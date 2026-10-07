@@ -907,6 +907,15 @@ jobs:
           -run '^(TestExplicitLocalRepositoryWindowsPathSemantics|TestListDirectory.*|TestDriveRootsFromMask|TestSplitAbsForRoot)$'
           ./internal/task/service
 
+      - name: Test Windows document attachment publication
+        if: matrix.suite == 'native'
+        timeout-minutes: 6
+        run: |
+          $env:GOMAXPROCS = '2'
+          $env:GOMEMLIMIT = '512MiB'
+          go test -trimpath -tags fts5 -race -p 1 ./internal/task/service -run '^TestDocumentAttachment.*$' -count=1 -timeout=4m -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       # Keep SQLite path coverage targeted: other tests in these packages
       # assert POSIX file modes or depend on Git path output.
       - name: Test Windows SQLite database paths
