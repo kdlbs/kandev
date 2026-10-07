@@ -43,6 +43,7 @@ import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment
 import { ApiError } from "@/lib/api/client";
 import { useTranslation } from "react-i18next";
 import { matchesSubmittedAttachments } from "./chat-input-payload";
+import { attachmentSnapshot, clearDraftText, useDraftVisit } from "./use-chat-draft-visit";
 
 type UseChatInputStateProps = {
   sessionId: string | null;
@@ -98,17 +99,8 @@ function clearDraft(sessionId: string | null) {
   setChatDraftAttachments(sessionId, []);
 }
 
-function clearDraftText(sessionId: string | null) {
-  if (!sessionId) return;
-  setChatDraftText(sessionId, "");
-  setChatDraftContent(sessionId, null);
-}
-
-function attachmentSnapshot(attachments: FileAttachment[]): string {
-  return attachments.map((att) => `${att.id}:${att.deliveryMode ?? "prompt"}`).join("|");
-}
-
 type ClearSubmittedInputArgs = {
+  isCurrentVisit: () => boolean;
   valueRef: MutableRefObject<string>;
   submittedText: string;
   attachmentsRef: MutableRefObject<FileAttachment[]>;
@@ -122,6 +114,7 @@ type ClearSubmittedInputArgs = {
 };
 
 function clearSubmittedInput(args: ClearSubmittedInputArgs) {
+  if (!args.isCurrentVisit()) return;
   // Abort if the user already typed new content since this submit started.
   if (args.valueRef.current.trim() !== args.submittedText) return;
   const attachmentsChanged =
@@ -501,6 +494,7 @@ export function useChatInputState({
   const valueRef = useRef(value);
   const pendingCommentsRef = useRef(pendingCommentsByFile);
   const prevTextSessionIdRef = useRef(sessionId);
+  const getDraftVisit = useDraftVisit(taskId, sessionId);
 
   const {
     attachments,
@@ -545,6 +539,8 @@ export function useChatInputState({
 
   const handleSubmit = useCallback(
     (resetHeight: () => void) => {
+      const visit = getDraftVisit();
+      if (!visit) return;
       submitDraft({
         isSending,
         workspaceId,
@@ -555,6 +551,7 @@ export function useChatInputState({
         inputRef,
         onSubmit,
         clearArgs: {
+          isCurrentVisit: () => getDraftVisit() === visit,
           valueRef,
           attachmentsRef,
           inputRef,
@@ -567,6 +564,7 @@ export function useChatInputState({
       });
     },
     [
+      getDraftVisit,
       onSubmit,
       isSending,
       workspaceId,
@@ -579,6 +577,8 @@ export function useChatInputState({
 
   const clearAcceptedPayload = useCallback(
     (payload: Pick<ChatSubmitPayload, "message" | "attachments">, resetHeight: () => void) => {
+      const visit = getDraftVisit();
+      if (!visit) return false;
       const submittedText = payload.message.trim();
       const currentAttachments = attachmentsRef.current;
       if (
@@ -588,6 +588,7 @@ export function useChatInputState({
         return false;
       }
       clearSubmittedInput({
+        isCurrentVisit: () => getDraftVisit() === visit,
         valueRef,
         submittedText,
         attachmentsRef,
@@ -601,7 +602,7 @@ export function useChatInputState({
       });
       return true;
     },
-    [sessionId, setAttachments],
+    [getDraftVisit, sessionId, setAttachments],
   );
 
   const allItems = useMemo((): ContextItem[] => {

@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { defaultSidebarLayout, type SidebarLayout } from "@/lib/sidebar/layout-types";
+import {
+  defaultSidebarLayout,
+  toApiSidebarLayout,
+  type SidebarLayout,
+} from "@/lib/sidebar/layout-types";
 import { submitSidebarLayout } from "./sidebar-layout-editor-save";
 
 const mocks = vi.hoisted(() => ({ updateUserSettings: vi.fn() }));
@@ -131,7 +135,7 @@ describe("submission ordering", () => {
     resolvers[1]?.({
       settings: {
         sidebar_layouts_by_workspace: {
-          [WORKSPACE_ID]: { version: 1, revision: 2, nodes: second.nodes },
+          [WORKSPACE_ID]: toApiSidebarLayout({ ...second, revision: 2 }),
         },
       },
     });
@@ -139,7 +143,7 @@ describe("submission ordering", () => {
     resolvers[0]?.({
       settings: {
         sidebar_layouts_by_workspace: {
-          [WORKSPACE_ID]: { version: 1, revision: 1, nodes: first.nodes },
+          [WORKSPACE_ID]: toApiSidebarLayout({ ...first, revision: 1 }),
         },
       },
     });
@@ -149,4 +153,42 @@ describe("submission ordering", () => {
     expect(draftRef.current.nodes.at(-1)?.name).toBe("Second");
     expect(acknowledge).toHaveBeenCalledTimes(1);
   });
+});
+
+it("keeps newer sidebar events authoritative when an editor response arrives late", async () => {
+  const { createDefaultUserSettings } = await import("@/lib/ssr/user-settings");
+  const latestLayout = { ...defaultSidebarLayout(), revision: 3, navigationHeight: 120 };
+  const current = {
+    ...createDefaultUserSettings(),
+    revision: 9,
+    sidebarFastActionsEnabled: false,
+    sidebarLayoutsByWorkspace: { [WORKSPACE_ID]: toApiSidebarLayout(latestLayout) },
+  };
+  mocks.updateUserSettings.mockResolvedValue({
+    settings: {
+      revision: 7,
+      sidebar_fast_actions_enabled: true,
+      sidebar_layouts_by_workspace: {
+        [WORKSPACE_ID]: toApiSidebarLayout({ ...defaultSidebarLayout(), revision: 2 }),
+      },
+    },
+  });
+  const setUserSettings = vi.fn();
+  const acknowledge = vi.fn();
+  const savedRef = { current: defaultSidebarLayout() };
+  await submitSidebarLayout({
+    catalog: [],
+    acknowledge,
+    setUserSettings,
+    store: { getState: () => ({ userSettings: current }) },
+    draftRef: { current: defaultSidebarLayout() },
+    savedRef,
+    workspaceRef: { current: WORKSPACE_ID },
+    generationsRef: { current: new Map() },
+    requestGenerationsRef: { current: new Map() },
+    onOperationError: vi.fn(),
+  });
+  expect(setUserSettings).toHaveBeenCalledWith(current);
+  expect(savedRef.current.revision).toBe(3);
+  expect(savedRef.current.navigationHeight).toBe(120);
 });

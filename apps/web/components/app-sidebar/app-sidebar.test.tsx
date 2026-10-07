@@ -36,6 +36,21 @@ vi.mock("./app-sidebar-header", () => ({
   ),
 }));
 
+vi.mock("./sidebar-navigation-split", () => ({
+  SidebarNavigationSplit: ({
+    navigation,
+    tasks,
+  }: {
+    navigation: React.ReactNode;
+    tasks: React.ReactNode;
+  }) => (
+    <>
+      {navigation}
+      {tasks}
+    </>
+  ),
+}));
+
 vi.mock("./app-sidebar-primary-nav", () => ({
   AppSidebarPrimaryNav: () => <div data-testid="primary-nav" />,
 }));

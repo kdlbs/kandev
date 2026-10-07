@@ -48,6 +48,7 @@ describe("sidebar shortcut catalog", () => {
     expect(result.find((entry) => entry.target.kind === "destination")).toMatchObject({
       target: { id: "plugin:slack:home" },
       source: "plugin",
+      pluginItemId: "home",
     });
     expect(result.find((entry) => entry.target.kind === "canvas")).toMatchObject({
       target: { kind: "canvas", id: "canvas-1" },

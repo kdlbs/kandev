@@ -9,10 +9,32 @@ const catalog = [
   {
     target: { kind: "destination" as const, id: SLACK_ID },
     label: "Slack",
+    pluginItemId: "slack",
     section: "integrations" as const,
     source: "plugin" as const,
     available: true,
   },
+];
+
+const EXPECTED_NODE_IDS = [
+  "new-task",
+  "home",
+  "inbox",
+  "needs-you-inbox",
+  "automations",
+  "canvases",
+  "integrations",
+  SLACK_ID,
+];
+const EXPECTED_NODE_LABELS = [
+  "New Task",
+  "Home",
+  "Office Inbox",
+  "Inbox",
+  "Automations",
+  "Canvases",
+  "Integrations",
+  "Slack",
 ];
 
 describe("sidebar layout projection", () => {
@@ -20,6 +42,8 @@ describe("sidebar layout projection", () => {
     const projected = projectSidebarLayout(defaultSidebarLayout(), catalog, {
       builtinLabels: {
         home: "Home",
+        inbox: "Office Inbox",
+        needs_you_inbox: "Inbox",
         new_task: "New Task",
         automations: "Automations",
         canvases: "Canvases",
@@ -27,22 +51,11 @@ describe("sidebar layout projection", () => {
       },
     });
 
-    expect(projected.nodes.map((node) => node.id)).toEqual([
-      "new-task",
-      "home",
-      "automations",
-      "canvases",
-      "integrations",
-      SLACK_ID,
-    ]);
-    expect(projected.nodes.map((node) => node.label)).toEqual([
-      "New Task",
-      "Home",
-      "Automations",
-      "Canvases",
-      "Integrations",
-      "Slack",
-    ]);
+    expect(projected.nodes.map((node) => node.id)).toEqual(EXPECTED_NODE_IDS);
+    expect(projected.nodes.map((node) => node.label)).toEqual(EXPECTED_NODE_LABELS);
+    expect(projected.nodes.find((node) => node.id === SLACK_ID)).toMatchObject({
+      pluginItemId: "slack",
+    });
     expect(projected.protectedNodeIds).toContain("tasks");
   });
 

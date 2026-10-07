@@ -529,7 +529,7 @@ func assertLinkedSourceFileOperations(t *testing.T, tracker *WorkspaceTracker, p
 	if err := tracker.CreateFile(path); err != nil {
 		t.Fatalf("create %q through linked source: %v", path, err)
 	}
-	if _, _, err := tracker.ApplyFileDiff(context.Background(), path, "", "not a diff", stringPtr("updated")); err != nil {
+	if _, _, err := tracker.ApplyFileDiff(context.Background(), path, path, "", "not a diff", stringPtr("updated")); err != nil {
 		t.Fatalf("write %q through linked source: %v", path, err)
 	}
 	content, _, _, _, err := tracker.GetFileContent(path)

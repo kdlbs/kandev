@@ -7,8 +7,8 @@ import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositories";
 import { taskPRInfoFromSummary } from "./task-pr-info";
 import type { SidebarTaskColorAutomation } from "@/lib/task-color-automation-settings";
-import { taskColorFacts } from "@/lib/sidebar/task-color-projection";
-import { resolveAutomaticTaskColor } from "@/lib/sidebar/task-color-rules";
+import { sidebarTaskColorDisplay } from "@/lib/sidebar/task-color-projection";
+import type { TaskColor } from "@/lib/task-colors";
 
 export type SidebarItemContext = {
   repositorySlugById: Map<string, string | undefined>;
@@ -22,6 +22,7 @@ export type SidebarItemContext = {
   repositoriesById?: ReadonlyMap<string, Repository>;
   stepColorById?: ReadonlyMap<string, string>;
   automaticColorSettings?: SidebarTaskColorAutomation;
+  manualColors?: Record<string, TaskColor | null>;
   pendingRemovalTaskIds?: ReadonlySet<string>;
 };
 
@@ -135,14 +136,13 @@ export function buildSidebarItem(
   context: SidebarItemContext,
 ) {
   const status = sidebarStatus(task, context);
-  const facts = taskColorFacts(task, {
+  const color = sidebarTaskColorDisplay(task, {
     workspaceId: context.workspaceId,
     repositoriesById: context.repositoriesById ?? EMPTY_REPOSITORIES_BY_ID,
     stepColorById: context.stepColorById ?? EMPTY_STEP_COLORS,
+    settings: context.automaticColorSettings,
+    manualColor: context.manualColors?.[task.id],
   });
-  const automaticColor = context.automaticColorSettings
-    ? resolveAutomaticTaskColor(context.automaticColorSettings, facts)
-    : null;
 
   return {
     id: task.id,
@@ -158,10 +158,10 @@ export function buildSidebarItem(
     workflowName: context.workflowNameById.get(task._workflowId),
     workflowStepId: task.workflowStepId as string | undefined,
     workflowStepTitle: workflowStepTitle(task, context.stepTitleById),
-    workspaceId: facts.workspaceId,
+    workspaceId: color.facts.workspaceId,
     origin: task.origin,
     primaryExecutorProfileId: task.primaryExecutorProfileId ?? undefined,
-    workflowStepColor: facts.workflowStepColor,
+    workflowStepColor: color.facts.workflowStepColor,
     isRemoteExecutor: task.isRemoteExecutor,
     remoteExecutorId: task.primaryExecutorId ?? undefined,
     remoteExecutorType: task.primaryExecutorType ?? undefined,
@@ -175,9 +175,10 @@ export function buildSidebarItem(
     workspaceMode: task.workspaceMode,
     repositories: resolveTaskRepositorySlugs(task.repositories, context.repositorySlugById),
     repositoryLinks: task.repositories,
-    repositoryRuleIdentities: facts.repositories,
-    automaticColor: automaticColor?.color,
-    automaticColorSource: automaticColor?.source,
+    repositoryRuleIdentities: color.facts.repositories,
+    automaticColor: color.automaticColor?.color,
+    automaticColorSource: color.automaticColor?.source,
+    effectiveColorToken: color.effectiveColorToken,
     isPRReview: task.isPRReview ?? false,
     isIssueWatch: task.isIssueWatch ?? false,
   };

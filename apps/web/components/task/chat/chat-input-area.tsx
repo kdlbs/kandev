@@ -26,8 +26,7 @@ import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-
 import { useToast } from "@/components/toast-provider";
 import { isMessageSendError, MessageSendError } from "@/lib/chat/message-send-error";
 import { QueueAdmissionError, QueueFullError } from "@/lib/api/domains/queue-api";
-import type { ReviewComment } from "@/lib/state/slices/comments";
-import type { AgentMessageComment } from "@/lib/state/slices/comments";
+import type { ReviewComment, AgentMessageComment } from "@/lib/state/slices/comments";
 import type { ChatPanelState } from "./use-chat-panel-state";
 import { useComposerProps } from "./use-composer-props";
 import { cn } from "@/lib/utils";
@@ -202,16 +201,19 @@ function usePanelMessageHandler(panelState: ChatPanelState) {
   });
 }
 
-function completeChatSubmission(payload: ChatSubmitPayload, panelState: ChatPanelState) {
+function completeChatSubmission(
+  payload: ChatSubmitPayload,
+  panelState: ChatPanelState,
+  submittedContext: { sessionId: string | null; files: ChatPanelState["contextFiles"] },
+) {
   const {
-    resolvedSessionId,
     pendingPRFeedback,
     walkthroughComments,
     messageComments,
     markCommentsSent,
     handleClearPRFeedback,
     handleClearWalkthroughComments,
-    clearEphemeral,
+    consumeSubmittedEphemeral,
     addContextFile,
     planModeEnabled,
   } = panelState;
@@ -219,10 +221,10 @@ function completeChatSubmission(payload: ChatSubmitPayload, panelState: ChatPane
   if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
   if (pendingPRFeedback.length > 0) handleClearPRFeedback();
   if (walkthroughComments.length > 0) handleClearWalkthroughComments();
-  if (!resolvedSessionId) return true;
-  clearEphemeral(resolvedSessionId);
+  if (!submittedContext.sessionId) return true;
+  consumeSubmittedEphemeral(submittedContext.sessionId, submittedContext.files);
   if (planModeEnabled) {
-    addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
+    addContextFile(submittedContext.sessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
   }
   return true;
 }
@@ -242,6 +244,10 @@ async function submitChatPayload({
   handleSendMessage: (payload: ChatSubmitPayload) => Promise<void | boolean>;
   transformOutgoing?: (message: string) => string;
 }) {
+  const submittedContext = {
+    sessionId: panelState.resolvedSessionId,
+    files: panelState.contextFiles.filter((file) => file.pinned !== true),
+  };
   const {
     planComments,
     previewFeedback,
@@ -277,7 +283,7 @@ async function submitChatPayload({
     submissionResult = await handleSendMessage(outbound);
   }
   if (submissionResult === false) return false;
-  return completeChatSubmission(payload, panelState);
+  return completeChatSubmission(payload, panelState, submittedContext);
 }
 
 export type SubmitHandlerOptions = {

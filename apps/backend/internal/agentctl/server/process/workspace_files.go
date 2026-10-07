@@ -565,7 +565,7 @@ func (wt *WorkspaceTracker) resolveSymlinkRelPath(reqPath string) string {
 // When desiredContent is provided and the diff cannot be applied (hash conflict),
 // the file is overwritten with the desired content as a fallback.
 // Returns the new hash and a resolution string ("applied" or "overwritten").
-func (wt *WorkspaceTracker) ApplyFileDiff(ctx context.Context, reqPath, unifiedDiff, originalHash string, desiredContent *string) (string, string, error) {
+func (wt *WorkspaceTracker) ApplyFileDiff(ctx context.Context, reqPath, diffPath, unifiedDiff, originalHash string, desiredContent *string) (string, string, error) {
 	safePath, err := wt.resolveSafePath(reqPath)
 	if err != nil {
 		return "", "", err
@@ -588,19 +588,14 @@ func (wt *WorkspaceTracker) ApplyFileDiff(ctx context.Context, reqPath, unifiedD
 		return "", "", fmt.Errorf("conflict detected: file has been modified (expected hash %s, got %s)", originalHash, currentHash)
 	}
 
+	// Patch headers use the submitted path; Git runs at the workspace root.
+	if reqPath != diffPath {
+		unifiedDiff = rewriteDiffPaths(unifiedDiff, diffPath, reqPath)
+	}
+
 	// If the file is a symlink, resolve to the real path and rewrite the diff header.
 	// git apply cannot patch through symlinks — it needs the real file path.
 	applyPath, unifiedDiff := wt.resolveSymlinkForDiff(reqPath, safePath, cleanWorkDir, unifiedDiff)
-
-	// Write diff to a temporary patch file
-	patchFile := filepath.Join(wt.workDir, ".kandev-patch.tmp")
-	err = os.WriteFile(patchFile, []byte(unifiedDiff), 0o644)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to write patch file: %w", err)
-	}
-	defer func() {
-		_ = os.Remove(patchFile) // Best effort cleanup
-	}()
 
 	// Use git apply to apply the patch directly to the file
 	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
@@ -608,8 +603,9 @@ func (wt *WorkspaceTracker) ApplyFileDiff(ctx context.Context, reqPath, unifiedD
 		subproc.GitInteractive,
 		gitCommandTimeout,
 		func(execCtx context.Context) *exec.Cmd {
-			cmd := subproc.NewGitCommand(execCtx, "apply", "-p0", "--unidiff-zero", "--whitespace=nowarn", patchFile)
+			cmd := subproc.NewGitCommand(execCtx, "apply", "-p0", "--unidiff-zero", "--whitespace=nowarn", "-")
 			cmd.Dir = wt.workDir
+			cmd.Stdin = strings.NewReader(unifiedDiff)
 			return cmd
 		},
 	)
@@ -711,6 +707,9 @@ func (wt *WorkspaceTracker) writeDesiredContent(
 func rewriteDiffPaths(diff, oldPath, newPath string) string {
 	lines := strings.Split(diff, "\n")
 	for i, line := range lines {
+		if strings.HasPrefix(line, "@@ ") {
+			break
+		}
 		if strings.HasPrefix(line, "--- ") {
 			lines[i] = replaceDiffPath(line, "--- ", oldPath, newPath)
 		} else if strings.HasPrefix(line, "+++ ") {
@@ -723,11 +722,13 @@ func rewriteDiffPaths(diff, oldPath, newPath string) string {
 // replaceDiffPath replaces oldPath with newPath in a diff header line.
 func replaceDiffPath(line, prefix, oldPath, newPath string) string {
 	rest := line[len(prefix):]
-	// Handle "--- a/path" or "--- path" formats
-	cleaned := strings.TrimPrefix(rest, "a/")
-	cleaned = strings.TrimPrefix(cleaned, "b/")
-	if cleaned == oldPath || filepath.Clean(cleaned) == filepath.Clean(oldPath) {
-		return prefix + newPath
+	name, _, _ := strings.Cut(rest, "\t")
+	oldPath = filepath.ToSlash(filepath.Clean(oldPath))
+	// Match literal directories before accepting conventional Git prefixes.
+	for _, candidate := range []string{name, strings.TrimPrefix(name, "a/"), strings.TrimPrefix(name, "b/")} {
+		if filepath.ToSlash(filepath.Clean(candidate)) == oldPath {
+			return prefix + filepath.ToSlash(newPath) + rest[len(name):]
+		}
 	}
 	return line
 }

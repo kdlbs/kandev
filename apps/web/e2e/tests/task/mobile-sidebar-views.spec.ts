@@ -496,8 +496,14 @@ test.describe("Mobile sidebar — view system", () => {
       await expect(testPage.locator(`[id="${descriptionId}"]`)).toHaveText(description);
     }
     await testPage.getByRole("option", { name: "Last activity", exact: true }).tap();
-    const direction = popover.getByTestId("sort-direction-toggle");
-    if ((await direction.getAttribute("data-direction")) !== "desc") await direction.tap();
+    const direction = popover.getByTestId("sort-rule-direction-0");
+    await expect(direction).toHaveAttribute("data-direction", "desc");
+    await direction.tap();
+    await testPage.getByTestId("sort-rule-direction-option-0-asc").tap();
+    await expect(direction).toHaveAttribute("data-direction", "asc");
+    await direction.tap();
+    await testPage.getByTestId("sort-rule-direction-option-0-desc").tap();
+    await expect(direction).toHaveAttribute("data-direction", "desc");
     await popover.getByTestId("view-save-as-button").tap();
     await popover.getByTestId("view-save-as-name-input").fill("Mobile last activity");
     await popover.getByTestId("view-save-as-confirm").tap();

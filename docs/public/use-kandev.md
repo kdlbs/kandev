@@ -124,17 +124,16 @@ not apply to passthrough terminal sessions or manually stopped sessions.
 
 ## Customize the sidebar
 
-Open **Settings > Preferences > Sidebar** to customize the optional navigation for the active
-workspace. You can hide or reorder Home, New Task, Automations, Canvases, Integrations, and
+Open **Settings > Layout > Sidebar** to customize the optional navigation for the active
+workspace. You can hide or reorder Home, New Task, Inbox, Automations, Canvases, Integrations, and
 available plugin links. The setting belongs to your account and workspace, so it follows you
 across clients without changing another user's layout.
 
 Create named shortcut sections for destinations, canvases, automations, and plugin links. Fold a
 section to keep its header icons visible, or open the labelled list to use a shortcut. Automation
-icons show running, idle, or paused activity. Tasks and required inbox entries remain available in
-their fixed navigation area, and hiding a shortcut does not disable the underlying feature.
+icons show running, idle, or paused activity. Tasks stays in its fixed navigation area, and hiding a shortcut does not disable the underlying feature.
 
-On a phone, open the menu and choose **Sidebar** to edit the same layout. Use the move controls to
+On a phone, open the menu and choose **Customize sidebar** to edit the same layout. Use the move controls to
 reorder entries or move a shortcut to another section. The workspace picker stays at the top.
 **New Task**, Home, quick actions, workspace tools, and shortcut sections appear before the task
 list. If you hide New Task, the Tasks heading keeps its create button. Expand **Integrations** to
@@ -150,11 +149,27 @@ Group headings have a leading collapse control, label, and count. Tasks sit
 indented below each heading, with space between groups; subtasks remain nested one
 level deeper. Grouping by state also shows the group's status icon. Plain task rows keep your
 selected metadata and trailing details, with highlights for hover, selection, and keyboard focus.
-Settings and the signed-in account, when available, stay in the
-single-row desktop sidebar footer, alongside theme switching. Use **Show more actions**
-(the three-dot button) for Stats, plugin utilities, Improve Kandev, and release notes.
-**New Task** uses a neutral button, with **Quick Chat** and **Terminal** as smaller
-labelled actions in a shared utility bar beneath it.
+New users get a small, centered **New Task** button, with **Quick Chat** and **Terminal** below it.
+Existing users keep the compact New Task row with fast action icons. Choose **New Task button style**
+and **Show fast action icons** in Sidebar settings to change these independently.
+With fast icons enabled, Terminal and Quick Chat sit beside New Task. Canvas settings and eligible
+integration shortcuts sit before their section chevrons. Named settings and provider links remain
+available when fast icons are hidden.
+
+Right-click a navigation entry or empty navigation space to open **Sidebar settings**.
+Use this menu to show or hide entries, change the button style, or open Sidebar layout settings. Drag entries directly to reorder them. No drag handles appear.
+You can also focus an entry and press **Alt + Up** or **Alt + Down**. These sidebar edits save immediately.
+The settings editor keeps its shared Save and Discard controls.
+
+Drag the divider above Tasks upwards to reduce navigation space. You can hide all navigation
+buttons and leave only the small expansion chevron. Partially hidden entries fade at the bottom.
+Click the small chevron to expand navigation; click it again to restore the compressed height.
+Both the height and expansion state follow your saved workspace layout across reloads and clients.
+On phones, use the Customize drawer's move buttons; it preserves the desktop divider position.
+
+Settings, direct **Stats** access, theme switching, and the three-dot menu share the
+single-row desktop footer, in that order. The three-dot menu contains plugin utilities,
+Improve Kandev, and release notes.
 
 Expand **Automations** and choose **Open automations** below its entries to see the
 full list. This labelled link sits inside the group on desktop and phones, like

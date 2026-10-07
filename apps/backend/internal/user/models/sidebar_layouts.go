@@ -17,6 +17,8 @@ const (
 // Resource names, icons, and actions are resolved from the live catalog; only
 // stable identities and the user's ordering choices are persisted.
 type SidebarLayout struct {
+	NavigationHeight   *int                `json:"navigation_height,omitempty"`
+	NavigationExpanded bool                `json:"navigation_expanded,omitempty"`
 	Version            int                 `json:"version"`
 	Revision           int64               `json:"revision"`
 	Nodes              []SidebarLayoutNode `json:"nodes"`
@@ -60,6 +62,8 @@ func DefaultSidebarLayout() SidebarLayout {
 		Nodes: []SidebarLayoutNode{
 			{ID: "new-task", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "new_task"},
 			{ID: "home", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "home"},
+			{ID: "inbox", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "inbox"},
+			{ID: "needs-you-inbox", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "needs_you_inbox"},
 			{ID: "automations", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "automations"},
 			{ID: "canvases", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "canvases"},
 			{ID: "integrations", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "integrations"},
