@@ -282,6 +282,10 @@ legend filtering, formatting helpers, deferred plot mounting, and motion
 preferences. Library tree composition must not insert wrappers inside the
 Recharts plot's discovery boundary.
 
+Chart visibility checks every entry in each intersection observer batch. Any
+intersecting entry makes the plot eligible; background tabs defer its first
+mount until visible. Eligibility remains true after the first intersection.
+
 Within the FilePreview registry adapter, key the native FilePreview component by
 the serialized `(sessionId, repo, path)` tuple. Its element identity separates
 two cards referencing the same target. A tuple change unmounts only that card;
