@@ -157,6 +157,8 @@ test.describe("Mobile workspace repository sets", () => {
     await addRepository.tap();
     await testPage.getByRole("option", { name: /E2E Repo/ }).tap();
     await expect(testPage.getByRole("option", { name: /E2E Repo/ })).toHaveCount(0);
+    // Finish closing the add picker before opening the branch picker; its
+    // deferred focus restoration must not dismiss the next popover.
     await expect(testPage.getByTestId("repository-set-add-repository-dropdown")).toHaveCount(0);
     await expect(addRepository).toBeFocused();
     await expect(

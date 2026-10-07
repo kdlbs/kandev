@@ -190,6 +190,7 @@ test.describe("File tree inline rename", () => {
     git.commit("seed blur file");
     git.pushMainWithRetry();
 
+    const gateway = watchWs(testPage);
     const session = await setupTask({
       testPage,
       apiClient,
@@ -215,7 +216,9 @@ test.describe("File tree inline rename", () => {
     // The adjacent blur target stays mounted while the rename input owns focus.
     // Scrolling to a distant virtualized row can remove the input before blur.
     await expect(input).toBeFocused();
+    const renamed = gateway.waitForResponse("workspace.file.rename");
     await otherNode.click();
+    await renamed;
 
     await expect
       .poll(() => fs.existsSync(path.join(repoDir, "blur-final.ts")), { timeout: 10_000 })
