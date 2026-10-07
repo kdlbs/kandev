@@ -17,6 +17,7 @@ const OTHER_BACKEND_URL = "https://backend.example/other";
 const BOOT_ID = "disk-page-boot";
 const DISK_USAGE_STATE_TEST_ID = "disk-usage-state";
 const NOT_LOADING = '"isLoading":false';
+const REFRESH_FAILED_MESSAGE = "refresh failed";
 
 vi.mock("@/lib/config", () => ({ getBackendConfig: () => ({ apiBaseUrl: config.apiBaseUrl }) }));
 vi.mock("@/lib/api/domains/system-api");
@@ -321,9 +322,48 @@ describe("useDiskUsage query ownership", () => {
 });
 
 describe("useDiskUsage refresh outcomes", () => {
+  it("hides a prior GET error while the refresh POST is pending", async () => {
+    const usage = response(false);
+    vi.mocked(api.fetchDiskUsage)
+      .mockResolvedValueOnce(usage)
+      .mockRejectedValueOnce(new Error("old read failed"));
+    const post = deferred<{ job_id: string }>();
+    vi.mocked(api.refreshDiskUsage).mockReturnValueOnce(post.promise);
+    render(createElement(TestHarness, null, createElement(DiskUsageProbe)));
+    await waitFor(() => expect(api.fetchDiskUsage).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(screen.getByTestId(DISK_USAGE_STATE_TEST_ID).textContent).toContain(NOT_LOADING),
+    );
+
+    const failedReload = currentReload?.();
+    await waitFor(() => expect(api.fetchDiskUsage).toHaveBeenCalledTimes(2));
+    await expect(failedReload).resolves.toBeUndefined();
+    await waitFor(() =>
+      expect(screen.getByTestId(DISK_USAGE_STATE_TEST_ID).textContent).toContain("old read failed"),
+    );
+
+    const refreshResult = currentRefresh?.();
+    await waitFor(() => expect(api.refreshDiskUsage).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(screen.getByTestId(DISK_USAGE_STATE_TEST_ID).textContent).toContain('"error":null'),
+    );
+    expect(screen.getByTestId(DISK_USAGE_STATE_TEST_ID).textContent).toContain(
+      '"diskUsage":{"data":null,"computing":false',
+    );
+
+    post.reject(new Error(REFRESH_FAILED_MESSAGE));
+    await expect(refreshResult).resolves.toBeUndefined();
+    await waitFor(() =>
+      expect(screen.getByTestId(DISK_USAGE_STATE_TEST_ID).textContent).toContain(
+        REFRESH_FAILED_MESSAGE,
+      ),
+    );
+    expect(api.fetchDiskUsage).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps a refresh POST failure visible and resolves without a follow-up GET", async () => {
     vi.mocked(api.fetchDiskUsage).mockResolvedValueOnce(response(false));
-    vi.mocked(api.refreshDiskUsage).mockRejectedValueOnce(new Error("refresh failed"));
+    vi.mocked(api.refreshDiskUsage).mockRejectedValueOnce(new Error(REFRESH_FAILED_MESSAGE));
     render(createElement(TestHarness, null, createElement(DiskUsageProbe)));
     await waitFor(() => expect(api.fetchDiskUsage).toHaveBeenCalledOnce());
     await waitFor(() =>
@@ -336,7 +376,9 @@ describe("useDiskUsage refresh outcomes", () => {
     await expect(refreshResult).resolves.toBeUndefined();
 
     expect(api.fetchDiskUsage).toHaveBeenCalledOnce();
-    expect(screen.getByTestId(DISK_USAGE_STATE_TEST_ID).textContent).toContain("refresh failed");
+    expect(screen.getByTestId(DISK_USAGE_STATE_TEST_ID).textContent).toContain(
+      REFRESH_FAILED_MESSAGE,
+    );
   });
 
   it("performs an authoritative GET after a successful refresh POST", async () => {

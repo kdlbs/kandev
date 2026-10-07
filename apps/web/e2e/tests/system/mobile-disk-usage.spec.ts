@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 test.describe("System Status disk usage on mobile", () => {
   test("shows the breakdown and keeps refresh POST then GET working on a phone", async ({
@@ -7,10 +8,13 @@ test.describe("System Status disk usage on mobile", () => {
   }) => {
     test.setTimeout(60_000);
     await testPage.setViewportSize({ width: 390, height: 844 });
+
+    const initialDiskUsageRead = waitForHttp(testPage, "GET", /\/api\/v1\/system\/disk-usage$/);
     await testPage.goto("/settings/system/status");
+    await initialDiskUsageRead;
 
     await expect(testPage.getByTestId("system-disk-usage-card")).toBeVisible();
-    await expect(testPage.getByTestId("system-disk-usage-table")).toBeVisible({ timeout: 20_000 });
+    await expect(testPage.getByTestId("system-disk-usage-table")).toBeVisible();
     await expect(testPage.getByTestId("system-disk-usage-total")).toBeVisible();
     await expect(testPage.getByTestId("system-disk-usage-computed-at")).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage, "System Status disk usage on mobile");

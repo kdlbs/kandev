@@ -10,6 +10,12 @@ import {
 } from "./disk-usage-query";
 
 type RefreshError = { identityKey: string; generation: number; message: string };
+type PendingRefresh = {
+  token: symbol;
+  identityKey: string;
+  generation: number;
+  previousQueryError: Error | null;
+};
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -19,6 +25,13 @@ export function useDiskUsage() {
   const scope = useDiskUsageScope();
   const query = useQuery(createDiskUsageQueryOptions(scope.identity));
   const [refreshError, setRefreshError] = useState<RefreshError | null>(null);
+  const [pendingRefresh, setPendingRefresh] = useState<PendingRefresh | null>(null);
+
+  const pendingRefreshForScope =
+    pendingRefresh?.identityKey === scope.identityKey &&
+    pendingRefresh.generation === scope.generation
+      ? pendingRefresh
+      : null;
 
   useEffect(() => {
     if (query.isFetching) setRefreshError(null);
@@ -39,6 +52,13 @@ export function useDiskUsage() {
   const refresh = useCallback(async () => {
     const captured = scope.captureScope();
     if (!scope.isCurrentScope(captured)) return;
+    const token = Symbol();
+    setPendingRefresh({
+      token,
+      identityKey: captured.identityKey,
+      generation: captured.generation,
+      previousQueryError: query.error,
+    });
     setRefreshError(null);
 
     try {
@@ -50,12 +70,19 @@ export function useDiskUsage() {
           generation: captured.generation,
           message: errorMessage(error),
         });
+        setPendingRefresh((pending) => (pending?.token === token ? null : pending));
       }
       return;
     }
 
-    await reloadForScope(captured);
-  }, [reloadForScope, scope.captureScope, scope.isCurrentScope]);
+    try {
+      await reloadForScope(captured);
+    } finally {
+      if (scope.isCurrentScope(captured)) {
+        setPendingRefresh((pending) => (pending?.token === token ? null : pending));
+      }
+    }
+  }, [query.error, reloadForScope, scope.captureScope, scope.isCurrentScope]);
 
   let error: string | null = null;
   if (!query.isFetching) {
@@ -64,7 +91,7 @@ export function useDiskUsage() {
       refreshError.generation === scope.generation
     ) {
       error = refreshError.message;
-    } else if (query.error) {
+    } else if (query.error && query.error !== pendingRefreshForScope?.previousQueryError) {
       error = errorMessage(query.error);
     }
   }
