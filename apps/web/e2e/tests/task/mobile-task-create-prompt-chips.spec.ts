@@ -4,6 +4,7 @@ import { waitForHttp } from "../../helpers/causal-waits";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { expectTaskDescription } from "../../pages/task-description-editor";
 import { useRegularMode } from "../../helpers/regular-mode";
+import { openCreateTaskDialog } from "../../helpers/create-task-dialog";
 
 useRegularMode();
 
@@ -68,7 +69,7 @@ async function openTaskCreateDialogAtWidth(page: Page, width: number) {
   if (await mobileFab.isVisible()) {
     await mobileFab.tap();
   } else {
-    await page.getByTestId("create-task-button").first().click();
+    await openCreateTaskDialog(page);
   }
 
   const dialog = page.getByTestId("create-task-dialog");
@@ -209,9 +210,21 @@ test("long prompt chips remain usable across coarse-pointer widths", async ({
   testPage,
   apiClient,
   prCapture,
+  seedData,
 }) => {
   test.setTimeout(120_000);
   const prompt = await apiClient.createPrompt(LONG_PROMPT_NAME, "Long mobile prompt content");
+
+  // Crossing into the sidebar layout must also work with saved collapsed navigation.
+  const { settings } = await apiClient.getUserSettings();
+  const layout = settings.sidebar_layouts_by_workspace![seedData.workspaceId];
+  await apiClient.saveUserSettings({
+    sidebar_layout_state: {
+      workspace_id: seedData.workspaceId,
+      expected_revision: layout.revision,
+      layout: { ...layout, navigation_height: 0, navigation_expanded: false },
+    },
+  });
 
   try {
     for (const width of [390, 767, 768, 900]) {
