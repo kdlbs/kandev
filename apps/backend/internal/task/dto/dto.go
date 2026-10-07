@@ -2,6 +2,7 @@ package dto
 
 import (
 	"encoding/json"
+	"strconv"
 	"time"
 
 	"github.com/kandev/kandev/internal/authz"
@@ -358,6 +359,34 @@ type TaskWorkspaceFolderDTO struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// WorkspaceRecoveryDTO contains only the path-free public progress projection.
+// Generation and revision remain decimal strings to preserve 64-bit identity
+// across JavaScript clients.
+type WorkspaceRecoveryDTO struct {
+	TaskID              string     `json:"task_id"`
+	EnvironmentID       string     `json:"environment_id"`
+	SessionID           string     `json:"session_id"`
+	OperationID         string     `json:"operation_id"`
+	AttemptID           string     `json:"attempt_id"`
+	ErrorStamp          string     `json:"error_stamp,omitempty"`
+	OwnershipGeneration string     `json:"ownership_generation"`
+	Revision            string     `json:"revision"`
+	Kind                string     `json:"kind"`
+	State               string     `json:"state"`
+	Phase               string     `json:"phase"`
+	RepositoryID        string     `json:"repository_id,omitempty"`
+	RepositoryPosition  int        `json:"repository_position"`
+	RepositoryTotal     int        `json:"repository_total"`
+	CompletedSlots      int        `json:"completed_slots"`
+	WorkspaceComplete   bool       `json:"workspace_complete"`
+	AgentReady          bool       `json:"agent_ready"`
+	RunnerLive          bool       `json:"runner_live"`
+	StartedAt           time.Time  `json:"started_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+	EndedAt             *time.Time `json:"ended_at,omitempty"`
+	ReasonCode          string     `json:"reason_code,omitempty"`
+}
+
 type TaskSessionDTO struct {
 	ID                 string `json:"id"`
 	TaskID             string `json:"task_id"`
@@ -400,10 +429,11 @@ type TaskSessionDTO struct {
 	CompletedAt          *time.Time               `json:"completed_at,omitempty"`
 	UpdatedAt            time.Time                `json:"updated_at"`
 	// Workflow fields
-	IsPrimary         bool                `json:"is_primary"`
-	IsPassthrough     bool                `json:"is_passthrough"`
-	ReviewStatus      models.ReviewStatus `json:"review_status,omitempty"`
-	TaskEnvironmentID string              `json:"task_environment_id,omitempty"`
+	IsPrimary         bool                  `json:"is_primary"`
+	IsPassthrough     bool                  `json:"is_passthrough"`
+	ReviewStatus      models.ReviewStatus   `json:"review_status,omitempty"`
+	TaskEnvironmentID string                `json:"task_environment_id,omitempty"`
+	WorkspaceRecovery *WorkspaceRecoveryDTO `json:"workspace_recovery"`
 	// ForegroundActivity mirrors the in-memory fine-grained busy substate so a
 	// fresh page-load / second tab sees live background work without waiting for
 	// a WS flip (ADR-0049). Generating is emitted only for RUNNING sessions;
@@ -452,6 +482,46 @@ type TaskSessionDTO struct {
 	// ParkedEpoch identifies the backend process that produced Revision (see
 	// "Revision epoch"); a lower-or-equal epoch update is stale.
 	ParkedEpoch uint64 `json:"parked_epoch"`
+}
+
+// EnrichWorkspaceRecovery attaches the exact environment operation projection
+// to a rich session response. A nil operation is serialized as null so it can
+// clear a prior versioned client projection.
+func EnrichWorkspaceRecovery(
+	session *TaskSessionDTO,
+	operation *models.TaskEnvironmentRecoveryOperation,
+	runnerLive bool,
+) {
+	if session == nil {
+		return
+	}
+	session.WorkspaceRecovery = WorkspaceRecoveryFromOperation(operation, runnerLive)
+}
+
+// WorkspaceRecoveryFromOperation builds the public path-free progress shape.
+// Generation and revision are decimal strings so JavaScript preserves their
+// full 64-bit identity.
+func WorkspaceRecoveryFromOperation(
+	operation *models.TaskEnvironmentRecoveryOperation,
+	runnerLive bool,
+) *WorkspaceRecoveryDTO {
+	if operation == nil {
+		return nil
+	}
+	return &WorkspaceRecoveryDTO{
+		TaskID: operation.OwnerTaskID, EnvironmentID: operation.TaskEnvironmentID,
+		SessionID: operation.SessionID, OperationID: operation.OperationID,
+		AttemptID: operation.AttemptID, ErrorStamp: operation.ErrorStamp,
+		OwnershipGeneration: strconv.FormatInt(operation.OwnershipGeneration, 10),
+		Revision:            strconv.FormatInt(operation.Revision, 10),
+		Kind:                operation.Kind, State: operation.State, Phase: operation.Phase,
+		RepositoryID:       operation.RepositoryID,
+		RepositoryPosition: operation.RepositoryPosition, RepositoryTotal: operation.RepositoryTotal,
+		CompletedSlots: operation.CompletedSlots, WorkspaceComplete: operation.WorkspaceComplete,
+		AgentReady: operation.AgentReady, RunnerLive: runnerLive,
+		StartedAt: operation.StartedAt, UpdatedAt: operation.UpdatedAt,
+		EndedAt: operation.EndedAt, ReasonCode: operation.ReasonCode,
+	}
 }
 
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.

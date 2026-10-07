@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryoperation"
 )
 
 type managedCloneRelocationInspection struct {
@@ -28,6 +29,7 @@ type managedCloneRelocationInspection struct {
 }
 
 type managedCloneRelocationRecord struct {
+	LayoutVersion         int       `json:"layout_version,omitempty"`
 	OperationID           string    `json:"operation_id"`
 	TaskID                string    `json:"task_id"`
 	EnvironmentID         string    `json:"environment_id"`
@@ -244,24 +246,40 @@ func (m *Manager) relocateCleanManagedCloneWorktree(
 	if wt == nil || proof == nil || claim == nil || !inspection.mismatch || inspection.dirty {
 		return nil, managedCloneRelocationError(wtTaskID(wt), "worktree is not eligible for automatic relocation")
 	}
-	jobPath := wt.Path + ".kandev-clone-relocation.json"
-	lock, err := acquireRecoveryOperation(wt.Path + ".kandev-clone-relocation.claim")
+	paths, err := m.prepareManagedCloneArtifactLayout(ctx, wt, claim, false)
+	if err != nil {
+		return nil, err
+	}
+	jobPath := paths.RelocationRecord
+	lock, err := acquireRecoveryOperation(paths.RelocationClaim)
 	if err != nil {
 		return nil, managedCloneRelocationError(wt.TaskID, "another clone relocation is active")
 	}
 	defer func() { _ = lock.Close() }()
-	record, err := prepareManagedCloneRelocationRecord(jobPath, wt, proof, inspection, claim)
+	record, err := prepareManagedCloneRelocationRecord(jobPath, wt, proof, inspection, claim, paths.LayoutVersion)
 	if err != nil {
+		return nil, err
+	}
+	if err := m.registerManagedCloneArtifactPaths(ctx, wt, claim, record, nil); err != nil {
+		return nil, managedCloneRelocationError(wt.TaskID, "verified relocation artifacts could not be registered")
+	}
+	if err := reportRecoveryPhase(ctx, recoveryoperation.PhaseRestoring); err != nil {
 		return nil, err
 	}
 	if err := m.materializeManagedCloneRelocation(ctx, jobPath, &record); err != nil {
 		return nil, err
 	}
 	replacement := managedCloneRelocationReplacement(wt, record)
+	if err := reportRecoveryPhase(ctx, recoveryoperation.PhaseVerifyingReplacement); err != nil {
+		return nil, err
+	}
 	if !m.IsValid(replacement.Path) {
 		return nil, managedCloneRelocationError(wt.TaskID, "replacement worktree failed integrity validation")
 	}
 	if err := verifyExactRelocationCheckout(ctx, m, &replacement, record); err != nil {
+		return nil, err
+	}
+	if err := reportRecoveryPhase(ctx, recoveryoperation.PhasePublishing); err != nil {
 		return nil, err
 	}
 	if err := writePublishedManagedCloneRelocationRecord(&record); err != nil {
@@ -279,6 +297,9 @@ func (m *Manager) relocateCleanManagedCloneWorktree(
 	if err := markManagedCloneRelocationComplete(jobPath, &record, wt.TaskID); err != nil {
 		return nil, err
 	}
+	if err := m.registerManagedCloneArtifactPaths(ctx, wt, claim, record, nil); err != nil {
+		return nil, managedCloneRelocationError(wt.TaskID, "completed relocation artifacts could not be registered")
+	}
 	m.refreshRecoveredWorktreeCache(wt, replacementPtr)
 	return replacementPtr, nil
 }
@@ -289,6 +310,7 @@ func prepareManagedCloneRelocationRecord(
 	proof *ManagedCloneRelocationProof,
 	inspection managedCloneRelocationInspection,
 	claim *models.TaskEnvironmentRecoveryClaim,
+	layoutVersion int,
 ) (managedCloneRelocationRecord, error) {
 	if claim == nil {
 		return managedCloneRelocationRecord{}, managedCloneRelocationError(wtTaskID(wt), "relocation operation identity is invalid")
@@ -297,10 +319,11 @@ func prepareManagedCloneRelocationRecord(
 		return managedCloneRelocationRecord{}, managedCloneRelocationError(wt.TaskID, "relocation operation identity is invalid")
 	}
 	record := managedCloneRelocationRecord{
-		OperationID: claim.OperationID, TaskID: wt.TaskID, EnvironmentID: wt.TaskEnvironmentID,
+		LayoutVersion: layoutVersion,
+		OperationID:   claim.OperationID, TaskID: wt.TaskID, EnvironmentID: wt.TaskEnvironmentID,
 		WorktreeID: wt.ID, Original: wt.Path, OriginalWorkspacePath: wt.Path,
 		Replacement:   wt.Path + ".relocated-" + claim.OperationID[:8],
-		ReplacementID: uuid.NewString(), SourcePath: inspection.sourcePath,
+		ReplacementID: managedCloneReplacementID(wt, claim.OperationID), SourcePath: inspection.sourcePath,
 		SourceCommon: inspection.sourceGit, DestPath: proof.ExpectedDestinationPath,
 		DestCommon: inspection.destGit, Branch: inspection.branch, Head: inspection.head,
 		State: managedCloneRelocationStatePrepared, UpdatedAt: time.Now().UTC(),
@@ -384,8 +407,12 @@ func markManagedCloneRelocationComplete(jobPath string, record *managedCloneRelo
 	record.State, record.UpdatedAt = string(RecoveryStateComplete), time.Now().UTC()
 	paths := []string{
 		jobPath,
-		record.Replacement + ".kandev-clone-relocation.json",
-		record.Original + ".kandev-clone-relocation.json",
+	}
+	if record.LayoutVersion != 2 {
+		paths = append(paths,
+			record.Replacement+".kandev-clone-relocation.json",
+			record.Original+".kandev-clone-relocation.json",
+		)
 	}
 	for _, path := range paths {
 		if path == ".kandev-clone-relocation.json" {
@@ -400,7 +427,7 @@ func markManagedCloneRelocationComplete(jobPath string, record *managedCloneRelo
 
 // relocateDirtyManagedCloneWorktree transfers a verified dirty checkout only
 // after the recovery request carries its explicit, stamp-fenced authorization.
-// The original and the byte/mode snapshot remain beside the task worktree.
+// The original and the byte/mode snapshot remain in the private recovery bucket.
 func (m *Manager) relocateDirtyManagedCloneWorktree(
 	ctx context.Context,
 	wt *Worktree,
@@ -411,20 +438,33 @@ func (m *Manager) relocateDirtyManagedCloneWorktree(
 	if wt == nil || proof == nil || claim == nil || !inspection.mismatch || !inspection.dirty {
 		return nil, managedCloneRelocationError(wtTaskID(wt), "worktree is not eligible for explicit relocation")
 	}
-	jobPath := wt.Path + ".kandev-clone-relocation.json"
-	lock, err := acquireRecoveryOperation(wt.Path + ".kandev-clone-relocation.claim")
+	if err := validateDirtyCloneRelocationAuthorization(ctx); err != nil {
+		return nil, err
+	}
+	paths, err := m.prepareManagedCloneArtifactLayout(ctx, wt, claim, true)
+	if err != nil {
+		return nil, err
+	}
+	jobPath := paths.RelocationRecord
+	lock, err := acquireRecoveryOperation(paths.RelocationClaim)
 	if err != nil {
 		return nil, managedCloneRelocationError(wt.TaskID, "another clone relocation is active")
 	}
 	defer func() { _ = lock.Close() }()
-	record, err := prepareManagedCloneRelocationRecord(jobPath, wt, proof, inspection, claim)
+	record, err := prepareManagedCloneRelocationRecord(jobPath, wt, proof, inspection, claim, paths.LayoutVersion)
 	if err != nil {
+		return nil, err
+	}
+	if err := m.registerManagedCloneArtifactPaths(ctx, wt, claim, record, nil); err != nil {
+		return nil, managedCloneRelocationError(wt.TaskID, "verified relocation artifacts could not be registered")
+	}
+	if err := reportRecoveryPhase(ctx, recoveryoperation.PhaseRestoring); err != nil {
 		return nil, err
 	}
 	if err := m.materializeManagedCloneRelocation(ctx, jobPath, &record); err != nil {
 		return nil, err
 	}
-	return m.transferDirtyManagedCloneFiles(ctx, wt, jobPath, &record, claim, proof)
+	return m.transferDirtyManagedCloneFiles(ctx, wt, jobPath, &record, claim, proof, paths)
 }
 
 func (m *Manager) transferDirtyManagedCloneFiles(
@@ -434,21 +474,51 @@ func (m *Manager) transferDirtyManagedCloneFiles(
 	record *managedCloneRelocationRecord,
 	claim *models.TaskEnvironmentRecoveryClaim,
 	proof *ManagedCloneRelocationProof,
+	paths managedCloneRecoveryArtifactPaths,
 ) (*Worktree, error) {
-	recoveryJobPath := wt.Path + ".kandev-recovery.json"
+	recoveryJobPath := paths.RecoveryRecord
 	if err := validateDirtyCloneRelocationAuthorization(ctx); err != nil {
 		return nil, err
 	}
-	recovery, snapshotPath, recoveryLock, err := beginDirtyCloneRecovery(
-		ctx, m, wt, recoveryJobPath, claim, proof, *record,
-	)
+	if paths.LayoutVersion == 2 {
+		if err := m.registerManagedCloneArtifactPaths(ctx, wt, claim, *record, []string{
+			paths.RecoveryRecord, paths.RecoveryClaim, paths.Snapshot,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	var recovery recoveryRecord
+	var snapshotPath string
+	var recoveryLock *recoveryLock
+	var err error
+	if err := reportRecoveryPhase(ctx, recoveryoperation.PhaseSnapshotting); err != nil {
+		return nil, err
+	}
+	if paths.LayoutVersion == 1 {
+		recovery, snapshotPath, recoveryLock, err = beginDirtyCloneRecoveryV1(ctx, m, wt, paths, claim, proof, *record)
+	} else {
+		recovery, snapshotPath, recoveryLock, err = beginDirtyCloneRecoveryV2(ctx, m, wt, paths, claim, proof, *record)
+	}
 	if err != nil {
 		return nil, err
+	}
+	if paths.LayoutVersion == 1 {
+		legacyArtifacts := []string{paths.RecoveryRecord, paths.RecoveryClaim, snapshotPath}
+		if recovery.ModeRetry != nil {
+			legacyArtifacts = append(legacyArtifacts, recovery.ModeRetry.PreviousSnapshot)
+		}
+		if err := m.registerManagedCloneArtifactPaths(ctx, wt, claim, *record, legacyArtifacts); err != nil {
+			_ = recoveryLock.Close()
+			return nil, managedCloneRelocationError(wt.TaskID, "verified legacy recovery artifacts could not be registered")
+		}
 	}
 	defer func() { _ = recoveryLock.Close() }()
 	manifest, err := prepareRecoverySnapshot(wt.Path, snapshotPath, recoveryJobPath, recovery)
 	if err != nil {
 		return nil, managedCloneRelocationError(wt.TaskID, "original checkout could not be safely snapshotted")
+	}
+	if err := reportRecoveryPhase(ctx, recoveryoperation.PhaseVerifyingSnapshot); err != nil {
+		return nil, err
 	}
 	recovery.Manifest = manifest
 	recovery.State = RecoveryStateRematerializing
@@ -456,8 +526,14 @@ func (m *Manager) transferDirtyManagedCloneFiles(
 	if err := writeRecoveryRecord(recoveryJobPath, recovery); err != nil {
 		return nil, managedCloneRelocationError(wt.TaskID, "snapshot state could not be recorded")
 	}
+	if err := reportRecoveryPhase(ctx, recoveryoperation.PhaseRestoring); err != nil {
+		return nil, err
+	}
 	if err := restoreSnapshot(wt.Path, snapshotPath, record.Replacement, manifest); err != nil {
 		return nil, blockRecovery(recoveryJobPath, recovery, err)
+	}
+	if err := reportRecoveryPhase(ctx, recoveryoperation.PhaseVerifyingReplacement); err != nil {
+		return nil, err
 	}
 	if err := verifyDirtyRelocationCheckout(ctx, m, *record, manifest); err != nil {
 		return nil, blockRecovery(recoveryJobPath, recovery, err)
@@ -472,6 +548,9 @@ func (m *Manager) transferDirtyManagedCloneFiles(
 	}
 	if err := verifyRecoveryRequiredIdentityTrees(wt.Path, snapshotPath, record.Replacement); err != nil {
 		return nil, blockRecovery(recoveryJobPath, recovery, err)
+	}
+	if err := reportRecoveryPhase(ctx, recoveryoperation.PhasePublishing); err != nil {
+		return nil, err
 	}
 	published, err := m.publishManagedCloneReplacement(ctx, wt, &replacement, claim)
 	if err != nil {
@@ -488,6 +567,11 @@ func (m *Manager) transferDirtyManagedCloneFiles(
 	record.Original = archivePath
 	if err := markManagedCloneRelocationComplete(jobPath, record, wt.TaskID); err != nil {
 		return nil, err
+	}
+	if err := m.registerManagedCloneArtifactPaths(ctx, wt, claim, *record, []string{
+		paths.RecoveryRecord, paths.RecoveryClaim, snapshotPath,
+	}); err != nil {
+		return nil, managedCloneRelocationError(wt.TaskID, "completed recovery artifacts could not be registered")
 	}
 	m.refreshRecoveredWorktreeCache(wt, published)
 	return published, nil
@@ -812,13 +896,19 @@ func wtTaskID(wt *Worktree) string {
 
 func readManagedCloneRelocationRecord(path string) (managedCloneRelocationRecord, error) {
 	var record managedCloneRelocationRecord
-	data, err := os.ReadFile(path)
+	data, private, err := readManagedClonePrivateRecord(path)
+	if err == nil && !private {
+		data, err = os.ReadFile(path)
+	}
 	if err != nil {
 		return record, err
 	}
 	err = json.Unmarshal(data, &record)
 	if err != nil || record.OperationID == "" || record.TaskID == "" || record.WorktreeID == "" || record.ReplacementID == "" {
 		return managedCloneRelocationRecord{}, fmt.Errorf("relocation record is invalid")
+	}
+	if record.LayoutVersion == 0 {
+		record.LayoutVersion = 1
 	}
 	if _, err := uuid.Parse(record.OperationID); err != nil {
 		return managedCloneRelocationRecord{}, fmt.Errorf("relocation operation ID is invalid")
@@ -831,7 +921,7 @@ func writeManagedCloneRelocationRecord(path string, record managedCloneRelocatio
 }
 
 func managedCloneRelocationRecordMatches(existing, expected managedCloneRelocationRecord) bool {
-	return existing.OperationID == expected.OperationID && existing.TaskID == expected.TaskID &&
+	return existing.LayoutVersion == expected.LayoutVersion && existing.OperationID == expected.OperationID && existing.TaskID == expected.TaskID &&
 		existing.EnvironmentID == expected.EnvironmentID && existing.WorktreeID == expected.WorktreeID &&
 		existing.Original == expected.Original && existing.Replacement == expected.Replacement &&
 		existing.ReplacementID != "" && existing.SourcePath == expected.SourcePath &&
@@ -841,6 +931,11 @@ func managedCloneRelocationRecordMatches(existing, expected managedCloneRelocati
 
 // These journal writes use atomic, mode-restricted sidecars.
 func writeRecoveryRecordJSON(path string, value any, create bool, prefix string) error {
+	if isManagedClonePrivateRecordPath(path) {
+		if err := verifyManagedClonePrivateRecordDirectory(path); err != nil {
+			return err
+		}
+	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err

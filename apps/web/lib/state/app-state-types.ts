@@ -11,6 +11,7 @@ import type {
   TaskPendingActionRevision,
   Turn,
   TaskSession,
+  WorkspaceRecoveryProjection,
   TaskPlan,
   TaskPlanCommentSnapshot,
   TaskPlanRevision,
@@ -502,6 +503,10 @@ export type AppState = KanbanSlice & {
     pendingAction: TaskPendingAction | null,
     revision?: TaskPendingActionRevision,
     taskId?: string,
+  ) => void;
+  setWorkspaceRecoveryProjection: (
+    sessionIds: string[],
+    projection: WorkspaceRecoveryProjection,
   ) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (

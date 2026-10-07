@@ -11,12 +11,12 @@ import (
 
 func TestMockInterruptionContinuationWireError(t *testing.T) {
 	for _, tc := range []struct {
-		name, agentID          string
-		enabled, terminalEvent bool
+		name, agentID                    string
+		enabled, attested, terminalEvent bool
 	}{
-		{"enabled mock", mockAgentID, true, true},
-		{"disabled mock", mockAgentID, false, true},
-		{"untrusted provider marker", "other-acp", true, false},
+		{"enabled mock", mockAgentID, true, true, true},
+		{"disabled mock", mockAgentID, false, false, true},
+		{"untrusted provider marker", "other-acp", true, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, fake, conn := setupHandoffFakeAgent(t)
@@ -52,13 +52,17 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 			require.Equal(t, streams.EventTypeError, events[len(events)-1].Type)
 			failures := 0
 			toolCalls := 0
-			for _, event := range events {
+			errorIndex := -1
+			toolIndex := -1
+			for i, event := range events {
 				if event.Type == streams.EventTypeToolCall {
 					toolCalls++
+					toolIndex = i
 				}
 				if event.Type == streams.EventTypeError {
 					failures++
-					if tc.enabled {
+					errorIndex = i
+					if tc.attested {
 						require.True(t, event.ContinuationSafety.SafeFor(7))
 						require.Equal(t, uint16(1), event.ContinuationSafety.CompletedTools)
 						require.Equal(t, streams.PromptFailureDispositionRetainRuntime, event.PromptFailureDisposition)
@@ -71,6 +75,8 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 			}
 			require.Equal(t, 1, toolCalls)
 			require.Equal(t, 1, failures)
+			require.NotEqual(t, -1, toolIndex, "completed tool activity must be delivered")
+			require.Greater(t, errorIndex, toolIndex, "activity events must precede the terminal failure")
 		})
 	}
 }

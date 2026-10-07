@@ -29,17 +29,18 @@ const (
 )
 
 type recoveryRecord struct {
-	OperationID string             `json:"operation_id"`
-	TaskID      string             `json:"task_id"`
-	WorktreeID  string             `json:"worktree_id"`
-	Original    string             `json:"original"`
-	Snapshot    string             `json:"snapshot"`
-	Replacement string             `json:"replacement,omitempty"`
-	Manifest    string             `json:"manifest"`
-	State       RecoveryState      `json:"state"`
-	UpdatedAt   time.Time          `json:"updated_at"`
-	Error       string             `json:"error,omitempty"`
-	ModeRetry   *recoveryModeRetry `json:"mode_retry,omitempty"`
+	LayoutVersion int                `json:"layout_version,omitempty"`
+	OperationID   string             `json:"operation_id"`
+	TaskID        string             `json:"task_id"`
+	WorktreeID    string             `json:"worktree_id"`
+	Original      string             `json:"original"`
+	Snapshot      string             `json:"snapshot"`
+	Replacement   string             `json:"replacement,omitempty"`
+	Manifest      string             `json:"manifest"`
+	State         RecoveryState      `json:"state"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+	Error         string             `json:"error,omitempty"`
+	ModeRetry     *recoveryModeRetry `json:"mode_retry,omitempty"`
 }
 
 // CompareAndSwapWorktree replaces one exact durable worktree identity. The
@@ -300,7 +301,7 @@ func loadOrClaimRecoveryWithOperation(wt *Worktree, jobPath, requestedOperationI
 		operationID = uuid.NewString()
 	}
 	record := recoveryRecord{
-		OperationID: operationID, TaskID: wt.TaskID, WorktreeID: wt.ID,
+		LayoutVersion: 1, OperationID: operationID, TaskID: wt.TaskID, WorktreeID: wt.ID,
 		Original: wt.Path, Snapshot: snapshotPath, State: RecoveryStateSnapshotting,
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -338,6 +339,11 @@ func adoptRecoveryRecord(wt *Worktree, existing recoveryRecord) (recoveryRecord,
 }
 
 func createRecoveryRecord(path string, record recoveryRecord) error {
+	if isManagedClonePrivateRecordPath(path) {
+		if err := verifyManagedClonePrivateRecordDirectory(path); err != nil {
+			return err
+		}
+	}
 	data, err := json.Marshal(record)
 	if err != nil {
 		return err
@@ -384,14 +390,14 @@ func recoveryAlreadyClaimedError(wt *Worktree, reason string) error {
 }
 
 func prepareRecoverySnapshot(source, snapshot, recordPath string, record recoveryRecord) (string, error) {
-	if record.ModeRetry != nil && !validRecoveryModeRetry(record, source) {
+	if record.ModeRetry != nil && !validRecoveryModeRetryForRecord(record, source, recordPath) {
 		return "", blockRecovery(recordPath, record, fmt.Errorf("recovery permission retry record is invalid"))
 	}
 	switch record.State {
 	case RecoveryStateSnapshotting:
 		return rebuildRecoverySnapshot(source, snapshot, recordPath, record)
 	case RecoveryStateRematerializing:
-		if err := validateRecoverySnapshotPath(source, snapshot); err != nil {
+		if err := validateRecoverySnapshotPathForRecord(source, snapshot, recordPath, record); err != nil {
 			return "", blockRecovery(recordPath, record, err)
 		}
 		manifest, err := checkoutManifest(snapshot)
@@ -421,7 +427,7 @@ func rebuildRecoverySnapshotWithCopier(
 	record recoveryRecord,
 	copySnapshot func(string, string) error,
 ) (string, error) {
-	if err := validateRecoverySnapshotPath(source, snapshot); err != nil {
+	if err := validateRecoverySnapshotPathForRecord(source, snapshot, recordPath, record); err != nil {
 		return "", blockRecovery(recordPath, record, err)
 	}
 	if err := os.RemoveAll(snapshot); err != nil {
@@ -499,6 +505,79 @@ func validateRecoverySnapshotPath(source, snapshot string) error {
 	return nil
 }
 
+func validateRecoverySnapshotPathForRecord(source, snapshot, recordPath string, record recoveryRecord) error {
+	if record.LayoutVersion != 2 {
+		return validateRecoverySnapshotPath(source, snapshot)
+	}
+	if err := validatePrivateRecoverySnapshotBinding(source, snapshot, recordPath, record); err != nil {
+		return err
+	}
+	if err := verifyManagedClonePrivateSnapshotDirectory(snapshot); err != nil {
+		return fmt.Errorf("private recovery snapshot directory is unsafe: %w", err)
+	}
+	if err := validatePrivateRecoverySnapshotFilesystem(snapshot); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validatePrivateRecoverySnapshotBinding(source, snapshot, recordPath string, record recoveryRecord) error {
+	recordDir := filepath.Dir(filepath.Clean(recordPath))
+	bucket := filepath.Dir(recordDir)
+	if filepath.Base(recordDir) != "records" || filepath.Base(filepath.Dir(snapshot)) != "snapshots" ||
+		filepath.Clean(filepath.Dir(filepath.Dir(snapshot))) != bucket || filepath.Base(snapshot) == "" ||
+		filepath.Base(snapshot) == "." || record.Snapshot != snapshot {
+		return fmt.Errorf("recovery snapshot path is outside the registered private namespace")
+	}
+	if filepath.Clean(source) != filepath.Clean(record.Original) {
+		return fmt.Errorf("recovery snapshot source does not match its journal")
+	}
+	return nil
+}
+
+func validatePrivateRecoverySnapshotFilesystem(snapshot string) error {
+	parent := filepath.Dir(snapshot)
+	if _, err := os.Lstat(parent); err != nil {
+		return fmt.Errorf("inspect private snapshot directory: %w", err)
+	}
+	if info, err := os.Lstat(snapshot); err == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
+		return fmt.Errorf("private recovery snapshot is not a directory")
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect private recovery snapshot: %w", err)
+	}
+	return nil
+}
+
+func validRecoveryModeRetryForRecord(record recoveryRecord, original, recordPath string) bool {
+	if record.LayoutVersion != 2 {
+		return validRecoveryModeRetry(record, original)
+	}
+	retry := record.ModeRetry
+	if !validRecoveryModeRetryEvidence(retry, record.Snapshot) || !validRecoveryOperationID(record.OperationID) {
+		return false
+	}
+	return validPrivateRetrySnapshot(record, retry, original, recordPath)
+}
+
+func validPrivateRetrySnapshot(record recoveryRecord, retry *recoveryModeRetry, original, recordPath string) bool {
+	bucket := filepath.Dir(filepath.Dir(recordPath))
+	want := filepath.Join(bucket, "snapshots", record.OperationID+"-modes-v1")
+	if filepath.Clean(record.Snapshot) != want || filepath.Clean(original) != filepath.Clean(record.Original) {
+		return false
+	}
+	return validHistoricalRecoverySnapshotForRecord(original, retry.PreviousSnapshot, recordPath)
+}
+
+func validHistoricalRecoverySnapshotForRecord(original, snapshot, recordPath string) bool {
+	if err := validateRecoverySnapshotPathForRecord(original, snapshot, recordPath, recoveryRecord{
+		LayoutVersion: 2, Original: original, Snapshot: snapshot,
+	}); err != nil {
+		return false
+	}
+	info, err := os.Lstat(snapshot)
+	return err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0
+}
+
 func blockRecovery(path string, record recoveryRecord, err error) error {
 	record.State, record.Error, record.UpdatedAt = RecoveryStateBlocked, err.Error(), time.Now().UTC()
 	_ = writeRecoveryRecord(path, record)
@@ -506,7 +585,10 @@ func blockRecovery(path string, record recoveryRecord, err error) error {
 }
 
 func readRecoveryRecord(path string) (recoveryRecord, error) {
-	data, err := os.ReadFile(path)
+	data, private, err := readManagedClonePrivateRecord(path)
+	if err == nil && !private {
+		data, err = os.ReadFile(path)
+	}
 	if err != nil {
 		return recoveryRecord{}, err
 	}
@@ -514,10 +596,18 @@ func readRecoveryRecord(path string) (recoveryRecord, error) {
 	if err := json.Unmarshal(data, &record); err != nil {
 		return recoveryRecord{}, err
 	}
+	if record.LayoutVersion == 0 {
+		record.LayoutVersion = 1
+	}
 	return record, nil
 }
 
 func writeRecoveryRecord(path string, record recoveryRecord) error {
+	if isManagedClonePrivateRecordPath(path) {
+		if err := verifyManagedClonePrivateRecordDirectory(path); err != nil {
+			return err
+		}
+	}
 	data, err := json.Marshal(record)
 	if err != nil {
 		return err
