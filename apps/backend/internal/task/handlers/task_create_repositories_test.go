@@ -8,7 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 )
 
-func TestConvertCreateServiceRepositoriesPreservesSelectionPresence(t *testing.T) {
+func TestConvertTaskRepositoriesPreservesSelectionPresence(t *testing.T) {
 	tests := []struct {
 		name     string
 		provided bool
@@ -26,7 +26,7 @@ func TestConvertCreateServiceRepositoriesPreservesSelectionPresence(t *testing.T
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := convertCreateServiceRepositories(tt.provided, tt.input)
+			got := convertTaskRepositories(tt.provided, tt.input)
 			if tt.wantNil {
 				require.Nil(t, got)
 				return

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"testing"
 
 	officemodels "github.com/kandev/kandev/internal/office/models"
@@ -207,14 +208,15 @@ func TestCreateTaskWithoutProjectDoesNotRequireProjectSourceReader(t *testing.T)
 func TestCreateTaskProjectRepositorySourceFailuresPrecedeTaskCreation(t *testing.T) {
 	ctx := context.Background()
 	tests := []struct {
-		name   string
-		reader ProjectRepositorySourceReader
+		name             string
+		reader           ProjectRepositorySourceReader
+		errorNotContains string
 	}{
 		{name: "missing reader"},
 		{name: "read failure", reader: projectRepositorySourceReaderFunc(func(context.Context, string) (ProjectRepositorySources, error) {
 			return ProjectRepositorySources{}, errors.New("project store unavailable")
 		})},
-		{name: "foreign workspace", reader: projectRepositorySourceReaderFunc(func(context.Context, string) (ProjectRepositorySources, error) {
+		{name: "foreign workspace", errorNotContains: "ws-foreign", reader: projectRepositorySourceReaderFunc(func(context.Context, string) (ProjectRepositorySources, error) {
 			return ProjectRepositorySources{WorkspaceID: "ws-foreign"}, nil
 		})},
 		{name: "unsupported source", reader: projectRepositorySourceReaderFunc(func(context.Context, string) (ProjectRepositorySources, error) {
@@ -248,6 +250,9 @@ func TestCreateTaskProjectRepositorySourceFailuresPrecedeTaskCreation(t *testing
 			})
 			if err == nil {
 				t.Fatal("CreateTask succeeded with invalid or unavailable project sources")
+			}
+			if tc.errorNotContains != "" && strings.Contains(err.Error(), tc.errorNotContains) {
+				t.Fatalf("CreateTask error %q exposes forbidden value %q", err, tc.errorNotContains)
 			}
 			var taskCount int
 			if err := repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE workspace_id = ?`, "ws-1").Scan(&taskCount); err != nil {
@@ -347,6 +352,7 @@ func TestCreateTaskProjectSourcesReuseDeduplicateAndResolve(t *testing.T) {
 	}
 	projectSources := []string{
 		firstPath,
+		"github.com/acme/api",
 		"https://github.com/acme/api",
 		secondPath,
 		firstPath + string('/'),
@@ -514,6 +520,7 @@ func TestProjectRepositoryInputsPreserveOrderForResolvedDeduplication(t *testing
 	initRealGitRepo(t, secondPath)
 	inputs, err := projectRepositoryInputs([]string{
 		firstPath,
+		"github.com/acme/api",
 		"https://github.com/acme/api",
 		secondPath,
 		firstPath + string('/'),
@@ -522,21 +529,25 @@ func TestProjectRepositoryInputsPreserveOrderForResolvedDeduplication(t *testing
 	if err != nil {
 		t.Fatalf("projectRepositoryInputs: %v", err)
 	}
-	if len(inputs) != 5 {
-		t.Fatalf("input count = %d, want all five entries retained for authoritative resolution: %#v", len(inputs), inputs)
+	if len(inputs) != 6 {
+		t.Fatalf("input count = %d, want all six entries retained for authoritative resolution: %#v", len(inputs), inputs)
 	}
 	if inputs[0].LocalPath != canonicalRepoTestPath(t, firstPath) ||
-		inputs[1].RemoteURL != "https://github.com/acme/api" ||
-		inputs[2].LocalPath != canonicalRepoTestPath(t, secondPath) ||
-		inputs[3].LocalPath != canonicalRepoTestPath(t, firstPath) ||
-		inputs[4].RemoteURL != "git@github.com:acme/api.git" {
+		inputs[1].RemoteURL != "github.com/acme/api" ||
+		inputs[2].RemoteURL != "https://github.com/acme/api" ||
+		inputs[3].LocalPath != canonicalRepoTestPath(t, secondPath) ||
+		inputs[4].LocalPath != canonicalRepoTestPath(t, firstPath) ||
+		inputs[5].RemoteURL != "git@github.com:acme/api.git" {
 		t.Fatalf("inputs = %#v, want every source in first-occurrence order", inputs)
 	}
 }
 
 func TestProjectRepositoryInputsTreatWindowsDrivePathAsLocal(t *testing.T) {
-	if isRemoteProjectRepositorySource(`C:\\work\\repo`) {
+	if isRemoteProjectRepositorySource(`C:\work\repo`) {
 		t.Fatal("Windows drive path was classified as a remote URL")
+	}
+	if !isRemoteProjectRepositorySource("github.com/acme/repo") {
+		t.Fatal("scheme-less GitHub URL was not classified as a remote")
 	}
 	if !isRemoteProjectRepositorySource("git@github.com:acme/repo.git") {
 		t.Fatal("SSH Git URL was not classified as remote")

@@ -70,8 +70,9 @@ An empty decoded source list leaves the request repositoryless.
 ## Resolution
 
 Convert local paths to `TaskRepositoryInput.LocalPath` and supported remote URLs
-to `TaskRepositoryInput.RemoteURL`. Reuse existing provider parsing and validation.
-Do not interpret a Windows drive path as a remote URL.
+to `TaskRepositoryInput.RemoteURL`. Accept supported host/path forms such as
+`github.com/owner/repo` without a URL scheme through the existing provider
+parser. Do not interpret a Windows drive path as a remote URL.
 Do not set `TrustedProviderDescriptor` from project data.
 
 Validate and canonicalize local project entries with the existing explicit-local

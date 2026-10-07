@@ -62,7 +62,7 @@ git diff --check
 
 - `apps/backend/internal/task/service/service.go`
 - `apps/backend/internal/task/service/service_tasks.go`
-- `apps/backend/internal/task/service/service_project_repositories.go` (new)
+- `apps/backend/internal/task/service/project_repository_sources.go` (new)
 - `apps/backend/internal/task/service/service_project_repositories_test.go` (new)
 - `apps/backend/internal/task/service/service_office_test.go`
 - `apps/backend/internal/task/service/service_office_integration_test.go`
@@ -95,12 +95,16 @@ Do not suppress missing-reader errors to preserve old test fixtures.
 
 ## Results
 
-Completed. Root tasks with an omitted repository selection resolve every selected Office project source through the shared task service before deduplicating by the resolved repository ID. Explicit selections, workspace paths, shared-group tasks, and subtasks retain their existing precedence. Mixed GitLab HTTPS/HTTP source orders fail before task creation and publication. Local-path/remote-URL aliases attach one registered repository in either order. The Office adapter performs an exact project lookup and production task-service wiring is covered. The HTTP and WebSocket create paths preserve omitted versus explicitly empty repository lists.
+Completed. Root tasks with an omitted repository selection resolve every selected Office project source through the shared task service before deduplicating by the resolved repository ID. Explicit selections, workspace paths, shared-group tasks, and subtasks retain their existing precedence. Mixed GitLab HTTPS/HTTP source orders fail before task creation and publication. Local-path/remote-URL aliases attach one registered repository in either order. Supported scheme-less host/path remotes such as `github.com/acme/api` use the existing provider parser and attach normally. Foreign workspace IDs are omitted from the public creation error. The Office adapter performs an exact project lookup and production task-service wiring is covered. The HTTP and WebSocket create paths preserve omitted versus explicitly empty repository lists.
 
 Validation passed:
 
 - `go test -trimpath -tags fts5 -race ./internal/task/service ./internal/backendapp ./internal/orchestrator -count=1`
 - `go test -trimpath -tags fts5 ./internal/task/handlers -count=1`
+- `go test -trimpath -tags fts5 -race ./internal/task/service -count=1` (after PR review remediation)
+- `go test -trimpath -tags fts5 -race ./internal/mcp/handlers -count=1` (after making project-backed legacy fixtures explicit about their empty repository selection)
+- `make -C apps/backend build` (after PR review remediation)
+- `golangci-lint run ./... --new-from-rev=330e02a47808c11ca315ae30456fcce7f4806db5 --timeout=5m` (0 issues)
 - `python3 scripts/list-docs.py validate`
 - `python3 scripts/lint-spec-files.py --all`
 - `git diff --check`

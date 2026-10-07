@@ -195,14 +195,14 @@ func TestWSUpdateTaskReturnsValidationErrorForOverlongTitle(t *testing.T) {
 	assert.False(t, repo.deleteReposCalled, "rejected title must not touch task repositories")
 }
 
-func TestConvertUpdateRepositories(t *testing.T) {
-	assert.Nil(t, convertUpdateRepositories(false, nil), "absent field must stay nil")
+func TestConvertTaskRepositories(t *testing.T) {
+	assert.Nil(t, convertTaskRepositories(false, nil), "absent field must stay nil")
 
-	empty := convertUpdateRepositories(true, nil)
+	empty := convertTaskRepositories(true, nil)
 	require.NotNil(t, empty, "provided empty list must map to a non-nil slice so it clears")
 	assert.Len(t, empty, 0)
 
-	converted := convertUpdateRepositories(true, []dto.TaskRepositoryInput{{RepositoryID: "repo-1"}})
+	converted := convertTaskRepositories(true, []dto.TaskRepositoryInput{{RepositoryID: "repo-1"}})
 	require.Len(t, converted, 1)
 	assert.Equal(t, "repo-1", converted[0].RepositoryID)
 }

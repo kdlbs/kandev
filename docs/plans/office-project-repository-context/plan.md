@@ -83,9 +83,9 @@ Planned names are new regression tests, not completed evidence.
 
 | Criteria | File and test |
 | --- | --- |
-| .1, .2 | `service_project_repositories_test.go`: `TestCreateTaskRootProjectRepositories` and `TestCreateTaskProjectRepositoriesBeforeCreatedEvent` |
-| .2, .3 | Same file: `TestCreateTaskProjectSourcesReuseAndDeduplicate`, including aliases, multiple repositories, defaults, and supported remote inputs; `TestCreateTaskProjectSourcesDeduplicateLocalRemoteRepositoryAliases` covers both alias orders |
-| .4, .5, .7 | Same file: `TestCreateTaskProjectSourceSelectionPrecedence`, with explicit subset, empty list, workspace path/group, inherited child, repositoryless parent, empty project, and no project |
+| .1, .2 | `service_project_repositories_test.go`: `TestCreateTaskRootProjectRepositories` verifies attachments exist before `task.created` publication |
+| .2, .3 | Same file: `TestCreateTaskProjectSourcesReuseDeduplicateAndResolve`, including aliases, multiple repositories, defaults, and supported remote inputs; `TestCreateTaskProjectSourcesDeduplicateLocalRemoteRepositoryAliases` covers both alias orders |
+| .4, .5, .7 | Same file: `TestCreateTaskProjectRepositorySourceSelectionPrecedence`, with explicit subset, empty list, workspace path/group, inherited child, repositoryless parent, empty project, and no project |
 | .6 | Same file: `TestCreateTaskProjectRepositorySourceFailuresPrecedeTaskCreation`, with missing reader/project, read/decode errors, foreign workspace, unsupported URL, mixed valid/invalid sources, and both GitLab trusted/untrusted origin orders; asserts no task row or `task.created` event |
 | .1, .6 | `backendapp/office_project_repositories_test.go`: `TestOfficeProjectRepositoryReaderWiring`, through the real composition seam |
 | .8 | `backendapp/office_project_workspace_test.go`: `TestOfficeProjectFirstLaunchSources`, with `local_pc`, Worktree, and inheriting child cases |
@@ -117,7 +117,7 @@ Exact product verification commands are in each work order.
 
 - Diagnostic reproduction: failed as expected with zero attached repositories; covered by `TestCreateTaskRootProjectRepositories`.
 - Temporary reproduction cleanup: complete.
-- `python3 scripts/list-docs.py validate`: passed (359 decisions, 1425 specifications).
+- `python3 scripts/list-docs.py validate`: passed (360 decisions, 1427 specifications).
 - `python3 scripts/lint-spec-files.test.py`: passed (36 tests).
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `.github/scripts/pr-docs.cjs.validateCoverage`: passed for both work orders, using the planned task-service change as the coverage trigger.
@@ -127,17 +127,27 @@ Exact product verification commands are in each work order.
 - `go test -trimpath -tags fts5 -race ./internal/task/service ./internal/backendapp -count=1`: passed after mapping two legacy fake projects to their actual workspaces in tests.
 - `go test -trimpath -tags fts5 -race -run '^TestOfficeProjectFirstLaunchSources$' ./internal/backendapp -count=1 -v`: passed.
 - Review remediation: source validation precedes automatic repository-ID deduplication; GitLab HTTPS/HTTP mixed origins fail in both orders, and local-path/remote-URL aliases attach one registered repository in both orders.
+- PR review remediation: supported scheme-less host/path URLs such as `github.com/acme/api` now pass through the existing provider parser and attach normally. Foreign workspace IDs are omitted from task creation errors.
+- PR review cleanup: the test traceability table and work-order source path match the implementation; public docs describe invalid-source and unreadable-project failure behavior; the mobile source test uses deterministic titles and the Windows-path test uses a realistic raw string.
+- The create/update request handlers share repository-field conversion while preserving omitted versus explicit-empty behavior at their service boundaries.
 - Review remediation: `TestOfficeProjectFirstLaunchSources` now uses the production Office task starter, orchestrator, lifecycle manager, and HandoffService; it checks persisted `task_environment_repos`, the Worktree group path, and an inherited child with no supplied parent workspace path.
 - Review remediation required materializing workspace groups after executor preparation and returning the prepared single-repository Worktree path through the lifecycle adapter.
 - `go test -trimpath -tags fts5 -race ./internal/task/service ./internal/backendapp ./internal/orchestrator -count=1`: passed (100.5s, 114.8s, and 163.1s respectively).
 - `make -C apps/backend build`: passed for the backend and its bundled Go tools.
 - `make -C apps/backend lint`: passed after lowercasing the Office reader error strings flagged by staticcheck.
-- `go test -trimpath -tags fts5 ./internal/task/handlers -count=1`: passed, including the HTTP nil-versus-empty repository request regressions.
+- `go test -trimpath -tags fts5 ./internal/task/handlers -count=1`: passed, including the HTTP nil-versus-empty repository request regressions and shared conversion helper.
+- `go test -trimpath -tags fts5 -race ./internal/task/service -count=1`: passed after PR review remediation.
+- `go test -trimpath -tags fts5 -race ./internal/mcp/handlers -count=1`: passed after making project-backed legacy fixtures explicit about their empty repository selection.
+- `make -C apps/backend build`: passed after PR review remediation.
+- `golangci-lint run ./... --new-from-rev=330e02a47808c11ca315ae30456fcce7f4806db5 --timeout=5m`: passed with 0 issues after PR review remediation.
+- `pnpm exec prettier --check e2e/tests/office/mobile-new-task-dialog.spec.ts`: passed.
+- `pnpm e2e:run --project chromium tests/office/new-task-dialog.spec.ts`: passed again after the shared handler conversion refactor (3 tests).
+- `pnpm e2e:run --project mobile-chrome tests/office/mobile-new-task-dialog.spec.ts`: passed after deterministic-title and formatting updates (2 tests).
 - `pnpm e2e:run --project chromium tests/office/new-task-dialog.spec.ts`: passed (3 tests); backend and Vite production assets built.
 - `pnpm e2e:run --project mobile-chrome tests/office/mobile-new-task-dialog.spec.ts`: passed (2 tests); backend and Vite production assets built.
 - `node --test scripts/validate-public-docs.test.mjs`: passed (62 tests).
 - `node scripts/validate-public-docs.mjs`: passed (47 published docs pages).
-- `python3 scripts/list-docs.py validate`: passed (359 decisions, 1425 specifications).
+- `python3 scripts/list-docs.py validate`: passed (360 decisions, 1427 specifications).
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check`: passed after remediation.
 - Implementation verification: complete. The user authorized implementation on 2026-10-07.

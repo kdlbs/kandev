@@ -36,7 +36,7 @@ func (s *Service) prepareProjectRepositorySources(ctx context.Context, req *Crea
 		return fmt.Errorf("read repository sources for project %q: %w", req.ProjectID, err)
 	}
 	if project.WorkspaceID != req.WorkspaceID {
-		return fmt.Errorf("project %q belongs to workspace %q, not %q", req.ProjectID, project.WorkspaceID, req.WorkspaceID)
+		return fmt.Errorf("project %q does not belong to workspace %q", req.ProjectID, req.WorkspaceID)
 	}
 	repositories, err := projectRepositoryInputs(project.Sources)
 	if err != nil {
@@ -72,6 +72,9 @@ func isRemoteProjectRepositorySource(source string) bool {
 		return false
 	}
 	if strings.Contains(source, "://") || strings.HasPrefix(strings.ToLower(source), "git@") {
+		return true
+	}
+	if _, _, _, _, err := parseRemoteRepositoryURL(source, ""); err == nil {
 		return true
 	}
 	separator := strings.IndexByte(source, ':')

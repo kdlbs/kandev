@@ -97,7 +97,7 @@ Use the real preparation path and read the source bytes.
 
 ## Results
 
-Completed. `TestOfficeProjectFirstLaunchSources` drives the production Office task starter and orchestrator through a real lifecycle manager backed by a mock ACP agent. It reads the sentinel from the persisted environment for `local_pc` and Worktree, verifies each environment's `task_environment_repos` identity, and launches an `inherit_parent` child without supplying a parent workspace path. The Worktree case verifies the shared group records the prepared path. The integration also exposed and now covers post-launch workspace-group materialization and persistence of the single-repository Worktree path in lifecycle launch results. Desktop and phone New Task E2E scenarios verify returned and persisted repository attachments. The public Office configuration guide describes project source inheritance.
+Completed. `TestOfficeProjectFirstLaunchSources` drives the production Office task starter and orchestrator through a real lifecycle manager backed by a mock ACP agent. It reads the sentinel from the persisted environment for `local_pc` and Worktree, verifies each environment's `task_environment_repos` identity, and launches an `inherit_parent` child without supplying a parent workspace path. The Worktree case verifies the shared group records the prepared path. The integration also exposed and now covers post-launch workspace-group materialization and persistence of the single-repository Worktree path in lifecycle launch results. Desktop and phone New Task E2E scenarios verify returned and persisted repository attachments; the mobile scenario uses fixed project and task titles for deterministic runs. The public Office configuration guide describes inheritance and source failure behavior.
 
 Validation passed:
 
@@ -107,6 +107,7 @@ Validation passed:
 - `make -C apps/backend lint`
 - `pnpm e2e:run --project chromium tests/office/new-task-dialog.spec.ts` (3 tests)
 - `pnpm e2e:run --project mobile-chrome tests/office/mobile-new-task-dialog.spec.ts` (2 tests)
+- `pnpm exec prettier --check e2e/tests/office/mobile-new-task-dialog.spec.ts`
 - `node --test scripts/validate-public-docs.test.mjs` (62 tests)
 - `node scripts/validate-public-docs.mjs`
 - `python3 scripts/list-docs.py validate`

@@ -8,23 +8,20 @@ test("project sources attach before launch", async ({
   apiClient,
   seedData,
 }) => {
-  const runId = Date.now();
   const officeRepository = await apiClient.createRepository(
     officeSeed.workspaceId,
     seedData.repositoryPath,
   );
-  const project = (await officeApi.createProject(
-    officeSeed.workspaceId,
-    `Mobile Project Source ${runId}`,
-    [seedData.repositoryPath],
-  )) as { id: string; name: string };
+  const project = (await officeApi.createProject(officeSeed.workspaceId, "Mobile Project Source", [
+    seedData.repositoryPath,
+  ])) as { id: string; name: string };
   expect(project.id).toBeTruthy();
 
   await testPage.goto("/office/tasks");
   await testPage.getByRole("main").getByRole("button", { name: "New Task", exact: true }).tap();
   const dialog = testPage.getByTestId("office-new-issue-dialog");
   await expect(dialog).toBeVisible({ timeout: 10_000 });
-  await dialog.getByPlaceholder("Task title").fill(`Mobile Project Source Task ${runId}`);
+  await dialog.getByPlaceholder("Task title").fill("Mobile Project Source Task");
   await dialog.getByRole("button", { name: "Project" }).tap();
   await testPage.getByRole("button", { name: project.name, exact: true }).tap();
 
