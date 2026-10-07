@@ -126,7 +126,11 @@ function MobilePluginRow({
       variant="outline"
       className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
     >
-      <Link href={href} onClick={onNavigate} data-testid={`mobile-sidebar-plugin-${node.id}`}>
+      <Link
+        href={href}
+        onClick={onNavigate}
+        data-testid={`mobile-plugin-nav-item-${node.pluginItemId ?? node.destinationId ?? node.id}`}
+      >
         {content}
       </Link>
     </Button>

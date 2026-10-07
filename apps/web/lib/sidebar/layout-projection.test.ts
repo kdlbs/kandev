@@ -9,6 +9,7 @@ const catalog = [
   {
     target: { kind: "destination" as const, id: SLACK_ID },
     label: "Slack",
+    pluginItemId: "slack",
     section: "integrations" as const,
     source: "plugin" as const,
     available: true,
@@ -52,6 +53,9 @@ describe("sidebar layout projection", () => {
 
     expect(projected.nodes.map((node) => node.id)).toEqual(EXPECTED_NODE_IDS);
     expect(projected.nodes.map((node) => node.label)).toEqual(EXPECTED_NODE_LABELS);
+    expect(projected.nodes.find((node) => node.id === SLACK_ID)).toMatchObject({
+      pluginItemId: "slack",
+    });
     expect(projected.protectedNodeIds).toContain("tasks");
   });
 

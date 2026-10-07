@@ -39,7 +39,7 @@ function LayoutPluginItem({
       href={href}
       disabled={!node.destinationId || !href}
       collapsed={collapsed}
-      testId={`plugin-nav-item-${node.destinationId ?? node.id}`}
+      testId={`plugin-nav-item-${node.pluginItemId ?? node.destinationId ?? node.id}`}
     />
   );
 }

@@ -34,3 +34,30 @@ it("keeps the disclosure target present and hidden until expanded", () => {
   expect(document.getElementById(panelId!)).toBe(panel);
   expect(panel?.hidden).toBe(true);
 });
+
+it("keeps the canvas row test id stable inside the disclosure", () => {
+  render(
+    <MobileCanvasesSection
+      workspaceId="workspace"
+      entries={[
+        {
+          target: { kind: "canvas", id: "canvas-1" },
+          label: "Canvas one",
+          href: "/canvases/canvas-1",
+          source: "canvas",
+          available: true,
+        },
+      ]}
+      loading={false}
+      error={null}
+      onRetry={() => {}}
+      onNavigate={() => {}}
+    />,
+  );
+
+  const toggle = screen.getByRole("button", { name: "Canvases" });
+  fireEvent.click(toggle);
+  expect(screen.getByTestId("mobile-workspace-canvas-canvas-1").getAttribute("href")).toBe(
+    "/canvases/canvas-1",
+  );
+});

@@ -40,9 +40,14 @@ export function NewTaskPresentation({
           </Button>
         )}
         {fast && actions}
-        {workspaceActions}
+        {fast && workspaceActions}
       </div>
-      {!fast && utilities}
+      {!fast && (
+        <div className="min-w-0 space-y-1">
+          {utilities}
+          {workspaceActions}
+        </div>
+      )}
     </div>
   );
 }

@@ -118,13 +118,12 @@ test.describe("Mobile plugin navigation", () => {
     await expect(navItem).toHaveText(/Hello E2E/);
     expect((await navItem.boundingBox())?.height).toBeGreaterThanOrEqual(44);
 
-    // The sheet slides up on open and the section sits below the fold, so
-    // settle both before shooting or the asset captures an empty mid-animation
-    // drawer instead of the change under test.
-    await testPage.getByTestId("mobile-plugin-nav-section").scrollIntoViewIfNeeded();
+    // Saved layouts own plugin destinations, so scroll the projected row into
+    // view instead of the legacy plugin section that no longer renders it.
+    await navItem.scrollIntoViewIfNeeded();
     await expect(navItem).toBeInViewport();
     await capture.screenshot("mobile-plugin-nav-section", {
-      caption: "Phone menu sheet: the plugin's page now has an entry point",
+      caption: "Phone menu sheet: saved navigation includes the plugin page",
     });
 
     await navItem.click();

@@ -403,6 +403,20 @@ describe("AppSidebarNewTaskItem sidebar-workspace-actions plugin slot", () => {
     expect(screen.getByTestId(QUICK_ACTIONS_GROUP_TEST_ID).nextElementSibling).toBe(pluginSlot);
   });
 
+  it("renders plugin controls after the labelled utilities when fast actions are disabled", () => {
+    state.userSettings.sidebarFastActionsEnabled = false;
+    registerPlugin(() => <button type="button" data-testid={PLUGIN_TEST_ID} />);
+    renderItem(false);
+
+    const utilities = screen.getByTestId("sidebar-labelled-utilities");
+    const plugin = screen.getByTestId(PLUGIN_TEST_ID);
+    const pluginSlot = plugin.parentElement;
+    const utilitiesPosition = utilities.compareDocumentPosition(pluginSlot!);
+
+    expect(utilitiesPosition & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(pluginSlot?.getAttribute("data-plugin-slot")).toBe("sidebar-workspace-actions");
+  });
+
   it("A2: forwards the active workspace id and label as slotProps", () => {
     let captured: unknown;
     registerPlugin(({ slotProps }) => {

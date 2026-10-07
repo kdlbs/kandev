@@ -28,6 +28,7 @@ export type ProjectedShortcut = SidebarShortcut & {
 export type ProjectedSidebarNode = Omit<SidebarLayoutNode, "shortcuts"> & {
   label: string;
   icon: DestinationIcon;
+  pluginItemId?: ShortcutCatalogEntry["pluginItemId"];
   shortcuts: ProjectedShortcut[];
   available?: boolean;
 };
@@ -136,7 +137,7 @@ function projectNodePresentation(
   catalog: Map<string, ShortcutCatalogEntry>,
   unavailableLabel: string,
   builtinLabels: Record<string, string>,
-): Pick<ProjectedSidebarNode, "label" | "icon" | "available"> {
+): Pick<ProjectedSidebarNode, "label" | "icon" | "pluginItemId" | "available"> {
   const builtinIcon = node.destinationId ? BUILTIN_ICONS[node.destinationId] : undefined;
   const destination = node.destinationId
     ? catalog.get(`destination:${node.destinationId}`)
@@ -150,7 +151,12 @@ function projectNodePresentation(
     (node.destinationId ? builtinLabels[node.destinationId] : undefined) ??
     node.id;
   const icon = destination?.icon ?? builtinIcon ?? IconQuestionMark;
-  return { label, icon, available: true };
+  return {
+    label,
+    icon,
+    ...(destination?.pluginItemId ? { pluginItemId: destination.pluginItemId } : {}),
+    available: true,
+  };
 }
 
 function projectNode(
