@@ -130,3 +130,13 @@ Validation passed:
   backend test run passed. The exact full-suite command and final results are in
   `plan.md`.
 - The original initial runtime timeout remains out of scope.
+
+PR review follow-up on 2026-10-07 keeps later-prompt retirement tied to provider
+acceptance. A rejected prompt restores the pending receipt; an interrupted
+dispatch remains uncertain and fails closed. The original transcript row uses a
+stable idempotency key and the accepted replay turn ID, and an explicit durable
+identity check ignores unrelated session messages. Focused rejection,
+interrupted-dispatch, legacy-CAS-conflict, and transcript-backfill regressions
+passed with the full backend suite, targeted race checks, build, and
+changed-scope lint. The attachment read remains unchanged because its total size
+is bounded by the existing recovery limit.

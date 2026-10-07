@@ -233,9 +233,9 @@ Implementation and design validation passed on 2026-10-06:
 - `python3 scripts/lint-spec-files.py --all`: all specification files passed.
 - `git diff --check` and `gofmt -l` for changed Go source passed.
 
-The implementation and design package remain unstaged and uncommitted. The original
-runtime timeout remains unexplained and out of scope. The code blocks replay when
-provider acceptance is uncertain.
+The implementation package was committed as `d79811b` and opened as PR #4279.
+The original runtime timeout remains unexplained and out of scope. The code
+blocks replay when provider acceptance is uncertain.
 
 ## Review remediation
 
@@ -263,6 +263,29 @@ Validation passed on 2026-10-06:
 An earlier unconstrained full run hit a timing-budget failure in an unrelated
 SQLite performance test. That test passed in isolation, and the later complete
 backend run passed with package concurrency limited to two.
+
+## PR review follow-up (2026-10-07)
+
+Later prompts now move a pending replay receipt to a dispatching state before
+provider admission. A rejected prompt restores pending state; acceptance changes
+it to replay-blocked. An interrupted dispatch stays uncertain and fails closed.
+This preserves replay after a definite rejection without allowing an accepted
+ordinary resume or interactive prompt to authorize stale replay after restart.
+
+The original transcript row is now written idempotently with a stable
+task/session message ID and the accepted replay turn ID. Recovery checks that
+exact durable row, including its task, session, author, content, plan mode, and
+attachment descriptors, so an unrelated later message cannot suppress it.
+Legacy metadata-write conflict tests cover matching, accepted, mismatched, and
+unreadable concurrent winners. The attachment-read performance observation was
+reviewed and left unchanged because recovery is rare and the read is bounded by
+the existing attachment limit.
+
+Validation on 2026-10-07 passed: focused acceptance, rejection, conflict,
+transcript, restart, and queue-hold regressions; the full orchestrator suite;
+the complete backend test suite with `-p=2`; targeted race tests; the backend
+build; and changed-scope `golangci-lint`. PostgreSQL CAS coverage remained
+environment-gated because `KANDEV_TEST_POSTGRES_DSN` was not configured.
 
 ## Risks
 

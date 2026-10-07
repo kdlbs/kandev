@@ -24,6 +24,17 @@ var (
 
 const initialSubmissionMissingState = "missing"
 
+type initialSubmissionTranscriptContextKey struct{}
+
+func withInitialSubmissionTranscriptRecorded(ctx context.Context, recorded bool) context.Context {
+	return context.WithValue(ctx, initialSubmissionTranscriptContextKey{}, recorded)
+}
+
+func initialSubmissionTranscriptRecorded(ctx context.Context) bool {
+	recorded, _ := ctx.Value(initialSubmissionTranscriptContextKey{}).(bool)
+	return recorded
+}
+
 type initialSubmissionMetadataCAS interface {
 	SetSessionMetadataKeyIfJSONValue(context.Context, string, string, interface{}, interface{}) (bool, error)
 }
@@ -351,6 +362,32 @@ func (s *Service) transitionInitialSubmissionToAccepted(
 	return nil
 }
 
+func (s *Service) beginInitialSubmissionReplayRetirement(
+	ctx context.Context,
+	sessionID, executionID, turnID string,
+) error {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return errors.New("initial task submission is unavailable")
+	}
+	submission, found, err := models.LoadInitialPromptSubmission(session.Metadata)
+	if err != nil {
+		return err
+	}
+	if !found || submission.State != models.InitialPromptSubmissionPending {
+		return nil
+	}
+	updated := *submission
+	updated.State = models.InitialPromptSubmissionDispatching
+	updated.ExecutionID = executionID
+	updated.AttemptID = turnID
+	updated.DispatchStartedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := s.compareAndSetInitialSubmission(ctx, sessionID, submission, &updated); err != nil {
+		return fmt.Errorf("mark later prompt admission for original submission: %w", err)
+	}
+	return nil
+}
+
 func (s *Service) blockInitialSubmissionReplayForOtherPrompt(
 	ctx context.Context,
 	sessionID, executionID, turnID string,
@@ -366,17 +403,58 @@ func (s *Service) blockInitialSubmissionReplayForOtherPrompt(
 	if err != nil {
 		return fmt.Errorf("load initial task submission before later prompt admission: %w", err)
 	}
-	if !found || submission.State != models.InitialPromptSubmissionPending {
+	if !found || submission.State == models.InitialPromptSubmissionAccepted ||
+		submission.State == models.InitialPromptSubmissionReplayBlocked {
 		return nil
+	}
+	if submission.State == models.InitialPromptSubmissionDispatching &&
+		(submission.ExecutionID != executionID || submission.AttemptID != turnID) {
+		return ErrInitialSubmissionAcceptanceUncertain
+	}
+	if submission.State != models.InitialPromptSubmissionPending &&
+		submission.State != models.InitialPromptSubmissionDispatching {
+		return ErrInitialSubmissionAcceptanceUncertain
 	}
 	updated := *submission
 	updated.State = models.InitialPromptSubmissionReplayBlocked
+	updated.ExecutionID = ""
+	updated.AttemptID = ""
+	updated.DispatchStartedAt = ""
 	updated.ReplayBlockedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	updated.ReplayBlockedReason = "later_prompt_provider_admission"
+	updated.ReplayBlockedReason = "later_prompt_provider_acceptance"
 	updated.ReplayBlockedExecutionID = executionID
 	updated.ReplayBlockedTurnID = turnID
 	if err := s.compareAndSetInitialSubmission(ctx, sessionID, submission, &updated); err != nil {
 		return fmt.Errorf("retire stale original task submission replay: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) restoreInitialSubmissionReplayAfterRejectedPrompt(
+	ctx context.Context,
+	sessionID, turnID string,
+) error {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("load initial task submission after rejected prompt: %w", err)
+	}
+	if session == nil {
+		return errors.New("load initial task submission after rejected prompt: session not found")
+	}
+	submission, found, err := models.LoadInitialPromptSubmission(session.Metadata)
+	if err != nil {
+		return err
+	}
+	if !found || submission.State != models.InitialPromptSubmissionDispatching || submission.AttemptID != turnID {
+		return nil
+	}
+	updated := *submission
+	updated.State = models.InitialPromptSubmissionPending
+	updated.ExecutionID = ""
+	updated.AttemptID = ""
+	updated.DispatchStartedAt = ""
+	if err := s.compareAndSetInitialSubmission(ctx, sessionID, submission, &updated); err != nil {
+		return fmt.Errorf("restore original submission after rejected prompt: %w", err)
 	}
 	return nil
 }
@@ -475,9 +553,10 @@ func (s *Service) replayInitialPromptSubmission(
 				ctx, sessionID, attempt.execution(), attempt.identity(),
 			)
 		},
-		onAccepted: func(string) {
+		onAccepted: func(turnID string) {
 			persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
+			s.backfillInitialSubmissionIfMissing(persistCtx, taskID, sessionID, turnID, submission)
 			if transitionErr := s.transitionInitialSubmissionToAccepted(
 				persistCtx, sessionID, attempt.execution(), attempt.identity(),
 			); transitionErr != nil {
@@ -496,22 +575,67 @@ func (s *Service) replayInitialPromptSubmission(
 
 func (s *Service) backfillInitialSubmissionIfMissing(
 	ctx context.Context,
-	taskID, sessionID string,
+	taskID, sessionID, turnID string,
 	submission *models.InitialPromptSubmission,
 ) {
-	if submission == nil || s.messageCreator == nil || !submission.HasReplayableContent() {
+	if submission == nil || s.messageCreator == nil || !submission.HasReplayableContent() ||
+		initialSubmissionTranscriptRecorded(ctx) {
 		return
 	}
-	msgs, err := s.repo.ListMessages(ctx, sessionID)
-	if err != nil {
-		s.logger.Warn("backfill initial task submission: list messages failed",
-			zap.String("session_id", sessionID), zap.Error(err))
-		return
-	}
-	if len(msgs) > 0 {
-		return
-	}
-	s.recordInitialMessage(
-		ctx, taskID, sessionID, submission.Content, submission.PlanMode, false, submission.Attachments,
+	s.recordInitialMessageForTurn(
+		ctx, taskID, sessionID, turnID, submission.Content, submission.PlanMode, false, submission.Attachments,
 	)
+}
+
+func (s *Service) initialSubmissionUserMessageExists(
+	ctx context.Context,
+	taskID, sessionID string,
+	submission *models.InitialPromptSubmission,
+) (bool, error) {
+	messages, err := s.repo.ListMessages(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	messageID := initialSubmissionUserMessageID(taskID, sessionID)
+	for _, message := range messages {
+		if message != nil && message.ID == messageID && message.TaskID == taskID &&
+			message.TaskSessionID == sessionID && message.AuthorType == models.MessageAuthorUser &&
+			submissionMessageMatches(message, submission) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func submissionMessageMatches(message *models.Message, submission *models.InitialPromptSubmission) bool {
+	if message == nil || submission == nil || message.Content != submission.Content {
+		return false
+	}
+	storedPlanMode, _ := message.Metadata["plan_mode"].(bool)
+	if storedPlanMode != submission.PlanMode {
+		return false
+	}
+	var attachments []v1.MessageAttachment
+	if raw := message.Metadata["attachments"]; raw != nil {
+		payload, err := json.Marshal(raw)
+		if err != nil || json.Unmarshal(payload, &attachments) != nil {
+			return false
+		}
+	}
+	if len(attachments) != len(submission.Attachments) {
+		return false
+	}
+	for index, stored := range attachments {
+		if !canonicalDescriptorMatches(stored, &models.TaskMessageAttachment{
+			ID:           submission.Attachments[index].AttachmentID,
+			Kind:         submission.Attachments[index].Type,
+			Name:         submission.Attachments[index].Name,
+			MimeType:     submission.Attachments[index].MimeType,
+			SizeBytes:    submission.Attachments[index].SizeBytes,
+			DeliveryMode: submission.Attachments[index].DeliveryMode,
+		}) {
+			return false
+		}
+	}
+	return true
 }

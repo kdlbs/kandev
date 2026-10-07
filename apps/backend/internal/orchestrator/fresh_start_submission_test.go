@@ -518,10 +518,11 @@ func assertFreshStartSubmissionReplay(t *testing.T, scenario freshStartSubmissio
 			StampValue: "fresh-start-successor-error",
 		}))
 	}
-	svc.handleAgentBootReady(ctx, watcher.AgentEventData{
+	bootReady := watcher.AgentEventData{
 		TaskID: taskID, SessionID: sessionID,
 		AgentExecutionID: "fresh-start-submission-execution", AttemptID: attempt.identity(),
-	})
+	}
+	svc.handleAgentBootReady(ctx, bootReady)
 	if scenario.pauseBeforeReplayAdmission {
 		select {
 		case <-queueAdmissionBarrier.listMessagesEntered:
