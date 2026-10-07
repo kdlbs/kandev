@@ -407,6 +407,23 @@ Original native handles, command logs and terminal/fresh-group receipts live in
 read-only and untouched. Scoped lint is complete. The single pnpm9.15.9 frozen install succeeded using
 935 cached packages; no lockfile change. The exact task-owned tmpfs PostgreSQL
 fixture was removed by literal ID and fresh absence verified; private credential
-files were removed. Normal-hook commit/ready publication are next. Native Windows and hosted PostgreSQL RUN/PASS, all required
+files were removed. Normal-hook commit and ready PR #4308 publication completed.
+The first native Windows run exposed two stale exact-version controls that
+depended on rapid writes receiving different wall-clock values. Only those
+ordinary/binding fixtures now store and read deterministic historical versions
+before the real full/exact and disjoint settings writes. Matching writes, stale
+conflict assertions and CAS checks remain; production timestamp behavior is
+unchanged. Both affected controls passed the bounded race selector locally.
+The original hosted observer was stopped by explicit ROOT instruction, actually
+joined and its group freshly absent; its partial counts are not a verdict.
+The sole corrective full changed-code backend lint used the authoritative PR
+base, two-way concurrency, a 1GiB memory setting and five-minute CLI limit. It
+emitted no diagnostics and reached the six-minute outer timeout (exit 124).
+Its original process was actually joined and its group freshly absent. This
+gate failed; no automatic retry, corrective commit or push followed. ROOT
+explicitly authorized one recovery with the same limits and retained caches.
+That full changed-code lint passed with zero issues in 237.83 seconds, actually
+joined with its group freshly absent. The failed receipt remains retained.
+Normal-hook corrective delivery follows. Native Windows and hosted PostgreSQL RUN/PASS, all required
 checks, substantive current-head full review and ROOT serial merge admission
 remain pending external gates. No delegation or new primary was used.

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -17,6 +18,16 @@ func checkoutStoreFixture(t *testing.T) (*Repository, *models.Repository) {
 	row := &models.Repository{ID: "checkout", WorkspaceID: "checkout-ws", Name: "Before", DefaultBranch: "main", PullBeforeWorktree: true, SetupScript: "keep setup", CopyFiles: "*.json"}
 	require.NoError(t, r.CreateRepository(t.Context(), row))
 	return r, row
+}
+
+func checkoutStoredVersion(t *testing.T, r *Repository, id string, version time.Time) *models.Repository {
+	t.Helper()
+	_, err := r.db.ExecContext(t.Context(), `UPDATE repositories SET updated_at = ? WHERE id = ?`, version, id)
+	require.NoError(t, err)
+	row, err := r.GetRepository(t.Context(), id)
+	require.NoError(t, err)
+	require.Equal(t, version, row.UpdatedAt)
+	return row
 }
 
 // @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.20, AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.21
@@ -61,6 +72,7 @@ func TestRepositoryCheckoutDefaultsLegacyAndExact(t *testing.T) {
 	for _, bindings := range []bool{false, true} {
 		t.Run(map[bool]string{false: "ordinary_exact", true: "binding_exact"}[bindings], func(t *testing.T) {
 			r, original := checkoutStoreFixture(t)
+			original = checkoutStoredVersion(t, r, original.ID, time.Unix(1000, 0).UTC())
 			initialVersion := original.UpdatedAt
 			legacy := *original
 			legacy.DefaultBranch = "release"
@@ -87,8 +99,11 @@ func TestRepositoryCheckoutDefaultsLegacyAndExact(t *testing.T) {
 				err = r.UpdateRepositoryIfUnchanged(t.Context(), &rejected, initialVersion)
 			}
 			require.ErrorIs(t, err, repoerrors.ErrTaskVersionConflict)
+			exact = *checkoutStoredVersion(t, r, original.ID, time.Unix(2000, 0).UTC())
 			version := exact.UpdatedAt
+			exact.Name = "Disjoint"
 			require.NoError(t, r.UpdateRepositoryWithCheckoutIntent(t.Context(), &exact, models.RepositoryCheckoutIntent{}))
+			require.NotEqual(t, version, exact.UpdatedAt)
 			if bindings {
 				err = r.UpdateRepositoryWithSecretBindingsIfUnchanged(t.Context(), &rejected, nil, version)
 			} else {
@@ -101,6 +116,7 @@ func TestRepositoryCheckoutDefaultsLegacyAndExact(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "recovered", stored.DefaultBranch)
 			require.True(t, stored.PullBeforeWorktree)
+			require.Equal(t, "Disjoint", stored.Name)
 			require.NotEqual(t, "Rejected", stored.Name)
 		})
 	}
