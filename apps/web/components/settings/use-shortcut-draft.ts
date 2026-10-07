@@ -15,7 +15,7 @@ import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revis
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 import type { UserSettingsResponse } from "@/lib/types/http";
-import { useSettingsSaveContributor } from "../settings-save-provider";
+import { useSettingsSaveContributor } from "./settings-save-provider";
 
 type ShortcutOverride = StoredShortcutOverrides[string];
 
@@ -93,7 +93,7 @@ function selectAuthoritativeSettings(
   };
 }
 
-export function usePluginShortcutDraft(contributorId: string): {
+export function useShortcutDraft(contributorId: string): {
   saved: StoredShortcutOverrides;
   draft: StoredShortcutOverrides;
   setDraft: Dispatch<SetStateAction<StoredShortcutOverrides>>;
@@ -157,6 +157,8 @@ export function usePluginShortcutDraft(contributorId: string): {
         settingsAtSubmit.keyboardShortcuts as StoredShortcutOverrides,
       );
       const response = await updateUserSettings({ keyboard_shortcuts: submitted });
+      // A successful full-map patch acknowledges an empty map even when the response omits it.
+      response.settings.keyboard_shortcuts ??= submitted;
       const latestSettings = storeApi.getState().userSettings;
       const authoritative = selectAuthoritativeSettings(response, settingsAtSubmit, latestSettings);
       const nextSaved = {

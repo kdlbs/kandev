@@ -768,6 +768,8 @@
   "vsCodeRemoteSsh": "VS Code Remote SSH",
   "whenEnabledInstallYourProjectS": "有効時、プロジェクトの依存関係をインストールする。例: <2>{{command}}</2> をリポジトリのセットアップスクリプト経由で実行。型エラーの見落とし防ぐ。",
   "externalMcpToolListTaskSessions": "タスクの全エージェントセッションを新しい順で一覧。別ツールがID指定で処理できる。",
+  "integrationShortcuts": "連携",
+  "shortcutOpenIntegration": "{{integration}} を開く",
   "shortcutBottomTerminal": "下部ターミナル切替",
   "shortcutCommandPanel": "コマンドパネル",
   "shortcutCommandPanelAlt": "コマンドパネル（Alt）",

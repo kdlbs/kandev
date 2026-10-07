@@ -50,7 +50,7 @@ import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import { holdPluginInstallResponse } from "../../helpers/plugin-install";
 import { PluginMarketplaceReleaseFixture } from "../../helpers/plugin-marketplace-release";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, waitForHttp } from "../../helpers/causal-waits";
 import {
   openInstallDialog,
   PACKAGE_PATH,
@@ -975,6 +975,8 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
 
   test("projects a sidebar-footer destination into layout navigation without a footer duplicate", async ({
     testPage,
+    apiClient,
+    seedData,
   }) => {
     test.setTimeout(60_000);
 
@@ -987,13 +989,35 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
 
     const navItem = testPage.getByTestId("plugin-nav-item-e2e-insights-tools");
     await expect(navItem).toBeVisible({ timeout: 15_000 });
-    await navItem.click();
-    await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
+    const baseline = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+      seedData.workspaceId
+    ];
+    try {
+      const expand = testPage.getByTestId("sidebar-navigation-expand");
+      await expect(expand).toHaveAttribute("aria-expanded", "false");
+      const saved = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
+      await expand.click();
+      expect((await saved).ok()).toBeTruthy();
+      await expect(expand).toHaveAttribute("aria-expanded", "true");
+      await navItem.click();
+      await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
 
-    await testPage.getByTestId("sidebar-footer-more-button").click();
-    await expect(
-      testPage.getByTestId(`sidebar-plugin:${PLUGIN_ID}:e2e-insights-tools-button`),
-    ).toHaveCount(0);
+      await testPage.getByTestId("sidebar-footer-more-button").click();
+      await expect(
+        testPage.getByTestId(`sidebar-plugin:${PLUGIN_ID}:e2e-insights-tools-button`),
+      ).toHaveCount(0);
+    } finally {
+      const current = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+        seedData.workspaceId
+      ];
+      await apiClient.saveUserSettings({
+        sidebar_layout_state: {
+          workspace_id: seedData.workspaceId,
+          expected_revision: current?.revision ?? 0,
+          layout: baseline ?? null,
+        },
+      });
+    }
   });
 
   test("projects every sidebar-footer destination into layout navigation", async ({ testPage }) => {
