@@ -235,10 +235,14 @@ or job-stream protocol.
 ## Results
 
 Implemented on dependency-prepared base
-`b3f207b2e7f08f39c628db8b1d5d0a1374e1b3d7`. Current `main` is
-`1204f0e5488418d0d9aa9aaaf6a31988ccdfcd8f`; its one intervening commit changes
-unrelated workflow-field paths, so no shared contract drift or conflict
-required a rebase.
+`b3f207b2e7f08f39c628db8b1d5d0a1374e1b3d7`. The PR initially targeted `main`
+at `1204f0e5488418d0d9aa9aaaf6a31988ccdfcd8f`. During review fixup, `main`
+advanced to `330e02a47808c11ca315ae30456fcce7f4806db5` with the workspace
+recovery change. `apps/web/lib/state/app-state-types.ts` was the only overlapping
+file; the main change adds a separate projection field. A synthetic merge of
+PR head `d6e5e03ab3a0e8e8f1df05bfff0a3c0e679acaf0` into that base was conflict
+free; 145 focused tests and `pnpm run typecheck` passed on the merged tree.
+No rebase or shared-contract expansion was needed.
 
 - TanStack Query 5.104.0 deferred tests passed for no-data initial GETs and
   cached-data refetches. Exact-key cancel followed by invalidation starts an
@@ -267,6 +271,6 @@ PR [#4291](https://github.com/kdlbs/kandev/pull/4291) is open against
 `f19509441558d3354f09774b496246a694854e9a` addresses stale GET-error
 presentation during a refresh POST, updates the mobile causal wait, and corrects
 the scoped ownership guide. The observed base
-was `1204f0e5488418d0d9aa9aaaf6a31988ccdfcd8f`. Required checks and AI reviews
-were pending at PR creation. Complete authorized exact-head fixup before
-handoff; do not merge.
+was `1204f0e5488418d0d9aa9aaaf6a31988ccdfcd8f` at PR creation. Required checks
+and AI reviews were pending at that time. Complete authorized exact-head
+fixup before handoff; do not merge.

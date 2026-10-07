@@ -165,12 +165,16 @@ Dependencies and implementation evidence:
 PR [#4291](https://github.com/kdlbs/kandev/pull/4291) is open against
 `main`. Its initial implementation commit is
 `7f5319f3f191c9f8310314cf2e3201fa0fbc6f48`; its review-fixup commit is
-`f19509441558d3354f09774b496246a694854e9a` and the observed base was
-`1204f0e5488418d0d9aa9aaaf6a31988ccdfcd8f`. Required checks and AI reviews
-were pending at PR creation and continue through authorized fixup. Keep this
-task in progress and do not merge. Hand off final head/base SHAs, owned files,
-command results, request counts, exact-head CI/review status, residual risks,
-and merge-order notes to the parent.
+`f19509441558d3354f09774b496246a694854e9a`. PR creation observed base
+`1204f0e5488418d0d9aa9aaaf6a31988ccdfcd8f`. During fixup, `main` advanced to
+`330e02a47808c11ca315ae30456fcce7f4806db5`; the only overlapping file,
+`apps/web/lib/state/app-state-types.ts`, adds the separate workspace-recovery
+projection. A synthetic merge at that base was conflict-free; 145 focused tests
+and `pnpm run typecheck` passed on the merged tree, so no rebase was needed.
+Required checks and AI reviews continue on the pushed fixup. Keep this task in
+progress and do not merge. Hand off final head/base SHAs, owned files, command
+results, request counts, exact-head CI/review status, residual risks, and
+merge-order notes to the parent.
 
 ## Risks
 
