@@ -124,11 +124,7 @@ export function assertNativeContinuationTrace(tracePath: string, scenario: strin
     (record) => record.event === "prompt" && record.prompt?.includes(`/continuation-${scenario}`),
   );
   const continuations = records.filter(
-    (record) =>
-      record.event === "prompt" &&
-      record.prompt?.startsWith(
-        "Your previous turn was interrupted by a temporary connection failure.",
-      ),
+    (record) => record.event === "prompt" && record.prompt === "continue",
   );
   expect(originals).toHaveLength(1);
   expect(continuations).toHaveLength(1);

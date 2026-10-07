@@ -39,6 +39,7 @@ afterEach(() => {
   getWebSocketClientMock.mockReturnValue({ request: requestMock });
 });
 
+const RETRY_CARD_TEST_ID = "transient-retry-card";
 const CANCEL_TEST_ID = "recovery-cancel-retry-button";
 const TECHNICAL_DETAILS = "Technical details";
 const RECOVERY_HISTORY_TEST_ID = "session-recovery-history";
@@ -234,7 +235,7 @@ function renderActionWithStore(
 describe("ActionMessage — transient retry (warning variant)", () => {
   it("announces legacy retry status politely", () => {
     renderAction(retryMessage(), "WAITING_FOR_INPUT");
-    const notice = screen.getByTestId("transient-retry-card");
+    const notice = screen.getByTestId(RETRY_CARD_TEST_ID);
     expect(notice.getAttribute("role")).toBe("status");
     expect(notice.getAttribute("aria-live")).toBe("polite");
   });
@@ -248,7 +249,7 @@ describe("ActionMessage — transient retry (warning variant)", () => {
         recovery_phase: "continuing",
       };
       renderAction(message, state);
-      expect(screen.queryByTestId("transient-retry-card")).toBeNull();
+      expect(screen.queryByTestId(RETRY_CARD_TEST_ID)).toBeNull();
       expect(screen.queryByTestId(CANCEL_TEST_ID)).toBeNull();
     },
   );
@@ -284,7 +285,7 @@ describe("ActionMessage — transient retry (warning variant)", () => {
         }),
         "WAITING_FOR_INPUT",
       );
-      expect(screen.getByTestId("transient-retry-card")).toBeTruthy();
+      expect(screen.getByTestId(RETRY_CARD_TEST_ID)).toBeTruthy();
       expect(screen.getByText(/retrying in 1:05/i)).toBeTruthy();
       expect(screen.getByText(/Codex · gpt-5/i)).toBeTruthy();
       expect(screen.getByText(/attempt 1 of 5/i)).toBeTruthy();
@@ -786,6 +787,25 @@ describe("ActionMessage — agent transport lost", () => {
       "WAITING_FOR_INPUT",
     );
     expect(screen.getByText(/Agent connection lost/i)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage resource exhaustion", () => {
+  it("shows the resource exhaustion category in the recovery notice", () => {
+    renderAction(
+      retryMessage({
+        metadata: {
+          ...transientRetryMetadata(1, 5),
+          failure_code: "provider_resource_exhausted",
+          recovery_mode: "continue",
+          recovery_phase: "waiting",
+        },
+      }),
+      "WAITING_FOR_INPUT",
+    );
+    expect(screen.getByTestId(RETRY_CARD_TEST_ID).textContent).toContain(
+      "Provider resources exhausted",
+    );
   });
 });
 

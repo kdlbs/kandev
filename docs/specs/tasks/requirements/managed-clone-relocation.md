@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-27
-updated: 2026-10-04
+updated: 2026-10-06
 owners:
   - kandev
 ---
@@ -66,6 +66,15 @@ The workspace system still owns source-clone placement and credentials.
   repository moving to a new source clone remains eligible for the guarded
   relocation in .001.1. An unchanged slot shall not bypass validation of any
   other selected repository slot.
+
+- **AC-TASKS-MANAGED-CLONE-RELOCATION-001.7:** After relocation completes,
+  ordinary commits, amended commits, rebases, and file edits shall not prevent
+  reuse of an otherwise valid replacement checkout. Launch, resume, and
+  read-only workspace restoration shall preserve its current work and existing
+  provider conversation, including after a backend restart or upgrade. Every
+  selected repository shall pass the current identity and ownership checks.
+  An unfinished relocation shall retain its exact-commit and exclusive-authority
+  checks. Existing completed relocations shall require no manual record repair.
 
 ### REQ-TASKS-MANAGED-CLONE-RELOCATION-002: Recover work that cannot move silently
 
@@ -131,14 +140,17 @@ desktop and phone.
 - [Worktree metadata recovery](worktree-metadata-recovery.md)
 - [Task launch failure recovery](task-launch-failure-recovery.md)
 - [System design](../system-design/managed-clone-relocation.md)
+- [Proposed progress and workspace presentation extension](managed-clone-relocation-experience.md)
 
 ## Implementation plans
 
+- [Recovery progress and workspace presentation](../../../plans/managed-clone-recovery-experience/plan.md) (draft)
 - [Snapshot permissions and blocked retry](../../../plans/workspace-recovery-permissions/plan.md)
 
 - [Original relocation package](../../../plans/managed-clone-relocation/plan.md)
 - [Unchanged legacy clone admission](../../../plans/legacy-clone-resume/plan.md)
 - [Resume and workspace recovery convergence](../../../plans/managed-clone-recovery-convergence/plan.md)
+- [Completed relocation continuity](../../../plans/completed-relocation-continuity/plan.md)
 
 The convergence package repairs violations of the existing acceptance criteria.
 It does not authorize automatic relocation of dirty worktrees.

@@ -369,6 +369,7 @@ describe("resolveTaskContentState", () => {
       resolveTaskContentState({
         isMounted: false,
         hasTask: false,
+        hasTaskDetails: false,
         hasTaskLoadError: true,
       }),
     ).toBe("loading");
@@ -379,16 +380,29 @@ describe("resolveTaskContentState", () => {
       resolveTaskContentState({
         isMounted: true,
         hasTask: false,
+        hasTaskDetails: false,
         hasTaskLoadError: true,
       }),
     ).toBe("error");
   });
 
-  it("surfaces task load failures even when a placeholder task exists", () => {
+  it("keeps authoritative task details ready when a refresh fails", () => {
     expect(
       resolveTaskContentState({
         isMounted: true,
         hasTask: true,
+        hasTaskDetails: true,
+        hasTaskLoadError: true,
+      }),
+    ).toBe("ready");
+  });
+
+  it("surfaces a read failure when only a projected task row exists", () => {
+    expect(
+      resolveTaskContentState({
+        isMounted: true,
+        hasTask: true,
+        hasTaskDetails: false,
         hasTaskLoadError: true,
       }),
     ).toBe("error");
@@ -399,6 +413,7 @@ describe("resolveTaskContentState", () => {
       resolveTaskContentState({
         isMounted: true,
         hasTask: true,
+        hasTaskDetails: true,
         hasTaskLoadError: false,
       }),
     ).toBe("ready");

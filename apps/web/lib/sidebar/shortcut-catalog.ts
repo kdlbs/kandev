@@ -20,6 +20,8 @@ export type ShortcutCatalogEntry = {
   label: string;
   icon?: DestinationIcon;
   href?: string;
+  /** Raw plugin navigation id used by the shared navigation test-id contract. */
+  pluginItemId?: ResolvedDestination["pluginItemId"];
   /** Original navigation section for registered plugin destinations. */
   section?: ResolvedDestination["section"];
   source?: "builtin" | "plugin" | "canvas" | "automation" | "host_action";
@@ -75,6 +77,7 @@ export function buildShortcutCatalog({
     label: destination.label,
     icon: destination.icon,
     href: destination.href,
+    ...(destination.pluginItemId ? { pluginItemId: destination.pluginItemId } : {}),
     section: destination.section,
     source: destination.source === "plugin" ? ("plugin" as const) : ("builtin" as const),
     available: true,

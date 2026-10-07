@@ -9,9 +9,10 @@ import (
 
 func newMockACPDialect() acpDialect {
 	return acpDialect{responseAttemptReset: mockResponseAttemptResetMeta,
-		continuationSupport:         streams.ContinuationNativeSavedHistoryV1,
-		capacityContinuationSupport: streams.CapacityContinuationMockLiveSessionV1, continuationError: mockContinuationError,
-		retainedApplicationErr: mockRetainedApplicationError}
+		continuationSupport:         streams.ContinuationNativeSavedHistoryV2,
+		capacityContinuationSupport: streams.CapacityContinuationMockLiveSessionV1,
+		continuationError:           mockContinuationError,
+		retainedApplicationErr:      mockRetainedApplicationError}
 }
 
 func mockRetainedApplicationError(err error) bool {

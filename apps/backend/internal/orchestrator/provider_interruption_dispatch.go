@@ -17,7 +17,7 @@ import (
 )
 
 const continuationPrepareTimeout = time.Minute
-const continuationInstruction = "Your previous turn was interrupted by a temporary connection failure. Continue the unfinished request using this conversation's existing history and available completed tool results. Re-read files when needed to inspect current state or recover missing read results. Do not repeat completed actions or restart the original request. If the next action or an earlier outcome is uncertain, stop and ask the user."
+const continuationInstruction = "continue"
 const capacityContinuationInstruction = "Your previous turn stopped because the selected model was at capacity. Continue the unfinished request using this conversation's existing history. Preserve all completed actions and do not repeat completed work. If any earlier outcome is uncertain, stop and ask the user before acting."
 
 func (s *Service) retryInterruptedContinuation(ctx context.Context, taskID, sessionID, execID string, entry *transientRetryEntry) {

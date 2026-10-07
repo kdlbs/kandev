@@ -64,6 +64,10 @@ function BootstrapRecoveryActions({
   blocked,
   canRestore,
   needsManagedCloneRelocation,
+  workspaceRecovery,
+  workspaceRecoveryRepositoryName,
+  workspaceRecoveryStatusCheck,
+  onCheckWorkspaceRecoveryStatus,
   providerRestoredResumeEligible,
   onResume,
   onRestore,
@@ -77,6 +81,10 @@ function BootstrapRecoveryActions({
   blocked: boolean;
   canRestore: boolean;
   needsManagedCloneRelocation: boolean;
+  workspaceRecovery: import("@/lib/types/http").WorkspaceRecoveryProjection | null;
+  workspaceRecoveryRepositoryName?: string | null;
+  workspaceRecoveryStatusCheck: import("@/hooks/domains/session/use-session-recovery-actions").WorkspaceRecoveryStatusCheck;
+  onCheckWorkspaceRecoveryStatus: () => void;
   providerRestoredResumeEligible: boolean;
   onResume: () => void;
   onRestore: () => void;
@@ -133,6 +141,10 @@ function BootstrapRecoveryActions({
       busyAction={busyAction}
       blocked={blocked}
       preferred={preferred}
+      workspaceRecovery={workspaceRecovery}
+      workspaceRecoveryRepositoryName={workspaceRecoveryRepositoryName}
+      workspaceRecoveryStatusCheck={workspaceRecoveryStatusCheck}
+      onCheckWorkspaceRecoveryStatus={onCheckWorkspaceRecoveryStatus}
     />
   );
 }
@@ -156,6 +168,10 @@ export function RecoveryCardContent({
   blocked,
   canRestore,
   needsManagedCloneRelocation,
+  workspaceRecovery,
+  workspaceRecoveryRepositoryName,
+  workspaceRecoveryStatusCheck,
+  onCheckWorkspaceRecoveryStatus,
   onResume,
   onRestore,
   onFreshStart,
@@ -173,6 +189,10 @@ export function RecoveryCardContent({
   blocked: boolean;
   canRestore: boolean;
   needsManagedCloneRelocation: boolean;
+  workspaceRecovery: import("@/lib/types/http").WorkspaceRecoveryProjection | null;
+  workspaceRecoveryRepositoryName?: string | null;
+  workspaceRecoveryStatusCheck: import("@/hooks/domains/session/use-session-recovery-actions").WorkspaceRecoveryStatusCheck;
+  onCheckWorkspaceRecoveryStatus: () => void;
   onResume: () => void;
   onRestore: () => void;
   onFreshStart: () => void;
@@ -196,7 +216,10 @@ export function RecoveryCardContent({
           <span className="text-xs text-muted-foreground">{copy.launchNeedsAttention}</span>
         ) : null}
       </div>
-      {summary && (model.showSummary || needsManagedCloneRelocation) ? (
+      {summary &&
+      (model.showSummary || needsManagedCloneRelocation) &&
+      !workspaceRecovery &&
+      (workspaceRecoveryStatusCheck ?? "idle") === "idle" ? (
         <p className="mt-1 max-w-prose break-words text-sm text-muted-foreground">{summary}</p>
       ) : null}
       <RecoveryCardNotices model={model} profileExists={profileExists} copy={copy} t={t} />
@@ -208,6 +231,10 @@ export function RecoveryCardContent({
         blocked={blocked}
         canRestore={canRestore}
         needsManagedCloneRelocation={needsManagedCloneRelocation}
+        workspaceRecovery={workspaceRecovery}
+        workspaceRecoveryRepositoryName={workspaceRecoveryRepositoryName}
+        workspaceRecoveryStatusCheck={workspaceRecoveryStatusCheck}
+        onCheckWorkspaceRecoveryStatus={onCheckWorkspaceRecoveryStatus}
         onResume={onResume}
         onRestore={onRestore}
         onFreshStart={onFreshStart}

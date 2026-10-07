@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/pkg/agent"
@@ -133,12 +134,16 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 
 	loginCommand := buildLoginCommandDTO(ag)
 	runtimeUpdate := c.buildRuntimeUpdateDTO(ctx, ag, availability.Available)
+	installScript, installErr := c.installScriptForSettings(ctx, ag)
+	if installErr != nil {
+		installScript = ""
+	}
 
 	return dto.AvailableAgentDTO{
 		Name:               ag.ID(),
 		DisplayName:        displayName,
 		Description:        ag.Description(),
-		InstallScript:      ag.InstallScript(),
+		InstallScript:      installScript,
 		SupportsMCP:        availability.SupportsMCP,
 		MCPConfigPath:      availability.MCPConfigPath,
 		InstallationPaths:  availability.InstallationPaths,
@@ -173,6 +178,13 @@ func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent,
 		return item
 	}
 	spec, fallback, err := c.managedRuntimeUpdateSpec(ag)
+	var openCodeSelection *managedruntime.OpenCodeSelection
+	if openCode, ok := ag.(*agents.OpenCodeACP); ok && err == nil {
+		spec, openCodeSelection = c.selectedOpenCodeRuntime(ctx, openCode, spec)
+		if openCodeSelection != nil {
+			fallback = false
+		}
+	}
 	if err != nil {
 		return nil
 	}
@@ -185,7 +197,12 @@ func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent,
 		DefaultVersion:   defaultVersion,
 		EffectiveVersion: defaultVersion,
 	}
-	if c.managedRuntimeSelections != nil {
+	if openCodeSelection != nil {
+		item.ActiveVersion = openCodeSelection.SelectedVersion
+		if item.ActiveVersion != "" {
+			item.EffectiveVersion = item.ActiveVersion
+		}
+	} else if c.managedRuntimeSelections != nil {
 		if selection, found, err := c.managedRuntimeSelections.Get(ctx, ag.ID(), spec.Package); err == nil && found &&
 			selection.Package == spec.Package {
 			item.ActiveVersion = selection.Version
@@ -198,6 +215,10 @@ func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent,
 	if c.runtimeUpdater != nil {
 		if caps, found := c.runtimeUpdater.CurrentCapabilities(ag.ID()); found {
 			item.CurrentVersion = caps.AgentVersion
+			if openCodeSelection != nil && openCodeSelection.Source == managedruntime.OpenCodeSourceNative {
+				item.ActiveVersion = caps.AgentVersion
+				item.EffectiveVersion = caps.AgentVersion
+			}
 		}
 		return item
 	}
@@ -207,6 +228,26 @@ func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent,
 		}
 	}
 	return item
+}
+
+func (c *Controller) selectedOpenCodeRuntime(
+	ctx context.Context,
+	agent *agents.OpenCodeACP,
+	fallback agents.ManagedNPMRuntimeSpec,
+) (agents.ManagedNPMRuntimeSpec, *managedruntime.OpenCodeSelection) {
+	reader, ok := c.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader)
+	if !ok {
+		return fallback, nil
+	}
+	selection, found, err := reader.GetOpenCodeSelection(ctx)
+	if err != nil || !found {
+		return fallback, nil
+	}
+	selected, err := agent.ManagedNPMRuntimeForFamily(selection.Family)
+	if err != nil {
+		return fallback, nil
+	}
+	return selected, &selection
 }
 
 func (c *Controller) harnessCurrentVersion(agentName string) string {
@@ -651,4 +692,28 @@ func (c *Controller) synthAvailabilityFromRegistry() []discovery.Availability {
 		results = append(results, av)
 	}
 	return results
+}
+
+func (c *Controller) runtimeUpdateCapabilities(ag agents.Agent) agents.RuntimeUpdateCapability {
+	cap := agents.RuntimeUpdateCapabilities(ag)
+	openCode, ok := ag.(*agents.OpenCodeACP)
+	if !ok {
+		return cap
+	}
+	spec, selection := c.selectedOpenCodeRuntime(context.Background(), openCode, openCode.ManagedNPMRuntime())
+	if selection == nil {
+		return cap
+	}
+	cap.Source.NPM = spec.Package
+	cap.Source.GuidanceURL = "https://www.npmjs.com/package/" + spec.Package
+	cap.ManagedFallback = nil
+	if selection.Source == managedruntime.OpenCodeSourceNative {
+		cap.RuntimeID, cap.Owner, cap.Mechanism, cap.Management = "native:opencode", "external", "native", "manual"
+		cap.Managed = nil
+		return cap
+	}
+	spec.NativeBinary = ""
+	cap.RuntimeID, cap.Owner, cap.Mechanism, cap.Management = "npm:"+spec.Package, "kandev", "npm_candidate", "managed"
+	cap.Managed = &spec
+	return cap
 }

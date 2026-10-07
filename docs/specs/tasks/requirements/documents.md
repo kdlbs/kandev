@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-04-29
-updated: 2026-08-28
+updated: 2026-10-07
 owners:
   - cfl
 ---
@@ -22,6 +22,25 @@ This document is the migrated task-system source for the capability. The source 
 
 - **AC-TASKS-DOCUMENTS-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
 - **AC-TASKS-DOCUMENTS-001.2:** When a plan write targets a missing task, the system shall return `not_found`, create no plan data, and expose no storage constraint details. This expected rejection shall create a debug entry and no error-level entry.
+
+### REQ-TASKS-DOCUMENTS-002: Attachment replacement failure preservation
+
+**Intent:** A rejected attachment upload shall leave the previously published
+attachment usable. Publication means that the task document's current metadata
+selects the bytes returned by its download endpoint.
+
+#### Acceptance criteria
+
+- **AC-TASKS-DOCUMENTS-002.1:** When an upload's lookup, file preparation, or uncommitted metadata write fails, that operation shall return an error without altering the previously published document metadata or download bytes. This applies to replacements with the same or a different filename extension.
+- **AC-TASKS-DOCUMENTS-002.2:** When a first upload fails before publication, it shall expose no new attachment document or downloadable candidate. A successful first upload shall expose the complete submitted bytes and their filename, MIME type, and byte count.
+- **AC-TASKS-DOCUMENTS-002.3:** When a replacement succeeds, it shall retain the document ID and creation time, expose the complete new bytes and matching attachment metadata, and keep a single current document without creating attachment revisions. Existing attachments shall remain downloadable and deletable without re-upload.
+- **AC-TASKS-DOCUMENTS-002.4:** When an upload fails before attempting metadata publication, cleanup shall affect only its own definitely unpublished candidate. Once metadata publication has been attempted, any returned error shall retain the candidate bytes, including bytes a download already resolved before a later replacement or deletion. A later current attachment or missing document shall not authorize candidate removal. An independent successful operation remains authoritative; failure preservation shall not roll it back or remove its bytes.
+- **AC-TASKS-DOCUMENTS-002.5:** When the registered document HTTP upload route rejects a replacement, it shall return its existing error response and subsequent downloads shall still serve the published bytes and metadata. A successful replacement shall return the existing success payload shape and subsequent downloads shall serve the new bytes.
+
+The internal filename is not a public attachment identity. Binary attachments
+remain replace-only. Crash recovery, immediate reclamation of superseded files,
+cross-resource transactional rollback, arbitrary overlapping upload/delete
+serialization, and filesystem ACL preservation are outside this amendment.
 
 ## Migrated source detail
 
@@ -74,11 +93,11 @@ POST   /tasks/:id/documents/:key/revisions/:revId/restore → restore from prior
 ### Attachments
 
 - Documents with `type=attachment` store binary files (images, PDFs, etc.) rather than markdown text.
-- Attachment content is stored on disk (not in SQLite) under the runtime data directory: `<home>/data/attachments/<task-id>/<key>.<ext>`. This is separate from the workspace config directory (`<home>/workspaces/`) which is reserved for declarative config files that can be git-synced.
+- Attachment content is stored on disk (not in SQLite) under the attachment root, in a task-scoped directory. The internal filename is opaque; legacy `<key>.<ext>` paths remain readable. The persisted metadata selects the current file. This is separate from the workspace config directory (`<home>/workspaces/`) which is reserved for declarative config files that can be git-synced.
 - The DB row stores metadata only: key, filename, mime type, size bytes, disk path.
 - Upload via `POST /tasks/:id/documents/:key/upload` (multipart form). Max file size: 10MB.
 - Download via `GET /tasks/:id/documents/:key/download` (streams the file).
-- Attachments have no revision history — upload replaces the previous file.
+- Attachments have no revision history; a successful upload replaces the current attachment. A rejected upload preserves the published attachment as defined by `REQ-TASKS-DOCUMENTS-002`.
 - Agents upload via `kandev doc upload <task-id> <key> <filepath>`.
 
 ### Backward compatibility

@@ -8,6 +8,7 @@ import {
   useSessionGitPendingScope,
   useSessionGitStatus,
   useSessionGitStatusByRepo,
+  useSessionGitStatusSnapshots,
 } from "./use-session-git-status";
 import { useSessionCommits } from "./use-session-commits";
 import { useCumulativeDiff } from "./use-cumulative-diff";
@@ -95,6 +96,10 @@ export type SessionGit = {
   allFiles: FileInfo[];
   unstagedFiles: FileInfo[];
   stagedFiles: FileInfo[];
+  /** Display-only projections that may retain eligible prior counts and patches. */
+  displayAllFiles: FileInfo[];
+  displayUnstagedFiles: FileInfo[];
+  displayStagedFiles: FileInfo[];
 
   // Commits
   commits: SessionCommit[];
@@ -682,10 +687,21 @@ function useFileDerivations(
   };
 }
 
+function useDisplayFileDerivations(
+  displayStatusByRepo: ReturnType<typeof useSessionGitStatusByRepo>,
+  displayGitStatus: ReturnType<typeof useSessionGitStatus>,
+) {
+  const allFiles = useMemo(
+    () => aggregateFilesAcrossRepos(displayStatusByRepo, displayGitStatus),
+    [displayStatusByRepo, displayGitStatus],
+  );
+  return useMemo(() => ({ allFiles, ...splitFilesByChangeLayer(allFiles) }), [allFiles]);
+}
+
 export function useSessionGit(sessionId: string | null | undefined): SessionGit {
   const sid = sessionId ?? null;
-  const gitStatus = useSessionGitStatus(sid);
-  const statusByRepo = useSessionGitStatusByRepo(sid);
+  const snapshots = useSessionGitStatusSnapshots(sid);
+  const { gitStatus, statusByRepo, displayGitStatus, displayStatusByRepo } = snapshots;
   const pendingScopeIdentity = useSessionGitPendingScope(sid);
   const pendingCheckoutGenerations = useSessionGitPendingCheckoutGenerations(sid);
   const { commits, loading: commitsLoading } = useSessionCommits(sid);
@@ -702,6 +718,11 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     repoNamesForControls,
     perRepoStatus,
   } = useFileDerivations(statusByRepo, gitStatus);
+  const {
+    allFiles: displayAllFiles,
+    stagedFiles: displayStagedFiles,
+    unstagedFiles: displayUnstagedFiles,
+  } = useDisplayFileDerivations(displayStatusByRepo, displayGitStatus);
   const pendingScopeMatches = usePendingFileOperationScope(
     pendingScopeIdentity,
     pendingFileOperations,
@@ -724,15 +745,7 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     pendingScopeIdentity,
   });
   const { stageAll, unstageAll, commit, stageFile, unstageFile, discard } = stageOps;
-  const derived = deriveSessionGitValues({
-    gitStatus,
-    hasRepositoryStatuses: statusByRepo.length > 0,
-    unstagedFiles,
-    stagedFiles,
-    commits,
-    repositoryDetailsReady: areRepositoryDetailsReady(statusByRepo),
-  });
-  const comparison = deriveComparisonValues(comparisonStatuses(statusByRepo, gitStatus));
+  const presentation = deriveSessionGitPresentation(snapshots, unstagedFiles, stagedFiles, commits);
   const remoteOps = useRemoteOpsFanOut({
     gitOps,
     repoNamesForControls,
@@ -749,14 +762,16 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
   return {
     gitStatus,
     statusByRepo,
-    ...derived,
-    ...comparison,
+    ...presentation,
     repoNames: repoNamesForControls,
     perRepoStatus,
 
     allFiles,
     unstagedFiles,
     stagedFiles,
+    displayAllFiles,
+    displayUnstagedFiles,
+    displayStagedFiles,
 
     commits,
     cumulativeDiff,
@@ -772,10 +787,6 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     merge: remoteOps.merge,
     abort: remoteOps.abort,
     commit,
-    // stage/unstage with no paths and a `repo` arg = stage-all/unstage-all
-    // for that single repo (one agentctl call). Without `repo`, we fan out
-    // across every repo with files (multi-repo) or hit the workspace root
-    // (single-repo). With paths, we route to the right repo per file.
     stage: scopedStageOperations.stage,
     stageFile,
     stageAll,
@@ -796,6 +807,26 @@ function comparisonStatuses(
 ): GitStatusEntry[] {
   if (statusByRepo.length > 0) return statusByRepo.map(({ status }) => status);
   return gitStatus ? [gitStatus] : [];
+}
+
+function deriveSessionGitPresentation(
+  snapshots: ReturnType<typeof useSessionGitStatusSnapshots>,
+  unstagedFiles: FileInfo[],
+  stagedFiles: FileInfo[],
+  commits: SessionCommit[],
+) {
+  const { gitStatus, statusByRepo } = snapshots;
+  return {
+    ...deriveSessionGitValues({
+      gitStatus,
+      hasRepositoryStatuses: statusByRepo.length > 0,
+      unstagedFiles,
+      stagedFiles,
+      commits,
+      repositoryDetailsReady: areRepositoryDetailsReady(statusByRepo),
+    }),
+    ...deriveComparisonValues(comparisonStatuses(statusByRepo, gitStatus)),
+  };
 }
 
 function areRepositoryDetailsReady(statuses: Array<{ status: GitStatusEntry }>): boolean {

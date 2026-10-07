@@ -27,6 +27,47 @@ type officeCommentWindowReader interface {
 	ListTaskCommentsWindow(ctx context.Context, taskID string, limit int) ([]*officemodels.TaskComment, int, error)
 }
 
+type officeProjectRepositoryReader interface {
+	GetProject(ctx context.Context, id string) (*officemodels.Project, error)
+}
+
+// officeProjectRepositorySourceAdapter keeps Office project models outside the
+// task service while exposing the exact workspace and ordered source list it
+// needs during root task creation.
+type officeProjectRepositorySourceAdapter struct {
+	reader officeProjectRepositoryReader
+}
+
+func (a *officeProjectRepositorySourceAdapter) ReadProjectRepositorySources(
+	ctx context.Context,
+	projectID string,
+) (taskservice.ProjectRepositorySources, error) {
+	if a == nil || a.reader == nil {
+		return taskservice.ProjectRepositorySources{}, errors.New("office project repository reader is unavailable")
+	}
+	project, err := a.reader.GetProject(ctx, projectID)
+	if err != nil {
+		return taskservice.ProjectRepositorySources{}, err
+	}
+	if project == nil {
+		return taskservice.ProjectRepositorySources{}, fmt.Errorf("office project %q was not found", projectID)
+	}
+	sources, err := officemodels.DecodeRepositories(project.Repositories)
+	if err != nil {
+		return taskservice.ProjectRepositorySources{}, fmt.Errorf("decode Office project repositories: %w", err)
+	}
+	return taskservice.ProjectRepositorySources{WorkspaceID: project.WorkspaceID, Sources: sources}, nil
+}
+
+func wireOfficeProjectRepositorySources(taskSvc *taskservice.Service, reader officeProjectRepositoryReader) {
+	if taskSvc == nil || reader == nil {
+		return
+	}
+	taskSvc.SetProjectRepositorySourceReader(&officeProjectRepositorySourceAdapter{reader: reader})
+}
+
+var _ taskservice.ProjectRepositorySourceReader = (*officeProjectRepositorySourceAdapter)(nil)
+
 // officeCommentReaderAdapter keeps Office persistence models at the backend
 // composition boundary. The task service receives its own neutral records.
 type officeCommentReaderAdapter struct {

@@ -580,6 +580,7 @@ func TestHTTPCreateTask_ProjectIDReachesOfficePath(t *testing.T) {
 		"workspace_id": "ws-1",
 		"title": "Analyse integrations",
 		"project_id": "proj-1",
+		"repositories": [],
 		"priority": "medium"
 	}`))
 	c.Request.Header.Set("Content-Type", "application/json")

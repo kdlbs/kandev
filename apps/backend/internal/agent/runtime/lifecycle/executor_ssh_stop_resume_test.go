@@ -10,6 +10,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/githubauth"
 )
 
@@ -672,6 +674,46 @@ func TestSSHExecutorPreflightAgentBinary(t *testing.T) {
 }
 
 func TestSSHExecutorProbeNativeBinary(t *testing.T) {
+	t.Run("preflight verifies selected managed command despite unrelated native CLI", func(t *testing.T) {
+		server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
+			if strings.Contains(command, "npx") {
+				return sshOut("/usr/bin/npx\n")
+			}
+			return sshOut("/usr/bin/opencode\n")
+		})
+		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		req := &ExecutorCreateRequest{
+			AgentConfig:           agents.NewOpenCodeACP(),
+			ManagedRuntimeFamily:  managedruntime.OpenCodeFamilyV2,
+			ManagedRuntimeSource:  managedruntime.OpenCodeSourceManaged,
+			ManagedRuntimeVersion: "2.0.18",
+		}
+		if err := exec.preflightAgentBinary(context.Background(), server.dial(t), req, SSHRemotePlatform{}); err != nil {
+			t.Fatalf("preflightAgentBinary: %v", err)
+		}
+		commands := server.commands()
+		if len(commands) != 1 || !strings.Contains(commands[0], "npx") {
+			t.Fatalf("managed preflight commands = %v, want the selected npx command only", commands)
+		}
+	})
+
+	t.Run("managed OpenCode selection skips unrelated native executable", func(t *testing.T) {
+		server := newFakeSSHServer(t, func(string, string) sshExecResult { return sshOut("/usr/bin/opencode\n") })
+		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())
+		req := &ExecutorCreateRequest{
+			AgentConfig:           agents.NewOpenCodeACP(),
+			ManagedRuntimeFamily:  managedruntime.OpenCodeFamilyV2,
+			ManagedRuntimeSource:  managedruntime.OpenCodeSourceManaged,
+			ManagedRuntimeVersion: "2.0.18",
+		}
+		if exec.probeNativeBinary(context.Background(), server.dial(t), "bash", req, "step") {
+			t.Fatal("a managed OpenCode selection must not prefer a remote native binary")
+		}
+		if len(server.commands()) != 0 {
+			t.Fatalf("managed OpenCode should go directly to its selected npx command, got probes %v", server.commands())
+		}
+	})
+
 	t.Run("agent without a native binary is skipped", func(t *testing.T) {
 		server := newFakeSSHServer(t, nil)
 		exec := NewSSHExecutor(nil, nil, nil, newTestLogger())

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api/client";
 import * as api from "@/lib/api/domains/tool-payload-retention-api";
 import type {
@@ -6,6 +7,15 @@ import type {
   ToolPayloadPolicyUpdate,
   ToolPayloadRetentionStatus,
 } from "@/lib/types/tool-payload-retention";
+import {
+  invalidateBackupList,
+  useBackupListScope,
+  type BackupListScope,
+} from "./backup-list-query";
+import {
+  observeBackupPreparation,
+  type BackupPreparationCorrelation,
+} from "./backup-preparation-correlation";
 
 type Lifetime = {
   epoch: number;
@@ -13,8 +23,22 @@ type Lifetime = {
   mutating: boolean;
   reading: Promise<void> | null;
   generation: number;
+  scope: BackupListScope;
+  preparation: BackupPreparationCorrelation;
 };
 type AcceptedOperation = { id: string; kind: "analysis" | "cleanup" };
+type AcceptedOperationRef = { current: AcceptedOperation | null };
+type LifetimeRef = { current: Lifetime };
+type RetentionMutation = <T>(request: () => Promise<T>, accept: (value: T) => void) => Promise<T>;
+type RetentionStatusOptions = {
+  owner: LifetimeRef;
+  acceptedOperation: AcceptedOperationRef;
+  backupScope: ReturnType<typeof useBackupListScope>;
+  queryClient: ReturnType<typeof useQueryClient>;
+  setStatus: (value: ToolPayloadRetentionStatus | null) => void;
+  setStatusError: (value: unknown) => void;
+  setAcceptedId: (value: string | null) => void;
+};
 type Updates = {
   pending: (value: boolean) => void;
   actionError: (cause: unknown) => void;
@@ -63,10 +87,11 @@ async function performMutation<T>(
   // i18n-exempt: machine-only conflict; the card renders a translated error category.
   if (owner.mutating) throw new ApiError("busy", 409, { code: "busy" });
   owner.mutating = true;
-  owner.generation++;
+  const mutationGeneration = ++owner.generation;
   owner.reading = null;
   const { epoch } = owner;
-  const current = () => owner.mounted && owner.epoch === epoch;
+  const current = () =>
+    owner.mounted && owner.epoch === epoch && owner.generation === mutationGeneration;
   updates.pending(true);
   updates.clearErrors();
   try {
@@ -77,8 +102,10 @@ async function performMutation<T>(
     if (current()) updates.actionError(cause);
     throw cause;
   } finally {
-    owner.mutating = false;
-    if (current()) updates.pending(false);
+    if (current()) {
+      owner.mutating = false;
+      updates.pending(false);
+    }
   }
 }
 function statusPollingInterval(active: boolean, preparing: boolean) {
@@ -109,7 +136,11 @@ function useAcceptedOperationRefresh(acceptedId: string | null, reload: () => Pr
     return () => clearTimeout(timer);
   }, [acceptedId, reload]);
 }
-function useRetentionLifetime(owner: { current: Lifetime }, reload: () => Promise<void>) {
+function useRetentionLifetime(
+  owner: { current: Lifetime },
+  reload: () => Promise<void>,
+  scopeKey: string,
+) {
   useEffect(() => {
     const lifetime = owner.current;
     lifetime.mounted = true;
@@ -119,7 +150,7 @@ function useRetentionLifetime(owner: { current: Lifetime }, reload: () => Promis
       lifetime.epoch++;
       lifetime.reading = null;
     };
-  }, [owner, reload]);
+  }, [owner, reload, scopeKey]);
 }
 function useRetentionMutation(
   owner: { current: Lifetime },
@@ -140,64 +171,130 @@ function useRetentionMutation(
     [owner, setActionError, setPending, setStatusError],
   );
 }
-export function useToolPayloadRetention() {
-  const [status, setStatus] = useState<ToolPayloadRetentionStatus | null>(null);
-  const [statusError, setStatusError] = useState<unknown>(null);
-  const [actionError, setActionError] = useState<unknown>(null);
-  const [pending, setPending] = useState(false);
-  const [acceptedId, setAcceptedId] = useState<string | null>(null);
-  const acceptedOperation = useRef<AcceptedOperation | null>(null);
-  const owner = useRef<Lifetime>({
-    epoch: 0,
-    mounted: false,
-    mutating: false,
-    reading: null,
-    generation: 0,
-  });
+function useRetentionOwner(
+  backupScope: ReturnType<typeof useBackupListScope>,
+  acceptedOperation: AcceptedOperationRef,
+  resetState: () => void,
+): LifetimeRef {
+  const owner = useRef<Lifetime | null>(null);
+  if (owner.current === null) {
+    owner.current = {
+      epoch: 0,
+      mounted: false,
+      mutating: false,
+      reading: null,
+      generation: 0,
+      scope: backupScope.captureScope(),
+      preparation: { activeRevision: null, settledRevision: -1 },
+    };
+  }
+  const lifetime = owner as { current: Lifetime };
+  useLayoutEffect(() => {
+    const current = lifetime.current;
+    if (
+      current.scope.identityKey === backupScope.identityKey &&
+      current.scope.generation === backupScope.generation
+    ) {
+      return;
+    }
+    current.scope = backupScope.captureScope();
+    current.epoch++;
+    current.generation++;
+    current.mutating = false;
+    current.reading = null;
+    current.preparation = { activeRevision: null, settledRevision: -1 };
+    acceptedOperation.current = null;
+    resetState();
+  }, [
+    acceptedOperation,
+    backupScope.captureScope,
+    backupScope.generation,
+    backupScope.identityKey,
+    lifetime,
+    resetState,
+  ]);
+  return lifetime;
+}
+
+function useRetentionStatus({
+  owner,
+  acceptedOperation,
+  backupScope,
+  queryClient,
+  setStatus,
+  setStatusError,
+  setAcceptedId,
+}: RetentionStatusOptions) {
+  const acceptStatus = useCallback(
+    (next: ToolPayloadRetentionStatus, saveCandidateRevision?: number) => {
+      const current = owner.current;
+      const observed = observeBackupPreparation(current.preparation, next, saveCandidateRevision);
+      current.preparation = observed.correlation;
+      setStatus(next);
+      const accepted = acceptedOperation.current;
+      if (!accepted || operationObserved(next, accepted)) {
+        acceptedOperation.current = null;
+        setAcceptedId(null);
+      }
+      if (observed.shouldInvalidate) {
+        const settledScope = current.scope;
+        void invalidateBackupList(queryClient, settledScope.identity, () =>
+          backupScope.isCurrentScope(settledScope),
+        );
+      }
+    },
+    [acceptedOperation, backupScope.isCurrentScope, owner, queryClient, setAcceptedId, setStatus],
+  );
   const reload = useCallback(
-    () =>
-      loadStatus(
-        owner.current,
-        (next) => {
-          setStatus(next);
-          const accepted = acceptedOperation.current;
-          if (!accepted || operationObserved(next, accepted)) {
-            acceptedOperation.current = null;
-            setAcceptedId(null);
-          }
-        },
-        () => setStatusError(null),
-        setStatusError,
-      ),
-    [],
+    () => loadStatus(owner.current, acceptStatus, () => setStatusError(null), setStatusError),
+    [acceptStatus, owner, setStatusError],
   );
   const refresh = useCallback(() => {
     setStatusError(null);
     return reload();
   }, [reload]);
-  useAcceptedOperationRefresh(acceptedId, reload);
-  useRetentionLifetime(owner, reload);
-  const preparing =
-    status?.preparation.state === "pending" || status?.preparation.state === "running";
-  const active = Boolean(acceptedId || preparing || status?.operation?.state === "running");
-  useStatusPolling(reload, active, preparing);
-  const perform = useRetentionMutation(owner, setPending, setStatusError, setActionError);
-  const acceptStatus = useCallback((next: ToolPayloadRetentionStatus) => {
-    acceptedOperation.current = null;
-    setStatus(next);
-    setAcceptedId(null);
-  }, []);
+  return { acceptStatus, reload, refresh };
+}
+
+function useRetentionOperations(
+  backupScope: ReturnType<typeof useBackupListScope>,
+  perform: RetentionMutation,
+  acceptedOperation: AcceptedOperationRef,
+  acceptStatus: (status: ToolPayloadRetentionStatus, saveCandidateRevision?: number) => void,
+  setAcceptedId: (value: string | null) => void,
+) {
   const acceptOperation = useCallback(
     (result: { operation_id: string }, kind: AcceptedOperation["kind"]) => {
       acceptedOperation.current = { id: result.operation_id, kind };
       setAcceptedId(result.operation_id);
     },
-    [],
+    [acceptedOperation, setAcceptedId],
   );
   const save = useCallback(
-    (policy: ToolPayloadPolicyUpdate) =>
-      perform(() => api.saveToolPayloadRetention(policy), acceptStatus),
-    [perform, acceptStatus],
+    (policy: ToolPayloadPolicyUpdate, options?: { backupChoiceAttempt?: boolean }) => {
+      const writerScope = backupScope.captureScope();
+      const candidateRevision =
+        options?.backupChoiceAttempt && policy.backup_choice === "backup"
+          ? policy.revision + 1
+          : undefined;
+      return perform(
+        () => api.saveToolPayloadRetention(policy),
+        (next) => {
+          if (!backupScope.isCurrentScope(writerScope)) return;
+          acceptedOperation.current = null;
+          setAcceptedId(null);
+          acceptStatus(next, candidateRevision);
+        },
+      );
+    },
+    [
+      acceptStatus,
+      acceptedOperation,
+      backupScope.captureScope,
+      backupScope.isCurrentScope,
+      perform,
+      setAcceptedId,
+    ],
   );
   const analyze = useCallback(
     (age: ToolPayloadAge) =>
@@ -216,8 +313,69 @@ export function useToolPayloadRetention() {
     [perform, acceptOperation],
   );
   const cancel = useCallback(
-    (id: string) => perform(() => api.cancelToolPayloadRetention(id), acceptStatus),
-    [perform, acceptStatus],
+    (id: string) => {
+      const writerScope = backupScope.captureScope();
+      return perform(
+        () => api.cancelToolPayloadRetention(id),
+        (next) => {
+          if (!backupScope.isCurrentScope(writerScope)) return;
+          acceptedOperation.current = null;
+          setAcceptedId(null);
+          acceptStatus(next);
+        },
+      );
+    },
+    [
+      acceptStatus,
+      acceptedOperation,
+      backupScope.captureScope,
+      backupScope.isCurrentScope,
+      perform,
+      setAcceptedId,
+    ],
+  );
+  return { save, analyze, run, cancel };
+}
+
+export function useToolPayloadRetention() {
+  const backupScope = useBackupListScope();
+  const queryClient = useQueryClient();
+  const [status, setStatus] = useState<ToolPayloadRetentionStatus | null>(null);
+  const [statusError, setStatusError] = useState<unknown>(null);
+  const [actionError, setActionError] = useState<unknown>(null);
+  const [pending, setPending] = useState(false);
+  const [acceptedId, setAcceptedId] = useState<string | null>(null);
+  const acceptedOperation = useRef<AcceptedOperation | null>(null);
+  const resetState = useCallback(() => {
+    setStatus(null);
+    setStatusError(null);
+    setActionError(null);
+    setPending(false);
+    setAcceptedId(null);
+  }, []);
+  const owner = useRetentionOwner(backupScope, acceptedOperation, resetState);
+  const { acceptStatus, reload, refresh } = useRetentionStatus({
+    owner,
+    acceptedOperation,
+    backupScope,
+    queryClient,
+    setStatus,
+    setStatusError,
+    setAcceptedId,
+  });
+  useAcceptedOperationRefresh(acceptedId, reload);
+  useRetentionLifetime(owner, reload, backupScope.identityKey);
+  const preparing =
+    status?.preparation.state === "pending" || status?.preparation.state === "running";
+  const active = Boolean(acceptedId || preparing || status?.operation?.state === "running");
+  useStatusPolling(reload, active, preparing);
+  const perform = useRetentionMutation(owner, setPending, setStatusError, setActionError);
+  const operations = useRetentionOperations(
+    backupScope,
+    perform,
+    acceptedOperation,
+    acceptStatus,
+    setAcceptedId,
   );
   return {
     status,
@@ -228,11 +386,10 @@ export function useToolPayloadRetention() {
     active,
     preparing,
     acceptedId,
+    captureScope: backupScope.captureScope,
+    isCurrentScope: backupScope.isCurrentScope,
     reload,
     refresh,
-    save,
-    analyze,
-    run,
-    cancel,
+    ...operations,
   };
 }

@@ -106,9 +106,7 @@ func rewindToLegacySchema(t *testing.T, db *sqlx.DB) {
 	if _, err := db.Exec(`DROP TABLE workspace_inventory_recovery_receipts`); err != nil {
 		t.Fatalf("drop final workspace inventory receipts: %v", err)
 	}
-	if _, err := db.Exec(`DROP TABLE task_environment_recovery_claims`); err != nil {
-		t.Fatalf("drop recovery claims: %v", err)
-	}
+	dropTaskRecoveryTablesForLegacyCutover(t, db)
 	if _, err := db.Exec(`DROP TABLE task_environment_repos`); err != nil {
 		t.Fatalf("drop final env repos: %v", err)
 	}
@@ -118,6 +116,19 @@ func rewindToLegacySchema(t *testing.T, db *sqlx.DB) {
 	for _, ddl := range []string{legacyEnvDDL, legacySessionWorktreeDDL} {
 		if _, err := db.Exec(ddl); err != nil {
 			t.Fatalf("seed legacy schema: %v", err)
+		}
+	}
+}
+
+func dropTaskRecoveryTablesForLegacyCutover(t *testing.T, db *sqlx.DB) {
+	t.Helper()
+	for _, table := range []string{
+		"task_environment_recovery_claims",
+		"task_environment_recovery_artifacts",
+		"task_environment_recovery_operations",
+	} {
+		if _, err := db.Exec(`DROP TABLE ` + table); err != nil {
+			t.Fatalf("drop final %s: %v", table, err)
 		}
 	}
 }
@@ -265,6 +276,7 @@ func TestCutover_HybridNormalizedEnvironmentWithLegacySessionWorktrees(t *testin
 
 func seedHybridCutoverState(t *testing.T, db *sqlx.DB, suffix string) legacySeed {
 	t.Helper()
+	dropTaskRecoveryTablesForLegacyCutover(t, db)
 	now := time.Now().UTC().Truncate(time.Second)
 	seed := legacySeed{
 		envID: "env-hybrid-" + suffix, taskID: "task-hybrid-" + suffix,

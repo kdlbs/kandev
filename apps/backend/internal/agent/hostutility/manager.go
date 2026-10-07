@@ -667,15 +667,37 @@ func (m *Manager) probeWithCommand(
 	refresh bool,
 	command agents.Command,
 ) AgentCapabilities {
+	return m.probeWithOverrides(ctx, inst, ia, refresh, command, "", nil, nil)
+}
+
+func (m *Manager) probeWithOverrides(
+	ctx context.Context,
+	inst *instance,
+	ia agents.InferenceAgent,
+	refresh bool,
+	command agents.Command,
+	workDir string,
+	env map[string]string,
+	stripEnv []string,
+) AgentCapabilities {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	resolvedCommand, err := m.resolveInferenceCommand(probeCtx, inst.agentType, ia, command)
-	if err != nil {
-		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
+	req := buildProbeRequest(inst, ia, refresh, command)
+	if workDir != "" {
+		req.InferenceConfig.WorkDir = workDir
 	}
-
-	req := buildProbeRequest(inst, ia, refresh, resolvedCommand)
-	resp, err := m.probeManagedRuntime(probeCtx, inst, ia, resolvedCommand, req)
+	if len(env) > 0 {
+		if req.InferenceConfig.Env == nil {
+			req.InferenceConfig.Env = make(map[string]string)
+		}
+		for key, value := range env {
+			req.InferenceConfig.Env[key] = value
+		}
+	}
+	if len(stripEnv) > 0 {
+		req.InferenceConfig.StripEnv = append(req.InferenceConfig.StripEnv, stripEnv...)
+	}
+	resp, resolvedCommand, err := m.probeManagedRuntime(probeCtx, inst, ia, command, req)
 	if err != nil {
 		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
 	}
@@ -688,25 +710,32 @@ func (m *Manager) probeManagedRuntime(
 	ctx context.Context,
 	inst *instance,
 	ia agents.InferenceAgent,
-	command agents.Command,
+	override agents.Command,
 	req *agentctlutil.ProbeRequest,
-) (*agentctlutil.ProbeResponse, error) {
-	release, err := inst.acquireOperation(ctx, false)
+) (*agentctlutil.ProbeResponse, agents.Command, error) {
+	command, release, err := m.acquireInferenceCommand(ctx, inst, ia, override)
 	if err != nil {
-		return nil, err
+		return nil, command, err
 	}
+	req = cloneProbeRequestWithCommand(req, command)
 	resp, err := inst.client.Probe(ctx, req)
 	release()
 	if err != nil || resp.Success || resp.FailureCode != agentctlutil.ProbeFailureManagedRuntimeNPMResolution {
-		return resp, err
+		return resp, command, err
 	}
 
 	release, err = inst.acquireOperation(ctx, true)
 	if err != nil {
-		return resp, nil
+		return resp, command, nil
 	}
 	defer release()
-	return m.recoverManagedRuntimeProbe(ctx, inst, ia, command, req, resp), nil
+	command, err = m.resolveInferenceCommand(ctx, inst.agentType, ia, override)
+	if err != nil {
+		m.log.Warn("could not resolve selected runtime for probe recovery", zap.Error(err))
+		return resp, command, nil
+	}
+	req = cloneProbeRequestWithCommand(req, command)
+	return m.recoverManagedRuntimeProbe(ctx, inst, ia, command, req, resp), command, nil
 }
 
 func (m *Manager) recoverManagedRuntimeProbe(
@@ -725,6 +754,16 @@ func (m *Manager) recoverManagedRuntimeProbe(
 		return initial
 	}
 	spec := managed.ManagedNPMRuntime()
+	if openCode, ok := ia.(*agents.OpenCodeACP); ok {
+		if reader, hasSelection := m.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader); hasSelection {
+			selected, err := openCode.ResolveSelectedRuntimeWithReader(ctx, reader)
+			if err != nil {
+				m.log.Warn("could not resolve selected OpenCode runtime for probe recovery", zap.Error(err))
+				return initial
+			}
+			spec = selected.Spec
+		}
+	}
 	retryCommand, _, ok := managedRuntimeProbeRetry(failedCommand, spec)
 	if !ok {
 		return initial
@@ -900,6 +939,11 @@ func (m *Manager) resolveInferenceCommand(
 	if !ok || m.managedRuntimeSelections == nil {
 		return command, nil
 	}
+	openCode, isOpenCode := ag.(*agents.OpenCodeACP)
+	reader, hasSelectionReader := m.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader)
+	if isOpenCode && hasSelectionReader {
+		return m.resolveOpenCodeInferenceCommand(ctx, openCode, reader)
+	}
 	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
 	if !ok {
 		return command, nil
@@ -920,6 +964,54 @@ func (m *Manager) resolveInferenceCommand(
 		return spec.RuntimeCommand(version), nil
 	}
 	return spec.ACPCommand(version), nil
+}
+
+func (m *Manager) resolveOpenCodeInferenceCommand(
+	ctx context.Context,
+	openCode *agents.OpenCodeACP,
+	reader managedruntime.OpenCodeSelectionReader,
+) (agents.Command, error) {
+	selection, err := openCode.ResolveSelectedRuntimeWithReader(ctx, reader)
+	if err != nil {
+		return agents.Command{}, fmt.Errorf("resolve OpenCode runtime selection: %w", err)
+	}
+	if selection.Source != managedruntime.OpenCodeSourceNative || !selection.Spec.NativeBinaryOnPath() {
+		return selection.Spec.ACPCommand(selection.Version), nil
+	}
+	return nativeOpenCodeInferenceCommand(ctx, selection.Spec.NativeBinary)
+}
+
+func nativeOpenCodeInferenceCommand(ctx context.Context, binary string) (agents.Command, error) {
+	native, found, err := agents.DetectOpenCodeNativeRuntime(ctx)
+	if err != nil {
+		return agents.Command{}, err
+	}
+	if !found {
+		return agents.Command{}, errors.New("selected native OpenCode runtime is unavailable")
+	}
+	args, err := agents.OpenCodeACPArgsForVersion(native.Version)
+	if err != nil {
+		return agents.Command{}, err
+	}
+	return agents.NewCommand(append([]string{binary}, args...)...), nil
+}
+
+func (m *Manager) acquireInferenceCommand(
+	ctx context.Context,
+	inst *instance,
+	ia agents.InferenceAgent,
+	override agents.Command,
+) (agents.Command, func(), error) {
+	release, err := inst.acquireOperation(ctx, false)
+	if err != nil {
+		return agents.Command{}, nil, err
+	}
+	command, err := m.resolveInferenceCommand(ctx, inst.agentType, ia, override)
+	if err != nil {
+		release()
+		return agents.Command{}, nil, err
+	}
+	return command, release, nil
 }
 
 const modelConfigResolveTimeout = 60 * time.Second

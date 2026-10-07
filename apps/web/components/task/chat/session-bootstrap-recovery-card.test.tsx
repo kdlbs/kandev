@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
+import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
 import { SessionBootstrapRecoveryCard } from "./session-bootstrap-recovery-card";
 
 const recoveryActionState = vi.hoisted(() => ({
@@ -20,6 +21,7 @@ const recoveryActionState = vi.hoisted(() => ({
   guardDetails: null as { retryable: boolean } | null,
   recoveryNotice: null as string | null,
   managedCloneRecoveryStamp: null as string | null,
+  workspaceRecovery: null as WorkspaceRecoveryProjection | null,
   providerRestoredResumeEligible: false,
   handleRecover: vi.fn().mockResolvedValue(true),
   handleRestore: vi.fn().mockResolvedValue(undefined),
@@ -78,6 +80,7 @@ afterEach(() => {
   recoveryActionState.guardDetails = null;
   recoveryActionState.recoveryNotice = null;
   recoveryActionState.managedCloneRecoveryStamp = null;
+  recoveryActionState.workspaceRecovery = null;
   recoveryActionState.providerRestoredResumeEligible = false;
   vi.clearAllMocks();
 });
@@ -373,6 +376,37 @@ describe("SessionBootstrapRecoveryCard", () => {
     fireEvent.click(screen.getByTestId("managed-clone-relocate-button"));
     fireEvent.click(screen.getByTestId("managed-clone-relocation-confirm"));
     expect(recoveryActionState.handleManagedCloneRelocation).toHaveBeenCalledOnce();
+  });
+
+  it("restores relocation progress from the durable projection after reload", () => {
+    recoveryActionState.workspaceRecovery = {
+      task_id: "task-1",
+      environment_id: "environment-1",
+      session_id: "session-1",
+      operation_id: "operation-1",
+      attempt_id: "attempt-1",
+      ownership_generation: "generation-1",
+      revision: "2",
+      kind: "managed_clone_relocation",
+      state: "running",
+      phase: "publishing",
+      repository_position: 2,
+      repository_total: 2,
+      completed_slots: 1,
+      workspace_complete: false,
+      agent_ready: false,
+      runner_live: true,
+      started_at: "2026-10-05T12:00:00Z",
+      updated_at: "2026-10-05T12:01:00Z",
+    };
+
+    render(<SessionBootstrapRecoveryCard taskId="task-1" sessionId="session-1" error={error} />);
+
+    expect(
+      screen.getByTestId("workspace-recovery-progress").getAttribute("data-recovery-phase"),
+    ).toBe("publishing");
+    expect(screen.getByText("task:managedCloneRelocationTitle")).toBeTruthy();
+    expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
   });
 
   it("changes a cancelled legacy restore failure to one relocation action", () => {

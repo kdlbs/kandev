@@ -11,7 +11,14 @@ import path from "node:path";
 
 test.setTimeout(480_000);
 
-for (const scenario of ["read", "output", "read-restore-transient", "read-restore-hard"]) {
+for (const scenario of [
+  "read",
+  "write",
+  "shell",
+  "output",
+  "read-restore-transient",
+  "read-restore-hard",
+]) {
   test(`integration: ${scenario} continues in the same live native conversation without original prompt replay`, async ({
     backend,
     apiClient,
@@ -40,6 +47,11 @@ for (const scenario of ["read", "output", "read-restore-transient", "read-restor
         messages.some((message) => message.content?.includes("partial history preserved")),
       ).toBe(true);
       expect(messages.filter((message) => message.metadata?.retrying === true)).toHaveLength(0);
+      expect(
+        messages.filter(
+          (message) => message.author_type === "user" && message.content === "continue",
+        ),
+      ).toHaveLength(0);
       const { turns } = await apiClient.listSessionTurns(fixture.sessionId);
       const agentTurns = turns.filter((turn) => turn.metadata?.lifecycle_only !== true);
       expect(agentTurns).toHaveLength(2);
@@ -110,6 +122,7 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
     );
     await expect(session.transientRetryCard()).toHaveCount(1);
     await expect(session.transientRetryCard()).toContainText("Continuing");
+    await expect(session.activeChat().getByText("continue", { exact: true })).toHaveCount(0);
     assertNativeContinuationTrace(fixture.tracePath, "read-hold");
     await testPage.reload();
     await session.waitForLoad();
@@ -120,6 +133,13 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
       (message) => message.metadata?.recovery_phase === "continuing",
     );
     expect(after.id).toBe(notice.id);
+    await expect(session.activeChat().getByText("continue", { exact: true })).toHaveCount(0);
+    const { messages: reloadedMessages } = await apiClient.listSessionMessages(fixture.sessionId);
+    expect(
+      reloadedMessages.filter(
+        (message) => message.author_type === "user" && message.content === "continue",
+      ),
+    ).toHaveLength(0);
     const viewer = await testPage.context().newPage();
     try {
       await viewer.goto(`/t/${fixture.taskId}`);
@@ -127,6 +147,7 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
       await second.waitForLoad();
       await expect(second.transientRetryCard()).toHaveCount(1);
       await expect(second.transientRetryCard()).toContainText("Continuing");
+      await expect(second.activeChat().getByText("continue", { exact: true })).toHaveCount(0);
       assertNativeContinuationTrace(fixture.tracePath, "read-hold");
     } finally {
       await viewer.close();
@@ -152,6 +173,20 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
       )
       .toBe("WAITING_FOR_INPUT");
     assertNativeContinuationTrace(fixture.tracePath, "read-hold");
+    await session.sendMessage("continue");
+    await waitForContinuationMessage(
+      apiClient,
+      fixture.sessionId,
+      (message) => message.author_type === "user" && message.content === "continue",
+    );
+    await expect(session.activeChat().getByText("continue", { exact: true })).toBeVisible();
+    await waitForContinuationMessage(
+      apiClient,
+      fixture.sessionId,
+      (message) =>
+        message.author_type === "agent" &&
+        message.content?.includes('completed the analysis of your request: "continue"') === true,
+    );
   } catch (error) {
     console.warn(
       JSON.stringify(
@@ -169,7 +204,7 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
   }
 });
 
-for (const scenario of ["write", "pending", "unknown"]) {
+for (const scenario of ["pending", "unknown"]) {
   test(`desktop: ${scenario} refuses replay and keeps the live runtime`, async ({
     testPage,
     backend,
@@ -224,30 +259,67 @@ test("desktop: disabled continuation preserves manual recovery without native re
   apiClient,
   seedData,
 }) => {
+  const { settings } = await apiClient.getUserSettings();
+  const previousPreventAutoStart =
+    typeof settings.prevent_auto_start_agent_on_open === "boolean"
+      ? settings.prevent_auto_start_agent_on_open
+      : false;
   const fixture = await createContinuationFixture(backend, apiClient, seedData, "read", {
     enabled: false,
   });
   try {
-    await testPage.goto(`/t/${fixture.taskId}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
     const recovery = await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,
       (message) => message.metadata?.recovery_reason === "disabled",
     );
+    await expect
+      .poll(async () => {
+        const status = await apiClient.wsRequest<{
+          state: string;
+          is_agent_running: boolean;
+          needs_resume: boolean;
+          resume_reason?: string;
+        }>("task.session.status", { task_id: fixture.taskId, session_id: fixture.sessionId });
+        return {
+          state: status.state,
+          running: status.is_agent_running,
+          needsResume: status.needs_resume,
+          reason: status.resume_reason,
+        };
+      })
+      .toEqual({
+        state: "WAITING_FOR_INPUT",
+        running: false,
+        needsResume: false,
+        reason: "error_recovery",
+      });
+    await testPage.goto(`/t/${fixture.taskId}`);
+    const session = new SessionPage(testPage);
     expect(recovery.metadata?.recovery_actions).toBe(true);
     expect(recovery.metadata?.runtime_retained).not.toBe(true);
     expect(recovery.metadata?.attempts_started ?? 0).toBe(0);
+    assertNativeNoContinuationTrace(fixture.tracePath, "read");
     await expect(session.recoveryResumeButton()).toBeVisible();
     await expect(session.transientRetryCard()).toBeHidden();
     const trace = fs.readFileSync(fixture.tracePath, "utf8");
     expect(trace.match(/"event":"session_new"/g)).toHaveLength(1);
-    expect(trace).not.toContain(
-      "Your previous turn was interrupted by a temporary connection failure.",
-    );
+    expect(
+      trace
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+        .filter((record) => record.event === "prompt"),
+    ).toHaveLength(1);
   } finally {
-    await fixture.dispose();
+    try {
+      await fixture.dispose();
+    } finally {
+      await apiClient.saveUserSettings({
+        prevent_auto_start_agent_on_open: previousPreventAutoStart,
+      });
+    }
   }
 });
 

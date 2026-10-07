@@ -53,7 +53,10 @@ function useStoppedRecoveryChoices(
   } = props.actions;
   const completed = props.mode === "completed";
 
-  if (props.actions.managedCloneRecoveryStamp) {
+  if (
+    props.actions.managedCloneRecoveryStamp ||
+    props.actions.workspaceRecoveryMatchesCurrentFailure
+  ) {
     return [
       {
         kind: "relocate_and_resume",
@@ -145,16 +148,105 @@ function stoppedRecoveryErrorMessage(
   return cause;
 }
 
+function ManagedCloneRecoveryHint({
+  managedCloneRecovery,
+  hasProgress,
+}: {
+  managedCloneRecovery: boolean;
+  hasProgress: boolean;
+}) {
+  const { t } = useTranslation();
+  if (!managedCloneRecovery || hasProgress) return null;
+  return (
+    <p className="mt-1 wrap-anywhere text-sm text-muted-foreground">
+      {t("task:managedCloneRelocationBody")}
+    </p>
+  );
+}
+
+function StoppedSessionRecoveryDetails({
+  props,
+  profileExists,
+  managedCloneRecovery,
+  recoveryErrorMessage,
+  choices,
+  blocked,
+}: {
+  props: SessionStoppedBannerProps & { actions: SessionRecoveryActions };
+  profileExists: boolean;
+  managedCloneRecovery: boolean;
+  recoveryErrorMessage: string | null;
+  choices: RecoveryChoice[];
+  blocked: boolean;
+}) {
+  const { t } = useTranslation();
+  const { busyAction, recoveryError, recoveryNotice } = props.actions;
+  return (
+    <>
+      <ManagedCloneRecoveryHint
+        managedCloneRecovery={managedCloneRecovery}
+        hasProgress={Boolean(props.actions.workspaceRecovery)}
+      />
+      {props.sessionId && !profileExists && (
+        <p className="mt-1 text-xs text-muted-foreground">{t("task:agentProfileNoLongerExists")}</p>
+      )}
+      {recoveryErrorMessage && (
+        <p
+          role="status"
+          data-testid="session-recovery-error"
+          className="mt-1 text-xs text-muted-foreground"
+        >
+          {recoveryErrorMessage}
+        </p>
+      )}
+      {recoveryNotice && (
+        <p role="status" className="mt-1 text-xs text-muted-foreground">
+          {recoveryNotice}
+        </p>
+      )}
+      <RecoveryActions
+        actions={choices}
+        busy={busyAction !== null}
+        busyAction={busyAction}
+        blocked={blocked}
+        workspaceRecovery={
+          choices.some((choice) => choice.kind === "relocate_and_resume") ||
+          props.actions.workspaceRecovery?.runner_live
+            ? props.actions.workspaceRecovery
+            : null
+        }
+        workspaceRecoveryReadyApplies={
+          props.actions.workspaceRecoveryMatchesCurrentFailure ?? false
+        }
+        workspaceRecoveryRepositoryName={props.actions.workspaceRecoveryRepositoryName}
+        workspaceRecoveryStatusCheck={
+          props.actions.managedCloneRecoveryStamp ||
+          props.actions.workspaceRecoveryMatchesCurrentFailure ||
+          props.actions.workspaceRecovery?.runner_live
+            ? props.actions.workspaceRecoveryStatusCheck
+            : "idle"
+        }
+        onCheckWorkspaceRecoveryStatus={() => void props.actions.checkWorkspaceRecoveryStatus()}
+      />
+      <SessionErrorDetails>
+        {[props.message, props.detail, recoveryError?.message].filter(Boolean).join("\n")}
+      </SessionErrorDetails>
+    </>
+  );
+}
+
 function StoppedSessionContent(
   props: SessionStoppedBannerProps & { actions: SessionRecoveryActions },
 ) {
   const { t } = useTranslation();
   const [relocationConfirmationOpen, setRelocationConfirmationOpen] = useState(false);
   const profileExists = useSessionProfileExists(props.sessionId);
-  const { busyAction, recoveryError, recoveryNotice, guardDetails } = props.actions;
+  const { busyAction, guardDetails } = props.actions;
   const completed = props.mode === "completed";
   const blocked = Boolean(guardDetails && !guardDetails.retryable);
-  const managedCloneRecovery = Boolean(props.actions.managedCloneRecoveryStamp);
+  const managedCloneRecovery =
+    Boolean(props.actions.managedCloneRecoveryStamp) ||
+    props.actions.workspaceRecoveryMatchesCurrentFailure === true;
   const choices = useStoppedRecoveryChoices(props, profileExists, () =>
     setRelocationConfirmationOpen(true),
   );
@@ -178,39 +270,14 @@ function StoppedSessionContent(
           <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <p className="wrap-anywhere text-sm">{title}</p>
-            {managedCloneRecovery && (
-              <p className="mt-1 wrap-anywhere text-sm text-muted-foreground">
-                {t("task:managedCloneRelocationBody")}
-              </p>
-            )}
-            {props.sessionId && !profileExists && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                {t("task:agentProfileNoLongerExists")}
-              </p>
-            )}
-            {recoveryErrorMessage && (
-              <p
-                role="status"
-                data-testid="session-recovery-error"
-                className="mt-1 text-xs text-muted-foreground"
-              >
-                {recoveryErrorMessage}
-              </p>
-            )}
-            {recoveryNotice && (
-              <p role="status" className="mt-1 text-xs text-muted-foreground">
-                {recoveryNotice}
-              </p>
-            )}
-            <RecoveryActions
-              actions={choices}
-              busy={busyAction !== null}
-              busyAction={busyAction}
+            <StoppedSessionRecoveryDetails
+              props={props}
+              profileExists={profileExists}
+              managedCloneRecovery={managedCloneRecovery}
+              recoveryErrorMessage={recoveryErrorMessage}
+              choices={choices}
               blocked={blocked}
             />
-            <SessionErrorDetails>
-              {[props.message, props.detail, recoveryError?.message].filter(Boolean).join("\n")}
-            </SessionErrorDetails>
           </div>
         </div>
       </div>

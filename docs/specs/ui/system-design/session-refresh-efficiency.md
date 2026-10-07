@@ -191,6 +191,85 @@ The work order records the attributed component and failing lifecycle regression
 before the implementation choice is finalized. If no owner reproduces, retain
 that uncertainty instead of claiming an editor fix.
 
+#### Composer draft settlement ownership
+
+Implements `AC-UI-SESSION-REFRESH-EFFICIENCY-004.3`–`.6` through the
+[bounded draft settlement plan](../../../plans/composer-draft-settlement-ownership/plan.md).
+This is a correctness boundary within the existing session draft lifecycle,
+independent of the uncompleted editor CPU/mount-cost investigation above.
+UI owns reusable composer reply admission and browser-local drafts; Tasks
+retains delivery, attachment claims, and conversation lifecycle authority.
+
+`useChatInputState` owns text state, submitted text/attachment snapshots,
+`handleSubmit`, and `clearAcceptedPayload`. `TipTapInput` and
+`useTipTapEditor` own the real editor and its imperative handle. An imperative
+`clear()` calls the current `onChange`, which saves text under the current
+session. Editor updates save rich JSON under that session. The storage helpers
+in `lib/local-storage.ts` actually use browser-tab `sessionStorage`, with
+separate text/content/attachment keys suffixed by session ID. Do not migrate
+those keys or introduce a second draft store.
+
+Treat an owner as one hook instance's committed visit to `(taskId, sessionId)`.
+Ordinary rerenders, typing, workspace readiness, and `isSending` changes retain
+the visit. Committing an identity change retires it, including A-B-A and null
+session transitions. Unmount or effect cleanup also retires outstanding work;
+StrictMode setup after cleanup receives fresh admission. A render that has not
+committed must neither retire the current visit nor authorize its own work.
+
+Keep this admission local to `useChatInputState` and its `useDraftVisit` helper
+in `use-chat-draft-visit.ts`. Associate callbacks with
+their rendered owner identity and publish an opaque visit token in a layout
+effect. Cleanup invalidates that token. A callback must match the committed
+owner before reading mutable draft/editor refs or invoking `onSubmit`; capture
+the active token before calling the submitter. On acceptance, compare the
+captured token with the active committed visit before any editor clear, state
+setter, history/height reset, or storage write. A token invalidated by cleanup
+must never become valid again. Comparing only session IDs, text, or attachment
+values cannot distinguish a returned or replaced visit.
+
+Apply the same admission to retained `clearAcceptedPayload` callbacks and
+return `false` when stale. Current callbacks still use the existing payload
+matching contract. Do not change the public imperative handle shape or add
+source attribution to payloads. Arbitrary callers passing an old payload to
+a newly obtained current handle are outside this callback-ownership correction.
+
+Once admission passes, retain the existing content policy: trimmed text
+comparison; ordered attachment `id:deliveryMode` snapshot for ordinary submit;
+`matchesSubmittedAttachments` for accepted opening payloads; newer text
+preservation; text-only clearing when attachments changed; otherwise complete
+draft clearing. Retain `false`/promise-rejection preservation and existing
+error logging. Keep structured mentions, review comments, context payloads,
+upload gating, and attachment restoration/deletion with their current owners.
+Do not touch the context snapshot cleanup recently delivered in
+`chat-input-area.tsx` or add cancellation/replay of transport work.
+
+**Consumers and mobile:** `ChatInputArea` keys `ChatInputContainer` by its
+clarification counter, not session identity. `SessionMobileLayout` mounts
+`TaskChatPanel` without a session key. `SessionTabletLayout` passes identity
+through `TaskCenterPanel` to the same unkeyed panel. Desktop Dockview, preview,
+Threads, Quick Chat, and run-transcript consumers also reach the shared input;
+some remount and some retain instances. One hook correction covers both.
+Retain all existing surfaces, focus/scroll/touch composition, and readiness
+rules. This is pure state ownership without rendered markup, copy, or geometry
+changes, so focused real-editor/component tests satisfy mobile parity without
+new Playwright or visual checks. If implementation needs presentation changes,
+revise this assessment before extending scope.
+
+**Evidence:** permanent behavioral tests must mount production
+`useChatInputState` and real `TipTapInput` under `StateProvider` (which creates
+the real app store) and `ToastProvider`. Defer only the submission acceptance
+boundary. Prove current editor text, hook value, saved text/rich JSON/attachments,
+and remount restoration, not only a mocked `clear()` count. Include a rendered
+`ChatInputContainer` entry-point case with the real body/hook/editor and submit
+control. Cover both session directions, A-B-A, same-ID replacement, retained
+callbacks, unmount, StrictMode cleanup, current success/failure/newer edits,
+and independent different-session composers/stores. This component boundary
+does not itself prove the default message handler, WebSocket, or browser path.
+
+No API, schema, flag, global coordinator, cache, or architectural ownership
+change is introduced. Existing per-session ownership is enforced locally;
+the paired design preserves the constraint without a new ADR.
+
 ### PR feedback coordination
 
 Implements `REQ-UI-SESSION-REFRESH-EFFICIENCY-005`.

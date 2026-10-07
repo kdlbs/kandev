@@ -54,7 +54,9 @@ test.describe("Coordinators settings tab", () => {
       const result = sidebar
         .getByRole("link")
         .filter({ hasText: /^Coordinators/ })
-        .first();
+        .and(
+          sidebar.locator(`a[href="/settings/workspaces/${seedData.workspaceId}/coordinators"]`),
+        );
       await expect(result).toBeVisible();
       await result.click();
       await expect(testPage).toHaveURL(

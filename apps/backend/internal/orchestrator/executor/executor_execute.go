@@ -365,7 +365,7 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 				// release any launch-side claim without publishing FAILED.
 				cleanupCtx := context.WithoutCancel(ctx)
 				attemptOwned := e.stopFailedStartExecutionIfCurrentAttempt(
-					cleanupCtx, sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
+					cleanupCtx, taskID, sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
 				)
 				if attemptOwned && e.onAgentProcessStartFailed != nil {
 					e.onAgentProcessStartFailed(cleanupCtx, taskID, sessionID, agentExecutionID, err)
@@ -400,7 +400,7 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 			// not run the resume success callback or restore task/session state.
 			// Teardown is exact-execution scoped so a retry cannot be stopped.
 			attemptOwned := e.stopFailedStartExecutionIfCurrentAttempt(
-				context.WithoutCancel(ctx), sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
+				context.WithoutCancel(ctx), taskID, sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
 			)
 			if attemptOwned && e.onAgentProcessStartFailed != nil {
 				e.onAgentProcessStartFailed(context.WithoutCancel(ctx), taskID, sessionID, agentExecutionID, context.Canceled)
@@ -563,7 +563,7 @@ func (e *Executor) stopFailedStartExecution(ctx context.Context, agentExecutionI
 
 func (e *Executor) stopFailedStartExecutionIfCurrentAttempt(
 	ctx context.Context,
-	sessionID, agentExecutionID string,
+	taskID, sessionID, agentExecutionID string,
 	expectedStartAttemptID string,
 	phase string,
 ) bool {
@@ -580,7 +580,11 @@ func (e *Executor) stopFailedStartExecutionIfCurrentAttempt(
 		return false
 	}
 	if owned || cleanupSafe {
-		e.stopFailedStartExecution(ctx, agentExecutionID, phase)
+		if e.onCancelledResumeExecutionCleanup != nil {
+			e.onCancelledResumeExecutionCleanup(ctx, taskID, sessionID, agentExecutionID, expectedStartAttemptID)
+		} else {
+			e.stopFailedStartExecution(ctx, agentExecutionID, phase)
+		}
 	}
 	return owned
 }
@@ -2046,7 +2050,8 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if hasRunning {
 		result, existingErr := e.startAgentOnExistingWorkspaceWithRequest(
 			launchCtx, task, session, prompt, startAgent, opts.McpMode, req,
-			opts.OnExecutionAdmitted, opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
+			opts.OnExecutionAdmitted, opts.BeforeInitialPromptDispatch,
+			opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
 			opts.RefuseIfAgentRunning, opts.TurnID,
 		)
 		if !errors.Is(existingErr, ErrStaleExecution) && !errors.Is(existingErr, ErrAgentCommandMissing) {
@@ -2090,8 +2095,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
 	}
 	if startAgent && (prompt != "" || len(opts.Attachments) > 0) {
-		if err := e.registerInitialPromptDispatchCallbacks(
-			resp.AgentExecutionID, opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
+		if err := e.registerInitialPromptCallbacks(
+			resp.AgentExecutionID, opts.BeforeInitialPromptDispatch,
+			opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
 		); err != nil {
 			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
 			return nil, fmt.Errorf("register initial prompt dispatch callbacks: %w", err)
@@ -2803,7 +2809,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		Env:         cloneStringMap(env),
 	}
 	return e.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, prompt, startAgent, mcpMode, request, nil, nil, nil, false, turnIDs...,
+		ctx, task, session, prompt, startAgent, mcpMode, request, nil, nil, nil, nil, false, turnIDs...,
 	)
 }
 
@@ -2816,6 +2822,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	mcpMode string,
 	request *LaunchAgentRequest,
 	onExecutionAdmitted func(string),
+	beforeInitialPromptDispatch func(string) error,
 	onInitialPromptAccepted func(string),
 	onInitialPromptFailed func(),
 	refuseIfAgentRunning bool,
@@ -2899,8 +2906,9 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 		return nil, err
 	}
 	if prompt != "" || len(request.Attachments) > 0 {
-		if err := e.registerInitialPromptDispatchCallbacks(
-			executionID, onInitialPromptAccepted, onInitialPromptFailed,
+		if err := e.registerInitialPromptCallbacks(
+			executionID, beforeInitialPromptDispatch,
+			onInitialPromptAccepted, onInitialPromptFailed,
 		); err != nil {
 			return nil, fmt.Errorf("register initial prompt dispatch callbacks: %w", err)
 		}

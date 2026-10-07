@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-06
 owners:
   - Kandev
 ---
@@ -24,6 +24,7 @@ Operators need to discover updates while working and optionally authorize Kandev
 - **AC-AGENTS-RUNTIME-NOTIFY-001.6:** Opening a runtime notification shall expand the runtime section and reveal its destination, including a disabled or unavailable runtime inside the additional registrations disclosure. Desktop and phone users shall be able to collapse and reopen the section without losing policy drafts. Phone controls shall have at least 44px touch targets and content shall not cause horizontal page overflow.
 
 - **AC-AGENTS-RUNTIME-NOTIFY-001.7:** Desktop and phone application views shall show no persistent floating agent runtime update button or count, including while newer runtimes are available. Runtime version management, ownership information, and manual guidance shall remain reachable through Settings > Agents and runtime notification links without hover.
+- **AC-AGENTS-RUNTIME-NOTIFY-001.8:** When a native host installation owns an agent, the managed fallback version control shall present the fallback's current version as the version that the most recent successful fallback activation validated, including a successful return to the Kandev default, while that version is still the version future fallback launches use. It shall classify the selected target against that version, including after the completing job is gone, the dialog is reopened, or Kandev restarts. When no successful activation validated the version future fallback launches use, the fallback current version shall remain explicitly unknown. The native host's observed version shall never be presented as the fallback's current version.
 
 ### REQ-AGENTS-RUNTIME-NOTIFY-002: Opt-in verified automatic updates
 
@@ -43,4 +44,4 @@ Model discovery, vendor credential/configuration migrations, hot-swapping sessio
 
 The [availability summary requirements](runtime-update-summary.md) extend startup and reconnect delivery under REQ-AGENTS-RUNTIME-NOTIFY-003.
 
-See [runtime update notifications design](../system-design/runtime-update-notifications.md), [original delivery plan](../../../plans/agent-runtime-notifications/plan.md), and [compact settings follow-up plan](../../../plans/agent-runtime-settings-compact/plan.md), and [floating indicator removal plan](../../../plans/remove-agent-runtime-update-indicator/plan.md).
+See [runtime update notifications design](../system-design/runtime-update-notifications.md), [original delivery plan](../../../plans/agent-runtime-notifications/plan.md), and [compact settings follow-up plan](../../../plans/agent-runtime-settings-compact/plan.md), [floating indicator removal plan](../../../plans/remove-agent-runtime-update-indicator/plan.md), and [managed fallback current version fix plan](../../../plans/managed-fallback-current-version/plan.md).

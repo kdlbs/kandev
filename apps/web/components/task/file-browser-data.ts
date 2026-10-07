@@ -11,22 +11,32 @@ import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useFileBrowserSearch, useFileBrowserTree } from "./file-browser-hooks";
 import { useFileTreeCacheBinding } from "./file-browser-tree-state";
 import { getFileBrowserSessionWorkspacePath, resolveFileBrowserPaths } from "./file-browser-path";
+import {
+  buildFileBrowserRepositoryLabels,
+  workspaceInventoryRevision,
+} from "./file-browser-repository-labels";
 
 export function getFileBrowserResetKey({
   sessionId,
   environmentId,
   worktreeCount,
+  inventoryRevision,
   workspaceFilesRefresh,
 }: {
   sessionId: string;
   environmentId?: string | null;
   worktreeCount: number;
+  inventoryRevision?: string;
   workspaceFilesRefresh: number;
 }) {
-  return `${environmentId ?? sessionId}:${worktreeCount}:${workspaceFilesRefresh}`;
+  return `${environmentId ?? sessionId}:${worktreeCount}:${inventoryRevision ?? ""}:${workspaceFilesRefresh}`;
 }
 
-function useFileBrowserResetKey(sessionId: string, environmentId?: string | null) {
+function useFileBrowserResetKey(
+  sessionId: string,
+  environmentId?: string | null,
+  inventoryRevision = "",
+) {
   const worktreeCount = useAppStore(
     (state) => state.sessionWorktreesBySessionId.itemsBySessionId[sessionId]?.length ?? 0,
   );
@@ -37,6 +47,7 @@ function useFileBrowserResetKey(sessionId: string, environmentId?: string | null
     sessionId,
     environmentId,
     worktreeCount,
+    inventoryRevision,
     workspaceFilesRefresh,
   });
 }
@@ -45,10 +56,21 @@ export function useFileBrowserData(sessionId: string, environmentId: string | nu
   const { session, isFailed: isSessionFailed, errorMessage: sessionError } = useSession(sessionId);
   const workspaceRestoration = useWorkspaceRestoration(session?.task_id, sessionId, environmentId);
   const repository = useRepository(session?.repository_id ?? null);
+  const repositoriesByWorkspaceId = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const repositories = useMemo(
+    () => Object.values(repositoriesByWorkspaceId).flat(),
+    [repositoriesByWorkspaceId],
+  );
+  const repositoryDisplayLabels = useMemo(
+    () =>
+      buildFileBrowserRepositoryLabels(session?.workspace_path, session?.worktrees, repositories),
+    [repositories, session?.worktrees, session?.workspace_path],
+  );
+  const inventoryRevision = workspaceInventoryRevision(session?.worktrees);
   const gitStatus = useSessionGitStatus(sessionId);
   const folderAction = useTaskFolderAction(sessionId);
   const { copied, copy: copyPath } = useCopyToClipboard(1000);
-  const resetKey = useFileBrowserResetKey(sessionId, environmentId);
+  const resetKey = useFileBrowserResetKey(sessionId, environmentId, inventoryRevision);
   const cacheBinding = useFileTreeCacheBinding(environmentId ?? sessionId, resetKey);
   const search = useFileBrowserSearch(sessionId, cacheBinding, resetKey);
   const treeState = useFileBrowserTree(sessionId, resetKey, cacheBinding);
@@ -74,6 +96,8 @@ export function useFileBrowserData(sessionId: string, environmentId: string | nu
     search,
     treeState,
     workspaceRestoration,
+    repositoryDisplayLabels,
+    inventoryRevision,
     isTreeLoaded,
     fileStatuses,
     ...paths,

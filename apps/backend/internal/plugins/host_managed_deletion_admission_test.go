@@ -192,6 +192,9 @@ func TestManagedDeletionHostReceipts(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			f := newManagedDeletionHostFixture(t, ctx)
+			if mode == "completed_replay" {
+				f.lifecycle.StopTaskResourceCleanupWorker()
+			}
 			originalTask, taskErr := f.other.GetTask(ctx, f.descriptor.TaskID)
 			require.NoError(t, taskErr)
 			want := pluginsdk.CommandApplied
@@ -273,6 +276,9 @@ func TestManagedDeletionHostReceipts(t *testing.T) {
 				require.Equal(t, "command_receipt_unavailable", result.Reason)
 				_, err = f.database.ExecContext(ctx, `DROP TRIGGER fail_delete_receipt`)
 				require.NoError(t, err)
+			}
+			if mode == "completed_replay" {
+				require.NoError(t, f.lifecycle.StartTaskResourceCleanupWorker(ctx))
 			}
 			f.waitForCleanupCompletion(t, ctx)
 			spec := f.spec

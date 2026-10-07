@@ -5422,6 +5422,45 @@
           "settings_href": "/settings/preferences"
         },
         {
+          "key": "user_settings.sidebar_fast_actions_enabled",
+          "field_path": "sidebar_fast_actions_enabled",
+          "label": "sidebar fast action icons",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "boolean",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "default_behavior": "false for new users; true for existing users without a saved value",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences/layouts?tab=sidebar"
+        },
+        {
+          "key": "user_settings.sidebar_new_task_style",
+          "field_path": "sidebar_new_task_style",
+          "label": "sidebar New Task style",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "string",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "default_behavior": "simple for new users; compact for existing users without a saved value",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences/layouts?tab=sidebar",
+          "schema": {
+            "enum": [
+              "simple",
+              "compact"
+            ],
+            "type": "string"
+          }
+        },
+        {
           "key": "user_settings.sidebar_hover_enabled",
           "field_path": "sidebar_hover_enabled",
           "label": "sidebar hover enabled",
@@ -6434,9 +6473,11 @@
       "show_transcript_auto_scroll_control",
       "sidebar_active_view_id",
       "sidebar_draft",
+      "sidebar_fast_actions_enabled",
       "sidebar_hover_delay_ms",
       "sidebar_hover_enabled",
       "sidebar_layouts_by_workspace",
+      "sidebar_new_task_style",
       "sidebar_task_color_automation",
       "sidebar_task_color_patch",
       "sidebar_task_colors",

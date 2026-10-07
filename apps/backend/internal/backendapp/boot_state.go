@@ -529,6 +529,14 @@ func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID str
 	for _, item := range items {
 		sessions = append(sessions, mapQuickChatSessionState(item))
 		sessionDTO := taskdto.FromTaskSession(item.Session)
+		if item.Session != nil && item.Session.TaskEnvironmentID != "" {
+			operation, runnerLive, recoveryErr := b.p.taskSvc.WorkspaceRecoveryProjection(ctx, item.Session.TaskEnvironmentID)
+			if recoveryErr != nil {
+				b.logBootError("get quick chat workspace recovery projection", recoveryErr)
+			} else {
+				taskdto.EnrichWorkspaceRecovery(&sessionDTO, operation, runnerLive)
+			}
+		}
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichCancellationPending(&sessionDTO, b.p.orchestratorSvc)
 			taskdto.EnrichParkedProjection(&sessionDTO, b.p.orchestratorSvc)
@@ -1135,6 +1143,14 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 			continue
 		}
 		dto := taskdto.FromTaskSession(session)
+		if session.TaskEnvironmentID != "" {
+			operation, runnerLive, recoveryErr := b.p.taskSvc.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
+			if recoveryErr != nil {
+				b.logBootError("get task detail workspace recovery projection", recoveryErr)
+			} else {
+				taskdto.EnrichWorkspaceRecovery(&dto, operation, runnerLive)
+			}
+		}
 		// Mirror the in-memory fine-grained busy substate onto a RUNNING session
 		// so a fresh page-load / second tab sees the accept-input +
 		// working-in-background affordance without waiting for a WS flip

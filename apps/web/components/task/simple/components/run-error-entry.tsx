@@ -79,6 +79,10 @@ export function RunErrorEntry({
     guardDetails,
     recoveryNotice,
     manualRecoveryFailure,
+    workspaceRecovery,
+    workspaceRecoveryRepositoryName,
+    workspaceRecoveryStatusCheck,
+    checkWorkspaceRecoveryStatus,
     providerRestoredResumeEligible,
     handleRecover,
     handleRestore,
@@ -139,6 +143,10 @@ export function RunErrorEntry({
           ? t("task:failedToRestoreWorkspace")
           : t("task:failedToResumeSession")
       }
+      workspaceRecovery={workspaceRecovery}
+      workspaceRecoveryRepositoryName={workspaceRecoveryRepositoryName}
+      workspaceRecoveryStatusCheck={workspaceRecoveryStatusCheck}
+      onCheckWorkspaceRecoveryStatus={() => void checkWorkspaceRecoveryStatus()}
     />
   );
 }

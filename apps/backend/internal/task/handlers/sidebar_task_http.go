@@ -83,10 +83,20 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 			return
 		}
 		if settings != nil {
+			automation, marshalErr := json.Marshal(settings.SidebarTaskColorAutomation)
+			if marshalErr != nil {
+				h.logger.Error("failed to prepare sidebar task color settings", zap.Error(marshalErr))
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+				return
+			}
 			prefs = models.SidebarTaskViewPreferences{
 				PinnedTaskIDs:          settings.SidebarTaskPrefs.PinnedTaskIDs,
 				OrderedTaskIDs:         settings.SidebarTaskPrefs.OrderedTaskIDs,
 				SubtaskOrderByParentID: settings.SidebarTaskPrefs.SubtaskOrderByParentID,
+				ColorSettings: &models.SidebarTaskColorSettings{
+					ManualColors: settings.SidebarTaskColors,
+					Automation:   automation,
+				},
 			}
 		}
 	}

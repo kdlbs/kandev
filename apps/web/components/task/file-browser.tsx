@@ -36,6 +36,7 @@ import {
   fetchAndOpenFile,
 } from "./file-browser-hooks";
 import { useFileBrowserData } from "./file-browser-data";
+import { labelFileBrowserPath } from "./file-browser-repository-labels";
 import { useFileUploadEntryPoints } from "./use-file-upload-entry-points";
 import { FileUploadStatusList } from "./file-upload-status-list";
 import { FileTreeEditorProvider } from "./file-tree-editor-menu";
@@ -134,14 +135,14 @@ function useFileBrowserHandlers(
   );
   const handleCancelCreate = useCallback(() => setCreatingInPath(null), []);
   const handleAddToChatContext = useCallback(
-    (node: FileTreeNode) => {
+    (node: FileTreeNode, displayName = node.name) => {
       addContextFile(sessionId, {
         path: node.path,
-        name: node.name,
+        name: displayName,
         isDirectory: node.is_dir,
       });
       toast({
-        description: t("chat:addedToChatContext", { name: node.name }),
+        description: t("chat:addedToChatContext", { name: displayName }),
         variant: "success",
       });
     },
@@ -457,6 +458,7 @@ function FileBrowserTreeContent({
         sessionId={data.sessionId}
         isSearchActive={search.isSearchActive}
         searchResults={search.searchResults}
+        repositoryDisplayLabels={data.repositoryDisplayLabels}
         isSessionFailed={isSessionFailed}
         sessionError={sessionError}
         loadState={treeState.loadState}
@@ -476,7 +478,13 @@ function FileBrowserTreeContent({
         onRenameFile={workspaceBlocked ? undefined : onRenameFile}
         onDownloadFile={onDownloadFile}
         onUploadFilesHere={workspaceBlocked ? undefined : onUploadFilesHere}
-        onAddToChatContext={handlers.handleAddToChatContext}
+        onAddToChatContext={(node) => {
+          const labeledPath = labelFileBrowserPath(node.path, data.repositoryDisplayLabels);
+          handlers.handleAddToChatContext(
+            node,
+            labeledPath === node.path ? node.name : labeledPath,
+          );
+        }}
         showTouchActions={showTouchActions}
         onCreateFileSubmit={workspaceBlocked ? () => undefined : handlers.handleCreateFileSubmit}
         onCancelCreate={handlers.handleCancelCreate}

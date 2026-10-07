@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-07-19
-updated: 2026-10-06
+updated: 2026-10-07
 owners:
   - kandev
 ---
@@ -28,7 +28,7 @@ A failed live source still cannot authorize an unmarked persisted fallback.
 
 ### REQ-PLATFORM-WORKSPACE-GIT-STATUS-001: Workspace Git Status
 
-**Intent:** Users opening Changes and Review need current workspace status without excessive Git or filesystem work. Repeated requests share useful work. Slow refreshes have bounded recovery, and file visibility does not wait for diff content.
+**Intent:** Keep workspace status current with bounded recovery and shared computation. Show files independently of diff latency.
 
 #### Acceptance criteria
 
@@ -84,9 +84,13 @@ A failed live source still cannot authorize an unmarked persisted fallback.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.43:** When agent startup advances on the same current execution and agentctl client, an attached workspace stream shall continue forwarding accepted Git snapshots.
   Promotion from workspace-only operation shall not require another foreground refresh or stream reconnection to deliver later membership and detail updates.
   Replaced executions and clients shall retain the rejection required by criterion `.27`.
-- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.44:** When Discard receives a nonempty list of repository-relative files, each filename shall select only that literal file in the selected repository, including supported wildcard, bracket, and pathspec-magic names. Tracked selected files shall return to their committed index and working-tree content; added or untracked selected files shall be removed from the index and filesystem as applicable. Every unselected file in that repository and every file in other repositories shall retain its index content and working-tree bytes, regardless of inherited pathspec matching settings. An empty list shall be rejected, and an invalid empty filename shall remain rejected rather than authorizing a whole-repository discard. Desktop and mobile shall observe the same selected-file outcome through their existing Changes actions.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.44:** When Discard receives a nonempty list of repository-relative files, each filename shall select only that literal file in the selected repository, including supported wildcard, bracket, and pathspec-magic names, with the recognized staged-rename exception in `.47`. Tracked selected files shall return to their committed index and working-tree content; added or untracked selected files shall be removed from the index and filesystem as applicable. Every file outside the selected changes in that repository and every file in other repositories shall retain its index content and working-tree bytes, regardless of inherited pathspec matching settings. An empty list shall be rejected, and an invalid empty filename shall remain rejected rather than authorizing a whole-repository discard. Desktop and mobile shall observe the same selected-file outcome through their existing Changes actions.
 
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.45:** Successful workspace patch enrichment shall return plain Git patch syntax independently of forced Git diff or UI color settings, for flattened, staged, and unstaged representations. Git presentation color shall not enter ready patch data. Literal ANSI bytes in file content and supported filenames shall retain their identity and content. Reads shall preserve Git configuration, refs, index content, and worktree bytes; file membership, status, line totals, facets, readiness, and existing resource limits remain correct. Desktop and mobile shall receive the same patch data through existing transports.
+
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.46:** Successful workspace patch enrichment shall return bounded built-in Git patches for flattened, staged, and unstaged representations independently of a repository-configured external diff command or an external diff command in the instance's captured environment, including when both are present. Workspace detail reads shall not execute those external commands or publish their output as ready patches. Ordinary patches, exact supported filename identity, layer-specific hunks and line totals, file membership, status, facets, readiness, cache ownership, cancellation, and existing resource limits shall remain correct. Reads shall preserve captured and process environments, Git configuration, refs, index content, and working-tree bytes. Desktop and mobile shall receive the same patch data through existing transports.
+
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.47:** For a selected destination with one live Git-recognized staged rename, a committed source absent from the working tree, no committed destination and no overlapping endpoints, Discard shall undo the pair including destination edits. Success shall restore committed source index/worktree content, remove the destination from both layers and leave no staged source deletion. Exact supported filenames and multiple selections retain `.44` isolation. Occupied sources, unsupported or ambiguous recognized pairs and unavailable pairing evidence shall fail before request mutation. Ordinary tracked, added, untracked and copied files retain literal selection without guessed origins; source-only selection does not select the destination. Desktop and mobile share the outcome. HEAD, refs, Git configuration and inherited environments remain unchanged. External-writer atomicity is not guaranteed.
 
 ## Out of scope
 
@@ -109,3 +113,10 @@ The [workspace stream continuity design](../system-design/workspace-stream-conti
 defines the callback lifetime required by criterion `.43`.
 Plain patch production follows the [path-details design](../system-design/workspace-git-path-details.md)
 and [repair package](../../../plans/workspace-tracker-plain-patches/plan.md).
+External-command independence follows the same path-details design and the
+[built-in patch repair package](../../../plans/workspace-tracker-built-in-patches/plan.md).
+Display continuity has its own [requirement](git-refresh-continuity.md),
+[system design](../system-design/git-refresh-continuity.md), and
+[repair plan](../../../plans/git-refresh-continuity/plan.md).
+Staged-rename selection follows the path-details design and
+[rename Discard package](../../../plans/git-discard-staged-renames/plan.md).

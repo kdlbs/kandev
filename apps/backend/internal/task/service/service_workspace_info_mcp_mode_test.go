@@ -27,22 +27,39 @@ func (r *fakeMcpModeTaskRepo) GetTask(context.Context, string) (*models.Task, er
 	return r.task, r.err
 }
 
+func createMcpModeTestService(
+	t *testing.T,
+	task *models.Task,
+	err error,
+) (*Service, *MockEventBus, *sqliterepo.Repository) {
+	t.Helper()
+	return createTestServiceWithTaskAndSessionRepos(
+		t,
+		func(repo *sqliterepo.Repository) taskrepo.TaskRepository {
+			return &fakeMcpModeTaskRepo{TaskRepository: repo, task: task, err: err}
+		},
+		func(repo *sqliterepo.Repository) taskrepo.SessionRepository {
+			return repo
+		},
+	)
+}
+
 func TestResolveWorkspaceInfoMcpMode_EmptyTaskID(t *testing.T) {
-	svc := &Service{}
+	svc, _, _ := createTestService(t)
 	mode, err := svc.resolveWorkspaceInfoMcpMode(context.Background(), "")
 	require.NoError(t, err)
 	require.Empty(t, mode)
 }
 
 func TestResolveWorkspaceInfoMcpMode_NilTaskIsEmptyWithNoError(t *testing.T) {
-	svc := &Service{tasks: &fakeMcpModeTaskRepo{}}
+	svc, _, _ := createMcpModeTestService(t, nil, nil)
 	mode, err := svc.resolveWorkspaceInfoMcpMode(context.Background(), "task-missing")
 	require.NoError(t, err)
 	require.Empty(t, mode)
 }
 
 func TestResolveWorkspaceInfoMcpMode_NotFoundIsEmptyWithNoError(t *testing.T) {
-	svc := &Service{tasks: &fakeMcpModeTaskRepo{err: fmt.Errorf("get task: %w", taskrepo.ErrTaskNotFound)}}
+	svc, _, _ := createMcpModeTestService(t, nil, fmt.Errorf("get task: %w", taskrepo.ErrTaskNotFound))
 	mode, err := svc.resolveWorkspaceInfoMcpMode(context.Background(), "task-missing")
 	require.NoError(t, err)
 	require.Empty(t, mode)
@@ -50,21 +67,21 @@ func TestResolveWorkspaceInfoMcpMode_NotFoundIsEmptyWithNoError(t *testing.T) {
 
 func TestResolveWorkspaceInfoMcpMode_OtherReadErrorFails(t *testing.T) {
 	readErr := errors.New("boom")
-	svc := &Service{tasks: &fakeMcpModeTaskRepo{err: readErr}}
+	svc, _, _ := createMcpModeTestService(t, nil, readErr)
 	_, err := svc.resolveWorkspaceInfoMcpMode(context.Background(), "task-123")
 	require.Error(t, err)
 	require.ErrorIs(t, err, readErr)
 }
 
 func TestResolveWorkspaceInfoMcpMode_CoordinatorOriginTask(t *testing.T) {
-	svc := &Service{tasks: &fakeMcpModeTaskRepo{task: &models.Task{ID: "task-coordinator", Origin: models.TaskOriginCoordinator}}}
+	svc, _, _ := createMcpModeTestService(t, &models.Task{ID: "task-coordinator", Origin: models.TaskOriginCoordinator}, nil)
 	mode, err := svc.resolveWorkspaceInfoMcpMode(context.Background(), "task-coordinator")
 	require.NoError(t, err)
 	require.Equal(t, mcpmode.Coordinator, mode)
 }
 
 func TestResolveWorkspaceInfoMcpMode_KanbanOriginIsEmpty(t *testing.T) {
-	svc := &Service{tasks: &fakeMcpModeTaskRepo{task: &models.Task{ID: "task-kanban"}}}
+	svc, _, _ := createMcpModeTestService(t, &models.Task{ID: "task-kanban"}, nil)
 	mode, err := svc.resolveWorkspaceInfoMcpMode(context.Background(), "task-kanban")
 	require.NoError(t, err)
 	require.Empty(t, mode)
@@ -120,15 +137,7 @@ func TestGetWorkspaceInfoForSession_KanbanTaskLeavesMcpModeEmpty(t *testing.T) {
 // itself is swapped to observe a not-found read, mirroring a benign
 // delete/lookup race rather than a schema violation.
 func TestGetWorkspaceInfoForSession_ConfiguredServiceStillFailsOnMissingTask(t *testing.T) {
-	svc, _, repo := createTestServiceWithTaskAndSessionRepos(t,
-		func(repo *sqliterepo.Repository) taskrepo.TaskRepository {
-			return &fakeMcpModeTaskRepo{
-				TaskRepository: repo,
-				err:            fmt.Errorf("get task: %w", taskrepo.ErrTaskNotFound),
-			}
-		},
-		func(repo *sqliterepo.Repository) taskrepo.SessionRepository { return repo },
-	)
+	svc, _, repo := createMcpModeTestService(t, nil, fmt.Errorf("get task: %w", taskrepo.ErrTaskNotFound))
 	ctx := context.Background()
 	setupTestTask(t, repo)
 	now := time.Now().UTC()

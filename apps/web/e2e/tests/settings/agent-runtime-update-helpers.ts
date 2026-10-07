@@ -8,8 +8,16 @@ const OMP_PACKAGE = "@oh-my-pi/pi-coding-agent";
 const PINNED_PACKAGE = "@agentclientprotocol/claude-agent-acp";
 type UpdateMode = "pinned" | "self_update";
 
-type UpdateStatus = "queued" | "resolving" | "updating" | "refreshing" | "succeeded" | "failed";
-type UpdateOperation = "update" | "rollback" | "repair" | "up_to_date" | "use_default";
+type UpdateStatus =
+  | "queued"
+  | "resolving"
+  | "updating"
+  | "probing"
+  | "saving"
+  | "refreshing"
+  | "succeeded"
+  | "failed";
+type UpdateOperation = "update" | "rollback" | "repair" | "up_to_date" | "use_default" | "migrate";
 
 type UpdateJob = {
   update_mode: UpdateMode;
@@ -38,6 +46,11 @@ type UpdatePreview = {
   active_version?: string;
   effective_version?: string;
   target_version: string;
+  family?: "v1" | "v2";
+  source?: "managed" | "native";
+  target_family?: "v1" | "v2";
+  runtime_revision?: number;
+  migration_available?: boolean;
   stable_latest_version?: string;
   operation?: UpdateOperation;
   available_versions?: Array<{ version: string; latest: boolean }>;
@@ -57,13 +70,25 @@ export type RuntimeUpdateStatus = {
   check_state: "update_available" | "up_to_date" | "unknown";
 };
 
+type AgentCatalogueOptions = {
+  displayName?: string;
+  runtimeVersion?: string;
+  agentName?: string;
+  packageName?: string;
+  defaultVersion?: string;
+  mode?: UpdateMode;
+};
+
 function catalogue(
   models: Array<{ id: string; name: string }>,
-  displayName = "Claude",
-  runtimeVersion = "0.62.0",
-  agentName = AGENT_NAME,
-  mode: UpdateMode = "pinned",
+  options: AgentCatalogueOptions = {},
 ) {
+  const mode = options.mode ?? "pinned";
+  const displayName = options.displayName ?? "Claude";
+  const runtimeVersion = options.runtimeVersion ?? "0.62.0";
+  const agentName = options.agentName ?? AGENT_NAME;
+  const packageName = options.packageName ?? "@agentclientprotocol/claude-agent-acp";
+  const defaultVersion = options.defaultVersion ?? "0.64.0";
   return {
     agents: [
       {
@@ -95,15 +120,11 @@ function catalogue(
         runtime_update: {
           supported: true,
           update_mode: mode,
-          package: mode === "self_update" ? OMP_PACKAGE : PINNED_PACKAGE,
+          package: packageName,
           current_version: runtimeVersion,
-          ...(mode === "pinned"
-            ? {
-                default_version: "0.64.0",
-                active_version: runtimeVersion,
-                effective_version: runtimeVersion,
-              }
-            : {}),
+          default_version: defaultVersion,
+          active_version: runtimeVersion,
+          effective_version: runtimeVersion,
         },
         updated_at: NOW,
       },
@@ -186,12 +207,14 @@ async function handlePreviewRoute({
   route,
   url,
   previewResponse,
+  migrationPreviewResponse,
   previewFailures,
   previewDelayMs,
 }: {
   route: Route;
   url: URL;
   previewResponse: UpdatePreview;
+  migrationPreviewResponse?: UpdatePreview;
   previewFailures: string[];
   previewDelayMs: number;
 }): Promise<void> {
@@ -212,7 +235,10 @@ async function handlePreviewRoute({
       "simulates a slow agent-update preview so the in-flight preview state stays observable",
     );
   }
-  const response = previewForRequest(previewResponse, requestedTarget, useDefault);
+  const response =
+    url.searchParams.get("target_family") === "v2"
+      ? (migrationPreviewResponse ?? previewResponse)
+      : previewForRequest(previewResponse, requestedTarget, useDefault);
   await route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -221,123 +247,202 @@ async function handlePreviewRoute({
 }
 
 export type RuntimeUpdateFixtureOptions = {
-  mode?: UpdateMode;
   agentName?: string;
+  displayName?: string;
+  packageName?: string;
+  currentVersion?: string;
+  defaultVersion?: string;
+  latestVersion?: string;
+  mode?: UpdateMode;
   broadcast?: (action: string, payload: unknown) => Promise<void>;
   retainedJobs?: UpdateJob[];
   postResponse?: UpdateJob;
   previewResponse?: UpdatePreview;
+  migrationPreviewResponse?: UpdatePreview;
   previewFailures?: string[];
   previewDelayMs?: number;
   statusResponse?: RuntimeUpdateStatus[];
 };
 
+type RuntimeUpdateFixtureConfig = {
+  agentName: string;
+  displayName: string;
+  packageName: string;
+  currentVersion: string;
+  defaultVersion: string;
+  latestVersion: string;
+  model: { id: string; name: string };
+  mode: UpdateMode;
+};
+
+function resolveRuntimeUpdateFixtureConfig(
+  options: RuntimeUpdateFixtureOptions,
+): RuntimeUpdateFixtureConfig {
+  const mode = options.mode ?? "pinned";
+  const agentName = options.agentName ?? (mode === "self_update" ? OMP_AGENT_NAME : AGENT_NAME);
+  const defaults = {
+    displayName: "Claude",
+    packageName: PINNED_PACKAGE,
+    currentVersion: "0.62.0",
+    latestVersion: "0.64.0",
+    model: { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+  };
+  if (mode === "self_update") {
+    defaults.displayName = "omp";
+    defaults.packageName = OMP_PACKAGE;
+    defaults.currentVersion = "18.3.1";
+    defaults.latestVersion = "18.3.2";
+  }
+  if (agentName === "opencode-acp") {
+    defaults.displayName = "OpenCode";
+    defaults.packageName = "opencode-ai";
+    defaults.model = { id: "opencode-default", name: "OpenCode Default" };
+  }
+  return {
+    agentName,
+    mode,
+    displayName: options.displayName ?? defaults.displayName,
+    packageName: options.packageName ?? defaults.packageName,
+    currentVersion: options.currentVersion ?? defaults.currentVersion,
+    defaultVersion: options.defaultVersion ?? "0.64.0",
+    latestVersion: options.latestVersion ?? options.defaultVersion ?? defaults.latestVersion,
+    model: defaults.model,
+  };
+}
+
+function defaultRuntimeUpdatePreview(config: RuntimeUpdateFixtureConfig): UpdatePreview {
+  const { agentName, packageName, currentVersion, defaultVersion, mode } = config;
+  if (mode === "self_update")
+    return {
+      update_mode: mode,
+      agent_name: agentName,
+      package: packageName,
+      current_version: currentVersion,
+      target_version: "",
+      stable_latest_version: config.latestVersion,
+      operation: "update",
+      available_versions: [],
+      command: ["omp", "update"],
+      command_string: "omp update",
+    };
+  return {
+    update_mode: mode,
+    agent_name: agentName,
+    package: packageName,
+    current_version: currentVersion,
+    target_version: currentVersion === "1.18.32" ? currentVersion : "0.63.0",
+    operation: "update",
+    default_version: defaultVersion,
+    active_version: currentVersion,
+    effective_version: currentVersion,
+    available_versions: [
+      { version: defaultVersion, latest: true },
+      { version: "0.63.0", latest: false },
+      { version: currentVersion, latest: false },
+      { version: "0.61.0", latest: false },
+    ],
+    command: [
+      "npm",
+      "exec",
+      "--yes",
+      "--prefer-online",
+      `--package=${packageName}`,
+      "--",
+      "node",
+      "-e",
+      "",
+    ],
+    command_string: `npm exec --yes --prefer-online --package=${packageName} -- node -e ""`,
+  };
+}
+
+function initialRuntimeUpdateState(
+  options: RuntimeUpdateFixtureOptions,
+  config: RuntimeUpdateFixtureConfig,
+) {
+  return {
+    currentModels: [config.model],
+    persistedRuntimeVersion: config.currentVersion,
+    retainedJobs: options.retainedJobs ?? [],
+    postResponse:
+      options.postResponse ??
+      ({
+        job_id: "runtime-update-job-1",
+        update_mode: config.mode,
+        agent_name: config.agentName,
+        status: "resolving",
+        current_version: config.currentVersion,
+        started_at: NOW,
+      } satisfies UpdateJob),
+    postCount: 0,
+    previewCount: 0,
+    previewDefaultCount: 0,
+    statusRequestCount: 0,
+    previewTargets: [] as string[],
+    previewFamilies: [] as string[],
+    postTargets: [] as string[],
+    postBodies: [] as Array<Record<string, unknown>>,
+    previewFailures: [...(options.previewFailures ?? [])],
+    previewDelayMs: options.previewDelayMs ?? 0,
+    statusResponse:
+      options.statusResponse ??
+      ([
+        {
+          update_mode: config.mode,
+          agent_name: config.agentName,
+          package: config.packageName,
+          default_version: config.defaultVersion,
+          active_version: config.currentVersion,
+          effective_version: config.currentVersion,
+          latest_version: config.latestVersion,
+          checked_at: NOW,
+          check_state: "update_available",
+        },
+      ] satisfies RuntimeUpdateStatus[]),
+    previewResponse: options.previewResponse ?? defaultRuntimeUpdatePreview(config),
+  };
+}
+
+function isPreviewRequest(request: { method(): string }, url: URL, agentName: string): boolean {
+  return request.method() === "GET" && url.pathname.endsWith(`/agent-update/${agentName}/preview`);
+}
+
+function isStatusRequest(request: { method(): string }, url: URL): boolean {
+  return request.method() === "GET" && url.pathname.endsWith("/agent-update/status");
+}
+
 export async function installRuntimeUpdateFixture(
   page: Page,
   options: RuntimeUpdateFixtureOptions = {},
 ) {
-  let currentModels = [{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" }];
-  const mode = options.mode ?? "pinned";
-  const agentName = options.agentName ?? (mode === "self_update" ? OMP_AGENT_NAME : AGENT_NAME);
-  let persistedRuntimeVersion = mode === "self_update" ? "18.3.1" : "0.62.0";
-  let retainedJobs = options.retainedJobs ?? [];
-  let postResponse: UpdateJob =
-    options.postResponse ??
-    ({
-      job_id: "runtime-update-job-1",
-      update_mode: mode,
-      agent_name: agentName,
-      status: "resolving",
-      current_version: persistedRuntimeVersion,
-      started_at: NOW,
-    } satisfies UpdateJob);
-  let postCount = 0;
-  let previewCount = 0;
-  let previewDefaultCount = 0;
-  let statusRequestCount = 0;
+  const config = resolveRuntimeUpdateFixtureConfig(options);
+  const { agentName, displayName, packageName, defaultVersion, mode } = config;
+  const initialState = initialRuntimeUpdateState(options, config);
+  let currentModels = initialState.currentModels;
+  let persistedRuntimeVersion = initialState.persistedRuntimeVersion;
+  let retainedJobs = initialState.retainedJobs;
+  let postResponse = initialState.postResponse;
+  let postCount = initialState.postCount;
+  let previewCount = initialState.previewCount;
+  let previewDefaultCount = initialState.previewDefaultCount;
+  let statusRequestCount = initialState.statusRequestCount;
+  const previewTargets = initialState.previewTargets;
+  const previewFamilies = initialState.previewFamilies;
+  const postTargets = initialState.postTargets;
+  const postBodies = initialState.postBodies;
+  const previewFailures = initialState.previewFailures;
+  const previewDelayMs = initialState.previewDelayMs;
+  let statusResponse = initialState.statusResponse;
+  let previewResponse = initialState.previewResponse;
   let jobsRequestCount = 0;
   let failedStatusGate: Promise<void> | null = null;
-  const postBodies: string[] = [];
-  const previewTargets: string[] = [];
-  const postTargets: string[] = [];
-  const previewFailures = [...(options.previewFailures ?? [])];
-  const previewDelayMs = options.previewDelayMs ?? 0;
-  let statusResponse: RuntimeUpdateStatus[] = options.statusResponse ?? [
-    mode === "self_update"
-      ? {
-          update_mode: mode,
-          agent_name: agentName,
-          package: OMP_PACKAGE,
-          default_version: "",
-          effective_version: persistedRuntimeVersion,
-          latest_version: "18.3.2",
-          checked_at: NOW,
-          check_state: "update_available",
-        }
-      : {
-          update_mode: mode,
-          agent_name: agentName,
-          package: PINNED_PACKAGE,
-          default_version: "0.64.0",
-          active_version: "0.62.0",
-          effective_version: "0.62.0",
-          latest_version: "0.64.0",
-          checked_at: NOW,
-          check_state: "update_available",
-        },
-  ];
-  let previewResponse: UpdatePreview =
-    options.previewResponse ??
-    (mode === "self_update"
-      ? {
-          update_mode: mode,
-          agent_name: agentName,
-          package: OMP_PACKAGE,
-          current_version: persistedRuntimeVersion,
-          target_version: "",
-          stable_latest_version: "18.3.2",
-          operation: "update",
-          available_versions: [],
-          command: ["omp", "update"],
-          command_string: "omp update",
-        }
-      : ({
-          update_mode: mode,
-          agent_name: agentName,
-          package: PINNED_PACKAGE,
-          current_version: "0.62.0",
-          target_version: "0.63.0",
-          operation: "update",
-          default_version: "0.64.0",
-          active_version: "0.62.0",
-          effective_version: "0.62.0",
-          available_versions: [
-            { version: "0.64.0", latest: true },
-            { version: "0.63.0", latest: false },
-            { version: "0.62.0", latest: false },
-            { version: "0.61.0", latest: false },
-          ],
-          command: [
-            "npm",
-            "exec",
-            "--yes",
-            "--prefer-online",
-            "--package=@agentclientprotocol/claude-agent-acp",
-            "--",
-            "node",
-            "-e",
-            "",
-          ],
-          command_string:
-            'npm exec --yes --prefer-online --package=@agentclientprotocol/claude-agent-acp -- node -e ""',
-        } satisfies UpdatePreview));
   let socket: WebSocketRoute | undefined;
   let clientReady = false;
 
   const handleApproval = (route: Route) => {
     const request = route.request();
     postCount += 1;
-    postBodies.push(request.postData() ?? "");
+    postBodies.push(request.postDataJSON() ?? {});
     const body = request.postDataJSON() as {
       target_version?: string;
       use_default?: boolean;
@@ -362,13 +467,14 @@ export async function installRuntimeUpdateFixture(
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(
-        catalogue(
-          currentModels,
-          mode === "self_update" ? "omp" : "Claude",
-          persistedRuntimeVersion,
+        catalogue(currentModels, {
+          displayName,
+          runtimeVersion: persistedRuntimeVersion,
           agentName,
+          packageName,
+          defaultVersion,
           mode,
-        ),
+        }),
       ),
     }),
   );
@@ -382,20 +488,22 @@ export async function installRuntimeUpdateFixture(
   await page.route("**/api/v1/agent-update/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (request.method() === "GET" && url.pathname.endsWith(`/agent-update/${agentName}/preview`)) {
+    if (isPreviewRequest(request, url, agentName)) {
       previewCount += 1;
       const requestedTarget = url.searchParams.get("target_version");
       previewTargets.push(requestedTarget ?? "");
+      previewFamilies.push(url.searchParams.get("target_family") ?? "");
       if (url.searchParams.get("use_default") === "true") previewDefaultCount += 1;
       return handlePreviewRoute({
         route,
         url,
         previewResponse,
+        migrationPreviewResponse: options.migrationPreviewResponse,
         previewFailures,
         previewDelayMs,
       });
     }
-    if (request.method() === "GET" && url.pathname.endsWith("/agent-update/status")) {
+    if (isStatusRequest(request, url)) {
       statusRequestCount += 1;
       if (failedStatusGate) {
         const gate = failedStatusGate;
@@ -504,6 +612,7 @@ export async function installRuntimeUpdateFixture(
     jobsRequestCount: () => jobsRequestCount,
     postBodies: () => [...postBodies],
     previewTargets: () => [...previewTargets],
+    previewFamilies: () => [...previewFamilies],
     postTargets: () => [...postTargets],
     async emit(action: string, payload: unknown) {
       await expect.poll(() => Boolean(socket)).toBe(true);
@@ -529,13 +638,14 @@ export async function installRuntimeUpdateFixture(
       currentModels = models;
       await this.emit(
         "agent.available.updated",
-        catalogue(
-          models,
-          mode === "self_update" ? "omp refreshed" : "Claude refreshed",
-          persistedRuntimeVersion,
+        catalogue(models, {
+          displayName: `${displayName} refreshed`,
+          runtimeVersion: persistedRuntimeVersion,
           agentName,
+          packageName,
+          defaultVersion,
           mode,
-        ),
+        }),
       );
     },
   };

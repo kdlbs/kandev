@@ -65,6 +65,8 @@ When a turn, startup, or resume fails:
 
 - For a supported ACP provider's classified temporary capacity, overload, or rate-limit error in an interactive task session with a concrete agent profile, Kandev records a failed turn and keeps the same runtime available when it can confirm that runtime is still usable. It retries only when it can establish that the prompt produced no assistant output or tool activity; otherwise, it does not replay the prompt. You can send another message or choose a supported model in the same session, and retry feedback reports only attempts that started. Office and automation tasks, dynamic routes, utility sessions, and passthrough sessions keep their existing failure handling.
 - When startup or resume fails, or Kandev detects an unusable runtime, it adds one recovery entry to the selected session's chat. Select **Resume** to restore the saved conversation, or expand **Technical details** to inspect the failure.
+- If the first task launch fails before the provider accepts the submitted prompt, select **Start fresh session** to retry that prompt in the same task session. Kandev restores the original text and available file-backed attachments after the provider is ready, and records one user message. It does not replay an accepted prompt or earlier conversation. If an original attachment is unavailable, Kandev leaves the failed session and warning in place; reattach the file in Chat before you continue.
+- **Restore read-only workspace** does not send the pending prompt or dismiss its startup warning. The warning is resolved only after the provider confirms readiness for the matching recovery attempt.
 - For failures that require manual startup or runtime recovery, the current unresolved failure replaces the blocked message composer with one recovery card. Automatic resume and workspace-restore failures appear in that card, with separate causes in Technical details, rather than a second session banner. Older entries keep their message and technical details without stale controls.
 - In Kanban preview, selecting Plan keeps the recovery card below the Plan content, in the composer area.
 - Repeated delivery of the same failure does not add another entry.
@@ -85,20 +87,21 @@ A later failure keeps its own recovery controls.
 ### Experimental interruption continuation
 
 **Interrupted conversation continuation** is off by default. When enabled, a
-supported Cursor ACP connection failure can continue the unfinished request in
-the same saved conversation after output or completed file reads. Kandev sends
-a continuation instruction, preserves the transcript, and allows files to be
-read again when Cursor did not save an interrupted read result. It does not
-resend the original request or create a replacement conversation automatically.
+supported transient Cursor ACP provider failure can continue the unfinished request in
+the same saved conversation after output or completed foreground tools. Kandev
+sends an internal continue instruction, preserves the transcript, and keeps
+previous results. It does not resend the original request or create a replacement
+conversation automatically.
 
 Recovery shares the existing five-attempt budget and paced backoff. One notice
 shows waiting, reconnecting, or continuing, with **Cancel** available while the
 continued turn runs. Cancellation returns control to Chat when the ACP runtime
 is still usable; normal recovery actions remain available if it is not. An
 exhaustion message reports attempts that actually started; a refused recovery
-does not claim retries ran. Writes, shell commands, pending or unknown tool
-outcomes, permissions, and background work prevent automatic continuation. If
-the runtime remains usable, send a follow-up in the same conversation. If it is
+does not claim retries ran. Pending, unknown, failed, cancelled, malformed, or conflicting tool outcomes
+prevent automatic continuation. So do subagents, background work, unresolved,
+denied or cancelled permissions, and overlapping work after a turn handoff. If the
+runtime remains usable, send a follow-up in the same conversation. If it is
 unavailable, use the manual recovery actions. Missing saved identity and
 unsupported agents also require manual recovery. New human work takes priority.
 Backend restart retires the old automatic notice without launching a
@@ -274,6 +277,8 @@ Messages show peer attribution, and Kandev gives the receiving agent hidden repl
 
 Desktop panel groups can host agent chat, files, terminals, Changes, the task plan, previews, and GitHub pull-request detail. Use **+** to add a panel. Mobile exposes sessions, files, terminal, and changes through task navigation and sheets. On a phone, the hamburger opens the same app menu from Home, listings, and the workbench. Tap the task title and chevron to switch tasks; the picker opens as an inset bottom card. Tap the **Kanban**, **Threads**, or **List** title dropdown for view options, search, filters, and display settings. The app menu uses **Home** for all listing modes, with **Quick Chat** and **Quick terminal** directly below it. Its collapsible **Tasks** section contains saved views, filters, and task actions; the adjacent **+** creates a task even when the section is collapsed. **Automations** and **Integrations** start collapsed; expand their headings to browse automations or connected providers. Integrations includes settings even before a provider is connected. **Utilities** follows these sections, with Settings before Stats. The current-session control shows the active agent's icon and name.
 
+In multi-select view filters, selected options appear first when search is empty. Workflow-step options keep their workflow headings. Typing a search filters and ranks the matching options as usual.
+
 The phone menu groups plugin controls in one **Plugins** section. When both workspace and task controls are available, **Workspace** and **Task** labels distinguish them. Optional **System metrics** appear after navigation, before Utilities, when the app status bar is disabled.
 
 Press **Cmd+Shift+F** on macOS or **Ctrl+Shift+F** elsewhere to search the
@@ -291,6 +296,18 @@ search field. File matches are grouped by repository. Hover a mode to see its
 direct shortcut.
 
 Open **Settings > Preferences > Keyboard Shortcuts** to customize these bindings.
+
+In the **Integrations** group, click **Unbound** beside an integration, press a
+key combination, then select **Save changes**. The shortcut opens its Kandev
+dashboard from any app page; Sentry opens its connection settings. Active
+plugin links in the Integrations navigation group also appear here. These
+personal shortcuts start unassigned and follow your user settings across devices.
+Use the row's **Reset** action and save to remove a binding. Conflict indicators
+identify combinations shared with other actions; existing Kandev shortcuts take
+precedence. On a phone, recording a combination requires an attached keyboard.
+Tab and Shift+Tab remain available for moving keyboard focus, including while
+recording an integration shortcut. Ctrl/Cmd+Shift+P remains reserved for the
+command panel.
 
 ![Settings > Preferences > Keyboard Shortcuts showing chat input and command panel bindings.](../screenshots/settings-keyboard-shortcuts.png)
 

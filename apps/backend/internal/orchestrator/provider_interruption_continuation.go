@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -43,18 +44,17 @@ func (s *Service) continuationBindingForFailure(ctx context.Context, data watche
 	}
 	policy := continuationPolicy("")
 	switch classified.Code {
-	case routingerr.CodeAgentTransportLost:
-		if !s.continuationFailureHasEvidence(data) {
-			return nil
-		}
-		policy = continuationPolicySavedHistoryRestore
 	case routingerr.CodeModelCapacity:
 		if !s.capacityContinuationFailureHasEvidence(data) {
 			return nil
 		}
 		policy = continuationPolicyCapacityLive
 	default:
-		return nil
+		if routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) != routingerr.DecisionShortRetry ||
+			!s.continuationFailureHasEvidence(data) {
+			return nil
+		}
+		policy = continuationPolicySavedHistoryRestore
 	}
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil || session == nil || session.TaskID != data.TaskID || session.IsPassthrough || session.AgentProfileID == "" {
@@ -113,7 +113,7 @@ func (s *Service) continuationRefusalReason(ctx context.Context, data watcher.Ag
 	if safety.Unsafe || safety.Pending {
 		return "unsafe_work"
 	}
-	if safety.Support != streams.ContinuationNativeSavedHistoryV1 || data.OwnerKind != queueStatusScopeTask || data.DynamicRouteAttempt {
+	if (safety.Support != streams.ContinuationNativeSavedHistoryV1 && safety.Support != streams.ContinuationNativeSavedHistoryV2) || data.OwnerKind != queueStatusScopeTask || data.DynamicRouteAttempt {
 		return "unsupported_restore"
 	}
 	if s.continuationBindingForFailure(ctx, data) == nil {

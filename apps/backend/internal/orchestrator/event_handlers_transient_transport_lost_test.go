@@ -70,8 +70,8 @@ func TestHandleTransientFailure_CursorRetriableErrorReplaySchedulesRetry(t *test
 	if len(mc.sessionMessages) != 1 {
 		t.Fatalf("expected 1 status message, got %d", len(mc.sessionMessages))
 	}
-	if got := mc.sessionMessages[0].metadata["failure_code"]; got != "agent_transport_lost" {
-		t.Errorf("failure_code = %v, want agent_transport_lost", got)
+	if got := mc.sessionMessages[0].metadata["failure_code"]; got != "network_unavailable" {
+		t.Errorf("failure_code = %v, want network_unavailable", got)
 	}
 }
 

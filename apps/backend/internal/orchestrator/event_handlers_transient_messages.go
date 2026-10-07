@@ -305,6 +305,8 @@ func transientFailureLabel(classified *routingerr.Error) string {
 		return "Rate limited"
 	case routingerr.CodeAgentTransportLost:
 		return "Agent connection lost"
+	case routingerr.CodeProviderResourceExhausted:
+		return "Resource exhausted"
 	default:
 		return "Provider temporarily unavailable"
 	}

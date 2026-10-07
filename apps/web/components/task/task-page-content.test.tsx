@@ -3,14 +3,17 @@ import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-libr
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import * as api from "@/lib/api";
+import { ApiError } from "@/lib/api/client";
 import { taskId, workflowId, workspaceId, type Task } from "@/lib/types/http";
 import { TaskLoadErrorState, useTaskDetails } from "./task-page-content";
+import { TaskNavigationReadFeedback } from "./task-navigation-read-feedback";
 import { TaskRouteSessionHydrationProvider } from "./task-route-session-hydration";
 import { TaskRemovalBoundary } from "./task-removal-boundary";
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 const TASK_A = "task-a";
@@ -38,7 +41,7 @@ describe("TaskLoadErrorState", () => {
 
     const link = screen.getByTestId("task-unavailable-overview-link");
     expect(link.getAttribute("href")).toBe("/?home=overview&workspaceId=ws-1");
-    expect(link.className).toContain("min-h-11");
+    expect(link.className).toContain("h-7");
   });
 
   it("falls back to the unscoped overview when no workspace is active", () => {
@@ -47,6 +50,121 @@ describe("TaskLoadErrorState", () => {
     expect(screen.getByTestId("task-unavailable-overview-link").getAttribute("href")).toBe(
       "/?home=overview",
     );
+  });
+
+  it("offers a localized manual retry for temporary task failures", () => {
+    const onRetry = vi.fn();
+    render(
+      <StateProvider>
+        <TaskLoadErrorState temporaryError onRetry={onRetry} />
+      </StateProvider>,
+    );
+
+    expect(screen.getByText("Task temporarily unavailable")).toBeTruthy();
+    expect(screen.getByTestId("task-read-retry").textContent).toBe("Retry");
+    screen.getByTestId("task-read-retry").click();
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the Retry name stable and announces initial-read progress", () => {
+    render(
+      <StateProvider>
+        <TaskLoadErrorState temporaryError retrying onRetry={vi.fn()} />
+      </StateProvider>,
+    );
+
+    const retry = screen.getByRole("button", { name: "Retry" });
+    expect(retry.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("status").textContent).toContain("Retrying...");
+  });
+
+  it("keeps the Retry name stable and announces refresh progress", () => {
+    render(
+      <TaskNavigationReadFeedback
+        recovery={{ temporaryError: true, retrying: true, onRetry: vi.fn() }}
+      />,
+    );
+
+    const retry = screen.getByRole("button", { name: "Retry" });
+    expect(retry.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("status").textContent).toContain("Retrying...");
+  });
+});
+
+describe("useTaskDetails temporary refresh failure", () => {
+  it("keeps loaded task details and allows a bounded manual retry", async () => {
+    vi.useFakeTimers();
+    const initialTask = { id: taskId(TASK_A), title: "Current task" } as Task;
+    const refreshedTask = { ...initialTask, title: "Refreshed task" };
+    const fetchTask = vi
+      .spyOn(api, "fetchTask")
+      .mockRejectedValueOnce(new ApiError("busy", 503, { code: "persistence_unavailable" }))
+      .mockRejectedValueOnce(new ApiError("busy", 503, { code: "persistence_unavailable" }))
+      .mockRejectedValueOnce(new ApiError("busy", 503, { code: "persistence_unavailable" }))
+      .mockResolvedValueOnce(refreshedTask);
+    vi.spyOn(api, "listTaskSessions").mockResolvedValue({ sessions: [], total: 0 });
+    const { result } = renderHook(() => useTaskDetails(TASK_A, initialTask), {
+      wrapper: createStateWrapper({ tasks: { activeTaskId: TASK_A } }),
+    });
+
+    await act(async () => {
+      const refresh = result.current.refreshTask();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await refresh;
+    });
+    expect(result.current.taskLoadError).toMatchObject({ status: 503 });
+    expect(result.current.task?.title).toBe("Current task");
+    expect(result.current.isTemporaryTaskReadError).toBe(true);
+
+    await act(async () => {
+      await result.current.retryTaskRead();
+    });
+    expect(result.current.task?.title).toBe("Refreshed task");
+    expect(result.current.taskLoadError).toBeNull();
+    expect(fetchTask).toHaveBeenCalledTimes(4);
+  });
+
+  it("retries one shared recovery cycle on a foreground burst after exhaustion", async () => {
+    vi.useFakeTimers();
+    const initialTask = { id: taskId(TASK_A), title: "Current task" } as Task;
+    const recoveredTask = { ...initialTask, title: "Recovered task" };
+    const temporaryFailure = () => new ApiError("busy", 503, { code: "persistence_unavailable" });
+    const fetchTask = vi
+      .spyOn(api, "fetchTask")
+      .mockRejectedValueOnce(temporaryFailure())
+      .mockRejectedValueOnce(temporaryFailure())
+      .mockRejectedValueOnce(temporaryFailure())
+      .mockResolvedValueOnce(recoveredTask);
+    vi.spyOn(api, "listTaskSessions").mockResolvedValue({ sessions: [], total: 0 });
+    const { result, rerender } = renderHook(() => useTaskDetails(TASK_A, initialTask), {
+      wrapper: createStateWrapper({ tasks: { activeTaskId: TASK_A } }),
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(fetchTask).toHaveBeenCalledTimes(3);
+    expect(result.current.taskLoadError).toMatchObject({ status: 503 });
+
+    await act(async () => result.current.refreshTask());
+    rerender();
+    expect(fetchTask).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("pageshow"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.task?.title).toBe("Recovered task");
+    expect(fetchTask).toHaveBeenCalledTimes(4);
+    expect(result.current.taskLoadError).toBeNull();
   });
 });
 
@@ -132,8 +250,16 @@ describe("useTaskDetails reconnect refresh", () => {
     expect(fetchTask).not.toHaveBeenCalled();
     act(() => result.current.store.getState().setConnectionStatus("connected"));
 
-    await waitFor(() => expect(fetchTask).toHaveBeenCalledWith(TASK_A, { cache: "no-store" }));
-    expect(listTaskSessions).toHaveBeenCalledWith(TASK_A, { cache: "no-store" });
+    await waitFor(() =>
+      expect(fetchTask).toHaveBeenCalledWith(TASK_A, {
+        cache: "no-store",
+        init: { signal: expect.any(AbortSignal) },
+      }),
+    );
+    expect(listTaskSessions).toHaveBeenCalledWith(TASK_A, {
+      cache: "no-store",
+      init: { signal: expect.any(AbortSignal) },
+    });
     await waitFor(() => {
       expect(result.current.details.task).toMatchObject({
         workflow_id: "workflow-destination",
@@ -170,7 +296,12 @@ describe("useTaskDetails delayed unarchive navigation", () => {
     const oldUnarchiveCallback = result.current.onTaskUnarchived;
 
     rerender({ activeId: TASK_B, initialTask: null });
-    await waitFor(() => expect(fetchTask).toHaveBeenCalledWith(TASK_B, { cache: "no-store" }));
+    await waitFor(() =>
+      expect(fetchTask).toHaveBeenCalledWith(TASK_B, {
+        cache: "no-store",
+        init: { signal: expect.any(AbortSignal) },
+      }),
+    );
     act(() => oldUnarchiveCallback(TASK_A));
 
     await act(async () => {
@@ -206,7 +337,12 @@ describe("useTaskDetails unarchive refresh", () => {
 
     act(() => result.current.onTaskUnarchived(TASK_A));
 
-    await waitFor(() => expect(fetchTask).toHaveBeenCalledWith(TASK_A, { cache: "no-store" }));
+    await waitFor(() =>
+      expect(fetchTask).toHaveBeenCalledWith(TASK_A, {
+        cache: "no-store",
+        init: { signal: expect.any(AbortSignal) },
+      }),
+    );
     await waitFor(() => expect(result.current.task?.archived_at).toBeNull());
   });
 
@@ -224,7 +360,12 @@ describe("useTaskDetails unarchive refresh", () => {
 
     act(() => result.current.onTaskUnarchived(TASK_A));
 
-    await waitFor(() => expect(fetchTask).toHaveBeenCalledWith(TASK_A, { cache: "no-store" }));
+    await waitFor(() =>
+      expect(fetchTask).toHaveBeenCalledWith(TASK_A, {
+        cache: "no-store",
+        init: { signal: expect.any(AbortSignal) },
+      }),
+    );
     await waitFor(() => expect(result.current.task?.archived_at).toBeNull());
   });
 

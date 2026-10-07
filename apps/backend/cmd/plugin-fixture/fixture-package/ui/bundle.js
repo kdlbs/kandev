@@ -555,6 +555,22 @@
         return Promise.resolve();
       }
 
+      function PluginFocusModalContent() {
+        return jsx(
+          "button",
+          { type: "button", "data-testid": "e2e-plugin-focus-modal-content" },
+          "Modal content action",
+        );
+      }
+
+      function openPluginFocusModal(title, presentation) {
+        host.openModal({
+          title: title,
+          content: PluginFocusModalContent,
+          presentation: presentation,
+        });
+      }
+
       function SidebarSlot() {
         return jsx("div", { id: "hello-sidebar" }, "Hello E2E sidebar");
       }
@@ -633,7 +649,19 @@
           standardActions,
           "Fixture workspace topbar actions",
         );
-        return jsx(React.Fragment, { children: [legacyButton, standardActionGroup] });
+        var focusModalAction = ui.Action
+          ? jsx(ui.Action, {
+              label: "Open workspace modal focus fixture",
+              icon: jsx(FixtureActionGlyph, {}),
+              "data-testid": "e2e-main-topbar-focus-action",
+              onClick: function () {
+                openPluginFocusModal("Fixture workspace modal");
+              },
+            })
+          : null;
+        return jsx(React.Fragment, {
+          children: [legacyButton, standardActionGroup, focusModalAction],
+        });
       }
 
       // Keeps source-derived legacy topbar shapes beside standard Actions:
@@ -780,6 +808,20 @@
             ]
           : [];
         var standardActionGroup = renderActionGroup(standardActions, "Fixture task topbar actions");
+        var focusModalAction = ui.Action
+          ? jsx(ui.Action, {
+              label: "Open task modal focus fixture",
+              icon: jsx(FixtureActionGlyph, {}),
+              "data-testid": "e2e-chat-top-bar-focus-action",
+              onClick: function () {
+                if (slotProps.presentation === "mobile") {
+                  openPluginFocusModal("Fixture task drawer", "drawer");
+                } else {
+                  openPluginFocusModal("Fixture task modal");
+                }
+              },
+            })
+          : null;
         var legacyMobileButton =
           slotProps.presentation === "mobile"
             ? jsx(
@@ -798,8 +840,10 @@
                 active ? "Fixture action complete" : "Run fixture task action",
               )
             : null;
-        if (!standardActionGroup && !legacyMobileButton) return null;
-        return jsx(React.Fragment, { children: [standardActionGroup, legacyMobileButton] });
+        if (!standardActionGroup && !focusModalAction && !legacyMobileButton) return null;
+        return jsx(React.Fragment, {
+          children: [standardActionGroup, focusModalAction, legacyMobileButton],
+        });
       }
 
       // Debounce delay for the Notes panel's autosave — short, so e2e specs
@@ -1255,7 +1299,20 @@
           );
         }
         var standardActionGroup = renderActionGroup(actions, "Fixture status actions");
-        return jsx(React.Fragment, { children: [legacyStatus, standardActionGroup] });
+        var focusModalAction =
+          slotProps.placement === "right" && ui.Action
+            ? jsx(ui.Action, {
+                label: "Open status modal focus fixture",
+                icon: jsx(FixtureActionGlyph, {}),
+                "data-testid": "e2e-status-right-focus-action",
+                onClick: function () {
+                  openPluginFocusModal("Fixture status modal");
+                },
+              })
+            : null;
+        return jsx(React.Fragment, {
+          children: [legacyStatus, standardActionGroup, focusModalAction],
+        });
       }
 
       // Drives PluginComposerCapability through native composers. Capturing
@@ -1481,6 +1538,12 @@
         label: "E2E Overflow Item 4",
         path: FIXTURE_HELLO_PATH,
         section: FIXTURE_SIDEBAR_SECTION,
+      });
+      registry.registerNavItem({
+        id: "e2e-integration",
+        label: "E2E Integration",
+        path: FIXTURE_HELLO_PATH,
+        section: "integrations",
       });
       registry.registerRoute(FIXTURE_HELLO_PATH, PluginPage);
       registry.registerRoute(FIXTURE_MANAGED_CHAT_PATH, ManagedChatPage);

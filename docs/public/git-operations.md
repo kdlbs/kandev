@@ -134,6 +134,10 @@ Managed worktrees can remain registered to an older repository clone after the r
 
 If a worktree contains local changes, Resume or **Restore workspace** stops before agent startup and offers **Move files and resume**. Kandev leaves the original worktree untouched until you confirm. It then preserves a recovery snapshot and copies tracked, untracked, and ignored file content, deletions, file modes, and symbolic links to the replacement worktree. Git's index and staging choices do not transfer, so stage the files again before committing. Review the changes after recovery. Kandev blocks worktrees with unsupported filters, sparse checkout, or submodules.
 
+After Kandev completes the relocation, keep using the replacement worktree. New commits, amended commits, rebases, and local edits stay there. A completed relocation record does not pin the branch to the commit from transfer. Resume, **Restore workspace**, and a backend restart use the current worktree. Kandev checks its Git and managed-clone identity before startup.
+
+If an older Kandev version shows `published replacement commit could not be verified` after you continue work, upgrade Kandev. Then select Resume or **Restore workspace**. The corrected version checks the current branch and managed-clone identity. It does not reset the branch or discard changes.
+
 If an older task still shows a generic recovery error, use Resume or **Restore workspace** once to check the current workspace and reveal the relocation action. A busy inspection leaves every checkout unchanged. Wait for it to finish, then retry manually.
 
 After upgrading, select **Move files and resume** to retry an older blocked
@@ -439,7 +443,7 @@ All operations below run in the selected repository workspace.
 | Stage | With paths, `git add --` with each path selected literally; with an empty path list, `git add -A`. | Named files select only those files. Actual directories select their subtrees. Empty means all changes, including deletions. |
 | Unstage | With paths, `git reset HEAD --` with each path selected literally; with an empty path list, `git reset HEAD`. | Keeps working-tree content. Named files and actual directory subtrees use the same literal selection as Stage. |
 | Commit | Optionally runs `git add -A`, then `git commit -m MESSAGE`; Amend adds `--amend`. | The normal UI defaults to staging all when it invokes this helper. Amend rewrites `HEAD`. |
-| Discard | Restores tracked paths from `HEAD`; added and untracked files are unstaged and deleted. | Removes both staged and unstaged work. Named files select only their literal filenames in the selected repository. Explicit non-empty paths are required; deletion is not recoverable through Kandev. |
+| Discard | Restores tracked paths from `HEAD`; added and untracked files are unstaged and deleted. A recognized staged rename destination restores the committed source and removes the destination. | Removes both staged and unstaged work. Named files select literal filenames in the selected repository, including both endpoints of an eligible staged rename. An occupied source or unsupported or ambiguous rename is refused before any selected file changes. Explicit non-empty paths are required; deletion is not recoverable through Kandev. |
 | Edit branch | `git branch -m NEW_NAME` for the current local branch. | Does not rename/delete the old remote branch or automatically repair every external reference. Push the new branch explicitly. |
 
 Only one Git operation can run at a time for a given repository operator. A second concurrent request is rejected as “another git operation is already in progress.” Different repositories in a multi-repository workspace have separate operators.
@@ -519,7 +523,7 @@ These are the registered Kandev WebSocket actions. Every payload requires `sessi
 | `worktree.commit` | required non-empty `message`; `stage_all`; `amend` |
 | `worktree.stage` | `paths` list of literal repository-relative files or directories; empty means all |
 | `worktree.unstage` | `paths` list of literal repository-relative files or directories; empty means all |
-| `worktree.discard` | required non-empty `paths` list of literal repository-relative files in the selected repository |
+| `worktree.discard` | required non-empty `paths` list of literal repository-relative files in the selected repository; an eligible recognized staged rename destination selects both endpoints |
 | `worktree.create_pr` | required `title`; `body`; `base_branch`; `draft`; response can include `pr_url` and `provider` (`github`, `gitlab`, or `azure_repos`) |
 | `worktree.revert_commit` | required `commit_sha`, which must be exact `HEAD` |
 | `worktree.rename_branch` | required `new_name` |

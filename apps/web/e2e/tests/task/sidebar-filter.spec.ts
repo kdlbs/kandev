@@ -337,15 +337,15 @@ test.describe("Sidebar filter — group + sort", () => {
     await expect(headers.first()).toBeVisible();
   });
 
-  test("Sort direction toggle flips icon direction", async ({ testPage, apiClient, seedData }) => {
+  test("Sort rule direction can be changed", async ({ testPage, apiClient, seedData }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Sort A"]);
     await filters.open();
     await filters.openSortSettings();
-    const toggle = filters.popover.getByTestId("sort-direction-toggle");
-    const initial = await toggle.getAttribute("data-direction");
-    await toggle.click();
-    const flipped = await toggle.getAttribute("data-direction");
-    expect(flipped).not.toBe(initial);
+    const direction = filters.popover.getByTestId("sort-rule-direction-0");
+    await expect(direction).toHaveAttribute("data-direction", "asc");
+    await direction.click();
+    await testPage.getByTestId("sort-rule-direction-option-0-desc").click();
+    await expect(direction).toHaveAttribute("data-direction", "desc");
   });
 
   test("sorts by last activity, persists, and ignores provider-only refresh", async ({
@@ -513,7 +513,7 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await expect(filters.popover.getByTestId("group-key-select")).toHaveCount(0);
     await filters.openSortSettings();
     await expect(filters.popover.getByTestId("sort-key-select")).toContainText("Status");
-    await expect(filters.popover.getByTestId("sort-direction-toggle")).toHaveAttribute(
+    await expect(filters.popover.getByTestId("sort-rule-direction-0")).toHaveAttribute(
       "data-direction",
       "asc",
     );

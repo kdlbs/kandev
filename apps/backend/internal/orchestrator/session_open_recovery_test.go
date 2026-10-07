@@ -154,13 +154,13 @@ func TestSessionOpenRecoveryOwnership(t *testing.T) {
 	}
 	build := func() (*models.Task, *models.TaskSession) {
 		return &models.Task{
-			ID:             "task-reused",
-			WorkflowStepID: "step-current",
-		}, &models.TaskSession{
-			ID:             "session-reused",
-			TaskID:         "task-reused",
-			AgentProfileID: "profile-reused",
-		}
+				ID:             "task-reused",
+				WorkflowStepID: "step-current",
+			}, &models.TaskSession{
+				ID:             "session-reused",
+				TaskID:         "task-reused",
+				AgentProfileID: "profile-reused",
+			}
 	}
 	tests := []struct {
 		name          string

@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-29
+last_updated: 2026-10-06
 requirements:
   - REQ-COORDINATOR-COORDINATORS-001
   - REQ-COORDINATOR-COORDINATORS-002
@@ -40,7 +40,7 @@ them.
 | `REQ-COORDINATOR-COORDINATORS-001` | [Flag and wiring](#flag-and-wiring) |
 | `REQ-COORDINATOR-COORDINATORS-002` | [Store](#store), [Routes](#routes), [Validation](#validation) |
 | `REQ-COORDINATOR-COORDINATORS-003` | [Routes](#routes), [Security](#security) |
-| `REQ-COORDINATOR-COORDINATORS-004` | [Settings UI](#settings-ui) |
+| `REQ-COORDINATOR-COORDINATORS-004` | [Settings UI](#settings-ui), [Settings list read publication](#settings-list-read-publication) |
 | `REQ-COORDINATOR-COORDINATORS-005` | [Validation](#validation), [Settings UI](#settings-ui) |
 | `REQ-COORDINATOR-COORDINATORS-006` | [Workspace deletion](#workspace-deletion) |
 | `REQ-COORDINATOR-COORDINATORS-007` | [Phase 2](#phase-2) |
@@ -534,6 +534,12 @@ buttons.
   order; the entries render the sections of
   [permissions](permissions-ui.md#may-do-ui), which share the one draft and the
   one save contributor `coordinator-control` owned by `CoordinatorSections`.
+
+### Settings list read publication
+
+The [list publication design](list-publication.md) defines the read ownership,
+publication fences, cache identity, and regression coverage for
+`AC-COORDINATOR-COORDINATORS-004.8`.
 
 ## Security
 

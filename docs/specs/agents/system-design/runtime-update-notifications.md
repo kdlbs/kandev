@@ -5,7 +5,7 @@ requirements:
   - REQ-AGENTS-RUNTIME-NOTIFY-001
   - REQ-AGENTS-RUNTIME-NOTIFY-002
 created: 2026-10-01
-updated: 2026-10-02
+updated: 2026-10-06
 owners:
   - Kandev
 ---
@@ -30,7 +30,11 @@ Status adds display name, runtime identity, owner, mechanism, enabled/available 
 
 Only enabled, available runtimes query sources or automate. Registered but unavailable/disabled runtimes remain in status with no current claim. Strict stable SemVer comparison fails closed. Npm uses the existing RuntimeUpdater metadata boundary. Verified native GitHub releases use a bounded unauthenticated request to a trusted repository and reject drafts/prereleases/invalid versions. Opaque vendor channels expose guidance with no guessed latest release.
 
-See the complete [coverage matrix](../../../plans/agent-runtime-notifications/coverage.md). The eight existing managed packages include Codex app-server as well as ACP adapters. Native OpenCode selected by PATH is external: npm ownership cannot be inferred, and its host version comes from the host probe rather than the npm default. The native host uses vendor guidance. A separately named managed fallback control remains available for remote/container package selections, including older-version/default recovery. It stages and validates only the managed package and never publishes that candidate as the native host capability observation; remote native installations keep their own update owner. Separate Claude/Codex/Muse/Pi dependency and passthrough CLIs are named as outside the managed package's update result.
+See the complete [coverage matrix](../../../plans/agent-runtime-notifications/coverage.md). The eight existing managed packages include Codex app-server as well as ACP adapters. Native OpenCode selected by PATH is external: npm ownership cannot be inferred, and its host version comes from the host probe rather than the npm default. The native host uses vendor guidance. A separately named managed fallback control remains available for remote/container package selections, including older-version/default recovery. It stages and validates only the managed package and never publishes that candidate as the native host capability observation; remote native installations keep their own update owner.
+
+Because the host capability observation belongs to the native installation, the fallback has no live probe of its own (AC-AGENTS-RUNTIME-NOTIFY-001.8). After `runExactCandidate` activates a fallback candidate (saving the selection, or deleting it for `use_default`), it records the probed exact version as the fallback's validation record in the managed-runtime settings namespace, under `managed_runtime.validated.<agent>` with the trusted package. The record is separate from the operator selection, so AC-AGENTS-RUNTIME-UPDATES-001.6 still holds: the default is never persisted as a selection. Recording is best-effort after activation: a write failure is logged and leaves the version unknown, but never fails an activation that already succeeded.
+
+`managedCurrentVersion` derives the fallback's `current_version` for both `previewAgentUpdate` and the job's operation classification. It returns the validation record's version when the record names the trusted package and equals the effective version. Otherwise it returns the active selection, which is itself persisted only after a successful probe (this covers selections made before the record existed), or empty when there is none. A Kandev upgrade that changes the default therefore leaves the fallback unknown until a new activation validates it. A reopened dialog reports `update`, `rollback`, or `up_to_date` against the validated version instead of falling back to `repair`. The installed-agent catalogue and update-status projections keep their existing native-host semantics. Selecting the already-validated fallback version is `up_to_date` and starts no job, matching a healthy host-owned runtime. A broken execution tree for that version remains governed by [managed npm runtime recovery](managed-npm-runtime-recovery.md); the operator can still select another published version or return to the default.
 
 ## Cache and scheduler
 

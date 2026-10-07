@@ -887,7 +887,20 @@ func appendAvailableCommandsMessage(sessionID string, session *models.TaskSessio
 	if lifecycleMgr == nil {
 		return result
 	}
-	commands := lifecycleMgr.GetAvailableCommandsForSession(sessionID)
+	return appendAvailableCommandsMessageForCommands(
+		sessionID,
+		session,
+		lifecycleMgr.GetAvailableCommandsForSession(sessionID),
+		result,
+	)
+}
+
+func appendAvailableCommandsMessageForCommands(
+	sessionID string,
+	session *models.TaskSession,
+	commands []streams.AvailableCommand,
+	result []*ws.Message,
+) []*ws.Message {
 	if len(commands) == 0 {
 		return result
 	}
@@ -984,6 +997,7 @@ func appendSessionModelsMessageFromState(sessionID string, session *models.TaskS
 	notification, err := ws.NewNotification(ws.ActionSessionModelsUpdated, lifecycle.SessionModelsEventPayload{
 		TaskID:                session.TaskID,
 		SessionID:             sessionID,
+		AgentExecutionID:      snapshot.SettingsSourceExecutionID,
 		CurrentModelID:        replayState.CurrentModelID,
 		SessionSettingsPolicy: sessionSettingsProjectionPolicyFromSnapshot(snapshot, hasSnapshot),
 		Models:                replayState.Models,
@@ -1130,6 +1144,7 @@ func registerRoutes(p routeParams) {
 	p.taskSvc.SetWorkflowTaskArchiveCoordinator(handoffSvc)
 	p.taskSvc.SetTaskLifecycleCoordinator(handoffSvc)
 	p.taskSvc.SetWorkspacePolicyAttacher(handoffSvc)
+	wireOfficeProjectRepositorySources(p.taskSvc, p.officeRepo)
 	p.taskSvc.SetWorkspaceGroupMembershipReader(p.officeRepo)
 	handoffSvc.SetCommentReader(&officeCommentReaderAdapter{reader: p.officeRepo})
 	// Phase 6 wirings — materializer hook + disk cleaner. The

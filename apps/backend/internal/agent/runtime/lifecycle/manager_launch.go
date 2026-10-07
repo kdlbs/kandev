@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -724,7 +725,7 @@ func (m *Manager) buildAgentCommandWithContext(
 	}
 	cliFlagTokens = appendRouteOverrideFlags(cliFlagTokens, req)
 	runtime := models.ExecutorType(req.ExecutorType).Runtime()
-	managedRuntimeVersion, err := m.resolveManagedRuntimeVersion(ctx, runtime, agentConfig)
+	managedRuntimeOptions, err := m.resolveManagedRuntimeCommandOptions(ctx, runtime, agentConfig)
 	if err != nil {
 		return agentCommands{}, err
 	}
@@ -743,7 +744,13 @@ func (m *Manager) buildAgentCommandWithContext(
 		CommandPrefixTokens:   commandPrefixTokens,
 		Runtime:               runtime,
 		PreferNativeBinary:    preferNative,
-		ManagedRuntimeVersion: managedRuntimeVersion,
+		ManagedRuntimeVersion: managedRuntimeOptions.ManagedRuntimeVersion,
+		ManagedRuntimeFamily:  managedRuntimeOptions.ManagedRuntimeFamily,
+		ManagedRuntimeSource:  managedRuntimeOptions.ManagedRuntimeSource,
+		NativeRuntimeVersion:  managedRuntimeOptions.NativeRuntimeVersion,
+	}
+	if runtime != "" && runtime != agentruntime.RuntimeStandalone && agentConfig.ID() == agents.OpenCodeACPAgentID {
+		cmdOpts.PreferNativeBinary = false
 	}
 	args := m.commandBuilder.BuildCommandArgs(agentConfig, cmdOpts)
 	continueArgs := m.commandBuilder.BuildContinueCommandArgs(agentConfig, cmdOpts)
@@ -755,13 +762,68 @@ func (m *Manager) buildAgentCommandWithContext(
 
 func (m *Manager) resolveManagedRuntimeVersion(
 	ctx context.Context,
-	_ agentruntime.Runtime,
+	runtime agentruntime.Runtime,
 	agentConfig agents.Agent,
 ) (string, error) {
+	options, err := m.resolveManagedRuntimeCommandOptions(ctx, runtime, agentConfig)
+	if err != nil {
+		return "", err
+	}
+	return options.ManagedRuntimeVersion, nil
+}
+
+func (m *Manager) resolveManagedRuntimeCommandOptions(
+	ctx context.Context,
+	runtime agentruntime.Runtime,
+	agentConfig agents.Agent,
+) (agents.CommandOptions, error) {
 	managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent)
 	if !ok {
-		return "", nil
+		return agents.CommandOptions{}, nil
 	}
+	openCode, isOpenCode := agentConfig.(*agents.OpenCodeACP)
+	reader, hasSelectionReader := m.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader)
+	if isOpenCode && hasSelectionReader {
+		return m.resolveOpenCodeCommandOptions(ctx, runtime, openCode, reader)
+	}
+	return m.resolveOtherManagedRuntimeOptions(ctx, agentConfig, managed)
+}
+
+func (m *Manager) resolveOpenCodeCommandOptions(
+	ctx context.Context,
+	runtime agentruntime.Runtime,
+	openCode *agents.OpenCodeACP,
+	reader managedruntime.OpenCodeSelectionReader,
+) (agents.CommandOptions, error) {
+	selected, err := openCode.ResolveSelectedRuntimeWithReader(ctx, reader)
+	if err != nil {
+		return agents.CommandOptions{}, fmt.Errorf("resolve OpenCode runtime selection: %w", err)
+	}
+	options := agents.CommandOptions{
+		ManagedRuntimeFamily:  selected.Family,
+		ManagedRuntimeSource:  selected.Source,
+		ManagedRuntimeVersion: selected.Version,
+	}
+	if runtime != agentruntime.RuntimeStandalone || selected.Source != managedruntime.OpenCodeSourceNative ||
+		!selected.Spec.NativeBinaryOnPath() {
+		return options, nil
+	}
+	native, found, err := agents.DetectOpenCodeNativeRuntime(ctx)
+	if err != nil {
+		return agents.CommandOptions{}, fmt.Errorf("detect native OpenCode runtime: %w", err)
+	}
+	if !found {
+		return agents.CommandOptions{}, errors.New("selected native OpenCode runtime is unavailable")
+	}
+	options.NativeRuntimeVersion = native.Version
+	return options, nil
+}
+
+func (m *Manager) resolveOtherManagedRuntimeOptions(
+	ctx context.Context,
+	agentConfig agents.Agent,
+	managed agents.ManagedNPMRuntimeAgent,
+) (agents.CommandOptions, error) {
 	spec := managed.ManagedNPMRuntime()
 	effectiveVersion := spec.DefaultVersion
 	if effectiveVersion == "" {
@@ -773,16 +835,16 @@ func (m *Manager) resolveManagedRuntimeVersion(
 		}
 	}
 	if m.managedRuntimeSelections == nil {
-		return effectiveVersion, nil
+		return agents.CommandOptions{ManagedRuntimeVersion: effectiveVersion}, nil
 	}
 	selection, found, err := m.managedRuntimeSelections.Get(ctx, agentConfig.ID(), spec.Package)
 	if err != nil {
-		return "", fmt.Errorf("resolve active managed runtime version for %s: %w", agentConfig.ID(), err)
+		return agents.CommandOptions{}, fmt.Errorf("resolve active managed runtime version for %s: %w", agentConfig.ID(), err)
 	}
 	if !found || selection.Package != spec.Package {
-		return effectiveVersion, nil
+		return agents.CommandOptions{ManagedRuntimeVersion: effectiveVersion}, nil
 	}
-	return selection.Version, nil
+	return agents.CommandOptions{ManagedRuntimeVersion: selection.Version}, nil
 }
 
 func validateBuiltAgentCommands(args, continueArgs []string) error {
@@ -1027,6 +1089,7 @@ func (m *Manager) newProgressCallbackForPreparation(taskID, sessionID, preparati
 			StepKind:             step.Kind,
 			MCPProvider:          step.MCPProvider,
 			MCPServerID:          step.MCPServerID,
+			Diagnostic:           normalizeCursorMCPDiagnostic(step.Diagnostic),
 			RemotePlatform:       step.RemotePlatform,
 			FailureCode:          step.FailureCode,
 			StepCommand:          step.Command,
@@ -1097,7 +1160,11 @@ func persistedPrepareSteps(metadata map[string]interface{}) []PrepareStep {
 	if json.Unmarshal(data, &stored) != nil {
 		return nil
 	}
-	return append([]PrepareStep(nil), stored.Steps...)
+	steps := append([]PrepareStep(nil), stored.Steps...)
+	for index := range steps {
+		steps[index].Diagnostic = normalizeCursorMCPDiagnostic(steps[index].Diagnostic)
+	}
+	return steps
 }
 
 func (m *Manager) newPreparationAttemptRecorder(taskID, sessionID string) *prepareProgressRecorder {
@@ -1155,6 +1222,24 @@ func (r *prepareProgressRecorder) SeedSteps(steps []PrepareStep) {
 		r.seededSteps = len(r.steps)
 	}
 	r.mu.Unlock()
+}
+
+// RestoreSteps republishes the prior snapshot under this attempt's identity.
+func (r *prepareProgressRecorder) RestoreSteps(steps []PrepareStep) {
+	if len(steps) == 0 {
+		return
+	}
+	restored := append([]PrepareStep(nil), steps...)
+	r.mu.Lock()
+	r.steps = restored
+	r.seededSteps = 0
+	callback := r.callback
+	r.mu.Unlock()
+	if callback != nil {
+		for index, step := range restored {
+			callback(step, index, len(restored))
+		}
+	}
 }
 
 func (r *prepareProgressRecorder) UpdateStep(index int, step PrepareStep) {
@@ -1819,6 +1904,8 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		if err != nil {
 			return nil, err
 		}
+		releaseOpenCodeAdmission := m.acquireOpenCodeLaunchAdmission(agentTypeName)
+		defer releaseOpenCodeAdmission()
 		agentConfig, ok := m.registry.Get(agentTypeName)
 		if !ok {
 			return nil, fmt.Errorf("agent type %q not found in registry", agentTypeName)
@@ -1907,6 +1994,8 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if err != nil {
 		return nil, err
 	}
+	releaseOpenCodeAdmission := m.acquireOpenCodeLaunchAdmission(agentTypeName)
+	defer releaseOpenCodeAdmission()
 
 	// 2. Get agent config from registry
 	agentConfig, ok := m.registry.Get(agentTypeName)

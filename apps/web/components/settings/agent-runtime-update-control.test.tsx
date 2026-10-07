@@ -9,7 +9,10 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: false }),
 }));
 
+vi.mock("@/hooks/use-compact-task-chrome", () => ({ useTouchDrawer: () => false }));
+
 vi.mock("@kandev/ui/tooltip", () => ({
+  TooltipProvider: ({ children }: { children?: ReactNode }) => <>{children}</>,
   Tooltip: ({ children }: { children?: ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
   TooltipContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
@@ -109,7 +112,74 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("AgentRuntimeUpdateControl", () => {
+describe("AgentRuntimeUpdateControl OpenCode migration", () => {
+  it("keeps OpenCode family migration explicit and discloses its scope", async () => {
+    const ordinary = preview({
+      agent_name: "opencode-acp",
+      package: "opencode-ai",
+      current_version: "1.18.32",
+      target_version: "1.18.32",
+      default_version: "1.18.32",
+      effective_version: "1.18.32",
+      active_version: "1.18.32",
+      migration_available: true,
+      family: "v1",
+      source: "managed",
+      runtime_revision: 9,
+    });
+    const migration = {
+      ...ordinary,
+      package: "@opencode/cli",
+      target_version: "2.0.18",
+      target_family: "v2" as const,
+      operation: "migrate" as const,
+    };
+    const onPreview = vi
+      .fn()
+      .mockImplementation((_agent, _target, _default, family) =>
+        Promise.resolve(family === "v2" ? migration : ordinary),
+      );
+    const onUpdate = vi.fn().mockResolvedValue(queuedJob());
+    render(
+      <AgentRuntimeUpdateControl
+        agentName="opencode-acp"
+        displayName="OpenCode"
+        runtimeUpdate={{
+          update_mode: "pinned",
+          supported: true,
+          package: "opencode-ai",
+          default_version: "1.18.32",
+          effective_version: "1.18.32",
+        }}
+        onPreview={onPreview}
+        onUpdate={onUpdate}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("agent-update-trigger-opencode-acp"));
+    await waitFor(() => expect(onPreview).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("agent-update-confirm-opencode-acp").textContent).toBe(
+      "Update runtime",
+    );
+    fireEvent.click(screen.getByTestId("agent-update-migrate-family-opencode-acp"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-update-migration-scope-opencode-acp")).toBeTruthy(),
+    );
+    expect(
+      screen.getByText(
+        "This selects managed OpenCode v2 for future launches across every OpenCode profile in this Kandev installation. The standalone CLI remains unchanged.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByTestId("agent-update-confirm-opencode-acp"));
+
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith("opencode-acp", "2.0.18", false, "v2", 9),
+    );
+  });
+});
+
+describe("AgentRuntimeUpdateControl version browsing", () => {
   it("keeps a long version history behind the browse action", async () => {
     const onPreview = vi.fn().mockResolvedValue(
       preview({

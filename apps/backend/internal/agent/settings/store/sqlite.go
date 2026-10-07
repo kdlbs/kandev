@@ -882,6 +882,22 @@ func (r *sqliteRepository) UpdateAgentProfileWithDynamic(
 	expectedVersion int64,
 	routes []models.DynamicAgentRoute,
 ) error {
+	if profile == nil {
+		return fmt.Errorf("profile and dynamic profile IDs are required")
+	}
+	return r.UpdateAgentProfileWithDynamicEnabledIntent(ctx, profile, dynamic, expectedVersion, routes, &profile.Enabled)
+}
+
+// UpdateAgentProfileWithDynamicEnabledIntent commits the base profile and
+// versioned routes together, exposing the written enabled value after commit.
+func (r *sqliteRepository) UpdateAgentProfileWithDynamicEnabledIntent(
+	ctx context.Context,
+	profile *models.AgentProfile,
+	dynamic *models.DynamicAgentProfile,
+	expectedVersion int64,
+	routes []models.DynamicAgentRoute,
+	enabled *bool,
+) error {
 	if profile == nil || dynamic == nil || profile.ID == "" || dynamic.ProfileID != profile.ID {
 		return fmt.Errorf("profile and dynamic profile IDs are required")
 	}
@@ -890,7 +906,8 @@ func (r *sqliteRepository) UpdateAgentProfileWithDynamic(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.updateAgentProfile(ctx, tx, profile); err != nil {
+	committedEnabled, err := r.updateAgentProfile(ctx, tx, profile, enabled)
+	if err != nil {
 		return err
 	}
 	if err := r.updateDynamicAgentProfileTx(ctx, tx, dynamic, expectedVersion, routes); err != nil {
@@ -899,6 +916,7 @@ func (r *sqliteRepository) UpdateAgentProfileWithDynamic(
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	profile.Enabled = committedEnabled
 	return nil
 }
 
@@ -1330,7 +1348,18 @@ func normalizeMCPSelectionMode(mode string) string {
 }
 
 func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
-	return r.updateAgentProfile(ctx, r.db, profile)
+	return r.UpdateAgentProfileWithEnabledIntent(ctx, profile, &profile.Enabled)
+}
+
+// UpdateAgentProfileWithEnabledIntent returns the enabled value from this
+// update's statement, so a later toggle cannot alter its response snapshot.
+func (r *sqliteRepository) UpdateAgentProfileWithEnabledIntent(ctx context.Context, profile *models.AgentProfile, enabled *bool) error {
+	committedEnabled, err := r.updateAgentProfile(ctx, r.db, profile, enabled)
+	if err != nil {
+		return err
+	}
+	profile.Enabled = committedEnabled
+	return nil
 }
 
 // UpdateAgentProfileModelIfEmpty adopts a probed model without replacing any
@@ -1356,29 +1385,35 @@ func (r *sqliteRepository) UpdateAgentProfileModelIfEmpty(
 	return rows == 1, nil
 }
 
-func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profileExecer, profile *models.AgentProfile) error {
+type profileUpdater interface {
+	QueryRowxContext(ctx context.Context, query string, args ...any) *sqlx.Row
+	Rebind(query string) string
+}
+
+func (r *sqliteRepository) updateAgentProfile(ctx context.Context, updater profileUpdater, profile *models.AgentProfile, enabled *bool) (bool, error) {
 	profile.UpdatedAt = time.Now().UTC()
 	cliFlagsJSON, err := cliFlagsToJSON(profile.CLIFlags)
 	if err != nil {
-		return err
+		return false, err
 	}
 	envVarsJSON, err := envVarsToJSON(profile.EnvVars)
 	if err != nil {
-		return err
+		return false, err
 	}
 	mcpSelectedServersJSON, err := mcpSelectedServersToJSON(profile.MCPSelectedServers)
 	if err != nil {
-		return err
+		return false, err
 	}
 	enrich, err := enrichmentValues(profile)
 	if err != nil {
-		return err
+		return false, err
 	}
-	result, err := execer.ExecContext(ctx, execer.Rebind(`
+	enabledValue := dialect.BoolToInt(enabled != nil && *enabled)
+	row := updater.QueryRowxContext(ctx, updater.Rebind(`
 		UPDATE agent_profiles
 		SET agent_id = ?, name = ?, agent_display_name = ?, model = ?, mode = ?, migrated_from = ?,
 			auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?,
-			cli_passthrough = ?, enabled = ?, user_modified = ?, cli_flags = ?, env_vars = ?, updated_at = ?,
+			cli_passthrough = ?, enabled = CASE WHEN ? = 1 THEN ? ELSE enabled END, user_modified = ?, cli_flags = ?, env_vars = ?, updated_at = ?,
 			workspace_id = ?, role = ?, icon = ?, reports_to = ?,
 			skill_ids = ?, desired_skills = ?, custom_prompt = ?,
 			status = CASE
@@ -1404,11 +1439,12 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 			mcp_selection_mode = ?, mcp_selected_servers = ?,
 			execution_agent_profile_id = ?
 		WHERE id = ? AND deleted_at IS NULL
+		RETURNING enabled
 	`), profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
 		dialect.BoolToInt(profile.AutoApprove),
 		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing),
-		dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.Enabled), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.UpdatedAt,
+		dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(enabled != nil), enabledValue, dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.UpdatedAt,
 		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
 		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
 		enrich.status, enrich.status, enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
@@ -1427,14 +1463,14 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 		mcpSelectedServersJSON,
 		profile.ExecutionAgentProfileID,
 		profile.ID)
-	if err != nil {
-		return err
+	var committedEnabled bool
+	if err := row.Scan(&committedEnabled); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("agent profile not found: %s", profile.ID)
+		}
+		return false, err
 	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("agent profile not found: %s", profile.ID)
-	}
-	return nil
+	return committedEnabled, nil
 }
 
 // UpdateAgentProfileEnabled changes only the selection flag. Keeping this

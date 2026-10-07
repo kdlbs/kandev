@@ -200,14 +200,18 @@ export class OfficeApiClient {
   /**
    * Create a project in the workspace. Onboarding does not seed a default
    * project (see e2e/tests/office/project-repository-picker.spec.ts), so
-   * tests that need a real project_id to reassign a task to must create
-   * one first.
+   * tests that need a project must create one first. Optional repository
+   * paths seed the project's source list for task-creation coverage.
    */
-  async createProject(wsId: string, name: string): Promise<Record<string, unknown>> {
+  async createProject(
+    wsId: string,
+    name: string,
+    repositories?: string[],
+  ): Promise<Record<string, unknown>> {
     const res = await this.request<{ project?: Record<string, unknown> }>(
       "POST",
       `/workspaces/${wsId}/projects`,
-      { name },
+      { name, ...(repositories === undefined ? {} : { repositories }) },
     );
     return res.project ?? (res as unknown as Record<string, unknown>);
   }

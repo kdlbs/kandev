@@ -118,7 +118,11 @@ test.describe("Quick Chat", () => {
     await expect(overlay).not.toBeVisible();
   });
 
-  test("returns focus without a visible indicator", async ({ testPage }) => {
+  test("returns focus without a visible indicator", async ({ testPage, apiClient }) => {
+    await apiClient.saveUserSettings({
+      sidebar_fast_actions_enabled: true,
+      sidebar_new_task_style: "compact",
+    });
     await testPage.goto("/");
     await testPage.waitForLoadState("networkidle");
     const launcher = testPage.getByTestId("sidebar-quick-chat-shortcut");
@@ -145,9 +149,12 @@ test.describe("Quick Chat", () => {
     expect(silentStyles.boxShadow).toBe("none");
     await expect(launcher).toHaveCSS("border-color", restingBorder);
 
+    const terminalLauncher = testPage.getByTestId("sidebar-quick-terminal-shortcut");
     await testPage.getByTestId("create-task-button").focus();
     await expect(launcher).not.toHaveAttribute("data-quick-chat-silent-focus");
 
+    await testPage.keyboard.press("Tab");
+    await expect(terminalLauncher).toBeFocused();
     await testPage.keyboard.press("Tab");
     await expect(launcher).toBeFocused();
 

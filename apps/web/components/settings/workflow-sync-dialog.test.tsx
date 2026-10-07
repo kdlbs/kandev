@@ -63,6 +63,7 @@ function formForConfig(currentConfig: WorkflowSyncConfig | null): WorkflowSyncFo
 function controller(overrides: Partial<WorkflowSyncController> = {}): WorkflowSyncController {
   const currentConfig = overrides.config === undefined ? config() : overrides.config;
   return {
+    lifetime: Symbol(),
     config: currentConfig,
     form: formForConfig(currentConfig),
     url: currentConfig ? "https://github.com/acme/flows" : "",

@@ -153,7 +153,9 @@ type Manager struct {
 	// by workspace operations and repository-child discovery. It is guarded by
 	// repoTrackersMu so a rebind snapshots its proposed policy before creating
 	// replacement trackers.
-	workspaceSourceRoots []string
+	workspaceSourceRoots           []string
+	workspaceFileExclusions        []string
+	workspaceFileExclusionRevision uint64
 	// rescanMu serializes RescanRepositories calls so two concurrent
 	// rescans can't both observe an empty tracker set and double-bootstrap
 	// (or both append duplicate trackers for the same new child). The
@@ -275,13 +277,8 @@ type Manager struct {
 	// attachedCount is the live count of backend event-stream connections
 	// (see attachment.go). Zero value correctly starts an instance detached.
 	attachedCount atomic.Int32
-	// turnOutcomeRecorder and turnOutcomeInstanceID back retained-outcome
-	// wiring (see turn_outcome.go). Both are guarded by mu: set once by
-	// SetTurnOutcomeRecorder before any goroutine that could read them is
-	// spawned (instance.Manager.CreateInstance calls it immediately after
-	// constructing this Manager, before Start can be reached), then read
-	// from forwardUpdates and sendUpdateBlocking's callers, neither of which
-	// otherwise holds mu.
+	// turnOutcomeMu guards recorder wiring independently of lifecycle transitions.
+	turnOutcomeMu         sync.RWMutex
 	turnOutcomeRecorder   TurnOutcomeRecorder
 	turnOutcomeInstanceID string
 	startMu               sync.Mutex
@@ -492,6 +489,65 @@ func (m *Manager) SetWorkspaceSourceRoots(roots []string) {
 			tracker.SetAllowedSourceRoots(canonical)
 		}
 	}
+}
+
+// SetWorkspaceFileExclusions installs exact trusted recovery-artifact paths
+// on every current tracker. The update is serialized with tracker rescans so
+// newly created trackers inherit the same filter.
+func (m *Manager) SetWorkspaceFileExclusions(paths []string) {
+	canonical := canonicalWorkspaceFileExclusions(paths)
+	m.rescanMu.Lock()
+	defer m.rescanMu.Unlock()
+	m.repoTrackersMu.Lock()
+	if sameStringSlice(m.workspaceFileExclusions, canonical) {
+		m.repoTrackersMu.Unlock()
+		return
+	}
+	m.workspaceFileExclusions = canonical
+	m.workspaceFileExclusionRevision++
+	trackers := append([]*WorkspaceTracker{m.workspaceTracker}, m.repoTrackers...)
+	m.repoTrackersMu.Unlock()
+	m.workspaceTrackersMu.Lock()
+	for _, tracker := range m.workspaceTrackersBySubpath {
+		trackers = append(trackers, tracker)
+	}
+	m.workspaceTrackersMu.Unlock()
+	for _, tracker := range trackers {
+		if tracker != nil {
+			tracker.SetRecoveryArtifactExclusions(canonical)
+		}
+	}
+}
+
+func canonicalWorkspaceFileExclusions(paths []string) []string {
+	set := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			continue
+		}
+		clean := filepath.Clean(path)
+		if clean != string(filepath.Separator) {
+			set[clean] = struct{}{}
+		}
+	}
+	canonical := make([]string, 0, len(set))
+	for path := range set {
+		canonical = append(canonical, path)
+	}
+	sort.Strings(canonical)
+	return canonical
+}
+
+func (m *Manager) currentWorkspaceFileExclusions() []string {
+	m.repoTrackersMu.RLock()
+	defer m.repoTrackersMu.RUnlock()
+	return append([]string(nil), m.workspaceFileExclusions...)
+}
+
+func (m *Manager) currentWorkspaceFileExclusionRevision() uint64 {
+	m.repoTrackersMu.RLock()
+	defer m.repoTrackersMu.RUnlock()
+	return m.workspaceFileExclusionRevision
 }
 
 // SetUserInputRequestHandler configures protocol-native question routing before

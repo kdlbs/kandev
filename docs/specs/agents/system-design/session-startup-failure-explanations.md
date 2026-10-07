@@ -2,7 +2,7 @@
 status: current
 system: agents
 created: 2026-09-30
-updated: 2026-09-30
+updated: 2026-10-06
 requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006
 owners:
@@ -389,3 +389,48 @@ owner is required. The local additive evidence contract and its rationale fit
 this design; no new ADR is needed. Existing decisions on
 [active recovery ownership](../../../decisions/2026-09-20-active-session-recovery-owner.md)
 and explicit Auggie recovery remain in force.
+
+## Fresh-start readiness repair
+
+This implementation correction applies existing criteria 006.4, .8, .9, .16,
+.17, .19, .32, and .33. Task-owned history remains governed by
+[task error ownership](../../tasks/requirements/task-launch-failure-recovery.md).
+Delivery: [Fresh-start recovery](../../../plans/fresh-start-recovery/plan.md).
+
+A failed-start fresh retry keeps a nonempty `TaskDescription` in the resume request.
+`SessionManager.dispatchInitialPrompt` dispatches that prompt without its no-prompt
+`markReady` branch. Thus `handleAgentBootReady` does not run the stamp-specific
+resolution path. A normal completed turn proves agent output, but does not retire
+the persisted bootstrap error. Do not fix this by clearing every error on RUNNING,
+a user message, or turn completion.
+
+Separate fresh startup from initial submission dispatch through the task system's
+[owned recovery flow](../../tasks/system-design/prompt-attachments.md#owned-recovery-dispatch).
+The owned resume attempt captures the unresolved stamp before provider reset.
+Its provider-confirmed boot-ready event records a `SessionRecoveryResolution`
+through `markRecoveryResolvedForAttempt`. Reuse `RecordSessionRecoveryResolution`
+and stamp-CAS dismissal through `dismissRecoveredAgentErrorForAttempt`.
+No new error store or generic resolution timestamp is authoritative.
+
+Propagate the same attempt identity through no-prompt launch, readiness, and
+continuation. A readiness event without an owned matching attempt cannot retire
+an error. A successor failure wins its stamp comparison. Failed or cancelled
+startup retains the current controls; workspace-only restoration cannot resolve it.
+After readiness, a replay delivery failure owns a new correlated error.
+
+Publish the matching inactive error event and session metadata after durable
+resolution. Readiness, error updates, HTTP hydration, and reconnect must converge
+without a later user message. Preserve the original dated error and details.
+Frontend consumers use the bounded stamp-specific proof and existing dismissal
+state, never preview text or a global timestamp, to retire recovery actions.
+The composer retains its draft and selected attachments. Return focus only from
+the disappearing user-initiated recovery controls.
+
+Use `SessionRecoveryCard`, `useRecoveryPresentation`, and
+`lib/session-recovery-presentation.ts` for both desktop and phone. Successful
+recovery restores the existing composer. Historical entries remain in the
+transcript without mutation controls. A later failure owns its own active card.
+The dedicated phone layout retains stacked 44px targets, safe-area handling,
+and one transcript scroll region. No new layout or user-facing label is needed
+for successful recovery. Test both WS event orders, missing optional success
+notice, reload, sibling failure, and stale prior completion.

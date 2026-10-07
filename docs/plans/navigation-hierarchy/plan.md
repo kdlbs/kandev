@@ -12,6 +12,14 @@ legacy_specs: []
 
 # Navigation hierarchy and seeded comparison
 
+## Subsequent placement revision
+
+The [desktop action-placement package](../sidebar-action-placement/plan.md) records
+the 2026-10-05 feedback after PR #4063.
+It supersedes the desktop creation-row, header-shortcut, and Stats-menu placement targets below.
+This completed package retains its original previews, commands, and results as historical evidence.
+The task-panel and phone work orders remain applicable.
+
 ## Overview
 
 Apply the supplied navigation reference and subsequent visual feedback using

@@ -802,9 +802,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: windows-latest
-    # Isolate the large process suite from build/vet and targeted native checks
-    # so each cold runner has time for its tests and cache upload.
-    timeout-minutes: 40
+    # Isolate the large process suite from build/vet and targeted native checks.
+    # A cold Windows race build and test can exceed 60 minutes before cleanup.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -907,6 +907,24 @@ jobs:
           -run '^(TestExplicitLocalRepositoryWindowsPathSemantics|TestListDirectory.*|TestDriveRootsFromMask|TestSplitAbsForRoot)$'
           ./internal/task/service
 
+      - name: Test Windows document attachment publication
+        if: matrix.suite == 'native'
+        timeout-minutes: 6
+        run: |
+          $env:GOMAXPROCS = '2'
+          $env:GOMEMLIMIT = '512MiB'
+          go test -trimpath -tags fts5 -race -p 1 ./internal/task/service -run '^TestDocumentAttachment.*$' -count=1 -timeout=4m -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test Windows profile enabled omission
+        if: matrix.suite == 'native'
+        timeout-minutes: 6
+        run: |
+          $env:GOMAXPROCS = '2'
+          $env:GOMEMLIMIT = '512MiB'
+          go test -trimpath -tags fts5 -race -p 1 -count=1 -timeout=4m -v ./internal/agent/settings/store ./internal/agent/settings/controller ./internal/agent/settings/handlers ./internal/mcp/server ./internal/backendapp -run '^(TestProfileEnabledIntent(Caller|OwnCommit|Controls|DynamicCaller|DynamicRejection|Storage|HTTP|MCP|Compact)|TestUpdateAgentProfileModelIfEmptyIsConditional|TestUpdateAgentProfile_DoesNotOverwriteWorkingOwner|TestAgentProfileEnabled_RoundTrip|TestDynamicProfileCreateAndUpdatePersistsCandidates|TestSQLiteRepositoryDynamicProfileCRUDUsesOptimisticVersions)$'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       # Keep SQLite path coverage targeted: other tests in these packages
       # assert POSIX file modes or depend on Git path output.
       - name: Test Windows SQLite database paths
@@ -915,6 +933,27 @@ jobs:
         run: |
           go test -race -tags fts5 -v ./internal/system/backups -run '^TestVerifySnapshotOpensNativeAbsolutePath$'
           go test -race -tags fts5 -v ./internal/task/inventoryrepair -run '^TestOpenDatabase(Reads|Writes)NativeAbsolutePath$'
+
+      - name: Test Windows workspace settings persistence
+        if: matrix.suite == 'native'
+        timeout-minutes: 30
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 512MiB
+        run: >-
+          go test -trimpath -tags fts5 -race -p=1 -count=1 -json -timeout=5m
+          -run '^Test(WorkspaceFieldUpdates(ConcurrentSQLite|PresenceAndDefaults|ExactFenceSQLite|AdmissionAndFailures|Storage)|RegisteredWorkspaceFieldUpdates(HTTP|WS))$'
+          ./internal/task/service ./internal/task/repository/sqlite ./internal/task/handlers
+
+      - name: Test Windows workflow start selection
+        if: matrix.suite == 'native'
+        timeout-minutes: 6
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 512MiB
+        run: |
+          go test -trimpath -tags fts5 -race -p=1 -count=1 -json -timeout=4m -run '^TestWorkflowStartSelection(ControllerOmission|ControllerControls|SQLiteIndependentStores|RepositoryRollback|LegacyAndExact|RegisteredREST|AccessFailures|RegisteredMCP)$' ./internal/workflow/controller ./internal/workflow/repository ./internal/workflow/handlers ./internal/mcp/handlers
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test Cursor project slug path normalization
         if: matrix.suite == 'native'

@@ -1,12 +1,30 @@
 package lifecycle
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestSerializePrepareResultRetainsNativeMCPDiagnostic(t *testing.T) {
+	var step PrepareStep
+	require.NoError(t, json.Unmarshal([]byte(`{"name":"Cursor MCP approval","kind":"agent_mcp_approval","status":"failed","mcp_diagnostic":{"operation":"enable","stage":"wait","kind":"output_wait_timeout","message":"exec: WaitDelay expired before I/O complete","exit_code":0}}`), &step))
+	serialized := SerializePrepareResult(&EnvPrepareResult{Steps: []PrepareStep{step}})
+	steps := serialized["steps"].([]map[string]interface{})
+	encoded, err := json.Marshal(steps[0]["mcp_diagnostic"])
+	require.NoError(t, err)
+	var diagnostic map[string]interface{}
+	if err := json.Unmarshal(encoded, &diagnostic); err != nil {
+		encoded, _ := json.Marshal(steps[0])
+		t.Fatalf("decode native MCP diagnostic from %s: %v", encoded, err)
+	}
+	require.Equal(t, "enable", diagnostic["operation"])
+	require.Equal(t, "wait", diagnostic["stage"])
+	require.Equal(t, float64(0), diagnostic["exit_code"])
+}
 
 func TestSerializePrepareResult(t *testing.T) {
 	t.Run("success result", func(t *testing.T) {

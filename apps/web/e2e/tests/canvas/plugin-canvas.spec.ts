@@ -31,12 +31,9 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
     try {
       await testPage.goto(`/?workspaceId=${encodeURIComponent(seedData.workspaceId)}`);
       await expect(testPage.getByTestId("kanban-board")).toBeVisible({ timeout: 20_000 });
-      await expect(testPage.getByTestId("sidebar-canvases-settings")).toBeVisible({
-        timeout: 20_000,
-      });
-
       const sectionHeader = testPage.getByRole("button", { name: /canvases/i }).first();
       await sectionHeader.click();
+      await expect(testPage.getByTestId("sidebar-canvases-settings")).toBeVisible();
       const setup = testPage.getByTestId("sidebar-canvases-empty");
       await expect(setup).toBeVisible();
 

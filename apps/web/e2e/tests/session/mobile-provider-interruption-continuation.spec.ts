@@ -27,6 +27,23 @@ test("phone: continuation Cancel is visible while running and preserves history"
     );
     await expect(session.transientRetryCard()).toHaveCount(1);
     await expect(session.transientRetryCard()).toContainText("Continuing");
+    await expect(session.activeChat()).toContainText(
+      "Mock interruption: partial history preserved.",
+    );
+    await expect(session.activeChat().getByText("continue", { exact: true })).toHaveCount(0);
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(session.transientRetryCard()).toContainText("Continuing");
+    await expect(session.activeChat()).toContainText(
+      "Mock interruption: partial history preserved.",
+    );
+    await expect(session.activeChat().getByText("continue", { exact: true })).toHaveCount(0);
+    const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
+    expect(
+      messages.filter(
+        (message) => message.author_type === "user" && message.content === "continue",
+      ),
+    ).toHaveLength(0);
     await expect(session.recoveryCancelRetryButton()).toHaveCount(1);
     const bounds = await session.recoveryCancelRetryButton().boundingBox();
     expect(bounds?.height).toBeGreaterThanOrEqual(44);

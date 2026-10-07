@@ -10,7 +10,7 @@ import (
 // handlePermissionRequest handles permission requests from the agent.
 // Since both acpclient and adapter now use the shared types package,
 // no conversion is needed - we just forward to the handler.
-func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRequest) (*PermissionResponse, error) {
+func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRequest) (response *PermissionResponse, err error) {
 	req.ToolName = a.dialect.normalizePermissionToolName(req.ToolName, req.ToolMeta, req.Title, req.ActionType)
 
 	a.mu.RLock()
@@ -23,8 +23,8 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 	if sessionID == "" {
 		sessionID = fallbackSessionID
 	}
-	if sessionID == fallbackSessionID {
-		a.poisonContinuationSafety()
+	if finish := a.beginContinuationPermission(sessionID, req.ToolCallID, req.Options); finish != nil {
+		defer func() { finish(response, err) }()
 	}
 	turn := a.currentPromptTurn()
 	var capacityPermissionTracked bool

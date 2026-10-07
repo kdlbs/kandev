@@ -3037,7 +3037,7 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 	if err != nil {
 		return agentCommands{}, err
 	}
-	managedRuntimeVersion, err := m.resolveManagedRuntimeVersion(ctx, execution.RuntimeName, agentConfig)
+	managedRuntimeOptions, err := m.resolveManagedRuntimeCommandOptions(ctx, execution.RuntimeName, agentConfig)
 	if err != nil {
 		return agentCommands{}, err
 	}
@@ -3053,7 +3053,10 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 		// reads this to pick a bare name (container PATH lookup) vs.
 		// an absolute host path.
 		Runtime:               execution.RuntimeName,
-		ManagedRuntimeVersion: managedRuntimeVersion,
+		ManagedRuntimeVersion: managedRuntimeOptions.ManagedRuntimeVersion,
+		ManagedRuntimeFamily:  managedRuntimeOptions.ManagedRuntimeFamily,
+		ManagedRuntimeSource:  managedRuntimeOptions.ManagedRuntimeSource,
+		NativeRuntimeVersion:  managedRuntimeOptions.NativeRuntimeVersion,
 	}
 	args := m.commandBuilder.BuildCommandArgs(agentConfig, opts)
 	continueArgs := m.commandBuilder.BuildContinueCommandArgs(agentConfig, opts)

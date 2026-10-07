@@ -219,16 +219,19 @@ func (a *Adapter) sendPrompt(
 		// agent_message_chunk cannot be overtaken by the terminal failure event.
 		notificationsDrained := a.syncNotifQueue()
 		if a.dialect.continuationError != nil && a.dialect.continuationError(err) {
-			if snapshot := a.continuationSafetySnapshot(turn); snapshot != nil {
-				a.cancelAsyncTurnComplete(sessionID)
-				a.sendUpdate(AgentEvent{Type: streams.EventTypeError, SessionID: sessionID,
-					PromptGeneration: promptGeneration, Error: "peer disconnected before response", ContinuationSafety: snapshot,
-					PromptFailureDisposition: a.promptFailureDisposition(
-						conn, sessionID, turn, promptGeneration, notificationsDrained,
-					),
-				})
-				return nil
+			// Recognized interruptions follow queued output regardless of continuation eligibility.
+			snapshot := a.continuationSafetySnapshot(turn)
+			a.cancelAsyncTurnComplete(sessionID)
+			failure := AgentEvent{Type: streams.EventTypeError, SessionID: sessionID,
+				PromptGeneration: promptGeneration, Error: "peer disconnected before response", ContinuationSafety: snapshot,
 			}
+			if snapshot != nil {
+				failure.PromptFailureDisposition = a.promptFailureDisposition(
+					conn, sessionID, turn, promptGeneration, notificationsDrained,
+				)
+			}
+			a.sendUpdate(failure)
+			return nil
 		}
 		normalizedErr := normalizePromptErrorAfterCancel(traceCtx, err)
 		if a.agentID == codexAgentID &&
@@ -295,12 +298,11 @@ func (a *Adapter) sendPrompt(
 	// a subagent tool_call this turn.
 	a.sweepCursorTaskMetaOnPromptEnd(sessionID)
 
-	if cursorRetriable, occurredAt := turn.cursorRetriableFailureAt(); cursorRetriable {
-		const safeMessage = cursorRetriableStreamResetMessage
+	if cursorRetriable, safeMessage, occurredAt, identityComplete := turn.cursorRetriableFailureDetails(); cursorRetriable {
 		if occurredAt.IsZero() {
 			occurredAt = time.Now().UTC()
 		}
-		a.logger.Info("cursor prompt ended with retriable stream-reset evidence",
+		a.logger.Info("cursor prompt ended with retriable provider-error evidence",
 			zap.String("session_id", sessionID),
 			zap.Uint64("prompt_generation", promptGeneration))
 		a.cancelAsyncTurnComplete(sessionID)
@@ -314,10 +316,11 @@ func (a *Adapter) sendPrompt(
 				conn, sessionID, turn, promptGeneration, notificationsDrained,
 			),
 			ProviderError: &streams.ProviderError{
-				Source:     streams.ProviderErrorSourceCursorACP,
-				ProviderID: acpcompat.CursorAgentID,
-				Message:    safeMessage,
-				OccurredAt: occurredAt,
+				Source:                     streams.ProviderErrorSourceCursorACP,
+				ProviderID:                 acpcompat.CursorAgentID,
+				Message:                    safeMessage,
+				OccurredAt:                 occurredAt,
+				DiagnosticIdentityComplete: identityComplete,
 			},
 		})
 		return nil

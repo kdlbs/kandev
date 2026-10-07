@@ -39,13 +39,19 @@ func TestHandleResponseAttemptResetRetractsCurrentAttemptRecords(t *testing.T) {
 	})
 
 	streamed := eventBus.getStreamEvents()
-	if len(streamed) != 3 {
-		t.Fatalf("streamed events = %+v, want assistant, thinking, then reset", streamed)
+	wantTypes := []string{"message_chunk", "message_streaming", "reasoning", thinkingStreamingEventType, "response_attempt_reset"}
+	if len(streamed) != len(wantTypes) {
+		t.Fatalf("streamed events = %+v, want original assistant/reasoning evidence, their projections, then reset", streamed)
 	}
-	if streamed[0].Data.Type != "message_streaming" || streamed[1].Data.Type != thinkingStreamingEventType {
-		t.Fatalf("events before reset = %+v, want assistant then thinking creation", streamed[:2])
+	for i, want := range wantTypes {
+		if streamed[i].Data.Type != want {
+			t.Fatalf("stream event types = %+v, want %v", streamed, wantTypes)
+		}
 	}
-	wantIDs := []string{streamed[0].Data.MessageID, streamed[1].Data.MessageID}
+	if streamed[0].Data.Text != "abandoned answer" || streamed[2].Data.Text != "abandoned reasoning" {
+		t.Fatalf("original evidence = (%+v, %+v), want exact assistant and reasoning text", streamed[0].Data, streamed[2].Data)
+	}
+	wantIDs := []string{streamed[1].Data.MessageID, streamed[3].Data.MessageID}
 	resets := streamEventsOfType(eventBus, "response_attempt_reset")
 	if len(resets) != 1 {
 		t.Fatalf("reset events = %+v, want one", resets)
@@ -158,11 +164,20 @@ func TestResponseAttemptRecordsIncludeLegacyStreams(t *testing.T) {
 	})
 
 	events := eventBus.getStreamEvents()
-	if len(events) != 3 {
-		t.Fatalf("events = %+v, want legacy assistant, thinking, then reset", events)
+	wantTypes := []string{"message_chunk", "message_streaming", "reasoning", thinkingStreamingEventType, "response_attempt_reset"}
+	if len(events) != len(wantTypes) {
+		t.Fatalf("events = %+v, want original legacy evidence, transcript projections, then reset", events)
 	}
-	wantIDs := []string{events[0].Data.MessageID, events[1].Data.MessageID}
-	if got := events[2].Data.RetractedMessageIDs; !reflect.DeepEqual(got, wantIDs) {
+	for i, want := range wantTypes {
+		if events[i].Data.Type != want {
+			t.Fatalf("stream event types = %+v, want %v", events, wantTypes)
+		}
+	}
+	if events[0].Data.Text != "legacy answer\n" || events[2].Data.Text != "legacy reasoning\n" {
+		t.Fatalf("original evidence = (%+v, %+v), want exact legacy assistant and reasoning text", events[0].Data, events[2].Data)
+	}
+	wantIDs := []string{events[1].Data.MessageID, events[3].Data.MessageID}
+	if got := events[4].Data.RetractedMessageIDs; !reflect.DeepEqual(got, wantIDs) {
 		t.Fatalf("legacy retracted IDs = %v, want %v", got, wantIDs)
 	}
 }

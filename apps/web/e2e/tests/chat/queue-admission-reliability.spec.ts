@@ -15,6 +15,8 @@ import {
   openQuickChatSetup,
   sendQuickChatMessage,
   startQuickChatFromSetup,
+  waitForQuickChatDirectInput,
+  waitForSessionSettledBaseline,
 } from "./quick-chat-helpers";
 import { SessionPage } from "../../pages/session-page";
 
@@ -110,6 +112,8 @@ test.describe("queue admission reliability", () => {
       const dialog = await openQuickChatSetup(testPage);
       const started = await startQuickChatFromSetup(dialog, testPage);
       const identity = await apiClient.getQueueSessionIdentity(started.task_id, started.session_id);
+      await waitForSessionSettledBaseline(apiClient, started.task_id, started.session_id);
+      await waitForQuickChatDirectInput(dialog);
       await sendQuickChatMessage(dialog, testPage, "/sleep 30");
       await expect(
         testPage.getByRole("status", { name: /Agent is (starting|running)/ }),
