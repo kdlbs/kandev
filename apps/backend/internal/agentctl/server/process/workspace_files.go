@@ -592,11 +592,9 @@ func (wt *WorkspaceTracker) ApplyFileDiff(ctx context.Context, reqPath, unifiedD
 	// git apply cannot patch through symlinks — it needs the real file path.
 	applyPath, unifiedDiff := wt.resolveSymlinkForDiff(reqPath, safePath, cleanWorkDir, unifiedDiff)
 
-	// Write diff to a temporary patch file
-	patchFile := filepath.Join(wt.workDir, ".kandev-patch.tmp")
-	err = os.WriteFile(patchFile, []byte(unifiedDiff), 0o644)
+	patchFile, err := writeFileDiffPatch(wt.workDir, unifiedDiff)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to write patch file: %w", err)
+		return "", "", err
 	}
 	defer func() {
 		_ = os.Remove(patchFile) // Best effort cleanup
@@ -648,6 +646,32 @@ func (wt *WorkspaceTracker) ApplyFileDiff(ctx context.Context, reqPath, unifiedD
 	)
 
 	return newHash, ResolutionApplied, nil
+}
+
+func writeFileDiffPatch(workDir, unifiedDiff string) (string, error) {
+	patchDir, err := filepath.Abs(workDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve patch directory: %w", err)
+	}
+	patch, err := os.CreateTemp(patchDir, ".kandev-patch-*")
+	if err != nil {
+		return "", fmt.Errorf("failed to create patch file: %w", err)
+	}
+	keep := false
+	defer func() {
+		_ = patch.Close()
+		if !keep {
+			_ = os.Remove(patch.Name())
+		}
+	}()
+	if _, err := patch.WriteString(unifiedDiff); err != nil {
+		return "", fmt.Errorf("failed to write patch file: %w", err)
+	}
+	if err := patch.Close(); err != nil {
+		return "", fmt.Errorf("failed to close patch file: %w", err)
+	}
+	keep = true
+	return patch.Name(), nil
 }
 
 // resolveSymlinkForDiff checks if reqPath is a symlink and, if so, rewrites the diff
