@@ -72,10 +72,14 @@ function applyCaptureModeAcknowledgement(
 }
 
 function usePreviewInspectorEvents(options: InspectorEventOptions) {
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
+      const current = optionsRef.current;
       if (
-        event.source !== options.iframeRef.current?.contentWindow ||
+        event.source !== current.iframeRef.current?.contentWindow ||
         !isInspectorMessage(event.data)
       ) {
         return;
@@ -84,32 +88,32 @@ function usePreviewInspectorEvents(options: InspectorEventOptions) {
       switch (message.type) {
         case "inspector-ready":
         case "route-changed":
-          options.setPageRoute(sanitizePreviewPageRoute(message.payload.page_route));
-          options.setPageTitle(message.payload.page_title);
-          options.projectMarkers();
+          current.setPageRoute(sanitizePreviewPageRoute(message.payload.page_route));
+          current.setPageTitle(message.payload.page_title);
+          current.projectMarkers();
           break;
         case "candidate-changed":
-          options.setCandidateLabel(message.payload.label);
+          current.setCandidateLabel(message.payload.label);
           break;
         case "capture-mode-changed":
-          applyCaptureModeAcknowledgement(message.payload.mode, options);
+          applyCaptureModeAcknowledgement(message.payload.mode, current);
           break;
         case "capture-completed":
-          if (!options.enabled) return;
-          options.setDraft({
+          if (!current.enabled) return;
+          current.setDraft({
             ...message.payload,
             page_route: sanitizePreviewPageRoute(message.payload.page_route),
           });
-          options.setMode(null);
-          options.setCandidateLabel(null);
+          current.setMode(null);
+          current.setCandidateLabel(null);
           break;
         case "capture-cancelled":
-          options.setMode(null);
-          options.setCandidateLabel(null);
+          current.setMode(null);
+          current.setCandidateLabel(null);
           break;
         case "screenshot-region-selected":
-          if (options.enabled) {
-            options.captureScreenshot({
+          if (current.enabled) {
+            current.captureScreenshot({
               ...message.payload,
               page_route: sanitizePreviewPageRoute(message.payload.page_route),
             });
@@ -121,7 +125,7 @@ function usePreviewInspectorEvents(options: InspectorEventOptions) {
     }
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [options]);
+  }, []);
 }
 
 function belongsToSource(item: TaskPreviewFeedback, source: PreviewCaptureSource) {
