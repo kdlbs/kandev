@@ -31,7 +31,11 @@ func TestCreateComment_FanOutIncompleteSuppressesLegacyWakeButNotMention(t *test
 	rt := &recordingReactivity{result: &dashboard.TaskReactivityResult{}}
 	sentinelErr := fmt.Errorf("%w: task task-fanout-incomplete step review role \"reviewer\": boom",
 		engine.ErrCommentFanOutIncomplete)
-	disp := &recordingEngineDispatcher{handled: false, err: sentinelErr}
+	disp := &recordingEngineDispatcher{handled: false, err: &engine.CommentFanOutIncompleteError{
+		WorkflowStepID:           "step-review",
+		WorkflowStepTransitionID: 42,
+		Err:                      sentinelErr,
+	}}
 	eb := bus.NewMemoryEventBus(logger.Default())
 	var eventData map[string]string
 	if _, err := eb.Subscribe(events.OfficeCommentCreated, func(_ context.Context, event *bus.Event) error {
@@ -71,6 +75,45 @@ func TestCreateComment_FanOutIncompleteSuppressesLegacyWakeButNotMention(t *test
 	}
 	if _, hasFlag := eventData["engine_dispatched"]; hasFlag {
 		t.Fatalf("engine_dispatched = %q, want absent (trigger was not handled)", eventData["engine_dispatched"])
+	}
+	if eventData["workflow_step_id"] != "step-review" || eventData["workflow_step_transition_id"] != "42" {
+		t.Fatalf("retry identity = (%q, %q), want (step-review, 42)", eventData["workflow_step_id"], eventData["workflow_step_transition_id"])
+	}
+}
+
+func TestCreateComment_UntypedFanOutErrorSuppressesUnsafeEventRetry(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "task-untyped-fanout", "ws-1", "Fan-out incomplete", "todo", 1)
+	rt := &recordingReactivity{result: &dashboard.TaskReactivityResult{}}
+	sentinelErr := fmt.Errorf("%w: legacy dispatcher error", engine.ErrCommentFanOutIncomplete)
+	deps.svc.SetReactivityApplier(rt)
+	deps.svc.SetWorkflowEngineDispatcher(&recordingEngineDispatcher{handled: false, err: sentinelErr})
+	eb := bus.NewMemoryEventBus(logger.Default())
+	var eventData map[string]string
+	if _, err := eb.Subscribe(events.OfficeCommentCreated, func(_ context.Context, event *bus.Event) error {
+		eventData = event.Data.(map[string]string)
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	deps.svc.SetEventBus(eb)
+
+	comment := &models.TaskComment{
+		ID:         "comment-untyped-fanout",
+		TaskID:     "task-untyped-fanout",
+		AuthorType: "user",
+		AuthorID:   "user-1",
+		Body:       "please decide",
+		CreatedAt:  time.Now().UTC(),
+	}
+	if err := deps.svc.CreateComment(context.Background(), comment); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	if eventData["engine_retry_suppressed"] != "true" {
+		t.Fatalf("engine_retry_suppressed = %q, want true when origin identity is unavailable", eventData["engine_retry_suppressed"])
+	}
+	if !rt.calls[0].SkipAssigneeCommentWake {
+		t.Fatal("legacy assignee wake was not suppressed after incomplete fan-out")
 	}
 }
 

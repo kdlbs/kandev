@@ -4,8 +4,51 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 )
+
+func TestSchedulerIntegration_CancelsCommentRunAfterSameStepReentry(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := makeAgent("worker-comment-reentry", models.AgentRoleWorker)
+	agent.ExecutorPreference = `{"type":"local_pc"}`
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	svc.ExecSQL(t, `INSERT INTO tasks
+		(id, workspace_id, workflow_step_id, title, created_at, updated_at)
+		VALUES ('task-comment-reentry', 'ws-1', 'step-review', 'Review task',
+		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+	svc.ExecSQL(t, `CREATE TABLE task_step_transitions (
+		id INTEGER PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		to_workflow_step_id TEXT
+	)`)
+	svc.ExecSQL(t, `INSERT INTO task_step_transitions (id, task_id, to_workflow_step_id)
+		VALUES (1, 'task-comment-reentry', 'step-review'),
+		       (2, 'task-comment-reentry', 'step-review')`)
+
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskComment,
+		`{"task_id":"task-comment-reentry","workflow_step_id":"step-review","workflow_step_transition_id":"1"}`, ""); err != nil {
+		t.Fatalf("queue comment run: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	if mock.callCount() != 0 {
+		t.Fatalf("StartTask calls = %d, want 0 for an earlier visit to the same workflow step", mock.callCount())
+	}
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 1 || runs[0].Status != service.RunStatusCancelled {
+		t.Fatalf("runs = %+v, want the stale comment run cancelled", runs)
+	}
+}
 
 // TestSchedulerIntegration_BuildPromptContext_TaskCommentStageFromWorkflowStep
 // pins AC-OFFICE-GATE-COMMENT-003.4: the run's own workflow_step_id (the step

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -45,6 +46,24 @@ var ErrParticipantSeatUnfillable = errors.New("ensure_participant_seat: role unf
 // assignee wake — from every other comment-handler failure, which keeps
 // that wake.
 var ErrCommentFanOutIncomplete = errors.New("queue_run_for_each_participant: comment fan-out incomplete")
+
+// CommentFanOutIncompleteError records the workflow-step visit that a failed
+// comment fan-out evaluated. The dashboard carries this identity with the
+// subscriber retry so a later step cannot consume the old comment.
+type CommentFanOutIncompleteError struct {
+	WorkflowStepID           string
+	WorkflowStepTransitionID int64
+	Err                      error
+}
+
+func (e *CommentFanOutIncompleteError) Error() string {
+	if e == nil || e.Err == nil {
+		return ErrCommentFanOutIncomplete.Error()
+	}
+	return e.Err.Error()
+}
+
+func (e *CommentFanOutIncompleteError) Unwrap() error { return e.Err }
 
 // Target prefixes / sentinels recognised by QueueRunCallback.
 const (
@@ -481,6 +500,12 @@ func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID 
 		targetTaskID != in.State.TaskID &&
 		(ok || commentkeys.HasTaskCommentPrefix(in.OperationID)) {
 		out["source_task_id"] = in.State.TaskID
+	}
+	// Comment-triggered runs must retain the exact source-step visit. A task
+	// can leave a step and later return to the same step ID before launch, so
+	// the step ID alone is not a sufficient staleness check.
+	if ok && targetTaskID == in.State.TaskID {
+		out["workflow_step_transition_id"] = strconv.FormatInt(in.State.WorkflowStepTransitionID, 10)
 	}
 	if len(out) == 0 {
 		return nil

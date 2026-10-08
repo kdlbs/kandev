@@ -15,6 +15,30 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 )
 
+func TestQueueRunPayload_CommentIncludesWorkflowStepEntry(t *testing.T) {
+	in := ActionInput{
+		Trigger: TriggerOnComment,
+		State: MachineState{
+			TaskID:                   "task-1",
+			WorkflowStepTransitionID: 42,
+		},
+		Payload: OnCommentPayload{CommentID: "comment-1"},
+	}
+
+	got := queueRunPayload(in, nil, "task-1")
+	if got["workflow_step_transition_id"] != "42" {
+		t.Fatalf("workflow_step_transition_id = %#v, want string \"42\"", got["workflow_step_transition_id"])
+	}
+	in.State.WorkflowStepTransitionID = 0
+	if legacy := queueRunPayload(in, nil, "task-1"); legacy["workflow_step_transition_id"] != "0" {
+		t.Fatalf("legacy workflow_step_transition_id = %#v, want string \"0\"", legacy["workflow_step_transition_id"])
+	}
+	in.State.WorkflowStepTransitionID = 42
+	if crossTask := queueRunPayload(in, nil, "another-task"); crossTask["workflow_step_transition_id"] != nil {
+		t.Fatalf("cross-task payload has source entry identity: %#v", crossTask["workflow_step_transition_id"])
+	}
+}
+
 func newObservedFanOutLogger(t *testing.T) (*logger.Logger, *observer.ObservedLogs) {
 	t.Helper()
 	core, logs := observer.New(zap.WarnLevel)

@@ -850,7 +850,7 @@ func (s *DashboardService) CreateComment(ctx context.Context, comment *models.Ta
 		return err
 	}
 	dispatch := s.dispatchCommentEngineTrigger(ctx, comment)
-	s.publishCommentCreated(ctx, comment, dispatch.handled)
+	s.publishCommentCreated(ctx, comment, dispatch)
 	s.runReactivityForComment(ctx, comment, dispatch.handled || dispatch.suppressAssigneeWake)
 	return nil
 }

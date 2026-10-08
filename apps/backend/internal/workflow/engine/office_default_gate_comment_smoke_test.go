@@ -213,6 +213,13 @@ func TestOfficeDefaultWorkflow_OnCommentPartialFailureRedispatchQueuesOncePerSea
 	if !errors.Is(err, ErrCommentFanOutIncomplete) {
 		t.Fatalf("first dispatch error = %v, want it to wrap ErrCommentFanOutIncomplete", err)
 	}
+	var failure *CommentFanOutIncompleteError
+	if !errors.As(err, &failure) {
+		t.Fatalf("first dispatch error = %v, want the original workflow entry", err)
+	}
+	if failure.WorkflowStepID != steps["review"].ID || failure.WorkflowStepTransitionID == 0 {
+		t.Fatalf("failure entry = (%q, %d), want review step and a transition ID", failure.WorkflowStepID, failure.WorkflowStepTransitionID)
+	}
 	if len(queue.calls) != 1 || queue.calls[0].AgentProfileID != "rev-A" {
 		t.Fatalf("after first dispatch, calls = %+v, want exactly one call for rev-A", queue.calls)
 	}
@@ -225,7 +232,13 @@ func TestOfficeDefaultWorkflow_OnCommentPartialFailureRedispatchQueuesOncePerSea
 		t.Fatal("operation marked applied despite a fan-out error; redispatch would be silently dropped")
 	}
 
-	// Subscriber redispatch: same comment, same OperationID.
+	// Subscriber redispatch: same comment, same OperationID and workflow visit.
+	in.Payload = OnCommentPayload{
+		CommentID:                     "c-1",
+		AuthorID:                      "coordinator-1",
+		RetryWorkflowStepID:           failure.WorkflowStepID,
+		RetryWorkflowStepTransitionID: failure.WorkflowStepTransitionID,
+	}
 	if _, err := eng.HandleTrigger(ctx, in); err != nil {
 		t.Fatalf("redispatch: %v", err)
 	}
@@ -243,4 +256,97 @@ func TestOfficeDefaultWorkflow_OnCommentPartialFailureRedispatchQueuesOncePerSea
 	if seenAgents["rev-A"] != 1 || seenAgents["rev-B"] != 1 {
 		t.Fatalf("per-agent call counts = %+v, want exactly one call each for rev-A and rev-B", seenAgents)
 	}
+}
+
+func TestOfficeDefaultWorkflow_OnCommentRetryDoesNotFollowTaskToAnotherStepEntry(t *testing.T) {
+	tests := []struct {
+		name        string
+		move        func(*smokeStore, map[string]StepSpec)
+		wantCalls   int
+		wantApplied bool
+	}{
+		{
+			name: "Review to Work",
+			move: func(store *smokeStore, steps map[string]StepSpec) {
+				store.setCurrentStep(steps["work"].ID)
+			},
+			wantCalls:   1,
+			wantApplied: true,
+		},
+		{
+			name: "Review to Approval",
+			move: func(store *smokeStore, steps map[string]StepSpec) {
+				store.setCurrentStep(steps["approval"].ID)
+			},
+			wantCalls:   1,
+			wantApplied: true,
+		},
+		{
+			name: "Review to Work and back to Review",
+			move: func(store *smokeStore, steps map[string]StepSpec) {
+				store.setCurrentStep(steps["work"].ID)
+				store.setCurrentStep(steps["review"].ID)
+			},
+			wantCalls:   1,
+			wantApplied: true,
+		},
+		{
+			name:        "same Review entry",
+			move:        func(*smokeStore, map[string]StepSpec) {},
+			wantCalls:   2,
+			wantApplied: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			steps := compileWorkflow(loadEmbeddedTemplate(t, "office-default"))
+			store := newSmokeStore(steps)
+			store.setCurrentStep(steps["review"].ID)
+			queue := &dedupingFlakyRunQueue{failOnceForAgent: "rev-B"}
+			eng := newGateCommentEngine(store, queue, newSmokeParticipants(steps), newFakeDecisionStore())
+			in := HandleInput{
+				TaskID: "task-1", SessionID: "sess-1",
+				Trigger:     TriggerOnComment,
+				OperationID: "op-comment-stale-retry",
+				Payload:     OnCommentPayload{CommentID: "c-1", AuthorID: "coordinator-1"},
+			}
+
+			_, err := eng.HandleTrigger(ctx, in)
+			if !errors.Is(err, ErrCommentFanOutIncomplete) {
+				t.Fatalf("first dispatch error = %v, want incomplete fan-out", err)
+			}
+			failure := commentFanOutFailure(t, err)
+			tt.move(store, steps)
+			in.Payload = OnCommentPayload{
+				CommentID:                     "c-1",
+				AuthorID:                      "coordinator-1",
+				RetryWorkflowStepID:           failure.WorkflowStepID,
+				RetryWorkflowStepTransitionID: failure.WorkflowStepTransitionID,
+			}
+			if _, err := eng.HandleTrigger(ctx, in); err != nil {
+				t.Fatalf("redispatch: %v", err)
+			}
+			if len(queue.calls) != tt.wantCalls {
+				t.Fatalf("queued runs = %d, want %d; calls: %+v", len(queue.calls), tt.wantCalls, queue.calls)
+			}
+			applied, err := store.IsOperationApplied(ctx, in.OperationID)
+			if err != nil {
+				t.Fatalf("check operation applied: %v", err)
+			}
+			if applied != tt.wantApplied {
+				t.Fatalf("operation applied = %t, want %t", applied, tt.wantApplied)
+			}
+		})
+	}
+}
+
+func commentFanOutFailure(t *testing.T, err error) *CommentFanOutIncompleteError {
+	t.Helper()
+	var failure *CommentFanOutIncompleteError
+	if !errors.As(err, &failure) {
+		t.Fatalf("fan-out error %v does not carry its workflow entry", err)
+	}
+	return failure
 }
