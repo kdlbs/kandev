@@ -184,8 +184,127 @@ func TestTerminalCaptureFenceBlocksSuccessorAdmission(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("terminal handler did not release completion")
 	}
+	require.Eventually(t, func() bool {
+		execution.promptLifecycleMu.Lock()
+		defer execution.promptLifecycleMu.Unlock()
+		return execution.turnChangeCaptureGeneration == 0
+	}, time.Second, 10*time.Millisecond, "successful capture did not release the generation fence")
 	if _, err := manager.BeginPrompt(execution.ID); err != nil {
 		t.Fatalf("successor remained fenced after terminal capture: %v", err)
+	}
+}
+
+func TestTerminalCaptureKeepsCompletionResponsiveAndFencesSuccessor(t *testing.T) {
+	for _, outcome := range []string{"end_turn", "cancelled"} {
+		t.Run(outcome, func(t *testing.T) {
+			manager := newTestManager(t)
+			execution := &AgentExecution{
+				ID: "execution-terminal-budget-" + outcome, TaskID: "task-terminal-budget",
+				SessionID: "session-terminal-budget", TaskEnvironmentID: "env-terminal-budget",
+				Status: v1.AgentStatusRunning, promptDoneCh: make(chan PromptCompletionSignal, 1),
+			}
+			execution.setPromptTurnID("turn-terminal-budget-" + outcome)
+			require.NoError(t, manager.executionStore.Add(execution))
+			generation, err := manager.BeginPrompt(execution.ID)
+			require.NoError(t, err)
+			handler := &turnChangeCaptureCompletionBudgetHandler{
+				firstDeadline: make(chan time.Time, 1), retryEntered: make(chan struct{}),
+				releaseFirst: make(chan struct{}), releaseRetry: make(chan struct{}),
+				firstReturned: make(chan struct{}),
+			}
+			var releaseOnce sync.Once
+			var releaseFirstOnce sync.Once
+			releaseRetry := func() {
+				releaseOnce.Do(func() { close(handler.releaseRetry) })
+				releaseFirstOnce.Do(func() { close(handler.releaseFirst) })
+			}
+			t.Cleanup(releaseRetry)
+			manager.SetTurnChangeCaptureHandler(handler)
+
+			started := time.Now()
+			eventDone := make(chan bool, 1)
+			go func() {
+				eventDone <- manager.handleCompleteEvent(execution, &agentctl.AgentEvent{
+					Type: "complete", SessionID: execution.SessionID,
+					TurnID: "turn-terminal-budget-" + outcome, PromptGeneration: generation,
+					Data: map[string]any{"stop_reason": outcome},
+				})
+			}()
+			<-handler.firstDeadline
+			var handled bool
+			select {
+			case handled = <-eventDone:
+			case <-time.After(turnChangeTerminalCompletionBudget):
+				t.Fatal("terminal capture delayed completion signal")
+			}
+			completedAt := time.Now()
+			require.True(t, handled)
+			select {
+			case <-handler.firstReturned:
+				t.Fatal("terminal capture completed before publishing completion")
+			default:
+			}
+			require.LessOrEqual(t, completedAt.Sub(started), turnChangeTerminalCompletionBudget)
+			releaseFirstOnce.Do(func() { close(handler.releaseFirst) })
+			select {
+			case <-handler.retryEntered:
+			case <-time.After(turnChangeTerminalCompletionBudget + time.Second):
+				t.Fatal("failed terminal attempt was not retried")
+			}
+			require.Equal(t, v1.AgentStatusReady, execution.Status)
+			if _, err := manager.BeginPrompt(execution.ID); !errors.Is(err, ErrPromptSettlementPending) {
+				t.Fatalf("successor admission error = %v, want capture-fence rejection", err)
+			}
+			releaseRetry()
+			require.Eventually(t, func() bool {
+				execution.promptLifecycleMu.Lock()
+				defer execution.promptLifecycleMu.Unlock()
+				return execution.turnChangeCaptureGeneration == 0
+			}, 2*time.Second, 10*time.Millisecond, "successful retry did not release the generation fence")
+		})
+	}
+}
+
+func TestStopWaitsForRetriedTerminalCaptureBeforeReturning(t *testing.T) {
+	manager := newTestManager(t)
+	execution := &AgentExecution{
+		ID: "execution-stop-terminal-retry", TaskID: "task-stop-terminal-retry",
+		SessionID: "session-stop-terminal-retry", TaskEnvironmentID: "env-stop-terminal-retry",
+		Status: v1.AgentStatusRunning, promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	execution.setPromptTurnID("turn-stop-terminal-retry")
+	require.NoError(t, manager.executionStore.Add(execution))
+	_, err := manager.BeginPrompt(execution.ID)
+	require.NoError(t, err)
+	handler := &turnChangeCaptureCompletionBudgetHandler{
+		firstDeadline: make(chan time.Time, 1), retryEntered: make(chan struct{}),
+		releaseRetry: make(chan struct{}),
+	}
+	manager.SetTurnChangeCaptureHandler(handler)
+	var releaseOnce sync.Once
+	releaseRetry := func() { releaseOnce.Do(func() { close(handler.releaseRetry) }) }
+	t.Cleanup(releaseRetry)
+	stopDone := make(chan struct{})
+	go func() {
+		manager.preserveTurnChangesBeforeStop(context.Background(), execution)
+		close(stopDone)
+	}()
+	<-handler.firstDeadline
+	select {
+	case <-handler.retryEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("failed terminal capture was not retried before executor stop")
+	}
+	select {
+	case <-stopDone:
+		t.Fatal("executor stop returned while terminal capture retry was pending")
+	default:
+	}
+	releaseRetry()
+	select {
+	case <-stopDone:
+	case <-time.After(time.Second):
+		t.Fatal("executor stop did not continue after terminal capture settled")
 	}
 }
 
@@ -373,6 +492,58 @@ type turnChangeCaptureRetryHandler struct {
 	mu        sync.Mutex
 	attempts  int
 	terminals chan TurnChangeTerminal
+}
+
+type turnChangeCaptureCompletionBudgetHandler struct {
+	mu            sync.Mutex
+	attempts      int
+	firstDeadline chan time.Time
+	releaseFirst  chan struct{}
+	firstReturned chan struct{}
+	retryEntered  chan struct{}
+	releaseRetry  chan struct{}
+}
+
+func (h *turnChangeCaptureCompletionBudgetHandler) AdmitTurnChanges(context.Context, TurnChangeAdmission, TurnChangeCheckpointClient) error {
+	return nil
+}
+
+func (h *turnChangeCaptureCompletionBudgetHandler) FinishTurnChanges(ctx context.Context, _ TurnChangeTerminal, _ TurnChangeCheckpointClient) error {
+	h.mu.Lock()
+	h.attempts++
+	attempt := h.attempts
+	h.mu.Unlock()
+	if attempt == 1 {
+		deadline, _ := ctx.Deadline()
+		h.firstDeadline <- deadline
+		if h.releaseFirst != nil {
+			select {
+			case <-ctx.Done():
+				close(h.firstReturned)
+				return ctx.Err()
+			case <-h.releaseFirst:
+				close(h.firstReturned)
+				return errors.New("transient terminal capture failure")
+			}
+		}
+		timer := time.NewTimer(1500 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			if h.firstReturned != nil {
+				close(h.firstReturned)
+			}
+			return ctx.Err()
+		case <-timer.C:
+			if h.firstReturned != nil {
+				close(h.firstReturned)
+			}
+			return context.DeadlineExceeded
+		}
+	}
+	close(h.retryEntered)
+	<-h.releaseRetry
+	return nil
 }
 
 func (h *turnChangeCaptureRetryHandler) AdmitTurnChanges(context.Context, TurnChangeAdmission, TurnChangeCheckpointClient) error {

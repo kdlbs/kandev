@@ -10,6 +10,7 @@ import (
 )
 
 const turnChangeTerminalCaptureTimeout = 20 * time.Second
+const turnChangeTerminalCompletionBudget = time.Second
 const turnChangeCancelRequestTimeout = 2 * time.Second
 const turnChangeRetryInitialDelay = 250 * time.Millisecond
 const turnChangeRetryMaximumDelay = 5 * time.Second
@@ -87,19 +88,9 @@ func (m *Manager) finishTurnChangeCapture(execution *AgentExecution, event *agen
 	// The completion claim keeps the generation immutable. Release its mutex
 	// while checkpoint and database I/O run; BeginPrompt observes the fence.
 	execution.promptLifecycleMu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), turnChangeTerminalCaptureTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), turnChangeTerminalCompletionBudget)
 	client, release := execution.AcquireAgentCtlClient()
-	terminal := TurnChangeTerminal{
-		TurnChangeAdmission: turnChangeAdmission(execution, event.PromptGeneration, event.TurnID),
-		At:                  time.Now().UTC(),
-		Outcome:             stopReason,
-	}
-	if isError {
-		terminal.Outcome = kubernetesLaunchOutcomeError
-	}
-	execution.messageMu.Lock()
-	terminal.FinalAssistantMessageID = execution.lastAssistantMessageIDByGeneration[event.PromptGeneration]
-	execution.messageMu.Unlock()
+	terminal := turnChangeTerminalForEvent(execution, event, isError, stopReason)
 	finishErr := m.turnChangeCaptureHandler.FinishTurnChanges(ctx, terminal, client)
 	if finishErr != nil {
 		m.logger.Warn("failed to finalize turn-change capture at terminal boundary",
@@ -116,7 +107,40 @@ func (m *Manager) finishTurnChangeCapture(execution *AgentExecution, event *agen
 	}
 }
 
+// startTurnChangeCapture keeps completion publication independent from Git and
+// persistence latency. The generation fence remains held until capture succeeds.
+func (m *Manager) startTurnChangeCapture(execution *AgentExecution, event *agentctl.AgentEvent, isError bool, stopReason string) {
+	if m == nil || m.turnChangeCaptureHandler == nil || event == nil || event.PromptGeneration == 0 ||
+		!eligibleTurnChangeExecution(execution) || event.TurnID == "" ||
+		execution.turnChangeCaptureGeneration != event.PromptGeneration {
+		return
+	}
+	terminal := turnChangeTerminalForEvent(execution, event, isError, stopReason)
+	execution.promptLifecycleMu.Unlock()
+	m.scheduleTurnChangeCapture(execution, terminal, 0, turnChangeTerminalCaptureTimeout)
+	execution.promptLifecycleMu.Lock()
+}
+
+func turnChangeTerminalForEvent(execution *AgentExecution, event *agentctl.AgentEvent, isError bool, stopReason string) TurnChangeTerminal {
+	terminal := TurnChangeTerminal{
+		TurnChangeAdmission: turnChangeAdmission(execution, event.PromptGeneration, event.TurnID),
+		At:                  time.Now().UTC(),
+		Outcome:             stopReason,
+	}
+	if isError {
+		terminal.Outcome = kubernetesLaunchOutcomeError
+	}
+	execution.messageMu.Lock()
+	terminal.FinalAssistantMessageID = execution.lastAssistantMessageIDByGeneration[event.PromptGeneration]
+	execution.messageMu.Unlock()
+	return terminal
+}
+
 func (m *Manager) retryTurnChangeCapture(execution *AgentExecution, terminal TurnChangeTerminal) {
+	m.scheduleTurnChangeCapture(execution, terminal, turnChangeRetryInitialDelay, turnChangeTerminalCaptureTimeout)
+}
+
+func (m *Manager) scheduleTurnChangeCapture(execution *AgentExecution, terminal TurnChangeTerminal, firstDelay, firstTimeout time.Duration) {
 	if m == nil || m.stopCh == nil || m.shuttingDown.Load() {
 		return
 	}
@@ -132,18 +156,21 @@ func (m *Manager) retryTurnChangeCapture(execution *AgentExecution, terminal Tur
 
 	go func() {
 		defer m.wg.Done()
-		delay := turnChangeRetryInitialDelay
+		delay := firstDelay
+		timeout := firstTimeout
 		for {
-			timer := time.NewTimer(delay)
-			select {
-			case <-m.stopCh:
-				timer.Stop()
-				return
-			case <-timer.C:
+			if delay > 0 {
+				timer := time.NewTimer(delay)
+				select {
+				case <-m.stopCh:
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
 			}
 
 			client, release := execution.AcquireAgentCtlClient()
-			ctx, cancel := m.turnChangeRetryAttemptContext()
+			ctx, cancel := m.turnChangeAttemptContext(timeout)
 			err := m.turnChangeCaptureHandler.FinishTurnChanges(ctx, terminal, client)
 			cancel()
 			release()
@@ -158,16 +185,21 @@ func (m *Manager) retryTurnChangeCapture(execution *AgentExecution, terminal Tur
 				zap.String("execution_id", execution.ID),
 				zap.Uint64("prompt_generation", terminal.PromptGeneration),
 				zap.Error(err))
-			delay *= 2
+			if delay == 0 {
+				delay = turnChangeRetryInitialDelay
+			} else {
+				delay *= 2
+			}
 			if delay > turnChangeRetryMaximumDelay {
 				delay = turnChangeRetryMaximumDelay
 			}
+			timeout = turnChangeTerminalCaptureTimeout
 		}
 	}()
 }
 
-func (m *Manager) turnChangeRetryAttemptContext() (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(context.Background(), turnChangeTerminalCaptureTimeout)
+func (m *Manager) turnChangeAttemptContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	watchDone := make(chan struct{})
 	go func() {
 		select {
@@ -239,6 +271,12 @@ func (m *Manager) preserveTurnChangesBeforeStop(ctx context.Context, execution *
 	beginTurnChangeCaptureLocked(execution, generation)
 	event := &agentctl.AgentEvent{PromptGeneration: generation, TurnID: turnID}
 	m.finishTurnChangeCapture(execution, event, false, "stopped")
+	if execution.turnChangeCaptureGeneration == generation {
+		done := execution.turnChangeCaptureDone
+		execution.promptLifecycleMu.Unlock()
+		m.waitForTurnChangeCaptureBeforeStop(ctx, execution, generation, done)
+		return
+	}
 	execution.promptLifecycleMu.Unlock()
 }
 

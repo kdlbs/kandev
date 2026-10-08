@@ -440,7 +440,7 @@ func (m *Manager) finishPromptCompletion(
 		return
 	}
 
-	m.finishTurnChangeCapture(execution, event, isError, completeEventStopReason(event))
+	m.startTurnChangeCapture(execution, event, isError, completeEventStopReason(event))
 	handleCompleteEventSignalLeased(execution, event, isError)
 	if claim.locked && event.PromptGeneration != 0 {
 		// Finalization and signal delivery are complete, so a later prompt can

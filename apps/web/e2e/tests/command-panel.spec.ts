@@ -97,7 +97,9 @@ test.describe("Command Panel", () => {
     await expect(dialog.getByText("Go to Settings")).toBeVisible({ timeout: 5_000 });
 
     // Should NOT show a "Files" group — file search is now separate
-    await expect(dialog.getByText("Files").first()).not.toBeVisible({ timeout: 2_000 });
+    await expect(
+      dialog.locator("[cmdk-group-heading]").getByText("Files", { exact: true }),
+    ).toHaveCount(0);
   });
 
   test("common aliases find home commands", async ({ testPage }) => {
