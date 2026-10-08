@@ -60,6 +60,7 @@ type mockAgent struct {
 	sessionModes                   map[acp.SessionId]acp.SessionModeId
 	commandsEmitted                map[acp.SessionId]bool
 	dynamicFallbackCounterSessions map[acp.SessionId]acp.SessionId
+	promptSuggestionSessions       map[acp.SessionId]bool
 	nextSessionID                  uint64
 	mu                             sync.Mutex
 }
@@ -180,6 +181,7 @@ func (a *mockAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (
 	}
 	a.sessionMCPServers[sid] = cloneMCPServerDefs(sessionMCPServers)
 	a.mu.Unlock()
+	a.recordPromptSuggestionRequest(sid, req.Meta)
 
 	primeKandevMCPToolCatalog(ctx)
 	// Emit available commands asynchronously after the session/new response
@@ -384,6 +386,7 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 		}
 	}
 	sessionMCPServers := registerACPMcpServers(req.McpServers)
+	a.recordPromptSuggestionRequest(req.SessionId, req.Meta)
 	a.mu.Lock()
 	if a.sessions == nil {
 		a.sessions = make(map[acp.SessionId]bool)
@@ -500,6 +503,7 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if promptCtx.Err() != nil {
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	}
+	go a.emitPromptSuggestionAfterResponse(req.SessionId, prompt)
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 }
 
@@ -698,7 +702,8 @@ func (a *mockAgent) ListSessions(_ context.Context, _ acp.ListSessionsRequest) (
 }
 
 // ResumeSession is not supported by the mock; LoadSession is used instead.
-func (a *mockAgent) ResumeSession(_ context.Context, _ acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
+func (a *mockAgent) ResumeSession(_ context.Context, req acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
+	a.recordPromptSuggestionRequest(req.SessionId, req.Meta)
 	return acp.ResumeSessionResponse{}, nil
 }
 

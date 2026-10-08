@@ -487,6 +487,7 @@ func agentctlInstanceRequest(req *ExecutorCreateRequest, workspacePath string) a
 		),
 		McpServers:                 req.McpServers,
 		McpMode:                    req.McpMode,
+		PromptSuggestions:          req.PromptSuggestions,
 		McpProviders:               req.McpProviders,
 		McpProfile:                 req.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromReq(req),

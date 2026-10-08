@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TipTapInput } from "./tiptap-input";
 import { ChatInputFocusHint } from "./chat-input-focus-hint";
+import { ComposerPromptSuggestionHint } from "./composer-prompt-suggestion-hint";
 import { ResizeHandle } from "./resize-handle";
 import { ChatInputToolbar } from "./chat-input-toolbar";
 import { ContextZone } from "./context-items/context-zone";
@@ -26,6 +27,8 @@ import { useComposerActivity, useComposerFocus } from "./composer-disclosure";
 
 export type ChatInputEditorAreaProps = {
   inputRef: React.RefObject<import("./tiptap-input").TipTapInputHandle | null>;
+  promptSuggestion?: string | null;
+  onPromptSuggestionDismiss?: () => void;
   value: string;
   handleChange: (val: string) => void;
   handleSubmitWithReset: () => void;
@@ -181,15 +184,61 @@ function useChatPluginComposer(p: {
   );
 }
 
+/** The editable composer surface: the TipTap editor and its suggestion accept affordance. */
+function ChatInputEditorField({
+  p,
+  onSubmit,
+}: {
+  p: ChatInputEditorAreaProps;
+  onSubmit: () => void;
+}) {
+  const { inputRef, value, isDisabled, setIsInputFocused, promptSuggestion } = p;
+  return (
+    <EditorWithTooltip
+      showTooltip={p.showRequestChangesTooltip}
+      isEnhancingPrompt={p.isEnhancingPrompt}
+      className={p.editorClassName}
+    >
+      <TipTapInput
+        ref={inputRef}
+        value={value}
+        onChange={p.handleChange}
+        onSubmit={onSubmit}
+        placeholder={p.inputPlaceholder}
+        disabled={isDisabled}
+        planModeEnabled={p.planModeEnabled}
+        submitKey={p.submitKey}
+        onFocus={() => setIsInputFocused(true)}
+        onBlur={() => setIsInputFocused(false)}
+        sessionId={p.sessionId}
+        taskId={p.taskId}
+        workspaceId={p.workspaceId ?? null}
+        entityReferencesEnabled={p.entityReferencesEnabled ?? false}
+        onAddContextFile={p.onAddContextFile}
+        onToggleContextFile={p.onToggleContextFile}
+        planContextEnabled={p.planContextEnabled}
+        onImagePaste={p.addFiles}
+        onPlanModeChange={p.onPlanModeChange}
+        promptSuggestion={promptSuggestion ?? null}
+        onPromptSuggestionDismiss={p.onPromptSuggestionDismiss}
+      />
+      {promptSuggestion && !value.trim() && !isDisabled && (
+        <ComposerPromptSuggestionHint
+          suggestion={promptSuggestion}
+          onAccept={() => inputRef.current?.acceptPromptSuggestion()}
+        />
+      )}
+    </EditorWithTooltip>
+  );
+}
+
 export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   useComposerActivity({ busy: Boolean(p.isEnhancingPrompt) });
   const { t } = useTranslation("chat");
-  const { inputRef, value, handleChange, handleSubmitWithReset, inputPlaceholder } = p;
-  const { isDisabled, planModeEnabled, planModeAvailable, mcpServers } = p;
-  const { submitKey, setIsInputFocused, sessionId, taskId, planContextEnabled } = p;
-  const { onAddContextFile, onToggleContextFile, addFiles, fileInputRef } = p;
-  const { showRequestChangesTooltip, isAgentBusy, onPlanModeChange, taskTitle, taskDescription } =
-    p;
+  const { inputRef, value, handleSubmitWithReset, planModeEnabled, planModeAvailable } = p;
+  const { mcpServers, submitKey, sessionId, taskId, planContextEnabled } = p;
+  const { onToggleContextFile, addFiles, fileInputRef } = p;
+  const { isAgentBusy, onPlanModeChange, taskTitle, taskDescription } = p;
   const { isSending, onCancel, contextCount, contextPopoverOpen, setContextPopoverOpen } = p;
   const { contextFiles, onImplementPlan, onEnhancePrompt, isEnhancingPrompt } = p;
   const { isUtilityConfigured, hideSessionsDropdown, minimalToolbar, hideAgentControls } = p;
@@ -199,7 +248,16 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const userContextCount = planContextEnabled ? Math.max(0, contextCount - 1) : contextCount;
   const hasContent = value.trim().length > 0 || userContextCount > 0;
   // Block submit while enhancing prompt, but keep editor editable for programmatic updates
-  const wrappedSubmit = isEnhancingPrompt || p.submitDisabled ? () => {} : handleSubmitWithReset;
+  const canSubmit = !isEnhancingPrompt && !p.submitDisabled;
+  const wrappedSubmit = canSubmit ? handleSubmitWithReset : () => {};
+  // The send button, like the submit shortcut, sends a visible suggestion from an empty draft.
+  const toolbarSubmit = canSubmit
+    ? () => {
+        const handle = inputRef.current;
+        if (handle) handle.submitWithPromptSuggestion(handleSubmitWithReset);
+        else handleSubmitWithReset();
+      }
+    : wrappedSubmit;
 
   const composerCapability = useChatPluginComposer({
     inputRef,
@@ -218,33 +276,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const handleAttachFiles = useCallback(() => fileInputRef.current?.click(), [fileInputRef]);
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-      <EditorWithTooltip
-        showTooltip={showRequestChangesTooltip}
-        isEnhancingPrompt={isEnhancingPrompt}
-        className={p.editorClassName}
-      >
-        <TipTapInput
-          ref={inputRef}
-          value={value}
-          onChange={handleChange}
-          onSubmit={wrappedSubmit}
-          placeholder={inputPlaceholder}
-          disabled={isDisabled}
-          planModeEnabled={planModeEnabled}
-          submitKey={submitKey}
-          onFocus={() => setIsInputFocused(true)}
-          onBlur={() => setIsInputFocused(false)}
-          sessionId={sessionId}
-          taskId={taskId}
-          workspaceId={p.workspaceId ?? null}
-          entityReferencesEnabled={p.entityReferencesEnabled ?? false}
-          onAddContextFile={onAddContextFile}
-          onToggleContextFile={onToggleContextFile}
-          planContextEnabled={planContextEnabled}
-          onImagePaste={addFiles}
-          onPlanModeChange={onPlanModeChange}
-        />
-      </EditorWithTooltip>
+      <ChatInputEditorField p={p} onSubmit={wrappedSubmit} />
       <FileInput fileInputRef={fileInputRef} addFiles={addFiles} />
       <ChatInputToolbar
         planModeEnabled={planModeEnabled}
@@ -264,7 +296,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         submitDisabledReason={submitDisabledReason}
         isSending={isSending}
         onCancel={onCancel}
-        onSubmit={wrappedSubmit}
+        onSubmit={toolbarSubmit}
         composerCapability={composerCapability}
         composerSurface={taskId ? "task-chat" : "quick-chat"}
         submitKey={submitKey}

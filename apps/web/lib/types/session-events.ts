@@ -10,6 +10,7 @@ import type {
 import type {
   AgentCapabilitiesPayload,
   SessionInfoPayload,
+  SessionPromptSuggestionPayload,
   SessionModelsPayload,
   SessionModelSelectionWarningPayload,
   SessionMCPStatusPayload,
@@ -354,6 +355,10 @@ export type SessionBackendMessageMap = {
     SessionMCPStatusPayload
   >;
   "session.info_updated": BackendMessage<"session.info_updated", SessionInfoPayload>;
+  "session.prompt_suggestion": BackendMessage<
+    "session.prompt_suggestion",
+    SessionPromptSuggestionPayload
+  >;
   "session.todos_updated": BackendMessage<"session.todos_updated", SessionTodosPayload>;
   "session.prompt_usage": BackendMessage<"session.prompt_usage", SessionPromptUsagePayload>;
   "session.usage_updated": BackendMessage<"session.usage_updated", SessionUsageUpdatedPayload>;

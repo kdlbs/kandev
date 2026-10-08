@@ -142,6 +142,11 @@ type ExecutePromptRequest struct {
 	TaskDescription     string `json:"task_description,omitempty"`
 	UserPrompt          string `json:"user_prompt,omitempty"`
 	ConversationHistory string `json:"conversation_history,omitempty"`
+
+	// FallbackAgentProfileID is used only when the utility agent inherits and no
+	// default utility profile exists. The prompt suggestion fallback sends the
+	// session's own agent profile here.
+	FallbackAgentProfileID string `json:"fallback_agent_profile_id,omitempty"`
 }
 
 // ExecutePromptResponse is the response from executing a utility prompt.

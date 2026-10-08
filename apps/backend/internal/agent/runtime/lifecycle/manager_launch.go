@@ -1401,6 +1401,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpServers:                     mcpServers,
 		PreviousExecutionID:            reqWithWorktree.PreviousExecutionID,
 		McpMode:                        reqWithWorktree.McpMode,
+		PromptSuggestions:              m.promptSuggestionsForLaunch(ctx, reqWithWorktree.McpMode),
 		McpProviders:                   reqWithWorktree.McpProviders,
 		McpProfile:                     reqWithWorktree.McpProfile,
 		AuthToken:                      launchAuthToken,

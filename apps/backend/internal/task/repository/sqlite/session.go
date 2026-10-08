@@ -437,6 +437,23 @@ func (r *Repository) AbandonTurn(ctx context.Context, id string) error {
 	return err
 }
 
+// GetLatestTurnBySessionID returns the last turn ListTurnsBySession would list
+// for the session, or nil when the session has no turns.
+func (r *Repository) GetLatestTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error) {
+	query := fmt.Sprintf(`
+		SELECT id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at
+		FROM task_session_turns turn_row
+		WHERE turn_row.task_session_id = ? AND %s
+		ORDER BY turn_row.started_at DESC, turn_row.created_at DESC, turn_row.id DESC
+		LIMIT 1
+	`, turnHistoryPredicate(r.ro.DriverName(), "turn_row"))
+	turn, err := scanTurnRow(r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return turn, err
+}
+
 // ListTurnsBySession returns all turns for a session ordered by start time
 func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTurnsBySession")

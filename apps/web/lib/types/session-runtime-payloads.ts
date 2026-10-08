@@ -17,6 +17,8 @@ export type AgentCapabilitiesPayload = {
   supports_image: boolean;
   supports_audio: boolean;
   supports_embedded_context: boolean;
+  /** True when the session asked its Claude Code agent for native next-prompt suggestions. */
+  supports_prompt_suggestions?: boolean;
   auth_methods: AuthMethodInfoPayload[];
   timestamp: string;
 };
@@ -112,6 +114,14 @@ export type SessionMCPStatusPayload = {
   session_id: string;
   history: MCPAttachmentHistoryPayload;
   timestamp: string;
+};
+
+/** Native next-prompt suggestion bound to the session turn that produced it. */
+export type SessionPromptSuggestionPayload = {
+  task_id: string;
+  session_id: string;
+  turn_id: string;
+  text: string;
 };
 
 export type SessionInfoPayload = {

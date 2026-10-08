@@ -143,6 +143,12 @@ type Adapter struct {
 	// `capabilities.Meta` map would race.
 	promptQueueing bool
 
+	// claudeCodeAgent records that the initialize response advertised the
+	// `_meta.claudeCode` namespace, i.e. a Claude Code bridge that can emit
+	// native prompt suggestions. Negotiated, not named: custom ACP agents
+	// wrapping Claude Code qualify; other harnesses never do.
+	claudeCodeAgent bool
+
 	// Update channel
 	updatesCh chan AgentEvent
 
@@ -573,6 +579,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		acpclient.WithUpdateHandler(a.enqueueACPUpdate),
 		acpclient.WithPermissionHandler(a.handlePermissionRequest),
 		acpclient.WithCursorTaskHandler(a.handleCursorTask),
+		acpclient.WithExtensionNotificationHandler(a.handleExtensionNotification),
 	)
 
 	// Create ACP SDK connection. Raise the inbound notification queue cap
@@ -620,6 +627,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	}
 	a.capabilities = resp.AgentCapabilities
 	promptQueueing := agentAdvertisesPromptQueueing(resp.AgentCapabilities)
+	claudeCodeAgent := agentAdvertisesClaudeCode(resp.AgentCapabilities)
 
 	span.SetAttributes(
 		attribute.String("agent_name", a.agentInfo.Name),
@@ -639,16 +647,18 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	a.mu.Lock()
 	a.availableAuthMethods = authMethods
 	a.promptQueueing = promptQueueing
+	a.claudeCodeAgent = claudeCodeAgent
 	a.mu.Unlock()
 
 	// Emit agent capabilities event with prompt capabilities and auth methods
 	a.sendUpdate(AgentEvent{
-		Type:                    streams.EventTypeAgentCapabilities,
-		SupportsImage:           a.capabilities.PromptCapabilities.Image,
-		SupportsAudio:           a.capabilities.PromptCapabilities.Audio,
-		SupportsEmbeddedContext: a.capabilities.PromptCapabilities.EmbeddedContext,
-		SupportsPromptQueueing:  promptQueueing,
-		AuthMethods:             authMethods,
+		Type:                      streams.EventTypeAgentCapabilities,
+		SupportsImage:             a.capabilities.PromptCapabilities.Image,
+		SupportsAudio:             a.capabilities.PromptCapabilities.Audio,
+		SupportsEmbeddedContext:   a.capabilities.PromptCapabilities.EmbeddedContext,
+		SupportsPromptQueueing:    promptQueueing,
+		SupportsPromptSuggestions: a.cfg.PromptSuggestions && claudeCodeAgent,
+		AuthMethods:               authMethods,
 	})
 
 	if err := a.applyProviderGatewayAuth(ctx); err != nil {

@@ -133,6 +133,9 @@ type ChatInputContainerProps = {
   hideAgentControls?: boolean;
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
+  /** Next-prompt suggestion for the current turn, rendered as ghost text. */
+  promptSuggestion?: string | null;
+  onPromptSuggestionDismiss?: () => void;
 };
 
 type ContainerState = ReturnType<typeof useChatInputContainer>;
@@ -238,6 +241,8 @@ function buildEditorAreaProps(
     hideSessionsDropdown: p.hideSessionsDropdown,
     minimalToolbar: p.minimalToolbar,
     hideAgentControls: p.hideAgentControls,
+    promptSuggestion: p.promptSuggestion ?? null,
+    onPromptSuggestionDismiss: p.onPromptSuggestionDismiss,
     hidePlanMode: p.hidePlanMode,
   };
 }
@@ -438,7 +443,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         showRequestChangesTooltip={p.showRequestChangesTooltip}
         hasPendingComments={s.hasPendingComments}
         planModeEnabled={props.planModeEnabled}
-        showFocusHint={s.showFocusHint}
+        showFocusHint={s.showFocusHint && !(p.promptSuggestion && !s.value.trim())}
         needsRecovery={(props.needsRecovery ?? false) || executorUnavailable}
         addFiles={s.addFiles}
         contextAreaProps={buildContextAreaProps(s, p)}

@@ -39,11 +39,16 @@ var builtinDefs = []builtinDef{
 	{"builtin-enhance-prompt", "enhance-prompt", "Enhance and expand a user prompt with context and clarity", "enhance-prompt"},
 	{"builtin-summarize-session", "summarize-session", "Summarize a session conversation for context handover", "summarize-session"},
 	{"builtin-code-review", "code-review", "Review the task's changed files and return anchored findings", "code-review"},
+	{SuggestNextPromptAgentID, "suggest-next-prompt", "Predict the user's next prompt when the chat agent has no native suggestions", "suggest-next-prompt"},
 }
 
 // CodeReviewAgentID is the built-in utility agent that supplies the default
 // reviewer identity for a native code-review pass.
 const CodeReviewAgentID = "builtin-code-review"
+
+// SuggestNextPromptAgentID is the built-in utility agent the chat composer
+// runs to predict the next prompt for agents without native suggestions.
+const SuggestNextPromptAgentID = "builtin-suggest-next-prompt"
 
 // builtinSeedAgentID is the inference-agent ID embedded in seeded built-in
 // rows. Kept aligned with the schema DEFAULT so a row that survives every

@@ -661,6 +661,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		AssumeMcpSse:               assumeMcpSse,
 		AssumeMcpHttp:              assumeMcpHttp,
 		McpMode:                    req.McpMode,
+		PromptSuggestions:          req.PromptSuggestions,
 		RequiresProcessKill:        requiresProcessKill,
 		StripEnv:                   stripEnv,
 		ProviderGatewayAuth:        req.ProviderGatewayAuth,

@@ -115,7 +115,22 @@ func (c *Controller) PreparePromptRequest(ctx context.Context, req dto.ExecutePr
 		UserPrompt:          req.UserPrompt,
 		ConversationHistory: req.ConversationHistory,
 	}
+	defaults = withFallbackProfile(defaults, req.FallbackAgentProfileID)
 	return c.svc.PreparePromptRequest(ctx, req.UtilityAgentID, tmplCtx, defaults, sessionless)
+}
+
+// withFallbackProfile adds the request's last-resort profile to a copy of the
+// defaults, leaving the caller's value untouched.
+func withFallbackProfile(defaults *service.DefaultUtilitySettings, fallbackProfileID string) *service.DefaultUtilitySettings {
+	if fallbackProfileID == "" {
+		return defaults
+	}
+	merged := service.DefaultUtilitySettings{}
+	if defaults != nil {
+		merged = *defaults
+	}
+	merged.FallbackProfileID = fallbackProfileID
+	return &merged
 }
 
 // CreateCall creates a call record for tracking.

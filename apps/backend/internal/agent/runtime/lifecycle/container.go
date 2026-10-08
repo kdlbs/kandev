@@ -60,6 +60,7 @@ type ContainerConfig struct {
 	MainRepoGitDir                 string // Path to main repo's .git directory (for worktrees)
 	McpServers                     []McpServerConfig
 	McpMode                        string
+	PromptSuggestions              bool
 	McpProviders                   []string
 	McpProfile                     *mcpprofile.Context
 	PrepareScript                  string // Script to run inside container before agent starts (e.g., clone repo)
@@ -138,6 +139,7 @@ func buildContainerCreateInstanceRequest(
 		AssumeMcpSse:               assumeMcpSse,
 		AssumeMcpHttp:              assumeMcpHttp,
 		McpMode:                    config.McpMode,
+		PromptSuggestions:          config.PromptSuggestions,
 		McpProviders:               config.McpProviders,
 		McpProfile:                 config.McpProfile,
 		NamespacesMCPToolsByServer: namespacesMCPToolsByServerFromAgent(config.AgentConfig),

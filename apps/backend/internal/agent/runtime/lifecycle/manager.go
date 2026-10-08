@@ -235,6 +235,9 @@ type Manager struct {
 	// launches. See manager_base_branches.go.
 	baseBranchProvider BaseBranchProvider
 
+	// promptSuggestionsPreference reads the user's next-prompt suggestion opt-in at launch.
+	promptSuggestionsPreference PromptSuggestionsPreference
+
 	// comparisonTargetProvider hydrates task-repository comparison bindings so
 	// every workspace creation path can seed agentctl from durable state.
 	comparisonTargetProvider ComparisonTargetProvider

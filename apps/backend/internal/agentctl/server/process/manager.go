@@ -1538,6 +1538,7 @@ func (m *Manager) buildAdapterConfig() error {
 		NotificationQueueCapacity:        m.cfg.NotificationQueueCapacity,
 		PromptCancelJoinTimeout:          m.cfg.PromptCancelJoinTimeout,
 		ProviderInterruptionContinuation: m.cfg.ProviderInterruptionContinuation,
+		PromptSuggestions:                m.cfg.PromptSuggestions,
 		ProviderGatewayAuth:              m.cfg.ProviderGatewayAuth,
 	}
 

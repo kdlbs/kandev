@@ -668,6 +668,7 @@ type ExecutorCreateRequest struct {
 	NativeRuntimeVersion  string
 	PreviousExecutionID   string   // Non-empty when reconnecting to a previous execution
 	McpMode               string   // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
+	PromptSuggestions     bool     // Ask a native-suggestion agent to emit next-prompt suggestions
 	McpProviders          []string // Normalized provider capabilities attached to the task
 	McpProfile            *mcpprofile.Context
 	AuthToken             string // Previously handshaken agentctl token for reconnects

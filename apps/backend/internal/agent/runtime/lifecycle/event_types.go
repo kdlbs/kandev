@@ -270,11 +270,12 @@ type AgentStreamEventData struct {
 	AvailableModes []streams.SessionModeInfo `json:"available_modes,omitempty"`
 
 	// Agent capabilities (from "agent_capabilities" event)
-	SupportsImage           bool                     `json:"supports_image"`
-	SupportsAudio           bool                     `json:"supports_audio"`
-	SupportsEmbeddedContext bool                     `json:"supports_embedded_context"`
-	SupportsPromptQueueing  bool                     `json:"supports_prompt_queueing"`
-	AuthMethods             []streams.AuthMethodInfo `json:"auth_methods,omitempty"`
+	SupportsImage             bool                     `json:"supports_image"`
+	SupportsAudio             bool                     `json:"supports_audio"`
+	SupportsEmbeddedContext   bool                     `json:"supports_embedded_context"`
+	SupportsPromptQueueing    bool                     `json:"supports_prompt_queueing"`
+	SupportsPromptSuggestions bool                     `json:"supports_prompt_suggestions,omitempty"`
+	AuthMethods               []streams.AuthMethodInfo `json:"auth_methods,omitempty"`
 
 	// Session models (from "session_models" event)
 	CurrentModelID string                     `json:"current_model_id,omitempty"`
@@ -652,15 +653,16 @@ func (p SessionModeEventPayload) GetSessionID() string {
 
 // AgentCapabilitiesEventPayload is the payload for agent capabilities events.
 type AgentCapabilitiesEventPayload struct {
-	TaskID                  string                   `json:"task_id"`
-	SessionID               string                   `json:"session_id"`
-	AgentID                 string                   `json:"agent_id"`
-	SupportsImage           bool                     `json:"supports_image"`
-	SupportsAudio           bool                     `json:"supports_audio"`
-	SupportsEmbeddedContext bool                     `json:"supports_embedded_context"`
-	SupportsPromptQueueing  bool                     `json:"supports_prompt_queueing"`
-	AuthMethods             []streams.AuthMethodInfo `json:"auth_methods"`
-	Timestamp               string                   `json:"timestamp"`
+	TaskID                    string                   `json:"task_id"`
+	SessionID                 string                   `json:"session_id"`
+	AgentID                   string                   `json:"agent_id"`
+	SupportsImage             bool                     `json:"supports_image"`
+	SupportsAudio             bool                     `json:"supports_audio"`
+	SupportsEmbeddedContext   bool                     `json:"supports_embedded_context"`
+	SupportsPromptQueueing    bool                     `json:"supports_prompt_queueing"`
+	SupportsPromptSuggestions bool                     `json:"supports_prompt_suggestions,omitempty"`
+	AuthMethods               []streams.AuthMethodInfo `json:"auth_methods"`
+	Timestamp                 string                   `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

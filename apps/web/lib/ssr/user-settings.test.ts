@@ -235,6 +235,21 @@ describe("agent-generated task title defaults", () => {
   });
 });
 
+// @covers AC-UI-PROMPT-SUGGEST-001.1 AC-UI-PROMPT-SUGGEST-001.5
+describe("prompt suggestion preference defaults", () => {
+  it("defaults both switches to disabled", () => {
+    const fields = buildCoreFields({});
+    expect(fields.promptSuggestions).toBe(false);
+    expect(fields.promptSuggestionsFallback).toBe(false);
+  });
+
+  it("maps explicit values", () => {
+    const fields = buildCoreFields({ prompt_suggestions: true, prompt_suggestions_fallback: true });
+    expect(fields.promptSuggestions).toBe(true);
+    expect(fields.promptSuggestionsFallback).toBe(true);
+  });
+});
+
 describe("agent tab close behavior defaults", () => {
   it("defaults unknown and missing values to delete_session", () => {
     expect(buildCoreFields({}).agentTabCloseBehavior).toBe("delete_session");

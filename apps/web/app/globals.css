@@ -1370,6 +1370,22 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   height: 0;
 }
 
+/* Next-prompt suggestion ghost text: wraps on narrow composers instead of overflowing. */
+.tiptap p.is-editor-empty.has-prompt-suggestion:first-child::before {
+  content: attr(data-prompt-suggestion);
+  opacity: 0.85;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* Keeps the text clear of the accept chip in the composer's top-right corner. */
+  padding-right: 11rem;
+}
+
+@media (any-pointer: coarse) {
+  .tiptap p.is-editor-empty.has-prompt-suggestion:first-child::before {
+    padding-right: 7.5rem;
+  }
+}
+
 .tiptap p {
   margin: 0;
 }

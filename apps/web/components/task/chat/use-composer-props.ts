@@ -5,6 +5,7 @@ import type {
   ChatSubmitResult,
 } from "@/components/task/chat/chat-input-container";
 import type { ChatPanelState } from "./use-chat-panel-state";
+import { useComposerPromptSuggestion } from "./use-composer-prompt-suggestion";
 
 type ComposerPropsArgs = {
   panelState: ChatPanelState;
@@ -57,6 +58,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
   } = args;
   const { resolvedSessionId, taskId, isAgentBusy, isWorking, needsRecovery, planModeEnabled } =
     panelState;
+  const promptSuggestion = useComposerPromptSuggestion(panelState, isMoving);
   const canQueueWhileStarting = panelState.inputMode === "queue" && panelState.isQueueReady;
   const supportsSteering = panelState.supportsSteering;
   const hasContextComments =
@@ -66,6 +68,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     panelState.walkthroughComments.length > 0 ||
     panelState.messageComments.length > 0;
   return {
+    ...promptSuggestion,
     onSubmit: handleSubmit,
     sessionId: resolvedSessionId,
     taskId,

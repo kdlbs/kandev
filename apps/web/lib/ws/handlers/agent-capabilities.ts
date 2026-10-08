@@ -10,6 +10,7 @@ export function registerAgentCapabilitiesHandlers(store: StoreApi<AppState>): Ws
       if (!payload?.session_id) {
         return;
       }
+      syncPromptSuggestionSource(store, payload);
       store.getState().setAgentCapabilities(payload.session_id, {
         supportsImage: payload.supports_image,
         supportsAudio: payload.supports_audio,
@@ -30,4 +31,20 @@ export function registerAgentCapabilitiesHandlers(store: StoreApi<AppState>): Ws
       });
     },
   };
+}
+
+/** Mirrors the backend's prompt_suggestion_source metadata so the composer
+ *  stops (or starts) using the utility fallback without a reload. */
+function syncPromptSuggestionSource(store: StoreApi<AppState>, payload: AgentCapabilitiesPayload) {
+  const session = store.getState().taskSessions.items[payload.session_id];
+  if (!session) return;
+  const current = session.metadata?.prompt_suggestion_source;
+  const native = Boolean(payload.supports_prompt_suggestions);
+  if (!native && current !== "native") return;
+  const next = native ? "native" : "none";
+  if (current === next) return;
+  store.getState().setTaskSession({
+    ...session,
+    metadata: { ...(session.metadata ?? {}), prompt_suggestion_source: next },
+  });
 }

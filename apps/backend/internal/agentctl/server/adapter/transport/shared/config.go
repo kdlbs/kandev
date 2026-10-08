@@ -68,6 +68,10 @@ type Config struct {
 	// ProviderGatewayAuth, when set, makes the ACP adapter authenticate the
 	// agent against an OpenAI-compatible gateway right after initialize.
 	ProviderGatewayAuth *acpprovider.GatewayAuth
+
+	// PromptSuggestions asks an agent with native next-prompt suggestions to
+	// emit them. Only dialects that support native suggestions act on it.
+	PromptSuggestions bool
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

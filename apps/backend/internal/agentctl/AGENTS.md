@@ -92,6 +92,23 @@ The adapter prefers advertised `session/resume` for any agent to restore the sav
 
 OpenCode v1 and v2 share the `opencode-acp` identity and can access the same session database. For OpenCode only, a failed restore never falls back to `session/new`, including a recognized missing-session response. Preserve the native session ID and return the load error to the existing Kandev session.
 
+### Native prompt suggestions (Claude)
+
+When the instance config has `PromptSuggestions` and the agent advertised the
+`_meta.claudeCode` namespace on `initialize` (negotiated, not named, so a custom
+ACP agent wrapping Claude Code qualifies), `session/new`, `session/load`, and
+`session/resume` carry this `_meta`:
+`claudeCode.options.promptSuggestions` plus
+`claudeCode.emitRawSDKMessages: [{type: "prompt_suggestion"}]`.
+claude-agent-acp then forwards Claude Code's suggestion as the
+`_claude/sdkMessage` extension notification. The Kandev ACP SDK fork routes
+client-side `_` notifications to `HandleExtensionNotification`.
+`adapter_prompt_suggestion.go` emits `prompt_suggestion` only for the active
+ACP session and only while no `session/prompt` is in flight. A suggestion that
+arrives after a newer prompt belongs to a superseded turn and is dropped. The
+backend decides the flag at launch (`lifecycle/prompt_suggestions.go`).
+Design: `docs/specs/ui/system-design/composer-prompt-suggestions.md`.
+
 ### ACP permission identity and injected MCP approval
 
 The ACP client preserves `ToolCall.Name` and `ToolCall.Meta` on the internal

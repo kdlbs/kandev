@@ -105,6 +105,8 @@ export type ExecutePromptRequest = {
   task_description?: string;
   user_prompt?: string;
   conversation_history?: string;
+  /** Last-resort agent profile when the utility agent inherits and no default exists. */
+  fallback_agent_profile_id?: string;
 };
 
 export type ExecutePromptResponse = {

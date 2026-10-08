@@ -77,6 +77,10 @@ const (
 	// EventTypeSessionInfo indicates ACP session metadata such as title changed.
 	EventTypeSessionInfo = "session_info"
 
+	// EventTypePromptSuggestion carries the agent's native prediction of the
+	// user's next prompt, emitted after a turn completes. Text holds it.
+	EventTypePromptSuggestion = "prompt_suggestion"
+
 	// EventTypeResponseAttemptReset indicates that the provider abandoned its
 	// current response attempt and will continue the active prompt with a new one.
 	EventTypeResponseAttemptReset = "response_attempt_reset"
@@ -405,6 +409,11 @@ type AgentEvent struct {
 	// does not by itself promise the agent will fold that prompt into the running
 	// turn. See docs/specs/platform/requirements/mid-turn-steering.md.
 	SupportsPromptQueueing bool `json:"supports_prompt_queueing"`
+
+	// SupportsPromptSuggestions indicates this session asked a Claude Code agent
+	// for native next-prompt suggestions, so the composer must not run its
+	// utility fallback for it.
+	SupportsPromptSuggestions bool `json:"supports_prompt_suggestions,omitempty"`
 
 	// AuthMethods lists authentication methods from ACP initialize.
 	AuthMethods []AuthMethodInfo `json:"auth_methods,omitempty"`

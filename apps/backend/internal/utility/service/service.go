@@ -353,6 +353,9 @@ type DefaultUtilitySettings struct {
 	AgentID   string
 	Model     string
 	ProfileID string
+	// FallbackProfileID is used only when the utility agent inherits and no
+	// default profile exists. It is validated like any explicit binding.
+	FallbackProfileID string
 }
 
 // PreparePromptRequest prepares a prompt request by resolving the template.
@@ -379,6 +382,9 @@ func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tm
 		case models.UsesDefaultProfile(agent):
 			if defaults != nil {
 				profileID = defaults.ProfileID
+				if profileID == "" {
+					profileID = defaults.FallbackProfileID
+				}
 			}
 		case agent.ProfileBindingState == models.ProfileBindingUnconfigured:
 			return nil, ErrProfileUnconfigured

@@ -2,6 +2,13 @@ import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useComposerProps } from "./use-composer-props";
 
+vi.mock("./use-composer-prompt-suggestion", () => ({
+  useComposerPromptSuggestion: () => ({
+    promptSuggestion: null,
+    onPromptSuggestionDismiss: () => {},
+  }),
+}));
+
 function composerArgs() {
   return {
     panelState: {

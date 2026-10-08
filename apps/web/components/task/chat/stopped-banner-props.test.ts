@@ -4,6 +4,13 @@ import { buildStoppedBannerProps } from "./chat-input-container";
 import { shouldHideChatInputForLaunchError, shouldRenderStoppedSessionBanner } from "./types";
 import { useComposerProps } from "./use-composer-props";
 
+vi.mock("./use-composer-prompt-suggestion", () => ({
+  useComposerPromptSuggestion: () => ({
+    promptSuggestion: null,
+    onPromptSuggestionDismiss: () => {},
+  }),
+}));
+
 function composerArgs(errorMessage: string) {
   return {
     panelState: {
