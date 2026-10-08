@@ -126,6 +126,7 @@ test.describe("Mobile workspace repository sets", () => {
     await testPage.getByTestId(`repository-set-remove-${seedData.repositoryId}`).tap();
     await addRepository.tap();
     await testPage.getByRole("option", { name: /E2E Repo/ }).tap();
+    await expect(testPage.getByTestId("repository-set-add-repository-dropdown")).toHaveCount(0);
     await expect(
       testPage.getByTestId(`repository-set-base-${seedData.repositoryId}`),
     ).toBeVisible();
