@@ -58,9 +58,9 @@ inherits. Inheritance is unaffected by reparenting.
   process table is enumerated. For one snapshot, and for a process set whose
   liveness does not change while the probe runs, any enumeration order shall
   produce the same result. The qualifier is not a loophole: a candidate whose
-  pid was recycled before the probe began shall be rejected under every
-  enumeration order, because its start-time datum differs from the snapshot's
-  whenever it is read.
+  pid was recycled after the snapshot and before candidate re-validation shall
+  be rejected under every enumeration order, because its start-time datum
+  differs from the snapshot's whenever it is read.
 - **AC-DW-ORPHAN-001.6:** The probe shall remain a read-only sample. Repeating
   it against an unchanged process table shall return the same result and shall
   change no session, projection or stored state.
@@ -100,9 +100,11 @@ platform permits. Where it is unavailable the probe shall degrade to the
 descendant-only answer it gives today rather than guess, and the limit shall be
 recorded rather than left for an operator to discover.
 
-- **AC-DW-ORPHAN-002.1:** On a platform that cannot read another process's
-  environment, the probe shall return the result produced by the descendant walk
-  alone. Behaviour on those platforms shall be unchanged by this capability.
+- **AC-DW-ORPHAN-002.1:** When the process-table read succeeds but the platform
+  cannot read another process's environment, the probe shall return the result
+  produced by the descendant walk alone. Behaviour on those platforms shall be
+  unchanged by this capability. When no process-table reader is available, the
+  probe shall return `unknown` as required by legacy AC-27.
 - **AC-DW-ORPHAN-002.2:** When a candidate process's environment cannot be read
   because the process exited, or because it belongs to another user, that
   candidate shall be skipped and the probe shall continue. A skipped candidate
@@ -113,9 +115,9 @@ recorded rather than left for an operator to discover.
   whose start-time datum no longer matches is skipped. Such a failure shall never
   produce `unknown`: the `unknown` of AC-DW-ORPHAN-002.3 is reserved for a
   failure of the process-table read, and shall not be reached from this step.
-- **AC-DW-ORPHAN-002.3:** When the process-table read itself fails, the probe
-  shall return `unknown`, unchanged from today. A failed table read shall never
-  be reported as `settled`.
+- **AC-DW-ORPHAN-002.3:** When no process-table reader is available or its read
+  fails, the probe shall return `unknown`, unchanged from today. Neither case
+  shall be reported as `settled`.
 - **AC-DW-ORPHAN-002.4:** When the probe request carries an empty session
   identity, the probe shall skip the identity pass entirely, read no process
   environment, and return the result of the descendant walk alone. Together with

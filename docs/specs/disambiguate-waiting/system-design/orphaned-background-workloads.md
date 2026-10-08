@@ -131,6 +131,8 @@ The Linux environment read was confirmed against a reparented orphan
 (`ppid=1`): a token exported before the wrapper shell ran was found in
 `/proc/<pid>/environ` after the shell exited. The Darwin result is the reason
 REQ-DW-ORPHAN-002 exists rather than a platform-uniform guarantee.
+Other builds, including BSD and Windows, have no process-table reader and
+return `unknown` before the descendant walk (legacy AC-27).
 
 ### The identity already in place
 
@@ -151,18 +153,19 @@ added.
 `probe.ProbeBackgroundWorkloads` gains a session identity argument and one new
 pass. The flow, in order:
 
-1. Read the process table in one snapshot, unchanged. A read error returns
-   `unknown` (AC-DW-ORPHAN-002.3).
+1. Read the process table in one snapshot, unchanged. A missing process-table
+   reader or a read error returns `unknown` (AC-DW-ORPHAN-002.3).
 2. Confirm the agent process is present, unchanged. An absent root returns
    `unknown`.
 3. Walk transitive descendants and test each against the truncated turn start,
    unchanged. If one qualifies, return `live` immediately — the orphan pass does
    not run and no environment is read (AC-DW-ORPHAN-002.5).
-4. Otherwise, return `settled` without reading any environment if either
-   precondition holds: the platform reader does not implement the
-   environment-read capability (AC-DW-ORPHAN-002.1), or the session id on the
-   probe request is empty (AC-DW-ORPHAN-002.4). Both are evaluable without
-   touching a process, and both are checked before any candidate is considered.
+4. Otherwise, after a successful process-table read, return `settled` without
+   reading any environment if either precondition holds: the reader does not
+   implement the environment-read capability (AC-DW-ORPHAN-002.1), or the
+   session id on the probe request is empty (AC-DW-ORPHAN-002.4). Both are
+   checked before any candidate is considered. A missing process-table reader
+   returns `unknown` in step 1.
 5. Otherwise, for each process in the same snapshot that is not a zombie, is not
    already a descendant, is neither the agent process nor an ancestor of it, and
    started at or after the truncated turn start, read its environment and
@@ -174,10 +177,10 @@ pass. The flow, in order:
    compared is the platform's own invariant datum, never a value re-derived from
    the current wall clock (AC-DW-ORPHAN-001.11). Equal data return `live`
    (AC-DW-ORPHAN-001.1). Two outcomes skip the candidate and continue the scan
-   with the next one: a different datum, meaning the pid was recycled between the
-   snapshot and the read; and a read that fails outright, meaning the candidate is
-   gone (AC-DW-ORPHAN-002.7). Neither is ever reported as `unknown` — that
-   belongs to step 1 alone.
+   with the next one: a different datum, meaning the pid was recycled between
+   the snapshot and start-time re-validation; or a failed read, meaning the
+   candidate is gone (AC-DW-ORPHAN-002.7). Neither is ever reported as
+   `unknown`; that belongs to step 1 alone.
 7. Otherwise return `settled`.
 
 The agent process, the ACP bridge, the Claude CLI and any stdio MCP server all
@@ -214,20 +217,18 @@ a process outside it, so it adds no syscall and cannot fail.
 **Why the match re-validates.** Legacy `spec.md` fixes the identity rule for this
 whole feature: a process is identified by the pair (pid, start time), never by a
 bare pid, because a recycled pid would otherwise inherit the wrong verdict. The
-snapshot obeys that rule, but an environment is necessarily read by bare pid
-afterwards, so a candidate that exits and has its pid reused between the two
-could be matched on the dead process's start-time datum and the live process's
-environment — and on this host the reused pid plausibly does carry the session's
-`KANDEV_SESSION_ID`, since the agent spawns processes constantly. Re-reading that
-datum closes that window. It costs one extra read per probe at most,
-because re-validation runs only on a match and a passing match ends the scan.
+snapshot obeys that rule, but the environment and start-time reads use a bare
+pid. If a candidate exits and its pid is reused after the snapshot but before
+re-validation, the new process could carry the session's `KANDEV_SESSION_ID`.
+Re-reading the start-time datum detects the replacement. It costs one extra read
+per match, and a passing match ends the scan.
 
 The scan is a filter over one immutable snapshot, so its outcome cannot depend
 on enumeration order (AC-DW-ORPHAN-001.5), and it holds no state between calls
 (AC-DW-ORPHAN-001.6, AC-DW-ORPHAN-001.7). The re-validation read is the one
 step that consults live state rather than the snapshot, and it does not weaken
-that: a pid recycled before the pass began reports a start-time datum different
-from the snapshot's no matter when it is read, so such a candidate is rejected
+that: a pid recycled after the snapshot and before re-validation reports a
+start-time datum different from the snapshot's, so that candidate is rejected
 under every enumeration order. A process that exits *during* the pass can be observed
 differently by two orderings, which is why AC-DW-ORPHAN-001.5 is scoped to a
 process set whose liveness does not change while the pass runs.
@@ -244,9 +245,11 @@ both passes (AC-DW-ORPHAN-001.4).
 
 Environment reading joins the existing `processTableReader` seam as an optional
 capability. The Linux reader implements it over `/proc/<pid>/environ`. The
-Darwin reader does not implement it, and the Windows build stays as it is: a nil
-reader, `unknown` everywhere. When the capability is absent the orphan pass is
-skipped entirely and the descendant result stands (AC-DW-ORPHAN-002.1).
+Darwin reader does not implement it, so Darwin keeps the descendant-only result.
+BSD, Windows and other builds have no process-table reader and return `unknown`
+before the descendant walk (legacy AC-27). The descendant-only result applies
+only when a process-table read succeeds but the reader lacks environment access
+(AC-DW-ORPHAN-002.1).
 
 The capability answers one question — does this pid carry this session id — and
 it owns the parsing, because the blob's shape is the platform's business rather
@@ -262,8 +265,9 @@ the scan ran. A trailing empty field after the final NUL is not an entry.
 The same capability supplies the start-time re-read that re-validation needs,
 since only the platform reader knows where a start time comes from. Ordering is normative:
 read the environment first, then the start-time datum, then compare against the
-snapshot. Read in that order, a pid recycled at any point before the comparison
-yields a datum that differs from the snapshot's and is skipped.
+snapshot. Read in that order, a pid recycled after the snapshot and before
+start-time re-validation yields a datum that differs from the snapshot's and is
+skipped.
 
 **What re-validation compares, and what it must never compare.** The compared
 value is the platform's own start-time datum: the number the kernel reports for a
@@ -331,11 +335,12 @@ materially different host.
 | Candidate exited between snapshot and environment read | Skip the candidate, continue. It is not live. |
 | Candidate owned by another user | Skip the candidate, continue. It is not ours. |
 | Environment unreadable for any other reason | Skip the candidate, continue (AC-DW-ORPHAN-002.2). |
-| Platform cannot read environments at all | Descendant-only result, unchanged (AC-DW-ORPHAN-002.1). |
+| Process-table read succeeds, but platform cannot read environments (Darwin) | Descendant-only result, unchanged (AC-DW-ORPHAN-002.1). |
+| No process-table reader is available (BSD, Windows and other unsupported builds) | `unknown` before the descendant walk (AC-DW-ORPHAN-002.3; legacy AC-27). |
 | Process-table read fails | `unknown`, unchanged (AC-DW-ORPHAN-002.3). |
 | Probe session id on the request is empty | Descendant-only result; the identity scan is skipped and no environment is read (AC-DW-ORPHAN-002.4). |
 | Agent launched without `KANDEV_SESSION_ID` | Descendant-only result, reached by ordinary non-matching rather than a check. No descendant carries the variable, so the identity scan runs and matches nothing (AC-DW-ORPHAN-002.8). |
-| Candidate's pid recycled between the snapshot and the environment read | The re-read start-time datum differs from the snapshot's, so the candidate is skipped rather than matched, preserving the legacy (pid, start time) identity rule. |
+| Candidate's pid recycled after the snapshot and before re-validation | The re-read start-time datum differs from the snapshot's, so the candidate is skipped rather than matched, preserving the legacy (pid, start time) identity rule. |
 | Re-validation read fails outright (candidate exited before it could be read) | Skip the candidate, continue the scan. Never `unknown` (AC-DW-ORPHAN-002.7). |
 | Candidate is unchanged and still running, but its start time was re-derived instead of re-read | Rejected as a false mismatch, and the live orphan reads `settled`. This is the failure AC-DW-ORPHAN-001.11 forbids by fixing the comparison to the platform's invariant datum. |
 | Orphan leaked by an earlier turn is still alive | Excluded by the start-time predicate (AC-DW-ORPHAN-001.2). It reads `live` only for the turn that started it, which is the same bound the legacy leaked-orphan row already accepts. |
@@ -380,11 +385,14 @@ test could not create the condition.
 
 Coverage belongs in the `probe` package's real-process-tree suite,
 `probe_realtree_test.go`, which is gated at runtime and runs for real on Linux in
-CI. Three cases are required by the requirements and none exists today: a child
-that runs a workload and exits before the sample must read `live`; a workload
-left over from an earlier turn must not; and an unchanged, still-running
-candidate must re-validate successfully after a delay long enough to move the
-wall clock (AC-DW-ORPHAN-001.11).
+CI. The required cases exist:
+[TestProbeRealTree_ReparentedWorkloadAttributedBySessionID](../../../../apps/backend/internal/agentctl/server/process/probe/probe_realtree_test.go#L240)
+checks that a reparented workload reads `live`;
+[TestProbeRealTree_PreTurnReparentedWorkload_Settled](../../../../apps/backend/internal/agentctl/server/process/probe/probe_realtree_test.go#L259)
+checks that work from an earlier turn does not count; and
+[TestProbeRealTree_ReparentedWorkloadRevalidatesAfterDelay](../../../../apps/backend/internal/agentctl/server/process/probe/probe_realtree_test.go#L295)
+checks that an unchanged candidate remains live after a delay between snapshot
+capture and re-validation (AC-DW-ORPHAN-001.11).
 
 The third case must live here and not in the fake-reader unit suite, and the
 reason is the point of the criterion: `fakeProcessTableReader` serves stored
