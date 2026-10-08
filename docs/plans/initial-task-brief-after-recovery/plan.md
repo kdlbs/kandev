@@ -260,7 +260,7 @@ below. PostgreSQL parity remains unverified because this environment has no
   initial-brief marker, while queue draining keeps its accepted-dispatch guard.
   The full orchestrator package and focused work-order and race suites pass
   after this correction; fresh remote checks for the resulting commit remain
-  the delivery gate.
+  the delivery gate at the time of that review.
 
 Design validation on 2026-10-07:
 
@@ -271,6 +271,32 @@ Design validation on 2026-10-07:
   their linked documents, and prospective handler, service, and E2E changed paths.
   This is structural package evidence, not final implementation coverage.
 - `git diff --check` passed; new work orders are unstaged and uncommitted.
+
+### PR E2E triage (2026-10-08)
+
+The first PR E2E run after remediation, `37688349104` on head
+`8e296c1d0d0046208654700214c4fb504da63d70`, failed the mobile and desktop queue
+admission cases described in Task 01. The base had advanced to
+`c40f6d96d726b8ff765c038ceabacf50405ba9be`; the affected queue tests, helpers,
+and backend queue implementation were unchanged by that base advance.
+
+Both cases passed without retries in local synthetic-merge replays against the
+then-current base `c40f6d96d726b8ff765c038ceabacf50405ba9be`. The mobile shard's
+assigned project completed with 58 passed and one skipped. The desktop case
+passed at its assigned position, but the wider replay was not clean: a newer
+mobile fork-comparison test could not read the linked worktree's `.git` pointer
+from the Docker container. The downloaded shard manifest no longer matched the
+current test catalog, so its file assignment was replayed directly.
+
+The base later advanced to `db0348d1623ea9dc06e28c85afbcba9e4c087c06`. No
+files changed between those base revisions overlap the PR's changed-file set.
+On synthetic merge `d5e946c24cf5b38b7cf2b948185b817195556d63` (head
+`8e296c1d0d0046208654700214c4fb504da63d70`, base `db0348d1623ea9dc06e28c85afbcba9e4c087c06`),
+the desktop and mobile queue-admission cases both passed with retries disabled
+(2 passed, 49.6s). Docker was unavailable to the runner, so this focused replay
+used host mode. These local replays do not replace exact-head PR checks, and the
+PostgreSQL parity test remains unverified because `KANDEV_TEST_POSTGRES_DSN` is
+unset.
 
 ## Risks
 

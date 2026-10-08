@@ -201,8 +201,36 @@ treating any accepted queued turn as a pending initial brief. The guard now
 checks only the dedicated first-brief marker; queue-drain paths keep their
 separate accepted-dispatch checks. The regression, the full orchestrator
 package, the focused work-order suite, and the focused race suite pass after
-this correction. Fresh remote checks for the resulting commit must be reviewed
-before delivery is complete.
+this correction. Fresh remote checks for the resulting commit remained the
+delivery gate at the time; see the PR E2E triage below.
 
 PostgreSQL parity remains unverified because `KANDEV_TEST_POSTGRES_DSN` is
 unset; no skipped run is counted as a pass.
+
+### PR E2E triage results (2026-10-08)
+
+The PR check run `37688349104` on head `8e296c1d0d0046208654700214c4fb504da63d70`
+failed E2E shards 3 and 11. The mobile case retained `/sleep 30` after its
+direct send; the desktop case retained the accepted queued follow-up after its
+queue-add response was dropped. Both cases set their local retry count to zero.
+
+On a synthetic merge against the then-current base
+`c40f6d96d726b8ff765c038ceabacf50405ba9be`, the desktop case passed in isolation
+and at its original shard position (23.6s). The retry-disabled mobile project
+replay of shard 3 passed 58 tests with one skip; the failed case passed at
+position 6 (22.6s). The desktop shard replay passed the queue case at position
+24 but did not produce a clean shard result (276 passed, 1 skipped, 1 failure):
+a newer mobile fork-comparison test failed because the Docker container could
+not resolve the linked worktree's host `.git` pointer. The current catalog had
+also moved past the downloaded CI manifest, so the assigned file list was
+replayed directly.
+
+The latest base is `db0348d1623ea9dc06e28c85afbcba9e4c087c06`; the files changed
+since `c40f6d96d726b8ff765c038ceabacf50405ba9be` do not overlap the PR's changed
+files. On synthetic merge `d5e946c24cf5b38b7cf2b948185b817195556d63` (head
+`8e296c1d0d0046208654700214c4fb504da63d70`), the desktop case
+`reconciles without duplicating a queued message` passed in 22.2s and the mobile
+case `reconciles through a touch submit` passed in 22.4s (2 passed, 49.6s,
+zero retries). Docker was unavailable, so the focused replay used host mode.
+These results do not replace the exact-head PR check result. PostgreSQL parity
+remains unverified.
