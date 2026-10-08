@@ -23,6 +23,11 @@ the native identity, ownership, cancellation, and original-replay constraints.
 
 ## Decision
 
+Availability is amended by the
+[October 8 graduation decision](2026-10-08-unconditional-interruption-continuation.md):
+supported continuation becomes unconditional and its release toggle is retired.
+The safety, hidden-prompt, and ownership decisions below remain authoritative.
+
 After a supported short-retryable provider failure settles, an enabled concrete
 task conversation may receive the exact internal prompt `continue` when every
 observed foreground tool has reported unambiguous successful completion. Completed

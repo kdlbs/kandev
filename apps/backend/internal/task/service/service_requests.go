@@ -131,6 +131,10 @@ type CreateTaskRequest struct {
 	// coordinator service sets it, when creating the task behind an approved
 	// proposal.
 	AllowReservedExternalID bool `json:"-"`
+	// AllowReservedMetadata permits Metadata keys with the
+	// ReservedMetadataKeyPrefixCoordinator prefix. Tagged json:"-" so no
+	// request body can set it; only the coordinator service does.
+	AllowReservedMetadata bool `json:"-"`
 
 	// Office extensions
 	AssigneeAgentProfileID string   `json:"assignee_agent_profile_id,omitempty"`
@@ -186,6 +190,10 @@ type UpdateTaskRequest struct {
 	// pointer to "" unassigns. It is independent of the agent assignee and
 	// never clears it.
 	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
+	// AllowReservedMetadata permits Metadata keys with the
+	// ReservedMetadataKeyPrefixCoordinator prefix; json:"-" as on
+	// CreateTaskRequest.
+	AllowReservedMetadata bool `json:"-"`
 }
 
 // CreateWorkflowRequest contains the data for creating a new workflow

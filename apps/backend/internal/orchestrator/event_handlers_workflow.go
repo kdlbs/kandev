@@ -6273,7 +6273,7 @@ func (s *Service) launchCreatedAutoStartStepPrompt(state *autoStartStepPromptSta
 	execution, err := s.startCreatedSessionWithComposedPrompt(
 		launchCtx, state.taskID, state.sessionID, state.session.AgentProfileID,
 		state.recordedPrompt, state.agentPrompt, state.promptReferenceContext,
-		true, state.planMode, true, state.initialCreatePromptPassthrough, state.attachments, state.references,
+		true, state.planMode, true, state.initialCreatePromptPassthrough, state.attachments, state.references, false,
 	)
 	if execution == nil {
 		workflowAttempt.retire()
@@ -6347,7 +6347,7 @@ func (s *Service) handleAutoStartPromptAttemptError(
 		return true, s.fallbackFreshLaunchOnMissingExecution(
 			state.ctx, state.taskID, state.sessionID, state.recordedPrompt, true,
 			state.dispatchPrompt, state.planMode, state.promptReferenceContext,
-			state.initialCreatePromptPassthrough, state.takenMsg, state.attachments, state.references,
+			state.initialCreatePromptPassthrough, state.takenMsg, state.attachments, state.references, false,
 		)
 	}
 	if isAgentAlreadyRunningError(err) && state.shouldQueueIfBusy {
@@ -6404,6 +6404,28 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	takenMsg *messagequeue.QueuedMessage,
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
+	promptReferencesPrepared bool,
+) error {
+	return s.fallbackFreshLaunchOnMissingExecutionWithLifecycleOwnership(
+		ctx, taskID, sessionID, prompt, promptAlreadyComposed, retryPrompt, planMode,
+		promptReferenceContext, initialCreatePromptPassthrough, takenMsg, attachments,
+		references, promptReferencesPrepared, false,
+	)
+}
+
+func (s *Service) fallbackFreshLaunchOnMissingExecutionWithLifecycleOwnership(
+	ctx context.Context,
+	taskID, sessionID, prompt string,
+	promptAlreadyComposed bool,
+	retryPrompt string,
+	planMode bool,
+	promptReferenceContext string,
+	initialCreatePromptPassthrough bool,
+	takenMsg *messagequeue.QueuedMessage,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferencesPrepared bool,
+	lifecycleLockHeld bool,
 ) error {
 	requeue := func() {
 		if takenMsg != nil {
@@ -6433,15 +6455,16 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 
 	var launchErr error
 	if promptAlreadyComposed {
-		_, launchErr = s.startCreatedSessionWithComposedPrompt(
+		_, launchErr = s.startCreatedSessionWithComposedPromptAndLifecycleOwnership(
 			ctx, taskID, sessionID, fresh.AgentProfileID,
 			prompt, retryPrompt, promptReferenceContext,
 			true, planMode, true, initialCreatePromptPassthrough, attachments, references,
+			promptReferencesPrepared, lifecycleLockHeld,
 		)
 	} else {
-		_, launchErr = s.startCreatedSession(
+		_, launchErr = s.startCreatedSessionWithLifecycleOwnership(
 			ctx, taskID, sessionID, fresh.AgentProfileID,
-			prompt, true, planMode, true, attachments, references, promptReferenceContext, startCreatedSessionOptions{},
+			prompt, true, planMode, true, attachments, references, promptReferenceContext, lifecycleLockHeld,
 		)
 	}
 	if launchErr != nil {
@@ -6451,6 +6474,22 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 		return launchErr
 	}
 	return nil
+}
+
+func (s *Service) startCreatedSessionWithLifecycleOwnership(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	lifecycleLockHeld bool,
+) (*executor.TaskExecution, error) {
+	return s.startCreatedSession(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		startCreatedSessionOptions{lifecycleLockHeld: lifecycleLockHeld},
+	)
 }
 
 func (s *Service) resetSessionForFreshFallback(

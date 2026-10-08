@@ -160,7 +160,7 @@ func TestHTTPListCoordinators(t *testing.T) {
 		if err := h.service.store.InsertProposal(context.Background(), &Proposal{
 			CoordinatorID: created.ID, WorkspaceID: testWorkspaceID,
 			Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
-		}); err != nil {
+		}, false); err != nil {
 			t.Fatalf("InsertProposal() unexpected error: %v", err)
 		}
 
@@ -296,7 +296,7 @@ func TestHTTPListProposals(t *testing.T) {
 		if err := h.service.store.InsertProposal(context.Background(), &Proposal{
 			CoordinatorID: created.ID, WorkspaceID: testWorkspaceID,
 			Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
-		}); err != nil {
+		}, false); err != nil {
 			t.Fatalf("InsertProposal() unexpected error: %v", err)
 		}
 		return h, created.ID
@@ -372,7 +372,7 @@ func TestHTTPGetProposal(t *testing.T) {
 			CoordinatorID: created.ID, WorkspaceID: testWorkspaceID,
 			Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
 		}
-		if err := h.service.store.InsertProposal(context.Background(), proposal); err != nil {
+		if err := h.service.store.InsertProposal(context.Background(), proposal, false); err != nil {
 			t.Fatalf("InsertProposal() unexpected error: %v", err)
 		}
 		params := append(workspaceParams(created.ID), gin.Param{Key: "pid", Value: proposal.ID})

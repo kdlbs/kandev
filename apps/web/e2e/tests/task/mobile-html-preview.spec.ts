@@ -85,6 +85,12 @@ async function setupMobileHtmlPreviewTest({
     },
   );
 
+  await expect
+    .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+      timeout: 60_000,
+      message: "the mobile HTML preview workspace did not become ready",
+    })
+    .toBe("ready");
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();

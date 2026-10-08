@@ -79,6 +79,7 @@ describe("buildRecoveryCardModel", () => {
       manualFailure: null,
       manualError: null,
       recoveryNotice: null,
+      recoveryNoticeKind: "workspace_read_only",
       translate,
       agentDisplayName: "Auggie",
     });
@@ -165,6 +166,32 @@ it("does not claim the configured model when the attempted selector is unsafe", 
 });
 
 describe("buildRecoveryCardModel request-local failures", () => {
+  it("presents inspection contention as a retry notice, not a read-only outcome", () => {
+    const model = buildRecoveryCardModel({
+      error: error([]),
+      automaticRecovery: {
+        resumptionState: "error",
+        error: null,
+        notice: "workspace is still being checked",
+        noticeKind: "inspection_busy",
+        recoveryFailure: null,
+        resumeSession: async () => false,
+      },
+      manualFailure: null,
+      manualError: null,
+      recoveryNotice: null,
+      recoveryNoticeKind: "inspection_busy",
+      translate,
+    });
+
+    expect(model).toMatchObject({
+      displayNotice: "workspace is still being checked",
+      isReadOnly: false,
+      hasRecoveryFailure: false,
+      titleKey: "task:sessionBootstrapRecoveryTitle",
+    });
+  });
+
   it("ignores a request-local failure owned by an earlier error stamp", () => {
     const model = buildRecoveryCardModel({
       error: error(

@@ -8,6 +8,7 @@ import {
   cleanupSidebarSortColors,
   expectSidebarRootOrder,
   openSidebarSortEditor,
+  moveSortRuleWithMenu,
   readPreviousSidebarColorPatch,
   readPreviousSidebarViewState,
   readTaskRunningSummary,
@@ -17,6 +18,7 @@ import {
   saveSidebarSortView,
   sidebarRootOrder,
   seedSidebarRunningRankScenario,
+  waitForSidebarSortSync,
   waitForTaskRunningSummary,
 } from "./sidebar-running-first-activity-sort-helpers";
 
@@ -164,12 +166,88 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
       testPage,
       false,
     );
+    await waitForFiniteAnimations(reloadPopover);
     await reloadFilters.openSortSettings();
     await expect(reloadPopover.getByTestId("sort-key-select")).toContainText("Running");
     await expect(reloadPopover.getByTestId("sort-rule-key-1")).toContainText("Color");
     await expect(reloadPopover.getByTestId("sort-rule-color-1")).toContainText("Red");
     await expect(reloadPopover.getByTestId("sort-rule-key-2")).toContainText("Last activity");
+
+    for (const control of ["sort-rule-handle-0", "sort-rule-more-0", "sort-rule-remove-0"]) {
+      const box = await reloadPopover.getByTestId(control).boundingBox();
+      expect(box?.height).toBeCloseTo(28, 0);
+      expect(box?.width).toBeCloseTo(28, 0);
+    }
+    const originalOrder = await reloadPopover
+      .locator("[data-testid^='sort-rule-description-']")
+      .allTextContents();
+    const firstHandle = reloadPopover.getByTestId("sort-rule-handle-0");
+    await firstHandle.focus();
+    await testPage.keyboard.press("Space");
+    await expect(firstHandle).toHaveAttribute("aria-pressed", "true");
+    await testPage.keyboard.press("ArrowDown");
+    await testPage.keyboard.press("Escape");
+    await expect(firstHandle).toBeFocused();
+    await expect
+      .poll(() =>
+        reloadPopover.locator("[data-testid^='sort-rule-description-']").allTextContents(),
+      )
+      .toEqual(originalOrder);
+
     await reloadFilters.close();
+    await reloadFilters.open();
+    await reloadFilters.openSortSettings();
+    const keyboardMoveHandle = reloadPopover.getByTestId("sort-rule-handle-0");
+    await keyboardMoveHandle.focus();
+    await testPage.keyboard.press("Space");
+    await expect(keyboardMoveHandle).toHaveAttribute("aria-pressed", "true");
+    await testPage.evaluate(
+      () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())),
+    );
+    await testPage.keyboard.press("ArrowDown");
+    await expect(
+      testPage.getByText("Running moved to position 2 of 3 items.", { exact: true }),
+    ).toBeAttached();
+    await testPage.keyboard.press("Space");
+    await expect(reloadPopover.getByTestId("sort-key-select")).toContainText("Color");
+    await moveSortRuleWithMenu(testPage, reloadPopover, 1, "down");
+    await expect(reloadPopover.getByTestId("sort-key-select")).toContainText("Running");
+    await waitForFiniteAnimations(reloadPopover);
+    await waitForSidebarSortSync(
+      testPage,
+      seedData.workspaceId,
+      ["running", "color", "lastActivityAt"],
+      "red",
+    );
+
+    const dragHandle = reloadPopover.getByTestId("sort-rule-handle-2");
+    const firstCard = reloadPopover.getByTestId("sort-rule-card-0");
+    await firstCard.scrollIntoViewIfNeeded();
+    await dragHandle.scrollIntoViewIfNeeded();
+    const dragHandleBox = await dragHandle.boundingBox();
+    const firstCardBox = await firstCard.boundingBox();
+    expect(dragHandleBox).not.toBeNull();
+    expect(firstCardBox).not.toBeNull();
+    const dragStartX = dragHandleBox!.x + dragHandleBox!.width / 2;
+    const dragStartY = dragHandleBox!.y + dragHandleBox!.height / 2;
+    await testPage.mouse.move(dragStartX, dragStartY);
+    await testPage.mouse.down();
+    await testPage.mouse.move(dragStartX, dragStartY + 16, { steps: 4 });
+    await expect(testPage.locator('[data-dragging="true"]')).toHaveCount(1);
+    await testPage.mouse.move(
+      firstCardBox!.x + firstCardBox!.width / 2,
+      firstCardBox!.y + firstCardBox!.height / 2,
+      { steps: 16 },
+    );
+    await testPage.mouse.up();
+    await expect(reloadPopover.getByTestId("sort-key-select")).toContainText("Last activity");
+    await expect(reloadPopover.getByTestId("sort-rule-key-1")).toContainText("Running");
+    await expect(reloadPopover.getByTestId("sort-rule-key-2")).toContainText("Color");
+    await moveSortRuleWithMenu(testPage, reloadPopover, 1, "down");
+    await moveSortRuleWithMenu(testPage, reloadPopover, 2, "down");
+    await expect(reloadPopover.getByTestId("sort-key-select")).toContainText("Running");
+    await reloadFilters.gear.click();
+    await expect(reloadPopover).toBeHidden();
 
     await expect(controls.getByText("Page 1 of 2")).toBeVisible();
     await expectSidebarRootOrder(
@@ -202,7 +280,7 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
       false,
     );
     await precedenceFilters.openSortSettings();
-    await precedencePopover.getByTestId("sort-rule-up-1").click();
+    await moveSortRuleWithMenu(testPage, precedencePopover, 2, "up");
     await expectSidebarRootOrder(session.sidebar, [parent.id, red.id], [red.id, parent.id]);
     await precedencePopover.getByTestId("sort-rule-remove-0").click();
     await expectSidebarRootOrder(session.sidebar, [parent.id, red.id], [parent.id]);
@@ -216,7 +294,8 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
       await openSidebarSortEditor(testPage, false);
     await restoreChainFilters.openSortSettings();
     await addColorAfterActivity(testPage, restoreChainPopover);
-    await restoreChainFilters.close();
+    await restoreChainFilters.gear.click();
+    await expect(restoreChainPopover).toBeHidden();
     await expectSidebarRootOrder(session.sidebar, [parent.id, red.id], [parent.id, red.id]);
     await controls.getByRole("button").last().click();
     await expect(controls.getByText("Page 2 of 2")).toBeVisible();

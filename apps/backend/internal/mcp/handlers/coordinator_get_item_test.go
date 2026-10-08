@@ -72,7 +72,7 @@ func TestHandleGetCoordinatorItem_Proposal(t *testing.T) {
 	ctx := context.Background()
 
 	own := &coordinator.Proposal{WorkspaceID: c.WorkspaceID, CoordinatorID: c.ID, Spec: coordinator.ProposalSpec{Title: "Own"}}
-	require.NoError(t, store.InsertProposal(ctx, own))
+	require.NoError(t, store.InsertProposal(ctx, own, false))
 	// Settle it, so "any status" is exercised too.
 	rejected, err := store.RejectProposal(ctx, own.ID, "no longer needed", "user-1", time.Now().UTC())
 	require.NoError(t, err)
@@ -85,7 +85,7 @@ func TestHandleGetCoordinatorItem_Proposal(t *testing.T) {
 	foreignOwned := &coordinator.Proposal{
 		WorkspaceID: c.WorkspaceID, CoordinatorID: foreignCoordinator.ID, Spec: coordinator.ProposalSpec{Title: "Foreign"},
 	}
-	require.NoError(t, store.InsertProposal(ctx, foreignOwned))
+	require.NoError(t, store.InsertProposal(ctx, foreignOwned, false))
 
 	t.Run("own proposal, settled status", func(t *testing.T) {
 		msg := makeWSMessage(t, coordinator.ActionGetItem, getItemPayload("proposal", own.ID))

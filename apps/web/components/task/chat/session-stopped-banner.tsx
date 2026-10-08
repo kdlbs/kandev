@@ -42,7 +42,13 @@ function useStoppedRecoveryChoices(
   onRelocateRequested: () => void,
 ): RecoveryChoice[] {
   const { t } = useTranslation();
-
+  const immediateChoices = stoppedRecoveryOverrideChoices(
+    props,
+    profileExists,
+    onRelocateRequested,
+    t,
+  );
+  if (immediateChoices) return immediateChoices;
   const {
     recoveryError,
     branchDetails,
@@ -52,20 +58,6 @@ function useStoppedRecoveryChoices(
     handleNewBranch,
   } = props.actions;
   const completed = props.mode === "completed";
-
-  if (
-    props.actions.managedCloneRecoveryStamp ||
-    props.actions.workspaceRecoveryMatchesCurrentFailure
-  ) {
-    return [
-      {
-        kind: "relocate_and_resume",
-        label: t("task:managedCloneRelocateResume"),
-        testId: "managed-clone-relocate-button",
-        onClick: onRelocateRequested,
-      },
-    ];
-  }
 
   const choices: RecoveryChoice[] = [];
   if (props.taskId && props.sessionId)
@@ -108,6 +100,39 @@ function useStoppedRecoveryChoices(
       onClick: () => void handleNewBranch(),
     });
   return choices;
+}
+
+function stoppedRecoveryOverrideChoices(
+  props: SessionStoppedBannerProps & { actions: SessionRecoveryActions },
+  profileExists: boolean,
+  onRelocateRequested: () => void,
+  t: ReturnType<typeof useTranslation>["t"],
+): RecoveryChoice[] | null {
+  if (props.actions.recoveryNoticeKind === "inspection_busy") {
+    return [
+      {
+        kind: "resume",
+        label: props.resumeLabel ?? t("task:resume"),
+        disabled: !profileExists,
+        testId: "recovery-resume-button",
+        onClick: () => void props.actions.handleRetry(),
+      },
+    ];
+  }
+  if (
+    props.actions.managedCloneRecoveryStamp ||
+    props.actions.workspaceRecoveryMatchesCurrentFailure
+  ) {
+    return [
+      {
+        kind: "relocate_and_resume",
+        label: t("task:managedCloneRelocateResume"),
+        testId: "managed-clone-relocate-button",
+        onClick: onRelocateRequested,
+      },
+    ];
+  }
+  return null;
 }
 
 function stoppedRecoveryCause(

@@ -4,8 +4,9 @@ system: tasks
 requirements:
   - REQ-TASKS-DOCUMENTS-001
   - REQ-TASKS-DOCUMENTS-002
+  - REQ-TASKS-DOCUMENTS-003
 created: 2026-08-28
-updated: 2026-10-07
+updated: 2026-10-08
 owners:
   - kandev
 ---
@@ -14,7 +15,8 @@ owners:
 ## Purpose and boundaries
 
 This design defines the missing-task boundary for backward-compatible task-plan
-writes and the attachment publication boundary. It does not implement the
+writes, the attachment publication boundary, and local editor acknowledgement
+of successful plan saves. It does not implement the
 broader task-documents migration. The existing filename remains for catalog and
 plan-reference compatibility.
 
@@ -24,6 +26,7 @@ plan-reference compatibility.
 | --- | --- |
 | `REQ-TASKS-DOCUMENTS-001` | [Transactional write](#transactional-write) and [Error contract](#error-contract) |
 | `REQ-TASKS-DOCUMENTS-002` | [Attachment publication](#attachment-publication), [Candidate cleanup](#candidate-cleanup), and [Attachment consumers](#attachment-consumers) |
+| `REQ-TASKS-DOCUMENTS-003` | [Plan draft acknowledgement](#plan-draft-acknowledgement) and [Plan draft regression strategy](#plan-draft-regression-strategy) |
 
 ## Components and responsibilities
 
@@ -193,3 +196,143 @@ Since publication path creation changes, add a narrow actually executed
 Use native paths and close handles before removal. A Windows build alone is
 not evidence. PostgreSQL fixtures are unnecessary while SQL and repository
 contracts remain unchanged.
+
+## Plan draft acknowledgement
+
+The task system owns this boundary because the editor submits and observes the
+task's backward-compatible plan document. The correction stays inside the
+existing local draft/save synchronization. It adds no backend, public API,
+store action, event metadata, or version policy. Existing attachment and
+missing-task behavior above is independent.
+
+### Existing consumers and responsibilities
+
+- `useTaskPlan` in `hooks/domains/session/use-task-plan.ts` reads the task plan
+  from Zustand, saves through `plan-api`, and publishes the returned
+  `TaskPlan` through `setTaskPlan` only while its attempt is latest-started for
+  that task. It returns a successful result even when an older attempt's
+  publication is suppressed. It may publish a legitimate background success
+  after task navigation. Preserve both behaviors.
+- `usePlanDraft` in `use-plan-draft.ts` owns local content, the editor reset key,
+  debounce, and the shared `attemptSave` entry point. Its current content sync
+  treats every differing observed plan as external. This is incomplete when
+  an own save acknowledges an older snapshot while the live draft has advanced.
+- `TaskPlanPanel` passes the hook's live draft into `TipTapPlanEditor`, keyed by
+  task ID and `editorKey`. Saving leaves editing enabled: `readOnly` depends on
+  loading only. The keyboard shortcut and `PlanPanelHeader`'s save-before-
+  implementation path both use `attemptSave`. Keep those consumers intact.
+- `TipTapPlanEditor` initializes TipTap from `value`; a changed parent key
+  destroys that editor and constructs a replacement. Preventing the own-save
+  reset therefore protects content, selection, and focus at the actual consumer.
+
+### Baseline and attempt ownership
+
+Keep two values distinct: the persisted baseline observed from `plan.content`
+and the current editable `draftContent`. Observing a successful own snapshot A
+advances the baseline, without assigning A to a newer live draft B. Dirty state
+continues to compare the live draft with the observed plan, and the existing
+debounce can submit B once saving settles. A returned truthy save result by
+itself does not advance the baseline: only the published plan does.
+
+Install local own-attempt ownership synchronously before `savePlan` dispatch.
+Capture the submitted snapshot, an attempt identity, and the current task-view
+identity. Track acknowledgement recognition separately from size-retry
+suppression. Recognition must be available when the store publishes, which
+occurs inside `savePlan` before the wrapper's promise continuation. Moving a
+ref assignment only into `.then()` is insufficient protection for that order.
+
+For this bounded flow, correlate a changed observed plan with an active own
+submitted snapshot or an unconsumed successful own receipt in the same task
+view. Consume that recognition once. Use the returned result's identity when
+available to narrow correlation; do not introduce a permanent content whitelist.
+Retire failed/null attempts, consumed receipts, superseded unpublished attempts,
+and obsolete task-view records. A callback can update only its own still-owned
+record; it cannot clear a newer record merely because their content is equal.
+If publication is observed before the wrapper settles, remember consumption
+until that attempt settles rather than reviving it in the completion callback.
+If settlement happens first, retain only the receipt needed for its pending
+publication observation. Equal-content success needs no editor reset or future
+receipt exemption.
+
+This local correlation does not establish global source provenance. An external
+writer publishing the identical snapshot during an own request is outside the
+arbitrary concurrent-writer reconciliation excluded by the requirement. Keep
+the current transport/event ordering; do not invent revision comparisons,
+merge text, serialize requests, or add global bookkeeping to resolve it.
+
+### Synchronization and recovery
+
+1. On a task-view change, clear local ownership and suppression, adopt that
+   task's current plan or empty content, and retain the existing external-sync
+   autosave guard. Track a view generation as well as the task ID so A-to-B-to-A
+   cannot re-adopt an old callback as ownership of the new A view. A guard must
+   read current identity, rather than compare values captured by one closure.
+2. On matching same-view own publication, update the observed baseline and
+   consume the receipt. Preserve the live draft and `editorKey`; do not mark
+   this as an external replacement or suppress B's next debounce. If the draft
+   equals the new baseline, dirty state clears without another save.
+3. On a genuine external change, keep the existing replacement/remount and
+   one-cycle autosave guard. This still applies with a dirty local draft and
+   for deletion. Clear obsolete acknowledgement recognition so a later external
+   update cannot be hidden by a past submitted string.
+4. On failure, leave draft/baseline unchanged. Keep size-only unchanged retry
+   suppression, changed-content eligibility, explicit retry, generic retry,
+   and save-error task scoping from the [size-limit design](plan-content-size-limit.md).
+   A successful old callback must not clear the latest rejected attempt's
+   suppression, including when both submissions used identical text.
+
+The existing per-task latest-started admission and boolean saving state in
+`useTaskPlan` remain authoritative. Do not infer request order from `isSaving`
+or redesign the boolean as a refcount. Only a result actually observed in the
+store may be treated as persisted; a suppressed stale success cannot clean the
+live draft. Any local helper extraction remains inside this draft lifecycle.
+
+### Responsive and documentation impact
+
+Desktop and phone use the same draft/save hooks and Plan editor. This is state
+handling within an existing surface, with no changes to markup, controls,
+scrolling, focus interaction, navigation, or breakpoint behavior. Focused real
+hook/store tests and a real panel/editor integration case satisfy the
+`mobile-parity` state/data exception; no new Playwright coverage or ASCII layout
+preview is needed. Exercise both pointer modes in the component case where
+practical. Browser/build/full suites are excluded from the design turn.
+
+The public [task plan guide](../../../public/tasks-and-workflows.md#use-the-task-plan)
+already describes direct editing with a 1.5-second autosave. The correction
+restores that behavior and introduces no new user steps, terms, or API fields.
+Internal specification and delivery records suffice. No ADR is required for a
+local correction within the established draft/store boundary.
+
+## Plan draft regression strategy
+
+Use `StateProvider`/`createAppStore`, the real `useTaskPlan` and `usePlanDraft`,
+and deferred promises only at the plan transport. Seed baseline state through
+real store actions, observe the production store publication, then assert the
+live draft, dirty state, editor key, and next request arguments. Do not feed
+synthetic saved props through rerender or mock either hook or the provider.
+Task-ID rerender is appropriate to exercise real task navigation.
+
+`hooks/domains/session/use-plan-draft.save-ack.test.tsx` covers the causal A/B
+failure, unchanged success, subsequent edit, create/update, genuine external
+updates with clean and dirty drafts, deletion, failed save/retry behavior,
+overlapping different and identical submissions, and task/null/round-trip
+switches with delayed completions. Check both possible completion orders and
+the case of earlier success after a later size rejection. Assert exact request
+counts beyond multiple debounce intervals to distinguish preservation from a
+lost or spurious autosave.
+
+`components/task/task-plan-panel.save-ack.test.tsx` mounts the real panel and
+TipTap editor through the real dynamic adapter and store. Use editor
+transactions to produce onChange, defer the transport, type again while saving,
+resolve A, and verify editor DOM identity, text, selection/focus, unsaved state,
+and B's subsequent transport submission. Mock only transport and unrelated
+chrome/services needed for the fixture; never replace the editor with a
+textarea or mock the internal draft/save hooks. Existing editor test setup is
+the source for narrow browser-environment shims. If a real integration fixture
+cannot run without new infrastructure, checkpoint the exact limitation instead
+of claiming a mocked editor proves continuity.
+
+Keep the existing draft-size-suppression, use-task-plan, header wiring, session
+switch, and TipTap editor suites in the affected regression run. The single
+sequential [work order](../../../plans/preserve-plan-typing/task-01-save-ack-continuity.md)
+owns the exact commands and implementation evidence.

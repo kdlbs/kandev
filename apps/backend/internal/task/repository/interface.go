@@ -727,6 +727,9 @@ type GitSnapshotRepository interface {
 	DeleteSessionCommit(ctx context.Context, id string) error
 }
 
+// RepositoryCheckoutIntent preserves omission for the two checkout choices.
+type RepositoryCheckoutIntent = models.RepositoryCheckoutIntent
+
 // RepositoryEntityRepository handles git repository entity CRUD and repository scripts.
 // Named RepositoryEntityRepository to avoid conflation with the Repository interface itself;
 // mirrors the sqlite/repository_entity.go implementation file.
@@ -734,6 +737,7 @@ type RepositoryEntityRepository interface {
 	CreateRepository(ctx context.Context, repository *models.Repository) error
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	UpdateRepository(ctx context.Context, repository *models.Repository) error
+	UpdateRepositoryWithCheckoutIntent(ctx context.Context, repository *models.Repository, intent RepositoryCheckoutIntent) error
 	DeleteRepository(ctx context.Context, id string) error
 	ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error)
 	CreateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error
@@ -820,6 +824,7 @@ type RepositorySecretBindingMutator interface {
 	RepositorySecretBindingRepository
 	CreateRepositoryWithSecretBindings(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding) error
 	UpdateRepositoryWithSecretBindings(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding) error
+	UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding, intent RepositoryCheckoutIntent) error
 }
 
 // RepositoryCleanupRepository performs guarded deletion of repositories
@@ -841,6 +846,9 @@ type ExecutorRepository interface {
 	CreateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 	UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
+	// UpdateExecutorProfileWithScriptIntent preserves omitted scripts and installs
+	// the committed script pair and timestamp in profile only after success.
+	UpdateExecutorProfileWithScriptIntent(ctx context.Context, profile *models.ExecutorProfile, intent models.ExecutorProfileScriptIntent) error
 	UpdateExecutorProfileIfUnmodified(ctx context.Context, profile *models.ExecutorProfile, expectedUpdatedAt time.Time) error
 	DeleteExecutorProfile(ctx context.Context, id string) error
 	ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error)

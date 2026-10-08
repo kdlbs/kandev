@@ -71,6 +71,11 @@ and task state; this design consumes them and adds no task field.
   through the screen-level inputs hook below; once that store exists, the
   proposals input is read from it and the hook's own proposals read is
   removed.
+- **Watch set (phase 2 only):** the coordinator's effective watch set from
+  `GET .../coordinators/:cid/settings`, through `useCoordinatorWatchSet`; tasks
+  and stalls are filtered by it before classification
+  ([permissions](permissions-ui.md#client-watch-filter)). Not read while the phase-2
+  flag is off.
 - **Screen inputs hook:** `apps/web/app/coordinator/use-coordinator-inputs.ts`
   holds the stall records and pending proposals for the viewed coordinator,
   each as `{value, loadedAt, error}`: `value` is the last successful response
@@ -275,7 +280,12 @@ present in `kanbanMulti.snapshots`, so a partial failure shows the workflows
 that loaded, with the banner. When no workflow snapshot is present and the
 read failed, the lists and the count strip are replaced by the banner.
 **Try again** for tasks calls `requestWorkspaceContextRefresh()`, which makes
-the hook re-fetch only the workflows that failed. A failed PR detail read is not a banner case: rows fall back
+the hook re-fetch only the workflows that failed. While the phase-2 flag is on the banner may also carry a fourth line for the
+watch set, after the proposals line, with its own load time and the same
+first-load and re-read wording rules; it is specified in
+[permissions](permissions-ui.md#client-watch-filter) and adds no case to
+`AC-COORDINATOR-NEEDS-YOU-007.3` to `007.5`, which are unchanged with the
+flag off. A failed PR detail read is not a banner case: rows fall back
 as described in [Classification](#classification). A copilot session failure is contained in the copilot panel and does not
 affect these inputs.
 

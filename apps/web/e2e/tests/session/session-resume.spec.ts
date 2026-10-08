@@ -8,6 +8,7 @@ import { waitForSessionState } from "../../helpers/session";
 import {
   seedActiveSessionForegroundActivity,
   waitForActiveSessionForegroundActivity,
+  waitForTaskSessionsSettled,
 } from "../../helpers/session-store";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
@@ -200,6 +201,7 @@ test.describe("Session resume (ACP mode)", () => {
       message: "Resumed session did not settle before activity reconciliation",
       timeout: 30_000,
     });
+    await waitForTaskSessionsSettled(testPage, task.id);
 
     // Reproduce the stale client projection left behind when the reconnect
     // state_changed event is missed. The real session-list refresh must clear it.

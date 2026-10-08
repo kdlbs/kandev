@@ -27,6 +27,9 @@ describe("continuation fixture cleanup", () => {
       ).rejects.toBe(failure);
       expect(backend.restart).toHaveBeenLastCalledWith();
       expect(backend.restart).toHaveBeenCalledTimes(2);
+      expect(backend.restart.mock.calls[0][0]).not.toHaveProperty(
+        "KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION",
+      );
     },
   );
 

@@ -14,6 +14,9 @@ requirements:
   - REQ-COORDINATOR-COORDINATORS-004
   - REQ-COORDINATOR-COORDINATORS-005
   - REQ-COORDINATOR-COORDINATORS-006
+  - REQ-COORDINATOR-COORDINATORS-007
+  - REQ-COORDINATOR-COORDINATORS-008
+  - REQ-COORDINATOR-COORDINATORS-009
 ---
 
 # Coordinators in a workspace System Design
@@ -37,9 +40,12 @@ them.
 | `REQ-COORDINATOR-COORDINATORS-001` | [Flag and wiring](#flag-and-wiring) |
 | `REQ-COORDINATOR-COORDINATORS-002` | [Store](#store), [Routes](#routes), [Validation](#validation) |
 | `REQ-COORDINATOR-COORDINATORS-003` | [Routes](#routes), [Security](#security) |
-| `REQ-COORDINATOR-COORDINATORS-004` | [Settings UI](#settings-ui), [Settings list read publication](#settings-list-read-publication) |
+| `REQ-COORDINATOR-COORDINATORS-004` | [Settings UI](#settings-ui) |
 | `REQ-COORDINATOR-COORDINATORS-005` | [Validation](#validation), [Settings UI](#settings-ui) |
 | `REQ-COORDINATOR-COORDINATORS-006` | [Workspace deletion](#workspace-deletion) |
+| `REQ-COORDINATOR-COORDINATORS-007` | [Phase 2](#phase-2) |
+| `REQ-COORDINATOR-COORDINATORS-008` | [Guided setup](#guided-setup) |
+| `REQ-COORDINATOR-COORDINATORS-009` | [Configure sections](#configure-sections) |
 
 ## Flag and wiring
 
@@ -221,7 +227,8 @@ agent or executor `missing` message of its field.
 ## Workspace deletion
 
 The `workspace.deleted` subscriber runs one transaction deleting the
-workspace's coordinators, proposals and stall rows. Conversation tasks,
+workspace's coordinators, proposals and stall rows and, children first,
+the phase-2 rows ([Shared interface](#shared-interface)). Conversation tasks,
 current and archived, go with the workspace's tasks through the task system. Deleting zero rows is success,
 so a redelivered event is harmless.
 
@@ -246,63 +253,287 @@ so a redelivered event is harmless.
   `AC-COORDINATOR-COORDINATORS-004.7`; the other five locales translate that
   sentence, not the earlier "propose work you approve".
 
-### Settings list read publication
+## Phase 2
 
-`AC-COORDINATOR-COORDINATORS-004.8` is implemented locally in
-`apps/web/hooks/domains/settings/use-coordinators.ts`. Its production consumers
-are `CoordinatorsListPage` (rows, loaded/loading, error and refresh) and
-`CoordinatorAddPage` (create only, though mounting the hook also starts its list
-read). The flat `coordinators` slice and its actions remain the existing store
-contract. The settings route admits these pages through
-`WorkspaceCoordinatorRoute` and `useFeature("coordinator")`; this correction
-does not alter admission or the flag defaults.
+- `features.coordinatorPhase2` is registered in
+  `internal/runtimeflags/registry.go` (environment
+  `KANDEV_FEATURES_COORDINATOR_PHASE2`), `RestartRequired: true`, and in
+  `profiles.yaml` as `prod: "false"`, `dev: "false"`, `e2e: "true"`
+  (`007.1`). The client `features` type gains `coordinatorPhase2`. The
+  backend computes `phase2 := features.Coordinator && features.CoordinatorPhase2`
+  once at startup and passes it to the coordinator service, the MCP server's
+  coordinator registration, the guard and the executor's coordinator branch.
+  The client derives the same value from both flags.
+  The registry entry's `Label` is "Coordinator control", its `Description`
+  says it adds permissions, standing orders, goals, the activity log and
+  more proposal kinds to the Coordinator, and takes effect only while
+  "Coordinator" is on, and its `Risk` is the same tier as `features.coordinator`.
+  Tests: the backend `phase2` value is false for every combination other than
+  both flags on (four cases), the client derivation returns the same four
+  results, and turning `coordinatorPhase2` on with `coordinator` off registers
+  no phase-2 route (`007.1`).
+- With `phase2` false (`007.2`, `007.4`): the phase-2 routes (settings,
+  standing orders, goal, activity, setup) are not registered and return
+  404; the phase-2 propose tools and `list_coordinator_activity_kandev` are
+  not registered; `ToolNames` returns the phase-1 seven tools and the guard
+  ignores stored policy and Watches ([permissions](permissions.md#binding));
+  the standing instructions carry no orders or goal; no activity row is
+  written; the retention ticker does not run, so rows are kept (`007.3`) and
+  the first run after the flag returns deletes any past 400 days; and the web renders none of
+  the phase-2 sections, launcher, card kinds, goal note, What it did,
+  stall Resume or Ready to merge actions.
+- Stored phase-2 columns and tables stay, untouched (`007.3`). The phase-1
+  proposal list query gains `AND kind = 'create_task'` while `phase2` is
+  false, so open non-create proposals neither show nor count toward
+  `open_proposals`, and the startup pass and sweep skip them; they are
+  served again unchanged when the flag returns. The same predicate guards
+  the by-id reads and the decision routes: with `phase2` false, `GET
+  proposals/:pid`, `approve` and `reject` read the row with `kind =
+  'create_task'` in the WHERE clause, so a non-create id is the phase-1 404
+  of an absent proposal. Nothing is claimed, settled or logged, and no
+  executor runs; the row keeps its state and is decided normally once the
+  flag returns (`007.3`).
+- A conversation opened while `phase2` was on carries a binding; after a
+  restart with it off, the binding is ignored and the phase-1 profile
+  applies. A conversation opened while it was off has no binding and gets the
+  phase-1 profile when it is turned on, until a change archives it.
 
-Initial load and explicit refresh share one local read path. Each admitted read
-captures a unique request token, workspace and owning store action identity.
-Every success, failure and finally publication requires that token to remain
-current in the live hook lifetime. A local memoized lifetime identifies each
-workspace/store-action owner. Layout-effect setup activates it; layout cleanup
-retires it at the committed workspace/store/unmount boundary before passive
-effects or successor layout callbacks. This precedes the null-workspace or
-already-loaded early return and invalidates every read, including refreshes.
-Refresh captures that lifetime and refuses admission after retirement, even if
-a retained callback names the same workspace as a later visit. No global/store
-state is mutated during render. A later same-ID visit or remount cannot revive
-a token. Cancellation may save transport work,
-but publication safety does not depend on the transport honoring cancellation.
+## Shared interface
 
-Keep loaded-cache identity bound to the same owner as the accepted rows.
-Expose rows only when that accepted workspace/store-action identity matches the
-current render, so a workspace commit cannot construct foreign links before
-passive loading starts. This is an identity gate, not a store rewrite.
-Returning A-loaded -> B-pending -> A retains A's accepted rows and loaded state
-without allowing B's callbacks to publish. A's cached branch must settle the
-abandoned loading state itself; obsolete finally callbacks cannot do so. An
-uncached workspace starts its normal load. Overlapping reads for one workspace
-have separate tokens: an older completion cannot replace newer rows, clear the
-newer pending state, erase a newer error or restore a stale loaded marker.
-Owner replacement discards the old owner's local loaded/error identity and
-performs the new owner's ordinary load even for the same workspace ID. Cleanup
-may synchronously clear loading owned by its abandoned read, before a successor
-starts; it must not clear a successor's loading.
+The Go signatures, transaction handle, policy and watch types, activity
+writer surface, proposal wire fields, deletion order and downgrade rules
+every phase-2 work order builds on are in
+[shared interface](shared-interface.md#shared-interface).
 
-Current failures keep the established inline error and Retry path, leave an
-initial load unaccepted and retain any previously accepted rows. Current
-success replaces rows in server order, clears error and accepts the loaded
-workspace; its finally settles loading. Same-workspace cached rerenders do not
-add requests, null workspaces do not fetch, and refresh remains explicit. CRUD
-callbacks and read-versus-mutation ordering are outside this correction.
+## Guided setup
 
-Validation uses the real hook, `StateProvider`/`AppStore`, API list client and
-rendered `CoordinatorsListPage`, replacing only `fetchJson` transport with
-deferred replies. Assert rows and loaded/loading/error state as well as rendered
-name, Open and Configure link identity. Existing mocked-hook tests remain
-compatibility checks, not evidence for the publication race. The correction is
-state-only: phone and desktop share the hook, and no markup, copy, layout,
-navigation or touch behavior changes. Targeted hook/component tests satisfy
-the mobile-parity state-only exception; browser/build/E2E expansion requires
-ROOT's causal-scope decision. Delivery is tracked by the
-[list publication plan](../../../plans/coordinator-list-publication/plan.md).
+`POST /api/v1/workspaces/:id/coordinators/setup` (`workspace.manage`, phase 2
+only) creates a coordinator with its settings, Watches and optional goal in
+one transaction (`008.4`). The phase-1 `POST .../coordinators` stays for phase
+1. The route has no idempotency key.
+
+**Order of checks.** Phase-2 flag off is 404; authorization (403) and the
+workspace lookup (404) come before any body decode, as for the goal routes.
+An undecodable body, a body that is not a JSON object, or a member of the
+wrong JSON type is 400 `invalid_body`, `field` naming that member (none for
+a non-object body) and no `step`. Then, before the transaction, the parts are
+validated in the fixed order below and the first failure wins. The reads a
+part needs are made when that part is reached, never earlier: the profile
+reads (same helpers as [validation](#validation)) belong to step `identity`
+and the workflow reads (`GetWorkflow`) to step `watches`,
+so an invalid name is a 400 whatever a profile read would do. A
+failed read is 500 with nothing stored. The transaction only inserts, in
+this order: the coordinator row with `policy_json` and `policy_revision = 1`,
+its `watch_scope` and watch rows, then the goal with its baseline (the
+baseline counts the watch rows just inserted through the same transaction
+handle, [goals](goals.md#baselines)). Any insert failure rolls back everything (500). A workflow deleted after its read and before the commit is
+not re-checked: its watch row is stored, uncounted and dropped by the next
+Watches save ([permissions](permissions.md#settings-routes)). A workspace
+deleted after its lookup is likewise not re-checked, as in the phase-1
+create.
+
+**Body.** `{name, agent_profile_id, executor_profile_id, context?, watches,
+policy, goal?}`. `name` and both profile ids are required strings; `context` absent or `null`
+means `""`; `watches` and `policy` are required objects; `goal` absent or
+`null` means no goal. Unknown members are ignored.
+
+**Validation, first failure wins.** Each part uses its owner's validator with
+the setup-mode rules below, in this fixed order; the first failure is the
+response and nothing is stored:
+
+| # | Step id | Field paths, in check order | Rules |
+| --- | --- | --- | --- |
+| 1 | `identity` | `name`, `agent_profile_id`, `executor_profile_id` | [validation](#validation): name trimmed 1 to 60 code points; profiles exist, agent profile not CLI-passthrough. Names may repeat in a workspace (`002`) |
+| 2 | `watches` | `watches.scope`, `watches.workflow_ids` | [permissions](permissions.md#settings-routes) codes, with the setup-mode rules below |
+| 3 | `goal` | `goal.name`, `goal.due_on`, `goal.criteria`, `goal.criteria[i].text`, `goal.criteria[i].id` | [goals](goals.md#routes) steps 1 to 4, with the setup-mode rules below |
+| 4 | `context` | `context` | at most 4,000 code points |
+| 5 | `may-do` | `policy`, `policy.actions.<action>` | [permissions](permissions.md#settings-routes) codes; all six actions named, `stop` denied, none `automatic` |
+
+The 400 body is the phase-1 error envelope plus `step` (the step id), `field`
+(the path) and, when the owner has one, its closed `code` (such as
+`watches_empty`). A missing required member is its owner's error: a
+missing `watches` is step `watches`, field `watches.scope`, code
+`invalid_scope`; a missing `policy` is step `may-do`, field
+`policy.actions.create_task`, code `action_missing`; a missing name or
+profile id is step `identity` naming that field.
+
+**Setup-mode rules.** There is no stored coordinator, so the rules that
+compare with a stored state do not apply:
+
+- *Watches.* The stored set is empty, so there is no "equal to stored" rule
+  and no id dropping. `scope: "all"` stores no workflow rows
+  and ignores `workflow_ids`. `scope: "selected"` needs 1 to 50 unique ids,
+  each an existing workflow of this workspace; the first failing check in this
+  order is the code: `watches_empty`, `watches_too_many`, `watches_duplicate`,
+  then `watches_foreign_workflow` (an id that does not exist or belongs to
+  another workspace).
+- *Goal.* `goal.goal_id` is ignored (never 409). `goal.criteria[i].id` must
+  be absent, `null` or `""`; any other value is 400 `goal.criteria[i].id`.
+  `done` is ignored and every criterion is stored not done. A present `goal`
+  is a full goal: an empty object is 400 `goal.name`, not "no goal".
+
+Two setups at once create two coordinators, and so may a retry after a
+timeout; the page says so (below).
+
+The web page `settings/workspace/[id]/coordinators/new` renders
+`CoordinatorSetup` while phase 2 is on: a header "Add coordinator", the step
+list, one step's form (with **Skip this step** where it applies) and the
+buttons.
+
+- **State.** Step state and every value live in the component; nothing is sent
+  before Finish, so leaving creates nothing (`008.5`). Leaving by any route
+  (link, browser back, reload) discards the state without confirmation; an
+  in-flight Finish is not cancelled and the coordinator appears in the list.
+- **Step list.** The six steps in order. The current step carries
+  `aria-current="step"`, bold text and a marker that is not colour alone, and
+  a step left with **Next** or **Skip this step** and currently valid a check
+  mark; **Back** keeps marks, and a step edited invalid loses its mark.
+  The items are not links. A phone shows "Step N of 6" and the step name
+  instead (`008.1`).
+- **Buttons.** Step 1 has **Next** only, steps 2 to 5 **Back** and **Next**,
+  Review **Back** and **Finish**. **Back** keeps the values. **Next** on a step with invalid values is disabled and shows the errors of
+  fields edited or left (see Field errors); the steps with values to check are Who runs it (name and
+  both profiles chosen), What it watches (`all`, or at least one board) and
+  the two below.
+- **Skippable steps.** What it is for and What it knows have **Skip this step**.
+  Skip clears that step's values and goes to the next step; a step left with
+  every field empty is the same as skipped (no `goal` sent, `context` `""`).
+  Once any goal field has a value, **Next** requires a valid goal (name 1 to
+  120 code points, a real due date or none, at most 10 criteria of 1 to 200
+  code points); context needs at most 4,000 code points.
+- **Step contents.** Reuse the Identity fields and the Watches, Goal and May do
+  section forms in "draft" mode that edits local state (`008.2`): the same
+  components with values and handlers passed in instead of loaded for a
+  stored coordinator.
+  Draft mode keeps the editable controls and removes everything that needs a
+  stored coordinator or its history:
+  - *May do* keeps the six rows and their settings, the disabled Automatic
+    option with its "Not available yet" note, the `start_agent` note, the
+    "Always human" rows and the stop-is-denied note; it removes the per-row
+    activity counts, the **Review the last 30 days** link, the summary-failed
+    banner, the load and error states of the stored read and the page note
+    about the next conversation starting fresh. Draft mode makes no summary request.
+  - *Watches* keeps the `all` or `selected` choice, the board picker with its
+    at-most-50 rule and "keep at least one board" message, the no-boards
+    notice and the boards-read failure notice with its **Try again**; it
+    removes the load and error states of the stored watch read and the
+    "watches no board" notice. The setup keeps the section's boards read
+    for Review's names, and `selected` cannot be chosen until
+    that read has succeeded.
+  - *Goal* keeps the milestone, due date and exit-criteria fields and their
+    errors; it removes the criterion checkboxes, **Set goal**, **Mark
+    milestone met**, the measures and the stale-goal state.
+  - Identity and What it knows use the phase-1 fields unchanged.
+  - *Field errors.* Each draft section takes an optional error per field;
+    Watches, May do and the Goal criteria list gain the slots they lack.
+    Path to control: `name`, `agent_profile_id`, `executor_profile_id`,
+    `goal.name`, `goal.due_on`, `goal.criteria[i].text` and `context` beside
+    or under their own field; `watches.scope` and `watches.workflow_ids` in
+    one line under the Watches choice; `goal.criteria` and
+    `goal.criteria[i].id` in one line under the criteria list;
+    `policy.actions.<action>` beside that row and `policy` in one line above
+    the rows. The text is `t()` copy keyed by the owner's `code` (task 06's
+    closed-code copy), never the server's English message; a 400 without a
+    known `code` shows "A value on this step was not accepted." An error
+    clears when its field is edited. A field shows its client-side error only
+    once edited or left, so a pristine step shows none and **Next** is
+    disabled without a message.
+  The controlled-components refactor of the three sections is its own task in
+  the work order, with Configure-page regression tests. May do starts from
+  `create_task`, `message`, `move`, `resume` `requires_approval` and
+  `start_agent`, `stop` `denied`; Watches starts as `all`.
+- **Review.** "What it wrote" has the columns Setting, Value and Owned from
+  now on by, and 12 rows in this order (`008.3`):
+
+  | Setting | Value | Owned from now on by | Change goes to |
+  | --- | --- | --- | --- |
+  | Name | the trimmed name | Identity | step 1 |
+  | Agent profile | its name | Identity | step 1 |
+  | Executor | its name | Identity | step 1 |
+  | Watches | "Every board" or the board names in the order of the workspace board list, joined by ", " | Watches | step 2 |
+  | Goal | `<milestone>, due <date>, <n> criteria`, or `<milestone>, no due date, <n> criteria`, or "Not set" when skipped | Goal | step 3 |
+  | Context | the text up to its first line break, trimmed and cut to 80 code points with a trailing "…" when it was cut or had more lines, or "Not set" | Identity | step 4 |
+  | six May do rows, one per action in the order of the May do section | its setting label | May do | step 5 |
+
+  The "Change goes to" column only documents where **Change** leads; the page
+  shows three columns and a **Change** button per row (`008.3`). The Goal
+  cell is one `t()` template with `_one`/`_other` count keys and the due
+  date as a locale medium date.
+
+  **Change** goes to that step, values kept; there **Next** and
+  **Skip this step** (steps 3, 4) return to Review, and **Back** goes to
+  the previous step and ends that shortcut. The owner labels are the
+  Configure labels of `009.1`.
+- **Finish.** Enabled per `008.4` and only while the goal and context are valid
+  or empty and no request is in flight (disabled from click to response, so
+  a double click sends one request). Results:
+  - 201: navigate to the new coordinator's Configure page.
+  - 400 with `step`: go to that step, keep every value, show the error beside
+    the field named by `field` (`008.6`, control mapping in Step contents).
+    Any Change shortcut is dropped: **Next** then walks forward.
+  - Any other answer (a 400 without `step`, 403, 404, 500): stay on Review,
+    keep every value, re-enable **Finish** and show a banner that nothing was
+    created.
+  - No answer (network failure or a request the browser rejects): stay on
+    Review, keep every value, re-enable **Finish** and show a banner that the
+    page could not confirm whether the coordinator was created and that the
+    list should be checked before trying again. The page sets no timeout of
+    its own.
+- Readers never reach the page: the list has no Add for them and a direct URL
+  renders the phase-1 reader state.
+
+## Configure sections
+
+- The coordinator page gains a Sections row (Identity, Watches, May do,
+  Standing orders, Goal) with the help text of each section; the section is
+  kept in `?section=` (`009.1`). The row takes a list of `{slug, label, help,
+  render}` entries in that fixed order. Slugs are `identity`, `watches`,
+  `may-do`, `standing-orders` and `goal`. A missing, empty, unknown or
+  unavailable value (Watches and May do before task 06 registers them) shows
+  Identity, and for the first value of a repeated parameter the rest are
+  ignored; choosing a section replaces the `section` parameter, keeps every
+  other query parameter and adds a history entry, so back and forward move
+  between sections. With the flag off the parameter is ignored and the
+  phase-1 page renders. The row is `components/settings/settings-tabs.tsx`
+  with the slugs as tab ids, so a visited section stays mounted and an unsaved
+  draft survives a switch ([goals](goals.md#goal-ui)). Help lines (one line each, in `coordinator.json`):
+  Identity "Name, description and context.", Watches "Which boards this
+  coordinator watches.", May do "What this coordinator may do, and what needs
+  your approval.", Standing orders "Rules the coordinator follows in every
+  conversation.", Goal "The milestone this coordinator's list is ranked
+  against.". The five-section AC is met when task 06 has registered Watches
+  and May do; task 11 alone asserts the entries it registers and the list
+  contract. Identity is the phase-1 form. Watches and
+  May do share the settings save bar and one PUT
+  ([permissions](permissions.md#settings-routes)); Standing orders writes
+  immediately; the Goal form uses the save bar and its checkboxes write
+  immediately.
+- **List summary (`009.2`), added by task 06.** The list response gains, per
+  coordinator while phase 2 is on, `summary: {watch_scope, watched_count,
+  approval_actions, active_orders}`, computed in the list query with grouped
+  counts. `watched_count` counts the effective watch set (the stored watch
+  rows joined to existing workflows; a row of a deleted workflow is not
+  counted) and is 0 for `all`. `approval_actions` counts the actions whose
+  setting is `requires_approval` (0 to 5; `automatic` never occurs and `stop`
+  is always `denied`). `active_orders` counts the coordinator's active
+  standing orders. All three are integers, never null; a coordinator that
+  cannot be summarised is a list 500, not a partial card.
+- **Card line.** In place of the later-phase note the card renders three
+  parts in this order, separated by a middle dot: the watch part ("Every
+  board" for `all`; otherwise `_one` "1 board", `_other` "N boards"; and
+  "Watches no board" when `watched_count` is 0 for `selected`), the approvals
+  part (`_one` "1 action needs approval", `_other` "N actions need approval",
+  zero reading "0 actions need approval") and the orders part (`_one`
+  "1 standing order", `_other` "N standing orders", zero reading "0 standing
+  orders"), each through `t()` with `count` plurals in all six locales. A
+  response without `summary` (an older backend) renders no line. The
+  page-level later-phase note ("What it watches, what it may do ...") is not
+  rendered while the phase-2 flag is on; with the flag off it is unchanged.
+- **Sections entries.** Task 06 adds `watches` and `may-do` to
+  `coordinator-sections.tsx` between Identity and Standing orders in the fixed
+  order; the entries render the sections of
+  [permissions](permissions-ui.md#may-do-ui), which share the one draft and the
+  one save contributor `coordinator-control` owned by `CoordinatorSections`.
 
 ## Security
 
@@ -320,3 +551,4 @@ workspace-deletion cleanup at info level with workspace and coordinator ids.
 ## Related decisions
 
 - [Workspace coordinator in core](../../../decisions/2026-09-26-workspace-coordinator.md)
+- [Coordinator phase 2, a person approves everything](../../../decisions/2026-09-29-coordinator-phase-2-control.md)

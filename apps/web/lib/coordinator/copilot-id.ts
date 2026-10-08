@@ -23,7 +23,7 @@ function rawCopilotItemId(
   if (item.kind === "proposal") {
     const sourceTask = resolveProposalSourceTask(item, openTasksById);
     if (sourceTask) return sourceTask.identifier ?? sourceTask.title;
-    return item.proposal.spec.title;
+    return item.proposal.spec.title ?? item.proposal.spec.task_id ?? item.proposal.id;
   }
   return item.task.identifier ?? item.task.title;
 }
@@ -43,7 +43,7 @@ export function deriveCopilotItemId(
   return normalizeCopilotItemId(rawCopilotItemId(item, openTasksById));
 }
 
-export type CopilotItemRefKind = "task" | "proposal" | "stall";
+export type CopilotItemRefKind = "task" | "proposal" | "stall" | "workflow";
 
 export type CopilotItemRef = { kind: CopilotItemRefKind; id: string };
 

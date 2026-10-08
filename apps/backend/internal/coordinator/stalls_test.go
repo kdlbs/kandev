@@ -98,7 +98,7 @@ func TestSubscribeTaskStalled_UpsertsAndPublishesPerCoordinatorInListOrder(t *te
 	// Give the second coordinator one open (pending) proposal so the
 	// captured payloads are distinguishable by open_proposals too.
 	p := &Proposal{CoordinatorID: second.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, p); err != nil {
+	if err := store.InsertProposal(ctx, p, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 

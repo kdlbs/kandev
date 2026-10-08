@@ -347,6 +347,9 @@ func managedCloneRelocationConflictResponse(msg *ws.Message, err error) (*ws.Mes
 }
 
 func recoveryInspectionConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	if !worktree.IsRecoveryInspectionContentionOnly(err) {
+		return nil, nil
+	}
 	var contention *worktree.RecoveryInspectionContentionError
 	if !errors.As(err, &contention) {
 		return nil, nil

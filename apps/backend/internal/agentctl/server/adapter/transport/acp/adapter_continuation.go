@@ -11,11 +11,11 @@ const continuationToolLimit = 256
 
 func (a *Adapter) continuationSafetySnapshot(turn *promptTurnState) *streams.ContinuationSafetySnapshot {
 	a.mu.RLock()
-	enabled := a.cfg.ProviderInterruptionContinuation && a.dialect.continuationSupport != "" &&
+	supported := a.dialect.continuationSupport != "" &&
 		(a.capabilities.LoadSession || a.capabilities.SessionCapabilities.Resume != nil) && a.sessionID != ""
 	support := a.dialect.continuationSupport
 	a.mu.RUnlock()
-	if !enabled || turn == nil || turn.promptGeneration == 0 {
+	if !supported || turn == nil || turn.promptGeneration == 0 {
 		return nil
 	}
 	turn.evidenceMu.Lock()
@@ -48,12 +48,12 @@ func (a *Adapter) continuationSafetySnapshot(turn *promptTurnState) *streams.Con
 
 func (a *Adapter) observeContinuationSafety(n acpsdk.SessionNotification, generation uint64) {
 	a.mu.RLock()
-	enabled := a.cfg.ProviderInterruptionContinuation && a.dialect.continuationSupport != "" &&
+	supported := a.dialect.continuationSupport != "" &&
 		string(n.SessionId) == a.sessionID && !a.isLoadingSession
 	support := a.dialect.continuationSupport
 	a.mu.RUnlock()
 	turn := a.currentPromptTurn()
-	if !enabled || turn == nil || generation == 0 || turn.promptGeneration != generation {
+	if !supported || turn == nil || generation == 0 || turn.promptGeneration != generation {
 		return
 	}
 	turn.evidenceMu.Lock()
@@ -183,12 +183,6 @@ func continuationReadPayload(meta map[string]any, input any) bool {
 }
 
 func (a *Adapter) poisonContinuationSafety() {
-	a.mu.RLock()
-	enabled := a.cfg.ProviderInterruptionContinuation
-	a.mu.RUnlock()
-	if !enabled {
-		return
-	}
 	turn := a.currentPromptTurn()
 	if turn == nil {
 		return

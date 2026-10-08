@@ -100,6 +100,7 @@ const resumeReasonTaskArchived = "task_archived"
 var ErrAgentPromptInProgress = errors.New("agent is currently processing a prompt")
 var ErrAgentNotReadyForPrompt = errors.New("agent not ready for prompt")
 var ErrSessionResetInProgress = errors.New("session reset in progress")
+var ErrInitialTaskBriefDispatchPending = errors.New("initial task brief dispatch is pending")
 
 // ErrSessionRuntimeUnavailable is returned by promptTask when
 // ensureSessionRunning fails for the single reason that is safe to treat as
@@ -653,14 +654,35 @@ func (s *Service) startCreatedSessionWithComposedPrompt(
 	skipMessageRecord, planMode, autoStart, initialCreatePrompt bool,
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
+	promptReferencesPrepared bool,
+) (*executor.TaskExecution, error) {
+	return s.startCreatedSessionWithComposedPromptAndLifecycleOwnership(
+		ctx, taskID, sessionID, agentProfileID, prompt, retryPrompt, promptReferenceContext,
+		skipMessageRecord, planMode, autoStart, initialCreatePrompt, attachments, references,
+		promptReferencesPrepared, false,
+	)
+}
+
+func (s *Service) startCreatedSessionWithComposedPromptAndLifecycleOwnership(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	retryPrompt string,
+	promptReferenceContext string,
+	skipMessageRecord, planMode, autoStart, initialCreatePrompt bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferencesPrepared bool,
+	lifecycleLockHeld bool,
 ) (*executor.TaskExecution, error) {
 	return s.startCreatedSession(
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, startCreatedSessionOptions{
+			lifecycleLockHeld:           lifecycleLockHeld,
 			initialCreatePrompt:         initialCreatePrompt,
 			skipTaskDescriptionFallback: true,
 			promptAlreadyComposed:       true,
 			retryPrompt:                 retryPrompt,
+			promptReferencesPrepared:    promptReferencesPrepared,
 		},
 	)
 }
@@ -2888,8 +2910,11 @@ func (s *Service) recordInitialMessageForTurn(
 }
 
 // buildWorkflowPrompt constructs the effective prompt using workflow step configuration.
-// If step.Prompt contains {{task_prompt}}, it is replaced with the base prompt.
-// Otherwise, step.Prompt fully replaces the base prompt.
+// If step.Prompt contains {{task_prompt}}, its first occurrence is replaced with
+// the base prompt. Otherwise, step.Prompt fully replaces the base prompt.
+// Step and workflow-level templates also substitute every occurrence of the
+// single-brace placeholders {task_id}, {step_entry_number} and {task_title};
+// these are resolved against the templates only, never inside the base prompt.
 // If the step has enable_plan_mode in on_enter events, plan mode prefix is also prepended.
 // Only true internal instructions are wrapped in <kandev-system> tags so they can be stripped from the visible chat.
 func (s *Service) buildWorkflowPrompt(ctx context.Context, basePrompt string, step *wfmodels.WorkflowStep, taskID string, sessionID string, isPassthrough bool) string {
@@ -3003,47 +3028,68 @@ func (s *Service) buildWorkflowPromptWithTrustedContextOptions(
 ) (string, string) {
 	_ = sessionID
 	var parts []string
+	var taskTitleReferences []string
 
-	if block := s.workflowInstructionsBlock(ctx, step, taskID); block != "" {
+	if block, title := s.workflowInstructionsBlock(ctx, step, taskID); block != "" {
 		parts = append(parts, block)
+		if title != "" {
+			taskTitleReferences = append(taskTitleReferences, title)
+		}
 	}
 
 	// skip_step_prompt suppresses the step prompt and its task-description
 	// fallback for this one entry; only the workflow-level block above (and any
 	// one-time move instructions appended by the caller) remain.
 	if !skipStepPrompt {
-		// {step_entry_number} is resolved against the step's own template before
-		// {{task_prompt}} substitution, so a literal token inside basePrompt (task
-		// description / direct message) is never treated as an interpolation
-		// target. The step is copied rather than mutated in place because it may
-		// be a cached/shared *wfmodels.WorkflowStep.
+		// {step_entry_number} and {task_title} are resolved against the step's
+		// own template before {{task_prompt}} substitution, so a literal token
+		// inside basePrompt (task description / direct message) is never treated
+		// as an interpolation target. The title is spliced in last, after
+		// stepPromptBodyWithOptions, so its text is never scanned for tokens.
+		// The step is copied rather than mutated in place because it may be a
+		// cached/shared *wfmodels.WorkflowStep.
+		interpolated := s.interpolateStepEntryNumberIfPresent(ctx, step.Prompt, taskID, step.ID)
+		interpolated, title, finalizeTitle := s.reserveTaskTitleInStepTemplate(ctx, interpolated, taskID)
+		if title != "" {
+			taskTitleReferences = append(taskTitleReferences, title)
+		}
 		interpolatedStep := step
-		if interpolated := s.interpolateStepEntryNumberIfPresent(ctx, step.Prompt, taskID, step.ID); interpolated != step.Prompt {
+		if interpolated != step.Prompt {
 			stepCopy := *step
 			stepCopy.Prompt = interpolated
 			interpolatedStep = &stepCopy
 		}
-		parts = append(parts, stepPromptBodyWithOptions(interpolatedStep, taskID, basePrompt, preserveDirectPrompt))
+		parts = append(parts, finalizeTitle(stepPromptBodyWithOptions(interpolatedStep, taskID, basePrompt, preserveDirectPrompt)))
 	}
 
 	joined := strings.Join(parts, "\n\n")
-	if trustedPromptContext != "" {
-		trustedBlock := sysprompt.Wrap(trustedPromptContext)
-		if !strings.Contains(joined, trustedBlock) {
-			joined += "\n\n" + trustedBlock
-		}
-		return joined, trustedPromptContext
+	if trustedPromptContext == "" && !promptReferencesPrepared {
+		return s.expandPromptReferencesWithContext(ctx, joined, isPassthrough)
 	}
-	if promptReferencesPrepared {
+	acceptedContext := trustedPromptContext
+	if len(taskTitleReferences) > 0 {
+		trustedPromptContext = s.appendTitlePromptReferencesToTrustedContext(
+			ctx, strings.Join(taskTitleReferences, "\n\n"), trustedPromptContext, isPassthrough,
+		)
+	}
+	if acceptedContext != "" && trustedPromptContext != acceptedContext {
+		joined = strings.Replace(joined, sysprompt.Wrap(acceptedContext), sysprompt.Wrap(trustedPromptContext), 1)
+	}
+	if trustedPromptContext == "" {
 		return joined, ""
 	}
-	return s.expandPromptReferencesWithContext(ctx, joined, isPassthrough)
+	trustedBlock := sysprompt.Wrap(trustedPromptContext)
+	if strings.Contains(joined, trustedBlock) {
+		return joined, trustedPromptContext
+	}
+	return joined + "\n\n" + trustedBlock, trustedPromptContext
 }
 
 // stepPromptBody renders the visible step prompt for one entry: the step's
 // prompt template with {{task_prompt}} resolved to basePrompt, a step prompt
 // without that placeholder used verbatim, or the base prompt when the step has
-// no prompt of its own.
+// no prompt of its own. It substitutes {task_id} itself; callers resolve
+// {step_entry_number} and {task_title} in step.Prompt beforehand.
 func stepPromptBody(step *wfmodels.WorkflowStep, taskID, basePrompt string) string {
 	return stepPromptBodyWithOptions(step, taskID, basePrompt, false)
 }
@@ -3066,9 +3112,9 @@ func stepPromptBodyWithOptions(step *wfmodels.WorkflowStep, taskID, basePrompt s
 // workflowInstructionsBlock returns the visible "## Workflow instructions"
 // section when the step's workflow has a non-empty prompt. Empty/whitespace
 // prompts and missing getters/workflows omit the section entirely.
-func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.WorkflowStep, taskID string) string {
+func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.WorkflowStep, taskID string) (string, string) {
 	if s.workflowStepGetter == nil || step == nil || step.WorkflowID == "" {
-		return ""
+		return "", ""
 	}
 	meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
 	if err != nil {
@@ -3077,26 +3123,28 @@ func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.
 				zap.String("workflow_id", step.WorkflowID),
 				zap.Error(err))
 		}
-		return ""
+		return "", ""
 	}
 	prompt := strings.TrimSpace(meta.Prompt)
 	if prompt == "" {
-		return ""
+		return "", ""
 	}
 	interpolated := sysprompt.InterpolatePlaceholders(prompt, taskID)
 	interpolated = s.interpolateStepEntryNumberIfPresent(ctx, interpolated, taskID, step.ID)
+	// The title is substituted last so its text is never scanned for tokens.
+	interpolated, title := s.interpolateTaskTitleIfPresent(ctx, interpolated, taskID)
 	interpolated = strings.TrimSpace(interpolated)
 	if interpolated == "" {
-		return ""
+		return "", ""
 	}
 	// Drop any accidental end-marker text from user content so chat split
 	// cannot cut the block early (frontend also prefers the final marker).
 	interpolated = strings.ReplaceAll(interpolated, workflowInstructionsEnd, "")
 	interpolated = strings.TrimSpace(interpolated)
 	if interpolated == "" {
-		return ""
+		return "", ""
 	}
-	return workflowInstructionsHeading + "\n\n" + interpolated + "\n\n" + workflowInstructionsEnd
+	return workflowInstructionsHeading + "\n\n" + interpolated + "\n\n" + workflowInstructionsEnd, title
 }
 
 // stepEntryNumberToken is the exact literal REQ-TWS-001 substitutes in
@@ -3173,6 +3221,22 @@ func (s *Service) expandPromptReferencesWithContext(
 	return s.promptExpander.AppendReferenceExpansionsWithContext(ctx, prompt, zapLogger)
 }
 
+func (s *Service) appendTitlePromptReferencesToTrustedContext(
+	ctx context.Context,
+	title string,
+	trustedContext string,
+	isPassthrough bool,
+) string {
+	if s.promptExpander == nil || isPassthrough || !strings.Contains(title, "@") {
+		return trustedContext
+	}
+	var zapLogger *zap.Logger
+	if s.logger != nil {
+		zapLogger = s.logger.Zap()
+	}
+	return s.promptExpander.AppendReferenceExpansionsToTrustedContext(ctx, title, trustedContext, zapLogger)
+}
+
 // PrepareDirectPrompt applies the same backend-owned saved-prompt expansion
 // used by workflow prompts to a direct user message. Message handlers call it
 // before persistence so the stored content and the first dispatched prompt
@@ -3210,6 +3274,40 @@ func (s *Service) ResumeTaskSessionAndPrompt(
 	planMode bool,
 	attachments []v1.MessageAttachment,
 ) (*PromptResult, error) {
+	return s.resumeTaskSessionAndPrompt(ctx, taskID, sessionID, prompt, model, planMode, attachments, promptTaskOptions{})
+}
+
+// ResumeTaskSessionAndPromptWithPromptContext keeps an accepted direct prompt's
+// server-owned reference snapshot and validated entity references through the
+// compound recovery retry. The values are never inferred from prompt text or
+// re-expanded after admission.
+func (s *Service) ResumeTaskSessionAndPromptWithPromptContext(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	initialTaskBriefDispatchOwner bool,
+) (*PromptResult, error) {
+	return s.resumeTaskSessionAndPrompt(ctx, taskID, sessionID, prompt, model, planMode, attachments, promptTaskOptions{
+		promptAlreadyComposed:         true,
+		fallbackUsesEffectivePrompt:   true,
+		promptReferenceContext:        promptReferenceContext,
+		promptReferencesPrepared:      promptReferencesPrepared,
+		entityReferences:              append([]v1.EntityReference(nil), references...),
+		initialTaskBriefDispatchOwner: initialTaskBriefDispatchOwner,
+	})
+}
+
+func (s *Service) resumeTaskSessionAndPrompt(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptOptions promptTaskOptions,
+) (*PromptResult, error) {
 	var result *PromptResult
 	_, err := s.resumeTaskSessionWithContinuation(
 		ctx,
@@ -3218,6 +3316,8 @@ func (s *Service) ResumeTaskSessionAndPrompt(
 		executor.ResumeOptions{Origin: string(launchOriginManual)},
 		func(resumeCtx context.Context, attempt *resumeAttempt, _ *executor.TaskExecution) error {
 			var promptErr error
+			options := promptOptions
+			options.resumeAttempt = attempt
 			result, promptErr = s.promptTask(
 				resumeCtx,
 				taskID,
@@ -3228,7 +3328,7 @@ func (s *Service) ResumeTaskSessionAndPrompt(
 				attachments,
 				false,
 				launchOriginManual,
-				promptTaskOptions{resumeAttempt: attempt},
+				options,
 			)
 			return promptErr
 		},
@@ -3499,6 +3599,9 @@ func (s *Service) resumeTaskSessionWithContinuation(
 			}
 			if owned, _ := resumeCtx.Value(continuationOwnedContextKey{}).(bool); owned {
 				return execution, decorateResumeFailure(err)
+			}
+			if executor.IsSafeResumeInspectionDeferral(err) {
+				return nil, decorateResumeFailure(err)
 			}
 			persistBranchRecovery()
 			// Use resumeCtx (WithoutCancel) for the failure-recording writes too —
@@ -6275,6 +6378,69 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	return s.promptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, launchOriginManual, promptTaskOptions{})
 }
 
+// PromptTaskWithPromptContext delivers an accepted direct message together
+// with the server-owned saved-prompt snapshot and validated entity references
+// used to compose it. Recovery must not infer either value from prompt text or
+// re-resolve saved-prompt definitions after admission.
+func (s *Service) PromptTaskWithPromptContext(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	dispatchOnly bool,
+) (*PromptResult, error) {
+	return s.promptTaskWithPromptContext(
+		ctx, taskID, sessionID, prompt, model, planMode, attachments,
+		promptReferenceContext, promptReferencesPrepared, references, dispatchOnly, false,
+	)
+}
+
+// PromptTaskWithPromptContextAndDispatchOwnership delivers an accepted direct
+// message and identifies the selected initial brief as its dispatch owner.
+func (s *Service) PromptTaskWithPromptContextAndDispatchOwnership(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	dispatchOnly bool,
+	initialTaskBriefDispatchOwner bool,
+) (*PromptResult, error) {
+	return s.promptTaskWithPromptContext(
+		ctx, taskID, sessionID, prompt, model, planMode, attachments,
+		promptReferenceContext, promptReferencesPrepared, references, dispatchOnly, initialTaskBriefDispatchOwner,
+	)
+}
+
+func (s *Service) promptTaskWithPromptContext(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	dispatchOnly bool,
+	initialTaskBriefDispatchOwner bool,
+) (*PromptResult, error) {
+	return s.promptTask(
+		ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, launchOriginManual,
+		promptTaskOptions{
+			promptAlreadyComposed:         true,
+			fallbackUsesEffectivePrompt:   true,
+			promptReferenceContext:        promptReferenceContext,
+			promptReferencesPrepared:      promptReferencesPrepared,
+			entityReferences:              append([]v1.EntityReference(nil), references...),
+			initialTaskBriefDispatchOwner: initialTaskBriefDispatchOwner,
+		},
+	)
+}
+
 type promptTaskOptions struct {
 	internalContinuation bool
 	claimEntryID         string
@@ -6350,7 +6516,10 @@ type promptTaskOptions struct {
 	fallbackRetryPrompt  string
 	// promptReferenceContext is the exact expansion returned while composing
 	// this workflow entry. Recovery uses it to preserve the trusted block.
-	promptReferenceContext string
+	promptReferenceContext        string
+	promptReferencesPrepared      bool
+	entityReferences              []v1.EntityReference
+	initialTaskBriefDispatchOwner bool
 	// resumeAttempt keeps a compound resume-and-prompt operation under one
 	// ownership record. The outer resume operation finishes it after provider
 	// acceptance or the retry's terminal result.
@@ -6473,6 +6642,11 @@ func (promptTaskOptions) failureContext(ctx context.Context) (context.Context, c
 // (clearQueuedDispatchInFlightIfCurrent), which is safe since none of them
 // block on an agent turn.
 func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, origin launchOrigin, options promptTaskOptions) (*PromptResult, error) {
+	// Direct prompts must own the boundary; already-reserved queue work keeps its claim.
+	if s.isInitialTaskBriefDispatchPending(sessionID) &&
+		!options.initialTaskBriefDispatchOwner && options.claimEntryID == "" {
+		return nil, ErrInitialTaskBriefDispatchPending
+	}
 	if options.cancellationFence == nil {
 		_, revision := s.CancellationPendingSnapshot(sessionID)
 		options.cancellationFence = &promptCancellationFence{revision: revision}
@@ -7318,7 +7492,8 @@ func (s *Service) finishPromptDispatchFailure(
 		failureCtx, taskID, sessionID, prompt, planMode, resumedForPrompt && !options.disableDispatchRetry,
 		attachments, rollback, options.lifecyclePrompt || options.internalContinuation, dispatchAccepted, promptErr,
 		options.promptAlreadyComposed, options.fallbackLaunchPrompt, options.fallbackRetryPrompt,
-		options.promptReferenceContext,
+		options.promptReferenceContext, options.promptReferencesPrepared, options.entityReferences,
+		options.resumeAttempt != nil,
 	)
 	return failureResult, wrapAcceptedPromptDispatchFailure(
 		dispatchAccepted,
@@ -8489,6 +8664,9 @@ func (s *Service) handlePromptDispatchFailure(
 	fallbackLaunchPrompt string,
 	fallbackRetryPrompt string,
 	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	lifecycleLockHeld bool,
 ) (*PromptResult, error) {
 	if errors.Is(promptErr, errPromptAdmissionRejected) {
 		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
@@ -8503,9 +8681,9 @@ func (s *Service) handlePromptDispatchFailure(
 		if fallbackLaunchPrompt != "" {
 			fallbackPrompt = fallbackLaunchPrompt
 		}
-		if freshErr := s.fallbackFreshLaunchOnMissingExecution(
+		if freshErr := s.fallbackFreshLaunchOnMissingExecutionWithLifecycleOwnership(
 			ctx, taskID, sessionID, fallbackPrompt, promptAlreadyComposed, fallbackRetryPrompt, planMode,
-			promptReferenceContext, false, nil, attachments, nil,
+			promptReferenceContext, false, nil, attachments, references, promptReferencesPrepared, lifecycleLockHeld,
 		); freshErr == nil {
 			return &PromptResult{}, nil
 		} else {
@@ -9655,6 +9833,9 @@ func (s *Service) drainQueuedMessageForPromptableSessionForIdentity(
 
 func (s *Service) drainQueuedMessageForPromptableSessionLockedForIdentity(ctx context.Context, identity messagequeue.QueueSessionIdentity) (bool, error) {
 	if s.isCancelInFlight(identity.SessionID) || s.isQueuedDispatchInFlight(identity.SessionID) || s.isSteerInFlight(identity.SessionID) {
+		return false, nil
+	}
+	if s.isInitialTaskBriefDispatchPending(identity.SessionID) {
 		return false, nil
 	}
 	if s.resumeAttemptStore().holdsInitialPromptForSession(identity.SessionID) {

@@ -1036,7 +1036,9 @@ func (s *Service) prepareSessionRecoveryLaunchContext(
 	if err != nil {
 		return models.WorkspaceRecoveryErrorObservation{}, nil, err
 	}
-	return observation, worktree.WithRecoveryLifecycleContext(launchCtx, s.recoveryLifecycleContext()), nil
+	launchCtx = worktree.WithRecoveryLifecycleContext(launchCtx, s.recoveryLifecycleContext())
+	launchCtx, _ = worktree.WithRecoveryInspectionWait(launchCtx, worktree.RecoveryInspectionWaitBudget)
+	return observation, launchCtx, nil
 }
 
 func (s *Service) liveWorkspaceRecoveryResponse(

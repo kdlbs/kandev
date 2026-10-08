@@ -60,6 +60,12 @@ export function recoveryCopy(
   model: ActiveSessionRecovery,
   t: ReturnType<typeof useTranslation>["t"],
 ) {
+  if (model.kind === "recovery_inspection_busy")
+    return {
+      title: t("task:launchNeedsAttention"),
+      summary: model.summary ?? t("task:workspaceRecoveryInspectionBusy"),
+      showSummary: true,
+    };
   if (model.kind === "provider_interrupted")
     return {
       title: t("task:sessionRecoveryFailed"),
@@ -118,14 +124,41 @@ function recoveryActionCopy(kind: string, t: ReturnType<typeof useTranslation>["
   return { label: t("task:resumeSession"), testId: "recovery-resume-button" };
 }
 
-export function useRecoveryChoices(
-  model: ActiveSessionRecovery,
-  actions: SessionRecoveryActions,
-  profileExists: boolean,
-  onNewSession: () => void,
-  onRelocateRequested: () => void,
-) {
+type RecoveryChoiceOptions = {
+  model: ActiveSessionRecovery;
+  actions: SessionRecoveryActions;
+  profileExists: boolean;
+  onNewSession: () => void;
+  onRelocateRequested: () => void;
+  onInspectionRetry?: () => Promise<boolean> | undefined;
+};
+
+export function useRecoveryChoices({
+  model,
+  actions,
+  profileExists,
+  onNewSession,
+  onRelocateRequested,
+  onInspectionRetry,
+}: RecoveryChoiceOptions) {
   const { t } = useTranslation();
+  const inspectionBusy =
+    model.kind === "recovery_inspection_busy" || actions.recoveryNoticeKind === "inspection_busy";
+  if (inspectionBusy) {
+    return [
+      createRecoveryChoice({
+        kind: "resume",
+        model,
+        actions,
+        profileExists,
+        onNewSession,
+        onRelocateRequested,
+        onInspectionRetry,
+        inspectionBusy,
+        t,
+      }),
+    ];
+  }
   const supplied = model.metadata?.actions
     ?.map(sessionRecoveryAction)
     .filter((kind) => kind !== null);
@@ -142,6 +175,8 @@ export function useRecoveryChoices(
       profileExists,
       onNewSession,
       onRelocateRequested,
+      onInspectionRetry,
+      inspectionBusy,
       t,
     }),
   );
@@ -185,6 +220,8 @@ function createRecoveryChoice({
   profileExists,
   onNewSession,
   onRelocateRequested,
+  onInspectionRetry,
+  inspectionBusy,
   t,
 }: {
   kind: NonNullable<ReturnType<typeof sessionRecoveryAction>>;
@@ -193,6 +230,8 @@ function createRecoveryChoice({
   profileExists: boolean;
   onNewSession: () => void;
   onRelocateRequested: () => void;
+  onInspectionRetry?: () => Promise<boolean> | undefined;
+  inspectionBusy: boolean;
   t: ReturnType<typeof useTranslation>["t"];
 }): RecoveryChoice {
   const copy = recoveryActionCopy(kind, t);
@@ -208,6 +247,10 @@ function createRecoveryChoice({
     tooltip: model.metadata?.actions?.find((action) => sessionRecoveryAction(action) === kind)
       ?.tooltip,
     onClick: () => {
+      if (inspectionBusy && kind === "resume" && onInspectionRetry) {
+        void onInspectionRetry();
+        return;
+      }
       if (kind === "fresh_start" && !profileExists) {
         onNewSession();
         return;
@@ -329,8 +372,9 @@ function withAutomaticNotice(
   automatic: SessionRecoveryOwner | null,
   actions: SessionRecoveryActions,
 ) {
-  return automatic?.notice && !actions.recoveryError
-    ? { ...copy, summary: automatic.notice }
+  const notice = actions.recoveryNotice ?? automatic?.notice;
+  return notice && !actions.recoveryError && !copy.hasTypedSelectionCause
+    ? { ...copy, summary: notice }
     : copy;
 }
 
@@ -358,6 +402,7 @@ function buildBootstrapRecoveryModel(
     manualFailure: actions.manualRecoveryFailure,
     manualError: actions.recoveryError,
     recoveryNotice: actions.recoveryNotice,
+    recoveryNoticeKind: actions.recoveryNoticeKind,
     translate: t,
     agentDisplayName,
   });

@@ -265,8 +265,11 @@ of an idle preferred-color task without changing the open conversation.
 
 Replace the single sidebar `SortPicker` presentation with an ordered rule editor.
 Keep the generic `TypedSortPicker` for other surfaces. The sidebar editor uses
-existing Select/Button primitives, plus explicit Move up, Move down, Remove,
-and Add sort controls. Changes enter the existing saved-view draft.
+existing Select/Button primitives, leading drag handles, a compact More menu
+with adjacent Move up and Move down actions, Remove, and Add sort controls.
+Changes enter the existing saved-view draft. The full current reorder contract,
+including the matching automatic-color and task-row controls, is described in
+the [sidebar view editor reordering design](sidebar-view-editor-reordering.md).
 
 A color rule shows a labelled swatch selector and order, such as Red first.
 Running shows Running first or Others first. Date fields show Newest first or
@@ -281,7 +284,10 @@ rule cards. This surface already handles automatic-color rule editing and is
 the nearest mobile exemplar. Keep one editor scroll body, a fixed drawer header,
 dynamic viewport containment, safe areas, focus return, and keyboard dismissal.
 Use at least 44px touch hit areas and compact 28px fine-pointer controls.
-Explicit reorder buttons make every action available without drag or hover.
+The More menu makes every move available without drag or hover. Dragging starts
+only from the leading handle. Sort and automatic-color rows use compact
+horizontal controls on desktop; phone cards stack their fields below a
+touch-sized header.
 
 All copy uses the task locale catalog in English, pt-pt, zh-cn, zh-hk, zh-tw,
 ja, and ko, plus generated pseudo copy. Keep color names accessible in text.

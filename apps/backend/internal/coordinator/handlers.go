@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -47,6 +48,30 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	workspace.POST("/coordinators/:cid/proposals/:pid/approve", h.httpApproveProposal)
 	workspace.POST("/coordinators/:cid/proposals/:pid/reject", h.httpRejectProposal)
 	workspace.GET("/coordinator-stalls", h.httpListStalls)
+	if svc.phase2 {
+		registerStandingOrderRoutes(workspace, h)
+		registerGoalRoutes(workspace, h)
+		workspace.POST("/coordinators/setup", h.httpSetupCoordinator)
+		workspace.GET("/coordinators/:cid/activity", h.httpListActivity)
+		workspace.GET("/coordinators/:cid/activity/summary", h.httpActivitySummary)
+		workspace.POST("/coordinators/:cid/activity/:rid/undo", h.httpUndoActivity)
+		workspace.GET("/coordinators/:cid/settings", h.httpGetSettings)
+		workspace.PUT("/coordinators/:cid/settings", h.httpPutSettings)
+	}
+}
+
+// coordinatorDTO builds the coordinator wire shape, adding the phase-2 policy
+// and watch fields while the flag is on.
+func (h *Handlers) coordinatorDTO(ctx context.Context, c *Coordinator) (*CoordinatorDTO, error) {
+	dto := NewCoordinatorDTO(c)
+	if !h.service.phase2 {
+		return dto, nil
+	}
+	view, err := h.service.Policy(ctx, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	return dto.WithPolicyView(view), nil
 }
 
 // httpListCoordinators backs GET /api/v1/workspaces/:id/coordinators.
@@ -59,7 +84,21 @@ func (h *Handlers) httpListCoordinators(c *gin.Context) {
 	}
 	dtos := make([]*CoordinatorDTO, len(items))
 	for i, item := range items {
-		dtos[i] = NewCoordinatorDTO(item.Coordinator).WithOpenProposals(item.OpenProposals)
+		dto, err := h.coordinatorDTO(ctx, item.Coordinator)
+		if err != nil {
+			h.respondError(c, err)
+			return
+		}
+		orders := 0
+		if h.service.phase2 {
+			active, err := h.service.store.ActiveStandingOrders(ctx, item.Coordinator.ID)
+			if err != nil {
+				h.respondError(c, err)
+				return
+			}
+			orders = len(active)
+		}
+		dtos[i] = dto.WithOpenProposals(item.OpenProposals).WithSummary(orders)
 	}
 	c.JSON(http.StatusOK, NewCoordinatorListResponse(dtos))
 }
@@ -77,7 +116,12 @@ func (h *Handlers) httpCreateCoordinator(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, NewCoordinatorDTO(created))
+	dto, err := h.coordinatorDTO(ctx, created)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, dto)
 }
 
 // httpGetCoordinator backs GET /api/v1/workspaces/:id/coordinators/:cid.
@@ -88,7 +132,12 @@ func (h *Handlers) httpGetCoordinator(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, NewCoordinatorDTO(found).WithProfileStatuses(agentStatus, executorStatus))
+	dto, err := h.coordinatorDTO(ctx, found)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, dto.WithProfileStatuses(agentStatus, executorStatus))
 }
 
 // httpPatchCoordinator backs PATCH /api/v1/workspaces/:id/coordinators/:cid.
@@ -104,7 +153,12 @@ func (h *Handlers) httpPatchCoordinator(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, NewCoordinatorDTO(updated))
+	dto, err := h.coordinatorDTO(ctx, updated)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, dto)
 }
 
 // httpDeleteCoordinator backs DELETE /api/v1/workspaces/:id/coordinators/:cid.
@@ -133,10 +187,14 @@ func (h *Handlers) httpListProposals(c *gin.Context) {
 	}
 	dtos := make([]*ProposalDTO, len(items))
 	for i, item := range items {
-		dtos[i] = NewProposalDTO(item)
+		dtos[i] = NewProposalDTOFor(item, h.service.phase2)
 	}
 	c.JSON(http.StatusOK, NewProposalListResponse(dtos))
 }
+
+// proposalStatusAll is the proposal list's `status` query value that selects
+// every proposal; it is unrelated to the Watches scope of the same spelling.
+const proposalStatusAll = "all"
 
 // parseProposalListStatus implements Build decision 3's status query
 // parameter rule: absent means pending; exactly "pending" or "all" (case
@@ -150,7 +208,7 @@ func parseProposalListStatus(c *gin.Context) (ListProposalsStatus, *FieldError) 
 	switch raw {
 	case "pending":
 		return ListProposalsPending, nil
-	case "all":
+	case proposalStatusAll:
 		return ListProposalsAll, nil
 	default:
 		return 0, &FieldError{Field: "status", Message: `status must be "pending" or "all"`}
@@ -166,7 +224,7 @@ func (h *Handlers) httpGetProposal(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, NewProposalDTO(found))
+	c.JSON(http.StatusOK, NewProposalDTOFor(found, h.service.phase2))
 }
 
 // httpApproveProposal backs
@@ -183,7 +241,7 @@ func (h *Handlers) httpApproveProposal(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, NewProposalDTO(updated))
+	c.JSON(http.StatusOK, NewProposalDTOFor(updated, h.service.phase2))
 }
 
 // httpRejectProposal backs
@@ -200,7 +258,7 @@ func (h *Handlers) httpRejectProposal(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, NewProposalDTO(updated))
+	c.JSON(http.StatusOK, NewProposalDTOFor(updated, h.service.phase2))
 }
 
 // decodeOptionalJSONBody reads c.Request.Body and, unless it is empty or
@@ -241,11 +299,24 @@ func (h *Handlers) httpListStalls(c *gin.Context) {
 func (h *Handlers) respondError(c *gin.Context, err error) {
 	var fieldErr *FieldError
 	var conflictErr *ProposalConflictError
+	var undoErr *UndoRefusal
+	var settingsErr *SettingsError
+	var deniedErr *PolicyDeniedError
 	switch {
+	case errors.As(err, &undoErr):
+		c.JSON(http.StatusConflict, gin.H{"code": undoErr.Code, "reason": undoErr.Reason})
+	case errors.As(err, &settingsErr):
+		c.JSON(http.StatusBadRequest, settingsErrorBody(settingsErr))
+	case errors.As(err, &deniedErr):
+		c.JSON(http.StatusConflict, gin.H{"error": "policy_denied", "action": deniedErr.Action})
 	case errors.As(err, &fieldErr):
 		c.JSON(http.StatusBadRequest, NewFieldErrorResponse(fieldErr))
+	case errors.Is(err, ErrGoalConflict):
+		c.JSON(http.StatusConflict, NewErrorResponse(err.Error()))
+	case errors.Is(err, ErrStandingOrderLimit):
+		c.JSON(http.StatusBadRequest, NewStandingOrderLimitResponse())
 	case errors.As(err, &conflictErr):
-		c.JSON(http.StatusConflict, NewProposalConflictResponse(conflictErr.Proposal))
+		c.JSON(http.StatusConflict, NewProposalConflictResponse(conflictErr.Proposal, h.service.phase2))
 	case errors.Is(err, ErrNotFound), errors.Is(err, repoerrors.ErrWorkspaceNotFound):
 		c.JSON(http.StatusNotFound, NewErrorResponse("not found"))
 	case errors.Is(err, service.ErrForbidden):
@@ -254,4 +325,17 @@ func (h *Handlers) respondError(c *gin.Context, err error) {
 		h.logger.Error("coordinator route failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("internal error"))
 	}
+}
+
+// settingsErrorBody is the 400 body of a settings or setup error: the message
+// and field, plus the closed code and the setup step when the error has them.
+func settingsErrorBody(e *SettingsError) gin.H {
+	body := gin.H{"error": e.Message, "field": e.Field}
+	if e.Code != "" {
+		body["code"] = e.Code
+	}
+	if e.Step != "" {
+		body["step"] = e.Step
+	}
+	return body
 }

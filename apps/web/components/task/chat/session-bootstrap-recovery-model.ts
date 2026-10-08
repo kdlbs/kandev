@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 import type { ManualSessionRecoveryFailure } from "@/hooks/domains/session/use-session-recovery-actions";
+import type { SessionRecoveryNoticeKind } from "@/hooks/domains/session/use-session-resumption";
 import type { SessionRecoveryOwner } from "@/lib/session-recovery-presentation";
 import type { SessionErrorDetailsField } from "@/lib/session-error-details";
 import { normalizeAgentErrorCauses } from "@/lib/session-last-agent-error";
@@ -386,11 +387,12 @@ function currentManualRecoveryFailure(
 
 function readOnlyWorkspaceOutcome(
   automaticRecovery: SessionRecoveryOwner | null | undefined,
-  recoveryNotice: string | null,
+  recoveryNoticeKind: SessionRecoveryNoticeKind | null | undefined,
 ): boolean {
   return (
     automaticRecovery?.recoveryFailure?.outcome === "workspace_read_only" ||
-    Boolean(recoveryNotice ?? automaticRecovery?.notice)
+    automaticRecovery?.noticeKind === "workspace_read_only" ||
+    recoveryNoticeKind === "workspace_read_only"
   );
 }
 
@@ -418,6 +420,7 @@ function recoveryCardStatus({
   automaticRecovery,
   manualFailure,
   recoveryNotice,
+  recoveryNoticeKind,
   primaryCause,
   translate,
 }: {
@@ -425,11 +428,12 @@ function recoveryCardStatus({
   automaticRecovery: SessionRecoveryOwner | null | undefined;
   manualFailure: ManualSessionRecoveryFailure | null;
   recoveryNotice: string | null;
+  recoveryNoticeKind?: SessionRecoveryNoticeKind | null;
   primaryCause: AgentErrorCause | null;
   translate: TFunction;
 }): RecoveryCardStatus {
   const displayNotice = recoveryNotice ?? automaticRecovery?.notice ?? null;
-  const readOnlyOutcome = readOnlyWorkspaceOutcome(automaticRecovery, recoveryNotice);
+  const readOnlyOutcome = readOnlyWorkspaceOutcome(automaticRecovery, recoveryNoticeKind);
   const hasRecoveryFailure = anyRecoveryFailure(
     automaticRecovery,
     currentManualRecoveryFailure(error, manualFailure),
@@ -455,6 +459,7 @@ export function buildRecoveryCardModel({
   manualFailure,
   manualError,
   recoveryNotice,
+  recoveryNoticeKind,
   translate,
   agentDisplayName,
 }: {
@@ -463,6 +468,7 @@ export function buildRecoveryCardModel({
   manualFailure: ManualSessionRecoveryFailure | null;
   manualError: Error | null;
   recoveryNotice: string | null;
+  recoveryNoticeKind?: SessionRecoveryNoticeKind | null;
   translate: TFunction;
   agentDisplayName?: string;
 }): RecoveryCardModel {
@@ -477,6 +483,7 @@ export function buildRecoveryCardModel({
     automaticRecovery,
     manualFailure,
     recoveryNotice,
+    recoveryNoticeKind,
     primaryCause,
     translate,
   });

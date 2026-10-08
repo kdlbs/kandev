@@ -16,9 +16,20 @@ import (
 // The dispatch site is owned by a later work package.
 const ActionProposeTask = mcpcontract.ActionProposeTask
 
+// ActionProposeResume, ActionProposeMessage and ActionProposeMove re-export
+// the mcpcontract action names.
+const (
+	ActionProposeResume  = mcpcontract.ActionProposeResume
+	ActionProposeMessage = mcpcontract.ActionProposeMessage
+	ActionProposeMove    = mcpcontract.ActionProposeMove
+)
+
 // ActionGetItem is mcpcontract.ActionGetItem, re-exported
 // (docs/specs/coordinator/system-design/copilot-tools.md#item-read).
 const ActionGetItem = mcpcontract.ActionGetItem
+
+// ActionListActivity is mcpcontract.ActionListActivity, re-exported.
+const ActionListActivity = mcpcontract.ActionListActivity
 
 // ActionApproveProposal, ActionRejectProposal and DecisionActions re-export
 // mcpcontract's reserved decision action names
@@ -44,6 +55,12 @@ type Coordinator struct {
 	ConfigRevision     int64
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+
+	// PolicyJSON is the stored permission map, nil for a phase-1 coordinator.
+	PolicyJSON     *string
+	PolicyRevision int
+	// WatchScope is the stored scope, "all" by default.
+	WatchScope string
 }
 
 // ProposalStatus is the coordinator_proposals.status enum.
@@ -89,7 +106,27 @@ type Proposal struct {
 	DecidedBy     *string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+
+	// Kind is the stored proposal kind. Phase-1 rows read as create_task.
+	Kind             string
+	TargetTaskID     *string
+	StandingOrderIDs []string
+	StartsAgent      bool
+	OutcomeJSON      *string
+	// RawSpec is the stored spec JSON of a non-create_task kind, whose shape
+	// this package does not parse.
+	RawSpec string
+	// RawFinalSpec is the frozen spec of a non-create_task kind, set once claimed.
+	RawFinalSpec string
 }
+
+// Proposal kinds.
+const (
+	ProposalKindCreateTask = "create_task"
+	ProposalKindMessage    = "message"
+	ProposalKindMove       = "move"
+	ProposalKindResume     = "resume"
+)
 
 // Stall is a coordinator_stalls row: the most recent task.stalled episode
 // observed for a task, in a workspace with at least one coordinator.
@@ -109,5 +146,6 @@ type StepNode struct {
 	IsStart          bool
 	AllowManualMove  bool
 	AutoStartOnEnter bool
+	CompletesOnEnter bool
 	PullFromStepID   string
 }

@@ -28,7 +28,7 @@ func TestStartApprovalSweep_RecoversOnTick(t *testing.T) {
 	tick <- tickTime
 	<-passDone
 
-	got, err := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestStartApprovalSweep_LeavesClaimsYoungerThanTwoMinutesAlone(t *testing.T)
 	tick <- tickTime
 	<-passDone
 
-	got, err := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}

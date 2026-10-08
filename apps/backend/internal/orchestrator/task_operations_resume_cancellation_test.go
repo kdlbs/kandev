@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -89,6 +90,43 @@ func TestResumeAttemptCancellationInterruptsDetachedContext(t *testing.T) {
 		t.Fatalf("cancelled attempt validation error = %v, want ErrResumeAttemptCancelled", err)
 	}
 	attempt.finish(registry)
+}
+
+func TestResumeAttemptPreservesRecoveryInspectionDeadlineAcrossDetachment(t *testing.T) {
+	for _, manualPreflight := range []bool{false, true} {
+		name := "automatic session open"
+		if manualPreflight {
+			name = "explicit manual preflight"
+		}
+		t.Run(name, func(t *testing.T) {
+			requestCtx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+			defer cancel()
+			callerDeadline, ok := requestCtx.Deadline()
+			if !ok {
+				t.Fatal("request context has no caller deadline")
+			}
+			if manualPreflight {
+				requestCtx, _ = worktree.WithRecoveryInspectionWait(
+					requestCtx, worktree.RecoveryInspectionWaitBudget,
+				)
+			}
+
+			registry := newResumeAttemptRegistry()
+			attempt, owner := registry.begin(requestCtx, "task-deadline", "session-deadline")
+			if !owner {
+				t.Fatal("resume attempt was not admitted")
+			}
+			defer attempt.finish(registry)
+
+			_, inspectionDeadline := worktree.WithRecoveryInspectionWait(
+				attempt.context(), worktree.RecoveryInspectionWaitBudget,
+			)
+			if !inspectionDeadline.Equal(callerDeadline) {
+				t.Fatalf("inspection deadline after request detachment = %s, want caller deadline %s",
+					inspectionDeadline, callerDeadline)
+			}
+		})
+	}
 }
 
 func TestResumeAttemptRegistryFencesEvictedCancelledIdentities(t *testing.T) {

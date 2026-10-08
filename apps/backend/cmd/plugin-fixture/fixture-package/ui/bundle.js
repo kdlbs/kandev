@@ -6,7 +6,7 @@
  * registers a nav item, a top-level route, a `task-sidebar` slot component,
  * a `main-top-bar` slot component, a `task.created` WS handler, and the
  * `open-demo` keybinding (declared in manifest.yaml's `ui.keybindings`,
- * default `mod+shift+j`) which opens a `host.openModal(...)` demo modal
+ * default `mod+alt+shift+j`) which opens a `host.openModal(...)` demo modal
  * containing a `host.ui` Tooltip. Uses only host.React/host.jsx/host.ui.
  *
  * The plugin page also renders a `host.theme` readout kept current purely

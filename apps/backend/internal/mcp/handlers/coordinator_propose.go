@@ -23,13 +23,14 @@ const fieldErrorDetailsKey = "field"
 // the trusted principal, never the payload.
 func (h *Handlers) handleProposeTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var payload struct {
-		Title        string `json:"title"`
-		Description  string `json:"description"`
-		Rationale    string `json:"rationale"`
-		WorkflowID   string `json:"workflow_id"`
-		StepID       string `json:"step_id"`
-		RepositoryID string `json:"repository_id"`
-		SourceTaskID string `json:"source_task_id"`
+		Title            string   `json:"title"`
+		Description      string   `json:"description"`
+		Rationale        string   `json:"rationale"`
+		WorkflowID       string   `json:"workflow_id"`
+		StepID           string   `json:"step_id"`
+		RepositoryID     string   `json:"repository_id"`
+		SourceTaskID     string   `json:"source_task_id"`
+		StandingOrderIDs []string `json:"standing_order_ids"`
 	}
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -44,13 +45,14 @@ func (h *Handlers) handleProposeTask(ctx context.Context, msg *ws.Message) (*ws.
 	}
 
 	req := coordinator.ProposeTaskRequest{
-		Title:        payload.Title,
-		Description:  payload.Description,
-		Rationale:    payload.Rationale,
-		WorkflowID:   payload.WorkflowID,
-		StepID:       payload.StepID,
-		RepositoryID: payload.RepositoryID,
-		SourceTaskID: payload.SourceTaskID,
+		Title:            payload.Title,
+		Description:      payload.Description,
+		Rationale:        payload.Rationale,
+		WorkflowID:       payload.WorkflowID,
+		StepID:           payload.StepID,
+		RepositoryID:     payload.RepositoryID,
+		SourceTaskID:     payload.SourceTaskID,
+		StandingOrderIDs: payload.StandingOrderIDs,
 	}
 	proposal, openCount, err := h.coordinatorSvc.ProposeTask(ctx, principal.CoordinatorID, req)
 	if err != nil {

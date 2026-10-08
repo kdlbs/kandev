@@ -493,8 +493,6 @@ type OfficeConfig struct {
 //
 // See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
 type FeaturesConfig struct {
-	// ProviderInterruptionContinuation enables conservative native conversation recovery.
-	ProviderInterruptionContinuation bool `mapstructure:"provider_interruption_continuation" json:"providerInterruptionContinuation"`
 	// CursorCloud gates managed Cursor Cloud configuration, discovery, and new
 	// dispatch. Existing bound conversations retain the narrow observation and
 	// cancellation drain path while the feature is disabled.
@@ -568,6 +566,11 @@ type FeaturesConfig struct {
 	// tasks for a human to approve. Off in prod/dev until the feature is
 	// user-ready; on in e2e so tests exercise it.
 	Coordinator bool `mapstructure:"coordinator" json:"coordinator"`
+
+	// CoordinatorPhase2 gates the coordinator control surface (policy,
+	// watches, standing orders, goals, activity log and the new proposal
+	// kinds). It only takes effect together with Coordinator.
+	CoordinatorPhase2 bool `mapstructure:"coordinator_phase2" json:"coordinatorPhase2"`
 
 	// CodexAppServer enables the separate native Codex app-server agent. It is
 	// off in every shipped profile and requires a restart because its protocol

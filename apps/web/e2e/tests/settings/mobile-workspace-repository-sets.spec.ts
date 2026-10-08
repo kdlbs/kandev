@@ -154,6 +154,7 @@ test.describe("Mobile workspace repository sets", () => {
     await basePicker.tap();
     const dropdown = testPage.getByTestId(`repository-set-base-dropdown-${seedData.repositoryId}`);
     await expect(dropdown).toBeVisible();
+    await waitForFiniteAnimations(dropdown);
     await expect(dropdown.getByPlaceholder("Search branches...")).toBeVisible();
     await expect(dropdown.getByText("origin/main")).toBeVisible();
     const remoteMainOption = dropdown.getByRole("option", { name: /^origin\/main origin/ });
@@ -168,7 +169,6 @@ test.describe("Mobile workspace repository sets", () => {
     expect(refreshButtonBox!.height).toBeGreaterThanOrEqual(44);
     expect(refreshButtonBox!.width).toBeGreaterThanOrEqual(44);
     await refreshButton.scrollIntoViewIfNeeded();
-    await waitForFiniteAnimations(dropdown);
     const refreshReceivesCenterTap = await refreshButton.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       const target = document.elementFromPoint(

@@ -35,7 +35,10 @@ export function useGitWithFeedback() {
   const { toast, updateToast } = useToast();
 
   const run = useCallback(
-    async (operation: () => Promise<GitOperationResult>, operationName: string) => {
+    async (
+      operation: () => Promise<GitOperationResult>,
+      operationName: string,
+    ): Promise<boolean> => {
       const toastId = toast({
         title: t("common:gitOperationRunning", { operation: operationName }),
         variant: "loading",
@@ -57,12 +60,14 @@ export function useGitWithFeedback() {
             variant: "error",
           });
         }
+        return result.success;
       } catch (e) {
         updateToast(toastId, {
           title: t("common:gitOperationFailed", { operation: operationName }),
           description: e instanceof Error ? e.message : t("common:anUnexpectedErrorOccurred"),
           variant: "error",
         });
+        return false;
       }
     },
     [t, toast, updateToast],

@@ -138,10 +138,8 @@ func captureMonitorMessages(sub types.WorkspaceStreamSubscriber) []types.Workspa
 
 func requireMonitorRefresh(t *testing.T, tracker *WorkspaceTracker, sub types.WorkspaceStreamSubscriber, path, version string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	// A cached detail wait settles the tick's worker without starting a fresh read.
-	status, err := tracker.GetGitStatusWithDetails(ctx, false)
+	// The cached wait joins the bounded worker and shares tracker shutdown cancellation.
+	status, err := tracker.GetGitStatusWithDetails(tracker.cancelCtxOrBackground(), false)
 	if err != nil {
 		t.Fatal(err)
 	}

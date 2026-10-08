@@ -352,6 +352,15 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			metadata[mcpprofile.ManagedToolPolicyMetadataKey] = encoded
 		}
 	}
+	delete(metadata, mcpprofile.CoordinatorToolPolicyMetadataKey)
+	if req.McpProfile != nil && req.McpProfile.CoordinatorToolPolicy != nil {
+		encoded, err := mcpprofile.MarshalCoordinatorToolPolicy(*req.McpProfile.CoordinatorToolPolicy)
+		if err != nil {
+			metadata[mcpprofile.CoordinatorToolPolicyMetadataKey] = map[string]any{"invalid": true}
+		} else {
+			metadata[mcpprofile.CoordinatorToolPolicyMetadataKey] = encoded
+		}
+	}
 	putPrimaryCheckoutOptions(metadata, req)
 	for k, v := range req.ExecutorConfig {
 		if isTrustedExecutorConfigKey(k) {
@@ -359,6 +368,9 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			// or buggy task metadata payload can't swap out the SSH host /
 			// pinned fingerprint and pivot the launch to a different target.
 			metadata[k] = v
+			continue
+		}
+		if k == mcpprofile.CoordinatorToolPolicyMetadataKey {
 			continue
 		}
 		if _, exists := metadata[k]; !exists {

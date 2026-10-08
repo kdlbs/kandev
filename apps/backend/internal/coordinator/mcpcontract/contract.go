@@ -6,9 +6,23 @@ package mcpcontract
 // ActionProposeTask is the MCP action the propose_task_kandev tool dispatches.
 const ActionProposeTask = "coordinator.propose_task"
 
+// ActionProposeResume, ActionProposeMessage and ActionProposeMove are the MCP
+// actions the propose_resume_kandev, propose_message_kandev and
+// propose_move_kandev tools dispatch
+// (docs/specs/coordinator/system-design/proposal-kinds.md).
+const (
+	ActionProposeResume  = "coordinator.propose_resume"
+	ActionProposeMessage = "coordinator.propose_message"
+	ActionProposeMove    = "coordinator.propose_move"
+)
+
 // ActionGetItem is the MCP action the get_coordinator_item_kandev tool
 // dispatches (docs/specs/coordinator/system-design/copilot-tools.md#item-read).
 const ActionGetItem = "coordinator.get_item"
+
+// ActionListActivity is the MCP action the list_coordinator_activity_kandev
+// tool dispatches (docs/specs/coordinator/system-design/activity-log.md#read-tool).
+const ActionListActivity = "coordinator.list_activity"
 
 // ActionApproveProposal and ActionRejectProposal are reserved MCP action
 // names (docs/specs/coordinator/system-design/proposals.md#security): approve

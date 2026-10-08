@@ -74,6 +74,19 @@ type resumeAndPromptOrchestrator interface {
 	) (*orchestrator.PromptResult, error)
 }
 
+type resumeAndPromptWithPromptContextOrchestrator interface {
+	ResumeTaskSessionAndPromptWithPromptContext(
+		ctx context.Context,
+		taskID, sessionID, prompt, model string,
+		planMode bool,
+		attachments []v1.MessageAttachment,
+		promptReferenceContext string,
+		promptReferencesPrepared bool,
+		references []v1.EntityReference,
+		initialTaskBriefDispatchOwner bool,
+	) (*orchestrator.PromptResult, error)
+}
+
 // AtomicQueuedPromptCoordinator exposes admission limits and committed prompt delivery.
 type AtomicQueuedPromptCoordinator interface {
 	MaxQueuedPromptsPerSession() int
@@ -88,11 +101,46 @@ type taskCanvasGuidanceResolver interface {
 	TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error)
 }
 
+type promptTaskWithPromptContext interface {
+	PromptTaskWithPromptContext(
+		ctx context.Context,
+		taskID, sessionID, prompt, model string,
+		planMode bool,
+		attachments []v1.MessageAttachment,
+		promptReferenceContext string,
+		promptReferencesPrepared bool,
+		references []v1.EntityReference,
+		dispatchOnly bool,
+	) (*orchestrator.PromptResult, error)
+}
+
+type promptTaskWithPromptContextAndDispatchOwnership interface {
+	PromptTaskWithPromptContextAndDispatchOwnership(
+		ctx context.Context,
+		taskID, sessionID, prompt, model string,
+		planMode bool,
+		attachments []v1.MessageAttachment,
+		promptReferenceContext string,
+		promptReferencesPrepared bool,
+		references []v1.EntityReference,
+		dispatchOnly bool,
+		initialTaskBriefDispatchOwner bool,
+	) (*orchestrator.PromptResult, error)
+}
+
+type initialTaskBriefDispatchCoordinator interface {
+	WithInitialTaskBriefAdmission(ctx context.Context, sessionID string, fn func(context.Context) error) error
+	MarkInitialTaskBriefDispatchPending(sessionID string)
+	InitialTaskBriefDispatchPending(sessionID string) bool
+	CompleteInitialTaskBriefDispatch(ctx context.Context, taskID, sessionID string)
+}
+
 type canvasGuidanceProjection struct {
-	resolved                 bool
-	include                  bool
-	preserveDirectPrompt     bool
-	promptReferencesPrepared bool
+	resolved                      bool
+	include                       bool
+	preserveDirectPrompt          bool
+	promptReferencesPrepared      bool
+	initialTaskBriefDispatchOwner bool
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -511,10 +559,11 @@ type wsAddMessageRequest struct {
 	RequirePrimarySession bool                            `json:"require_primary_session,omitempty"`
 	// These fields are server-owned and are carried only from message admission
 	// to the created-session dispatch. They are intentionally not JSON fields.
-	canvasGuidanceResolved   bool
-	includeCanvasGuidance    bool
-	initialTaskBriefSelected bool
-	promptReferencesPrepared bool
+	canvasGuidanceResolved          bool
+	includeCanvasGuidance           bool
+	initialTaskBriefSelected        bool
+	promptReferencesPrepared        bool
+	initialTaskBriefDispatchPending bool
 }
 
 type addMessageReplayIdentity struct {
@@ -778,6 +827,20 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	titleOwner := false
 	hasMessageContent := req.Content != "" || len(req.Attachments) > 0 ||
 		len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0
+	initialTaskBriefEligible := eligibleForInitialTaskBrief(
+		task, sessionResp, configMode, startCreatedSession, hasMessageContent,
+	)
+	if initialTaskBriefEligible && sessionResp.Session.State == models.TaskSessionStateWaitingForInput {
+		hasPromptHistory, historyErr := h.service.HasUserPromptHistory(admissionCtx, req.TaskSessionID)
+		if historyErr != nil {
+			h.logger.Error("failed to check initial task brief prompt history",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.TaskSessionID),
+				zap.Error(historyErr))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to check session prompt history", nil)
+		}
+		initialTaskBriefEligible = !hasPromptHistory
+	}
 	task, titleOwner, wsErr = h.resolveMessageTaskAndTitleOwner(
 		ctx, msg, task, req.TaskID, req.TaskSessionID, configMode, startCreatedSession, hasMessageContent,
 	)
@@ -815,6 +878,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 	initialTaskBrief := h.prepareInitialTaskBriefCandidate(
 		ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
+		initialTaskBriefEligible,
 	)
 	req.Content = storedContent
 	if planCommentAttachmentClaim == nil {
@@ -858,7 +922,18 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queued prompt admission is unavailable", nil)
 		}
 	}
-	createMessage := func() (*models.Message, error) {
+	var initialBriefCoordinator initialTaskBriefDispatchCoordinator
+	if h.orchestrator != nil {
+		initialBriefCoordinator, _ = h.orchestrator.(initialTaskBriefDispatchCoordinator)
+	}
+	initialBriefDispatchMarked := false
+	queueBehindInitialBriefDispatch := false
+	defer func() {
+		if initialBriefDispatchMarked && initialBriefCoordinator != nil {
+			initialBriefCoordinator.CompleteInitialTaskBriefDispatch(ctx, req.TaskID, req.TaskSessionID)
+		}
+	}()
+	createMessage := func(messageCtx context.Context) (*models.Message, error) {
 		if atomicQueuedTaskFeedback {
 			queueMetadata := make(map[string]interface{}, len(createRequest.Metadata)+1)
 			for key, value := range createRequest.Metadata {
@@ -874,21 +949,46 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 				QueuedBy: messagequeue.QueuedByUser,
 			}
 			created, createErr := h.service.CreateQueuedMessageIdempotent(
-				admissionCtx, req.ClientMessageID, createRequest, queued, queuedCoordinator.MaxQueuedPromptsPerSession(),
+				messageCtx, req.ClientMessageID, createRequest, queued, queuedCoordinator.MaxQueuedPromptsPerSession(),
 			)
 			if createErr == nil && (createRequest.InitialTaskBrief == nil ||
 				createRequest.InitialTaskBrief.Selected || (created != nil && created.PromptIndex == 1)) {
-				queuedCoordinator.NotifyQueuedUserPrompt(ctx, req.TaskID, req.TaskSessionID)
+				queuedCoordinator.NotifyQueuedUserPrompt(messageCtx, req.TaskID, req.TaskSessionID)
 			}
 			return created, createErr
 		}
 		if req.ClientMessageID != "" {
-			return h.service.CreateMessageIdempotent(admissionCtx, req.ClientMessageID, createRequest)
+			return h.service.CreateMessageIdempotent(messageCtx, req.ClientMessageID, createRequest)
 		}
-		return h.service.CreateMessage(admissionCtx, createRequest)
+		return h.service.CreateMessage(messageCtx, createRequest)
 	}
 	for refreshAttempt := 0; ; refreshAttempt++ {
-		message, err = createMessage()
+		createAndTrackInitialBrief := func(messageCtx context.Context) error {
+			ownerPending := initialBriefCoordinator != nil &&
+				initialBriefCoordinator.InitialTaskBriefDispatchPending(req.TaskSessionID)
+			message, err = createMessage(messageCtx)
+			if err == nil && message != nil {
+				selectedInitialBrief := initialTaskBrief != nil && initialTaskBrief.Selected &&
+					message.PromptIndex == 1 && message.Content == initialTaskBrief.Content
+				if ownerPending && !selectedInitialBrief {
+					queueBehindInitialBriefDispatch = true
+				}
+				if selectedInitialBrief && !turnStartResult.Queued &&
+					!atomicQueuedTaskFeedback && initialBriefCoordinator != nil {
+					initialBriefCoordinator.MarkInitialTaskBriefDispatchPending(req.TaskSessionID)
+					initialBriefDispatchMarked = true
+					req.initialTaskBriefDispatchPending = true
+				}
+			}
+			return err
+		}
+		if initialBriefCoordinator != nil {
+			err = initialBriefCoordinator.WithInitialTaskBriefAdmission(
+				admissionCtx, req.TaskSessionID, createAndTrackInitialBrief,
+			)
+		} else {
+			err = createAndTrackInitialBrief(admissionCtx)
+		}
 		if !errors.Is(err, repoerrors.ErrInitialTaskBriefStale) || initialTaskBrief == nil || refreshAttempt > 0 {
 			break
 		}
@@ -904,6 +1004,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		task = freshTask
 		initialTaskBrief = h.prepareInitialTaskBriefCandidate(
 			admissionCtx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
+			initialTaskBriefEligible,
 		)
 		createRequest.InitialTaskBrief = initialTaskBrief
 	}
@@ -921,7 +1022,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
 	req.Content = message.Content
-	initialTaskBriefQueued := initialTaskBrief != nil && !initialTaskBrief.Selected
+	initialTaskBriefQueued := (initialTaskBrief != nil && !initialTaskBrief.Selected) || queueBehindInitialBriefDispatch
 	// An idempotent create can return a row committed by another process, so
 	// the candidate pointer is not necessarily the object that selected the
 	// first slot. Recover that result from the committed row before deciding who
@@ -994,6 +1095,8 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		h.dispatchPromptAsync(
 			ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer, trustedPromptContext,
 		)
+		// The async delivery now owns completion of the selected first dispatch.
+		initialBriefDispatchMarked = false
 	}
 
 	return response, nil
@@ -1494,6 +1597,11 @@ func (h *MessageHandlers) dispatchPromptAsync(
 	attachments := req.Attachments
 	go func() {
 		promptCtx := context.WithoutCancel(ctx)
+		if req.initialTaskBriefDispatchPending {
+			if coordinator, ok := h.orchestrator.(initialTaskBriefDispatchCoordinator); ok {
+				defer coordinator.CompleteInitialTaskBriefDispatch(promptCtx, taskID, sessionID)
+			}
+		}
 		if steer {
 			h.forwardMessageAsSteer(promptCtx, taskID, sessionID, content, model, planMode, attachments)
 			return
@@ -1502,10 +1610,11 @@ func (h *MessageHandlers) dispatchPromptAsync(
 			promptCtx, taskID, sessionID, agentProfileID,
 			content, model, planMode, attachments, req.EntityReferences, isCreatedSession,
 			trustedPromptContext, canvasGuidanceProjection{
-				resolved:                 req.canvasGuidanceResolved,
-				include:                  req.includeCanvasGuidance,
-				preserveDirectPrompt:     req.initialTaskBriefSelected,
-				promptReferencesPrepared: req.promptReferencesPrepared,
+				resolved:                      req.canvasGuidanceResolved,
+				include:                       req.includeCanvasGuidance,
+				preserveDirectPrompt:          req.initialTaskBriefSelected,
+				promptReferencesPrepared:      req.promptReferencesPrepared,
+				initialTaskBriefDispatchOwner: req.initialTaskBriefDispatchPending,
 			},
 		)
 	}()
@@ -1517,7 +1626,8 @@ func eligibleForInitialTaskBrief(
 	configMode, startCreatedSession, hasMessageContent bool,
 ) bool {
 	return task != nil && sessionResp != nil &&
-		startCreatedSession && hasMessageContent &&
+		(startCreatedSession ||
+			sessionResp.Session.State == models.TaskSessionStateWaitingForInput) && hasMessageContent &&
 		!task.IsEphemeral && !task.IsFromOffice && !configMode &&
 		strings.TrimSpace(task.Description) != ""
 }
@@ -1642,9 +1752,33 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		return
 	}
 
-	_, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false)
+	var err error
+	promptReferencesPrepared := false
+	initialTaskBriefDispatchOwner := false
+	if len(canvasGuidance) > 0 {
+		promptReferencesPrepared = canvasGuidance[0].promptReferencesPrepared
+		initialTaskBriefDispatchOwner = canvasGuidance[0].initialTaskBriefDispatchOwner
+	}
+	if promptWithContext, ok := h.orchestrator.(promptTaskWithPromptContext); ok {
+		if promptWithOwnership, hasOwnership := h.orchestrator.(promptTaskWithPromptContextAndDispatchOwnership); hasOwnership {
+			_, err = promptWithOwnership.PromptTaskWithPromptContextAndDispatchOwnership(
+				ctx, taskID, sessionID, content, model, planMode, attachments,
+				trustedPromptContext, promptReferencesPrepared, references, false, initialTaskBriefDispatchOwner,
+			)
+		} else {
+			_, err = promptWithContext.PromptTaskWithPromptContext(
+				ctx, taskID, sessionID, content, model, planMode, attachments,
+				trustedPromptContext, promptReferencesPrepared, references, false,
+			)
+		}
+	} else {
+		_, err = h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false)
+	}
 	if err != nil {
-		err = h.handlePromptWithResume(ctx, taskID, sessionID, content, model, planMode, attachments, err)
+		err = h.handlePromptWithResume(
+			ctx, taskID, sessionID, content, model, planMode, attachments,
+			trustedPromptContext, promptReferencesPrepared, references, initialTaskBriefDispatchOwner, err,
+		)
 	}
 	if err != nil {
 		// Don't create a prompt error message if the agent itself reported the error.
@@ -1782,10 +1916,36 @@ func (h *MessageHandlers) handlePromptWithResume(
 	taskID, sessionID, content, model string,
 	planMode bool,
 	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	initialTaskBriefDispatchOwner bool,
 	origErr error,
 ) error {
 	if !errors.Is(origErr, executor.ErrExecutionNotFound) &&
 		!errors.Is(origErr, orchestrator.ErrAgentNotReadyForPrompt) {
+		return origErr
+	}
+	if runner, ok := h.orchestrator.(resumeAndPromptWithPromptContextOrchestrator); ok {
+		if _, retryErr := runner.ResumeTaskSessionAndPromptWithPromptContext(
+			ctx, taskID, sessionID, content, model, planMode, attachments,
+			promptReferenceContext, promptReferencesPrepared, references, initialTaskBriefDispatchOwner,
+		); retryErr != nil {
+			h.logger.Warn("resume and prompt retry failed",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(retryErr))
+			if errors.Is(retryErr, orchestrator.ErrResumeAttemptCancelled) ||
+				h.hasActiveSessionRecovery(ctx, taskID, sessionID, retryErr) {
+				return fmt.Errorf("%w: %w", errPromptRecoveryCardOwnsFailure, retryErr)
+			}
+			return retryErr
+		}
+		return nil
+	}
+	if promptReferencesPrepared || promptReferenceContext != "" || len(references) > 0 || initialTaskBriefDispatchOwner {
+		h.logger.Warn("prompt context cannot be preserved by the available recovery adapter",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID))
 		return origErr
 	}
 	if runner, ok := h.orchestrator.(resumeAndPromptOrchestrator); ok {

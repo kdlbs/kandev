@@ -15,8 +15,11 @@ import {
   type TaskSessionState,
 } from "@/lib/types/http";
 import {
+  recoveryInspectionBusyDetails,
+  recoveryInspectionBusyMessage,
   sessionRecoveryGuardDetails,
   sessionRecoveryGuardMessage,
+  type SessionRecoveryGuardDetails,
 } from "@/lib/services/session-recovery-service";
 import { isLaunchStateRegression } from "@/lib/session-state";
 import { t } from "@/lib/i18n";
@@ -68,6 +71,7 @@ export type SessionStatus = {
 };
 
 export type ResumptionState = "idle" | "checking" | "resuming" | "resumed" | "running" | "error";
+export type SessionRecoveryNoticeKind = "workspace_read_only" | "inspection_busy";
 
 export type SessionRecoveryFailure =
   | {
@@ -90,6 +94,7 @@ export type ResumeStateSetter = {
   setResumptionState: (s: ResumptionState) => void;
   setError: (e: string | null) => void;
   setNotice?: (notice: string | null) => void;
+  setNoticeKind?: (kind: SessionRecoveryNoticeKind | null) => void;
   setWorktreePath: (p: string | null) => void;
   setWorktreeBranch: (p: string | null) => void;
   setTaskSession: (s: {
@@ -228,6 +233,7 @@ export function clearArchiveRecovery(setters: ResumeStateSetter): void {
   setters.setResumptionState("idle");
   setters.setError(null);
   setters.setNotice?.(null);
+  setters.setNoticeKind?.(null);
   setters.setRecoveryFailure?.(null);
   setters.onTaskArchiveConflict?.();
 }
@@ -243,6 +249,7 @@ function applyResumeResponse(
   if (resp.success) {
     setters.setRecoveryFailure?.(null);
     setters.setResumptionState("resumed");
+    setters.setNoticeKind?.(null);
     if (resp.state) {
       setters.setTaskSession({
         id: toSessionId(sessionId),
@@ -288,6 +295,7 @@ function settleWorkspaceRestoreFailure(
   context.setters.setResumptionState("error");
   context.setters.setError(null);
   context.setters.setNotice?.(null);
+  context.setters.setNoticeKind?.(null);
   context.setters.setRecoveryFailure?.(null);
 }
 
@@ -318,6 +326,7 @@ function applyLaunchSuccess(
     context.setters.setResumptionState("idle");
     context.setters.setError(null);
     context.setters.setNotice?.(null);
+    context.setters.setNoticeKind?.(null);
     return { ok: true, waiting: true };
   }
   applyResumeResponse(
@@ -408,6 +417,7 @@ async function restoreAfterResumeFailure(
   if (restoreAttempt.ok) {
     setters.setError(null);
     setters.setNotice?.(t("task:resumeFailedWorkspaceReadOnly"));
+    setters.setNoticeKind?.("workspace_read_only");
     setters.setRecoveryFailure?.({
       outcome: "workspace_read_only",
       resumeError: resumeAttempt.error.message,
@@ -420,6 +430,7 @@ async function restoreAfterResumeFailure(
   }
   setters.setResumptionState("error");
   setters.setNotice?.(null);
+  setters.setNoticeKind?.(null);
   setters.setRecoveryFailure?.({
     outcome: "recovery_failed",
     resumeError: resumeAttempt.error.message,
@@ -429,6 +440,32 @@ async function restoreAfterResumeFailure(
       : {}),
   });
   setters.setError(t("task:sessionRecoveryFailed"));
+  return false;
+}
+
+function finishInspectionBusyResume(
+  setters: ResumeStateSetter,
+  startingProjection: ResumeStartingProjection | null,
+): false {
+  setters.setResumptionState("error");
+  setters.setError(null);
+  setters.setNotice?.(recoveryInspectionBusyMessage((key) => t(key)));
+  setters.setNoticeKind?.("inspection_busy");
+  setters.setRecoveryFailure?.(null);
+  startingProjection?.rollback();
+  return false;
+}
+
+function finishGuardedResumeFailure(
+  setters: ResumeStateSetter,
+  details: SessionRecoveryGuardDetails,
+  startingProjection: ResumeStartingProjection | null,
+): false {
+  setters.setResumptionState("error");
+  setters.setNotice?.(null);
+  setters.setNoticeKind?.(null);
+  setters.setError(sessionRecoveryGuardMessage(details, t));
+  startingProjection?.rollback();
   return false;
 }
 
@@ -444,6 +481,7 @@ async function finishSilentResume(
   }
   if (resumeAttempt.ok) {
     setters.setNotice?.(null);
+    setters.setNoticeKind?.(null);
     if (resumeAttempt.waiting) startingProjection?.rollback();
     return !resumeAttempt.waiting;
   }
@@ -452,18 +490,15 @@ async function finishSilentResume(
     startingProjection?.rollback();
     return false;
   }
+  if (recoveryInspectionBusyDetails(resumeAttempt.error))
+    return finishInspectionBusyResume(setters, startingProjection);
   // The startup recovery guard refuses every launch for this session, so a
   // restore_workspace fallback would fail identically. Skip it and show the
   // guard's own distinct, retryable-or-not message instead of the generic
   // "resume and restore both failed" combination.
   const resumeGuardDetails = sessionRecoveryGuardDetails(resumeAttempt.error);
-  if (resumeGuardDetails) {
-    setters.setResumptionState("error");
-    setters.setNotice?.(null);
-    setters.setError(sessionRecoveryGuardMessage(resumeGuardDetails, t));
-    startingProjection?.rollback();
-    return false;
-  }
+  if (resumeGuardDetails)
+    return finishGuardedResumeFailure(setters, resumeGuardDetails, startingProjection);
   const restored = await restoreAfterResumeFailure(context, resumeAttempt);
   if (!restored) startingProjection?.rollback();
   return restored;

@@ -271,27 +271,6 @@ async function saveEditedTaskFields({
   }
 }
 
-async function shouldKeepEditDialogOpen(
-  error: unknown,
-  refreshStaleBranchPolicies: (error: unknown) => Promise<boolean>,
-): Promise<boolean> {
-  if (isRepositorySelectionError(error)) return true;
-  if (isTaskDependencyUpdateFailure(error)) return true;
-  // A rejected switch, or a later call failing after the switch already
-  // committed, both need the user back in the dialog to see the reason and
-  // retry.
-  if (error instanceof RunnerSwitchRejectedError) return true;
-  if (error instanceof TaskUpdateAfterRunnerSwitchError) return true;
-  if (error instanceof LaunchAfterTaskUpdateError) return true;
-  return refreshStaleBranchPolicies(error);
-}
-
-function isRepositorySelectionError(error: unknown): boolean {
-  return (
-    error instanceof ApiError && Boolean(REPOSITORY_SELECTION_ERROR_KEYS[error.errorCode ?? ""])
-  );
-}
-
 // eslint-disable-next-line max-lines-per-function
 export function useTaskSubmitHandlers({
   isSessionMode,
@@ -669,7 +648,8 @@ export function useTaskSubmitHandlers({
 
       onSuccess?.(updatedTask, "edit", { taskSessionId });
     } catch (error) {
-      closeDialog = !(await shouldKeepEditDialogOpen(error, refreshStaleBranchPolicies));
+      closeDialog = false;
+      await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToUpdateTask"),
         description: taskSubmitErrorMessage(error),
@@ -705,7 +685,8 @@ export function useTaskSubmitHandlers({
       if (!result) return;
       onSuccess?.(result.updatedTask, "edit");
     } catch (error) {
-      closeDialog = !(await shouldKeepEditDialogOpen(error, refreshStaleBranchPolicies));
+      closeDialog = false;
+      await refreshStaleBranchPolicies(error);
       toast({
         title: t("task:failedToUpdateTask"),
         description: taskSubmitErrorMessage(error),
