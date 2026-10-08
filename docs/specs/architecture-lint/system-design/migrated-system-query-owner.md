@@ -97,8 +97,8 @@ name by itself is never sufficient.
 
 | File | Structural owner and supported shapes |
 | --- | --- |
-| `lib/state/slices/system/types.ts` | Match the exact `SystemSliceState` type alias and inspect only direct members of its direct `system` property type literal. Match the exact `SystemSliceActions` type alias and inspect only its direct members. Reject the four retired data fields and four former setter names there. Reject only the exact `SystemBackupsState` type-alias declaration. Do not follow aliases to reach these nodes. |
-| `lib/state/slices/system/system-slice.ts` | Match the exact `defaultSystemState` variable declaration and inspect only direct members of its direct `system` object initializer. Match the exact `createSystemSlice` variable declaration and inspect direct action properties only on its returned object expression. For a mutation, resolve the called `set` identifier to the first parameter binding of `createSystemSlice`; inspect only its direct first-argument recipe callback. A write must resolve the root identifier to that callback's first parameter binding (named `draft` in production) and pass through the direct static `system` member. Compare lexical bindings, not identifier text. Ignore nested functions/callbacks, same-named shadow parameters, and local unrelated objects. |
+| `lib/state/slices/system/types.ts` | Match the exact `SystemSliceState` type alias and inspect only direct members of its direct `system` property type literal. Match the exact `SystemSliceActions` type alias and inspect only its direct members. Reject the four retired data fields and four former setter names there. Reject only the exact `SystemBackupsState` type-alias declaration in this file. Do not follow aliases to reach these nodes. |
+| `lib/state/slices/system/system-slice.ts` | Match the exact `defaultSystemState` variable declaration and inspect only direct members of its direct `system` object initializer. Match the exact `createSystemSlice` variable declaration and inspect direct action properties only on its returned object expression; reject the four retired action names even if the declaration has no `set` parameter. For writes, resolve `set` to the first parameter binding of `createSystemSlice` and inspect direct `set` calls in a returned action function's body, including expression-bodied returns and block-bodied calls in ordinary blocks/conditionals. The first `set` argument must be an inline function/arrow recipe. A write must resolve the root identifier to that callback's first parameter binding (named `draft` in production) and pass through the direct static `system` member. Compare lexical bindings, not identifier text. Do not enter nested functions or callbacks; ignore same-named shadow parameters and local unrelated objects. |
 | `lib/state/slices/system/index.ts` | Reject only a named `export type` specifier for `SystemBackupsState` from the local types module. Other exports and imports are allowed. |
 | `lib/state/hydration/hydrator.ts` | Match the exact `hydrateState` function declaration and its first parameter binding (`draft: Draft<AppState>`). Inspect its body and ordinary nested blocks/conditionals, but do not enter nested functions or callbacks. A direct assignment must target `draft.system.<retired-field>`, with `draft` resolving to that first parameter binding. An inline merge finding requires the callee to resolve to the named `deepMerge` import from `./merge-strategies`, the call to be inside `hydrateState`, argument one to be the exact `draft.system` rooted in the authoritative parameter binding, and argument two to be an object literal with a direct retired-field property. Same-named local `draft`, `system`, or `deepMerge` bindings and nested unrelated calls do not qualify. |
 
@@ -116,14 +116,17 @@ The exact accepted owner nodes and binding identities matter. In
 `system-slice.ts`, the default must be the direct `system` object inside the
 exact `defaultSystemState` initializer; action properties must be direct
 members of the object returned by the exact `createSystemSlice` declaration;
-and a mutation must use the actual `set` parameter and its direct recipe
-callback. In `hydrator.ts`, writes must use the first parameter binding of the
-exact `hydrateState` declaration and remain within its non-nested function
-body. The `deepMerge` reference must resolve to the production import. A nested
-callback, shadowed parameter, local unrelated object, or same-spelled local
-helper remains outside the rule even when it contains a retired key. The backup
-type and barrel export checks use their exact declaration/export nodes, not
-matching word sequences elsewhere.
+and a mutation must call the actual `set` parameter with an inline recipe as
+its first argument. The action may return that call directly or invoke it in
+its block body. In `hydrator.ts`, writes must use the first parameter binding
+of the exact `hydrateState` declaration and remain within its non-nested
+function body. The `deepMerge` reference must resolve to the production import.
+A nested function declaration, callback, shadowed parameter, local unrelated
+object, or same-spelled local helper remains outside the rule even when it
+contains a retired key. Structural declarations are checked only in their
+owning file, so a `SystemBackupsState` alias in `hydrator.ts` is allowed. The
+backup type and barrel export checks use their exact declaration/export nodes,
+not matching word sequences elsewhere.
 
 Current jobs, metrics, updates, retention, storage policy, overview, analysis
 revision, runs, quarantine, and storage.disk remain valid Zustand state.
@@ -157,7 +160,7 @@ hook. Its per-file positive matrix is:
 | Production `filePath` | Required `lintText` positive fixture |
 | --- | --- |
 | `lib/state/slices/system/types.ts` | Add each retired data property to `SystemSliceState.system`, each former setter member to `SystemSliceActions`, and the exact `SystemBackupsState` alias. |
-| `lib/state/slices/system/system-slice.ts` | Add each retired property to `defaultSystemState.system`; add each former setter to the `createSystemSlice` returned object with a direct write through that action's actual `set` recipe parameter. |
+| `lib/state/slices/system/system-slice.ts` | Add each retired property to `defaultSystemState.system`, each former setter name to the returned object, and a direct write for each retired field through the actual `set` recipe parameter in a block-bodied action. |
 | `lib/state/slices/system/index.ts` | Add the exact named type re-export for `SystemBackupsState`. |
 | `lib/state/hydration/hydrator.ts` | For each retired field, test both a direct assignment through the actual `hydrateState` draft parameter and a direct property in an inline `deepMerge` payload rooted at that draft's `system`. |
 
@@ -170,15 +173,17 @@ The guard is not configured on the four Query hook paths:
 `apps/web/hooks/domains/system/use-system-info.ts`,
 `use-database-stats.ts`, `use-backups.ts`, and `use-disk-usage.ts`.
 
-RuleTester fixtures cover each resource's state type, default, action type,
-returned slice action, direct assignment, and explicit hydration merge, plus
-the backup alias and export. They cover identifier, quoted, and computed
+RuleTester and real-config `lintText` fixtures cover each resource's state
+field, default, action type/name, slice recipe write, hydration assignment, and
+explicit hydration merge, plus the backup alias and export. They cover
+identifier, quoted, and computed
 static-string keys in supported positions. Negative fixtures cover current
 jobs, metrics, updates, retention, storage policy/overview/runs/quarantine,
 especially `storage.disk`; legitimate Query types, calls, and hook ownership;
 independent control-plane no-store process reads; unrelated domains, roots, and
 nested object fields; shadowed `draft`, `system`, `set`, and `deepMerge`
-bindings; nested callbacks; and snapshot terms in comments, ordinary strings,
+bindings; nested function declarations and callbacks; owner declarations on a
+different guarded filename; and snapshot terms in comments, ordinary strings,
 and template text. They also cover harmless formatting.
 No baseline, rule exemption, broad suppression, or test-only registration is
 introduced.

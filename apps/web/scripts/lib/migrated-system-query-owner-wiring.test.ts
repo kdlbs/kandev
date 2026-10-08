@@ -18,38 +18,162 @@ const queryHookPaths = [
   "hooks/domains/system/use-disk-usage.ts",
 ];
 
-const positiveFixtures = [
+const snapshotOwners = [
   {
-    file: ownerPaths.types,
-    code: `type SystemSliceState = { system: { info: string | null } };
-type SystemSliceActions = {};`,
-    line: 1,
+    field: "info",
+    action: "setSystemInfo",
     resource: "About SystemInfo",
     replacement: "useSystemInfo",
   },
   {
-    file: ownerPaths.slice,
-    code: `const defaultSystemState = { system: { database: null } };`,
-    line: 1,
+    field: "database",
+    action: "setSystemDatabase",
     resource: "database statistics",
     replacement: "useDatabaseStats",
   },
   {
-    file: ownerPaths.barrel,
-    code: `export type { SystemBackupsState } from "./types";`,
-    line: 1,
+    field: "backups",
+    action: "setSystemBackups",
     resource: "backup list",
     replacement: "useBackups",
   },
   {
-    file: ownerPaths.hydrator,
-    code: `import { deepMerge } from "./merge-strategies";
-export function hydrateState(draft: any) {
-  deepMerge(draft.system, { diskUsage: null });
-}`,
-    line: 3,
+    field: "diskUsage",
+    action: "setSystemDiskUsage",
     resource: "disk usage",
     replacement: "useDiskUsage",
+  },
+];
+
+const fixture = (file: string, code: string, owner: (typeof snapshotOwners)[number]) => ({
+  file,
+  code,
+  line: 1,
+  resource: owner.resource,
+  replacement: owner.replacement,
+});
+
+const backupOwner = snapshotOwners.find((owner) => owner.field === "backups")!;
+
+const positiveFixtures = [
+  ...snapshotOwners.map((owner) =>
+    fixture(
+      ownerPaths.types,
+      `type SystemSliceState = { system: { ${owner.field}: unknown } };`,
+      owner,
+    ),
+  ),
+  ...snapshotOwners.map((owner) =>
+    fixture(ownerPaths.types, `type SystemSliceActions = { ${owner.action}: () => void };`, owner),
+  ),
+  fixture(
+    ownerPaths.types,
+    `type SystemBackupsState = { items: string[]; loaded: boolean };`,
+    backupOwner,
+  ),
+  ...snapshotOwners.map((owner) =>
+    fixture(
+      ownerPaths.slice,
+      `const defaultSystemState = { system: { ${owner.field}: null } };`,
+      owner,
+    ),
+  ),
+  ...snapshotOwners.map((owner) =>
+    fixture(
+      ownerPaths.slice,
+      `const createSystemSlice = () => ({ ${owner.action}: () => undefined });`,
+      owner,
+    ),
+  ),
+  ...snapshotOwners.map((owner) =>
+    fixture(
+      ownerPaths.slice,
+      `const createSystemSlice = (set: any) => ({ update: () => { set((draft: any) => { draft.system.${owner.field} = null; }); } });`,
+      owner,
+    ),
+  ),
+  fixture(ownerPaths.barrel, `export type { SystemBackupsState } from "./types";`, backupOwner),
+  ...snapshotOwners.map((owner) =>
+    fixture(
+      ownerPaths.hydrator,
+      `export function hydrateState(draft: any) { draft.system.${owner.field} = null; }`,
+      owner,
+    ),
+  ),
+  ...snapshotOwners.map((owner) =>
+    fixture(
+      ownerPaths.hydrator,
+      `import { deepMerge } from "./merge-strategies"; export function hydrateState(draft: any) { deepMerge(draft.system, { ${owner.field}: null }); }`,
+      owner,
+    ),
+  ),
+];
+
+const negativeFixtures = [
+  {
+    file: ownerPaths.types,
+    code: `import type { SystemInfo, DatabaseStats, SnapshotInfo, DiskUsageResponse } from "@/lib/types";
+type SystemSliceState = { system: { jobs: {}; metrics: null; updates: null; retention: null; storage: { disk: null } } };
+type SystemSliceActions = { upsertSystemJob: (job: unknown) => void };`,
+  },
+  {
+    file: ownerPaths.slice,
+    code: `const defaultSystemState = { system: { jobs: {}, metrics: null, updates: null, retention: null, storage: { disk: null, policy: null, overview: null, runs: [], quarantine: [] } } };
+const unrelated = { system: { info: null, database: null, backups: [], diskUsage: null } };
+const createSystemSlice = (set: any) => ({ update: () => set((draft: any) => {
+  const system = { info: null };
+  system.info = null;
+  const localDraft = { system: { database: null } };
+  localDraft.system.database = null;
+  function nested(draft: any, system: any) {
+    draft.system.backups = [];
+    system.diskUsage = null;
+  }
+  function capturesDraft() { draft.system.diskUsage = null; }
+}) });
+// Retired-key text in comments and strings is not a state owner.
+const note = "system.info database backups diskUsage";
+const template = \`system.info \${"database"} backups diskUsage\`;
+const uiDraft = { settingsDraft: { value: "local" }, mutationFeedback: null };
+const queryRead = () => useSystemInfo();
+const processProbe = () => fetch("/api/v1/system/processes?no-store=true");`,
+  },
+  {
+    file: ownerPaths.barrel,
+    code: `export type { SystemSliceState, SystemSliceActions } from "./types";
+const unrelated = { SystemBackupsState: true };`,
+  },
+  {
+    file: ownerPaths.hydrator,
+    code: `import { deepMerge } from "./merge-strategies";
+type SystemBackupsState = { items: string[]; loaded: boolean };
+export function hydrateState(draft: any, state: any) {
+  deepMerge(draft.system, state.system);
+  const unrelated = { system: { info: null, nested: { database: null }, storage: { disk: null } } };
+  function nested(draft: any) {
+    draft.system.info = null;
+    deepMerge(draft.system, { database: null });
+  }
+  function nestedShadow(draft: any, system: any) {
+    draft.system.backups = [];
+    system.diskUsage = null;
+  }
+  function capturesDraft() {
+    draft.system.info = null;
+    deepMerge(draft.system, { database: null });
+  }
+  const later = () => { draft.system.backups = []; };
+  const system = { diskUsage: null };
+  system.diskUsage = null;
+  {
+    const draft = { system: { diskUsage: null } };
+    deepMerge(draft.system, { info: null });
+  }
+  {
+    const deepMerge = (_target: unknown, _payload: unknown) => {};
+    deepMerge(draft.system, { info: null });
+  }
+}`,
   },
 ];
 
@@ -108,68 +232,11 @@ describe("migrated System Query owner ESLint wiring", () => {
   });
 
   // @covers AC-ARCHITECTURE-LINT-MIGRATED-SYSTEM-QUERY-OWNER-001.2
-  it.each([
-    {
-      file: ownerPaths.types,
-      code: `import type { SystemInfo, DatabaseStats, SnapshotInfo, DiskUsageResponse } from "@/lib/types";
-type SystemSliceState = { system: { jobs: {}; metrics: null; updates: null; retention: null; storage: { disk: null } } };
-type SystemSliceActions = { upsertSystemJob: (job: unknown) => void };`,
+  it.each(negativeFixtures)(
+    "allows unrelated or shadowed shape in $file",
+    async ({ file, code }) => {
+      const [result] = await eslint.lintText(code, { filePath: absolute(file) });
+      expect(result.messages.filter((message) => message.ruleId === ruleId)).toEqual([]);
     },
-    {
-      file: ownerPaths.slice,
-      code: `const defaultSystemState = { system: { jobs: {}, metrics: null, updates: null, retention: null, storage: { disk: null, policy: null, overview: null, runs: [], quarantine: [] } } };
-const unrelated = { system: { info: null, database: null, backups: [], diskUsage: null } };
-const createSystemSlice = (set: any) => ({ update: () => set((draft: any) => {
-  const system = { info: null };
-  system.info = null;
-  const localDraft = { system: { database: null } };
-  localDraft.system.database = null;
-  function nested(draft: any, system: any) {
-    draft.system.backups = [];
-    system.diskUsage = null;
-  }
-}) });
-// Retired-key text in comments and strings is not a state owner.
-const note = "system.info database backups diskUsage";
-const template = \`system.info \${"database"} backups diskUsage\`;
-const uiDraft = { settingsDraft: { value: "local" }, mutationFeedback: null };
-const queryRead = () => useSystemInfo();
-const processProbe = () => fetch("/api/v1/system/processes?no-store=true");`,
-    },
-    {
-      file: ownerPaths.barrel,
-      code: `export type { SystemSliceState, SystemSliceActions } from "./types";
-const unrelated = { SystemBackupsState: true };`,
-    },
-    {
-      file: ownerPaths.hydrator,
-      code: `import { deepMerge } from "./merge-strategies";
-export function hydrateState(draft: any, state: any) {
-  deepMerge(draft.system, state.system);
-  const unrelated = { system: { info: null, nested: { database: null }, storage: { disk: null } } };
-  function nested(draft: any) {
-    draft.system.info = null;
-    deepMerge(draft.system, { database: null });
-  }
-  function nestedShadow(draft: any, system: any) {
-    draft.system.backups = [];
-    system.diskUsage = null;
-  }
-  const later = () => { draft.system.backups = []; };
-  const system = { diskUsage: null };
-  system.diskUsage = null;
-  {
-    const draft = { system: { diskUsage: null } };
-    deepMerge(draft.system, { info: null });
-  }
-  {
-    const deepMerge = (_target: unknown, _payload: unknown) => {};
-    deepMerge(draft.system, { info: null });
-  }
-}`,
-    },
-  ])("allows unrelated or shadowed shape in $file", async ({ file, code }) => {
-    const [result] = await eslint.lintText(code, { filePath: absolute(file) });
-    expect(result.messages.filter((message) => message.ruleId === ruleId)).toEqual([]);
-  });
+  );
 });

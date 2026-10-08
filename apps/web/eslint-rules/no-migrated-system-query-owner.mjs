@@ -13,6 +13,12 @@ const RESOURCE_BY_ACTION = new Map([
 ]);
 
 const MERGE_MODULE = "./merge-strategies";
+const OWNER_PATHS = {
+  types: "lib/state/slices/system/types.ts",
+  systemSlice: "lib/state/slices/system/system-slice.ts",
+  barrel: "lib/state/slices/system/index.ts",
+  hydrator: "lib/state/hydration/hydrator.ts",
+};
 
 function unwrap(node) {
   let current = node;
@@ -78,7 +84,20 @@ function sameBinding(sourceCode, reference, binding) {
 }
 
 function isFunction(node) {
-  return node?.type === "ArrowFunctionExpression" || node?.type === "FunctionExpression";
+  return (
+    node?.type === "ArrowFunctionExpression" ||
+    node?.type === "FunctionExpression" ||
+    node?.type === "FunctionDeclaration"
+  );
+}
+
+function ownerForFilename(filename) {
+  const normalized = String(filename ?? "").replaceAll("\\", "/");
+  return (
+    Object.entries(OWNER_PATHS).find(
+      ([, suffix]) => normalized === suffix || normalized.endsWith(`/${suffix}`),
+    )?.[0] ?? null
+  );
 }
 
 function walkBody(node, sourceCode, visit) {
@@ -113,12 +132,6 @@ function functionBody(node) {
   if (current.body.type !== "BlockStatement") return current.body;
   const returned = current.body.body.find((statement) => statement.type === "ReturnStatement");
   return returned?.argument ?? null;
-}
-
-function directReturnedSetCall(actionValue, setBinding, sourceCode) {
-  const returned = unwrap(functionBody(actionValue));
-  if (returned?.type !== "CallExpression" || returned.callee.type !== "Identifier") return null;
-  return sameBinding(sourceCode, returned.callee, setBinding) ? returned : null;
 }
 
 function systemField(target, rootBinding, sourceCode) {
@@ -207,26 +220,33 @@ function checkSystemSlice(context, sourceCode, declarator) {
 
   const setParameter = sliceFunction.params[0];
   const setBinding = variableForIdentifier(sourceCode, setParameter);
-  if (!setBinding) return;
 
   for (const action of returned.properties) {
     if (action.type === "SpreadElement") continue;
     const actionName = propertyKey(action);
     reportOwner(context, action, RESOURCE_BY_ACTION.get(actionName));
 
-    const setCall = directReturnedSetCall(action.value, setBinding, sourceCode);
-    const recipe = setCall?.arguments[0];
-    if (!isFunction(recipe) || recipe.params[0]?.type !== "Identifier") continue;
-    const draftParameter = recipe.params[0];
+    if (!setBinding || !isFunction(action.value)) continue;
 
-    walkBody(recipe.body, sourceCode, (node) => {
-      if (node.type !== "AssignmentExpression" || node.operator !== "=") return;
-      const owner = systemField(
-        node.left,
-        variableForIdentifier(sourceCode, draftParameter),
-        sourceCode,
-      );
-      if (owner) reportOwner(context, owner.node, RESOURCE_BY_FIELD.get(owner.fieldName));
+    walkBody(action.value.body, sourceCode, (node) => {
+      if (
+        node.type !== "CallExpression" ||
+        node.callee.type !== "Identifier" ||
+        !sameBinding(sourceCode, node.callee, setBinding)
+      ) {
+        return;
+      }
+
+      const recipe = node.arguments[0];
+      if (!isFunction(recipe) || recipe.params[0]?.type !== "Identifier") return;
+      const draftBinding = variableForIdentifier(sourceCode, recipe.params[0]);
+      if (!draftBinding) return;
+
+      walkBody(recipe.body, sourceCode, (recipeNode) => {
+        if (recipeNode.type !== "AssignmentExpression" || recipeNode.operator !== "=") return;
+        const owner = systemField(recipeNode.left, draftBinding, sourceCode);
+        if (owner) reportOwner(context, owner.node, RESOURCE_BY_FIELD.get(owner.fieldName));
+      });
     });
   }
 }
@@ -308,18 +328,25 @@ export const noMigratedSystemQueryOwner = {
   },
   create(context) {
     const sourceCode = context.sourceCode;
+    const owner = ownerForFilename(context.filename);
     return {
       "Program:exit"(program) {
         const declarations = topLevelDeclarations(program);
-        checkTypes(context, declarations);
-        for (const declaration of declarations) {
-          for (const declarator of variableDeclarators(declaration)) {
-            checkDefaultSystemState(context, declarator);
-            checkSystemSlice(context, sourceCode, declarator);
+        if (!owner || owner === "types") checkTypes(context, declarations);
+        if (!owner || owner === "systemSlice") {
+          for (const declaration of declarations) {
+            for (const declarator of variableDeclarators(declaration)) {
+              checkDefaultSystemState(context, declarator);
+              checkSystemSlice(context, sourceCode, declarator);
+            }
           }
-          checkHydration(context, sourceCode, program, declaration);
         }
-        checkBarrelExports(context, program);
+        if (!owner || owner === "hydrator") {
+          for (const declaration of declarations) {
+            checkHydration(context, sourceCode, program, declaration);
+          }
+        }
+        if (!owner || owner === "barrel") checkBarrelExports(context, program);
       },
     };
   },

@@ -55,12 +55,17 @@ Accept identifier, quoted string, and computed static string-literal keys at
 the positions defined in the system design. Recognize actual AST owners and
 lexical binding identity: `SystemSliceState.system`, `SystemSliceActions`, the
 `defaultSystemState.system` initializer, the object returned by
-`createSystemSlice`, its `set` recipe parameter, the exact named barrel export,
+`createSystemSlice`, its actual `set` parameter and direct recipe calls, the exact named barrel export,
 and the first parameter of `hydrateState`. Ignore shadowed `draft` or `system`
 names, nested callbacks, and local unrelated objects. The precise traversal
 and supported forms are specified in the [system design](../../specs/architecture-lint/system-design/migrated-system-query-owner.md).
-For slice mutations, resolve `set` to `createSystemSlice`'s first parameter
-binding and `draft` to the direct recipe callback's first parameter binding.
+For slice mutations, reject returned action names even when the slice has no
+`set` parameter. Resolve `set` to `createSystemSlice`'s first parameter
+binding and `draft` to the inline recipe callback's first parameter binding.
+Inspect direct `set(recipe)` calls in expression-bodied returns and in
+block-bodied action functions, including ordinary nested blocks and
+conditionals. Do not inspect calls inside nested function declarations or
+callbacks.
 For hydration, resolve `draft` to `hydrateState`'s first parameter binding;
 `deepMerge` must resolve to the named production import from
 `./merge-strategies`, with the exact authoritative `draft.system` as argument
@@ -293,40 +298,58 @@ are the source contracts.
   TypeScript owner paths. The invocation on only the .mjs rule and
   eslint.config.mjs was skipped as expected by the hook file filter.
 - Pre-registration full web-lint runs were 55.14, 52.83, and 72.24 seconds;
-  the median was 55.14 seconds. Post-registration runs were 67.32, 64.70, and
-  106.52 seconds, with a 67.32-second median. Variance is high; these results do
-  not establish a rule-specific performance cost or a performance improvement.
+  the median was 55.14 seconds. After the review fixes, full web-lint runs were
+  69.13, 66.90, and 69.77 seconds, with a 69.13-second median. The earlier
+  samples had wider variance; these measurements do not establish a
+  rule-specific performance cost or a performance improvement.
 
 ## Results
 
 The implementation adds the scoped ESLint rule, RuleTester matrix, real-config
-wiring tests, and registration. Red/Green evidence: before implementation, the
-real-config wiring suite had 8 failing assertions across the four exact owner
-paths; the empty rule then failed 35 of 42 supported RuleTester cases. A
-temporary `info: null` field in the real `defaultSystemState.system` object
-failed ESLint with `About SystemInfo is Query-owned; read it with useSystemInfo`.
-The temporary edit was restored byte-for-byte, and targeted ESLint passed.
+wiring tests, and registration. Initial Red/Green evidence: before
+implementation, the real-config wiring suite had 8 failing assertions across
+the four exact owner paths; the empty rule then failed 35 of 42 supported
+RuleTester cases. Review-fix Red evidence: before the correctness and wiring
+fixes, 15 focused cases failed, covering nested function declarations,
+owner-file routing, setter detection without `set`, block-bodied `set` calls,
+and incomplete real-config coverage. After the fixes, the focused suites passed.
 
-Final focused RuleTester and wiring suites passed: 2 files, 64 tests, 4.27
-seconds. Targeted ESLint passed on the four production owner files, rule,
-tests, and configuration. Full web lint passed in 67.32, 64.70, and 106.52
-seconds (median 67.32); typecheck passed in 82.7 seconds. Full web tests passed
-with 2,758 files and 24,613 tests passed, 4 skipped, in 3,201.21 seconds. Some
-integration child processes logged `ECONNREFUSED localhost:3000`; Vitest exited
-successfully with no failed tests.
+The real production-boundary check inserted `info: null` into the actual
+`defaultSystemState.system` object. Targeted ESLint rejected it at line 6 with
+`About SystemInfo is Query-owned; read it with useSystemInfo`. The temporary
+edit was restored byte-for-byte, and targeted ESLint passed on all owner files,
+the rule, tests, and configuration.
 
-The final scoped pre-commit run passed, including documentation catalog and
-specification lint, formatting, changed-file web lint, i18n, and public-copy
-checks. The trusted-base coverage preflight used merge base
+Final focused RuleTester and real-config wiring suites passed: 2 files, 93
+tests, 4.19 seconds. The 30 positive `lintText` fixtures cover each state field,
+action, default, slice recipe write, hydration assignment, and inline hydration
+merge at its exact production filename, plus the backup alias and barrel
+export. Negative tests verify captured drafts in nested function declarations,
+cross-owner declarations, unrelated state, storage.disk, and Query usage.
+Typecheck passed in 6.4 seconds. Full web tests passed with 2,758 files and
+24,642 tests passed, 4 skipped, in 2,778.01 seconds. Integration child
+processes logged `ECONNREFUSED localhost:3000`; Vitest exited successfully with
+no failed tests. Another worktree was running a full Vitest suite concurrently,
+so wall-time comparison is noisy.
+
+Full web lint passed in 69.13, 66.90, and 69.77 seconds (median 69.13),
+compared with the 55.14-second pre-registration median. The earlier and final
+samples vary; no rule-specific timing claim follows from that difference. The
+final scoped pre-commit suite passed after Prettier formatted the expanded
+wiring fixtures; its second complete invocation passed every selected hook.
+The documentation catalog validated 366 decisions and 1,475 specifications,
+the specification-structure lint passed, and `git diff --check` was clean. The
+trusted-base coverage preflight used merge base
 6254b05eb0242b67900e160ff5b1d9acbb7962ad and validator blob
 4569a63bf3da88bc31b1d6b34d7f03bf20269e93 (matching `origin/main`); the actual
-14-file scoped diff was covered by the new requirement/design with one accepted
-reference and no errors. It invoked only `validateCoverage`; the required PR
-coverage gate remains pending. The rule has zero owner findings or exemptions.
+14-file scoped diff was covered by the requirement/design with one accepted
+reference and no errors. This was the pure `validateCoverage` check only; the
+required PR coverage gate remains pending. The rule has zero owner findings or
+exemptions.
 
 No application runtime, cache, hydration, API, UI, or backend source change is
 retained. The guard does not resolve aliases or arbitrary data flow, dynamic or
 template keys, object spreads, indirect helper payloads, renamed owners, or
-mirrors outside the four configured source files. The tested full-lint time
-range was 64.70–106.52 seconds after registration versus 52.83–72.24 seconds
-before; run-to-run variance prevents attributing the difference to this rule.
+mirrors outside the four configured source files. All actionable review
+findings have implementation and regression coverage locally; exact-head PR
+replies and inline-thread resolutions remain pending.

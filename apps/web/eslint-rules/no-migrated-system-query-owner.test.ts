@@ -75,6 +75,7 @@ ruleTester.run("no-migrated-system-zustand-owner", noMigratedSystemQueryOwner, {
               draft.system.info = null;
               system.database = null;
             }
+            function capturesDraft() { draft.system.diskUsage = null; }
           }),
         });`,
     },
@@ -93,6 +94,7 @@ ruleTester.run("no-migrated-system-zustand-owner", noMigratedSystemQueryOwner, {
             draft.system.info = null;
             system.database = null;
           }
+          function capturesDraft() { draft.system.backups = []; }
           const system = { diskUsage: null };
           system.diskUsage = null;
           {
@@ -114,6 +116,10 @@ ruleTester.run("no-migrated-system-zustand-owner", noMigratedSystemQueryOwner, {
       code: `export type { SystemSliceState, SystemSliceActions } from "./types";
         const message = "SystemBackupsState info database backups diskUsage";
         const note = \`SystemBackupsState \${"info"}\`;`,
+    },
+    {
+      filename: "apps/web/lib/state/hydration/hydrator.ts",
+      code: `type SystemBackupsState = { items: string[]; loaded: boolean };`,
     },
   ],
   // @covers AC-ARCHITECTURE-LINT-MIGRATED-SYSTEM-QUERY-OWNER-001.1
@@ -151,6 +157,10 @@ ruleTester.run("no-migrated-system-zustand-owner", noMigratedSystemQueryOwner, {
       errors: [diagnostic(resource, hook)],
     })),
     {
+      code: `const createSystemSlice = () => ({ setSystemInfo: () => undefined });`,
+      errors: [diagnostic(systemInfoResource, systemInfoHook)],
+    },
+    {
       code: `const createSystemSlice = (set: any) => ({ ["setSystemDatabase"]: () => undefined });`,
       errors: [diagnostic("database statistics", "useDatabaseStats")],
     },
@@ -158,6 +168,10 @@ ruleTester.run("no-migrated-system-zustand-owner", noMigratedSystemQueryOwner, {
       code: `const createSystemSlice = (set: any) => ({ update: () => set((draft: any) => { draft.system.${field} = null; }) });`,
       errors: [diagnostic(resource, hook)],
     })),
+    {
+      code: `const createSystemSlice = (set: any) => ({ update: () => { set((draft: any) => { draft.system.info = null; }); } });`,
+      errors: [diagnostic(systemInfoResource, systemInfoHook)],
+    },
     {
       code: `const createSystemSlice = (set: any) => ({ update: () => set((draft: any) => { draft["system"]["info"] = null; }) });`,
       errors: [diagnostic(systemInfoResource, systemInfoHook)],
