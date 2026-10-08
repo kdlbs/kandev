@@ -989,6 +989,7 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 
 ## Troubleshooting
 
+- **A task edit fails to save:** the editor stays open so you can correct the error and retry with your current title and editable instructions. A successful save closes the editor. **Cancel** discards the current draft. If the error reports a saved task or runner change followed by another failure, that completed change remains; retry only the remaining operation.
 - **No workflow is available:** open the workspace's **Workflows** page. Newly added workspaces have none by default.
 - **No agent starts:** the empty-description **Start Plan Mode** path does not use the normal start-agent submission. To begin an agent immediately, enter a description and use **Start task** or **Start task in plan mode**; also confirm the selected profiles are healthy and compatible.
 - **Task starts in the wrong step:** the destination depends on whether an agent starts immediately. **Create without starting agent** uses **Start step** with first-step fallback. **Start task** and **Start task in plan mode** use the first **Auto-start agent** step, then fall back to **Start step**. An explicit `workflow_step_id` from the creator outranks these defaults.
