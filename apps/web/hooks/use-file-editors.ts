@@ -22,6 +22,7 @@ import { useOpenFileWorkspaceSync } from "./file-editors-sync";
 import { t } from "@/lib/i18n";
 import {
   fetchFileEditorState,
+  buildPersistedTabs,
   getPreviewItemIdToRemoveOnReplace,
   isFileEditorPanelAlreadyRestored,
   isRestoreWriteCurrent,
@@ -93,39 +94,6 @@ function applyFileChange(
     }
   }
   updateFileState(fileKey, { content: newContent, isDirty: nextIsDirty });
-}
-
-/** Build the sessionStorage tab records from live openFiles + dockview state. */
-function buildPersistedTabs(
-  api: ReturnType<typeof useDockviewStore.getState>["api"],
-  openFiles: Map<string, FileEditorState>,
-) {
-  const preview = api?.getPanel(PREVIEW_FILE_EDITOR_ID);
-  const previewParams = preview?.params as Record<string, unknown> | undefined;
-  const previewItemId = (previewParams?.previewItemId ?? null) as string | null;
-  const isPromoted = previewParams?.promoted === true;
-  return Array.from(openFiles.values()).flatMap(
-    ({ path, name, repo, renderedPreview, markdownMode }) => {
-      const itemId = buildRepoScopedItemId(path, repo);
-      const isPinned = !!api?.getPanel(`file:${itemId}`);
-      const isPreview = !isPinned && itemId === previewItemId;
-      if (!isPinned && !isPreview) return [];
-      // Promoted previews persist as pinned so edits survive refresh
-      const persistAsPinned = isPinned || (isPreview && isPromoted);
-      return [
-        {
-          path,
-          name,
-          ...(repo ? { repo } : {}),
-          ...(getFilePreviewKind(path) === "markdown" && renderedPreview
-            ? { renderedPreview }
-            : {}),
-          ...(markdownMode ? { markdownMode } : {}),
-          pinned: persistAsPinned,
-        },
-      ];
-    },
-  );
 }
 
 type RestoreTabsParams = {

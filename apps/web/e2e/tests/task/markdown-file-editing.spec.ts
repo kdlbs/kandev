@@ -6,6 +6,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+import { watchWs, type WsWatcher } from "../../helpers/causal-waits";
 
 const MARKDOWN_CONTENT = `# Markdown lifecycle
 
@@ -48,7 +49,7 @@ async function seedMarkdownSession({
   fileName: string;
   content: string;
   taskTitle: string;
-}): Promise<{ session: SessionPage; filePath: string; sessionId: string }> {
+}): Promise<{ session: SessionPage; filePath: string; sessionId: string; gateway: WsWatcher }> {
   const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
   const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
   git.createFile(fileName, content);
@@ -66,6 +67,7 @@ async function seedMarkdownSession({
       repository_ids: [seedData.repositoryId],
     },
   );
+  const gateway = watchWs(testPage);
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
@@ -74,6 +76,7 @@ async function seedMarkdownSession({
     session,
     filePath: path.join(repoDir, fileName),
     sessionId: task.session_id,
+    gateway,
   };
 }
 
@@ -241,7 +244,7 @@ async function expectSingleCompactToolbar(testPage: Page) {
 }
 
 test.describe("Markdown file editing", () => {
-  test.describe.configure({ retries: 1, timeout: 120_000 });
+  test.describe.configure({ retries: 0, timeout: 120_000 });
 
   test("opens in Preview, edits the rendered hybrid buffer, saves, and restores Edit mode", async ({
     testPage,
@@ -252,7 +255,7 @@ test.describe("Markdown file editing", () => {
   }) => {
     const fileName = `markdown-lifecycle-${Date.now()}.md`;
     const marker = `saved markdown marker ${Date.now()}`;
-    const { session, filePath, sessionId } = await seedMarkdownSession({
+    const { session, filePath, sessionId, gateway } = await seedMarkdownSession({
       testPage,
       apiClient,
       seedData,
@@ -296,10 +299,9 @@ test.describe("Markdown file editing", () => {
     const saveButton = editor.getByTestId("markdown-file-save");
     await expect(saveButton).toContainText(/Save\s*\((?:Ctrl|⌘)\+S\)/);
     await expect(saveButton).toBeEnabled();
+    const saved = gateway.waitForResponse("workspace.file.update");
     await saveButton.click();
-    await expect
-      .poll(() => fs.readFileSync(filePath, "utf8"), { timeout: 15_000 })
-      .toContain(marker);
+    await saved;
     expect(fs.readFileSync(filePath, "utf8")).toBe(
       `${MARKDOWN_CONTENT.replace(
         "This paragraph stays in the canonical source.",
@@ -426,7 +428,7 @@ const ready = true;
 | --- | --- |
 | Preview | Ready |
 `;
-    const { session, filePath } = await seedMarkdownSession({
+    const { session, filePath, gateway } = await seedMarkdownSession({
       testPage,
       apiClient,
       seedData,
@@ -601,11 +603,9 @@ const ready = true;
 
     await columnAction.click();
     await rowAction.click();
+    const saved = gateway.waitForResponse("workspace.file.update");
     await editor.getByTestId("markdown-file-save").click();
-
-    await expect
-      .poll(() => fs.readFileSync(filePath, "utf8"), { timeout: 15_000 })
-      .toContain("| Area | State |  |");
+    await saved;
     expect(fs.readFileSync(filePath, "utf8")).toBe(
       content.replace(
         "| Area | State |\n| --- | --- |\n| Preview | Ready |\n",

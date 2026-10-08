@@ -4,7 +4,7 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, watchWs, type WsWatcher } from "../../helpers/causal-waits";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
@@ -40,7 +40,7 @@ async function seedMobileMarkdownSession({
   seedData: SeedData;
   backend: { tmpDir: string };
   fileName: string;
-}): Promise<{ session: SessionPage; filePath: string }> {
+}): Promise<{ session: SessionPage; filePath: string; gateway: WsWatcher }> {
   const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
   const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
   git.createFile(fileName, MOBILE_MARKDOWN_CONTENT);
@@ -58,11 +58,12 @@ async function seedMobileMarkdownSession({
       repository_ids: [seedData.repositoryId],
     },
   );
+  const gateway = watchWs(testPage);
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 45_000 });
-  return { session, filePath: path.join(repoDir, fileName) };
+  return { session, filePath: path.join(repoDir, fileName), gateway };
 }
 
 async function appendToHybrid(testPage: Page, viewer: Locator, marker: string): Promise<void> {
@@ -111,7 +112,7 @@ async function dragTouch(page: Page, target: Locator, deltaX: number): Promise<v
 }
 
 test.describe("Mobile Markdown file editing", () => {
-  test.describe.configure({ retries: 1, timeout: 120_000 });
+  test.describe.configure({ retries: 0, timeout: 120_000 });
 
   test("edits and saves the hybrid document below the fold and keeps phone controls reachable", async ({
     testPage,
@@ -122,7 +123,7 @@ test.describe("Mobile Markdown file editing", () => {
   }) => {
     const fileName = `mobile-markdown-${Date.now()}.md`;
     const marker = `mobile saved marker ${Date.now()}`;
-    const { session, filePath } = await seedMobileMarkdownSession({
+    const { session, filePath, gateway } = await seedMobileMarkdownSession({
       testPage,
       apiClient,
       seedData,
@@ -238,10 +239,9 @@ test.describe("Mobile Markdown file editing", () => {
     const saveButton = viewer.getByTestId("mobile-file-save");
     await expect(saveButton).toBeEnabled();
     await expect(saveButton).toBeInViewport();
+    const saved = gateway.waitForResponse("workspace.file.update");
     await testPage.keyboard.press(process.platform === "darwin" ? "Meta+S" : "Control+S");
-    await expect
-      .poll(() => fs.readFileSync(filePath, "utf8"), { timeout: 15_000 })
-      .toContain(marker);
+    await saved;
     expect(fs.readFileSync(filePath, "utf8")).toBe(
       `${MOBILE_MARKDOWN_CONTENT.replace(
         "| Area | State | Notes |\n| --- | --- | --- |\n| Preview | Ready | The table remains contained |\n",
