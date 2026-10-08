@@ -508,6 +508,8 @@ A task stores one walkthrough. Publishing another replaces the current one. Kand
 
 The commit dialog commits staged changes by default. Enter a title and optional body. **Stage all changes before committing** is off by default; enable it only after checking every unstaged file. Utility agents can propose commit text, but you remain responsible for the result.
 
+If a commit fails, the dialog keeps your title, body, repository and Stage all choice for correction and retry. You can dismiss and reopen it for the same repository without losing that draft. A successful commit clears the submitted draft; edits made while it was pending remain available. Drafts are local to the current session and environment and do not survive reloads. In a multi-repository commit, completed Git writes remain completed even if another repository fails.
+
 The creation dialog requires a title, defaults it from the task title, accepts an optional body, and creates a draft by default. Kandev first runs `git push --set-upstream origin HEAD`, then selects the provider from the repository's `origin`:
 
 - GitHub uses `gh pr create` and requires an installed, authenticated GitHub CLI.
