@@ -329,3 +329,22 @@ The renewed real Kubernetes attempt first encountered a missing default Docker b
 Full backend lint (`./...`, comparison base `56cc19514e20b1c78c366005a9358ba9a8857393`, five-minute deadline) passed with zero new issues after cache warming. The successful run completed in 1m50s. Earlier loading timeouts and the interrupted stalled analyzer run remain failed attempts, not passes.
 
 The first normal merge commit was blocked by the hook resolver after the remote main ref advanced beyond the recorded merge input. Its old equality check selected the pre-merge branch point and reported upstream-only lint findings. The resolver now accepts an incoming merge commit that remains an ancestor of the canonical base ref. Regression coverage verifies both remote-ref advancement and rejection of an unrelated merge input. The resolver tests and shell syntax checks pass; no hook was bypassed and no unrelated upstream source was modified for those findings.
+
+
+### Docker recovery acceptance reconciliation
+
+The container-backed CI regression still clicked the pre-episode Restart control
+while disconnect classification was in flight. Confirmed executor loss now owns
+the composer, and read-only Recheck must never start compute. The focused scenario
+now waits for the durable card, verifies no Resume is advertised while stopped,
+checks that Recheck leaves compute stopped, explicitly repairs only its owned test
+container, and checks recovery with unchanged environment/container identity and a
+usable terminal. This exercises the approved repair-then-recheck contract rather
+than treating a transient old control as recovery authority.
+
+The focused composer/recheck unit tests passed (10 tests across three files), and
+the changed E2E helpers/spec passed ESLint. The first local attempt was blocked by
+missing shared Go-cache artifacts. Rebuilding with the task-owned cache succeeded,
+but Docker fixture image creation failed before the scenario ran. The revised
+container scenario is therefore pending current-head CI verification; local setup
+failure is not a pass. The real Kubernetes acceptance gate remains open as well.

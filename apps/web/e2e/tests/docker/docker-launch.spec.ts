@@ -18,6 +18,7 @@ import {
   dockerRemove,
   dockerState,
   dockerStop,
+  dockerStart,
   waitForDockerContainerRemoved,
 } from "../../helpers/docker";
 import {
@@ -361,7 +362,7 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       .toBe("running");
   });
 
-  test("blocks chat input after an externally stopped container disconnects the executor", async ({
+  test("blocks chat input until an externally stopped executor is repaired and rechecked", async ({
     apiClient,
     seedData,
     testPage,
@@ -415,25 +416,24 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       .toBe("exited");
 
     await expect(editor).toBeHidden({ timeout: 15_000 });
-    await expect(session.recoveryResumeButton()).toBeVisible();
-    await session.recoveryResumeButton().click();
+    const card = testPage.getByTestId("session-executor-failure-card");
+    await expect(card).toContainText("Executor stopped");
+    await expect(session.recoveryResumeButton()).toBeHidden();
+    const recheck = card.getByTestId("executor-recheck");
+    await recheck.click();
+    await expect(recheck).toBeEnabled();
+    await expect(card).toBeVisible();
+    expect(dockerState(before!.container_id!)).toBe("exited");
 
-    await expect
-      .poll(
-        async () => {
-          const res = await apiClient.rawRequest(
-            "GET",
-            `/api/v1/tasks/${task.id}/environment/live`,
-          );
-          const live = (await res.json()) as { container?: { state?: string } };
-          return live.container?.state;
-        },
-        {
-          timeout: 30_000,
-          message: "Waiting for explicit restart to bring the container back",
-        },
-      )
-      .toBe("running");
+    // Repair only this fixture-owned container, independently of read-only recheck.
+    dockerStart(before!.container_id!);
+    await expect.poll(() => dockerState(before!.container_id!)).toBe("running");
+    await recheck.click();
+    await expect(card).toBeHidden();
+    await expect(editor).toHaveAttribute("contenteditable", "true");
+    const after = await apiClient.getTaskEnvironment(task.id);
+    expect(after?.id).toBe(before!.id);
+    expect(after?.container_id).toBe(before!.container_id);
 
     await session.clickTab("Terminal");
     await session.expectTerminalConnected(30_000);

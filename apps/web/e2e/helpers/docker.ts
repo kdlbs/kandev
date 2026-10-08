@@ -17,6 +17,13 @@ export function dockerStop(containerID: string): void {
   }
 }
 
+export function dockerStart(containerID: string): void {
+  const res = spawnSync("docker", ["start", containerID], { stdio: "ignore" });
+  if (res.status !== 0) {
+    throw new Error(`failed to start Docker container ${containerID}`);
+  }
+}
+
 export function dockerState(containerID: string): string {
   const res = spawnSync("docker", ["inspect", "-f", "{{.State.Status}}", containerID], {
     encoding: "utf8",
