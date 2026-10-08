@@ -141,7 +141,7 @@ export function ReviewDialogSurface(props: ReviewDialogSurfaceProps) {
           onRequestWalkthrough={props.onRequestWalkthrough}
           requestWalkthroughDisabled={state.allFiles.length === 0}
           getPendingComments={state.getPendingComments}
-          markCommentsSent={state.markCommentsSent}
+          sendingComments={state.sendingComments}
           prs={props.prs}
           selectedPR={props.selectedPR}
           onSelectPR={props.onSelectPR}
