@@ -165,7 +165,7 @@ function useReviewCommentDelivery(
       );
       if (submitted.length === 0) return false;
       const client = getWebSocketClient();
-      if (!client) {
+      if (!client || client.getStatus() !== "connected") {
         toast({ title: t("task:failedToSendComments"), variant: "error" });
         return false;
       }

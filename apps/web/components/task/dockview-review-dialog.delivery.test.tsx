@@ -1,5 +1,5 @@
 import { act, fireEvent, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useCommentsStore, type Comment } from "@/lib/state/slices/comments";
 import {
   acknowledge,
@@ -16,8 +16,10 @@ import {
   prepareDeliveryFixture,
   reconnectDelivery,
   reopenDelivery,
+  restoreDeliveryConnection,
   sends,
   submittedMarkdown,
+  takeDeliveryOffline,
   type Surface,
 } from "./dockview-review-dialog.delivery.test-helpers";
 
@@ -26,6 +28,7 @@ for (const surface of ["desktop", "phone"] as const) {
     beforeEach(() => prepareDeliveryFixture(surface));
     afterEach(disposeDeliveryFixture);
     registerFailureTests(surface);
+    registerOfflineTests(surface);
     registerAcknowledgementTests(surface);
     registerOwnershipTests(surface);
   });
@@ -86,6 +89,41 @@ function registerFailureTests(surface: Surface) {
     expect(deliveryButton().hasAttribute("disabled")).toBe(true);
     fireEvent.click(deliveryButton());
     expect(sends()).toHaveLength(1);
+    await acknowledge();
+    assertRetained([], primary.sessionId);
+    expect(isReviewOpen()).toBe(false);
+  });
+}
+
+function registerOfflineTests(surface: Surface) {
+  // @covers AC-UI-REVIEW-COMMENT-DELIVERY-001.2 .3 .6 .8 .9
+  it("a registered disconnected client preserves retry without queuing an offline send", async () => {
+    const { primary, notes } = await openDelivery(surface);
+    takeDeliveryOffline();
+    clickDelivery(surface);
+    await flushDelivery();
+    expect(sends()).toHaveLength(0);
+    assertRetained(notes, primary.sessionId);
+    expect(isReviewOpen()).toBe(true);
+    expect.soft(deliveryButton().hasAttribute("disabled")).toBe(false);
+    expect.soft(screen.queryByText("Failed to send comments")).not.toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10001);
+    });
+    expect.soft(deliveryButton().hasAttribute("disabled")).toBe(false);
+    closeDelivery();
+    await reopenDelivery();
+    expect.soft(deliveryButton().hasAttribute("disabled")).toBe(false);
+    await restoreDeliveryConnection();
+    expect.soft(sends()).toHaveLength(0);
+    if (sends().length > 0) {
+      await acknowledge();
+      return;
+    }
+    assertRetained(notes, primary.sessionId);
+    clickDelivery(surface);
+    expect(sends()).toHaveLength(1);
+    expect(sends()[0].payload.content).toBe(submittedMarkdown);
     await acknowledge();
     assertRetained([], primary.sessionId);
     expect(isReviewOpen()).toBe(false);

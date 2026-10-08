@@ -77,8 +77,13 @@ survives the shared dialog's dismissal/reopening while the hook stays mounted.
 There is no module/global latch, cross-composer lease, or automatic retry.
 
 Empty selection, missing task/session, or an already pending owner cannot
-report success. An unavailable client preserves notes and uses the existing
-localized `task:failedToSendComments` error toast. Await the existing request:
+report success. An absent or disconnected client preserves notes and uses the
+existing localized `task:failedToSendComments` error toast. Check the existing
+client's `getStatus()` before admission: the transport queues offline requests
+and starts their timeout only after connected dispatch, which would otherwise
+hold Review pending indefinitely and flush feedback on reconnect without a
+new deliberate attempt. This local guard does not change transport queuing,
+reconnection or timeout semantics for any consumer. Await the existing request:
 
 ```text
 message.add

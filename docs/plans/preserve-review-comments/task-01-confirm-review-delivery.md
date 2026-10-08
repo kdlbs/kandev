@@ -267,13 +267,23 @@ limits. Do not trade those boundaries for tests of an implementation predicate.
 ## Results
 
 Implementation passed the bounded scoped gates after ROOT's explicit release.
-All nine scenarios run through both actual mounts (18 tests); 32 unchanged
-controls passed. Rejection and missing-client RED reached actual store and
+The initial nine scenarios ran through both actual mounts (18 tests); 32 unchanged
+controls passed. Corrective coverage adds a registered-disconnected scenario
+on both mounts, bringing the mounted matrix to 20 tests. Rejection and missing-client RED reached actual store and
 persistence; acknowledged controls passed. Fixture failures and affected
 repairs/reruns are recorded in the [manifest](plan.md#verification-results).
 ESLint, typecheck, i18n, documentation validators, actual-path coverage and
 whitespace checks passed. Production scope is exactly six existing callback
 modules; no global store/backend changes.
+
+The PR review's offline-client finding was confirmed by actual WebSocketClient
+queuing and dispatch-only timeout behavior. Its two mounted regressions failed
+before the local status guard while two acknowledged controls passed. After
+the guard, all 20 mounted cases passed in two disjoint affected runs. Changed
+ESLint, typecheck, i18n, docs validators and full 14-path coverage passed.
+The public retry guide now tells users to inspect the conversation before
+resending an uncertain result. Historical full-review evidence at the original
+head is retained; current-head review and merge gates remain delivery work.
 
 No production/permanent test edits, product runs, install, staging, commit, PR
 or merge occurred during design. Original design receipts are recorded

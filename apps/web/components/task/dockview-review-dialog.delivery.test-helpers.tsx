@@ -359,6 +359,17 @@ export function disconnectDelivery() {
 export function reconnectDelivery() {
   act(() => setWebSocketClient(client));
 }
+export function takeDeliveryOffline() {
+  act(() => client.disconnect());
+}
+export async function restoreDeliveryConnection() {
+  act(() => {
+    client.connect();
+    ReviewSocket.current.readyState = ReviewSocket.OPEN;
+    ReviewSocket.current.onopen?.();
+  });
+  await flushDelivery();
+}
 export function closeDelivery() {
   fireEvent.click(screen.getByRole("button", { name: "Close review" }));
 }

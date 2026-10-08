@@ -60,7 +60,7 @@ No global CommentsStore action or storage format changes.
 | Desktop TaskReviewDialogMount / available WS | Wait for correlated request success, clear exact unchanged submitted rows, close if no review notes remain | Actual full mounted integration, including rejection/retry |
 | Phone SessionMobileReviewDialog / same WS | Same settlement through shared mount; retain coarse-pointer overview-first activation | Actual phone wrapper, real button, coarse-pointer matchMedia fixture |
 | Tablet TaskReviewDialogMount | Same shared contract without a separate adapter | Source call audit plus shared mount checks; no tablet geometry change |
-| Missing client / missing owner / empty selection | Never acknowledge or remove notes; missing client gives existing error feedback | Actual absent-client regression and no message.add assertion |
+| Absent or disconnected client / missing owner / empty selection | Never acknowledge or remove notes; unavailable client gives existing error feedback without queuing | Actual absent-client and registered-disconnected regressions, no message.add or reconnect auto-flush |
 | Rejected request or uncertain transport failure | Preserve current notes and storage; no automatic resend | Deferred error/rejection, exact retained data and error feedback |
 
 Existing onSendComments production callers are all on this shared path. Existing
@@ -102,6 +102,7 @@ TaskReviewDialogMount and actual SessionMobileReviewDialog:
 | --- | --- |
 | retains exact file and line notes on rejection and acknowledges a deliberate retry | `.1`, `.4`, `.5`, `.6`, `.8` |
 | unavailable transport preserves persisted feedback and allows a later send | `.2`, `.5`, `.6`, `.8` |
+| a registered disconnected client preserves retry without queuing an offline send | `.2`, `.3`, `.6`, `.8`, `.9` |
 | deferred delivery retains notes and admits only one rapid or reopened send | `.3`, `.8` |
 | acknowledged unchanged feedback clears exactly the submitted IDs and closes | `.4`, `.5`, `.7`, `.8` |
 | acknowledgement preserves edited text, new notes and unrelated sources/sessions | `.4`, `.5`, `.7`, `.8` |
@@ -197,6 +198,34 @@ lint/ratchet checks and a normal new commit attempt follow this correction.
 Implementation completion does not authorize merge. Normal commit/push/ready
 PR and one frozen-head hosted observer follow the standing delivery gates;
 ROOT retains the separate serial merge grant and final verification.
+
+Corrective PR review gates passed on 2026-10-08 after ROOT's bounded release:
+
+- Greptile's registered-offline-client finding was valid. Real WebSocketClient
+  queued the request without a running deadline, locking retry and flushing
+  automatically on reconnect. Two desktop/phone RED cases failed before the
+  local `getStatus()` admission guard; two acknowledged controls passed.
+- Two disjoint affected GREEN runs passed all 20 mounted cases (10 each),
+  including connected held delivery, rejection, retry, exact notes, edits,
+  ownership and dismissal. The 32 unchanged controls were not replayed.
+- A one-condition hook guard rejects unavailable status before queuing.
+  Transport/timeout/reconnection/global store semantics remain unchanged.
+- Changed ESLint, typecheck, i18n check and staged ratchet passed. Catalog/spec
+  lint, 62 public-doc-validator tests, 47 pages and real full 14-path coverage
+  (`covered`, errors `[]`) passed. No install or backend lint ran.
+- CodeRabbit's grouped guidance finding was valid; the public guide now asks
+  users to inspect the conversation before resending uncertain feedback.
+- The optional Claude cross-session suggestion is outside the reviewed local
+  single-flight policy. A reset would permit overlapping requests whose old
+  finally could clear the newer latch. Other optional presentation/guard
+  suggestions do not warrant scope expansion. Thread dispositions and new-head
+  review evidence are recorded in the durable delivery checkpoint.
+
+The original full CodeRabbit review covered all 14 files at
+`4549ce735313b9c31201e6bd9c499837ccee0263` with authenticated App347564,
+`sourceCommitId=coveredCommitId=head`, kind `reviewed`. That remains historical
+after a corrected push. The one original hosted observer is preserved across
+the correction, with its original deadline; no replacement or hosted retry.
 
 ## Risks
 

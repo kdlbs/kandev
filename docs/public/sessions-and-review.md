@@ -484,7 +484,9 @@ Pending line and file comments are scoped to the current review session but pers
 
 While delivery is pending, **Fix comments** is disabled and your notes remain available. After acknowledgement, Kandev removes only unchanged submitted notes and closes Review if no pending review notes remain. Notes you edit or add while waiting stay available for your next send.
 
-If sending fails or the connection is unavailable, Kandev shows an error and preserves your notes so you can retry. A connection error or timeout can leave delivery uncertain; Kandev does not resend automatically. You can still close Review while waiting. Reopen the current diff before sending old feedback: a valid line number can still refer to different code after a rewrite.
+If sending fails or the connection is unavailable, Kandev shows an error and preserves your notes so you can retry. A connection error or timeout can leave delivery uncertain; Kandev does not resend automatically. Inspect the conversation before resending to see whether your feedback already arrived.
+
+You can still close Review while waiting. Reopen the current diff before sending old feedback: a valid line number can still refer to different code after a rewrite.
 
 ## Generate a walkthrough
 
