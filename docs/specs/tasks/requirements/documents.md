@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-04-29
-updated: 2026-10-07
+updated: 2026-10-08
 owners:
   - cfl
 ---
@@ -41,6 +41,29 @@ The internal filename is not a public attachment identity. Binary attachments
 remain replace-only. Crash recovery, immediate reclamation of superseded files,
 cross-resource transactional rollback, arbitrary overlapping upload/delete
 serialization, and filesystem ACL preservation are outside this amendment.
+
+### REQ-TASKS-DOCUMENTS-003: Plan draft continuity during successful saves
+
+**Intent:** Acknowledging a submitted plan shall preserve newer typing in the
+same task's editor. The persisted plan and the live unsaved draft represent
+different points in the user's editing history.
+
+#### Acceptance criteria
+
+- **AC-TASKS-DOCUMENTS-003.1:** When the user submits plan content A, types newer content B in the same task before that save succeeds, and receives their own save acknowledgement for A, the persisted plan shall contain A while the editor retains B and reports unsaved changes. The acknowledgement shall not remount the editor or reset its selection or focus.
+- **AC-TASKS-DOCUMENTS-003.2:** After that successful save settles, the retained B shall remain eligible for the next existing debounced autosave, which shall submit B for the same task without requiring more typing or an explicit save.
+- **AC-TASKS-DOCUMENTS-003.3:** When a successful save acknowledges the live submitted content and no newer typing exists, the editor shall remain unchanged, report no unsaved changes, and issue no redundant autosave. A subsequent edit shall autosave normally.
+- **AC-TASKS-DOCUMENTS-003.4:** A genuine external plan-content update shall continue to replace the local editor content through the existing external-update behavior, including when a different local draft exists. A plan deletion shall retain the existing empty-content behavior. An earlier completed, failed, or superseded own attempt shall not permanently exempt matching content from external synchronization.
+- **AC-TASKS-DOCUMENTS-003.5:** Autosave and explicit save shall provide the same acknowledgement protection. Overlapping own saves for one task shall preserve the existing latest-started save outcome; an older callback shall not replace newer typing, report an unpublished result as saved, or clear suppression belonging to a later rejected attempt, including repeated submissions of identical content.
+- **AC-TASKS-DOCUMENTS-003.6:** A task change, including a change to no task or a return to an earlier task, shall reset the local draft to the currently selected task's persisted content. A callback from the outgoing task view shall not alter the new view's draft, editor identity, or retry suppression. Existing legitimate background publication for the outgoing task shall remain supported.
+- **AC-TASKS-DOCUMENTS-003.7:** A failed save shall retain the live draft and the persisted baseline. Size rejection shall suppress only an unchanged automatic retry; changing the draft or explicitly saving shall remain available, and generic failures shall retain automatic retry eligibility, as defined by [plan-content-size-limit](plan-content-size-limit.md#req-tasks-plan-content-size-limit-003-a-user-sees-the-rejection-and-keeps-their-draft).
+
+This contract applies to the existing task Plan editor on desktop and phone.
+It changes no editing affordances or navigation. It does not define arbitrary
+concurrent-writer reconciliation, conflict merging, transport ordering, or a
+new version policy. Its technical owner is the [task document persistence
+lifecycle](../system-design/plan-write-lifecycle.md#plan-draft-acknowledgement).
+Delivery is recorded in the [draft-continuity plan](../../../plans/preserve-plan-typing/plan.md).
 
 ## Migrated source detail
 
