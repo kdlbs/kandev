@@ -1265,3 +1265,36 @@ ESLint and `pnpm run typecheck` passed. Latest-head CI/review and final combined
 base evidence remain external until delivery. Native Windows/macOS containment
 and targeted durable PostgreSQL/live-harness release gates remain open. The
 queue runtime-loss flake remains unconfirmed; failed tests retain backend logs.
+
+### Subsequent hosted browser remediation
+
+The hosted handoff capability test selected an arbitrary retained agent for its
+second profile and received a profile-create 500. Its fixture now selects the
+registered mock adapter for both profiles. A unit regression rejected the old
+selection with an unrelated unregistered agent present, then passed after the
+correction. The browser capability update affects every profile owned by the
+mock agent, including retained profiles. Production handoff behavior is unchanged.
+
+From `apps/web`, the final checks were:
+
+```bash
+pnpm exec vitest run e2e/helpers/session-handoff-profile-fixtures.test.ts e2e/helpers/agent-fixtures.test.ts
+pnpm exec eslint e2e/helpers/session-handoff-profile-fixtures.ts e2e/helpers/session-handoff-profile-fixtures.test.ts e2e/tests/session/session-handoff-unhealthy-profile.spec.ts e2e/tests/workflow/queue-limit-navigation.spec.ts
+pnpm run typecheck
+E2E_PORT_OFFSET=0 pnpm e2e:run --host tests/session/session-handoff-unhealthy-profile.spec.ts tests/session/session-handoff.spec.ts tests/workflow/queue-limit-navigation.spec.ts --project=chromium --retries=0 --repeat-each=3
+```
+
+The unit check passed three tests; the managed browser check passed 12 cases on
+three fresh workers without retries. ESLint and typecheck passed. An intermediate
+browser check caught a fixture `agentId`/`agent_id` mismatch; the final command
+above covers the corrected boundary.
+
+The hosted queue-navigation setup also failed once before passing on retry.
+Its isolated six-case repetition passed. A one-worker CI-image replay with
+2 CPUs and 4 GiB memory preserved the failed shard's preceding desktop order;
+both queue-navigation cases passed on their first attempts. The owned replay
+was stopped after that prefix, so this is not a full-shard completion receipt.
+The queue cause remains unconfirmed. Failed navigation attempts now attach the
+isolated backend log; waits and admission behavior are unchanged. Fresh hosted
+CI and its complete artifact audit remain pending after delivery. Native and
+targeted PostgreSQL/live-harness release gates remain open.
