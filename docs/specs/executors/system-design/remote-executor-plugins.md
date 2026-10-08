@@ -64,6 +64,10 @@ Keep `ExecutorProfile.Config` as `map[string]string`. The initial schema accepts
 enums, and secret references. Boolean and number values have canonical string encodings.
 Nested provider objects and custom form JavaScript are excluded from this first contract.
 Use existing plugin secret storage for secret fields. Persist references, never secret values.
+A profile may also carry Kandev-owned keys shared with the other remote executors:
+`remote_credentials`, `remote_auth_secrets`, `agent_config_bundles`, `remote_auth_target_home`,
+`git_user_name`, and `git_user_email`. Kandev validates them, never sends them to the provider, and
+treats an empty value as removal. A provider schema that declares one of these names is invalid.
 Redacted reads return presence, not vault IDs or values; updates distinguish unchanged, replace, and clear.
 References are bound to the owning plugin and profile; arbitrary global secret lookup is not allowed.
 
@@ -131,12 +135,17 @@ The provider starts agentctl with its control server on `runtime_port` and the n
 nonce. agentctl serves each session instance on a separate port that it assigns, so the provider must
 issue leases for the control port and for any instance port the host requests.
 Core owns the existing handshake and encrypted agentctl token persistence. Agent credentials and
-repository credentials follow existing host-to-agentctl setup after authenticated readiness.
+repository credentials follow existing host-to-agentctl setup after authenticated readiness: once
+the session instance is healthy, core writes the credential files and configuration bundles
+selected on the profile through agentctl processes, with contents in the process environment and
+never in the command line, and runs the setup scripts of selected environment-variable methods.
+Upload is best-effort and does not fail the launch, as for the other remote executors.
 Do not put session secrets into reusable image configuration.
 
 The first version requires a Kandev runtime API URL reachable from the remote network.
-Reuse the configured runtime API address and scoped task credentials; reject loopback-only or missing
-addresses before provisioning. Structural validation is not a reachability guarantee.
+It is `githubCredentialBroker.publicBaseUrl` followed by `/api/v1`, the externally reachable address
+already configured for remote executors, and replaces any launch-supplied value. Use scoped task
+credentials; reject loopback-only or missing addresses before provisioning. Structural validation is not a reachability guarantee.
 Bootstrap performs a bounded authenticated callback probe; failure rolls back provisioning.
 Use a fake non-loopback address and controlled transport in unit tests, not a production bypass.
 No new public relay or tunnel broker is introduced.

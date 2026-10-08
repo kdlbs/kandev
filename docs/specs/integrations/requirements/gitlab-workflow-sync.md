@@ -2,7 +2,7 @@
 status: active
 system: integrations
 created: 2026-08-06
-updated: 2026-08-06
+updated: 2026-10-06
 owners:
   - tbd
 ---
@@ -23,6 +23,63 @@ Workflow sync keeps a workspace's workflows in lockstep with definition files co
 - **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-001.1:** **One sync source per workspace.** The provider is a property of the single existing config row, not a new dimension.
 - **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-001.2:** **GitLab targets are addressed by `project_path`.** GitHub keeps `repo_owner` + `repo_name`.
 - **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-001.3:** **The GitLab host comes from the workspace's existing GitLab connection.** The sync config stores no host of its own.
+
+### REQ-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002: Settings lifetime
+
+**Intent:** Workflow Sync settings for either GitHub or GitLab shall publish
+results only to the settings lifetime that admitted the action. Leaving that
+view shall not let its delayed completion reload or dismiss a later view.
+This extends this integration-owned capability; workspace authorization remains
+owned by the [workspace authorization contract](../../tasks/requirements/workflow-sync-workspace-authz.md).
+
+#### Acceptance criteria
+
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.1:** After a settings view is
+  retired by committed workspace replacement or unmount, its delayed read,
+  save, removal, or forced-sync success or failure shall not replace local
+  configuration or form values, emit feedback, reset pending controls, or
+  refresh the current browser view.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.2:** A retained action or form-input
+  callback from a retired view shall not dispatch a new request or edit the
+  current view. Work admitted before retirement may complete on the server.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.3:** Returning from A through B to A
+  shall create a new settings lifetime; old A work shall remain retired.
+  Independent views shall not retire each other, and a workspace render that
+  never commits shall not retire the visible view.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.4:** Retirement shall reset only
+  that view's pending state. When multiple current operations own the same
+  pending control, an older finalizer shall not clear the newest pending
+  operation's control. This does not order configuration results across reads
+  and writes.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.5:** An admitted save or removal
+  shall preserve its truthful caller outcome: success resolves true and failure
+  resolves false, including after retirement. Suppressing presentation shall
+  not pretend an accepted write failed, cancel it, or reverse it. An action
+  refused before admission shall perform no mutation and report no success.
+  Forced-sync completion shall preserve its existing caller outcome shape.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.6:** Current reads shall still load
+  configuration and report initial-load errors. Current saves and removals
+  shall preserve feedback and caller outcomes; current removal shall refresh
+  workflows. Current forced sync shall preserve success, warnings, returned
+  sync errors, request failures, and refresh only when a result reports changes.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.7:** An admitted dialog save or
+  removal shall dismiss only its still-current open dialog. Closing, reopening,
+  replacing, or unmounting the dialog shall retire its delayed dismissal.
+  A configuration returned by that same current save, or removal's own
+  config/form reset, shall not by itself prevent successful dismissal.
+  A genuine removal target change while the request is pending shall suppress
+  that confirmation's delayed dismissal or failure retry publication. Current
+  failures shall retain the existing error and retry behavior.
+- **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.8:** Desktop and phone shall share
+  these lifetime rules through the existing controls. Current form parsing,
+  provider selection, save/reset behavior, status-only background reads,
+  refresh cadence, API shapes, backend authorization, accepted writes, and
+  provider/poller semantics shall remain unchanged. This contract establishes
+  no independent rule for edits made during a same-workspace save.
+
+The [settings lifetime design](../system-design/workflow-sync-settings-lifetime.md)
+defines this clause's technical boundary. Earlier provider requirements and
+the migrated source detail below retain their existing scope.
 
 ## Migrated source detail
 
@@ -265,3 +322,6 @@ logged, never fatal to the poller.
 ## Implementation Plan
 
 See `docs/plans/gitlab-workflow-sync/plan.md`.
+
+Settings lifetime delivery is tracked separately in the
+[retirement plan](../../../plans/retire-workflow-sync-navigation/plan.md).

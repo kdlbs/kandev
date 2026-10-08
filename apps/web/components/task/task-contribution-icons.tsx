@@ -2,13 +2,13 @@
 
 import { useTranslation } from "react-i18next";
 import {
-  getCompactPRStatusAccessibleLabels,
   getPRAggregateStatusColor,
   getTaskPRAutomationSummary,
   PRTaskIcon,
   type TaskPRInfo,
 } from "@/components/github/pr-task-icon";
 import { PRStatusGlyph } from "@/components/github/pr-status-glyph";
+import { getCompactPRStatusAccessibleLabels } from "@/components/github/pr-task-workflow-projection";
 import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
 import { cn } from "@/lib/utils";
 

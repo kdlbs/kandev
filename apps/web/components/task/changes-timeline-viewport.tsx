@@ -538,6 +538,15 @@ function VisibleTimelineNode<Row extends ChangesTimelineRowIdentity>({
   if (node.kind === "row") {
     const row = rows[node.item.index];
     if (!row) return null;
+    const paddingInlineStartPx =
+      "paddingInlineStartPx" in row ? row.paddingInlineStartPx : undefined;
+    const paddingBlockEndPx = "paddingBlockEndPx" in row ? row.paddingBlockEndPx : undefined;
+    const rowPadding = {
+      ...(typeof paddingInlineStartPx === "number"
+        ? { paddingInlineStart: paddingInlineStartPx }
+        : {}),
+      ...(typeof paddingBlockEndPx === "number" ? { paddingBlockEnd: paddingBlockEndPx } : {}),
+    };
     return (
       <div
         key={node.item.key}
@@ -547,7 +556,10 @@ function VisibleTimelineNode<Row extends ChangesTimelineRowIdentity>({
         data-changes-row-key={row.key}
         tabIndex={-1}
         className="absolute left-0 top-0 w-full"
-        style={{ transform: `translateY(${node.item.start - parentStart}px)` }}
+        style={{
+          transform: `translateY(${node.item.start - parentStart}px)`,
+          ...rowPadding,
+        }}
       >
         {renderRow(row, node.item.index)}
       </div>

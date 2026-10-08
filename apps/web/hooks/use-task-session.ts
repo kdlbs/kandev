@@ -16,8 +16,11 @@ export function useTaskSession(taskId: string | null) {
     taskId ? state.taskSessionsByTask.itemsByTaskId[taskId] : null,
   );
 
-  const [fetchedSessionId, setFetchedSessionId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [fetched, setFetched] = useState<{
+    taskId: string | null;
+    sessionId: string | null;
+    isLoading: boolean;
+  }>({ taskId: null, sessionId: null, isLoading: false });
 
   // Derive the session ID from store first, fall back to fetched value
   const sessionIdFromStore = useMemo(() => {
@@ -26,7 +29,8 @@ export function useTaskSession(taskId: string | null) {
     return (primary ?? sessionsFromStore[0])?.id ?? null;
   }, [sessionsFromStore]);
 
-  const finalSessionId = sessionIdFromStore ?? fetchedSessionId;
+  const currentFallback = fetched.taskId === taskId ? fetched : null;
+  const finalSessionId = sessionIdFromStore ?? currentFallback?.sessionId ?? null;
 
   useEffect(() => {
     // If we have session in store or no taskId, don't fetch
@@ -40,27 +44,28 @@ export function useTaskSession(taskId: string | null) {
       const client = getWebSocketClient();
       if (!client) {
         if (isActive) {
-          setFetchedSessionId(null);
-          setIsLoading(false);
+          setFetched({ taskId, sessionId: null, isLoading: false });
         }
         return;
       }
 
       try {
-        setIsLoading(true);
+        setFetched((previous) => ({
+          taskId,
+          sessionId: previous.taskId === taskId ? previous.sessionId : null,
+          isLoading: true,
+        }));
         const response = await client.request<{ sessions: Array<{ id: string }> }>(
           "task.session.list",
           { task_id: taskId },
           10000,
         );
         if (isActive) {
-          setFetchedSessionId(response.sessions[0]?.id ?? null);
-          setIsLoading(false);
+          setFetched({ taskId, sessionId: response.sessions[0]?.id ?? null, isLoading: false });
         }
       } catch {
         if (isActive) {
-          setFetchedSessionId(null);
-          setIsLoading(false);
+          setFetched({ taskId, sessionId: null, isLoading: false });
         }
       }
     };
@@ -75,6 +80,6 @@ export function useTaskSession(taskId: string | null) {
   return {
     sessionId: taskId ? finalSessionId : null,
     hasSession: !!taskId && !!finalSessionId,
-    isLoading: taskId && !sessionIdFromStore ? isLoading : false,
+    isLoading: taskId && !sessionIdFromStore ? (currentFallback?.isLoading ?? false) : false,
   };
 }

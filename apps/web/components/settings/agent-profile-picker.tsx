@@ -22,6 +22,15 @@ export type AgentProfilePickerProps = {
   ariaLabel?: string;
   profileFilter?: (profile: AgentProfileOption) => boolean;
   iconTestId?: string;
+  /**
+   * Marks a listed profile disabled with a reason instead of removing it
+   * (e.g. a CLI-passthrough profile a coordinator cannot use). Unlike
+   * `profileFilter`, the profile stays visible; return `undefined` to leave
+   * it selectable.
+   */
+  disabledOptionReason?: (profile: AgentProfileOption) => string | undefined;
+  /** Disables the whole picker (e.g. a reader viewing a coordinator's page). */
+  disabled?: boolean;
 };
 
 function ProfileLabel({
@@ -58,6 +67,8 @@ export function AgentProfilePicker({
   ariaLabel,
   profileFilter,
   iconTestId = "agent-profile-picker-agent-icon",
+  disabledOptionReason,
+  disabled,
 }: AgentProfilePickerProps) {
   const { t } = useTranslation();
   const selectableProfiles = useMemo(
@@ -82,21 +93,27 @@ export function AgentProfilePicker({
       });
     }
     result.push(
-      ...selectableProfiles.map((profile) => ({
-        value: profile.id,
-        label: profile.label || profile.id,
-        keywords: [profile.label, profile.agent_name, profile.id],
-        renderLabel: () => (
-          <ProfileLabel
-            profile={profile}
-            label={profile.label || profile.id}
-            iconTestId={iconTestId}
-          />
-        ),
-      })),
+      ...selectableProfiles.map((profile) => {
+        const reason = disabledOptionReason?.(profile);
+        return {
+          value: profile.id,
+          label: profile.label || profile.id,
+          keywords: [profile.label, profile.agent_name, profile.id],
+          disabled: Boolean(reason),
+          disabledReason: reason,
+          renderLabel: () => (
+            <ProfileLabel
+              profile={profile}
+              label={profile.label || profile.id}
+              iconTestId={iconTestId}
+            />
+          ),
+        };
+      }),
     );
     return result;
   }, [
+    disabledOptionReason,
     fallback,
     hasUnavailableValue,
     iconTestId,
@@ -133,6 +150,7 @@ export function AgentProfilePicker({
         triggerClassName,
       )}
       className="max-h-[min(60vh,24rem)]"
+      disabled={disabled}
     />
   );
 }

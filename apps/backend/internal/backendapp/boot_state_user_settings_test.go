@@ -237,6 +237,25 @@ func TestMapUserSettingsStateNormalizesLastSeenDisplay(t *testing.T) {
 	}
 }
 
+func TestMapUserSettingsStateNormalizesMessageTimeDisplay(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  string
+	}{
+		{value: usermodels.MessageTimeDisplayAbsoluteShort, want: usermodels.MessageTimeDisplayAbsoluteShort},
+		{value: usermodels.MessageTimeDisplayAbsoluteLong, want: usermodels.MessageTimeDisplayAbsoluteLong},
+		{value: "future", want: usermodels.MessageTimeDisplayRelative},
+		{value: "", want: usermodels.MessageTimeDisplayRelative},
+	} {
+		state := mapUserSettingsState(userdto.UserSettingsResponse{
+			Settings: userdto.UserSettingsDTO{MessageTimeDisplay: test.value},
+		}, "workspace-1")
+		if got := state["messageTimeDisplay"]; got != test.want {
+			t.Errorf("messageTimeDisplay = %#v, want %q", got, test.want)
+		}
+	}
+}
+
 func TestMapUserSettingsStateDefaultsAgentTabCloseBehavior(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{}, "workspace-1")
 	if got := state["agentTabCloseBehavior"]; got != usermodels.AgentTabCloseBehaviorDeleteSession {

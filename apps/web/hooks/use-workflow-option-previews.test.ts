@@ -265,3 +265,24 @@ it("does not duplicate requests after ordinary rerenders", () => {
     "workflow-b",
   ]);
 });
+
+// @covers AC-UI-LIST-STEP-GROUPING-001.4
+it("refreshes an open workflow and rejects its previous in-flight response", async () => {
+  const oldRequest = deferred<StepResponse>();
+  workflowApiMocks.listWorkflowSteps
+    .mockReturnValueOnce(oldRequest.promise)
+    .mockResolvedValueOnce(steps(["Renamed step"]));
+  const { result, rerender } = renderHook(
+    ({ revision }) => useWorkflowOptionPreviews(WORKSPACE_A, true, [WORKFLOW_A], revision),
+    { initialProps: { revision: 0 } },
+  );
+  rerender({ revision: 1 });
+  await waitFor(() =>
+    expect(result.current.previews[WORKFLOW_A]).toMatchObject({
+      status: "success",
+      steps: [{ title: "Renamed step" }],
+    }),
+  );
+  await act(async () => oldRequest.resolve(steps(["Stale step"])));
+  expect(result.current.previews[WORKFLOW_A]).toMatchObject({ steps: [{ title: "Renamed step" }] });
+});

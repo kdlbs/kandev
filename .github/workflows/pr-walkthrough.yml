@@ -80,7 +80,7 @@ jobs:
         )
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     environment: opencode-review-trusted
     permissions:
       contents: read
@@ -106,7 +106,7 @@ jobs:
           bash .github/scripts/pr-walkthrough-history.sh
 
       - name: Prepare trusted walkthrough context
-        timeout-minutes: 1
+        timeout-minutes: 3
         env:
           TRUSTED_SHA: ${{ github.workflow_sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}

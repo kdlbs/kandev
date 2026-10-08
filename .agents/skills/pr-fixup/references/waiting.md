@@ -29,6 +29,12 @@ For an interactive wait, leave per-poll progress enabled; `--quiet` suppresses
 it and can make a slow API-backed wait look stalled. Keep the same waiter handle
 and do not start a second monitor.
 
+If the host supports longer process waits, resume a silent waiter at 45-55
+second intervals. Cap each wait at the remaining user deadline.
+Set the outer orchestration yield interval to cover the nested process wait.
+Print only new progress or the final exit status.
+Keep user updates within 60 seconds.
+
 Before starting the waiter, validate the GitHub credential with `gh auth status`.
 If it is stale or invalid, try an explicit `GH_TOKEN="$(gh auth token)"` prefix
 for the helper or use the structured connector fallback. Classify REST 401/403
@@ -58,12 +64,12 @@ counts and validate against the live base before deciding what to change.
 Exit 1 can be a review-only blocker: if `failed_checks` and `pending_checks`
 are empty while unresolved review threads remain, proceed to thread disposition
 instead of CI remediation. After every waiter result, run both
-`scripts/pr-state --summary <PR>` and `scripts/pr-resolve list <PR>`; do not
+`scripts/pr-state --compact <PR>` and `scripts/pr-resolve list <PR>`; do not
 call the PR clean until the thread list is also clear.
 
 Exit 2 can report zero pending and failed checks when the terminal rollup is
 still unconfirmed. Do not classify the wait as clean from those counts. Refresh
-`scripts/pr-state --summary <PR>`, `scripts/pr-resolve list <PR>`, and PR
+`scripts/pr-state --compact <PR>`, `scripts/pr-resolve list <PR>`, and PR
 mergeability, then require the exact head, `checks_snapshot_complete=true`,
 empty failed and pending lists, no unresolved or hidden review threads, and
 `MERGEABLE`/`CLEAN` before calling it clean.
@@ -71,7 +77,7 @@ empty failed and pending lists, no unresolved or hidden review threads, and
 Apply the same rule after `gh run rerun --failed`: a provisional terminal
 rollup may show zero failed and pending checks before the rerun evidence is
 confirmed. Poll once more through `scripts/pr-await`, then require a fresh
-matching-head `scripts/pr-state --summary <PR>` snapshot before triage or
+matching-head `scripts/pr-state --compact <PR>` snapshot before triage or
 reporting completion.
 
 The structured report can also say `outcome: deadline` with zero failures while
@@ -102,7 +108,7 @@ the fixup blocked while required-status policy or review evidence is unknown.
 
 ## Refresh after waiting
 
-Run `scripts/pr-state --summary <PR>` and `scripts/pr-resolve list <PR>` after
+Run `scripts/pr-state --compact <PR>` and `scripts/pr-resolve list <PR>` after
 each report. Require the check SHA to match the fresh PR head.
 If delayed checks appear, restart the waiter. A sparse early rollup cannot
 prove completion. The helper requires two matching terminal snapshots.

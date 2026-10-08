@@ -128,6 +128,25 @@ describe("ChangesInlineCommitState collapsed snapshots", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
+  it("projects in-flight details even after their commit collapses", async () => {
+    let resolveRequest: ((value: Record<string, FileInfo>) => void) | undefined;
+    const state = new ChangesInlineCommitState({
+      contextKey: TASK_CONTEXT,
+      request: () => new Promise((resolve) => (resolveRequest = resolve)),
+    });
+    const target = localTarget("pending-after-collapse");
+
+    const request = state.expand(target);
+    expect(state.getPendingRequestCount()).toBe(1);
+
+    state.collapse(target);
+    expect(state.getPendingRequestCount()).toBe(1);
+
+    resolveRequest?.(files(1));
+    await request;
+    expect(state.getPendingRequestCount()).toBe(0);
+  });
+
   it("evicts a collapsed snapshot that exceeds the file-count limit", async () => {
     const request = vi.fn(async () => files(2));
     const state = new ChangesInlineCommitState({

@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/kandev/kandev/internal/agentctl/types"
 )
 
 // publishStagingAt creates and pushes `staging` at the given ref, giving the
@@ -45,7 +48,31 @@ func gitStatusBaseCommit(t *testing.T, srv *Server) string {
 	if !status.Success {
 		t.Fatalf("git status failed: %+v", status)
 	}
-	return status.BaseCommit
+	if status.DetailState == "ready" {
+		return status.BaseCommit
+	}
+	tracker := srv.procMgr.GetWorkspaceTracker()
+	if tracker == nil {
+		t.Fatal("workspace tracker is unavailable")
+	}
+	subscriber := make(types.WorkspaceStreamSubscriber, 4)
+	tracker.AttachWorkspaceStreamSubscriber(subscriber)
+	defer tracker.DetachWorkspaceStreamSubscriber(subscriber)
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case message := <-subscriber:
+			if message.GitStatus == nil {
+				continue
+			}
+			update := message.GitStatus
+			if update.TrackerEpoch == status.TrackerEpoch && update.SnapshotRevision > status.SnapshotRevision && update.DetailState == "ready" {
+				return update.BaseCommit
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for details after status revision %d", status.SnapshotRevision)
+		}
+	}
 }
 
 // TestHandleSetBaseBranches_RetargetsComparison asserts the endpoint's actual

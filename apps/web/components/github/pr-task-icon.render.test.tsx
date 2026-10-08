@@ -15,6 +15,7 @@ const TASK_ID = "task-1";
 const WORKSPACE_ID = "workspace-1";
 const OPEN_STATUS_LABEL = "Open";
 const ARIA_LABEL_ATTRIBUTE = "aria-label";
+const TOOLTIP_LOADING_TEST_ID = "pr-task-tooltip-loading";
 
 vi.mock("@/lib/api/domains/github-api", () => ({
   listTaskPRs: listTaskPRsMock,
@@ -166,7 +167,7 @@ describe("PRTaskIcon corrupted store entry", () => {
     expect(icon.getAttribute("role")).toBe("img");
     fireEvent.pointerEnter(icon, { pointerType: "mouse" });
 
-    expect(screen.getAllByTestId("pr-task-tooltip-loading").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId(TOOLTIP_LOADING_TEST_ID).length).toBeGreaterThan(0);
   });
 
   it("opens a loading disclosure when a compact PR projection receives keyboard focus", () => {
@@ -183,9 +184,50 @@ describe("PRTaskIcon corrupted store entry", () => {
     fireEvent.focus(icon);
     matches.mockRestore();
 
-    expect(screen.getAllByTestId("pr-task-tooltip-loading").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId(TOOLTIP_LOADING_TEST_ID).length).toBeGreaterThan(0);
   });
+});
 
+describe("PRTaskIcon tooltip accessibility", () => {
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.24
+  it("describes the PR details and names the keyboard scroll region", async () => {
+    listTaskPRsMock.mockResolvedValue({
+      task_prs: {
+        [TASK_ID]: [
+          makePR({ review_state: "approved", checks_state: "success", mergeable_state: "clean" }),
+        ],
+      },
+    });
+    renderWithStore(
+      { workspaces: { items: [], activeId: WORKSPACE_ID } },
+      <TaskContributionIcons
+        taskId={TASK_ID}
+        prInfo={{ number: 7, state: "open", aggregateState: "pending" }}
+      />,
+    );
+
+    fireEvent.pointerEnter(screen.getByTestId(`pr-task-icon-${TASK_ID}`), {
+      pointerType: "mouse",
+    });
+
+    const tooltip = await screen.findByRole("tooltip");
+    screen.getByRole("img", { name: /Pull request #1 status/, description: /Test PR/ });
+    expect(tooltip.textContent).toContain("PR #1");
+    expect(tooltip.textContent).toContain("Test PR");
+    expect(tooltip.textContent).toContain("alice");
+    expect(tooltip.textContent).toContain("Approved");
+    expect(tooltip.textContent).toContain("Passed");
+    expect(tooltip.textContent).toContain("Ready to merge");
+    const scrollRegion = screen.getByRole("region", {
+      name: "Pull request CI status, reviews, and checks summary.",
+    });
+    expect(scrollRegion.getAttribute("role")).toBe("region");
+    expect(scrollRegion.textContent).toContain("Test PR");
+    expect(screen.getAllByTestId("pr-task-summary-scroll-body")).toHaveLength(1);
+  });
+});
+
+describe("PRTaskIcon disclosure hydration", () => {
   it("keeps keyboard focus and the open tooltip when hydration completes", async () => {
     let resolveResponse!: (value: { task_prs: Record<string, TaskPR[]> }) => void;
     const response = new Promise<{ task_prs: Record<string, TaskPR[]> }>((resolve) => {
@@ -206,8 +248,12 @@ describe("PRTaskIcon corrupted store entry", () => {
     matches.mockRestore();
 
     await waitFor(() =>
-      expect(screen.getAllByTestId("pr-task-tooltip-loading").length).toBeGreaterThan(0),
+      expect(screen.getAllByTestId(TOOLTIP_LOADING_TEST_ID).length).toBeGreaterThan(0),
     );
+    const scrollBody = screen.getByTestId("pr-task-summary-scroll-body");
+    vi.spyOn(scrollBody, "matches").mockReturnValue(true);
+    fireEvent.keyDown(icon, { key: "Tab" });
+    expect(document.activeElement).toBe(scrollBody);
     await act(async () => {
       resolveResponse({ task_prs: { [TASK_ID]: [makePR()] } });
       await response;
@@ -216,7 +262,51 @@ describe("PRTaskIcon corrupted store entry", () => {
     await waitFor(() =>
       expect(screen.getAllByTestId("pr-task-status-summary").length).toBeGreaterThan(0),
     );
-    expect(document.activeElement).toBe(screen.getByTestId(`pr-task-icon-${TASK_ID}`));
+    expect(document.activeElement).toBe(scrollBody);
+    expect(
+      screen.getByRole("img", {
+        name: /Pull request #1 status/,
+        description: /Test PR/,
+      }),
+    ).toBeTruthy();
+  });
+
+  it("keeps the hovered tooltip open through pointer transfer and hydrates only once", async () => {
+    let resolveResponse!: (value: { task_prs: Record<string, TaskPR[]> }) => void;
+    const response = new Promise<{ task_prs: Record<string, TaskPR[]> }>((resolve) => {
+      resolveResponse = resolve;
+    });
+    listTaskPRsMock.mockReturnValue(response);
+    renderWithStore(
+      { workspaces: { items: [], activeId: WORKSPACE_ID } },
+      <TaskContributionIcons
+        taskId={TASK_ID}
+        prInfo={{ number: 7, state: "open", aggregateState: "pending" }}
+      />,
+    );
+
+    const icon = screen.getByTestId(`pr-task-icon-${TASK_ID}`);
+    fireEvent.pointerEnter(icon, { pointerType: "mouse" });
+    await waitFor(() => expect(screen.getAllByTestId(TOOLTIP_LOADING_TEST_ID)).not.toHaveLength(0));
+    const tooltip = document.querySelector<HTMLElement>(
+      '[data-slot="tooltip-content"]:not([data-state="closed"])',
+    );
+    expect(tooltip).not.toBeNull();
+
+    act(() => {
+      fireEvent.pointerLeave(icon, { pointerType: "mouse" });
+      fireEvent.pointerEnter(tooltip!, { pointerType: "mouse" });
+    });
+    await act(async () => {
+      resolveResponse({ task_prs: { [TASK_ID]: [makePR()] } });
+      await response;
+    });
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId("pr-task-status-summary")).not.toHaveLength(0),
+    );
+    expect(tooltip?.getAttribute("data-state")).not.toBe("closed");
+    expect(listTaskPRsMock).toHaveBeenCalledTimes(1);
   });
 });
 

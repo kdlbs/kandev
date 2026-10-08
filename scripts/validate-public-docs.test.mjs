@@ -667,6 +667,20 @@ test("accepts heading fragments whose labels contain complete inline HTML", asyn
   await assert.doesNotReject(validatePublicDocs(dir));
 });
 
+test("accepts explicit HTML anchors for renamed section fragments", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        '<a id="old-section-title"></a>\n\n## New section title\n\n[Old link](#old-section-title)',
+      ),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
+});
+
 test("rejects unterminated inline HTML in a linked heading", async () => {
   const dir = await createDocs(
     {

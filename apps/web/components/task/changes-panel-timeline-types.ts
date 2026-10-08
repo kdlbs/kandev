@@ -48,6 +48,9 @@ export type ChangesPanelTimelineContentProps = Pick<
   | "perRepoStatus"
   | "prByRepo"
   | "comparisonRequestToken"
+  | "inlineCommitDetails"
+  | "inlineCommitDetailVersion"
+  | "contextKey"
 > & {
   scrollElement: HTMLDivElement | null;
   beforeLayoutKey: string;

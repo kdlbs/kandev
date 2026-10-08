@@ -1,16 +1,18 @@
 import { test, expect } from "../../fixtures/docker-test-base";
+import { randomUUID } from "node:crypto";
 import { dockerFileContent, dockerPathExists } from "../../helpers/docker";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import {
   MANAGED_RUNTIME_CACHE_ROOT,
-  managedRuntimeExecutionCacheKey,
+  managedRuntimeStartupAttemptFile,
+  managedRuntimeStartupSentinels,
   prepareManagedRuntimeProfile,
   restoreE2EAgentRegistry,
 } from "../../helpers/managed-runtime-recovery";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Docker executor - managed npm runtime recovery", () => {
-  test("repairs the executor cache and completes the original session", async ({
+  test("retries online without deleting the executor tree", async ({
     apiClient,
     backend,
     seedData,
@@ -19,7 +21,11 @@ test.describe("Docker executor - managed npm runtime recovery", () => {
     test.setTimeout(240_000);
     let profileId = "";
     try {
-      const { profile, packageSpec } = await prepareManagedRuntimeProfile(apiClient, backend);
+      const launchId = randomUUID();
+      const { profile, packageSpec } = await prepareManagedRuntimeProfile(apiClient, backend, {
+        startupMode: "transient",
+        launchId,
+      });
       profileId = profile.id;
       const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
@@ -37,17 +43,25 @@ test.describe("Docker executor - managed npm runtime recovery", () => {
       await waitForLatestSessionDone(apiClient, task.id, 1, "Wait for Docker managed recovery");
       const environment = await apiClient.getTaskEnvironment(task.id);
       expect(environment?.container_id).toBeTruthy();
-      const target = `${MANAGED_RUNTIME_CACHE_ROOT}/_npx/${managedRuntimeExecutionCacheKey(packageSpec)}`;
-      const sibling = `${MANAGED_RUNTIME_CACHE_ROOT}/_npx/0123456789abcdef`;
       const containerID = environment!.container_id!;
-      expect(dockerPathExists(containerID, `${target}/stale-marker`)).toBe(false);
-      expect(dockerFileContent(containerID, `${target}/fresh-marker`)).toBe("fresh\n");
-      expect(dockerFileContent(containerID, `${sibling}/sibling-marker`)).toBe("sibling\n");
-      const onlineInvocations = dockerFileContent(
+      expect(
+        dockerFileContent(containerID, managedRuntimeStartupAttemptFile(launchId)).trim(),
+      ).toBe("2");
+      const sentinels = managedRuntimeStartupSentinels(packageSpec, launchId);
+      expect(dockerPathExists(containerID, sentinels.selected)).toBe(true);
+      expect(dockerFileContent(containerID, sentinels.selected)).toBe("preserved\n");
+      expect(dockerFileContent(containerID, sentinels.sibling)).toBe("preserved\n");
+      const launches = dockerFileContent(
         containerID,
-        `${MANAGED_RUNTIME_CACHE_ROOT}/online-invocations`,
-      );
-      expect(onlineInvocations.trim().split(/\r?\n/)).toEqual([packageSpec]);
+        `${MANAGED_RUNTIME_CACHE_ROOT}/kandev-e2e-launches`,
+      )
+        .trim()
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith(`${launchId}\t`));
+      expect(launches.map((line) => line.split("\t")[3])).toEqual([
+        "--prefer-offline",
+        "--prefer-online",
+      ]);
 
       await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);

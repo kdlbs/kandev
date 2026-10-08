@@ -257,7 +257,10 @@ export const MobileDiffSheet = memo(function MobileDiffSheet({
 
   return (
     <Drawer open={mode !== null} onOpenChange={(open) => (!open ? onClose() : undefined)}>
-      <DrawerContent className="h-full max-h-screen flex flex-col rounded-none">
+      <DrawerContent
+        data-testid="mobile-diff-sheet"
+        className="h-dvh !max-h-dvh flex flex-col rounded-none data-[vaul-drawer-direction=bottom]:!mt-0"
+      >
         <SheetHeader
           title={title}
           showSourceChip={mode?.kind === "all" && sourceTabs.length === 1}

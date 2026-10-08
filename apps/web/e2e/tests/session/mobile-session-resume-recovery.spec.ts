@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { SeedData } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
@@ -20,6 +21,7 @@ import {
 import {
   cleanupManagedCloneRelocationFixture,
   countSimpleMockResponses,
+  readPrivateManagedCloneRecoveryArtifacts,
   readManagedCloneRecoveryConsumers,
   removeRecoveryBranch,
   seedManagedCloneRelocationFixture,
@@ -64,13 +66,9 @@ test.describe("mobile: delayed resume cancellation", () => {
   }) => {
     test.setTimeout(180_000);
 
-    const fixture = await seedDelayedResumeFixture(
-      testPage,
-      apiClient,
-      seedData,
-      backend,
-      "Mobile session cancel and retry recovery",
-    );
+    const fixture = await seedDelayedResumeFixture(testPage, apiClient, seedData, backend, {
+      title: "Mobile session cancel and retry recovery",
+    });
 
     try {
       await expect(fixture.session.cancelAgentButton()).toBeVisible({ timeout: 15_000 });
@@ -485,6 +483,7 @@ test.describe("mobile: dirty managed clone relocation", () => {
     await expect(testPage.getByTestId("recovery-fresh-button")).toHaveCount(0);
     await expect(testPage.getByTestId("recovery-restore-workspace-button")).toHaveCount(0);
     if (prCapture.capturing) {
+      await waitForFiniteAnimations(testPage.locator("body"));
       await prCapture.screenshot("managed-clone-relocation-card-phone", {
         caption: "The phone recovery card keeps the repair action reachable.",
       });
@@ -498,6 +497,7 @@ test.describe("mobile: dirty managed clone relocation", () => {
     const confirm = testPage.getByTestId("managed-clone-relocation-confirm");
     await confirm.scrollIntoViewIfNeeded();
     if (prCapture.capturing) {
+      await waitForFiniteAnimations(confirmation);
       await prCapture.screenshot("managed-clone-relocation-confirm-phone", {
         caption: "The phone drawer explains the preserved files and staging limit.",
       });
@@ -526,16 +526,25 @@ test.describe("mobile: dirty managed clone relocation", () => {
     expect(afterEnvironment?.id).toBe(beforeEnvironment?.id);
     expect(afterRepository?.worktree_id).not.toBe(beforeRepository?.worktree_id);
     expect(afterRepository?.worktree_branch).toBe(fixture.originalBranch);
-    const relocationRecord = JSON.parse(
-      fs.readFileSync(`${originalPath}.kandev-clone-relocation.json`, "utf8"),
-    ) as { original: string };
-    const retainedOriginal = relocationRecord.original;
+    const recoveryArtifacts = readPrivateManagedCloneRecoveryArtifacts(
+      backend.tmpDir,
+      fixture.environment.id,
+      seedData.repositoryId,
+    );
+    expect(recoveryArtifacts.relocationPath).toContain(`${path.sep}.kandev-recovery${path.sep}`);
+    expect(recoveryArtifacts.recoveryPath).toContain(`${path.sep}.kandev-recovery${path.sep}`);
+    expect(fs.existsSync(`${originalPath}.kandev-clone-relocation.json`)).toBe(false);
+    const retainedOriginal = recoveryArtifacts.original;
     expect(retainedOriginal).not.toBe(originalPath);
     expect(retainedOriginal).toContain(`${path.sep}.kandev-recovery${path.sep}`);
+    expect(recoveryArtifacts.snapshot).toContain(`${path.sep}.kandev-recovery${path.sep}`);
     expect(fs.existsSync(originalPath)).toBe(false);
     expect(fs.readFileSync(path.join(retainedOriginal, fixture.dirtyFileName), "utf8")).toBe(
       fixture.dirtyFileContent,
     );
+    expect(
+      fs.readFileSync(path.join(recoveryArtifacts.snapshot, fixture.dirtyFileName), "utf8"),
+    ).toBe(fixture.dirtyFileContent);
     expect(fs.readFileSync(path.join(relocatedPath!, fixture.dirtyFileName), "utf8")).toBe(
       fixture.dirtyFileContent,
     );

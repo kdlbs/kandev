@@ -19,7 +19,7 @@ vi.mock("@/hooks/domains/workspace/use-repository-branch-policies", () => ({
         name: "Feature branches",
         description: "Policy description",
         base_branch: "main",
-        branch_template: "feature/{title}-{suffix}",
+        branch_template: FEATURE_BRANCH_PATTERN,
         pull_request_target: "develop",
         created_at: "2026-08-24T10:00:00Z",
         updated_at: "2026-08-24T10:00:00Z",
@@ -33,6 +33,8 @@ const BACKEND_ID = "repo-back";
 const CHIP_TRIGGER = "repo-chip-trigger";
 const ADDED_MARKER = "already-added-repository-marker";
 const DISCOVERED_PATH = "/home/me/projects/local-project";
+const FEATURE_BRANCH_PATTERN = "feature/{title}-{suffix}";
+const REPOSITORIES_HELP_ID = "quick-chat-repositories-help";
 const NOOP = (_key: string, _value: string) => undefined;
 
 function repository(id: string, name: string): Repository {
@@ -185,6 +187,22 @@ describe("WorkspaceRepoChips duplicate policy", () => {
   });
 });
 
+describe("WorkspaceRepoChips field descriptions", () => {
+  it("describes the repository, branch, and add controls directly", () => {
+    renderChips({ ariaDescribedBy: REPOSITORIES_HELP_ID });
+
+    expect(screen.getAllByTestId(CHIP_TRIGGER)[0].getAttribute("aria-describedby")).toBe(
+      REPOSITORIES_HELP_ID,
+    );
+    expect(screen.getAllByTestId("branch-chip-trigger")[0].getAttribute("aria-describedby")).toBe(
+      REPOSITORIES_HELP_ID,
+    );
+    expect(screen.getByTestId("add-repository").getAttribute("aria-describedby")).toBe(
+      REPOSITORIES_HELP_ID,
+    );
+  });
+});
+
 describe("WorkspaceRepoChips branch policy preview", () => {
   it("keeps policy choices on one line and moves details behind an info control", () => {
     renderChips({
@@ -195,10 +213,10 @@ describe("WorkspaceRepoChips branch policy preview", () => {
     fireEvent.click(screen.getByTestId("branch-chip-trigger"));
 
     const option = screen.getByRole("option", { name: /Feature branches/ });
-    expect(option.textContent).not.toContain("feature/{title}-{suffix}");
+    expect(option.textContent).not.toContain(FEATURE_BRANCH_PATTERN);
     expect(
       screen.getByTestId("branch-policy-option-info-policy-1").getAttribute("aria-label"),
-    ).toContain("feature/{title}-{suffix}");
+    ).toContain(FEATURE_BRANCH_PATTERN);
   });
 });
 

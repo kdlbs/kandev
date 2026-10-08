@@ -72,12 +72,12 @@ test.describe("Unread divider", () => {
     // the real endpoint is monotonic (it never regresses the persisted
     // cursor), so replaying an older messageId through it would now be a
     // rejected no-op instead of rewinding state for this test.
-    await apiClient.forceSetSessionReadCursor(sessionId, readCursorMessageId);
 
-    // Navigate away, then back — the actual "navigate into a task that was
-    // running outside of active view" trigger this feature targets.
+    // Leave and drain live read tracking before rewinding the cursor. Then
+    // return through the navigation and hydration path under test.
     await testPage.goto("/");
     await testPage.waitForLoadState("networkidle");
+    await apiClient.forceSetSessionReadCursor(sessionId, readCursorMessageId);
     session = await openTaskSession(testPage, task.id);
 
     const activeChat = session.activeChat();

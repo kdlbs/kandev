@@ -21,6 +21,7 @@ import {
 } from "./storage-gating";
 import { StorageDiskCapacityCard } from "./storage-disk-capacity-card";
 import { StorageOverviewCard } from "./storage-overview-card";
+import { storageGoCacheResultSummary } from "./storage-go-cache-result";
 import { StoragePolicyCard } from "./storage-policy-card-root";
 import { StorageQuarantineCard } from "./storage-quarantine-card";
 import { StorageRunHistory } from "./storage-run-history";
@@ -306,6 +307,7 @@ function StoragePrimarySections({
   const controlsPending = policyControlsPending(controller.pendingAction, readOnlyReason);
   const policyLoading = controller.loading?.policy ?? !savedSettings;
   const capabilities = controller.policy?.capabilities ?? controller.overview?.capabilities;
+  const latestGoCacheRun = controller.runs.find((run) => storageGoCacheResultSummary(run.result));
   return (
     <div className="min-w-0 space-y-4" data-testid="storage-primary-sections">
       <StorageDiskCapacityCard
@@ -320,6 +322,7 @@ function StoragePrimarySections({
         loading={controller.loading?.overview}
         error={controller.sectionErrors?.overview}
         disabledReason={disabledReason}
+        latestGoCacheRun={latestGoCacheRun}
         onRunGoCache={() => void controller.runNow(["go_cache"])}
         onRunTemporaryArtifacts={onRunTemporaryArtifacts}
         focusTemporaryEntries={temporaryEntriesRequest}

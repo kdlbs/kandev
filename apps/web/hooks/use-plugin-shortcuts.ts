@@ -13,26 +13,7 @@ import {
 } from "@/lib/keyboard/plugin-shortcuts";
 import { comboKey } from "@/lib/keyboard/shortcut-conflicts";
 import { SHORTCUTS, type KeyboardShortcut } from "@/lib/keyboard/constants";
-
-/**
- * Central shortcuts that are not in `CONFIGURABLE_SHORTCUTS` (so they have no
- * user override to resolve) but are still global, always-on core behavior
- * that must win over a plugin keybinding bound to the same combo:
- * - `FIND_IN_PANEL` (Cmd/Ctrl+F) — per-panel capture-phase listeners
- *   (`use-panel-search.ts`, terminal find) that don't check
- *   `event.defaultPrevented`.
- * - `SAVE` (Cmd/Ctrl+S) — reserved for editor save; must not be hijacked by a
- *   plugin even before a save listener exists for every surface.
- *
- * Other `SHORTCUTS` entries not in this list (`SUBMIT`, `SUBMIT_ENTER`,
- * `CANCEL`, `COMMAND_PANEL_SHIFT`) are contextual/per-component shortcuts —
- * typically registered via `useKeyboardShortcut`, which already yields to
- * plugin keybindings — so they're intentionally excluded here.
- */
-const NON_CONFIGURABLE_CORE_SHORTCUT_IDS = [
-  "FIND_IN_PANEL",
-  "SAVE",
-] as const satisfies ReadonlyArray<keyof typeof SHORTCUTS>;
+import { NON_CONFIGURABLE_CORE_SHORTCUT_IDS } from "@/lib/keyboard/core-shortcuts";
 
 /**
  * Global dispatcher for plugin-declared keybindings (`ui.keybindings`),

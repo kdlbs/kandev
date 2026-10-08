@@ -63,6 +63,66 @@ func TestWorkspaceTrackerConcurrentFreshStatusSharesObservation(t *testing.T) {
 	}
 }
 
+func TestWorkspaceTrackerFreshStatusDoesNotJoinOlderObservation(t *testing.T) {
+	wt := newStatusConcurrencyTracker(t)
+	olderStarted := make(chan struct{})
+	releaseOlder := make(chan struct{})
+	var releaseOnce sync.Once
+	unblockOlder := func() { releaseOnce.Do(func() { close(releaseOlder) }) }
+	defer unblockOlder()
+
+	freshStarted := make(chan struct{})
+	olderStatus := types.GitStatusUpdate{Timestamp: time.Unix(123, 0), Branch: "before-change"}
+	freshStatus := types.GitStatusUpdate{Timestamp: time.Unix(456, 0), Branch: "after-change"}
+	var observations atomic.Int32
+	wt.gitStatusObserver = func(context.Context) (types.GitStatusUpdate, error) {
+		switch observations.Add(1) {
+		case 1:
+			close(olderStarted)
+			<-releaseOlder
+			return olderStatus, nil
+		case 2:
+			close(freshStarted)
+			return freshStatus, nil
+		default:
+			return types.GitStatusUpdate{}, errors.New("unexpected extra status observation")
+		}
+	}
+
+	olderDone := make(chan error, 1)
+	go func() {
+		_, err := wt.getBasicGitStatusClass(context.Background(), subproc.GitInteractive)
+		olderDone <- err
+	}()
+	waitForSignal(t, olderStarted, "older status observation")
+
+	type result struct {
+		status types.GitStatusUpdate
+		err    error
+	}
+	freshDone := make(chan result, 1)
+	go func() {
+		status, err := wt.GetGitStatus(context.Background(), true)
+		freshDone <- result{status: status, err: err}
+	}()
+	waitForSignal(t, freshStarted, "fresh status observation")
+	got := <-freshDone
+	if got.err != nil {
+		t.Fatalf("fresh GetGitStatus returned error: %v", got.err)
+	}
+	if got.status.Branch != freshStatus.Branch {
+		t.Fatalf("fresh status branch = %q, want %q", got.status.Branch, freshStatus.Branch)
+	}
+
+	unblockOlder()
+	if err := <-olderDone; err != nil {
+		t.Fatalf("older GetGitStatus returned error: %v", err)
+	}
+	if got := observations.Load(); got != 2 {
+		t.Fatalf("status observations = %d, want 2 independent observations", got)
+	}
+}
+
 func TestWorkspaceTrackerStatusWaiterCancellationDoesNotCancelPeers(t *testing.T) {
 	wt := newStatusConcurrencyTracker(t)
 	started := make(chan struct{})

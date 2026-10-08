@@ -70,20 +70,20 @@ func TestHandleTransientFailure_CursorRetriableErrorReplaySchedulesRetry(t *test
 	if len(mc.sessionMessages) != 1 {
 		t.Fatalf("expected 1 status message, got %d", len(mc.sessionMessages))
 	}
-	if got := mc.sessionMessages[0].metadata["failure_code"]; got != "agent_transport_lost" {
-		t.Errorf("failure_code = %v, want agent_transport_lost", got)
+	if got := mc.sessionMessages[0].metadata["failure_code"]; got != "network_unavailable" {
+		t.Errorf("failure_code = %v, want network_unavailable", got)
 	}
 }
 
-func TestTransientFailureLabelAndExhaustedMessage_TransportLost(t *testing.T) {
+func TestTransientFailureLabelAndManualMessage_TransportLost(t *testing.T) {
 	classified := &routingerr.Error{Code: routingerr.CodeAgentTransportLost}
 
 	if got, want := transientFailureLabel(classified), "Agent connection lost"; got != want {
 		t.Errorf("transientFailureLabel(CodeAgentTransportLost) = %q, want %q", got, want)
 	}
 
-	want := "The agent connection kept dropping after several retries. Resume to try again, or start a fresh session."
-	if got := transientFailureExhaustedMessage(classified); got != want {
-		t.Errorf("transientFailureExhaustedMessage(CodeAgentTransportLost) = %q, want %q", got, want)
+	want := "Agent connection lost. Resume to try again, or start a fresh session."
+	if got := transientFailureManualMessage(classified); got != want {
+		t.Errorf("transientFailureManualMessage(CodeAgentTransportLost) = %q, want %q", got, want)
 	}
 }

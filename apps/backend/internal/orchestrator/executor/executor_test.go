@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 // Tests
@@ -224,6 +225,33 @@ func TestPrepareSessionRetriesTaskRunnerChangedAfterReload(t *testing.T) {
 	}
 	if created.ExecutorProfileID != "profile-new" {
 		t.Fatalf("session executor profile = %q, want profile-new", created.ExecutorProfileID)
+	}
+}
+
+func TestResolveTaskLaunchScopeExcludesAutomationOrigins(t *testing.T) {
+	repo := newMockRepository()
+	repo.tasks["automation-run"] = &models.Task{ID: "automation-run", Origin: models.TaskOriginAutomationRun}
+	repo.tasks["automation-task"] = &models.Task{ID: "automation-task", Origin: models.TaskOriginAutomationTask}
+	repo.tasks["office-automation-run"] = &models.Task{ID: "office-automation-run", Origin: models.TaskOriginAutomationRun, IsFromOffice: true}
+	repo.tasks["office-automation-task"] = &models.Task{ID: "office-automation-task", Origin: models.TaskOriginAutomationTask, IsFromOffice: true}
+	repo.tasks["manual-task"] = &models.Task{ID: "manual-task", Origin: models.TaskOriginManual}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	for _, tc := range []struct {
+		taskID string
+		want   lifecycle.TaskLaunchScope
+	}{
+		{taskID: "automation-run", want: lifecycle.TaskLaunchScopeAutomation},
+		{taskID: "automation-task", want: lifecycle.TaskLaunchScopeAutomation},
+		{taskID: "office-automation-run", want: lifecycle.TaskLaunchScopeAutomation},
+		{taskID: "office-automation-task", want: lifecycle.TaskLaunchScopeAutomation},
+		{taskID: "manual-task", want: lifecycle.TaskLaunchScopeTask},
+	} {
+		t.Run(tc.taskID, func(t *testing.T) {
+			got, err := exec.resolveTaskLaunchScope(context.Background(), tc.taskID)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
 	}
 }
 

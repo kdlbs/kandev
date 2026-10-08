@@ -308,6 +308,7 @@ type lifecycleAdapter struct {
 var _ interface {
 	OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
 	GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error)
+	AcknowledgeRetainedPromptFailure(executionID string, generation uint64) bool
 	GetACPSessionIDForSession(sessionID string) (string, bool)
 	OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool
 	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
@@ -395,6 +396,9 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		requestedBaseBranch = execution.PrepareResult.RequestedBaseBranch
 		baseBranch = execution.PrepareResult.BaseBranch
 		baseBranchFallbackWarning = execution.PrepareResult.BaseBranchFallbackWarning
+		if worktreePath == "" && execution.PrepareResult.WorktreeID != "" && len(execution.PrepareResult.Worktrees) == 0 {
+			worktreePath = execution.PrepareResult.WorkspacePath
+		}
 	}
 	if execution.PrepareResult != nil && len(execution.PrepareResult.Worktrees) > 0 {
 		worktrees = make([]executor.RepoWorktreeResult, 0, len(execution.PrepareResult.Worktrees))
@@ -443,6 +447,7 @@ func buildLifecycleLaunchRequest(
 		TaskID:                        req.TaskID,
 		TaskScope:                     req.TaskScope,
 		SessionSettingsPolicy:         lifecycleSessionSettingsPolicy(req.SessionSettingsPolicy),
+		RequiredNativeConversationID:  req.RequiredNativeConversationID,
 		WorkspaceID:                   req.WorkspaceID,
 		SessionID:                     req.SessionID,
 		TaskEnvironmentID:             req.TaskEnvironmentID,
@@ -760,6 +765,10 @@ func (a *lifecycleAdapter) OwnsPromptGeneration(sessionID, executionID string, g
 
 func (a *lifecycleAdapter) GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error) {
 	return a.mgr.GetPromptGenerationForSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) AcknowledgeRetainedPromptFailure(executionID string, generation uint64) bool {
+	return a.mgr.AcknowledgeRetainedPromptFailure(executionID, generation)
 }
 
 func (a *lifecycleAdapter) OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool {
@@ -1163,6 +1172,20 @@ func (a *lifecycleAdapter) GetGitStatusFresh(ctx context.Context, sessionID stri
 	return agentClient.GetGitStatusFresh(ctx)
 }
 
+// GetGitStatusWithDetails retrieves a fresh status after enrichment completes.
+func (a *lifecycleAdapter) GetGitStatusWithDetails(ctx context.Context, sessionID string) (*client.GitStatusResult, error) {
+	execution, ok := a.mgr.GetExecutionBySessionID(sessionID)
+	if !ok {
+		return nil, nil
+	}
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if agentClient == nil {
+		return nil, nil
+	}
+	return agentClient.GetGitStatusWithDetails(ctx)
+}
+
 // WaitForAgentctlReady waits for the agentctl HTTP server to be ready for a session.
 func (a *lifecycleAdapter) WaitForAgentctlReady(ctx context.Context, sessionID string) error {
 	return a.mgr.WaitForAgentctlReadyForSession(ctx, sessionID)
@@ -1182,6 +1205,43 @@ func (w *orchestratorWrapper) PromptTask(ctx context.Context, taskID, taskSessio
 	return w.svc.PromptTask(ctx, taskID, taskSessionID, prompt, model, planMode, attachments, dispatchOnly)
 }
 
+// PromptTaskWithPromptContext forwards an accepted direct message together
+// with its server-owned reference snapshot and validated entity references.
+func (w *orchestratorWrapper) PromptTaskWithPromptContext(
+	ctx context.Context,
+	taskID, taskSessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	dispatchOnly bool,
+) (*orchestrator.PromptResult, error) {
+	return w.svc.PromptTaskWithPromptContext(
+		ctx, taskID, taskSessionID, prompt, model, planMode, attachments,
+		promptReferenceContext, promptReferencesPrepared, references, dispatchOnly,
+	)
+}
+
+// PromptTaskWithPromptContextAndDispatchOwnership lets the accepted first
+// prompt pass the session's in-memory first-boundary admission gate.
+func (w *orchestratorWrapper) PromptTaskWithPromptContextAndDispatchOwnership(
+	ctx context.Context,
+	taskID, taskSessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	dispatchOnly bool,
+	initialTaskBriefDispatchOwner bool,
+) (*orchestrator.PromptResult, error) {
+	return w.svc.PromptTaskWithPromptContextAndDispatchOwnership(
+		ctx, taskID, taskSessionID, prompt, model, planMode, attachments,
+		promptReferenceContext, promptReferencesPrepared, references, dispatchOnly, initialTaskBriefDispatchOwner,
+	)
+}
+
 // ResumeTaskSession forwards to the orchestrator service, discarding the TaskExecution result.
 func (w *orchestratorWrapper) ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error {
 	_, err := w.svc.ResumeTaskSession(ctx, taskID, taskSessionID)
@@ -1198,6 +1258,44 @@ func (w *orchestratorWrapper) HasActiveSessionRecoveryForFailure(ctx context.Con
 // provider acceptance for the handler's internal retry.
 func (w *orchestratorWrapper) ResumeTaskSessionAndPrompt(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
 	return w.svc.ResumeTaskSessionAndPrompt(ctx, taskID, taskSessionID, prompt, model, planMode, attachments)
+}
+
+// ResumeTaskSessionAndPromptWithPromptContext preserves the accepted direct
+// prompt context through the handler's compound recovery retry.
+func (w *orchestratorWrapper) ResumeTaskSessionAndPromptWithPromptContext(
+	ctx context.Context,
+	taskID, taskSessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	initialTaskBriefDispatchOwner bool,
+) (*orchestrator.PromptResult, error) {
+	return w.svc.ResumeTaskSessionAndPromptWithPromptContext(
+		ctx, taskID, taskSessionID, prompt, model, planMode, attachments,
+		promptReferenceContext, promptReferencesPrepared, references, initialTaskBriefDispatchOwner,
+	)
+}
+
+func (w *orchestratorWrapper) WithInitialTaskBriefAdmission(
+	ctx context.Context,
+	sessionID string,
+	fn func(context.Context) error,
+) error {
+	return w.svc.WithInitialTaskBriefAdmission(ctx, sessionID, fn)
+}
+
+func (w *orchestratorWrapper) MarkInitialTaskBriefDispatchPending(sessionID string) {
+	w.svc.MarkInitialTaskBriefDispatchPending(sessionID)
+}
+
+func (w *orchestratorWrapper) InitialTaskBriefDispatchPending(sessionID string) bool {
+	return w.svc.InitialTaskBriefDispatchPending(sessionID)
+}
+
+func (w *orchestratorWrapper) CompleteInitialTaskBriefDispatch(ctx context.Context, taskID, sessionID string) {
+	w.svc.CompleteInitialTaskBriefDispatch(ctx, taskID, sessionID)
 }
 
 // StartCreatedSession forwards to the orchestrator service, discarding the TaskExecution result.
@@ -1294,8 +1392,8 @@ func (a githubTaskIssueStoreAdapter) GetRepository(ctx context.Context, reposito
 	return a.svc.GetRepository(ctx, repositoryID)
 }
 
-func (a githubTaskIssueStoreAdapter) UpdateTaskMetadata(ctx context.Context, taskID string, metadata map[string]interface{}) (*models.Task, error) {
-	task, err := a.svc.UpdateTask(ctx, taskID, &taskservice.UpdateTaskRequest{Metadata: metadata})
+func (a githubTaskIssueStoreAdapter) UpdateTaskGitHubIssue(ctx context.Context, taskID string, link *models.TaskGitHubIssueLink) (*models.Task, error) {
+	task, err := a.svc.UpdateTaskGitHubIssue(ctx, taskID, link)
 	if err != nil {
 		return nil, wrapGitHubTaskIssueStoreError(err)
 	}

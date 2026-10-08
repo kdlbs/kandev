@@ -4,6 +4,7 @@ import type {
   TaskPlanRevisionEventPayload,
 } from "./task-plan-events";
 import type { CaptureRequest } from "@/lib/logger/capture";
+import type { AgentUpdateJob } from "@/lib/api/domains/agent-update-api";
 
 export const SYSTEM_AGENT_RUNTIME_STATUS_CHANGED = "system.agent_runtime.status_changed" as const;
 
@@ -17,6 +18,7 @@ export type { SessionBackendMessageMap } from "./session-events";
 export type { OfficeEventType, OfficeEventPayload } from "./office-events";
 import type { RunEventAppendedPayload } from "./run-events";
 export type { RunEventAppendedPayload } from "./run-events";
+import type { CoordinatorUpdatedPayload } from "@/lib/api/domains/coordinator-api";
 
 import type {
   Agent,
@@ -198,6 +200,9 @@ export type AgentInstallOutputPayload = {
 };
 
 export type AgentUpdateJobPayload = {
+  automatic?: boolean;
+  runtime_id?: string;
+  previous_version?: string;
   job_id: string;
   agent_name: string;
   status: "queued" | "resolving" | "updating" | "refreshing" | "succeeded" | "failed";
@@ -233,11 +238,27 @@ export type DiffUpdatePayload = {
 };
 
 export type UpdateAvailablePayload = {
-  version: string;
+  notification_kind?: "agent_runtime_summary";
+  runtime_updates?: RuntimeUpdateSummaryMember[];
+  agent_name?: string;
+  runtime_id?: string;
+  display_name?: string;
+  previous_version?: string;
+  runtime_update_status?: "available" | "succeeded" | "failed" | "interrupted";
+  version?: string;
   url?: string;
   title: string;
   body: string;
   occurrence_id: string;
+};
+
+export type RuntimeUpdateSummaryMember = {
+  occurrence_id: string;
+  agent_name: string;
+  runtime_id: string;
+  display_name: string;
+  previous_version: string;
+  version: string;
 };
 
 export type WorkspacePayload = {
@@ -347,6 +368,7 @@ export type FileChangeFacet = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  diff_state?: "pending" | "ready" | "unavailable";
 };
 
 export type FileInfo = {
@@ -359,6 +381,7 @@ export type FileInfo = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  diff_state?: "pending" | "ready" | "unavailable";
   staged_change?: FileChangeFacet;
   unstaged_change?: FileChangeFacet;
 };
@@ -502,9 +525,9 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "agent.install.started": BackendMessage<"agent.install.started", AgentInstallJobPayload>;
     "agent.install.output": BackendMessage<"agent.install.output", AgentInstallOutputPayload>;
     "agent.install.finished": BackendMessage<"agent.install.finished", AgentInstallJobPayload>;
-    "agent.update.started": BackendMessage<"agent.update.started", AgentUpdateJobPayload>;
+    "agent.update.started": BackendMessage<"agent.update.started", AgentUpdateJob>;
     "agent.update.output": BackendMessage<"agent.update.output", AgentUpdateOutputPayload>;
-    "agent.update.finished": BackendMessage<"agent.update.finished", AgentUpdateJobPayload>;
+    "agent.update.finished": BackendMessage<"agent.update.finished", AgentUpdateJob>;
     "terminal.output": BackendMessage<"terminal.output", TerminalOutputPayload>;
     "diff.update": BackendMessage<"diff.update", DiffUpdatePayload>;
     "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;
@@ -526,6 +549,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "workspace.created": BackendMessage<"workspace.created", WorkspacePayload>;
     "workspace.updated": BackendMessage<"workspace.updated", WorkspacePayload>;
     "workspace.deleted": BackendMessage<"workspace.deleted", WorkspacePayload>;
+    "coordinator.updated": BackendMessage<"coordinator.updated", CoordinatorUpdatedPayload>;
     "repository_set.created": BackendMessage<"repository_set.created", RepositorySetPayload>;
     "repository_set.updated": BackendMessage<"repository_set.updated", RepositorySetPayload>;
     "repository_set.deleted": BackendMessage<"repository_set.deleted", RepositorySetPayload>;

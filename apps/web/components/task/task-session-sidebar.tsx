@@ -65,7 +65,8 @@ function buildSidebarTaskItems(params: {
   acknowledgedAgentErrors: Record<string, string>;
   dismissedAgentErrors: Record<string, string>;
   automaticColorSettings: SidebarItemContext["automaticColorSettings"];
-  pendingArchiveTaskIds: ReadonlySet<string>;
+  manualColors: SidebarItemContext["manualColors"];
+  pendingRemovalTaskIds: ReadonlySet<string>;
 }): ReturnType<typeof buildSidebarItem>[] {
   const {
     workspaceId,
@@ -78,7 +79,8 @@ function buildSidebarTaskItems(params: {
     acknowledgedAgentErrors,
     dismissedAgentErrors,
     automaticColorSettings,
-    pendingArchiveTaskIds,
+    manualColors,
+    pendingRemovalTaskIds,
   } = params;
   const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
   const repositorySlugById = new Map(repositories.map((repo) => [repo.id, repositorySlug(repo)]));
@@ -109,7 +111,8 @@ function buildSidebarTaskItems(params: {
     repositoriesById,
     stepColorById,
     automaticColorSettings,
-    pendingArchiveTaskIds,
+    manualColors,
+    pendingRemovalTaskIds,
   };
   return allTasks.map((task) => buildSidebarItem(task, context));
 }
@@ -124,6 +127,7 @@ export function useSidebarData(workspaceId: string | null, activeTaskOnly = fals
   const automaticColorSettings = useAppStore(
     (state) => state.userSettings.sidebarTaskColorAutomation,
   );
+  const manualColors = useAppStore((state) => state.userSettings.sidebarTaskColors);
 
   const selectedTaskId = useMemo(() => {
     if (activeSessionId) return sessionsById[activeSessionId]?.task_id ?? activeTaskId;
@@ -132,7 +136,7 @@ export function useSidebarData(workspaceId: string | null, activeTaskOnly = fals
 
   const {
     allTasks,
-    pendingArchiveTaskIds,
+    pendingRemovalTaskIds,
     allSteps,
     stepsByWorkflowId,
     page,
@@ -161,7 +165,8 @@ export function useSidebarData(workspaceId: string | null, activeTaskOnly = fals
         acknowledgedAgentErrors,
         dismissedAgentErrors,
         automaticColorSettings,
-        pendingArchiveTaskIds,
+        manualColors,
+        pendingRemovalTaskIds,
       }),
     [
       repositoriesByWorkspace,
@@ -174,7 +179,8 @@ export function useSidebarData(workspaceId: string | null, activeTaskOnly = fals
       acknowledgedAgentErrors,
       dismissedAgentErrors,
       automaticColorSettings,
-      pendingArchiveTaskIds,
+      manualColors,
+      pendingRemovalTaskIds,
     ],
   );
 

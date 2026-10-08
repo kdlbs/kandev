@@ -255,14 +255,83 @@ For the legacy method, accept current-mode reports and mode values in
 Serialize mode changes, including changes through the generic config API.
 Reject reports from another session and observations from before the request.
 Keep bounded waiting and timeout ambiguity handling for asynchronous reports.
-A correlated settings response does not inherit ambiguity from an earlier
+A correlated mode-config response does not inherit ambiguity from an earlier
 uncorrelated legacy notification.
+
+An unconfirmed legacy operation makes mode certainty sticky for that session.
+ACP mode reports have no request ID, so a `current_mode_update` or an
+unsolicited `config_option_update` can arrive late after the operation has
+returned. Such a report may update the displayed observation, but it cannot
+clear `modeOutcomeUncertain`, even while no mode request is active. A matching
+cached value therefore remains ineligible for the already-satisfied shortcut.
+Certainty can be restored only by a correlated mode-config response that
+contains the provider's current mode, or by a session transition that clears
+the old observation and receives a mode report for the replacement session.
+Unrelated config responses and uncorrelated mode reports are not recovery
+evidence.
 
 All consumers receive the same authoritative mode. This includes mode events,
 settings snapshots, lifecycle caches, persistence, and the desktop/mobile selector.
 A reset must not write the requested mode into its cache after an unconfirmed
 response. An unmet explicit start mode stops prompt dispatch and records the
 reason. A session without an explicit requested mode retains provider defaults.
+
+### Already satisfied legacy modes
+
+Criteria 007.9-007.11 extend confirmation without relaxing evidence for a mode
+mutation. Agents owns this contract because provider observations and mode
+enforcement are agent-facing runtime responsibilities, even when task startup
+is the visible failure.
+
+The active adapter can already know that the selected mode is in force. For a
+legacy-only mode catalog, `Adapter.setSessionMode` shall check this after taking
+the existing mode and config gates and validating the requested choice, before
+`beginModeChange` or sending a provider RPC. Under `a.mu`, require all of:
+
+- The connection exists, the adapter is open, and the active session is nonempty.
+- No advertised select config option with category `mode` was selected. The
+  authoritative config-option mutation path remains unchanged.
+- `modeSessionID` equals the active `sessionID`, `currentModeID` is nonempty and
+  equals the requested advertised legacy choice, and `modeOutcomeUncertain`
+  is false. A request value alone is never a current-mode observation.
+- The caller context has not been cancelled after acquiring the gates.
+
+Return a confirmed `streams.ModeResult` using that observed value and route it
+through the existing mode-event completion path. Preserve session-settings
+generation ordering and the normal source attribution. Do not call
+`noteCurrentMode` with the requested value, clear uncertainty, or manufacture a
+new provider observation. The existing mode and config gates remain the
+linearization boundary relative to other mutations and new/load/reset.
+
+If any condition fails, retain the existing RPC selection, observation-generation
+check, 750 ms settle window, and uncertainty handling. In particular, an empty
+successful legacy RPC response still cannot confirm a genuine mode change. A
+late report or a cached matching value after an uncertain request must not
+activate the short path. Reports received while idle do not restore that
+session's certainty. A correlated mode-config response can restore certainty
+when it includes the actual mode value; otherwise only a replacement session's
+own mode report can do so.
+
+`NewSession`, `LoadSession`, and `ResetSession` already replace session-scoped
+mode observations. Reuse those paths. `SessionManager.applyExplicitSessionMode`
+and context-reset enforcement still require an applied result before dispatch;
+they do not special-case Auggie or omit configured settings. The explicit
+provider-restored recovery policy remains a separate, attempt-scoped exception.
+
+The no-op result proves satisfaction, not a fresh mutation. Existing startup
+confirmation logs remain valid; new diagnostics must not say an RPC was sent.
+No schema, public API, settings-file write, profile option, or new runtime flag
+is required. This preserves the existing ADR's evidence and isolation boundary;
+the design records the local decision rather than introducing another ADR.
+
+Deterministic adapter tests must assert zero provider mode RPCs and the emitted
+confirmed result. A lifecycle-to-adapter wire fixture must prove prompt admission
+for fresh and loaded matching sessions and non-admission for a different silent
+mode. Include a late mode report delivered while idle before the next request,
+and prove it does not restore the shortcut; cover the correlated mode-config
+response and replacement-session report as the evidence that can restore
+certainty. Config-option clamps and timeout ambiguity remain regression
+controls.
 
 ### Attribution
 
@@ -396,3 +465,5 @@ or on network access. Backend integration coverage asserts the same contract at
 
 - [Session-control replacement plan](../../../plans/agent-permission-session-controls/plan.md)
   supersedes automatic mode overlays and completes config-option confirmation.
+- [Auggie confirmed-mode startup repair](../../../plans/auggie-confirmed-mode-startup/plan.md)
+  adds already satisfied legacy-mode handling without changing silent mutations.

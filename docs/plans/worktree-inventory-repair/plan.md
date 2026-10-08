@@ -41,6 +41,7 @@ Execute sequentially; there is no delegation authorization.
 - [x] [01: Preview and validate exact inventory repairs](task-01-preview-repair.md)
 - [x] [02: Apply and recover journaled inventory repairs](task-02-apply-repair.md)
 - [x] [03: Classify absent-execution diagnostics](task-03-stop-diagnostics.md)
+- [x] [04: Open the repair database at native Windows paths](task-04-windows-database-path.md)
 
 ## Verification mapping
 
@@ -50,6 +51,7 @@ Execute sequentially; there is no delegation authorization.
 | 001.3-.5 | New `apply_test.go` and `recovery_test.go`: preserved content/index/refs, move and SQL failpoints, busy backend, stale compare-and-set, unresolved-journal startup gate |
 | 002.2-.3 | New `cleanup_test.go`: predecessor snapshot unchanged, missing legacy OID, successor idempotency, already-removed sibling, changed archive generation, dirty and borrowed worktrees |
 | 003.1-.2 | New `executor_stop_diagnostics_test.go`: typed runtime absence has no WARN, real failure remains WARN and cannot unlock destructive cleanup |
+| 001.6 | New `internal/task/inventoryrepair/read_test.go`: native absolute database path with a space, `#`, `%`, or (POSIX only) `?` in read-only and read-write mode; no other file created; journal backup check |
 
 The numeric prefixes above refer to `AC-TASKS-WORKTREE-INVENTORY-REPAIR-*`.
 Work orders provide exact commands. Existing tests remain the baseline for
@@ -89,7 +91,7 @@ Implementation validation on 2026-09-28:
 - A real hotfix process refused an unresolved repair fence before creating a
   database; the standalone command built successfully.
 
-All three implementation work orders are complete. Live installation repair
+Implementation work orders 01-03 are complete. Live installation repair
 is a separate operator action and was not performed as part of this change.
 
 Review validation on 2026-09-29:

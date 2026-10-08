@@ -9,10 +9,11 @@ import {
   removeDesktopDiscoveryRootAction,
 } from "@/app/actions/workspaces";
 import { useToast } from "@/components/toast-provider";
+import type { RepositoryDiscoveryReadKind } from "./use-repository-discovery";
 
 type DiscoveryRefresh = {
   refresh: () => Promise<unknown>;
-  load: () => Promise<unknown>;
+  synchronizeAfterRootMutation: (kind: RepositoryDiscoveryReadKind) => Promise<unknown>;
 };
 
 type Toast = ReturnType<typeof useToast>["toast"];
@@ -72,7 +73,12 @@ export function useDiscoveryRootActions(discovery: DiscoveryRefresh, toast: Toas
     );
   const handleChooseDiscoveryRoot = (path: string) =>
     executeMutatingAction(() =>
-      runDiscoveryAction(() => addDesktopDiscoveryRootAction(path), discovery.load, toast, t),
+      runDiscoveryAction(
+        () => addDesktopDiscoveryRootAction(path),
+        () => discovery.synchronizeAfterRootMutation("load"),
+        toast,
+        t,
+      ),
     );
   const handleConfirmHomeDiscovery = async () => {
     if (confirmingHomeRef.current || !startMutation()) return;
@@ -80,7 +86,7 @@ export function useDiscoveryRootActions(discovery: DiscoveryRefresh, toast: Toas
     setIsConfirmingHomeDiscovery(true);
     try {
       await confirmHomeDesktopDiscoveryAction();
-      await discovery.load();
+      await discovery.synchronizeAfterRootMutation("load");
     } catch (error) {
       reportDiscoveryError(toast, t, error);
     } finally {
@@ -93,14 +99,19 @@ export function useDiscoveryRootActions(discovery: DiscoveryRefresh, toast: Toas
     executeMutatingAction(() =>
       runDiscoveryAction(
         () => reconnectDesktopDiscoveryRootAction(oldPath, newPath),
-        discovery.load,
+        () => discovery.synchronizeAfterRootMutation("load"),
         toast,
         t,
       ),
     );
   const handleRemoveDiscoveryRoot = (path: string) =>
     executeMutatingAction(() =>
-      runDiscoveryAction(() => removeDesktopDiscoveryRootAction(path), discovery.refresh, toast, t),
+      runDiscoveryAction(
+        () => removeDesktopDiscoveryRootAction(path),
+        () => discovery.synchronizeAfterRootMutation("refresh"),
+        toast,
+        t,
+      ),
     );
 
   return {

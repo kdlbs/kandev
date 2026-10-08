@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 
@@ -13,7 +12,7 @@ import (
 )
 
 func TestManagedConversationIdentity(t *testing.T) {
-	svc, deps := newACTestService()
+	svc, deps := newACManagedTestService(t)
 	spec := pluginsdk.ManagedAgentConversationSpec{
 		WorkspaceID: "ws-1", InstanceKey: "delivery-lead", AgentProfileID: "profile-gpt4",
 		ApprovalRevision: 1, ManifestDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -47,7 +46,7 @@ func TestManagedConversationIdentity(t *testing.T) {
 }
 
 func TestManagedConversationEnsureOperationReplay(t *testing.T) {
-	svc, deps := newACTestService()
+	svc, deps := newACManagedTestService(t)
 	spec := pluginsdk.ManagedAgentConversationSpec{
 		WorkspaceID: "ws-1", InstanceKey: "delivery-lead", AgentProfileID: "profile-gpt4",
 		ApprovalRevision: 1, ManifestDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -68,20 +67,17 @@ func TestManagedConversationEnsureOperationReplay(t *testing.T) {
 }
 
 func TestManagedConversationEnsureRepairsAcceptedOperation(t *testing.T) {
-	svc, deps := newACTestService()
+	svc, deps := newACManagedTestService(t)
 	spec := pluginsdk.ManagedAgentConversationSpec{
 		WorkspaceID: "ws-1", InstanceKey: "delivery-lead", AgentProfileID: "profile-gpt4",
 		ApprovalRevision: 1, ManifestDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		BasePrompt: "Review the workspace",
 	}
-	deps.sess.createErr = errors.New("temporary session write failure")
-	if _, _, err := svc.EnsureManaged(context.Background(), "plugin-coordinator", "installation-1", spec, "op-repair", "digest-repair"); err == nil {
-		t.Fatal("initial EnsureManaged error = nil, want failed session creation")
+	// Historical accepted tasks may have no primary after an interrupted older write.
+	task := svc.newManagedConversationTask("plugin-coordinator", "installation-1", spec, "op-repair", "digest-repair")
+	if err := deps.tasks.CreateTask(context.Background(), task); err != nil {
+		t.Fatal(err)
 	}
-	if got := deps.tasks.count(); got != 1 {
-		t.Fatalf("task count after partial creation = %d, want 1", got)
-	}
-	deps.sess.createErr = nil
 
 	repaired, outcome, err := svc.EnsureManaged(context.Background(), "plugin-coordinator", "installation-1", spec, "op-repair", "digest-repair")
 	if err != nil || outcome != AgentConversationStatusAlreadyApplied || repaired.SessionID == "" {
@@ -90,7 +86,7 @@ func TestManagedConversationEnsureRepairsAcceptedOperation(t *testing.T) {
 }
 
 func TestManagedConversationConfigurationUsesRevisionAndIdleBoundary(t *testing.T) {
-	svc, deps := newACTestService()
+	svc, deps := newACManagedTestService(t)
 	spec := pluginsdk.ManagedAgentConversationSpec{
 		WorkspaceID: "ws-1", InstanceKey: "delivery-lead", AgentProfileID: "profile-gpt4",
 		ApprovalRevision: 1, ManifestDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -126,7 +122,7 @@ func TestManagedConversationConfigurationUsesRevisionAndIdleBoundary(t *testing.
 }
 
 func TestManagedConversationConcurrentRevisionConflict(t *testing.T) {
-	svc, _ := newACTestService()
+	svc, _ := newACManagedTestService(t)
 	spec := pluginsdk.ManagedAgentConversationSpec{
 		WorkspaceID: "ws-1", InstanceKey: "delivery-lead", AgentProfileID: "profile-gpt4", BasePrompt: "Initial",
 		ApprovalRevision: 1, ManifestDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -175,7 +171,7 @@ func TestManagedConversationConcurrentRevisionConflict(t *testing.T) {
 }
 
 func TestManagedConversationSurvivesLegacyPluginCleanup(t *testing.T) {
-	svc, deps := newACTestService()
+	svc, deps := newACManagedTestService(t)
 	managed, _, err := svc.EnsureManaged(context.Background(), "plugin-coordinator", "installation-1", pluginsdk.ManagedAgentConversationSpec{
 		WorkspaceID: "ws-1", InstanceKey: "delivery-lead", AgentProfileID: "profile-gpt4",
 		ApprovalRevision: 1, ManifestDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -202,7 +198,7 @@ func TestManagedConversationSurvivesLegacyPluginCleanup(t *testing.T) {
 }
 
 func TestManagedConversationUninstallDetachesAndHidesRetainedTranscript(t *testing.T) {
-	svc, deps := newACTestService()
+	svc, deps := newACManagedTestService(t)
 	conversation, _, err := svc.EnsureManaged(context.Background(), "plugin-coordinator", "installation-1", pluginsdk.ManagedAgentConversationSpec{
 		WorkspaceID: "ws-1", InstanceKey: "delivery-lead", AgentProfileID: "profile-gpt4",
 		ApprovalRevision: 1, ManifestDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -233,7 +229,7 @@ func TestManagedConversationUninstallDetachesAndHidesRetainedTranscript(t *testi
 }
 
 func TestManagedConversationPauseStopsActiveExecution(t *testing.T) {
-	svc, deps := newACTestService()
+	svc, deps := newACManagedTestService(t)
 	conversation, _, err := svc.EnsureManaged(context.Background(), "plugin-coordinator", "installation-1", pluginsdk.ManagedAgentConversationSpec{
 		WorkspaceID: "ws-1", InstanceKey: "delivery-lead", AgentProfileID: "profile-gpt4",
 		ApprovalRevision: 1, ManifestDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -261,7 +257,7 @@ func TestManagedConversationPauseStopsActiveExecution(t *testing.T) {
 }
 
 func TestManagedConversationApprovalChangeInvalidatesAndStopsPolicy(t *testing.T) {
-	svc, deps := newACTestService()
+	svc, deps := newACManagedTestService(t)
 	spec := pluginsdk.ManagedAgentConversationSpec{
 		WorkspaceID: "ws-1", InstanceKey: "delivery-lead", AgentProfileID: "profile-gpt4",
 		ApprovalRevision: 1, ManifestDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

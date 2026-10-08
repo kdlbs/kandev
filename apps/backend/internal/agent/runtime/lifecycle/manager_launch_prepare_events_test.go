@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -12,6 +13,21 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPrepareProgressCarriesNativeMCPDiagnostic(t *testing.T) {
+	mgr, eventBus := newPrepareEventsTestManager(t, "profile-mcp-diagnostic-progress")
+	var step PrepareStep
+	require.NoError(t, json.Unmarshal([]byte(`{"name":"Cursor MCP approval","kind":"agent_mcp_approval","mcp_provider":"cursor","mcp_server_id":"plugin-example","status":"failed","mcp_diagnostic":{"operation":"enable","stage":"wait","kind":"wait_failed","message":"native helper failed"}}`), &step))
+	mgr.newProgressCallback("task-mcp", "session-mcp")(step, 0, 1)
+
+	payloads := prepareProgressPayloads(eventBus)
+	require.Len(t, payloads, 1)
+	encoded, err := json.Marshal(payloads[0])
+	require.NoError(t, err)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(encoded, &payload))
+	require.Contains(t, payload, "mcp_diagnostic")
+}
 
 func TestPreparationAttemptOptionalMCPFailureKeepsOverallSuccess(t *testing.T) {
 	mgr, _ := newPrepareEventsTestManager(t, "profile-mcp-degraded")

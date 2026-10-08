@@ -13,7 +13,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -55,6 +58,55 @@ func TestDeleteTaskForE2EResetDiscardsWorktreeChanges(t *testing.T) {
 	}
 	if !deleter.options.DiscardWorktreeChanges {
 		t.Fatal("E2E reset must discard disposable worktree changes")
+	}
+}
+
+func TestOrderE2ETasksForDeletionPlacesChildrenFirst(t *testing.T) {
+	tasks := []*taskmodels.Task{
+		{ID: "root"},
+		{ID: "sibling"},
+		{ID: "child", ParentID: "root"},
+		{ID: "grandchild", ParentID: "child"},
+		{ID: "sibling-child", ParentID: "sibling"},
+	}
+
+	ordered, err := orderE2ETasksForDeletion(tasks)
+	if err != nil {
+		t.Fatalf("orderE2ETasksForDeletion(): %v", err)
+	}
+	if len(ordered) != len(tasks) {
+		t.Fatalf("ordered task count = %d, want %d", len(ordered), len(tasks))
+	}
+
+	positions := make(map[string]int, len(ordered))
+	for index, task := range ordered {
+		positions[task.ID] = index
+	}
+	for _, task := range tasks {
+		if task.ParentID == "" {
+			continue
+		}
+		parentPosition, parentInList := positions[task.ParentID]
+		if parentInList && positions[task.ID] >= parentPosition {
+			t.Errorf(
+				"task %q at %d must precede parent %q at %d",
+				task.ID,
+				positions[task.ID],
+				task.ParentID,
+				parentPosition,
+			)
+		}
+	}
+}
+
+func TestOrderE2ETasksForDeletionRejectsParentCycles(t *testing.T) {
+	tasks := []*taskmodels.Task{
+		{ID: "first", ParentID: "second"},
+		{ID: "second", ParentID: "first"},
+	}
+
+	if _, err := orderE2ETasksForDeletion(tasks); err == nil {
+		t.Fatal("orderE2ETasksForDeletion() error = nil, want a hierarchy cycle error")
 	}
 }
 
@@ -127,6 +179,69 @@ func TestE2EResetDeletesWorkspaceGitHubAuthentication(t *testing.T) {
 	}
 	if ws1Secrets != 0 || ws2Secrets != 1 {
 		t.Fatalf("secret counts = ws-1:%d ws-2:%d, want 0 and 1", ws1Secrets, ws2Secrets)
+	}
+}
+
+func TestDeleteCoordinatorStateForReset_NilServiceIsNoop(t *testing.T) {
+	if err := deleteCoordinatorStateForReset(context.Background(), nil, "ws-1"); err != nil {
+		t.Fatalf("deleteCoordinatorStateForReset(nil service) = %v, want nil", err)
+	}
+}
+
+func TestDeleteCoordinatorStateForReset_DeletesOnlyTargetWorkspace(t *testing.T) {
+	raw, err := db.OpenSQLite(filepath.Join(t.TempDir(), "e2e-reset-coordinator.db"))
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	database := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = database.Close() })
+
+	store, err := coordinator.NewStore(database, database)
+	if err != nil {
+		t.Fatalf("new coordinator store: %v", err)
+	}
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	svc := coordinator.NewService(store, nil, nil, log)
+
+	seedCoordinatorWorkspaceRows(t, database, "ws-1")
+	seedCoordinatorWorkspaceRows(t, database, "ws-2")
+
+	if err := deleteCoordinatorStateForReset(context.Background(), svc, "ws-1"); err != nil {
+		t.Fatalf("deleteCoordinatorStateForReset: %v", err)
+	}
+
+	for _, table := range []string{"coordinators", "coordinator_proposals", "coordinator_stalls"} {
+		assertWorkspaceRows(t, database, table, "ws-1", 0)
+		assertWorkspaceRows(t, database, table, "ws-2", 1)
+	}
+}
+
+func seedCoordinatorWorkspaceRows(t *testing.T, database *sqlx.DB, workspaceID string) {
+	t.Helper()
+	coordinatorID := "coordinator-" + workspaceID
+	if _, err := database.Exec(
+		`INSERT INTO coordinators (id, workspace_id, name, agent_profile_id, executor_profile_id, context, created_at, updated_at)
+		 VALUES (?, ?, 'Planner', 'agent-1', 'executor-1', '', datetime('now'), datetime('now'))`,
+		coordinatorID, workspaceID,
+	); err != nil {
+		t.Fatalf("seed coordinators: %v", err)
+	}
+	if _, err := database.Exec(
+		`INSERT INTO coordinator_proposals (id, coordinator_id, workspace_id, status, spec_json, created_at, updated_at)
+		 VALUES (?, ?, ?, 'open', '{}', datetime('now'), datetime('now'))`,
+		"proposal-"+workspaceID, coordinatorID, workspaceID,
+	); err != nil {
+		t.Fatalf("seed coordinator_proposals: %v", err)
+	}
+	if _, err := database.Exec(
+		`INSERT INTO coordinator_stalls (task_id, workspace_id, stalled_for_ms, last_event_at, detected_at)
+		 VALUES (?, ?, 1000, datetime('now'), datetime('now'))`,
+		"task-"+workspaceID, workspaceID,
+	); err != nil {
+		t.Fatalf("seed coordinator_stalls: %v", err)
 	}
 }
 

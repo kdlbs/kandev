@@ -249,9 +249,9 @@ func TestMissingCheckoutRecoveryAllowsTransferredEnvironmentOwner(t *testing.T) 
 	`, newOwnerTaskID, fixture.environmentID); err != nil {
 		t.Fatalf("transfer task environment owner: %v", err)
 	}
-	fixture.request.TaskID = newOwnerTaskID
 	fixture.request.OwnerTaskID = newOwnerTaskID
 	fixture.request.OwnershipGeneration = 2
+	fixture.refreshSelectionSnapshot(t)
 
 	assertMissingCheckoutRecovered(t, fixture)
 }
@@ -457,6 +457,18 @@ func newMissingCheckoutFixture(t *testing.T) *missingCheckoutFixture {
 		t.Fatalf("set stable task directory name: %v", err)
 	}
 	f.repositoryPath = initGitRepoWithRemote(t)
+	if _, err := f.store.db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES ('workspace', 'Workspace', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if _, err := f.store.db.ExecContext(ctx, `
+		INSERT INTO repositories (id, workspace_id, name, source_type, local_path, created_at, updated_at)
+		VALUES (?, 'workspace', 'repository', 'local', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, f.repositoryID, f.repositoryPath); err != nil {
+		t.Fatalf("seed registered repository: %v", err)
+	}
 	cfg := newTestConfig(t)
 	manager, err := NewManager(cfg, f.store, newTestLogger())
 	if err != nil {
@@ -487,9 +499,17 @@ func newMissingCheckoutFixture(t *testing.T) *missingCheckoutFixture {
 	if err := f.store.CreateWorktree(ctx, worktree); err != nil {
 		t.Fatalf("persist canonical worktree: %v", err)
 	}
+	selectionSnapshot, err := f.store.ReadRecoverySelectionSnapshot(ctx, models.WorkspaceRecoverySelectionSnapshot{
+		TaskID: f.taskID, SessionID: f.sessionID, SessionPersisted: true,
+		SessionTaskEnvironmentID: f.environmentID, TaskEnvironmentID: f.environmentID,
+	})
+	if err != nil {
+		t.Fatalf("capture selected recovery inventory: %v", err)
+	}
 	f.request = RecoveryAdmissionRequest{
 		TaskID: f.taskID, SessionID: f.sessionID, TaskEnvironmentID: f.environmentID,
 		OwnerTaskID: f.taskID, OwnershipGeneration: 1, ExecutorType: "worktree",
+		SelectionSnapshot: selectionSnapshot,
 		Slots: []RecoverySlot{{WorktreeID: f.worktreeID, RepositoryID: f.repositoryID,
 			BranchSlug: f.branchSlug, RepositoryPath: f.repositoryPath, Worktree: worktree}},
 	}
@@ -546,6 +566,12 @@ func (f *missingCheckoutFixture) addWorktreeSlot(
 		runGit(t, f.repositoryPath, "branch", branch, f.branchHead)
 		runGit(t, f.repositoryPath, "worktree", "add", path, branch)
 	}
+	if _, err := f.store.db.ExecContext(context.Background(), `
+		INSERT INTO repositories (id, workspace_id, name, source_type, local_path, created_at, updated_at)
+		VALUES (?, 'workspace', ?, 'local', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, repositoryID, "repository-"+branchSlug, f.repositoryPath); err != nil {
+		t.Fatalf("seed registered repository for slot %q: %v", worktreeID, err)
+	}
 	worktree := &Worktree{
 		ID: worktreeID, SessionID: f.sessionID, TaskID: f.taskID, TaskDirName: f.taskDirName,
 		TaskEnvironmentID: f.environmentID, RepositoryID: repositoryID, BranchSlug: branchSlug,
@@ -554,7 +580,23 @@ func (f *missingCheckoutFixture) addWorktreeSlot(
 	if err := f.store.CreateWorktree(context.Background(), worktree); err != nil {
 		t.Fatalf("persist additional worktree slot %q: %v", worktreeID, err)
 	}
+	f.refreshSelectionSnapshot(t)
 	return worktree
+}
+
+func (f *missingCheckoutFixture) refreshSelectionSnapshot(t *testing.T) {
+	t.Helper()
+	snapshot, err := f.store.ReadRecoverySelectionSnapshot(context.Background(), models.WorkspaceRecoverySelectionSnapshot{
+		TaskID: f.request.TaskID, SessionID: f.sessionID, SessionPersisted: true,
+		SessionTaskEnvironmentID: f.environmentID, TaskEnvironmentID: f.environmentID,
+	})
+	if err != nil {
+		t.Fatalf("capture selected recovery inventory: %v", err)
+	}
+	if !snapshot.Complete() {
+		t.Fatalf("selected recovery inventory is incomplete: %+v", snapshot)
+	}
+	f.request.SelectionSnapshot = snapshot
 }
 
 func (f *missingCheckoutFixture) addSession(t *testing.T, sessionID, taskID, state string) {

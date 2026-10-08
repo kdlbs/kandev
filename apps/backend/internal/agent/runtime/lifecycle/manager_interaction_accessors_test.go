@@ -33,7 +33,10 @@ func TestGetAvailableCommandsForSessionReturnsCachedCommands(t *testing.T) {
 	mgr := newTestManager(t)
 	exec := &AgentExecution{ID: "exec-1", SessionID: "session-1"}
 	exec.SetAvailableCommands([]streams.AvailableCommand{
-		{Name: "review", Description: "Review the diff"},
+		{
+			Name: "review", Kind: "skill", Description: "Review the diff", InputHint: "target",
+			Action: &streams.AvailableCommandAction{Kind: "set_config_option", ConfigID: "collaboration_mode", Value: "plan", ResetValue: "default"},
+		},
 		{Name: "commit"},
 	})
 	require.NoError(t, mgr.executionStore.Add(exec))
@@ -42,7 +45,10 @@ func TestGetAvailableCommandsForSessionReturnsCachedCommands(t *testing.T) {
 
 	require.Len(t, got, 2)
 	require.Equal(t, "review", got[0].Name)
+	require.Equal(t, "skill", got[0].Kind)
 	require.Equal(t, "Review the diff", got[0].Description)
+	require.Equal(t, "target", got[0].InputHint)
+	require.Equal(t, &streams.AvailableCommandAction{Kind: "set_config_option", ConfigID: "collaboration_mode", Value: "plan", ResetValue: "default"}, got[0].Action)
 	require.Equal(t, "commit", got[1].Name)
 	require.Nil(t, mgr.GetAvailableCommandsForSession("session-absent"))
 }

@@ -35,6 +35,14 @@ func toolKindToMessageType(normalized *streams.NormalizedPayload) string {
 func (s *Service) handleTaskDeleted(ctx context.Context, data watcher.TaskEventData) {
 	s.scheduler.RemoveTask(data.TaskID)
 	s.clearParkedProjectionOnTaskDeleted(data.TaskID)
+	if closer, ok := s.automationService.(deferredAutomationRunCloser); ok {
+		if err := closer.MarkDeferredRunFailedByTaskID(
+			ctx, data.TaskID, "task deleted before deferred automation start",
+		); err != nil {
+			s.logger.Warn("failed to close deferred automation run after task deletion",
+				zap.String("task_id", data.TaskID), zap.Error(err))
+		}
+	}
 }
 
 func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPSessionEventData) {

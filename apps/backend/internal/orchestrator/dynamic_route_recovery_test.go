@@ -763,8 +763,7 @@ func TestRouteDynamicAgentFailureMarksSuccessorGenerationActionRequiredWhenLaunc
 		FallbackAllowed: true,
 	})
 	// The successor launch can complete in this call or on a detached worker.
-	// Both paths must settle the claimed generation before this recovery can
-	// be presented to the user.
+	// Wait for both the route and its separately written session projection.
 	deadline := time.Now().Add(2 * time.Second)
 	var state *dynamicruntime.RouteState
 	for {
@@ -773,7 +772,13 @@ func TestRouteDynamicAgentFailureMarksSuccessorGenerationActionRequiredWhenLaunc
 			t.Fatalf("LoadRouteState while waiting for successor failure: %v", err)
 		}
 		if state != nil && state.Generation == 2 && state.Status == dynamicRouteStatusActionRequired {
-			break
+			projected, loadErr := repo.GetTaskSession(ctx, sessionID)
+			if loadErr != nil {
+				t.Fatalf("GetTaskSession while waiting for successor failure: %v", loadErr)
+			}
+			if projected.RouteGeneration == 2 && projected.RouteState == dynamicRouteStatusActionRequired {
+				break
+			}
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("successor launch result not settled (handled=%v): %#v", handled, state)

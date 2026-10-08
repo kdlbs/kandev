@@ -71,16 +71,28 @@ function runRealGit(args, extraEnv) {
 }
 
 /** Sleeps before fetch/pull when a positive delay file is present. */
-function maybeDelay(subcommand) {
-  if (subcommand !== "fetch" && subcommand !== "pull") return;
+function maybeDelay(subcommand, args) {
   const raw = readFileSafe(process.env.KANDEV_E2E_GIT_DELAY_FILE);
   if (/^[0-9]+$/.test(raw)) {
+    if (subcommand !== "fetch" && subcommand !== "pull") return;
     const delayMs = Number(raw);
     if (delayMs > 0) sleepMs(delayMs);
     return;
   }
   try {
     const gate = JSON.parse(raw);
+    const targetCommand = typeof gate.subcommand === "string" ? gate.subcommand : null;
+    if (
+      targetCommand ? targetCommand !== subcommand : subcommand !== "fetch" && subcommand !== "pull"
+    ) {
+      return;
+    }
+    if (
+      Array.isArray(gate.requiredArgs) &&
+      !gate.requiredArgs.every((required) => args.includes(required))
+    ) {
+      return;
+    }
     if (typeof gate.startedFile !== "string" || typeof gate.releaseFile !== "string") return;
     fs.writeFileSync(gate.startedFile, "started");
     while (!fs.existsSync(gate.releaseFile)) sleepMs(50);
@@ -119,7 +131,7 @@ function maybeInterceptPush(subcommand, args) {
 function main() {
   const args = process.argv.slice(2);
   const subcommand = findSubcommand(args);
-  maybeDelay(subcommand);
+  maybeDelay(subcommand, args);
   if (maybeInterceptPush(subcommand, args)) {
     process.exit(0);
   }

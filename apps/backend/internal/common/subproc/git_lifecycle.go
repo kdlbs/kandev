@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -286,7 +287,10 @@ func (p *managedGitProcess) closePipes() {
 		var err error
 		for _, pipe := range p.pipes {
 			if pipe != nil {
-				err = errors.Join(err, pipe.Close())
+				closeErr := pipe.Close()
+				if !errors.Is(closeErr, os.ErrClosed) {
+					err = errors.Join(err, closeErr)
+				}
 			}
 		}
 		p.mu.Lock()
@@ -329,7 +333,10 @@ func closeGitPipes(pipes ...io.Closer) error {
 	var err error
 	for _, pipe := range pipes {
 		if pipe != nil {
-			err = errors.Join(err, pipe.Close())
+			closeErr := pipe.Close()
+			if !errors.Is(closeErr, os.ErrClosed) {
+				err = errors.Join(err, closeErr)
+			}
 		}
 	}
 	return err

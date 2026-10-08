@@ -40,6 +40,7 @@ export function shouldReservePageLevelMobileFeedbackOffset(params: {
   hasTaskMoveError: boolean;
   hasEnsureSessionError: boolean;
   hasBootstrapRecoveryError: boolean;
+  hasComposerRecoveryOwner?: boolean;
   effectiveSessionId: string | null;
   isSessionPassthrough: boolean;
   hasResumptionError: boolean;
@@ -48,7 +49,9 @@ export function shouldReservePageLevelMobileFeedbackOffset(params: {
 }): boolean {
   const hasPageRecoveryFeedback = params.hasBootstrapRecoveryError
     ? Boolean(params.effectiveSessionId && params.isSessionPassthrough)
-    : params.hasResumptionError || params.hasResumptionNotice || params.hasStatusUnavailable;
+    : params.hasStatusUnavailable ||
+      (!params.hasComposerRecoveryOwner &&
+        (params.hasResumptionError || params.hasResumptionNotice));
   return (
     params.isMobile &&
     (params.hasTaskMoveError || params.hasEnsureSessionError || hasPageRecoveryFeedback)
@@ -309,9 +312,11 @@ export function buildArchivedValue(task: Task | null, repository: Repository | n
 export function resolveTaskContentState(params: {
   isMounted: boolean;
   hasTask: boolean;
+  hasTaskDetails: boolean;
   hasTaskLoadError: boolean;
 }) {
   if (!params.isMounted) return "loading";
+  if (params.hasTaskDetails) return "ready";
   if (params.hasTaskLoadError) return "error";
   if (params.hasTask) return "ready";
   return "loading";

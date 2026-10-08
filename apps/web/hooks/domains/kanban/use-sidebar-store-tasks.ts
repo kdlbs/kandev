@@ -31,6 +31,7 @@ export function useSidebarStoreTasks(workspaceId: string | null) {
       workspaceContextGeneration: state.workspaceContextGeneration,
       auth: state.auth,
       repositories: state.repositories,
+      userSettings: state.userSettings,
     })),
   );
   return useMemo(

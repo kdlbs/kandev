@@ -288,10 +288,12 @@ func (h *RepositoryHandlers) httpRemoveDiscoveryRoot(c *gin.Context) {
 // to $HOME). The picker deliberately allows browsing any directory the
 // kandev process has read access to — kandev runs locally on the user's
 // own machine, and the repo-less starting-folder flow legitimately wants
-// /tmp, /var/log/foo, etc. Hidden (dotfile) directories are excluded.
+// /tmp, /var/log/foo, etc. Hidden (dotfile) directories are excluded unless
+// ?include_hidden is exactly "true"; any other value keeps the current
+// contract, so a display-only setting can never turn into a request error.
 func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
 	path := c.Query("path")
-	result, err := h.service.ListDirectory(c.Request.Context(), path)
+	result, err := h.service.ListDirectory(c.Request.Context(), path, includeHiddenRequested(c))
 	if err != nil {
 		// Log the raw OS error for debugging but return a generic message —
 		// otherwise we leak host paths and access patterns to the client (e.g.
@@ -306,6 +308,14 @@ func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
 		"entries":   directoryEntriesResponse(result.Entries),
 		"choosable": result.Choosable,
 	})
+}
+
+// includeHiddenRequested reports whether the caller asked to reveal hidden
+// (".") directories. Only the exact value "true" activates it: a total
+// comparison cannot fail, so an absent or mis-spelled value falls back to the
+// default listing instead of rejecting a display-only request.
+func includeHiddenRequested(c *gin.Context) bool {
+	return c.Query("include_hidden") == "true"
 }
 
 func directoryEntriesResponse(entries []service.DirectoryEntry) []gin.H {

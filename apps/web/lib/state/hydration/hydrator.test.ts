@@ -620,26 +620,9 @@ describe("hydrateState — sidebar views from user settings", () => {
       filters: [],
       sort: { key: "updatedAt", direction: "desc" },
       group: "workflow",
+      groupIndent: true,
       taskRow: DEFAULT_TASK_ROW,
     });
-  });
-
-  it("clears stale local draft when backend draft is null", () => {
-    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
-      draft.sidebarViews.draft = {
-        baseViewId: "local",
-        filters: [],
-        sort: { key: "state", direction: "asc" },
-        group: "state",
-      };
-      hydrateState(draft, {
-        userSettings: {
-          sidebarDraft: null,
-        },
-      } as unknown as Partial<AppState>);
-    });
-
-    expect(result.sidebarViews.draft).toBeNull();
   });
 
   it("hydrates sidebar task prefs from backend, including explicit clears", () => {
@@ -692,6 +675,24 @@ describe("hydrateState — sidebar views from user settings", () => {
       subtaskOrderByParentId: { shared: ["server-child"], serverOnly: ["child"] },
       syncError: "retry",
     });
+  });
+});
+
+describe("hydrateState clears stale sidebar drafts", () => {
+  it("clears the local draft when the backend draft is null", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sidebarViews.draft = {
+        baseViewId: "local",
+        filters: [],
+        sort: { key: "state", direction: "asc" },
+        group: "state",
+        groupIndent: true,
+      };
+      hydrateState(draft, {
+        userSettings: { sidebarDraft: null },
+      } as unknown as Partial<AppState>);
+    });
+    expect(result.sidebarViews.draft).toBeNull();
   });
 });
 

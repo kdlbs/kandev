@@ -7,7 +7,7 @@ import { SessionPage } from "../../pages/session-page";
 import { seedRunningGeneratingSession } from "../../helpers/generating-session";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
-import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
+import { startQuickChatFromSetup } from "./quick-chat-helpers";
 import {
   expectSendNowInterruptsRunningFIFOTurn,
   expectSendNowWorkflowRunning,
@@ -73,9 +73,7 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
     await agentSelector.click();
     await page.getByRole("option").first().click();
   }
-  await dialog.getByTestId("quick-chat-start").click();
-
-  await waitForQuickChatComposerReady(dialog);
+  await startQuickChatFromSetup(dialog, page);
   return dialog;
 }
 

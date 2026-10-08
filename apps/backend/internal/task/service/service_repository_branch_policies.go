@@ -25,7 +25,7 @@ const (
 
 var (
 	ErrInvalidRepositoryBranchPolicy       = errors.New("invalid repository branch policy")
-	ErrRepositoryBranchPolicyNameConflict  = errors.New("repository branch policy name already used")
+	ErrRepositoryBranchPolicyNameConflict  = repoerrors.ErrRepositoryBranchPolicyNameConflict
 	ErrRepositoryBranchPolicyAlreadySeeded = errors.New("repository branch policies already seeded")
 	ErrRepositoryBranchPolicyReadOnly      = errors.New("this workspace is managed by Improve Kandev and is read-only")
 	ErrRepositoryBranchPolicyStoreMissing  = errors.New("repository branch policy store is unavailable")
@@ -123,33 +123,19 @@ func (s *Service) UpdateRepositoryBranchPolicy(ctx context.Context, id string, r
 	if err != nil {
 		return nil, err
 	}
-	if req.Name != nil {
-		policy.Name = *req.Name
-	}
-	if req.Description != nil {
-		policy.Description = *req.Description
-	}
-	if req.BaseBranch != nil {
-		policy.BaseBranch = *req.BaseBranch
-	}
-	if req.BranchTemplate != nil {
-		policy.BranchTemplate = *req.BranchTemplate
-	}
-	if req.PullRequestTarget != nil {
-		policy.PullRequestTarget = *req.PullRequestTarget
-	}
 	repository, err := s.authorizeWritableBranchPolicyRepository(ctx, policy.RepositoryID)
 	if err != nil {
 		return nil, err
 	}
-	normalized, err := normalizeRepositoryBranchPolicy(policy)
+	patch := &models.RepositoryBranchPolicyPatch{
+		Name: req.Name, Description: req.Description, BaseBranch: req.BaseBranch,
+		BranchTemplate: req.BranchTemplate, PullRequestTarget: req.PullRequestTarget,
+	}
+	normalized, err := s.branchPolicies.PatchRepositoryBranchPolicy(ctx, id, repository.ID, patch,
+		func(current *models.RepositoryBranchPolicy) (*models.RepositoryBranchPolicy, error) {
+			return normalizeRepositoryBranchPolicyWithTargetDefault(current, req.PullRequestTarget != nil)
+		})
 	if err != nil {
-		return nil, err
-	}
-	if err := s.assertBranchPolicyNameFree(ctx, policy.RepositoryID, normalized.Name, policy.ID); err != nil {
-		return nil, err
-	}
-	if err := s.branchPolicies.UpdateRepositoryBranchPolicy(ctx, normalized); err != nil {
 		return nil, err
 	}
 	s.publishRepositoryBranchPolicyEvent(ctx, events.RepositoryBranchPolicyUpdated, repository.WorkspaceID, normalized)
@@ -291,12 +277,16 @@ func (s *Service) assertBranchPolicyNameFree(ctx context.Context, repositoryID, 
 }
 
 func normalizeRepositoryBranchPolicy(policy *models.RepositoryBranchPolicy) (*models.RepositoryBranchPolicy, error) {
+	return normalizeRepositoryBranchPolicyWithTargetDefault(policy, true)
+}
+
+func normalizeRepositoryBranchPolicyWithTargetDefault(policy *models.RepositoryBranchPolicy, defaultTarget bool) (*models.RepositoryBranchPolicy, error) {
 	policy.Name = strings.TrimSpace(policy.Name)
 	policy.Description = strings.TrimSpace(policy.Description)
 	policy.BaseBranch = strings.TrimSpace(policy.BaseBranch)
 	policy.BranchTemplate = strings.TrimSpace(policy.BranchTemplate)
 	policy.PullRequestTarget = strings.TrimSpace(policy.PullRequestTarget)
-	if policy.PullRequestTarget == "" {
+	if defaultTarget && policy.PullRequestTarget == "" {
 		policy.PullRequestTarget = policy.BaseBranch
 	}
 	if policy.Name == "" || len([]rune(policy.Name)) > repositoryBranchPolicyNameMaxLength {

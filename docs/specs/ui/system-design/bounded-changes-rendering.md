@@ -136,6 +136,34 @@ current task/session/environment mapping and backend/auth context. Old requests
 cannot publish into a replacement context, including an A-to-B-to-A transition.
 Follow existing domain invalidation and unavailable-workspace rules.
 
+## Section spacing
+
+The [sidebar repair package](../../../plans/changes-sidebar-history-spacing/plan.md)
+implements existing geometry criteria .6 and .8. History and working-tree
+headers use one disclosure row, with descendants rendered as separate virtual
+items. Whole-section bottom padding does not belong inside these header rows.
+
+Both section kinds use one measured disclosure row: 28px at the standard root
+font on fine-pointer desktop, at least 44px on phone widths below 768px and
+coarse pointers. The header has no section-bottom padding or negative margins.
+Controls, counts, dots, and actions stay within the row. Section estimates
+match the corresponding presentation mode; positive measurements remain the
+authority for wrapping and font scaling. Do not set a fixed height on virtual
+wrappers or add spacer descriptors for this repair.
+
+History repository sub-headers also keep at least 44px disclosure targets on
+phone widths, including fine pointers, and on coarse pointers. Their measured
+wrappers retain the existing repository-row padding and desktop density.
+
+Rendered checks must measure the disclosures, header wrappers, and first
+descendants, as well as adjacent virtual transforms. Wrapper adjacency alone
+cannot detect excessive internal header padding. Exercise collapsed/expanded
+PR and commit sections, presentation refresh, and the 767/768px boundary with
+a fine pointer, plus phone/coarse-pointer target containment.
+
+Residual spacing verification after toolbar loading-row removal is tracked in
+[the Changes toolbar work order](../../../plans/changes-loading-feedback/task-02-section-spacing.md).
+
 ## Commit detail ownership
 
 `CommitRow` currently owns `expanded` and `hasExpanded`, and retains a hidden

@@ -4,6 +4,7 @@ import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
+import { formatCompactDuration } from "@/lib/i18n/formats";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import type { PRFeedbackComment } from "@/lib/state/slices/comments";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
@@ -243,10 +244,10 @@ function PRPopoverFooter({
 }
 
 function formatElapsedShort(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 60) return formatCompactDuration(seconds, "second");
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  return `${Math.floor(minutes / 60)}h`;
+  if (minutes < 60) return formatCompactDuration(minutes, "minute");
+  return formatCompactDuration(Math.floor(minutes / 60), "hour");
 }
 
 function ReconnectGitHubBlock() {

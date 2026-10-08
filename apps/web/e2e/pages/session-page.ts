@@ -71,7 +71,7 @@ export class SessionPage {
     return this.page.getByTestId(`port-forward-row-${port}`);
   }
   portForwardTunnelToggle(port: number) {
-    return this.portForwardRow(port).getByRole("button").first();
+    return this.portForwardRow(port).getByTestId(`port-forward-tunnel-toggle-${port}`);
   }
   portForwardTunnelStart(port: number) {
     return this.portForwardRow(port).getByRole("button", { name: "Start", exact: true });

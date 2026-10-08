@@ -405,6 +405,56 @@ func TestCollectRemoteContributionsMultiRepoKeysSiblings(t *testing.T) {
 		"siblings use the same deterministic key as base-branch projection")
 }
 
+func TestPluginRemoteRepositoryMetadataUsesMaterializedWorkspacePaths(t *testing.T) {
+	firstContribution := validTestRemoteContribution(7, "contributor/widget")
+	secondContribution := validTestRemoteContribution(9, "contributor/gadget")
+	firstDestination := lifecycleTestContributionDestination("200")
+	secondDestination := lifecycleTestContributionDestination("201")
+	comparisonTarget := lifecycleTestQualifiedPRBase().Target
+	req := &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypePluginRemote),
+		Repositories: []RepoLaunchSpec{
+			{
+				RepoName: "widget", BaseBranch: "main", RemoteContribution: &firstContribution,
+				ContributionDestination: &firstDestination, ComparisonTarget: &comparisonTarget,
+			},
+			{
+				RepoName: "gadget", BaseBranch: "main", CheckoutBranch: "feature/next",
+				RemoteContribution: &secondContribution, ContributionDestination: &secondDestination,
+				ComparisonTarget: &comparisonTarget,
+			},
+		},
+	}
+
+	wantKeys := []string{"widget-main", "gadget-feature-next"}
+	bindings, err := collectRemoteContributions(req)
+	require.NoError(t, err)
+	assertLifecycleWorkspaceKeys(t, bindings, wantKeys)
+	destinations, err := collectContributionDestinations(req)
+	require.NoError(t, err)
+	assertLifecycleWorkspaceKeys(t, destinations, wantKeys)
+	targets, err := collectComparisonTargets(req)
+	require.NoError(t, err)
+	assertLifecycleWorkspaceKeys(t, targets, wantKeys)
+	require.Equal(t, map[string]string{"widget-main": "main", "gadget-feature-next": "main"}, collectBaseBranches(req))
+
+	workspaceTargets, err := comparisonTargetsFromWorkspaceRepositories([]WorkspaceRepositorySpec{
+		{RepoName: "widget", BaseBranch: "main", ComparisonTarget: &comparisonTarget},
+		{RepoName: "gadget", BaseBranch: "main", CheckoutBranch: "feature/next", ComparisonTarget: &comparisonTarget},
+	}, string(models.ExecutorTypePluginRemote))
+	require.NoError(t, err)
+	assertLifecycleWorkspaceKeys(t, workspaceTargets, wantKeys)
+}
+
+func assertLifecycleWorkspaceKeys[V any](t *testing.T, got map[string]V, want []string) {
+	t.Helper()
+	keys := make([]string, 0, len(got))
+	for key := range got {
+		keys = append(keys, key)
+	}
+	require.ElementsMatch(t, want, keys)
+}
+
 func TestCollectRemoteContributionsRejectsConflictingBindings(t *testing.T) {
 	first := validTestRemoteContribution(7, "contributor/widget")
 	second := validTestRemoteContribution(9, "contributor/widget")

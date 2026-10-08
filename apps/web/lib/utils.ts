@@ -150,15 +150,21 @@ export function selectPreferredBranch(branches: BranchSelectionCandidate[]): str
 export const DEFAULT_LOCAL_EXECUTOR_TYPE = "worktree";
 
 /**
- * Format a date string as a human-readable relative time (e.g., "2m ago", "1h ago", "yesterday").
- * @param dateString - ISO date string
+ * Format a relative timestamp with compact units and a calendar-date fallback.
+ * @param dateString - Strict timestamp string or parsed date
+ * @param now - Reference time in epoch milliseconds
  * @returns Formatted relative time string
  */
-export function formatRelativeTime(dateString: string): string {
-  if (parseStrictRfc3339Timestamp(dateString) === null) return "";
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
+export function formatRelativeTime(dateString: string | Date, now: number = Date.now()): string {
+  let date: Date;
+  if (dateString instanceof Date) {
+    date = dateString;
+  } else {
+    if (parseStrictRfc3339Timestamp(dateString) === null) return "";
+    date = new Date(dateString);
+  }
+  if (Number.isNaN(date.getTime())) return "";
+  const diffMs = now - date.getTime();
   const diffSec = Math.floor(diffMs / 1000);
   const diffMin = Math.floor(diffSec / 60);
   const diffHour = Math.floor(diffMin / 60);

@@ -248,18 +248,18 @@ class PRWalkthroughWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("opencode_status", self.generation)
 
     def test_generation_budgets_preparation_and_generation_time(self) -> None:
-        self.assertIn("timeout-minutes: 20", self.generation)
+        self.assertIn("timeout-minutes: 25", self.generation)
         budgets = (
             ("Checkout trusted workflow", "2"),
             ("Fetch trusted and PR history", "4"),
-            ("Prepare trusted walkthrough context", "1"),
+            ("Prepare trusted walkthrough context", "3"),
             ("Install OpenCode", "1"),
             ("Run OpenCode walkthrough", "11"),
         )
         for name, timeout in budgets:
             step = self.generation.split(f"- name: {name}", 1)[1].split("- name:", 1)[0]
             self.assertIn(f"timeout-minutes: {timeout}", step)
-        self.assertLessEqual(sum(int(timeout) for _, timeout in budgets), 19)
+        self.assertLessEqual(sum(int(timeout) for _, timeout in budgets), 24)
         self.assertNotIn("name: Verify agent-built walkthrough", self.generation)
         runner = (REPO_ROOT / ".github" / "scripts" / "pr-walkthrough-runner.py").read_text(
             encoding="utf-8"

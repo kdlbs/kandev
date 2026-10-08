@@ -15,6 +15,7 @@ import {
   defaultFeaturesState,
   defaultAuthState,
   defaultAutomationsState,
+  defaultCoordinatorsState,
   defaultSystemState,
   defaultReviewState,
   defaultNeedsYouInboxState,
@@ -81,7 +82,6 @@ export const defaultState = {
   sessionWorktreesBySessionId: defaultSessionState.sessionWorktreesBySessionId,
   pendingModel: defaultSessionState.pendingModel,
   activeModel: defaultSessionState.activeModel,
-  messagePrompts: defaultSessionState.messagePrompts,
   taskPlans: defaultSessionState.taskPlans,
   walkthroughs: defaultSessionState.walkthroughs,
   taskReview: defaultReviewState.taskReview,
@@ -94,6 +94,7 @@ export const defaultState = {
   shell: defaultSessionRuntimeState.shell,
   processes: defaultSessionRuntimeState.processes,
   gitStatus: defaultSessionRuntimeState.gitStatus,
+  gitStatusDisplay: defaultSessionRuntimeState.gitStatusDisplay,
   environmentIdBySessionId: defaultSessionRuntimeState.environmentIdBySessionId,
   sessionCommits: defaultSessionRuntimeState.sessionCommits,
   gitCheckoutGeneration: defaultSessionRuntimeState.gitCheckoutGeneration,
@@ -144,6 +145,7 @@ export const defaultState = {
   sessionHostnamesEpoch: defaultAuthState.sessionHostnamesEpoch,
   automations: defaultAutomationsState.automations,
   automationRuns: defaultAutomationsState.automationRuns,
+  coordinators: defaultCoordinatorsState.coordinators,
   system: defaultSystemState.system,
   agentRuntime: null as AgentRuntimeAvailability | null,
   previewPanel: defaultUIState.previewPanel,
@@ -325,22 +327,6 @@ function mergeAgentReviewArtifacts(initialState: HydrationState) {
   };
 }
 
-/** Merges the independently hydrated Prompt History projection. */
-function mergePromptHistoryState(initialState: HydrationState) {
-  return {
-    ...defaultState.messagePrompts,
-    ...initialState.messagePrompts,
-    generationBySession: {
-      ...defaultState.messagePrompts.generationBySession,
-      ...initialState.messagePrompts?.generationBySession,
-    },
-    refreshGenerationBySession: {
-      ...defaultState.messagePrompts.refreshGenerationBySession,
-      ...initialState.messagePrompts?.refreshGenerationBySession,
-    },
-  };
-}
-
 /** Merges the GitHub slices for initial (SSR/boot) hydration. */
 /** Merges the GitHub slices for initial (SSR/boot) hydration. */
 function mergeGitHubState(initialState: HydrationState) {
@@ -498,7 +484,6 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
       initialState.agentProfileRecentUse ?? {},
     ),
     messages: { ...defaultState.messages, ...initialState.messages },
-    messagePrompts: mergePromptHistoryState(initialState),
     turns: mergeTurnsState(defaultState.turns, initialState.turns, initialState.taskSessions),
     ...mergeTaskSessionState(initialState),
     sessionAgentctl: { ...defaultState.sessionAgentctl, ...initialState.sessionAgentctl },

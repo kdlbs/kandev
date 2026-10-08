@@ -276,12 +276,12 @@ function useWorkingTreeScrollMargin(props: ChangesWorkingTreeProps) {
 }
 
 const DESKTOP_ROW_SIZES: Record<ChangesTimelineRow["kind"], number> = {
-  section: 36,
+  section: 28,
   repository: 28,
   directory: 24,
   file: 28,
   selection: 32,
-  "history-section": 36,
+  "history-section": 28,
   "history-repository": 28,
   commit: 34,
   "commit-directory": 28,
@@ -291,12 +291,12 @@ const DESKTOP_ROW_SIZES: Record<ChangesTimelineRow["kind"], number> = {
 };
 
 const TOUCH_ROW_SIZES: Record<ChangesTimelineRow["kind"], number> = {
-  section: 36,
+  section: 44,
   repository: 44,
   directory: 44,
   file: 48,
   selection: 48,
-  "history-section": 36,
+  "history-section": 44,
   "history-repository": 44,
   commit: 56,
   "commit-directory": 44,
@@ -306,8 +306,18 @@ const TOUCH_ROW_SIZES: Record<ChangesTimelineRow["kind"], number> = {
 };
 
 function estimateChangesTimelineRowSize(row: ChangesTimelineRow, touchMode: boolean): number {
-  return (touchMode ? TOUCH_ROW_SIZES : DESKTOP_ROW_SIZES)[row.kind];
+  const baseSize = (touchMode ? TOUCH_ROW_SIZES : DESKTOP_ROW_SIZES)[row.kind];
+  if (!("groups" in row)) return baseSize;
+  const hasSeparateDetailRows =
+    row.kind === "commit" &&
+    row.expanded &&
+    (row.detail.status === "error" || row.detail.status === "loaded");
+  return (
+    baseSize + (row.paddingBlockEndPx ?? 0) - (hasSeparateDetailRows ? COMMIT_ROW_FOOTER_PX : 0)
+  );
 }
+
+const COMMIT_ROW_FOOTER_PX = 4;
 
 function toggleSetValue<T>(current: Set<T>, value: T): Set<T> {
   const next = new Set(current);
@@ -354,16 +364,16 @@ function renderSectionTimelineRow(
   const label = args.t(isUnstaged ? "task:unstagedFiles" : "task:stagedFiles");
   return (
     <div className="relative flex gap-2.5">
-      <div className="flex flex-col items-center">
+      <div className="flex flex-col items-center justify-center">
         <div
-          className={`relative z-10 size-1.5 shrink-0 rounded-full mt-[5px] ${SECTION_DOT_COLORS[row.variant]}`}
+          className={`relative z-10 size-1.5 shrink-0 rounded-full ${SECTION_DOT_COLORS[row.variant]}`}
         />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-2 -mt-0.5 mb-1">
+        <div className="flex items-center justify-between gap-2">
           <button
             type="button"
-            className="flex min-h-6 items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-foreground/70 cursor-pointer hover:text-foreground/90 [@media(pointer:coarse)]:min-h-11"
+            className="flex min-h-7 min-w-0 items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-foreground/70 cursor-pointer hover:text-foreground/90 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
             onClick={() => args.toggleSection(row.variant)}
             aria-expanded={!row.collapsed}
             data-testid={`${row.variant}-files-section-collapse-toggle`}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useId } from "react";
+import { useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { Switch } from "@kandev/ui/switch";
 import {
@@ -16,6 +17,7 @@ import type { PermissionSetting, PassthroughConfig } from "@/lib/types/http";
 import type { ProfileFormData } from "@/components/settings/profile-form-fields";
 
 export type PermissionToggleProps = {
+  agentName?: string;
   profile: ProfileFormData;
   baselineProfile?: ProfileFormData;
   onChange: (patch: Partial<ProfileFormData>) => void;
@@ -81,6 +83,7 @@ function PermissionToggleRow({
 }
 
 export function PermissionToggles({
+  agentName,
   profile,
   onChange,
   permissionSettings,
@@ -89,9 +92,14 @@ export function PermissionToggles({
   lockPassthrough,
   baselineProfile,
 }: PermissionToggleProps) {
+  const { t } = useTranslation();
+  const passthroughLabel =
+    agentName === "minimax-acp" ? t("agents:minimaxPassthroughLabel") : passthroughConfig?.label;
+  const passthroughDescription =
+    agentName === "minimax-acp"
+      ? t("agents:minimaxPassthroughDescription")
+      : passthroughConfig?.description;
   const isCompact = variant === "compact";
-  const switchSize = isCompact ? ("sm" as const) : ("default" as const);
-
   if (isCompact) {
     return (
       <>
@@ -118,8 +126,8 @@ export function PermissionToggles({
         {passthroughConfig?.supported && (
           <div className="flex items-center justify-between gap-2">
             <div className="space-y-0.5">
-              <SettingsFieldLabel className="text-xs">{passthroughConfig.label}</SettingsFieldLabel>
-              <SettingsFieldDescription>{passthroughConfig.description}</SettingsFieldDescription>
+              <SettingsFieldLabel className="text-xs">{passthroughLabel}</SettingsFieldLabel>
+              <SettingsFieldDescription>{passthroughDescription}</SettingsFieldDescription>
             </div>
             <Switch
               size="sm"
@@ -132,7 +140,6 @@ export function PermissionToggles({
       </>
     );
   }
-
   return (
     <>
       {PERMISSION_KEYS.map((key) => {
@@ -162,11 +169,11 @@ export function PermissionToggles({
           data-testid="cli-passthrough-toggle"
         >
           <div className="space-y-1">
-            <SettingsFieldLabel>{passthroughConfig.label}</SettingsFieldLabel>
-            <SettingsFieldDescription>{passthroughConfig.description}</SettingsFieldDescription>
+            <SettingsFieldLabel>{passthroughLabel}</SettingsFieldLabel>
+            <SettingsFieldDescription>{passthroughDescription}</SettingsFieldDescription>
           </div>
           <Switch
-            size={switchSize}
+            size="default"
             checked={profile.cli_passthrough}
             disabled={lockPassthrough}
             onCheckedChange={(checked) => onChange({ cli_passthrough: checked })}

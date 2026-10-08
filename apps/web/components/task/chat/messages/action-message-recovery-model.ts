@@ -2,10 +2,10 @@ import type { Message, TaskSessionState } from "@/lib/types/http";
 import {
   lastAgentErrorStamp,
   readLastAgentError,
+  readLastAgentErrorIncludingDismissed,
   type LastAgentError,
 } from "@/lib/session-last-agent-error";
 import { legacyRecoveryMessageMatchesError } from "@/lib/session-recovery-presentation";
-
 export function isSessionActive(state?: TaskSessionState) {
   return state === "RUNNING" || state === "STARTING" || state === "COMPLETED";
 }
@@ -20,11 +20,15 @@ export function isCurrentRecoveryMessage(
   messageRecoveryStamp: string | undefined,
   currentRecoveryError: LastAgentError | null,
   comment: Message,
+  sessionMetadata: Record<string, unknown> | null | undefined,
 ) {
   if (!isRecoveryMessage) return true;
+  if (messageRecoveryStamp) {
+    const latestError = readLastAgentErrorIncludingDismissed(sessionMetadata);
+    if (!latestError || latestError.dismissedAt) return false;
+    return lastAgentErrorStamp(latestError) === messageRecoveryStamp;
+  }
   if (!currentRecoveryError) return true;
-  const currentRecoveryStamp = lastAgentErrorStamp(currentRecoveryError);
-  if (messageRecoveryStamp) return currentRecoveryStamp === messageRecoveryStamp;
   return legacyRecoveryMessageMatchesError(
     comment.content,
     comment.created_at,

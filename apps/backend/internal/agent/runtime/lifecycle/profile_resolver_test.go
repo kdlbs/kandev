@@ -93,6 +93,19 @@ func (m *MockRepository) UpdateAgentProfileEnabled(_ context.Context, _ string, 
 	return time.Time{}, nil
 }
 
+func (m *MockRepository) UpdateAgentProfileWithEnabledIntent(ctx context.Context, profile *models.AgentProfile, enabled *bool) error {
+	if enabled == nil {
+		current, err := m.GetAgentProfile(ctx, profile.ID)
+		if err != nil {
+			return err
+		}
+		profile.Enabled = current.Enabled
+	} else {
+		profile.Enabled = *enabled
+	}
+	return m.UpdateAgentProfile(ctx, profile)
+}
+
 func (m *MockRepository) DeleteAgentProfile(ctx context.Context, id string) error {
 	return nil
 }

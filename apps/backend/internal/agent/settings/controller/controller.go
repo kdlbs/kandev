@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/singleflight"
 	"strings"
 	"sync"
 	"time"
@@ -82,6 +83,7 @@ type Controller struct {
 	updateJobStore              *AgentUpdateJobStore
 	runtimeUpdater              RuntimeUpdater
 	managedRuntimeSelections    managedruntime.SelectionStore
+	openCodeMigrationGuard      OpenCodeMigrationGuard
 	maintenance                 *maintenanceCoordinator
 	hub                         JobBroadcaster
 	logger                      *logger.Logger
@@ -91,6 +93,13 @@ type Controller struct {
 	runtimeUpdateStatusNow      func() time.Time
 	runtimeUpdateStatusResolver RuntimeUpdateStatusResolver
 	runtimeUpdateStatusLookup   chan struct{}
+	runtimeUpdateStatusFlight   singleflight.Group
+	runtimeAutoUpdateStore      *managedruntime.AutoUpdateStore
+	runtimeUpdateNotifier       RuntimeUpdateNotifier
+	runtimeBackgroundMu         sync.Mutex
+	runtimeBackground           *runtimeUpdateBackground
+	runtimeAutoUpdateMu         sync.Mutex
+	runtimeUpdatePassMu         sync.Mutex
 	dynamicAgentRoutingEnabled  bool
 }
 
@@ -287,6 +296,7 @@ func (c *Controller) SetHostUtility(h *hostutility.Manager) {
 	c.SetRuntimeUpdater(&hostRuntimeUpdater{
 		host:     h,
 		executor: execDirectCommandExecutor{},
+		logger:   c.logger,
 	})
 }
 
@@ -303,6 +313,17 @@ func (c *Controller) SetRuntimeUpdater(updater RuntimeUpdater) {
 func (c *Controller) SetManagedRuntimeSelectionStore(store managedruntime.SelectionStore) {
 	c.managedRuntimeSelections = store
 	c.initializeUpdateJobStore()
+}
+
+// OpenCodeMigrationGuard reserves lifecycle and utility admission around the
+// authoritative selection write.
+type OpenCodeMigrationGuard func(context.Context) (context.Context, func(), error)
+
+func (c *Controller) SetOpenCodeMigrationGuard(guard OpenCodeMigrationGuard) {
+	c.openCodeMigrationGuard = guard
+	if c.updateJobStore != nil {
+		c.updateJobStore.SetOpenCodeMigrationGuard(guard)
+	}
 }
 
 // SetJobBroadcaster initializes the install job store with a WS broadcaster
@@ -451,6 +472,14 @@ func (c *Controller) initializeUpdateJobStore() {
 		c.managedRuntimeSelections,
 	)
 	c.updateJobStore.SetStatusInvalidator(c.InvalidateRuntimeUpdateStatus)
+	if reader, ok := c.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader); ok {
+		c.updateJobStore.SetOpenCodeSelectionReader(reader)
+	}
+	if writer, ok := c.managedRuntimeSelections.(managedruntime.OpenCodeSelectionWriter); ok {
+		c.updateJobStore.SetOpenCodeSelections(writer)
+	}
+	c.updateJobStore.SetOpenCodeMigrationGuard(c.openCodeMigrationGuard)
+	c.updateJobStore.onFinished = c.retainAutomaticOutcome
 }
 
 // BroadcastAvailableAgents fetches the current available-agents snapshot and

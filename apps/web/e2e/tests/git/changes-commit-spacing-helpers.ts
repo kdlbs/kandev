@@ -59,6 +59,7 @@ export async function visibleTimelineGeometry(page: Page) {
     return {
       count: rows.length,
       maxGap: Math.max(0, ...gaps.map(Math.abs)),
+      coversTop: rows.length > 0 && rows[0].top <= top + 1,
       indicesContiguous: rows.every(
         (row, index) => index === 0 || row.index === rows[index - 1].index + 1,
       ),
@@ -74,11 +75,12 @@ export async function expectContiguousTimeline(page: Page): Promise<void> {
       const geometry = await visibleTimelineGeometry(page);
       return {
         enoughRows: geometry.count > 3,
+        coversTop: geometry.coversTop,
         indicesContiguous: geometry.indicesContiguous,
         touching: geometry.maxGap <= 1,
       };
     })
-    .toEqual({ enoughRows: true, indicesContiguous: true, touching: true });
+    .toEqual({ enoughRows: true, coversTop: true, indicesContiguous: true, touching: true });
 }
 
 export async function refreshSpacingAndExpectAnchor(page: Page): Promise<void> {

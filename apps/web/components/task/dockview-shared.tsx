@@ -11,6 +11,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { usePanelActive } from "@/hooks/use-panel-active";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import { useSessionGitRefresh } from "@/hooks/domains/session/use-session-git-refresh";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
@@ -44,12 +45,10 @@ import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 import { PluginTaskPanel } from "./plugin-task-panel";
 import { PluginPanelTab } from "./plugin-panel-tab";
-import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
 import { BackgroundWorkPanel } from "./chat/background-work/background-work-panel";
 
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import { usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
 import { useTranslation } from "react-i18next";
@@ -126,7 +125,6 @@ export const dockviewComponents: Record<string, React.FunctionComponent<IDockvie
   vscode: PortalSlot,
   plan: PortalSlot,
   todos: PortalSlot,
-  "prompt-history": PortalSlot,
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
   "review-detail": PortalSlot,
@@ -262,14 +260,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
  */
 function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
   const isVisible = usePanelActive(panelId);
-
-  useEffect(() => {
-    if (!sessionId || !isVisible) return;
-    // Visibility is synchronized by usePanelActive, including the initial
-    // portal-registration race. Ask for a fresh snapshot whenever the panel
-    // becomes visible or its session changes.
-    getWebSocketClient()?.refreshSessionData(sessionId);
-  }, [sessionId, isVisible]);
+  useSessionGitRefresh(sessionId, isVisible);
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or
@@ -430,7 +421,6 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   vscode: (panelId) => <VscodePanel panelId={panelId} />,
   plan: () => <PlanContent />,
   todos: () => <TodosContent />,
-  "prompt-history": () => <PromptHistoryContent />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),
@@ -465,5 +455,3 @@ export function renderPanel(
   if (renderer) return renderer(panelId, params);
   return <div className="p-4 text-muted-foreground">{t("common:unknownPanel", { component })}</div>;
 }
-
-export const VALID_COMPONENTS = new Set(Object.keys(dockviewComponents));

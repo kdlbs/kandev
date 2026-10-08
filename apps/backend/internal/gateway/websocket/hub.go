@@ -22,6 +22,21 @@ type SessionDataProvider func(ctx context.Context, sessionID string) ([]*ws.Mess
 // does not replay unrelated session state, models, commands, or control data.
 type SessionGitDataProvider func(ctx context.Context, sessionID string) ([]*ws.Message, error)
 
+// SessionGitRefreshProvider returns the accepted status projection for a
+// correlated foreground refresh. Snapshots contain the same notification
+// messages broadcast to subscribed consumers.
+type SessionGitRefreshProvider func(ctx context.Context, sessionID, mode string) (SessionGitRefreshResult, error)
+
+type SessionGitRefreshResult struct {
+	Success           bool          `json:"success"`
+	SessionID         string        `json:"session_id"`
+	TaskEnvironmentID string        `json:"task_environment_id,omitempty"`
+	Mode              string        `json:"mode"`
+	StatusState       string        `json:"status_state"`
+	ErrorCode         string        `json:"error_code,omitempty"`
+	Snapshots         []*ws.Message `json:"snapshots"`
+}
+
 // Hub manages all WebSocket client connections
 type Hub struct {
 	// All registered clients
@@ -55,6 +70,7 @@ type Hub struct {
 	// Optional provider for session data on subscription (e.g., git status)
 	sessionDataProvider       SessionDataProvider
 	sessionGitDataProvider    SessionGitDataProvider
+	sessionGitRefreshProvider SessionGitRefreshProvider
 	userSubscriptionListeners []func(userID string)
 	pluginConversationService *plugins.Service
 	conversationSourceReader  ConversationSourceReader
@@ -902,6 +918,12 @@ func (h *Hub) SetSessionGitDataProvider(provider SessionGitDataProvider) {
 	h.sessionGitDataProvider = provider
 }
 
+// SetSessionGitRefreshProvider installs the mode-aware foreground status
+// provider used by session.git.refresh.
+func (h *Hub) SetSessionGitRefreshProvider(provider SessionGitRefreshProvider) {
+	h.sessionGitRefreshProvider = provider
+}
+
 // GetSessionData retrieves session data (e.g., git status) if a provider is set
 func (h *Hub) GetSessionData(ctx context.Context, sessionID string) ([]*ws.Message, error) {
 	if h.sessionDataProvider == nil {
@@ -918,4 +940,33 @@ func (h *Hub) GetSessionGitData(ctx context.Context, sessionID string) ([]*ws.Me
 		return h.sessionGitDataProvider(ctx, sessionID)
 	}
 	return h.GetSessionData(ctx, sessionID)
+}
+
+// GetSessionGitRefreshData retrieves one correlated foreground result. Older
+// providers remain usable by wrapping their git notifications in a response.
+func (h *Hub) GetSessionGitRefreshData(ctx context.Context, sessionID, mode string) (SessionGitRefreshResult, error) {
+	if h.sessionGitRefreshProvider != nil {
+		return h.sessionGitRefreshProvider(ctx, sessionID, mode)
+	}
+	data, err := h.GetSessionGitData(ctx, sessionID)
+	if err != nil {
+		return SessionGitRefreshResult{}, err
+	}
+	snapshots := make([]*ws.Message, 0, len(data))
+	for _, message := range data {
+		if message != nil && message.Action == ws.ActionSessionGitEvent {
+			snapshots = append(snapshots, message)
+		}
+	}
+	state := "unavailable"
+	if len(snapshots) > 0 {
+		state = "ready"
+	}
+	return SessionGitRefreshResult{
+		Success:     len(snapshots) > 0,
+		SessionID:   sessionID,
+		Mode:        mode,
+		StatusState: state,
+		Snapshots:   snapshots,
+	}, nil
 }

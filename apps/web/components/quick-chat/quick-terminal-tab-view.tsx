@@ -9,6 +9,8 @@ import {
   type StartPtySession,
 } from "@/components/settings/pty-terminal-view";
 import type { QuickTerminalTab } from "@/lib/state/slices/ui/types";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useVisualViewportOffset } from "@/hooks/use-visual-viewport-offset";
 
 export type QuickTerminalTabDescriptor = QuickTerminalTab;
 
@@ -67,6 +69,8 @@ function QuickTerminalLifecycleStatus({ tab }: { tab: QuickTerminalTab }) {
 
 /** Selected terminal content for the shared Quick Chat surface. */
 export function QuickTerminalTabView({ tab, onStateChange, onDescriptorReady }: Props) {
+  const { isMobile } = useResponsiveBreakpoint();
+  const { bottomOffset } = useVisualViewportOffset();
   const needsDescriptor = !tab.sessionId && tab.status === "connecting";
   const [descriptorReady, setDescriptorReady] = useState(!needsDescriptor);
   const onStateChangeRef = useRef(onStateChange);
@@ -128,6 +132,7 @@ export function QuickTerminalTabView({ tab, onStateChange, onDescriptorReady }: 
       className="flex min-h-0 flex-1 flex-col overflow-hidden"
       data-testid="quick-terminal-tab-panel"
       data-terminal-tab-id={tab.tabId}
+      style={isMobile ? { paddingBottom: bottomOffset } : undefined}
     >
       {shouldRenderTerminal && (
         <PtyTerminalView
@@ -139,6 +144,7 @@ export function QuickTerminalTabView({ tab, onStateChange, onDescriptorReady }: 
           testIdPrefix="quick-terminal"
           className="h-full min-h-0 flex-1 rounded-md bg-[#0b0b0c] p-2 overflow-hidden"
           onStateChange={onStateChange}
+          mobileControls={isMobile && tab.status === "running"}
         />
       )}
       <QuickTerminalLifecycleStatus tab={tab} />

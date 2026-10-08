@@ -64,7 +64,7 @@ func TestStorageOverviewIncludesQuarantineAndManagedContainers(t *testing.T) {
 	overview := &storageOverview{
 		settings: settings, quarantine: store, workspaceFactory: workspaceFactory,
 		goCache: gocache.New(gocache.Config{
-			HomeDir: home, TrashDir: filepath.Join(home, "trash"), Settings: settings, Store: store,
+			HomeDir: home, TrashDir: filepath.Join(home, "trash"), Settings: settings,
 		}),
 		docker: docker, homeDir: home,
 	}
@@ -177,7 +177,7 @@ func TestStorageOverviewIncludesInformationalSystemTemporaryFootprint(t *testing
 				Retention:   time.Duration(current.QuarantineRetentionHours) * time.Hour,
 			})
 		},
-		goCache: gocache.New(gocache.Config{HomeDir: root, TrashDir: filepath.Join(root, "trash"), Settings: settings, Store: store}),
+		goCache: gocache.New(gocache.Config{HomeDir: root, TrashDir: filepath.Join(root, "trash"), Settings: settings}),
 		docker:  dockerstore.NewProvider(&overviewDockerClient{}, overviewContainerInventory{}, settings),
 		systemTemporary: tempstore.New(tempstore.Config{
 			GOOS: "windows", EffectiveRoot: root,
@@ -221,7 +221,7 @@ func TestStorageOverviewIncludesDatabaseAndBackupMeasurements(t *testing.T) {
 			})
 		},
 		goCache: gocache.New(gocache.Config{
-			HomeDir: root, TrashDir: filepath.Join(root, "trash"), Settings: settings, Store: store,
+			HomeDir: root, TrashDir: filepath.Join(root, "trash"), Settings: settings,
 		}),
 		docker:  dockerstore.NewProvider(&overviewDockerClient{}, overviewContainerInventory{}, settings),
 		homeDir: root,
@@ -276,7 +276,7 @@ func TestStorageOverviewDoesNotSuppressDatabaseUnderFormerDefaultGoCache(t *test
 			})
 		},
 		goCache: gocache.New(gocache.Config{
-			HomeDir: root, TrashDir: filepath.Join(root, "trash"), Settings: settings, Store: store,
+			HomeDir: root, TrashDir: filepath.Join(root, "trash"), Settings: settings,
 		}),
 		docker:  dockerstore.NewProvider(&overviewDockerClient{}, overviewContainerInventory{}, settings),
 		homeDir: root,
@@ -529,7 +529,7 @@ func TestStorageOverviewStartsIndependentMeasurementsTogether(t *testing.T) {
 			})
 		},
 		goCache: gocache.New(gocache.Config{
-			HomeDir: home, TrashDir: filepath.Join(home, "trash"), Settings: settings, Store: store,
+			HomeDir: home, TrashDir: filepath.Join(home, "trash"), Settings: settings,
 		}),
 		docker: docker, homeDir: home,
 	}
@@ -824,6 +824,23 @@ func TestQuarantineControllerRetainsGoCacheWhileTaskActivityIsRunning(t *testing
 	}
 	if _, err := os.Stat(artifact); err != nil {
 		t.Fatalf("quarantined cache changed while task active: %v", err)
+	}
+}
+
+func TestGoCacheQuarantineMutationsHonorCancellation(t *testing.T) {
+	controller := &workspaceQuarantineController{
+		goCacheMutations: storagepkg.NewMutationGate(),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := controller.restoreGoCache(ctx, storagepkg.QuarantineEntry{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("restoreGoCache error = %v, want cancellation before entry validation", err)
+	}
+	if _, _, err := controller.deleteGoCacheWithRetention(
+		ctx, storagepkg.QuarantineEntry{}, storagepkg.QuarantineConfirmationDelete, false,
+	); !errors.Is(err, context.Canceled) {
+		t.Fatalf("deleteGoCacheWithRetention error = %v, want cancellation before entry validation", err)
 	}
 }
 

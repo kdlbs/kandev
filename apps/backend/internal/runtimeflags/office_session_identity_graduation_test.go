@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -63,11 +62,10 @@ func TestOfficeSessionIdentityIsRetiredAndStaleValuesAreInert(t *testing.T) {
 
 func officeSessionIdentityRepoRoot(t *testing.T) string {
 	t.Helper()
-	_, sourceFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
+	packageDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("locate test package: %v", err)
 	}
-	// sourceFile: apps/backend/internal/runtimeflags/<this file> -> repo root
-	// is four directories up.
-	return filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "../../../.."))
+	// The package working directory is four directories below the repository root.
+	return filepath.Clean(filepath.Join(packageDir, "../../../.."))
 }

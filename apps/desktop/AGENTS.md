@@ -33,6 +33,7 @@ Use `scripts/release/prepare-desktop-runtime.sh` and `scripts/release/verify-des
 
 - Frontend code in `src/` is only the startup/error surface. The real product UI is still served by the Go backend after `/ready` succeeds.
 - Rust code owns backend process spawning and cleanup. Do not expose broad shell or filesystem permissions to frontend JavaScript.
+- Auxiliary children started outside `BackendState` use the private `child_process::spawn_managed` helper. It allocates a named wait worker before spawning and reaps only the exact child; do not discard auxiliary `Child` handles or add a global reaper.
 - Native menus emit versioned `kandev-desktop-v1-*` events for SPA-owned context and navigation.
   Updater, notification, and external-link operations use narrow generated Tauri commands scoped
   to the owned loopback WebView; do not grant the SPA direct plugin permissions.

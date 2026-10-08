@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/url"
 	"time"
+
+	"github.com/kandev/kandev/internal/db"
 )
 
 type row map[string]any
@@ -29,19 +31,18 @@ type inspection struct {
 	guards []observation
 }
 
+// openDatabase opens the database file itself; neither mode creates a file.
 func openDatabase(p Plan, write bool) (*sql.DB, error) {
 	mode := "ro"
 	if write {
 		mode = "rw"
 	}
-	u := url.URL{Scheme: "file", Path: p.Database}
 	q := url.Values{"mode": {mode}, "_foreign_keys": {"on"}, "_busy_timeout": {"5000"}}
 	if write {
 		q.Set("_txlock", "immediate")
 		q.Set("_synchronous", "FULL")
 	}
-	u.RawQuery = q.Encode()
-	db, err := sql.Open("sqlite3", u.String())
+	db, err := sql.Open("sqlite3", "file:"+db.EscapeSQLiteURIPath(p.Database)+"?"+q.Encode())
 	if err != nil {
 		return nil, err
 	}

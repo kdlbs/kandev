@@ -33,6 +33,7 @@ Repository setup and agent work often need credentials that are specific to a pr
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.11:** Reference lookup failures shall block deletion with a sanitized internal error. Secret authorization shall run before reference disclosure or a forced deletion.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.12:** Settings shall check references before enabling secret deletion. Existing references shall open a contained conflict dialog that lists visible resources and offers no destructive action. The final deletion request shall repeat the authoritative reference check.
 - **AC-WORKSPACES-REPOSITORY-SECRETS-001.13:** Global and Workspace Secrets settings shall explain that saving a secret does not add it to a session environment. The guidance shall remain visible when secrets exist. Global guidance shall name agent profile, executor profile, and repository environment bindings. Workspace guidance shall name repository bindings and state that shared profiles cannot use Workspace secrets. The guidance shall be readable on desktop and phone without exposing secret values.
+- **AC-WORKSPACES-REPOSITORY-SECRETS-001.14:** While the selected workspace and its supplied initial listing remain unchanged, starting, completing, or failing an unrelated Global secrets load shall preserve the Workspace Secrets metadata list, including successfully acknowledged creation, rename, and deletion. It shall not restart that workspace's loading state. This applies on desktop and phone.
 
 ## Migrated source detail
 

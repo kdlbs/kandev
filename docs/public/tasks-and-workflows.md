@@ -36,6 +36,7 @@ The task carries the outcome through the workflow. The repository and session pr
 - [Find and organize tasks](#find-and-organize-tasks)
 - [Use the task plan](#use-the-task-plan)
 - [Arrange task panels](#arrange-task-panels)
+- [Manage forwarded ports](#manage-forwarded-ports)
 - [Archive, unarchive, and delete](#archive-unarchive-and-delete)
 
 **Configure workflows**
@@ -45,6 +46,21 @@ The task carries the outcome through the workflow. The repository and session pr
 - [Troubleshooting](#troubleshooting)
 
 </details>
+
+## Manage forwarded ports
+
+Enable **Port forwarding** from the task's `+` menu on desktop or the active-task
+drawer on a phone, then open the network control in the task top bar.
+
+**Forwarded ports** appears first with the number of active tunnels. Each row
+shows **Forwarding**, its dedicated tunnel URL, and controls to open, copy, or
+stop that tunnel. **Other ports** lists detected and manually added ports that
+you can start forwarding. Each group sorts by target port number.
+
+A proxy URL is also available for each listed port. A proxy link alone does not
+mean a dedicated tunnel is active. Starting a tunnel moves the port to the top
+group; stopping it keeps the port available to restart during that dialog visit.
+Closing the dialog leaves active tunnels running.
 
 ## Keep your view when creating tasks
 
@@ -177,6 +193,12 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
    | **Remote** | A remote repository                               | Search GitHub, GitLab, or Azure DevOps, or paste a supported URL. Public GitHub reads and public `gitlab.com` branch discovery work without credentials. Private access and authenticated browse/write actions require provider credentials. |
    | **None**   | Planning, research, or work outside Git           | Use a scratch workspace or an optional folder on the Kandev host. Git worktree and repository-aware Changes, branch, and pull-request features are unavailable.                                                                              |
 
+   In-app directory browsers list directories on the Kandev host. By default,
+   they hide names that start with a dot, such as `.config` or `.local`. Select
+   **Hidden folders** beside the path to show them. The switch is off by default,
+   and Kandev remembers your choice across in-app browsers. The desktop app's
+   native folder picker uses the operating system's control for hidden entries.
+
 4. **Choose an executor and agent profile.** Both profiles must be compatible. A workflow default agent profile locks the task-level selector.
 5. **Add a description when needed.** Use the eye button beside **Enhance prompt with AI** to preview a step's prompt template. The preview does not resolve task IDs or saved-prompt references until the task exists.
 6. **Choose how to start:**
@@ -188,6 +210,15 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
    | **Create without starting agent** | Requires a description and uses **Start step**, or the first positional step if none is set. A structured ACP profile prepares the session; passthrough/TUI starts immediately to create its PTY. |
 
    On mobile, **Plan mode** and **Create only** provide the same behavior as the two non-primary actions.
+
+When you choose **Remote**, Kandev can reuse an available matching checkout.
+If a previously registered local checkout folder was deleted, it uses another
+available source or creates a managed clone. The original local registration
+and its existing task associations remain unchanged; selecting that local
+repository explicitly still requires its checkout to be available. If an
+existing local checkout's origin no longer matches the selected remote,
+Kandev reports a validation error. Correct its origin or select it explicitly
+as a local repository.
 
 ### Reduce downloads for a large remote repository
 
@@ -343,6 +374,8 @@ A task can include several local or remote repository rows. Multi-repository cre
 
 If Kandev cannot resolve a pasted remote URL or its branch, the repository row keeps the URL and shows the provider error. Use **Retry** after correcting the URL or when a transient provider failure has cleared.
 
+If replacing a task's repository associations fails before the database commit, Kandev keeps the complete previous association set. Other task edits, repository setup, or Git work completed earlier can remain; a fresh-branch persistence error still requires checking the repository.
+
 Changes and review are scoped by repository. State the expected deliverable, base branch, and pull-request target for every attachment. See [Coordinate work](coordination.md) for adding branches after creation and splitting multi-repository work.
 
 </details>
@@ -404,7 +437,10 @@ DELETE /api/v1/repository-sets/:id
 `base_branch`; an empty or omitted base uses task defaulting. A supplied list replaces the whole
 membership list, which is also how you reorder one. Omit the field to leave membership untouched.
 Existing clients may send ordered `repository_ids`; those members have no saved bases. Do not send both
-member fields in one request. The same five operations exist as
+member fields in one request. Omitted `name` and `description` fields are also preserved; send an empty
+description to clear it. Concurrent updates to different fields preserve both changes. Updates to the
+same field use the last committed value, and each supplied membership list replaces the entire list.
+The same five operations exist as
 `repository_set.list|create|get|update|delete` WebSocket actions, and
 `repository_set.created|updated|deleted` notifications keep every open client current. See
 [WebSocket API](websocket-api.md).
@@ -476,7 +512,7 @@ A task created with **Create without starting agent** opens in a prepared workbe
 
 If the selected profile is unhealthy or incompatible with the executor, fix that configuration before launch. Starting an agent is separate from moving the task through its workflow; entry actions and turn-complete transitions can move or restart work afterward.
 
-When you send a message from Chat before selecting **Start agent**, Kandev keeps the task description in the first user prompt and places your instruction after it. The combined prompt is stored and remains after reload. Later messages contain only their own text.
+When you send the first message from Chat on a prepared task, Kandev keeps the task description in the first user prompt and places your instruction after it. This also applies if the backend restarts after workspace preparation but before the first user prompt is accepted. The combined prompt is stored and remains after reload. Later messages contain only their own text.
 
 By default, a running session keeps the coarse **Generating** state and queues
 another message even if Kandev detects background work. Operators can opt into
@@ -512,6 +548,37 @@ interrupted session still shows its recovery actions.
 An interrupted task keeps a warning indicator until the agent confirms
 recovery. Opening the task or starting a recovery attempt does not clear the
 indicator; a failed attempt keeps it visible with the existing retry actions.
+
+## Use agent commands in the composer
+
+In task Chat or Quick Chat, type `/` to browse the commands advertised by the
+active agent. Select an entry with the arrow keys, Enter, Tab, a pointer, or a
+touch. Selection adds the command to your editable draft. It does not send a
+message or change the session configuration. Review the draft, add context if
+needed, then select **Send**.
+
+Kandev labels a command as a skill only when the agent identifies it as one.
+For example, Codex ACP advertises `$retro`; the menu shows `/retro` with a
+localized **Skill** chip, while the submitted command remains `/$retro`.
+Commands without classification keep their advertised names and have no
+inferred chip.
+
+Verified mode-command metadata adds a **Mode** chip. Kandev shows **Active**
+only when the session has confirmed that mode. A command can also show its
+advertised argument hint, such as `/goal`'s supported arguments. These labels
+and hints describe the command; they do not apply it until you send the draft.
+Pasted rich text does not create a command chip; Kandev uses its visible plain text.
+
+For a supported interactive task, Kandev can continue an unfinished request
+in the same live conversation after the normal retry delay when the model is
+at capacity and at least one tool has a confirmed result. Kandev keeps those
+actions in the conversation and asks the agent to continue without repeating
+them. This does not guarantee exactly-once execution. The inline notice shows
+the attempt count and lets you cancel while Kandev waits. Kandev leaves the
+error for you to handle when a tool or permission is still pending, an outcome
+is uncertain, background work is unaccounted for, the provider does not
+support live continuation, or the runtime is no longer usable. The composer
+remains available for a new message.
 
 ## Answer clarification questions
 
@@ -628,14 +695,19 @@ By default, on desktop, hover over the collapsed sidebar for half a second to re
 
 In **Settings → Preferences → Appearance → Sidebar**, turn **Show sidebar on hover** on or off and set **Hover delay (ms)** from 0 to 5000 (default 500). Zero reveals immediately. Choose **Save changes** to apply the settings across your browsers. Turning hover off retains the delay and leaves explicit expansion available. You can edit these preferences on a phone, but hover activation requires a mouse or trackpad.
 
-The **TASKS** list in the left sidebar has two time-based sort choices. These choices are separate from the sort choices in the task **List** view.
+The **TASKS** list in the left sidebar can combine up to ten sort rules. Each later rule breaks ties from the rules above it. This is separate from sorting in the task **List** view. For example, **Running first → Red first → Last activity newest first** puts running red tasks first, running tasks with other colors next, non-running red tasks next, then the remaining non-running tasks. Newest activity orders tasks within each set. Move a rule to change its priority or remove it to stop using it.
 
-| Sort choice       | Meaning                                                                                                                 |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| **Updated**       | The last task summary refresh. Background events, such as pull-request status changes, can change this time.            |
-| **Last activity** | The last real user or agent action. Opening or focusing a task and background provider polling do not change this time. |
+| Sort rule         | Meaning                                                                                                                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Running**       | Tasks with a running session, primary or secondary, rank first or last. A running included subtask also promotes its parent. Workflow placement alone does not mean that an agent is running. |
+| **Color**         | A chosen named color ranks first or last by the marker shown on each task. An automatic color rule takes precedence over a manual color. The marker is personal and does not change shared task priority.                  |
+| **Updated**       | The last task summary refresh. Background events, such as pull-request status changes, can change this time.                                                                                                              |
+| **Last activity** | The last real user or agent action. Opening or focusing a task and background provider polling do not change this time. When a view includes this rule, each row shows its own activity time, while included subtasks help order parents. |
+| **Created, Title, Status** | These fields can also order tasks in either direction. Manual order remains available as a standalone choice.                                                                                                    |
 
-Choose **Last activity** when you want to review tasks by the least recent user or agent interaction.
+On desktop, open **Sort** from the sidebar filter button. On a phone, open **Tasks**, tap **Sidebar filters**, then expand **Sort**. Each field can be set to its first or last order. Drag a rule by its grip to change its priority, or open **More** and choose **Move up** or **Move down**. The saved view keeps the rule sequence. With no later rule, the sidebar's usual tie order applies. Automatic color rules and task-row details use the same grip and **More** menu. Color-rule changes apply immediately; sort and task-row changes follow the view's save or discard controls.
+
+When tasks are grouped, expand **Group by** and use **Indent grouped tasks** to align the rows with the normal sidebar inset. It is enabled by default. Turning it off removes only the group inset; headings, counts, collapse controls, and subtask nesting remain.
 
 Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
 
@@ -650,6 +722,11 @@ for up to five minutes. Task changes, workspace changes, and signing out invalid
 the relevant pages. Switching views leaves your open conversation in place,
 including in the phone **Tasks** drawer.
 
+Collapsing a repository group or a task's subtasks keeps the other rows visible
+while its page refreshes. Expanding shows already available rows immediately;
+any additional rows appear when the refresh finishes. This also applies in the
+phone **Tasks** drawer and navigation menu.
+
 If loading fails, the sidebar shows one message. **Retry** reloads a recoverable
 failure; rows already shown remain visible during a failed refresh. If a filter
 is invalid, use **Filters** to correct the indicated selection instead. Repository
@@ -657,9 +734,10 @@ and workflow selections support up to 1,000 values per filter; the limits apply
 to each selected value, not to the combined selection.
 
 - Search matches tasks without changing their state.
+- On Kanban and Pipeline boards, selecting a repository includes tasks linked to it, including tasks whose primary repository is different.
 - The display menu groups its controls into collapsible **Filters**, **Sort**, **Preview panel**, and, in **List**, **List rows** sections. Each section shows its current values while collapsed. Filters cover **Workflow**, **Repository**, and, in Kanban, **Priority**; registered plugin filters appear there when available. In Kanban/Pipeline, each workflow lane has a **Columns** menu outside these groups to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. The optional **Auto-hide empty columns** setting collapses unoccupied steps without changing those manual choices; auto-hidden empty steps return as move destinations while a task is being moved, while manually hidden steps remain unavailable for pointer and bulk moves. On phones, tap the listing-title dropdown to open **View options** and expand the same display groups and change columns for the focused workflow.
 - In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.
-- **List** can group by **State**, **Workflow**, **Repository**, or **None**.
+- **List** can group by **Workflow step**, **Workflow**, **Repository**, or **None**. Workflow step uses configured step names and order, such as Backlog, Work, or Review. The icon on each task still shows its runtime status, which can differ from its workflow step. Old State grouping preferences and links open workflow step grouping.
 - **List** can sort by updated time, created time, or title in either direction.
 - **Show archived** reveals archived tasks in List.
 - List page sizes are 10, 25, or 50; the default is 25.
@@ -764,7 +842,15 @@ Kandev retries temporary connection issues in the background.
 - **Run** stays available when the selected comment and primary session are eligible.
 - A recovered comment must finish browser-draft cleanup before you can run it.
 
-Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it. For safe agent corrections, see [Protect task plan writes](automation-and-mcp.md#protect-task-plan-writes).
+Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `edit_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it. For safe agent corrections, see [Protect task plan writes](automation-and-mcp.md#protect-task-plan-writes).
+
+Large plans support bounded reads through `get_task_plan_kandev(offset, limit)`.
+Ranges count Unicode code points and return exact fragments with a version and
+continuation offset. Pass that version as `expected_version` on later pages
+to detect intervening edits. Omit both range arguments to read the whole plan;
+never use a fragment as a replacement document. See
+[Read only the relevant part of a plan](automation-and-mcp.md#read-only-the-relevant-part-of-a-plan)
+for bounds, pagination, and a fragment-edit example.
 
 ### Protect agent plan writes
 
@@ -881,7 +967,9 @@ While archived, a task keeps its history. Kandev does not start its agent or res
 
 Select an archived task to read its saved conversation in the current page. Archived conversations are read-only. Kandev does not launch, prepare, or resume an agent while you browse them. Unarchive the task to use its normal start or resume actions.
 
-If task or workspace preparation fails, select **Show details** in the error strip above the session tabs. It opens the available recovery actions. The strip stays visible when you switch sessions and disappears after recovery succeeds. Archiving during recovery stops that recovery path without starting a fallback restore. For session recovery behavior, see [Sessions and review](sessions-and-review.md).
+If task or workspace preparation fails, select **Show details** in the error strip above the session tabs. It opens the available recovery actions. The strip stays visible when you switch sessions and disappears after recovery succeeds. Archiving during recovery stops that recovery path without starting a fallback restore. For first-startup prompt replay and session recovery behavior, see [Sessions and review](sessions-and-review.md).
+
+If Quick Chat setup fails after a session is created, Kandev keeps the chat in your tab strip with its preparation details and safe error details so you can inspect the failure or retry. A failure before a session exists keeps your selected agent and repository choices on the setup form with an inline error and a **Retry** action.
 
 <details>
 <summary>Worktree recovery after archive</summary>
@@ -894,12 +982,14 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 
 **Delete**
 
-- Delete is permanent. If **Also delete _N_ subtasks** is off, direct children become root tasks. If it is on, Kandev deletes the descendants.
+- While deletion is pending, the task stays dimmed with a spinner in the sidebar and phone task picker. It disappears when deletion succeeds. If deletion fails and the task is still available, the row returns to its normal state.
+- Delete is permanent. If **Also delete _N_ subtasks** is off, direct children become root tasks. If it is on, Kandev deletes the descendants. If a new child arrives before deletion finishes, Kandev keeps the parent and reports a conflict. Refresh the deletion preview before retrying. Ephemeral and automation-created children may be excluded from the cascade preview, so refreshing alone may return the same conflict while one retains its parent relationship.
 - Executor cleanup follows the same asynchronous retry and restart-reconciliation rules as archive.
 - When a task has a `RUNNING` agent, the dialog warns that deletion discards in-progress work. Delete always shows this warning. Archive shows it only when confirmation is on.
 
 ## Troubleshooting
 
+- **A task edit fails to save:** the editor stays open so you can correct the error and retry with your current title and editable instructions. A successful save closes the editor. **Cancel** discards the current draft. If the error reports a saved task or runner change followed by another failure, that completed change remains; retry only the remaining operation.
 - **No workflow is available:** open the workspace's **Workflows** page. Newly added workspaces have none by default.
 - **No agent starts:** the empty-description **Start Plan Mode** path does not use the normal start-agent submission. To begin an agent immediately, enter a description and use **Start task** or **Start task in plan mode**; also confirm the selected profiles are healthy and compatible.
 - **Task starts in the wrong step:** the destination depends on whether an agent starts immediately. **Create without starting agent** uses **Start step** with first-step fallback. **Start task** and **Start task in plan mode** use the first **Auto-start agent** step, then fall back to **Start step**. An explicit `workflow_step_id` from the creator outranks these defaults.

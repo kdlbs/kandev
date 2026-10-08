@@ -571,6 +571,13 @@ test.describe("Plugin-backed canvases on mobile", () => {
       await expect(menuButton).toBeVisible();
       await menuButton.tap();
 
+      const canvasGroup = testPage
+        .getByTestId("app-nav-sheet")
+        .getByRole("button", { name: "Canvases", exact: true });
+      await expect(canvasGroup).toHaveAttribute("aria-expanded", "false");
+      await canvasGroup.tap();
+      await expect(canvasGroup).toHaveAttribute("aria-expanded", "true");
+
       const workspaceCanvas = testPage.getByTestId(`mobile-workspace-canvas-${activeCanvas.id}`);
       await expect(workspaceCanvas).toBeVisible({ timeout: 15_000 });
       await expectMobileTouchTarget(workspaceCanvas);

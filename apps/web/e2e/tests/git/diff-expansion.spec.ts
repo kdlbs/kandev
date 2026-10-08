@@ -400,6 +400,10 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     const expandAllBtn = testPage.getByRole("button", { name: "Expand all" });
     await expect(expandAllBtn).toBeVisible({ timeout: 10_000 });
     await expandAllBtn.click();
+    await expect(testPage.getByRole("button", { name: "Collapse unchanged" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
 
     // After expanding, all original lines should be visible — pick a line
     // from the middle of the previously collapsed region.

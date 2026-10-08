@@ -27,6 +27,8 @@ type ChangesHistoryRowBase = {
   key: string;
   sectionKey: string;
   groups: ChangesTimelineGroupDescriptor[];
+  paddingInlineStartPx?: number;
+  paddingBlockEndPx?: number;
 };
 
 export type ChangesHistoryTimelineRow =
@@ -81,7 +83,7 @@ export type ChangesHistoryTimelineRow =
   | (ChangesHistoryRowBase & {
       kind: "commit-status";
       target: CommitDetailTarget;
-      status: "loading" | "error" | "empty";
+      status: "error" | "empty";
       error?: string;
     });
 
@@ -127,6 +129,10 @@ export type ChangesHistorySectionInput =
 
 const CHANGES_KEY_PREFIX = "changes";
 const COMMIT_FILE_ROW_KIND = "commit-file" as const;
+const HISTORY_CONTENT_INSET_PX = 16;
+const HISTORY_LIST_GAP_PX = 2;
+const HISTORY_SECTION_GAP_PX = 10;
+const COMMIT_FOOTER_PADDING_PX = 4;
 
 function rowKey(...parts: unknown[]): string {
   return JSON.stringify([CHANGES_KEY_PREFIX, ...parts]);
@@ -180,6 +186,7 @@ function appendChangesHistorySectionRows(
   section: ChangesHistorySectionInput,
   collapsedCommitKeys: ReadonlySet<string>,
 ): void {
+  const sectionStartIndex = rows.length;
   const sectionGroup: ChangesTimelineGroupDescriptor = {
     key: `history-section:${section.sectionKey}`,
     testId: section.testId,
@@ -205,9 +212,37 @@ function appendChangesHistorySectionRows(
       testId: "pr-files-list",
       attributes: { role: "list" },
     });
-    return;
+  } else {
+    appendCommitHistoryRows(rows, section, sectionGroup, collapsedCommitKeys);
   }
-  appendCommitHistoryRows(rows, section, sectionGroup, collapsedCommitKeys);
+  applyHistorySectionGeometry(rows, sectionStartIndex);
+}
+
+function applyHistorySectionGeometry(rows: ChangesHistoryTimelineRow[], sectionStartIndex: number) {
+  const sectionHeader = rows[sectionStartIndex];
+  if (!sectionHeader || sectionHeader.kind !== "history-section") return;
+  let hasVisibleContent = false;
+  for (let index = sectionStartIndex + 1; index < rows.length; index++) {
+    const row = rows[index];
+    if (!row) continue;
+    row.paddingInlineStartPx = HISTORY_CONTENT_INSET_PX;
+    if (row.kind !== HISTORY_REPOSITORY_ROW_KIND) hasVisibleContent = true;
+  }
+
+  const lastIndex = rows.length - 1;
+  const lastRow = rows[lastIndex];
+  if (lastRow && hasVisibleContent) {
+    lastRow.paddingBlockEndPx = HISTORY_SECTION_GAP_PX;
+  }
+}
+
+function setPaddingBlockEnd(
+  rows: ChangesHistoryTimelineRow[],
+  index: number,
+  paddingBlockEndPx: number,
+): void {
+  const row = rows[index];
+  if (row) row.paddingBlockEndPx = paddingBlockEndPx;
 }
 
 function appendPRHistoryRows(
@@ -218,7 +253,8 @@ function appendPRHistoryRows(
 ): void {
   const groups = groupByRepositoryName(section.files, (file) => file.repository_name);
   const showRepositoryHeaders = groups.length > 1 || (groups[0]?.repositoryName ?? "") !== "";
-  for (const group of groups) {
+  groups.forEach((group, groupIndex) => {
+    const groupStartIndex = rows.length;
     const repositoryKey = changesHistoryRepositoryExpansionKey(
       section.sectionKey,
       group.repositoryName,
@@ -246,16 +282,20 @@ function appendPRHistoryRows(
         groups: [sectionGroup, fileListGroup, repositoryGroup],
       });
     }
-    if (collapsed) continue;
-    appendPRFileRows(
-      rows,
-      section,
-      group,
-      showRepositoryHeaders
-        ? [sectionGroup, fileListGroup, repositoryGroup]
-        : [sectionGroup, fileListGroup],
-    );
-  }
+    if (!collapsed) {
+      appendPRFileRows(
+        rows,
+        section,
+        group,
+        showRepositoryHeaders
+          ? [sectionGroup, fileListGroup, repositoryGroup]
+          : [sectionGroup, fileListGroup],
+      );
+    }
+    if (groupIndex < groups.length - 1 && rows.length > groupStartIndex) {
+      setPaddingBlockEnd(rows, rows.length - 1, HISTORY_LIST_GAP_PX);
+    }
+  });
 }
 
 function appendPRFileRows(
@@ -264,7 +304,7 @@ function appendPRFileRows(
   group: { repositoryName: string; items: ChangesHistoryPRFileInput[] },
   groups: ChangesTimelineGroupDescriptor[],
 ): void {
-  for (const file of group.items) {
+  group.items.forEach((file, index) => {
     rows.push({
       kind: "pr-file",
       key: rowKey("pr-file", section.sectionKey, group.repositoryName, file.prKey ?? "", file.path),
@@ -276,9 +316,10 @@ function appendPRFileRows(
       minus: file.minus,
       oldPath: file.oldPath,
       repositoryName: group.repositoryName,
+      ...(index < group.items.length - 1 ? { paddingBlockEndPx: HISTORY_LIST_GAP_PX } : {}),
       groups,
     });
-  }
+  });
 }
 
 function appendCommitHistoryRows(
@@ -294,7 +335,7 @@ function appendCommitHistoryRows(
   };
   const groups = groupByRepositoryName(section.commits, (item) => item.commit.repository_name);
   const singleUnscopedRepo = groups.length <= 1 && (groups[0]?.repositoryName ?? "") === "";
-  for (const group of groups) {
+  groups.forEach((group, groupIndex) => {
     appendCommitRepositoryRows(rows, {
       section,
       sectionGroup,
@@ -302,8 +343,9 @@ function appendCommitHistoryRows(
       group,
       showRepositoryHeader: !singleUnscopedRepo,
       collapsedCommitKeys,
+      hasFollowingRepository: groupIndex < groups.length - 1,
     });
-  }
+  });
 }
 
 function appendCommitRepositoryRows(
@@ -315,9 +357,17 @@ function appendCommitRepositoryRows(
     group: { repositoryName: string; items: ChangesHistoryCommitInput[] };
     showRepositoryHeader: boolean;
     collapsedCommitKeys: ReadonlySet<string>;
+    hasFollowingRepository: boolean;
   },
 ): void {
-  const { section, sectionGroup, commitListGroup, group, showRepositoryHeader } = options;
+  const {
+    section,
+    sectionGroup,
+    commitListGroup,
+    group,
+    showRepositoryHeader,
+    hasFollowingRepository,
+  } = options;
   const repositoryName = group.repositoryName;
   const repositoryKey = changesHistoryRepositoryExpansionKey(section.sectionKey, repositoryName);
   const collapsed = section.collapsedRepositories.has(repositoryKey);
@@ -331,6 +381,7 @@ function appendCommitRepositoryRows(
       : {}),
   };
   if (showRepositoryHeader) {
+    const repositoryHeaderIndex = rows.length;
     rows.push({
       kind: HISTORY_REPOSITORY_ROW_KIND,
       key: rowKey(HISTORY_REPOSITORY_ROW_KIND, section.sectionKey, repositoryName),
@@ -342,6 +393,9 @@ function appendCommitRepositoryRows(
       showActions: section.showActions !== false,
       groups: [sectionGroup, commitListGroup],
     });
+    if (collapsed && hasFollowingRepository) {
+      setPaddingBlockEnd(rows, repositoryHeaderIndex, HISTORY_LIST_GAP_PX);
+    }
   }
   if (collapsed) return;
 
@@ -357,6 +411,7 @@ function appendCommitRepositoryRows(
       latestIndex,
       groups: commitGroups,
       collapsedCommitKeys: options.collapsedCommitKeys,
+      hasFollowingCommit: index < group.items.length - 1 || options.hasFollowingRepository,
     });
   });
 }
@@ -370,6 +425,7 @@ function appendCommitRows(
     latestIndex: number;
     groups: ChangesTimelineGroupDescriptor[];
     collapsedCommitKeys: ReadonlySet<string>;
+    hasFollowingCommit: boolean;
   },
 ): void {
   const { section, item, index, latestIndex } = options;
@@ -385,6 +441,7 @@ function appendCommitRows(
       attributes: { id: inlineCommitFilesId(commit) },
     },
   ];
+  const commitRowIndex = rows.length;
   rows.push({
     kind: "commit",
     key: rowKey("commit", section.sectionKey, targetKey),
@@ -397,10 +454,13 @@ function appendCommitRows(
     detail,
     groups,
   });
-  if (!expanded) return;
-  if (detail.status === "loading" || detail.status === "idle") {
-    appendCommitStatusRow({ rows, section, commit, targetKey, status: "loading", groups });
-  } else if (detail.status === "error") {
+  if (!expanded) {
+    if (options.hasFollowingCommit) {
+      setPaddingBlockEnd(rows, commitRowIndex, HISTORY_LIST_GAP_PX);
+    }
+    return;
+  }
+  if (detail.status === "error") {
     appendCommitStatusRow({
       rows,
       section,
@@ -410,10 +470,22 @@ function appendCommitRows(
       groups,
       error: detail.error,
     });
-  } else if (detail.files.length === 0) {
+  } else if (detail.status === "loaded" && detail.files.length === 0) {
     appendCommitStatusRow({ rows, section, commit, targetKey, status: "empty", groups });
-  } else {
+  } else if (detail.status === "loaded") {
     appendCommitFileRows(rows, section, item, groups, targetKey);
+  }
+
+  const lastCommitRowIndex = rows.length - 1;
+  if (lastCommitRowIndex > commitRowIndex) {
+    for (let rowIndex = commitRowIndex + 1; rowIndex < lastCommitRowIndex; rowIndex++) {
+      setPaddingBlockEnd(rows, rowIndex, HISTORY_LIST_GAP_PX);
+    }
+    if (options.hasFollowingCommit) {
+      setPaddingBlockEnd(rows, lastCommitRowIndex, COMMIT_FOOTER_PADDING_PX + HISTORY_LIST_GAP_PX);
+    }
+  } else if (options.hasFollowingCommit) {
+    setPaddingBlockEnd(rows, commitRowIndex, HISTORY_LIST_GAP_PX);
   }
 }
 
@@ -422,7 +494,7 @@ function appendCommitStatusRow(options: {
   section: Extract<ChangesHistorySectionInput, { kind: "commits" }>;
   commit: CommitItem;
   targetKey: string;
-  status: "loading" | "error" | "empty";
+  status: "error" | "empty";
   groups: ChangesTimelineGroupDescriptor[];
   error?: string;
 }): void {
@@ -447,7 +519,7 @@ function appendCommitFileRows(
 ): void {
   const { commit, detail } = item;
   if (section.layout !== "tree") {
-    for (const file of detail.files) {
+    detail.files.forEach((file, index) => {
       rows.push({
         kind: COMMIT_FILE_ROW_KIND,
         key: rowKey(COMMIT_FILE_ROW_KIND, section.sectionKey, targetKey, file.path),
@@ -456,9 +528,10 @@ function appendCommitFileRows(
         file,
         treeMode: false,
         indentPx: 0,
+        ...(index < detail.files.length - 1 ? { paddingBlockEndPx: HISTORY_LIST_GAP_PX } : {}),
         groups,
       });
-    }
+    });
     return;
   }
   const changedFiles: ChangedFile[] = detail.files.map((file) => ({
@@ -477,7 +550,7 @@ function appendCommitFileRows(
     ),
   );
   const filesByPath = new Map(detail.files.map((file) => [file.path, file]));
-  for (const row of visibleRows) {
+  visibleRows.forEach((row, index) => {
     if (row.isDir) {
       rows.push({
         kind: "commit-directory",
@@ -485,14 +558,15 @@ function appendCommitFileRows(
         sectionKey: section.sectionKey,
         target: commit.detailTarget,
         row,
+        ...(index < visibleRows.length - 1 ? { paddingBlockEndPx: HISTORY_LIST_GAP_PX } : {}),
         groups,
       });
-      continue;
+      return;
     }
     const file = row.node.file;
-    if (!file) continue;
+    if (!file) return;
     const inlineFile = filesByPath.get(file.path);
-    if (!inlineFile) continue;
+    if (!inlineFile) return;
     rows.push({
       kind: COMMIT_FILE_ROW_KIND,
       key: rowKey(COMMIT_FILE_ROW_KIND, section.sectionKey, targetKey, file.path),
@@ -501,16 +575,17 @@ function appendCommitFileRows(
       file: inlineFile,
       treeMode: true,
       indentPx: row.depth * 12,
+      ...(index < visibleRows.length - 1 ? { paddingBlockEndPx: HISTORY_LIST_GAP_PX } : {}),
       groups,
     });
-  }
+  });
 }
 
 function historyCommitStatusRow(options: {
   sectionKey: string;
   targetKey: string;
   target: CommitDetailTarget;
-  status: "loading" | "error" | "empty";
+  status: "error" | "empty";
   groups: ChangesTimelineGroupDescriptor[];
   error?: string;
 }): ChangesHistoryTimelineRow {

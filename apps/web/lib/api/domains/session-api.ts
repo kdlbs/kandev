@@ -7,6 +7,7 @@ import type {
   ListTurnsResponse,
 } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import type { NativeMCPDiagnosticPayload } from "@/lib/prepare/native-mcp-diagnostic";
 
 export type ShellCommandOutput = {
   exit_code?: number;
@@ -54,6 +55,7 @@ export type AgentMcpRetryResponse = {
     | "unavailable";
   reason_code?: string;
   tool_count?: number;
+  mcp_diagnostic?: NativeMCPDiagnosticPayload;
 };
 
 export function isAgentMcpRecoveryBusyError(error: unknown): boolean {

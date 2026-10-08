@@ -40,6 +40,7 @@ func (r *PluginRemoteExecutor) attachRetainedPluginExecutor(ctx context.Context,
 		client.Close()
 		return nil, errors.New("plugin executor retained agentctl readiness check failed")
 	}
+	r.uploadPluginExecutorAgentCredentials(ctx, client, req)
 	metadata := clonePluginExecutorMetadata(req.Metadata)
 	metadata[MetadataKeyPluginExecutor] = inventory
 	return &ExecutorInstance{

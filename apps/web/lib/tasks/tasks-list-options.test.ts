@@ -5,7 +5,26 @@ import {
   TASKS_LIST_GROUP_OPTIONS,
   TASKS_LIST_SORT_OPTIONS,
   sortTasksByFacet,
+  parseTasksListGroup,
+  DEFAULT_TASKS_LIST_GROUP,
 } from "./tasks-list-options";
+
+// @covers AC-UI-LIST-STEP-GROUPING-001.1 and AC-UI-LIST-STEP-GROUPING-001.5
+describe("workflow step grouping preferences", () => {
+  it.each(["state", "workflow_step", "invalid", null, undefined, ""])(
+    "resolves %s to workflow step grouping",
+    (value) => expect(parseTasksListGroup(value)).toBe("workflow_step"),
+  );
+  it("offers workflow step as the default instead of runtime state", () => {
+    expect(DEFAULT_TASKS_LIST_GROUP).toBe("workflow_step");
+    expect(TASKS_LIST_GROUP_OPTIONS.map((option) => option.value)).toEqual([
+      "workflow_step",
+      "workflow",
+      "repository",
+      "none",
+    ]);
+  });
+});
 
 describe("SORT_OPTION_LABEL_KEYS", () => {
   it("maps every sort option to a tasks: translation key", () => {

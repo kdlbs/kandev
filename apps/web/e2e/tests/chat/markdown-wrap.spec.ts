@@ -416,9 +416,9 @@ test.describe("Markdown text wrapping", () => {
     const tableWrapper = table.locator("xpath=..");
 
     await expect(table).toBeVisible();
-    expect(
-      await tableWrapper.evaluate((element) => element.scrollWidth > element.clientWidth + 1),
-    ).toBe(true);
+    await expect
+      .poll(() => tableWrapper.evaluate((element) => element.scrollWidth > element.clientWidth + 1))
+      .toBe(true);
     await expectNoMarkdownOverflow(testPage);
     await expectNoDocumentOverflow(testPage);
   });

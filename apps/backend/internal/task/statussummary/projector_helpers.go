@@ -22,6 +22,7 @@ func isPendingSensitiveEvent(eventType string, data map[string]interface{}) bool
 	switch eventType {
 	case events.TaskUpdated,
 		events.TaskSessionStateChanged,
+		events.SessionRemoved,
 		events.MessageAdded,
 		events.ClarificationAnswered,
 		events.ClarificationPrimaryAnswered,
@@ -206,7 +207,7 @@ func errorEqual(a, b *ActiveErrorSummary) bool {
 		a.ExecutionID == b.ExecutionID && a.AttemptID == b.AttemptID && a.Phase == b.Phase &&
 		a.Stamp == b.Stamp && a.OccurredAt.Equal(b.OccurredAt) &&
 		a.Preview == b.Preview && a.Details == b.Details && a.Category == b.Category &&
-		slices.Equal(a.RecoveryActions, b.RecoveryActions) && slices.Equal(a.Causes, b.Causes)
+		slices.Equal(a.RecoveryActions, b.RecoveryActions) && models.AgentErrorCausesEqual(a.Causes, b.Causes)
 }
 
 func normalizeRecoveryActions(actions []string) []string {

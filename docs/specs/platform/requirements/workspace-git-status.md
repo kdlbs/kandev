@@ -2,15 +2,22 @@
 status: active
 system: platform
 created: 2026-07-19
-updated: 2026-08-31
+updated: 2026-10-08
 owners:
   - kandev
 ---
+
 # Workspace Git Status Requirements
 
 ## Overview
 
-Users opening or focusing Changes and Review need a current workspace snapshot without a large generated or untracked tree monopolizing agentctl. Repeated requests for the same repository must not amplify expensive Git and filesystem work, and the initial session-hydration path must remain within its two-second live-status budget by falling back when necessary.
+Users opening Changes and Review need current workspace status without excessive Git or filesystem work. Repeated requests share useful work. Slow refreshes have bounded recovery, and file visibility does not wait for diff content.
+
+## Contract update
+
+This requirement includes progressive refresh and bounded recovery.
+It replaces the former non-publication rule in criterion `.2` and clarifies admission, completion, and cancellation in `.3`, `.4`, and `.5`.
+A failed live source still cannot authorize an unmarked persisted fallback.
 
 ## Terminology
 
@@ -21,15 +28,15 @@ Users opening or focusing Changes and Review need a current workspace snapshot w
 
 ### REQ-PLATFORM-WORKSPACE-GIT-STATUS-001: Workspace Git Status
 
-**Intent:** Users opening or focusing Changes and Review need a current workspace snapshot without a large generated or untracked tree monopolizing agentctl. Repeated requests for the same repository must not amplify expensive Git and filesystem work, and the initial session-hydration path must remain within its two-second live-status budget by falling back when necessary.
+**Intent:** Keep workspace status current with bounded recovery and shared computation. Show files independently of diff latency.
 
 #### Acceptance criteria
 
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.1:** Cached reads return the latest workspace-tracker snapshot. When no cached snapshot exists, the tracker performs a live observation.
-- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.2:** Fresh reads observe the live worktree and do not themselves replace the polling cache.
-- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.3:** Overlapping live observations for the same repository share one underlying observation. Different repositories in a multi-repository task may still be observed in parallel.
-- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.4:** Every non-cancelled caller receives the same completed snapshot or error from a shared observation. A caller whose own context is cancelled returns promptly without cancelling or otherwise poisoning the result for other callers.
-- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.5:** Tracker shutdown or the bounded shared-observation deadline cancels the underlying work. Cancelled work does not publish or cache a partial snapshot.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.2:** Fresh reads observe the live worktree. Accepted tracker-owned results update the cache and subscribers, even after the requesting caller stops waiting.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.3:** Overlapping live observations for the same repository and admission class share one underlying observation. Different repositories in a multi-repository task may still be observed in parallel.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.4:** Every non-cancelled caller receives the same complete file-membership snapshot or error from a shared observation. Diff enrichment can arrive later. A caller whose own context is cancelled returns promptly without cancelling or otherwise poisoning the result for other callers.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.5:** Tracker shutdown or the bounded shared-observation deadline cancels the underlying work. Cancelled basic observations do not publish incomplete file membership. Cancellation during later enrichment preserves an already accepted basic snapshot without claiming complete diff data.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.6:** After Git output is parsed, changed-file and synthetic untracked-diff enrichment performs work proportional to the number of eligible changed entries plus the bounded content processed.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.7:** Existing diff limits remain in force: 10 MiB maximum source file size, 256 KiB maximum per emitted diff representation, and a 2 MiB enrichment threshold per status snapshot. Flattened compatibility diffs and layer-specific diffs all participate in the same snapshot threshold. Because the threshold is checked before enriching each representation, the final accepted representation may preserve the existing overshoot of up to the 256 KiB cap. Existing skip reasons remain unchanged.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.8:** Large changed sets retain every eligible path and its status metadata. Once the total diff budget is exhausted, files that are not enriched retain `budget_exceeded` as their diff skip reason.
@@ -44,14 +51,72 @@ Users opening or focusing Changes and Review need a current workspace snapshot w
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.17:** Comparison-target materialization does not delay instance readiness or a Git-status UI request. Until background materialization succeeds, file status remains usable and comparison-derived data reports unavailable.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.18:** When a comparison-target fetch fails over its canonical HTTPS transport, Kandev does not retry SSH or another transport automatically. It preserves checkout and push routing and reports that comparison data is unavailable.
 
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.19:** Every eligible changed path and its staged or unstaged classification appears before slow diff or branch-total work completes. Mixed facets, rename origins, symlink identity, and submodule identity remain correct.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.20:** If a requesting client times out or disconnects, an accepted shared refresh result remains available for later reads and existing subscribers. Recovery does not require another workspace mutation.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.21:** Each tracker lifetime has a unique opaque source identity. Revisions order results only within that identity; capture timestamps order eligible sources across identities. Older observations cannot replace newer accepted state, and diff data cannot attach to a different checkout, index, worktree state, repository, or comparison target. A details waiter accepts completed enrichment derived from its accepted basic observation even when enrichment advances the publication revision before the waiter joins; a superseding observation remains unavailable to that waiter.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.22:** Fresh interactive file observations retain interactive admission independently of background observations. At most one enrichment job executes per repository tracker, with bounded replacement work and no duplicate job for an unchanged observation.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.23:** Before a complete file snapshot arrives, Changes shows loading or unavailable status. Only a successful complete empty snapshot permits the normal clean empty state.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.24:** Dirty files remain visible while diff enrichment is pending or unavailable. Opening a pending diff shows its state. Missing diff content cannot close the panel or imply that the file was discarded.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.25:** A pending or failed refresh preserves valid prior data in the same environment and repository. The UI identifies its freshness. Replaced workspace state cannot reuse old data as current.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.26:** A multi-repository failure preserves every healthy repository. Each failed repository has an identifiable state and retry path, even when another repository is clean.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.27:** Sessions sharing an environment see the same accepted repository state. Session and live-execution bindings are accepted only for the canonical environment root or an exact active repository worktree recorded on that environment. Late results from replaced sessions, executions, stream connections, or workspace bindings cannot change their successor state, including initial-subscribe reads and workspace-stream callbacks.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.28:** Each Changes-surface activation requests or joins one fresh snapshot for its shared environment and connection scope, even when complete cached membership exists. Foreground refreshes have bounded snapshot-response recovery when the initial notification is missed. After recovery fails, Changes identifies unavailable freshness and automatically retries through the scoped recovery policy.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.29:** Desktop and phone surfaces expose loading, unavailable freshness, automatic recovery, pending diffs, and preserved prior data through shared state. Phone status remains accessible without hover or a manual refresh action.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.30:** New status text uses the translation system in all six supported catalogs. Traditional Chinese generation and punctuation follow the repository localization rules.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.31:** Progressive refresh retains subprocess admission, command deadlines, existing diff limits, and focus-based polling. The tracker-owned enrichment deadline covers pre-validation, diff work, and final validation. Per-file evidence bounds are independent from diff-output limits. Caller cancellation and tracker shutdown release owned jobs, resources, and subscriptions.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.32:** Compact persisted snapshots do not establish complete file membership or a clean workspace. Without a usable live source, Changes identifies incomplete or unavailable status instead of presenting missing file details as clean.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.33:** A failed Git detail command cannot certify an empty diff or zero statistics as ready. Healthy files and facets retain ready detail where available, failed detail is identifiable, ordinary same-fingerprint observations do not restart unavailable enrichment, and an explicit refresh can retry it without repository mutation.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.34:** An unavailable implicit comparison reference can make ancestry totals unavailable without invalidating independently successful per-file diffs.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.35:** A WebSocket connection admits at most four concurrent session Git refresh operations. Excess requests receive a correlated unavailable result without starting source work.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.36:** For every eligible tracked changed path in a stable observation, successful diff enrichment shall associate statistics and patch content with the exact repository-relative path in the file-membership snapshot, including Unicode, quoting characters, literal rename-like text, Git wildcard or pathspec-magic characters, tabs, newlines, and leading or trailing whitespace supported by the task filesystem. Actual renames shall enrich the destination path while preserving observed rename metadata. This applies independently to flattened, staged, and unstaged representations; binary and content-unchanged changes may legitimately have zero line counts.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.37:** When Stage or Unstage receives a nonempty path list, before or after the first commit, each path shall select its literal repository-relative file or actual directory subtree in the selected repository. Wildcard and pathspec-magic characters in a filename shall not select additional files. Multiple paths shall retain their individual selections, including renamed and deleted entries. Every path outside the selections shall retain its index content and working-tree bytes.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.38:** An empty Stage path list shall stage all changes in the selected repository, including deletions. An empty Unstage path list shall unstage all changes in that repository, including before its first commit. Stage and Unstage shall preserve working-tree bytes for every file, whether the selection is explicit or empty. Unstaging shall not create a commit.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.39:** A failed status or unavailable detail refresh shall schedule a delayed read retry while Changes remains active, focused, visible, and connected.
+  Consecutive failures shall increase the delay to a bounded maximum.
+  Retry shall preserve prior valid data and shall not change Git content, credentials, or transport.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.40:** Sibling consumers in one environment shall share a recovery schedule and at most one refresh attempt.
+  Context replacement, loss of the last active consumer, page hiding, unfocus, or disconnection shall cancel delayed recovery.
+  Accepted live recovery shall stop the schedule and reset its backoff without replaying older results.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.41:** Partial failure shall preserve healthy repositories and retain unavailable freshness until every failed repository recovers.
+  Ready notifications shall cancel unnecessary retries.
+  A same-state rerender shall not restart the retry delay or create another request.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.42:** During an eligible workspace monitor tick, every already-dirty tracked path whose filesystem modification time changed shall trigger the existing repository-scoped file refresh and background Git-status refresh attempt. Detection shall preserve exact supported filenames, including leading or trailing whitespace, tabs, newlines, quoting characters, and Unicode, independently of Git path-quoting configuration. An unchanged monitor observation shall not trigger another monitor refresh. Existing admission, cadence, deadlines, and bounded subscriber delivery remain in force; writes preserving the observed modification time are outside this polling guarantee.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.43:** When agent startup advances on the same current execution and agentctl client, an attached workspace stream shall continue forwarding accepted Git snapshots.
+  Promotion from workspace-only operation shall not require another foreground refresh or stream reconnection to deliver later membership and detail updates.
+  Replaced executions and clients shall retain the rejection required by criterion `.27`.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.44:** When Discard receives a nonempty list of repository-relative files, each filename shall select only that literal file in the selected repository, including supported wildcard, bracket, and pathspec-magic names, with the recognized staged-rename exception in `.47`. Tracked selected files shall return to their committed index and working-tree content; added or untracked selected files shall be removed from the index and filesystem as applicable. Every file outside the selected changes in that repository and every file in other repositories shall retain its index content and working-tree bytes, regardless of inherited pathspec matching settings. An empty list shall be rejected, and an invalid empty filename shall remain rejected rather than authorizing a whole-repository discard. Desktop and mobile shall observe the same selected-file outcome through their existing Changes actions.
+
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.45:** Successful workspace patch enrichment shall return plain Git patch syntax independently of forced Git diff or UI color settings, for flattened, staged, and unstaged representations. Git presentation color shall not enter ready patch data. Literal ANSI bytes in file content and supported filenames shall retain their identity and content. Reads shall preserve Git configuration, refs, index content, and worktree bytes; file membership, status, line totals, facets, readiness, and existing resource limits remain correct. Desktop and mobile shall receive the same patch data through existing transports.
+
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.46:** Successful workspace patch enrichment shall return bounded built-in Git patches for flattened, staged, and unstaged representations independently of a repository-configured external diff command or an external diff command in the instance's captured environment, including when both are present. Workspace detail reads shall not execute those external commands or publish their output as ready patches. Ordinary patches, exact supported filename identity, layer-specific hunks and line totals, file membership, status, facets, readiness, cache ownership, cancellation, and existing resource limits shall remain correct. Reads shall preserve captured and process environments, Git configuration, refs, index content, and working-tree bytes. Desktop and mobile shall receive the same patch data through existing transports.
+
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.47:** For a selected destination with one live Git-recognized staged rename, a committed source absent from the working tree, no committed destination and no overlapping endpoints, Discard shall undo the pair including destination edits. Success shall restore committed source index/worktree content, remove the destination from both layers and leave no staged source deletion. Exact supported filenames and multiple selections retain `.44` isolation. Occupied sources, unsupported or ambiguous recognized pairs and unavailable pairing evidence shall fail before request mutation. Ordinary tracked, added, untracked and copied files retain literal selection without guessed origins; source-only selection does not select the destination. Desktop and mobile share the outcome. HEAD, refs, Git configuration and inherited environments remain unchanged. External-writer atomicity is not guaranteed.
+
 ## Out of scope
 
 - Suppressing generated directories other than `node_modules`. They continue to follow repository and global Git ignore rules.
 - Suppressing tracked paths based on a directory name.
 - Filtering dependency trees only after Git has enumerated their files.
-- Changing the Git-status API or WebSocket payload shape.
+- Replacing the existing Git-status routes or environment ownership.
+- Persisting complete live diffs in the database.
+- Aggressive polling of inactive tasks.
 - Automatically changing the Git transport after an authentication or transport error.
 
 ## System design
 
-The migrated technical source is split into [part 1](../system-design/workspace-git-status.md).
+See the [workspace status design](../system-design/workspace-git-status.md) and [delivery plan](../../../plans/changes-panel-git-refresh/plan.md).
+The [delayed recovery design](../system-design/changes-refresh-recovery.md) and
+[follow-up plan](../../../plans/changes-loading-feedback/plan.md) own automatic recovery delivery.
+The [dirty-path monitor design](../system-design/workspace-dirty-path-monitor.md) and
+[repair package](../../../plans/workspace-dirty-path-monitor/plan.md) own exact-path polling refresh.
+The [workspace stream continuity design](../system-design/workspace-stream-continuity.md)
+defines the callback lifetime required by criterion `.43`.
+Plain patch production follows the [path-details design](../system-design/workspace-git-path-details.md)
+and [repair package](../../../plans/workspace-tracker-plain-patches/plan.md).
+External-command independence follows the same path-details design and the
+[built-in patch repair package](../../../plans/workspace-tracker-built-in-patches/plan.md).
+Display continuity has its own [requirement](git-refresh-continuity.md),
+[system design](../system-design/git-refresh-continuity.md), and
+[repair plan](../../../plans/git-refresh-continuity/plan.md).
+Staged-rename selection follows the path-details design and
+[rename Discard package](../../../plans/git-discard-staged-renames/plan.md).

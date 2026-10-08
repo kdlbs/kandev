@@ -147,6 +147,11 @@ desktop installation and are available to its workspaces. A normal browser
 connected to the same backend uses the HTTP folder picker. The browser does
 not receive the desktop app's native picker authority.
 
+The in-app folder browser hides directories whose name starts with a dot. Use
+its **Hidden folders** switch to list them. The desktop app's own folder
+panel is the operating system's panel, where hidden files are shown with the
+platform's own control instead.
+
 After an upgrade, an existing installation can show **Continue Home
 Discovery**. This action saves the desktop backend's Home folder directly; it
 does not open a folder picker. Kandev does not start a new Home scan without

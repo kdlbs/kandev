@@ -22,6 +22,7 @@ const (
 	CleanupInspectionStageBranch       = "branch_lookup"
 	CleanupInspectionStageRegistration = "registration_inspection"
 	CleanupInspectionStageCommit       = "commit_lookup"
+	CleanupInspectionStageStatus       = "working_tree_status"
 )
 
 // Cleanup inspection reasons.

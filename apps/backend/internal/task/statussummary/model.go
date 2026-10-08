@@ -22,17 +22,18 @@ const (
 
 	// MaxActiveErrorPreviewBytes keeps an error decoration safe to send with
 	// every task row without turning it into a message-stream transport.
-	MaxActiveErrorPreviewBytes  = 512
-	MaxActiveErrorDetailsBytes  = 4096
-	maxSessionIDBytes           = 256
-	maxTaskRepositoryIDBytes    = 256
-	maxPendingActionBytes       = 128
-	maxActiveErrorStampBytes    = 64
-	maxActiveErrorCategoryBytes = 64
-	maxPullRequestStateBytes    = 64
-	maxPullRequestURLBytes      = 2048
-	maxLaunchQueueIDBytes       = 256
-	maxLaunchQueueReasonBytes   = 64
+	MaxActiveErrorPreviewBytes    = 512
+	MaxActiveErrorDetailsBytes    = 4096
+	maxSessionIDBytes             = 256
+	maxTaskRepositoryIDBytes      = 256
+	maxPendingActionBytes         = 128
+	maxActiveErrorStampBytes      = 64
+	maxActiveErrorCategoryBytes   = 64
+	maxPullRequestStateBytes      = 64
+	maxPullRequestURLBytes        = 2048
+	maxPullRequestRepositoryBytes = 256
+	maxLaunchQueueIDBytes         = 256
+	maxLaunchQueueReasonBytes     = 64
 )
 
 const (
@@ -45,17 +46,20 @@ const (
 // consumers. Revision and UpdatedAt are transport metadata and are ignored by
 // SemanticEqual when deciding whether a projection actually changed.
 type TaskStatusSummary struct {
-	Revision            uint64                 `json:"revision"`
-	UpdatedAt           time.Time              `json:"updated_at"`
-	LastActivityAt      *time.Time             `json:"last_activity_at,omitempty"`
-	PrimarySession      *PrimarySessionSummary `json:"primary_session,omitempty"`
-	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
-	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
-	PendingAction       string                 `json:"pending_action,omitempty"`
-	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
-	TaskError           *ActiveErrorSummary    `json:"task_error,omitempty"`
-	Git                 *GitSummary            `json:"git,omitempty"`
-	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
+	Revision       uint64                 `json:"revision"`
+	UpdatedAt      time.Time              `json:"updated_at"`
+	LastActivityAt *time.Time             `json:"last_activity_at,omitempty"`
+	PrimarySession *PrimarySessionSummary `json:"primary_session,omitempty"`
+	// HasRunningSession is authoritative when present. A nil value identifies
+	// summaries written before the task-wide session projection was available.
+	HasRunningSession   *bool               `json:"has_running_session,omitempty"`
+	ForegroundActivity  string              `json:"foreground_activity,omitempty"`
+	ActiveSubagentCount int                 `json:"active_subagent_count,omitempty"`
+	PendingAction       string              `json:"pending_action,omitempty"`
+	ActiveError         *ActiveErrorSummary `json:"active_error,omitempty"`
+	TaskError           *ActiveErrorSummary `json:"task_error,omitempty"`
+	Git                 *GitSummary         `json:"git,omitempty"`
+	PullRequest         *PullRequestSummary `json:"pull_request,omitempty"`
 	// QueuedPromptCount is the number of prompts currently en-queued for the
 	// task across all of its sessions (pending semantics identical to
 	// message.queue.get). Omitted when zero so task rows without queued work
@@ -131,16 +135,22 @@ type GitSummary struct {
 // PullRequestSummary is intentionally an aggregate plus one representative
 // identity. It is not a list of PR records.
 type PullRequestSummary struct {
-	Count             int    `json:"count,omitempty"`
-	OpenCount         int    `json:"open_count,omitempty"`
-	Attention         bool   `json:"attention,omitempty"`
-	AutoFixEnabled    bool   `json:"auto_fix_enabled,omitempty"`
-	AutoMergeEnabled  bool   `json:"auto_merge_enabled,omitempty"`
-	HasMergeConflicts bool   `json:"has_merge_conflicts,omitempty"`
-	AggregateState    string `json:"aggregate_state,omitempty"`
-	State             string `json:"state,omitempty"`
-	Number            int    `json:"number,omitempty"`
-	URL               string `json:"url,omitempty"`
+	Count                      int    `json:"count,omitempty"`
+	OpenCount                  int    `json:"open_count,omitempty"`
+	Attention                  bool   `json:"attention,omitempty"`
+	WorkflowApprovalRequired   bool   `json:"workflow_approval_required"`
+	WorkflowApprovalStale      bool   `json:"workflow_approval_stale,omitempty"`
+	WorkflowApprovalPRNumber   int    `json:"workflow_approval_pr_number,omitempty"`
+	WorkflowApprovalRepository string `json:"workflow_approval_repository,omitempty"`
+	AutoFixEnabled             bool   `json:"auto_fix_enabled,omitempty"`
+	AutoMergeEnabled           bool   `json:"auto_merge_enabled,omitempty"`
+	HasMergeConflicts          bool   `json:"has_merge_conflicts,omitempty"`
+	MergeConflictPRNumber      int    `json:"merge_conflict_pr_number,omitempty"`
+	MergeConflictRepository    string `json:"merge_conflict_repository,omitempty"`
+	AggregateState             string `json:"aggregate_state,omitempty"`
+	State                      string `json:"state,omitempty"`
+	Number                     int    `json:"number,omitempty"`
+	URL                        string `json:"url,omitempty"`
 }
 
 // StoredTaskStatusSummary is the persistence boundary for one task. The
@@ -272,7 +282,7 @@ func validateActiveError(activeError *ActiveErrorSummary) error {
 	if activeError.Phase != "" && activeError.Phase != models.LaunchErrorPhaseBootstrap {
 		return fmt.Errorf("active error has unknown phase")
 	}
-	if !slices.Equal(activeError.Causes, models.NormalizeAgentErrorCauses(activeError.Causes)) {
+	if !models.AgentErrorCausesEqual(activeError.Causes, models.NormalizeAgentErrorCauses(activeError.Causes)) {
 		return fmt.Errorf("active error has malformed causes")
 	}
 	if activeError.Details != models.NormalizeAgentErrorDetails(activeError.Details, activeError.Causes) {
@@ -285,7 +295,8 @@ func validatePullRequest(pr *PullRequestSummary) error {
 	if pr == nil {
 		return nil
 	}
-	if pr.Count < 0 || pr.OpenCount < 0 || pr.Number < 0 {
+	if pr.Count < 0 || pr.OpenCount < 0 || pr.Number < 0 || pr.WorkflowApprovalPRNumber < 0 ||
+		pr.MergeConflictPRNumber < 0 {
 		return fmt.Errorf("pull request counts and number cannot be negative")
 	}
 	fields := []struct {
@@ -296,6 +307,8 @@ func validatePullRequest(pr *PullRequestSummary) error {
 		{"pull request state", pr.State, maxPullRequestStateBytes},
 		{"pull request aggregate state", pr.AggregateState, maxPullRequestStateBytes},
 		{"pull request URL", pr.URL, maxPullRequestURLBytes},
+		{"workflow approval repository", pr.WorkflowApprovalRepository, maxPullRequestRepositoryBytes},
+		{"merge conflict repository", pr.MergeConflictRepository, maxPullRequestRepositoryBytes},
 	}
 	for _, field := range fields {
 		if err := validateUTF8Bytes(field.name, field.value, field.limit); err != nil {
@@ -363,6 +376,7 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 	return json.Marshal(semanticPayload{
 		LastActivityAt:      s.LastActivityAt,
 		PrimarySession:      s.PrimarySession,
+		HasRunningSession:   s.HasRunningSession,
 		ForegroundActivity:  s.ForegroundActivity,
 		ActiveSubagentCount: s.ActiveSubagentCount,
 		PendingAction:       s.PendingAction,
@@ -379,6 +393,7 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 type semanticPayload struct {
 	LastActivityAt      *time.Time             `json:"last_activity_at,omitempty"`
 	PrimarySession      *PrimarySessionSummary `json:"primary_session,omitempty"`
+	HasRunningSession   *bool                  `json:"has_running_session,omitempty"`
 	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
 	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
 	PendingAction       string                 `json:"pending_action,omitempty"`

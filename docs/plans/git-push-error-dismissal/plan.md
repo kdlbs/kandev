@@ -90,3 +90,10 @@ Implemented and verified. The focused service and handler tests pass with `GOMAX
 
 - The existing generic action-button error state is not rendered, so the new Dismiss path must supply visible localized error feedback on failed writes.
 - Dismiss is client-generated from the legacy Git push metadata, so it remains available to already-stored rows without writing a new `actions` entry or changing the producer.
+
+
+Current-main review remediation: merged the current base and preserved its prompt-history API, recovery history renderer, retained-turn failure handling, and recovery stamp checks while retaining message-scoped Dismiss. Added `TestPostgresGitPushDismissalConcurrentFirstWrite` using two independent database connections; five race-enabled runs against disposable PostgreSQL 17 passed. The regression verifies one winning timestamp, one conversation revision increment, and retained diagnostics. The four focused frontend files passed 117 tests. Web type checking, full web lint, i18n validation, public-doc tests and validation, specification catalog and file validation, and shared harness validation passed. Fresh managed Chromium and mobile Chrome dismissal specs each passed, including persistence, task switching, later failures, and the mobile touch target. The old failed Codex probe regression passed five race-enabled runs after incorporating the upstream stderr-drain fix. Initial Go compilation and browser build attempts hit local disk exhaustion; retries followed recovery of available disk space. A cold-cache Go lint attempt timed out during package loading and was retried without changing source. Exact-head remote CI, review, and merge remain pending delivery.
+
+Final local backend checks: focused service/handler dismissal tests passed under `go test -trimpath -p 1 -race`; the store-conformance race suite passed, and `go run ./cmd/sqlguard ./internal` passed.
+
+Final changed-code backend lint passed with zero issues: `(cd apps/backend && GOMAXPROCS=2 golangci-lint run ./... --new-from-rev=6254b05eb0242b67900e160ff5b1d9acbb7962ad --timeout=5m)`.

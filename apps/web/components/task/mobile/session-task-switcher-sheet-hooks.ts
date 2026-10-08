@@ -67,7 +67,8 @@ function buildSheetItems(params: {
   acknowledgedAgentErrors: Record<string, string>;
   dismissedAgentErrors: Record<string, string>;
   automaticColorSettings: SheetItemCtx["automaticColorSettings"];
-  pendingArchiveTaskIds: ReadonlySet<string>;
+  manualColors: SheetItemCtx["manualColors"];
+  pendingRemovalTaskIds: ReadonlySet<string>;
   workspaceContextAccessDenied: boolean;
 }): TaskSwitcherItem[] {
   const {
@@ -81,7 +82,8 @@ function buildSheetItems(params: {
     acknowledgedAgentErrors,
     dismissedAgentErrors,
     automaticColorSettings,
-    pendingArchiveTaskIds,
+    manualColors,
+    pendingRemovalTaskIds,
     workspaceContextAccessDenied,
   } = params;
   if (workspaceContextAccessDenied) return [];
@@ -112,7 +114,8 @@ function buildSheetItems(params: {
     repositoriesById,
     stepColorById,
     automaticColorSettings,
-    pendingArchiveTaskIds,
+    manualColors,
+    pendingRemovalTaskIds,
   };
   return allTasks.map((task) => toSheetItem(task, context));
 }
@@ -122,7 +125,7 @@ export function useSheetData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const {
     allTasks,
-    pendingArchiveTaskIds,
+    pendingRemovalTaskIds,
     allSteps,
     stepsByWorkflowId,
     page,
@@ -143,6 +146,7 @@ export function useSheetData(workspaceId: string | null) {
   const automaticColorSettings = useAppStore(
     (state) => state.userSettings.sidebarTaskColorAutomation,
   );
+  const manualColors = useAppStore((state) => state.userSettings.sidebarTaskColors);
   const acknowledgedAgentErrors = useAppStore((state) => state.acknowledgedAgentErrors);
   const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
 
@@ -161,7 +165,8 @@ export function useSheetData(workspaceId: string | null) {
         acknowledgedAgentErrors,
         dismissedAgentErrors,
         automaticColorSettings,
-        pendingArchiveTaskIds,
+        manualColors,
+        pendingRemovalTaskIds,
         workspaceContextAccessDenied,
       }),
     [
@@ -175,7 +180,8 @@ export function useSheetData(workspaceId: string | null) {
       dismissedAgentErrors,
       wipQueueByTaskId,
       automaticColorSettings,
-      pendingArchiveTaskIds,
+      manualColors,
+      pendingRemovalTaskIds,
       workspaceContextAccessDenied,
     ],
   );

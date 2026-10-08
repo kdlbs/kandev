@@ -197,6 +197,41 @@ func TestCodexAppServerProbeClassifiesTrustedManagedRuntimeETarget(t *testing.T)
 	}
 }
 
+func TestCodexAppServerProbeClassifiesManagedRuntimeETargetAfterInitialize(t *testing.T) {
+	binDir := t.TempDir()
+	writeCodexAppServerFakeNpx(t, filepath.Join(binDir, "npx"), `#!/bin/sh
+while IFS= read -r request; do
+  id=$(printf '%s\n' "$request" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$request" in
+    *'"method":"initialize"'*)
+      printf '{"id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"model/list"'*)
+      printf '%s\n' 'npm error code ETARGET' 'npm error notarget No matching version found for @openai/codex@0.154.0.' >&2
+      exit 1
+      ;;
+  esac
+done
+`)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	response, err := NewCodexAppServerInferenceExecutor(zap.NewNop()).Probe(context.Background(), &ProbeRequest{
+		InferenceConfig: &InferenceConfigDTO{
+			Command: []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@openai/codex@0.154.0", "app-server"},
+			WorkDir: t.TempDir(),
+			Env:     map[string]string{"HOME": t.TempDir()},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if response.FailureCode != ProbeFailureManagedRuntimeNPMResolution {
+		t.Fatalf("failure code = %q, want %q", response.FailureCode, ProbeFailureManagedRuntimeNPMResolution)
+	}
+	if response.Success || strings.Contains(response.Error, "npm error") {
+		t.Fatalf("probe did not return a sanitized failure: %#v", response)
+	}
+}
+
 func isPreparedNPMPrefix(prefix, workDir string) bool {
 	return filepath.IsAbs(prefix) && prefix != managedruntime.NPMProjectPrefix && prefix != workDir &&
 		filepath.Dir(filepath.Clean(prefix)) == filepath.Clean(os.TempDir()) &&

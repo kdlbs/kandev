@@ -3389,12 +3389,18 @@ func (s *Service) Snapshot(ctx context.Context, identity QueueSessionIdentity) (
 func (s *Service) CountPendingByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error) {
 	counts, err := s.repo.CountPendingByTaskIDs(ctx, taskIDs)
 	if err != nil {
-		s.logger.Error("count pending by task ids failed",
-			zap.Int("task_count", len(taskIDs)),
-			zap.Error(err))
+		if !isCanceledRequestError(ctx, err) {
+			s.logger.Error("count pending by task ids failed",
+				zap.Int("task_count", len(taskIDs)),
+				zap.Error(err))
+		}
 		return nil, err
 	}
 	return counts, nil
+}
+
+func isCanceledRequestError(ctx context.Context, err error) bool {
+	return errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled)
 }
 
 // CountPendingByTask returns the pending prompt count for one task.

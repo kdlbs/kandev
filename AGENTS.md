@@ -73,7 +73,7 @@ The commitlint hook caps the header at **100 characters** (`type(scope): descrip
 
 ### Release & Versioning
 
-Stable Kandev releases use one **SemVer** `X.Y.Z` across npm, Homebrew, Scoop, GitHub Releases, Desktop, and containers. Scheduled npm-only Nightlies use `X.Y.(Z+1)-nightly.sha<12-hex>` without moving any Stable channel. Both flows run in `.github/workflows/release.yml`. Required web, runtime, and desktop artifact uploads retry up to three total attempts with 30-second and 60-second waits; desktop matrix jobs continue independently, while publication still requires every target to succeed. A normal Stable release uses the protected `RELEASE_PR_BYPASS_TOKEN` environment secret only for its administrator PR merge. A Stable release is complete only after the GitHub Release, npm, Homebrew, and Scoop publications succeed and are verified. Full details are in the `/release` skill — load it when cutting a release, changing version channels, or debugging release artifacts. Stable default runtime archives for npm, Homebrew, Scoop, winget, Chocolatey, and Desktop contain host binaries plus a helper manifest; use `-full` for offline CLI, while containers and npm Nightlies remain full.
+Stable Kandev releases use one **SemVer** `X.Y.Z` across npm, Homebrew, Scoop, GitHub Releases, Desktop, and containers. Scheduled npm-only Nightlies use `X.Y.(Z+1)-nightly.sha<12-hex>` without moving any Stable channel. Both flows run in `.github/workflows/release.yml`. Required web, runtime, and desktop artifact uploads retry up to three total attempts with 30-second and 60-second waits; desktop matrix jobs continue independently, while publication still requires every target to succeed. A normal Stable release uses the protected `RELEASE_PR_BYPASS_TOKEN` environment secret only for its administrator PR merge. A Stable release is complete only after the GitHub Release, npm, Homebrew, and Scoop publications succeed and are verified. Full details are in the `/release` skill — load it when cutting a release, changing version channels, or debugging release artifacts. Stable default runtime archives for npm, Homebrew, Scoop, winget, Chocolatey, and Desktop contain host binaries plus a helper manifest; use `-full` for offline CLI, while containers and npm Nightlies remain full. Contributor notices use `.github/workflows/notify-release-contributors.yml` and `.github/scripts/notify-release-contributors.py`. The standalone workflow supports latest-release selection, exact tags, and preview without posting. The Release checkbox defaults to off and posts only after GitHub Release, npm, Homebrew, and Scoop succeed. Nightly, dry-run, desktop-validation, failed publication, and cancellation before notification start skip notices. Cancelling during posting can leave partial results; exact-tag manual reruns recover safely. The helper reads maintainers from `cliff.toml`, checks that each linked PR belongs to the selected tag, and skips bots, maintainers, and untrusted duplicate comments. Use the standalone workflow with the exact tag to recover a partial run without repeating publication.
 
 ### Code Quality
 
@@ -132,10 +132,10 @@ line-anchored and will not see one buried in a `/** */` block. The pseudo-locale
 (Settings → General → Appearance, dev/e2e builds) is still the completeness check
 for copy no literal scan can see.
 
-**Translations gate the build.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw` and `ja` are
-complete, and `check-i18n-keys.mjs` now fails on a missing key, an extra key, a
+**Translations gate the build.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw`, `ja` and `ko`
+are complete, and `check-i18n-keys.mjs` now fails on a missing key, an extra key, a
 dropped placeholder, or a value left identical to English. Adding user-facing
-copy means adding it in six languages; for the Traditional Chinese pair run
+copy means adding it in seven languages; for the Traditional Chinese pair run
 `pnpm run i18n:zh-hant` rather than hand-translating. When the correct
 translation genuinely IS the English word, declare it in
 `src/locales/<locale>/_verbatim.json` with a reason — brand nouns, acronyms and

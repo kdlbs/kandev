@@ -51,3 +51,10 @@ func TestAgentStartupFailureDoesNotWrapCancellationOrManagedRuntimePolicy(t *tes
 		})
 	}
 }
+
+func TestManagedRuntimeStartupCodeDoesNotEnableGenericRecovery(t *testing.T) {
+	classified := applyInvariants(&Error{Code: CodeManagedRuntimeStartup})
+	if classified.Class != ClassUnclassified || classified.AutoRetryable || classified.FallbackAllowed || !classified.UserAction {
+		t.Fatalf("managed startup policy = %+v, want user action without generic retry or fallback", classified)
+	}
+}

@@ -41,7 +41,6 @@
   "gitlabMergeRequest": "GitLab Merge Request",
   "goToTask": "Go to Task",
   "group": "Group",
-  "groupTasksIntoSectionsByState": "Group tasks into sections by state, workflow, repository, or none.",
   "healthIssues": "Health issues",
   "improveKandev": "Improve Kandev",
   "jiraTicket": "Jira Ticket",
@@ -133,5 +132,6 @@
   "bulkSelected_other": "{{count}} selected",
   "bulkActions": "Actions",
   "selectTasks": "Select tasks",
-  "cancelTaskSelection": "Cancel selection"
+  "cancelTaskSelection": "Cancel selection",
+  "groupTasksIntoSectionsByWorkflowStep": "Group tasks into sections by workflow step, workflow, repository, or none."
 }

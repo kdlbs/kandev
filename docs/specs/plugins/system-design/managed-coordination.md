@@ -149,6 +149,117 @@ Its delete-on-disable behavior does not become a hidden migration. The reference
 plugin uses only the new lifetime. An optional explicit migration maps an owned
 v1 conversation into the new lifetime while idle, with human confirmation.
 
+### Atomic managed settings admission
+
+The [correction plan](../../../plans/managed-conversation-admission/plan.md) covers
+AC-PLUGINS-MANAGED-COORDINATION-002.1 and .4-.8. Preserve draft status and history;
+no schema, wire/SDK or execution redesign.
+
+Discovery reads are advisory. Native admission authorizes from current rows,
+replacing service-local locks and separate full task/session configuration writes.
+
+Add mandatory typed `EnsureManagedConversation` and
+`ChangeManagedConversationState` methods to the task repository/adapter slice.
+Typed domain requests/results and errors belong in
+`internal/task/repository/managedconversation`: server-owned coordinates, prepared
+settings/policy, expected revision, operation/digest; state intent is pause, detach
+or invalidate. Results contain fresh task/session projections and created/changed/
+replayed flags. No callback, arbitrary patch, exposed tx or generic version engine.
+Backendapp/provider wiring requires these methods at compile time; no optional
+unsafe fallback. Legacy-only test adapters may fail closed as unavailable. Profile
+resolution, tool sorting, validation ordering and configuration-required stay intact.
+
+#### Native transaction and current predicates
+
+Use the writer pool. SQLite reserves its writer BEFORE gated reads through the
+existing db.LockTaskHierarchy no-op UPDATE, including independent pools.
+PostgreSQL uses READ COMMITTED: workspace hierarchy boundary, physical task row,
+primary session rows in ID order, then existing primary executor row. Read current
+task after locking; re-read session/executor after locking. Separate lock queries
+precede joined session projection: FOR UPDATE on a nullable LEFT JOIN is invalid.
+Preserve task -> session order used by creation, promotion, purge and registration.
+Reuse tx-level scan/insert helpers; never acquire another repository connection.
+
+Physical session UPDATEs fence runtime state/attempt/snapshot CAS and metadata
+writers without new advisory locks. UpsertExecutorRunning already locks task then
+session. Lock an existing executor row too: direct executor update/deletion need
+not take task/session locks. Absent executor registration is fenced by canonical
+task/session locks, not a lock on an absent row; raw unguarded imports are excluded.
+Workspace locking covers missing task creation/deletion; task locks cover primary
+creation/promotion. Honor active cleanup barriers before repair/config. No runtime,
+event, wake or lifecycle callback under locks. Rollback every own failure and
+cancellation before commit; no automatic stale-command retry as a new operation.
+
+Validate retained/ephemeral identity, physical/metadata workspace, installation,
+instance and detached state from current task. Check operation+digest replay BEFORE
+revision. Replay may succeed while busy without config writes; missing-primary
+repair uses CURRENT stored config and retains revision. Different digest follows
+existing revision handling and host ledger conflicts. Non-replay stale revision
+maps to Aborted before busy checks. Changed config with current STARTING/RUNNING or
+nonempty joined execution ID maps to FailedPrecondition, even a leftover execution
+ID on an otherwise idle row. CURRENT primary identity/incarnation, attempt metadata,
+state and execution govern admission; never write a replaced predecessor.
+Unchanged config at current revision returns exists while busy without writes or
+revision increment. Missing/detached remains NotFound; service maps typed native
+errors to existing codes.
+
+#### Commit, writers, and exclusions
+
+Update only primary agent_profile_id, executor_id, executor_profile_id, updated_at.
+Preserve runtime state/execution, route, snapshots, metadata, environment/workspace,
+errors/completion. Overlay only managed config, invalidated reset, revision and
+operation/digest into CURRENT task metadata using raw JSON members plus timestamp; preserve other scalars
+and keys, pause/detach/retention, empty-field semantics, effective profile, instruction
+and policy comparison. One change or non-replay primary repair increments once.
+Reuse normal task creation defaults, including labels `[]`. Create task+primary
+together at revision 1; reconcile competing
+creation against committed ownership. Failure rolls both back. Historical partial
+rows/replay repair retain identity/transcript. Replace the fake expectation of a
+new failed creation leaving a task with atomic rollback plus successful retry.
+
+Canonical config/revision writers in managed_conversation_settings.go are create, reconcile/
+persist, exact pause, installation pause, invalidation and detach. Route ALL through
+the seam. Exact pause checks current replay/revision, increments only on change,
+retaining operation stamps. A missing non-replay primary fails before pause commit; accepted replay repairs it. Lifecycle inventory selects candidates; each transaction
+revalidates owner and overlays its flags, incrementing on first transition.
+Invalidation clears operation/digest; detach also pauses. Neither rejects busy
+runtime nor overwrites a config winner. Stop/notifier run AFTER commit; failure
+reports must acknowledge committed flags. Keep host approvalEffectMu, disable,
+queued-input and immediate busy-dispatch contracts; no second authority/dispatcher.
+
+DeleteManaged is lifecycle removal, not a config/revision writer. Its explicit-delete
+revision preflight and cleanup protocol stay unchanged. Admission observes task
+absence/cleanup barriers; never repair disposal or wrap DeleteTask in this tx or
+replace lifecycle deletion with bare SQL. Legacy v1, ordinary full-snapshot/bulk
+imports and generic task writes retain existing contracts. Ordinary metadata merges
+serialize physically and survive this admission; later explicit legacy replacement
+is excluded. Runtime preparation predating config commit gets no new launch snapshot
+contract. Runtime state/execution accepted BEFORE admission is preserved; writers
+blocked behind it resume under their existing rules.
+
+#### Results and evidence
+
+Descriptors use the committed projection. Rejection has no applied descriptor,
+creation/update event, wake or stop. pluginHostManagedConversationManager retains actual
+CommandStore.Admit/Complete; Aborted/FailedPrecondition remain CONFLICT. Operation
+stamps support replay after lost receipt acknowledgement; preserve
+command_receipt_unavailable with committed descriptor, not an effect-free claim.
+Publish task.created after new-task commit and narrow task.updated after each
+committed task-row change. No updates for rejection, replay or write-free nochange.
+Resume notification follows committed pause admission.
+
+The work order defines permanent existing-API RED before correction without ROOT
+proof replay. Independent real SQLite and registered Host v2 prove status/receipts;
+only profiles/external transport may be mocked. PG16 requires physical task/session/
+executor waits, cancellation and READ COMMITTED current-result proof. Inject failure
+between writes for update/create/repair rollback; check identity, metadata, runtime,
+events, replay/nochange. SQLguard/store conformance apply without exemptions.
+
+No rendering, navigation, touch/scroll, viewport, copy or browser/runtime instance
+changes: mobile parity uses pure state/data exception with integration proof.
+Public plugins-authoring already promises revision/active-turn rejection; restoring
+it needs no guide edit. Preserve the broad coordinator package's completed history.
+
 ## Ordered input and recovery
 
 Keep `DispatchManagedAgentConversationExact` as immediate dispatch with a typed

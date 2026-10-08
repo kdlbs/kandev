@@ -36,14 +36,17 @@ type E2EStoreWindow = Window & {
   };
 };
 
-async function getBrowserSessionState(page: Page, sessionId: string): Promise<string | null> {
+export async function getBrowserSessionState(
+  page: Page,
+  sessionId: string,
+): Promise<string | null> {
   return page.evaluate((id) => {
     const state = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState();
     return state?.taskSessions.items[id]?.state ?? null;
   }, sessionId);
 }
 
-async function getSessionState(
+export async function getSessionState(
   apiClient: ApiClient,
   taskId: string,
   sessionId: string,
@@ -98,7 +101,10 @@ export async function waitForSessionReady(
     .toEqual({ api: true, browser: true });
 }
 
-async function createDelayedResumeProfile(apiClient: ApiClient, delay = "30s"): Promise<string> {
+export async function createDelayedResumeProfile(
+  apiClient: ApiClient,
+  delay = "30s",
+): Promise<string> {
   const { agents } = await apiClient.listAgents();
   const mockAgent = agents.find((agent) => agent.name === "mock-agent");
   if (!mockAgent) throw new Error("mock-agent not found while creating delayed resume profile");
@@ -121,13 +127,13 @@ export async function seedDelayedResumeFixture(
   apiClient: ApiClient,
   seedData: SeedData,
   backend: BackendContext,
-  title: string,
+  options: { title: string; resumeDelay?: string },
 ): Promise<DelayedResumeFixture> {
-  const delayedProfileId = await createDelayedResumeProfile(apiClient);
+  const delayedProfileId = await createDelayedResumeProfile(apiClient, options.resumeDelay);
   try {
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
-      title,
+      options.title,
       delayedProfileId,
       {
         description: "/e2e:simple-message",

@@ -4,7 +4,7 @@ system: desktop
 requirements:
   - REQ-DESKTOP-DESKTOP-TAURI-APP-001
 created: 2026-06-23
-updated: 2026-09-25
+updated: 2026-09-30
 owners:
   - tbd
 ---
@@ -19,7 +19,7 @@ This design defines the technical contract for `REQ-DESKTOP-DESKTOP-TAURI-APP-00
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-DESKTOP-DESKTOP-TAURI-APP-001` | [Desktop architecture](#desktop-architecture), [macOS window chrome](#macos-window-chrome) |
+| `REQ-DESKTOP-DESKTOP-TAURI-APP-001` | [Desktop architecture](#desktop-architecture), [macOS window chrome](#macos-window-chrome), [Auxiliary child ownership](#auxiliary-child-ownership) |
 
 ## Desktop architecture
 
@@ -379,8 +379,54 @@ display before being shown.
 - Rewriting the shared frontend or backend in Rust.
 - General native filesystem plugin access from the SPA.
 
+## Auxiliary child ownership
+
+The shell owns the exit status of each auxiliary process it starts. This
+covers `AC-DESKTOP-DESKTOP-TAURI-APP-001.12` through `.14`. The backend's
+existing `BackendState` supervision remains separate.
+
+`apps/desktop/src-tauri/src/child_process.rs` provides a private managed-launch
+helper. It accepts a Rust `Command`, not WebView arguments. It allocates a
+named worker thread before any child starts. The worker spawns the command,
+returns the spawn result and PID through a one-shot channel, and calls
+`Child::wait()` on the exact child. The caller waits only for that spawn
+acknowledgement. It never waits for process exit. If acknowledgement delivery
+fails, the worker still waits for its child. A thread-allocation failure cannot
+leave an unwatched child because spawn follows thread allocation.
+
+The macOS branch of `external_links::open_validated_external_url` keeps
+`validate_external_url` and invokes `/usr/bin/open` with two distinct arguments:
+`--` and the validated URL. It uses the managed-launch helper and null standard
+streams. It does not use a shell, accept a program from the page, or call
+`tauri_plugin_opener` for this branch. The browser application keeps its normal
+independent lifetime. The existing plugin remains the Windows and Linux path.
+The common menu handler and origin-checked Tauri command already use this
+function, so both receive the correction.
+
+The temporary GUI launch uses the same helper, as described in the
+[isolated startup design](isolated-startup.md#process-modes). Its wait worker
+does not create a parent-lifetime watchdog or terminate the GUI child.
+
+Workers report a wait error or unsuccessful helper exit through bounded native
+stderr messages. Messages identify the operation and status, without the URL,
+environment, or captured process output. Spawn and worker-allocation failures
+return through the existing `Result<(), String>` command contract. A helper
+exit after spawn does not retroactively reject a completed command.
+
+No worker uses `waitpid(-1)`, `SIGCHLD` handlers, automatic child-status discard,
+or a global reaper. Every wait targets its own `Child`. Rust Unix tests prove
+that the PID no longer has a waitable status after cleanup, while an unrelated
+live child remains under its original owner. Production does not poll process
+lists or introduce a timer, persistence, configuration, or a runtime flag.
+
+This change preserves existing child lifetimes and native capabilities.
+[ADR-0039](../../../decisions/0039-native-desktop-integration-boundary.md)
+and the [temporary-process decision](../../../decisions/2026-09-25-temporary-desktop-test-processes.md)
+remain the authority. The local wait implementation needs no new ADR.
+
 ## Implementation plans and decisions
 
+- [Desktop child reaping fix](../../../plans/desktop-child-reaping/plan.md)
 - [Initial Desktop Tauri App plan](../../../plans/desktop-tauri-app/plan.md)
 - [Desktop Native Integration plan](../../../plans/desktop-native-integration/plan.md)
 - [Isolated desktop startup plan](../../../plans/desktop-isolated-startup/plan.md)

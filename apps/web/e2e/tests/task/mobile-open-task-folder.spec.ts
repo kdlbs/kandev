@@ -6,6 +6,7 @@ import {
   mockFolderAvailability,
 } from "../../helpers/open-task-folder";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForSessionDone } from "../../helpers/session";
 
 // @covers AC-TASKS-OPEN-FOLDER-001.2, AC-TASKS-OPEN-FOLDER-001.4
 test("phone Files action opens the selected repository folder", async ({
@@ -32,11 +33,18 @@ test("phone Files action opens the selected repository folder", async ({
     },
   );
   await mockFolderAvailability(testPage, true);
+  if (!task.session_id) throw new Error("Task has no session");
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "Waiting for the folder task's initial turn",
+    45_000,
+  );
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle();
-  if (!task.session_id) throw new Error("Task has no session");
   const worktreeId = await findFolderTestWorktree(
     apiClient,
     task.id,
@@ -109,6 +117,14 @@ test("missing host folder opener disables the action before any picker opens", a
     requests++;
     await route.fulfill({ json: { success: true } });
   });
+  if (!task.session_id) throw new Error("Task has no session");
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "Waiting for the folder task's initial turn",
+    45_000,
+  );
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();

@@ -36,7 +36,6 @@
   "gitlabMergeRequest": "GitLab 合併請求",
   "goToTask": "轉到任務",
   "group": "分組",
-  "groupTasksIntoSectionsByState": "按狀態、工作流程、儲存庫或無分組將任務歸入分割槽。",
   "healthIssues": "健康問題",
   "improveKandev": "改進 Kandev",
   "jiraTicket": "Jira 工單",
@@ -133,5 +132,6 @@
   "bulkActions": "操作",
   "selectTasks": "選擇任務",
   "cancelTaskSelection": "取消選擇",
-  "bulkSelected_one": "已選擇 {{count}} 個"
+  "bulkSelected_one": "已選擇 {{count}} 個",
+  "groupTasksIntoSectionsByWorkflowStep": "按工作流程步驟、工作流程、儲存庫分組，或不分組。"
 }

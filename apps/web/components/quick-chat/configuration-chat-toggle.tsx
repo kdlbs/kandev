@@ -22,7 +22,9 @@ export function ConfigurationChatToggle({
         <h3 id="config-chat-mode-label" className="text-sm font-medium">
           {t("chat:configurationChat")}
         </h3>
-        <p className="text-xs text-muted-foreground">{t("chat:configurationChatDescription")}</p>
+        {checked && (
+          <p className="text-xs text-muted-foreground">{t("chat:configurationChatDescription")}</p>
+        )}
       </div>
       <Switch
         aria-label={t("chat:configurationChat")}

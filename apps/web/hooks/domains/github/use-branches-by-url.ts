@@ -159,6 +159,18 @@ function finalizeRequest(refs: Refs, url: string, request: RequestIdentity): voi
   refs.abortersRef.current.delete(url);
 }
 
+function invalidateRegistryCache(refs: Refs, setState: SetState): void {
+  // Fence every old callback before cancellation can settle its request.
+  for (const [url, sequence] of refs.seqRef.current) {
+    refs.seqRef.current.set(url, sequence + 1);
+  }
+  refs.inFlightRef.current.clear();
+  refs.loadedRef.current.clear();
+  for (const controller of refs.abortersRef.current.values()) controller.abort();
+  refs.abortersRef.current.clear();
+  setState({});
+}
+
 export function useBranchesByURL(workspaceId: string | null = null): UseBranchesByURLResult {
   const registryVersion = usePluginRegistry().getVersion();
   const registryVersionRef = useRef(registryVersion);
@@ -223,8 +235,8 @@ export function useBranchesByURL(workspaceId: string | null = null): UseBranches
       const url = rawUrl.trim();
       if (!url) return;
       if (registryVersionRef.current !== registryVersion) {
+        invalidateRegistryCache(refsRef.current, setState);
         registryVersionRef.current = registryVersion;
-        loadedRef.current.delete(url);
       }
       if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
       // Accept plain repo URLs plus PR/issue URLs — branches are listed against

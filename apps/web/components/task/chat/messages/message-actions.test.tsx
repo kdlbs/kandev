@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { StoreApi } from "zustand";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import { defaultState } from "@/lib/state/default-state";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -9,9 +10,13 @@ import {
   type Turn,
 } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
+import { resolveMessageTimeLocale } from "@/lib/i18n/message-time";
 import { MessageActions } from "./message-actions";
 
 const TOUCH_DRAWER = vi.hoisted(() => ({ enabled: false }));
+const { copyToClipboard } = vi.hoisted(() => ({
+  copyToClipboard: vi.fn().mockResolvedValue(true),
+}));
 const FORK = vi.hoisted(() => ({ request: vi.fn() }));
 
 vi.mock("@/lib/services/session-launch-service", () => ({
@@ -21,6 +26,8 @@ vi.mock("@/lib/services/session-launch-service", () => ({
 vi.mock("@/hooks/use-compact-task-chrome", () => ({
   useTouchDrawer: () => TOUCH_DRAWER.enabled,
 }));
+
+vi.mock("@/lib/utils/copy-to-clipboard", () => ({ copyToClipboard }));
 
 const MESSAGE_TIMESTAMP = "2026-07-20T10:15:00Z";
 const MESSAGE_TURN_DURATION_TEST_ID = "message-turn-duration";
@@ -95,11 +102,27 @@ afterEach(() => {
   TOUCH_DRAWER.enabled = false;
   cleanup();
   storeApi = null;
+  copyToClipboard.mockClear();
   FORK.request.mockReset();
 });
 
+describe("MessageActions copy", () => {
+  it("copies the full stored text, prefix included, for a coordinator About-prefixed message", () => {
+    const content = "About KAN-418: why is this here?";
+    render(
+      <StateProvider>
+        <MessageActions message={userMessage({ content })} />
+      </StateProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /copy message to clipboard/i }));
+
+    expect(copyToClipboard).toHaveBeenCalledWith(content);
+  });
+});
+
 describe("MessageActions timestamp tooltip", () => {
-  it("renders the relative timestamp as a <time> element with the full absolute time as its title", () => {
+  it("renders the relative timestamp as a <time> element with the absolute short form as its title", () => {
     const { container } = render(
       <StateProvider>
         <MessageActions message={assistantMessage()} />
@@ -109,7 +132,50 @@ describe("MessageActions timestamp tooltip", () => {
     const timeEl = container.querySelector("time");
     expect(timeEl).not.toBeNull();
     expect(timeEl?.getAttribute("dateTime")).toBe(MESSAGE_TIMESTAMP);
-    expect(timeEl?.getAttribute("title")).toBe(new Date(MESSAGE_TIMESTAMP).toLocaleString());
+    expect(timeEl?.getAttribute("title")).toBe(
+      new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(
+        new Date(MESSAGE_TIMESTAMP),
+      ),
+    );
+  });
+
+  it.each([
+    ["absolute_short", { dateStyle: "short", timeStyle: "short" }],
+    ["absolute_long", { dateStyle: "long", timeStyle: "medium" }],
+  ] as const)("renders the %s label and relative counterpart", (display, options) => {
+    const { container } = render(
+      <StateProvider
+        initialState={{
+          userSettings: { ...defaultState.userSettings, messageTimeDisplay: display },
+        }}
+      >
+        <MessageActions message={assistantMessage()} />
+      </StateProvider>,
+    );
+
+    const timeEl = container.querySelector("time");
+    const label = new Intl.DateTimeFormat(resolveMessageTimeLocale(), options).format(
+      new Date(MESSAGE_TIMESTAMP),
+    );
+    expect(timeEl?.textContent).toBe(label);
+    expect(timeEl?.getAttribute("title")).toMatch(/ago$/);
+    expect(timeEl?.getAttribute("aria-label")).toContain(label);
+    expect(timeEl?.getAttribute("aria-label")).toContain(timeEl?.getAttribute("title") ?? "");
+  });
+
+  it("exposes both the visible timestamp and counterpart in its accessible name", () => {
+    const { container } = render(
+      <StateProvider>
+        <MessageActions message={assistantMessage()} />
+      </StateProvider>,
+    );
+
+    const timeEl = container.querySelector("time");
+    const label = timeEl?.textContent ?? "";
+    const counterpart = timeEl?.getAttribute("title") ?? "";
+    const accessibleName = timeEl?.getAttribute("aria-label") ?? "";
+    expect(accessibleName).toContain(label);
+    expect(accessibleName).toContain(counterpart);
   });
 
   it.each(["", "not-a-date", "0", "2026-02-30T10:00:00Z"])(
@@ -141,7 +207,10 @@ describe("MessageActions timestamp tooltip", () => {
 describe("MessageActions timestamp tooltip on touch devices", () => {
   it("exposes the full absolute time via a tap-to-open drawer instead of relying on hover-only title", () => {
     TOUCH_DRAWER.enabled = true;
-    const expectedAbsoluteTime = new Date(MESSAGE_TIMESTAMP).toLocaleString();
+    const expectedAbsoluteTime = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "short",
+      timeStyle: "short",
+    }).format(new Date(MESSAGE_TIMESTAMP));
 
     render(
       <StateProvider>

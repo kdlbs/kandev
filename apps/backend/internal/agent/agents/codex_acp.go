@@ -112,6 +112,17 @@ func (a *CodexACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
 	return newManagedNPMRuntimeSpec(codexACPPackage)
 }
 
+func (a *CodexACP) RuntimeProviderObservation() RuntimeComponentDescriptor {
+	return RuntimeComponentDescriptor{
+		Name:               "Codex CLI",
+		Package:            "@openai/codex",
+		Source:             RuntimeComponentBundled,
+		Owner:              RuntimeComponentOwnerKandev,
+		ExternalVersionEnv: "CODEX_PATH",
+		GuidanceURL:        "https://github.com/openai/codex",
+	}
+}
+
 func (a *CodexACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{

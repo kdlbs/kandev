@@ -110,13 +110,12 @@ test.describe("Session recovery", () => {
   }) => {
     test.setTimeout(150_000);
 
-    const fixture = await seedDelayedResumeFixture(
-      testPage,
-      apiClient,
-      seedData,
-      backend,
-      "Session cancel and retry recovery",
-    );
+    // The cancelled startup and the retry both load this session. Keep each
+    // injected delay short enough for the response assertion after cleanup.
+    const fixture = await seedDelayedResumeFixture(testPage, apiClient, seedData, backend, {
+      title: "Session cancel and retry recovery",
+      resumeDelay: "15s",
+    });
 
     try {
       // Cancel the actual STARTING session while the provider load is held by
@@ -141,6 +140,8 @@ test.describe("Session recovery", () => {
         fixture.identity.sessionId,
         90_000,
       );
+      // Delay only the cancelled process; the new process uses the normal resume path.
+      await apiClient.updateAgentProfile(fixture.delayedProfileId, { env_vars: [] });
       await fixture.session.composerReady();
       await fixture.session.sendMessage("/e2e:simple-message");
       await fixture.session.expectChatResponseVisible("simple mock response", 1, {
@@ -270,13 +271,9 @@ test.describe("Session recovery", () => {
   }) => {
     test.setTimeout(120_000);
 
-    const fixture = await seedDelayedResumeFixture(
-      testPage,
-      apiClient,
-      seedData,
-      backend,
-      "Session startup composer readiness test",
-    );
+    const fixture = await seedDelayedResumeFixture(testPage, apiClient, seedData, backend, {
+      title: "Session startup composer readiness test",
+    });
 
     try {
       const editor = fixture.session.activeChat().getByTestId("chat-input-editor");

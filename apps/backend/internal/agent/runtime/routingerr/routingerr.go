@@ -51,8 +51,10 @@ const (
 	CodeNpxCacheCorrupted           Code = "npx_cache_corrupted"
 	CodeManagedRuntimeNpmResolution Code = "managed_runtime_npm_resolution"
 	CodeManagedRuntimeNpmPolicy     Code = "managed_runtime_npm_policy"
+	CodeManagedRuntimeStartup       Code = "managed_runtime_startup"
 	CodeResumeCorrupted             Code = "resume_corrupted"
 	CodeAgentTransportLost          Code = "agent_transport_lost"
+	CodeProviderResourceExhausted   Code = "provider_resource_exhausted"
 )
 
 // RemediationStartFreshSession is the symbolic RemediationPath value for
@@ -131,7 +133,7 @@ type Error struct {
 func ClassForCode(code Code) Class {
 	switch code {
 	case CodeNetworkUnavailable, CodeProviderUnavailable, CodeProviderOverloaded,
-		CodeModelCapacity, CodeRateLimited, CodeAgentTransportLost:
+		CodeModelCapacity, CodeRateLimited, CodeAgentTransportLost, CodeProviderResourceExhausted:
 		return ClassTransient
 	case CodeAuthRequired, CodeMissingCredentials, CodeSubscriptionRequired,
 		CodeQuotaLimited, CodeModelUnavailable, CodeProviderNotConfigured:
@@ -159,6 +161,7 @@ type Input struct {
 	StructuredErr             error
 	HTTPStatus                int
 	ResetHint                 *time.Time
+	OccurredAt                time.Time // observation time for this provider diagnostic
 	Stderr                    string
 	Stdout                    string
 	ManagedRuntimePackageSpec string // trusted exact package from the managed runtime command
@@ -179,7 +182,16 @@ func Classify(in Input) *Error {
 		// Providers such as codex state the retry time only in the human
 		// notice, not in a structured field. Deriving it here lets every
 		// consumer (short retry, circuit breaker) honor it uniformly.
-		if hint := parseResetHint(in.Stderr + "\n" + in.Stdout); hint != nil {
+		observedAt := in.OccurredAt
+		if observedAt.IsZero() {
+			observedAt = time.Now()
+		}
+		text := in.Stderr + "\n" + in.Stdout
+		hint := parseResetHintAt(text, observedAt)
+		if hint == nil && e.ClassifierRule == "claude.stderr.session_limit.v1" {
+			hint = parseResetClockHintAt(text, observedAt)
+		}
+		if hint != nil {
 			e.ResetHint = hint
 		}
 	}
@@ -360,7 +372,7 @@ func applyInvariants(e *Error) *Error {
 	case CodeNpxCacheCorrupted:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
-	case CodeManagedRuntimeNpmResolution, CodeManagedRuntimeNpmPolicy:
+	case CodeManagedRuntimeNpmResolution, CodeManagedRuntimeNpmPolicy, CodeManagedRuntimeStartup:
 		e.UserAction = true
 		e.AutoRetryable = false
 		e.FallbackAllowed = false
@@ -379,6 +391,13 @@ func applyInvariants(e *Error) *Error {
 		// model-availability problem. Retrying the same provider is expected to
 		// succeed (the resume token belongs to the current provider), so
 		// falling back to another provider can't fix it and isn't offered.
+		e.AutoRetryable = true
+		e.FallbackAllowed = false
+		e.UserAction = false
+	case CodeProviderResourceExhausted:
+		// Exact Cursor retriable resource exhaustion is transient and
+		// auto-retryable against the same provider without fallback or
+		// user action.
 		e.AutoRetryable = true
 		e.FallbackAllowed = false
 		e.UserAction = false

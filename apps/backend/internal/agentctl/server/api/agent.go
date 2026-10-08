@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	acptransport "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp"
+	agentctlconfig "github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/server/process/probe"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -37,8 +38,9 @@ const (
 
 // InitializeRequest is a request to initialize the agent session.
 type InitializeRequest struct {
-	ClientName    string `json:"client_name"`
-	ClientVersion string `json:"client_version"`
+	ClientName        string `json:"client_name"`
+	ClientVersion     string `json:"client_version"`
+	ProcessGeneration uint64 `json:"process_generation,omitempty"`
 }
 
 // AgentInfoResponse contains information about the connected agent.
@@ -478,8 +480,11 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 
 	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
-
-	adapter := s.procMgr.GetAdapter()
+	adapter, generationCurrent := s.procMgr.GetAdapterForGeneration(req.ProcessGeneration)
+	if !generationCurrent {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent process generation changed before initialization", nil)
+		return resp
+	}
 	if adapter == nil {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
@@ -487,7 +492,11 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 
 	if err := adapter.Initialize(ctx); err != nil {
 		s.logger.Error("initialize failed", zap.Error(err))
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		var details map[string]any
+		if evidence := s.procMgr.ManagedStartupEvidence(ctx, req.ProcessGeneration); evidence != nil {
+			details = map[string]any{"startup_evidence": evidence}
+		}
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), details)
 		return resp
 	}
 
@@ -517,12 +526,12 @@ func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) []types.Mc
 	kandevMcpSse := types.McpServer{
 		Name: kandevMcpServerName,
 		Type: mcpTransportSSE,
-		URL:  fmt.Sprintf("http://localhost:%d%s", s.cfg.Port, mcpPathSSE),
+		URL:  agentctlconfig.MCPServerURL(s.cfg.MCPHost, s.cfg.Port, mcpPathSSE),
 	}
 	kandevMcpHttp := types.McpServer{
 		Name: kandevMcpServerName,
 		Type: mcpTransportHTTP,
-		URL:  fmt.Sprintf("http://localhost:%d%s", s.cfg.Port, mcpPathHTTP),
+		URL:  agentctlconfig.MCPServerURL(s.cfg.MCPHost, s.cfg.Port, mcpPathHTTP),
 	}
 	filtered := make([]types.McpServer, 0, len(mcpServers)+2)
 	filtered = append(filtered, kandevMcpHttp, kandevMcpSse)

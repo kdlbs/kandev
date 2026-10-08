@@ -374,7 +374,7 @@ function ChatInput({ taskId, taskTitle, taskDescription, onSubmitted }: ChatInpu
     setSubmitting(true);
     try {
       await createComment(taskId, { body: current.trim(), author_type: "user" });
-      setInputAndSync("");
+      setInputAndSync((latest) => (latest === current ? "" : latest));
       onSubmitted?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("task:failedToSendComment"));

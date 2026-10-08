@@ -6185,6 +6185,19 @@ func TestRecoverSessionDirtyCloneRefusalPreservesResumeTokenAndStampsRepairActio
 		ResumeToken: "provider-conversation-1", Resumable: true, CreatedAt: now, UpdatedAt: now,
 	}))
 	preflightCalls := 0
+	svc.SetWorkspaceRecoveryErrorReporter(workspaceRecoveryErrorReporterFunc(func(
+		reportCtx context.Context,
+		observation models.WorkspaceRecoveryErrorObservation,
+	) (string, error) {
+		projected := models.LastAgentError{
+			Message: "workspace needs explicit relocation", OccurredAt: time.Now().UTC(),
+			Scope: models.ErrorScopeSession, Phase: models.LaunchErrorPhaseBootstrap,
+			Code:            models.LaunchErrorCategoryManagedCloneRelocationRequired,
+			RecoveryActions: []string{models.RecoveryActionRelocateAndResume}, StampValue: "dirty-recovery-test-stamp",
+		}
+		_, stamp, err := repo.CommitWorkspaceRecoveryErrorIfCurrent(reportCtx, observation, projected)
+		return stamp, err
+	}))
 	svc.executor.SetSelectedWorktreeRecoveryAdmission(func(_ context.Context, req worktree.RecoveryAdmissionRequest) (*worktree.RecoveryAdmission, error) {
 		preflightCalls++
 		if req.TaskEnvironmentID != "env-dirty-recovery" || len(req.Slots) != 1 {

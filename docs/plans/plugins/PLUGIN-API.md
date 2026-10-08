@@ -166,6 +166,8 @@ interface PluginHostApi {
   // (mounted once at the app root with its own tooltip provider and isolated
   // behind its own error boundary).
   // Independent of keybindings — any plugin code path may call it.
+  // Closing restores focus to an available opener; nested modals keep focus
+  // inside the surviving surface.
   openModal(options: PluginModalOptions): PluginModalHandle;
   // Opens Kandev's native one-field task change-request linking workflow.
   // Provider code supplies copy, parsing, and mutation only; the host owns
@@ -323,7 +325,7 @@ interface PluginModalOptions {
 }
 
 interface PluginModalHandle {
-  close(): void; // closes this modal instance; no-op if already closed
+  close(): void; // closes this instance and restores focus when its opener remains available
 }
 
 interface PluginTaskLinkDialogOptions {
@@ -971,9 +973,8 @@ store or writes conversation history.
 // section: "main" (default) renders as a top-level sidebar entry;
 // "integrations" renders inside the sidebar's Integrations section alongside
 // the first-party integration links (GitHub, Jira, ...); "sidebar-footer"
-// renders as an icon button in the sidebar footer's icon row and as a
-// labelled row in the phone menu's Utilities group, subject to the footer's
-// inline budget — an over-budget item is reached through the footer's
+// renders as a labelled item in the desktop footer's utilities menu and as a
+// labelled row in the phone menu's Utilities group. All desktop items use the
 // overflow menu instead of an inline button; "settings" is accepted but
 // renders on no surface. Hosts predating a section value, or seeing an
 // unrecognised one, simply degrade to "main"'s placement — nothing is ever
@@ -1259,6 +1260,8 @@ interface PluginRegistry {
   // "new-session-input-actions" render composer actions for task/Quick Chat,
   // task creation, and new-session creation. Each forwards the typed
   // `PluginComposerSlotProps`, including native insert/focus/submit capabilities.
+  // Only create-mode "task-create-input-actions" receives
+  // `registerTaskCreatedHandler`; it is absent from edit and new-session slots.
   // These composer slots, both topbars, sidebar workspace actions, and both
   // status-bar slots support host.ui.Action and ActionGroup. Existing raw
   // components remain valid and retain their current appearance.
@@ -1326,9 +1329,11 @@ interface PluginRegistry {
   // registered by the plugin currently being viewed, so your card appears on
   // your own settings page and never on another plugin's — no per-id gating
   // needed in your component.
-  registerComponent(
+  // `Props` can provide an imported SDK slot contract such as
+  // `PluginComposerSlotProps` instead of narrowing `slotProps` from `unknown`.
+  registerComponent<Props = { slotProps?: unknown }>(
     slot: string,
-    Component: React.ComponentType<{ slotProps?: unknown }>,
+    Component: React.ComponentType<Props>,
   ): void;
 
   // WS action handler. Bridged into the existing lib/ws dispatch; called with the
@@ -1614,6 +1619,17 @@ interface PluginReviewPanelProps {
 
 type PluginPresentation = "desktop" | "mobile";
 
+interface PluginTaskCreatedIdentity {
+  readonly id: string;
+  readonly workspace_id: string;
+}
+type PluginTaskCreatedHandler = (
+  task: PluginTaskCreatedIdentity,
+) => void | Promise<void>;
+type RegisterPluginTaskCreatedHandler = (
+  handler: PluginTaskCreatedHandler,
+) => () => void;
+
 type PluginComposerSurface =
   | "task-chat"
   | "quick-chat"
@@ -1638,6 +1654,13 @@ interface PluginComposerSlotProps {
   submittable: boolean;
   disabledReason?: string;
   composer: PluginComposerCapability;
+  /**
+   * Create-mode task-create-input-actions only. Registrations belong to one
+   * open cycle and receive a frozen task identity after successful creation.
+   * Cleanup unregisters the handler; close or replacement revokes that cycle.
+   * Handler errors are logged and do not change or delay task creation.
+   */
+  registerTaskCreatedHandler?: RegisterPluginTaskCreatedHandler;
 }
 type PluginOpenMessageResult = { status: "accepted" | "unavailable" };
 interface PluginTaskPanelConversationCapability {

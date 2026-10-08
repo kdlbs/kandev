@@ -185,7 +185,7 @@ func TestPluginExecutorPartialLaunch(t *testing.T) {
 	if _, err := runtime.CreateInstance(context.Background(), request); err == nil {
 		t.Fatal("CreateInstance() unexpectedly succeeded")
 	}
-	if operations.destroyRequest == nil || operations.destroyRequest.GetCleanupReason() != "launch_failed" {
+	if operations.destroyRequest == nil || operations.destroyRequest.GetCleanupReason() != pluginExecutorCleanupReasonLaunch {
 		t.Fatalf("cleanup request = %#v", operations.destroyRequest)
 	}
 	if !released {

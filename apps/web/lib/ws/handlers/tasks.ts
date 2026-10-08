@@ -1,3 +1,4 @@
+import { sidebarTaskPageCache } from "@/lib/sidebar/sidebar-task-page-cache";
 import type { StoreApi } from "zustand";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
@@ -461,6 +462,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       for (const sid of sessionIds) {
         useContextFilesStore.getState().clearSession(sid);
         currentState.clearQueueStatus?.(sid);
+        currentState.removeTaskSession?.(deletedId, sid);
       }
 
       const wasActive = currentState.tasks.activeTaskId === deletedId;
@@ -483,6 +485,8 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
             undefined,
         ),
       );
+
+      sidebarTaskPageCache(store).removeTasks(new Set([deletedId]));
 
       // Capture the route match before any redirect mutates the pathname. This
       // covers a fresh load where the browser is parked on the task's route

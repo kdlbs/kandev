@@ -15,8 +15,16 @@ import type {
   TaskPriority,
   SidebarTaskColorPatchApi,
   WorkflowAgentOverrides,
+  Repository,
+  WorkspaceRecoveryProjection,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
+import type {
+  Coordinator,
+  CoordinatorListResponse,
+  CreateCoordinatorRequest,
+  Proposal,
+} from "../../lib/api/domains/coordinator-api";
 import type { SidebarTaskColorAutomation } from "../../lib/task-color-automation-settings";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
 import type {
@@ -555,6 +563,31 @@ export class ApiClient {
     return this.request("GET", "/api/v1/workspaces");
   }
 
+  // --- Coordinator (docs/specs/coordinator/) ---
+
+  async createCoordinator(
+    workspaceId: string,
+    req: CreateCoordinatorRequest,
+  ): Promise<Coordinator> {
+    return this.request("POST", `/api/v1/workspaces/${workspaceId}/coordinators`, req);
+  }
+
+  async listCoordinators(workspaceId: string): Promise<CoordinatorListResponse> {
+    return this.request("GET", `/api/v1/workspaces/${workspaceId}/coordinators`);
+  }
+
+  /** GET .../coordinators/:cid/proposals/:pid, for polling proposal state (e.g. status, task_id) from the backend directly. */
+  async getProposal(
+    workspaceId: string,
+    coordinatorId: string,
+    proposalId: string,
+  ): Promise<Proposal> {
+    return this.request(
+      "GET",
+      `/api/v1/workspaces/${workspaceId}/coordinators/${coordinatorId}/proposals/${proposalId}`,
+    );
+  }
+
   async createWorkflow(workspaceId: string, name: string, templateId?: string): Promise<Workflow> {
     return this.request("POST", "/api/v1/workflows", {
       workspace_id: workspaceId,
@@ -1042,7 +1075,7 @@ export class ApiClient {
   }
 
   async listRepositories(workspaceId: string): Promise<{
-    repositories: Array<{ id: string; name: string }>;
+    repositories: Repository[];
     total: number;
   }> {
     return this.request("GET", `/api/v1/workspaces/${workspaceId}/repositories`);
@@ -1184,6 +1217,19 @@ export class ApiClient {
     },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/repositories/${repositoryId}`, updates);
+  }
+
+  async getRepository(repositoryId: string): Promise<Repository> {
+    return this.request("GET", `/api/v1/repositories/${repositoryId}`);
+  }
+
+  async deleteRepository(repositoryId: string): Promise<void> {
+    const response = await this.rawRequest("DELETE", `/api/v1/repositories/${repositoryId}`);
+    if (!response.ok) {
+      throw new Error(
+        `API DELETE /api/v1/repositories/${repositoryId} failed (${response.status}): ${await response.text()}`,
+      );
+    }
   }
 
   async createRepositoryScript(
@@ -1339,9 +1385,14 @@ export class ApiClient {
       terminal_font_family?: string;
       terminal_font_size?: number;
       startup_page?: "task_overview" | "last_task" | "threads";
+      sidebar_fast_actions_enabled?: boolean;
+      sidebar_new_task_style?: "simple" | "compact";
       sidebar_hover_enabled?: boolean;
       sidebar_hover_delay_ms?: number;
-      sidebar_layouts_by_workspace?: Record<string, { revision: number; [key: string]: unknown }>;
+      sidebar_layouts_by_workspace?: Record<
+        string,
+        import("../../lib/types/http-user-settings").SidebarLayoutApi
+      >;
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
@@ -1361,6 +1412,7 @@ export class ApiClient {
     auto_focus_new_tasks?: boolean;
     unread_divider?: boolean;
     agent_generated_task_titles?: boolean;
+    message_time_display?: "relative" | "absolute_short" | "absolute_long";
     agent_tab_close_behavior?: "delete_session" | "hide_panel";
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
     show_anchored_prompt_bar?: boolean;
@@ -1374,6 +1426,8 @@ export class ApiClient {
     terminal_font_family?: string;
     terminal_font_size?: number;
     startup_page?: "task_overview" | "last_task" | "threads";
+    sidebar_fast_actions_enabled?: boolean;
+    sidebar_new_task_style?: "simple" | "compact";
     sidebar_hover_enabled?: boolean;
     sidebar_hover_delay_ms?: number;
     keyboard_shortcuts?: Record<string, unknown>;
@@ -2739,7 +2793,12 @@ export class ApiClient {
   }
 
   async listSessionTurns(sessionId: string): Promise<{
-    turns: Array<{ id: string; completed_at?: string | null }>;
+    turns: Array<{
+      id: string;
+      started_at?: string;
+      completed_at?: string | null;
+      metadata?: Record<string, unknown>;
+    }>;
   }> {
     return this.request("GET", `/api/v1/task-sessions/${sessionId}/turns`);
   }
@@ -2749,7 +2808,7 @@ export class ApiClient {
       from_step_id?: string | null;
       to_step_id: string;
       trigger: string;
-    }>;
+    }> | null;
   }> {
     return this.request("GET", `/api/v1/sessions/${sessionId}/workflow/history`);
   }
@@ -2831,6 +2890,9 @@ export class ApiClient {
       agent_profile_id?: string;
       agent_profile_snapshot?: Record<string, unknown> | null;
       state: string;
+      task_environment_id?: string;
+      workspace_recovery?: WorkspaceRecoveryProjection | null;
+      error_message?: string;
     };
   }> {
     return this.request("GET", `/api/v1/task-sessions/${sessionId}`);

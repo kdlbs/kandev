@@ -2,6 +2,7 @@ package netprobe
 
 import (
 	"net"
+	"net/netip"
 	"testing"
 )
 
@@ -80,4 +81,56 @@ func TestHasListenerProbesBothLoopbackFamilies(t *testing.T) {
 	if PortAvailable(port) {
 		t.Fatalf("port %d reported free while an IPv6 listener holds it", port)
 	}
+}
+
+func TestPortAvailableAtHostReportsNonLoopbackListener(t *testing.T) {
+	listener, host := listenOnNonLoopbackIPv4(t)
+	defer func() { _ = listener.Close() }()
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	if PortAvailableAtHost(host, port) {
+		t.Fatalf("port %d reported free while %s holds it", port, host)
+	}
+}
+
+func TestProbeAddressesForUnspecifiedHostUsesSpecificInterfaces(t *testing.T) {
+	addresses, err := ProbeAddresses("0.0.0.0")
+	if err != nil {
+		t.Fatalf("ProbeAddresses: %v", err)
+	}
+	if len(addresses) == 0 {
+		t.Fatal("ProbeAddresses returned no interface addresses")
+	}
+	for _, address := range addresses {
+		if address.IsUnspecified() {
+			t.Fatalf("probe address %s is unspecified; temporary wildcard listeners are not allowed", address)
+		}
+	}
+}
+
+func listenOnNonLoopbackIPv4(t *testing.T) (net.Listener, string) {
+	t.Helper()
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		t.Skipf("list network interfaces: %v", err)
+	}
+	for _, iface := range interfaces {
+		addresses, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, address := range addresses {
+			prefix, err := netip.ParsePrefix(address.String())
+			if err != nil || !prefix.Addr().Is4() || prefix.Addr().IsLoopback() {
+				continue
+			}
+			host := prefix.Addr().String()
+			listener, err := net.Listen("tcp4", net.JoinHostPort(host, "0"))
+			if err == nil {
+				return listener, host
+			}
+		}
+	}
+	t.Skip("no usable non-loopback IPv4 address is available")
+	return nil, ""
 }

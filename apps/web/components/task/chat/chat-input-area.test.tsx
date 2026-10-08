@@ -185,6 +185,7 @@ function panelState(overrides = {}) {
     handleClearPRFeedback: vi.fn(),
     handleClearWalkthroughComments: vi.fn(),
     clearEphemeral: vi.fn(),
+    consumeSubmittedEphemeral: vi.fn(),
     addContextFile: vi.fn(),
     planModeEnabled: false,
     planCommentMigration: {
@@ -373,13 +374,13 @@ describe("useSubmitHandler routing", () => {
   });
 
   it("does not clear composer side effects when admission reports unsuccessful", async () => {
-    const clearEphemeral = vi.fn();
+    const consumeSubmittedEphemeral = vi.fn();
     handleSendMessageMock.mockResolvedValueOnce(false);
     const { result } = renderHook(() =>
       useSubmitHandler(
         panelState({
           contextFiles: [{ path: "src", name: "src", isDirectory: true }],
-          clearEphemeral,
+          consumeSubmittedEphemeral,
         }),
       ),
     );
@@ -388,7 +389,7 @@ describe("useSubmitHandler routing", () => {
       await result.current.handleSubmit({ message: "keep this draft" });
     });
 
-    expect(clearEphemeral).not.toHaveBeenCalled();
+    expect(consumeSubmittedEphemeral).not.toHaveBeenCalled();
   });
 });
 
@@ -640,13 +641,13 @@ describe("useSubmitHandler message comments", () => {
 describe("context file send retention", () => {
   it("keeps ephemeral context files when sending fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const clearEphemeral = vi.fn();
+    const consumeSubmittedEphemeral = vi.fn();
     handleSendMessageMock.mockRejectedValueOnce(new Error("send failed"));
     const { result } = renderHook(() =>
       useSubmitHandler(
         panelState({
           contextFiles: [{ path: "src", name: "src", isDirectory: true }],
-          clearEphemeral,
+          consumeSubmittedEphemeral,
         }),
       ),
     );
@@ -655,17 +656,17 @@ describe("context file send retention", () => {
       await result.current.handleSubmit({ message: "hello" });
     });
 
-    expect(clearEphemeral).not.toHaveBeenCalled();
+    expect(consumeSubmittedEphemeral).not.toHaveBeenCalled();
   });
 
   it("clears ephemeral context files after a successful send", async () => {
-    const clearEphemeral = vi.fn();
+    const consumeSubmittedEphemeral = vi.fn();
     handleSendMessageMock.mockResolvedValueOnce(undefined);
     const { result } = renderHook(() =>
       useSubmitHandler(
         panelState({
           contextFiles: [{ path: "src", name: "src", isDirectory: true }],
-          clearEphemeral,
+          consumeSubmittedEphemeral,
         }),
       ),
     );
@@ -674,6 +675,8 @@ describe("context file send retention", () => {
       await result.current.handleSubmit({ message: "hello" });
     });
 
-    expect(clearEphemeral).toHaveBeenCalledWith("session-1");
+    expect(consumeSubmittedEphemeral).toHaveBeenCalledWith("session-1", [
+      { path: "src", name: "src", isDirectory: true },
+    ]);
   });
 });

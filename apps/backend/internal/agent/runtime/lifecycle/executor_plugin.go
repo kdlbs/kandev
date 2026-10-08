@@ -45,6 +45,8 @@ const (
 	pluginExecutorStateUnknown         = "unknown"
 	pluginExecutorStateUnavailable     = "unavailable"
 	pluginExecutorRetentionBounded     = "bounded"
+	pluginExecutorCleanupReasonTask    = "task_cleanup"
+	pluginExecutorCleanupReasonLaunch  = "launch_failed"
 )
 
 type PluginExecutorLaunch struct {
@@ -176,6 +178,7 @@ func (r *PluginRemoteExecutor) CreateInstance(ctx context.Context, req *Executor
 	if err != nil {
 		return nil, err
 	}
+	r.uploadPluginExecutorAgentCredentials(ctx, client, launch.request)
 	return r.finishPluginExecutorLaunch(ctx, launch, resource, client, token)
 }
 
@@ -692,7 +695,7 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 	cleanupContext := proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext)
 	cleanupContext.Deadline = time.Now().Add(30 * time.Second).UTC().Format(time.RFC3339Nano)
 	response, err := r.operations.DestroyExecutorEnvironment(cleanupCtx, &pluginsdk.DestroyExecutorEnvironmentRequest{
-		Context: cleanupContext, Resource: resource, CleanupReason: "launch_failed", CleanupClaim: claim.OperationID,
+		Context: cleanupContext, Resource: resource, CleanupReason: pluginExecutorCleanupReasonLaunch, CleanupClaim: claim.OperationID,
 	})
 	if err == nil && response != nil && response.GetConfirmedAbsent() {
 		inventory.Resource = resource

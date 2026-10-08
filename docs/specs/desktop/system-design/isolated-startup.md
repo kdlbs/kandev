@@ -7,7 +7,7 @@ requirements:
   - REQ-DESKTOP-ISOLATED-STARTUP-003
   - REQ-DESKTOP-ISOLATED-STARTUP-004
 created: 2026-09-25
-updated: 2026-09-25
+updated: 2026-09-30
 owners:
   - kandev
 ---
@@ -120,6 +120,14 @@ test GUI independently owns its launcher/backend process tree and loopback
 origin. Closing the conflict launcher does not close already opened test
 windows.
 
+For `AC-DESKTOP-ISOLATED-STARTUP-002.6`,
+`backend::start_temporary_test_instance` transfers each GUI child's wait
+ownership to the [managed-launch helper](desktop-tauri-app.md#auxiliary-child-ownership).
+The conflict launcher acknowledges spawn without waiting for GUI exit. The
+worker retains the exact `Child` until `wait()` returns. It neither kills the
+child nor ties its lifetime to the launcher's window. Spawn failure preserves
+the existing conflict page and permits another attempt.
+
 The test process creates its home before backend launch, skips normal desktop
 window-geometry persistence, and does not start automatic update checks or
 permit update installation. Those operations otherwise use shared Tauri app
@@ -198,3 +206,5 @@ external environment wrapper can set the same variables for a reusable home.
 ## Implementation plan
 
 - [Isolated desktop startup](../../../plans/desktop-isolated-startup/plan.md)
+
+- [Desktop child reaping fix](../../../plans/desktop-child-reaping/plan.md)

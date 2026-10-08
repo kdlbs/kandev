@@ -1051,7 +1051,7 @@ func (e *Executor) switchModel(
 	if err != nil {
 		return nil, err
 	}
-	recoveryAdmission, err := e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, req.ExecutorType, false)
+	recoveryAdmission, err := e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, req.ExecutorType, false, 0, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1370,6 +1370,18 @@ func (e *Executor) registerInitialPromptDispatchCallbacks(
 		return fmt.Errorf("failed to register initial prompt dispatch callbacks: %w", err)
 	}
 	return nil
+}
+
+func (e *Executor) registerInitialPromptCallbacks(
+	executionID string,
+	beforeAdmission func(executionID string) error,
+	onDispatched func(executionID string),
+	onFailure func(),
+) error {
+	if beforeAdmission != nil {
+		return e.registerInitialPromptAdmissionCallbacks(executionID, beforeAdmission, onDispatched, onFailure)
+	}
+	return e.registerInitialPromptDispatchCallbacks(executionID, onDispatched, onFailure)
 }
 
 // buildSwitchModelRequest constructs a LaunchAgentRequest for a model switch, applying

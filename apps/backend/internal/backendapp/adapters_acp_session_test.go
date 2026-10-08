@@ -47,6 +47,10 @@ type acpSessionIDProvider interface {
 	GetACPSessionIDForSession(sessionID string) (string, bool)
 }
 
+type retainedPromptFailureAcknowledger interface {
+	AcknowledgeRetainedPromptFailure(executionID string, generation uint64) bool
+}
+
 type initialPromptAdmissionRegistrar interface {
 	RegisterInitialPromptAdmissionCallbacks(string, func() error, func(), func()) error
 }
@@ -119,6 +123,21 @@ func TestLifecycleAdapter_GetACPSessionIDForSession_ForwardsLiveIdentity(t *test
 
 	if _, ok := adapter.GetACPSessionIDForSession("no-such-session"); ok {
 		t.Fatal("expected (_, false) for a session with no registered execution")
+	}
+}
+
+func TestLifecycleAdapter_SatisfiesRetainedPromptFailureAcknowledgementSeam(t *testing.T) {
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
+	var client orchestratorexecutor.AgentManagerClient = newLifecycleAdapter(mgr, nil, newTestLogger())
+
+	acknowledger, ok := client.(retainedPromptFailureAcknowledger)
+	if !ok {
+		t.Fatal("production lifecycleAdapter, held as executor.AgentManagerClient, does not satisfy " +
+			"AcknowledgeRetainedPromptFailure(string, uint64) bool; the retained failure owner would leave " +
+			"successor prompt admission fenced after durable settlement")
+	}
+	if acknowledger.AcknowledgeRetainedPromptFailure("no-such-execution", 1) {
+		t.Fatal("expected stale or unknown retained prompt acknowledgement to return false")
 	}
 }
 

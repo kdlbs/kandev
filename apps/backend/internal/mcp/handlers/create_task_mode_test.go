@@ -462,11 +462,12 @@ func TestHandleCreateTask_KanbanCallerCannotExposeFoundOfficeIdentity(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			externalID := "legacy-office-" + tc.name
 			existing, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
-				WorkspaceID: workspace.ID,
-				WorkflowID:  workflows[0].ID,
-				ProjectID:   "legacy-project-" + tc.name,
-				Title:       "Hidden Office " + tc.name,
-				ExternalID:  externalID,
+				WorkspaceID:  workspace.ID,
+				WorkflowID:   workflows[0].ID,
+				ProjectID:    "legacy-project-" + tc.name,
+				Repositories: []service.TaskRepositoryInput{},
+				Title:        "Hidden Office " + tc.name,
+				ExternalID:   externalID,
 			})
 			require.NoError(t, err)
 			persisted, err := svc.GetTask(ctx, existing.Task.ID)

@@ -227,6 +227,7 @@ export function ProfileFormFields({
       />
 
       <PermissionToggles
+        agentName={agentName}
         profile={profile}
         onChange={onChange}
         permissionSettings={permissionSettings}

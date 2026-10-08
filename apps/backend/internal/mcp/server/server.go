@@ -60,6 +60,9 @@ const (
 	// ModeAutomation registers the fixed workspace coordinator catalog for
 	// scheduled automation agents.
 	ModeAutomation = mcpmode.Automation
+	// ModeCoordinator registers the fixed six-tool catalog for a workspace
+	// coordinator's conversation session.
+	ModeCoordinator = mcpmode.Coordinator
 	// ModeManagedConversation exposes only the selected plugin agent tools.
 	ModeManagedConversation = "managed-conversation"
 )
@@ -99,7 +102,7 @@ func locatorCount(locators ...string) int {
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
 	switch mode {
-	case ModeConfig, ModeExternal, ModeOffice, ModeAutomation, ModeTaskTitlePending:
+	case ModeConfig, ModeExternal, ModeOffice, ModeAutomation, ModeTaskTitlePending, ModeCoordinator:
 		return mode
 	default:
 		return ModeTask
@@ -114,6 +117,7 @@ type Server struct {
 	disableAskQuestion         bool
 	mode                       string // "task" (default), "task-title-pending", "config", "external", "office", or "automation"
 	mcpProviders               []string
+	sseBaseURL                 string
 	profile                    mcpprofile.Context
 	legacyModeCapabilities     []mcpprofile.Capability
 	namespacesMCPToolsByServer bool
@@ -147,6 +151,14 @@ func WithMCPToolNamespacingByServer(enabled bool) ServerOption {
 	}
 }
 
+// WithSSEBaseURL sets the origin advertised in the SSE message endpoint event.
+// The default remains localhost for callers that do not set an instance host.
+func WithSSEBaseURL(baseURL string) ServerOption {
+	return func(s *Server) {
+		s.sseBaseURL = strings.TrimSuffix(baseURL, "/")
+	}
+}
+
 type mcpAttachmentAttemptContextKey struct{}
 
 // New creates a new MCP server for agentctl.
@@ -163,7 +175,7 @@ func New(backend BackendClient, sessionID, taskID string, port int, log *logger.
 	// WithBaseURL ensures the SSE endpoint event includes the full message URL
 	// (e.g. http://localhost:10005/message?sessionId=xxx) so MCP clients can POST back.
 	s.sseServer = server.NewSSEServer(s.mcpServer,
-		server.WithBaseURL(fmt.Sprintf("http://localhost:%d", port)),
+		server.WithBaseURL(s.sseBaseURLForPort(port)),
 	)
 
 	// Create Streamable HTTP server for Codex
@@ -185,13 +197,20 @@ func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, l
 	}
 	s := newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, profileContext, options...)
 	s.sseServer = server.NewSSEServer(s.mcpServer,
-		server.WithBaseURL(fmt.Sprintf("http://localhost:%d", port)),
+		server.WithBaseURL(s.sseBaseURLForPort(port)),
 	)
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithEndpointPath("/mcp"),
 		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
 	return s
+}
+
+func (s *Server) sseBaseURLForPort(port int) string {
+	if s.sseBaseURL != "" {
+		return s.sseBaseURL
+	}
+	return fmt.Sprintf("http://localhost:%d", port)
 }
 
 // NewExternal creates an MCP server for the Kandev backend's external endpoint.
@@ -351,6 +370,8 @@ func modeForProfile(profileContext mcpprofile.Context) string {
 		return ModeOffice
 	case mcpprofile.SurfaceAutomation:
 		return ModeAutomation
+	case mcpprofile.SurfaceCoordinator:
+		return ModeCoordinator
 	case mcpprofile.SurfaceKanbanTask:
 		if profileContext.HasCapability(mcpprofile.CapabilityTaskTitle) {
 			return ModeTaskTitlePending
@@ -739,13 +760,19 @@ func (s *Server) SetMode(mode string) {
 	}
 	previousMode := s.mode
 	capabilities := s.profile.Capabilities
-	if normalizedMode == ModeAutomation {
-		s.legacyModeCapabilities = slices.Clone(capabilities)
-		// The automation surface is a fixed coordinator catalog and never
-		// carries task-local capabilities. The snapshot lets a later legacy
-		// mode change restore the profile that was active before automation.
+	if isFixedCatalogMode(normalizedMode) {
+		// Only snapshot when entering a fixed mode from a non-fixed one.
+		// Fixed catalogs never carry task-local capabilities themselves, so a
+		// fixed-to-fixed transition (e.g. coordinator -> automation) would
+		// otherwise re-snapshot the already-nil current capabilities over the
+		// real snapshot taken on the first transition, losing it.
+		if !isFixedCatalogMode(previousMode) {
+			s.legacyModeCapabilities = slices.Clone(capabilities)
+		}
+		// The snapshot lets a later legacy mode change restore the profile
+		// that was active before the switch.
 		capabilities = nil
-	} else if previousMode == ModeAutomation {
+	} else if isFixedCatalogMode(previousMode) {
 		capabilities = slices.Clone(s.legacyModeCapabilities)
 	}
 	s.mode = normalizedMode
@@ -755,10 +782,18 @@ func (s *Server) SetMode(mode string) {
 	} else {
 		s.profile = s.profile.WithoutCapability(mcpprofile.CapabilityTaskTitle)
 	}
-	if normalizedMode != ModeAutomation {
+	if !isFixedCatalogMode(normalizedMode) {
 		s.legacyModeCapabilities = slices.Clone(s.profile.Capabilities)
 	}
 	s.rebuildTools()
+}
+
+// isFixedCatalogMode reports whether mode uses a fixed tool catalog that never
+// carries task-local capabilities (docs/specs/coordinator/system-design/
+// copilot.md#attended-only), mirroring mcpprofile.Legacy's own exclusion of
+// SurfaceAutomation and SurfaceCoordinator from CapabilityUserQuestion.
+func isFixedCatalogMode(mode string) bool {
+	return mode == ModeAutomation || mode == ModeCoordinator
 }
 
 func surfaceForMode(mode string) mcpprofile.Surface {
@@ -771,6 +806,8 @@ func surfaceForMode(mode string) mcpprofile.Surface {
 		return mcpprofile.SurfaceOfficeTask
 	case ModeAutomation:
 		return mcpprofile.SurfaceAutomation
+	case ModeCoordinator:
+		return mcpprofile.SurfaceCoordinator
 	default:
 		return mcpprofile.SurfaceKanbanTask
 	}
@@ -826,6 +863,16 @@ func (s *Server) SetProfile(profileContext mcpprofile.Context) {
 	s.rebuildTools()
 }
 
+// sameCoordinatorToolPolicy compares two bindings by their marshalled form.
+func sameCoordinatorToolPolicy(left, right *mcpprofile.CoordinatorToolPolicy) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	l, lerr := mcpprofile.MarshalCoordinatorToolPolicy(*left)
+	r, rerr := mcpprofile.MarshalCoordinatorToolPolicy(*right)
+	return lerr == nil && rerr == nil && l == r
+}
+
 func sameProfile(left, right mcpprofile.Context) bool {
 	if left.Surface != right.Surface || len(left.Capabilities) != len(right.Capabilities) || len(left.Providers) != len(right.Providers) {
 		return false
@@ -839,6 +886,9 @@ func sameProfile(left, right mcpprofile.Context) bool {
 		if left.Providers[i] != right.Providers[i] {
 			return false
 		}
+	}
+	if !sameCoordinatorToolPolicy(left.CoordinatorToolPolicy, right.CoordinatorToolPolicy) {
+		return false
 	}
 	if (left.ManagedToolPolicy == nil) != (right.ManagedToolPolicy == nil) {
 		return false
@@ -1100,12 +1150,14 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 	office := surfaceEnabled(mcpprofile.SurfaceOfficeTask)
 	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
 	automation := surfaceEnabled(mcpprofile.SurfaceAutomation)
+	coordinatorSurface := surfaceEnabled(mcpprofile.SurfaceCoordinator)
 	if s.profile.Surface == mcpprofile.SurfaceManagedConversation {
 		return nil
 	}
 	return []profileToolGroup{
 		{name: "configuration-automations", enabled: config, register: func(s *Server) { s.registerConfigAutomationTools() }},
 		{name: "automation", enabled: automation, register: func(s *Server) { s.registerAutomationTools() }},
+		{name: "coordinator", enabled: coordinatorSurface, register: func(s *Server) { s.registerCoordinatorTools() }},
 		{name: "configuration-workflows", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigWorkflowTools() }},
 		{name: "configuration-agents", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigAgentTools() }},
 		{name: "configuration-mcp", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigMcpTools() }},
@@ -1175,7 +1227,7 @@ func (s *Server) registerTools() {
 			group.register(s)
 		}
 	}
-	if s.profile.Surface != mcpprofile.SurfaceAutomation {
+	if s.profile.Surface != mcpprofile.SurfaceAutomation && s.profile.Surface != mcpprofile.SurfaceCoordinator {
 		s.registerPluginTools()
 	}
 	s.logger.Info("registered MCP tools",
@@ -1925,8 +1977,11 @@ func (s *Server) registerPlanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_plan_kandev",
-			mcp.WithDescription("Get the current plan for a task, including any user edits. task_id selects the task: pass your own task ID for your current task, or another task's ID to read that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithDescription("Get the current plan for a task, including user edits and its version. task_id selects your current task by default or another task within your reach (same workspace / task tree); an outside task is rejected, never silently redirected to your own. Omit offset and limit to read the whole plan; supply either for a bounded exact fragment. Ranges count Unicode code points, not bytes. Partial reads return total length, has_more, and next_offset; continue with that offset and expected_version to avoid mixing versions. A fragment is not a replacement document: use edit_task_plan_kandev for local changes or update_task_plan_kandev with mode=\"append\" for additions."),
 			mcp.WithString("task_id", mcp.Description("The task ID to get the plan for. Defaults to your current task when omitted; pass another task's ID to read it directly.")),
+			mcp.WithInteger("offset", mcp.Min(0), mcp.Max(float64(taskcontract.MaxPlanReadOffset)), mcp.Description("Optional zero-based Unicode character offset. Supplying offset or limit enables partial reading. Defaults to 0 only in partial mode.")),
+			mcp.WithInteger("limit", mcp.Min(1), mcp.Max(taskcontract.MaxPlanReadCharacters), mcp.Description("Optional maximum characters to return: 1 through 8192. Defaults to 4096 only when a range argument is supplied; omit both range arguments for a full read.")),
+			mcp.WithString("expected_version", mcp.Description("Optional non-empty version from an earlier read or successful write. A changed or deleted plan returns a conflict without content. Use the first page's version for subsequent pages and reconcile on conflict.")),
 		),
 		s.wrapHandler("get_task_plan_kandev", s.getTaskPlanHandler()),
 	)

@@ -24,6 +24,7 @@ import {
   createFeaturesSlice,
   createAuthSlice,
   createAutomationsSlice,
+  createCoordinatorsSlice,
   createSystemSlice,
   createPluginsSlice,
   createReviewSlice,
@@ -61,8 +62,7 @@ export function createAppStore(initialState?: HydrationState) {
         ...createGitHubSlice(set as any, get as any, api as any),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...createGitLabSlice(set as any, get as any, api as any),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ...createAzureDevOpsSlice(set as any),
+        ...createAzureDevOpsSlice(set),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...createJiraSlice(set as any, get as any, api as any),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -82,6 +82,7 @@ export function createAppStore(initialState?: HydrationState) {
         ...createUISlice(set as any, get as any, api as any),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...createAutomationsSlice(set as any, get as any, api as any),
+        ...createCoordinatorsSlice(set),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...createPluginsSlice(set as any, get as any, api as any),
         // createReviewSlice only needs `set`; passing get/api would be superfluous
