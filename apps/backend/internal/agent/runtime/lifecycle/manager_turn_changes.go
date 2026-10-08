@@ -74,7 +74,9 @@ func (m *Manager) failTurnChangeDispatch(ctx context.Context, execution *AgentEx
 	if err := m.turnChangeCaptureHandler.FinishTurnChanges(ctx, terminal, client); err != nil {
 		m.logger.Warn("failed to finalize turn-change capture after prompt dispatch error",
 			zap.String("execution_id", execution.ID), zap.Uint64("prompt_generation", generation), zap.Error(err))
+		return
 	}
+	m.scheduleTurnChangeSummary(execution, terminal)
 }
 
 func (m *Manager) finishTurnChangeCapture(execution *AgentExecution, event *agentctl.AgentEvent, isError bool, stopReason string) {
@@ -102,8 +104,29 @@ func (m *Manager) finishTurnChangeCapture(execution *AgentExecution, event *agen
 	if finishErr == nil {
 		clearTurnChangeCaptureAnchor(execution, event.PromptGeneration)
 		finishTurnChangeCaptureLocked(execution, event.PromptGeneration)
+		execution.promptLifecycleMu.Unlock()
+		m.processTurnChangeSummaryBeforeTeardown(execution, terminal)
+		execution.promptLifecycleMu.Lock()
 	} else {
 		m.retryTurnChangeCapture(execution, terminal)
+	}
+}
+
+func (m *Manager) processTurnChangeSummaryBeforeTeardown(execution *AgentExecution, terminal TurnChangeTerminal) {
+	processor, ok := m.turnChangeCaptureHandler.(TurnChangeSummaryProcessor)
+	if !ok {
+		return
+	}
+	client, release := execution.AcquireAgentCtlClient()
+	defer release()
+	ctx, cancel := m.turnChangeAttemptContext(turnChangeTerminalCaptureTimeout)
+	defer cancel()
+	if err := processor.ProcessTurnChanges(ctx, terminal, client); err != nil {
+		m.logger.Warn("failed to process turn-change summary before executor teardown",
+			zap.String("execution_id", execution.ID),
+			zap.Uint64("prompt_generation", terminal.PromptGeneration),
+			zap.Error(err))
+		m.scheduleTurnChangeSummary(execution, terminal)
 	}
 }
 
@@ -179,6 +202,7 @@ func (m *Manager) scheduleTurnChangeCapture(execution *AgentExecution, terminal 
 				clearTurnChangeCaptureAnchor(execution, terminal.PromptGeneration)
 				finishTurnChangeCaptureLocked(execution, terminal.PromptGeneration)
 				execution.promptLifecycleMu.Unlock()
+				m.scheduleTurnChangeSummary(execution, terminal)
 				return
 			}
 			m.logger.Warn("retrying failed terminal turn-change capture",
@@ -194,6 +218,58 @@ func (m *Manager) scheduleTurnChangeCapture(execution *AgentExecution, terminal 
 				delay = turnChangeRetryMaximumDelay
 			}
 			timeout = turnChangeTerminalCaptureTimeout
+		}
+	}()
+}
+
+func (m *Manager) scheduleTurnChangeSummary(execution *AgentExecution, terminal TurnChangeTerminal) {
+	processor, ok := m.turnChangeCaptureHandler.(TurnChangeSummaryProcessor)
+	if !ok || m.stopCh == nil || m.shuttingDown.Load() {
+		return
+	}
+	m.turnChangeRetryMu.Lock()
+	select {
+	case <-m.stopCh:
+		m.turnChangeRetryMu.Unlock()
+		return
+	default:
+	}
+	m.wg.Add(1)
+	m.turnChangeRetryMu.Unlock()
+
+	go func() {
+		defer m.wg.Done()
+		delay := time.Duration(0)
+		for {
+			if delay > 0 {
+				timer := time.NewTimer(delay)
+				select {
+				case <-m.stopCh:
+					timer.Stop()
+					return
+				case <-timer.C:
+				}
+			}
+			client, release := execution.AcquireAgentCtlClient()
+			ctx, cancel := m.turnChangeAttemptContext(turnChangeTerminalCaptureTimeout)
+			err := processor.ProcessTurnChanges(ctx, terminal, client)
+			cancel()
+			release()
+			if err == nil {
+				return
+			}
+			m.logger.Warn("retrying turn-change summary processing",
+				zap.String("execution_id", execution.ID),
+				zap.Uint64("prompt_generation", terminal.PromptGeneration),
+				zap.Error(err))
+			if delay == 0 {
+				delay = turnChangeRetryInitialDelay
+			} else {
+				delay *= 2
+			}
+			if delay > turnChangeRetryMaximumDelay {
+				delay = turnChangeRetryMaximumDelay
+			}
 		}
 	}()
 }

@@ -62,6 +62,33 @@ func TestCoordinatorPersistsPolicyAndCapturesBeforeDispatch(t *testing.T) {
 	require.Equal(t, 1, client.endCalls, "a duplicate terminal event must reuse the accepted result")
 }
 
+func TestCoordinatorAcceptsTerminalEndpointsBeforeSummaryProcessing(t *testing.T) {
+	store := newCoordinatorStore()
+	policy := &coordinatorPolicy{result: turnchanges.CapturePolicy{
+		SettingsUserID: "user-initiator", Enabled: true, ResolutionKind: turnchanges.PolicyAuthenticatedUser,
+	}}
+	client := &coordinatorCheckpointClient{}
+	coordinator := NewCoordinator(store, coordinatorTurnReader{}, policy, NewContentService(store, nil), nil)
+	admission := coordinatorAdmission()
+	require.NoError(t, coordinator.Admit(context.Background(), admission, client))
+	terminal := Terminal{Admission: admission, At: time.Now().UTC(), Outcome: "end_turn", FinalAssistantMessageID: "reply-final"}
+
+	require.NoError(t, coordinator.CaptureTerminalEndpoints(context.Background(), terminal, client))
+	changeSet := store.changeSets[turnChangeSetID(admission.TurnID)]
+	require.Nil(t, changeSet.TerminalAt, "comparison and export have not finalized the summary yet")
+	require.Equal(t, "reply-final", changeSet.TerminalCaptureFinalMessageID)
+	require.Equal(t, "commit-end", store.repositoryRows[changeSet.ID][0].EndCommitOID)
+	require.Zero(t, client.compareCalls)
+	require.Zero(t, client.exportCalls)
+
+	require.NoError(t, coordinator.ProcessTerminal(context.Background(), terminal, client))
+	changeSet = store.changeSets[changeSet.ID]
+	require.NotNil(t, changeSet.TerminalAt)
+	require.True(t, changeSet.Complete)
+	require.Equal(t, 1, client.compareCalls)
+	require.Equal(t, 1, client.exportCalls)
+}
+
 func TestLoadUnfinishedRepositoryRowsUsesOneBatchQuery(t *testing.T) {
 	store := newCoordinatorStore()
 	first := &models.TurnChangeSet{ID: "set-first"}

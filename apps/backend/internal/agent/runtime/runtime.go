@@ -44,6 +44,7 @@ type TurnChangeAdmission = lifecycle.TurnChangeAdmission
 type TurnChangeTerminal = lifecycle.TurnChangeTerminal
 type TurnChangeCheckpointClient = lifecycle.TurnChangeCheckpointClient
 type TurnChangeCaptureHandler = lifecycle.TurnChangeCaptureHandler
+type TurnChangeSummaryProcessor = lifecycle.TurnChangeSummaryProcessor
 
 const (
 	BackgroundWorkloadProbeResultLive    = client.ProbeResultLive

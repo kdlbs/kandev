@@ -308,6 +308,67 @@ func TestStopWaitsForRetriedTerminalCaptureBeforeReturning(t *testing.T) {
 	}
 }
 
+func TestTerminalCaptureReleasesFenceBeforeSummaryProcessing(t *testing.T) {
+	manager := newTestManager(t)
+	execution := &AgentExecution{
+		ID: "execution-terminal-summary", TaskID: "task-terminal-summary",
+		SessionID: "session-terminal-summary", TaskEnvironmentID: "env-terminal-summary",
+		Status: v1.AgentStatusRunning, promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	execution.setPromptTurnID("turn-terminal-summary")
+	require.NoError(t, manager.executionStore.Add(execution))
+	generation, err := manager.BeginPrompt(execution.ID)
+	require.NoError(t, err)
+	handler := &turnChangeCapturePhasedHandler{
+		captureEntered: make(chan struct{}), releaseCapture: make(chan struct{}),
+		processingEntered: make(chan struct{}), releaseProcessing: make(chan struct{}),
+	}
+	manager.SetTurnChangeCaptureHandler(handler)
+	var captureReleaseOnce sync.Once
+	var processingReleaseOnce sync.Once
+	release := func() {
+		captureReleaseOnce.Do(func() { close(handler.releaseCapture) })
+		processingReleaseOnce.Do(func() { close(handler.releaseProcessing) })
+	}
+	t.Cleanup(release)
+
+	eventDone := make(chan bool, 1)
+	go func() {
+		eventDone <- manager.handleCompleteEvent(execution, &agentctl.AgentEvent{
+			Type: "complete", SessionID: execution.SessionID,
+			TurnID: "turn-terminal-summary", PromptGeneration: generation,
+		})
+	}()
+	select {
+	case <-handler.captureEntered:
+	case <-time.After(time.Second):
+		t.Fatal("terminal endpoint capture did not start")
+	}
+	select {
+	case handled := <-eventDone:
+		require.True(t, handled)
+	case <-time.After(time.Second):
+		t.Fatal("completion publication waited for terminal endpoint capture")
+	}
+	if _, err := manager.BeginPrompt(execution.ID); !errors.Is(err, ErrPromptSettlementPending) {
+		t.Fatalf("successor admission before endpoint acceptance = %v, want capture-fence rejection", err)
+	}
+	captureReleaseOnce.Do(func() { close(handler.releaseCapture) })
+	select {
+	case <-handler.processingEntered:
+	case <-time.After(time.Second):
+		t.Fatal("summary processing did not start after endpoint acceptance")
+	}
+	require.Eventually(t, func() bool {
+		execution.promptLifecycleMu.Lock()
+		defer execution.promptLifecycleMu.Unlock()
+		return execution.turnChangeCaptureGeneration == 0
+	}, time.Second, 10*time.Millisecond, "accepted endpoint did not release the generation fence")
+	if _, err := manager.BeginPrompt(execution.ID); err != nil {
+		t.Fatalf("successor admission waited for summary processing: %v", err)
+	}
+}
+
 func TestStreamDisconnectFinishesAdmittedTurnBeforeErrorPublication(t *testing.T) {
 	manager := newTestManager(t)
 	execution := &AgentExecution{
@@ -502,6 +563,29 @@ type turnChangeCaptureCompletionBudgetHandler struct {
 	firstReturned chan struct{}
 	retryEntered  chan struct{}
 	releaseRetry  chan struct{}
+}
+
+type turnChangeCapturePhasedHandler struct {
+	captureEntered    chan struct{}
+	releaseCapture    chan struct{}
+	processingEntered chan struct{}
+	releaseProcessing chan struct{}
+}
+
+func (h *turnChangeCapturePhasedHandler) AdmitTurnChanges(context.Context, TurnChangeAdmission, TurnChangeCheckpointClient) error {
+	return nil
+}
+
+func (h *turnChangeCapturePhasedHandler) FinishTurnChanges(context.Context, TurnChangeTerminal, TurnChangeCheckpointClient) error {
+	close(h.captureEntered)
+	<-h.releaseCapture
+	return nil
+}
+
+func (h *turnChangeCapturePhasedHandler) ProcessTurnChanges(context.Context, TurnChangeTerminal, TurnChangeCheckpointClient) error {
+	close(h.processingEntered)
+	<-h.releaseProcessing
+	return nil
 }
 
 func (h *turnChangeCaptureCompletionBudgetHandler) AdmitTurnChanges(context.Context, TurnChangeAdmission, TurnChangeCheckpointClient) error {

@@ -51,6 +51,12 @@ type TurnChangeCaptureHandler interface {
 	FinishTurnChanges(context.Context, TurnChangeTerminal, TurnChangeCheckpointClient) error
 }
 
+// TurnChangeSummaryProcessor handles comparison and content export after the
+// terminal endpoints have been accepted and the prompt-generation fence ends.
+type TurnChangeSummaryProcessor interface {
+	ProcessTurnChanges(context.Context, TurnChangeTerminal, TurnChangeCheckpointClient) error
+}
+
 func turnChangeCheckoutsFromWorkspaceRepositories(repositories []WorkspaceRepositorySpec) []TurnChangeCheckout {
 	if len(repositories) == 0 {
 		return nil

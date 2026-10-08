@@ -28,6 +28,58 @@ type terminalProgress struct {
 }
 
 func (c *Coordinator) Finish(ctx context.Context, terminal Terminal, client CheckpointClient) error {
+	if err := c.CaptureTerminalEndpoints(ctx, terminal, client); err != nil {
+		return err
+	}
+	return c.ProcessTerminal(ctx, terminal, client)
+}
+
+// CaptureTerminalEndpoints durably claims a turn's terminal identity and
+// accepts each end checkpoint before any comparison or content export begins.
+// Callers may release the prompt-generation fence after this method succeeds.
+func (c *Coordinator) CaptureTerminalEndpoints(ctx context.Context, terminal Terminal, client CheckpointClient) error {
+	if c == nil || c.repository == nil {
+		return errors.New("turn change coordinator is not configured")
+	}
+	if terminal.TaskID == "" || terminal.SessionID == "" || terminal.TurnID == "" || terminal.PromptGeneration == 0 {
+		return nil
+	}
+	changeSet, terminal, done, err := c.claimTerminalInterval(terminal, client)
+	if err != nil || done {
+		return err
+	}
+	rows, err := c.loadTerminalRepositoryRows(ctx, changeSet, terminal, client)
+	if err != nil {
+		return err
+	}
+	return c.captureAndAcceptTerminalRepositoryEndpoints(ctx, changeSet, terminal, rows, client)
+}
+
+func (c *Coordinator) captureAndAcceptTerminalRepositoryEndpoints(
+	ctx context.Context,
+	changeSet *models.TurnChangeSet,
+	terminal Terminal,
+	rows []*models.TurnRepositoryChangeSet,
+	client CheckpointClient,
+) error {
+	for _, stored := range rows {
+		row := *stored
+		if row.Availability != models.TurnChangeAvailabilityPending || row.StartTreeOID == "" {
+			return c.finalizeUnavailable(context.Background(), changeSet, terminal, models.TurnChangeReasonCheckoutUnavailable, client)
+		}
+		if row.EndCommitOID != "" && row.EndTreeOID != "" {
+			continue
+		}
+		if _, captureErr := c.captureAndAcceptTurnRepositoryEnd(ctx, changeSet, row, client); captureErr != nil {
+			return c.finalizeUnavailable(context.Background(), changeSet, terminal, checkpointReason(captureErr, models.TurnChangeReasonCaptureFailed), client)
+		}
+	}
+	return nil
+}
+
+// ProcessTerminal compares and exports only endpoints already accepted by
+// CaptureTerminalEndpoints. It never asks an executor to create a new end.
+func (c *Coordinator) ProcessTerminal(ctx context.Context, terminal Terminal, client CheckpointClient) error {
 	if c == nil || c.repository == nil {
 		return errors.New("turn change coordinator is not configured")
 	}
@@ -44,6 +96,11 @@ func (c *Coordinator) Finish(ctx context.Context, terminal Terminal, client Chec
 	}
 	progress := newTerminalProgress(changeSet, terminal, len(rows))
 	for _, stored := range rows {
+		if stored.EndCommitOID == "" || stored.EndTreeOID == "" {
+			row := unavailableTurnRepository(*stored, models.TurnChangeReasonCaptureFailed)
+			progress.add(row, nil, 0)
+			continue
+		}
 		row, comparison, contentBytes := c.finishTerminalRepository(ctx, changeSet, *stored, client)
 		progress.add(row, comparison, contentBytes)
 	}
@@ -290,15 +347,9 @@ func (c *Coordinator) finishTerminalRepository(
 	row models.TurnRepositoryChangeSet,
 	client CheckpointClient,
 ) (models.TurnRepositoryChangeSet, *turnchanges.CheckpointComparison, int64) {
-	if row.Availability != models.TurnChangeAvailabilityPending || row.StartTreeOID == "" {
+	if row.Availability != models.TurnChangeAvailabilityPending || row.StartTreeOID == "" ||
+		row.EndCommitOID == "" || row.EndTreeOID == "" {
 		return unavailableTurnRepository(row, models.TurnChangeReasonCheckoutUnavailable), nil, 0
-	}
-	if row.EndCommitOID == "" {
-		var err error
-		row, err = c.captureAndAcceptTurnRepositoryEnd(ctx, changeSet, row, client)
-		if err != nil {
-			return unavailableTurnRepository(row, checkpointReason(err, models.TurnChangeReasonCaptureFailed)), nil, 0
-		}
 	}
 	comparison, err := client.CompareTurnCheckpoints(ctx, compareRequestForTurnRepository(changeSet.ID, row))
 	if err != nil || !validComparison(comparison, changeSet.ID, row) {

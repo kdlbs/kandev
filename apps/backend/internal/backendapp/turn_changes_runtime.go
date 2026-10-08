@@ -39,7 +39,33 @@ func (h *runtimeTurnChangeCaptureHandler) FinishTurnChanges(
 	terminal agentruntime.TurnChangeTerminal,
 	client agentruntime.TurnChangeCheckpointClient,
 ) error {
-	finishErr := h.coordinator.Finish(ctx, changes.Terminal{
+	finishErr := h.coordinator.CaptureTerminalEndpoints(ctx, coordinatorTurnChangeTerminal(terminal), client)
+	if finishErr != nil {
+		// A terminal whose executor deadline expired can still be settled from
+		// the persisted claim and any accepted endpoint. Retry once so a bounded
+		// capture failure becomes a durable unavailable result before the
+		// lifecycle releases its generation fence.
+		finishErr = h.coordinator.CaptureTerminalEndpoints(ctx, coordinatorTurnChangeTerminal(terminal), client)
+	}
+	return finishErr
+}
+
+func (h *runtimeTurnChangeCaptureHandler) ProcessTurnChanges(
+	ctx context.Context,
+	terminal agentruntime.TurnChangeTerminal,
+	client agentruntime.TurnChangeCheckpointClient,
+) error {
+	if err := h.coordinator.ProcessTerminal(ctx, coordinatorTurnChangeTerminal(terminal), client); err != nil {
+		return err
+	}
+	if h.publisher != nil {
+		return h.publisher.PublishTurnChangeSummary(ctx, terminal.TaskID, terminal.SessionID, changes.ChangeSetIDForTurn(terminal.TurnID))
+	}
+	return nil
+}
+
+func coordinatorTurnChangeTerminal(terminal agentruntime.TurnChangeTerminal) changes.Terminal {
+	return changes.Terminal{
 		Admission: changes.Admission{
 			TaskID: terminal.TaskID, SessionID: terminal.SessionID,
 			TaskEnvironmentID: terminal.TaskEnvironmentID, TurnID: terminal.TurnID,
@@ -49,30 +75,7 @@ func (h *runtimeTurnChangeCaptureHandler) FinishTurnChanges(
 		},
 		At: terminal.At, Outcome: terminal.Outcome,
 		FinalAssistantMessageID: terminal.FinalAssistantMessageID,
-	}, client)
-	if finishErr != nil {
-		// A terminal whose executor deadline expired can still be settled from
-		// the persisted claim and any accepted endpoint. Retry once so a bounded
-		// capture failure becomes a durable unavailable result before the
-		// lifecycle releases its generation fence.
-		finishErr = h.coordinator.Finish(ctx, changes.Terminal{
-			Admission: changes.Admission{
-				TaskID: terminal.TaskID, SessionID: terminal.SessionID,
-				TaskEnvironmentID: terminal.TaskEnvironmentID, TurnID: terminal.TurnID,
-				ExecutionID: terminal.ExecutionID, StartupAttemptID: terminal.StartupAttemptID,
-				PromptGeneration: terminal.PromptGeneration, ExecutionProfileID: terminal.ExecutionProfileID,
-				RouteGeneration: terminal.RouteGeneration, Checkouts: runtimeTurnChangeCheckouts(terminal.Checkouts),
-			}, At: terminal.At, Outcome: terminal.Outcome,
-			FinalAssistantMessageID: terminal.FinalAssistantMessageID,
-		}, client)
 	}
-	if h.publisher == nil {
-		return finishErr
-	}
-	if finishErr == nil {
-		_ = h.publisher.PublishTurnChangeSummary(ctx, terminal.TaskID, terminal.SessionID, changes.ChangeSetIDForTurn(terminal.TurnID))
-	}
-	return finishErr
 }
 
 func runtimeTurnChangeCheckouts(checkouts []agentruntime.TurnChangeCheckout) []changes.Checkout {
@@ -90,3 +93,4 @@ func runtimeTurnChangeCheckouts(checkouts []agentruntime.TurnChangeCheckout) []c
 }
 
 var _ agentruntime.TurnChangeCaptureHandler = (*runtimeTurnChangeCaptureHandler)(nil)
+var _ agentruntime.TurnChangeSummaryProcessor = (*runtimeTurnChangeCaptureHandler)(nil)
