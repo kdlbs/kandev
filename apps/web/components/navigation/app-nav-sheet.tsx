@@ -19,6 +19,7 @@ import { MobileAutomationsSection } from "./mobile-automations-section";
 import { MobileCoordinatorsSection } from "./mobile-coordinators-section";
 import { AppNavTrigger } from "./app-nav-trigger";
 import { AppNavSurface } from "./app-nav-surface";
+import { ProjectsSection } from "@/components/app-sidebar/sections/projects-section";
 
 import { useMobileTaskNavigationOutlet } from "./mobile-task-navigation-provider";
 import { useWorkbenchTaskSelection } from "@/components/task/mobile/task-sheet-selection-context";
@@ -206,6 +207,7 @@ function MobileNavigationExtras({
           {localNav}
         </section>
       )}
+      <ProjectsSection collapsed={false} onNavigate={close} />
       {showTasks && workspaceId && <MobileTaskOutlet key={workspaceId} close={close} />}
     </>
   );

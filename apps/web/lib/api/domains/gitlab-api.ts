@@ -476,11 +476,16 @@ export async function listUserProjects(workspaceId: string, options?: ApiRequest
   );
 }
 
-export async function searchProjects(workspaceId: string, query: string) {
+export async function searchProjects(
+  workspaceId: string,
+  query: string,
+  options?: ApiRequestOptions,
+) {
   const qs = new URLSearchParams({ workspace_id: workspaceId });
   qs.set("query", query);
   return fetchJson<{ projects: GitLabProject[] }>(
     `/api/v1/gitlab/projects/search?${qs.toString()}`,
+    options,
   );
 }
 

@@ -16,6 +16,7 @@ import {
   hasActiveTaskSourceWork as getHasActiveTaskSourceWork,
 } from "./add-workspace-sources/add-workspace-sources-availability";
 import { useTranslation } from "react-i18next";
+import { AgentProjectFileRoots } from "./agent-project-file-roots";
 
 type FilesPanelProps = {
   onOpenFile: (file: OpenFileTab) => void;
@@ -165,27 +166,29 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
     <PanelRoot data-testid="files-panel">
       <PanelBody padding={false}>
         {activeSessionId ? (
-          <FileBrowser
-            key={environmentId ?? "files"}
-            sessionId={activeSessionId}
-            environmentId={environmentId}
-            onOpenFile={onOpenFile}
-            onCreateFile={handleCreateFile}
-            onDeleteFile={deleteFile}
-            onRenameFile={renameFile}
-            onDownloadFile={downloadFile}
-            activeFilePath={activeTreePath}
-            onAddSources={
-              hasRepository
-                ? (opener) => {
-                    setAddSourcesOpener(opener);
-                    setAddSourcesOpen(true);
-                  }
-                : undefined
-            }
-            addSourcesDisabledReason={resolvedAddSourcesDisabledReason}
-            addSourcesButtonRef={addSourcesButtonRef}
-          />
+          <AgentProjectFileRoots>
+            <FileBrowser
+              key={environmentId ?? "files"}
+              sessionId={activeSessionId}
+              environmentId={environmentId}
+              onOpenFile={onOpenFile}
+              onCreateFile={handleCreateFile}
+              onDeleteFile={deleteFile}
+              onRenameFile={renameFile}
+              onDownloadFile={downloadFile}
+              activeFilePath={activeTreePath}
+              onAddSources={
+                hasRepository
+                  ? (opener) => {
+                      setAddSourcesOpener(opener);
+                      setAddSourcesOpen(true);
+                    }
+                  : undefined
+              }
+              addSourcesDisabledReason={resolvedAddSourcesDisabledReason}
+              addSourcesButtonRef={addSourcesButtonRef}
+            />
+          </AgentProjectFileRoots>
         ) : (
           <NoTaskSelected />
         )}

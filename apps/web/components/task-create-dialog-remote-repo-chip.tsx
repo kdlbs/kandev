@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import type { Branch } from "@/lib/types/http";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Spinner } from "@kandev/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -279,7 +280,7 @@ function RemoteRepoPill({
         align="start"
         portalContainer={portalContainer}
       >
-        <RemoteRepoPopoverContent
+        <RemoteRepoPickerContent
           accessible={accessibleRepos}
           selectedRepositoryIdentities={selectedRepositoryIdentities}
           onPick={(repo) => {
@@ -341,7 +342,7 @@ function StagedRemoteUrlHint() {
   );
 }
 
-function RemoteRepoPopoverContent({
+export function RemoteRepoPickerContent({
   accessible,
   selectedRepositoryIdentities,
   onPick,
@@ -415,7 +416,10 @@ function RemoteRepoPopoverContent({
         data-testid="remote-repo-input"
         data-legacy-testid="remote-paste-url-input"
         className={cn(
-          "h-11 sm:h-9 mx-2 mt-2 rounded-md px-2 text-xs bg-muted/30 border border-border/60",
+          controlSizingClassName(
+            "standard",
+            "mx-2 mt-2 rounded-md px-2 text-xs bg-muted/30 border border-border/60",
+          ),
           "outline-none focus:bg-muted focus:border-border placeholder:text-muted-foreground",
           visibleUrlError && "border-destructive focus:border-destructive",
         )}
@@ -525,7 +529,7 @@ function RepoOption({
       onClick={() => onPick(repo)}
       data-testid="remote-repo-option"
       className={cn(
-        "flex min-h-11 sm:min-h-8 w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-xs",
+        "flex min-h-7 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 w-full items-center justify-between gap-2 rounded-sm px-2 text-xs",
         "hover:bg-muted cursor-pointer text-left",
       )}
     >

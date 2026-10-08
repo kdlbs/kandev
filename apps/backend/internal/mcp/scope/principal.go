@@ -13,12 +13,15 @@ import (
 // Automation handlers use the principal as their workspace and self-target
 // boundary in addition to the normal owner identity attached to the context.
 type Principal struct {
-	AutomationID    string
-	WorkspaceID     string
-	CallerTaskID    string
-	CallerSessionID string
-	Surface         mcpprofile.Surface
-	CoordinatorID   string
+	AutomationID      string
+	WorkspaceID       string
+	CallerTaskID      string
+	CallerSessionID   string
+	Surface           mcpprofile.Surface
+	CoordinatorID     string
+	AgentProjectID    string
+	AgentProjectTier  string
+	ProjectMainTaskID string
 }
 
 func (p Principal) IsAutomation() bool {
@@ -30,6 +33,14 @@ func (p Principal) IsAutomation() bool {
 // copilot.md#principal-and-mode).
 func (p Principal) IsCoordinator() bool {
 	return p.CoordinatorID != "" && p.Surface == mcpprofile.SurfaceCoordinator
+}
+
+func (p Principal) IsProjectCoordinator() bool {
+	return p.AgentProjectID != "" && p.AgentProjectTier == models.AgentProjectTierCoordinator && p.Surface == mcpprofile.SurfaceProjectCoordinator
+}
+
+func (p Principal) IsProjectWorker() bool {
+	return p.AgentProjectID != "" && (p.AgentProjectTier == models.AgentProjectTierEconomy || p.AgentProjectTier == models.AgentProjectTierFrontier) && p.Surface == mcpprofile.SurfaceProjectWorker
 }
 
 type principalContextKey struct{}
@@ -70,13 +81,23 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 	if err != nil {
 		return nil, fmt.Errorf("resolve MCP principal task %s: %w", taskID, err)
 	}
+	mainTaskID := ""
+	if task.AgentProjectID != "" {
+		mainTaskID = task.ID
+		if task.AgentProjectTier != models.AgentProjectTierCoordinator {
+			mainTaskID = task.ParentID
+		}
+	}
 	return WithPrincipal(ctx, Principal{
-		AutomationID:    automationID,
-		WorkspaceID:     workspaceID,
-		CallerTaskID:    taskID,
-		CallerSessionID: sessionID,
-		Surface:         surface,
-		CoordinatorID:   coordinatorID,
+		AutomationID:      automationID,
+		WorkspaceID:       workspaceID,
+		CallerTaskID:      taskID,
+		CallerSessionID:   sessionID,
+		Surface:           surface,
+		CoordinatorID:     coordinatorID,
+		AgentProjectID:    task.AgentProjectID,
+		AgentProjectTier:  task.AgentProjectTier,
+		ProjectMainTaskID: mainTaskID,
 	}), nil
 }
 
@@ -123,10 +144,9 @@ func (r *Resolver) resolvePrincipalWorkspace(ctx context.Context, task *models.T
 }
 
 // principalSurface derives the MCP surface (and, for automation/coordinator
-// tasks, the owning automation/coordinator id) from task. The coordinator
-// branch runs first: a coordinator-origin task must resolve to its
-// coordinator or be refused, never fall through to the Kanban/office default
-// (docs/specs/coordinator/system-design/copilot.md#principal-and-mode).
+// tasks, the owning automation/coordinator id) from task. A coordinator-origin
+// task must resolve to its coordinator or be refused, never fall through to
+// the Kanban/office default.
 func (r *Resolver) principalSurface(ctx context.Context, task *models.Task) (automationID, coordinatorID string, surface mcpprofile.Surface, err error) {
 	if task.Origin == models.TaskOriginCoordinator {
 		if r.coordinators == nil {
@@ -140,6 +160,22 @@ func (r *Resolver) principalSurface(ctx context.Context, task *models.Task) (aut
 			return "", "", mcpprofile.SurfaceCoordinator, fmt.Errorf("task %s is not a live coordinator conversation task", task.ID)
 		}
 		return "", id, mcpprofile.SurfaceCoordinator, nil
+	}
+	if task.AgentProjectID != "" {
+		switch task.AgentProjectTier {
+		case models.AgentProjectTierCoordinator:
+			if task.ParentID != "" {
+				return "", "", mcpprofile.SurfaceKanbanTask, fmt.Errorf("project coordinator has a parent task")
+			}
+			return "", "", mcpprofile.SurfaceProjectCoordinator, nil
+		case models.AgentProjectTierEconomy, models.AgentProjectTierFrontier:
+			if task.ParentID == "" {
+				return "", "", mcpprofile.SurfaceKanbanTask, fmt.Errorf("project worker has no coordinator parent")
+			}
+			return "", "", mcpprofile.SurfaceProjectWorker, nil
+		default:
+			return "", "", mcpprofile.SurfaceKanbanTask, fmt.Errorf("project task tier is invalid")
+		}
 	}
 	if task.Origin != models.TaskOriginAutomationRun {
 		if task.IsFromOffice {

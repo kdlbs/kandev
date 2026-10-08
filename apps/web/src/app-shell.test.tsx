@@ -13,6 +13,9 @@ vi.mock("@/components/navigation/mobile-task-navigation-provider", () => ({
   MobileTaskNavigationProvider: mocks.passthrough,
 }));
 vi.mock("@/components/app-sidebar/app-sidebar", () => ({ AppSidebar: () => null }));
+vi.mock("@/components/agent-projects/agent-project-dialog-provider", () => ({
+  AgentProjectDialogProvider: mocks.passthrough,
+}));
 vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
   AppStatusSurfaceProvider: mocks.passthrough,
 }));

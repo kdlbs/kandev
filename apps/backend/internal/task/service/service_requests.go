@@ -59,29 +59,27 @@ type TaskRepositoryInput struct {
 	ResolveProviderDefaults bool `json:"-"`
 
 	// TrustedProviderDescriptor is an internal-only marker for a complete
-	// provider descriptor already authorized by the plugin host. It is never
-	// accepted from REST/MCP JSON; callers must still supply every identity and
-	// exact credential-free clone URL field above.
-	//
-	// A descriptor that arrives without this marker uses the normal built-in
-	// resolver. Plugin descriptors must come through the authenticated plugin
-	// Host Tasks.Create path, which sets this marker only after validating the
-	// active plugin's provider ownership and clone origin.
+	// provider descriptor verified by the server-side repository-selection
+	// resolver. It is never accepted from REST, WebSocket, or MCP JSON.
 	TrustedProviderDescriptor bool                           `json:"-"`
 	BranchPolicySnapshot      *models.RepositoryBranchPolicy `json:"-"`
 }
 
 // CreateTaskRequest contains the data for creating a new task
 type CreateTaskRequest struct {
-	WorkspaceID    string                `json:"workspace_id"`
-	WorkflowID     string                `json:"workflow_id"`
-	WorkflowStepID string                `json:"workflow_step_id"`
-	Title          string                `json:"title"`
-	Description    string                `json:"description"`
-	AutoTitle      bool                  `json:"auto_title,omitempty"`
-	Priority       string                `json:"priority"`
-	State          *v1.TaskState         `json:"state,omitempty"`
-	Repositories   []TaskRepositoryInput `json:"repositories,omitempty"`
+	WorkspaceID           string `json:"workspace_id"`
+	AgentProjectID        string `json:"-"`
+	AgentProjectTier      string `json:"-"`
+	AgentProjectProfileID string `json:"-"`
+	agentProjectTask      bool
+	WorkflowID            string                `json:"workflow_id"`
+	WorkflowStepID        string                `json:"workflow_step_id"`
+	Title                 string                `json:"title"`
+	Description           string                `json:"description"`
+	AutoTitle             bool                  `json:"auto_title,omitempty"`
+	Priority              string                `json:"priority"`
+	State                 *v1.TaskState         `json:"state,omitempty"`
+	Repositories          []TaskRepositoryInput `json:"repositories,omitempty"`
 	// projectRepositoryDefaults marks the source list read from a root task's
 	// Office project. Only these automatic selections deduplicate aliases after
 	// each source has passed normal repository resolution.

@@ -3,15 +3,19 @@ package lifecycle
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -35,6 +39,153 @@ func canonicalTempDir(t *testing.T) string {
 
 func testWorkspaceLinkOwner() worktree.OwnedDirectoryLinkOwner {
 	return worktree.OwnedDirectoryLinkOwner{TaskID: "task-1", TaskDirName: "task-1"}
+}
+
+func TestProjectWritableRootsReachAgentExecution(t *testing.T) {
+	root := canonicalTempDir(t)
+	paths := []string{
+		filepath.Join(root, "context"), filepath.Join(root, "repo-api"), filepath.Join(root, "repo-web"),
+	}
+	for _, path := range paths {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writableRoots, err := projectWritableRoots(&ProjectWorkspaceAccess{
+		ContextPath: paths[0], RepositoryWorktreePaths: paths[1:],
+	})
+	if err != nil {
+		t.Fatalf("projectWritableRoots: %v", err)
+	}
+	if !reflect.DeepEqual(writableRoots, paths) {
+		t.Fatalf("project writable roots = %v, want context and every selected repository %v", writableRoots, paths)
+	}
+	execution := (&ExecutorInstance{}).ToAgentExecution(&ExecutorCreateRequest{
+		Env: map[string]string{}, ProjectWritableRoots: writableRoots,
+	})
+	if !reflect.DeepEqual(execution.ProjectWritableRoots, paths) {
+		t.Fatalf("agent execution writable roots = %v, want %v", execution.ProjectWritableRoots, paths)
+	}
+}
+
+func TestProjectWritableRootsFailClosedForMissingSelectedRepository(t *testing.T) {
+	contextPath := filepath.Join(canonicalTempDir(t), "context")
+	if err := os.MkdirAll(contextPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if roots, err := projectWritableRoots(&ProjectWorkspaceAccess{
+		ContextPath:             contextPath,
+		RepositoryWorktreePaths: []string{filepath.Join(filepath.Dir(contextPath), "missing-repository")},
+	}); err == nil || roots != nil {
+		t.Fatalf("projectWritableRoots = %v, %v; want failure without a partial root list", roots, err)
+	}
+}
+
+func TestReconcileProjectWorkspaceLinksCanonicalContextAtTaskRoot(t *testing.T) {
+	base := canonicalTempDir(t)
+	taskDirName := "task-project_abc"
+	taskID := "task-project"
+	taskRoot := filepath.Join(base, "tasks", taskDirName)
+	primary := filepath.Join(taskRoot, "api")
+	contextPath := filepath.Join(base, "agent-projects", uuid.NewString(), "context")
+	if err := os.MkdirAll(primary, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(contextPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("git", "init", "-q", primary).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+	if err := storageworkspaces.WriteOwnershipMarker(taskRoot, storageworkspaces.OwnershipMarker{
+		TaskID: taskID, WorkspaceID: "workspace-1", TaskDirName: taskDirName,
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	gotRoot, err := reconcileProjectWorkspace(primary, contextPath, taskID, "workspace-1", taskDirName)
+	if err != nil {
+		t.Fatalf("reconcileProjectWorkspace: %v", err)
+	}
+	if gotRoot != taskRoot {
+		t.Fatalf("task root = %q, want %q", gotRoot, taskRoot)
+	}
+	linkPath := filepath.Join(taskRoot, "context")
+	if !worktree.IsDirectoryLink(linkPath) {
+		t.Fatalf("task context entry is not a directory link: %s", linkPath)
+	}
+	resolved, err := filepath.EvalSymlinks(linkPath)
+	if err != nil || resolved != contextPath {
+		t.Fatalf("task context link resolves to %q, %v; want %q", resolved, err, contextPath)
+	}
+	if _, err := os.Lstat(filepath.Join(primary, "context")); !os.IsNotExist(err) {
+		t.Fatalf("context must remain outside repository Git scope, lstat err=%v", err)
+	}
+	if err := os.WriteFile(filepath.Join(taskRoot, "context", "notes.md"), []byte("shared update\n"), 0o600); err != nil {
+		t.Fatalf("write shared context through task link: %v", err)
+	}
+	status, err := exec.Command("git", "-C", primary, "status", "--porcelain").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v: %s", err, status)
+	}
+	if len(status) != 0 {
+		t.Fatalf("shared context edit entered repository Git status: %s", status)
+	}
+}
+
+func TestReconcileProjectWorkspaceRejectsWrongContextLink(t *testing.T) {
+	base := canonicalTempDir(t)
+	taskDirName := "task-project_abc"
+	taskID := "task-project"
+	taskRoot := filepath.Join(base, "tasks", taskDirName)
+	primary := filepath.Join(taskRoot, "api")
+	canonical := filepath.Join(base, "agent-projects", uuid.NewString(), "context")
+	wrong := filepath.Join(base, "agent-projects", uuid.NewString(), "context")
+	for _, path := range []string{primary, canonical, wrong} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := storageworkspaces.WriteOwnershipMarker(taskRoot, storageworkspaces.OwnershipMarker{
+		TaskID: taskID, WorkspaceID: "workspace-1", TaskDirName: taskDirName,
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worktree.EnsureOwnedDirectoryLink(taskRoot, "context", wrong, worktree.OwnedDirectoryLinkOwner{
+		TaskID: taskID, TaskDirName: taskDirName,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := reconcileProjectWorkspace(primary, canonical, taskID, "workspace-1", taskDirName); err == nil {
+		t.Fatal("wrong project context link was silently repointed")
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Join(taskRoot, "context"))
+	if err != nil || resolved != wrong {
+		t.Fatalf("wrong link target changed to %q, %v; want %q", resolved, err, wrong)
+	}
+}
+
+func TestWorkspaceSourceRootsUseProjectWorktreesAndContext(t *testing.T) {
+	contextPath := t.TempDir()
+	primaryWorktree := t.TempDir()
+	otherWorktree := t.TempDir()
+	sourceRepository := t.TempDir()
+	roots := workspaceSourceRoots(nil, []WorkspaceRepositorySpec{{RepositoryPath: sourceRepository}}, &ProjectWorkspaceAccess{
+		ContextPath:             contextPath,
+		RepositoryWorktreePaths: []string{primaryWorktree, otherWorktree},
+	})
+	want := []string{contextPath, primaryWorktree, otherWorktree}
+	if len(roots) != len(want) {
+		t.Fatalf("source roots = %v, want %v", roots, want)
+	}
+	for i := range roots {
+		if roots[i] != want[i] {
+			t.Fatalf("source roots = %v, want %v", roots, want)
+		}
+	}
 }
 
 func TestReconcileWorkspaceRepositories_RecreatesMissingOwnedLink(t *testing.T) {

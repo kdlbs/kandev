@@ -35,6 +35,10 @@ describe("feature flag repository contract", () => {
     expect(defaultFeatureFlags.canvases).toBe(false);
   });
 
+  it("keeps Agent Projects disabled by default", () => {
+    expect(defaultFeatureFlags.agentProjects).toBe(false);
+  });
+
   it("omits the graduated remote executor plugins flag", () => {
     expect(defaultFeatureFlags).not.toHaveProperty("remoteExecutorPlugins");
   });

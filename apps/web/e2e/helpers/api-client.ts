@@ -135,6 +135,15 @@ export type MockRepo = {
   private?: boolean;
 };
 
+export type MockGitHubRepositoryDetails = {
+  full_name: string;
+  owner: string;
+  name: string;
+  clone_url: string;
+  html_url: string;
+  default_branch: string;
+};
+
 export type MockReview = {
   id: number;
   author: string;
@@ -2123,6 +2132,10 @@ export class ApiClient {
 
   async mockGitHubAddRepos(org: string, repos: MockRepo[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/repos", { org, repos });
+  }
+
+  async mockGitHubAddRepositoryDetails(repositories: MockGitHubRepositoryDetails[]): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/repository-details", { repositories });
   }
 
   private async seedMockGitHubRepositoryAccess(

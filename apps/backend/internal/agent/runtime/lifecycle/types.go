@@ -72,6 +72,7 @@ type AgentExecution struct {
 	ContainerIP          string               // IP address of the container for agentctl communication
 	WorkspacePath        string               // Path to the workspace (worktree or repository path)
 	WorkspaceSourceRoots []string             // Canonical durable source roots permitted by agentctl file operations
+	ProjectWritableRoots []string             // Server-granted ACP roots for project context and selected repositories
 	ACPSessionID         string               // ACP session ID to resume, if available
 	AgentCommand         string               // Command to start the agent subprocess
 	ContinueCommand      string               // Command for follow-up prompts (one-shot agents)
@@ -1339,6 +1340,15 @@ type WorkspaceFolderSpec struct {
 	LocalPath string
 }
 
+// ProjectWorkspaceAccess carries the durable context root and the project
+// task's isolated repository worktrees into runtime workspace admission.
+type ProjectWorkspaceAccess struct {
+	ContextPath             string
+	Tier                    string
+	PrimaryRepositoryID     string
+	RepositoryWorktreePaths []string
+}
+
 // WorkspaceRepositorySpec is the durable host-side source needed to recreate
 // a task's owned repository entry after a restart.
 type WorkspaceRepositorySpec struct {
@@ -1500,6 +1510,7 @@ type LaunchRequest struct {
 	// yet been updated.
 	Repositories     []RepoLaunchSpec
 	WorkspaceFolders []WorkspaceFolderSpec
+	ProjectWorkspace *ProjectWorkspaceAccess
 
 	// managedGoCachePath is resolved once before local preparation so setup
 	// scripts and the runtime instance cannot observe different settings.
@@ -1647,6 +1658,7 @@ type McpConfigProvider interface {
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation
 type WorkspaceInfo struct {
 	TaskID            string
+	AgentProjectID    string
 	SessionID         string // Task session ID (from task_sessions table)
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
 	// RecoveryErrorObservation captures session and owner identity before
@@ -1676,6 +1688,7 @@ type WorkspaceInfo struct {
 	WorkspacePath          string // Path to the workspace/repository
 	WorkspaceFolders       []WorkspaceFolderSpec
 	WorkspaceRepositories  []WorkspaceRepositorySpec
+	ProjectWorkspace       *ProjectWorkspaceAccess
 	TaskDirName            string
 	WorkspaceID            string
 	AgentProfileID         string // Stable Office agent identity (or the execution profile for legacy sessions)

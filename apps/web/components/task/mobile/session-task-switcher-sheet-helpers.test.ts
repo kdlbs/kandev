@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { WorkflowSnapshot } from "@/lib/types/http";
 import {
   mapSnapshotToKanban,
+  mostRecentWorkspaceTask,
   reconcileMobileSnapshot,
 } from "./session-task-switcher-sheet-helpers";
 import { createAppStore } from "@/lib/state/store";
@@ -74,4 +75,16 @@ it("reconciles mobile reads with live deletions and rejects a previous workspace
   expect(current?.taskCoverage).toMatchObject({ complete: true, total: 0 });
   store.getState().setActiveWorkspace("other");
   expect(reconcileMobileSnapshot(store.getState(), snapshot, read)).toBeNull();
+});
+
+it("keeps workspace navigation available when a concurrent overview read invalidates reconciliation", () => {
+  const store = createAppStore();
+  store.getState().setActiveWorkspace("ws");
+  const read = store.getState().beginTaskOverviewRead();
+  store.getState().finishTaskOverviewRead(read);
+  const snapshot = mapSnapshotToKanban(coveredSnapshot(), "wf");
+  const reconciled = reconcileMobileSnapshot(store.getState(), snapshot, read);
+
+  expect(reconciled).toBeNull();
+  expect(mostRecentWorkspaceTask(reconciled, snapshot)).toMatchObject({ id: "task" });
 });

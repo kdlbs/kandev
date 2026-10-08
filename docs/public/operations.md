@@ -172,6 +172,7 @@ To recover capacity in one session, expand its queue chip in the task workbench.
 | `data/master.key` | Owner-only AES-256 key used to decrypt secrets stored in the database; a database copy without the matching key cannot recover those secret values |
 | `data/backups/` | SQLite snapshots when the database uses the default path |
 | `tasks/` and legacy `worktrees/` | Managed Git worktrees and per-task files; may contain uncommitted or untracked work |
+| `agent-projects/` | Shared Agent Project context files; not included in database snapshots |
 | `repos/` | Kandev-managed source clones |
 | `sessions/`, `quick-chat/`, `agent-sessions/` | Session history, ephemeral workspaces, and isolated agent homes when used |
 | `logs/` | Service and optional ACP debug logs |
@@ -179,7 +180,7 @@ To recover capacity in one session, expand its queue chip in the task workbench.
 | `lsp-servers/`, `runtime/`, `workspaces/` | Installed tools and feature-specific materialized state |
 | `plugins/webapps/` | Immutable static web-app release artifacts, required with the database for canvas recovery |
 
-Database snapshots do not contain Git worktrees, clones, the master key, service metadata, or provider-side objects. Native agent and `gh` login files also normally live in the service user's home outside `~/.kandev` (for example `~/.codex` and `~/.config/gh`). The official container instead sets `HOME=/data/home`, so those CLI credentials live on its mounted volume.
+Database snapshots do not contain Git worktrees, clones, Agent Project context, the master key, service metadata, or provider-side objects. Native agent and `gh` login files also normally live in the service user's home outside `~/.kandev` (for example `~/.codex` and `~/.config/gh`). The official container instead sets `HOME=/data/home`, so those CLI credentials live on its mounted volume.
 
 The **Data & Logs > Database** tab and its Backups section use the configured SQLite file path. They use `backups/` under the parent directory of that file. The default remains `<home>/data/kandev.db` with snapshots in `<home>/data/backups/`. A custom path can place the database and snapshots outside the Kandev home. Kandev does not move snapshots from another directory automatically.
 

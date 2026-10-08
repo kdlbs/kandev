@@ -22,6 +22,8 @@ type HTTPGitFixture = {
 export type HTTPGitFixtureOptions = {
   /** Override the Docker bridge address for direct host-side fixture tests. */
   bridgeGateway?: string;
+  /** Match the fixture's public clone URL to a provider identity under test. */
+  providerOrigin?: string;
   onListening?: (server: Server, port: number) => void;
   writeBackendGitConfig?: (file: string, content: string) => void;
   closeServer?: (server: Server) => Promise<void>;
@@ -73,7 +75,8 @@ export async function startHTTPGitFixture(
   try {
     options.onListening?.(server, port);
     const fixtureOrigin = `http://${options.bridgeGateway ?? dockerBridgeGateway()}:${port}/`;
-    const remoteURL = `https://gitlab.com/fixture/${name}.git`;
+    const providerOrigin = new URL(options.providerOrigin ?? "https://gitlab.com").origin;
+    const remoteURL = `${providerOrigin}/fixture/${name}.git`;
     execFileSync("git", ["remote", "set-url", "origin", remoteURL], { cwd: checkout });
     const backendGitConfigPath = path.join(root, "fixture", `${name}.gitconfig`);
     const config = `[url "${fixtureOrigin}fixture/${name}.git"]\n\tinsteadOf = ${remoteURL}\n`;
@@ -89,7 +92,7 @@ export async function startHTTPGitFixture(
       gitConfigEnvVars: [
         { key: "GIT_CONFIG_COUNT", value: "1" },
         { key: "GIT_CONFIG_KEY_0", value: `url.${fixtureOrigin}.insteadOf` },
-        { key: "GIT_CONFIG_VALUE_0", value: "https://gitlab.com/" },
+        { key: "GIT_CONFIG_VALUE_0", value: `${providerOrigin}/` },
       ],
       // Leave the config under the backend fixture root until that fixture has
       // released its environment and stopped its process, then removes the root.

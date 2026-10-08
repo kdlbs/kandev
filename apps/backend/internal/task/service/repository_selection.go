@@ -6,9 +6,8 @@ import (
 	"strings"
 )
 
-// RepositorySelectionResolver verifies a first-use, plugin-owned repository
-// URL and returns the complete trusted descriptor to persist. It must not
-// perform repository or task writes.
+// RepositorySelectionResolver verifies a provider repository URL and returns
+// its complete trusted descriptor. It must not perform repository or task writes.
 type RepositorySelectionResolver interface {
 	ResolveRepositorySelection(context.Context, string, TaskRepositoryInput) (TaskRepositoryInput, error)
 }
@@ -24,7 +23,7 @@ const (
 )
 
 // RepositorySelectionError is safe to expose to task transports. Its Error
-// method is bounded and never includes plugin response data.
+// method is bounded and never includes untrusted provider response data.
 type RepositorySelectionError struct {
 	Code  RepositorySelectionErrorCode
 	cause error
@@ -139,6 +138,31 @@ func trustResolvedRepositorySelection(
 	resolved.GitHubURL = ""
 	resolved.LocalPath = ""
 	return resolved, nil
+}
+
+func repositorySelectionHintsMatch(requested, resolved TaskRepositoryInput) bool {
+	provider := strings.TrimSpace(requested.Provider)
+	if hint := strings.TrimSpace(requested.ProviderHost); hint != "" &&
+		normalizeProviderHost(provider, hint) != normalizeProviderHost(provider, resolved.ProviderHost) {
+		return false
+	}
+	if hint := strings.TrimSpace(requested.ProviderOwner); hint != "" && !providerValueMatches(provider, hint, resolved.ProviderOwner) {
+		return false
+	}
+	if hint := strings.TrimSpace(requested.ProviderName); hint != "" && !providerValueMatches(provider, hint, resolved.ProviderName) {
+		return false
+	}
+	if hint := strings.TrimSpace(requested.DefaultBranch); hint != "" && hint != strings.TrimSpace(resolved.DefaultBranch) {
+		return false
+	}
+	return true
+}
+
+func providerValueMatches(provider, left, right string) bool {
+	if strings.EqualFold(provider, providerGitHub) {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }
 
 func normalizeRepositorySelectionError(err error) error {

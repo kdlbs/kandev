@@ -14,7 +14,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/api/domains/github-api", () => ({
   fetchAccessibleRepos: mocks.fetchAccessibleRepos,
 }));
-vi.mock("@/lib/api/domains/gitlab-api", () => ({ listUserProjects: mocks.listUserProjects }));
+vi.mock("@/lib/api/domains/gitlab-api", () => ({
+  listUserProjects: mocks.listUserProjects,
+}));
 vi.mock("@/lib/api/domains/azure-devops-api", () => ({
   listAzureDevOpsProjects: mocks.listAzureDevOpsProjects,
   listAzureDevOpsRepositories: mocks.listAzureDevOpsRepositories,
@@ -295,6 +297,48 @@ describe("useRemoteRepositories provider eligibility", () => {
 });
 
 describe("useRemoteRepositories provider results", () => {
+  it("keeps self-hosted GitLab host, scope, and branch metadata from provider rows", async () => {
+    mocks.fetchAccessibleRepos.mockResolvedValue([]);
+    mocks.listUserProjects.mockResolvedValue({
+      projects: [
+        {
+          id: 42,
+          namespace: "group",
+          path: "project",
+          path_with_namespace: "group/project",
+          web_url: "https://gitlab.example.test:8443/group/project",
+          default_branch: "release",
+          visibility: "private",
+        },
+      ],
+    });
+    mocks.listAzureDevOpsProjects.mockResolvedValue({ projects: [] });
+    mocks.useGitLabStatus.mockReturnValue({
+      status: {
+        authenticated: true,
+        token_configured: true,
+        host: "https://gitlab.example.test:8443",
+      },
+      loading: false,
+      refresh: vi.fn(),
+    });
+    const { result } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.repos).toHaveLength(1));
+    expect(result.current.repos[0]).toEqual(
+      expect.objectContaining({
+        providerHost: "https://gitlab.example.test:8443",
+        defaultBranch: "release",
+      }),
+    );
+    expect(result.current.gitLabHost).toBe("https://gitlab.example.test:8443");
+    expect(result.current.matchesURL?.("https://gitlab.example.test:8443/group/project")).toBe(
+      true,
+    );
+  });
+});
+
+describe("useRemoteRepositories combined provider results", () => {
   it("combines successful providers while tolerating a provider failure", async () => {
     mocks.fetchAccessibleRepos.mockResolvedValue([
       {

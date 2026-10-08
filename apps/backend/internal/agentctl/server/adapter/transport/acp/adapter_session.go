@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/coder/acp-go-sdk"
@@ -113,15 +114,19 @@ func (a *Adapter) waitForSessionCleanup() {
 
 // NewSession creates a new agent session.
 func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
+	return a.NewSessionWithAdditionalDirectories(ctx, mcpServers, nil)
+}
+
+func (a *Adapter) NewSessionWithAdditionalDirectories(ctx context.Context, mcpServers []types.McpServer, directories []string) (string, error) {
 	if err := a.lockSessionTransition(ctx); err != nil {
 		return "", err
 	}
 	defer a.sessionTransitionMu.Unlock()
-	return a.newSession(ctx, mcpServers)
+	return a.newSession(ctx, mcpServers, directories)
 }
 
 //nolint:funlen // pre-existing session creation flow retained for transition ordering
-func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
+func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer, directories []string) (string, error) {
 	// Session replacement and live config changes share one ordering boundary:
 	// each ACP response carries a complete config snapshot for its session.
 	if err := a.lockConfigChange(ctx); err != nil {
@@ -131,13 +136,16 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-
 	a.mu.Lock()
 	conn := a.acpConn
+	capabilities := a.capabilities
 	a.mu.Unlock()
 
 	if conn == nil {
 		return "", fmt.Errorf("adapter not initialized")
+	}
+	if err := validateAdditionalDirectories(capabilities, directories); err != nil {
+		return "", err
 	}
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -148,50 +156,23 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	// session. Reset pendingWakeups and cancel the scheduler under one
 	// a.mu critical section so a concurrent handleWakeupEvent can't slip
 	// a stale entry between the two operations.
-	a.mu.Lock()
-	a.pendingWakeups = make(map[string]*pendingWakeup)
-	a.clearCodexSubagentCorrelationsLocked("")
-	a.clearCursorTaskMetaLocked("")
-	a.clearPromptHandoffToolTrackingLocked()
-	clear(a.usageBySession)
-	a.wakeup.cancel()
-	a.mu.Unlock()
-	a.cancelAllAsyncTurnCompletes()
+	a.resetForNewSession()
 
 	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.new")
 	defer span.End()
 
-	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
-	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
-	for _, decision := range decisions {
-		kind := streams.MCPAttachmentEvidenceDelivered
-		if !decision.Included {
-			kind = streams.MCPAttachmentEvidenceFiltered
-		}
-		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
-	}
+	filteredServers := a.filterSessionMcpServers(ctx, mcpServers, capabilities.McpCapabilities)
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
-		Cwd:        a.cfg.WorkDir,
-		McpServers: toACPMcpServers(filteredServers),
+		Cwd:                   a.cfg.WorkDir,
+		McpServers:            toACPMcpServers(filteredServers),
+		AdditionalDirectories: directories,
 	})
 	if err != nil {
-		for _, server := range filteredServers {
-			a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceExplicitError, "session_new_failed", err.Error())
-		}
-		// An agent may have emitted provisional usage before returning an RPC
-		// error. Clear at the FIFO boundary so an already queued notification
-		// cannot repopulate the tracker after this failure cleanup.
-		if !a.syncNotifQueueThen(a.clearUsageTrackers) {
-			a.clearUsageTrackers()
-		}
 		span.RecordError(err)
-		if a.maybeEmitAuthRequired(err) {
-			return "", fmt.Errorf("authentication required: %w", err)
-		}
-		return "", fmt.Errorf("failed to create session: %w", err)
+		return "", a.newSessionRPCError(ctx, filteredServers, err)
 	}
 	for _, server := range filteredServers {
 		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
@@ -211,44 +192,13 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 		return "", fmt.Errorf("failed to synchronize new session notifications: %w", barrierErr)
 	}
 
-	initialModels, initialConfigOptions := a.initialSessionConfigState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
-	a.mu.Lock()
-	a.sessionID = sessionID
-	a.sessionSettingsPolicy = ""
-	a.configGeneration++
-	clear(a.contextSamples)
-	// Reset session-scoped model caches before computing the new session's
-	// state so a session without a model surface can't reuse the previous
-	// session's models / configOptions for validation in SetModel.
-	a.availableModels = nil
-	a.availableConfigOptions = cloneConfigOptions(initialConfigOptions)
-	a.resetSessionModeLocked()
-	if initialModels != nil {
-		a.availableModels = initialModels.AvailableModels
-	}
-	if resp.Modes == nil {
-		a.availableModes, _ = sessionModesFromConfig(initialConfigOptions)
-	}
-	a.mu.Unlock()
-	a.invalidatePromptTurnOwnership(priorPromptTurn)
+	initialModels, initialConfigOptions := a.initializeNewSessionState(sessionID, priorPromptTurn, resp)
 	a.attachMgr.SetSessionID(sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))
 	a.logger.Info("created new session", zap.String("session_id", sessionID))
 
-	// Emit initial session mode if the agent returned mode state
-	if resp.Modes != nil {
-		a.emitInitialModeState(sessionID, resp.Modes, "")
-	} else {
-		a.emitInitialModeConfigState(sessionID, initialConfigOptions, "")
-	}
-
-	// Emit session models when the session exposes a model-shaped config option.
-	if initialModels != nil {
-		a.emitSessionModels(sessionID, initialModels, resp.Meta, resp.ConfigOptions, "")
-	} else if len(initialConfigOptions) > 0 {
-		a.emitSessionConfigOptionsState(sessionID, initialConfigOptions, "")
-	}
+	a.emitNewSessionInitialState(sessionID, resp, initialModels, initialConfigOptions)
 
 	// Emit session status event to normalize with other adapters.
 	// This eliminates the need for ReportsStatusViaStream flag.
@@ -263,6 +213,92 @@ func (a *Adapter) newSession(ctx context.Context, mcpServers []types.McpServer) 
 	})
 
 	return sessionID, nil
+}
+
+func (a *Adapter) resetForNewSession() {
+	a.mu.Lock()
+	a.pendingWakeups = make(map[string]*pendingWakeup)
+	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearCursorTaskMetaLocked("")
+	a.clearPromptHandoffToolTrackingLocked()
+	clear(a.usageBySession)
+	a.wakeup.cancel()
+	a.mu.Unlock()
+	a.cancelAllAsyncTurnCompletes()
+}
+
+func (a *Adapter) filterSessionMcpServers(
+	ctx context.Context,
+	servers []types.McpServer,
+	capabilities acp.McpCapabilities,
+) []types.McpServer {
+	caps := effectiveMcpCapabilities(capabilities, a.cfg)
+	filteredServers, decisions := filterMcpServersWithDecisions(servers, caps, a.logger)
+	for _, decision := range decisions {
+		kind := streams.MCPAttachmentEvidenceDelivered
+		if !decision.Included {
+			kind = streams.MCPAttachmentEvidenceFiltered
+		}
+		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
+	}
+	return filteredServers
+}
+
+func (a *Adapter) newSessionRPCError(ctx context.Context, servers []types.McpServer, err error) error {
+	for _, server := range servers {
+		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceExplicitError, "session_new_failed", err.Error())
+	}
+	// Clear provisional usage only after queued notifications have been drained.
+	if !a.syncNotifQueueThen(a.clearUsageTrackers) {
+		a.clearUsageTrackers()
+	}
+	if a.maybeEmitAuthRequired(err) {
+		return fmt.Errorf("authentication required: %w", err)
+	}
+	return fmt.Errorf("failed to create session: %w", err)
+}
+
+func (a *Adapter) initializeNewSessionState(
+	sessionID string,
+	priorPromptTurn *promptTurnState,
+	resp acp.NewSessionResponse,
+) (*sessionModelState, []streams.ConfigOption) {
+	initialModels, initialConfigOptions := a.initialSessionConfigState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
+	a.mu.Lock()
+	a.sessionID = sessionID
+	a.sessionSettingsPolicy = ""
+	a.configGeneration++
+	clear(a.contextSamples)
+	a.availableModels = nil
+	a.availableConfigOptions = cloneConfigOptions(initialConfigOptions)
+	a.resetSessionModeLocked()
+	if initialModels != nil {
+		a.availableModels = initialModels.AvailableModels
+	}
+	if resp.Modes == nil {
+		a.availableModes, _ = sessionModesFromConfig(initialConfigOptions)
+	}
+	a.mu.Unlock()
+	a.invalidatePromptTurnOwnership(priorPromptTurn)
+	return initialModels, initialConfigOptions
+}
+
+func (a *Adapter) emitNewSessionInitialState(
+	sessionID string,
+	resp acp.NewSessionResponse,
+	initialModels *sessionModelState,
+	initialConfigOptions []streams.ConfigOption,
+) {
+	if resp.Modes != nil {
+		a.emitInitialModeState(sessionID, resp.Modes, "")
+	} else {
+		a.emitInitialModeConfigState(sessionID, initialConfigOptions, "")
+	}
+	if initialModels != nil {
+		a.emitSessionModels(sessionID, initialModels, resp.Meta, resp.ConfigOptions, "")
+	} else if len(initialConfigOptions) > 0 {
+		a.emitSessionConfigOptionsState(sessionID, initialConfigOptions, "")
+	}
 }
 
 // initialSessionModelState resolves the initial model state for a session.
@@ -525,13 +561,17 @@ func mapToHTTPHeaders(headers map[string]string) []acp.HttpHeader {
 	return hdrs
 }
 
-// LoadSession restores an existing session, preferring advertised session/resume
-// without history replay and otherwise using session/load.
-// mcpServers are passed to the agent so it can reconnect to MCP servers on the new
-// agentctl instance (critical for agents that receive MCP configs via the protocol).
-//
-//nolint:funlen // pre-existing length preserved from adapter.go file split
+// LoadSession restores an existing session through the advertised session protocol.
 func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
+	return a.LoadSessionWithAdditionalDirectories(ctx, sessionID, mcpServers, nil)
+}
+
+// LoadSessionWithAdditionalDirectories restores an existing session and grants
+// the listed server-selected workspace directories to the agent.
+// mcpServers are passed to the agent so it can reconnect after resume.
+//
+//nolint:funlen // preserve the ordering-sensitive restore and replay lifecycle
+func (a *Adapter) LoadSessionWithAdditionalDirectories(ctx context.Context, sessionID string, mcpServers []types.McpServer, directories []string) error {
 	if err := a.lockSessionTransition(ctx); err != nil {
 		return err
 	}
@@ -557,10 +597,8 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		return err
 	}
 
-	if !capabilities.LoadSession && capabilities.SessionCapabilities.Resume == nil {
-		a.logger.Debug("session/load rejected: agent does not advertise LoadSession capability",
-			zap.String("session_id", sessionID))
-		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
+	if err := a.validateSessionRestore(sessionID, capabilities, directories); err != nil {
+		return err
 	}
 	priorPromptTurn := a.currentPromptTurn()
 
@@ -568,6 +606,47 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	// finalizer keyed to the prior session — same reset block as NewSession to
 	// avoid leaving an armed timer for a session id that's about to change and
 	// accumulating stale pendingWakeups entries across reloads.
+	a.resetForSessionRestore()
+
+	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.restore")
+	defer span.End()
+
+	// Filter MCP servers by agent capabilities (same logic as NewSession).
+	filteredServers := a.filterSessionMcpServers(ctx, mcpServers, capabilities.McpCapabilities)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	resp, err := a.restoreSession(ctx, sessionID, conn, capabilities, filteredServers, directories)
+	if err != nil {
+		span.RecordError(err)
+		return fmt.Errorf("failed to load session: %w", err)
+	}
+
+	// The SDK may finish the load RPC while replay notifications are still
+	// queued in the adapter worker. Keep suppression active until a FIFO barrier
+	// proves every replay frame has been processed, then mark replayed cumulative
+	// usage/cost as the baseline for the first new prompt.
+	a.completeSessionRestore(sessionID, settingsPolicy, priorPromptTurn, resp)
+	span.SetAttributes(attribute.String("session_id", sessionID))
+	a.logger.Info("loaded session", zap.String("session_id", sessionID))
+	return nil
+}
+
+func (a *Adapter) validateSessionRestore(
+	sessionID string,
+	capabilities acp.AgentCapabilities,
+	directories []string,
+) error {
+	if !capabilities.LoadSession && capabilities.SessionCapabilities.Resume == nil {
+		a.logger.Debug("session/load rejected: agent does not advertise LoadSession capability",
+			zap.String("session_id", sessionID))
+		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
+	}
+	return validateAdditionalDirectories(capabilities, directories)
+}
+
+func (a *Adapter) resetForSessionRestore() {
 	a.mu.Lock()
 	a.pendingWakeups = make(map[string]*pendingWakeup)
 	a.clearCodexSubagentCorrelationsLocked("")
@@ -576,28 +655,17 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.wakeup.cancel()
 	a.mu.Unlock()
 	a.cancelAllAsyncTurnCompletes()
+}
 
-	ctx, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "session.restore")
-	defer span.End()
-
-	// Filter MCP servers by agent capabilities (same logic as NewSession).
-	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
-	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
-	for _, decision := range decisions {
-		kind := streams.MCPAttachmentEvidenceDelivered
-		if !decision.Included {
-			kind = streams.MCPAttachmentEvidenceFiltered
-		}
-		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	// Suppress history replay notifications during load.
-	// ACP session/load replays the entire conversation history asynchronously.
-	// We set a flag to suppress these notifications to avoid duplicating messages in the database.
-	// The flag will be cleared when we send the next prompt (see Prompt method).
+func (a *Adapter) restoreSession(
+	ctx context.Context,
+	sessionID string,
+	conn *acp.ClientSideConnection,
+	capabilities acp.AgentCapabilities,
+	servers []types.McpServer,
+	directories []string,
+) (acp.LoadSessionResponse, error) {
+	// Suppress history replay notifications during load to avoid duplicating the stored conversation.
 	a.mu.Lock()
 	a.isLoadingSession = true
 	a.loadReplayPlan = nil
@@ -605,13 +673,13 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.mu.Unlock()
 
 	resp, err := a.restoreSessionState(ctx, conn, capabilities, acp.LoadSessionRequest{
-		SessionId:  acp.SessionId(sessionID),
-		Cwd:        a.cfg.WorkDir,
-		McpServers: toACPMcpServers(filteredServers),
+		SessionId:             acp.SessionId(sessionID),
+		Cwd:                   a.cfg.WorkDir,
+		McpServers:            toACPMcpServers(servers),
+		AdditionalDirectories: directories,
 	})
-
 	if err != nil {
-		for _, server := range filteredServers {
+		for _, server := range servers {
 			a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceExplicitError, "session_load_failed", err.Error())
 		}
 		// Notifications sent before the failed RPC response may still be queued
@@ -629,19 +697,21 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 			// barrier callback will not run in that case, so clean up directly.
 			clearFailedLoad()
 		}
-		span.RecordError(err)
-		return fmt.Errorf("failed to load session: %w", err)
+		return acp.LoadSessionResponse{}, err
 	}
-	for _, server := range filteredServers {
+	for _, server := range servers {
 		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
 	}
+	return resp, nil
+}
 
+func (a *Adapter) completeSessionRestore(
+	sessionID string,
+	settingsPolicy streams.SessionSettingsPolicy,
+	priorPromptTurn *promptTurnState,
+	resp acp.LoadSessionResponse,
+) {
 	initialModels, initialConfigOptions := a.initialSessionConfigState(resp.Meta, resp.ConfigOptions, resp.LegacyModels)
-
-	// The SDK may finish the load RPC while replay notifications are still
-	// queued in the adapter worker. Keep suppression active until a FIFO barrier
-	// proves every replay frame has been processed, then mark replayed cumulative
-	// usage/cost as the baseline for the first new prompt.
 	a.syncNotifQueue()
 
 	a.mu.Lock()
@@ -667,9 +737,6 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.mu.Unlock()
 	a.invalidatePromptTurnOwnership(priorPromptTurn)
 	a.attachMgr.SetSessionID(sessionID)
-
-	span.SetAttributes(attribute.String("session_id", sessionID))
-	a.logger.Info("loaded session", zap.String("session_id", sessionID))
 
 	// Emit initial session mode if the agent returned mode state
 	if resp.Modes != nil {
@@ -708,8 +775,6 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 			"init":           true,
 		},
 	})
-
-	return nil
 }
 
 // ResetSession creates a new session on the existing connection, effectively resetting
@@ -720,6 +785,10 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 // superseded one, so a successful reset closes the outgoing session to release its
 // resources. The old session is captured before NewSession overwrites a.sessionID.
 func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
+	return a.ResetSessionWithAdditionalDirectories(ctx, mcpServers, nil)
+}
+
+func (a *Adapter) ResetSessionWithAdditionalDirectories(ctx context.Context, mcpServers []types.McpServer, directories []string) (string, error) {
 	if err := a.lockSessionTransition(ctx); err != nil {
 		return "", err
 	}
@@ -728,7 +797,7 @@ func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer
 	previous, conn := a.sessionID, a.acpConn
 	a.mu.RUnlock()
 
-	newID, err := a.newSession(ctx, mcpServers)
+	newID, err := a.newSession(ctx, mcpServers, directories)
 	if err != nil {
 		a.sessionTransitionMu.Unlock()
 		return "", err
@@ -746,6 +815,21 @@ func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer
 	}
 	a.sessionTransitionMu.Unlock()
 	return newID, nil
+}
+
+func validateAdditionalDirectories(capabilities acp.AgentCapabilities, directories []string) error {
+	if len(directories) == 0 {
+		return nil
+	}
+	if capabilities.SessionCapabilities.AdditionalDirectories == nil {
+		return fmt.Errorf("agent does not advertise additionalDirectories session support")
+	}
+	for _, directory := range directories {
+		if !filepath.IsAbs(directory) {
+			return fmt.Errorf("additional project workspace directory must be absolute: %q", directory)
+		}
+	}
+	return nil
 }
 
 func (a *Adapter) runSupersededSessionCleanup(

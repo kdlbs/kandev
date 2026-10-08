@@ -2,7 +2,15 @@ import type { RemoteRepository } from "@/hooks/domains/integrations/use-remote-r
 import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
 
 export function selectedRemoteRepositoryIdentity(row: TaskRemoteRepoRow): string | undefined {
-  if (row.provider && row.providerRepoId) return `${row.provider}:id:${row.providerRepoId}`;
+  if (row.provider && row.providerRepoId) {
+    return remoteRepositorySelectionIdentity({
+      provider: row.provider,
+      id: row.providerRepoId,
+      providerHost: row.providerHost,
+      providerScope: row.providerScope,
+      url: row.remoteUrl ?? row.url,
+    });
+  }
   const url = normalizeRemoteRepositoryURL(row.url);
   return url ? `url:${url}` : undefined;
 }
@@ -11,9 +19,59 @@ export function remoteRepositoryMatchesSelection(
   repo: RemoteRepository,
   selectedIdentity: string,
 ): boolean {
-  if (selectedIdentity === `${repo.provider}:id:${repo.id}`) return true;
+  if (selectedIdentity === remoteRepositorySelectionIdentity(repo)) return true;
+  if (
+    !repo.providerHost &&
+    !repo.providerScope &&
+    selectedIdentity === `${repo.provider}:id:${repo.id}`
+  ) {
+    return true;
+  }
   const normalizedURL = normalizeRemoteRepositoryURL(repo.url);
   return Boolean(normalizedURL && selectedIdentity === `url:${normalizedURL}`);
+}
+
+export function remoteRepositorySelectionIdentity(repository: {
+  provider: string;
+  id: string;
+  providerHost?: string;
+  providerScope?: string;
+  url?: string;
+}): string {
+  const host = normalizeProviderHost(
+    repository.providerHost ||
+      providerHostFromURL(repository.url) ||
+      defaultProviderHost(repository.provider),
+  );
+  const scope = repository.providerScope?.trim() ?? "";
+  return `${repository.provider}:id:${repository.id}${host ? `:host:${host}` : ""}${scope ? `:scope:${scope}` : ""}`;
+}
+
+function normalizeProviderHost(value: string | undefined): string {
+  return (value ?? "").trim().replace(/\/+$/, "").toLowerCase();
+}
+
+function providerHostFromURL(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function defaultProviderHost(provider: string): string | undefined {
+  switch (provider.toLowerCase()) {
+    case "github":
+      return "https://github.com";
+    case "gitlab":
+      return "https://gitlab.com";
+    case "azure_devops":
+      return "https://dev.azure.com";
+    default:
+      return undefined;
+  }
 }
 
 export function normalizeRemoteRepositoryURL(value: string): string | undefined {

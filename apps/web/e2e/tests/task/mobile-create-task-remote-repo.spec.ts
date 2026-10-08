@@ -294,6 +294,7 @@ test.describe("Create task Remote repo picker on mobile", () => {
 
   test("selects a GitLab repository from the unified provider picker", async ({
     apiClient,
+    prCapture,
     seedData,
     testPage,
   }) => {
@@ -346,6 +347,22 @@ test.describe("Create task Remote repo picker on mobile", () => {
     }));
     expect(tabOverflow.overflowY).toBe("hidden");
     expect(tabOverflow.scrollHeight).toBeLessThanOrEqual(tabOverflow.clientHeight);
+    const viewport = testPage.viewportSize();
+    const stripBox = await providerTabs.boundingBox();
+    expect(viewport).not.toBeNull();
+    expect(stripBox).not.toBeNull();
+    const geometry = {
+      viewport,
+      providerTabs: stripBox,
+      gitLabTab: tabBoxes[0],
+      azureTab: tabBoxes[1],
+      overflowY: tabOverflow.overflowY,
+      scrollHeight: tabOverflow.scrollHeight,
+      clientHeight: tabOverflow.clientHeight,
+    };
+    await prCapture.screenshot("mobile-unified-provider-tabs", {
+      caption: `Mobile provider-tab geometry ${JSON.stringify(geometry)}`,
+    });
     await gitLabTab.click();
     const option = testPage.getByTestId("remote-repo-option").filter({ hasText: "kandev/sample" });
     await expect(option).toBeVisible({ timeout: 10_000 });

@@ -362,7 +362,7 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 	// ModeExternal stays rejected on purpose: it belongs to the backend's own
 	// MCP endpoint for external coding agents, and no launch path can emit it.
 	if !mcpmode.IsInstanceMode(req.Mode) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', 'automation', or 'coordinator'"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', 'automation', 'coordinator', 'project-coordinator', or 'project-worker'"})
 		return
 	}
 	s.mcpServer.SetMode(req.Mode)

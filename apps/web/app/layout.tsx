@@ -11,6 +11,7 @@ import { GlobalCommands } from "@/components/global-commands";
 import { RecentTaskSwitcher } from "@/components/task/recent-task-switcher";
 import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
+import { AgentProjectDialogProvider } from "@/components/agent-projects/agent-project-dialog-provider";
 import { AppStatusSurfaceProvider } from "@/components/app-status-bar/app-status-surface-provider";
 import { QuickChatProvider } from "@/components/quick-chat/quick-chat-provider";
 import { ConfigChatProvider } from "@/components/config-chat/config-chat-provider";
@@ -90,12 +91,14 @@ export default async function RootLayout({
                     <RecentTaskSwitcher />
                     <ConfigChatProvider>
                       <QuickChatProvider>
-                        <div className="flex h-dvh min-h-0 w-full overflow-hidden">
-                          <AppSidebar />
-                          <AppStatusSurfaceProvider>
-                            <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
-                          </AppStatusSurfaceProvider>
-                        </div>
+                        <AgentProjectDialogProvider>
+                          <div className="flex h-dvh min-h-0 w-full overflow-hidden">
+                            <AppSidebar />
+                            <AppStatusSurfaceProvider>
+                              <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+                            </AppStatusSurfaceProvider>
+                          </div>
+                        </AgentProjectDialogProvider>
                       </QuickChatProvider>
                     </ConfigChatProvider>
                   </CommandRegistryProvider>

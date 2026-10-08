@@ -7,6 +7,7 @@ import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type AppSidebarSectionProps = {
   id: string;
@@ -56,14 +57,24 @@ function SectionHeader({
   headerRef,
 }: SectionHeaderProps) {
   const showHeaderAction = !!headerAction && (expanded || headerActionVisibility === "always");
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const touch = isMobile || isFinePointer === false;
 
   return (
-    <div className="group/section flex items-center px-2 min-h-9 shrink-0 [@media(pointer:coarse)]:min-h-11">
+    <div
+      className={cn(
+        "group/section flex items-center px-2 shrink-0 min-h-9 [@media(pointer:coarse)]:min-h-11",
+        touch && "h-11",
+      )}
+    >
       <button
         ref={headerRef}
         type="button"
         onClick={onToggle}
-        className="flex min-h-7 [@media(pointer:coarse)]:min-h-11 min-w-0 flex-1 items-center gap-1.5 text-left cursor-pointer text-foreground/70 hover:text-foreground transition-colors"
+        className={cn(
+          "flex min-h-7 [@media(pointer:coarse)]:min-h-11 min-w-0 flex-1 items-center gap-1.5 text-left cursor-pointer text-foreground/70 hover:text-foreground transition-colors",
+          touch && "min-h-11",
+        )}
         aria-expanded={expanded}
         aria-controls={`sidebar-section-${id}`}
       >
@@ -83,7 +94,10 @@ function SectionHeader({
         onClick={onToggle}
         tabIndex={-1}
         aria-hidden="true"
-        className="shrink-0 flex h-5 w-5 items-center justify-center text-muted-foreground/60 hover:text-foreground/70 cursor-pointer transition-colors"
+        className={cn(
+          "shrink-0 flex items-center justify-center text-muted-foreground/60 hover:text-foreground/70 cursor-pointer transition-colors",
+          touch ? "h-11 w-11" : "h-5 w-5",
+        )}
       >
         <IconChevronRight
           className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-90")}
@@ -152,6 +166,96 @@ function NavigationSectionHeader({
   );
 }
 
+type CollapsedRailButtonProps = {
+  id: string;
+  label: string;
+  icon: DestinationIcon;
+  expanded: boolean;
+  defaultExpanded: boolean;
+  headerRef?: RefObject<HTMLButtonElement | null>;
+  onExpandSidebar: () => void;
+  onToggleSection: (id: string, defaultExpanded: boolean) => void;
+};
+
+function CollapsedRailButton({
+  id,
+  label,
+  icon: Icon,
+  expanded,
+  defaultExpanded,
+  headerRef,
+  onExpandSidebar,
+  onToggleSection,
+}: CollapsedRailButtonProps) {
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const touch = isMobile || isFinePointer === false;
+
+  const handleClick = () => {
+    onExpandSidebar();
+    if (!expanded) onToggleSection(id, defaultExpanded);
+  };
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          ref={headerRef}
+          type="button"
+          className={cn(
+            "mx-auto flex h-9 w-9 items-center justify-center rounded-md text-foreground/70 hover:bg-muted/60 cursor-pointer [@media(pointer:coarse)]:size-11",
+            touch && "h-11 w-11",
+          )}
+          onClick={handleClick}
+          aria-label={label}
+        >
+          <Icon className="h-4 w-4" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+type GrowSectionContentProps = {
+  id: string;
+  collapsed: boolean;
+  expanded: boolean;
+  header: React.ReactNode;
+  railButton: React.ReactNode;
+  children: React.ReactNode;
+};
+
+function GrowSectionContent({
+  id,
+  collapsed,
+  expanded,
+  header,
+  railButton,
+  children,
+}: GrowSectionContentProps) {
+  return (
+    <div
+      className={cn(
+        !collapsed && "border-t border-border/60 pt-2",
+        !collapsed && expanded && "flex-1 basis-1/2 shrink-0 min-h-0 flex flex-col",
+      )}
+    >
+      {collapsed ? railButton : header}
+      {expanded && (
+        <div
+          id={`sidebar-section-${id}`}
+          className={cn(
+            "flex flex-col gap-0.5",
+            collapsed ? "hidden" : "flex-1 min-h-0 sidebar-fade-in",
+          )}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AppSidebarSection({
   id,
   presentation = "section",
@@ -171,23 +275,16 @@ export function AppSidebarSection({
   const setCollapsed = useAppStore((s) => s.setAppSidebarCollapsed);
 
   const railButton = (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          ref={headerRef}
-          type="button"
-          className="flex h-9 w-9 [@media(pointer:coarse)]:size-11 mx-auto items-center justify-center rounded-md text-foreground/70 hover:bg-muted/60 cursor-pointer"
-          onClick={() => {
-            setCollapsed(false);
-            if (!expanded) toggleSection(id, defaultExpanded);
-          }}
-          aria-label={label}
-        >
-          <Icon className="h-4 w-4" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="right">{label}</TooltipContent>
-    </Tooltip>
+    <CollapsedRailButton
+      id={id}
+      label={label}
+      icon={Icon}
+      expanded={expanded}
+      defaultExpanded={defaultExpanded}
+      headerRef={headerRef}
+      onExpandSidebar={() => setCollapsed(false)}
+      onToggleSection={toggleSection}
+    />
   );
 
   if (collapsed && !grow) return railButton;
@@ -221,25 +318,15 @@ export function AppSidebarSection({
   // React preserves it instead of remounting.
   if (grow) {
     return (
-      <div
-        className={cn(
-          !collapsed && "border-t border-border/60 pt-2",
-          !collapsed && expanded && "flex-1 basis-1/2 shrink-0 min-h-0 flex flex-col",
-        )}
+      <GrowSectionContent
+        id={id}
+        collapsed={collapsed}
+        expanded={expanded}
+        header={header}
+        railButton={railButton}
       >
-        {collapsed ? railButton : header}
-        {expanded && (
-          <div
-            id={`sidebar-section-${id}`}
-            className={cn(
-              "flex flex-col gap-0.5",
-              collapsed ? "hidden" : "flex-1 min-h-0 sidebar-fade-in",
-            )}
-          >
-            {children}
-          </div>
-        )}
-      </div>
+        {children}
+      </GrowSectionContent>
     );
   }
 

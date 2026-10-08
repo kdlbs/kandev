@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { MobileTaskNavigationProvider } from "@/components/navigation/mobile-task-navigation-provider";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
+import { AgentProjectDialogProvider } from "@/components/agent-projects/agent-project-dialog-provider";
 import { AppStatusSurfaceProvider } from "@/components/app-status-bar/app-status-surface-provider";
 import { CommandPanel } from "@/components/command-panel";
 import { ConfigChatProvider } from "@/components/config-chat/config-chat-provider";
@@ -93,24 +94,26 @@ export function AppShell({ children }: AppShellProps) {
                         the active workspace, and Office-vs-kanban chrome comes
                         from it rather than from the URL. */}
                     <WorkspaceScopeProvider>
-                      <div
-                        className="flex h-dvh min-h-0 w-full overflow-hidden"
-                        data-testid="app-shell"
-                        data-window-controls-overlay={titlebar.visible ? "visible" : "hidden"}
-                        data-macos-tauri-overlay={titlebar.macTauriOverlay ? "true" : undefined}
-                        style={shellStyle}
-                      >
-                        <AppSidebar />
-                        <AppStatusSurfaceProvider>
-                          <MobileTaskNavigationProvider>
-                            <WorkspaceCopilotHost>
-                              <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-                                {children}
-                              </main>
-                            </WorkspaceCopilotHost>
-                          </MobileTaskNavigationProvider>
-                        </AppStatusSurfaceProvider>
-                      </div>
+                      <AgentProjectDialogProvider>
+                        <div
+                          className="flex h-dvh min-h-0 w-full overflow-hidden"
+                          data-testid="app-shell"
+                          data-window-controls-overlay={titlebar.visible ? "visible" : "hidden"}
+                          data-macos-tauri-overlay={titlebar.macTauriOverlay ? "true" : undefined}
+                          style={shellStyle}
+                        >
+                          <AppSidebar />
+                          <AppStatusSurfaceProvider>
+                            <MobileTaskNavigationProvider>
+                              <WorkspaceCopilotHost>
+                                <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+                                  {children}
+                                </main>
+                              </WorkspaceCopilotHost>
+                            </MobileTaskNavigationProvider>
+                          </AppStatusSurfaceProvider>
+                        </div>
+                      </AgentProjectDialogProvider>
                     </WorkspaceScopeProvider>
                   </QuickChatProvider>
                 </ConfigChatProvider>

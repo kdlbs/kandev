@@ -285,6 +285,7 @@ func convertRawProject(raw *rawProject) Project {
 		Name:              raw.Name,
 		Visibility:        raw.Visibility,
 		WebURL:            raw.WebURL,
+		HTTPURLToRepo:     raw.HTTPURLToRepo,
 		DefaultBranch:     raw.DefaultBranch,
 	}
 }

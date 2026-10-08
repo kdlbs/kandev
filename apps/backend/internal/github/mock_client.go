@@ -450,7 +450,7 @@ func (m *MockClient) ListUserRepos(_ context.Context, query string, _ int) ([]Gi
 // case-insensitive full_name substring filter the real clients use. Honours the
 // reposUnavailable toggle by returning ErrNoClient so the 503/banner e2e path
 // still works. Mirrors the single GET /user/repos call the real clients make.
-func (m *MockClient) ListAccessibleRepos(_ context.Context, query string, _ int) ([]GitHubRepo, error) {
+func (m *MockClient) ListAccessibleRepos(_ context.Context, query string, limit int) ([]GitHubRepo, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.reposUnavailable {
@@ -467,7 +467,11 @@ func (m *MockClient) ListAccessibleRepos(_ context.Context, query string, _ int)
 			all = append(all, r)
 		}
 	}
-	return filterReposByQuery(all, query), nil
+	filtered := filterReposByQuery(all, query)
+	if limit > 0 && len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered, nil
 }
 
 func (m *MockClient) HasRepositoryAccess(_ context.Context, owner, repo string) (bool, error) {

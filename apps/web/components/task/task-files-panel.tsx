@@ -13,6 +13,7 @@ import {
   hasActiveTaskSourceWork as getHasActiveTaskSourceWork,
 } from "./add-workspace-sources/add-workspace-sources-availability";
 import { useTranslation } from "react-i18next";
+import { AgentProjectFileRoots } from "./agent-project-file-roots";
 
 function FilesTabContent({
   sessionId,
@@ -107,25 +108,27 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
   return (
     <SessionPanel borderSide="left">
       <SessionPanelContent>
-        <FilesTabContent
-          sessionId={activeSessionId}
-          onOpenFile={onOpenFile}
-          handleCreateFile={handleCreateFile}
-          hookDeleteFile={hookDeleteFile}
-          hookRenameFile={hookRenameFile}
-          hookDownloadFile={hookDownloadFile}
-          activeFilePath={activeFilePath}
-          onAddSources={
-            hasRepository
-              ? (opener) => {
-                  setAddSourcesOpener(opener);
-                  setAddSourcesOpen(true);
-                }
-              : undefined
-          }
-          addSourcesButtonRef={addSourcesButtonRef}
-          addSourcesDisabledReason={resolvedAddSourcesDisabledReason}
-        />
+        <AgentProjectFileRoots>
+          <FilesTabContent
+            sessionId={activeSessionId}
+            onOpenFile={onOpenFile}
+            handleCreateFile={handleCreateFile}
+            hookDeleteFile={hookDeleteFile}
+            hookRenameFile={hookRenameFile}
+            hookDownloadFile={hookDownloadFile}
+            activeFilePath={activeFilePath}
+            onAddSources={
+              hasRepository
+                ? (opener) => {
+                    setAddSourcesOpener(opener);
+                    setAddSourcesOpen(true);
+                  }
+                : undefined
+            }
+            addSourcesButtonRef={addSourcesButtonRef}
+            addSourcesDisabledReason={resolvedAddSourcesDisabledReason}
+          />
+        </AgentProjectFileRoots>
       </SessionPanelContent>
       {activeTask && hasRepository ? (
         <AddWorkspaceSourcesDialog

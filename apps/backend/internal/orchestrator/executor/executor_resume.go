@@ -2014,7 +2014,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundaryWithOptions(
 	}
 
 	existingRunning = e.applyRunningRecordToResumeRequest(req, task, session, startAgent, existingRunning)
-	if err := e.applyResumeWorkspaceFolders(ctx, task.ID, req); err != nil {
+	if err := e.applyResumeWorkspaceFolders(ctx, task, req); err != nil {
 		return nil, "", execConfig, existingEnv, existingRunning, err
 	}
 	profileEnvVars, profileResolved := e.resolveHostGitHubBridgeProfileEnv(
@@ -2215,10 +2215,13 @@ func (e *Executor) applyRecordedKubernetesExecutorConfigToResumeRequest(
 
 func (e *Executor) applyResumeWorkspaceFolders(
 	ctx context.Context,
-	taskID string,
+	task *v1.Task,
 	req *LaunchAgentRequest,
 ) error {
-	folders, err := e.repo.ListTaskWorkspaceFolders(ctx, taskID)
+	if task == nil || req == nil {
+		return fmt.Errorf("resume workspace request is incomplete")
+	}
+	folders, err := e.repo.ListTaskWorkspaceFolders(ctx, task.ID)
 	if err != nil {
 		return err
 	}
@@ -2228,6 +2231,13 @@ func (e *Executor) applyResumeWorkspaceFolders(
 				Name: folder.DisplayName, LocalPath: folder.LocalPath,
 			})
 		}
+	}
+	if task.AgentProjectID != "" {
+		contextPath, err := e.resolveAgentProjectContextPath(ctx, task.AgentProjectID)
+		if err != nil {
+			return err
+		}
+		req.ProjectWorkspace = &ProjectWorkspaceAccess{ContextPath: contextPath, Tier: task.AgentProjectTier}
 	}
 	return nil
 }

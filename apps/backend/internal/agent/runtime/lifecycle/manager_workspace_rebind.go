@@ -153,7 +153,7 @@ func (m *Manager) restoreReboundACPSession(ctx context.Context, execution *Agent
 	if client == nil {
 		return fmt.Errorf("agentctl client is unavailable")
 	}
-	err = client.LoadSession(ctx, acpID, nil)
+	err = client.LoadSessionWithAdditionalDirectories(ctx, acpID, nil, execution.ProjectWritableRoots)
 	releaseClient()
 	if err != nil {
 		return err
@@ -189,7 +189,7 @@ func (m *Manager) createReboundACPSession(ctx context.Context, execution *AgentE
 	if client == nil {
 		return fmt.Errorf("agentctl client is unavailable")
 	}
-	newSessionID, err := client.NewSession(ctx, execution.WorkspacePath, mcpServers)
+	newSessionID, err := client.NewSessionWithAdditionalDirectories(ctx, execution.WorkspacePath, mcpServers, execution.ProjectWritableRoots)
 	releaseClient()
 	if err != nil {
 		execution.SetModelState(previousModel)

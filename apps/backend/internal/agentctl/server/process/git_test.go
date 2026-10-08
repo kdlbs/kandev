@@ -45,10 +45,9 @@ func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testin
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			repoDir, cleanup := setupTestRepo(t)
+			repoDir, originDir, cleanup := setupTestRepoWithRemote(t)
 			t.Cleanup(cleanup)
-
-			originDir := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin"))
+			originURL := localGitRemoteURL(originDir)
 			runGit(t, repoDir, "checkout", "-b", "feature/contribution")
 			writeFile(t, repoDir, "contribution.txt", "contribution\n")
 			runGit(t, repoDir, "add", ".")
@@ -76,7 +75,7 @@ func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testin
 			}
 			// Keep the test hermetic while exercising the credential-free source URL
 			// that the operator receives from runtime materialization.
-			runGit(t, repoDir, "config", "url."+originDir+".insteadOf", binding.SourceRepository.RemoteURL)
+			runGit(t, repoDir, "config", "url."+originURL+".insteadOf", binding.SourceRepository.RemoteURL)
 			runGit(t, repoDir, "remote", "add", binding.ContributionRemoteName(), binding.SourceRepository.RemoteURL)
 			runGit(t, repoDir, "push", binding.ContributionRemoteName(), "HEAD:refs/heads/feature/contribution")
 
@@ -116,8 +115,8 @@ func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testin
 			if remoteHead != headSHA {
 				t.Fatalf("source branch head = %q, want %q", remoteHead, headSHA)
 			}
-			if got := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin")); got != originDir {
-				t.Fatalf("origin URL = %q, want %q", got, originDir)
+			if got := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin")); got != originURL {
+				t.Fatalf("origin URL = %q, want %q", got, originURL)
 			}
 
 			result, err := operator.CreatePR(context.Background(), "untrusted title", "untrusted body", "main", false)
@@ -132,15 +131,15 @@ func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testin
 }
 
 func TestGitOperatorRemoteContributionPullsFromSourceRemote(t *testing.T) {
-	repoDir, cleanup := setupTestRepo(t)
+	repoDir, targetPath, cleanup := setupTestRepoWithRemote(t)
 	t.Cleanup(cleanup)
-	targetDir := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin"))
+	targetURL := localGitRemoteURL(targetPath)
 
 	sourceRoot := t.TempDir()
 	sourceBare := filepath.Join(sourceRoot, "source.git")
 	sourceWork := filepath.Join(sourceRoot, "source-work")
 	runGit(t, sourceRoot, "init", "--bare", "--initial-branch=main", sourceBare)
-	runGit(t, sourceRoot, "clone", targetDir, sourceWork)
+	runGit(t, sourceRoot, "clone", targetURL, sourceWork)
 	runGit(t, sourceWork, "config", "user.email", "test@test.com")
 	runGit(t, sourceWork, "config", "user.name", "Test User")
 	runGit(t, sourceWork, "checkout", "-b", "feature/contribution")
@@ -152,7 +151,7 @@ func TestGitOperatorRemoteContributionPullsFromSourceRemote(t *testing.T) {
 	runGit(t, sourceWork, "push", "source", "main", "feature/contribution")
 
 	sourceURL := "https://github.com/contributor/widget.git"
-	runGit(t, repoDir, "config", "url.file://"+sourceBare+".insteadOf", sourceURL)
+	runGit(t, repoDir, "config", "url."+localGitRemoteURL(sourceBare)+".insteadOf", sourceURL)
 	runGit(t, repoDir, "checkout", "-b", "feature/contribution")
 	binding := &taskmodels.RemoteContribution{
 		Version:      taskmodels.RemoteContributionVersion,
@@ -183,8 +182,8 @@ func TestGitOperatorRemoteContributionPullsFromSourceRemote(t *testing.T) {
 	if got := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD")); got != sourceSHA {
 		t.Fatalf("pulled HEAD = %q, want source SHA %q", got, sourceSHA)
 	}
-	if got := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin")); got != targetDir {
-		t.Fatalf("origin URL = %q, want target %q", got, targetDir)
+	if got := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin")); got != targetURL {
+		t.Fatalf("origin URL = %q, want target %q", got, targetURL)
 	}
 }
 

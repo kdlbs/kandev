@@ -60,9 +60,11 @@ const (
 	// ModeAutomation registers the fixed workspace coordinator catalog for
 	// scheduled automation agents.
 	ModeAutomation = mcpmode.Automation
-	// ModeCoordinator registers the fixed six-tool catalog for a workspace
-	// coordinator's conversation session.
-	ModeCoordinator = mcpmode.Coordinator
+	// ModeCoordinator selects the fixed catalog for a coordinator's attended
+	// conversation session.
+	ModeCoordinator        = mcpmode.Coordinator
+	ModeProjectCoordinator = mcpmode.ProjectCoordinator
+	ModeProjectWorker      = mcpmode.ProjectWorker
 	// ModeManagedConversation exposes only the selected plugin agent tools.
 	ModeManagedConversation = "managed-conversation"
 )
@@ -102,7 +104,7 @@ func locatorCount(locators ...string) int {
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
 	switch mode {
-	case ModeConfig, ModeExternal, ModeOffice, ModeAutomation, ModeTaskTitlePending, ModeCoordinator:
+	case ModeConfig, ModeExternal, ModeOffice, ModeAutomation, ModeCoordinator, ModeTaskTitlePending, ModeProjectCoordinator, ModeProjectWorker:
 		return mode
 	default:
 		return ModeTask
@@ -195,6 +197,7 @@ func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, l
 	if disableAskQuestion {
 		profileContext = profileContext.WithoutCapability(mcpprofile.CapabilityUserQuestion)
 	}
+	profileContext = normalizeProjectProfile(profileContext, disableAskQuestion)
 	s := newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, profileContext, options...)
 	s.sseServer = server.NewSSEServer(s.mcpServer,
 		server.WithBaseURL(s.sseBaseURLForPort(port)),
@@ -372,6 +375,10 @@ func modeForProfile(profileContext mcpprofile.Context) string {
 		return ModeAutomation
 	case mcpprofile.SurfaceCoordinator:
 		return ModeCoordinator
+	case mcpprofile.SurfaceProjectCoordinator:
+		return ModeProjectCoordinator
+	case mcpprofile.SurfaceProjectWorker:
+		return ModeProjectWorker
 	case mcpprofile.SurfaceKanbanTask:
 		if profileContext.HasCapability(mcpprofile.CapabilityTaskTitle) {
 			return ModeTaskTitlePending
@@ -755,22 +762,23 @@ func (s *Server) SetMode(mode string) {
 	}
 
 	normalizedMode := normalizeMode(mode)
+	switch s.profile.Surface {
+	case mcpprofile.SurfaceProjectCoordinator:
+		normalizedMode = ModeProjectCoordinator
+	case mcpprofile.SurfaceProjectWorker:
+		normalizedMode = ModeProjectWorker
+	}
 	if s.mode == normalizedMode {
 		return
 	}
 	previousMode := s.mode
 	capabilities := s.profile.Capabilities
 	if isFixedCatalogMode(normalizedMode) {
-		// Only snapshot when entering a fixed mode from a non-fixed one.
-		// Fixed catalogs never carry task-local capabilities themselves, so a
-		// fixed-to-fixed transition (e.g. coordinator -> automation) would
-		// otherwise re-snapshot the already-nil current capabilities over the
-		// real snapshot taken on the first transition, losing it.
 		if !isFixedCatalogMode(previousMode) {
 			s.legacyModeCapabilities = slices.Clone(capabilities)
 		}
-		// The snapshot lets a later legacy mode change restore the profile
-		// that was active before the switch.
+		// Fixed catalogs do not carry task-local capabilities. Keep the
+		// pre-transition snapshot when switching between fixed catalogs.
 		capabilities = nil
 	} else if isFixedCatalogMode(previousMode) {
 		capabilities = slices.Clone(s.legacyModeCapabilities)
@@ -782,18 +790,27 @@ func (s *Server) SetMode(mode string) {
 	} else {
 		s.profile = s.profile.WithoutCapability(mcpprofile.CapabilityTaskTitle)
 	}
+	switch normalizedMode {
+	case ModeProjectCoordinator:
+		s.profile = s.profile.WithCapability(mcpprofile.CapabilityUserQuestion).WithoutCapability(mcpprofile.CapabilityParentQuestion)
+	case ModeProjectWorker:
+		s.profile = s.profile.WithCapability(mcpprofile.CapabilityParentQuestion).WithoutCapability(mcpprofile.CapabilityUserQuestion)
+	}
 	if !isFixedCatalogMode(normalizedMode) {
 		s.legacyModeCapabilities = slices.Clone(s.profile.Capabilities)
 	}
 	s.rebuildTools()
 }
 
-// isFixedCatalogMode reports whether mode uses a fixed tool catalog that never
-// carries task-local capabilities (docs/specs/coordinator/system-design/
-// copilot.md#attended-only), mirroring mcpprofile.Legacy's own exclusion of
-// SurfaceAutomation and SurfaceCoordinator from CapabilityUserQuestion.
+// isFixedCatalogMode reports whether mode uses a fixed catalog without
+// task-local capabilities.
 func isFixedCatalogMode(mode string) bool {
-	return mode == ModeAutomation || mode == ModeCoordinator
+	switch mode {
+	case ModeAutomation, ModeCoordinator, ModeProjectCoordinator, ModeProjectWorker:
+		return true
+	default:
+		return false
+	}
 }
 
 func surfaceForMode(mode string) mcpprofile.Surface {
@@ -808,6 +825,10 @@ func surfaceForMode(mode string) mcpprofile.Surface {
 		return mcpprofile.SurfaceAutomation
 	case ModeCoordinator:
 		return mcpprofile.SurfaceCoordinator
+	case ModeProjectCoordinator:
+		return mcpprofile.SurfaceProjectCoordinator
+	case ModeProjectWorker:
+		return mcpprofile.SurfaceProjectWorker
 	default:
 		return mcpprofile.SurfaceKanbanTask
 	}
@@ -842,6 +863,17 @@ func (s *Server) SetProfile(profileContext mcpprofile.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	switch s.profile.Surface {
+	case mcpprofile.SurfaceProjectCoordinator, mcpprofile.SurfaceProjectWorker:
+		profileContext.Surface = s.profile.Surface
+		if s.profile.Surface == mcpprofile.SurfaceProjectWorker && s.profile.HasCapability(mcpprofile.CapabilityParentQuestion) {
+			profileContext = profileContext.WithCapability(mcpprofile.CapabilityParentQuestion)
+		}
+	case mcpprofile.SurfaceCoordinator:
+		profileContext.Surface = mcpprofile.SurfaceCoordinator
+		profileContext.Capabilities = nil
+	}
+	profileContext = normalizeProjectProfile(profileContext, s.disableAskQuestion)
 	profileContext = mcpprofile.Normalize(profileContext)
 	if s.profile.Surface == mcpprofile.SurfaceManagedConversation {
 		return
@@ -849,8 +881,8 @@ func (s *Server) SetProfile(profileContext mcpprofile.Context) {
 	if sameProfile(s.profile, profileContext) {
 		return
 	}
-	if profileContext.Surface == mcpprofile.SurfaceAutomation {
-		if s.profile.Surface != mcpprofile.SurfaceAutomation {
+	if isFixedCatalogMode(modeForProfile(profileContext)) {
+		if !isFixedCatalogMode(s.mode) {
 			s.legacyModeCapabilities = slices.Clone(s.profile.Capabilities)
 		}
 	} else {
@@ -871,6 +903,26 @@ func sameCoordinatorToolPolicy(left, right *mcpprofile.CoordinatorToolPolicy) bo
 	l, lerr := mcpprofile.MarshalCoordinatorToolPolicy(*left)
 	r, rerr := mcpprofile.MarshalCoordinatorToolPolicy(*right)
 	return lerr == nil && rerr == nil && l == r
+}
+
+func normalizeProjectProfile(profileContext mcpprofile.Context, disableAskQuestion bool) mcpprofile.Context {
+	profileContext = mcpprofile.Normalize(profileContext)
+	switch profileContext.Surface {
+	case mcpprofile.SurfaceProjectCoordinator:
+		profileContext = profileContext.WithoutCapability(mcpprofile.CapabilityParentQuestion).
+			WithoutCapability(mcpprofile.CapabilityTaskTitle).
+			WithoutCapability(mcpprofile.CapabilityCanvas)
+		if disableAskQuestion {
+			profileContext = profileContext.WithoutCapability(mcpprofile.CapabilityUserQuestion)
+		} else {
+			profileContext = profileContext.WithCapability(mcpprofile.CapabilityUserQuestion)
+		}
+	case mcpprofile.SurfaceProjectWorker:
+		profileContext = profileContext.WithoutCapability(mcpprofile.CapabilityUserQuestion).
+			WithoutCapability(mcpprofile.CapabilityTaskTitle).
+			WithoutCapability(mcpprofile.CapabilityCanvas)
+	}
+	return profileContext
 }
 
 func sameProfile(left, right mcpprofile.Context) bool {
@@ -1151,6 +1203,8 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
 	automation := surfaceEnabled(mcpprofile.SurfaceAutomation)
 	coordinatorSurface := surfaceEnabled(mcpprofile.SurfaceCoordinator)
+	projectCoordinator := surfaceEnabled(mcpprofile.SurfaceProjectCoordinator)
+	projectWorker := surfaceEnabled(mcpprofile.SurfaceProjectWorker)
 	if s.profile.Surface == mcpprofile.SurfaceManagedConversation {
 		return nil
 	}
@@ -1158,6 +1212,8 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "configuration-automations", enabled: config, register: func(s *Server) { s.registerConfigAutomationTools() }},
 		{name: "automation", enabled: automation, register: func(s *Server) { s.registerAutomationTools() }},
 		{name: "coordinator", enabled: coordinatorSurface, register: func(s *Server) { s.registerCoordinatorTools() }},
+		{name: "project-coordinator", enabled: projectCoordinator, register: func(s *Server) { s.registerProjectCoordinatorTools() }},
+		{name: "project-worker", enabled: projectWorker, register: func(s *Server) { s.registerProjectWorkerTools() }},
 		{name: "configuration-workflows", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigWorkflowTools() }},
 		{name: "configuration-agents", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigAgentTools() }},
 		{name: "configuration-mcp", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigMcpTools() }},
@@ -1177,7 +1233,9 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		}), register: func(s *Server) { s.registerTaskPRLinkTools() }},
 		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
 		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
-		{name: "parent-question", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityParentQuestion)), register: func(s *Server) { s.registerParentQuestionTool() }},
+		{name: "parent-question", enabled: andProfilePredicates(func(ctx mcpprofile.Context) bool {
+			return kanban(ctx) || projectWorker(ctx)
+		}, capabilityEnabled(mcpprofile.CapabilityParentQuestion)), register: func(s *Server) { s.registerParentQuestionTool() }},
 		{name: "plan", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerPlanTools() }},
 		{name: "rich-output", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRichOutputTool() }},
 		{name: "walkthrough", enabled: kanban, register: func(s *Server) { s.registerWalkthroughTools() }},
@@ -1227,7 +1285,7 @@ func (s *Server) registerTools() {
 			group.register(s)
 		}
 	}
-	if s.profile.Surface != mcpprofile.SurfaceAutomation && s.profile.Surface != mcpprofile.SurfaceCoordinator {
+	if s.profile.Surface != mcpprofile.SurfaceAutomation && s.profile.Surface != mcpprofile.SurfaceCoordinator && s.profile.Surface != mcpprofile.SurfaceProjectCoordinator && s.profile.Surface != mcpprofile.SurfaceProjectWorker {
 		s.registerPluginTools()
 	}
 	s.logger.Info("registered MCP tools",

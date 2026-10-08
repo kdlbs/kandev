@@ -26,6 +26,8 @@ import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { EnvironmentBadges, ContextSelect } from "./session-dialog-shared";
 import { useSessionContextChange, useSessionLaunchSubmit } from "./new-session-form-actions";
 import { resolveNewSessionProfileSelection } from "./new-session-profile-selection";
+import { filterAgentProjectSessionProfiles } from "./agent-project-session-profile";
+import { useAgentProjectSessionProfile } from "@/hooks/domains/agent-projects/use-agent-project-session-profile";
 import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
 import { Trans, useTranslation } from "react-i18next";
 
@@ -205,17 +207,33 @@ function useSessionProfileSelection({
   agentProfiles,
   executorProfile,
   currentProfileId,
+  taskId,
+  workspaceId,
+  currentSessionTaskId,
   handoff,
 }: {
   agentProfiles: AgentProfileOption[];
   executorProfile: ExecutorProfile | null;
   currentProfileId: string;
+  taskId: string;
+  workspaceId?: string | null;
+  currentSessionTaskId?: string;
   handoff?: HandoffPreset;
 }) {
+  const projectProfilePolicy = useAgentProjectSessionProfile({
+    taskId,
+    workspaceId,
+    currentSessionTaskId,
+    currentSessionProfileId: currentProfileId,
+  });
   const compatibleAgentProfiles = useCompatibleAgentProfiles(
     agentProfiles,
     executorProfile,
     handoff,
+  );
+  const allowedAgentProfiles = useMemo(
+    () => filterAgentProjectSessionProfiles(compatibleAgentProfiles, projectProfilePolicy),
+    [compatibleAgentProfiles, projectProfilePolicy],
   );
   const recentProfileIds = useAppStore(
     (state) => state.agentProfileRecentUse?.records.task_session?.profileIds,
@@ -223,17 +241,17 @@ function useSessionProfileSelection({
   const automaticSelection = useMemo(
     () =>
       resolveNewSessionProfileSelection({
-        compatibleProfiles: compatibleAgentProfiles,
+        compatibleProfiles: allowedAgentProfiles,
         recentProfileIds,
         currentProfileId,
         handoffProfileId: handoff?.targetProfileId,
       }),
-    [compatibleAgentProfiles, currentProfileId, handoff?.targetProfileId, recentProfileIds],
+    [allowedAgentProfiles, currentProfileId, handoff?.targetProfileId, recentProfileIds],
   );
   const [selectedProfileId, setSelectedProfileId] = useState(automaticSelection.profileId);
   const [selectionSource, setSelectionSource] = useState(automaticSelection.source);
   useEffect(() => {
-    const selectedIsCompatible = compatibleAgentProfiles.some(
+    const selectedIsCompatible = allowedAgentProfiles.some(
       (profile) => profile.id === selectedProfileId,
     );
     if (selectionSource === "manual" && selectedIsCompatible) return;
@@ -245,8 +263,8 @@ function useSessionProfileSelection({
     }
     setSelectedProfileId(automaticSelection.profileId);
     setSelectionSource(automaticSelection.source);
-  }, [automaticSelection, compatibleAgentProfiles, selectedProfileId, selectionSource]);
-  const profileOptions = useAgentProfileOptions(compatibleAgentProfiles, "task_session");
+  }, [automaticSelection, allowedAgentProfiles, selectedProfileId, selectionSource]);
+  const profileOptions = useAgentProfileOptions(allowedAgentProfiles, "task_session");
   const hasProfiles = profileOptions.length > 0;
   const noCompatibleProfiles = isMissingCompatibleProfile(
     executorProfile,
@@ -336,6 +354,7 @@ function NewSessionForm({
   worktreeBranch,
   initialPrompt,
   agentProfiles,
+  currentSessionTaskId,
   groupId,
   handoff,
   onClose,
@@ -349,6 +368,7 @@ function NewSessionForm({
   worktreeBranch: string | null;
   initialPrompt: string | null;
   agentProfiles: AgentProfileOption[];
+  currentSessionTaskId?: string;
   groupId?: string;
   handoff?: HandoffPreset;
   onClose: () => void;
@@ -371,6 +391,9 @@ function NewSessionForm({
     agentProfiles,
     executorProfile,
     currentProfileId,
+    taskId,
+    workspaceId,
+    currentSessionTaskId,
     handoff,
   });
   const { handleEnhancePrompt, isEnhancingPrompt, pendingResult, applyPending, copyPending } =
@@ -578,6 +601,7 @@ export function NewSessionDialog({
           worktreeBranch={worktreeBranch}
           initialPrompt={initialPrompt}
           agentProfiles={agentProfiles}
+          currentSessionTaskId={currentSession?.task_id}
           groupId={groupId}
           handoff={handoff}
           onClose={() => onOpenChange(false)}

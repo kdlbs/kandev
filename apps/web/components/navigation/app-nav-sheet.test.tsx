@@ -69,6 +69,10 @@ vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => appStoreApi,
 }));
 
+vi.mock("@/components/app-sidebar/sections/projects-section", () => ({
+  ProjectsSection: () => null,
+}));
+
 vi.mock("@/hooks/use-select-workspace", () => ({ useSelectWorkspace: () => vi.fn() }));
 vi.mock("@/hooks/use-quick-chat-launcher", () => ({ useQuickChatLauncher: () => vi.fn() }));
 vi.mock("@/hooks/use-quick-terminal-launcher", () => ({ useQuickTerminalLauncher: () => vi.fn() }));

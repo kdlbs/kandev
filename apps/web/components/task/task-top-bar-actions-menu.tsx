@@ -81,6 +81,7 @@ type TaskTopBarActionsMenuProps = {
   boardRow: TaskActionsMenuBoardRow | null;
   workspaceId: string | null;
   isArchived?: boolean;
+  isAgentProjectWorker?: boolean;
   /** The subject's own workflow step and executor type, independent of
    * `boardRow`: the board excludes archived tasks and can lag/miss a
    * cross-workflow row, but plugin context and the delete confirmation's
@@ -124,6 +125,7 @@ export function TaskTopBarActionsMenu({
   boardRow,
   workspaceId,
   isArchived,
+  isAgentProjectWorker,
   subjectWorkflowStepId,
   subjectPrimaryExecutorType,
 }: TaskTopBarActionsMenuProps) {
@@ -138,7 +140,7 @@ export function TaskTopBarActionsMenu({
     taskTitle,
     workspaceId,
     isArchived: Boolean(isArchived),
-    boardRow,
+    boardRow: isAgentProjectWorker ? null : boardRow,
     isArchiving: archiving.pending,
     isDeleting: deleting.pending,
     onArchive: (opts) => (taskId ? archiving.invoke(taskId, opts) : undefined),

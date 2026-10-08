@@ -34,6 +34,12 @@ func TestMockAgent_BuildCommand_NoResumeFlag(t *testing.T) {
 	}
 }
 
+func TestMockAgentSupportsProjectWorkspaceDirectories(t *testing.T) {
+	if !NewMockAgent().SupportsProjectWorkspaceDirectories() {
+		t.Fatal("MockAgent does not advertise project workspace directory support")
+	}
+}
+
 // TestMockAgent_BuildCommand_ContainerizedUsesBareName pins the docker
 // branch of BuildCommand: when opts.Runtime is containerized (docker,
 // remote_docker, sprites) or SSH, MockAgent must emit the bare binary

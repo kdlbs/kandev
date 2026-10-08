@@ -10,13 +10,11 @@ import {
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/lib/layout/app-sidebar-geometry";
 import type { AppSidebarState, UISlice } from "./types";
 
-/** Keep primary navigation and entity groups open by default so first-time
- *  Office users can see projects, agents, and workspace tools immediately. */
+/** Keep primary navigation and stable entity groups open for first-time users. */
 export const DEFAULT_SECTION_EXPANDED: Record<string, boolean> = {
   tasks: true,
   "office-work": true,
   "office-workspace": true,
-  projects: true,
   agents: true,
   integrations: false,
   canvases: false,

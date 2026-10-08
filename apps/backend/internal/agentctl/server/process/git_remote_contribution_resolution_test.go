@@ -203,9 +203,8 @@ func TestGitOperatorUseRemoteContributionRechecksWorktreeAfterFetch(t *testing.T
 
 func setupDivergedContributionRepo(t *testing.T) (repoDir, originDir, remoteName string, binding *taskmodels.RemoteContribution, providerOne, providerTwo, localHead string) {
 	t.Helper()
-	repoDir, cleanup := setupTestRepo(t)
+	repoDir, originDir, cleanup := setupTestRepoWithRemote(t)
 	t.Cleanup(cleanup)
-	originDir = strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin"))
 
 	runGit(t, repoDir, "checkout", "-b", "provider-history")
 	writeFile(t, repoDir, "provider.txt", "provider one\n")
@@ -228,7 +227,7 @@ func setupDivergedContributionRepo(t *testing.T) (repoDir, originDir, remoteName
 	localHead = strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
 
 	sourceURL := "https://github.com/contributor/widget.git"
-	runGit(t, repoDir, "config", "url.file://"+originDir+".insteadOf", sourceURL)
+	runGit(t, repoDir, "config", "url."+localGitRemoteURL(originDir)+".insteadOf", sourceURL)
 	binding = &taskmodels.RemoteContribution{
 		Version:      taskmodels.RemoteContributionVersion,
 		Provider:     taskmodels.RemoteContributionProviderGitHub,

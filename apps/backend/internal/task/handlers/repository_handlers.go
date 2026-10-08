@@ -41,6 +41,8 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/workspaces/:id/repository-checkout-capabilities", h.httpRepositoryCheckoutCapabilities)
 	api.GET("/workspaces/:id/repositories", h.httpListRepositories)
 	api.POST("/workspaces/:id/repositories", h.httpCreateRepository)
+	api.POST("/workspaces/:id/repositories/remote-selection/inspect", h.httpInspectRemoteRepositorySelection)
+	api.POST("/workspaces/:id/repositories/remote-selection", h.httpRegisterRemoteRepositorySelection)
 	api.POST("/workspaces/:id/repositories/initialize-local", h.httpInitializeLocalRepository)
 	api.GET("/workspaces/:id/repositories/discover", h.httpDiscoverRepositories)
 	api.GET("/workspaces/:id/repositories/discovery", h.httpGetDiscoverySnapshot)
@@ -71,6 +73,97 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/scripts/:id", h.httpGetRepositoryScript)
 	api.PUT("/scripts/:id", h.httpUpdateRepositoryScript)
 	api.DELETE("/scripts/:id", h.httpDeleteRepositoryScript)
+}
+
+type remoteRepositorySelectionRequest struct {
+	RemoteURL      string `json:"remote_url"`
+	Provider       string `json:"provider"`
+	ProviderHost   string `json:"provider_host,omitempty"`
+	ProviderScope  string `json:"provider_scope,omitempty"`
+	ProviderRepoID string `json:"provider_repo_id,omitempty"`
+	ProviderOwner  string `json:"provider_owner,omitempty"`
+	ProviderName   string `json:"provider_name,omitempty"`
+	DefaultBranch  string `json:"default_branch,omitempty"`
+}
+
+type remoteRepositorySelectionResponse struct {
+	RemoteURL      string `json:"remote_url"`
+	Provider       string `json:"provider"`
+	ProviderHost   string `json:"provider_host"`
+	ProviderScope  string `json:"provider_scope"`
+	ProviderRepoID string `json:"provider_repo_id"`
+	ProviderOwner  string `json:"provider_owner"`
+	ProviderName   string `json:"provider_name"`
+	DefaultBranch  string `json:"default_branch"`
+}
+
+func (r remoteRepositorySelectionRequest) serviceInput() service.TaskRepositoryInput {
+	return service.TaskRepositoryInput{
+		RemoteURL: r.RemoteURL, Provider: r.Provider, ProviderHost: r.ProviderHost,
+		ProviderScope: r.ProviderScope, ProviderRepoID: r.ProviderRepoID,
+		ProviderOwner: r.ProviderOwner, ProviderName: r.ProviderName,
+		DefaultBranch: r.DefaultBranch,
+	}
+}
+
+func remoteRepositorySelectionFromInput(input service.TaskRepositoryInput) remoteRepositorySelectionResponse {
+	return remoteRepositorySelectionResponse{
+		RemoteURL: input.RemoteURL, Provider: input.Provider, ProviderHost: input.ProviderHost,
+		ProviderScope: input.ProviderScope, ProviderRepoID: input.ProviderRepoID,
+		ProviderOwner: input.ProviderOwner, ProviderName: input.ProviderName,
+		DefaultBranch: input.DefaultBranch,
+	}
+}
+
+func (h *RepositoryHandlers) httpInspectRemoteRepositorySelection(c *gin.Context) {
+	var body remoteRepositorySelectionRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
+		return
+	}
+	selection, err := h.service.InspectRemoteRepositorySelection(c.Request.Context(), c.Param("id"), body.serviceInput())
+	if err != nil {
+		h.writeRemoteRepositorySelectionError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, remoteRepositorySelectionFromInput(selection))
+}
+
+func (h *RepositoryHandlers) httpRegisterRemoteRepositorySelection(c *gin.Context) {
+	var body remoteRepositorySelectionRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
+		return
+	}
+	workspaceID := c.Param("id")
+	if h.rejectReadOnlyWorkspaceHTTP(c, workspaceID) {
+		return
+	}
+	repository, err := h.service.RegisterRemoteRepositorySelection(
+		c.Request.Context(), workspaceID, body.serviceInput(),
+	)
+	if err != nil {
+		h.writeRemoteRepositorySelectionError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, dto.FromRepository(repository))
+}
+
+func (h *RepositoryHandlers) writeRemoteRepositorySelectionError(c *gin.Context, err error) {
+	if status, ok := repositorySelectionHTTPStatus(err); ok {
+		c.JSON(status, taskErrorBody(err))
+		return
+	}
+	if service.IsForbidden(err) {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
+	h.logger.Error("failed to verify remote repository selection", zap.Error(err))
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify repository selection"})
 }
 
 func (h *RepositoryHandlers) registerWS(dispatcher *ws.Dispatcher) {

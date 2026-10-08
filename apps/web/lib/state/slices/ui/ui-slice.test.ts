@@ -423,10 +423,10 @@ describe("setSubtaskOrder", () => {
   });
 });
 
-describe("appSidebar actions", () => {
-  const COLLAPSED_KEY = "kandev.appSidebar.collapsed";
-  const SECTION_KEY = "kandev.appSidebar.sectionExpanded";
+const COLLAPSED_KEY = "kandev.appSidebar.collapsed";
+const SECTION_KEY = "kandev.appSidebar.sectionExpanded";
 
+describe("appSidebar hydration and section preferences", () => {
   beforeEach(() => {
     window.localStorage.clear();
   });
@@ -438,7 +438,7 @@ describe("appSidebar actions", () => {
     expect(store.getState().appSidebar.sectionExpanded.tasks).toBe(true);
     expect(store.getState().appSidebar.sectionExpanded["office-work"]).toBe(true);
     expect(store.getState().appSidebar.sectionExpanded["office-workspace"]).toBe(true);
-    expect(store.getState().appSidebar.sectionExpanded.projects).toBe(true);
+    expect(store.getState().appSidebar.sectionExpanded.projects).toBeUndefined();
     expect(store.getState().appSidebar.sectionExpanded.agents).toBe(true);
   });
 
@@ -468,13 +468,27 @@ describe("appSidebar actions", () => {
 
   it("toggleAppSidebarSection flips per-section state and persists the map", () => {
     const store = makeStore();
-    store.getState().toggleAppSidebarSection("projects");
+    store.getState().toggleAppSidebarSection("projects", true);
     expect(store.getState().appSidebar.sectionExpanded.projects).toBe(false);
     const persisted = JSON.parse(window.localStorage.getItem(SECTION_KEY) ?? "{}");
     expect(persisted.projects).toBe(false);
 
     store.getState().toggleAppSidebarSection("projects");
     expect(store.getState().appSidebar.sectionExpanded.projects).toBe(true);
+  });
+
+  it.each([true, false])("preserves saved Projects expansion=%s", (expanded) => {
+    window.localStorage.setItem(SECTION_KEY, JSON.stringify({ projects: expanded }));
+
+    const store = makeStore();
+
+    expect(store.getState().appSidebar.sectionExpanded.projects).toBe(expanded);
+  });
+});
+
+describe("appSidebar settings actions", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
   });
 
   it("toggleAppSidebarSection honors the caller default for missing section keys", () => {

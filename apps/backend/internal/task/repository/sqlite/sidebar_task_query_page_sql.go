@@ -41,6 +41,7 @@ func sidebarPageQueueCTEs(driver string, page sidebarPageBuildContext) string {
 		CROSS JOIN tasks queue_task
 		WHERE queue_task.archived_at IS NULL
 			AND page_queue_steps.workspace_id = queue_task.workspace_id
+			AND COALESCE(queue_task.agent_project_id, '') = ''
 			AND page_queue_steps.queued_for_step_id = queue_task.queued_for_step_id
 			AND queue_task.workflow_step_id = queue_task.queued_for_step_id
 			AND queue_task.queued_for_step_id <> ''

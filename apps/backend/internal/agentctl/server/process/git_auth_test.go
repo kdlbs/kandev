@@ -14,9 +14,8 @@ import (
 )
 
 func TestGitOperatorAuthenticationFailureAndRecovery(t *testing.T) {
-	repoDir, cleanup := setupTestRepo(t)
+	repoDir, remoteDir, cleanup := setupTestRepoWithRemote(t)
 	t.Cleanup(cleanup)
-	remoteDir := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin"))
 
 	var unauthorized atomic.Int32
 	var authenticated atomic.Int32

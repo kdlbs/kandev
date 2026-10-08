@@ -205,6 +205,28 @@ func assertManagedDeletionRows(t *testing.T, ctx context.Context, repo *sqlitere
 	require.Equal(t, "accepted transcript", messages[0].Content)
 }
 
+func TestGenericDeleteTaskUsesManagedDeletionAdmissionForRetainedTask(t *testing.T) {
+	conversations, repos, lifecycle, _ := managedDeletionPair(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	first := seedManagedDeletionTranscript(t, ctx, conversations[0], repos[0])
+
+	task, err := repos[0].GetTask(ctx, first.TaskID)
+	require.NoError(t, err)
+	require.Equal(t, true, task.Metadata[models.MetaKeyManagedRetained])
+	require.NoError(t, lifecycle.DeleteTask(ctx, first.TaskID))
+
+	_, err = repos[1].GetTask(ctx, first.TaskID)
+	require.Error(t, err)
+	jobs, err := repos[1].ListTaskResourceCleanupJobs(ctx, first.TaskID)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	claim, err := managed.DeletionEnvelope(jobs[0].ResourceSnapshot)
+	require.NoError(t, err)
+	require.NotNil(t, claim)
+	require.Equal(t, managed.DeleteCommitted, claim.Phase)
+}
+
 // @covers AC-PLUGINS-MANAGED-COORDINATION-013.3, AC-PLUGINS-MANAGED-COORDINATION-013.4, AC-PLUGINS-MANAGED-COORDINATION-013.5, AC-PLUGINS-MANAGED-COORDINATION-013.7
 func TestManagedDeletionAdmissionFailureEffects(t *testing.T) {
 	for _, mode := range []string{"admission_rollback", "canvas_abort", "final_rollback", "current_delete", "cancel_before_admission", "cancel_after_admission"} {

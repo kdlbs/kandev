@@ -73,6 +73,30 @@ function AppSidebarUnresolvedNav({ collapsed }: { collapsed: boolean }) {
   );
 }
 
+function AppSidebarModeSections({
+  collapsed,
+  inOffice,
+  hasSavedSidebarLayout,
+}: {
+  collapsed: boolean;
+  inOffice: boolean;
+  hasSavedSidebarLayout: boolean;
+}) {
+  const showDefaultKanbanSections = !inOffice && !hasSavedSidebarLayout;
+  const showPostProjectAgents = inOffice || hasSavedSidebarLayout;
+
+  return (
+    <>
+      {inOffice && <OfficeNavigationSection collapsed={collapsed} section="work" />}
+      {showDefaultKanbanSections && <AgentsSection collapsed={collapsed} />}
+      {showDefaultKanbanSections && <IntegrationsSection collapsed={collapsed} />}
+      <ProjectsSection collapsed={collapsed} />
+      {showPostProjectAgents && <AgentsSection collapsed={collapsed} />}
+      {inOffice && <OfficeNavigationSection collapsed={collapsed} section="office" />}
+    </>
+  );
+}
+
 function AppSidebarModeNav({ collapsed, inOffice }: { collapsed: boolean; inOffice: boolean }) {
   const hasSavedSidebarLayout = useHasSavedSidebarLayout();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
@@ -98,11 +122,11 @@ function AppSidebarModeNav({ collapsed, inOffice }: { collapsed: boolean; inOffi
           <PluginNavItems collapsed={collapsed} />
         </>
       )}
-      {inOffice && <OfficeNavigationSection collapsed={collapsed} section="work" />}
-      <ProjectsSection collapsed={collapsed} />
-      <AgentsSection collapsed={collapsed} />
-      {inOffice && <OfficeNavigationSection collapsed={collapsed} section="office" />}
-      {!inOffice && !hasSavedSidebarLayout && <IntegrationsSection collapsed={collapsed} />}
+      <AppSidebarModeSections
+        collapsed={collapsed}
+        inOffice={inOffice}
+        hasSavedSidebarLayout={hasSavedSidebarLayout}
+      />
     </div>
   );
   if (!inOffice && !collapsed)

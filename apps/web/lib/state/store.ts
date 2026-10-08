@@ -21,6 +21,7 @@ import {
   createJiraSlice,
   createLinearSlice,
   createOfficeSlice,
+  createAgentProjectsSlice,
   createFeaturesSlice,
   createAuthSlice,
   createAutomationsSlice,
@@ -69,6 +70,7 @@ export function createAppStore(initialState?: HydrationState) {
         ...createLinearSlice(set as any, get as any, api as any),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...createOfficeSlice(set as any, get as any, api as any),
+        ...createAgentProjectsSlice<AppState>(set),
         ...createFeaturesSlice(set),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...createAuthSlice(set as any),

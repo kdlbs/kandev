@@ -4,14 +4,15 @@
 package mcpmode
 
 const (
-	Task             = "task"
-	TaskTitlePending = "task-title-pending"
-	Config           = "config"
-	External         = "external"
-	Office           = "office"
-	Automation       = "automation"
-	// Coordinator identifies a workspace coordinator's conversation session.
-	Coordinator = "coordinator"
+	Task               = "task"
+	TaskTitlePending   = "task-title-pending"
+	Config             = "config"
+	External           = "external"
+	Office             = "office"
+	Automation         = "automation"
+	Coordinator        = "coordinator"
+	ProjectCoordinator = "project-coordinator"
+	ProjectWorker      = "project-worker"
 )
 
 var instanceModes = [...]string{
@@ -21,6 +22,8 @@ var instanceModes = [...]string{
 	Office,
 	Automation,
 	Coordinator,
+	ProjectCoordinator,
+	ProjectWorker,
 }
 
 // InstanceModes returns the modes accepted by the agentctl instance API.
