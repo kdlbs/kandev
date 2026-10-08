@@ -11,13 +11,14 @@ Starting head: `aabbae4074`. Date: 2026-10-08.
 - [x] Exercise boundary/error states, keyboard/touch navigation, and performance.
 - [x] Record reproducible findings and missing test coverage.
 - [x] Fix confirmed findings and run focused regression checks.
-- [ ] Push changes to PR 4332.
-- [ ] Wait 15 minutes after push, then run PR fixup against the current head.
-- [ ] Report verified behavior and remaining qualification limits.
+- [x] Push changes to PR 4332.
+- [x] Wait 15 minutes after push, then start PR fixup against the current head.
+- [ ] Confirm terminal CI and complete current-head review disposition.
+- [x] Record verified behavior and remaining qualification limits.
 
 ## Findings
 
-Eleven confirmed findings were fixed and covered by focused regressions. Delivery and current-head PR checks remain pending.
+Eleven confirmed findings were fixed and covered by focused regressions. The fixes are pushed. Current-head PR checks remain pending.
 
 ## Reference comparison
 
@@ -123,3 +124,17 @@ Ten-observation local checkpoint benchmarks after the attribute fix:
 
 Shared-host load differed. These observations do not establish a causal speedup.
 Raw logs: `/tmp/turn-attributes-benchmark-before.log` and `/tmp/turn-attributes-benchmark-after.log`.
+
+## Delivery and executor recheck
+
+The QA fixes were committed with normal hooks and pushed to PR 4332. Six refreshed desktop/mobile screenshots were published in the PR description.
+
+Docker and SSH retention E2Es passed on the pushed code (two tests, 1.4 minutes). Docker content remained readable after container removal and backend restart. SSH content remained readable after deleting the remote checkout.
+
+The first executor attempt stopped on a stale Linux mock-agent artifact. The next attempt failed before capture because the backend and remote-helper manifest had different build identities. Rebuilding the backend and Linux helpers together resolved setup; the subsequent run passed without retries.
+
+Command: `KANDEV_E2E_CONTAINERS=1 pnpm --dir apps/web e2e:run --host --no-build --project containers e2e/tests/git/turn-changed-files-executors.spec.ts e2e/tests/ssh/turn-changed-files.spec.ts -- --retries=0`. Raw success log: `/tmp/kandev-run.e2e.dPAxKMoh.log`.
+
+The full post-push hold ran from 20:53:37 UTC to 21:08:37 UTC before PR fixup started. The initial fixup snapshot found no failed checks or unresolved inline threads, but CI remained queued. A sampled job had `runner_id=0` and no steps. GitHub API rate limiting temporarily blocked complete policy/review evidence; the standard waiter restarted after the quota reset. Terminal current-head CI and review completion remain pending until verified.
+
+A disposable synthetic merge checked the QA code against base `5aa06bcefe02b6ce7b7c321f7092efe89f0c8992`. It merged without conflicts. Focused checkpoint/lifecycle/boot-state tests, the coordinator package, six frontend files (36 tests), localization, and public-doc validation passed. This is compatibility evidence for those exact inputs, not a completed CI verdict.
