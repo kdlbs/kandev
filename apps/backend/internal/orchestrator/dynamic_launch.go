@@ -1385,24 +1385,6 @@ func (s *Service) launchDynamicRouteAction(ctx context.Context, sessionID string
 	return nil
 }
 
-func (s *Service) dynamicFailureSession(
-	ctx context.Context,
-	data watcher.AgentEventData,
-) (*models.TaskSession, bool) {
-	if s.profileExecutionResolver == nil || data.SessionID == "" {
-		return nil, false
-	}
-	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
-	if err != nil || session == nil || session.RouteGeneration <= 0 || session.ExecutionProfileID == "" {
-		return nil, false
-	}
-	if session.AgentExecutionID != "" && data.AgentExecutionID != "" &&
-		session.AgentExecutionID != data.AgentExecutionID {
-		return nil, false
-	}
-	return session, true
-}
-
 func (s *Service) unclassifiedPromptEvidence(
 	ctx context.Context,
 	data watcher.AgentEventData,
