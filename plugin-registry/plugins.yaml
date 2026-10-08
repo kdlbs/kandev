@@ -70,7 +70,7 @@ plugins:
     categories: [integrations]
   - id: nulab-backlog
     repo: khuongdo/kandev-plugin-nulab-backlog
-    categories: [integrations]
+    categories: [connector]
 # Example entry (copy, uncomment, and fill in when adding a plugin):
 #
 # plugins:
