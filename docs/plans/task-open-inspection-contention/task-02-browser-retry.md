@@ -187,9 +187,14 @@ Validation passed:
 - Desktop Chromium E2E: 1 passed. Phone `mobile-chrome` E2E: 1 passed. Both
   managed runs rebuilt the backend and production Vite assets. A host replay
   captured and visually checked the phone exhausted-state view.
+- Desktop Chromium and phone `mobile-chrome` E2E passed again after the
+  retry-owner review correction: one test in each viewport. These flows verify
+  same-session retry and phone touch access; rendered-card tests additionally
+  cover absent or mismatched automatic owners and provider-restored manual
+  policy.
+- Fresh screenshot-capture runs passed in desktop Chromium and phone
+  `mobile-chrome`. The retry notice and action were visually checked in both
+  captures; the temporary capture specs were removed after publication prep.
 - Screenshot: `apps/web/e2e/test-results/session-mobile-session-ope-31ab7-ion-and-preserves-the-draft-mobile-chrome/session-open-inspection-contention-mobile.png`.
 - The Task 01 orchestrator regression and the prescribed backend race suite,
   document catalog validation, specification lint, and `git diff --check`.
-- Desktop and phone E2E were not rerun for the review correction because it only
-  changes retry callback ownership; the new rendered-card tests exercise both
-  branches without changing layout or touch behavior.
