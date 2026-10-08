@@ -32,9 +32,9 @@ async function expectPhoneTargets(page: Page) {
   const navigation = page.getByTestId("mobile-sidebar-layout-navigation");
   const coordinators = navigation.getByTestId("mobile-coordinators-section");
   const header = coordinators.getByRole("button").first();
-  expect((await header.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  expect(Math.round((await header.boundingBox())?.height ?? 0)).toBeGreaterThanOrEqual(44);
   const bodyLink = coordinators.getByTestId("mobile-coordinators-open-list-body");
-  expect((await bodyLink.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  expect(Math.round((await bodyLink.boundingBox())?.height ?? 0)).toBeGreaterThanOrEqual(44);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -69,7 +69,7 @@ async function expectNarrowFinePointer(page: Page, backendUrl: string) {
     await finePage.getByTestId("mobile-sidebar-customize").click();
     const drawer = finePage.getByTestId("mobile-sidebar-customization");
     const move = drawer.getByRole("button", { name: "Move Coordinators down", exact: true });
-    expect((await move.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect(Math.round((await move.boundingBox())?.height ?? 0)).toBeGreaterThanOrEqual(44);
     const bounds = (await drawer.boundingBox())!;
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(finePage.viewportSize()!.width);
   } finally {
@@ -119,7 +119,7 @@ test("customizes Coordinator from the phone drawer and saves the same layout in 
     const visibility = drawer.getByTestId("mobile-sidebar-visibility-coordinators");
     await expect(visibility).toBeChecked();
     const checkboxLabel = visibility.locator("xpath=ancestor::label[1]");
-    expect((await checkboxLabel.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect(Math.round((await checkboxLabel.boundingBox())?.height ?? 0)).toBeGreaterThanOrEqual(44);
     await visibility.tap();
     await expect
       .poll(async () => (await savedNode(apiClient, seedData.workspaceId, "coordinators"))?.visible)

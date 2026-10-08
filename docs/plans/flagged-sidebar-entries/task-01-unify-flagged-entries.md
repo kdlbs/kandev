@@ -212,3 +212,12 @@ restored the hidden and reordered choices after re-enabling the feature. UI-03
 followed saved phone order and passed customization, route, 44px target,
 viewport-boundary, and narrow fine-pointer checks. Vite builds emitted existing
 chunk-size and dynamic-import warnings but completed successfully.
+
+PR fixup verification corrected flex shrinking in the desktop customization
+wrapper so Coordinator content cannot overlap later Office sections. The phone
+target assertions round measured CSS-pixel heights before checking the 44px
+minimum, avoiding subpixel precision failures. The focused Office navigation
+E2E checks passed 2/2 tests; the focused phone sidebar and plugin metadata E2E
+checks passed 2/2 tests. Typecheck, changed-file ESLint, and Prettier passed.
+These fixes preserve the documented navigation behavior, so no requirement,
+design, or public-guide change was needed.
