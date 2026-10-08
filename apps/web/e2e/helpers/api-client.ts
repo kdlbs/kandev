@@ -1075,7 +1075,7 @@ export class ApiClient {
   }
 
   async listRepositories(workspaceId: string): Promise<{
-    repositories: Array<{ id: string; name: string }>;
+    repositories: Repository[];
     total: number;
   }> {
     return this.request("GET", `/api/v1/workspaces/${workspaceId}/repositories`);

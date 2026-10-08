@@ -3,6 +3,7 @@ import { waitForSessionDone } from "../../helpers/session";
 import { controlHeight } from "../../helpers/control-sizing";
 import { mockFolderAvailability } from "../../helpers/open-task-folder";
 import type { Locator, Page } from "@playwright/test";
+import { SessionPage } from "../../pages/session-page";
 import fs from "node:fs";
 import path from "node:path";
 import type { BackendContext } from "../../fixtures/backend";
@@ -49,7 +50,18 @@ async function settlePicker(picker: Locator): Promise<void> {
  * row, which is the directory browser this feature owns. */
 async function openFolderSourceDialog(page: Page, taskId: string) {
   await page.goto(`/t/${taskId}`);
-  await page.getByTestId("files-workspace-actions").click();
+  const session = new SessionPage(page);
+  await session.waitForLoad();
+  await session.waitForDockviewReady();
+  const filesTab = page.locator(".dv-tab:visible", {
+    has: page.locator(".dv-default-tab-content").filter({ hasText: /^Files$/ }),
+  });
+  await expect(filesTab).toBeVisible();
+  await filesTab.click();
+  await expect(session.files).toBeVisible();
+  const workspaceActions = page.getByTestId("files-workspace-actions");
+  await expect(workspaceActions).toBeVisible();
+  await workspaceActions.click();
   await page.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
   const dialog = page.getByTestId("add-workspace-sources-dialog");
   await expect(dialog).toBeVisible();
