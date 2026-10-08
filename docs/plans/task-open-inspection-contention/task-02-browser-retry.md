@@ -192,6 +192,13 @@ Validation passed:
   same-session retry and phone touch access; rendered-card tests additionally
   cover absent or mismatched automatic owners and provider-restored manual
   policy.
+- Review follow-up clears an inspection notice after the session becomes
+  `RUNNING` or `WAITING_FOR_INPUT`, while retaining it during `STARTING`. A hook
+  regression verifies both transitions. The rendered bootstrap card also keeps
+  a manual retry when a matching automatic owner is present. The three focused
+  rendered-card/hook test files pass 24 tests, including automatic retry,
+  absent and mismatched owners, provider-restored manual policy, and bootstrap
+  manual-notice precedence.
 - Fresh screenshot-capture runs passed in desktop Chromium and phone
   `mobile-chrome`. The retry notice and action were visually checked in both
   captures; the temporary capture specs were removed after publication prep.

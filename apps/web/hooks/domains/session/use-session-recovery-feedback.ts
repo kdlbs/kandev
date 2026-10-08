@@ -15,6 +15,10 @@ function isActiveSessionState(state: string | undefined): boolean {
   return state === "STARTING" || state === "RUNNING" || state === "WAITING_FOR_INPUT";
 }
 
+function isRecoveryReadyState(state: string | undefined): boolean {
+  return state === "RUNNING" || state === "WAITING_FOR_INPUT";
+}
+
 /** Clear automatic recovery feedback after another recovery makes the session active. */
 export function useSessionRecoveryFeedback({
   sessionId,
@@ -43,7 +47,8 @@ export function useSessionRecoveryFeedback({
     lastObservedSessionRef.current = { id: sessionId, state: sessionState };
     if (!stateChanged || !isActiveSessionState(sessionState)) return;
     if (error !== null) setError(null);
-    if (notice !== null && noticeKind !== "inspection_busy") {
+    const inspectionReady = noticeKind === "inspection_busy" && isRecoveryReadyState(sessionState);
+    if (notice !== null && (noticeKind !== "inspection_busy" || inspectionReady)) {
       setNotice?.(null);
       setNoticeKind?.(null);
     }

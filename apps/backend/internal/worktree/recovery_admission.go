@@ -1103,7 +1103,36 @@ func recoverySelectionSnapshotMatchesRequest(snapshot models.WorkspaceRecoverySe
 }
 
 func waitForRecoveryInspectionLock(ctx context.Context, lock *sync.Mutex, deadline time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return recoveryInspectionWaitError(err)
+	}
+	if lock.TryLock() {
+		if err := ctx.Err(); err != nil {
+			lock.Unlock()
+			return recoveryInspectionWaitError(err)
+		}
+		return nil
+	}
+	if deadline.IsZero() {
+		return &RecoveryInspectionContentionError{}
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return recoveryInspectionWaitError(ctx.Err())
+	}
+
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
 	for {
+		select {
+		case <-ctx.Done():
+			return recoveryInspectionWaitError(ctx.Err())
+		case <-timer.C:
+			return recoveryInspectionWaitError(ctx.Err())
+		case <-ticker.C:
+		}
 		if err := ctx.Err(); err != nil {
 			return recoveryInspectionWaitError(err)
 		}
@@ -1113,27 +1142,6 @@ func waitForRecoveryInspectionLock(ctx context.Context, lock *sync.Mutex, deadli
 				return recoveryInspectionWaitError(err)
 			}
 			return nil
-		}
-		if deadline.IsZero() {
-			return &RecoveryInspectionContentionError{}
-		}
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			return recoveryInspectionWaitError(ctx.Err())
-		}
-		timer := time.NewTimer(remaining)
-		ticker := time.NewTicker(10 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			ticker.Stop()
-			return recoveryInspectionWaitError(ctx.Err())
-		case <-timer.C:
-			ticker.Stop()
-			return recoveryInspectionWaitError(ctx.Err())
-		case <-ticker.C:
-			timer.Stop()
-			ticker.Stop()
 		}
 	}
 }

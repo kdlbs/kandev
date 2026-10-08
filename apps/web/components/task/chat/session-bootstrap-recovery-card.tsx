@@ -55,12 +55,14 @@ type BootstrapRecoveryViewProps = {
 
 function useBootstrapResumeHandler({
   automaticBusy,
+  manualInspectionBusy,
   profileExists,
   matchingRecovery,
   clearInspectionContentionNotice,
   handleRecover,
 }: {
   automaticBusy: boolean;
+  manualInspectionBusy: boolean;
   profileExists: boolean;
   matchingRecovery: ReturnType<typeof matchingAutomaticRecovery>;
   clearInspectionContentionNotice?: () => void;
@@ -68,6 +70,10 @@ function useBootstrapResumeHandler({
 }) {
   return useCallback(() => {
     if (automaticBusy || !profileExists) return;
+    if (manualInspectionBusy) {
+      void handleRecover("resume");
+      return;
+    }
     if (matchingRecovery?.noticeKind === "inspection_busy") {
       void matchingRecovery.resumeSession().then((success) => {
         if (success) clearInspectionContentionNotice?.();
@@ -79,6 +85,7 @@ function useBootstrapResumeHandler({
     automaticBusy,
     clearInspectionContentionNotice,
     handleRecover,
+    manualInspectionBusy,
     matchingRecovery,
     profileExists,
   ]);
@@ -94,6 +101,19 @@ function bootstrapRecoveryCopy(
   };
 }
 
+function useSessionAgentDisplayName(sessionId: string) {
+  return useOptionalAppStore((state) => {
+    const session = state.taskSessions.items[sessionId];
+    const profileId = session?.execution_profile_id || session?.agent_profile_id;
+    const profile = profileId
+      ? state.agentProfiles.items.find((candidate) => candidate.id === profileId)
+      : undefined;
+    return profile
+      ? state.availableAgents.items.find((agent) => agent.name === profile.agent_name)?.display_name
+      : undefined;
+  }, undefined);
+}
+
 function BootstrapRecoveryControls({
   taskId,
   sessionId,
@@ -104,16 +124,7 @@ function BootstrapRecoveryControls({
   const { t } = useTranslation();
   const [showDialog, setShowDialog] = useState(false);
   const [relocationConfirmationOpen, setRelocationConfirmationOpen] = useState(false);
-  const agentDisplayName = useOptionalAppStore((state) => {
-    const session = state.taskSessions.items[sessionId];
-    const profileId = session?.execution_profile_id || session?.agent_profile_id;
-    const profile = profileId
-      ? state.agentProfiles.items.find((candidate) => candidate.id === profileId)
-      : undefined;
-    return profile
-      ? state.availableAgents.items.find((agent) => agent.name === profile.agent_name)?.display_name
-      : undefined;
-  }, undefined);
+  const agentDisplayName = useSessionAgentDisplayName(sessionId);
   const recovery = useSessionRecoveryActions({ taskId, sessionId, errorStamp: error.stamp });
   const {
     busyAction,
@@ -161,6 +172,7 @@ function BootstrapRecoveryControls({
 
   const handleResume = useBootstrapResumeHandler({
     automaticBusy,
+    manualInspectionBusy: recoveryNoticeKind === "inspection_busy",
     profileExists,
     matchingRecovery,
     clearInspectionContentionNotice,
@@ -169,10 +181,7 @@ function BootstrapRecoveryControls({
 
   const handleFreshStart = useCallback(() => {
     if (automaticBusy) return;
-    if (!profileExists) {
-      setShowDialog(true);
-      return;
-    }
+    if (!profileExists) return setShowDialog(true);
     void handleRecover("fresh_start");
   }, [automaticBusy, handleRecover, profileExists]);
 

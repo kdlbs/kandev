@@ -26,6 +26,7 @@ func TestIsRecoveryInspectionContentionOnlyRejectsJoinedFailures(t *testing.T) {
 		{name: "wrapped", err: fmt.Errorf("admission: %w", contention), want: true},
 		{name: "joined real failure", err: errors.Join(contention, cleanupErr), want: false},
 		{name: "unrelated", err: cleanupErr, want: false},
+		{name: "nil", err: nil, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

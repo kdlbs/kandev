@@ -152,3 +152,10 @@ Validation passed:
   packages.
 - The focused `-race` regression set across those packages.
 - Backend build and `git diff --check`.
+- Review follow-up reuses one timer and ticker for the bounded inspection wait,
+  instead of allocating both for every poll. The contention classifier test
+  includes a nil-error case, which reaches the final `false` return.
+- Follow-up validation passed:
+  `go test -trimpath -tags fts5 -race ./internal/worktree -run
+  'TestIsRecoveryInspectionContentionOnlyRejectsJoinedFailures|TestRecoveryAdmissionWaitPolicy'
+  -count=1`.

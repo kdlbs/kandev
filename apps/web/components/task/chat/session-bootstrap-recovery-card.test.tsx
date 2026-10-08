@@ -147,6 +147,39 @@ describe("SessionBootstrapRecoveryCard", () => {
     expect(recoveryActionState.handleRecover).toHaveBeenCalledWith("resume");
   });
 
+  it("prioritizes a manual inspection notice over a matching automatic owner", () => {
+    recoveryActionState.recoveryNotice = "task:workspaceRecoveryInspectionBusy";
+    recoveryActionState.recoveryNoticeKind = "inspection_busy";
+    recoveryActionState.providerRestoredResumeEligible = true;
+    const automaticResume = vi.fn().mockResolvedValue(true);
+    render(
+      <SessionBootstrapRecoveryCard
+        taskId="task-1"
+        sessionId="session-1"
+        error={error}
+        automaticRecovery={{
+          requestIdentity: {
+            taskId: "task-1",
+            sessionId: "session-1",
+            generation: 1,
+            attemptId: 1,
+          },
+          resumptionState: "idle",
+          error: null,
+          notice: "task:workspaceRecoveryInspectionBusy",
+          noticeKind: "inspection_busy",
+          recoveryFailure: null,
+          resumeSession: automaticResume,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(RESUME_BUTTON_TEST_ID));
+
+    expect(recoveryActionState.handleRecover).toHaveBeenCalledWith("resume");
+    expect(automaticResume).not.toHaveBeenCalled();
+  });
+
   it("keeps the automatic read-only result inside the shared informational card", () => {
     render(
       <SessionBootstrapRecoveryCard
