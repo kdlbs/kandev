@@ -15,15 +15,19 @@ legacy_specs: []
 
 ## Overview
 
-The first-commit Unstage correction and real-Git regressions are published in READY
-PR4313 at frozen `a5ebc322a7dfddc6af21b10edc65b4dfc11e8072`. Both new operator
-functions passed in both Windows attempts. Delivery is blocked by two unchanged
-Windows package timeouts and one monitor fixture caller deadline.
+The first-commit Unstage correction, real-Git regressions and reviewed Windows
+process-cohort amendment are published in READY PR4313 at frozen
+`7bcbec5b8882c8ef177623fe8c521d40ba6f56e3`. Both new operator functions passed
+in the two earlier Windows attempts. The current native Windows job exposed an
+additional unchanged fixture timestamp assertion; hosted delivery remains pending.
 
 This amendment keeps ONE sequential work order for the bounded test/CI dependencies
-below. ROOT reviewed all four design files after actual DESIGN END 04:05:42 and
-later released implementation to this SAME primary. Local implementation/checks are
-in progress under the expressly granted global local-heavy lease. No merge authority.
+below. ROOT reviewed and released the process amendment after DESIGN END 04:05:42.
+Its local checks, normal publication and lease return are complete. ROOT first released
+authoring of the timestamp fixture correction and later released validation/publication
+after qualifying child78's explicit return. Child77 now owns the sole heavy lease.
+The same work order's local implementation is complete; hosted delivery remains pending.
+No merge authority.
 
 ## Ownership and evidence
 
@@ -60,6 +64,9 @@ browser/build/E2E, PostgreSQL, installation in design, delegates and extra tasks
 The amendment additionally covers only the monitor fixture's cached detail wait,
 the Windows process workflow member, its fixed native Go cohort runner and focused
 runner/workflow contract tests. No production tracker or Git behavior changes.
+The later native dependency additionally owns only timestamp baseline setup in
+`apps/backend/internal/task/service/service_repository_checkout_controls_test.go`.
+It preserves all real checkout-update and event assertions without a production clock change.
 Public docs remain untouched in the amendment: the Windows support guide truthfully
 describes focused race-tested packages without promising an unpartitioned command.
 
@@ -307,3 +314,48 @@ checks passed (covered/errors[]). Task01 local implementation is done; normal
 hooks/fixup publication and actual new-head hosted native coverage, six required
 contexts, three parents and substantive full review remain pending delivery gates.
 No complete Windows cohort pass, performance improvement or merge-ready claim.
+
+## Native timestamp dependency: released validation
+
+The process amendment passed active hooks and was published normally at `7bcbec5b...`.
+All 39 retained local originals were joined and fresh owned groups were absent before
+the explicit heavy-lease return. Current authenticated CodeRabbit App347564 FULL ALL17
+review completed with a substantive assessment and no actionable findings; it becomes
+historical after any later fixup. Original hosted collector57475 remains live with its
+original deadlines; no replacement or hosted retry is authorized.
+
+Current-head native Windows job113152567200/run37728353083/attempt1 failed
+`TestRepositoryCheckoutDefaultsPresence` at line42: strict `UpdatedAt.After` was false.
+That test and production update were unchanged from base202d48. The update stamps
+`time.Now().UTC()` without a logical monotonic-clock promise. Actual failed timestamps
+were not logged; the raw log proves the assertion failure, not a clock-resolution cause.
+ROOT reviewed the source/log and authorized the minimal private fixture baseline.
+
+Before each existing payload iteration, parameterized `ExecContext` sets only the
+private row's persisted `updated_at` to 2000-01-01 UTC, requires exactly one affected
+row, and the canonical repository read confirms that instant. All original payload,
+presence, field, real-update, strict timestamp and event assertions remain intact.
+No sleep, looser comparison, production clock seam or companion-test change.
+
+The fixture and SAME manifest/order are unstaged and uncommitted. No validation
+result is claimed yet. ROOT's later sole-heavy release is active after child78's
+qualified return; Task01 records the anchored count10/race test under three minutes,
+ONE full CHANGED lint and normal documentation/actual-path coverage gate. Before
+corrected push, stop/join ONLY owned observer57475 and prove its group absent;
+preserve historical evidence without waiting for incomplete old CI or cancelling jobs.
+Natural new-head Windows success must prove the correction; no same-head rerun,
+performance claim or merge authority. A single new-head observer follows qualified
+local publication, all original joins and explicit heavy return.
+
+Released count10/race fixture check passed (package1.577s, wall90.435s), original75293
+joinedaade8a/0/group2382648 absent. ONE full CHANGED lint passed zero issues,
+original52635 joined1377ed/0/group2389256 absent, wall99.131s. No passing test replay
+or production clock change. ROOT-authorized old observer57475 was ownership-verified,
+stopped and actually joined26aa11: collector143/no verdict, wrapper1 on empty-report
+summary parsing after recording the true terminal receipt; exact owned group/wrapper
+are absent. Historical35PASS/1FAIL/25PENDING remains unqualified for delivery. Old
+process job was still running; no available complete coverage report or hosted cancellation.
+Catalog363/1437, all-spec lint, actual18-path coverage (covered/errors[]) and diff
+whitespace passed, original7210 joined415baa/0/group2401993 absent. Normal active
+hooks/publication follow; new-head native
+fixture and complete cohort coverage, required gates/parents/review remain pending.

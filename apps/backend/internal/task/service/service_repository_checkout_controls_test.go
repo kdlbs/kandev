@@ -24,8 +24,16 @@ func TestRepositoryCheckoutDefaultsPresence(t *testing.T) {
 	require.True(t, created.PullBeforeWorktree)
 	f[0].bus.ClearEvents()
 	for _, payload := range []string{`{}`, `{"default_branch":null,"pull_before_worktree":null}`, `{"default_branch":"","pull_before_worktree":false}`, `{"default_branch":"topic","pull_before_worktree":true}`, `{"pull_before_worktree":false}`} {
+		// A historical baseline keeps timestamp advancement independent of clock resolution.
+		baseline := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+		result, err := f[0].db.ExecContext(t.Context(), "UPDATE repositories SET updated_at = ? WHERE id = ?", baseline, "checkout-repo")
+		require.NoError(t, err)
+		affected, err := result.RowsAffected()
+		require.NoError(t, err)
+		require.EqualValues(t, 1, affected)
 		before, err := f[0].gate.Repository.GetRepository(t.Context(), "checkout-repo")
 		require.NoError(t, err)
+		require.True(t, before.UpdatedAt.Equal(baseline))
 		var request UpdateRepositoryRequest
 		require.NoError(t, json.Unmarshal([]byte(payload), &request))
 		row, err := f[0].api.UpdateRepository(t.Context(), before.ID, &request)

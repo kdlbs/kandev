@@ -29,10 +29,10 @@ Make empty-list Unstage work before the first commit using the smallest uncondit
 Git argv correction. Independently authored real operator and registered HTTP regressions
 must establish causal RED, then GREEN with selected-file and committed compatibility.
 
-That initial implementation is complete and published. This SAME order is reopened
-for the design-only delivery amendment below; historical commands/results remain
-evidence and must not be replayed. Only a LATER reviewed ROOT release authorizes
-the amended implementation, local-heavy work or a new published head.
+The initial implementation and reviewed process-cohort amendment are complete and
+published. This SAME order is reopened for the authoring-only native timestamp
+dependency below; historical commands/results must not be replayed. Only a LATER
+ROOT heavy grant authorizes its checks, hooks or another published head.
 
 ## In scope
 
@@ -382,3 +382,105 @@ coverage/diff checks followed, b9dd20 originalcall/exit0/group2285516 gone,
 covered/errors[]. No public-doc replay. Code implementation and scoped local
 verification are complete. Normal hooks/fixup publication, new-head actual native
 coverage/CI/review and separate merge grant remain delivery gates, not proved here.
+
+### Additional native timestamp dependency: released validation
+
+Normal active hooks, commit15166 joined234ce6/0, push83942 joined3a982f/0 and
+publication91660 joinedb7c262/0 published the process amendment at `7bcbec5b...`.
+Local/remote/upstream/PR heads matched, the worktree was clean, author body was
+preserved and canonical association was complete/errors[] with all five flags false.
+Fresh 39-receipt audit preceded the explicit local-heavy return. FULL ALL17 current
+App347564 semantic review completed without actionable findings during CI.
+
+At dependency release the SAME original collector57475 was live, group2301134, start04:38:09.542433Z,
+inner90m cutoff06:08:09.542433Z, GNU91m cutoff06:09:09.542433Z/kill10. It has no
+terminal verdict and must be actually joined before any later authorized replacement.
+Windows process rerun budget remains exhausted; no native job rerun was granted.
+
+Native Windows job113152567200/Backend Tests37728353083/attempt1 at frozen7bcb
+failed the existing `TestRepositoryCheckoutDefaultsPresence` strict timestamp
+assertion at `service_repository_checkout_controls_test.go:42`. Test bytes match
+base202d48; the real update stamps `time.Now().UTC()`. Exact failed timestamps were
+not logged, so clock-resolution/tie cause remains unproved. Original diagnostic25720
+joined529265/0/group2363319 absent; complete raw log1023954bytes and metadata are
+in `/tmp/kandev-child77-unstage-20261008/amend-native-failure-checkpoint.json`.
+
+ROOT reviewed this concrete additional dependency and released AUTHORING ONLY.
+Owned source is solely
+`apps/backend/internal/task/service/service_repository_checkout_controls_test.go`,
+inside `TestRepositoryCheckoutDefaultsPresence`. Before EACH payload's canonical
+before-read, parameterized fixture DB `ExecContext` sets only `checkout-repo.updated_at`
+to a deterministic historical UTC instant; require exactly one affected row and confirm
+that baseline through the canonical repository read. Keep strict `UpdatedAt.After`,
+all five payloads, omitted/null/explicit presence, returned field values, real mutation
+and actual event assertions. All companion/control tests and production code remain
+unchanged. No sleep, weakened comparison, test skip or clock seam.
+
+ROOT subsequently released validation in this SAME primary after qualifying
+child78's explicit heavy return; receipt is
+`/tmp/kandev-root-child78-publication-return-20261008.json`. The SAME order is
+in progress, with the sole global local-heavy lease granted to child77. The fixture
+and documents are still unstaged/uncommitted; no result is claimed before execution.
+
+1. Read current release/version and retain original collector57475; no duplicate.
+2. Run only the changed test with the released count10/race command below and
+   ONE full CHANGED lint at the exact unchanged PR base. Retain every original
+   handle, PID/group, UTC cutoff and actual join/exit. No automatic resource retry.
+3. Run the relevant normal documentation/diff/actual-path coverage gate for all
+   actual changed files (18 after this fixture). No passing Unstage/API/helper/monitor
+   or companion-test replay. Normal active hooks, no bypass/amend, then fixup publication.
+4. Preserve author body/canonical association/five false flags; return any granted
+   heavy lease only after all original local commands are joined/groups gone.
+   Before corrected push, verify ownership, stop ONLY old observer57475 and actually
+   join it, preserve its reports and prove its exact group gone; do not cancel hosted jobs.
+   A new observer is authorized only after local publication/joins and lease return.
+   The prior FULL17 review
+   becomes historical; qualify new-head full actual-file review and natural hosted
+   Windows coverage/required contexts/parents. No blind rerun or merge authority.
+
+Exact released changed-test command, bounded to three minutes:
+
+```bash
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB timeout --signal=TERM --kill-after=10s 3m go test -trimpath -tags fts5 -race -p=1 -count=10 -timeout=3m -run '^TestRepositoryCheckoutDefaultsPresence$' ./internal/task/service)
+```
+
+Exact released full CHANGED lint; original earlier124 and failed recovery
+remain historical failures, not cleanliness evidence:
+
+```bash
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=1GiB timeout --signal=TERM --kill-after=10s 6m golangci-lint run ./... --new-from-rev=202d48bceb50ff839e1834d928d1677337fda672 --concurrency=2 --allow-serial-runners --timeout=5m)
+```
+
+Use existing Go1.26.0/Node24.21.0 PATH and bash login=false, no install or cache deletion.
+The actual hosted failure is the RED evidence; later local count10 success alone
+cannot certify native Windows correction. Resource/transport/timeout/unknown/scope
+failures checkpoint ROOT without automatic retry. No production clock change,
+passing test replay, hosted rerun or merge authority.
+
+### Native timestamp local results; hosted delivery pending
+
+The exact released count10 command passed, original75293 joinedaade8a/0,
+group2382648 absent. Start05:00:37.288070Z/cutoff05:03:37.288070Z,
+end05:02:07.723436Z: wall90.435s, package1.577s. ONE full CHANGED lint
+then passed zero issues, original52635 joined1377ed/0/group2389256 absent,
+start05:02:18.020205Z/cutoff05:08:18.020205Z/end05:03:57.151314Z,
+wall99.131s. All existing strict/payload/field/event assertions are retained;
+no production change or passing-control replay. Original earlier lint124 remains failed.
+
+Before publication, ROOT-authorized ownership checks verified original57475's
+exact argv, parent and private wrapper. TERM05:05:01.386936Z stopped only its
+owned group. Original57475 actually joined26aa11; collector exit143/no verdict,
+wrapper exit1 because its summary parser encountered the empty interrupted report
+AFTER saving the truthful terminal receipt. Raw reports/progress are preserved;
+fresh PID/group/wrapper check is empty. Last snapshot35PASS/1FAIL/25PENDING is
+historical. Old process job113152567188 was still running when read; no complete
+cohort report was available, and no hosted job was cancelled or awaited for this fixup.
+
+Local implementation is done. Catalog363/1437, all-spec lint, actual18-path coverage
+(covered/errors[]) and diff whitespace passed, original7210 joined415baa/0,
+group2401993 absent, wall1.277s. Unchanged specification/public validator self-tests
+and product controls were not replayed. Normal active-hook publication follows.
+New-head native fixture RUNPASS,
+complete process/probe inventory/two25m cohort joins/coverage, required six contexts,
+three successful parents and substantive full actual-file review remain hosted gates.
+The published-head review is historical after this fixup; no merge-ready claim yet.
