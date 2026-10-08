@@ -30,11 +30,11 @@ test.describe("historical turn changed files", () => {
       await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(1);
 
       await session.sendMessage("/e2e:untracked-file-modify");
+      await waitForTurnChangeCount(apiClient, sessionId, 2);
       await expect(
         session.chat.getByText("untracked-file-modify complete", { exact: false }),
       ).toBeVisible();
       await session.waitForChatIdle();
-      await waitForTurnChangeCount(apiClient, sessionId, 2);
 
       const git = new GitHelper(seedData.repositoryPath, makeGitEnv(backend.tmpDir));
       git.stageFile("untracked_test.txt");
@@ -55,6 +55,9 @@ test.describe("historical turn changed files", () => {
 
       const firstCard = session.activeChat().getByTestId("turn-changed-files-card").first();
       await expect(firstCard).toContainText("1 changed file");
+      await expect(firstCard.getByRole("button", { name: /Expand all|Collapse all/ })).toHaveCount(
+        0,
+      );
       if (prCapture.capturing) {
         await firstCard.scrollIntoViewIfNeeded();
         await waitForFiniteAnimations(firstCard);
@@ -88,4 +91,45 @@ test.describe("historical turn changed files", () => {
       await restorePreference();
     }
   });
+});
+
+test("recovers a failed file list instead of claiming no files", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const { resetTurnQaFile } = await import("./turn-changed-files-qa-helpers");
+  resetTurnQaFile(seedData.repositoryPath);
+  const { sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
+  await waitForTurnChangeCount(apiClient, sessionId, 1);
+  await testPage.route("**/turn-changes/*/repositories/*/files?*", (route) =>
+    route.fulfill({ status: 503, json: { error: "QA transient failure" } }),
+  );
+  await testPage.reload();
+  const card = testPage.getByTestId("turn-changed-files-card");
+  await expect(card.getByRole("alert")).toBeVisible();
+  await card.getByRole("button", { name: "Open diff", exact: true }).click();
+  const viewer = testPage.getByTestId("historical-turn-diff");
+  await expect(viewer.getByRole("alert")).toBeVisible();
+  await testPage.unroute("**/turn-changes/*/repositories/*/files?*");
+  await viewer.getByRole("button", { name: "Retry", exact: true }).click();
+  await waitForDiffText(testPage, "INITIAL_CONTENT");
+});
+
+test("discloses renamed paths and sizes narrow fine-pointer actions", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const { routeRenamedTurnFile, assertCardTouchTargets, assertTurnFileDisclosure } =
+    await import("./turn-changed-files-qa-helpers");
+  await testPage.setViewportSize({ width: 390, height: 844 });
+  await routeRenamedTurnFile(testPage);
+  const { resetTurnQaFile } = await import("./turn-changed-files-qa-helpers");
+  resetTurnQaFile(seedData.repositoryPath);
+  const { sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
+  await waitForTurnChangeCount(apiClient, sessionId, 1);
+  await assertCardTouchTargets(testPage);
+  await assertTurnFileDisclosure(testPage);
+  await testPage.screenshot({ path: test.info().outputPath("renamed-path-narrow.png") });
 });

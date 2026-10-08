@@ -95,8 +95,8 @@ function FolderRows({
     <div>
       <button
         type="button"
-        className="flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-11"
-        style={{ paddingInlineStart: `${12 + depth * 16}px` }}
+        className="flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+        style={{ paddingInlineStart: `${12 + Math.min(depth, 3) * 16}px` }}
         aria-expanded={isExpanded}
         onClick={() => onToggle(`${repositoryChangeId}:${folder.path}`)}
         aria-label={t("task:turnChangesFolderAccessibleLabel", {
@@ -175,8 +175,8 @@ function FileRow({
   return (
     <button
       type="button"
-      className="flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-11"
-      style={{ paddingInlineStart: `${12 + depth * 16}px` }}
+      className="flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+      style={{ paddingInlineStart: `${12 + Math.min(depth, 3) * 16}px` }}
       onClick={onOpen}
       aria-label={t("task:turnChangesFileAccessibleLabel", {
         path: file.path,
@@ -191,13 +191,15 @@ function FileRow({
       data-turn-file-change-id={file.id}
     >
       <IconFile className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate">{file.path.split("/").at(-1) || file.path}</span>
+      <span className="min-w-0 flex-1 py-1">
+        <span className="block truncate">{file.path.split("/").at(-1) || file.path}</span>
+        {file.old_path && (
+          <span className="block truncate text-muted-foreground">
+            {t("task:turnChangesRenamedFrom")} {file.old_path}
+          </span>
+        )}
+      </span>
       <span className="shrink-0 text-muted-foreground">{kindLabel(file, t)}</span>
-      {file.old_path && (
-        <span className="hidden truncate text-muted-foreground sm:inline">
-          {t("task:turnChangesRenamedFrom")} {file.old_path}
-        </span>
-      )}
       <span className="shrink-0 text-muted-foreground">{statusLabel(file, t)}</span>
       {file.old_mode && file.new_mode && file.old_mode !== file.new_mode && (
         <span className="sr-only">
@@ -214,7 +216,7 @@ export const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
   onOpenDiff,
 }: TurnChangedFilesCardProps) {
   const { t } = useTranslation();
-  const { filesByRepository, fileTotalsByRepository, loading, error, hasMore, loadMore } =
+  const { filesByRepository, fileTotalsByRepository, loading, error, hasMore, loadMore, retry } =
     useTurnChangeFiles(sessionId, summary);
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set((summary.repositories ?? []).map((repository) => repository.id)),
@@ -273,6 +275,7 @@ export const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
         summary={summary}
         allExpanded={allExpanded}
         hasRows={hasRows}
+        hasFolders={tree.some((repository) => repository.folders.length > 0) || tree.length > 1}
         isExpired={isExpired}
         isPending={isPending}
         isUnavailable={isUnavailable}
@@ -287,6 +290,7 @@ export const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
         hasRows={hasRows}
         hasError={Boolean(error)}
       />
+      {Boolean(error) && <RetryFilesButton onClick={() => void retry()} />}
       <RepositoryRows
         sessionId={sessionId}
         summary={summary}
@@ -311,6 +315,7 @@ function TurnChangesCardHeader({
   summary,
   allExpanded,
   hasRows,
+  hasFolders,
   isExpired,
   isPending,
   isUnavailable,
@@ -320,6 +325,7 @@ function TurnChangesCardHeader({
   summary: TurnChangeSetSummary;
   allExpanded: boolean;
   hasRows: boolean;
+  hasFolders: boolean;
   isExpired: boolean;
   isPending: boolean;
   isUnavailable: boolean;
@@ -335,21 +341,23 @@ function TurnChangesCardHeader({
         isExpired={isExpired}
       />
       <div className="flex shrink-0 gap-1.5">
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-7 min-h-7 cursor-pointer px-2 text-xs [@media(pointer:coarse)]:min-h-11"
-          onClick={onToggleAll}
-          disabled={!hasRows}
-        >
-          {allExpanded ? t("task:turnChangesCollapseAll") : t("task:turnChangesExpandAll")}
-        </Button>
+        {hasFolders && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 min-h-7 cursor-pointer px-2 text-xs max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+            onClick={onToggleAll}
+            disabled={!hasRows}
+          >
+            {allExpanded ? t("task:turnChangesCollapseAll") : t("task:turnChangesExpandAll")}
+          </Button>
+        )}
         <Button
           type="button"
           size="sm"
           variant="secondary"
-          className="h-7 min-h-7 cursor-pointer px-2 text-xs [@media(pointer:coarse)]:min-h-11"
+          className="h-7 min-h-7 cursor-pointer px-2 text-xs max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           onClick={onOpenDiff}
           disabled={isExpired || isPending || isUnavailable || summary.file_count === 0}
           data-turn-change-open-diff
@@ -501,7 +509,7 @@ function RepositoryRows({
       <div key={repository.id} className="border-b border-border/40 last:border-b-0">
         <button
           type="button"
-          className="flex min-h-7 w-full cursor-pointer items-center gap-2 px-3 text-left text-xs font-medium hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-11"
+          className="flex min-h-7 w-full cursor-pointer items-center gap-2 px-3 text-left text-xs font-medium hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           aria-expanded={isExpanded}
           onClick={() => onToggle(repository.id)}
         >
@@ -560,11 +568,27 @@ function LoadMoreButton({ loading, onClick }: { loading: boolean; onClick: () =>
         type="button"
         size="sm"
         variant="ghost"
-        className="h-7 min-h-7 cursor-pointer px-2 text-xs [@media(pointer:coarse)]:min-h-11"
+        className="h-7 min-h-7 cursor-pointer px-2 text-xs max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
         disabled={loading}
         onClick={onClick}
       >
         {loading ? t("task:turnChangesLoading") : t("task:turnChangesLoadMore")}
+      </Button>
+    </div>
+  );
+}
+
+function RetryFilesButton({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="px-3 pb-2">
+      <Button
+        size="sm"
+        variant="ghost"
+        className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+        onClick={onClick}
+      >
+        {t("task:turnChangesRetry")}
       </Button>
     </div>
   );

@@ -147,10 +147,21 @@ it("disambiguates identical file paths by actual checkout in the selector label"
       content_complete: true,
     },
   ];
-  expect(turnChangeRepositoryOptionName(repositories, "repo-a", checkoutA)).toBe(
-    "app (checkout-a)",
-  );
-  expect(turnChangeRepositoryOptionName(repositories, "repo-b", checkoutB)).toBe(
-    "app (checkout-b)",
+  expect(turnChangeRepositoryOptionName(repositories, "repo-a", checkoutA)).toBe("app (1)");
+  expect(turnChangeRepositoryOptionName(repositories, "repo-b", checkoutB)).toBe("app (2)");
+});
+
+it("omits internal checkout IDs when a repository name is unambiguous", () => {
+  const repository = {
+    id: "repo",
+    checkout_id: "12345678-abcd-0000-0000-123456789abc",
+    display_name: "app",
+    availability: readyAvailability,
+    enumeration_complete: true,
+    comparison_complete: true,
+    content_complete: true,
+  };
+  expect(turnChangeRepositoryOptionName([repository], repository.id, repository.checkout_id)).toBe(
+    "app",
   );
 });

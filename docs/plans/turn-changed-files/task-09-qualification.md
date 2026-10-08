@@ -140,3 +140,9 @@ The next exact-head PR run completed with four failed browser cases across six f
 ### PR CI result for the endpoint-capture fix
 
 The updated code head `26d41fd33a68f3b6c3026c468e58286516fd0a53` completed PR CI with 61 checks passed, 11 skipped, and no failures or pending checks. The PR was mergeable and clean with no unresolved review threads. This verifies the prior targeted browser failures at that code head. The qualification gaps listed in this work order remain open; no cross-executor or performance acceptance is claimed.
+
+### UX and reliability QA (2026-10-08)
+
+The [QA findings](qa-findings.md) record eleven corrected issues, reference comparison, visual evidence, and local measurements. Six focused frontend test files passed (36 tests), as did desktop/mobile browser scenarios, typecheck, localization, and changed-file lint. Backend checkpoint/coordinator/SQLite race tests and seven PostgreSQL 16 tests passed without skips. The full checkpoint group also passed on Git 2.39.5. This closes the previously disclosed focused PostgreSQL execution gap.
+
+Warm local API and UI measurements, tiny-file retention reuse, and ten-observation 100-file/20,000-file checkpoint benchmarks are recorded in the QA report. These do not close remote executor, cold/slow storage, large retention-growth, or full end-to-end timing qualification. This work order remains `in_progress`.

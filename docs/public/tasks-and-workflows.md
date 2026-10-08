@@ -526,6 +526,8 @@ By default, this preference is on. To change it, open **Settings > General**. Un
 
 Each card uses retained data for that turn. Later edits, commits, or branch changes do not rewrite it. Select **Open diff** to review the full turn. Select a file row to open its historical diff. On a phone, the diff opens in a full-height drawer.
 
+The diff shows the selected file’s full path and its previous path after a rename. If a file list fails to load, select **Retry**.
+
 Some captures are partial or unavailable. The card labels that state and gives the reason when available. Retained content can expire. Kandev then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
 
 By default, a running session keeps the coarse **Generating** state and queues

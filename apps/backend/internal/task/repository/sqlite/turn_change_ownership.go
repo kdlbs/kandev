@@ -144,6 +144,7 @@ func (r *Repository) AcceptTurnRepositoryEnd(
 		UPDATE turn_repository_changes SET end_commit_oid = ?, end_tree_oid = ?, end_captured_at = ?, end_ref = ?,
 			cleanup_pending = ?, updated_at = ?
 		WHERE id = ? AND change_set_id = ? AND start_commit_oid = ? AND start_tree_oid = ?
+			AND availability <> 'unavailable'
 			AND (end_commit_oid = '' OR (end_commit_oid = ? AND end_tree_oid = ?))
 	`), end.EndCommitOID, end.EndTreeOID, end.EndCapturedAt.UTC(), end.EndReachabilityRef, end.EndReachabilityRef != "", time.Now().UTC(),
 		repositoryChangeID, changeSetID, expectedStartCommitOID, expectedStartTreeOID, end.EndCommitOID, end.EndTreeOID)

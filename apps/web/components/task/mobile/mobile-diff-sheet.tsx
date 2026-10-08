@@ -116,7 +116,7 @@ function SheetHeader({
 }) {
   const { t } = useTranslation();
   return (
-    <DrawerHeader className="flex items-center justify-between py-2 px-4 border-b shrink-0">
+    <DrawerHeader className="flex flex-row items-center justify-between py-2 px-4 border-b shrink-0">
       <DrawerTitle className="text-base flex items-center gap-2">
         <span>{title}</span>
         {showSourceChip && sourceLabel && (
@@ -188,7 +188,7 @@ function renderPanel(props: RenderPanelProps): React.ReactNode {
     );
   }
   if (mode.kind === "historical") {
-    return <HistoricalTurnDiffViewer target={mode.target} onClose={onClose} />;
+    return <HistoricalTurnDiffViewer target={mode.target} onClose={onClose} hideCloseButton />;
   }
   const panelMode = mode.kind;
   const filePath = mode.kind === "file" ? mode.path : undefined;

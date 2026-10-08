@@ -123,11 +123,16 @@ export function summarizeTurnChangeTreeFolder(folder: TurnChangeTreeFolder): {
 export function turnChangeRepositoryOptionName(
   repositories: TurnRepositoryChange[],
   repositoryChangeId: string,
-  checkoutId: string,
+  _checkoutId: string,
 ): string {
   const repository = repositories.find((item) => item.id === repositoryChangeId);
-  const name = repository?.display_name?.trim() || repository?.checkout_id || checkoutId;
-  return `${name} (${repository?.checkout_id || checkoutId})`;
+  const name = repository?.display_name?.trim() || repository?.repository_subpath || "";
+  const peers = repositories.filter(
+    (item) => (item.display_name?.trim() || item.repository_subpath || "") === name,
+  );
+  const ordinal = repositories.findIndex((item) => item.id === repositoryChangeId) + 1;
+  if (!name) return `#${ordinal || 1}`;
+  return peers.length > 1 ? `${name} (${ordinal})` : name;
 }
 
 function flattenFolderFiles(folder: TurnChangeTreeFolder): TurnFileChange[] {

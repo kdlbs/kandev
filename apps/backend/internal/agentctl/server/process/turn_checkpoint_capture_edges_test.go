@@ -47,6 +47,21 @@ func TestTurnCheckpointSupportsSHA256ObjectFormat(t *testing.T) {
 	if checkpoint.HashAlgorithm != "sha256" || len(checkpoint.CommitOID) != 64 || len(checkpoint.TreeOID) != 64 {
 		t.Fatalf("sha256 checkpoint = %+v", checkpoint)
 	}
+	writeFile(t, repoDir, "README.md", "updated sha256 repository\n")
+	_, err = operator.CaptureTurnCheckpoint(context.Background(), turnchanges.CheckpointRequest{
+		ChangeSetID: checkpoint.ChangeSetID, CheckoutID: checkpoint.CheckoutID, Boundary: turnchanges.CheckpointEnd,
+	})
+	if err != nil {
+		t.Fatalf("capture sha256 end: %v", err)
+	}
+	pair := acceptedTurnCheckpointPair(t, operator, checkpoint.ChangeSetID, checkpoint.CheckoutID, "")
+	exported, err := operator.ExportTurnCheckpoint(context.Background(), exportRequestForPair(pair))
+	if err != nil {
+		t.Fatalf("export sha256 interval: %v", err)
+	}
+	if !exported.Complete || len(exported.Files) != 1 || string(exported.Files[0].NewRendering) != "updated sha256 repository\n" {
+		t.Fatalf("sha256 export = %+v", exported)
+	}
 }
 
 func TestTurnCheckpointRejectsUntrustedIdentity(t *testing.T) {

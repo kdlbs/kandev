@@ -39,7 +39,12 @@ func (g *GitOperator) compareTurnCheckpointLocked(
 	if err != nil {
 		return turnchanges.CheckpointComparison{}, err
 	}
-	files, err := g.compareTurnCheckpointTrees(ctx, start.TreeOID, end.TreeOID)
+	view, cleanup, err := g.newTurnCheckpointDiffView(ctx, end.TreeOID, hashAlgorithm)
+	if err != nil {
+		return turnchanges.CheckpointComparison{}, checkpointCompareFailure(err)
+	}
+	defer cleanup()
+	files, err := view.compareTurnCheckpointTrees(ctx, start.TreeOID)
 	if err != nil {
 		return turnchanges.CheckpointComparison{}, err
 	}
@@ -93,14 +98,14 @@ func (g *GitOperator) checkpointResultForAcceptedOID(
 	}, nil
 }
 
-func (g *GitOperator) compareTurnCheckpointTrees(ctx context.Context, startOID, endOID string) ([]turnchanges.CheckpointFile, error) {
-	args := []string{"diff", "--raw", "-z", "--no-abbrev", "-M", "-C", "--find-copies-harder", "--no-ext-diff", "--no-textconv", startOID, endOID}
-	rawOutput, err := g.turnCheckpointOutput(ctx, "", args...)
+func (v *turnCheckpointDiffView) compareTurnCheckpointTrees(ctx context.Context, startOID string) ([]turnchanges.CheckpointFile, error) {
+	args := []string{"diff", "--raw", "-z", "--no-abbrev", "-M", "-C", "--find-copies-harder", "--no-ext-diff", "--no-textconv", "--cached", startOID}
+	rawOutput, err := v.output(ctx, args...)
 	if err != nil {
 		return nil, checkpointCompareFailure(err)
 	}
-	numstatArgs := []string{"diff", "--numstat", "-z", "-M", "-C", "--find-copies-harder", "--no-ext-diff", "--no-textconv", startOID, endOID}
-	numstatOutput, err := g.turnCheckpointOutput(ctx, "", numstatArgs...)
+	numstatArgs := []string{"diff", "--numstat", "-z", "-M", "-C", "--find-copies-harder", "--no-ext-diff", "--no-textconv", "--cached", startOID}
+	numstatOutput, err := v.output(ctx, numstatArgs...)
 	if err != nil {
 		return nil, checkpointCompareFailure(err)
 	}

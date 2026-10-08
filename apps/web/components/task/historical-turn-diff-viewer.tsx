@@ -4,6 +4,7 @@ import { memo, useEffect, useMemo, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { PanelBody, PanelRoot } from "./panel-primitives";
 import {
+  FileSelectionControls,
   HistoricalScopeSelect,
   HistoricalViewerHeader,
 } from "./historical-turn-diff-viewer-controls";
@@ -18,7 +19,6 @@ import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
 import type { TurnChangeSetSummary, TurnFileChange } from "@/lib/types/turn-changes";
 import { readTurnChangeViewState, updateTurnChangeViewState } from "@/lib/turn-changes/view-state";
 import { resolveTurnChangeScope } from "@/lib/turn-changes/history-scope";
-import { turnChangeRepositoryOptionName } from "@/lib/turn-changes/tree";
 import { useTranslation } from "react-i18next";
 
 function statusFromKind(kind: string): string {
@@ -148,9 +148,11 @@ function persistSelectedFile(target: HistoricalTurnDiffTarget, file: TurnFileCha
 export const HistoricalTurnDiffViewer = memo(function HistoricalTurnDiffViewer({
   target,
   onClose,
+  hideCloseButton = false,
 }: {
   target: HistoricalTurnDiffTarget;
   onClose?: () => void;
+  hideCloseButton?: boolean;
 }) {
   const {
     summaries,
@@ -227,7 +229,7 @@ export const HistoricalTurnDiffViewer = memo(function HistoricalTurnDiffViewer({
       scopeValue={scopeValue}
       onScopeSelect={handleScopeSelect}
       summary={summary}
-      onClose={onClose}
+      onClose={hideCloseButton ? undefined : onClose}
       files={selectionOptions}
       selectedFile={selectedFile}
       onFileSelect={handleFileSelect}
@@ -328,64 +330,11 @@ function HistoricalViewerLayout({
   );
 }
 
-function FileSelectionControls({
-  files,
-  repositories,
-  selectedFile,
-  onSelect,
-  whitespace,
-  onWhitespace,
-}: {
-  files: TurnFileChange[];
-  repositories: TurnChangeSetSummary["repositories"];
-  selectedFile: TurnFileChange | null;
-  onSelect: (fileId: string) => void;
-  whitespace: boolean;
-  onWhitespace: (value: boolean) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex shrink-0 flex-col gap-2 border-b px-3 py-2 sm:flex-row sm:items-center">
-      <label className="min-w-0 flex-1">
-        <span className="sr-only">{t("task:turnChangesSelectFile")}</span>
-        <select
-          className="min-h-11 w-full min-w-0 rounded-md border bg-background px-2 text-sm md:min-h-7 [@media(pointer:coarse)]:min-h-11"
-          aria-label={t("task:turnChangesSelectFile")}
-          value={selectedFile?.id ?? ""}
-          onChange={(event) => onSelect(event.target.value)}
-          disabled={files.length === 0}
-        >
-          {files.map((file) => (
-            <option key={file.id} value={file.id}>
-              {t("task:turnChangesFileOptionLabel", {
-                repository: turnChangeRepositoryOptionName(
-                  repositories,
-                  file.repository_change_id,
-                  file.checkout_id,
-                ),
-                path: file.path,
-              })}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="flex min-h-11 items-center gap-2 text-xs md:min-h-7 [@media(pointer:coarse)]:min-h-11">
-        <input
-          type="checkbox"
-          checked={whitespace}
-          onChange={(event) => onWhitespace(event.target.checked)}
-        />
-        {t("task:turnChangesIgnoreWhitespace")}
-      </label>
-    </div>
-  );
-}
-
 type ViewerNotices = {
   key: string;
   text: string;
   role?: "status" | "alert";
-  retry?: "history" | "content";
+  retry?: "history" | "content" | "files";
 }[];
 
 function HistoricalViewerBody({
@@ -420,6 +369,7 @@ function HistoricalViewerBody({
       historyLoading,
       historyError,
       filesLoading: files.loading,
+      filesError: files.error,
       expired,
       unavailable,
     },
@@ -447,6 +397,7 @@ function HistoricalViewerBody({
           key={notice.key}
           notice={notice}
           onRetryHistory={() => void reload()}
+          onRetryFiles={() => void files.retry()}
           onRetryContent={onRetryContent}
         />
       ))}
@@ -466,6 +417,7 @@ function viewerNotices(
     historyLoading: boolean;
     historyError: unknown;
     filesLoading: boolean;
+    filesError: unknown;
     expired: boolean;
     unavailable: boolean;
   },
@@ -488,6 +440,14 @@ function historyNotices(
       text: t("task:turnChangesLoadFailed"),
       role: "alert",
       retry: "history",
+    });
+  }
+  if (state.filesError && !state.expired) {
+    notices.push({
+      key: "files-error",
+      text: t("task:turnChangesLoadFailed"),
+      role: "alert",
+      retry: "files",
     });
   }
   if (state.expired) {
@@ -520,6 +480,7 @@ function contentNotices(
     !state.expired &&
     !state.content.loading &&
     !state.content.error &&
+    !state.filesError &&
     !state.selectedFile
   ) {
     notices.push({
@@ -533,19 +494,28 @@ function contentNotices(
 function ViewerNotice({
   notice,
   onRetryHistory,
+  onRetryFiles,
   onRetryContent,
 }: {
   notice: ViewerNotices[number];
   onRetryHistory: () => void;
+  onRetryFiles: () => void;
   onRetryContent: () => void;
 }) {
   const { t } = useTranslation();
-  const retry = notice.retry === "history" ? onRetryHistory : onRetryContent;
+  const retry = { history: onRetryHistory, files: onRetryFiles, content: onRetryContent }[
+    notice.retry ?? "content"
+  ];
   return (
     <div className="p-4 text-sm text-muted-foreground" role={notice.role}>
       <p>{notice.text}</p>
       {notice.retry && (
-        <Button size="sm" variant="ghost" className="mt-2 cursor-pointer" onClick={retry}>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="mt-2 cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+          onClick={retry}
+        >
           {t("task:turnChangesRetry")}
         </Button>
       )}
@@ -560,7 +530,7 @@ function LoadMoreButton({ loading, onClick }: { loading: boolean; onClick: () =>
       <Button
         size="sm"
         variant="ghost"
-        className="cursor-pointer"
+        className="cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
         onClick={onClick}
         disabled={loading}
       >

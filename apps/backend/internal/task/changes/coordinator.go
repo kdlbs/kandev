@@ -74,6 +74,8 @@ type Coordinator struct {
 }
 
 const turnChangePersistenceTimeout = 3 * time.Second
+const turnChangeAdmissionTimeout = 10 * time.Second
+const turnChangeCleanupTimeout = 5 * time.Second
 
 func turnChangePersistenceContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), turnChangePersistenceTimeout)
@@ -101,6 +103,8 @@ func (c *Coordinator) Admit(ctx context.Context, admission Admission, client Che
 	if !c.configuredForAdmission() {
 		return errors.New("turn change coordinator is not configured")
 	}
+	ctx, cancel := context.WithTimeout(ctx, turnChangeAdmissionTimeout)
+	defer cancel()
 	turn, admission, err := c.prepareTurnChangeAdmission(ctx, admission, client)
 	if err != nil || turn == nil {
 		return err
@@ -131,7 +135,7 @@ func (c *Coordinator) prepareTurnChangeAdmission(
 	if client != nil {
 		// A failed cleanup remains a durable retry intent and is retried when the
 		// task executor reconnects.
-		_ = c.drainSessionCheckpointRefs(admission.TaskID, admission.SessionID, client)
+		_ = c.drainSessionCheckpointRefs(ctx, admission.TaskID, admission.SessionID, client)
 	}
 	turn, err := c.turns.GetTurn(ctx, admission.TurnID)
 	if err != nil {
@@ -419,17 +423,22 @@ func (c *Coordinator) finalizeUnavailable(
 		}
 	}
 	if len(clients) > 0 {
-		_ = c.cleanupRepositoryCheckpointRefs(finalizedRepositories, clients[0])
+		_ = c.cleanupRepositoryCheckpointRefs(ctx, finalizedRepositories, clients[0])
 	}
 	return nil
 }
 
-func (c *Coordinator) cleanupRepositoryCheckpointRefs(rows []models.TurnRepositoryChangeSet, client CheckpointClient) error {
+func (c *Coordinator) cleanupRepositoryCheckpointRefs(ctx context.Context, rows []models.TurnRepositoryChangeSet, client CheckpointClient) error {
 	if client == nil {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(ctx, turnChangeCleanupTimeout)
+	defer cancel()
 	var failures []error
 	for _, row := range rows {
+		if ctx.Err() != nil {
+			return errors.Join(append(failures, ctx.Err())...)
+		}
 		if !row.CleanupPending {
 			continue
 		}
@@ -445,7 +454,7 @@ func (c *Coordinator) cleanupRepositoryCheckpointRefs(rows []models.TurnReposito
 			if endpoint.ref == "" || endpoint.commit == "" {
 				continue
 			}
-			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			cleanupCtx, cleanupCancel := context.WithTimeout(ctx, turnChangeCleanupTimeout)
 			err := client.DeleteTurnCheckpoint(cleanupCtx, turnchanges.CheckpointDeleteRequest{
 				ChangeSetID: row.TurnChangeSetID, CheckoutID: row.CheckoutID, Repo: row.RepositorySubpath,
 				Boundary: endpoint.boundary, CommitOID: endpoint.commit,
@@ -460,7 +469,7 @@ func (c *Coordinator) cleanupRepositoryCheckpointRefs(rows []models.TurnReposito
 		if cleanupFailed {
 			continue
 		}
-		persistCtx, persistCancel := turnChangePersistenceContext()
+		persistCtx, persistCancel := context.WithTimeout(ctx, turnChangePersistenceTimeout)
 		err := c.repository.MarkTurnRepositoryCheckpointRefsCleaned(persistCtx, row.ID)
 		persistCancel()
 		if err != nil {
@@ -470,37 +479,32 @@ func (c *Coordinator) cleanupRepositoryCheckpointRefs(rows []models.TurnReposito
 	return errors.Join(failures...)
 }
 
-func (c *Coordinator) drainSessionCheckpointRefs(taskID, sessionID string, client CheckpointClient) error {
+func (c *Coordinator) drainSessionCheckpointRefs(ctx context.Context, taskID, sessionID string, client CheckpointClient) error {
 	if client == nil {
 		return nil
 	}
+	ctx, cleanupCancel := context.WithTimeout(ctx, turnChangeCleanupTimeout)
+	defer cleanupCancel()
 	var failures []error
 	for offset := 0; ; {
-		ctx, cancel := turnChangePersistenceContext()
-		sets, total, err := c.repository.ListTurnChangeSets(ctx, taskID, sessionID, offset, 100)
+		if ctx.Err() != nil {
+			return errors.Join(append(failures, ctx.Err())...)
+		}
+		readCtx, cancel := context.WithTimeout(ctx, turnChangePersistenceTimeout)
+		sets, total, err := c.repository.ListTurnChangeSets(readCtx, taskID, sessionID, offset, 100)
 		cancel()
 		if err != nil {
 			return errors.Join(append(failures, fmt.Errorf("list checkpoint cleanup intents: %w", err))...)
 		}
 		for _, set := range sets {
+			if ctx.Err() != nil {
+				return errors.Join(append(failures, ctx.Err())...)
+			}
 			if set == nil || set.TerminalAt == nil {
 				continue
 			}
-			ctx, cancel := turnChangePersistenceContext()
-			rows, listErr := c.repository.ListTurnRepositoryChanges(ctx, set.ID)
-			cancel()
-			if listErr != nil {
-				failures = append(failures, listErr)
-				continue
-			}
-			var values []models.TurnRepositoryChangeSet
-			for _, row := range rows {
-				if row != nil {
-					values = append(values, *row)
-				}
-			}
-			if cleanupErr := c.cleanupRepositoryCheckpointRefs(values, client); cleanupErr != nil {
-				failures = append(failures, cleanupErr)
+			if err := c.drainTurnChangeSetCheckpointRefs(ctx, set.ID, client); err != nil {
+				failures = append(failures, err)
 			}
 		}
 		offset += len(sets)
@@ -735,29 +739,34 @@ func sameTurnChangeCheckoutsWithScopes(rows []*models.TurnRepositoryChangeSet, c
 	if len(rows) != len(checkouts) {
 		return false
 	}
-	scopeSet := make(map[string]struct{}, len(scopes))
-	for _, scope := range scopes {
-		scopeSet[scope] = struct{}{}
-	}
-	checkoutByID := make(map[string]Checkout, len(checkouts))
-	for _, checkout := range checkouts {
-		checkoutByID[checkout.ID] = checkout
-	}
 	for _, row := range rows {
-		if row == nil {
-			return false
-		}
-		checkout, exists := checkoutByID[row.CheckoutID]
-		if !exists || row.TaskEnvironmentRepoID != checkout.EnvironmentRepoID || row.TaskRepositoryID != checkout.TaskRepositoryID ||
-			row.RepositoryID != checkout.RepositoryID || row.WorktreeID != checkout.WorktreeID {
-			return false
-		}
-		scope, ok := checkoutScope(checkout, len(checkouts), scopeSet)
-		if !ok || scope != row.RepositorySubpath {
+		if !sameTurnChangeCheckoutWithScopes(row, checkouts, scopes) {
 			return false
 		}
 	}
 	return true
+}
+
+func sameTurnChangeCheckoutWithScopes(row *models.TurnRepositoryChangeSet, checkouts []Checkout, scopes []string) bool {
+	if row == nil {
+		return false
+	}
+	scopeSet := make(map[string]struct{}, len(scopes))
+	for _, scope := range scopes {
+		scopeSet[scope] = struct{}{}
+	}
+	for _, checkout := range checkouts {
+		if checkout.ID != row.CheckoutID {
+			continue
+		}
+		if row.TaskEnvironmentRepoID != checkout.EnvironmentRepoID || row.TaskRepositoryID != checkout.TaskRepositoryID ||
+			row.RepositoryID != checkout.RepositoryID || row.WorktreeID != checkout.WorktreeID {
+			return false
+		}
+		scope, ok := checkoutScope(checkout, len(checkouts), scopeSet)
+		return ok && scope == row.RepositorySubpath
+	}
+	return false
 }
 
 func (c *Coordinator) repositoryStartRow(changeSetID string, checkout Checkout) models.TurnRepositoryChangeSet {

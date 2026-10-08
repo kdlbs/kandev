@@ -62,16 +62,26 @@ func (c *Coordinator) captureAndAcceptTerminalRepositoryEndpoints(
 	rows []*models.TurnRepositoryChangeSet,
 	client CheckpointClient,
 ) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	scopes, scopeErr := client.TurnCheckpointRepositoryScopes(ctx)
 	for _, stored := range rows {
 		row := *stored
-		if row.Availability != models.TurnChangeAvailabilityPending || row.StartTreeOID == "" {
-			return c.finalizeUnavailable(context.Background(), changeSet, terminal, models.TurnChangeReasonCheckoutUnavailable, client)
-		}
-		if row.EndCommitOID != "" && row.EndTreeOID != "" {
+		if row.Availability != models.TurnChangeAvailabilityPending || row.StartTreeOID == "" ||
+			(row.EndCommitOID != "" && row.EndTreeOID != "") {
 			continue
 		}
-		if _, captureErr := c.captureAndAcceptTurnRepositoryEnd(ctx, changeSet, row, client); captureErr != nil {
-			return c.finalizeUnavailable(context.Background(), changeSet, terminal, checkpointReason(captureErr, models.TurnChangeReasonCaptureFailed), client)
+		reason := models.TurnChangeReasonCheckoutUnavailable
+		if scopeErr == nil && sameTurnChangeCheckoutWithScopes(&row, terminal.Checkouts, scopes) {
+			if _, captureErr := c.captureAndAcceptTurnRepositoryEnd(ctx, changeSet, row, client); captureErr == nil {
+				continue
+			} else {
+				reason = checkpointReason(captureErr, models.TurnChangeReasonCaptureFailed)
+			}
+		}
+		if err := c.settleUnavailableTurnRepositoryEnd(changeSet.ID, row, reason); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -97,7 +107,11 @@ func (c *Coordinator) ProcessTerminal(ctx context.Context, terminal Terminal, cl
 	progress := newTerminalProgress(changeSet, terminal, len(rows))
 	for _, stored := range rows {
 		if stored.EndCommitOID == "" || stored.EndTreeOID == "" {
-			row := unavailableTurnRepository(*stored, models.TurnChangeReasonCaptureFailed)
+			reason := stored.Reason
+			if reason == "" {
+				reason = models.TurnChangeReasonCaptureFailed
+			}
+			row := unavailableTurnRepository(*stored, reason)
 			progress.add(row, nil, 0)
 			continue
 		}
@@ -108,7 +122,7 @@ func (c *Coordinator) ProcessTerminal(ctx context.Context, terminal Terminal, cl
 	if err := c.persistTerminalFinalization(changeSet, terminal, finalization, client); err != nil {
 		return err
 	}
-	_ = c.cleanupRepositoryCheckpointRefs(finalization.Repositories, client)
+	_ = c.cleanupRepositoryCheckpointRefs(ctx, finalization.Repositories, client)
 	return nil
 }
 
@@ -252,10 +266,6 @@ func (c *Coordinator) loadTerminalRepositoryRows(
 			zap.String("change_set_id", changeSet.ID), zap.Error(overlapErr))
 	}
 	if client == nil {
-		return nil, c.finalizeUnavailable(context.Background(), changeSet, terminal, models.TurnChangeReasonCheckoutUnavailable, client)
-	}
-	scopes, scopeErr := client.TurnCheckpointRepositoryScopes(ctx)
-	if scopeErr != nil || !sameTurnChangeCheckoutsWithScopes(rows, terminal.Checkouts, scopes) {
 		return nil, c.finalizeUnavailable(context.Background(), changeSet, terminal, models.TurnChangeReasonCheckoutUnavailable, client)
 	}
 	return rows, nil

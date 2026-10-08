@@ -22,6 +22,7 @@ type TurnChangesRepository interface {
 	AdvanceTurnChangeSetPromptGeneration(ctx context.Context, changeSetID, executionID, startupAttemptID, taskEnvironmentID string, expectedRevision, generation int64) (bool, error)
 	ClaimTurnChangeSetTerminal(ctx context.Context, changeSetID string, expectedRevision int64, claim models.TurnChangeSetTerminalClaim) (bool, error)
 	AcceptTurnRepositoryEnd(ctx context.Context, changeSetID, repositoryChangeID string, expectedStartCommitOID, expectedStartTreeOID string, end models.TurnRepositoryChangeSet) (bool, error)
+	SetTurnRepositoryEndUnavailable(ctx context.Context, changeSetID, repositoryChangeID, startCommitOID, startTreeOID string, reason models.TurnChangeReason) (bool, error)
 	MarkTurnRepositoryCheckpointRefsCleaned(ctx context.Context, repositoryChangeID string) error
 	UpdateTurnChangeSetOverlaps(ctx context.Context, changeSetID string, overlaps []models.TurnChangeOverlap) error
 	FinalizeTurnChangeSet(ctx context.Context, changeSetID string, expectedRevision int64, finalization models.TurnChangeSetFinalization) (bool, error)

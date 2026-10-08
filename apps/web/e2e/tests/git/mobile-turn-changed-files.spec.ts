@@ -27,11 +27,11 @@ test.describe("mobile historical turn changed files", () => {
       await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(1);
 
       await session.sendMessageViaButton("/e2e:untracked-file-modify");
+      await waitForTurnChangeCount(apiClient, sessionId, 2);
       await expect(
         session.chat.getByText("untracked-file-modify complete", { exact: false }),
       ).toBeVisible();
       await session.waitForChatIdle();
-      await waitForTurnChangeCount(apiClient, sessionId, 2);
       await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(2);
       if (prCapture.capturing) {
         const firstCard = session.activeChat().getByTestId("turn-changed-files-card").first();
@@ -83,4 +83,21 @@ test.describe("mobile historical turn changed files", () => {
       await restorePreference();
     }
   });
+});
+
+test("keeps renamed file paths readable in the phone diff", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const { routeRenamedTurnFile, assertCardTouchTargets, assertTurnFileDisclosure } =
+    await import("./turn-changed-files-qa-helpers");
+  await routeRenamedTurnFile(testPage);
+  const { resetTurnQaFile } = await import("./turn-changed-files-qa-helpers");
+  resetTurnQaFile(seedData.repositoryPath);
+  const { sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
+  await waitForTurnChangeCount(apiClient, sessionId, 1);
+  await assertCardTouchTargets(testPage);
+  await assertTurnFileDisclosure(testPage, true);
+  await testPage.screenshot({ path: test.info().outputPath("renamed-path-phone.png") });
 });

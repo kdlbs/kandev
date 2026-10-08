@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/common/turnchanges"
@@ -39,7 +40,12 @@ func (g *GitOperator) exportTurnCheckpointLocked(ctx context.Context, request tu
 	if err != nil {
 		return turnchanges.CheckpointExport{}, err
 	}
-	files, err := g.compareTurnCheckpointTrees(ctx, start.TreeOID, end.TreeOID)
+	view, cleanup, err := g.newTurnCheckpointDiffView(ctx, end.TreeOID, hashAlgorithm)
+	if err != nil {
+		return turnchanges.CheckpointExport{}, checkpointCompareFailure(err)
+	}
+	defer cleanup()
+	files, err := view.compareTurnCheckpointTrees(ctx, start.TreeOID)
 	if err != nil {
 		return turnchanges.CheckpointExport{}, err
 	}
@@ -50,7 +56,7 @@ func (g *GitOperator) exportTurnCheckpointLocked(ctx context.Context, request tu
 		Files: make([]turnchanges.CheckpointExportFile, 0, len(files)), Complete: true,
 	}
 	for _, file := range files {
-		item, itemBytes, complete := g.exportTurnCheckpointFile(ctx, start.TreeOID, end.TreeOID, file, turnCheckpointExportLimit-export.ExportBytes)
+		item, itemBytes, complete := g.exportTurnCheckpointFile(ctx, view, start.TreeOID, file, turnCheckpointExportLimit-export.ExportBytes)
 		if !complete {
 			markTurnCheckpointExportIncomplete(&export, item.Reason)
 		}
@@ -62,7 +68,8 @@ func (g *GitOperator) exportTurnCheckpointLocked(ctx context.Context, request tu
 
 func (g *GitOperator) exportTurnCheckpointFile(
 	ctx context.Context,
-	startTreeOID, endTreeOID string,
+	view *turnCheckpointDiffView,
+	startTreeOID string,
 	file turnchanges.CheckpointFile,
 	remaining int64,
 ) (turnchanges.CheckpointExportFile, int64, bool) {
@@ -71,12 +78,12 @@ func (g *GitOperator) exportTurnCheckpointFile(
 		markTurnCheckpointExportPartial(&item, turnchanges.ReasonInvalidPathEncoding)
 		return item, 0, false
 	}
-	patch, err := g.turnCheckpointFilePatch(ctx, startTreeOID, endTreeOID, file, false)
+	patch, err := view.turnCheckpointFilePatch(ctx, startTreeOID, file, false)
 	if err != nil || len(patch) > turnCheckpointPatchLimit {
 		return incompleteTurnCheckpointPatch(item, err, len(patch) > turnCheckpointPatchLimit)
 	}
 	item.CanonicalPatch, item.CanonicalBytes = patch, int64(len(patch))
-	filtered, err := g.turnCheckpointFilePatch(ctx, startTreeOID, endTreeOID, file, true)
+	filtered, err := view.turnCheckpointFilePatch(ctx, startTreeOID, file, true)
 	if err != nil || len(filtered) > turnCheckpointPatchLimit {
 		reason := exportFailureReason(err)
 		if err == nil {
@@ -167,21 +174,39 @@ func fitTurnCheckpointExportFile(item *turnchanges.CheckpointExportFile, remaini
 	return used, truncated
 }
 
-func (g *GitOperator) turnCheckpointFilePatch(ctx context.Context, startOID, endOID string, file turnchanges.CheckpointFile, ignoreWhitespace bool) ([]byte, error) {
-	args := []string{"diff", "--binary", "--no-ext-diff", "--no-textconv", "--no-color", "-M", "-C", "--find-copies-harder"}
+func (v *turnCheckpointDiffView) turnCheckpointFilePatch(ctx context.Context, startOID string, file turnchanges.CheckpointFile, ignoreWhitespace bool) ([]byte, error) {
+	args := []string{"diff", "--binary", "--no-ext-diff", "--no-textconv", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "-M", "-C", "--find-copies-harder"}
 	if ignoreWhitespace {
 		args = append(args, "--ignore-all-space")
 	}
-	args = append(args, startOID, endOID, "--")
+	args = append(args, "--cached", startOID, "--")
 	if len(file.OldPathBytes) > 0 {
 		args = append(args, literalGitPathspec(string(file.OldPathBytes)))
 	}
 	args = append(args, literalGitPathspec(string(file.PathBytes)))
-	output, err := g.turnCheckpointOutput(ctx, "", args...)
+	output, err := v.output(ctx, args...)
 	if err != nil {
 		return nil, err
 	}
-	return append(make([]byte, 0, len(output)), output...), nil
+	if len(output) == 0 {
+		return []byte{}, nil
+	}
+	_, sections := splitDiffSections(string(output))
+	for _, section := range sections {
+		if path, ok := turnCheckpointPatchPath(section); ok && path == string(file.PathBytes) {
+			return []byte(section), nil
+		}
+	}
+	return nil, turnCheckpointFailure(turnchanges.ReasonContentUnavailable, errors.New("historical patch does not contain the selected file"))
+}
+
+func turnCheckpointPatchPath(section string) (string, bool) {
+	for _, line := range strings.Split(section, "\n") {
+		if path, ok := diffWholeLinePath("copy to ", line); ok {
+			return path, true
+		}
+	}
+	return diffSectionPath(section)
 }
 
 func (g *GitOperator) turnCheckpointBlob(ctx context.Context, oid string) ([]byte, error) {
