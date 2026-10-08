@@ -27,6 +27,7 @@ The task carries the outcome through the workflow. The repository and session pr
 **Create and start tasks**
 
 - [Prepare a workspace](#prepare-a-workspace)
+- [Clone a workspace](#clone-a-workspace)
 - [Create a task](#create-a-task)
 - [Start a task](#start-a-task)
 
@@ -170,6 +171,30 @@ with the built-in Kanban steps, so it can accept tasks immediately.
 The initial database bootstrap can include a **Default Workspace** and a **Development** workflow.
 Later user-created workspaces receive **Kanban** instead; they do not inherit other workflows or
 settings from the default workspace.
+
+## Clone a workspace
+
+Open **Settings → Workspaces** and use the **…** actions menu beside the source
+workspace name, or use the same menu in that workspace's settings header.
+Select **Clone workspace**, enter a name, then select **Clone workspace**.
+Clone copies saved setup; save any settings edits first. The copy opens in its
+settings; your active workspace stays selected. On phones, the form opens in a bottom sheet.
+
+The copy includes general settings, repository configuration and scripts,
+repository sets, workflow definitions, and the GitHub connection plus saved and
+default queries. Synchronized workflows become independent editable copies.
+Local repository paths still point to the same checkout; repository files are
+not duplicated.
+
+Tasks, sessions, history, members, general secrets, repository secret bindings,
+automations, and other integration connections are excluded. Configure those
+separately. A copied GitHub PAT has its own encrypted secret. Named CLI accounts
+and GitHub App installations reuse their existing account or installation;
+personal GitHub sign-ins must be connected again.
+
+Cloning requires workspace management and credential permissions. Office and
+Improve Kandev workspaces cannot be cloned. If the request is interrupted, check
+the workspace list before trying again because the copy may already exist.
 
 ## Create a task
 

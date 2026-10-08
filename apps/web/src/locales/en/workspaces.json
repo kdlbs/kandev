@@ -277,5 +277,18 @@
   "idlePolicyTitle": "Resource saving",
   "idleSuspensionEnabled": "Suspend idle ACP agents",
   "idleTimeoutMinutes": "Idle timeout (minutes)",
-  "idleTimeoutMustBePositive": "Enter a whole number greater than zero."
+  "idleTimeoutMustBePositive": "Enter a whole number greater than zero.",
+  "clone": "Clone",
+  "cloneWorkspace": "Clone workspace",
+  "cloneWorkspaceNamed": "Clone {{name}}",
+  "cloneNameSuggestion": "{{name}} (copy)",
+  "cloneDescription": "Copy settings, repositories, workflows, and GitHub connection and queries from {{name}}. Tasks, sessions, members, repository secrets, and other integrations are excluded. Personal GitHub sign-in stays separate.",
+  "cloningWorkspace": "Cloning workspace...",
+  "cloneSuccess": "Workspace cloned",
+  "cloneUncertain": "The response was interrupted. Check the workspace list before trying again; the copy may already exist.",
+  "cloneForbidden": "You do not have permission to copy this workspace or its GitHub connection.",
+  "cloneSourceMissing": "The source workspace is no longer available.",
+  "cloneConfigurationUnsupported": "This workspace has managed settings, unavailable defaults, or workflow references that cannot be cloned.",
+  "cloneFailed": "Could not clone the workspace. Please try again.",
+  "workspaceActionsNamed": "Actions for {{name}}"
 }

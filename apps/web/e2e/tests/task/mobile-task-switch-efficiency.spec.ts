@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import {
   associateNavigationPR,
   holdAgentListRead,
@@ -133,6 +134,7 @@ test.describe("mobile progressive task navigation", () => {
         .locator("[data-testid='pr-check-group'][data-kind='failed']");
       await expect(failed.getByTestId("pr-check-group-count")).toHaveText("1");
 
+      await waitForFiniteAnimations(session.prStatusChipDrawer());
       await session.prStatusChipDrawerClose().tap();
       await expect(session.prStatusChipDrawer()).toHaveCount(0);
       await apiClient.mockGitHubSeedPRFeedback({

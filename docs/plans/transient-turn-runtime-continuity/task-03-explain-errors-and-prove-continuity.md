@@ -202,3 +202,46 @@ Completed in the primary session. Retained provider failures render as truthful 
   ```
 - Backend build and frontend pseudo-locale QA build passed during implementation.
 - Public documentation validation, documentation catalog/specification checks, the actual-change work-order coverage preflight, and `git diff --check` are recorded in the completed manifest.
+
+## PR 4311 truthful cancellation browser proof
+
+Status: local correction and verification complete. Desktop and phone cancellation tests
+shall acknowledge
+`session.recover` with `cancelled=true`, retain the runtime/native/process/
+connection assertions, and match the exact ACP prompt count to persisted
+`attempts_started + 1`. Initial page hydration can outlast the first five-second
+backoff; cancellation remains valid during later idle backoffs, so the browser
+shall verify actual dispatches instead of assuming zero. Counts remain integral
+and within the existing five-attempt budget; exhaustion still requires five.
+Touch targets, containment, error count, composer availability and execution
+identity assertions remain unchanged. Work order 02 separately covers idle
+cancellation after a failed replay and the stale active-generation guards.
+
+The zero-retry full shard RED result was 243 passed, two skipped and two failed
+in 51.4m. The other failure is a profile-editor locator owned by the workspace
+CI-remediation work order; it is not a runtime-contract change. RED traces and
+contexts are in `/tmp/clone-e2e-aa6b-shard5-local-red`. Three repetitions of the
+focused desktop/phone cancellation and profile-editor cases completed from
+the disposable exact-merge checkout after a fresh managed production build.
+
+Focused managed Playwright GREEN: 9/9 tests passed in 9.8m, three repetitions
+per desktop cancellation/exhaustion, phone cancellation, and profile-editor
+case, with retries disabled after a fresh production build. Log:
+`/tmp/clone-fixup-e2e-local/kandev-run.e2e.AN57mwam.log`. Catalog validation
+(362 decisions, 1438 specifications), full specification lint, and whitespace
+checks passed. Scoped lint and current-base composition passed as recorded below.
+
+Final local checks: scoped Go lint reported zero issues; all three browser
+specs passed ESLint and Prettier. A conflict-free merge with the latest main
+passed 124 clone/routing/editor tests across 12 suites, 24 archived-sidebar
+freshness tests, and web TypeScript. The original 13-suite command supplied
+an incorrect sidebar path and ran only 12 suites; the sidebar suite then ran
+separately at `lib/sidebar/sidebar-archived-update-freshness.test.ts`. Logs:
+`/tmp/kandev-run.vitest.21UlgosQ.log`,
+`/tmp/kandev-run.vitest.p4wCbkEc.log`,
+`/tmp/kandev-run.typecheck.2e9Djqxo.log`.
+Actual changed-file work-order coverage passed with all unchanged referenced
+platform requirement/design inputs loaded. Full catalog/specification and
+whitespace checks passed. The primary session records exact merge/head IDs,
+normal hook receipts and fresh remote CI/review results in the external task
+plan, avoiding a documentation-only push that would invalidate those results.

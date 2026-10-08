@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
+vi.mock("@/hooks/domains/workspace/use-workspace-clone", () => ({
+  canCloneWorkspace: () => false,
+  useWorkspaceClone: () => ({ source: null, name: "", pending: false, error: null }),
+}));
+
 const navigationMock = vi.hoisted(() => ({ push: vi.fn() }));
 
 vi.mock("@/lib/routing/client-router", () => ({

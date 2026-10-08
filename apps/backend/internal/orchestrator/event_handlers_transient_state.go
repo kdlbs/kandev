@@ -218,9 +218,9 @@ func (s *Service) cancelRetainedRuntimeRetry(
 	entry *transientRetryEntry,
 ) bool {
 	entry.mu.Lock()
-	started, acceptedExecution := entry.started, entry.acceptedExecution
+	acceptedExecution := entry.acceptedExecution
 	entry.mu.Unlock()
-	if started == 0 && acceptedExecution == "" {
+	if acceptedExecution == "" {
 		if entry.cancel != nil {
 			entry.cancel()
 		}

@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { watchWs } from "../../helpers/causal-waits";
 import {
   assertCompletedCapacityACPTrace,
   assertRetainedACPTrace,
@@ -221,24 +222,30 @@ test("phone: capacity retry can be cancelled during backoff", async ({
 }) => {
   const fixture = await createRetainedCapacityFixture(backend, apiClient, seedData, "cancel");
   try {
+    const ws = watchWs(testPage);
     const session = new SessionPage(testPage);
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
     await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
-    await expect(session.transientRetryCard()).toContainText(/attempt 1 of 5/i);
+    await expect(session.transientRetryCard()).toContainText(/attempt [1-5] of 5/i);
     await expect(session.recoveryCancelRetryButton()).toBeVisible();
     const bounds = await session.recoveryCancelRetryButton().boundingBox();
     expect(bounds?.height).toBeGreaterThanOrEqual(44);
     expect(bounds?.width).toBeGreaterThanOrEqual(44);
     await assertNoDocumentHorizontalOverflow(testPage);
+    const cancelled = ws.waitForResponse("session.recover");
     await session.recoveryCancelRetryButton().tap();
+    expect((await cancelled).payload).toMatchObject({ cancelled: true });
 
     const failure = await waitForRetainedTurnFailure(apiClient, fixture.sessionId, "cancelled");
     assertRetainedFailureMessage(failure);
-    expect(failure.metadata?.attempts_started).toBe(0);
+    const attemptsStarted = failure.metadata?.attempts_started as number;
+    expect(Number.isInteger(attemptsStarted)).toBe(true);
+    expect(attemptsStarted).toBeGreaterThanOrEqual(0);
+    expect(attemptsStarted).toBeLessThanOrEqual(5);
     await expect(session.transientRetryCard()).toBeHidden();
     await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
-    assertRetainedACPTrace(fixture.tracePath, 1);
+    assertRetainedACPTrace(fixture.tracePath, attemptsStarted + 1);
     await assertNoDocumentHorizontalOverflow(testPage);
   } finally {
     await fixture.dispose();

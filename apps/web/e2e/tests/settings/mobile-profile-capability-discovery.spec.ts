@@ -27,6 +27,7 @@ async function expectMobileModelSettings(page: Page, capture: PrAssetCapture) {
 
 async function editRuntimeDraft(page: Page): Promise<string> {
   const selector = page.getByRole("button", { name: "Profile start model settings" });
+  await expect(selector).toHaveText("Mock Fast");
   const selectedBefore = (await selector.textContent()) ?? "";
   await page.getByTestId("env-var-row-0").locator("input").nth(1).fill("mobile-runtime-draft");
   await expect(page.getByTestId("profile-capability-status")).toHaveAttribute(

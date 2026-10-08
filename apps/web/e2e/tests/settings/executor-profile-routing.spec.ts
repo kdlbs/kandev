@@ -92,7 +92,7 @@ test.describe("executor profile routing", () => {
       await expectDockerProfileEditor(testPage, profile.id);
 
       await testPage.goto(`/settings/executor/${encodeURIComponent(executor.id)}`);
-      await testPage.getByText(profile.name, { exact: true }).click();
+      await profileCard.click();
       await expectDockerProfileEditor(testPage, profile.id);
 
       const legacyBookmark =

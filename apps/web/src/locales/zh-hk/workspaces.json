@@ -277,5 +277,18 @@
   "idlePolicyTitle": "節省資源",
   "idleSuspensionEnabled": "掛起空閒 ACP 代理",
   "idleTimeoutMinutes": "空閒超時（分鐘）",
-  "idleTimeoutMustBePositive": "請輸入大於零的整數。"
+  "idleTimeoutMustBePositive": "請輸入大於零的整數。",
+  "clone": "複製",
+  "cloneWorkspace": "複製工作區",
+  "cloneWorkspaceNamed": "複製 {{name}}",
+  "cloneNameSuggestion": "{{name}}（副本）",
+  "cloneDescription": "從 {{name}} 複製設定、儲存庫、工作流程以及 GitHub 連接和查詢。不包含任務、工作階段、成員、儲存庫機密和其他集成。個人 GitHub 登入保持獨立。",
+  "cloningWorkspace": "正在複製工作區...",
+  "cloneSuccess": "工作區已複製",
+  "cloneUncertain": "回應已中斷。重試前請檢查工作區列表，副本可能已經建立。",
+  "cloneForbidden": "你沒有權限複製此工作區或其 GitHub 連接。",
+  "cloneSourceMissing": "源工作區已不可用。",
+  "cloneConfigurationUnsupported": "此工作區包含無法複製的受管理設定、不可用的預設設定或工作流程引用。",
+  "cloneFailed": "無法複製工作區，請重試。",
+  "workspaceActionsNamed": "{{name}}的操作"
 }

@@ -277,5 +277,18 @@
   "idlePolicyTitle": "节省资源",
   "idleSuspensionEnabled": "挂起空闲 ACP 代理",
   "idleTimeoutMinutes": "空闲超时（分钟）",
-  "idleTimeoutMustBePositive": "请输入大于零的整数。"
+  "idleTimeoutMustBePositive": "请输入大于零的整数。",
+  "clone": "克隆",
+  "cloneWorkspace": "克隆工作区",
+  "cloneWorkspaceNamed": "克隆 {{name}}",
+  "cloneNameSuggestion": "{{name}}（副本）",
+  "cloneDescription": "从 {{name}} 复制设置、仓库、工作流以及 GitHub 连接和查询。不包含任务、会话、成员、仓库机密和其他集成。个人 GitHub 登录保持独立。",
+  "cloningWorkspace": "正在克隆工作区...",
+  "cloneSuccess": "工作区已克隆",
+  "cloneUncertain": "响应已中断。重试前请检查工作区列表，副本可能已经创建。",
+  "cloneForbidden": "你没有权限复制此工作区或其 GitHub 连接。",
+  "cloneSourceMissing": "源工作区已不可用。",
+  "cloneConfigurationUnsupported": "此工作区包含无法克隆的受管理设置、不可用的默认配置或工作流引用。",
+  "cloneFailed": "无法克隆工作区，请重试。",
+  "workspaceActionsNamed": "{{name}}的操作"
 }

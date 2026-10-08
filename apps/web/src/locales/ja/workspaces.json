@@ -277,5 +277,18 @@
   "idlePolicyTitle": "リソースを節約",
   "idleSuspensionEnabled": "アイドル状態の ACP エージェントを一時停止",
   "idleTimeoutMinutes": "アイドルタイムアウト（分）",
-  "idleTimeoutMustBePositive": "0 より大きい整数を入力してください。"
+  "idleTimeoutMustBePositive": "0 より大きい整数を入力してください。",
+  "clone": "複製",
+  "cloneWorkspace": "ワークスペースを複製",
+  "cloneWorkspaceNamed": "{{name}} を複製",
+  "cloneNameSuggestion": "{{name}}（コピー）",
+  "cloneDescription": "{{name}} の設定、リポジトリ、ワークフロー、GitHub 接続とクエリをコピーします。タスク、セッション、メンバー、リポジトリのシークレット、その他の連携は含まれません。個人の GitHub サインインは別に管理されます。",
+  "cloningWorkspace": "ワークスペースを複製中...",
+  "cloneSuccess": "ワークスペースを複製しました",
+  "cloneUncertain": "応答が中断されました。コピーが作成済みの可能性があるため、再試行する前にワークスペース一覧を確認してください。",
+  "cloneForbidden": "このワークスペースまたは GitHub 接続をコピーする権限がありません。",
+  "cloneSourceMissing": "コピー元のワークスペースは利用できなくなりました。",
+  "cloneConfigurationUnsupported": "このワークスペースには、複製できない管理対象の設定、利用できない既定の構成、またはワークフローの参照があります。",
+  "cloneFailed": "ワークスペースを複製できませんでした。もう一度お試しください。",
+  "workspaceActionsNamed": "{{name}}の操作"
 }

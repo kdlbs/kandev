@@ -41,6 +41,40 @@ func TestTransientReplayUsesRetainedRuntime(t *testing.T) {
 	require.Equal(t, "execution-1", mgr.capturedPromptCalls[0].ExecutionID)
 }
 
+func TestRetainedRetryCancellationAfterFailedReplayKeepsRuntime(t *testing.T) {
+	svc, messages := newTransientTestService(t)
+	t.Cleanup(svc.cancelAllTransientRetries)
+	mgr := configureRetainedReplayRuntime(t, svc)
+	armTransientPromptEvidence(svc)
+	svc.rememberTurnPrompt("s1", "retry the request", "", false, nil)
+	svc.handleAgentTurnFailed(context.Background(), retainedTurnFailureDataForReplay())
+
+	value, ok := svc.transientRetries.Load("s1")
+	require.True(t, ok)
+	entry := value.(*transientRetryEntry)
+	entry.mu.Lock()
+	entry.started = 1
+	entry.mu.Unlock()
+	require.Empty(t, entry.acceptedExecution)
+
+	require.True(t, svc.CancelTransientRetry(context.Background(), "t1", "s1"))
+	_, active := svc.transientRetries.Load("s1")
+	require.False(t, active)
+	require.Zero(t, mgr.cancelAgentCalls.Load())
+	require.Empty(t, mgr.stopAgentArgs)
+	require.Empty(t, mgr.stopAgentWithReasonArgs)
+	require.True(t, mgr.isAgentRunning)
+	var failures []map[string]interface{}
+	for _, message := range messages.sessionMessages {
+		if message.metadata["runtime_retained"] == true {
+			failures = append(failures, message.metadata)
+		}
+	}
+	require.Len(t, failures, 1)
+	require.Equal(t, "cancelled", failures[0]["recovery_disposition"])
+	require.Equal(t, 1, failures[0]["attempts_started"])
+}
+
 func TestRetainedFailureAcknowledgesAcceptedRetryOwnership(t *testing.T) {
 	svc, _ := newTransientTestService(t)
 	t.Cleanup(svc.cancelAllTransientRetries)

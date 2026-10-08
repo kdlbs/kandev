@@ -277,5 +277,18 @@
   "idlePolicyTitle": "리소스 절약",
   "idleSuspensionEnabled": "쉬는 ACP 에이전트 일시 중지",
   "idleTimeoutMinutes": "유휴 시간 제한(분)",
-  "idleTimeoutMustBePositive": "0보다 큰 정수를 입력하세요."
+  "idleTimeoutMustBePositive": "0보다 큰 정수를 입력하세요.",
+  "clone": "복제",
+  "cloneWorkspace": "워크스페이스 복제",
+  "cloneWorkspaceNamed": "{{name}} 복제",
+  "cloneNameSuggestion": "{{name}} (복사본)",
+  "cloneDescription": "{{name}}의 설정, 저장소, 워크플로, GitHub 연결 및 쿼리를 복사합니다. 작업, 세션, 구성원, 저장소 시크릿 및 다른 통합은 제외됩니다. 개인 GitHub 로그인은 별도로 관리됩니다.",
+  "cloningWorkspace": "워크스페이스 복제 중...",
+  "cloneSuccess": "워크스페이스가 복제되었습니다",
+  "cloneUncertain": "응답이 중단되었습니다. 복사본이 이미 생성되었을 수 있으므로 다시 시도하기 전에 워크스페이스 목록을 확인하세요.",
+  "cloneForbidden": "이 워크스페이스 또는 GitHub 연결을 복사할 권한이 없습니다.",
+  "cloneSourceMissing": "원본 워크스페이스를 더 이상 사용할 수 없습니다.",
+  "cloneConfigurationUnsupported": "이 워크스페이스에 복제할 수 없는 관리 설정, 사용할 수 없는 기본 구성 또는 워크플로 참조가 있습니다.",
+  "cloneFailed": "워크스페이스를 복제할 수 없습니다. 다시 시도하세요.",
+  "workspaceActionsNamed": "{{name}} 작업"
 }

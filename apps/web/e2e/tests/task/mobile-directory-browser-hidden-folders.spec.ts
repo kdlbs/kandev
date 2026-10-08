@@ -97,6 +97,7 @@ test("coarse pointer grows the reveal control and keeps the reveal usable by tou
 
   // The label wraps the switch, so the whole band is the tap target; it must meet
   // the coarse-pointer minimum and must not push the entry list out of reach.
+  await waitForFiniteAnimations(picker);
   await expectControlHeight(control, TOUCH_TARGET_PX, 1);
   await expect(picker.getByTestId("folder-picker-entry").first()).toBeVisible();
 

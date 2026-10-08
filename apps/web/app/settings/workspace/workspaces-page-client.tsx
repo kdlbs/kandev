@@ -28,6 +28,10 @@ import {
 import { orderWorkspacesForDisplay } from "@/lib/settings/workspace-display-order";
 import type { WorkspaceState } from "@/lib/state/slices";
 
+import { useWorkspaceClone } from "@/hooks/domains/workspace/use-workspace-clone";
+import { WorkspaceActionsMenu } from "@/components/settings/workspaces/workspace-actions-menu";
+import { WorkspaceCloneDialog } from "@/components/settings/workspaces/workspace-clone-dialog";
+
 type Workspace = WorkspaceState["items"][number];
 
 type AddWorkspaceFormProps = {
@@ -80,7 +84,13 @@ function AddWorkspaceForm({
   );
 }
 
-function WorkspaceListItem({ workspace }: { workspace: Workspace }) {
+function WorkspaceListItem({
+  workspace,
+  onClone,
+}: {
+  workspace: Workspace;
+  onClone: (workspace: Workspace) => void;
+}) {
   const { t } = useTranslation();
   const activeId = useAppStore((s) => s.workspaces.activeId);
   const isActive = workspace.id === activeId;
@@ -101,21 +111,23 @@ function WorkspaceListItem({ workspace }: { workspace: Workspace }) {
         className="absolute inset-0"
         data-testid="workspace-overview-link"
       />
-      <CardContent className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-6">
-        <div className="flex items-center justify-between gap-3 lg:w-44 lg:shrink-0">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h4 className="truncate text-lg font-semibold">{workspace.name}</h4>
-              {isActive && <ActiveWorkspaceBadge />}
-            </div>
-            <p className="mt-0.5 hidden text-sm text-muted-foreground lg:block">
-              {settled ? t("workspaces:resourceCount", { count: total }) : "\u00a0"}
-            </p>
+      <CardContent className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 lg:grid-cols-[15rem_minmax(0,1fr)_auto] lg:gap-6">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <h4 className="truncate text-lg font-semibold">{workspace.name}</h4>
+            {isActive && <ActiveWorkspaceBadge />}
+            <WorkspaceActionsMenu workspace={workspace} onClone={onClone} />
           </div>
-          <IconChevronRight className="h-5 w-5 shrink-0 text-muted-foreground lg:hidden" />
+          <p className="mt-0.5 hidden text-sm text-muted-foreground lg:block">
+            {settled ? t("workspaces:resourceCount", { count: total }) : "\u00a0"}
+          </p>
         </div>
-        <WorkspaceSectionStats workspaceId={workspace.id} counts={counts} />
-        <IconChevronRight className="hidden h-5 w-5 shrink-0 text-muted-foreground lg:block" />
+        <WorkspaceSectionStats
+          workspaceId={workspace.id}
+          counts={counts}
+          className="col-span-2 row-start-2 min-w-0 lg:col-span-1 lg:col-start-2 lg:row-start-1"
+        />
+        <IconChevronRight className="col-start-2 row-start-1 h-5 w-5 text-muted-foreground lg:col-start-3" />
       </CardContent>
     </Card>
   );
@@ -131,6 +143,7 @@ export function WorkspacesPageClient() {
   const { toast } = useToast();
   const { t } = useTranslation();
   const orderedItems = orderWorkspacesForDisplay(items, activeWorkspaceId);
+  const clone = useWorkspaceClone(t);
 
   const handleAddWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -191,7 +204,7 @@ export function WorkspacesPageClient() {
           )}
 
           {orderedItems.map((workspace: Workspace) => (
-            <WorkspaceListItem key={workspace.id} workspace={workspace} />
+            <WorkspaceListItem key={workspace.id} workspace={workspace} onClone={clone.open} />
           ))}
 
           {orderedItems.length === 0 && (
@@ -205,6 +218,7 @@ export function WorkspacesPageClient() {
           )}
         </div>
       </div>
+      <WorkspaceCloneDialog flow={clone} />
     </div>
   );
 }

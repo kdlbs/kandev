@@ -111,6 +111,12 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 	if err != nil {
 		return nil, nil, err
 	}
+	credentialCopier, _ := repos.Secrets.(secrets.CredentialCopier)
+	taskSvc.SetWorkspaceCloner(&workspaceClonePersistence{
+		writer: dbPool.Writer(), tasks: repos.Task, workflows: repos.Workflow,
+		github: providers.github, secrets: credentialCopier,
+		validateProfile: taskSvc.ValidateWorkspaceCloneProfile,
+	})
 	integrations, err := initIntegrationWiring(
 		ctx, cfg, dbPool, eventBus, repos, storeTracker, taskSvc, workflowSvc, agentSettingsController, providers.github, version, log,
 	)
