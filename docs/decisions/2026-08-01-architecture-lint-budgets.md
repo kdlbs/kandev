@@ -16,6 +16,9 @@ spec is needed.
 
 ## Decision
 
+The per-rule scanner, test, baseline, registry, and entrypoint structure below defines the Python
+architecture-lint engine.
+
 Accepted architecture boundaries may be enforced with deterministic, dependency-free repository
 checks backed by explicit reviewed finding allowlists under `config/architecture-lint/`.
 Existing debt is grandfathered by exact path and import or source-marker identity. New findings
@@ -53,6 +56,14 @@ disappears. New compatibility behavior must register explicitly; broad keyword d
 part of this foundation.
 
 ## Consequences
+
+The scanner-module, Python-test, central-registry, and baseline contract in this ADR describes the
+Python architecture-lint engine. The bounded migrated System Query owner guard uses the existing
+frontend ESLint AST path as a complementary check; it does not change the Python registry,
+baselines, shrink-only comparison, or `make lint-architecture` entry point. Its exact scope and
+limitations are recorded in the proposed
+[frontend ESLint architecture guard decision](2026-10-08-bounded-frontend-eslint-architecture-guard.md)
+and [system design](../specs/architecture-lint/system-design/migrated-system-query-owner.md).
 
 Pull requests cannot silently increase these known forms of architecture debt, while existing
 cleanup can land incrementally. Baseline and ledger edits become visible review decisions, and
