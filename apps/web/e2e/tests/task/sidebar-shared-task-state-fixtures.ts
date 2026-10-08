@@ -1,6 +1,7 @@
 import { expect, type Page, type Locator } from "@playwright/test";
 import type { StoreApi } from "zustand";
 import type { AppState } from "../../../lib/state/store";
+import type { SidebarTaskQuery } from "../../../lib/types/http";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
@@ -170,7 +171,7 @@ export async function exerciseSharedFirstResponse(
   seed: SeedData,
   mobile: boolean,
 ) {
-  await saveViews(api, seed, true);
+  await saveViews(api, seed, false);
   const tasks = [];
   for (const name of ["kept", "deleted", "unarchived"])
     tasks.push(
@@ -189,6 +190,11 @@ export async function exerciseSharedFirstResponse(
     trailing = gate();
   let requests = 0;
   await page.route("**/sidebar/query", async (route) => {
+    const query = route.request().postDataJSON() as SidebarTaskQuery;
+    if (!query.filters.some((filter) => filter.dimension === "archived" && filter.value === true)) {
+      await route.continue();
+      return;
+    }
     requests++;
     if (requests === 1) {
       const response = await route.fetch();
@@ -203,6 +209,9 @@ export async function exerciseSharedFirstResponse(
   try {
     await page.goto(`/t/${anchor.id}`);
     const { rows } = await surface(page, mobile);
+    await waitForCoverage(page, seed.workspaceId);
+    expect(requests).toBe(0);
+    await selectView(page, rows, mobile, ARCHIVES);
     await captured.promise;
     await api.updateTaskTitle(tasks[0].id, "Shared fixture kept live");
     await api.deleteTask(tasks[1].id);
