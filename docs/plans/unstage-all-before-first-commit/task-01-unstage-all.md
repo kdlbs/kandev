@@ -1,26 +1,38 @@
 ---
 id: "01-unstage-all"
-title: "Restore first-commit Unstage all"
+title: "Restore first-commit Unstage all and settle delivery dependencies"
 status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
 requirements:
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
+  - REQ-PLATFORM-CI-PERFORMANCE-003
 acceptance_criteria:
   - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.37
   - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.38
+  - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.31
+  - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.42
+  - AC-PLATFORM-CI-PERFORMANCE-003.4
+  - AC-PLATFORM-CI-PERFORMANCE-003.5
 system_design:
   - ../../specs/platform/system-design/workspace-git-path-details.md
+  - ../../specs/platform/system-design/workspace-git-status.md
+  - ../../specs/platform/system-design/ci-performance.md
 ---
 
-# Task 01: Restore first-commit Unstage all
+# Task 01: Restore first-commit Unstage all and settle delivery dependencies
 
 ## Summary
 
 Make empty-list Unstage work before the first commit using the smallest unconditional
 Git argv correction. Independently authored real operator and registered HTTP regressions
 must establish causal RED, then GREEN with selected-file and committed compatibility.
+
+That initial implementation is complete and published. This SAME order is reopened
+for the design-only delivery amendment below; historical commands/results remain
+evidence and must not be replayed. Only a LATER reviewed ROOT release authorizes
+the amended implementation, local-heavy work or a new published head.
 
 ## In scope
 
@@ -49,57 +61,16 @@ Do not access/replay/copy/alter the protected ROOT proof.
    process handle actually joined; update only causal comments/public reference and
    record evidence. Return the local-heavy lease explicitly before hosted collection.
 
-## Inputs and files likely touched
+## Initial implementation inputs and sequence (completed)
 
-- [Manifest](plan.md), full regression matrix and supplied proof receipts.
-- [Owning requirement](../../specs/platform/requirements/workspace-git-status.md), AC.37/.38.
-- [Owning design](../../specs/platform/system-design/workspace-git-path-details.md), Literal selected paths.
-- `apps/backend/internal/agentctl/server/process/git.go`: Unstage empty branch/comment.
-- `apps/backend/internal/agentctl/server/process/git_unstage_initial_test.go`: new tests.
-- `apps/backend/internal/agentctl/server/api/git_unstage_initial_test.go`: new tests.
-- `apps/backend/internal/agent/runtime/agentctl/git.go`: command comment only.
-- `docs/public/git-operations.md`: Everyday operations Unstage row only.
-- Existing patterns: `process/git_pathspec_test.go`, `api/git_literal_paths_test.go`,
-  `api/git_handlers_test.go`. Reuse real-Git helpers only when they preserve unborn setup.
-- Guidance: backend, agentctl and API AGENTS; TDD backend test reference; fix/spec/plan,
-  docs-maintainer and pure-data mobile exception.
-
-## Dependencies and release barrier
-
-No preceding work orders. ROOT must review the completed design package and later send an
-explicit implementation INTERRUPT to this SAME primary session, with ONE GLOBAL
-LOCAL-HEAVY lease. Design artifacts alone are not release. Mark this order in_progress
-only after that release; no permanent tests, production edits, install, product check
-or commit before it.
-
-## Implementation sequence
-
-1. Read current task-plan version, release message and owned diff. Confirm no original
-   process handle from an earlier phase remains unjoined; record lease.
-2. Add the four planned new test functions in two new files, with sequential subtests.
-   For initial fixtures use real `git init` without committing, Stage through production,
-   edit one added file after staging, snapshot before Unstage and compare afterward.
-   Cover nil/empty all, literal selected name/sibling and invalid empty entry.
-   Assert actual index membership/blob/mode/stage and exact file bytes with distinct
-   sentinels. Capture HEAD/config/ref and environment/permission preservation.
-3. Use actual `Server.Router().ServeHTTP` and manager/operator lookup, not direct handler
-   invocation or mocked success. Exercise root unborn and two independent repositories
-   under a non-repository root. Request selected repo through the registered endpoint,
-   prove selected/all success and untouched other repo. Do not require unrelated
-   unborn tracker enrichment or manufacture browser evidence. Join all fixture owners.
-4. Run the single anchored permanent RED command below and actually join it. Expected
-   Go exit 1 must be confined to unborn/all operator/HTTP assertions; selected and
-   committed controls PASS. Save real command exit separately from wrapper exit.
-   Any other failure checkpoints ROOT; no automatic retry.
-5. Correct the empty argv unconditionally to `{"reset", "--"}`. Preserve explicit
-   selectors, invalid empty entries, environment overrides, lock, runner and refresh.
-   Run the single anchored GREEN command with the existing controls, actually join,
-   then run scoped lint serially. Fix only grounded in-scope failures; checkpoint
-   resource/timeout/transport/unknown failures without retry.
-6. After GREEN, make the minimal public row and comment corrections. Run documentation
-   gates, coverage preflight and diff checks. Record true results and statuses, return
-   lease explicitly, then continue authorized normal publication using the task-plan
-   hosted gates. Do not merge until separate serial ROOT grant.
+The manifest records the original owning AC.37/.38, real operator/registered HTTP
+boundary and nine owned paths. ROOT's first reviewed release granted the original
+lease. Independent initial/committed tests were authored, causal RED joined, only
+empty-list argv corrected, anchored GREEN joined, and grounded API QF1003 corrected
+with affected checks. Documentation gates and one conditional install passed.
+Normal active-hook commit/push/READY publication completed and the lease was returned
+before hosted collection. Exact original commands and receipts follow; this is
+history, not authorization to repeat them. The amended release barrier is below.
 
 ## Verification
 
@@ -133,8 +104,8 @@ Scoped initial lint, serial, exact starting base:
 (cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=1GiB timeout --signal=TERM --kill-after=10s 6m golangci-lint run --concurrency=2 --allow-serial-runners --timeout=5m --new-from-rev=202d48bceb50ff839e1834d928d1677337fda672 ./internal/agentctl/server/process ./internal/agentctl/server/api ./internal/agent/runtime/agentctl)
 ```
 
-Documentation/format gates (only these are authorized in the design turn; public-doc
-checks run after the implementation row correction):
+Original documentation/format gates, retained as historical commands. No command
+in this section is authorized during the amended design-only turn:
 
 ```bash
 python3 scripts/list-docs.py validate
@@ -216,5 +187,198 @@ whitespace check. The install was conditional on missing apps/node_modules and u
 Production changed only empty-list argv and matching comments; public reference changed
 only the Unstage row. No frontend/browser/E2E/PG or broad product checks were run.
 
-Task implementation is done. Normal hooks/publication, explicit lease return and hosted
-merge-ready evidence remain delivery gates tracked in the version-safe task plan.
+Initial Unstage implementation and normal publication are done, with lease returned
+before hosted collection. PR4313 is OPEN/BLOCKED at the frozen published SHA. The
+amended dependency below is pending; no implementation or merge-ready claim applies.
+
+## Amended dependency: reviewed implementation
+
+Design ended 04:05:42. ROOT later reviewed and released this amendment in the SAME
+primary, with ONE GLOBAL LOCAL-HEAVY lease; qualification is
+`/tmp/kandev-root-child77-reviewed-amendment-20261008.json`. Preserve both failed
+attempt logs, exhausted Backend Tests/Backend(windows,process) retry budget and
+all joined originals. The published SHA exception permits only this reviewed
+dependency correction. No install, third retry or merge authority.
+
+### Owned files and acceptance
+
+- `.github/workflows/backend-tests.yml`: process member only; retain job90m,
+  two independent process/native matrix members, native steps and required gate.
+- `.github/scripts/backend-tests-workflow-contract_test.py`: extend its existing
+  registered contract; no new workflow/test registration service.
+- `apps/backend/cmd/windows-process-tests/main.go`, `runner.go`, `runner_test.go`:
+  fixed native enumeration, two selectors, original command starts/joins,
+  separate diagnostics and fail-closed exact terminal coverage. Standard library
+  only; this CI command is invoked from apps/backend in the Windows process member.
+- `apps/backend/internal/agentctl/server/process/workspace_monitor_dirty_paths_test.go`:
+  ONLY `requireMonitorRefresh` context/comment; retain every assertion/caller/case.
+- The manifest, this SAME order and existing CI-performance requirement/design pair.
+  Existing workspace requirement/design, production Unstage and new regressions stay intact.
+
+Acceptance: native package/name inventory and two selectors form an exact disjoint
+union, including process/probe, examples, fuzz seeds and every inherited subtest;
+each command retains race/verbose/JSON/25m and every started original is joined.
+Any command/selection/completion failure blocks the backend aggregate. The monitor
+fixture joins the accepted bounded worker through the cached API, retaining exact
+status/diff/repository/refresh/cache/no-op assertions plus cancellation/deadlock
+controls. The current native suite, job90m and production60s contracts are unchanged.
+
+### One sequential amended implementation sequence
+
+1. Read current version, later reviewed ROOT release and owned diff; mark this SAME
+   order in_progress, record lease and ensure every original observer/read is joined.
+2. Write the workflow contract for the runner placement and unchanged native/gate
+   boundaries. Run its RED against the existing single process command: expected
+   assertion failure only for missing cohort runner/runner-test wiring. Author the
+   focused helper tests and compiling minimal stubs; helper RED must be behavioral
+   enumeration/partition/join/coverage failures, never a compiler failure.
+3. Implement the fixed runner described by the CI design. Native `go test -list`
+   JSON is the inventory authority; require success and package terminal records.
+   Sort unique names, alternate, anchor/escape selectors, verify each package/name
+   matches exactly once. Start both exact native commands before any Wait; a second
+   Start failure still joins the first. Wait failures still join the sibling.
+   Retain and publish both full logs, inventory/selectors, actual PIDs/times/exits;
+   reject missing/duplicate/unselected top-level terminal records. No user-selectable
+   cohort count, source-regex selection, weight maps or automatic retries.
+4. Process-only workflow steps run helper tests (`go test -race -timeout 25m
+   ./cmd/windows-process-tests`), then `go run ./cmd/windows-process-tests` in the
+   existing Test Windows process package step. Keep native member and permissions,
+   action pins, triggers, change detection and required gate unchanged. Existing
+   apps/backend change detection and Linux package selection cover the new command.
+5. In ONLY requireMonitorRefresh, remove the independent 10s context/cancel and
+   pass `tracker.cancelCtxOrBackground()` to GetGitStatusWithDetails(..., false).
+   Its existing job.done/error path and production60s bound justify settlement;
+   no new observation or bypass of unavailable/superseded errors. Retain all cases
+   and assertions. Hosted attempt2 is the actual causal RED for this fixture;
+   do not create a slow ten-second replay just to reproduce it locally.
+6. Run helper GREEN, workflow GREEN and the anchored monitor/lifecycle controls
+   below once, sequentially. Then one full CHANGED lint against exact PR base and
+   existing doc/coverage gates. Grounded in-scope fixture/compiler/lint fixes may
+   run only affected checks. Resource/timeout/transport/unknown/scope failure
+   checkpoints ROOT; no automatic retry or broad local suite.
+7. Record actual outcomes, normal active-hook commit and authorized fixup push;
+   preserve author body/managed regions, canonical association and five false flags.
+   Join all original local handles, fresh-check owned groups and EXPLICITLY RETURN
+   lease before ONE newly authorized collector. Its hosted current-head native list,
+   complete cohort results, six required contexts, three parent workflows and full
+   semantic review are delivery gates. Old FULL9 review proves only the old head;
+   accept sufficient new automatic review, request once only for a real gap.
+   No second hosted retry or merge without a separate specific ROOT grant.
+
+### Exact released checks
+
+Use the existing owned receipt wrapper, bash login=false and explicit Go1.26.0 /
+Node24.21.0 PATH. Retain and ACTUALLY JOIN every original handle with PID/group,
+UTC cutoffs and real exits. At most one heavy command at a time; no install is
+needed because existing apps/node_modules and caches are preserved.
+
+Workflow contract RED then GREEN (same anchored contract class, changes justify GREEN):
+
+```bash
+timeout --signal=TERM --kill-after=10s 60s python3 .github/scripts/backend-tests-workflow-contract_test.py BackendTestsWorkflowContractTest
+```
+
+Helper behavioral RED then GREEN (six planned top-level tests):
+
+```bash
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB timeout --signal=TERM --kill-after=10s 11m go test -trimpath -tags fts5 -race -p=1 -count=1 -timeout=4m -run '^(TestCohortNativeListParsing|TestCohortPartition|TestCohortSelectors|TestCohortJoinAllStartedCommands|TestCohortCoverage|TestCohortRunnerCommand)$' ./cmd/windows-process-tests)
+```
+
+Parser cases: package-qualified Test/Fuzz/Example identities, no-test package,
+duplicate within-package, unknown package, malformed stream, failed enumeration
+and empty inventory. Selection: shuffled inventory deterministic, cross-package
+same name, two nonempty cohorts, full union, no prefix match and complete nested
+selection. Start/Wait contracts: both starts precede waits; second start failure,
+first wait failure and both failures still join every successful start exactly once.
+Coverage: pass/skip are terminal, nested records retain their parent, and missing,
+duplicate, unselected or failed records/package/diagnostic reads never certify success.
+These are CI-helper contract tests, not a substitute for actual hosted Git tests.
+
+Changed monitor fixture and five focused deadline/cancellation/queue/Stop controls:
+
+```bash
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB timeout --signal=TERM --kill-after=10s 11m go test -trimpath -tags fts5 -race -p=1 -count=1 -timeout=4m -run '^(TestMonitorTickDirtyExactPaths|TestWorkspaceTrackerEnrichmentValidationUsesBoundedBackgroundAdmission|TestWorkspaceTrackerStopWaitsForCorrectionObservation|TestWorkspaceTrackerQueuesSameFingerprintCorrectionBeforeFailedAttemptSettles|TestWorkspaceTrackerDetailsWaitCanCancelWithoutCancelingEnrichment|TestWorkspaceTrackerDetailsWaitRejectsSupersededSnapshot)$' ./internal/agentctl/server/process)
+```
+
+Full CHANGED lint ONCE, exact PR-base read must still match the recorded base:
+
+```bash
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=1GiB timeout --signal=TERM --kill-after=10s 6m golangci-lint run ./... --new-from-rev=202d48bceb50ff839e1834d928d1677337fda672 --concurrency=2 --allow-serial-runners --timeout=5m)
+```
+
+After release, use the existing catalog/spec/doc coverage and diff gates above with
+ALL actual owned paths and amended documents. No public row changed, so no replay
+of public-doc tests. No new action/security boundary, so no unrelated workflow
+security audit. Native Windows listing/cohorts run only in authorized current-head
+CI, not a Linux passing replay, synthetic merged test, browser/build/E2E or PG run.
+
+### Amendment design result
+
+Source/lifecycle and both exact failure profiles inspected; see manifest for
+715/717 completed top-level identities and partial cohort timing distribution.
+At design END 04:05:42 all prior collectors/reads were joined; the four documents
+were unstaged/uncommitted and amendment checks had not run. ROOT later reviewed
+that exact package and released implementation. Consult current task-plan version,
+release and retained original handles after crash; results follow.
+
+
+### Released local results / resource checkpoint
+
+ROOT released after DESIGN END 04:05:42. Workflow behavioral RED failed only the
+two absent runner wiring assertions; its other eleven contracts passed. Compiling
+helper RED failed expected inventory, partition, selector, join, coverage and argv
+behavior. GREEN passed all six helper functions, including actual native selector
+subtests and native Start/Wait failure ownership; final affected helper run passed
+2.037s. Workflow GREEN passed all thirteen contracts. The changed monitor fixture
+and five bounded/cancellation/queue/Stop controls passed with race, 6.707s. Original
+Unstage/API controls were not replayed. Production Unstage/new regressions unchanged.
+
+The ONE full CHANGED lint command ran exactly against base202d48 with GOMAX2,
+GOMEM1GiB, concurrency2, serial runners, CLI5m/GNU6m/kill10. Original48453
+ACTUALLY JOINED a319cb, true exit124, group2232641 gone; start04:17:20.607279Z,
+cutoff04:23:20.607279Z, end04:23:20.708161Z, wall360.101s. It emitted zero bytes
+and NO lint verdict. Do not report zero issues or treat this as an assertion failure.
+Documentation gates, commit/push and new hosted collector have NOT RUN.
+
+All original local handles are joined and a fresh audit found every owned group
+absent. Child77 EXPLICITLY RETURNS the global local-heavy lease before checkpoint.
+Evidence: `/tmp/kandev-child77-unstage-20261008/amend-resource-checkpoint.json`,
+`amend-*.{receipt,native}.json`, complete `amend-*.log` streams. HEAD remains frozen
+a5ebc322..., changes uncommitted. No retry/fallback, observer or merge authority.
+NEXT ROOT resource decision; a replacement requires a specific later grant.
+
+ROOT subsequently granted exactly ONE identical warm-cache lint recovery; the original
+124 remains failed/no verdict. Recovery allowance exhausted on this dispatch; retain
+and join its original handle. No further automatic retry or broader validation.
+
+
+### Authorized recovery and owned lint correction
+
+ROOT explicitly granted one IDENTICAL full CHANGED warm-cache recovery after the
+original timeout was joined. Original7359 joined325135 exit1, group2262278 gone,
+04:25:35.178967Z to04:29:51.035982Z (255.857s), cutoff04:31:35.178967Z. It
+returned six concrete findings, all in the new runner: readInventory cyclop18,
+three unchecked file closes, one unchecked fixture write and a repeated action string.
+This is a real failed lint verdict; the original124 remains failed/cause unproved.
+
+Under standing owned-diagnostic authority, extracted listing event acceptance,
+propagated close/write errors and named repeated event constants. Assertions and
+policy unchanged. Only affected helper checks followed: original42054 joined50209d
+exit0/group2278483 gone, six functions/race2.037s; helper-only lint87fca2 completed
+original invocation exit0/group2280002 gone, zero issues/.771s. No third full lint,
+monitor/Unstage/API passing replay, cache deletion or bound change. Exact commands
+are in amend-helper-after-lint.job.json and amend-helper-lint.job.json; all raw
+streams and native/UTC/PID receipts remain in the same owned evidence directory.
+Local code checks now qualify; documentation/coverage gates and normal publication
+remain pending. Global lease remains child77 under ROOT recovery direction.
+
+
+### Local implementation qualified; hosted delivery pending
+
+Catalog validation363/1437, specification-linter tests36 and all-spec lint passed.
+Actual17-path coverage first found the manifest missing its already-owned main
+workspace-status design. Added only that frontmatter reference; only affected
+coverage/diff checks followed, b9dd20 originalcall/exit0/group2285516 gone,
+covered/errors[]. No public-doc replay. Code implementation and scoped local
+verification are complete. Normal hooks/fixup publication, new-head actual native
+coverage/CI/review and separate merge grant remain delivery gates, not proved here.

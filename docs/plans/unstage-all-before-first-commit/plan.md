@@ -3,8 +3,11 @@ created: 2026-10-08
 status: implemented
 requirements:
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
+  - REQ-PLATFORM-CI-PERFORMANCE-003
 system_design:
   - ../../specs/platform/system-design/workspace-git-path-details.md
+  - ../../specs/platform/system-design/workspace-git-status.md
+  - ../../specs/platform/system-design/ci-performance.md
 legacy_specs: []
 ---
 
@@ -12,11 +15,15 @@ legacy_specs: []
 
 ## Overview
 
-Restore Unstage all in a repository that has no first commit. One sequential work order
-adds independently authored real-Git regressions, corrects the empty-list argv, updates
-the causal reference wording and runs the focused checks. This design package remains
-unstaged and uncommitted until ROOT reviews it and sends a later explicit implementation
-interrupt to the same primary session. No local-heavy lease is granted in this turn.
+The first-commit Unstage correction and real-Git regressions are published in READY
+PR4313 at frozen `a5ebc322a7dfddc6af21b10edc65b4dfc11e8072`. Both new operator
+functions passed in both Windows attempts. Delivery is blocked by two unchanged
+Windows package timeouts and one monitor fixture caller deadline.
+
+This amendment keeps ONE sequential work order for the bounded test/CI dependencies
+below. ROOT reviewed all four design files after actual DESIGN END 04:05:42 and
+later released implementation to this SAME primary. Local implementation/checks are
+in progress under the expressly granted global local-heavy lease. No merge authority.
 
 ## Ownership and evidence
 
@@ -50,14 +57,18 @@ selection and committed behavior, and the matching Unstage documentation/comment
 Out of scope: HEAD probing, history/tracker changes, Discard/Revert, path admission,
 command budgets/environments, transport/schema, generic Git policy, UI/copy/layout,
 browser/build/E2E, PostgreSQL, installation in design, delegates and extra tasks/sessions.
-Public docs remain untouched in the design turn.
+The amendment additionally covers only the monitor fixture's cached detail wait,
+the Windows process workflow member, its fixed native Go cohort runner and focused
+runner/workflow contract tests. No production tracker or Git behavior changes.
+Public docs remain untouched in the amendment: the Windows support guide truthfully
+describes focused race-tested packages without promising an unpartitioned command.
 
 ## Technical approach
 
-The all-files branch currently builds `{"reset", "HEAD"}`; explicit paths build
+Before the initial correction, the all-files branch built `{"reset", "HEAD"}`; explicit paths build
 `{"reset", "HEAD", "--", literal selectors...}`. The former ambiguous argument is
-the causal difference. Change only the all-files branch to `{"reset", "--"}`, and
-update its explanatory comment. The separator removes revision/filename ambiguity,
+the causal difference. The published correction changed only that branch to
+`{"reset", "--"}` and its explanatory comment. The separator removes revision/filename ambiguity,
 while Git handles default HEAD and the unborn empty tree internally. No extra command,
 HEAD detection, fallback, empty-tree object creation or reference policy is necessary.
 
@@ -127,7 +138,7 @@ require re-execution for this repair.
 
 ## Work orders
 
-- [x] [Task 01: Restore first-commit Unstage all](task-01-unstage-all.md)
+- [x] [Task 01: Restore first-commit Unstage all and settle delivery dependencies](task-01-unstage-all.md)
 
 Execute sequentially in the same primary session only after later explicit ROOT release.
 
@@ -163,9 +174,77 @@ Implementation validation after ROOT's later explicit release:
   dependencies, changed no lockfile and passed. Active hooks remain in use.
 
 Task 01 records original native handles, actual joins and PID/group/deadline receipts.
-Implementation is complete; commit/publication and hosted evidence remain pending.
+Initial implementation, normal active-hook commit, push and READY PR publication
+are complete. The amended delivery dependency is pending reviewed release; hosted
+Backend remains failed. The other five required contexts passed at the frozen head.
 
-## Risks and delivery constraints
+## Amended delivery dependency: design checkpoint
+
+The design checkpoint authorized only source/log inspection and this amendment.
+ROOT subsequently reviewed and released its implementation; current results follow. The owning
+Unstage AC.37/.38, production correction, four new test functions and public row
+remain unchanged. [CI performance](../../specs/platform/requirements/ci-performance.md)
+AC.003.4/.5 and its [design](../../specs/platform/system-design/ci-performance.md)
+own complete Windows cohort selection. The existing CI-performance package keeps
+its frontend adoption gates, profiling results and pending operational evidence;
+this bounded follow-up does not complete or replay any of its work orders.
+
+The fixture changes only `requireMonitorRefresh`: replace its ten-second caller
+context with `tracker.cancelCtxOrBackground()` in the existing cached detail wait.
+`GetGitStatusWithDetails` selects the accepted fingerprint's `job.done`, returns
+worker errors and rejects supersession. The worker starts its 60-second deadline
+before background admission/validation, retains one successor slot, closes each
+completion after publication/index cleanup, and cancels/drains on Stop. The fixture
+does not run blocking enrichment hooks. All original assertions, production
+deadlines and package deadlock alarms stay intact. This is lifecycle settlement,
+not a new refresh performance promise or a longer arbitrary fixture timeout.
+
+The Windows process member gets a fixed two-cohort native Go runner. Native
+`go test -race -json -timeout 25m -list '^(Test|Fuzz|Example)'` discovers the
+existing entire process subtree, including `process/probe`. Sort distinct top-level
+names and alternate; assign duplicate names across packages to the same cohort.
+Validate complete/disjoint package-qualified selection and escaped anchored roots.
+Start BOTH unchanged race/JSON/verbose/25m commands before joining either, join
+every started command, retain separate raw diagnostics and actual exits, and
+require exact terminal coverage. Enumeration/selection/command/coverage failures
+are failures. No skipped Unicode case, assertion weakening, retry, bigger timeout,
+new CI provider or configurable sharding framework. Native Windows checks stay intact.
+
+Both exact failed logs were parsed read-only; elapsed sums count top-level terminal
+events once and exclude nested events. The ordinal alternating candidate uses the
+union of 718 observed names, not a claimed complete native inventory:
+
+| Attempt / failed leaf | Completed top-level identities | Candidate cohort seconds |
+| --- | --- | --- |
+| 1 / 113120863590 | 715 (one active at alarm) | 828.79 / 669.93 |
+| 2 / 113130914499 | 717 (one active at alarm) | 846.97 / 651.90 |
+
+These partial profiles total about 1500 seconds, split about 55/45 and 57/43.
+Largest observed tests include monitor dirty paths 78.82/86.05s, plain patches
+65.69/72.70s, external helpers 63.81/63.85s and discard environment 56.02/42.72s.
+Alphabetical alternation is sufficient for this measured candidate without a
+historical weight map. Native enumeration may add names and change assignments;
+unexecuted tail times, contention and complete-cohort wall times remain UNKNOWN.
+Do not certify a 25m bound from these sums or claim a comparative speedup.
+
+Both attempts ran Backend Tests37718308043 at frozen a5ebc322..., with two real
+25m package failures. Attempt2 additionally failed default/unicode at the fixture
+wait; the different final active tests had run only one second. Both owned Unstage
+functions passed twice. Original2193 joined95322a/143 under the exact stop grant,
+replacement22075 joined21ab0f/1 terminal with 59PASS/2FAIL/0PENDING. All diagnostic
+reads joined and owned groups are gone. Raw logs/metadata, exact receipts, canonical
+association complete/errors[]/five flags false and exhausted retry budget remain
+under `/tmp/kandev-child77-unstage-20261008/`. No active observer or merge authority.
+
+Later local checks are limited to helper TDD, the registered workflow contract,
+the changed monitor fixture plus focused bounded/cancellation/Stop controls, one
+full CHANGED lint against exact PR base, and documentation/coverage gates. Existing
+passing Unstage/API controls are not locally replayed. See Task 01 for exact commands.
+Natural current-head hosted Windows cohorts must prove complete actual native
+coverage. END design now; no implementation/test/lint/install/code/head/push or
+new collector is authorized until ROOT's later reviewed release.
+
+## Retained delivery constraints
 
 The requirement file is near its 20 KiB limit; keep AC clarifications minimal. A success
 response alone cannot certify the fix: index and working-byte assertions are mandatory.
@@ -190,3 +269,41 @@ current terminal evidence and no actionable findings, changes-requested or human
 Stop merge-ready until separate serial ROOT grant. Preserve worktree/dependencies,
 foreign processes/refs/caches and protected proof. Task-plan recovery notes hold identities,
 remaining gates, resource receipts and next action across turns.
+
+
+## Amended local result: blocked on lint timeout
+
+Reviewed implementation is written. Workflow GREEN passed 13 contracts; final
+helper GREEN passed six functions (race, 2.037s); changed monitor plus five
+lifecycle controls passed (race, 6.707s). Initial workflow/helper behavioral REDs
+established missing wiring and helper behavior. No original Unstage/API replay.
+
+The ONE full CHANGED lint exactbase202d48 hit GNU6m, original48453 joined a319cb
+exit124 with no output/verdict and group2232641 absent. All original local commands
+joined; fresh owned-group audit empty. Global local-heavy lease EXPLICITLY RETURNED.
+Docs/coverage gates, hooks, commit/push and hosted collector not run. Same order
+blocked pending ROOT's specific resource decision; no automatic retry or fallback.
+Frozen published HEAD and both Windows failures/retry exhaustion remain intact.
+Resource/receipt proof: `/tmp/kandev-child77-unstage-20261008/amend-resource-checkpoint.json`.
+
+
+## Authorized recovery result
+
+ROOT granted one identical full CHANGED warm-cache recovery. It joined7359/325135
+exit1 after255.857s with six owned runner diagnostics, not another resource timeout.
+Minimal listing extraction, checked closes/write and event constants corrected them.
+Only affected helper tests (six/race2.037s) and helper-only lint (zero issues/.771s)
+followed and passed; every original joined/groupsgone. The original124 remains
+failed/no verdict/cause unproved, and the one recovery allowance is exhausted.
+No original passing product checks, full lint or cache reset were repeated.
+Documentation/coverage gates and normal publication now follow under ROOT release.
+
+
+## Local implementation complete; hosted evidence pending
+
+Catalog363/1437, spec tests36 and all-spec lint passed. After the one missing
+manifest design reference was added, affected actual17-path coverage and diff
+checks passed (covered/errors[]). Task01 local implementation is done; normal
+hooks/fixup publication and actual new-head hosted native coverage, six required
+contexts, three parents and substantive full review remain pending delivery gates.
+No complete Windows cohort pass, performance improvement or merge-ready claim.

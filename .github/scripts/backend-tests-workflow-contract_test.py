@@ -60,7 +60,7 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         timeout = re.search(r"(?m)^\s*timeout-minutes:\s*(\d+)\s*$", windows_job)
         self.assertIsNotNone(timeout)
         self.assertGreaterEqual(int(timeout.group(1)), 90)
-        self.assertIn("-timeout 25m", windows_job)
+        self.assertIn("go test -race -timeout 25m ./cmd/windows-process-tests", windows_job)
 
     def test_windows_suites_run_independently_without_fail_fast(self) -> None:
         windows_job = self.workflow.partition("  test-windows:\n")[2]
@@ -70,7 +70,10 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("continue-on-error", windows_job)
         process = step_block(windows_job, "Test Windows process package")
         self.assertIn("if: matrix.suite == 'process'", process)
-        self.assertIn("go test -race -v -json -timeout 25m ./internal/agentctl/server/process/...", process)
+        self.assertIn("go run ./cmd/windows-process-tests", process)
+        helper = step_block(windows_job, "Test Windows process cohort runner")
+        self.assertIn("if: matrix.suite == 'process'", helper)
+        self.assertIn("go test -race -timeout 25m ./cmd/windows-process-tests", helper)
         native = step_block(windows_job, "Test windows-sensitive packages")
         self.assertNotIn("./internal/agentctl/server/process/", native)
         for package in (

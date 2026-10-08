@@ -853,9 +853,13 @@ jobs:
         if: matrix.suite == 'native'
         run: go vet ./...
 
+      - name: Test Windows process cohort runner
+        if: matrix.suite == 'process'
+        run: go test -race -timeout 25m ./cmd/windows-process-tests
+
       - name: Test Windows process package
         if: matrix.suite == 'process'
-        run: go test -race -v -json -timeout 25m ./internal/agentctl/server/process/...
+        run: go run ./cmd/windows-process-tests
 
       # Scope to packages with non-trivial Windows-specific code paths.
       # Tests that genuinely cannot run on Windows (Unix sockets, POSIX
