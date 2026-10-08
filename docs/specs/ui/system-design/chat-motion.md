@@ -11,11 +11,11 @@ requirements:
 
 ## Boundary and mapping
 
-| Requirement | Design section |
-| --- | --- |
-| REQ-UI-CHAT-MOTION-001 | Live content rendering |
+| Requirement            | Design section                  |
+| ---------------------- | ------------------------------- |
+| REQ-UI-CHAT-MOTION-001 | Live content rendering          |
 | REQ-UI-CHAT-MOTION-002 | Preference and effective motion |
-| REQ-UI-CHAT-MOTION-003 | Scroll integration |
+| REQ-UI-CHAT-MOTION-003 | Scroll integration              |
 
 UI owns presentation only. Reuse the existing native transcript; do not replace
 its placement engine or broaden the shared Markdown renderer's default behavior.
@@ -97,9 +97,13 @@ policy authority. Add one small cancelable follow driver per visible native
 scroll container. Existing allowed live-follow calls request a target instead
 of synchronously writing the bottom when motion is effective. Frame callbacks
 read current geometry, then perform one scroll write, easing toward a moving
-bottom target and settling within the required 2 px tolerance within 300 ms of the last growth. New content
-updates the target of the active driver, never queues another animation. Retargeting
-preserves elapsed frame time so continuous growth cannot stall scroll progress.
+bottom target. When the browser can place the scroll position within 2 px of
+the target, the driver settles within 300 ms after the last growth. If the
+browser clamps the target beyond that tolerance, the driver stops at the
+interpolation deadline and accepts the returned position; it does not retry
+while idle. New content updates the target of the active driver, never queues
+another animation. Retargeting preserves elapsed frame time so continuous
+growth cannot stall scroll progress.
 Use existing resize notifications for late content growth. Keep synchronous
 content-size reads out of message commits (the existing stability invariant).
 

@@ -37,9 +37,11 @@ retention, desktop process supervision, and new settings or telemetry.
 
 ## Acceptance
 
-1. Fractional readback settles within 300 ms and 2 px, with no pending follow
-   callbacks or further geometry reads during idle. Clamped writes terminate by
-   the interpolation endpoint even when the requested target is unreachable.
+1. When the browser can place the scroll position within 2 px of the target,
+   fractional readback settles within 300 ms, with no pending follow callbacks
+   or further geometry reads during idle. When the browser clamps the target
+   beyond that tolerance, follow work terminates at the interpolation endpoint
+   even when the requested target is unreachable.
 2. Later content restarts following. Continuous growth advances, requests coalesce,
    and reader input, hidden panels, unmounts, and disabled motion retain their behavior.
 3. Targeted unit tests and fresh-build desktop/phone scenarios pass. Results

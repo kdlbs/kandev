@@ -55,12 +55,12 @@ The matrix uses heights `200`, `200.25`, `200.5`, and `200.75` CSS pixels,
 with CSS zoom values `1`, `1.1`, `1.25`, and `1.5`.
 CSS zoom creates fractional readback. It is not an emulation of Tauri's native zoom API.
 
-| Browser and source | Cases | Still running after 600 slots | Maximum callbacks | Maximum bottom error |
-| --- | ---: | ---: | ---: | ---: |
-| Chromium, original | 16 | 6 | 600 | 0.909119 px |
-| Chromium, in-memory candidate | 16 | 0 | 11 | 0.909119 px |
-| Linux WebKit, original | 16 | 0 | 11 | 0 px |
-| Linux WebKit, in-memory candidate | 16 | 0 | 11 | 0 px |
+| Browser and source                | Cases | Still running after 600 slots | Maximum callbacks | Maximum bottom error |
+| --------------------------------- | ----: | ----------------------------: | ----------------: | -------------------: |
+| Chromium, original                |    16 |                             6 |               600 |          0.909119 px |
+| Chromium, in-memory candidate     |    16 |                             0 |                11 |          0.909119 px |
+| Linux WebKit, original            |    16 |                             0 |                11 |                 0 px |
+| Linux WebKit, in-memory candidate |    16 |                             0 |                11 |                 0 px |
 
 For Chromium at zoom `1.25` and height `200.5`, the target is `799`.
 The browser returns `799.2000122070312`. The original driver remains active.
@@ -154,12 +154,16 @@ predicate is absent. At that point, both variants must settle.
 
 ## Inspector question and remaining diagnosis
 
-`apps/desktop/src-tauri/Cargo.toml` declares Tauri without the `devtools` feature.
-No explicit inspector enablement was found in the desktop source. Tauri's
+At the investigated source commit (`6254b05eb0242b67900e160ff5b1d9acbb7962ad`),
+`apps/desktop/src-tauri/Cargo.toml` did not declare Tauri's `devtools` feature,
+and no explicit inspector enablement was found in the desktop source. Tauri's
 [debugging documentation](https://v2.tauri.app/develop/debug/#using-the-inspector-in-production)
 states that production inspection requires feature enablement or a debug build.
-There is no verified release-build setting to recommend for this report.
-Inspector enablement needs its own scoped desktop change or diagnostic build.
+This PR adds a native release inspector entry point through View > Developer
+Tools and the platform shortcut. Native release interaction remains pending on
+Linux, macOS, and Windows; the [desktop developer-tools work order](../desktop-developer-tools/task-01-enable-developer-tools.md)
+records those checks, including Safari inspection and a heap snapshot on macOS
+13.3 or later.
 
 The remaining macOS investigation needs a profile before process termination,
 with JavaScript caller attribution and stylesheet/animation ownership over time.
