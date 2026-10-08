@@ -40,6 +40,9 @@ func (r *KubernetesExecutor) reconnect(
 	if err := verifyKubernetesRecordedPVC(ctx, runtime.resources, recorded, identity); err != nil {
 		return nil, err
 	}
+	if err := kubernetesPodControlPreflight(pod, recorded.mainContainer); err != nil {
+		return nil, err
+	}
 
 	client, forward, token, remotePort, err := r.reconnectKubernetesAgentctl(ctx, runtime, req, pod, recorded)
 	if err != nil {

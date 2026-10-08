@@ -102,6 +102,7 @@ type ContainerInfo struct {
 	StartedAt  time.Time
 	FinishedAt time.Time
 	ExitCode   int
+	OOMKilled  bool
 	Health     string
 	Labels     map[string]string
 	Mounts     []string
@@ -588,6 +589,7 @@ func applyContainerState(info *ContainerInfo, state *container.State) {
 	info.State = string(state.Status)
 	info.Status = string(state.Status)
 	info.ExitCode = state.ExitCode
+	info.OOMKilled = state.OOMKilled
 
 	if startedAt, err := time.Parse(time.RFC3339Nano, state.StartedAt); err == nil {
 		info.StartedAt = startedAt

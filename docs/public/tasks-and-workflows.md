@@ -910,4 +910,10 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 - **An unarchived worktree starts fresh:** an external action or an older Kandev version removed the branch, and no matching branch exists on `origin`.
 - **A synchronized workflow is read-only:** edit the workflow file in its GitHub source and let sync apply the change.
 
+### Unexpected executor failures
+
+When a task's executor fails, its confirmed cause remains visible after reload and when switching sessions or content tabs. Open the persistent error strip's **Details** to review the cause, the last observation, and workspace evidence. **Recheck status** only checks the recorded resource. If status cannot be verified, the last cause stays available; repair the executor before attempting normal recovery.
+
+A lost executor interrupts the observed turn rather than completing the workflow step. Kandev does not replay that prompt automatically. Recovery history distinguishes a restored provider conversation from a newly created one, even when Resume succeeds. A retained workspace and the Kandev transcript do not prove that the provider retained its original conversation. See [executor failure recovery](executors.md#when-an-executor-stops-unexpectedly) before resetting an environment.
+
 Related: [Coordinate work](coordination.md), [Sessions and review](sessions-and-review.md), [Agents and profiles](agents-and-profiles.md), and [Automation and MCP](automation-and-mcp.md).

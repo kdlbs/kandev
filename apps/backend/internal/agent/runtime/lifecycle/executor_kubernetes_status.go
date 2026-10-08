@@ -3,12 +3,14 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -55,6 +57,7 @@ func (r *KubernetesExecutor) GetRemoteStatus(
 	if apierrors.IsNotFound(err) {
 		return &RemoteStatus{
 			RuntimeName: r.Name(), RemoteName: recorded.podName, State: "missing",
+			Observation:   &models.ExecutorObservation{Outcome: "missing", Runtime: string(r.Name()), ResourceKey: string(recorded.podUID), ObservedAt: checkedAt, Reason: "PodNotFound", Workspace: r.kubernetesWorkspaceRetention(ctx, instance)},
 			LastCheckedAt: checkedAt,
 			Details: map[string]interface{}{
 				MetadataKeyKubernetesConfigNamespace: recorded.namespace,
@@ -91,6 +94,12 @@ func (r *KubernetesExecutor) GetRemoteStatus(
 	if message != "" {
 		details["message"] = message
 	}
+	observation := kubernetesExecutorObservation(pod, recorded.mainContainer, checkedAt)
+	observation.Workspace = r.kubernetesWorkspaceRetention(ctx, instance)
+	if previous, err := strconv.ParseInt(getMetadataString(instance.Metadata, MetadataKeyKubernetesContainerRestartCount), 10, 32); err == nil && observation.Outcome == "healthy" && int64(observation.Restarts) > previous {
+		observation.Outcome = "restarted"
+		observation.Reason = "ContainerRestarted"
+	}
 	var createdAt *time.Time
 	if !pod.CreationTimestamp.IsZero() {
 		value := pod.CreationTimestamp.UTC()
@@ -98,7 +107,7 @@ func (r *KubernetesExecutor) GetRemoteStatus(
 	}
 	return &RemoteStatus{
 		RuntimeName: r.Name(), RemoteName: recorded.podName, State: state,
-		CreatedAt: createdAt, LastCheckedAt: checkedAt, Details: details,
+		CreatedAt: createdAt, LastCheckedAt: checkedAt, Details: details, Observation: observation,
 	}, nil
 }
 
@@ -138,6 +147,24 @@ func kubernetesRemotePodState(
 		if status.Name == mainContainer {
 			projection = kubernetesContainerProjection(pod.DeletionTimestamp != nil, status, projection)
 			break
+		}
+	}
+	if pod.Status.Phase == corev1.PodSucceeded {
+		projection.state = kubernetesStatusCompleted
+	}
+	if pod.Status.Phase == corev1.PodFailed {
+		projection.state = kubernetesStatusFailed
+		if pod.Status.Reason != "" {
+			projection.reason = pod.Status.Reason
+		}
+		if pod.Status.Message != "" {
+			projection.message = pod.Status.Message
+		}
+	}
+	if projection.state != kubernetesStatusFailed && projection.state != kubernetesStatusCompleted {
+		if reason := kubernetesPodAvailabilityReason(pod); reason != "" {
+			projection.state, projection.ready, projection.reason = kubernetesStatusUnknown, false, reason
+			projection.message = ""
 		}
 	}
 	return projection.state, projection.containerState, projection.ready,
@@ -192,6 +219,9 @@ func kubernetesContainerProjection(
 		projection.reason, projection.message = status.State.Waiting.Reason, status.State.Waiting.Message
 		if !podDeleting {
 			projection.state = kubernetesStatusStarting
+			if status.State.Waiting.Reason == "CrashLoopBackOff" && status.LastTerminationState.Terminated != nil {
+				projection.state = kubernetesStatusFailed
+			}
 		}
 	case status.State.Terminated != nil:
 		projection.containerState = "terminated"
@@ -208,3 +238,12 @@ func kubernetesContainerProjection(
 }
 
 var _ RemoteStatusProvider = (*KubernetesExecutor)(nil)
+
+func kubernetesPodControlPreflight(pod *corev1.Pod, mainContainer string) error {
+	state, _, _, _, _, _ := kubernetesRemotePodState(pod, mainContainer)
+	observation := kubernetesExecutorObservation(pod, mainContainer, time.Now().UTC())
+	if state != kubernetesStatusFailed && state != kubernetesStatusCompleted && state != "stopping" && !observation.ReportedUnavailable() {
+		return nil
+	}
+	return &ExecutorUnavailableError{Observation: observation}
+}

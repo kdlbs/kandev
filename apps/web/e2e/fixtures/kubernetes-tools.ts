@@ -42,7 +42,9 @@ const HOST_SERVICE_ACCOUNT = "kandev-host";
 const IN_CLUSTER_SERVICE_ACCOUNT = "kandev-in-cluster";
 const RESTRICTED_SERVICE_ACCOUNT = "kandev-restricted";
 const TOOL_DOWNLOAD_TIMEOUT_MS = 120_000;
-const KIND_IMAGE_LOAD_TIMEOUT_MS = 300_000;
+// Cold worker images include the runtime and helper cache; export and unpack
+// share this bounded budget on disk-constrained test hosts.
+const KIND_IMAGE_LOAD_TIMEOUT_MS = 600_000;
 
 export type KubernetesPod = {
   metadata: {

@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+import { executorFailureTitleKey } from "./executor-failure";
 import type { TaskStatusSummary } from "./types/task-status-summary";
 
 /**
@@ -47,7 +49,17 @@ export function pickFreshestStatusSummary(
 ): TaskStatusSummary | null | undefined {
   if (!next) return current;
   if (!current) return next;
-  return next.revision >= current.revision ? next : current;
+  if (next.revision < current.revision) return current;
+  if (
+    (next.executor_failure === undefined && current.executor_failure !== undefined) ||
+    (next.executor_failure?.id === current.executor_failure?.id &&
+      next.executor_failure != null &&
+      current.executor_failure != null &&
+      next.executor_failure.revision < current.executor_failure.revision)
+  ) {
+    return { ...next, executor_failure: current.executor_failure };
+  }
+  return next;
 }
 
 /** Select the newest detail/live reading without allowing an HTTP response to regress it. */
@@ -68,6 +80,8 @@ export function statusSummaryActiveErrorPreview(
   acknowledgedAgentErrors?: Record<string, string>,
   dismissedAgentErrors?: Record<string, string>,
 ): string | null {
+  const executorFailure = summary?.executor_failure;
+  if (executorFailure?.state === "active") return t(executorFailureTitleKey(executorFailure));
   const error = summary?.active_error;
   if (!error) return null;
   if (

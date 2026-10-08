@@ -641,6 +641,11 @@ func startAgentInfrastructure(
 		return false
 	}
 
+	lifecycleMgr.SetLocalExecutorInspector(localExecutorObservationReader(agentRuntimeAvailability, cfg.Agent.StandalonePID, time.Now().UTC()))
+	services.Task.SetExecutorInspector(lifecycleMgr.InspectExecutor)
+	lifecycleMgr.SetExecutorObservationHandler(services.Task.ObserveExecutorFailure)
+	services.Task.SetExecutorLossRetirer(lifecycleMgr.RetireExecutorLoss)
+
 	// ============================================
 	// WORKTREE MANAGER
 	// ============================================
@@ -1385,6 +1390,7 @@ func startGatewayAndServe(
 
 	services.Task.StartAutoArchiveLoop(ctx)
 	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)
+	services.Task.ReconcileExecutorFailures(ctx)
 	services.Task.StartSessionReconciliationLoop(ctx)
 	services.Task.StartQuickChatExpirationLoop(ctx)
 

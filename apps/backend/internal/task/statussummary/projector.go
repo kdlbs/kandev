@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // SummaryStore is the small persistence boundary needed by the live
@@ -102,6 +103,7 @@ type ProjectorConfig struct {
 	LoadPendingActions      PendingActionLoader
 	LoadSessionObservations SessionObservationLoader
 	LoadTaskLaunchError     TaskLaunchErrorLoader
+	LoadExecutorFailure     func(context.Context, string) (*models.ExecutorFailureEpisode, error)
 	LoadTaskActivity        TaskActivityLoader
 	LoadPullRequests        PullRequestLoader
 	LoadLaunchQueue         LaunchQueueLoader
@@ -135,6 +137,7 @@ type Projector struct {
 	loadPendingActions      PendingActionLoader
 	loadSessionObservations SessionObservationLoader
 	loadTaskLaunchError     TaskLaunchErrorLoader
+	loadExecutorFailure     func(context.Context, string) (*models.ExecutorFailureEpisode, error)
 	loadTaskActivity        TaskActivityLoader
 	loadPullRequests        PullRequestLoader
 	loadLaunchQueue         LaunchQueueLoader
@@ -171,6 +174,7 @@ type projectionState struct {
 	errors            map[string]*ActiveErrorSummary
 	taskError         *ActiveErrorSummary
 	taskErrorObserved bool
+	executorFailure   *models.ExecutorFailureEpisode
 	// clearedErrorStamps records, per session, the stamp of the last error this
 	// projection cleared, so a durable breadcrumb replayed on a later session
 	// event cannot re-arm an error affordance the agent already recovered from.
@@ -240,6 +244,7 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		loadPendingActions:      cfg.LoadPendingActions,
 		loadSessionObservations: cfg.LoadSessionObservations,
 		loadTaskLaunchError:     cfg.LoadTaskLaunchError,
+		loadExecutorFailure:     cfg.LoadExecutorFailure,
 		loadTaskActivity:        cfg.LoadTaskActivity,
 		loadPullRequests:        cfg.LoadPullRequests,
 		loadLaunchQueue:         cfg.LoadLaunchQueue,
@@ -445,9 +450,15 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 				!equalPullRequestSummary(state.current.PullRequest, after)
 		}
 	}
-	taskErrorChanged := false
+	executorFailureChanged, failureErr := p.refreshExecutorFailure(ctx, taskID, state)
+	if failureErr != nil {
+		return failureErr
+	}
+	taskErrorChanged := executorFailureChanged
 	if p.loadTaskLaunchError != nil && isTaskErrorRefreshEvent(event.Type) {
-		taskErrorChanged, err = p.refreshTaskLaunchError(ctx, taskID, state)
+		var launchErrorChanged bool
+		launchErrorChanged, err = p.refreshTaskLaunchError(ctx, taskID, state)
+		taskErrorChanged = taskErrorChanged || launchErrorChanged
 		if err != nil {
 			return err
 		}

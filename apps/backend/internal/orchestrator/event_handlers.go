@@ -49,6 +49,7 @@ func (s *Service) handleACPSessionCreated(ctx context.Context, data watcher.ACPS
 		return
 	}
 	s.storeResumeToken(ctx, data.TaskID, data.SessionID, data.AgentExecutionID, data.ACPSessionID, "", data.AttemptID)
+	s.recordProviderRecovery(ctx, data)
 }
 
 // storeResumeToken stores an agent's session ID as the resume token for session recovery.

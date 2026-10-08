@@ -542,3 +542,30 @@ Before deleting any environment, push or otherwise preserve uncommitted work. Pr
 - **Disk usage grows:** inspect **Settings > System > Disk usage**, Docker containers, provider sandboxes, host worktrees, and retained SSH task directories before removal.
 
 Related guides: [Docker](docker.md), [Git Operations](git-operations.md), [Operations](operations.md), and [Windows Support](windows-support.md).
+
+### When an executor stops unexpectedly
+
+A confirmed Docker container or Kubernetes Pod failure is recorded separately from an ordinary agent stop or completed turn. The recovery card above the session composer shows the recorded cause across reloads. Shared task environments use the same recovery card in attached sessions; tasks without sessions show it at the bottom of the workbench. **Show details** expands workspace and conversation evidence inline, with readable technical facts in a separate disclosure. **Recheck status** reads the recorded resource; it does not send a prompt, restart a container, or reset the environment.
+
+Kubernetes details distinguish Pod phase from container readiness and preserve available reasons, messages, exit codes, restart evidence, and observation times. A `Running` Pod can still contain an unavailable or crashing agent container. Exit code `137` alone does not prove an out-of-memory failure: for example, `Evicted` with an `emptyDir` size-limit message describes a storage eviction. A later missing-resource check retains the earlier physical cause. Cleanup timeout or authorization failures appear separately in the technical details.
+
+If inspection is unavailable, Kandev keeps the last confirmed cause and reports that the current status is unverified. Repair the recorded executor or contact its operator, then recheck. A healthy resource clears the active failure surface; the historical cause remains recorded. A transient transport disconnect without proof of resource loss does not trigger automatic prompt replay or environment replacement.
+
+A retained persistent volume is evidence about the workspace at the displayed check time, not a guarantee of conversation recovery. Provider recovery records whether the original conversation was restored, a new conversation was started, or continuity remains unverified. The Kandev transcript is separate from the provider's native conversation. A successful Resume does not establish continuity by itself; temporary bootstrap credentials and global Git configuration may also need operator repair after a worker restart.
+
+Older volume evidence also cannot prove that the original workspace survived a later deletion or rebuild. Legacy recovery paths have removed a managed Pod and PVC after a readiness timeout, even when entered through Resume or Continue. If recovery replaces an environment, verify the files independently: rebuilding from published commits or recorded edits does not restore missing unpushed work. Preserve recoverable files before allowing teardown and ask the operator to identify the recovery path when its retention behavior is uncertain.
+
+**Reset Environment is destructive recovery.** Preserve files first and review the recorded Pod/PVC or container ownership. Do not treat reset as an interchangeable or harmless Resume action.
+
+A responsive Kubernetes API does not guarantee worker connectivity. Pod readiness
+and disruption evidence can contradict cached container readiness. In that case,
+Kandev shows **Executor connection lost** and keeps the agent status unverified.
+Restore worker connectivity before retrying, then use **Recheck status**. A failed
+cleanup is reported separately; it does not prove an agent is still running.
+
+A matching Bound persistent-volume record proves retained volume inventory, not
+workspace accessibility or data integrity. Node-local storage may remain tied to
+an unavailable worker. It cannot be assumed recoverable on a different worker.
+Failure inspection does not require node-level permissions or move the workload.
+
+Executor recovery appears as a distinct card in the transcript. A fresh provider conversation is highlighted as a warning, because the original conversation could not be restored. Confirmed restored continuity uses a status card. Neither card is an active executor failure or an automatic retry.

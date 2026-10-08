@@ -17,6 +17,7 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		PendingAction:       derivePendingAction(state),
 		ActiveError:         deriveActiveError(state),
 		TaskError:           cloneActiveError(state.taskError),
+		ExecutorFailure:     cloneExecutorFailure(state.executorFailure),
 		Git:                 deriveGitSummary(state),
 		PullRequest:         derivePullRequestSummary(state),
 		QueuedPromptCount:   state.queuedCount,

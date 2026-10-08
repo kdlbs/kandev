@@ -327,6 +327,7 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 }
 
 func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
+	state.executorFailure = cloneExecutorFailure(summary.ExecutorFailure)
 	state.queuedCount = summary.QueuedPromptCount
 	state.launchQueue = cloneLaunchQueue(summary.LaunchQueue)
 	state.launchQueueObserved = summary.LaunchQueue != nil

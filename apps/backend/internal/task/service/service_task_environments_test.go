@@ -540,19 +540,19 @@ func TestPerformTaskCleanup_TearsDownTaskEnvironmentAndDeletesRow(t *testing.T) 
 // in-memory writes give us ints.
 func TestBuildSSHLiveStatus_StringsAndStringEncodedInts(t *testing.T) {
 	got := buildSSHLiveStatus(map[string]interface{}{
-		"ssh_host":                 "koi.zeval.local",
+		"ssh_host":                 "executor.example.test",
 		"ssh_port":                 "2222",
-		"ssh_user":                 "zeval",
-		"ssh_remote_task_dir":      "/home/zeval/.kandev/tasks/task-1",
+		"ssh_user":                 "test-user",
+		"ssh_remote_task_dir":      "/home/test-user/.kandev/tasks/task-1",
 		"ssh_remote_agentctl_pid":  "4732",
 		"ssh_remote_agentctl_port": "41001",
 		"ssh_local_forward_port":   "59123",
 		"ssh_host_fingerprint":     "SHA256:abc",
 	})
-	if got.Host != "koi.zeval.local" || got.Port != 2222 || got.User != "zeval" {
+	if got.Host != "executor.example.test" || got.Port != 2222 || got.User != "test-user" {
 		t.Errorf("connection fields = %+v, want host/port/user", got)
 	}
-	if got.RemoteTaskDir != "/home/zeval/.kandev/tasks/task-1" {
+	if got.RemoteTaskDir != "/home/test-user/.kandev/tasks/task-1" {
 		t.Errorf("RemoteTaskDir = %q", got.RemoteTaskDir)
 	}
 	if got.RemoteAgentctlPID != 4732 || got.RemoteAgentctlPort != 41001 || got.LocalForwardPort != 59123 {

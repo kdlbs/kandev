@@ -462,6 +462,10 @@ type Repos struct {
 
 // Service provides task business logic
 type Service struct {
+	executorLossRetirer             func(context.Context, models.ExecutorObservationTarget, *models.ExecutorObservation) (bool, error)
+	executorObservationMu           sync.Mutex
+	executorObservationCursor       string
+	executorInspector               func(context.Context, models.ExecutorObservationTarget) (*models.ExecutorObservation, error)
 	workspaces                      repository.WorkspaceRepository
 	userDirectory                   UserDirectory
 	unitPlacer                      UnitPlacer

@@ -55,6 +55,7 @@ type PullRequestInput struct {
 type RebuildInput struct {
 	Sessions         []RebuildSession
 	TaskError        *ActiveErrorSummary
+	ExecutorFailure  *models.ExecutorFailureEpisode
 	PendingActions   map[string]string
 	ActivityObserved bool
 	LastActivityAt   *time.Time
@@ -111,6 +112,7 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 			}
 		}
 	}
+	state.executorFailure = cloneExecutorFailure(input.ExecutorFailure)
 	if taskError := normalizeRebuildError(input.TaskError, input.Now); taskError != nil {
 		state.taskError = taskError
 		state.taskErrorObserved = true

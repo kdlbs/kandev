@@ -1706,7 +1706,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			if existingExecution.AgentCommand == "" {
 				return existingExecution, nil
 			}
-			return nil, fmt.Errorf("%w: session %q (execution: %s)", ErrAgentAlreadyRunning, req.SessionID, existingExecution.ID)
+			return nil, m.existingExecutorLaunchError(ctx, existingExecution)
 		}
 	}
 

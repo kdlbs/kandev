@@ -2,6 +2,9 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/task/models"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -45,17 +48,14 @@ func (m *Manager) pollOneRemoteStatus(ctx context.Context, execution *AgentExecu
 	}
 
 	instance := m.remoteStatusInstance(ctx, execution)
+	var refreshFailure error
 	if refresher, refreshable := rt.(RemoteInstanceRefresher); refreshable {
 		if refreshErr := m.refreshTrackedRemoteInstance(ctx, execution, refresher); refreshErr != nil {
-			m.storeRemoteStatus(execution.SessionID, &RemoteStatus{
-				RuntimeName: execution.RuntimeName, LastCheckedAt: time.Now().UTC(),
-				ErrorMessage: refreshErr.Error(),
-			})
+			refreshFailure = routingerr.SanitizeError(refreshErr)
 			m.logger.Debug("remote control refresh failed",
 				zap.String("session_id", execution.SessionID),
 				zap.String("execution_id", execution.ID),
-				zap.Error(refreshErr))
-			return
+				zap.Error(refreshFailure))
 		}
 		instance = m.remoteStatusInstance(ctx, execution)
 	}
@@ -64,7 +64,7 @@ func (m *Manager) pollOneRemoteStatus(ctx context.Context, execution *AgentExecu
 		m.storeRemoteStatus(execution.SessionID, &RemoteStatus{
 			RuntimeName:   execution.RuntimeName,
 			LastCheckedAt: time.Now().UTC(),
-			ErrorMessage:  statusErr.Error(),
+			ErrorMessage:  routingerr.SanitizeError(errors.Join(statusErr, refreshFailure)).Error(),
 		})
 		m.logger.Debug("remote status poll failed",
 			zap.String("session_id", execution.SessionID),
@@ -82,6 +82,9 @@ func (m *Manager) pollOneRemoteStatus(ctx context.Context, execution *AgentExecu
 	// state (or races with another caller holding the same result pointer).
 	statusCopy := *status
 	status = &statusCopy
+	if refreshFailure != nil {
+		status.ErrorMessage = refreshFailure.Error()
+	}
 	if status.RuntimeName == "" {
 		status.RuntimeName = execution.RuntimeName
 	}
@@ -116,6 +119,10 @@ func (m *Manager) storeRemoteStatus(sessionID string, status *RemoteStatus) {
 	m.remoteStatusMu.Lock()
 	defer m.remoteStatusMu.Unlock()
 	copyStatus := *status
+	copyStatus.Observation = status.Observation.Clone()
+	if copyStatus.Observation == nil {
+		copyStatus.Observation = &models.ExecutorObservation{Outcome: "unknown", Runtime: string(status.RuntimeName), ObservedAt: status.LastCheckedAt, Workspace: "unknown"}
+	}
 	m.remoteStatusBySession[sessionID] = &copyStatus
 }
 
@@ -137,6 +144,10 @@ func (m *Manager) GetRemoteStatusBySession(sessionID string) (*RemoteStatus, boo
 		return nil, false
 	}
 	copyStatus := *status
+	copyStatus.Observation = status.Observation.Clone()
+	if copyStatus.Observation == nil {
+		copyStatus.Observation = &models.ExecutorObservation{Outcome: "unknown", Runtime: string(status.RuntimeName), ObservedAt: status.LastCheckedAt, Workspace: "unknown"}
+	}
 	return &copyStatus, true
 }
 
@@ -193,7 +204,7 @@ func (m *Manager) PollRemoteStatusForRecords(ctx context.Context, records []Remo
 			m.storeRemoteStatus(rec.SessionID, &RemoteStatus{
 				RuntimeName:   rec.Runtime,
 				LastCheckedAt: time.Now().UTC(),
-				ErrorMessage:  statusErr.Error(),
+				ErrorMessage:  boundedExecutorText(statusErr.Error(), 768),
 			})
 			m.logger.Debug("startup remote status poll failed",
 				zap.String("session_id", rec.SessionID),
@@ -204,6 +215,8 @@ func (m *Manager) PollRemoteStatusForRecords(ctx context.Context, records []Remo
 		if status == nil {
 			continue
 		}
+		statusCopy := *status
+		status = &statusCopy
 		if status.RuntimeName == "" {
 			status.RuntimeName = rec.Runtime
 		}

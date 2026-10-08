@@ -181,7 +181,7 @@ formatting passed. This follow-up changes no application behavior.
 - Web build, typecheck, scoped zero-warning lint, translation checks, public
   docs validation, and specification lint passed.
 - The isolated branch instance was evaluated privately at
-  `https://koi.taile29c7d.ts.net:48490/threads` through Tailscale Serve.
+  a private HTTPS endpoint serving `/threads` through Tailscale Serve.
   It is now stopped. Its retained fictional workspace has four tasks, five
   sessions, and two demo profiles.
   Its runtime records and captures were retained locally as historical

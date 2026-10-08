@@ -40,14 +40,17 @@ const (
 
 // Manager manages agent instance lifecycles
 type Manager struct {
-	registry        *registry.Registry
-	eventBus        bus.EventBus
-	credsMgr        CredentialsManager
-	profileResolver ProfileResolver
-	ownerAdmission  OwnerAdmission
-	worktreeMgr     *worktree.Manager
-	mcpProvider     McpConfigProvider
-	logger          *logger.Logger
+	localExecutorInspector        func(models.ExecutorObservationTarget) *models.ExecutorObservation
+	executorObservationHandler    func(context.Context, models.ExecutorObservationTarget, *models.ExecutorObservation) error
+	executorDisconnectInspections sync.Map
+	registry                      *registry.Registry
+	eventBus                      bus.EventBus
+	credsMgr                      CredentialsManager
+	profileResolver               ProfileResolver
+	ownerAdmission                OwnerAdmission
+	worktreeMgr                   *worktree.Manager
+	mcpProvider                   McpConfigProvider
+	logger                        *logger.Logger
 	// dataDir is the kandev root directory. Misnamed for historical reasons:
 	// cmd/kandev/agents.go passes cfg.ResolvedHomeDir() (the kandev root —
 	// typically ~/.kandev) here, not ResolvedDataDir(). Used for:

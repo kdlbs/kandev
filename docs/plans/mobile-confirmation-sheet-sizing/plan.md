@@ -191,7 +191,7 @@ Specification lint, its 30 tests, public-doc validator tests, all 46 published
 page checks and `git diff --check` passed.
 
 The existing isolated instance remains at
-`https://koi.taile29c7d.ts.net:48649`. Its served assets match the final local
+a private HTTPS endpoint on port 48649. Its served assets match the final local
 build (`index-9P1CcRyb.js`, `index-DfhIhLPE.css`). Test 48429 and main 9998 both
 returned readiness 200. No seed reset, backend restart, Tailscale route change,
 commit or push was performed. The ownership-checked shutdown command remains:

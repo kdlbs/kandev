@@ -45,17 +45,18 @@ const (
 // consumers. Revision and UpdatedAt are transport metadata and are ignored by
 // SemanticEqual when deciding whether a projection actually changed.
 type TaskStatusSummary struct {
-	Revision            uint64                 `json:"revision"`
-	UpdatedAt           time.Time              `json:"updated_at"`
-	LastActivityAt      *time.Time             `json:"last_activity_at,omitempty"`
-	PrimarySession      *PrimarySessionSummary `json:"primary_session,omitempty"`
-	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
-	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
-	PendingAction       string                 `json:"pending_action,omitempty"`
-	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
-	TaskError           *ActiveErrorSummary    `json:"task_error,omitempty"`
-	Git                 *GitSummary            `json:"git,omitempty"`
-	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
+	Revision            uint64                         `json:"revision"`
+	UpdatedAt           time.Time                      `json:"updated_at"`
+	LastActivityAt      *time.Time                     `json:"last_activity_at,omitempty"`
+	PrimarySession      *PrimarySessionSummary         `json:"primary_session,omitempty"`
+	ForegroundActivity  string                         `json:"foreground_activity,omitempty"`
+	ActiveSubagentCount int                            `json:"active_subagent_count,omitempty"`
+	PendingAction       string                         `json:"pending_action,omitempty"`
+	ActiveError         *ActiveErrorSummary            `json:"active_error,omitempty"`
+	ExecutorFailure     *models.ExecutorFailureEpisode `json:"executor_failure,omitempty"`
+	TaskError           *ActiveErrorSummary            `json:"task_error,omitempty"`
+	Git                 *GitSummary                    `json:"git,omitempty"`
+	PullRequest         *PullRequestSummary            `json:"pull_request,omitempty"`
 	// QueuedPromptCount is the number of prompts currently en-queued for the
 	// task across all of its sessions (pending semantics identical to
 	// message.queue.get). Omitted when zero so task rows without queued work
@@ -173,6 +174,9 @@ func (s TaskStatusSummary) Validate() error {
 		return err
 	}
 	if err := validateUTF8Bytes("pending action", s.PendingAction, maxPendingActionBytes); err != nil {
+		return err
+	}
+	if err := validateExecutorFailure(s.ExecutorFailure); err != nil {
 		return err
 	}
 	if err := validateActiveError(s.ActiveError); err != nil {
@@ -368,6 +372,7 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 		PendingAction:       s.PendingAction,
 		ActiveError:         s.ActiveError,
 		TaskError:           s.TaskError,
+		ExecutorFailure:     s.ExecutorFailure,
 		Git:                 s.Git,
 		PullRequest:         s.PullRequest,
 		QueuedPromptCount:   s.QueuedPromptCount,
@@ -377,16 +382,17 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 }
 
 type semanticPayload struct {
-	LastActivityAt      *time.Time             `json:"last_activity_at,omitempty"`
-	PrimarySession      *PrimarySessionSummary `json:"primary_session,omitempty"`
-	ForegroundActivity  string                 `json:"foreground_activity,omitempty"`
-	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
-	PendingAction       string                 `json:"pending_action,omitempty"`
-	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
-	TaskError           *ActiveErrorSummary    `json:"task_error,omitempty"`
-	Git                 *GitSummary            `json:"git,omitempty"`
-	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
-	QueuedPromptCount   int                    `json:"queued_prompt_count,omitempty"`
-	LaunchQueue         *LaunchQueueSummary    `json:"launch_queue,omitempty"`
-	CompletionGate      *CompletionGateSummary `json:"completion_gate,omitempty"`
+	LastActivityAt      *time.Time                     `json:"last_activity_at,omitempty"`
+	PrimarySession      *PrimarySessionSummary         `json:"primary_session,omitempty"`
+	ForegroundActivity  string                         `json:"foreground_activity,omitempty"`
+	ActiveSubagentCount int                            `json:"active_subagent_count,omitempty"`
+	PendingAction       string                         `json:"pending_action,omitempty"`
+	ActiveError         *ActiveErrorSummary            `json:"active_error,omitempty"`
+	ExecutorFailure     *models.ExecutorFailureEpisode `json:"executor_failure,omitempty"`
+	TaskError           *ActiveErrorSummary            `json:"task_error,omitempty"`
+	Git                 *GitSummary                    `json:"git,omitempty"`
+	PullRequest         *PullRequestSummary            `json:"pull_request,omitempty"`
+	QueuedPromptCount   int                            `json:"queued_prompt_count,omitempty"`
+	LaunchQueue         *LaunchQueueSummary            `json:"launch_queue,omitempty"`
+	CompletionGate      *CompletionGateSummary         `json:"completion_gate,omitempty"`
 }

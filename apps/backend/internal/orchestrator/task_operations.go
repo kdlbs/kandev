@@ -8198,6 +8198,9 @@ func (s *Service) handlePromptDispatchFailure(
 	fallbackRetryPrompt string,
 	promptReferenceContext string,
 ) (*PromptResult, error) {
+	if errors.Is(promptErr, lifecycle.ErrExecutorInterrupted) {
+		return nil, promptErr
+	}
 	if errors.Is(promptErr, errPromptAdmissionRejected) {
 		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
 		return nil, promptErr
@@ -8950,6 +8953,9 @@ func (s *Service) checkSessionPromptable(taskID, sessionID string, state models.
 // task to REVIEW for non-transient errors, and completes the in-flight turn.
 // Returns the (possibly remapped) error for the caller to surface.
 func (s *Service) handlePromptError(ctx context.Context, taskID, sessionID string, previousSessionState models.TaskSessionState, err error) error {
+	if errors.Is(err, lifecycle.ErrExecutorInterrupted) {
+		return err
+	}
 	if isTransientPromptError(err) && s.isSessionResetInProgress(sessionID) {
 		s.logger.Warn("prompt deferred while session reset is in progress; retry expected",
 			zap.String("task_id", taskID),

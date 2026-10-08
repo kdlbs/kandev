@@ -24,7 +24,9 @@ export function updateTaskStatusSummaryInBothKanbans(
   const shouldReplace = (task: KanbanTask): boolean =>
     isNewerStatusSummary(nextSummary, task.statusSummary);
   const updateTask = (task: KanbanTask): KanbanTask =>
-    shouldReplace(task) ? { ...task, statusSummary: nextSummary } : task;
+    shouldReplace(task)
+      ? { ...task, statusSummary: pickFreshestStatusSummary(nextSummary, task.statusSummary) }
+      : task;
 
   let next = state;
   if (state.kanban.tasks.some((task) => task.id === taskId && shouldReplace(task))) {
@@ -127,6 +129,7 @@ function sidebarQuerySummaryChanged(
   current: TaskStatusSummary | null | undefined,
   next: TaskStatusSummary,
 ): boolean {
+  if (executorFailureChanged(current, next)) return true;
   if ((current?.last_activity_at ?? null) !== (next.last_activity_at ?? null)) return true;
   if ((current?.primary_session?.state ?? null) !== (next.primary_session?.state ?? null))
     return true;
@@ -198,4 +201,14 @@ export function removeArchivedTaskFromCache(state: AppState, taskId: string): Ap
       },
     },
   };
+}
+
+function executorFailureChanged(
+  current: TaskStatusSummary | null | undefined,
+  next: TaskStatusSummary,
+): boolean {
+  return (
+    current?.executor_failure?.id !== next.executor_failure?.id ||
+    current?.executor_failure?.revision !== next.executor_failure?.revision
+  );
 }

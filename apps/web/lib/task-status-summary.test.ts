@@ -110,3 +110,57 @@ describe("selectTaskStatusSummary", () => {
     expect(statusSummaryTaskError(taskOwned)).toBe(taskOwned.task_error);
   });
 });
+
+describe("executor failure freshness", () => {
+  const episode = {
+    id: "incident",
+    revision: 3,
+    state: "active",
+    observation: { outcome: "terminated", reason: "Evicted" },
+  } as NonNullable<TaskStatusSummary["executor_failure"]>;
+  it("keeps durable evidence when an additive field is omitted", () => {
+    const current = { ...summary(4), executor_failure: episode };
+    expect(pickFreshestStatusSummary(summary(5), current)?.executor_failure).toEqual(episode);
+  });
+  it("accepts explicit resource recovery but rejects stale summaries", () => {
+    const current = { ...summary(4), executor_failure: episode };
+    const resolved = {
+      ...summary(5),
+      executor_failure: { ...episode, revision: 4, state: "resolved" as const },
+    };
+    expect(pickFreshestStatusSummary(resolved, current)?.executor_failure?.state).toBe("resolved");
+    expect(
+      pickFreshestStatusSummary(resolved, { ...current, revision: 6 })?.executor_failure?.state,
+    ).toBe("active");
+  });
+});
+
+it("decorates navigation for a durable executor loss even with empty active_error", () => {
+  const failed = {
+    ...summary(4),
+    executor_failure: {
+      id: "incident",
+      revision: 1,
+      state: "active",
+      observation: { outcome: "terminated", reason: "Evicted" },
+    },
+  } as TaskStatusSummary;
+  expect(statusSummaryActiveErrorPreview(failed)).toBe("Executor evicted");
+});
+
+it("keeps a newer episode when a newer summary includes stale incident evidence", () => {
+  const incident = {
+    id: "incident",
+    revision: 4,
+    state: "resolved",
+    observation: { outcome: "healthy" },
+  } as NonNullable<TaskStatusSummary["executor_failure"]>;
+  const current = { ...summary(8), executor_failure: incident };
+  const next = {
+    ...summary(9),
+    executor_failure: { ...incident, revision: 3, state: "active" as const },
+  };
+  const selected = pickFreshestStatusSummary(next, current);
+  expect(selected?.revision).toBe(9);
+  expect(selected?.executor_failure).toEqual(incident);
+});

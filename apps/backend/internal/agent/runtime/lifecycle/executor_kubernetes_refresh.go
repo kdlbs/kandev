@@ -119,6 +119,9 @@ func (r *KubernetesExecutor) inspectKubernetesRefresh(
 	if err := verifyKubernetesRecordedPVC(ctx, freshRuntime.resources, recorded, identity); err != nil {
 		return kubernetesRefreshInspection{}, false, err
 	}
+	if err := kubernetesPodControlPreflight(pod, recorded.mainContainer); err != nil {
+		return kubernetesRefreshInspection{}, false, err
+	}
 	restarts := kubernetesMainContainerRestartCount(pod, recorded.mainContainer)
 	restarted := restarts != current.restartCount
 	inspection := kubernetesRefreshInspection{

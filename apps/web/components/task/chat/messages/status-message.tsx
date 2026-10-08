@@ -13,10 +13,18 @@ import type { Message } from "@/lib/types/http";
 import type { StatusMetadata } from "@/components/task/chat/types";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { ExecutorRecoveryHistory } from "@/components/task/executor-recovery-history";
+import type { ExecutorObservation } from "@/lib/types/executor-failure";
+import { providerRecoveryKey } from "@/lib/executor-failure";
 
 const UNKNOWN_TASK_KEY = "task:unknown";
 
 interface ErrorMetadata extends StatusMetadata {
+  executor_failure?: ExecutorObservation;
+  executor_recovery?: boolean;
+  provider_conversation?: string;
+  workspace?: string;
+  workspace_observed_at?: string;
   error?: string;
   text?: string;
   error_data?: Record<string, unknown>;
@@ -164,6 +172,9 @@ function getStatusMessage(
   metadata: ErrorMetadata | undefined,
   statusLine: string | undefined,
 ): string {
+  if (metadata?.executor_recovery) {
+    return `${t(providerRecoveryKey(metadata.provider_conversation))} ${t("task:executorFailureTranscriptRetained")}`;
+  }
   if (metadata?.variant === "resume_settings_provider_restored") {
     return t("task:providerRestoredResumeSuccess");
   }
@@ -381,7 +392,7 @@ function StatusMessageBody({
   );
 }
 
-export const StatusMessage = memo(function StatusMessage({ comment }: { comment: Message }) {
+function OrdinaryStatusMessage({ comment }: { comment: Message }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const { metadata, progress, statusLine, message, isError, isWarning } =
     parseStatusMetadata(comment);
@@ -427,4 +438,20 @@ export const StatusMessage = memo(function StatusMessage({ comment }: { comment:
       </div>
     </div>
   );
+}
+
+export const StatusMessage = memo(function StatusMessage({ comment }: { comment: Message }) {
+  const metadata = comment.metadata as ErrorMetadata | undefined;
+  if (metadata?.executor_recovery || metadata?.executor_failure) {
+    return (
+      <ExecutorRecoveryHistory
+        outcome={metadata.provider_conversation}
+        evidence={metadata.executor_failure}
+        recoveredAt={metadata.executor_recovery ? comment.created_at : undefined}
+        workspace={metadata.workspace}
+        workspaceObservedAt={metadata.workspace_observed_at}
+      />
+    );
+  }
+  return <OrdinaryStatusMessage comment={comment} />;
 });

@@ -21,46 +21,47 @@ import { Button } from "@kandev/ui/button";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { statusSummaryTaskError } from "@/lib/task-status-summary";
 import { cn } from "@/lib/utils";
-import { useTaskLaunchErrorContext } from "./task-launch-error-context";
+import {
+  useTaskLaunchErrorContext,
+  type TaskLaunchErrorContextValue,
+} from "./task-launch-error-context";
 import { TaskLaunchErrorEntry } from "./simple/components/task-launch-error-entry";
 
-/** Persistent task-owned failure surface. It is mounted above the task tabs so
- * session changes and Dockview panel changes cannot hide the recovery affordance. */
-export function TaskSharedError({
-  reserveMobileTopBar = false,
-}: {
-  reserveMobileTopBar?: boolean;
-} = {}) {
+/** Task launch errors retain their task-wide presentation. Executor incidents
+ * use the session composer recovery surface. */
+function useSharedFailurePresentation() {
   const context = useTaskLaunchErrorContext();
   const error = statusSummaryTaskError(context?.statusSummary);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const localAnnouncementStampRef = useRef<string | null>(null);
   const { isMobile } = useResponsiveBreakpoint();
   const { t } = useTranslation();
-  const launchNeedsAttention = t("task:launchNeedsAttention");
+  const preview = error?.preview ?? "";
+  const attention = t("task:launchNeedsAttention");
   const errorStamp = error?.stamp ?? "";
-  const [announcement, setAnnouncement] = useState("");
-
-  useEffect(() => {
-    if (!context || !error || !errorStamp) return;
-    const shouldAnnounce = context.claimTaskErrorAnnouncement
-      ? context.claimTaskErrorAnnouncement(errorStamp)
-      : localAnnouncementStampRef.current !== errorStamp;
-    if (!shouldAnnounce) return;
-    localAnnouncementStampRef.current = errorStamp;
-    setAnnouncement(`${error.preview}. ${launchNeedsAttention}`);
-  }, [context, error, errorStamp, launchNeedsAttention]);
+  const announcement = useFailureAnnouncement(context, errorStamp, preview, attention);
 
   if (!context || !error) return null;
 
-  const details = (
-    <TaskLaunchErrorEntry
-      taskId={context.taskId}
-      workspaceId={context.workspaceId}
-      error={error}
-      repositories={context.repositories}
-    />
-  );
+  return {
+    context,
+    error,
+    detailsOpen,
+    setDetailsOpen,
+    isMobile,
+    preview,
+    attention,
+    announcement,
+  };
+}
+
+export function TaskSharedError({
+  reserveMobileTopBar = false,
+}: { reserveMobileTopBar?: boolean } = {}) {
+  const presentation = useSharedFailurePresentation();
+  const { t } = useTranslation();
+  if (!presentation) return null;
+  const { detailsOpen, setDetailsOpen, isMobile, preview, attention, announcement } = presentation;
+  const details = <SharedFailureDetails presentation={presentation} />;
 
   return (
     <>
@@ -76,14 +77,14 @@ export function TaskSharedError({
           aria-hidden="true"
         />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-destructive">{error.preview}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">{launchNeedsAttention}</p>
+          <p className="text-sm font-medium text-destructive">{preview}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{attention}</p>
         </div>
         <Button
           type="button"
           variant="outline"
           size="sm"
-          className="min-h-11 shrink-0 cursor-pointer sm:min-h-8"
+          className="min-h-11 shrink-0 cursor-pointer sm:min-h-7"
           onClick={() => setDetailsOpen(true)}
           data-testid="task-shared-error-details"
         >
@@ -106,8 +107,8 @@ export function TaskSharedError({
             data-testid="task-shared-error-drawer"
           >
             <DrawerHeader>
-              <DrawerTitle>{error.preview}</DrawerTitle>
-              <DrawerDescription>{launchNeedsAttention}</DrawerDescription>
+              <DrawerTitle>{preview}</DrawerTitle>
+              <DrawerDescription>{attention}</DrawerDescription>
             </DrawerHeader>
             <div className="min-h-0 overflow-y-auto overscroll-contain px-4 pb-4" data-vaul-no-drag>
               {details}
@@ -118,13 +119,54 @@ export function TaskSharedError({
         <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
           <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>{error.preview}</DialogTitle>
-              <DialogDescription>{launchNeedsAttention}</DialogDescription>
+              <DialogTitle>{preview}</DialogTitle>
+              <DialogDescription>{attention}</DialogDescription>
             </DialogHeader>
             {details}
           </DialogContent>
         </Dialog>
       )}
     </>
+  );
+}
+
+function useFailureAnnouncement(
+  context: TaskLaunchErrorContextValue | null,
+  stamp: string,
+  preview: string,
+  attention: string,
+) {
+  const localStamp = useRef<string | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  useEffect(() => {
+    if (!context || !stamp) return;
+    const shouldAnnounce = context.claimTaskErrorAnnouncement
+      ? context.claimTaskErrorAnnouncement(stamp)
+      : localStamp.current !== stamp;
+    if (!shouldAnnounce) return;
+    localStamp.current = stamp;
+    setAnnouncement(`${preview}. ${attention}`);
+  }, [context, stamp, preview, attention]);
+  return announcement;
+}
+
+function SharedFailureDetails({
+  presentation,
+}: {
+  presentation: NonNullable<ReturnType<typeof useSharedFailurePresentation>>;
+}) {
+  const { error, context } = presentation;
+  return (
+    <div className="space-y-4">
+      {error && (
+        <TaskLaunchErrorEntry
+          isActive
+          taskId={context.taskId}
+          workspaceId={context.workspaceId}
+          error={error}
+          repositories={context.repositories}
+        />
+      )}
+    </div>
   );
 }

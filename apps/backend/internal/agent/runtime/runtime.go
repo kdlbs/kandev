@@ -36,6 +36,17 @@ type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
 type AgentExecution = lifecycle.AgentExecution
 type CachedModeState = lifecycle.CachedModeState
 type IdleSuspensionIdentity = lifecycle.IdleSuspensionIdentity
+type ExecutorUnavailableError = lifecycle.ExecutorUnavailableError
+
+// Availability exposes physical controller state through the runtime boundary.
+type Availability = client.Availability
+
+const (
+	AvailabilityStatusAvailable      = client.AvailabilityStatusAvailable
+	AvailabilityStatusUnavailable    = client.AvailabilityStatusUnavailable
+	AvailabilityReasonAgentctlExited = client.AvailabilityReasonAgentctlExited
+)
+
 type BackgroundWorkloadProbeResult = client.ProbeResult
 
 const (
@@ -220,3 +231,5 @@ var _ Backend = (*lifecycle.Manager)(nil)
 type RunOwnerRecovery interface {
 	StopRunOwnerForRecovery(context.Context, ExecutionOwner) error
 }
+
+var ErrExecutorInterrupted = lifecycle.ErrExecutorInterrupted

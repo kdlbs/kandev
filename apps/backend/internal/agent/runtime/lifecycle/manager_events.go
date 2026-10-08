@@ -758,6 +758,9 @@ func (m *Manager) handleStreamDisconnectWithStartupGeneration(
 	promptGeneration uint64,
 	startupGeneration uint64,
 ) {
+	if m.inspectManagedDisconnect(execution, promptGeneration, startupGeneration) {
+		return
+	}
 	accepted := execution.withStartupAttempt(startupGeneration, func(attemptID string) {
 		if !execution.signalPromptCompletionForStartupGenerationLeased(
 			startupGeneration,

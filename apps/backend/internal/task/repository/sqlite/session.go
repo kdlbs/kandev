@@ -2489,6 +2489,10 @@ func (r *Repository) RecoverTaskSessionByCandidate(
 		`
 		args = append(args, candidate.ExpectedTurnID)
 	}
+	if candidate.ExpectedExecutorAgentExecutionID != "" {
+		query += ` AND NOT EXISTS (SELECT 1 FROM executors_running replacement WHERE replacement.session_id=task_sessions.id AND (replacement.id<>? OR replacement.agent_execution_id<>? OR replacement.updated_at<>?))`
+		args = append(args, candidate.ExpectedExecutorID, candidate.ExpectedExecutorAgentExecutionID, candidate.ExpectedExecutorUpdatedAt)
+	}
 	query += `
 		RETURNING id, agent_profile_id, agent_profile_snapshot, is_passthrough, name,
 			review_status, metadata, task_environment_id, state, updated_at, is_primary

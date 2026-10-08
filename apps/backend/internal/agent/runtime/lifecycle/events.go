@@ -227,7 +227,7 @@ func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, ses
 // with the startup invocation's identity. This context-aware variant keeps a
 // reused execution from relabelling a delayed callback with a replacement
 // attempt's mutable execution field.
-func (p *EventPublisher) PublishACPSessionCreatedWithAttempt(execution *AgentExecution, sessionID, attemptID string) {
+func (p *EventPublisher) PublishACPSessionCreatedWithAttempt(execution *AgentExecution, sessionID, attemptID string, conversationOutcome ...string) {
 	if p.eventBus == nil || sessionID == "" {
 		return
 	}
@@ -235,13 +235,18 @@ func (p *EventPublisher) PublishACPSessionCreatedWithAttempt(execution *AgentExe
 		attemptID = execution.currentStartupAttemptID()
 	}
 
+	outcome := ""
+	if len(conversationOutcome) > 0 {
+		outcome = conversationOutcome[0]
+	}
 	payload := ACPSessionCreatedPayload{
-		TaskID:           execution.TaskID,
-		SessionID:        execution.SessionID,
-		AgentProfileID:   execution.ID,
-		AgentExecutionID: execution.ID,
-		AttemptID:        attemptID,
-		ACPSessionID:     sessionID,
+		TaskID:              execution.TaskID,
+		SessionID:           execution.SessionID,
+		AgentProfileID:      execution.ID,
+		AgentExecutionID:    execution.ID,
+		AttemptID:           attemptID,
+		ACPSessionID:        sessionID,
+		ConversationOutcome: outcome,
 	}
 
 	event := bus.NewEvent(events.AgentACPSessionCreated, "agent-manager", payload)

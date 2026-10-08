@@ -26,6 +26,7 @@ import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
 import { PortForwardingVisibilityProvider } from "@/components/task/port-forwarding-visibility-provider";
 import { TaskLaunchErrorProvider } from "@/components/task/task-launch-error-context";
 import { SessionBootstrapRecoveryCard } from "@/components/task/chat/session-bootstrap-recovery-card";
+import { TaskExecutorFailureFallback } from "@/components/task/chat/session-executor-failure-card";
 import { TaskSharedError } from "@/components/task/task-shared-error";
 import {
   buildDebugEntries,
@@ -328,6 +329,7 @@ function TaskPageLayoutFeedback({
       <div className="flex min-h-0 flex-1 flex-col">
         <TaskLayout {...layoutProps} hasPageLevelFeedback={hasPageLevelMobileFeedback} />
       </div>
+      {!layoutProps.sessionId && <TaskExecutorFailureFallback />}
     </>
   );
 }

@@ -1,7 +1,11 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ExecutorFailureEpisode } from "@/lib/types/executor-failure";
 import type { ReactNode } from "react";
 import { TaskSharedError } from "./task-shared-error";
+
+const detailsTriggerTestId = "task-shared-error-details";
+const detailsContentTestId = "task-shared-error-details-content";
 
 const { context, state, taskPreview } = vi.hoisted(() => {
   const taskPreview = "The task could not be prepared.";
@@ -10,6 +14,7 @@ const { context, state, taskPreview } = vi.hoisted(() => {
     taskId: "task-1",
     workspaceId: "workspace-1",
     statusSummary: {
+      executor_failure: null as ExecutorFailureEpisode | null,
       revision: 4,
       updated_at: "2026-09-14T10:00:00Z",
       task_error: {
@@ -35,7 +40,7 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 }));
 
 vi.mock("./simple/components/task-launch-error-entry", () => ({
-  TaskLaunchErrorEntry: () => <div data-testid="task-shared-error-details-content" />,
+  TaskLaunchErrorEntry: () => <div data-testid={detailsContentTestId} />,
 }));
 
 vi.mock("@kandev/ui/dialog", () => ({
@@ -60,6 +65,7 @@ vi.mock("@kandev/ui/drawer", () => ({
 
 describe("TaskSharedError", () => {
   beforeEach(() => {
+    context.statusSummary.executor_failure = null;
     context.claimTaskErrorAnnouncement.mockReset();
     context.claimTaskErrorAnnouncement.mockReturnValue(true);
   });
@@ -76,10 +82,10 @@ describe("TaskSharedError", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByTestId("task-shared-error-announcement").textContent).toContain(taskPreview);
     expect(screen.getByText(taskPreview)).toBeTruthy();
-    expect(screen.queryByTestId("task-shared-error-details-content")).toBeNull();
+    expect(screen.queryByTestId(detailsContentTestId)).toBeNull();
 
-    fireEvent.click(screen.getByTestId("task-shared-error-details"));
-    expect(screen.getByTestId("task-shared-error-details-content")).toBeTruthy();
+    fireEvent.click(screen.getByTestId(detailsTriggerTestId));
+    expect(screen.getByTestId(detailsContentTestId)).toBeTruthy();
   });
 
   it("uses the mobile drawer for the same task error", () => {
@@ -90,8 +96,8 @@ describe("TaskSharedError", () => {
       "mt-[calc(3.5rem+1px+env(safe-area-inset-top,0px))]",
     );
 
-    fireEvent.click(screen.getByTestId("task-shared-error-details"));
-    expect(screen.getByTestId("task-shared-error-details-content")).toBeTruthy();
+    fireEvent.click(screen.getByTestId(detailsTriggerTestId));
+    expect(screen.getByTestId(detailsContentTestId)).toBeTruthy();
   });
 
   it("announces a new task error stamp once across component remounts", () => {
@@ -109,5 +115,41 @@ describe("TaskSharedError", () => {
     render(<TaskSharedError />);
     expect(screen.getByTestId("task-shared-error-announcement").textContent).toBe("");
     expect(context.claimTaskErrorAnnouncement).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("executor failure shared owner", () => {
+  afterEach(() => {
+    context.statusSummary.executor_failure = null;
+    cleanup();
+  });
+  it("keeps launch errors independent without duplicating the composer executor banner", () => {
+    context.statusSummary.executor_failure = {
+      id: "episode",
+      task_id: "task-1",
+      environment_id: "environment",
+      revision: 1,
+      state: "active",
+      first_observed_at: "2026-09-30T00:00:00Z",
+      last_observed_at: "2026-09-30T00:00:00Z",
+      observation: {
+        outcome: "terminated",
+        runtime: "k8s",
+        reason: "Evicted",
+        message: 'Usage of EmptyDir volume "docker-data" exceeds the limit "12Gi".',
+        observed_at: "2026-09-30T00:00:00Z",
+        container_ready: false,
+        workspace: "retained",
+      },
+    };
+    render(<TaskSharedError />);
+    expect(screen.getByTestId("task-shared-error").textContent).toContain(taskPreview);
+    expect(screen.queryByText("Executor evicted")).toBeNull();
+    expect(screen.getAllByTestId(detailsTriggerTestId)).toHaveLength(1);
+    fireEvent.click(screen.getByTestId(detailsTriggerTestId));
+    expect(screen.queryByTestId("executor-failure-details")).toBeNull();
+    expect(screen.getByTestId(detailsContentTestId)).toBeTruthy();
+    expect(screen.queryByTestId("executor-recheck")).toBeNull();
+    expect(screen.queryByText("Resume")).toBeNull();
   });
 });

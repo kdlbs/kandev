@@ -842,7 +842,7 @@ func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionI
 	if !exists {
 		return nil // No execution to clean up
 	}
-	return m.cleanupStaleExecution(ctx, execution)
+	return m.cleanupStaleExecutionWithCause(ctx, execution)
 }
 
 // CleanupStaleExecutionBySessionIDIfCurrent cleans up only the execution that
@@ -870,7 +870,7 @@ func (m *Manager) CleanupStaleExecutionBySessionIDIfCurrent(
 				return nil, nil
 			}
 		}
-		return nil, m.cleanupStaleExecution(sharedCtx, execution)
+		return nil, m.cleanupStaleExecutionWithCause(sharedCtx, execution)
 	})
 	return err
 }

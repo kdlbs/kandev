@@ -572,13 +572,14 @@ func FilterPersistentMetadata(src map[string]interface{}) map[string]interface{}
 // RemoteStatus describes runtime health/details for remote executors.
 // It is intentionally generic so each executor can include extra details in Details.
 type RemoteStatus struct {
-	RuntimeName   agentruntime.Runtime   `json:"runtime_name"`
-	RemoteName    string                 `json:"remote_name,omitempty"`
-	State         string                 `json:"state,omitempty"`
-	CreatedAt     *time.Time             `json:"created_at,omitempty"`
-	LastCheckedAt time.Time              `json:"last_checked_at"`
-	ErrorMessage  string                 `json:"error_message,omitempty"`
-	Details       map[string]interface{} `json:"details,omitempty"`
+	Observation   *models.ExecutorObservation `json:"observation,omitempty"`
+	RuntimeName   agentruntime.Runtime        `json:"runtime_name"`
+	RemoteName    string                      `json:"remote_name,omitempty"`
+	State         string                      `json:"state,omitempty"`
+	CreatedAt     *time.Time                  `json:"created_at,omitempty"`
+	LastCheckedAt time.Time                   `json:"last_checked_at"`
+	ErrorMessage  string                      `json:"error_message,omitempty"`
+	Details       map[string]interface{}      `json:"details,omitempty"`
 }
 
 // RemoteSessionResumer is an optional capability for remote runtimes that need

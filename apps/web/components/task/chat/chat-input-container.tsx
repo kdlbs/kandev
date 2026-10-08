@@ -9,6 +9,9 @@ import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/ty
 import type { EntityReference } from "@/lib/types/entity-reference";
 import type { TaskPlanCommentRef, TaskPreviewFeedbackRef } from "@/lib/types/http";
 import { useChatInputContainer } from "./use-chat-input-container";
+import { useTaskLaunchErrorContext } from "../task-launch-error-context";
+import { executorFailureForComposer } from "@/lib/executor-failure";
+import { SessionExecutorFailureCard } from "./session-executor-failure-card";
 import { SessionRecoveryCard } from "./session-recovery-card";
 import { useSessionComposerRecovery } from "./session-recovery-context";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
@@ -359,6 +362,11 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     });
 
     const composerRecovery = useSessionComposerRecovery(sessionId);
+    const failureContext = useTaskLaunchErrorContext();
+    const executorFailure = executorFailureForComposer(
+      failureContext?.statusSummary?.executor_failure,
+      sessionId,
+    );
     const recoveryActions = useChatInputRecoveryActions(
       taskId,
       sessionId,
@@ -372,6 +380,9 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       taskTitle,
       taskDescription,
     });
+
+    if (executorFailure && taskId)
+      return <SessionExecutorFailureCard taskId={taskId} episode={executorFailure} />;
 
     if (
       shouldHideChatInputForLaunchError({

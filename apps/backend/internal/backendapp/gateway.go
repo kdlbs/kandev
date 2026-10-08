@@ -335,6 +335,7 @@ func provideGateway(
 			LoadSessionObservations: func(ctx context.Context, taskID string) (statussummary.SessionObservationSnapshot, error) {
 				return loadTaskSessionObservations(ctx, taskRepo, activityProvider, taskID)
 			},
+			LoadExecutorFailure: taskRepo.GetExecutorFailure,
 			LoadTaskLaunchError: func(ctx context.Context, taskID string) (statussummary.TaskLaunchErrorObservation, error) {
 				return loadTaskLaunchErrorObservation(ctx, taskRepo, taskID)
 			},

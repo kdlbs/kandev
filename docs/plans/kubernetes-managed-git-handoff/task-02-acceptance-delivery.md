@@ -40,7 +40,7 @@ Report exact head, results and any remaining acceptance blockers. Do not merge.
 - Ask the actual agent to run noninteractive `ls-remote` and a shallow fetch of
   private `zeval/intelligence`, first fresh, then after Stop/Resume. Record the
   dynamically observed advertised and fetched commits, not an old expected head.
-- Verify same retained Pod/PVC UIDs, foreign `zeval/koi.git` helper denial,
+- Verify same retained Pod/PVC UIDs, foreign `other-owner/unrelated-repository.git` helper denial,
   broker failure/revocation behavior, and presence-only subprocess diagnostics.
   Assert raw `GH_TOKEN`/`GITHUB_TOKEN` absence. Never print helper credentials.
 - Tear down only owned resources, processes, credential copies, CA keys and

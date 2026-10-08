@@ -54,6 +54,7 @@ func (s *Service) StartSessionReconciliationLoop(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case now := <-ticker.C:
+				s.ReconcileExecutorFailures(ctx)
 				s.runArchivedSessionReconciliation(ctx)
 				s.runOrphanedSessionReconciliation(ctx)
 				s.runActiveSessionSweep(ctx, now)

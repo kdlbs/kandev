@@ -1,3 +1,4 @@
+import type { ExecutorFailureEpisode } from "./executor-failure";
 import type { ForegroundActivity, TaskPendingAction, TaskSessionState } from "./http";
 import type { TaskLaunchRecoveryAction } from "./task-launch-error";
 
@@ -46,6 +47,7 @@ export type TaskStatusSummaryCompletionGate = {
 };
 
 export type TaskStatusSummary = {
+  executor_failure?: ExecutorFailureEpisode | null;
   revision: number;
   updated_at: string;
   /** Semantic task activity, separate from summary projection freshness. */

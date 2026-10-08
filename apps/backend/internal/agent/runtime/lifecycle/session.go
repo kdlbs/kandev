@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -133,9 +134,10 @@ func (sm *SessionManager) SetInitialPromptFailureHandler(handler func(failure In
 
 // InitializeResult contains the result of session initialization
 type InitializeResult struct {
-	AgentName    string
-	AgentVersion string
-	SessionID    string
+	ConversationOutcome string
+	AgentName           string
+	AgentVersion        string
+	SessionID           string
 }
 
 // InitializeSession initializes an ACP session with the agent.
@@ -211,12 +213,13 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		zap.String("agent_version", result.AgentVersion))
 
 	// Step 2: Create or resume ACP session based on configuration
-	sessionID, err := sm.createOrLoadSession(ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers, settingsPolicy)
+	sessionID, outcome, err := sm.createOrLoadSession(ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers, settingsPolicy)
 	if err != nil {
 		return nil, err
 	}
 
 	result.SessionID = sessionID
+	result.ConversationOutcome = outcome
 	return result, nil
 }
 
@@ -229,7 +232,7 @@ func (sm *SessionManager) createOrLoadSession(
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
 	settingsPolicy SessionSettingsPolicy,
-) (string, error) {
+) (string, string, error) {
 	rt := agentConfig.Runtime()
 	sm.logger.Debug("createOrLoadSession decision",
 		zap.String("agent_type", agentConfig.ID()),
@@ -239,14 +242,14 @@ func (sm *SessionManager) createOrLoadSession(
 	if rt.SessionConfig.NativeSessionResume && existingSessionID != "" {
 		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID, mcpServers, settingsPolicy)
 		if err == nil {
-			return sessionID, nil
+			return sessionID, "restored", nil
 		}
 		if settingsPolicy == SessionSettingsPolicyProviderRestored {
 			sm.logger.Warn("session/load failed during provider-restored recovery, preserving session identity",
 				zap.String("agent_type", agentConfig.ID()),
 				zap.String("existing_session_id", existingSessionID),
 				zap.Error(err))
-			return "", fmt.Errorf("provider-restored recovery could not load the stored session: %w", err)
+			return "", "unknown", fmt.Errorf("provider-restored recovery could not load the stored session: %w", err)
 		}
 		// If the underlying ACP connection is dead (peer disconnected, context
 		// cancelled), session/new on the same client will return the same
@@ -259,7 +262,7 @@ func (sm *SessionManager) createOrLoadSession(
 				zap.String("agent_type", agentConfig.ID()),
 				zap.String("existing_session_id", existingSessionID),
 				zap.String("reason", err.Error()))
-			return "", err
+			return "", "unknown", err
 		}
 		// Only explicitly recognized compatibility failures authorize replacing
 		// the provider conversation. An internal error, timeout, cancellation,
@@ -270,7 +273,7 @@ func (sm *SessionManager) createOrLoadSession(
 				zap.String("agent_type", agentConfig.ID()),
 				zap.String("existing_session_id", existingSessionID),
 				zap.String("reason", err.Error()))
-			return "", err
+			return "", "unknown", err
 		}
 		// The agent does not support loading or no longer recognizes the stored
 		// token (expired / version drift / agent-side GC). In those confirmed
@@ -286,9 +289,16 @@ func (sm *SessionManager) createOrLoadSession(
 			zap.Bool("capability_mismatch", hasCanonicalSessionLoadMessage(err, "agent does not support session loading (LoadSession capability is false)")),
 			zap.Bool("session_unknown", isSessionUnknownErr(err)),
 			zap.Bool("provider_session_missing", isMissingProviderSessionErr(err, existingSessionID)))
-		return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
 	}
-	return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
+	sessionID, err := sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
+	outcome := ""
+	if existingSessionID != "" {
+		outcome = "unknown"
+		if err == nil && rt.SessionConfig.NativeSessionResume {
+			outcome = models.ProviderConversationFresh
+		}
+	}
+	return sessionID, outcome, err
 }
 
 // shouldInjectResumeContext determines if we should inject resume context for this session.
@@ -528,7 +538,7 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	// Publish session created event
 	if sm.eventPublisher != nil {
 		sm.eventPublisher.PublishACPSessionCreatedWithAttempt(
-			execution, result.SessionID, ResumeAttemptIDFromContext(ctx),
+			execution, result.SessionID, ResumeAttemptIDFromContext(ctx), result.ConversationOutcome,
 		)
 	}
 
@@ -1245,6 +1255,9 @@ func (sm *SessionManager) waitForPromptDone(
 					zap.Uint64("signal_prompt_generation", signal.PromptGeneration),
 					zap.Uint64("active_prompt_generation", promptGeneration))
 				continue
+			}
+			if signal.ExecutorInterrupted {
+				return nil, ErrExecutorInterrupted
 			}
 			if signal.IsError {
 				// A transport death or cancel-release during shutdown is a
