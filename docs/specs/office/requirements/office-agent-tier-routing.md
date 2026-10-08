@@ -18,10 +18,10 @@ Office agent record still carries a `model` field that routing ignores. The resu
 an operator who configures a Critic on `opus[1m]`, watches it run on `sonnet`, and has
 nothing in the product that explains the difference.
 
-This spec extends `docs/specs/office/requirements/routing.md`. That spec remains authoritative for
-tiers, provider order, execution profiles, provider health, and wake-reason policy.
-Nothing here changes those contracts except where explicitly named in
-[Precedence](#precedence-contract).
+This specification defines the active Office tier-selection contract. Provider
+mappings, shared health, and fallback are part of the migration to
+[Dynamic Agent Routing](../../agents/system-design/dynamic-agent-routing-01.md).
+The decision below defines tier precedence for routed Office launches.
 
 ## Requirements
 
@@ -32,10 +32,10 @@ able to run on different model tiers. Today they can — a per-agent tier overri
 to end — but the capability is undiscoverable, the org has no way to express a tier as a property of
 a role, and the Office agent record still carries a `model` field that routing ignores. The result
 is an operator who configures a Critic on `opus[1m]`, watches it run on `sonnet`, and has nothing in
-the product that explains the difference. This spec extends `docs/specs/office/requirements/routing.md`. That
-spec remains authoritative for tiers, provider order, execution profiles, provider health, and
-wake-reason policy. Nothing here changes those contracts except where explicitly named in
-[Precedence](#precedence-contract).
+the product that explains the difference. This specification defines the active
+Office tier-selection contract. Provider mappings, shared health, and fallback are
+part of the migration to [Dynamic Agent Routing](../../agents/system-design/dynamic-agent-routing-01.md).
+The decision below defines tier precedence for routed Office launches.
 
 #### Acceptance criteria
 

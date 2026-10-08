@@ -14,7 +14,7 @@
 | `scheduler.md` | draft | Autonomous wakeup pipeline: assignments/comments/approvals, routines, idle skip, retry/backoff |
 | `routine-catch-up.md` | shipped | Resuming after downtime produces exactly one run per due trigger, never one per missed tick; `catch_up_max` bounds only how many ticks are counted/reported, never how many runs fire; policy `enqueue_missed_with_cap` renamed to `summarize_missed` (deprecated alias accepted forever) |
 | `runtime.md` | draft | Error-handling contract for the agent runtime; **2026-08-17 amendment**: provider classification/recovery is superseded by `../platform/provider-error-recovery.md` and `../agents/dynamic-agent-routing.md` — read the amendment banner before the body |
-| `routing.md` | **archived** | Provider routing; superseded by `../agents/dynamic-agent-routing.md` — do not treat as current |
+| `routing.md` | **deprecated** | Historical Office provider routing; migration target: `docs/specs/agents/system-design/dynamic-agent-routing-01.md` — do not treat as current |
 | `costs.md` | in-progress | Cost tracking and budget management |
 | `dashboard.md` | draft | Workspace-health landing page: agents, run trends, recent activity, spend |
 | `live-updates.md` | draft | Real-time refresh so concurrent agent fan-out is visible without a manual reload |
@@ -30,7 +30,7 @@
 
 The two rows above are the only entries reflecting the newer `requirements/` + `system-design/` split; the other 15 predate that migration and this table has not been reconciled with the full current Office spec set. `docs/specs/office/README.md` no longer carries a tracked specification map (see ADR `2026-09-07-on-demand-document-catalogs`) — run `python3 scripts/list-docs.py specs --system office --format paths` for the authoritative, current list of anything not covered here.
 
-`docs/specs/office/requirements/office-agent-tier-routing.md`'s own text still calls `routing.md` "authoritative" for tiers, provider order, execution profiles, provider health, and wake-reason policy — that predates `routing.md`'s archival in `docs/specs/INDEX.md` and is now stale; trust the INDEX status over that spec's own text.
+The active Office tier-selection contract is in `docs/specs/office/requirements/office-agent-tier-routing.md`. The deprecated `routing.md` specification is historical and does not override that contract.
 
 ## Traps
 
@@ -56,7 +56,7 @@ The two rows above are the only entries reflecting the newer `requirements/` + `
 - `routines/` — routine (cron) definitions and dispatch, including the default coordinator routine
 - `wakeup/` — wake payload/source/reason types and the dispatcher that turns them into runs
 - `repository/sqlite/` — Office's SQLite tables (`runs`, route-attempt ledger, etc.)
-- `routing/` — provider routing types; **spec archived**, package still live — exactly the kind of code/spec mismatch the precedence rule above exists for; readers wanting current routing behavior should start from `../agents/dynamic-agent-routing.md`
+- `routing/` — provider routing types; **spec deprecated**, package still live — tier precedence is in `docs/specs/office/requirements/office-agent-tier-routing.md`; the provider-routing migration target is `docs/specs/agents/system-design/dynamic-agent-routing-01.md`
 - `engine_dispatcher/` — office's bridge into `internal/workflow/engine` (participant roles, transitions)
 - `engine_adapters/` — concrete adapters office supplies to the workflow engine (CEO, child-task creation, workflow switching); consumed from `internal/backendapp`
 - `runtime/` — Office agent runtime wiring

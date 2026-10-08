@@ -291,8 +291,8 @@ Written EARS-style. Each is observable through the API, the database, or the UI.
   map, which is the same map `wakeReasonTier` consults: WHEN
   `tier_per_reason_source == "override"`, the effective map is the agent's own
   `tier_per_reason` **and the workspace map is not consulted at all** (an override
-  replaces it entirely, per `docs/specs/office/requirements/routing.md`); OTHERWISE the effective map
-  is the workspace `tier_per_reason`. The card never shows the union of the two, and
+  replaces it entirely); OTHERWISE the effective map is the workspace
+  `tier_per_reason`. The card never shows the union of the two, and
   never shows the workspace keys when an override is in force. Keys whose value is
   empty are excluded, since they do not shadow anything. GIVEN the effective map is
   empty, THEN the card shows no shadowing notice at all.
