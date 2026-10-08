@@ -474,7 +474,13 @@ Reviewed state is stored per session. Kandev also stores the diff hash: if the f
 
 **Whole-file feedback:** Select **Comment on file** in a file header, or in its file actions menu on a phone. Add feedback without selecting lines, including for deleted, renamed, or non-text files. Saved comments appear above the diff, where you can edit or delete them. File comments join line comments in **Fix comments** and the chat composer.
 
-Pending line and file comments are scoped to the current review session but persist only in that browser's `sessionStorage`; they are not synced to the backend or another browser. Select **Fix comments** to send the accumulated file, line, source, and comment context to the agent and close the review dialog. If the agent is busy, normal session queuing applies. The UI clears pending comments immediately after starting the fire-and-forget send; if that request later fails, it shows an error but does not restore them. Copy important feedback before sending. Reopen the current diff before sending old feedback: a valid line number can still refer to different code after a rewrite.
+Pending line and file comments are scoped to the current review session but persist only in that browser's `sessionStorage`; they are not synced to the backend or another browser. Select **Fix comments** to send the accumulated file, line, source, and comment context to the agent. If the agent is busy, normal session queuing applies.
+
+While delivery is pending, **Fix comments** is disabled and your notes remain available. After acknowledgement, Kandev removes only unchanged submitted notes and closes Review if no pending review notes remain. Notes you edit or add while waiting stay available for your next send.
+
+If sending fails or the connection is unavailable, Kandev shows an error and preserves your notes so you can retry. A connection error or timeout can leave delivery uncertain; Kandev does not resend automatically. Inspect the conversation before resending to see whether your feedback already arrived.
+
+You can still close Review while waiting. Reopen the current diff before sending old feedback: a valid line number can still refer to different code after a rewrite.
 
 ## Generate a walkthrough
 
