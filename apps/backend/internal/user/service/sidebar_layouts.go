@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	maxSidebarLayoutNodes          = 41
+	maxSidebarLayoutNodes          = 41 // +1 over the legacy 40-node limit to absorb a materialized Coordinator entry
 	maxSidebarLayoutShortcutsGroup = 20
 	maxSidebarLayoutShortcutsTotal = 100
 	maxSidebarLayoutIDRunes        = 255
@@ -63,8 +63,12 @@ func validateSidebarLayout(layout models.SidebarLayout) error {
 	if layout.Version != models.SidebarLayoutVersion {
 		return fmt.Errorf("sidebar layout version %d is unsupported", layout.Version)
 	}
-	if len(layout.Nodes) > maxSidebarLayoutNodes {
-		return fmt.Errorf("sidebar layout has more than %d nodes", maxSidebarLayoutNodes)
+	projectedNodeCount := len(layout.Nodes)
+	if !hasCoordinatorNode(layout.Nodes) {
+		projectedNodeCount++
+	}
+	if projectedNodeCount > maxSidebarLayoutNodes {
+		return fmt.Errorf("sidebar layout has more than %d nodes after materializing the Coordinator entry", maxSidebarLayoutNodes)
 	}
 
 	nodeIDs := make(map[string]struct{}, len(layout.Nodes))
@@ -259,10 +263,8 @@ func projectSidebarLayouts(settings *models.UserSettings, ids []string) map[stri
 }
 
 func materializeCoordinatorNode(nodes []models.SidebarLayoutNode) []models.SidebarLayoutNode {
-	for _, node := range nodes {
-		if node.Kind == models.SidebarLayoutNodeBuiltin && node.DestinationID == "coordinators" {
-			return nodes
-		}
+	if hasCoordinatorNode(nodes) {
+		return nodes
 	}
 
 	usedIDs := make(map[string]struct{}, len(nodes))
@@ -293,6 +295,15 @@ func materializeCoordinatorNode(nodes []models.SidebarLayoutNode) []models.Sideb
 	result = append(result, coordinator)
 	result = append(result, nodes[index:]...)
 	return result
+}
+
+func hasCoordinatorNode(nodes []models.SidebarLayoutNode) bool {
+	for _, node := range nodes {
+		if node.Kind == models.SidebarLayoutNodeBuiltin && node.DestinationID == "coordinators" {
+			return true
+		}
+	}
+	return false
 }
 
 func maxInt64(value, minimum int64) int64 {

@@ -250,6 +250,25 @@ func TestProjectSidebarLayoutsAvoidsCoordinatorIDCollisionWithShortcutGroup(t *t
 	}
 }
 
+func TestValidateSidebarLayoutCountsMaterializedCoordinatorTowardNodeLimit(t *testing.T) {
+	nodes := make([]models.SidebarLayoutNode, maxSidebarLayoutNodes)
+	for index := range nodes {
+		id := fmt.Sprintf("legacy-%02d", index)
+		nodes[index] = models.SidebarLayoutNode{
+			ID: id, Kind: models.SidebarLayoutNodeBuiltin, Visible: true, DestinationID: id,
+		}
+	}
+	projected := materializeCoordinatorNode(nodes)
+	if len(projected) != maxSidebarLayoutNodes+1 {
+		t.Fatalf("projected node count = %d, want %d", len(projected), maxSidebarLayoutNodes+1)
+	}
+
+	layout := models.SidebarLayout{Version: models.SidebarLayoutVersion, Nodes: nodes}
+	if err := validateSidebarLayout(layout); err == nil {
+		t.Fatal("validation accepted 41 saved nodes that project to 42")
+	}
+}
+
 func TestProjectedLegacyFortyNodeLayoutCanSaveCoordinatorVisibility(t *testing.T) {
 	const legacyNodeLimit = 40
 	nodes := []models.SidebarLayoutNode{
