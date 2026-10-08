@@ -12,6 +12,8 @@ import {
   SESS_PINNED,
 } from "./tasks.test-helpers";
 
+const SESS_NORMALIZED = "sess-normalized";
+
 vi.mock("@/lib/recent-tasks", () => ({ removeRecentTask: vi.fn() }));
 
 describe("task.deleted cleanup", () => {
@@ -69,8 +71,8 @@ describe("task.deleted cleanup", () => {
     const store = makeStore({
       taskSessions: {
         items: {
-          "sess-normalized": {
-            id: "sess-normalized",
+          [SESS_NORMALIZED]: {
+            id: SESS_NORMALIZED,
             task_id: "t1",
             queue_incarnation_id: "inc-normalized",
           },
@@ -82,7 +84,7 @@ describe("task.deleted cleanup", () => {
       makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }),
     );
 
-    expect(store.getState().clearQueueStatus).toHaveBeenCalledWith("sess-normalized");
+    expect(store.getState().clearQueueStatus).toHaveBeenCalledWith(SESS_NORMALIZED);
   });
 
   it("removes deleted tasks from the archived sidebar projection", () => {
@@ -120,7 +122,7 @@ describe("task.deleted session eviction", () => {
       },
       taskSessions: {
         items: {
-          "sess-normalized": { id: "sess-normalized", task_id: "t1" },
+          [SESS_NORMALIZED]: { id: SESS_NORMALIZED, task_id: "t1" },
           "sess-t2": { id: "sess-t2", task_id: "t2" },
         },
       },
@@ -132,7 +134,7 @@ describe("task.deleted session eviction", () => {
 
     const removeTaskSession = vi.mocked(store.getState().removeTaskSession);
     expect(removeTaskSession.mock.calls.map(([, sid]) => sid).sort()).toEqual(
-      [SESS_OTHER, SESS_PINNED, "sess-normalized"].sort(),
+      [SESS_OTHER, SESS_PINNED, SESS_NORMALIZED].sort(),
     );
     expect(removeTaskSession).toHaveBeenCalledWith("t1", SESS_PINNED);
     expect(removeTaskSession).not.toHaveBeenCalledWith(expect.anything(), "sess-t2");
