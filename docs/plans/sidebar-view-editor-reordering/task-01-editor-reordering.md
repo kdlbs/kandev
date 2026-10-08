@@ -200,3 +200,10 @@ Implemented stable-ID Sort dragging and shared More menus for Sort, automatic co
   `pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome --retries=0 --repeat-each=3 tests/task/mobile-directory-browser-hidden-folders.spec.ts`.
 - Static checks passed from `apps/web`: `pnpm run typecheck`; `pnpm exec eslint e2e/tests/git/changes-panel-refresh-recovery.spec.ts e2e/tests/git/git-status-refresh-helpers.ts e2e/tests/session/completed-workspace-restoration.spec.ts e2e/tests/task/control-sizing.spec.ts e2e/tests/task/mobile-directory-browser-hidden-folders.spec.ts e2e/tests/task/subtask.spec.ts`; `pnpm exec prettier --check` with the same six paths; and `git diff --check`.
 - The exact-head PR CI and retry-summary audit are pending after this remediation push.
+
+### Windows test-fixture cleanup remediation
+
+- Exact-head CI at `0ef5dc7ba742a2d4a74126c4d61aeefdce2c2420` failed in `TestReconcileRepositories_PrunesRemovedTrackerAndPreservesSubscription` on Windows while removing the simulated rolled-back repository. The test deleted the tracker working directory before stopping its Git tracker; Windows can reject removal while a process still uses that directory. The aggregate backend test failure was downstream of this job.
+- The fixture now stops the stale tracker before deleting its directory. Reconciliation still performs the pruning and subscription-detachment assertions under test.
+- Local verification passed: the focused test with `-race -count=3`, the full process package with `-race`, Windows amd64 test-binary cross-compilation, `golangci-lint run ./... --new-from-rev="a8bfce19fc299a4243af4c7be63c32e1a14dc7d5" --timeout=5m`, and `git diff --check`. The Linux runner does not reproduce Windows directory-lock semantics.
+- Exact-head CI and the E2E retry-summary audit are pending after this remediation push.
