@@ -41,6 +41,13 @@ async function sendMessage(dialog: Locator, text: string) {
 }
 
 test.describe("Configuration Chat", () => {
+  test.afterEach(async ({ backend }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    await testInfo.attach("config-chat-backend.log", {
+      path: backend.logPath,
+      contentType: "text/plain",
+    });
+  });
   test.beforeEach(async ({ apiClient, seedData }) => {
     await apiClient.updateWorkspace(seedData.workspaceId, {
       default_config_agent_profile_id: seedData.agentProfileId,

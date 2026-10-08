@@ -1419,3 +1419,17 @@ passed. The temporary merge worktree was removed without changing the branch.
 Other intermittent browser causes remain unconfirmed. New-head hosted CI,
 reviews and all-report audit remain pending. Native Windows/macOS containment
 and targeted durable-delivery PostgreSQL/live-harness gates remain open.
+
+### Configuration-chat deletion diagnostics
+
+The same hosted run's shard 2 job `113396605311` failed its first configuration
+chat deletion attempt while waiting for an HTTP DELETE success, then passed on
+retry. Its available trace covers the successful retry, not the failed attempt.
+No cause or production fix is claimed. Failure-only backend-log attachment was
+added; deletion behavior, retry policy and timeout remain unchanged.
+
+`bash e2e/scripts/run-raw-e2e.sh --project=chromium --workers=1
+ e2e/tests/settings/config-chat-popover.spec.ts --repeat-each=3 --retries=0
+ --trace=retain-on-failure --reporter=list --output=/owned-output` passed all
+18 cases on their first attempt in the CI runtime image with two CPUs, 4 GiB
+and one worker. Hosted verification remains necessary.
