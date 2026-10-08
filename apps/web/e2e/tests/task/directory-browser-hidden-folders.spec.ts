@@ -7,6 +7,7 @@ import type { Locator, Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import type { BackendContext } from "../../fixtures/backend";
+import type { ApiClient } from "../../helpers/api-client";
 
 const HIDDEN_DIRECTORY = ".hidden-project";
 const VISIBLE_DIRECTORY = "visible-project";
@@ -48,8 +49,21 @@ async function settlePicker(picker: Locator): Promise<void> {
 
 /** Opens the task's Add Repositories to workspace dialog with one empty folder
  * row, which is the directory browser this feature owns. */
-async function openFolderSourceDialog(page: Page, taskId: string) {
-  await page.goto(`/t/${taskId}`);
+async function openFolderSourceDialog(
+  page: Page,
+  apiClient: ApiClient,
+  task: { id: string; session_id?: string },
+) {
+  if (!task.session_id) throw new Error("directory browser task has no session_id");
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "Waiting for the directory browser task's initial turn",
+    45_000,
+  );
+  await expect.poll(() => apiClient.getTask(task.id).then((result) => result.state)).toBe("REVIEW");
+  await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.waitForDockviewReady();
@@ -85,6 +99,13 @@ async function openNarrowFolderSourceDrawer(page: Page, taskId: string) {
 }
 
 test.describe("Directory browser hidden folders", () => {
+  test.afterEach(async ({ backend }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    await testInfo.attach("directory-browser-backend.log", {
+      path: backend.logPath,
+      contentType: "text/plain",
+    });
+  });
   test.beforeEach(async ({ testPage }) => {
     await mockFolderAvailability(testPage, true);
     await testPage.route("**/api/v1/task-sessions/*/open-folder", (route) =>
@@ -119,7 +140,7 @@ test.describe("Directory browser hidden folders", () => {
       })
       .toBeTruthy();
 
-    await openFolderSourceDialog(testPage, task.id);
+    await openFolderSourceDialog(testPage, apiClient, task);
     const picker = await openFolderRowPicker(testPage);
 
     // @covers AC-WORKSPACES-HIDDEN-FOLDERS-001.6
@@ -161,7 +182,7 @@ test.describe("Directory browser hidden folders", () => {
       })
       .toBeTruthy();
 
-    await openFolderSourceDialog(testPage, task.id);
+    await openFolderSourceDialog(testPage, apiClient, task);
     const picker = await openFolderRowPicker(testPage);
     const entries = picker.getByTestId("folder-picker-entry");
     const hiddenEntry = entries.filter({ hasText: HIDDEN_DIRECTORY });
@@ -243,7 +264,7 @@ test.describe("Directory browser hidden folders", () => {
       })
       .toBeTruthy();
 
-    const dialog = await openFolderSourceDialog(testPage, task.id);
+    const dialog = await openFolderSourceDialog(testPage, apiClient, task);
     const folderPickerTrigger = dialog.getByTestId("folder-picker-trigger").last();
     const addFolderButton = dialog.getByRole("button", { name: "Add folder" });
     await expect(addFolderButton).toBeFocused();

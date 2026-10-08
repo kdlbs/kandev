@@ -1490,3 +1490,36 @@ No lint hook was bypassed.
 'Synchronous|ResumeAttempt|Inspection|Recovery|Delivery|Continuation' -count=1`
 passed after this error-preservation change. Browser receipts above precede this
 backend-only failure-path correction; they do not claim coverage of that path.
+
+### Directory browser hosted flake follow-up
+
+Run `37820281227`, shard 13 job `113463972650`, failed its first
+fine-pointer directory-browser case because Files remained hidden after its tab
+was clicked. Retry succeeded, so the fail-on-flaky gate correctly failed the
+job. Its first-attempt screenshot shows Changes active; only the retry has a
+trace. Source inspection confirms new Git output intentionally activates
+Changes. The exact hosted timing cause remains unconfirmed.
+
+The unchanged full spec passed 12 first attempts across three fresh CI-image
+workers. The desktop picker fixture did not wait for its initial turn to settle;
+the narrow-width case already did. Desktop setup now waits for the original
+session's terminal turn state and the task's Review state before navigation.
+Existing click, keyboard, geometry and reveal assertions remain unchanged.
+Failure-only backend logs were added. Product focus behavior, assertion
+timeouts, and retry policy remain unchanged.
+
+`bash e2e/scripts/run-raw-e2e.sh --project=chromium --workers=1
+ e2e/tests/task/directory-browser-hidden-folders.spec.ts --repeat-each=3
+ --retries=0 --trace=retain-on-failure --reporter=list --output=/owned-output`
+passed all 12 updated cases on first attempt using the isolated CI runtime image,
+two CPUs and 4 GiB. `pnpm exec eslint
+ e2e/tests/task/directory-browser-hidden-folders.spec.ts --max-warnings 0` and
+`pnpm run typecheck` passed. Fresh hosted verification is still required.
+
+The corresponding phone check,
+`bash e2e/scripts/run-raw-e2e.sh --project=mobile-chrome --workers=1
+ e2e/tests/task/mobile-directory-browser-hidden-folders.spec.ts --retries=0
+ --trace=retain-on-failure --reporter=list --output=/owned-output`, passed both
+cases on first attempt in the same constrained image. Full specification lint,
+catalog validation and whitespace checks passed. Native and targeted live-state
+release gaps recorded above remain open.
