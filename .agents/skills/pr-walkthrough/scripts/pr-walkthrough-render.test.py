@@ -238,6 +238,13 @@ class PRWalkthroughRenderTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("changed file in the prepared manifest", result.stderr)
 
+    def test_managed_renderer_requires_feature_flag_assessment(self) -> None:
+        data = json.loads(json.dumps(self.data))
+        data.pop("feature_flags", None)
+        result = self.run_render(data)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("feature_flags is required for new walkthroughs", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

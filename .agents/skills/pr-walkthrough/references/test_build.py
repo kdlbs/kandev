@@ -132,6 +132,108 @@ class TestImpact(unittest.TestCase):
         self.assertIn("Tasks start reliably", out)
 
 
+class TestFeatureFlags(unittest.TestCase):
+    def data(self):
+        data = minimal_data()
+        data["feature_flags"] = {
+            "coverage": "full", "summary": "The new picker is gated.",
+            "flags": [{
+                "key": "new_picker", "change": "new", "default": "prod: off; dev: off; e2e: off",
+                "enabled": "The new picker opens.", "disabled": "The old picker opens.",
+                "file": "a/b.go",
+            }],
+            "off_ux": {"status": "none", "items": [], "note": "The disabled branch keeps the old picker."},
+        }
+        return data
+
+    def test_coverage_and_disabled_ux_are_separate_and_precede_code(self):
+        data = self.data()
+        data["feature_flags"]["off_ux"] = {"status": "changed", "items": [{
+            "surface": "Settings", "before": "No toggle", "after": "A toggle is visible even when off.",
+            "file": "a/b.go",
+        }]}
+        out = build.build(data)
+        self.assertIn("All feature behavior is behind flags", out)
+        self.assertIn("UX changes with flags off", out)
+        self.assertIn("A toggle is visible even when off.", out)
+        self.assertIn("prod: off; dev: off; e2e: off", out)
+        self.assertIn('data-label="Flag"', out)
+        self.assertIn("/files#diff-" + build.sha256_hex("a/b.go"), out)
+        self.assertLess(out.index('id="feature-flags"'), out.index('id="changes"'))
+        self.assertIn('id="nav-feature-flags"', out)
+        self.assertIn('id="mobile-nav-feature-flags"', out)
+
+    def test_unknown_and_no_feature_flags_do_not_imply_unchanged_ux(self):
+        for coverage, label in (("unknown", "Flag coverage not verified"),
+                                ("none", "Feature behavior ships without flags"),
+                                ("not_applicable", "No feature behavior changes")):
+            data = self.data()
+            data["feature_flags"].update({"coverage": coverage, "flags": [],
+                "off_ux": {"status": "unknown", "items": [], "note": "UI evidence is unavailable."}})
+            out = build.build(data)
+            self.assertIn(label, out)
+            self.assertIn("Flag-off UX not verified", out)
+            self.assertNotIn("No UX changes with flags off", out)
+
+    def test_legacy_optional_but_new_contract_required(self):
+        self.assertNotIn('id="feature-flags" class=', build.build(minimal_data()))
+        with self.assertRaisesRegex(build.BuildError, "feature_flags is required"):
+            build.validate(minimal_data(), require_feature_flags=True)
+
+    def test_rejects_incomplete_and_contradictory_flag_evidence(self):
+        invalid = [None, {}, {"coverage": "yes"}, {"summary": ""}, {"flags": {}},
+                   {"flags": []}, {"off_ux": {}},
+                   {"off_ux": {"status": "none", "items": [], "note": ""}},
+                   {"off_ux": {"status": "none", "items": [{}], "note": "Checked"}},
+                   {"off_ux": {"status": "changed", "items": []}}]
+        for value in invalid:
+            data = self.data()
+            data["feature_flags"] = value if value is None else {**data["feature_flags"], **value}
+            if value == {}:
+                data["feature_flags"] = {}
+            with self.subTest(value=value), self.assertRaises(build.BuildError):
+                build.build(data)
+        for field in ("key", "change", "default", "enabled", "disabled", "file"):
+            data = self.data()
+            del data["feature_flags"]["flags"][0][field]
+            with self.subTest(field=field), self.assertRaises(build.BuildError):
+                build.build(data)
+        data = self.data()
+        data["feature_flags"]["flags"].append(dict(data["feature_flags"]["flags"][0]))
+        with self.assertRaises(build.BuildError):
+            build.build(data)
+
+    def test_partial_coverage_and_removed_flag(self):
+        data = self.data()
+        data["feature_flags"]["coverage"] = "partial"
+        self.assertIn("Some feature behavior ships without flags", build.build(data))
+        data["feature_flags"]["flags"][0]["change"] = "removed"
+        with self.assertRaises(build.BuildError):
+            build.build(data)
+        data["feature_flags"]["coverage"] = "none"
+        self.assertIn("Feature behavior ships without flags", build.build(data))
+        data["feature_flags"]["flags"][0]["change"] = "existing"
+        with self.assertRaises(build.BuildError):
+            build.build(data)
+
+    def test_evidence_is_escaped_and_constrained_to_manifest(self):
+        data = self.data()
+        data["feature_flags"]["flags"][0]["enabled"] = '<script>alert("x")</script>'
+        out = build.build(data)
+        self.assertIn('&lt;script&gt;alert("x")&lt;/script&gt;', out)
+        for path in ("../outside.go", "/absolute.go", "unchanged.go"):
+            for category in ("flags", "off_ux"):
+                data = self.data()
+                if category == "flags":
+                    data["feature_flags"]["flags"][0]["file"] = path
+                else:
+                    data["feature_flags"]["off_ux"] = {"status": "changed", "items": [{
+                        "surface": "Settings", "before": "Old", "after": "New", "file": path,
+                    }]}
+                with self.subTest(path=path, category=category), self.assertRaises(build.BuildError):
+                    build.validate(data, changed_paths={"a/b.go"})
+
+
 class TestPatchToMarked(unittest.TestCase):
     def test_headers_dropped_context_kept_indices_recorded(self):
         patch = ("diff --git a/f b/f\nindex 1..2 100644\n--- a/f\n+++ b/f\n"
