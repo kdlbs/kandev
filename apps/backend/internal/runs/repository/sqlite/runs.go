@@ -615,6 +615,7 @@ func (r *Repository) GetRunBySessionAt(ctx context.Context, sessionID string, at
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT * FROM runs
 		WHERE session_id = ?
+		  AND session_id != ''
 		  AND claimed_at IS NOT NULL
 		  AND claimed_at <= ?
 		ORDER BY claimed_at DESC

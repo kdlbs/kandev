@@ -13,7 +13,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -83,14 +85,15 @@ func TestExecuteStepTransitionRecordsEngineTransitionOnLegacyPath(t *testing.T) 
 }
 
 func stepTransitionRowsForTaskOrchestrator(t *testing.T, repo *sqliterepo.Repository, taskID string) []struct {
-	trigger   string
-	actorKind string
-	actorID   *string
-	sessionID *string
+	trigger      string
+	actorKind    string
+	actorID      *string
+	sessionID    *string
+	causingRunID *string
 } {
 	t.Helper()
 	rows, err := repo.DB().QueryContext(context.Background(), `
-		SELECT trigger, actor_kind, actor_id, session_id FROM task_step_transitions
+		SELECT trigger, actor_kind, actor_id, session_id, causing_run_id FROM task_step_transitions
 		WHERE task_id = ? ORDER BY occurred_at ASC, id ASC
 	`, taskID)
 	if err != nil {
@@ -99,19 +102,21 @@ func stepTransitionRowsForTaskOrchestrator(t *testing.T, repo *sqliterepo.Reposi
 	defer func() { _ = rows.Close() }()
 
 	var out []struct {
-		trigger   string
-		actorKind string
-		actorID   *string
-		sessionID *string
+		trigger      string
+		actorKind    string
+		actorID      *string
+		sessionID    *string
+		causingRunID *string
 	}
 	for rows.Next() {
 		var r struct {
-			trigger   string
-			actorKind string
-			actorID   *string
-			sessionID *string
+			trigger      string
+			actorKind    string
+			actorID      *string
+			sessionID    *string
+			causingRunID *string
 		}
-		if err := rows.Scan(&r.trigger, &r.actorKind, &r.actorID, &r.sessionID); err != nil {
+		if err := rows.Scan(&r.trigger, &r.actorKind, &r.actorID, &r.sessionID, &r.causingRunID); err != nil {
 			t.Fatalf("scan row: %v", err)
 		}
 		out = append(out, r)
@@ -204,6 +209,11 @@ func TestApplyTransitionRecordsEngineTransitionFromSessionID(t *testing.T) {
 			ctx := context.Background()
 			repo := setupTestRepo(t)
 			seedSession(t, repo, "t1", "s1", "step1")
+			ctx = agentCompletionTransitionAttribution(ctx, watcher.AgentEventData{
+				OwnerKind: lifecycle.ExecutionOwnerRun,
+				RunID:     "run-cause-1",
+				SessionID: "s1",
+			})
 
 			store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
 			if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", trigger); err != nil {
@@ -224,7 +234,35 @@ func TestApplyTransitionRecordsEngineTransitionFromSessionID(t *testing.T) {
 			if last.sessionID == nil || *last.sessionID != "s1" {
 				t.Fatalf("session_id = %v, want s1", last.sessionID)
 			}
+			if last.causingRunID == nil || *last.causingRunID != "run-cause-1" {
+				t.Fatalf("causing_run_id = %v, want run-cause-1", last.causingRunID)
+			}
 		})
+	}
+}
+
+func TestApplyTransitionRecordsCauseFromTaskOwnedOfficeExecution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	ctx = agentCompletionTransitionAttribution(ctx, watcher.AgentEventData{
+		OwnerKind:    lifecycle.ExecutionOwnerTask,
+		CausingRunID: "run-cause-task-owned",
+		SessionID:    "s1",
+	})
+
+	store := newWorkflowStore(repo, newMockStepGetter(), nil, noopPublisher, testLogger(), &operationLedger{})
+	if err := store.ApplyTransition(ctx, "t1", "s1", "step1", "step2", engine.TriggerOnTurnComplete); err != nil {
+		t.Fatalf("ApplyTransition: %v", err)
+	}
+
+	rows := stepTransitionRowsForTaskOrchestrator(t, repo, "t1")
+	last := rows[len(rows)-1]
+	if last.actorKind != string(steptelemetry.ActorAgent) {
+		t.Fatalf("actor_kind = %q, want agent", last.actorKind)
+	}
+	if last.causingRunID == nil || *last.causingRunID != "run-cause-task-owned" {
+		t.Fatalf("causing_run_id = %v, want run-cause-task-owned", last.causingRunID)
 	}
 }
 

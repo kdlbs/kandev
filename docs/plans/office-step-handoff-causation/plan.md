@@ -17,11 +17,14 @@ Office `auto_start_agent`) are recorded as fresh `system` roots at depth `0`.
 Because of that, the causation-depth refusal of REQ-OFFICE-LAUNCH-SAFETY-003
 cannot see a review and rework loop, and a human move is recorded as `system`
 instead of human-rooted. This plan resolves step-entry wakes from the committed
-step-transition ledger row, per AC-OFFICE-RUN-CAUSATION-001.25.
+step-transition ledger row, per AC-OFFICE-RUN-CAUSATION-001.25. Office task
+launches carry a trusted causing run ID through lifecycle events into the
+transition record, so dispatch does not depend on session binding or claim
+fields that retry and recovery can clear.
 
 ## Implementation Wave
 
-- [ ] [task-01-step-entry-causation-from-ledger](task-01-step-entry-causation-from-ledger.md)
+- [x] [task-01-step-entry-causation-from-ledger](task-01-step-entry-causation-from-ledger.md)
 
 ## Verification
 

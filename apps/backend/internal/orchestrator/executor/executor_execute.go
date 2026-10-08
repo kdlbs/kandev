@@ -1957,6 +1957,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if err != nil {
 		return nil, err
 	}
+	req.CausingRunID = opts.CausingRunID
 	req.TaskScope, err = e.resolveTaskLaunchScope(ctx, task.ID)
 	if err != nil {
 		return nil, err

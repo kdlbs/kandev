@@ -33,6 +33,7 @@ func newStepTransitionCarrierTestService(t *testing.T) (*Service, *officesqlite.
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			task_id TEXT NOT NULL,
 			session_id TEXT,
+			causing_run_id TEXT,
 			trigger TEXT NOT NULL,
 			actor_kind TEXT NOT NULL,
 			actor_id TEXT,
@@ -47,21 +48,24 @@ func newStepTransitionCarrierTestService(t *testing.T) (*Service, *officesqlite.
 }
 
 func seedStepTransition(
-	t *testing.T, repo *officesqlite.Repository, id int64, taskID, actorKind, actorID, sessionID string, occurredAt time.Time,
+	t *testing.T, repo *officesqlite.Repository, id int64, taskID, actorKind, actorID, sessionID, causingRunID string, occurredAt time.Time,
 ) {
 	t.Helper()
-	var actorIDArg, sessionIDArg any
+	var actorIDArg, sessionIDArg, causingRunIDArg any
 	if actorID != "" {
 		actorIDArg = actorID
 	}
 	if sessionID != "" {
 		sessionIDArg = sessionID
 	}
+	if causingRunID != "" {
+		causingRunIDArg = causingRunID
+	}
 	_, err := repo.ExecRaw(context.Background(), `
 		INSERT INTO task_step_transitions
-			(id, task_id, session_id, trigger, actor_kind, actor_id, contract_version, occurred_at)
-		VALUES (?, ?, ?, 'test', ?, ?, 1, ?)
-	`, id, taskID, sessionIDArg, actorKind, actorIDArg, occurredAt)
+			(id, task_id, session_id, causing_run_id, trigger, actor_kind, actor_id, contract_version, occurred_at)
+		VALUES (?, ?, ?, ?, 'test', ?, ?, 1, ?)
+	`, id, taskID, sessionIDArg, causingRunIDArg, actorKind, actorIDArg, occurredAt)
 	if err != nil {
 		t.Fatalf("seed step transition %d: %v", id, err)
 	}
@@ -128,7 +132,7 @@ func TestTaskBoundaryCarrierForStepTransition_AgentActor_ResolvesTheClaimedRun(t
 	mustClaimRunForCarrierTest(t, repo, run.ID, claimedAt)
 	mustSetRunSessionForCarrierTest(t, repo, run.ID, "sess-1")
 
-	seedStepTransition(t, repo, 1, "task-1", "agent", "", "sess-1", claimedAt.Add(time.Minute))
+	seedStepTransition(t, repo, 1, "task-1", "agent", "", "sess-1", "", claimedAt.Add(time.Minute))
 
 	got := svc.TaskBoundaryCarrierForStepTransition(ctx, "task-1", "1")
 	if got.ActorKind != models.ActorKindAgent || got.ActorID != "agent-executor" {
@@ -158,7 +162,7 @@ func TestTaskBoundaryCarrierForStepTransition_AgentActor_RaceCoverageFinishedRun
 	mustSetRunSessionForCarrierTest(t, repo, run.ID, "sess-2")
 	mustFinishRunForCarrierTest(t, repo, run.ID, claimedAt, claimedAt.Add(time.Minute))
 
-	seedStepTransition(t, repo, 2, "task-1", "agent", "", "sess-2", claimedAt.Add(2*time.Minute))
+	seedStepTransition(t, repo, 2, "task-1", "agent", "", "sess-2", "", claimedAt.Add(2*time.Minute))
 
 	got := svc.TaskBoundaryCarrierForStepTransition(ctx, "task-1", "2")
 	if got.CreatingRunID != "run-finished" {
@@ -174,7 +178,7 @@ func TestTaskBoundaryCarrierForStepTransition_HumanActor_ProducesAHumanRootedRoo
 	svc, repo := newStepTransitionCarrierTestService(t)
 	ctx := context.Background()
 	seedOfficeTaskWithMetadata(t, repo, "task-1", map[string]interface{}{})
-	seedStepTransition(t, repo, 3, "task-1", "human", "user-42", "", time.Now().UTC())
+	seedStepTransition(t, repo, 3, "task-1", "human", "user-42", "", "", time.Now().UTC())
 
 	got := svc.TaskBoundaryCarrierForStepTransition(ctx, "task-1", "3")
 	if got.ActorKind != models.ActorKindUser || got.ActorID != "user-42" {
@@ -227,11 +231,70 @@ func TestTaskBoundaryCarrierForStepTransition_SystemActor_FallsBackUnchanged(t *
 	svc, repo := newStepTransitionCarrierTestService(t)
 	ctx := context.Background()
 	seedOfficeTaskWithMetadata(t, repo, "task-1", map[string]interface{}{})
-	seedStepTransition(t, repo, 4, "task-1", "system", "", "", time.Now().UTC())
+	seedStepTransition(t, repo, 4, "task-1", "system", "", "", "", time.Now().UTC())
 
 	got := svc.TaskBoundaryCarrierForStepTransition(ctx, "task-1", "4")
 	want := svc.TaskBoundaryCarrier(ctx, "task-1")
 	if got != want {
 		t.Fatalf("carrier = %+v, want unchanged fallback %+v", got, want)
+	}
+}
+
+func TestTaskBoundaryCarrierForStepTransition_UsesRunIDBeforeSessionBinding(t *testing.T) {
+	svc, repo := newStepTransitionCarrierTestService(t)
+	ctx := context.Background()
+	seedOfficeTaskWithMetadata(t, repo, "task-1", map[string]interface{}{})
+
+	oldRun := &models.Run{
+		ID: "run-old", AgentProfileID: "agent-old", Reason: "task_assigned",
+		Payload: `{"task_id":"other-task"}`, ChainCausationID: "wrong-chain", CausationDepth: 8,
+	}
+	mustCreateRunForCarrierTest(t, repo, oldRun)
+	oldClaimedAt := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	mustClaimRunForCarrierTest(t, repo, oldRun.ID, oldClaimedAt)
+	mustSetRunSessionForCarrierTest(t, repo, oldRun.ID, "sess-reused")
+
+	causingRun := &models.Run{
+		ID: "run-cause", AgentProfileID: "agent-cause", Reason: "task_assigned",
+		Payload: `{"task_id":"source-task"}`, ChainCausationID: "right-chain", CausationDepth: 3,
+	}
+	mustCreateRunForCarrierTest(t, repo, causingRun)
+	causingClaimedAt := oldClaimedAt.Add(time.Minute)
+	mustClaimRunForCarrierTest(t, repo, causingRun.ID, causingClaimedAt)
+	// The runtime can finish the workflow transition before the scheduler
+	// binds the task session to this run. The durable run ID still identifies
+	// the actual cause while the reused session points at an older execution.
+	seedStepTransition(t, repo, 10, "task-1", "agent", "", "sess-reused", "run-cause", causingClaimedAt.Add(time.Minute))
+
+	got := svc.TaskBoundaryCarrierForStepTransition(ctx, "task-1", "10")
+	if got.ActorKind != models.ActorKindAgent || got.ActorID != "agent-cause" {
+		t.Fatalf("actor = %s/%s, want agent/agent-cause", got.ActorKind, got.ActorID)
+	}
+	if got.CausationID != "right-chain" || got.CreatingRunID != "run-cause" || got.CausationDepth != 3 {
+		t.Fatalf("lineage = %+v, want lineage from run-cause", got)
+	}
+}
+
+func TestTaskBoundaryCarrierForStepTransition_UsesRunIDAfterRetryClearsClaim(t *testing.T) {
+	svc, repo := newStepTransitionCarrierTestService(t)
+	ctx := context.Background()
+	seedOfficeTaskWithMetadata(t, repo, "task-1", map[string]interface{}{})
+
+	causingRun := &models.Run{
+		ID: "run-retried", AgentProfileID: "agent-retried", Reason: "task_assigned",
+		Payload: `{"task_id":"source-task"}`, ChainCausationID: "retry-chain", CausationDepth: 4,
+	}
+	mustCreateRunForCarrierTest(t, repo, causingRun)
+	claimedAt := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	mustClaimRunForCarrierTest(t, repo, causingRun.ID, claimedAt)
+	mustSetRunSessionForCarrierTest(t, repo, causingRun.ID, "sess-retried")
+	if _, err := repo.ExecRaw(ctx, `UPDATE runs SET status = 'queued', claimed_at = NULL, session_id = '' WHERE id = ?`, causingRun.ID); err != nil {
+		t.Fatalf("clear retry claim: %v", err)
+	}
+	seedStepTransition(t, repo, 11, "task-1", "agent", "", "sess-retried", "run-retried", claimedAt.Add(time.Minute))
+
+	got := svc.TaskBoundaryCarrierForStepTransition(ctx, "task-1", "11")
+	if got.CreatingRunID != "run-retried" || got.CausationID != "retry-chain" || got.CausationDepth != 4 {
+		t.Fatalf("lineage = %+v, want retry-chain from run-retried", got)
 	}
 }

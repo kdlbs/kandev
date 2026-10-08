@@ -332,6 +332,11 @@ func (m *Manager) claimPromptCompletion(
 		current.Status = v1.AgentStatusReady
 		claim.readyPayload = newAgentEventPayloadWithTurnID(current, event.TurnID)
 		claim.readyPayload.AttemptID = event.AttemptID
+		// The Office cause belongs to the launch's first turn. Preserve it on
+		// that completion event, then clear it so later user turns on this
+		// session cannot inherit stale run causation.
+		current.CausingRunID = ""
+		current.deleteMetadataValues(MetadataKeyCausingRunID)
 	})
 	if err == nil && claimed {
 		return claim, true

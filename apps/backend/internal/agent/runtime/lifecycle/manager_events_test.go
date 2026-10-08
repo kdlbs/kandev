@@ -289,6 +289,49 @@ func TestHandleAgentEvent_CompleteCarriesPromptTurnID(t *testing.T) {
 	t.Fatal("no complete stream event published")
 }
 
+func TestHandleAgentEvent_CompleteConsumesCausingRunIDAfterReady(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-run-cause", "task-1", "session-1")
+	execution.CausingRunID = "office-run-1"
+	execution.setMetadataValue(MetadataKeyCausingRunID, "office-run-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	generation, err := mgr.executionStore.BeginPrompt(execution.ID)
+	if err != nil {
+		t.Fatalf("begin prompt: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             streams.EventTypeComplete,
+		SessionID:        execution.SessionID,
+		PromptGeneration: generation,
+	})
+
+	var readyPayload *AgentEventPayload
+	for _, published := range eventBus.PublishedEvents {
+		if published.Subject != events.AgentReady {
+			continue
+		}
+		payload, ok := published.Event.Data.(AgentEventPayload)
+		if ok {
+			readyPayload = &payload
+		}
+	}
+	if readyPayload == nil {
+		t.Fatal("AgentReady payload was not published")
+	}
+	if readyPayload.CausingRunID != "office-run-1" {
+		t.Fatalf("ready event causing run ID = %q, want office-run-1", readyPayload.CausingRunID)
+	}
+	if execution.CausingRunID != "" {
+		t.Fatalf("execution causing run ID after ready = %q, want empty", execution.CausingRunID)
+	}
+	if _, ok := execution.metadataValue(MetadataKeyCausingRunID); ok {
+		t.Fatal("causing run metadata remains after the first turn completed")
+	}
+}
+
 func TestUsageObservationUsesItsPromptGenerationTurnID(t *testing.T) {
 	execution := &AgentExecution{}
 	execution.setPromptTurnID("turn-a")

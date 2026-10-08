@@ -5554,6 +5554,32 @@ func TestStartTaskPublishesCreatedSessionBeforeLaunch(t *testing.T) {
 	assert.True(t, publishedBeforeLaunch, "created session event must arrive before the runtime starts")
 }
 
+func TestStartTaskWithLaunchContextPassesCausingRunID(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-cause", "session-cause", models.TaskSessionStateCompleted)
+	task, err := repo.GetTask(ctx, "task-cause")
+	require.NoError(t, err)
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[task.ID] = task.ToAPI()
+
+	var launchReq *executor.LaunchAgentRequest
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchReq = req
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-cause"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	_, err = svc.StartTaskWithLaunchContext(ctx, task.ID, "profile-1", executor.LaunchContext{
+		CausingRunID: "office-run-1",
+		Prompt:       "Run the Office step",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, launchReq)
+	require.Equal(t, "office-run-1", launchReq.CausingRunID)
+}
+
 func TestStartTaskRecordsDirectWorkflowSourceBindingBeforeLaunch(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

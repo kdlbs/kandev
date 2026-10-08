@@ -49,7 +49,7 @@ func newTestRepoWithTaskSchema(t *testing.T) (*sqlite.Repository, *sqlx.DB) {
 // enforcement is on for this connection, so it seeds a minimal 'task-1' row
 // (idempotent — INSERT OR IGNORE) the first time it is called.
 func insertStepTransition(
-	t *testing.T, db *sqlx.DB, id int64, actorKind, actorID, sessionID string, occurredAt time.Time,
+	t *testing.T, db *sqlx.DB, id int64, actorKind, actorID, sessionID, causingRunID string, occurredAt time.Time,
 ) {
 	t.Helper()
 	now := time.Now().UTC()
@@ -72,13 +72,17 @@ func insertStepTransition(
 			t.Fatalf("seed task session %q: %v", sessionID, err)
 		}
 	}
+	var causingRunIDArg any
+	if causingRunID != "" {
+		causingRunIDArg = causingRunID
+	}
 	_, err := db.Exec(db.Rebind(`
 		INSERT INTO task_step_transitions
 			(id, task_id, session_id, from_workflow_id, from_workflow_step_id,
-			 to_workflow_id, to_workflow_step_id, trigger, actor_kind, actor_id,
+			 to_workflow_id, to_workflow_step_id, trigger, actor_kind, actor_id, causing_run_id,
 			 contract_version, occurred_at)
-		VALUES (?, 'task-1', ?, 'wf-1', 'from-step', 'wf-1', 'to-step', 'test', ?, ?, 1, ?)
-	`), id, sessionIDArg, actorKind, actorIDArg, occurredAt)
+		VALUES (?, 'task-1', ?, 'wf-1', 'from-step', 'wf-1', 'to-step', 'test', ?, ?, ?, 1, ?)
+	`), id, sessionIDArg, actorKind, actorIDArg, causingRunIDArg, occurredAt)
 	if err != nil {
 		t.Fatalf("insert step transition %d: %v", id, err)
 	}
@@ -92,7 +96,7 @@ func insertStepTransition(
 func TestGetStepTransitionActor_ReadsAgentAttribution(t *testing.T) {
 	repo, db := newTestRepoWithTaskSchema(t)
 	occurredAt := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	insertStepTransition(t, db, 1, "agent", "", "sess-1", occurredAt)
+	insertStepTransition(t, db, 1, "agent", "", "sess-1", "run-1", occurredAt)
 
 	got, err := repo.GetStepTransitionActor(context.Background(), 1)
 	if err != nil {
@@ -107,6 +111,9 @@ func TestGetStepTransitionActor_ReadsAgentAttribution(t *testing.T) {
 	if got.SessionID != "sess-1" {
 		t.Errorf("session_id = %q, want %q", got.SessionID, "sess-1")
 	}
+	if got.CausingRunID != "run-1" {
+		t.Errorf("causing_run_id = %q, want run-1", got.CausingRunID)
+	}
 	if !got.OccurredAt.Equal(occurredAt) {
 		t.Errorf("occurred_at = %v, want %v", got.OccurredAt, occurredAt)
 	}
@@ -117,7 +124,7 @@ func TestGetStepTransitionActor_ReadsAgentAttribution(t *testing.T) {
 func TestGetStepTransitionActor_ReadsHumanAttribution(t *testing.T) {
 	repo, db := newTestRepoWithTaskSchema(t)
 	occurredAt := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	insertStepTransition(t, db, 2, "human", "user-42", "", occurredAt)
+	insertStepTransition(t, db, 2, "human", "user-42", "", "", occurredAt)
 
 	got, err := repo.GetStepTransitionActor(context.Background(), 2)
 	if err != nil {

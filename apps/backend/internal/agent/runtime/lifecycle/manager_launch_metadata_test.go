@@ -64,6 +64,19 @@ func TestBuildLaunchMetadataExecutorConfigWinsForTrustedKeys(t *testing.T) {
 		"untrusted executor-config keys still fill in when the caller supplied nothing")
 }
 
+func TestBuildLaunchMetadataUsesTrustedCausingRunID(t *testing.T) {
+	metadata := buildLaunchMetadata(&LaunchRequest{
+		CausingRunID: "office-run-1",
+		Metadata:     map[string]interface{}{MetadataKeyCausingRunID: "untrusted-run"},
+	}, "", "", "")
+	require.Equal(t, "office-run-1", metadata[MetadataKeyCausingRunID])
+
+	metadata = buildLaunchMetadata(&LaunchRequest{
+		Metadata: map[string]interface{}{MetadataKeyCausingRunID: "untrusted-run"},
+	}, "", "", "")
+	require.NotContains(t, metadata, MetadataKeyCausingRunID)
+}
+
 func TestBuildLaunchMetadataExecutorConfigWinsForKubernetesConnectionKeys(t *testing.T) {
 	req := &LaunchRequest{
 		ExecutorType: string(models.ExecutorTypeKubernetes),

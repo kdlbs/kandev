@@ -16,6 +16,7 @@ type AgentEventPayload struct {
 	OwnerKind                ExecutionOwnerKind               `json:"owner_kind,omitempty"`
 	WorkspaceID              string                           `json:"workspace_id,omitempty"`
 	RunID                    string                           `json:"run_id,omitempty"`
+	CausingRunID             string                           `json:"causing_run_id,omitempty"`
 	RunSessionID             string                           `json:"run_session_id,omitempty"`
 	RunAttempt               int                              `json:"run_attempt,omitempty"`
 	TaskID                   string                           `json:"task_id"`

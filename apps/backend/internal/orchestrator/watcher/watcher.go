@@ -41,6 +41,8 @@ type AgentEventData struct {
 	TaskID                   string                                `json:"task_id"`
 	SessionID                string                                `json:"session_id"`
 	OwnerKind                string                                `json:"owner_kind,omitempty"`
+	RunID                    string                                `json:"run_id,omitempty"`
+	CausingRunID             string                                `json:"causing_run_id,omitempty"`
 	TaskEnvironmentID        string                                `json:"task_environment_id,omitempty"`
 	AgentExecutionID         string                                `json:"agent_execution_id"`
 	AgentID                  string                                `json:"agent_id,omitempty"`

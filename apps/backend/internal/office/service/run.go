@@ -340,11 +340,9 @@ func (s *Service) TaskBoundaryCarrierForRunQueue(ctx context.Context, taskID, ca
 // transitionID.
 //
 //   - actor_kind=agent: the wake was produced by an agent's turn completing.
-//     The run claimed on the ledger row's session_id at or before its
-//     occurred_at is that turn's run (GetRunBySessionAt deliberately isn't
-//     restricted to status='claimed' — resolution can race a fast-finishing
-//     run), and its lineage advances exactly like a live claimed-run lookup
-//     would.
+//     New rows carry the immutable causing run ID from the lifecycle event.
+//     Older rows use their session and occurrence time to find the run that
+//     was active when the transition occurred.
 //   - actor_kind=human: the wake was produced by a human moving the task.
 //     The move itself is the causing event, so this roots a fresh,
 //     human-rooted chain rather than attributing it to any run.
@@ -364,6 +362,15 @@ func (s *Service) TaskBoundaryCarrierForStepTransition(ctx context.Context, task
 	case steptelemetry.ActorHuman:
 		return TaskBoundaryCarrier{ActorKind: models.ActorKindUser, ActorID: actor.ActorID, HumanRooted: true}
 	case steptelemetry.ActorAgent:
+		if actor.CausingRunID != "" {
+			if run, err := s.repo.GetRun(ctx, actor.CausingRunID); err == nil && run != nil {
+				return carrierFromRunWithActor(run, models.ActorKindAgent, run.AgentProfileID)
+			}
+			return s.TaskBoundaryCarrier(ctx, taskID)
+		}
+		// Older ledger rows do not contain a causing run ID. Keep their
+		// session/time lookup as a compatibility path; new transitions use the
+		// immutable ID carried by their lifecycle event.
 		if actor.SessionID != "" {
 			if run, err := s.repo.GetRunBySessionAt(ctx, actor.SessionID, actor.OccurredAt); err == nil && run != nil {
 				return carrierFromRunWithActor(run, models.ActorKindAgent, run.AgentProfileID)

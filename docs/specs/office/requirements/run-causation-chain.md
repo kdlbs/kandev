@@ -237,13 +237,15 @@ chain without correlating log lines by timestamp.
 - **AC-OFFICE-RUN-CAUSATION-001.25:** When a wake is queued because a task entered a
   workflow step, the actor and causing run shall come from the committed step
   transition that produced the entry, not from a session that happens to be live when
-  the wake is queued. When that transition was caused by an agent session's turn, the
-  run that session was executing shall be the causing run under
-  AC-OFFICE-RUN-CAUSATION-001.3, even when that run has finished before the wake is
-  queued, so a review and rework loop between workflow steps deepens one chain. When
-  the transition was caused by a human, the wake shall be a human-rooted root under
-  AC-OFFICE-RUN-CAUSATION-001.9. Otherwise, the wake shall fall back to the task
-  carrier of AC-OFFICE-RUN-CAUSATION-001.18.
+  the wake is queued. When an Office task-owned or run-owned agent execution causes
+  the transition, the transition shall retain its trusted causing run ID. The wake
+  shall load that exact run under AC-OFFICE-RUN-CAUSATION-001.3, even if session
+  binding has not yet completed or retry and recovery have cleared mutable claim
+  fields. This lets a review and rework loop between workflow steps deepen one chain.
+  A transition caused by a human shall produce a human-rooted root under
+  AC-OFFICE-RUN-CAUSATION-001.9. Other transitions shall fall back to the task
+  carrier of AC-OFFICE-RUN-CAUSATION-001.18. Rows written before the trusted run ID
+  was recorded may use the existing session-and-time lookup for compatibility.
 
 ## Out of scope
 
