@@ -1080,6 +1080,7 @@ export class SessionPage {
       .first();
     await expect(tab).toBeVisible();
     await tab.click(options);
+    await expect(this.page.locator(".dv-tab", { has: tab })).toHaveClass(/dv-active-tab/);
   }
 
   /** Open the Changes Diff action in its direct or width-aware overflow presentation. */

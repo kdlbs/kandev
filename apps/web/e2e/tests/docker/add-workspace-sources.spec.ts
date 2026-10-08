@@ -127,9 +127,14 @@ test.describe("Docker executor — attach workspace sources", () => {
         ),
       ).toBe("docker-second-source fixture\n");
       // Attaching the repository creates an untracked change and can activate
-      // the Changes tab after the earlier Files selection. Restore Files at
-      // the observation point and reveal the row if the tree is virtualized.
+      // the Changes tab after the earlier Files selection. Wait for that
+      // workspace update to finish before switching back to Files.
+      const changesTab = testPage
+        .locator(".dv-default-tab:visible")
+        .filter({ hasText: /^Changes \([1-9]\d*\)$/ });
+      await expect(changesTab).toBeVisible();
       await session.clickTab("Files");
+      await expect(session.files).toBeVisible();
       await session.fileTree.waitForFileTreeNode("fixture-docker-second-source-main", 60_000);
 
       const forgedFolder = await apiClient.rawRequest(
