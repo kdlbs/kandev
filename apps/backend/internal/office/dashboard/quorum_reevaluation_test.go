@@ -50,10 +50,13 @@ func TestRequestTaskChanges_HumanVetoUnsticksReviewerGuardedStep(t *testing.T) {
 		newTestEngineDispatcherWithReevaluation(deps.wfRepo, logger.Default(), store, "vt1", session),
 	)
 
-	_, err := deps.svc.RequestTaskChanges(context.Background(),
+	decision, err := deps.svc.RequestTaskChanges(context.Background(),
 		models.DeciderTypeUser, "human-1", "vt1", "please fix the approach")
 	if err != nil {
 		t.Fatalf("RequestTaskChanges: %v", err)
+	}
+	if decision.Role != models.ParticipantRoleApprover {
+		t.Fatalf("human decision role = %q, want implicit approver", decision.Role)
 	}
 
 	var gotStepID string

@@ -5,8 +5,11 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/models"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
 // seedTwoStepWorkflowTask creates a two-step workflow (stepAID at
@@ -93,6 +96,95 @@ func TestApproveTask_NotForbiddenAfterStepMove(t *testing.T) {
 	}
 	if d == nil || d.Decision != models.DecisionApproved {
 		t.Fatalf("decision = %+v", d)
+	}
+}
+
+// A current-step reviewer must win over an approver seat elsewhere in the
+// workflow, and its decision must satisfy the reviewer guard.
+func TestRecordTaskDecision_MixedRoleSeatsUseCurrentStepRole(t *testing.T) {
+	tests := []struct {
+		name      string
+		threshold string
+		record    func(*dashboard.DashboardService) (*dashboard.DecisionRecord, error)
+	}{
+		{
+			name:      "approval",
+			threshold: engine.QuorumAllApprove,
+			record: func(svc *dashboard.DashboardService) (*dashboard.DecisionRecord, error) {
+				return svc.ApproveTask(context.Background(), models.DeciderTypeAgent, "agent-mixed", "mixed-approve", "")
+			},
+		},
+		{
+			name:      "request changes",
+			threshold: engine.QuorumAnyReject,
+			record: func(svc *dashboard.DashboardService) (*dashboard.DecisionRecord, error) {
+				return svc.RequestTaskChanges(context.Background(), models.DeciderTypeAgent, "agent-mixed", "mixed-changes", "please revise")
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := newTestDeps(t)
+			workflowID := "wf-mixed-" + tc.name
+			taskID := "mixed-approve"
+			if tc.name == "request changes" {
+				taskID = "mixed-changes"
+			}
+			reviewStepID := "step-" + taskID + "-review"
+			approvalStepID := "step-" + taskID + "-approval"
+			seedTwoStepWorkflowTask(t, deps.db, taskID, "ws-mixed", "Mixed roles", "in_review",
+				workflowID, reviewStepID, approvalStepID)
+			mustAddParticipant(t, deps, taskID, "agent-mixed", models.ParticipantRoleReviewer)
+			if _, err := deps.db.Exec(`
+				INSERT INTO workflow_step_participants
+				(id, step_id, task_id, role, agent_profile_id, decision_required, position)
+				VALUES (?, ?, ?, ?, ?, 1, 0)
+			`, "p-historical-approver-"+taskID, approvalStepID, taskID,
+				models.ParticipantRoleApprover, "agent-mixed"); err != nil {
+				t.Fatalf("insert approver seat at another step: %v", err)
+			}
+
+			store := newDashboardTransitionStore(deps.db)
+			store.workflowID = workflowID
+			store.steps[reviewStepID] = engine.StepSpec{
+				ID: reviewStepID, WorkflowID: workflowID, Position: 0,
+				Events: map[engine.Trigger][]engine.Action{
+					engine.TriggerOnTurnComplete: {
+						{
+							Kind: engine.ActionMoveToStep,
+							Guard: &engine.TransitionGuard{
+								WaitForQuorum: &engine.WaitForQuorumGuard{
+									Role: models.ParticipantRoleReviewer, Threshold: tc.threshold,
+								},
+							},
+							MoveToStep: &engine.MoveToStepAction{StepID: approvalStepID},
+						},
+					},
+				},
+			}
+			deps.svc.SetWorkflowEngineDispatcher(newTestEngineDispatcherWithReevaluation(
+				deps.wfRepo, logger.Default(), store, taskID,
+				&taskmodels.TaskSession{ID: "session-" + taskID},
+			))
+
+			decision, err := tc.record(deps.svc)
+			if err != nil {
+				t.Fatalf("record decision: %v", err)
+			}
+			if decision.Role != models.ParticipantRoleReviewer {
+				t.Fatalf("decision role = %q, want reviewer", decision.Role)
+			}
+			var gotStepID string
+			if err := deps.db.QueryRow(
+				`SELECT workflow_step_id FROM tasks WHERE id = ?`, taskID,
+			).Scan(&gotStepID); err != nil {
+				t.Fatalf("read task step: %v", err)
+			}
+			if gotStepID != approvalStepID {
+				t.Fatalf("workflow_step_id = %q, want %q after reviewer quorum", gotStepID, approvalStepID)
+			}
+		})
 	}
 }
 
