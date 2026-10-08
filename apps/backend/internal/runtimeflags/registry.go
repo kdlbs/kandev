@@ -37,12 +37,14 @@ type runtimeFlagIdentity struct {
 }
 
 const (
-	keyCodexAppServer                  = "features.codexAppServer"
-	envCodexAppServer                  = "KANDEV_FEATURES_CODEX_APP_SERVER"
-	retiredAppStatusBarKey             = "features.appStatusBar"
-	retiredAppStatusBarEnvVar          = "KANDEV_FEATURES_APP_STATUS_BAR"
-	retiredOfficeSessionIdentityKey    = "features.officeSessionIdentity"
-	retiredOfficeSessionIdentityEnvVar = "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"
+	keyCodexAppServer                             = "features.codexAppServer"
+	envCodexAppServer                             = "KANDEV_FEATURES_CODEX_APP_SERVER"
+	retiredAppStatusBarKey                        = "features.appStatusBar"
+	retiredAppStatusBarEnvVar                     = "KANDEV_FEATURES_APP_STATUS_BAR"
+	retiredOfficeSessionIdentityKey               = "features.officeSessionIdentity"
+	retiredOfficeSessionIdentityEnvVar            = "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"
+	retiredProviderInterruptionContinuationKey    = "features.providerInterruptionContinuation"
+	retiredProviderInterruptionContinuationEnvVar = "KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION"
 )
 
 // retiredRuntimeFlagIdentities is append-only. When a flag graduates, remove
@@ -54,6 +56,7 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 	{key: retiredAppStatusBarKey, envVar: retiredAppStatusBarEnvVar},
 	{key: retiredOfficeSessionIdentityKey, envVar: retiredOfficeSessionIdentityEnvVar},
 	{key: "features.remoteExecutorPlugins", envVar: "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS"},
+	{key: retiredProviderInterruptionContinuationKey, envVar: retiredProviderInterruptionContinuationEnvVar},
 }
 
 var registrations = []runtimeFlagRegistration{
@@ -197,23 +200,6 @@ var registrations = []runtimeFlagRegistration{
 		read:  func(cfg *config.Config) bool { return cfg.Features.CodexAppServer },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.CodexAppServer = value },
 	},
-	{
-		definition: RuntimeFlagDefinition{
-			Key:             "features.providerInterruptionContinuation",
-			EnvVar:          "KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION",
-			Kind:            KindFeature,
-			Label:           "Interrupted conversation continuation",
-			Description:     "Restores supported interrupted conversations and continues after completed tools.",
-			Stability:       StabilityExperimental,
-			RiskLevel:       RiskHigh,
-			RiskDescription: "Native restoration and tool outcomes must be verified. Uncertain work requires manual recovery.",
-			RestartRequired: true,
-			Mutable:         true,
-		},
-		read:  func(cfg *config.Config) bool { return cfg.Features.ProviderInterruptionContinuation },
-		apply: func(cfg *config.Config, value bool) { cfg.Features.ProviderInterruptionContinuation = value },
-	},
-
 	{
 		definition: RuntimeFlagDefinition{
 			Key:             "features.agentBackgroundWork",

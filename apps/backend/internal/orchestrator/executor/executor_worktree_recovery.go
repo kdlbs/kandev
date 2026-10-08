@@ -33,6 +33,10 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 	if env.TaskID == "" || env.OwnershipGeneration <= 0 {
 		return nil, fmt.Errorf("worktree recovery admission: selected environment identity is incomplete")
 	}
+	var inspectionDeadline time.Time
+	if inspectionWait > 0 {
+		ctx, inspectionDeadline = worktree.WithRecoveryInspectionWait(ctx, inspectionWait)
+	}
 
 	selectionSnapshot, selectedRepositories, err := e.captureSelectedWorkspaceRecoverySnapshot(ctx, session, env, sessionPersisted)
 	if err != nil {
@@ -87,6 +91,7 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 		SelectionSnapshot:      selectionSnapshot,
 		AllowBranchReplacement: allowBranchReplacement,
 		InspectionWait:         inspectionWait,
+		InspectionDeadline:     inspectionDeadline,
 		Slots:                  slots,
 	})
 	if err != nil {
@@ -157,7 +162,7 @@ func (e *Executor) PreflightSessionWorktreeRecovery(
 	if err != nil || env == nil {
 		return nil, err
 	}
-	return e.admitSelectedWorktreeRecovery(ctx, taskID, session, env, env.ExecutorType, allowBranchReplacement, worktree.ManualRecoveryInspectionWait, true)
+	return e.admitSelectedWorktreeRecovery(ctx, taskID, session, env, env.ExecutorType, allowBranchReplacement, worktree.RecoveryInspectionWaitBudget, true)
 }
 
 type managedClonePathResolver interface {

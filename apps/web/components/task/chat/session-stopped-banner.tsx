@@ -143,16 +143,28 @@ function useStoppedRecoveryChoices(
   onRelocateRequested: () => void,
 ): RecoveryChoice[] {
   const { t } = useTranslation();
+  if (props.uncertainDelivery && props.mode !== "completed") {
+    return uncertainDeliveryRecoveryChoices(props, t);
+  }
+
+  if (props.actions.recoveryNoticeKind === "inspection_busy") {
+    return [
+      {
+        kind: "resume",
+        label: props.resumeLabel ?? t("task:resume"),
+        disabled: !profileExists,
+        testId: "recovery-resume-button",
+        onClick: () => void props.actions.handleRetry(),
+      },
+    ];
+  }
+
   if (
     props.actions.managedCloneRecoveryStamp ||
     props.actions.workspaceRecoveryMatchesCurrentFailure
   ) {
     return [managedCloneRecoveryChoice(onRelocateRequested, t)];
   }
-  if (props.uncertainDelivery && props.mode !== "completed") {
-    return uncertainDeliveryRecoveryChoices(props, t);
-  }
-
   const choices = sessionRecoveryChoices(props, profileExists, t);
   addOptionalRecoveryChoices(choices, props.actions, t);
   return choices;

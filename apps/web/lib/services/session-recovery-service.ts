@@ -55,6 +55,10 @@ export type ContextContinuationDetails = WebSocketRequestErrorDetails & {
   generation?: number;
 };
 
+export type RecoveryInspectionBusyDetails = WebSocketRequestErrorDetails & {
+  kind: "recovery_inspection_busy";
+};
+
 type RecoveryResponse = { success?: boolean; error?: string };
 type WorkspaceRecoveryStatusResponse = {
   workspace_recovery?: WorkspaceRecoveryProjection | null;
@@ -94,6 +98,15 @@ export function sessionRecoveryGuardDetails(error: unknown): SessionRecoveryGuar
   return error.details as SessionRecoveryGuardDetails;
 }
 
+/** Returns the typed conflict used when workspace inspection exhausts its wait budget. */
+export function recoveryInspectionBusyDetails(
+  error: unknown,
+): RecoveryInspectionBusyDetails | null {
+  if (!(error instanceof WebSocketRequestError) || !isRecord(error.details)) return null;
+  if (error.details.kind !== "recovery_inspection_busy") return null;
+  return error.details as RecoveryInspectionBusyDetails;
+}
+
 /** Minimal shape both `useTranslation()`'s `t` and the module-level `t` satisfy. */
 type Translator = (key: string, options?: Record<string, unknown>) => string;
 
@@ -106,6 +119,11 @@ export function sessionRecoveryGuardMessage(
     return t("task:sessionRecoveryGuardInProgress");
   }
   return t("task:sessionRecoveryGuardUnstoppable");
+}
+
+/** Translates the retryable inspection conflict without exposing transport text. */
+export function recoveryInspectionBusyMessage(t: Translator): string {
+  return t("task:workspaceRecoveryInspectionBusy");
 }
 
 export function managedCloneRelocationRecoveryDetails(
@@ -130,6 +148,7 @@ export function resolveRequestErrorMessage(
 ): string {
   const guard = sessionRecoveryGuardDetails(error);
   if (guard) return sessionRecoveryGuardMessage(guard, t);
+  if (recoveryInspectionBusyDetails(error)) return recoveryInspectionBusyMessage(t);
   if (error instanceof Error) return error.message;
   return fallback;
 }

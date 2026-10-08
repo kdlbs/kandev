@@ -15,6 +15,7 @@ import (
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // ErrResumeAttemptCancelled is returned when a startup continuation no longer
@@ -151,6 +152,7 @@ func (r *resumeAttemptRegistry) begin(parent context.Context, taskID, sessionID 
 	if parent == nil {
 		parent = context.Background()
 	}
+	parent, _ = worktree.WithRecoveryInspectionWait(parent, worktree.RecoveryInspectionWaitBudget)
 	if owned, _ := parent.Value(continuationOwnedContextKey{}).(bool); !owned {
 		parent = context.WithoutCancel(parent)
 	}

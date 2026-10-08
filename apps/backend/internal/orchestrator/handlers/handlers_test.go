@@ -128,6 +128,11 @@ func TestRecoveryInspectionConflictResponseIsSanitized(t *testing.T) {
 	require.Equal(t, ws.ErrorCodeConflict, payload.Code)
 	require.Equal(t, "workspace recovery inspection is busy", payload.Message)
 	require.Equal(t, "recovery_inspection_busy", payload.Details["kind"])
+
+	joined := errors.Join(err, errors.New("lifecycle cleanup failed"))
+	response, responseErr = recoveryInspectionConflictResponse(msg, joined)
+	require.NoError(t, responseErr)
+	require.Nil(t, response, "joined lifecycle failures must use normal failure handling")
 }
 
 func TestSessionRecoveryGuardConflictResponseMapsRetryableToConflict(t *testing.T) {

@@ -346,9 +346,6 @@ func (s *Service) validateContinuationOwner(ctx context.Context, taskID, session
 	}
 	switch entry.continuationPolicy {
 	case continuationPolicySavedHistoryRestore:
-		if !s.config.ProviderInterruptionContinuation {
-			return ErrResumeAttemptCancelled
-		}
 	case continuationPolicyCapacityLive:
 	default:
 		return ErrResumeAttemptCancelled

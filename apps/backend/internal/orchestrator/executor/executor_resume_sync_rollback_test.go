@@ -42,6 +42,9 @@ func TestResumeSessionSynchronousStartFailureRespectsAttemptIdentity(t *testing.
 			}
 			want := models.TaskSessionStateWaitingForInput
 			if successor {
+				if !errors.Is(err, ErrSessionStateSuperseded) {
+					t.Fatalf("ResumeSessionWithOptions error = %v, want superseded attempt cause", err)
+				}
 				want = models.TaskSessionStateStarting
 				if got := repo.sessions["sess-1"].Metadata[models.SessionMetaKeyAgentStartAttemptID]; got != "successor" {
 					t.Fatalf("attempt identity = %v, want successor", got)

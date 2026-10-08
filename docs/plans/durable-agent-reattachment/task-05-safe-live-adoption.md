@@ -1433,3 +1433,60 @@ added; deletion behavior, retry policy and timeout remain unchanged.
  --trace=retain-on-failure --reporter=list --output=/owned-output` passed all
 18 cases on their first attempt in the CI runtime image with two CPUs, 4 GiB
 and one worker. Hosted verification remains necessary.
+
+### Main 56cc19514e integration (2026-10-08)
+
+Integrated main `56cc19514e20b1c78c366005a9358ba9a8857393` through the
+existing merge history. Five conflicts preserved context continuation,
+submission uncertainty, cancellation, inspection deadlines, and upstream's
+retirement of the interruption-continuation toggle. No new toggle was added.
+
+Combined recovery priorities were tested before the resolution: two cases
+failed and one passed when an older workspace relocation action could obscure
+uncertain delivery or inspection contention. Uncertain delivery now retains
+Retry connection and Stop; inspection contention retains same-session Retry.
+Workspace relocation remains available for its independent eligible failures.
+The existing workspace identity helpers moved into the extracted recovery fence
+module to satisfy the hook's lint size limit without changing their predicates.
+
+Validation:
+
+- `pnpm exec vitest run components/task/chat/session-stopped-banner.test.tsx
+  lib/services/session-recovery-service.test.ts hooks/domains/session/
+  lib/state/slices/session-runtime/ lib/state/slices/features/` passed 1,041
+  tests in 109 files. The final banner-only run passed all 24 cases.
+- `pnpm run typecheck`, focused ESLint with `--max-warnings 0`,
+  `pnpm run i18n:check`, full specification lint, and catalog validation passed.
+  All eight merged locale catalogs parsed without duplicate keys.
+- `go test -race ./internal/orchestrator ./internal/orchestrator/executor
+  ./internal/agentctl/server/adapter/transport/acp ./internal/runtimeflags
+  ./internal/worktree -run
+  'ResumeAttempt|CancelAgent|Inspection|Continuation|ProviderInterruption|Recovery|Delivery|Retired'
+  -count=1` passed all five packages.
+- Rebuilt desktop browser checks passed both durable reattachment cases and
+  all 15 provider-continuation cases. The inspection case initially failed
+  because task state was checked immediately after streamed response text;
+  desktop and phone now poll the separate task completion transition.
+- The corrected inspection case passed first attempt in the isolated CI
+  runtime image with two CPUs, 4 GiB, one worker, and `--retries=0`.
+  Two intervening host runs failed respectively at the contention notice and
+  fixture workspace setup; neither is claimed fixed by the completion poll.
+  The temporary incorrect response index was reverted before delivery.
+
+All four phone cases passed first attempt in the same isolated CI image: actual
+disconnect after reload, eligible continuation, cancellation with history, and
+inspection retry with draft preservation. New-head hosted CI remains pending.
+Native Windows/macOS containment and targeted durable-delivery
+PostgreSQL/live-harness release gates remain open.
+
+The normal merge hook exposed a cross-branch rollback contract change: the
+rollback helper now returns a classified error, while this PR's synchronous
+start failure caller discarded it. Extending the existing attempt-identity test
+failed because the successor-attempt cause was absent. The caller now joins the
+start and rollback errors and leaves the successor's state and identity intact.
+No lint hook was bypassed.
+
+`go test -race ./internal/orchestrator/executor -run
+'Synchronous|ResumeAttempt|Inspection|Recovery|Delivery|Continuation' -count=1`
+passed after this error-preservation change. Browser receipts above precede this
+backend-only failure-path correction; they do not claim coverage of that path.

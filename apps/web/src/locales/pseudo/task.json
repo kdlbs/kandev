@@ -2347,6 +2347,7 @@
   "sessionErrorPromptNotSent": "Ńō",
   "sessionErrorPromptSent": "Ŷēś",
   "resumeFailedWorkspaceReadOnly": "Ŵōŕķśƥàćē ŕēśţōŕēď ĩń ŕēàď-ōńĺŷ ḿōďē",
+  "workspaceRecoveryInspectionBusy": "Ţĥĩś ŵōŕķśƥàćē ĩś śţĩĺĺ ƀēĩńĝ ćĥēćķēď. Ţŕŷ ŕēśũḿĩńĝ ţĥē śēśśĩōń àĝàĩń.",
   "continueOnNewBranch": "Ćōńţĩńũē ōń à ńēŵ ƀŕàńćĥ",
   "continueFromHistory": "Ćōńţĩńũē ƒŕōḿ śàvēď ĥĩśţōŕŷ",
   "restoreReadOnlyWorkspace": "Ŕēśţōŕē ŕēàď-ōńĺŷ ŵōŕķśƥàćē",

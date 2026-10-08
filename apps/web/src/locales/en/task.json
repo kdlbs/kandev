@@ -2347,6 +2347,7 @@
   "sessionErrorPromptNotSent": "No",
   "sessionErrorPromptSent": "Yes",
   "resumeFailedWorkspaceReadOnly": "Workspace restored in read-only mode",
+  "workspaceRecoveryInspectionBusy": "This workspace is still being checked. Try resuming the session again.",
   "continueOnNewBranch": "Continue on a new branch",
   "continueFromHistory": "Continue from saved history",
   "restoreReadOnlyWorkspace": "Restore read-only workspace",

@@ -5,6 +5,9 @@ import {
   managedCloneRelocationRecoveryDetails,
   contextContinuationDetails,
   requestSessionRecover,
+  recoveryInspectionBusyDetails,
+  recoveryInspectionBusyMessage,
+  resolveRequestErrorMessage,
   sessionRecoveryGuardDetails,
 } from "./session-recovery-service";
 import { WebSocketRequestError } from "@/lib/ws/client";
@@ -15,6 +18,38 @@ vi.mock("@/lib/ws/connection", () => ({
 }));
 
 beforeEach(() => vi.clearAllMocks());
+
+describe("recoveryInspectionBusyDetails", () => {
+  it("recognizes only the structured inspection-contention conflict", () => {
+    const error = new WebSocketRequestError("busy", "CONFLICT", {
+      kind: "recovery_inspection_busy",
+    });
+
+    expect(recoveryInspectionBusyDetails(error)).toEqual({ kind: "recovery_inspection_busy" });
+    expect(recoveryInspectionBusyDetails(new Error("workspace recovery inspection is busy"))).toBe(
+      null,
+    );
+    expect(
+      recoveryInspectionBusyDetails(
+        new WebSocketRequestError("other conflict", "CONFLICT", { kind: "unrelated" }),
+      ),
+    ).toBeNull();
+  });
+
+  it("uses localized copy for typed contention and leaves unrelated transport errors unchanged", () => {
+    const t = (key: string) =>
+      key === "task:workspaceRecoveryInspectionBusy" ? "localized busy" : key;
+    const busy = new WebSocketRequestError("raw conflict", "CONFLICT", {
+      kind: "recovery_inspection_busy",
+    });
+
+    expect(recoveryInspectionBusyMessage(t)).toBe("localized busy");
+    expect(resolveRequestErrorMessage(busy, t)).toBe("localized busy");
+    expect(resolveRequestErrorMessage(new Error("raw transport failure"), t)).toBe(
+      "raw transport failure",
+    );
+  });
+});
 
 describe("session recovery service", () => {
   it("returns the details for a retryable in-progress recovery refusal", () => {

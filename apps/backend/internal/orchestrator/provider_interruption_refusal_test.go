@@ -18,7 +18,6 @@ func TestInterruptionContinuationManualReason(t *testing.T) {
 		name, reason string
 		mutate       func(*Service, *watcher.AgentEventData)
 	}{
-		{"disabled", "disabled", func(s *Service, _ *watcher.AgentEventData) { s.config.ProviderInterruptionContinuation = false }},
 		{"unsafe", "unsafe_work", func(_ *Service, d *watcher.AgentEventData) { d.ContinuationSafety.Unsafe = true }},
 		{"pending", "unsafe_work", func(_ *Service, d *watcher.AgentEventData) { d.ContinuationSafety.Pending = true }},
 		{"unsupported", "unsupported_restore", func(_ *Service, d *watcher.AgentEventData) { d.ContinuationSafety.Support = "" }},

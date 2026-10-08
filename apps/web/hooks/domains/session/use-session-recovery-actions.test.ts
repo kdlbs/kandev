@@ -49,6 +49,8 @@ vi.mock("@/lib/services/session-recovery-service", () => ({
     error instanceof Error ? error : new Error(fallback),
   branchRecoveryDetails: () => null,
   managedCloneRelocationRecoveryDetails: mocks.managedCloneRelocationRecoveryDetails,
+  recoveryInspectionBusyDetails: () => null,
+  recoveryInspectionBusyMessage: () => "",
   sessionRecoveryGuardDetails: () => null,
   sessionRecoveryGuardMessage: () => "",
   contextContinuationDetails: () => null,

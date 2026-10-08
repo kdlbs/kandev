@@ -2381,6 +2381,7 @@
   "sessionErrorPromptNotSent": "いいえ",
   "sessionErrorPromptSent": "はい",
   "resumeFailedWorkspaceReadOnly": "ワークスペースを読み取り専用で復元済み",
+  "workspaceRecoveryInspectionBusy": "このワークスペースを確認中です。セッションの再開をお試しください。",
   "continueOnNewBranch": "新しいブランチで続行",
   "restoreReadOnlyWorkspace": "読み取り専用ワークスペースを復元",
   "sessionRecoveryGuardInProgress": "このセッションのエージェントは、バックエンド再起動後の整合中。自動で消える。数秒待って再試行して。",

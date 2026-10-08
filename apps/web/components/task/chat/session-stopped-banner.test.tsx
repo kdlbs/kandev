@@ -10,6 +10,8 @@ import { WebSocketRequestError } from "@/lib/ws/client";
 const MORE_OPTIONS = "More options";
 const FAILED_TO_RESUME_MESSAGE = "Failed to resume session";
 const MANAGED_CLONE_RELOCATE_BUTTON = "managed-clone-relocate-button";
+const RETRY_CONNECTION_BUTTON = "recovery-retry-connection-button";
+const STOP_BUTTON = "recovery-stop-button";
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
@@ -233,10 +235,10 @@ describe("SessionStoppedBanner delivery recovery", () => {
     ).toBeTruthy();
     expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();
-    expect(screen.getByTestId("recovery-retry-connection-button")).toBeTruthy();
-    expect(screen.getByTestId("recovery-stop-button")).toBeTruthy();
+    expect(screen.getByTestId(RETRY_CONNECTION_BUTTON)).toBeTruthy();
+    expect(screen.getByTestId(STOP_BUTTON)).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId("recovery-retry-connection-button"));
+    fireEvent.click(screen.getByTestId(RETRY_CONNECTION_BUTTON));
     await waitFor(() =>
       expect(mocks.request).toHaveBeenCalledWith(
         SESSION_RECOVER_ACTION,
@@ -245,11 +247,52 @@ describe("SessionStoppedBanner delivery recovery", () => {
       ),
     );
 
-    fireEvent.click(screen.getByTestId("recovery-stop-button"));
+    fireEvent.click(screen.getByTestId(STOP_BUTTON));
     await waitFor(() => expect(mocks.stop).toHaveBeenCalledTimes(1));
     expect((await screen.findByTestId("delivery-stop-outcome-unconfirmed")).textContent).toBe(
       "Stop was requested. The prompt outcome is still unknown.",
     );
+  });
+
+  it.each([null, "older-workspace-error"])(
+    "keeps uncertain delivery fenced during inspection contention (workspace stamp: %s)",
+    (managedCloneRecoveryStamp) => {
+      const actions: SessionRecoveryActions = {
+        ...guardRecoveryActions("", "resume"),
+        recoveryError: null,
+        guardDetails: null,
+        manualRecoveryFailure: null,
+        recoveryNoticeKind: "inspection_busy",
+        managedCloneRecoveryStamp,
+      };
+      render(<BannerHarness mode="recoverable" uncertainDelivery recoveryActions={actions} />);
+
+      expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+      expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();
+      expect(screen.queryByTestId(MANAGED_CLONE_RELOCATE_BUTTON)).toBeNull();
+      expect(screen.getByTestId(STOP_BUTTON)).toBeTruthy();
+      fireEvent.click(screen.getByTestId(RETRY_CONNECTION_BUTTON));
+      expect(actions.handleRecover).toHaveBeenCalledWith("retry_connection");
+      expect(actions.handleRetry).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps inspection retry ahead of an older workspace relocation action", () => {
+    const actions: SessionRecoveryActions = {
+      ...guardRecoveryActions("", "resume"),
+      recoveryError: null,
+      guardDetails: null,
+      manualRecoveryFailure: null,
+      recoveryNoticeKind: "inspection_busy",
+      managedCloneRecoveryStamp: "older-workspace-error",
+    };
+    render(<BannerHarness mode="recoverable" recoveryActions={actions} />);
+
+    expect(screen.queryByTestId(MANAGED_CLONE_RELOCATE_BUTTON)).toBeNull();
+    expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();
+    fireEvent.click(screen.getByTestId(RESUME_BUTTON_TEST_ID));
+    expect(actions.handleRetry).toHaveBeenCalledTimes(1);
+    expect(actions.handleManagedCloneRelocation).not.toHaveBeenCalled();
   });
 
   it("keeps reconnecting distinct from an uncertain outcome", () => {
@@ -260,8 +303,8 @@ describe("SessionStoppedBanner delivery recovery", () => {
     expect(
       screen.getByText("Reconnecting to the agent. Your prompt will not be sent again."),
     ).toBeTruthy();
-    expect(screen.getByTestId("recovery-retry-connection-button")).toBeTruthy();
-    expect(screen.getByTestId("recovery-stop-button")).toBeTruthy();
+    expect(screen.getByTestId(RETRY_CONNECTION_BUTTON)).toBeTruthy();
+    expect(screen.getByTestId(STOP_BUTTON)).toBeTruthy();
   });
 });
 

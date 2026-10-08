@@ -84,12 +84,14 @@ and does not report a successful recovery. The matching failure remains
 **Resolved** even when a separate success notice is missing from the loaded chat.
 A later failure keeps its own recovery controls.
 
-### Experimental interruption continuation
+<a id="experimental-interruption-continuation"></a>
 
-**Interrupted conversation continuation** is off by default. When enabled, a
-supported transient Cursor ACP provider failure can continue the unfinished request in
-the same saved conversation after output or completed foreground tools. Kandev
-sends an internal continue instruction, preserves the transcript, and keeps
+### Interruption continuation
+
+Interrupted conversation continuation is supported by default for eligible
+transient Cursor ACP failures. It can continue the unfinished request in the
+same saved conversation after output or completed foreground tools. Kandev sends
+a hidden internal continue instruction, preserves the transcript, and keeps
 previous results. It does not resend the original request or create a replacement
 conversation automatically.
 
@@ -107,15 +109,7 @@ unsupported agents also require manual recovery. New human work takes priority.
 Backend restart retires the old automatic notice without launching a
 continuation or interrupting adopted live work.
 
-To try this on a selected installation, enable
-**Interrupted conversation continuation** (`features.providerInterruptionContinuation`)
-under **Settings > System > Feature Toggles**, then restart Kandev. Alternatively set
-`KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION=true` before startup. An
-explicit environment value takes precedence over the persisted toggle, which
-takes precedence over the shipped profile. To roll back, disable the toggle or
-set that environment variable to `false`, then restart. The flag is experimental,
-high risk, and off in production, development, and E2E profiles. No exactly-once
-execution guarantee is implied.
+No exactly-once execution guarantee is implied.
 
 **Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. The session entry remains visible until the session resumes successfully. Kandev uses stacked touch-sized actions on phones. A failure in another session remains in that session's history.
 
@@ -533,6 +527,8 @@ A task stores one walkthrough. Publishing another replaces the current one. Kand
 ## Commit and open a change request
 
 The commit dialog commits staged changes by default. Enter a title and optional body. **Stage all changes before committing** is off by default; enable it only after checking every unstaged file. Utility agents can propose commit text, but you remain responsible for the result.
+
+If a commit fails, the dialog keeps your title, body, repository and Stage all choice for correction and retry. You can dismiss and reopen it for the same repository without losing that draft. A successful commit clears the submitted draft; edits made while it was pending remain available. Drafts are local to the current session and environment and do not survive reloads. In a multi-repository commit, completed Git writes remain completed even if another repository fails.
 
 The creation dialog requires a title, defaults it from the task title, accepts an optional body, and creates a draft by default. Kandev first runs `git push --set-upstream origin HEAD`, then selects the provider from the repository's `origin`:
 

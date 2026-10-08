@@ -2,6 +2,7 @@
 status: active
 system: platform
 created: 2026-10-03
+updated: 2026-10-08
 owners:
   - Kandev
 ---
@@ -106,14 +107,17 @@ It permits completed tool effects under the confirmed policy described below.
   Exhaustion shall report actual started attempts.
   A retained usable runtime shall leave the normal composer available.
 - **AC-PLATFORM-TURN-CONTINUITY-003.6:** Initial support shall cover tested Codex ACP capacity evidence in concrete-profile interactive task sessions.
-  The capacity path shall operate independently of the experimental transport-loss continuation toggle.
+  The capacity path shall operate independently of transport-loss continuation's
+  native restoration capability and admission evidence.
   Original-prompt replay, other error classes, unsupported providers, older components, Office, dynamic routing, automation, and passthrough shall retain their existing policies.
 
 ## Compatibility and exclusions
 
 This changes the lifetime of supported interactive ACP runtimes after transient errors.
 It does not make interrupted work successful or permit replay after writes.
-It does not change models automatically, add a scheduler, change retry limits, or promote the experimental continuation toggle.
+It does not change models automatically, add a scheduler, or change retry limits.
+Transport-loss continuation availability is owned by the
+[interruption continuation contract](provider-interruption-continuation.md).
 Capacity continuation does not guarantee exactly-once agent actions or preservation of an interrupted model invocation.
 Completed effects remain in history, and the agent must decide the next unfinished action from that history.
 Older remote components without the new evidence retain conservative existing recovery.

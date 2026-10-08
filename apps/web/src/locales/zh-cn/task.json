@@ -2334,6 +2334,7 @@
   "sessionErrorPromptNotSent": "否",
   "sessionErrorPromptSent": "是",
   "resumeFailedWorkspaceReadOnly": "工作区已以只读模式还原",
+  "workspaceRecoveryInspectionBusy": "此工作区仍在检查中。请尝试恢复会话。",
   "continueOnNewBranch": "在新分支上继续",
   "continueFromHistory": "从已保存的历史记录继续",
   "restoreReadOnlyWorkspace": "还原只读工作区",

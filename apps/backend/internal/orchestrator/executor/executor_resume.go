@@ -1281,6 +1281,7 @@ func (e *Executor) resumeSession(
 	}
 	defer unlock()
 	resumeInitialState := session.State
+	resumeInitialErrorMessage := session.ErrorMessage
 	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)
 	completedResume := options.AllowCompletedSessionResume &&
 		resumeInitialState == models.TaskSessionStateCompleted
@@ -1306,7 +1307,7 @@ func (e *Executor) resumeSession(
 		_ = releaseSelectedWorktreeRecovery(resumeOwnedCleanupContext(ctx), &preflight.admission)
 	}()
 	if err := e.prepareResumePreflight(ctx, task, session, options, requestedExecutorType, preflight); err != nil {
-		return nil, err
+		return nil, safeResumeInspectionDeferral(err)
 	}
 	resumeStatePersisted := false
 	resumeAttemptID := ""
@@ -1366,9 +1367,23 @@ func (e *Executor) resumeSession(
 	recoveryAdmission, err := e.admitResumeSelectionAfterRequest(preflight, task.ID, session, existingEnv, req)
 	if err != nil {
 		if resumeStatePersisted {
-			e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err, nil)
+			if worktree.IsRecoveryInspectionContentionOnly(err) {
+				if rollbackErr := e.rollbackResumeStateForInspectionContention(
+					ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState,
+					resumeInitialErrorMessage,
+					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+				); rollbackErr != nil {
+					return nil, errors.Join(err, rollbackErr)
+				}
+			} else {
+				if rollbackErr := e.rollbackResumeStateAfterFailure(
+					ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err, nil,
+				); rollbackErr != nil {
+					return nil, errors.Join(err, rollbackErr)
+				}
+			}
 		}
-		return nil, err
+		return nil, safeResumeInspectionDeferral(err)
 	}
 	if existingEnv != nil {
 		session.TaskEnvironmentID = existingEnv.ID
@@ -1439,10 +1454,24 @@ func (e *Executor) resumeSession(
 	}
 	if err != nil {
 		if startAgent {
-			e.rollbackResumeStateAfterFailure(
-				launchCtx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
-				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+			credentialSnapshotBackup := resumeCredentialSnapshotBackupIfPersisted(
+				credentialSnapshotPersisted, previousCredentialSnapshot,
 			)
+			if worktree.IsRecoveryInspectionContentionOnly(err) {
+				if rollbackErr := e.rollbackResumeStateForInspectionContention(
+					launchCtx, task.ID, session.ID, resumeAttemptID, resumeInitialState,
+					resumeInitialErrorMessage, credentialSnapshotBackup,
+				); rollbackErr != nil {
+					err = errors.Join(err, rollbackErr)
+				} else {
+					err = safeResumeInspectionDeferral(err)
+				}
+			} else if rollbackErr := e.rollbackResumeStateAfterFailure(
+				launchCtx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
+				credentialSnapshotBackup,
+			); rollbackErr != nil {
+				err = errors.Join(err, rollbackErr)
+			}
 		}
 		e.logger.Error("failed to relaunch agent for session",
 			zap.String("task_id", task.ID),
@@ -1506,8 +1535,12 @@ func (e *Executor) resumeSession(
 		if options.StartAgentSynchronously && options.RequiredNativeConversationID == "" {
 			if err := e.agentManager.StartAgentProcess(ctx, resp.AgentExecutionID); err != nil {
 				e.cleanupUnstartedExecutionAfterPersistError(ctx, session.ID, resp.AgentExecutionID, err)
-				e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
-					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot))
+				if rollbackErr := e.rollbackResumeStateAfterFailure(
+					ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
+					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+				); rollbackErr != nil {
+					err = errors.Join(err, rollbackErr)
+				}
 				return nil, err
 			}
 			if terminalState, terminal := e.stopStartedExecutionIfSessionTerminal(
@@ -1596,9 +1629,12 @@ func (e *Executor) prepareResumePreflight(
 		e.selectedWorktreeRecoveryAdmission == nil {
 		return nil
 	}
+	ctx, _ = worktree.WithRecoveryInspectionWait(ctx, worktree.RecoveryInspectionWaitBudget)
+	preflight.ctx = ctx
 
 	preflight.admission, err = e.admitSelectedWorktreeRecovery(
-		ctx, task.ID, session, selectedEnv, requestedExecutorType, options.AllowBranchReplacement, 0, true,
+		ctx, task.ID, session, selectedEnv, requestedExecutorType, options.AllowBranchReplacement,
+		worktree.RecoveryInspectionWaitBudget, true,
 	)
 	if err != nil {
 		return err
@@ -1622,7 +1658,8 @@ func (e *Executor) admitResumeSelectionAfterRequest(
 	// Re-admit after request construction so Git checkout state is inspected
 	// immediately before launch even when the database selection is unchanged.
 	admission, err := e.admitSelectedWorktreeRecovery(
-		preflight.ctx, taskID, session, existingEnv, req.ExecutorType, req.AllowBranchReplacement, 0, true,
+		preflight.ctx, taskID, session, existingEnv, req.ExecutorType, req.AllowBranchReplacement,
+		worktree.RecoveryInspectionWaitBudget, true,
 	)
 	if err != nil {
 		return nil, err
@@ -1715,51 +1752,106 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 	priorState models.TaskSessionState,
 	resumeErr error,
 	credentialSnapshot *resumeCredentialSnapshotBackup,
-) {
-	if attemptID == "" {
-		e.logger.Warn("skipped resume rollback without startup-attempt identity",
-			zap.String("task_id", taskID), zap.String("session_id", sessionID))
-		return
-	}
-	var restore *ResumeCredentialSnapshotRestore
-	if credentialSnapshot != nil {
-		restore = &ResumeCredentialSnapshotRestore{
-			Value: credentialSnapshot.value, Present: credentialSnapshot.present,
-		}
-	}
-	request := ResumeFailureRollbackRequest{
+) error {
+	return e.rollbackResumeState(ctx, ResumeFailureRollbackRequest{
 		TaskID: taskID, SessionID: sessionID, AttemptID: attemptID,
 		ExpectedState: models.TaskSessionStateStarting,
 		NextState:     terminalRollbackState(priorState),
-		ErrorMessage:  resumeErr.Error(), CredentialSnapshot: restore,
+		ErrorMessage:  resumeErr.Error(), CredentialSnapshot: resumeCredentialSnapshotRestore(credentialSnapshot),
+	})
+}
+
+func (e *Executor) rollbackResumeStateForInspectionContention(
+	ctx context.Context,
+	taskID, sessionID, attemptID string,
+	priorState models.TaskSessionState,
+	priorErrorMessage string,
+	credentialSnapshot *resumeCredentialSnapshotBackup,
+) error {
+	return e.rollbackResumeState(ctx, ResumeFailureRollbackRequest{
+		TaskID: taskID, SessionID: sessionID, AttemptID: attemptID,
+		ExpectedState: models.TaskSessionStateStarting,
+		NextState:     priorState,
+		ErrorMessage:  priorErrorMessage, CredentialSnapshot: resumeCredentialSnapshotRestore(credentialSnapshot),
+	})
+}
+
+func resumeCredentialSnapshotRestore(
+	backup *resumeCredentialSnapshotBackup,
+) *ResumeCredentialSnapshotRestore {
+	if backup == nil {
+		return nil
+	}
+	return &ResumeCredentialSnapshotRestore{Value: backup.value, Present: backup.present}
+}
+
+func (e *Executor) rollbackResumeState(ctx context.Context, request ResumeFailureRollbackRequest) error {
+	taskID, sessionID, attemptID := request.TaskID, request.SessionID, request.AttemptID
+	if attemptID == "" {
+		e.logger.Warn("skipped resume rollback without startup-attempt identity",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID))
+		return errors.New("resume rollback has no startup-attempt identity")
 	}
 	if e.onResumeFailureRollback != nil {
-		if _, err := e.onResumeFailureRollback(ctx, request); err != nil {
+		changed, err := e.onResumeFailureRollback(ctx, request)
+		if err != nil {
 			e.logger.Warn("failed to roll back session state after resume failure",
 				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+			return fmt.Errorf("roll back session state after resume failure: %w", err)
 		}
-		return
+		if !changed {
+			return e.resumeRollbackSupersededError(ctx, request)
+		}
+		return nil
 	}
 	updater, ok := e.repo.(resumeStateAttemptUpdater)
 	if !ok {
+		err := errors.New("session repository does not support attempt-fenced resume rollback")
 		e.logger.Warn("failed to roll back session state after resume failure",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID),
-			zap.Error(errors.New("session repository does not support attempt-fenced resume rollback")))
-		return
+			zap.Error(err))
+		return err
 	}
 	changed, _, err := updater.UpdateTaskSessionResumeStateIfCurrentAttempt(
 		ctx, taskID, sessionID, attemptID, request.ExpectedState, request.NextState,
-		request.ErrorMessage, true, restore != nil, restore != nil && restore.Present,
-		credentialSnapshotValue(restore),
+		request.ErrorMessage, true, request.CredentialSnapshot != nil,
+		request.CredentialSnapshot != nil && request.CredentialSnapshot.Present,
+		credentialSnapshotValue(request.CredentialSnapshot),
 	)
 	if err != nil {
 		e.logger.Warn("failed to roll back session state after resume failure",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-		return
+		return fmt.Errorf("roll back session state after resume failure: %w", err)
 	}
-	if changed && e.onCeilingReservationRelease != nil {
+	if !changed {
+		return e.resumeRollbackSupersededError(ctx, request)
+	}
+	e.releaseResumeRollbackReservation(sessionID)
+	return nil
+}
+
+func (e *Executor) releaseResumeRollbackReservation(sessionID string) {
+	if e.onCeilingReservationRelease != nil {
 		e.onCeilingReservationRelease(sessionID)
 	}
+}
+
+func (e *Executor) resumeRollbackSupersededError(
+	ctx context.Context,
+	request ResumeFailureRollbackRequest,
+) error {
+	current, err := e.repo.GetTaskSession(ctx, request.SessionID)
+	if err != nil {
+		return fmt.Errorf("read session after resume rollback lost ownership: %w", err)
+	}
+	if current == nil {
+		return &SessionStateSupersededError{SessionID: request.SessionID}
+	}
+	if current.State != request.ExpectedState ||
+		models.StringFromAny(current.Metadata[models.SessionMetaKeyAgentStartAttemptID]) != request.AttemptID {
+		return &SessionStateSupersededError{SessionID: request.SessionID, State: current.State}
+	}
+	return errors.New("resume rollback did not update the current startup attempt")
 }
 
 func credentialSnapshotValue(snapshot *ResumeCredentialSnapshotRestore) interface{} {
