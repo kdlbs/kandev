@@ -38,14 +38,17 @@ type NativeMCPReadiness struct {
 	ReasonCode        string
 	ToolCount         *int
 	ApprovalSucceeded bool
+	Diagnostic        *NativeMCPDiagnostic `json:"mcp_diagnostic,omitempty"`
 }
 
 // NativeMCPCommandResult is the bounded result of one native CLI invocation.
 type NativeMCPCommandResult struct {
-	Stdout    []byte
-	Stderr    []byte
-	ExitCode  int
-	Truncated bool
+	Stdout           []byte
+	Stderr           []byte
+	ExitCode         int
+	Truncated        bool
+	ExitCodeObserved bool                 `json:"-"`
+	Diagnostic       *NativeMCPDiagnostic `json:"mcp_diagnostic,omitempty"`
 }
 
 // NativeMCPCommandRunner executes a native agent MCP command without a shell.
@@ -63,7 +66,7 @@ type ExecNativeMCPCommandRunner struct {
 func (r ExecNativeMCPCommandRunner) Run(ctx context.Context, executable string, args []string, workspace string, env map[string]string) (NativeMCPCommandResult, error) {
 	resolved, err := resolveExecutable(executable, env)
 	if err != nil {
-		return NativeMCPCommandResult{}, err
+		return nativeMCPFailedCommandResult(nativeMCPOperation(args), nativeMCPDiagnosticResolve, nativeMCPDiagnosticExecutableUnavailable, err, nil, nil), nativeMCPWrapCommandError(nativeMCPDiagnosticResolve, nativeMCPDiagnosticExecutableUnavailable, err, nil, nil)
 	}
 	cmd := exec.CommandContext(ctx, resolved, args...)
 	cmd.Dir = workspace
@@ -77,33 +80,45 @@ func (r ExecNativeMCPCommandRunner) Run(ctx context.Context, executable string, 
 	stderr := &limitedOutput{limit: limit}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	exitCode, runErr := runNativeMCPCommand(cmd)
-	if ctx.Err() != nil {
-		return NativeMCPCommandResult{}, ctx.Err()
-	}
-	if errors.Is(runErr, ErrNativeMCPExecutableUnavailable) {
-		return NativeMCPCommandResult{}, ErrNativeMCPExecutableUnavailable
-	}
+	exitCode, diagnostic, runErr := runNativeMCPCommand(cmd)
 	result := NativeMCPCommandResult{
-		Stdout:    stdout.Bytes(),
-		Stderr:    stderr.Bytes(),
-		ExitCode:  exitCode,
-		Truncated: stdout.Truncated() || stderr.Truncated(),
+		Stdout:           stdout.Bytes(),
+		Stderr:           stderr.Bytes(),
+		ExitCode:         exitCode,
+		ExitCodeObserved: exitCode >= 0,
+		Truncated:        stdout.Truncated() || stderr.Truncated(),
+	}
+	if diagnostic != nil {
+		result.Diagnostic = sanitizeNativeMCPDiagnostic(diagnostic, nativeMCPOperation(args))
+	}
+	var commandErr *nativeMCPCommandError
+	if errors.As(runErr, &commandErr) {
+		result.ExitCodeObserved = commandErr.exitCodeObserved
+		result.Diagnostic = sanitizeNativeMCPDiagnostic(commandErr.diagnostic, nativeMCPOperation(args))
+	}
+	if ctx.Err() != nil {
+		kind := nativeMCPDiagnosticCanceled
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			kind = nativeMCPDiagnosticTimeout
+		}
+		var cleanupErr error
+		if commandErr != nil {
+			cleanupErr = commandErr.cleanupErr
+		}
+		result.Diagnostic = sanitizeNativeMCPDiagnostic(nativeMCPDiagnosticForError(
+			nativeMCPOperation(args), nativeMCPDiagnosticWait, kind, ctx.Err(), cleanupErr, nativeMCPExitCode(result),
+		), nativeMCPOperation(args))
+		return result, nativeMCPWrapCommandError(nativeMCPDiagnosticWait, kind, ctx.Err(), cleanupErr, nativeMCPExitCode(result))
 	}
 	if runErr == nil {
 		return result, nil
 	}
-	var exitErr *exec.ExitError
-	if errors.As(runErr, &exitErr) {
-		return result, nil
-	}
-	result.ExitCode = -1
 	return result, runErr
 }
 
-func runNativeMCPCommand(cmd *exec.Cmd) (int, error) {
+func runNativeMCPCommand(cmd *exec.Cmd) (int, *NativeMCPDiagnostic, error) {
 	if err := prepareNativeMCPCommand(cmd); err != nil {
-		return -1, ErrNativeMCPExecutableUnavailable
+		return -1, nil, nativeMCPWrapCommandError(nativeMCPDiagnosticStart, nativeMCPDiagnosticStartFailed, err, nil, nil)
 	}
 	var guardMu sync.Mutex
 	var guard *nativeMCPProcessGuard
@@ -127,13 +142,14 @@ func runNativeMCPCommand(cmd *exec.Cmd) (int, error) {
 		return os.ErrProcessDone
 	}
 	if err := cmd.Start(); err != nil {
-		return -1, ErrNativeMCPExecutableUnavailable
+		return -1, nil, nativeMCPWrapCommandError(nativeMCPDiagnosticStart, nativeMCPDiagnosticStartFailed, err, nil, nil)
 	}
 	processGuard, err := attachNativeMCPCommand(cmd)
 	if err != nil {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		return -1, ErrNativeMCPExecutableUnavailable
+		killErr := cmd.Process.Kill()
+		waitErr := cmd.Wait()
+		cleanupErr := errors.Join(killErr, waitErr)
+		return nativeMCPProcessExitCode(cmd), nil, nativeMCPWrapCommandError(nativeMCPDiagnosticStart, nativeMCPDiagnosticStartFailed, err, cleanupErr, nativeMCPProcessExitCodePointer(cmd))
 	}
 	guardMu.Lock()
 	guard = &processGuard
@@ -142,17 +158,30 @@ func runNativeMCPCommand(cmd *exec.Cmd) (int, error) {
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	cleanupErr := processGuard.Cleanup(cleanupCtx)
 	cleanupCancel()
-	if cleanupErr != nil {
-		return -1, cleanupErr
-	}
+	exitCode := nativeMCPProcessExitCode(cmd)
+	exitCodePointer := nativeMCPProcessExitCodePointer(cmd)
+	return nativeMCPCommandResult(runErr, cleanupErr, exitCode, exitCodePointer)
+}
+
+func nativeMCPCommandResult(runErr, cleanupErr error, exitCode int, exitCodePointer *int) (int, *NativeMCPDiagnostic, error) {
 	if runErr == nil {
-		return 0, nil
+		if cleanupErr != nil {
+			return exitCode, nil, nativeMCPWrapCommandError(nativeMCPDiagnosticCleanup, nativeMCPDiagnosticCleanupFailed, cleanupErr, nil, exitCodePointer)
+		}
+		return exitCode, nil, nil
+	}
+	if errors.Is(runErr, exec.ErrWaitDelay) {
+		return exitCode, nil, nativeMCPWrapCommandError(nativeMCPDiagnosticWait, nativeMCPDiagnosticOutputWaitTimeout, runErr, cleanupErr, exitCodePointer)
 	}
 	var exitErr *exec.ExitError
-	if errors.As(runErr, &exitErr) {
-		return exitErr.ExitCode(), runErr
+	if errors.As(runErr, &exitErr) && exitErr.ExitCode() != 0 {
+		if cleanupErr != nil {
+			observedExitCode := exitErr.ExitCode()
+			return observedExitCode, nativeMCPDiagnosticForError("", nativeMCPDiagnosticWait, nativeMCPDiagnosticExitStatus, runErr, cleanupErr, &observedExitCode), nil
+		}
+		return exitErr.ExitCode(), nil, nil
 	}
-	return -1, runErr
+	return exitCode, nil, nativeMCPWrapCommandError(nativeMCPDiagnosticWait, nativeMCPDiagnosticWaitFailed, runErr, cleanupErr, exitCodePointer)
 }
 
 // CursorNativeMCPAdapter prepares one exact native server identity and verifies
@@ -181,12 +210,12 @@ func (a CursorNativeMCPAdapter) Enable(ctx context.Context, workspace string, en
 	}
 	commandCtx, cancel := a.commandContext(ctx)
 	defer cancel()
-	approved, err := a.run(commandCtx, workspace, env, "mcp", "enable", serverID)
+	approved, err := a.run(commandCtx, workspace, env, nativeMCPDiagnosticEnable, "mcp", "enable", serverID)
 	if err != nil {
-		return nativeMCPRunnerFailure(commandCtx, err)
+		return nativeMCPRunnerFailure(commandCtx, approved, err, nativeMCPDiagnosticEnable)
 	}
 	if approved.ExitCode != 0 || approved.Truncated {
-		return nativeMCPFailure(NativeMCPStatusApprovalFailed, "approval_failed")
+		return nativeMCPResultFailure(NativeMCPStatusApprovalFailed, "approval_failed", approved, nativeMCPDiagnosticEnable, nativeMCPDiagnosticOutputTruncated)
 	}
 	return NativeMCPReadiness{Status: NativeMCPStatusReady, ApprovalSucceeded: true}
 }
@@ -201,17 +230,17 @@ func (a CursorNativeMCPAdapter) Verify(ctx context.Context, workspace string, en
 }
 
 func (a CursorNativeMCPAdapter) verify(ctx context.Context, workspace string, env map[string]string, serverID string) NativeMCPReadiness {
-	result, err := a.run(ctx, workspace, env, "mcp", "list-tools", serverID)
+	result, err := a.run(ctx, workspace, env, nativeMCPDiagnosticListTools, "mcp", "list-tools", serverID)
 	if err != nil {
-		return nativeMCPRunnerFailure(ctx, err)
+		return nativeMCPRunnerFailure(ctx, result, err, nativeMCPDiagnosticListTools)
 	}
 	if result.ExitCode == 0 {
 		if result.Truncated {
-			return nativeMCPFailure(NativeMCPStatusConnectionFailed, "connection_failed")
+			return nativeMCPResultFailure(NativeMCPStatusConnectionFailed, "connection_failed", result, nativeMCPDiagnosticListTools, nativeMCPDiagnosticOutputTruncated)
 		}
 		count, ok := parseCursorListToolsHeader(result.Stdout, serverID)
 		if !ok {
-			return nativeMCPFailure(NativeMCPStatusConnectionFailed, "connection_failed")
+			return nativeMCPResultFailure(NativeMCPStatusConnectionFailed, "connection_failed", result, nativeMCPDiagnosticListTools, nativeMCPDiagnosticUnrecognizedOutput)
 		}
 		return NativeMCPReadiness{Status: NativeMCPStatusReady, ToolCount: &count}
 	}
@@ -219,26 +248,35 @@ func (a CursorNativeMCPAdapter) verify(ctx context.Context, workspace string, en
 	if status := classifyNativeMCPText(output, serverID); status != "" {
 		switch status {
 		case string(NativeMCPStatusAuthenticationRequired):
-			return nativeMCPFailure(NativeMCPStatusAuthenticationRequired, "authentication_required")
+			return nativeMCPResultFailure(NativeMCPStatusAuthenticationRequired, "authentication_required", result, nativeMCPDiagnosticListTools, nativeMCPDiagnosticOutputTruncated)
 		case string(NativeMCPStatusApprovalFailed):
-			return nativeMCPFailure(NativeMCPStatusApprovalFailed, "approval_failed")
+			return nativeMCPResultFailure(NativeMCPStatusApprovalFailed, "approval_failed", result, nativeMCPDiagnosticListTools, nativeMCPDiagnosticOutputTruncated)
 		}
 	}
 	if result.Truncated || result.ExitCode != 0 {
-		return nativeMCPFailure(NativeMCPStatusConnectionFailed, "connection_failed")
+		return nativeMCPResultFailure(NativeMCPStatusConnectionFailed, "connection_failed", result, nativeMCPDiagnosticListTools, nativeMCPDiagnosticOutputTruncated)
 	}
-	return nativeMCPFailure(NativeMCPStatusConnectionFailed, "connection_failed")
+	return nativeMCPResultFailure(NativeMCPStatusConnectionFailed, "connection_failed", result, nativeMCPDiagnosticListTools, nativeMCPDiagnosticUnrecognizedOutput)
 }
 
-func (a CursorNativeMCPAdapter) run(ctx context.Context, workspace string, env map[string]string, args ...string) (NativeMCPCommandResult, error) {
+func (a CursorNativeMCPAdapter) run(ctx context.Context, workspace string, env map[string]string, operation NativeMCPDiagnosticOperation, args ...string) (NativeMCPCommandResult, error) {
 	if strings.TrimSpace(a.Executable) == "" || strings.TrimSpace(workspace) == "" {
-		return NativeMCPCommandResult{}, ErrNativeMCPExecutableUnavailable
+		err := ErrNativeMCPExecutableUnavailable
+		result := nativeMCPFailedCommandResult(operation, nativeMCPDiagnosticResolve, nativeMCPDiagnosticExecutableUnavailable, err, nil, nil)
+		return result, err
 	}
 	runner := a.Runner
 	if runner == nil {
 		runner = ExecNativeMCPCommandRunner{}
 	}
-	return runner.Run(ctx, a.Executable, args, workspace, env)
+	result, err := runner.Run(ctx, a.Executable, args, workspace, env)
+	if result.Diagnostic == nil && err != nil {
+		result.Diagnostic = nativeMCPDiagnosticForRunnerError(ctx, operation, result, err)
+	}
+	if result.Diagnostic != nil {
+		result.Diagnostic = sanitizeNativeMCPDiagnostic(result.Diagnostic, operation)
+	}
+	return result, err
 }
 
 func (a CursorNativeMCPAdapter) commandContext(parent context.Context) (context.Context, context.CancelFunc) {
@@ -249,17 +287,18 @@ func (a CursorNativeMCPAdapter) commandContext(parent context.Context) (context.
 	return context.WithTimeout(parent, timeout)
 }
 
-func nativeMCPRunnerFailure(ctx context.Context, err error) NativeMCPReadiness {
+func nativeMCPRunnerFailure(ctx context.Context, result NativeMCPCommandResult, err error, operation NativeMCPDiagnosticOperation) NativeMCPReadiness {
+	diagnostic := sanitizeNativeMCPDiagnostic(result.Diagnostic, operation)
 	if errors.Is(err, ErrNativeMCPExecutableUnavailable) {
-		return nativeMCPFailure(NativeMCPStatusUnavailable, "unavailable")
+		return nativeMCPFailureWithDiagnostic(NativeMCPStatusUnavailable, "unavailable", diagnostic)
 	}
 	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
-		return nativeMCPFailure(NativeMCPStatusUnavailable, "canceled")
+		return nativeMCPFailureWithDiagnostic(NativeMCPStatusUnavailable, "canceled", diagnostic)
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
-		return nativeMCPFailure(NativeMCPStatusUnavailable, "unavailable")
+		return nativeMCPFailureWithDiagnostic(NativeMCPStatusUnavailable, "unavailable", diagnostic)
 	}
-	return nativeMCPFailure(NativeMCPStatusConnectionFailed, "connection_failed")
+	return nativeMCPFailureWithDiagnostic(NativeMCPStatusConnectionFailed, "connection_failed", diagnostic)
 }
 
 func nativeMCPFailure(status NativeMCPStatus, reason string) NativeMCPReadiness {

@@ -41,6 +41,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
 	debughandlers "github.com/kandev/kandev/internal/debug"
 	dockerremote "github.com/kandev/kandev/internal/dockerremote"
@@ -886,7 +887,20 @@ func appendAvailableCommandsMessage(sessionID string, session *models.TaskSessio
 	if lifecycleMgr == nil {
 		return result
 	}
-	commands := lifecycleMgr.GetAvailableCommandsForSession(sessionID)
+	return appendAvailableCommandsMessageForCommands(
+		sessionID,
+		session,
+		lifecycleMgr.GetAvailableCommandsForSession(sessionID),
+		result,
+	)
+}
+
+func appendAvailableCommandsMessageForCommands(
+	sessionID string,
+	session *models.TaskSession,
+	commands []streams.AvailableCommand,
+	result []*ws.Message,
+) []*ws.Message {
 	if len(commands) == 0 {
 		return result
 	}
@@ -983,6 +997,7 @@ func appendSessionModelsMessageFromState(sessionID string, session *models.TaskS
 	notification, err := ws.NewNotification(ws.ActionSessionModelsUpdated, lifecycle.SessionModelsEventPayload{
 		TaskID:                session.TaskID,
 		SessionID:             sessionID,
+		AgentExecutionID:      snapshot.SettingsSourceExecutionID,
 		CurrentModelID:        replayState.CurrentModelID,
 		SessionSettingsPolicy: sessionSettingsProjectionPolicyFromSnapshot(snapshot, hasSnapshot),
 		Models:                replayState.Models,
@@ -1016,6 +1031,7 @@ func sessionACPConfigBaseline(session *models.TaskSession) map[string]string {
 
 // routeParams holds all dependencies needed for HTTP and WebSocket route registration.
 type routeParams struct {
+	ctx                           context.Context
 	router                        *gin.Engine
 	gateway                       *gateways.Gateway
 	taskSvc                       *taskservice.Service
@@ -1128,6 +1144,7 @@ func registerRoutes(p routeParams) {
 	p.taskSvc.SetWorkflowTaskArchiveCoordinator(handoffSvc)
 	p.taskSvc.SetTaskLifecycleCoordinator(handoffSvc)
 	p.taskSvc.SetWorkspacePolicyAttacher(handoffSvc)
+	wireOfficeProjectRepositorySources(p.taskSvc, p.officeRepo)
 	p.taskSvc.SetWorkspaceGroupMembershipReader(p.officeRepo)
 	handoffSvc.SetCommentReader(&officeCommentReaderAdapter{reader: p.officeRepo})
 	// Phase 6 wirings — materializer hook + disk cleaner. The
@@ -1776,6 +1793,11 @@ func registerSecondaryRoutes(
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
 
+	if p.features.Coordinator {
+		wireCoordinatorConversation(p)
+		registerCoordinatorRoutes(p)
+	}
+
 	failedinbox.RegisterRoutes(p.router, p.taskSvc, p.taskRepo, p.log, p.features.NeedsYouInbox)
 	p.log.Debug("Registered Failed Inbox handlers (HTTP)")
 
@@ -1963,7 +1985,8 @@ func registerSecondaryRoutes(
 		automationSvc = p.services.Automation.Service
 	}
 	registerE2EResetRoutes(
-		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.eventBus, p.log,
+		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab,
+		p.services.Coordinator, p.eventBus, p.log,
 	)
 	registerE2ERuntimeUpdateRoutes(
 		p.router, p.agentSettingsController, p.runtimeUpdateNotifier, p.e2eRuntimeUpdateHooks, p.log,
@@ -2504,6 +2527,15 @@ func registerMCPAndDebugRoutes(
 	}
 	p.log.Debug("Registered native code review (WebSocket + MCP)")
 
+	if p.services.Coordinator != nil {
+		mcpHandlers.SetCoordinatorService(p.services.Coordinator)
+		p.services.Coordinator.SetKindDeps(coordinator.KindDeps{
+			Tasks:     &coordinatorKindReader{tasks: p.taskSvc, liveExec: p.lifecycleMgr.HasLiveAgentExecution},
+			Resumer:   &coordinatorResumer{resume: p.orchestratorSvc.ResumeTaskSession},
+			Messenger: mcpHandlers,
+		})
+	}
+
 	mcpHandlers.RegisterHandlers(p.gateway.Dispatcher)
 	p.log.Debug("Registered MCP handlers (WebSocket)")
 
@@ -2522,6 +2554,9 @@ func registerMCPAndDebugRoutes(
 		func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled },
 		p.log,
 	)
+	if p.services != nil && p.services.Coordinator != nil {
+		mcpScopeResolver.SetCoordinatorLookup(p.services.Coordinator)
+	}
 	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
 	if p.authSvc != nil {
 		p.lifecycleMgr.SetMCPIdentityScoper(mcpScopeResolver.Scope)

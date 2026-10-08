@@ -393,6 +393,9 @@ type AgentUpdateStatusDTO struct {
 	LatestVersion       string                        `json:"latest_version,omitempty"`
 	CheckedAt           *time.Time                    `json:"checked_at,omitempty"`
 	CheckState          AgentUpdateCheckState         `json:"check_state"`
+	Family              string                        `json:"family,omitempty"`
+	RuntimeRevision     uint64                        `json:"runtime_revision,omitempty"`
+	MigrationAvailable  bool                          `json:"migration_available,omitempty"`
 }
 
 type ListAgentUpdateStatusResponse struct {
@@ -447,6 +450,8 @@ const (
 	AgentUpdateJobStatusQueued     AgentUpdateJobStatus = "queued"
 	AgentUpdateJobStatusResolving  AgentUpdateJobStatus = "resolving"
 	AgentUpdateJobStatusUpdating   AgentUpdateJobStatus = "updating"
+	AgentUpdateJobStatusProbing    AgentUpdateJobStatus = "probing"
+	AgentUpdateJobStatusSaving     AgentUpdateJobStatus = "saving"
 	AgentUpdateJobStatusRefreshing AgentUpdateJobStatus = "refreshing"
 	AgentUpdateJobStatusSucceeded  AgentUpdateJobStatus = "succeeded"
 	AgentUpdateJobStatusFailed     AgentUpdateJobStatus = "failed"
@@ -467,6 +472,9 @@ type AgentUpdateJobDTO struct {
 	ActiveVersion    string               `json:"active_version,omitempty"`
 	EffectiveVersion string               `json:"effective_version"`
 	TargetVersion    string               `json:"target_version,omitempty"`
+	TargetFamily     string               `json:"target_family,omitempty"`
+	RuntimeRevision  uint64               `json:"runtime_revision,omitempty"`
+	Migration        bool                 `json:"migration,omitempty"`
 	Output           string               `json:"output,omitempty"`
 	Error            string               `json:"error,omitempty"`
 	RefreshError     string               `json:"refresh_error,omitempty"`
@@ -491,6 +499,11 @@ type AgentUpdatePreviewDTO struct {
 	AvailableVersions   []AgentUpdateVersionDTO `json:"available_versions"`
 	Command             []string                `json:"command"`
 	CommandString       string                  `json:"command_string"`
+	Family              string                  `json:"family,omitempty"`
+	Source              string                  `json:"source,omitempty"`
+	TargetFamily        string                  `json:"target_family,omitempty"`
+	RuntimeRevision     uint64                  `json:"runtime_revision,omitempty"`
+	MigrationAvailable  bool                    `json:"migration_available,omitempty"`
 }
 
 // AgentUpdateVersionDTO is one stable, selectable package version.
@@ -503,8 +516,10 @@ type AgentUpdateVersionDTO struct {
 // managed-runtime update endpoint. Package identity and command arguments are
 // always resolved from trusted built-in agent metadata.
 type AgentUpdateRequest struct {
-	TargetVersion string `json:"target_version"`
-	UseDefault    bool   `json:"use_default"`
+	TargetVersion           string `json:"target_version"`
+	UseDefault              bool   `json:"use_default"`
+	TargetFamily            string `json:"target_family,omitempty"`
+	ExpectedRuntimeRevision uint64 `json:"expected_runtime_revision,omitempty"`
 }
 
 type ListAgentUpdateJobsResponse struct {

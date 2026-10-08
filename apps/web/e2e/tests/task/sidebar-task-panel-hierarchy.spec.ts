@@ -3,6 +3,7 @@ import {
   seedNavigationTaskPanel,
   seedWorkflowGroupPanel,
   expectWorkflowGroupHierarchy,
+  expectStateGroupHeaders,
 } from "../../helpers/navigation-hierarchy";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 
@@ -16,10 +17,9 @@ test("status rows collapse by keyboard and saved filters remain visible after re
   await testPage.goto("/tasks");
   const sidebar = testPage.getByTestId("app-sidebar");
   const groups = sidebar.getByTestId("sidebar-group-header");
-  await expect(groups).toHaveCount(4);
-  await expect(sidebar.getByTestId("sidebar-group-state")).toHaveCount(4);
+  await expectStateGroupHeaders(sidebar);
   const complete = groups.filter({ hasText: "Completed" });
-  await expect(complete.getByTestId("task-state-workflow-complete")).toBeVisible();
+  await expect(complete).toHaveCount(1);
   await complete.focus();
   await testPage.keyboard.press("Enter");
   await expect(complete).toHaveAttribute("aria-expanded", "false");

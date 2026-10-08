@@ -121,7 +121,7 @@ func (r *sqliteRepository) runMigrations() error {
 	if err := m.Err(); err != nil {
 		return fmt.Errorf("required user migration: %w", err)
 	}
-	return nil
+	return r.migrateSidebarPresentation()
 }
 
 // ensureDefaultUser inserts the pre-auth default user row when it does not
@@ -136,8 +136,8 @@ func (r *sqliteRepository) ensureDefaultUser() error {
 		now := time.Now().UTC()
 		_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 			INSERT INTO users (id, email, display_name, role, status, settings, created_at, updated_at)
-			VALUES (?, ?, '', ?, ?, '{}', ?, ?)
-		`), DefaultUserID, DefaultUserEmail, models.RoleAdmin, models.StatusActive, now, now)
+			VALUES (?, ?, '', ?, ?, ?, ?, ?)
+		`), DefaultUserID, DefaultUserEmail, models.RoleAdmin, models.StatusActive, newSidebarPresentationJSON, now, now)
 		if err != nil {
 			return err
 		}
@@ -220,8 +220,8 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, user *models.User) er
 	user.UpdatedAt = now
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO users (id, email, display_name, role, status, org_id, is_operator, settings, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)
-	`), user.ID, user.Email, user.DisplayName, user.Role, user.Status, user.OrgID, dialect.BoolToInt(user.IsOperator),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), user.ID, user.Email, user.DisplayName, user.Role, user.Status, user.OrgID, dialect.BoolToInt(user.IsOperator), newSidebarPresentationJSON,
 		user.CreatedAt, user.UpdatedAt)
 	return err
 }
@@ -677,6 +677,8 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"agent_tab_close_behavior":                 models.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"sidebar_fast_actions_enabled":             settings.SidebarFastActionsEnabled,
+		"sidebar_new_task_style":                   settings.SidebarNewTaskStyle,
 		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,
 		"sidebar_hover_delay_ms":                   settings.SidebarHoverDelayMs,
 		"resolve_session_hostnames":                settings.ResolveSessionHostnames,
@@ -771,6 +773,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		SidebarTaskColorAutomation:        models.DefaultSidebarTaskColorAutomation(),
 		SidebarTaskColors:                 map[string]*string{},
 		AppStatusBarEnabled:               false,
+		SidebarNewTaskStyle:               "simple",
 		SidebarHoverEnabled:               true,
 		SidebarHoverDelayMs:               500,
 		ResolveSessionHostnames:           false,
@@ -785,12 +788,14 @@ func defaultUserSettings(userID string) *models.UserSettings {
 
 // DefaultSidebarViews returns the default single "All tasks" sidebar view.
 func DefaultSidebarViews() []models.SidebarView {
+	groupIndent := true
 	return []models.SidebarView{{
 		ID:              DefaultSidebarViewID,
 		Name:            "All tasks",
 		Filters:         []models.SidebarViewClause{},
 		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
 		Group:           "repository",
+		GroupIndent:     &groupIndent,
 		CollapsedGroups: []string{},
 		TaskRow:         models.DefaultSidebarTaskRowPresentation(),
 	}}
@@ -874,6 +879,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		AgentTabCloseBehavior             json.RawMessage                         `json:"agent_tab_close_behavior"`
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings     `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                                   `json:"app_status_bar_enabled"`
+		SidebarFastActionsEnabled         *bool                                   `json:"sidebar_fast_actions_enabled"`
+		SidebarNewTaskStyle               string                                  `json:"sidebar_new_task_style"`
 		SidebarHoverEnabled               *bool                                   `json:"sidebar_hover_enabled"`
 		SidebarHoverDelayMs               json.RawMessage                         `json:"sidebar_hover_delay_ms"`
 		ResolveSessionHostnames           *bool                                   `json:"resolve_session_hostnames"`
@@ -1046,6 +1053,12 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.TerminalFontFamily = payload.TerminalFontFamily
 	settings.TerminalFontSize = payload.TerminalFontSize
 	settings.SystemMetricsDisplay = payload.SystemMetricsDisplay
+	if payload.SidebarFastActionsEnabled != nil {
+		settings.SidebarFastActionsEnabled = *payload.SidebarFastActionsEnabled
+	}
+	if payload.SidebarNewTaskStyle == sidebarNewTaskStyleCompact {
+		settings.SidebarNewTaskStyle = sidebarNewTaskStyleCompact
+	}
 	if payload.SidebarHoverEnabled != nil {
 		settings.SidebarHoverEnabled = *payload.SidebarHoverEnabled
 	}

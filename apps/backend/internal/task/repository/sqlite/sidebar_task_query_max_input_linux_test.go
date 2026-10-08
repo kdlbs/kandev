@@ -12,12 +12,13 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/testutil/sqlitememory"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 	"github.com/stretchr/testify/require"
 )
 
 func TestSidebarQueryMaximumInputMemory(t *testing.T) {
 	if os.Getenv(sidebarMemoryChild) == "" {
-		for _, name := range []string{"pinned", "ordered", "children", "filters", "collapsed"} {
+		for _, name := range []string{"pinned", "ordered", "children", "filters", "collapsed", "colors"} {
 			t.Run(name, func(t *testing.T) {
 				t.Setenv(sidebarMemoryCase, name)
 				runSidebarMemoryChild(t, "TestSidebarQueryMaximumInputMemory", 101)
@@ -71,6 +72,26 @@ func maximumSidebarInput(t *testing.T, name string) (models.SidebarTaskViewQuery
 		for range models.MaxSidebarViewClauses {
 			query.Filters = append(query.Filters, models.SidebarTaskViewClause{Dimension: "titleMatch", Op: "not_in", Value: encoded})
 		}
+	case "colors":
+		query.Sort = models.SidebarTaskViewSort{Key: "color", Color: "red", Direction: "desc"}
+		manualColors := make(map[string]*string, usermodels.MaxSidebarTaskColors)
+		for index := 0; index < usermodels.MaxSidebarTaskColors; index++ {
+			manualColors[fmt.Sprintf("color-task-%05d", index)] = strptr("red")
+		}
+		rules := make([]usermodels.SidebarTaskColorRule, usermodels.MaxSidebarTaskColorAutomationRules)
+		for index := range rules {
+			rules[index] = usermodels.SidebarTaskColorRule{
+				ID: fmt.Sprintf("color-rule-%02d", index), Enabled: true,
+				Condition: usermodels.SidebarTaskColorCondition{
+					Dimension: usermodels.SidebarTaskColorDimensionTaskState,
+					Value:     "FAILED", Label: "Failed",
+				},
+				Output: usermodels.SidebarTaskColorOutput{Kind: usermodels.SidebarTaskColorOutputFixed, Color: "blue"},
+			}
+		}
+		automation, err := json.Marshal(usermodels.SidebarTaskColorAutomation{Enabled: true, Rules: rules})
+		require.NoError(t, err)
+		prefs.ColorSettings = &models.SidebarTaskColorSettings{ManualColors: manualColors, Automation: automation}
 	}
 	return query, prefs
 }

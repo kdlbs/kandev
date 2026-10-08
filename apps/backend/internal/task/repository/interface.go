@@ -6,6 +6,7 @@ import (
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryartifact"
 	"github.com/kandev/kandev/internal/task/repository/managedconversation"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/statussummary"
@@ -43,6 +44,7 @@ type WorkspaceRepository interface {
 	CreateWorkspace(ctx context.Context, workspace *models.Workspace) error
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error
+	UpdateWorkspaceFields(ctx context.Context, id string, update models.WorkspaceFieldUpdate, expected *time.Time) (*models.Workspace, error)
 	DeleteWorkspace(ctx context.Context, id string) error
 	DeleteWorkspaceCascade(ctx context.Context, id string) ([]*models.Task, []*models.Workflow, error)
 	DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) ([]*models.Task, []*models.Workflow, error)
@@ -135,6 +137,12 @@ type TaskRepository interface {
 	ListArchivedTasksWithActiveSessions(ctx context.Context) ([]string, error)
 	ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error)
 	DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error)
+	// ListCoordinatorOriginTasks returns every task with origin "coordinator"
+	// (all workspaces when workspaceID is empty), ordered by id
+	// (docs/specs/coordinator/system-design/copilot.md#conversation-cleanup).
+	// coordinator_id is read from the returned Metadata in Go; this query does
+	// no dialect-specific JSON extraction.
+	ListCoordinatorOriginTasks(ctx context.Context, workspaceID string) ([]*models.Task, error)
 	// CountOpenWatcherCreatedTasks returns the number of open watcher-created
 	// tasks for a single watch, identified by the integration's task-metadata
 	// key (e.g. "sentry_issue_watch_id") and the watch id. Open = non-archived
@@ -391,6 +399,7 @@ type WorkflowRepository interface {
 	CreateWorkflow(ctx context.Context, workflow *models.Workflow) error
 	GetWorkflow(ctx context.Context, id string) (*models.Workflow, error)
 	UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error
+	UpdateWorkflowFields(ctx context.Context, id string, update models.WorkflowFieldUpdate) (*models.Workflow, error)
 	DeleteWorkflow(ctx context.Context, id string) error
 	ListWorkflows(ctx context.Context, workspaceID string, includeHidden bool) ([]*models.Workflow, error)
 	ReorderWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) error
@@ -720,6 +729,9 @@ type GitSnapshotRepository interface {
 	DeleteSessionCommit(ctx context.Context, id string) error
 }
 
+// RepositoryCheckoutIntent preserves omission for the two checkout choices.
+type RepositoryCheckoutIntent = models.RepositoryCheckoutIntent
+
 // RepositoryEntityRepository handles git repository entity CRUD and repository scripts.
 // Named RepositoryEntityRepository to avoid conflation with the Repository interface itself;
 // mirrors the sqlite/repository_entity.go implementation file.
@@ -727,6 +739,7 @@ type RepositoryEntityRepository interface {
 	CreateRepository(ctx context.Context, repository *models.Repository) error
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	UpdateRepository(ctx context.Context, repository *models.Repository) error
+	UpdateRepositoryWithCheckoutIntent(ctx context.Context, repository *models.Repository, intent RepositoryCheckoutIntent) error
 	DeleteRepository(ctx context.Context, id string) error
 	ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error)
 	CreateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error
@@ -813,6 +826,7 @@ type RepositorySecretBindingMutator interface {
 	RepositorySecretBindingRepository
 	CreateRepositoryWithSecretBindings(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding) error
 	UpdateRepositoryWithSecretBindings(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding) error
+	UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding, intent RepositoryCheckoutIntent) error
 }
 
 // RepositoryCleanupRepository performs guarded deletion of repositories
@@ -834,6 +848,9 @@ type ExecutorRepository interface {
 	CreateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 	UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
+	// UpdateExecutorProfileWithScriptIntent preserves omitted scripts and installs
+	// the committed script pair and timestamp in profile only after success.
+	UpdateExecutorProfileWithScriptIntent(ctx context.Context, profile *models.ExecutorProfile, intent models.ExecutorProfileScriptIntent) error
 	UpdateExecutorProfileIfUnmodified(ctx context.Context, profile *models.ExecutorProfile, expectedUpdatedAt time.Time) error
 	DeleteExecutorProfile(ctx context.Context, id string) error
 	ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error)
@@ -934,6 +951,28 @@ type TaskEnvironmentRepository interface {
 type TaskEnvironmentRecoveryRepository interface {
 	AcquireTaskEnvironmentRecoveryClaim(context.Context, models.TaskEnvironmentRecoveryClaimRequest) (*models.TaskEnvironmentRecoveryClaim, error)
 	ReleaseTaskEnvironmentRecoveryClaim(context.Context, *models.TaskEnvironmentRecoveryClaim) error
+}
+
+// TaskEnvironmentRecoveryClaimReader reads the current environment authority
+// for startup reconciliation and status projection.
+type TaskEnvironmentRecoveryClaimReader interface {
+	GetTaskEnvironmentRecoveryClaim(context.Context, string) (*models.TaskEnvironmentRecoveryClaim, error)
+}
+
+// TaskEnvironmentRecoveryArtifactRepository is the optional exact-path
+// registry used by managed clone recovery and trusted workspace exclusions.
+type TaskEnvironmentRecoveryArtifactRepository interface {
+	RegisterTaskEnvironmentRecoveryArtifacts(context.Context, recoveryartifact.Registration) error
+	ListTaskEnvironmentRecoveryArtifacts(context.Context, string) ([]recoveryartifact.Registered, error)
+}
+
+// TaskEnvironmentRecoveryOperationRepository stores the latest durable recovery
+// projection independently of the exclusive environment claim.
+type TaskEnvironmentRecoveryOperationRepository interface {
+	BeginTaskEnvironmentRecoveryOperation(context.Context, models.TaskEnvironmentRecoveryOperation) (*models.TaskEnvironmentRecoveryOperation, error)
+	UpdateTaskEnvironmentRecoveryOperation(context.Context, models.TaskEnvironmentRecoveryOperationUpdate) (*models.TaskEnvironmentRecoveryOperation, error)
+	GetTaskEnvironmentRecoveryOperation(context.Context, string) (*models.TaskEnvironmentRecoveryOperation, error)
+	InterruptTaskEnvironmentRecoveryOperations(context.Context, string) (int, error)
 }
 
 // ReviewRepository handles session file review records.

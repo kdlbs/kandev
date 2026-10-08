@@ -1,6 +1,6 @@
 import { test, expect, type SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+import { WorkflowSettingsPage, openStepSection } from "../../pages/workflow-settings-page";
 import { dwell, watchWs } from "../../helpers/causal-waits";
 import {
   createWorkflowAgentProfiles as createProfiles,
@@ -1288,8 +1288,8 @@ test.describe("Workflow agent profile switching", () => {
       await expect(card).toBeVisible();
 
       // Click first step to open config panel
-      const stepNodes = card.locator(".group.relative");
-      await stepNodes.first().click();
+      const panel = await page.selectStep(card, seedData.steps[0].name);
+      await openStepSection(panel, "advanced");
 
       // Reset context checkbox should be enabled (no agent profile set)
       const resetCheckbox = card.getByRole("checkbox", { name: "Reset agent context" });
@@ -1301,8 +1301,8 @@ test.describe("Workflow agent profile switching", () => {
       // Reload and re-open the step
       await page.goto(seedData.workspaceId);
       const reloadedCard = await page.findWorkflowCard("E2E Workflow");
-      const reloadedSteps = reloadedCard.locator(".group.relative");
-      await reloadedSteps.first().click();
+      const reloadedPanel = await page.selectStep(reloadedCard, seedData.steps[0].name);
+      await openStepSection(reloadedPanel, "advanced");
 
       // Reset context checkbox should be disabled
       const reloadedCheckbox = reloadedCard.getByRole("checkbox", {

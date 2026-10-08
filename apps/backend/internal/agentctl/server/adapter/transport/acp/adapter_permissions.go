@@ -10,7 +10,7 @@ import (
 // handlePermissionRequest handles permission requests from the agent.
 // Since both acpclient and adapter now use the shared types package,
 // no conversion is needed - we just forward to the handler.
-func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRequest) (*PermissionResponse, error) {
+func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRequest) (response *PermissionResponse, err error) {
 	req.ToolName = a.dialect.normalizePermissionToolName(req.ToolName, req.ToolMeta, req.Title, req.ActionType)
 
 	a.mu.RLock()
@@ -23,14 +23,23 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 	if sessionID == "" {
 		sessionID = fallbackSessionID
 	}
+	if finish := a.beginContinuationPermission(sessionID, req.ToolCallID, req.Options); finish != nil {
+		defer func() { finish(response, err) }()
+	}
+	turn := a.currentPromptTurn()
+	var capacityPermissionTracked bool
 	if sessionID == fallbackSessionID {
-		a.poisonContinuationSafety()
+		capacityPermissionTracked = true
 	}
 
 	// Only emit a synthetic tool_call event if no ToolCall notification preceded this.
 	// waitForActiveToolCall bounds the race window between a SessionUpdate.ToolCall
 	// notification and a same-id request_permission dispatched on separate goroutines.
 	alreadyTracked := a.waitForActiveToolCall(ctx, req.ToolCallID, syntheticToolCallRaceWindow)
+	if capacityPermissionTracked {
+		a.capacityPermissionStarted(turn, req.ToolCallID)
+		defer a.capacityPermissionFinished(turn)
+	}
 
 	if !alreadyTracked {
 		toolCallEvent := AgentEvent{

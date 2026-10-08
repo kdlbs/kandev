@@ -122,6 +122,7 @@ test("keeps long workflow previews contained and touch-usable on a phone", async
       element.scrollTop = element.scrollHeight;
     });
     await expect(retry).toBeVisible();
+    await retry.scrollIntoViewIfNeeded();
     const retryBox = await retry.boundingBox();
     if (!retryBox) throw new Error("Workflow retry has no layout box");
     expect(await retry.evaluate((element) => getComputedStyle(element).minHeight)).toBe("48px");

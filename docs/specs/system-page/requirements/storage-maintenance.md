@@ -2,7 +2,7 @@
 status: active
 system: system-page
 created: 2026-07-14
-updated: 2026-10-02
+updated: 2026-10-05
 owners:
   - cfl
 ---
@@ -48,6 +48,9 @@ of treating a `/tmp` name or mtime as sufficient evidence.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.6:** Maintenance settings use separate cards grouped by scope: schedule, workspaces and containers, Go build cache, Docker cleanup, and quarantine safety. Every option includes focusable, pointer-accessible help that explains what it can change, when it runs, and which safety checks apply. Threshold and path fields are disabled while their parent cleanup option is disabled; quarantine retention remains independently editable because it governs entries created by future cleanup even when the other resource rules are disabled.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.7:** Read-only analysis is available even when scheduled maintenance is disabled. It reports total task workspace bytes alongside active and orphan-candidate bytes, active quarantined count and bytes, the managed Go cache, the service user's default Go cache when it is a distinct path, Kandev-managed container count and writable-layer bytes, Docker image-layer bytes, Docker build cache, and unused Docker images.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.8:** Storage analysis shows a total counted size derived from the available non-overlapping top-level measurements: total task workspaces, quarantine, managed and distinct user Go caches, registered temporary artifacts, Kandev-managed container writable layers, Docker image layers, and Docker build cache. Active and candidate workspace/temporary-artifact bytes and unused-image bytes remain visible subset measurements and are not added again. If any top-level measurement is unavailable, the total is visibly identified as partial rather than presented as complete host disk usage.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.9:** When unrelated directories coexist with task workspaces, analysis shall report recognized workspace sizes on desktop and phone. Its response shall identify omitted unclassified directories. A permission-denied directory without positive task-layout evidence shall be preserved, omitted, and reported as unclassified; permission errors on recognized paths shall remain errors.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.10:** Ordinary repository symlinks shall not prevent recognized workspace measurements. Analysis and cleanup shall never follow their targets. Unsafe workspace roots and ownership controls shall retain rejection.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.11:** Supported marked and legacy workspace layouts shall remain measurable. Unclassified directories and their ordinary subdirectories shall never become cleanup candidates. Inventory failure shall prevent cleanup.
 
 ### REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-002: Database footprint visibility
 
@@ -166,6 +169,10 @@ The Go-cache policy supersedes quarantine rotation and global-idle admission for
 resources and historical quarantine retain their existing rules.
 
 ## System design
+
+The current [workspace discovery design](../system-design/workspace-storage-discovery.md)
+defines workspace recognition. Its [implementation package](../../../plans/workspace-storage-discovery/plan.md)
+records the completed implementation and regression evidence.
 
 The implemented optional-cache contract is defined in the
 [managed Go-cache launch fallback design](../system-design/managed-go-cache-launch-fallback.md).

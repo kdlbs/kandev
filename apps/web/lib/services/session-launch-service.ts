@@ -1,6 +1,8 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskPriority } from "@/lib/types/http";
 
+const DEFAULT_SESSION_LAUNCH_TIMEOUT_MS = 60_000;
+
 export type SessionIntent =
   | "prepare"
   | "start"
@@ -60,7 +62,7 @@ export async function launchSession(
 ): Promise<LaunchSessionResponse> {
   const client = getWebSocketClient();
   if (!client) throw new Error("WebSocket client not available");
-  const effectiveTimeout = timeout ?? (request.intent === "resume" ? 30_000 : 15_000);
+  const effectiveTimeout = timeout ?? DEFAULT_SESSION_LAUNCH_TIMEOUT_MS;
   return client.request<LaunchSessionResponse>("session.launch", request, effectiveTimeout);
 }
 
@@ -127,6 +129,6 @@ export async function ensureTaskSession(
       ...(opts?.autoStart !== undefined ? { auto_start: opts.autoStart } : {}),
       ...(opts?.activationSource !== undefined ? { activation_source: opts.activationSource } : {}),
     },
-    opts?.timeout ?? 15_000,
+    opts?.timeout ?? DEFAULT_SESSION_LAUNCH_TIMEOUT_MS,
   );
 }

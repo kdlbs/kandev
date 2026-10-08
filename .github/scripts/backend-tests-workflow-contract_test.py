@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Contract tests for persistence gates and bounded backend test summaries."""
 
+import re
 from pathlib import Path
 import unittest
 
@@ -30,6 +31,8 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
     def test_postgres_16_uses_fixed_catalog_commands(self) -> None:
         self.assertNotIn("PostgresDSNFromEnv", self.workflow)
         self.assertNotIn("mapfile -t postgres_packages", self.workflow)
+        persistence_gate = step_block(self.workflow, "Run fixed PostgreSQL 16 persistence gates")
+        self.assertIn("./internal/coordinator", persistence_gate)
         self.assertIn("./internal/persistence/storeconformance ./internal/backendapp", self.workflow)
         for test_name in (
             "TestStoreCatalogCompleteness",
@@ -54,8 +57,10 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
     def test_windows_job_has_headroom_for_hosted_runner_variance(self) -> None:
         _, marker, windows_job = self.workflow.partition("  test-windows:\n")
         self.assertTrue(marker)
-        self.assertIn("timeout-minutes: 40", windows_job)
-        self.assertIn("-timeout 25m", windows_job)
+        timeout = re.search(r"(?m)^\s*timeout-minutes:\s*(\d+)\s*$", windows_job)
+        self.assertIsNotNone(timeout)
+        self.assertGreaterEqual(int(timeout.group(1)), 90)
+        self.assertIn("go test -race -timeout 25m ./cmd/windows-process-tests", windows_job)
 
     def test_windows_suites_run_independently_without_fail_fast(self) -> None:
         windows_job = self.workflow.partition("  test-windows:\n")[2]
@@ -65,7 +70,10 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("continue-on-error", windows_job)
         process = step_block(windows_job, "Test Windows process package")
         self.assertIn("if: matrix.suite == 'process'", process)
-        self.assertIn("go test -race -v -json -timeout 25m ./internal/agentctl/server/process/...", process)
+        self.assertIn("go run ./cmd/windows-process-tests", process)
+        helper = step_block(windows_job, "Test Windows process cohort runner")
+        self.assertIn("if: matrix.suite == 'process'", helper)
+        self.assertIn("go test -race -timeout 25m ./cmd/windows-process-tests", helper)
         native = step_block(windows_job, "Test windows-sensitive packages")
         self.assertNotIn("./internal/agentctl/server/process/", native)
         for package in (

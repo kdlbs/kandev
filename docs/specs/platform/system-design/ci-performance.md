@@ -102,6 +102,80 @@ Collect unique JSON reports per shard with test file identities and test case co
 Compare their union against an unsharded run at the same source snapshot.
 Failures and cancelled shards must still block the gate. Reports must not mask a failed test exit code.
 
+### Windows process cohorts
+
+The process member of `test-windows` in `.github/workflows/backend-tests.yml`
+retains its name, hosted runner, 90-minute job limit and required aggregate.
+The independent `native` member, its checks, race flags and failure handling stay intact.
+Only the process member uses `apps/backend/cmd/windows-process-tests`, a fixed
+two-cohort native Go runner. This is not a configurable shard service.
+
+From `apps/backend`, enumerate the existing `./internal/agentctl/server/process/...`
+selection using `go test -race -json -timeout 25m -list '^(Test|Fuzz|Example)'`.
+This builds and invokes the native test binaries, including descendant packages.
+Do not infer runnable names from source text, Linux lists or retained failure logs.
+Require a successful command and complete successful package records; retain each
+package/name identity. Reject malformed output, duplicate names within a package,
+invalid top-level identifiers, unexpected packages and an empty global inventory.
+Packages with no runnable entries remain in the original package selection.
+
+Sort the distinct top-level names by Go string order and alternate them between
+exactly two nonempty cohorts. The same name in multiple packages belongs to the
+same cohort in each package. Build escaped, anchored `^(name1|name2|...)$` selectors.
+Verify each native package/name identity matches exactly one selector and their
+union equals the inventory. A selector contains no slash, so Go runs every nested
+subtest and fuzz seed below its selected top-level name. Examples retain native
+Go eligibility. Benchmarks remain outside the existing default test invocation.
+
+Start both `go test -race -v -json -timeout 25m -run <selector>
+./internal/agentctl/server/process/...` commands before waiting for either.
+Use argv arrays, not shell interpolation. Keep separate raw JSON and stderr files
+under an owned temporary directory, and record each original PID, UTC start/end
+and true exit. Join every started command even when another start or wait fails;
+emit both complete diagnostic streams before returning a nonzero aggregate exit.
+Validate each expected package/name has its actual terminal pass or skip record,
+no unselected top-level test ran, and package completion is successful. Failure,
+missing or duplicate completion, malformed JSON or unreadable diagnostics fails closed.
+Do not cancel a sibling merely because one cohort fails or translate a timeout
+into success. GitHub retains the existing outer job cancellation boundary.
+
+Run the runner's focused Go tests in the process member before invoking it.
+Extend the already registered `backend-tests-workflow-contract_test.py` to protect
+the fixed selection, two cohorts, unchanged budgets/race checks, independent native
+member, required aggregate and change detection. No new action, permissions,
+runner provider, workflow trigger, dependency or retry policy is required.
+
+The monitor fixture in `workspace_monitor_dirty_paths_test.go` waits through
+`GetGitStatusWithDetails(tracker.cancelCtxOrBackground(), false)` instead of an
+independent ten-second caller deadline. The existing [workspace status lifecycle](workspace-git-status.md)
+owns the accepted job, its 60-second deadline, bounded successor slot, completion
+error and shutdown cancellation. The cached read does not request a new observation.
+Retain every exact path, diff, repository, message, cache and no-op assertion;
+worker timeout, unavailable detail or supersession must still fail the fixture.
+Keep production deadlines, cancellation tests and the Go package deadlock alarm.
+
+The mode-transition fixture in `workspace_poll_mode_loop_test.go` separates the
+two-second immediate-scan admission check from scan completion. Capture completed
+`MonitorTickStats` after paused initialization and drain stale `tickDone`. Within
+two seconds of the real fast-mode transition, require either `monitorRunning` or
+an increased completed-scan count, so a short completed tick cannot be missed.
+Keep both fast intervals at 30 seconds: their regular timer cannot satisfy admission.
+Then receive the causally admitted scan's `tickDone`, retaining tracker cancellation
+and the real file-change notification assertion with its existing two-second bound.
+The fixture completion guard uses the existing 60-second status-observation
+budget plus three existing ten-second Git command budgets (quick state twice and
+file listing once). This 90-second guard is a fixture failure bound, not a production
+whole-tick guarantee: admission queue wait and subprocess cleanup are separate.
+ROOT accepted this qualification for this owned test guard. Timeout or cancellation
+remains failure; do not infer a tracker deadline or enlarge package/job timeouts.
+
+The [first-commit Unstage package](../../../plans/unstage-all-before-first-commit/plan.md)
+owns this bounded delivery dependency. Its two failed Windows attempts provide
+partial scheduling evidence, not a successful full-suite performance comparison.
+Unobserved test times remain unknown. Native listing and successful full cohorts
+are required delivery evidence; no comparative speedup or transient-cause claim
+follows from those failed profiles. Existing frontend measurement gates remain intact.
+
 ## Measurement and capacity assessment
 
 Save curated evidence in the implementation package. Keep raw logs outside version control.

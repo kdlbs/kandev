@@ -7,9 +7,12 @@ import {
   getAgentUpdateJob,
   getInstallJob,
   previewAgentUpdate,
+  previewAgentUpdateToFamily,
   previewAgentUpdateUseDefault,
   updateAgent,
+  updateAgentToFamily,
   updateAgentUseDefault,
+  type AgentUpdatePreview,
   type AgentUpdateJob,
   type AgentUpdateMode,
 } from "@/lib/api";
@@ -23,6 +26,41 @@ type MaintenanceConflict = {
   active_job_id: string;
   active_kind: "install" | "update";
 };
+
+async function requestRuntimeUpdate(
+  agentName: string,
+  targetVersion: string,
+  useDefault: boolean,
+  targetFamily?: "v2" | AgentUpdateMode,
+  expectedRuntimeRevision?: number,
+): Promise<AgentUpdateJob> {
+  if (targetFamily === "self_update") return updateAgent(agentName, { update_mode: "self_update" });
+  if (useDefault) return updateAgentUseDefault(agentName);
+  if (targetFamily === "v2") {
+    return updateAgentToFamily(
+      agentName,
+      targetVersion,
+      targetFamily,
+      expectedRuntimeRevision ?? 0,
+    );
+  }
+  return updateAgent(agentName, { update_mode: "pinned", target_version: targetVersion });
+}
+
+function requestRuntimeUpdatePreview(
+  agentName: string,
+  targetVersion?: string,
+  useDefault = false,
+  targetFamily?: "v2",
+): Promise<AgentUpdatePreview> {
+  if (useDefault) return previewAgentUpdateUseDefault(agentName, { cache: "no-store" });
+  if (targetFamily === "v2") {
+    return previewAgentUpdateToFamily(agentName, targetFamily, targetVersion, {
+      cache: "no-store",
+    });
+  }
+  return previewAgentUpdate(agentName, targetVersion, { cache: "no-store" });
+}
 
 function maintenanceConflict(error: unknown): MaintenanceConflict | null {
   if (!(error instanceof ApiError) || error.status !== 409) return null;
@@ -59,17 +97,17 @@ export function useAgentRuntimeUpdates() {
       agentName: string,
       targetVersion: string,
       useDefault = false,
-      updateMode: AgentUpdateMode = "pinned",
+      targetFamily?: "v2" | AgentUpdateMode,
+      expectedRuntimeRevision?: number,
     ) => {
       try {
-        const job = useDefault
-          ? await updateAgentUseDefault(agentName)
-          : await updateAgent(
-              agentName,
-              updateMode === "self_update"
-                ? { update_mode: "self_update" }
-                : { update_mode: "pinned", target_version: targetVersion },
-            );
+        const job = await requestRuntimeUpdate(
+          agentName,
+          targetVersion,
+          useDefault,
+          targetFamily,
+          expectedRuntimeRevision,
+        );
         if (job.job_id) store.getState().upsertAgentUpdateJob(job);
         return job;
       } catch (error) {
@@ -84,10 +122,8 @@ export function useAgentRuntimeUpdates() {
   );
 
   const previewUpdate = useCallback(
-    (agentName: string, targetVersion?: string, useDefault = false) =>
-      useDefault
-        ? previewAgentUpdateUseDefault(agentName, { cache: "no-store" })
-        : previewAgentUpdate(agentName, targetVersion, { cache: "no-store" }),
+    (agentName: string, targetVersion?: string, useDefault = false, targetFamily?: "v2") =>
+      requestRuntimeUpdatePreview(agentName, targetVersion, useDefault, targetFamily),
     [],
   );
 

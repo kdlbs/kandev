@@ -237,17 +237,11 @@ type AgentExecution struct {
 	isResumedSession bool
 
 	// Buffers for accumulating agent response during a prompt
-	messageBuffer strings.Builder
-	// messageBufferDiagnostic is the ProviderDiagnosticCandidate value of the
-	// chunk(s) currently held in messageBuffer (legacy no-protocol-ID path).
-	// A chunk whose marker differs from this flag forces an immediate flush of
-	// the buffered segment first, so a diagnostic chunk's marker is never
-	// merged away by concatenation with ordinary output.
-	messageBufferDiagnostic bool
-	thinkingBuffer          strings.Builder
-	messageMu               sync.Mutex
-	streamMu                sync.Mutex
-	stream                  *streamCoalescer
+	messageBuffer  strings.Builder
+	thinkingBuffer strings.Builder
+	messageMu      sync.Mutex
+	streamMu       sync.Mutex
+	stream         *streamCoalescer
 
 	// Legacy streaming message tracking for agents that omit protocol message IDs.
 	// These are set when we create a streaming message and cleared on tool_call/complete.
@@ -1773,6 +1767,14 @@ type WorkspaceInfo struct {
 	RuntimeName      agentruntime.Runtime   // Runtime name from ExecutorRunning record
 	AgentExecutionID string                 // Previous execution ID (for remote reconnect)
 	Metadata         map[string]interface{} // Additional metadata (reconnect flags)
+
+	// McpMode carries the MCP tool mode to an agentctl instance the lifecycle
+	// builds from WorkspaceInfo alone (workspace-only restore/admission),
+	// which never passes through the executor's mode resolvers. Set by
+	// GetWorkspaceInfoForSession from the task row alone: mcpmode.Coordinator
+	// for a coordinator-origin task, empty otherwise
+	// (docs/specs/coordinator/system-design/copilot.md#fail-closed).
+	McpMode string
 }
 
 // WorkspaceInfoProvider provides workspace information for tasks

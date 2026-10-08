@@ -244,9 +244,17 @@ func (m *Manager) approveCursorProjectMCPImport(
 	}
 	approval := adapter.Enable(ctx, execution.WorkspacePath, execution.RuntimeEnvironment(), target.serverID)
 	ended := time.Now().UTC()
+	if failure := cursorMCPPreparationFence(ctx, m, execution, workspaceKey, generation, target, home, sourceRepository, sourceAvailable); failure != "" {
+		diagnostic := cursorMCPFenceDiagnostic(ctx, approval.Diagnostic)
+		m.logCursorMCPDiagnostic(execution, progress, target.serverID, diagnostic)
+		updateCursorMCPProgress(progress, index, target.serverID, PrepareStepKindAgentMCPApproval, PrepareStepFailed, failure, started, ended, diagnostic)
+		appendCursorMCPProgress(progress, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepSkipped, failure, &ended, &ended)
+		return
+	}
 	if !approval.ApprovalSucceeded {
 		failure := nativeMCPReasonCode(approval)
-		updateCursorMCPProgress(progress, index, target.serverID, PrepareStepKindAgentMCPApproval, PrepareStepFailed, failure, started, ended)
+		m.logCursorMCPDiagnostic(execution, progress, target.serverID, approval.Diagnostic)
+		updateCursorMCPProgress(progress, index, target.serverID, PrepareStepKindAgentMCPApproval, PrepareStepFailed, failure, started, ended, approval.Diagnostic)
 		appendCursorMCPProgress(progress, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepSkipped, failure, &ended, &ended)
 		return
 	}
@@ -303,19 +311,24 @@ func (m *Manager) verifyCursorProjectMCPImport(
 	index := appendCursorMCPProgress(progress, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepRunning, "", &started, nil)
 	readiness := adapter.Verify(ctx, execution.WorkspacePath, execution.RuntimeEnvironment(), target.serverID)
 	ended := time.Now().UTC()
-	failure := cursorMCPVerificationFence(ctx, m, execution, workspaceKey, generation, target, home, sourceRepository, sourceAvailable)
+	failure := cursorMCPPreparationFence(ctx, m, execution, workspaceKey, generation, target, home, sourceRepository, sourceAvailable)
 	if failure != "" {
-		updateCursorMCPProgress(progress, index, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepFailed, failure, started, ended)
+		diagnostic := cursorMCPFenceDiagnostic(ctx, readiness.Diagnostic)
+		m.logCursorMCPDiagnostic(execution, progress, target.serverID, diagnostic)
+		updateCursorMCPProgress(progress, index, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepFailed, failure, started, ended, diagnostic)
 		return
 	}
 	status := PrepareStepFailed
 	if readiness.Status == mcpconfig.NativeMCPStatusReady {
 		status = PrepareStepCompleted
 	}
-	updateCursorMCPProgress(progress, index, target.serverID, PrepareStepKindAgentMCPVerification, status, nativeMCPReasonCode(readiness), started, ended)
+	if readiness.Diagnostic != nil {
+		m.logCursorMCPDiagnostic(execution, progress, target.serverID, readiness.Diagnostic)
+	}
+	updateCursorMCPProgress(progress, index, target.serverID, PrepareStepKindAgentMCPVerification, status, nativeMCPReasonCode(readiness), started, ended, readiness.Diagnostic)
 }
 
-func cursorMCPVerificationFence(
+func cursorMCPPreparationFence(
 	ctx context.Context,
 	manager *Manager,
 	execution *AgentExecution,
@@ -435,15 +448,20 @@ func finishCursorMCPProgress(progress *prepareProgressRecorder, index int, serve
 	updateCursorMCPProgress(progress, index, serverID, kind, status, failureCode, startedAt, time.Now().UTC())
 }
 
-func updateCursorMCPProgress(progress *prepareProgressRecorder, index int, serverID, kind string, status PrepareStepStatus, failureCode string, startedAt, endedAt time.Time) {
+func updateCursorMCPProgress(progress *prepareProgressRecorder, index int, serverID, kind string, status PrepareStepStatus, failureCode string, startedAt, endedAt time.Time, diagnostics ...*mcpconfig.NativeMCPDiagnostic) {
 	if progress == nil || index < 0 {
 		return
+	}
+	var diagnostic *mcpconfig.NativeMCPDiagnostic
+	if len(diagnostics) > 0 {
+		diagnostic = diagnostics[0]
 	}
 	progress.UpdateStep(index, PrepareStep{
 		Name:        "Cursor MCP " + strings.TrimPrefix(kind, "agent_mcp_"),
 		Kind:        kind,
 		MCPProvider: "cursor",
 		MCPServerID: serverID,
+		Diagnostic:  normalizeCursorMCPDiagnostic(diagnostic),
 		Status:      status,
 		FailureCode: failureCode,
 		StartedAt:   &startedAt,

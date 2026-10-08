@@ -46,8 +46,11 @@ func TestSidebarQueryScratchLifecycle(t *testing.T) {
 				return nil
 			}
 			query := sidebarTaskQuery(1)
+			query.Sort = models.SidebarTaskViewSort{Key: "color", Color: "red", Direction: "desc"}
 			query.CollapsedGroupKeys = []string{"nonmatching-group"}
-			_, err := repo.QuerySidebarTaskPage(t.Context(), "scratch", query, models.SidebarTaskViewPreferences{PinnedTaskIDs: []string{"kept"}})
+			prefs := sidebarColorPreferencesForTest()
+			prefs.PinnedTaskIDs = []string{"kept"}
+			_, err := repo.QuerySidebarTaskPage(t.Context(), "scratch", query, prefs)
 			if stage == "success" {
 				require.NoError(t, err)
 			} else {
@@ -55,7 +58,7 @@ func TestSidebarQueryScratchLifecycle(t *testing.T) {
 			}
 			assertSidebarScratchAbsent(t, repo)
 			repo.sidebarQueryStage = nil
-			_, err = repo.QuerySidebarTaskPage(t.Context(), "scratch", query, models.SidebarTaskViewPreferences{PinnedTaskIDs: []string{"kept"}})
+			_, err = repo.QuerySidebarTaskPage(t.Context(), "scratch", query, prefs)
 			require.NoError(t, err, "next borrower must start with a clean temporary schema")
 		})
 	}
@@ -79,7 +82,11 @@ func TestSidebarQueryScratchCancellation(t *testing.T) {
 				}
 				return nil
 			}
-			_, err := repo.QuerySidebarTaskPage(ctx, "cancelled", sidebarTaskQuery(1), models.SidebarTaskViewPreferences{PinnedTaskIDs: []string{"kept"}})
+			query := sidebarTaskQuery(1)
+			query.Sort = models.SidebarTaskViewSort{Key: "color", Color: "red", Direction: "desc"}
+			prefs := sidebarColorPreferencesForTest()
+			prefs.PinnedTaskIDs = []string{"kept"}
+			_, err := repo.QuerySidebarTaskPage(ctx, "cancelled", query, prefs)
 			require.ErrorIs(t, err, context.Canceled)
 			assertSidebarScratchAbsent(t, repo)
 		})
@@ -186,11 +193,11 @@ func assertSidebarScratchAbsent(t *testing.T, repo *Repository) {
 	require.NoError(t, err)
 	defer func() { _ = conn.Close() }()
 	var count int
-	require.NoError(t, conn.GetContext(t.Context(), &count, "SELECT COUNT(*) FROM sqlite_temp_master WHERE name IN ('kandev_sidebar_filtered', 'kandev_sidebar_preferences')"))
+	require.NoError(t, conn.GetContext(t.Context(), &count, "SELECT COUNT(*) FROM sqlite_temp_master WHERE name IN ('kandev_sidebar_filtered', 'kandev_sidebar_preferences', 'kandev_sidebar_task_colors')"))
 	require.Zero(t, count)
 	require.NoError(t, conn.GetContext(t.Context(), &count, "SELECT COUNT(*) FROM sqlite_temp_master WHERE name = 'sqlite_stat1'"))
 	if count > 0 {
-		require.NoError(t, conn.GetContext(t.Context(), &count, "SELECT COUNT(*) FROM temp.sqlite_stat1 WHERE tbl IN ('kandev_sidebar_filtered', 'kandev_sidebar_preferences')"))
+		require.NoError(t, conn.GetContext(t.Context(), &count, "SELECT COUNT(*) FROM temp.sqlite_stat1 WHERE tbl IN ('kandev_sidebar_filtered', 'kandev_sidebar_preferences', 'kandev_sidebar_task_colors')"))
 		require.Zero(t, count, "scratch statistics must not retain workspace data for the next borrower")
 	}
 }

@@ -18,6 +18,7 @@ type cursorNativeSmokeACPClient struct {
 	initializeResult         json.RawMessage
 	sessionIDs               []string
 	toolEvidence             []cursorNativeSmokeToolEvidence
+	fixtureShellCommand      string
 }
 
 func (c *cursorNativeSmokeACPClient) initializeSummary() string {
@@ -225,9 +226,11 @@ func (c *cursorNativeSmokeACPClient) handleServerRequest(t *testing.T, frame cur
 	var request struct {
 		ToolCall struct {
 			Title    string `json:"title"`
+			Kind     string `json:"kind"`
 			RawInput struct {
 				ProviderIdentifier string `json:"providerIdentifier"`
 				ToolName           string `json:"toolName"`
+				Command            string `json:"command"`
 			} `json:"rawInput"`
 		} `json:"toolCall"`
 		Options []struct {
@@ -239,6 +242,10 @@ func (c *cursorNativeSmokeACPClient) handleServerRequest(t *testing.T, frame cur
 	fixtureTool := request.ToolCall.RawInput.ProviderIdentifier == cursorNativeSmokeID &&
 		request.ToolCall.RawInput.ToolName == "fixture_ping"
 	fixtureTool = fixtureTool || strings.Contains(request.ToolCall.Title, cursorNativeSmokeID+"-fixture_ping")
+	fixtureTool = fixtureTool || (c.fixtureShellCommand != "" && request.ToolCall.RawInput.Command == c.fixtureShellCommand)
+	// Cursor's permission frame may carry the shell command only in its title.
+	fixtureTool = fixtureTool || (c.fixtureShellCommand != "" && request.ToolCall.Kind == "execute" &&
+		request.ToolCall.Title == "`"+c.fixtureShellCommand+"`")
 	var outcome map[string]any
 	if fixtureTool {
 		for _, option := range request.Options {

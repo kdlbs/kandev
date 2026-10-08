@@ -17,6 +17,15 @@ type statusSelectionStore struct {
 	selection map[string]managedruntime.Selection
 }
 
+type statusOpenCodeSelectionStore struct {
+	statusSelectionStore
+	openCode managedruntime.OpenCodeSelection
+}
+
+func (s *statusOpenCodeSelectionStore) GetOpenCodeSelection(context.Context) (managedruntime.OpenCodeSelection, bool, error) {
+	return s.openCode, true, nil
+}
+
 func (s *statusSelectionStore) Get(_ context.Context, agentName, packageName string) (managedruntime.Selection, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -143,6 +152,66 @@ func TestListAgentUpdateStatusesComparesLatestAndCachesFailures(t *testing.T) {
 
 	if got := controller.ListAgentUpdateJobs(); len(got) != 0 {
 		t.Fatalf("status request created %d update jobs", len(got))
+	}
+}
+
+func TestListAgentUpdateStatusesUsesLatestWithinSelectedOpenCodeFamily(t *testing.T) {
+	openCode := agents.NewOpenCodeACP()
+	controller := newTestController(map[string]agents.Agent{openCode.ID(): openCode})
+	controller.SetManagedRuntimeSelectionStore(&statusOpenCodeSelectionStore{
+		openCode: managedruntime.OpenCodeSelection{
+			SchemaVersion:         1,
+			Family:                managedruntime.OpenCodeFamilyV2,
+			Source:                managedruntime.OpenCodeSourceManaged,
+			Package:               managedruntime.OpenCodeV2Package,
+			SelectedVersion:       "2.0.18",
+			AppliedDefaultVersion: "2.0.18",
+			Revision:              7,
+		},
+	})
+	controller.SetRuntimeUpdater(&sequencedVersionUpdater{
+		fakeRuntimeUpdater: fakeRuntimeUpdater{target: "3.0.0"},
+		metadata: RuntimeVersionMetadata{
+			Versions: []string{"2.0.18", "2.0.20", "3.0.0"},
+			Latest:   "3.0.0",
+		},
+	})
+
+	statuses, err := controller.ListAgentUpdateStatuses(context.Background())
+	if err != nil {
+		t.Fatalf("ListAgentUpdateStatuses: %v", err)
+	}
+	if len(statuses.Statuses) != 1 {
+		t.Fatalf("status count = %d, want one OpenCode status", len(statuses.Statuses))
+	}
+	status := statuses.Statuses[0]
+	if status.Package != managedruntime.OpenCodeV2Package || status.LatestVersion != "2.0.20" || status.CheckState != dto.AgentUpdateCheckStateUpdateAvailable {
+		t.Fatalf("v2 status = %+v, want package @opencode/cli latest 2.0.20", status)
+	}
+}
+
+func TestManagedRuntimeStateKeepsNativeSelectionWhenUpdaterIsUnavailable(t *testing.T) {
+	openCode := agents.NewOpenCodeACP()
+	controller := newTestController(map[string]agents.Agent{openCode.ID(): openCode})
+	controller.SetManagedRuntimeSelectionStore(&statusOpenCodeSelectionStore{
+		openCode: managedruntime.OpenCodeSelection{
+			SchemaVersion:         1,
+			Family:                managedruntime.OpenCodeFamilyV1,
+			Source:                managedruntime.OpenCodeSourceNative,
+			Package:               managedruntime.OpenCodeV1Package,
+			AppliedDefaultVersion: "1.18.32",
+			Revision:              1,
+		},
+	})
+
+	_, family, source, revision, active, _, err := controller.managedRuntimeState(
+		context.Background(), openCode.ID(), openCode,
+	)
+	if err != nil {
+		t.Fatalf("managedRuntimeState: %v", err)
+	}
+	if family != managedruntime.OpenCodeFamilyV1 || source != managedruntime.OpenCodeSourceNative || revision != 1 || active != "" {
+		t.Fatalf("native runtime state = family %q source %q revision %d active %q", family, source, revision, active)
 	}
 }
 

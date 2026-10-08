@@ -15,7 +15,7 @@ func TestContinuationSafetySnapshotTerminalEventRoundTrip(t *testing.T) {
 	execution := createTestExecution("exec-1", "task-1", "session-1")
 	execution.promptGeneration = 7
 	require.NoError(t, mgr.executionStore.Add(execution))
-	snapshot := &streams.ContinuationSafetySnapshot{Support: streams.ContinuationNativeSavedHistoryV1, PromptGeneration: 7, Known: true, CompletedReads: 1}
+	snapshot := &streams.ContinuationSafetySnapshot{Support: streams.ContinuationNativeSavedHistoryV2, PromptGeneration: 7, Known: true, CompletedTools: 2}
 	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "error", Error: "interrupted", PromptGeneration: 7, ContinuationSafety: snapshot})
 	bus.mu.Lock()
 	defer bus.mu.Unlock()

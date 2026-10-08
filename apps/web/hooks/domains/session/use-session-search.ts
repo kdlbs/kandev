@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { searchSessionMessages, type MessageSearchHit } from "@/lib/api/domains/session-api";
 
 type SessionSearchState = {
@@ -21,38 +21,70 @@ export type SessionSearchHook = SessionSearchState & {
   setActiveHit: (id: string | null) => void;
 };
 
-/** Debounced fetch + request-ID cancellation. */
+/** Query generation is captured before debounce and checked at every settlement. */
 function useDebouncedSearch(
   sessionId: string | null | undefined,
+  requestIdRef: React.RefObject<number>,
   setHits: (hits: MessageSearchHit[]) => void,
   setIsSearching: (v: boolean) => void,
+  canSearch: () => boolean,
 ) {
-  const requestIdRef = useRef(0);
   return useCallback(
-    async (q: string) => {
-      if (!sessionId) return;
+    async (q: string, myId: number) => {
+      const isCurrent = () => canSearch() && requestIdRef.current === myId;
+      if (!sessionId || !isCurrent()) return;
       const trimmed = q.trim();
-      if (!trimmed) {
-        setHits([]);
-        setIsSearching(false);
-        return;
-      }
-      const myId = ++requestIdRef.current;
+      if (!trimmed) return;
       setIsSearching(true);
       try {
         const resp = await searchSessionMessages(sessionId, trimmed, 50);
-        if (requestIdRef.current !== myId) return;
+        if (!isCurrent()) return;
         setHits(resp.hits ?? []);
       } catch (err) {
-        if (requestIdRef.current !== myId) return;
+        if (!isCurrent()) return;
+        // i18n-exempt: request diagnostic logged to the console, never rendered as UI copy.
         console.error("Session search failed:", err);
         setHits([]);
       } finally {
-        if (requestIdRef.current === myId) setIsSearching(false);
+        if (isCurrent()) setIsSearching(false);
       }
     },
-    [sessionId, setHits, setIsSearching],
+    [sessionId, requestIdRef, setHits, setIsSearching, canSearch],
   );
+}
+
+/** Only committed session and search lifetimes can accept retained callbacks. */
+function useSearchContext(
+  sessionId: string | null | undefined,
+  resetSearch: () => void,
+  cancelSearch: () => void,
+) {
+  const session = useMemo(() => ({ sessionId }), [sessionId]);
+  const committedSessionRef = useRef<typeof session | null>(null);
+  const [queryLifetime, setQueryLifetime] = useState(() => Symbol());
+  const committedQueryRef = useRef<symbol | null>(null);
+
+  useLayoutEffect(() => {
+    committedSessionRef.current = session;
+    committedQueryRef.current = queryLifetime;
+    resetSearch();
+    return () => {
+      committedSessionRef.current = null;
+      committedQueryRef.current = null;
+      cancelSearch();
+    };
+  }, [session, queryLifetime, resetSearch, cancelSearch]);
+
+  const isCurrentSession = useCallback(() => committedSessionRef.current === session, [session]);
+  const isCurrentQuery = useCallback(
+    () => isCurrentSession() && committedQueryRef.current === queryLifetime,
+    [isCurrentSession, queryLifetime],
+  );
+  const retireQuery = useCallback(() => {
+    committedQueryRef.current = null;
+    setQueryLifetime(Symbol());
+  }, []);
+  return { isCurrentSession, isCurrentQuery, retireQuery };
 }
 
 /** Focus a hit in the DOM with scroll + flash animation. */
@@ -108,42 +140,64 @@ export function useSessionSearch(
   const [isSearching, setIsSearching] = useState(false);
   const [activeHitId, setActiveHitIdState] = useState<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestIdRef = useRef(0);
+  const isOpenRef = useRef(false);
   // Generation counter for setActiveHit — bumping it aborts any in-flight
   // backfill loop (new click, search bar close, or component unmount).
   const activeHitGenRef = useRef(0);
 
-  const runSearch = useDebouncedSearch(sessionId, setHits, setIsSearching);
-
-  const setQuery = useCallback(
-    (q: string) => {
-      setQueryState(q);
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      timeoutRef.current = setTimeout(() => runSearch(q), DEBOUNCE_MS);
-    },
-    [runSearch],
-  );
-
-  useEffect(() => {
-    const genRef = activeHitGenRef;
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      // Abort any in-flight setActiveHit backfill loop on unmount.
-      genRef.current++;
-    };
+  const cancelSearch = useCallback(() => {
+    requestIdRef.current++;
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = null;
+    activeHitGenRef.current++;
   }, []);
-
-  const open = useCallback(() => setIsOpen(true), []);
-  const close = useCallback(() => {
-    setIsOpen(false);
+  const resetSearch = useCallback(() => {
+    cancelSearch();
     setHits([]);
     setActiveHitIdState(null);
     setQueryState("");
     setIsSearching(false);
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    // Abort any in-flight setActiveHit backfill loop.
-    activeHitGenRef.current++;
-  }, []);
-  const setActiveHit = useSetActiveHit(loadOlder, setActiveHitIdState, activeHitGenRef, navigate);
+  }, [cancelSearch]);
+  const { isCurrentSession, isCurrentQuery, retireQuery } = useSearchContext(
+    sessionId,
+    resetSearch,
+    cancelSearch,
+  );
+  const canSearch = useCallback(() => isCurrentQuery() && isOpenRef.current, [isCurrentQuery]);
+  const runSearch = useDebouncedSearch(sessionId, requestIdRef, setHits, setIsSearching, canSearch);
+
+  const setQuery = useCallback(
+    (q: string) => {
+      if (!canSearch()) return;
+      resetSearch();
+      setQueryState(q);
+      if (!sessionId || !q.trim()) return;
+      const myId = requestIdRef.current;
+      timeoutRef.current = setTimeout(() => runSearch(q, myId), DEBOUNCE_MS);
+    },
+    [canSearch, resetSearch, sessionId, runSearch],
+  );
+
+  const open = useCallback(() => {
+    if (!isCurrentSession()) return;
+    isOpenRef.current = true;
+    setIsOpen(true);
+  }, [isCurrentSession]);
+  const close = useCallback(() => {
+    if (!isCurrentSession()) return;
+    isOpenRef.current = false;
+    resetSearch();
+    retireQuery();
+    setIsOpen(false);
+  }, [isCurrentSession, resetSearch, retireQuery]);
+  const selectHit = useSetActiveHit(loadOlder, setActiveHitIdState, activeHitGenRef, navigate);
+  const setActiveHit = useCallback(
+    (id: string | null) => {
+      if (isCurrentSession()) return selectHit(id);
+    },
+    [isCurrentSession, selectHit],
+  );
 
   return {
     isOpen,

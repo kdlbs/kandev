@@ -11,6 +11,7 @@ export type ReviewChangeFacet = {
   deletions: number;
   old_path?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  display_stale?: boolean;
 };
 
 export type ReviewFile = {
@@ -24,6 +25,10 @@ export type ReviewFile = {
   source: "uncommitted" | "committed" | "pr";
   old_path?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  /** The rendered patch or counts come from the previous accepted snapshot. */
+  display_stale?: boolean;
+  /** Source target identity used to retire renderer state across replacement. */
+  display_scope_key?: string;
   staged_change?: ReviewChangeFacet;
   unstaged_change?: ReviewChangeFacet;
   /** Frontend-only layer selected from a mixed uncommitted file. */
@@ -41,6 +46,12 @@ export type ReviewFile = {
   /** True when this file belongs to an initialized Git submodule scope. */
   is_submodule?: boolean;
 };
+
+export function isReviewFileDetailReady(
+  file: Pick<ReviewFile, "diff_state" | "display_stale">,
+): boolean {
+  return !file.display_stale && file.diff_state !== "pending" && file.diff_state !== "unavailable";
+}
 
 /**
  * Composite per-file key used by the review dialog's in-memory state

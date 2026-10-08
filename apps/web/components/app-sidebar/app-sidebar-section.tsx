@@ -104,6 +104,8 @@ function NavigationSectionHeader({
   icon: Icon,
   id,
 }: SectionHeaderProps & { icon: DestinationIcon }) {
+  const showHeaderAction = !!headerAction && (expanded || headerActionVisibility === "always");
+
   return (
     <div className="flex min-w-0 items-center gap-1">
       <button
@@ -124,6 +126,20 @@ function NavigationSectionHeader({
             {collapsedSummary}
           </span>
         )}
+      </button>
+      {showHeaderAction && (
+        <div className="flex shrink-0 items-center" data-testid={`sidebar-section-action-${id}`}>
+          {headerAction}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={onToggle}
+        tabIndex={-1}
+        aria-hidden="true"
+        data-testid={`sidebar-section-chevron-${id}`}
+        className="flex size-5 shrink-0 cursor-pointer items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground/70 [@media(pointer:coarse)]:size-11"
+      >
         <IconChevronRight
           className={cn(
             "size-3.5 shrink-0 text-muted-foreground transition-transform",
@@ -132,7 +148,6 @@ function NavigationSectionHeader({
           aria-hidden="true"
         />
       </button>
-      {headerAction && (expanded || headerActionVisibility === "always") && headerAction}
     </div>
   );
 }
@@ -209,7 +224,7 @@ export function AppSidebarSection({
       <div
         className={cn(
           !collapsed && "border-t border-border/60 pt-2",
-          !collapsed && expanded && "flex-1 min-h-0 flex flex-col",
+          !collapsed && expanded && "flex-1 basis-1/2 shrink-0 min-h-0 flex flex-col",
         )}
       >
         {collapsed ? railButton : header}

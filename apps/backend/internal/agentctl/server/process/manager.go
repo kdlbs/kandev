@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -152,7 +153,9 @@ type Manager struct {
 	// by workspace operations and repository-child discovery. It is guarded by
 	// repoTrackersMu so a rebind snapshots its proposed policy before creating
 	// replacement trackers.
-	workspaceSourceRoots []string
+	workspaceSourceRoots           []string
+	workspaceFileExclusions        []string
+	workspaceFileExclusionRevision uint64
 	// rescanMu serializes RescanRepositories calls so two concurrent
 	// rescans can't both observe an empty tracker set and double-bootstrap
 	// (or both append duplicate trackers for the same new child). The
@@ -274,13 +277,8 @@ type Manager struct {
 	// attachedCount is the live count of backend event-stream connections
 	// (see attachment.go). Zero value correctly starts an instance detached.
 	attachedCount atomic.Int32
-	// turnOutcomeRecorder and turnOutcomeInstanceID back retained-outcome
-	// wiring (see turn_outcome.go). Both are guarded by mu: set once by
-	// SetTurnOutcomeRecorder before any goroutine that could read them is
-	// spawned (instance.Manager.CreateInstance calls it immediately after
-	// constructing this Manager, before Start can be reached), then read
-	// from forwardUpdates and sendUpdateBlocking's callers, neither of which
-	// otherwise holds mu.
+	// turnOutcomeMu guards recorder wiring independently of lifecycle transitions.
+	turnOutcomeMu         sync.RWMutex
 	turnOutcomeRecorder   TurnOutcomeRecorder
 	turnOutcomeInstanceID string
 	startMu               sync.Mutex
@@ -491,6 +489,65 @@ func (m *Manager) SetWorkspaceSourceRoots(roots []string) {
 			tracker.SetAllowedSourceRoots(canonical)
 		}
 	}
+}
+
+// SetWorkspaceFileExclusions installs exact trusted recovery-artifact paths
+// on every current tracker. The update is serialized with tracker rescans so
+// newly created trackers inherit the same filter.
+func (m *Manager) SetWorkspaceFileExclusions(paths []string) {
+	canonical := canonicalWorkspaceFileExclusions(paths)
+	m.rescanMu.Lock()
+	defer m.rescanMu.Unlock()
+	m.repoTrackersMu.Lock()
+	if sameStringSlice(m.workspaceFileExclusions, canonical) {
+		m.repoTrackersMu.Unlock()
+		return
+	}
+	m.workspaceFileExclusions = canonical
+	m.workspaceFileExclusionRevision++
+	trackers := append([]*WorkspaceTracker{m.workspaceTracker}, m.repoTrackers...)
+	m.repoTrackersMu.Unlock()
+	m.workspaceTrackersMu.Lock()
+	for _, tracker := range m.workspaceTrackersBySubpath {
+		trackers = append(trackers, tracker)
+	}
+	m.workspaceTrackersMu.Unlock()
+	for _, tracker := range trackers {
+		if tracker != nil {
+			tracker.SetRecoveryArtifactExclusions(canonical)
+		}
+	}
+}
+
+func canonicalWorkspaceFileExclusions(paths []string) []string {
+	set := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			continue
+		}
+		clean := filepath.Clean(path)
+		if clean != string(filepath.Separator) {
+			set[clean] = struct{}{}
+		}
+	}
+	canonical := make([]string, 0, len(set))
+	for path := range set {
+		canonical = append(canonical, path)
+	}
+	sort.Strings(canonical)
+	return canonical
+}
+
+func (m *Manager) currentWorkspaceFileExclusions() []string {
+	m.repoTrackersMu.RLock()
+	defer m.repoTrackersMu.RUnlock()
+	return append([]string(nil), m.workspaceFileExclusions...)
+}
+
+func (m *Manager) currentWorkspaceFileExclusionRevision() uint64 {
+	m.repoTrackersMu.RLock()
+	defer m.repoTrackersMu.RUnlock()
+	return m.workspaceFileExclusionRevision
 }
 
 // SetUserInputRequestHandler configures protocol-native question routing before
@@ -1480,17 +1537,16 @@ func (m *Manager) buildAdapterConfig() error {
 		return fmt.Errorf("resolve MCP servers for agent session: %w", err)
 	}
 	m.adapterCfg = &adapter.Config{
-		WorkDir:                          m.cfg.WorkDir,
-		AutoApprove:                      m.adapterAutoApprove(),
-		McpServers:                       mcpServers,
-		AgentID:                          m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
-		AssumeMcpSse:                     m.cfg.AssumeMcpSse,
-		AssumeMcpHttp:                    m.cfg.AssumeMcpHttp,
-		RequiresProcessKill:              m.cfg.RequiresProcessKill,
-		NotificationQueueCapacity:        m.cfg.NotificationQueueCapacity,
-		PromptCancelJoinTimeout:          m.cfg.PromptCancelJoinTimeout,
-		ProviderInterruptionContinuation: m.cfg.ProviderInterruptionContinuation,
-		ProviderGatewayAuth:              m.cfg.ProviderGatewayAuth,
+		WorkDir:                   m.cfg.WorkDir,
+		AutoApprove:               m.adapterAutoApprove(),
+		McpServers:                mcpServers,
+		AgentID:                   m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
+		AssumeMcpSse:              m.cfg.AssumeMcpSse,
+		AssumeMcpHttp:             m.cfg.AssumeMcpHttp,
+		RequiresProcessKill:       m.cfg.RequiresProcessKill,
+		NotificationQueueCapacity: m.cfg.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:   m.cfg.PromptCancelJoinTimeout,
+		ProviderGatewayAuth:       m.cfg.ProviderGatewayAuth,
 	}
 
 	// Configure one-shot mode when a continue command is provided.
@@ -2896,7 +2952,16 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		zap.String("tool_call_id", req.ToolCallID),
 		zap.Bool("auto_approve", m.cfg.AutoApprovePermissions))
 
-	if m.RequiresManagedToolPolicy() {
+	// A coordinator session's agentctl instance does not consult its own
+	// blanket AutoApprovePermissions flag or the generic "any kandev tool"
+	// injected-MCP approval; only the exact seven-tool coordinator allowlist
+	// decides (docs/specs/coordinator/system-design/copilot.md#permission-policy).
+	switch {
+	case m.cfg.McpMode == mcpmode.Coordinator:
+		if response, approved := m.autoApproveCoordinatorPermission(req); approved {
+			return response, nil
+		}
+	case m.RequiresManagedToolPolicy():
 		if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
 			return response, nil
 		}
@@ -2910,16 +2975,12 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		return &adapter.PermissionResponse{Cancelled: true}, nil
 	}
 
-	// The backend must persist the selected option before it resolves the live
-	// request. Keep the provider waiting here until that durable claim succeeds.
+	// A coordinator session never takes the blanket or injected-tool approval:
+	// only its allowlist above decides, and anything else waits for a person.
 	var autoApproveOption *adapter.PermissionOption
-	if m.cfg.AutoApprovePermissions {
-		if decision, approved := m.autoApprovePermission(req); approved {
-			autoApproveOption = &decision.option
-		}
-	}
-	if autoApproveOption == nil {
-		if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+	if m.cfg.McpMode != mcpmode.Coordinator {
+		var response *adapter.PermissionResponse
+		if autoApproveOption, response = m.nonCoordinatorAutoApproval(req); response != nil {
 			return response, nil
 		}
 	}
@@ -3004,6 +3065,23 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 type autoApprovalDecision struct {
 	response *adapter.PermissionResponse
 	option   adapter.PermissionOption
+}
+
+// nonCoordinatorAutoApproval returns either the option the blanket
+// auto-approve selected, or an immediate response for an injected Kandev tool.
+// The backend must persist a selected option before it resolves the live
+// request, so the caller keeps the provider waiting until that durable claim
+// succeeds.
+func (m *Manager) nonCoordinatorAutoApproval(req *adapter.PermissionRequest) (*adapter.PermissionOption, *adapter.PermissionResponse) {
+	if m.cfg.AutoApprovePermissions {
+		if decision, approved := m.autoApprovePermission(req); approved {
+			return &decision.option, nil
+		}
+	}
+	if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+		return nil, response
+	}
+	return nil, nil
 }
 
 func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (autoApprovalDecision, bool) {

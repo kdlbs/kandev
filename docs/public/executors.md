@@ -103,6 +103,11 @@ The MCP editor checks only that the value is a JSON object. Its presets cover st
 
 Profile edits apply when Kandev provisions a launch, but a Docker container or Sprite resume can reconnect to the already provisioned process, image, environment, credentials, and files. Kubernetes records a separate workload snapshot for each session; changing its profile affects new sessions, while an existing session and any replacement Pod keep that snapshot. Use **Reset Environment** or explicitly destroy the resource when a change must take effect on a fresh environment. Deleting or editing a profile does not tear down an already-running resource.
 
+An ordinary partial API save keeps each omitted prepare or cleanup script,
+including a newer value saved concurrently. Supplying a script replaces it;
+supplying an empty string clears it. The profile editor submits both scripts,
+so a stale full editor draft can still replace newer script values.
+
 ### Repository environment secrets
 
 Open a workspace repository's editor to add **Environment secrets** bindings. Each binding maps a POSIX environment key to a Global secret or a Workspace secret from that same workspace. A task receives the bindings from every repository attached to it, along with its selected executor profile environment. The resolved snapshot is available to repository setup scripts, the agent, child shells, and new terminal-panel terminals on supported executors.
@@ -262,6 +267,10 @@ Worktree creates a dedicated host Git worktree and runs the standalone `agentctl
 Repository settings control base branch, branch naming, pull-before-create, repository setup/cleanup scripts, and optional copies of ignored files. With **Always pull before creating a new worktree** enabled, a host Worktree refresh is best effort when the selected local base exists. An authentication, network, timeout, missing-ref, divergent-ref, or uncertain-ancestry error produces a credential-safe warning and the host worktree uses the verified local base. The warning states that remote changes may be missing. For a numbered GitHub PR, the current PR base is used when available. A proven deleted remote base can use a separately refreshed configured fallback branch, often the repository default, and produces a warning; authentication, network, timeout, and other unproven PR refresh failures remain fatal. If no usable local base exists, or if the executor must materialize the repository remotely, refresh and checkout remain required and a failure stops the launch. Disable this setting only for an intentional offline local workflow. Copy ignored files narrowly: `.env` and similar files often contain production secrets. Multi-repository tasks receive one materialized worktree per attachment; use the per-repository setup scripts because the profile-level prepare script is currently skipped for that path.
 
 Normal stop keeps the task environment available. Task deletion or **Reset Environment** removes the tracked worktree when configured to clean worktrees. Preserve or push valuable changes first; see [Git Operations](git-operations.md).
+
+If a managed repository clone changes while a task worktree has local changes, Kandev offers a confirmed recovery action to move those files into worktrees from the current clone and resume the same session. The recovery card reports the current repository, phase, and last update. That progress survives page reloads and reconnects, and it blocks another transfer while the recovery runner is live. If Kandev cannot confirm the recovery status, use **Check status** before choosing another recovery action.
+
+The original repository clone and a recovery snapshot remain on disk. Git staging choices do not transfer. After every selected repository's files have moved, Kandev reports session startup separately; moved files do not mean the agent is ready. Review the changes before committing. Recovery preserves ignored files as part of the worktree contents and does not promise a faster copy or show a time estimate.
 
 Typical failures:
 

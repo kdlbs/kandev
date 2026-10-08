@@ -146,6 +146,7 @@ func (s *Server) setupRoutes() {
 		// events reach the UI without a session restart.
 		api.POST("/workspace/rescan", s.handleRescanWorkspace)
 		api.POST("/workspace/reconcile", s.handleReconcileWorkspace)
+		api.POST("/workspace/recovery-exclusions", s.handleSetWorkspaceRecoveryExclusions)
 		api.POST("/workspace/rebind", s.handleRebindWorkspace)
 
 		// Per-task base-branch map update: kandev backend hits this when
@@ -362,7 +363,7 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 	// ModeExternal stays rejected on purpose: it belongs to the backend's own
 	// MCP endpoint for external coding agents, and no launch path can emit it.
 	if !mcpmode.IsInstanceMode(req.Mode) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', or 'automation'"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', 'automation', or 'coordinator'"})
 		return
 	}
 	s.mcpServer.SetMode(req.Mode)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -233,20 +234,21 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 
 // PrepareStep represents a single step in the preparation process.
 type PrepareStep struct {
-	Name           string            `json:"name"`
-	Kind           string            `json:"kind,omitempty"`
-	MCPProvider    string            `json:"mcp_provider,omitempty"`
-	MCPServerID    string            `json:"mcp_server_id,omitempty"`
-	RemotePlatform string            `json:"remote_platform,omitempty"`
-	FailureCode    string            `json:"failure_code,omitempty"`
-	Command        string            `json:"command,omitempty"`
-	Status         PrepareStepStatus `json:"status"`
-	Output         string            `json:"output,omitempty"`
-	Error          string            `json:"error,omitempty"`
-	Warning        string            `json:"warning,omitempty"`
-	WarningDetail  string            `json:"warning_detail,omitempty"`
-	StartedAt      *time.Time        `json:"started_at,omitempty"`
-	EndedAt        *time.Time        `json:"ended_at,omitempty"`
+	Name           string                         `json:"name"`
+	Kind           string                         `json:"kind,omitempty"`
+	MCPProvider    string                         `json:"mcp_provider,omitempty"`
+	MCPServerID    string                         `json:"mcp_server_id,omitempty"`
+	Diagnostic     *mcpconfig.NativeMCPDiagnostic `json:"mcp_diagnostic,omitempty"`
+	RemotePlatform string                         `json:"remote_platform,omitempty"`
+	FailureCode    string                         `json:"failure_code,omitempty"`
+	Command        string                         `json:"command,omitempty"`
+	Status         PrepareStepStatus              `json:"status"`
+	Output         string                         `json:"output,omitempty"`
+	Error          string                         `json:"error,omitempty"`
+	Warning        string                         `json:"warning,omitempty"`
+	WarningDetail  string                         `json:"warning_detail,omitempty"`
+	StartedAt      *time.Time                     `json:"started_at,omitempty"`
+	EndedAt        *time.Time                     `json:"ended_at,omitempty"`
 }
 
 // RepoWorktreeResult is the per-repository outcome of environment preparation.
@@ -361,6 +363,11 @@ func SerializePrepareResult(result *EnvPrepareResult) map[string]interface{} {
 		}
 		if step.FailureCode != "" {
 			entry["failure_code"] = step.FailureCode
+		}
+		if step.Diagnostic != nil {
+			if diagnostic := mcpconfig.NormalizeNativeMCPDiagnostic(step.Diagnostic, step.Diagnostic.Operation); diagnostic != nil {
+				entry["mcp_diagnostic"] = diagnostic
+			}
 		}
 		if step.Error != "" {
 			entry["error"] = step.Error

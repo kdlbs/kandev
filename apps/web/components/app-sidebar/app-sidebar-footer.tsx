@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "@/components/routing/app-link";
 import { useTranslation } from "react-i18next";
 import { useRouter, usePathname } from "@/lib/routing/client-router";
 import {
@@ -32,6 +33,7 @@ import { workspaceHomeHref } from "./app-sidebar-workspace-navigation";
 import { isSettingsRoute } from "./app-sidebar-route";
 import { useConnectionIssueCopy } from "../app-status-bar/connection-status-item";
 import type { ConnectionIssueSeverity } from "@/lib/types/connection";
+import { SIDEBAR_ITEM_ACTIVE } from "./app-sidebar-constants";
 
 type AppSidebarFooterProps = {
   collapsed: boolean;
@@ -43,10 +45,12 @@ type FooterIconButtonProps = {
   icon: DestinationIcon;
   label: string;
   collapsed: boolean;
+  href?: string;
   onClick?: () => void;
   testId?: string;
   /** Toggle state: rotates the icon a half-turn (spins back out when cleared). */
   active?: boolean;
+  current?: boolean;
   showLabel?: boolean;
 };
 
@@ -54,9 +58,11 @@ function FooterIconButton({
   icon: Icon,
   label,
   collapsed,
+  href,
   onClick,
   testId,
   active,
+  current,
   showLabel = false,
 }: FooterIconButtonProps) {
   const buttonProps = {
@@ -65,6 +71,7 @@ function FooterIconButton({
     className: cn(
       "h-7 cursor-pointer relative [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11",
       showLabel ? "min-w-0 flex-1 justify-start gap-2 px-2" : "w-7",
+      current && SIDEBAR_ITEM_ACTIVE,
     ),
   };
 
@@ -79,7 +86,24 @@ function FooterIconButton({
     </>
   );
 
-  const trigger = (
+  const triggerContent = (
+    <>
+      {content}
+      {showLabel && <span className="truncate text-left">{label}</span>}
+    </>
+  );
+  const trigger = href ? (
+    <Button asChild {...buttonProps}>
+      <Link
+        href={href}
+        aria-label={label}
+        aria-current={current ? "page" : undefined}
+        data-testid={testId}
+      >
+        {triggerContent}
+      </Link>
+    </Button>
+  ) : (
     <Button
       type="button"
       onClick={onClick}
@@ -88,8 +112,7 @@ function FooterIconButton({
       aria-pressed={active}
       data-testid={testId}
     >
-      {content}
-      {showLabel && <span className="truncate text-left">{label}</span>}
+      {triggerContent}
     </Button>
   );
 
@@ -289,9 +312,9 @@ function useSettingsGearToggle(
   settingsMode: boolean,
   activeWorkspace: Parameters<typeof workspaceHomeHref>[0],
   onToggleSettingsMode: () => void,
+  pathname: string,
 ) {
   const router = useRouter();
-  const pathname = usePathname();
   const startupPage = useAppStore((s) => s.userSettings.startupPage);
 
   return () => {
@@ -321,10 +344,19 @@ export function AppSidebarFooter({
   const workspaceId = workspaces.activeId;
   const activeWorkspace = workspaces.items.find((workspace) => workspace.id === workspaceId);
   const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
-  const toggleSettings = useSettingsGearToggle(settingsMode, activeWorkspace, onToggleSettingsMode);
+  const pathname = usePathname();
+  const toggleSettings = useSettingsGearToggle(
+    settingsMode,
+    activeWorkspace,
+    onToggleSettingsMode,
+    pathname,
+  );
   const appStatusBarEnabled = useAppStore((s) => s.userSettings.appStatusBarEnabled);
-  const insightDestinations = useStaticDestinations("sidebar", "insights").filter(
-    (destination) => !layoutManaged || destination.source !== "plugin",
+  const allInsightDestinations = useStaticDestinations("sidebar", "insights");
+  const statsDestination = allInsightDestinations.find((destination) => destination.id === "stats");
+  const insightDestinations = allInsightDestinations.filter(
+    (destination) =>
+      destination.id !== "stats" && (!layoutManaged || destination.source !== "plugin"),
   );
   const releaseNotes = useReleaseNotes();
   const improveOpen = useAppStore((s) => s.appSidebar.improveDialogOpen);
@@ -351,6 +383,18 @@ export function AppSidebarFooter({
         active={settingsMode}
         testId="sidebar-settings-gear"
       />
+      {statsDestination && (
+        <FooterIconButton
+          icon={statsDestination.icon}
+          label={statsDestination.label}
+          collapsed={collapsed}
+          href={statsDestination.href}
+          current={
+            pathname === statsDestination.href || pathname.startsWith(`${statsDestination.href}/`)
+          }
+          testId="sidebar-stats-button"
+        />
+      )}
       <ThemeToggle className="size-7 [@media(pointer:coarse)]:size-11" />
       <SidebarFooterMenu
         destinations={insightDestinations}

@@ -432,6 +432,7 @@
       <nav class="hidden lg:flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
         <a href="#why" class="hover:text-brand">Why</a>
         <a id="nav-impact" href="#impact" class="hover:text-brand">Impact</a>
+        <a id="nav-feature-flags" href="#feature-flags" class="hover:text-brand">Flags</a>
         <a id="nav-data" href="#data" class="hover:text-brand">Data</a>
         <a id="nav-architecture" href="#architecture" class="hover:text-brand">Architecture</a>
         <a href="#changes" class="hover:text-brand">Changes</a>
@@ -443,6 +444,7 @@
         <nav class="wt-mobile-menu" aria-label="Walkthrough sections">
           <a href="#why">Why</a>
           <a id="mobile-nav-impact" href="#impact">Impact</a>
+          <a id="mobile-nav-feature-flags" href="#feature-flags">Feature flags</a>
           <a id="mobile-nav-data" href="#data">Data</a>
           <a id="mobile-nav-architecture" href="#architecture">Architecture</a>
           <a href="#changes">Changes</a>
@@ -506,7 +508,7 @@
     // build.py drops the Architecture and Data sections on a PR that has no
     // such data, so their topbar anchors would scroll nowhere. Hide each link
     // unless its section exists.
-    for (const id of ['architecture', 'data', 'impact']) {
+    for (const id of ['architecture', 'data', 'impact', 'feature-flags']) {
       if (!document.getElementById(id)) {
         const link = document.getElementById('nav-' + id);
         if (link) link.hidden = true;

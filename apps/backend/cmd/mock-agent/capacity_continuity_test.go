@@ -16,6 +16,7 @@ func TestParseRetainedCapacityCmd(t *testing.T) {
 		ok     bool
 	}{
 		{prompt: "/capacity-after-tools", name: "after-tools", fails: 1, ok: true},
+		{prompt: "/capacity-completed-tools", name: "completed-tools", fails: 1, ok: true},
 		{prompt: "/capacity-retry:2", name: "retry", fails: 2, ok: true},
 		{prompt: "/capacity-cancel", name: "cancel", fails: 9, ok: true},
 		{prompt: "/capacity-exhaust", name: "exhaust", fails: 9, ok: true},
@@ -73,10 +74,31 @@ func TestRetainedCapacityCountersAreIndependentByScenario(t *testing.T) {
 	}
 }
 
+func TestRepeatedRetainedCapacityRetryCommandsReachSuccessAndResetNewEpisodes(t *testing.T) {
+	const sid acp.SessionId = "retained-capacity-repeated-direct-retry-test"
+	clearRetainedCapacityCounters(sid)
+	t.Cleanup(func() { clearRetainedCapacityCounters(sid) })
+	a := &mockAgent{conn: &mockUpdater{}}
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		_, err, handled := a.handleRetainedCapacity(context.Background(), sid, "/capacity-retry:2")
+		if !handled || err == nil {
+			t.Fatalf("direct retry %d handled=%v error=%v, want a capacity failure", attempt, handled, err)
+		}
+	}
+	if _, err, handled := a.handleRetainedCapacity(context.Background(), sid, "/capacity-retry:2"); !handled || err != nil {
+		t.Fatalf("third direct retry handled=%v error=%v, want configured success", handled, err)
+	}
+
+	if _, err, handled := a.handleRetainedCapacity(context.Background(), sid, "/capacity-retry:2"); !handled || err == nil {
+		t.Fatalf("new retry episode handled=%v error=%v, want a fresh first failure", handled, err)
+	}
+}
+
 func TestHandleRetainedCapacityAfterToolsEmitsVisibleReadBeforeFailure(t *testing.T) {
 	const sid acp.SessionId = "retained-capacity-tools-test"
-	_ = os.Remove(retainedCapacityCounterPath(sid, "after-tools"))
-	t.Cleanup(func() { _ = os.Remove(retainedCapacityCounterPath(sid, "after-tools")) })
+	clearRetainedCapacityCounters(sid)
+	t.Cleanup(func() { clearRetainedCapacityCounters(sid) })
 	updater := &mockUpdater{}
 	a := &mockAgent{conn: updater}
 	_, err, handled := a.handleRetainedCapacity(context.Background(), sid, "/capacity-after-tools")
@@ -84,8 +106,64 @@ func TestHandleRetainedCapacityAfterToolsEmitsVisibleReadBeforeFailure(t *testin
 		t.Fatalf("handled=%v error=%v, want marked provider failure", handled, err)
 	}
 	updates := updater.getUpdates()
-	if len(updates) != 3 || updates[0].notification.Update.AgentMessageChunk == nil ||
+	if len(updates) != 4 || updates[0].notification.Update.AgentMessageChunk == nil ||
 		updates[1].notification.Update.ToolCall == nil || updates[2].notification.Update.ToolCallUpdate == nil {
-		t.Fatalf("updates = %#v, want visible text plus completed read tool", updates)
+		t.Fatalf("updates = %#v, want visible text, completed read, and unresolved tool", updates)
+	}
+	if updates[3].notification.Update.ToolCall == nil {
+		t.Fatalf("last update = %#v, want unresolved tool start", updates[3])
+	}
+}
+
+func TestRetainedCapacityContinuationDoesNotRepeatCompletedTools(t *testing.T) {
+	const sid acp.SessionId = "retained-capacity-completed-tools-test"
+	clearRetainedCapacityCounters(sid)
+	t.Cleanup(func() { clearRetainedCapacityCounters(sid) })
+	updater := &mockUpdater{}
+	a := &mockAgent{conn: updater}
+
+	_, initialErr, handled := a.handleRetainedCapacity(context.Background(), sid, "/capacity-completed-tools")
+	if !handled || initialErr == nil {
+		t.Fatalf("initial request handled=%v error=%v, want capacity failure", handled, initialErr)
+	}
+	initialUpdates := updater.getUpdates()
+	if len(initialUpdates) != 3 || initialUpdates[1].notification.Update.ToolCall == nil ||
+		initialUpdates[2].notification.Update.ToolCallUpdate == nil {
+		t.Fatalf("initial updates = %#v, want exactly one completed tool", initialUpdates)
+	}
+
+	_, continuationErr, handled := a.handleRetainedCapacity(context.Background(), sid,
+		"Your previous turn stopped because the selected model was at capacity. Continue the unfinished request.")
+	if !handled || continuationErr != nil {
+		t.Fatalf("continuation handled=%v error=%v, want successful continuation", handled, continuationErr)
+	}
+	updates := updater.getUpdates()
+	toolUpdates := 0
+	for _, update := range updates {
+		if update.notification.Update.ToolCall != nil || update.notification.Update.ToolCallUpdate != nil {
+			toolUpdates++
+		}
+	}
+	if toolUpdates != 2 || len(updates) != len(initialUpdates)+1 || updates[len(updates)-1].notification.Update.AgentMessageChunk == nil {
+		t.Fatalf("continuation updates = %#v, want only a success message and no repeated tool", updates)
+	}
+}
+
+func TestRetainedCapacityContinuationCanExhaustAcrossPrompts(t *testing.T) {
+	const sid acp.SessionId = "retained-capacity-exhaust-continuation-test"
+	clearRetainedCapacityCounters(sid)
+	t.Cleanup(func() { clearRetainedCapacityCounters(sid) })
+	a := &mockAgent{conn: &mockUpdater{}}
+	if _, err, handled := a.handleRetainedCapacity(context.Background(), sid, "/capacity-exhaust"); !handled || err == nil {
+		t.Fatalf("initial request handled=%v error=%v, want capacity failure", handled, err)
+	}
+	continuation := "Your previous turn stopped because the selected model was at capacity. Continue the unfinished request."
+	for attempt := 2; attempt <= 9; attempt++ {
+		if _, err, handled := a.handleRetainedCapacity(context.Background(), sid, continuation); !handled || err == nil {
+			t.Fatalf("continuation attempt %d handled=%v error=%v, want capacity failure", attempt, handled, err)
+		}
+	}
+	if _, err, handled := a.handleRetainedCapacity(context.Background(), sid, continuation); !handled || err != nil {
+		t.Fatalf("final continuation handled=%v error=%v, want successful completion", handled, err)
 	}
 }

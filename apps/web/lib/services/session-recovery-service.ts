@@ -2,6 +2,7 @@ import { buildRestoreWorkspaceRequest } from "./session-launch-helpers";
 import { launchSession, type LaunchSessionResponse } from "./session-launch-service";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { WebSocketRequestError, type WebSocketRequestErrorDetails } from "@/lib/ws/client";
+import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
 
 export type SessionRecoveryAction =
   | "resume"
@@ -44,7 +45,14 @@ export type SessionRecoveryGuardDetails = WebSocketRequestErrorDetails & {
   session_id?: string;
 };
 
+export type RecoveryInspectionBusyDetails = WebSocketRequestErrorDetails & {
+  kind: "recovery_inspection_busy";
+};
+
 type RecoveryResponse = { success?: boolean; error?: string };
+type WorkspaceRecoveryStatusResponse = {
+  workspace_recovery?: WorkspaceRecoveryProjection | null;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -80,6 +88,15 @@ export function sessionRecoveryGuardDetails(error: unknown): SessionRecoveryGuar
   return error.details as SessionRecoveryGuardDetails;
 }
 
+/** Returns the typed conflict used when workspace inspection exhausts its wait budget. */
+export function recoveryInspectionBusyDetails(
+  error: unknown,
+): RecoveryInspectionBusyDetails | null {
+  if (!(error instanceof WebSocketRequestError) || !isRecord(error.details)) return null;
+  if (error.details.kind !== "recovery_inspection_busy") return null;
+  return error.details as RecoveryInspectionBusyDetails;
+}
+
 /** Minimal shape both `useTranslation()`'s `t` and the module-level `t` satisfy. */
 type Translator = (key: string, options?: Record<string, unknown>) => string;
 
@@ -92,6 +109,11 @@ export function sessionRecoveryGuardMessage(
     return t("task:sessionRecoveryGuardInProgress");
   }
   return t("task:sessionRecoveryGuardUnstoppable");
+}
+
+/** Translates the retryable inspection conflict without exposing transport text. */
+export function recoveryInspectionBusyMessage(t: Translator): string {
+  return t("task:workspaceRecoveryInspectionBusy");
 }
 
 export function managedCloneRelocationRecoveryDetails(
@@ -116,6 +138,7 @@ export function resolveRequestErrorMessage(
 ): string {
   const guard = sessionRecoveryGuardDetails(error);
   if (guard) return sessionRecoveryGuardMessage(guard, t);
+  if (recoveryInspectionBusyDetails(error)) return recoveryInspectionBusyMessage(t);
   if (error instanceof Error) return error.message;
   return fallback;
 }
@@ -149,6 +172,22 @@ export async function requestSessionRecover(options: SessionRecoveryRequest): Pr
   );
   const failure = responseFailure(response, failureMessage);
   if (failure) throw failure;
+}
+
+/** Read current recovery state without reconstructing or inspecting the workspace. */
+export async function getWorkspaceRecoveryStatus(
+  taskId: string,
+  sessionId: string,
+  failureMessage: string,
+): Promise<WorkspaceRecoveryProjection | null> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error(failureMessage);
+  const response = await client.request<WorkspaceRecoveryStatusResponse>(
+    "session.workspace_recovery.get",
+    { task_id: taskId, session_id: sessionId },
+    10_000,
+  );
+  return response.workspace_recovery ?? null;
 }
 
 /** Restore the existing task workspace without starting the provider. */

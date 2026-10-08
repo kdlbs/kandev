@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -175,25 +176,129 @@ func TestQueueUserPrompt_T2SkipsFastPathWhenInFlight(t *testing.T) {
 	}
 }
 
-// TestQueueUserPrompt_T2DefersInitialTaskBriefContender pins the first-prompt
-// ordering contract: a candidate that lost atomic admission remains queued
-// while the admitted candidate launches, even if the session is otherwise
-// promptable. The ready/boot-ready lifecycle drain delivers it afterward.
-func TestQueueUserPrompt_T2DefersInitialTaskBriefContender(t *testing.T) {
+// TestQueueUserPrompt_T2InitialTaskBriefContenderOwnership pins both sides of
+// the first-prompt ordering boundary through QueueUserPrompt and the real
+// queue dispatcher. A contender waits while the winner owns dispatch, then a
+// contender arriving after completion drains immediately.
+func TestQueueUserPrompt_T2InitialTaskBriefContenderOwnership(t *testing.T) {
+	ctx := context.Background()
+	metadata := map[string]interface{}{MetaKeyInitialTaskBriefDispatchPending: true}
+
+	t.Run("queued before winner dispatch completes", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+		svc := newFastPathDispatchService(t, repo)
+		ownerEntered := make(chan struct{})
+		releaseOwnerAdmission := make(chan struct{})
+		var releaseOwnerOnce sync.Once
+		releaseOwner := func() { releaseOwnerOnce.Do(func() { close(releaseOwnerAdmission) }) }
+		defer releaseOwner()
+		ownerAdmissionDone := make(chan error, 1)
+		go func() {
+			ownerAdmissionDone <- svc.WithInitialTaskBriefAdmission(ctx, "s1", func(context.Context) error {
+				svc.MarkInitialTaskBriefDispatchPending("s1")
+				close(ownerEntered)
+				<-releaseOwnerAdmission
+				return nil
+			})
+		}()
+		<-ownerEntered
+
+		queued := make(chan error, 1)
+		go func() {
+			queued <- svc.QueueUserPrompt(ctx, "t1", "s1", "before owner completion", "", false, nil, metadata, true)
+		}()
+		select {
+		case err := <-queued:
+			t.Fatalf("contender crossed the held first-boundary admission: %v", err)
+		default:
+		}
+		releaseOwner()
+		require.NoError(t, <-ownerAdmissionDone)
+		require.NoError(t, <-queued)
+		require.Equal(t, 1, svc.messageQueue.GetStatus(ctx, "s1").Count)
+		require.False(t, svc.isQueuedDispatchInFlight("s1"), "contender must not reserve ahead of the pending owner")
+
+		svc.CompleteInitialTaskBriefDispatch(ctx, "t1", "s1")
+		require.Eventually(t, func() bool { return svc.messageQueue.GetStatus(ctx, "s1").Count == 0 }, 5*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("queued after winner completion", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+		svc := newFastPathDispatchService(t, repo)
+		require.NoError(t, svc.WithInitialTaskBriefAdmission(ctx, "s1", func(context.Context) error {
+			svc.MarkInitialTaskBriefDispatchPending("s1")
+			return nil
+		}))
+		svc.CompleteInitialTaskBriefDispatch(ctx, "t1", "s1")
+
+		require.NoError(t, svc.QueueUserPrompt(
+			ctx, "t1", "s1", "after owner completion", "", false, nil, metadata, true,
+		))
+		require.Eventually(t, func() bool { return svc.messageQueue.GetStatus(ctx, "s1").Count == 0 }, 5*time.Second, 10*time.Millisecond)
+	})
+}
+
+func TestPromptTaskRejectsNonOwnerWhileInitialTaskBriefDispatchIsPending(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	require.NoError(t, svc.WithInitialTaskBriefAdmission(ctx, "s1", func(context.Context) error {
+		svc.MarkInitialTaskBriefDispatchPending("s1")
+		return nil
+	}))
 
-	if err := svc.QueueUserPrompt(
-		ctx, "t1", "s1", "later first-message contender", "", false, nil,
+	_, err := svc.PromptTask(ctx, "t1", "s1", "follow-up", "", false, nil, false)
+	require.ErrorIs(t, err, ErrInitialTaskBriefDispatchPending)
+}
+
+func TestNotifyQueuedUserPromptDefersDrainWhileInitialTaskBriefIsPending(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+	svc := newFastPathDispatchService(t, repo)
+	require.NoError(t, svc.WithInitialTaskBriefAdmission(ctx, "s1", func(context.Context) error {
+		svc.MarkInitialTaskBriefDispatchPending("s1")
+		return nil
+	}))
+
+	require.NoError(t, svc.QueueUserPrompt(
+		ctx, "t1", "s1", "follow-up", "", false, nil,
 		map[string]interface{}{MetaKeyInitialTaskBriefDispatchPending: true}, true,
-	); err != nil {
-		t.Fatalf("QueueUserPrompt: %v", err)
-	}
+	))
+	svc.NotifyQueuedUserPrompt(ctx, "t1", "s1")
 	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 1 {
-		t.Fatalf("post-enqueue queue count = %d, want 1 (initial contender must wait for admitted launch)", got)
+		t.Fatalf("queued follow-up count during owner dispatch = %d, want 1", got)
 	}
+
+	svc.CompleteInitialTaskBriefDispatch(ctx, "t1", "s1")
+	require.Eventually(t, func() bool { return svc.messageQueue.GetStatus(ctx, "s1").Count == 0 }, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestLifecyclePromptDefersDrainWhileInitialTaskBriefIsPending(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+	svc := newFastPathDispatchService(t, repo)
+	require.NoError(t, svc.WithInitialTaskBriefAdmission(ctx, "s1", func(context.Context) error {
+		svc.MarkInitialTaskBriefDispatchPending("s1")
+		return nil
+	}))
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+
+	_, err = svc.queueAndDrainLifecyclePrompt(
+		ctx, session, "t1", "lifecycle feedback", nil, "brief-pending-lifecycle", errors.New("inactive"),
+	)
+	require.NoError(t, err)
+	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 1 {
+		t.Fatalf("lifecycle queue count during owner dispatch = %d, want 1", got)
+	}
+
+	svc.CompleteInitialTaskBriefDispatch(ctx, "t1", "s1")
+	require.Eventually(t, func() bool { return svc.messageQueue.GetStatus(ctx, "s1").Count == 0 }, 5*time.Second, 10*time.Millisecond)
 }
 
 // TestQueueUserPrompt_T2SkipsFastPathOnWIPWait pins the WIP admission

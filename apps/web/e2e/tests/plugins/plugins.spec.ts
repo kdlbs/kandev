@@ -50,7 +50,7 @@ import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import { holdPluginInstallResponse } from "../../helpers/plugin-install";
 import { PluginMarketplaceReleaseFixture } from "../../helpers/plugin-marketplace-release";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, waitForHttp } from "../../helpers/causal-waits";
 import {
   openInstallDialog,
   PACKAGE_PATH,
@@ -578,10 +578,10 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await waitForPluginBundleReady(testPage);
 
     // --- manifest.yaml declares `ui.keybindings: [{ id: open-demo, default:
-    // mod+shift+j }]`; bundle.js binds it to host.openModal(...). "mod"
+    // mod+alt+shift+j }]`; bundle.js binds it to host.openModal(...). "mod"
     // resolves to Ctrl/Cmd per-platform, matching Playwright's
     // "ControlOrMeta" pseudo-modifier. ---
-    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+    await testPage.keyboard.press("ControlOrMeta+Alt+Shift+J");
     const modal = testPage.getByTestId("hello-demo-modal");
     await expect(modal).toBeVisible();
     // toContainText, not toHaveText: the modal body also carries the tooltip
@@ -611,7 +611,7 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.goto("/");
     await testPage.reload();
     await waitForPluginBundleReady(testPage);
-    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+    await testPage.keyboard.press("ControlOrMeta+Alt+Shift+J");
 
     const dialog = testPage.getByRole("dialog", { name: "Demo Modal" });
     const body = dialog.locator('[data-testid^="plugin-modal-body-"]');
@@ -697,7 +697,7 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.reload();
     await waitForPluginBundleReady(testPage);
 
-    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+    await testPage.keyboard.press("ControlOrMeta+Alt+Shift+J");
     const modal = testPage.getByTestId("hello-demo-modal");
     await expect(modal).toBeVisible();
 
@@ -973,8 +973,10 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     });
   });
 
-  test("registers a sidebar-footer item in the utilities menu without a rail duplicate", async ({
+  test("projects a sidebar-footer destination into layout navigation without a footer duplicate", async ({
     testPage,
+    apiClient,
+    seedData,
   }) => {
     test.setTimeout(60_000);
 
@@ -985,22 +987,45 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.goto("/");
     await testPage.reload();
 
-    const footerButton = testPage.getByTestId(
-      `sidebar-plugin:${PLUGIN_ID}:e2e-insights-tools-button`,
-    );
-    await testPage.getByTestId("sidebar-footer-more-button").click();
-    await expect(footerButton).toBeVisible({ timeout: 15_000 });
-    await expect(footerButton).toHaveText("E2E Insights Tools");
-    await footerButton.click();
-    await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
+    const navItem = testPage.getByTestId("plugin-nav-item-e2e-insights-tools");
+    await expect(navItem).toBeVisible({ timeout: 15_000 });
+    const baseline = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+      seedData.workspaceId
+    ];
+    try {
+      const expand = testPage.getByTestId("sidebar-navigation-expand");
+      if ((await expand.getAttribute("aria-expanded")) === "true") {
+        const collapsed = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
+        await expand.click();
+        expect((await collapsed).ok()).toBeTruthy();
+      }
+      await expect(expand).toHaveAttribute("aria-expanded", "false");
+      const saved = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
+      await expand.click();
+      expect((await saved).ok()).toBeTruthy();
+      await expect(expand).toHaveAttribute("aria-expanded", "true");
+      await navItem.click();
+      await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
 
-    // Moves, does not add: the same item never also renders in the rail.
-    await expect(testPage.getByTestId("plugin-nav-item-e2e-insights-tools")).toHaveCount(0);
+      await testPage.getByTestId("sidebar-footer-more-button").click();
+      await expect(
+        testPage.getByTestId(`sidebar-plugin:${PLUGIN_ID}:e2e-insights-tools-button`),
+      ).toHaveCount(0);
+    } finally {
+      const current = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+        seedData.workspaceId
+      ];
+      await apiClient.saveUserSettings({
+        sidebar_layout_state: {
+          workspace_id: seedData.workspaceId,
+          expected_revision: current?.revision ?? 0,
+          layout: baseline ?? null,
+        },
+      });
+    }
   });
 
-  test("keeps every sidebar-footer item in the utilities menu, hidden until opened", async ({
-    testPage,
-  }) => {
+  test("projects every sidebar-footer destination into layout navigation", async ({ testPage }) => {
     test.setTimeout(60_000);
 
     // Every footer destination is reachable through the shared utilities menu.
@@ -1010,12 +1035,6 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
       "e2e-insights-tools-3",
       "e2e-insights-tools-4",
     ];
-    const fixtureItemLabels: Record<string, string> = {
-      "e2e-insights-tools": "E2E Insights Tools",
-      "e2e-insights-tools-2": "E2E Overflow Item 2",
-      "e2e-insights-tools-3": "E2E Overflow Item 3",
-      "e2e-insights-tools-4": "E2E Overflow Item 4",
-    };
     await openInstallDialog(testPage);
     await uploadPackage(testPage, PACKAGE_PATH);
     await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
@@ -1023,28 +1042,17 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.goto("/");
     await testPage.reload();
 
-    const overBudgetId = fixtureItemIds[0];
-    const overBudgetTestId = `sidebar-plugin:${PLUGIN_ID}:${overBudgetId}-button`;
     const overflowTrigger = testPage.getByTestId("sidebar-footer-more-button");
     await expect(overflowTrigger).toBeVisible();
 
-    // Closed-menu guarantee: the over-budget item's button carries the same
-    // testid an inline button would use (spec.md#Rendered-identity), so it
-    // must be entirely absent from the DOM while the menu is closed, not
-    // merely hidden — a real DropdownMenu unmounts its content when closed.
-    await expect(testPage.getByTestId(overBudgetTestId)).toHaveCount(0);
+    for (const id of fixtureItemIds) {
+      await expect(testPage.getByTestId(`plugin-nav-item-${id}`)).toBeVisible();
+    }
 
     await overflowTrigger.click();
 
     for (const id of fixtureItemIds) {
-      await expect(testPage.getByTestId(`sidebar-plugin:${PLUGIN_ID}:${id}-button`)).toHaveText(
-        fixtureItemLabels[id],
-      );
+      await expect(testPage.getByTestId(`sidebar-plugin:${PLUGIN_ID}:${id}-button`)).toHaveCount(0);
     }
-    const menuItem = testPage.getByTestId(overBudgetTestId);
-    await expect(menuItem).toBeVisible();
-    await expect(menuItem).toHaveText(fixtureItemLabels[overBudgetId]);
-    await menuItem.click();
-    await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
   });
 });

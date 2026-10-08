@@ -96,6 +96,76 @@ it("breaks cycles deterministically, keeps tree activity, and emits continuation
   });
   expect(tasks[1].parentTaskId).toBe("b");
 });
+it("applies running and activity criteria lexicographically before local paging", () => {
+  const tasks = [
+    task("waiting-new", {
+      sessionState: "WAITING_FOR_INPUT",
+      lastActivityAt: "2026-10-05T00:00:00Z",
+    }),
+    task("running-parent", { lastActivityAt: "2026-10-01T00:00:00Z" }),
+    task("running-child", {
+      parentTaskId: "running-parent",
+      sessionState: "RUNNING",
+      lastActivityAt: "2026-10-04T00:00:00Z",
+    }),
+    task("running-root", {
+      sessionState: "RUNNING",
+      lastActivityAt: "2026-10-03T00:00:00Z",
+    }),
+    task("workflow-only", {
+      state: "IN_PROGRESS",
+      sessionState: "IDLE",
+      lastActivityAt: "2026-10-02T00:00:00Z",
+    }),
+  ];
+
+  const page = localSidebarPage(
+    tasks,
+    {
+      ...query,
+      sort: {
+        key: "running",
+        direction: "desc",
+        then_by: [{ key: "lastActivityAt", direction: "desc" }],
+      },
+    },
+    prefs,
+  );
+
+  expect(ids(page)).toEqual([
+    "running-parent",
+    "running-child",
+    "running-root",
+    "waiting-new",
+    "workflow-only",
+  ]);
+});
+
+it("ranks task-wide running evidence before primary-only legacy state", () => {
+  const tasks = [
+    task("running-secondary", {
+      sessionState: "WAITING_FOR_INPUT",
+      hasRunningSession: true,
+      lastActivityAt: "2026-10-01T00:00:00Z",
+    }),
+    task("stale-primary", {
+      sessionState: "RUNNING",
+      hasRunningSession: false,
+      lastActivityAt: "2026-10-05T00:00:00Z",
+    }),
+    task("legacy-primary", {
+      sessionState: "RUNNING",
+      lastActivityAt: "2026-10-04T00:00:00Z",
+    }),
+  ];
+  const page = localSidebarPage(
+    tasks,
+    { ...query, sort: { key: "running", direction: "desc" } },
+    prefs,
+  );
+
+  expect(ids(page)).toEqual(["legacy-primary", "running-secondary", "stale-primary"]);
+});
 it("applies root pins, child manual order and collapse before page selection", () => {
   const tasks = [
     task("a"),

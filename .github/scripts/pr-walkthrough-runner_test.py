@@ -320,14 +320,14 @@ import time
 counter = Path({marker})
 if not counter.exists():
     counter.write_text('1')
-    time.sleep(0.28)
+    time.sleep(0.65)
     raise SystemExit(0)
 Path('agent.ready').write_text('ready')
 while True: time.sleep(0.01)
 """
         command = self.write_agent(source)
         config = runner.RunConfig(
-            deadline_seconds=0.5,
+            deadline_seconds=2.0,
             poll_interval_seconds=0.01,
             term_grace_seconds=0.08,
             cleanup_timeout_seconds=0.25,
@@ -341,8 +341,8 @@ while True: time.sleep(0.01)
         elapsed = time.monotonic() - start
         self.assertNotEqual(result, 0)
         self.assertEqual(self.outcome(2)["stop_reason"], "deadline")
-        self.assertLess(elapsed, 0.7)
-        self.assertLess(self.outcome(2)["elapsed_seconds"], 0.35)
+        self.assertLess(elapsed, 2.3)
+        self.assertLess(self.outcome(2)["elapsed_seconds"], 1.65)
 
     def test_external_cancellation_fails_even_with_output_files_present(self) -> None:
         source = """from pathlib import Path

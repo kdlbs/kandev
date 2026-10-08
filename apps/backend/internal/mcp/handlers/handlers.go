@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
@@ -356,6 +357,12 @@ type Handlers struct {
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
 	agentPermissionSvc AgentPermissionService
+
+	// Optional coordinator.propose_task dependency (coordinator MCP surface
+	// only, set via SetCoordinatorService). Without it the action is not
+	// registered and a coordinator principal's propose call 404s via the
+	// guard's nil-service check.
+	coordinatorSvc *coordinator.Service
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -499,6 +506,13 @@ func (h *Handlers) SetCanvasAuthoringService(svc CanvasAuthoringService) {
 	h.canvasAuthoringSvc = svc
 }
 
+// SetCoordinatorService wires coordinator.propose_task and
+// coordinator.get_item. Leave it unset when features.coordinator is
+// disabled so neither action is registered either.
+func (h *Handlers) SetCoordinatorService(svc *coordinator.Service) {
+	h.coordinatorSvc = svc
+}
+
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(dispatcher *ws.Dispatcher) {
 	d := &guardedMCPDispatcher{Dispatcher: dispatcher, handlers: h}
@@ -541,6 +555,14 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
 	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
 	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
+	if h.coordinatorSvc != nil {
+		d.RegisterFunc(coordinator.ActionProposeTask, h.handleProposeTask)
+		d.RegisterFunc(coordinator.ActionProposeResume, h.proposeKindHandler(coordinator.ProposalKindResume))
+		d.RegisterFunc(coordinator.ActionProposeMessage, h.proposeKindHandler(coordinator.ProposalKindMessage))
+		d.RegisterFunc(coordinator.ActionProposeMove, h.proposeKindHandler(coordinator.ProposalKindMove))
+		d.RegisterFunc(coordinator.ActionGetItem, h.handleGetCoordinatorItem)
+		d.RegisterFunc(coordinator.ActionListActivity, h.handleListCoordinatorActivity)
+	}
 }
 
 func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
@@ -751,8 +773,15 @@ func (h *Handlers) handleListWorkflows(ctx context.Context, msg *ws.Message) (*w
 			if err != nil {
 				return nil, err
 			}
+			filter, err := h.coordinatorWatchFilter(ctx)
+			if err != nil {
+				return nil, err
+			}
 			dtos := make([]dto.WorkflowDTO, 0, len(workflows))
 			for _, w := range workflows {
+				if filter != nil && !filter.Contains(w.ID) {
+					continue
+				}
 				dtos = append(dtos, dto.FromWorkflow(w))
 			}
 			return dto.ListWorkflowsResponse{Workflows: dtos, Total: len(dtos)}, nil
@@ -1133,6 +1162,7 @@ func classifyCreateTaskError(err error) string {
 	case errors.Is(err, service.ErrSubtaskDepthExceeded),
 		errors.Is(err, service.ErrInvalidTaskWorkflow),
 		errors.Is(err, service.ErrExternalIDInvalid),
+		errors.Is(err, service.ErrReservedMetadata),
 		// A reference the caller supplied that does not resolve is a
 		// validation failure, not an internal one. Classifying it as
 		// INTERNAL_ERROR discarded err.Error() and left the caller with a

@@ -255,6 +255,12 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 	if err != nil {
 		return CreateTaskResult{}, err
 	}
+	if err := refuseReservedExternalIDPrefix(externalID, req.AllowReservedExternalID); err != nil {
+		return CreateTaskResult{}, err
+	}
+	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
+		return CreateTaskResult{}, err
+	}
 	req.ExternalID = externalID
 
 	if found, result, err := s.findTaskByExternalIDIfPresent(ctx, req.WorkspaceID, externalID); found {
@@ -329,6 +335,9 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	// parent's worktree (the UI omits repositories expecting this). Mirrors the
 	// MCP create_task path so UI- and agent-created subtasks behave identically.
 	if err := s.inheritParentRepositories(ctx, req); err != nil {
+		return nil, err
+	}
+	if err := s.prepareProjectRepositorySources(ctx, req); err != nil {
 		return nil, err
 	}
 	if err := s.preflightRepositorySelections(ctx, req); err != nil {
@@ -414,7 +423,9 @@ func (s *Service) resolveTaskCreationReferences(
 	if err := s.validateBlockerReferences(ctx, req); err != nil {
 		return nil, err
 	}
-	repositories, err := s.resolveTaskRepositoryRows(ctx, req.WorkspaceID, req.Repositories)
+	repositories, err := s.resolveTaskRepositoryRowsWithResolvedIdentityDedup(
+		ctx, req.WorkspaceID, req.Repositories, req.projectRepositoryDefaults,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1079,16 +1090,29 @@ func (s *Service) persistTaskRepositoryRows(ctx context.Context, taskID string, 
 func (s *Service) resolveTaskRepositoryRows(
 	ctx context.Context, workspaceID string, repositories []TaskRepositoryInput,
 ) ([]*models.TaskRepository, error) {
+	return s.resolveTaskRepositoryRowsWithResolvedIdentityDedup(ctx, workspaceID, repositories, false)
+}
+
+func (s *Service) resolveTaskRepositoryRowsWithResolvedIdentityDedup(
+	ctx context.Context, workspaceID string, repositories []TaskRepositoryInput, deduplicateResolvedRepositoryIDs bool,
+) ([]*models.TaskRepository, error) {
 	repoByPath, err := s.repositoriesByLocalPath(ctx, workspaceID, repositories)
 	if err != nil {
 		return nil, err
 	}
 	seen := make(map[string]bool, len(repositories))
+	seenRepositoryIDs := make(map[string]struct{}, len(repositories))
 	rows := make([]*models.TaskRepository, 0, len(repositories))
 	for i, repoInput := range repositories {
 		row, err := s.resolveTaskRepositoryRow(ctx, workspaceID, i, repoInput, repoByPath)
 		if err != nil {
 			return nil, err
+		}
+		if deduplicateResolvedRepositoryIDs {
+			if _, exists := seenRepositoryIDs[row.RepositoryID]; exists {
+				continue
+			}
+			seenRepositoryIDs[row.RepositoryID] = struct{}{}
 		}
 		if err := s.claimRepositoryBranchSlot(ctx, seen, row, repoInput); err != nil {
 			return nil, err
@@ -2009,6 +2033,9 @@ func (s *Service) hydrateTaskRelations(ctx context.Context, task *models.Task) {
 // UpdateTask updates an existing task and publishes a task.updated event
 func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequest) (*models.Task, error) {
 	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+		return nil, err
+	}
+	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
 		return nil, err
 	}
 	if req.Title != nil {

@@ -13,9 +13,10 @@ import (
 
 type sidebarLocalFixtureTask struct {
 	models.Task
-	Summary       json.RawMessage `json:"summary"`
-	ExecutorType  string          `json:"executor_type"`
-	RepositoryIDs []string        `json:"repository_ids"`
+	Summary             json.RawMessage `json:"summary"`
+	ExecutorType        string          `json:"executor_type"`
+	PrimarySessionState string          `json:"primary_session_state"`
+	RepositoryIDs       []string        `json:"repository_ids"`
 }
 type sidebarLocalFixtureCase struct {
 	Name          string                            `json:"name"`
@@ -90,7 +91,12 @@ func seedSidebarLocalProjection(t *testing.T, repo *Repository, row sidebarLocal
 	if row.ExecutorType != "" {
 		id := row.ID + "-executor"
 		require.NoError(t, repo.CreateExecutor(t.Context(), &models.Executor{ID: id, Name: id, Type: models.ExecutorType(row.ExecutorType)}))
-		require.NoError(t, repo.CreateTaskSession(t.Context(), &models.TaskSession{ID: row.ID + "-session", TaskID: row.ID, ExecutorID: id, State: models.TaskSessionStateCompleted}))
+		state := models.TaskSessionStateCompleted
+		primary := row.PrimarySessionState != ""
+		if primary {
+			state = models.TaskSessionState(row.PrimarySessionState)
+		}
+		require.NoError(t, repo.CreateTaskSession(t.Context(), &models.TaskSession{ID: row.ID + "-session", TaskID: row.ID, ExecutorID: id, State: state, IsPrimary: primary}))
 	}
 	if len(row.Summary) > 0 {
 		_, err := repo.db.Exec(`INSERT INTO task_status_summaries (task_id, workspace_id, revision, summary, updated_at) VALUES (?, ?, 1, ?, ?)`, row.ID, row.WorkspaceID, string(row.Summary), time.Now())

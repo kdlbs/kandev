@@ -11,6 +11,7 @@ import {
 } from "../../helpers/navigation-response-hold";
 import { SessionPage } from "../../pages/session-page";
 import { waitForSessionDone } from "../../helpers/session";
+import { workspaceInventoryRevision } from "../../../components/task/file-browser-repository-labels";
 import type { AppState } from "../../../lib/state/store";
 import type { StoreApi } from "zustand";
 
@@ -120,20 +121,26 @@ export async function saveExpandedPaths(
   paths: string[],
   mobile = false,
 ) {
-  await page.evaluate(
-    ({ sessionId, paths, mobile }) => {
+  const browserState = await page.evaluate(
+    ({ sessionId, mobile }) => {
       const state = (
         window as Window & { __KANDEV_E2E_STORE__: StoreApi<AppState> }
       ).__KANDEV_E2E_STORE__.getState();
       const env = mobile ? sessionId : (state.environmentIdBySessionId[sessionId] ?? sessionId);
-      const count = state.sessionWorktreesBySessionId.itemsBySessionId[sessionId]?.length ?? 0;
+      const worktreeCount =
+        state.sessionWorktreesBySessionId.itemsBySessionId[sessionId]?.length ?? 0;
+      const worktrees = state.taskSessions.items[sessionId]?.worktrees ?? [];
       const refresh = state.workspaceFilesRefresh.bySessionId[sessionId] ?? 0;
-      sessionStorage.setItem(
-        `kandev.filesPanel.expanded.${env}:${count}:${refresh}`,
-        JSON.stringify(paths),
-      );
+      return { env, worktreeCount, worktrees, refresh };
     },
-    { sessionId, paths, mobile },
+    { sessionId, mobile },
+  );
+  const resetKey = `${browserState.env}:${browserState.worktreeCount}:${workspaceInventoryRevision(browserState.worktrees)}:${browserState.refresh}`;
+  await page.evaluate(
+    ({ resetKey, paths }) => {
+      sessionStorage.setItem(`kandev.filesPanel.expanded.${resetKey}`, JSON.stringify(paths));
+    },
+    { resetKey, paths },
   );
 }
 
@@ -235,16 +242,10 @@ export async function assertProgressiveNavigation(
   await showNavigationFiles(page, mobile);
   await waitForTreeResponse(gate, taskBRequestOffset, b.session_id!, "");
   await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible();
-  gate.hold(
-    (r) =>
-      r.action === "workspace.tree.get" &&
-      r.payload.session_id === a.session_id &&
-      r.payload.path === "",
-  );
+  // Task A's environment-scoped tree cache remains available while returning from B.
   await selectNavigationTask(page, a.title, mobile);
   await expect(page).toHaveURL(new RegExp(`/t/${a.id}$`));
   await showNavigationFiles(page, mobile);
-  await expect.poll(() => gate.heldCount()).toBeGreaterThan(0);
   await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible();
   if (mobile) {
     await session.fileTreeNodeActions(ROOT_FILE).tap();

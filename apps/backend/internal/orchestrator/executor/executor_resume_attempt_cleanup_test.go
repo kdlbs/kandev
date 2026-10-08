@@ -48,7 +48,7 @@ func TestStopFailedStartExecutionIfCurrentAttemptHonorsCleanupClaim(t *testing.T
 			})
 
 			if !exec.stopFailedStartExecutionIfCurrentAttempt(
-				context.Background(), sessionID, executionID, attemptID, "cancelled resume startup",
+				context.Background(), "task-123", sessionID, executionID, attemptID, "cancelled resume startup",
 			) {
 				t.Fatal("cancelled startup attempt no longer owns the execution")
 			}

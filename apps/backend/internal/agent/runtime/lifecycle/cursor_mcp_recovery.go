@@ -106,10 +106,16 @@ func (m *Manager) RetryCursorMCPConnection(ctx context.Context, sessionID, serve
 		return CursorMCPRetryResult{}, ErrCursorMCPRecoveryUnavailable
 	}
 	defer release()
+	previousSteps := cursorMCPRecoveryPreviousSteps(execution)
 	recorder := m.newPreparationAttemptRecorder(execution.TaskID, execution.SessionID)
 	seedCursorMCPRecoverySteps(execution, recorder, target.serverID)
 	defer m.publishExecutionPrepareCompleted(execution, recorder, nil)
-	return m.retryCursorMCPImport(ctx, target, workspaceKey, generation, recorder)
+	result, retryErr := m.retryCursorMCPImport(ctx, target, workspaceKey, generation, recorder)
+	if errors.Is(retryErr, ErrCursorMCPRecoverySessionBusy) &&
+		cursorMCPRecoveryHasTargetSteps(previousSteps, target.serverID) {
+		recorder.RestoreSteps(previousSteps)
+	}
+	return result, retryErr
 }
 
 func (m *Manager) resolveCursorMCPRecoveryTarget(ctx context.Context, sessionID, serverID string) (*cursorMCPRecoveryTarget, error) {
@@ -307,9 +313,21 @@ func (m *Manager) retryCursorMCPImport(
 	approvalIndex := appendCursorMCPProgress(recorder, target.serverID, PrepareStepKindAgentMCPApproval, PrepareStepRunning, "", &approvalStarted, nil)
 	approval := adapter.Enable(ctx, target.execution.WorkspacePath, target.execution.RuntimeEnvironment(), target.serverID)
 	approvalEnded := time.Now().UTC()
+	if failure := cursorMCPPreparationFence(
+		ctx, m, target.execution, workspaceKey, generation,
+		cursorNativeMCPApprovalTarget{serverID: target.serverID, fingerprint: target.fingerprint},
+		filepath.Dir(target.cursorHome), target.sourceRepo, true,
+	); failure != "" {
+		diagnostic := cursorMCPFenceDiagnostic(ctx, approval.Diagnostic)
+		m.logCursorMCPDiagnostic(target.execution, recorder, target.serverID, diagnostic)
+		updateCursorMCPProgress(recorder, approvalIndex, target.serverID, PrepareStepKindAgentMCPApproval, PrepareStepFailed, failure, approvalStarted, approvalEnded, diagnostic)
+		appendCursorMCPProgress(recorder, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepSkipped, failure, &approvalEnded, &approvalEnded)
+		return cursorMCPRetryReadiness(target.serverID, cursorMCPFenceReadiness(ctx, approval.Diagnostic)), nil
+	}
 	if !approval.ApprovalSucceeded {
 		failure := nativeMCPReasonCode(approval)
-		updateCursorMCPProgress(recorder, approvalIndex, target.serverID, PrepareStepKindAgentMCPApproval, PrepareStepFailed, failure, approvalStarted, approvalEnded)
+		m.logCursorMCPDiagnostic(target.execution, recorder, target.serverID, approval.Diagnostic)
+		updateCursorMCPProgress(recorder, approvalIndex, target.serverID, PrepareStepKindAgentMCPApproval, PrepareStepFailed, failure, approvalStarted, approvalEnded, approval.Diagnostic)
 		appendCursorMCPProgress(recorder, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepSkipped, failure, &approvalEnded, &approvalEnded)
 		return cursorMCPRetryReadiness(target.serverID, approval), nil
 	}
@@ -321,8 +339,19 @@ func (m *Manager) retryCursorMCPImport(
 	verificationStarted := time.Now().UTC()
 	verificationIndex := appendCursorMCPProgress(recorder, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepRunning, "", &verificationStarted, nil)
 	readiness := adapter.Verify(ctx, target.execution.WorkspacePath, target.execution.RuntimeEnvironment(), target.serverID)
+	if failure := cursorMCPPreparationFence(
+		ctx, m, target.execution, workspaceKey, generation,
+		cursorNativeMCPApprovalTarget{serverID: target.serverID, fingerprint: target.fingerprint},
+		filepath.Dir(target.cursorHome), target.sourceRepo, true,
+	); failure != "" {
+		diagnostic := cursorMCPFenceDiagnostic(ctx, readiness.Diagnostic)
+		m.logCursorMCPDiagnostic(target.execution, recorder, target.serverID, diagnostic)
+		updateCursorMCPProgress(recorder, verificationIndex, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepFailed, failure, verificationStarted, time.Now().UTC(), diagnostic)
+		return cursorMCPRetryReadiness(target.serverID, cursorMCPFenceReadiness(ctx, readiness.Diagnostic)), nil
+	}
 	if readiness.Status != mcpconfig.NativeMCPStatusReady {
-		updateCursorMCPProgress(recorder, verificationIndex, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepFailed, nativeMCPReasonCode(readiness), verificationStarted, time.Now().UTC())
+		m.logCursorMCPDiagnostic(target.execution, recorder, target.serverID, readiness.Diagnostic)
+		updateCursorMCPProgress(recorder, verificationIndex, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepFailed, nativeMCPReasonCode(readiness), verificationStarted, time.Now().UTC(), readiness.Diagnostic)
 		return cursorMCPRetryReadiness(target.serverID, readiness), nil
 	}
 	if err := m.validateCursorMCPRecoveryTarget(ctx, target, workspaceKey, generation); err != nil {
@@ -422,12 +451,7 @@ func seedCursorMCPRecoverySteps(execution *AgentExecution, recorder *prepareProg
 	if execution == nil || recorder == nil {
 		return
 	}
-	var previous []PrepareStep
-	if execution.PrepareResult != nil {
-		previous = execution.PrepareResult.Steps
-	} else {
-		previous = persistedPrepareSteps(execution.MetadataSnapshot())
-	}
+	previous := cursorMCPRecoveryPreviousSteps(execution)
 	environmentSteps := make([]PrepareStep, 0, len(previous))
 	for _, step := range previous {
 		if !strings.HasPrefix(step.Kind, "agent_mcp_") || step.MCPServerID != targetServerID ||
@@ -442,6 +466,34 @@ func seedCursorMCPRecoverySteps(execution *AgentExecution, recorder *prepareProg
 			recorder.callback(step, index, total)
 		}
 	}
+}
+
+func cursorMCPRecoveryPreviousSteps(execution *AgentExecution) []PrepareStep {
+	if execution == nil {
+		return nil
+	}
+	var previous []PrepareStep
+	if execution.PrepareResult != nil {
+		previous = append([]PrepareStep(nil), execution.PrepareResult.Steps...)
+	} else {
+		previous = persistedPrepareSteps(execution.MetadataSnapshot())
+	}
+	for index := range previous {
+		if strings.HasPrefix(previous[index].Kind, "agent_mcp_") && previous[index].Diagnostic != nil {
+			previous[index].Diagnostic = normalizeCursorMCPDiagnostic(previous[index].Diagnostic)
+		}
+	}
+	return previous
+}
+
+func cursorMCPRecoveryHasTargetSteps(steps []PrepareStep, serverID string) bool {
+	for _, step := range steps {
+		if step.MCPServerID == serverID &&
+			(step.Kind == PrepareStepKindAgentMCPApproval || step.Kind == PrepareStepKindAgentMCPVerification) {
+			return true
+		}
+	}
+	return false
 }
 
 func cursorMCPRecoveryFailureCode(target *cursorMCPRecoveryTarget, _ error) string {
@@ -521,7 +573,7 @@ func cursorMCPRecoverySessionBusyLocked(execution *AgentExecution) bool {
 func cursorMCPRetryReadiness(serverID string, readiness mcpconfig.NativeMCPReadiness) CursorMCPRetryResult {
 	result := CursorMCPRetryResult{
 		ProviderID: "cursor", ServerID: serverID,
-		Status: string(readiness.Status), ReasonCode: readiness.ReasonCode,
+		Status: string(readiness.Status), ReasonCode: readiness.ReasonCode, Diagnostic: normalizeCursorMCPDiagnostic(readiness.Diagnostic),
 	}
 	if readiness.ToolCount != nil {
 		result.ToolCount = *readiness.ToolCount

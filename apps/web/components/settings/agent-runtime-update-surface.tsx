@@ -51,7 +51,7 @@ export function AgentRuntimeUpdateSurface({
         >
           <DrawerHeader className="shrink-0 px-4 py-3 text-left">
             <DrawerTitle>{t(UPDATE_AGENT_KEY, { name: displayName })}</DrawerTitle>
-            <DrawerDescription>{description}</DrawerDescription>
+            <DrawerDescription className="sr-only">{description}</DrawerDescription>
           </DrawerHeader>
           {body}
           {footer(true)}
@@ -67,7 +67,7 @@ export function AgentRuntimeUpdateSurface({
       >
         <DialogHeader className="px-4 pb-1 pt-3">
           <DialogTitle>{t(UPDATE_AGENT_KEY, { name: displayName })}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          <DialogDescription className="sr-only">{description}</DialogDescription>
         </DialogHeader>
         {body}
         {footer()}

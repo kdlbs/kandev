@@ -94,19 +94,29 @@ export async function openBrowserPreview(
 }
 
 export async function chooseCapture(page: Page, name: string): Promise<void> {
+  const captureMode = {
+    "Select text": "text",
+    "Select element": "element",
+    "Select screenshot region": "screenshot",
+  }[name as "Select text" | "Select element" | "Select screenshot region"];
+  if (!captureMode) throw new Error(`unsupported preview capture choice: ${name}`);
+
+  const trigger = page.getByTestId("preview-feedback-trigger");
   const popover = page.getByTestId("preview-feedback-popover");
-  if (!(await popover.isVisible())) {
-    await page.getByTestId("preview-feedback-trigger").click();
-  }
-  await expect(popover).toBeVisible();
-  const choice = popover.getByRole("button", { name, exact: true });
-  await expect(choice).toBeVisible({ timeout: 5_000 });
-  const box = await choice.boundingBox();
-  const viewport = page.viewportSize();
-  if (!box || !viewport || box.y < 0 || box.y + box.height > viewport.height) {
-    throw new Error(`capture choice is outside viewport: ${JSON.stringify({ box, viewport })}`);
-  }
-  await choice.click();
+  await expect(async () => {
+    if ((await trigger.getAttribute("data-capture-mode")) === captureMode) return;
+    if (!(await popover.isVisible())) await trigger.click();
+    await expect(popover).toBeVisible({ timeout: 500 });
+    const choice = popover.getByRole("button", { name, exact: true });
+    await expect(choice).toBeVisible({ timeout: 500 });
+    const box = await choice.boundingBox();
+    const viewport = page.viewportSize();
+    if (!box || !viewport || box.y < 0 || box.y + box.height > viewport.height) {
+      throw new Error(`capture choice is outside viewport: ${JSON.stringify({ box, viewport })}`);
+    }
+    await choice.click();
+    await expect(trigger).toHaveAttribute("data-capture-mode", captureMode, { timeout: 750 });
+  }).toPass({ timeout: 12_000, intervals: [250, 500, 1_000] });
 }
 
 /** Wait until the iframe has applied screenshot mode before dispatching a drag. */

@@ -33,6 +33,9 @@ closure. No common coordinator or responsive layout change is introduced.
 | `AC-UI-FILE-EDITOR-MUTATION-001.3`, `.4` | Save and delete publication |
 | `AC-UI-FILE-EDITOR-MUTATION-001.5` | Saving indication and repository identity |
 | `AC-UI-FILE-EDITOR-MUTATION-001.6` | Remote update and responsive presentation |
+| `AC-UI-FILE-EDITOR-MUTATION-001.7` | Workspace refresh admission and ordering |
+| `AC-UI-FILE-EDITOR-MUTATION-001.8` | Refresh consumer lifetime |
+| `AC-UI-FILE-EDITOR-MUTATION-001.9` | Live refresh reconciliation; Refresh verification and surfaces |
 
 ## Components and current lifecycle
 
@@ -120,7 +123,8 @@ save at the same key. This is cleanup ownership, not a new save-ordering policy.
 `applyRemoteUpdate` retains current remote content/hash handling. Its optional
 `calculateHash` await uses the same captured owner before applying state/panel
 changes. Already available hashes retain the synchronous publication path.
-General workspace refresh concurrency remains outside this repair.
+The mutation delivery package does not change general workspace refresh
+concurrency. The bounded open-buffer extension below has its own delivery record.
 
 Desktop keeps its pinned/preview editor and controls. Phone keeps the focused
 Files/document flow in `mobile/session-mobile-layout.tsx`; `usePanelActions`
@@ -129,6 +133,139 @@ This correction changes shared action/state publication only, with no new phone
 surface or mutation entry point. Meaningful hook/store/panel integration meets
 the state/data exception in `/mobile-parity`; browser/build/E2E work would add
 no evidence about responsive geometry here.
+
+## Workspace refresh admission and ordering
+
+`hooks/file-editors-sync.ts:syncOpenFileFromWorkspace` owns reconciliation of
+already-open Dockview buffers. Its two production callers are
+`useOpenFileWorkspaceSync` (Git-signature changes, called by `useFileEditors`)
+and `FileEditorPanel.useResyncOnTabActivate` (initial active tab and subsequent
+activation). Ordering must span both callers and independently mounted readers
+because they publish into the same Dockview buffer.
+
+At admission, require a live caller, current session visit, existing buffer with
+its stable `instanceId`, matching path/repository, and captured Dockview host.
+Reject a missing/replaced buffer before fetching; a refresh never installs one.
+Capture these identities before the first await. Do not compare whole buffer
+objects or content/hash identity: typing replaces objects while preserving the
+incarnation, and identical reopen must still retire old replies.
+
+Keep a small module-local pending-publication map keyed by the existing
+repo-scoped `fileKey`. Its current entry is a unique request token carrying the
+captured incarnation, not a file-content cache. Admission of another eligible
+read to that same buffer replaces the token synchronously, even across caller
+instances. Different keys remain independent. Admission by a retired caller
+must not supersede a current read. No global counter, coordinator, store action,
+deduplication or request cancellation is required.
+
+Validate caller, incarnation, host and token before transport, after
+`requestFileContent`, and after `calculateHash`. Token equality is required at
+publication even if the newer request already settled: cleaning up its entry
+must never make an older token current again. In `finally`, remove the entry
+only if it is still this request's entry. Thus the map retains at most one
+publication entry per key with outstanding work, without a history of closed
+buffers. A retired request may release only its own bookkeeping.
+
+Newest admission owns the result even when it fails. Leave the current editor
+unchanged; suppress the older success rather than resurrecting it as a fallback.
+The next real Git-signature or tab-activation trigger may refresh normally.
+There is no automatic retry or change to the existing first-observation skip.
+This policy follows the existing Files per-path publication-token pattern and
+prevents failure from silently reauthorizing known-obsolete work.
+
+## Refresh consumer lifetime
+
+Forward `useFileEditors`' existing `activeEditorVisitRef` into
+`useOpenFileWorkspaceSync`. Capture its committed token and session ref when
+starting each refresh; a local caller guard checks both. The current
+`useLayoutEffect` already retires that visit on session change, null, unmount
+and StrictMode cleanup. Do not create tokens or retire owners during render.
+A committed A-to-B-to-A transition creates a new A visit; it cannot revive an
+earlier read. Ordinary same-session renders and typing do not retire the visit.
+
+For tab activation, create a local committed effect lifetime in
+`useResyncOnTabActivate`, tied to its existing subscription identity (panel,
+session, file key/path/repository and availability). Layout cleanup retires it
+before an old passive subscription or deferred reply can publish. Capture this
+token in the registered callback and pass a caller guard to the shared helper;
+do not read a replacement token and adopt it on behalf of an old callback.
+Retain the initial-is-active sync, true-only activation callback and disposable
+cleanup. Capture/check the subscribed portal API identity as well, so replacing
+an API cannot authorize its old callback; no new manager-level subscription or
+layout restoration redesign is introduced.
+
+The helper's immediate arguments carry this local `isCurrent` guard; both
+production callers must supply it. The helper itself owns request/buffer/host
+checks, avoiding a caller-specific ordering map. A retired subscription cannot
+admit a new read or displace a live caller's token. A live consumer can still
+refresh after another consumer unmounts. Transport, normalization and hashing
+retain their current contracts.
+
+## Live refresh reconciliation
+
+After asynchronous preparation, obtain the still-owned buffer again immediately
+before deciding which update to publish. There is no await between this live
+read and the state update. All dirty/content comparisons use this final object,
+never an object captured before hashing. Apply the existing matching-dirty,
+nonmatching-dirty and clean branches with the genuine remote hash and metadata.
+Typing during hashing therefore follows the dirty branch and retains its text.
+
+For matching dirty text, clear dirty/remote state and call the real
+`updatePanelAfterSave` only while the owner remains current; recheck before that
+panel sink because synchronous store subscribers may retire an owner during
+buffer publication. For different dirty text, preserve the buffer/baseline and
+publish `remoteContent`/`remoteOriginalHash` with the existing reload affordance.
+For clean text, publish current content/baseline/hash/binary/resolved path and
+clear obsolete remote state. Keep existing unchanged-content no-ops and symlink
+metadata reconciliation. Failures stay noncritical and publish no editor change.
+
+## Refresh verification and surfaces
+
+Desktop and compact desktop (768-1023px with a fine pointer) both select
+`DockviewDesktopLayout` through `TaskLayout` and `usesDesktopWorkbench`.
+`dockview-shared.tsx` and `dockview-panel-content.tsx` render `FileEditorPanel`.
+All `useFileEditors` consumers inherit its Git-status synchronization, including
+panel actions, LSP openers, review/walkthrough controls and chat file opening.
+The full caller inventory and exact tests live in the refresh work order.
+
+Coarse-pointer tablet selects `SessionTabletLayout` and `TaskCenterPanel`; its
+restoration reads `requestFileContent` independently into local tabs. Phone
+selects `SessionMobileLayout` and its keyed `MobileFileViewerPanel`, using
+`fetchAndOpenFile` and selected-file state independently. `usePanelActions`
+can mount `useFileEditors` outside desktop, but its Dockview open-file actions
+are gated on `usesDesktopWorkbench`; this is not evidence that tablet/phone
+viewer content goes through the background helper.
+
+This correction changes state publication only: no rendered layout, copy,
+touch, scrolling, navigation or viewport-dependent interaction changes. The
+`/mobile-parity` state/data exception permits targeted real helper/hook/panel
+tests plus this explicit surface inventory. No new browser, build, E2E, ASCII
+composition or phone/tablet read implementation is required or claimed.
+
+Use independently authored deferred `client.request` tests with real
+`syncOpenFileFromWorkspace`, Dockview actions, `requestFileContent` normalization
+and `calculateHash`. Use real `StateProvider`/store actions and required providers
+at the `useFileEditors` boundary; drive actual Git status via the session's
+environment mapping. Mount real `FileEditorPanel` and use real portal-manager
+registration with a minimal panel-API event double for activation and disposal.
+Retain current initial-active/activation/dirty-title/reload positive controls.
+No mocked ownership predicate, store, request helper, hash implementation,
+consumer hook or affected panel can provide the ownership regression evidence.
+
+To deliberately hold hashing, instrument only `crypto.subtle.digest`: defer its
+completion, call the saved genuine digest, and forward the real bytes. Restore
+the descriptor and settle/join all work in teardown. This boundary instrumentation
+proves typing during real async hash preparation without replacing `calculateHash`
+or using sleeps. Cover both completion orders, newer failure/older success,
+same-key identical reopen/replacement, independent files/repos/readers, typing,
+current clean/empty/dirty outcomes, metadata, failures, committed visits, unmount
+and applicable StrictMode replay. Never replay/import the protected ROOT proof.
+
+The [workspace refresh delivery plan](../../../plans/editor-workspace-refresh-ownership/plan.md)
+extends this pair's missing criteria while the completed mutation package keeps
+its original scope and recorded results. It introduces no framework or new
+authority boundary; the requirement, design and tests preserve the local policy
+and rationale, so no additional ADR is needed under `/record`.
 
 ## Persistence and related decisions
 

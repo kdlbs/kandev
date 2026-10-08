@@ -110,6 +110,8 @@ type UpdateUserSettingsRequest struct {
 	AgentTabCloseBehavior             *string
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
+	SidebarFastActionsEnabled         *bool
+	SidebarNewTaskStyle               *string
 	SidebarHoverEnabled               *bool
 	SidebarHoverDelayMs               *int
 	ResolveSessionHostnames           *bool
@@ -406,6 +408,9 @@ func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.JiraDefaultViewID != nil {
 		settings.JiraDefaultViewID = strings.TrimSpace(*req.JiraDefaultViewID)
+	}
+	if err := applySidebarPresentationSettings(settings, req); err != nil {
+		return err
 	}
 	if err := applySidebarHoverSettings(settings, req); err != nil {
 		return err
@@ -1242,6 +1247,8 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"message_time_display":                     models.NormalizeMessageTimeDisplay(settings.MessageTimeDisplay),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"sidebar_fast_actions_enabled":             settings.SidebarFastActionsEnabled,
+		"sidebar_new_task_style":                   settings.SidebarNewTaskStyle,
 		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,
 		"sidebar_hover_delay_ms":                   settings.SidebarHoverDelayMs,
 		"resolve_session_hostnames":                settings.ResolveSessionHostnames,

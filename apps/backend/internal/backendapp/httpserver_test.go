@@ -23,7 +23,7 @@ func TestBuildHTTPServerAbortsWhenInterlockTokenGenerationFails(t *testing.T) {
 	t.Cleanup(func() { newInterimSettingsInterlockToken = original })
 
 	server, err := buildHTTPServer(
-		&config.Config{}, testLogger(t),
+		context.Background(), &config.Config{}, testLogger(t),
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)

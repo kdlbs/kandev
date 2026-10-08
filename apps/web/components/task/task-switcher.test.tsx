@@ -59,6 +59,31 @@ function renderSwitcher(collapsedSubtaskParentIds: string[] = []) {
   );
 }
 
+it("omits the state group header icon while retaining task row icons", () => {
+  render(
+    <Providers>
+      <TaskSwitcher
+        grouped={{
+          ...grouped(),
+          groupKey: "state",
+          groups: [{ key: "IN_PROGRESS", label: "In progress", tasks: [ROOT] }],
+        }}
+        activeTaskId={null}
+        selectedTaskId={null}
+        onSelectTask={vi.fn()}
+      />
+    </Providers>,
+  );
+  const header = screen.getByTestId("sidebar-group-header");
+  expect(header.querySelectorAll("svg")).toHaveLength(1);
+  expect(within(header).queryByTestId("sidebar-group-state")).toBeNull();
+  const rows = screen.getAllByTestId("sidebar-task-item");
+  expect(rows).toHaveLength(3);
+  for (const row of rows) {
+    expect(within(row).getByTestId("task-state-running")).toBeTruthy();
+  }
+});
+
 function blockDepth(container: HTMLElement, taskId: string): string | null {
   return (
     container

@@ -1,5 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
+import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
 import { useRegularMode } from "../../helpers/regular-mode";
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { expectTaskDescription } from "../../pages/task-description-editor";
 import {
   armWorkflowStepPreviewResponses,
@@ -24,6 +26,9 @@ test("loads every workflow preview from a task page and retries one failed row",
   apiClient,
   seedData,
 }) => {
+  const initialLayout = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+    seedData.workspaceId
+  ];
   const scenario = await seedWorkflowStepPreviewScenario(apiClient, seedData.workspaceId);
   let reviewAttempts = 0;
   let allowReviewRetry = () => {};
@@ -55,6 +60,7 @@ test("loads every workflow preview from a task page and retries one failed row",
   try {
     await testPage.goto("/t/" + scenario.taskId);
     await expect(testPage).toHaveURL(new RegExp("/t/" + scenario.taskId + "$"));
+    await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
     await testPage.getByTestId("create-task-button").first().click();
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
@@ -159,6 +165,7 @@ test("loads every workflow preview from a task page and retries one failed row",
   } finally {
     allowReviewRetry();
     await cleanupWorkflowStepPreviewScenario(apiClient, scenario);
+    await restoreSidebarLayout(apiClient, seedData.workspaceId, initialLayout);
   }
 });
 
@@ -169,6 +176,9 @@ test("scrolls ten workflow options in both directions without losing the task dr
   seedData,
 }) => {
   test.setTimeout(180_000);
+  const initialLayout = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+    seedData.workspaceId
+  ];
   const scenario = await seedWorkflowStepPreviewScenario(apiClient, seedData.workspaceId, {
     extraWorkflowCount: 7,
     longWorkflowSteps: true,
@@ -189,6 +199,7 @@ test("scrolls ten workflow options in both directions without losing the task dr
     await testPage.setViewportSize({ width: 1682, height: 768 });
     await testPage.goto("/t/" + scenario.taskId);
     await expect(testPage).toHaveURL(new RegExp("/t/" + scenario.taskId + "$"));
+    await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
     await testPage.getByTestId("create-task-button").first().click();
 
     const dialog = testPage.getByTestId("create-task-dialog");
@@ -306,5 +317,6 @@ test("scrolls ten workflow options in both directions without losing the task dr
     await expectTaskDescription(description, "Review every long workflow preview before choosing.");
   } finally {
     await cleanupWorkflowStepPreviewScenario(apiClient, scenario);
+    await restoreSidebarLayout(apiClient, seedData.workspaceId, initialLayout);
   }
 });

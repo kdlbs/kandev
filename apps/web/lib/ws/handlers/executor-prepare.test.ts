@@ -9,6 +9,7 @@ const ACTION_COMPLETED = "executor.prepare.completed";
 const EXECUTION_ID = "execution-1";
 const TASK_ID = "task-1";
 const SESSION_ID = "session-1";
+const PREPARATION_TIMESTAMP = "2026-09-25T10:00:00Z";
 
 function makePrepareStore() {
   let state = {
@@ -47,7 +48,7 @@ describe("executor.prepare progress mapping", () => {
         total_steps: 1,
         status: "failed",
         error: "context deadline exceeded",
-        timestamp: "2026-09-25T10:00:00Z",
+        timestamp: PREPARATION_TIMESTAMP,
       },
     } as never);
 
@@ -80,7 +81,7 @@ describe("executor.prepare progress mapping", () => {
             error: "context deadline exceeded",
           },
         ],
-        timestamp: "2026-09-25T10:00:00Z",
+        timestamp: PREPARATION_TIMESTAMP,
       },
     } as never);
 
@@ -92,11 +93,145 @@ describe("executor.prepare progress mapping", () => {
   });
 });
 
+describe("executor.prepare MCP diagnostic mapping", () => {
+  it("maps only bounded MCP diagnostics from live progress and completion payloads", () => {
+    const fixture = makePrepareStore();
+    const handlers = registerExecutorPrepareHandlers(fixture.store);
+    const diagnostic = {
+      operation: "enable",
+      stage: "wait",
+      kind: "output_wait_timeout",
+      message: "exec: WaitDelay expired before I/O complete",
+      exit_code: 0,
+    };
+
+    handlers[ACTION_PROGRESS]?.({
+      id: "progress-diagnostic",
+      type: "notification",
+      action: ACTION_PROGRESS,
+      payload: {
+        task_id: TASK_ID,
+        session_id: SESSION_ID,
+        execution_id: EXECUTION_ID,
+        step_name: "raw name",
+        step_kind: "agent_mcp_approval",
+        mcp_server_id: "server-a",
+        mcp_provider: "cursor",
+        step_index: 0,
+        total_steps: 1,
+        status: "failed",
+        output: "raw stdout",
+        error: "raw stderr",
+        mcp_diagnostic: diagnostic,
+        timestamp: PREPARATION_TIMESTAMP,
+      },
+    } as never);
+
+    expect(fixture.getState().prepareProgress.bySessionId[SESSION_ID]?.steps[0]).toMatchObject({
+      name: "",
+      kind: "agent_mcp_approval",
+      status: "failed",
+      mcpDiagnostic: {
+        operation: "enable",
+        stage: "wait",
+        kind: "output_wait_timeout",
+        message: "exec: WaitDelay expired before I/O complete",
+        exitCode: 0,
+      },
+      output: undefined,
+      error: undefined,
+    });
+
+    handlers[ACTION_COMPLETED]?.({
+      id: "completed-diagnostic",
+      type: "notification",
+      action: ACTION_COMPLETED,
+      payload: {
+        task_id: TASK_ID,
+        session_id: SESSION_ID,
+        execution_id: EXECUTION_ID,
+        success: false,
+        duration_ms: 1000,
+        steps: [
+          {
+            name: "raw name",
+            kind: "agent_mcp_approval",
+            mcp_server_id: "server-a",
+            status: "failed",
+            output: "raw stdout",
+            error: "raw stderr",
+            mcp_diagnostic: diagnostic,
+          },
+        ],
+        timestamp: PREPARATION_TIMESTAMP,
+      },
+    } as never);
+
+    expect(fixture.getState().prepareProgress.bySessionId[SESSION_ID]?.steps[0]).toMatchObject({
+      mcpDiagnostic: {
+        operation: "enable",
+        stage: "wait",
+        kind: "output_wait_timeout",
+        message: "exec: WaitDelay expired before I/O complete",
+        exitCode: 0,
+      },
+      output: undefined,
+      error: undefined,
+    });
+  });
+});
+
+describe("executor.prepare malformed MCP diagnostics", () => {
+  it("drops an unknown operation without exposing legacy fields", () => {
+    const fixture = makePrepareStore();
+    const handlers = registerExecutorPrepareHandlers(fixture.store);
+    handlers[ACTION_PROGRESS]?.({
+      id: "progress-invalid-diagnostic",
+      type: "notification",
+      action: ACTION_PROGRESS,
+      payload: {
+        task_id: TASK_ID,
+        session_id: SESSION_ID,
+        execution_id: EXECUTION_ID,
+        step_name: "Approve server",
+        step_kind: "agent_mcp_approval",
+        mcp_server_id: "server-a",
+        step_index: 0,
+        total_steps: 1,
+        status: "failed",
+        preparation_id: "invalid-diagnostic-attempt",
+        preparation_started_at: "2026-09-25T10:01:00Z",
+        error: "raw error",
+        output: "raw output",
+        mcp_diagnostic: {
+          operation: "shell",
+          stage: "wait",
+          kind: "wait_failed",
+          message: "command failed",
+        },
+        timestamp: "2026-09-25T10:01:00Z",
+      },
+    } as never);
+
+    const step = fixture.getState().prepareProgress.bySessionId[SESSION_ID]?.steps[0];
+    expect(step?.mcpDiagnostic).toBeUndefined();
+    expect(step).toMatchObject({
+      error: undefined,
+      output: undefined,
+    });
+  });
+});
+
 describe("executor.prepare attempt ordering", () => {
   it("replaces only MCP rows for a newer attempt and rejects unseen stale completions", () => {
     const fixture = makePrepareStore();
     const handlers = registerExecutorPrepareHandlers(fixture.store);
-    const progress = (attemptId: string, startedAt: string, stepName: string) =>
+    const progress = (
+      attemptId: string,
+      startedAt: string,
+      stepName: string,
+      mcpDiagnostic?: Record<string, unknown>,
+    ) =>
       handlers[ACTION_PROGRESS]?.({
         id: `progress-${attemptId}`,
         type: "notification",
@@ -112,9 +247,10 @@ describe("executor.prepare attempt ordering", () => {
           step_command: stepName === "Environment" ? undefined : "must-not-be-stored",
           step_index: stepName === "Environment" ? 0 : 1,
           total_steps: 2,
-          status: "completed",
+          status: mcpDiagnostic ? "failed" : "completed",
           output: stepName === "Environment" ? undefined : "secret output",
           error: stepName === "Environment" ? undefined : "raw error",
+          mcp_diagnostic: mcpDiagnostic,
           preparation_id: attemptId,
           preparation_started_at: startedAt,
           timestamp: startedAt,
@@ -123,7 +259,12 @@ describe("executor.prepare attempt ordering", () => {
 
     progress("attempt-old", "2026-09-28T18:00:00.123456788Z", "Environment");
     progress("attempt-old", "2026-09-28T18:00:00.123456788Z", "Old verification");
-    progress("attempt-new", "2026-09-28T18:00:00.123456789Z", "New verification");
+    progress("attempt-new", "2026-09-28T18:00:00.123456789Z", "New verification", {
+      operation: "list_tools",
+      stage: "wait",
+      kind: "wait_failed",
+      message: "current attempt cause",
+    });
 
     handlers[ACTION_COMPLETED]?.({
       id: "stale-completion",
@@ -135,9 +276,21 @@ describe("executor.prepare attempt ordering", () => {
         execution_id: EXECUTION_ID,
         preparation_id: "attempt-unseen-old",
         preparation_started_at: "2026-09-28T18:00:00.123456787Z",
-        success: true,
+        success: false,
         duration_ms: 100,
-        steps: [{ name: "stale", kind: "agent_mcp_verification", status: "completed" }],
+        steps: [
+          {
+            name: "stale",
+            kind: "agent_mcp_verification",
+            status: "failed",
+            mcp_diagnostic: {
+              operation: "list_tools",
+              stage: "wait",
+              kind: "wait_failed",
+              message: "stale attempt cause",
+            },
+          },
+        ],
         timestamp: "2026-09-28T18:00:00.123456787Z",
       },
     } as never);
@@ -155,6 +308,8 @@ describe("executor.prepare attempt ordering", () => {
         kind: "agent_mcp_verification",
         mcpServerId: "server-a",
         mcpProvider: "cursor",
+        status: "failed",
+        mcpDiagnostic: { message: "current attempt cause" },
       },
     ]);
     expect(prepare?.steps[1]?.command).toBeUndefined();

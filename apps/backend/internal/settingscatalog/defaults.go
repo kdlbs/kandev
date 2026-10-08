@@ -646,6 +646,7 @@ func userSettingsDomain() DomainDescriptor {
 		"default_utility_agent_id", "default utility agent", "string", "default_utility_model", "default utility model", "string", "default_utility_agent_profile_id", "default utility profile", "string",
 		"keyboard_shortcuts", "keyboard shortcuts", "object", "terminal_link_behavior", "terminal link behavior", "string", "terminal_font_family", "terminal font family", "string",
 		"terminal_font_size", "terminal font size", "integer", "changes_panel_layout", "changes panel layout", "string", "last_seen_display", "last seen display", "string", "message_time_display", "message time display", "string", "agent_tab_close_behavior", "agent tab close behavior", "string",
+		"sidebar_fast_actions_enabled", "sidebar fast action icons", "boolean", "sidebar_new_task_style", "sidebar New Task style", "string",
 		"sidebar_hover_enabled", "sidebar hover enabled", "boolean", "sidebar_hover_delay_ms", "sidebar hover delay", "integer",
 		"system_metrics_display", "system metrics display", "object", "app_status_bar_enabled", "status bar", "boolean", "resolve_session_hostnames", "resolve hostnames", "boolean",
 		"app_status_bar_order", "status bar order", "object", "quick_chat_tab_order_by_workspace", "quick chat tab order", "object", "kanban_hidden_step_ids", "hidden kanban steps", "object",
@@ -662,6 +663,13 @@ func userSettingsDomain() DomainDescriptor {
 			field.Schema = map[string]any{"type": "object"}
 		}
 		switch values[index] {
+		case "sidebar_fast_actions_enabled":
+			field.SettingsHref = "/settings/preferences/layouts?tab=sidebar"
+			field.DefaultBehavior = "false for new users; true for existing users without a saved value"
+		case "sidebar_new_task_style":
+			field.SettingsHref = "/settings/preferences/layouts?tab=sidebar"
+			field.DefaultBehavior = "simple for new users; compact for existing users without a saved value"
+			field.Schema = map[string]any{"type": "string", "enum": []string{"simple", "compact"}}
 		case "keyboard_shortcuts":
 			field.Schema = keyboardShortcutsSchema()
 		case "sidebar_task_color_patch":

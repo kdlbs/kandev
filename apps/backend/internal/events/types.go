@@ -50,6 +50,13 @@ const (
 	CanvasRemoved                   = "canvas.removed"
 )
 
+// CoordinatorUpdated fires after a proposal write (insert, claim, reclaim,
+// complete, fail or reject) or a stall upsert, never plain coordinator CRUD.
+// Payload: {workspace_id, coordinator_id, open_proposals}
+// (docs/specs/coordinator/system-design/proposals.md#events, Build decision
+// 13). Publishing sites land with tasks 03, 04 and 07.
+const CoordinatorUpdated = "coordinator.updated"
+
 // Event types for office task tree controls.
 const (
 	OfficeTaskTreeHoldCreated  = "task.tree_hold_created"
@@ -103,6 +110,9 @@ const (
 	// pending-action projection for one session. It contains no transcript
 	// content and lets inactive session selectors stay current.
 	SessionPendingActionChanged = "session.pending_action_changed"
+	// SessionWorkspaceRecoveryChanged carries the path-free recovery projection
+	// to every subscribed conversation bound to the same task environment.
+	SessionWorkspaceRecoveryChanged = "session.workspace_recovery.changed"
 	// TaskSessionActivityChanged fires when a session's fine-grained activity
 	// flips — a RUNNING foreground turn moving between actively generating and
 	// idle-on-background-work, or detached background work starting/finishing

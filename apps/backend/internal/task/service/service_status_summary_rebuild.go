@@ -36,6 +36,22 @@ type TaskStatusSummaryLaunchQueueReader func(
 	[]*models.Task,
 ) map[string]*statussummary.LaunchQueueSummary
 
+type runningSessionObservation struct {
+	observed bool
+	running  bool
+}
+
+func runningSessionSummary(sessions []*models.TaskSession, observed bool) runningSessionObservation {
+	result := runningSessionObservation{observed: observed}
+	for _, session := range sessions {
+		if observed && session != nil && session.State == models.TaskSessionStateRunning {
+			result.running = true
+			break
+		}
+	}
+	return result
+}
+
 // SetTaskStatusSummaryPRReader wires the optional provider-backed PR reader.
 // The task service keeps the interface narrow so it does not depend on the
 // GitHub package.
@@ -57,11 +73,12 @@ func isRequestCancellationError(ctx context.Context, err error) bool {
 	return errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled)
 }
 
-// ReconcileTaskStatusSummaries repairs stale pending state in existing rows and
-// builds absent rows. All durable inputs are batch-loaded by the caller or by
-// optional batch readers, so startup does not scan every historical task. A
-// present nil result is an explicit cache invalidation; an absent key remains
-// an ordinary partial-response omission.
+// ReconcileTaskStatusSummaries repairs stale status projections in existing rows
+// and builds absent rows. A non-nil sessionsByTask map is a complete batch
+// observation; a missing task key means that task has no sessions. All durable
+// inputs are batch-loaded by the caller or optional readers, so startup does
+// not scan every historical task. A present nil result is an explicit cache
+// invalidation; an absent key remains an ordinary partial-response omission.
 func (s *Service) ReconcileTaskStatusSummaries(
 	ctx context.Context,
 	tasks []*models.Task,
@@ -87,7 +104,7 @@ func (s *Service) ReconcileTaskStatusSummaries(
 		return summaries, err
 	}
 	failedTaskIDs, reconcileErr := s.reconcileExistingSummaries(
-		ctx, tasks, sessionsByTask, pendingBySession, summaries, activityByTask, activityObserved, launchQueueByTask,
+		ctx, tasks, sessionsByTask, sessionsByTask != nil, pendingBySession, summaries, activityByTask, activityObserved, launchQueueByTask,
 	)
 	if err := ctx.Err(); err != nil {
 		return summaries, err
@@ -117,6 +134,7 @@ func (s *Service) reconcileExistingSummaries(
 	ctx context.Context,
 	tasks []*models.Task,
 	sessionsByTask map[string][]*models.TaskSession,
+	sessionsObserved bool,
 	pendingBySession map[string]models.TaskPendingAction,
 	summaries map[string]*statussummary.TaskStatusSummary,
 	activityByTask map[string]time.Time,
@@ -133,6 +151,7 @@ func (s *Service) reconcileExistingSummaries(
 			continue
 		}
 		sessions := sessionsByTask[task.ID]
+		runningSessions := runningSessionSummary(sessions, sessionsObserved)
 		action := pendingActionForTask(sessions, pendingBySession)
 		reconciled, err := s.reconcileExistingSummary(
 			ctx,
@@ -141,6 +160,7 @@ func (s *Service) reconcileExistingSummaries(
 			action,
 			activityByTask[task.ID],
 			activityObserved,
+			runningSessions,
 			launchQueueByTask[task.ID],
 		)
 		if err != nil {
@@ -238,6 +258,7 @@ func (s *Service) rebuildMissingSummaries(
 			completionGateObserved,
 			activityAt,
 			activityObserved,
+			sessionsByTask != nil,
 			now,
 		))
 	}
@@ -414,6 +435,7 @@ func (s *Service) reconcileExistingSummary(
 	pendingAction string,
 	authoritativeActivity time.Time,
 	activityObserved bool,
+	runningSessions runningSessionObservation,
 	launchQueueValues ...*statussummary.LaunchQueueSummary,
 ) (*statussummary.TaskStatusSummary, error) {
 	if err := ctx.Err(); err != nil {
@@ -438,7 +460,7 @@ func (s *Service) reconcileExistingSummary(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, launchQueue, launchQueueObserved, completionGate, completionGateObserved) {
+		if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, runningSessions, launchQueue, launchQueueObserved, completionGate, completionGateObserved) {
 			return overlayLaunchQueueObservation(current, launchQueue, launchQueueObserved), nil
 		}
 		if err := prepareSummaryReconcileAttempt(ctx, attempt, current.Revision); err != nil {
@@ -446,6 +468,10 @@ func (s *Service) reconcileExistingSummary(
 		}
 		next := *current
 		next.PendingAction = pendingAction
+		if runningSessions.observed {
+			running := runningSessions.running
+			next.HasRunningSession = &running
+		}
 		if activityObserved && authoritativeActivity.After(time.Time{}) {
 			next.LastActivityAt = maxSummaryActivity(current.LastActivityAt, authoritativeActivity)
 		}
@@ -473,7 +499,7 @@ func (s *Service) reconcileExistingSummary(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		current, pendingAction, launchQueue, err = s.reloadSummaryReconcileState(ctx, task.ID, launchQueueObserved)
+		current, pendingAction, runningSessions, launchQueue, err = s.reloadSummaryReconcileState(ctx, task.ID, launchQueueObserved)
 		if err != nil {
 			return nil, err
 		}
@@ -491,7 +517,7 @@ func (s *Service) reconcileExistingSummary(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, launchQueue, launchQueueObserved, completionGate, completionGateObserved) {
+	if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, runningSessions, launchQueue, launchQueueObserved, completionGate, completionGateObserved) {
 		return overlayLaunchQueueObservation(current, launchQueue, launchQueueObserved), nil
 	}
 	s.logSummaryReconcileExhaustion(task.ID, current)
@@ -525,6 +551,7 @@ func summaryNeedsReconcile(
 	pendingAction string,
 	authoritativeActivity time.Time,
 	activityObserved bool,
+	runningSessions runningSessionObservation,
 	launchQueue *statussummary.LaunchQueueSummary,
 	launchQueueObserved bool,
 	completionGate *statussummary.CompletionGateSummary,
@@ -534,6 +561,9 @@ func summaryNeedsReconcile(
 		return false
 	}
 	if current.PendingAction != pendingAction {
+		return true
+	}
+	if runningSessions.observed && (current.HasRunningSession == nil || *current.HasRunningSession != runningSessions.running) {
 		return true
 	}
 	if launchQueueObserved && !statussummaryLaunchQueueEqual(current.LaunchQueue, launchQueue) {
@@ -565,53 +595,54 @@ func (s *Service) reloadSummaryReconcileState(
 	ctx context.Context,
 	taskID string,
 	loadLaunchQueue bool,
-) (*statussummary.TaskStatusSummary, string, *statussummary.LaunchQueueSummary, error) {
+) (*statussummary.TaskStatusSummary, string, runningSessionObservation, *statussummary.LaunchQueueSummary, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, "", nil, err
+		return nil, "", runningSessionObservation{}, nil, err
 	}
 	rows, err := s.statusSummaries.LoadTaskStatusSummaries(ctx, []string{taskID})
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("reload after compare-and-set rejection: %w", err)
+		return nil, "", runningSessionObservation{}, nil, fmt.Errorf("reload after compare-and-set rejection: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, "", nil, err
+		return nil, "", runningSessionObservation{}, nil, err
 	}
 	current := rows[taskID]
 	if current == nil {
-		return nil, "", nil, nil
+		return nil, "", runningSessionObservation{}, nil, nil
 	}
 	if s.sessions == nil {
-		return nil, "", nil, errors.New("reload sessions: session repository unavailable")
+		return nil, "", runningSessionObservation{}, nil, errors.New("reload sessions: session repository unavailable")
 	}
 	refreshedSessions, err := s.sessions.ListTaskSessions(ctx, taskID)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("reload sessions: %w", err)
+		return nil, "", runningSessionObservation{}, nil, fmt.Errorf("reload sessions: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, "", nil, err
+		return nil, "", runningSessionObservation{}, nil, err
 	}
+	runningSessions := runningSessionSummary(refreshedSessions, true)
 	pendingBySession, err := s.GetPendingActionsForSessions(ctx, taskSessionIDs(refreshedSessions))
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("reload pending actions: %w", err)
+		return nil, "", runningSessionObservation{}, nil, fmt.Errorf("reload pending actions: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, "", nil, err
+		return nil, "", runningSessionObservation{}, nil, err
 	}
 	if !loadLaunchQueue {
-		return current, pendingActionForTask(refreshedSessions, pendingBySession), nil, nil
+		return current, pendingActionForTask(refreshedSessions, pendingBySession), runningSessions, nil, nil
 	}
 	task, err := s.GetTask(ctx, taskID)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("reload task for launch queue: %w", err)
+		return nil, "", runningSessionObservation{}, nil, fmt.Errorf("reload task for launch queue: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, "", nil, err
+		return nil, "", runningSessionObservation{}, nil, err
 	}
 	queues := s.launchQueueSummaries(ctx, []*models.Task{task})
 	if err := ctx.Err(); err != nil {
-		return nil, "", nil, err
+		return nil, "", runningSessionObservation{}, nil, err
 	}
-	return current, pendingActionForTask(refreshedSessions, pendingBySession), queues[taskID], nil
+	return current, pendingActionForTask(refreshedSessions, pendingBySession), runningSessions, queues[taskID], nil
 }
 
 func maxSummaryActivity(current *time.Time, candidate time.Time) *time.Time {
@@ -881,10 +912,12 @@ func (s *Service) rebuildInput(
 	completionGateObserved bool,
 	lastActivityAt time.Time,
 	activityObserved bool,
+	sessionsObserved bool,
 	now time.Time,
 ) statussummary.RebuildInput {
 	input := statussummary.RebuildInput{
 		Sessions:               make([]statussummary.RebuildSession, 0, len(sessions)),
+		SessionsObserved:       sessionsObserved,
 		TaskError:              taskError,
 		PendingActions:         make(map[string]string),
 		ActivityObserved:       s.foregroundActivity != nil,

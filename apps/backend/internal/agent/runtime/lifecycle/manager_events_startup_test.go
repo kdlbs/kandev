@@ -332,10 +332,18 @@ func TestStartupGenerationCapturesAttemptIDForReusedExecutionMessageChunk(t *tes
 		Text: "replacement\n",
 	}, newGeneration)
 	streamEvents := eventBus.getStreamEvents()
-	if len(streamEvents) != 1 {
-		t.Fatalf("replacement message callback published %d stream events, want 1", len(streamEvents))
+	if len(streamEvents) != 2 {
+		t.Fatalf("replacement message callback published %d stream events, want original evidence and transcript projection", len(streamEvents))
 	}
-	if streamEvents[0].AttemptID != "attempt-new" {
-		t.Fatalf("message stream attempt ID = %q, want attempt-new", streamEvents[0].AttemptID)
+	if streamEvents[0].Data.Type != streams.EventTypeMessageChunk || streamEvents[0].Data.Text != "replacement\n" {
+		t.Fatalf("original evidence = %+v, want replacement message_chunk", streamEvents[0].Data)
+	}
+	if streamEvents[1].Data.Type != "message_streaming" {
+		t.Fatalf("transcript projection = %+v, want message_streaming", streamEvents[1].Data)
+	}
+	for _, event := range streamEvents {
+		if event.AttemptID != "attempt-new" {
+			t.Fatalf("message stream attempt ID = %q, want attempt-new", event.AttemptID)
+		}
 	}
 }

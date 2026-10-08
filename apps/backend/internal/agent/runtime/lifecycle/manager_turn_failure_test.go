@@ -352,3 +352,49 @@ func retainedCapacityEvent(execution *AgentExecution) *agentctl.AgentEvent {
 		Data:                     map[string]any{"is_error": true},
 	}
 }
+
+func TestCursorResourceTurnRetention(t *testing.T) {
+	fixture := newDispatchCompletionFixture(t, false)
+	execution := fixture.execution
+	execution.TaskScope = TaskLaunchScopeTask
+	execution.AgentProfileID = "profile-cursor"
+	execution.AgentID = "cursor-acp"
+	execution.setSessionInitialized(true)
+
+	accepted := fixture.manager.handleCompleteEvent(execution, &agentctl.AgentEvent{
+		Type:                     "complete",
+		SessionID:                execution.SessionID,
+		PromptGeneration:         1,
+		Error:                    "Error: RetriableError: [resource_exhausted] Error",
+		PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+		Data:                     map[string]any{"is_error": true},
+		ProviderError: &streams.ProviderError{
+			Source:     streams.ProviderErrorSourceCursorACP,
+			ProviderID: "cursor-acp",
+			Message:    "Error: RetriableError: [resource_exhausted] Error",
+			OccurredAt: time.Now().UTC(),
+		},
+	})
+	require.True(t, accepted)
+	require.NotNil(t, execution.ProviderError)
+	require.True(t, execution.ProviderError.Valid())
+	require.Equal(t, "Error: RetriableError: [resource_exhausted] Error", execution.ProviderError.Message)
+	require.Equal(t, v1.AgentStatusReady, execution.Status)
+	require.Nil(t, execution.ExitCode)
+	require.Nil(t, execution.FinishedAt)
+
+	var turnFailed, failed, ready bool
+	for _, event := range fixture.manager.eventBus.(*MockEventBus).PublishedEvents {
+		switch event.Type {
+		case "agent.turn_failed":
+			turnFailed = true
+		case "agent.failed":
+			failed = true
+		case "agent.ready":
+			ready = true
+		}
+	}
+	require.True(t, turnFailed, "retained resource error must publish its distinct turn-failure event")
+	require.False(t, failed, "retained turn failure must not publish terminal execution failure")
+	require.False(t, ready, "a failed turn must not publish successful readiness")
+}

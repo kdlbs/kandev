@@ -79,6 +79,7 @@ function ReviewDialogDiffContent({
           onOpenFile={onOpenFile}
           previewedFiles={previewedFiles}
           onToggleMarkdownPreview={toggleMarkdownPreview}
+          sourceKey={state.reviewSourceKey}
           fileRefs={state.fileRefs}
         />
       ) : (

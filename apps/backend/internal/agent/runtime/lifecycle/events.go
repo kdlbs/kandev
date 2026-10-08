@@ -176,6 +176,10 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 			snapshot := *evidence.ContinuationSafety
 			payload.ContinuationSafety = &snapshot
 		}
+		if evidence.CapacityContinuation != nil {
+			snapshot := *evidence.CapacityContinuation
+			payload.CapacityContinuation = &snapshot
+		}
 		payload.ProviderDiagnosticCandidate = evidence.ProviderDiagnosticCandidate
 		payload.ProviderDiagnosticText = evidence.ProviderDiagnosticText
 	}
@@ -310,6 +314,7 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 		RunSessionID:                    execution.RunSessionID,
 		RunAttempt:                      execution.RunAttempt,
 		AgentProfileID:                  execution.officeProfileID(),
+		ExecutionProfileID:              execution.AgentProfileID,
 		AgentType:                       execution.AgentID,
 		TaskID:                          execution.TaskID,
 		SessionID:                       execution.SessionID,
@@ -335,6 +340,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		Type:                        event.Type,
 		ACPSessionID:                event.SessionID,
 		OperationID:                 event.OperationID,
+		ProtocolMessageID:           event.ProtocolMessageID,
 		Text:                        event.Text,
 		ProviderDiagnosticCandidate: event.ProviderDiagnosticCandidate,
 		ToolCallID:                  event.ToolCallID,

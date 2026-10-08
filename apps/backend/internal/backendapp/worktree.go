@@ -89,6 +89,7 @@ func provideWorktreeManager(dbPool *db.Pool, cfg *config.Config, log *logger.Log
 		lifecycleMgr.SetWorktreeManager(manager)
 		lifecycleMgr.SetBootMessageService(&bootMsgAdapter{svc: taskSvc})
 	}
+	manager.SetRecoveryProgressReporter(taskSvc)
 	taskSvc.SetWorktreeCleanup(manager)
 	if lifecycleMgr != nil {
 		taskSvc.SetEnvironmentDestroyer(&environmentDestroyerAdapter{

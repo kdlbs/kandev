@@ -32,7 +32,7 @@ test.describe("OMP harness-owned updates", () => {
     const approvalResponse = waitForHttp(testPage, "POST", /\/api\/v1\/agent-update\/omp-acp$/);
     await dialog.getByTestId(`agent-update-confirm-${runtime.agentName}`).click();
     await approvalResponse;
-    expect(runtime.postBodies()).toEqual(["{}"]);
+    expect(runtime.postBodies()).toEqual([{}]);
     await runtime.emitOutput("Updated to 18.3.4 on canary channel\n");
     await expect(dialog.getByTestId(`agent-update-log-${runtime.agentName}`)).toContainText(
       "18.3.4",
@@ -130,7 +130,7 @@ test.describe("OMP harness-owned updates", () => {
     );
     await expect.poll(() => runtime.statusRequestCount()).toBe(baselineStatusReads + 1);
     expect(runtime.jobsRequestCount()).toBe(baselineJobReads);
-    expect(runtime.postBodies()).toEqual(["{}"]);
+    expect(runtime.postBodies()).toEqual([{}]);
     statusGate.resolve();
     await failedStatusResponse;
     await expect(dialog.getByTestId(`agent-update-result-${runtime.agentName}`)).toContainText(

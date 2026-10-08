@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Trans, useTranslation } from "react-i18next";
 
 import AgentsSettingsPage from "@/app/settings/agents/page";
@@ -21,7 +21,7 @@ import NewAutomationPage from "@/app/settings/workspace/[id]/automations/new/pag
 import WorkspaceEditPage from "@/app/settings/workspace/[id]/page";
 import WorkspacesPage from "@/app/settings/workspace/page";
 import Link from "@/components/routing/app-link";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
 import {
   AppearanceSettings,
   KeyboardShortcutsSettings,
@@ -29,7 +29,12 @@ import {
 import { SettingsIndex } from "@/components/settings/settings-index";
 import { LegacyExecutorSettingsRoute } from "@/components/settings/legacy-executor-settings-route";
 import { readLastSettingsPath } from "@/lib/settings/last-settings-page";
-import { SettingsRedirect, useRememberSettingsPath } from "./settings-route-helpers";
+import {
+  SettingsRedirect,
+  SettingsRouteFallback,
+  useRememberSettingsPath,
+} from "./settings-route-helpers";
+import { renderWorkspaceCoordinatorRoute } from "./settings-routes.coordinators";
 import { NotificationsSettings } from "@/components/settings/notifications-settings";
 import { LayoutSettings } from "@/components/settings/layouts/layout-settings";
 import { PromptsSettings } from "@/components/settings/prompts-settings";
@@ -93,7 +98,7 @@ import {
   WorkspaceRepositoriesRoute,
   WorkspaceWorkflowsRoute,
 } from "./settings-routes.workspace-data";
-import { loadSettingsInitialState } from "./settings-routes.initial-state";
+import { SettingsRouteBootstrap } from "./settings-routes.bootstrap";
 
 type RouteRenderer = () => ReactNode;
 
@@ -429,6 +434,22 @@ function renderWorkspaceSettingsRoute(pathname: string): ReactNode {
     return renderWorkspaceAutomationRoute(workspaceAutomation[0], workspaceAutomation[1]);
   }
 
+  const workspaceCoordinator = matchDouble(
+    pathname,
+    /^\/settings\/workspaces\/([^/]+)\/coordinators\/([^/]+)$/,
+  );
+  if (workspaceCoordinator) {
+    return renderWorkspaceCoordinatorRoute(workspaceCoordinator[0], workspaceCoordinator[1]);
+  }
+
+  const workspaceCoordinatorsList = matchSingle(
+    pathname,
+    /^\/settings\/workspaces\/([^/]+)\/coordinators$/,
+  );
+  if (workspaceCoordinatorsList) {
+    return renderWorkspaceCoordinatorRoute(workspaceCoordinatorsList, null);
+  }
+
   const workspaceSubpage = matchDouble(
     pathname,
     /^\/settings\/workspaces\/([^/]+)\/(repositories|workflows|automations|secrets)$/,
@@ -526,61 +547,5 @@ function UpdatesRoute() {
       </p>
       <UpdatesCard />
     </SystemRouteShell>
-  );
-}
-
-export function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
-  const store = useAppStoreApi();
-  const bootstrappedRef = useRef(false);
-
-  useEffect(() => {
-    if (bootstrappedRef.current) return;
-    bootstrappedRef.current = true;
-    let cancelled = false;
-
-    async function bootstrap() {
-      const initialState = await loadSettingsInitialState(
-        () => store.getState().agentProfiles.version,
-        () => store.getState().workspaces.activeId,
-      );
-      if (cancelled || Object.keys(initialState).length === 0) return;
-      const desiredWorkspaceId = initialState.workspaces?.activeId ?? null;
-      const workspaceBeforeHydration = store.getState().workspaces.activeId;
-      // Routing the actual switch through `setActiveWorkspace` (rather than
-      // letting `hydrate` overwrite `activeId` directly) keeps
-      // `activeIdRevision` accurate for consumers that key staleness off it,
-      // such as the Failed-inbox cache.
-      store.getState().hydrate(
-        initialState.workspaces
-          ? {
-              ...initialState,
-              workspaces: { ...initialState.workspaces, activeId: workspaceBeforeHydration },
-            }
-          : initialState,
-      );
-      if (initialState.workspaces && desiredWorkspaceId !== workspaceBeforeHydration) {
-        store.getState().setActiveWorkspace(desiredWorkspaceId);
-      }
-    }
-
-    void bootstrap();
-    return () => {
-      cancelled = true;
-      bootstrappedRef.current = false;
-    };
-  }, [pathname, store]);
-
-  return null;
-}
-
-function SettingsRouteFallback({ pathname }: { pathname: string }) {
-  return (
-    <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
-      {/* `pathname` is a route string, never translated. */}
-      <Trans i18nKey="system:settingsRouteNotPorted" values={{ pathname }}>
-        This settings route is handled by the SPA shell, but its dedicated client page is still
-        being ported: <span className="font-mono">{pathname}</span>
-      </Trans>
-    </div>
   );
 }

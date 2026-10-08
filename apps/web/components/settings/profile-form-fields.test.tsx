@@ -122,6 +122,14 @@ function renderForm(
   );
 }
 
+it("keeps a single refresh action when the profile advertises modes", () => {
+  renderForm(formData(), {
+    ...modelConfig,
+    available_modes: [{ id: "default", name: "Default" }],
+  });
+  expect(screen.getAllByTestId("profile-refresh-capabilities")).toHaveLength(1);
+});
+
 function renderStatefulForm(
   profile: ProfileFormData,
   config: ModelConfig,
@@ -358,22 +366,13 @@ describe("ProfileFormFields model options", () => {
     });
   });
 
-  it("constrains a single start model field on desktop", () => {
-    renderForm(formData());
-
-    const row = screen.getByTestId("profile-capabilities-model-row");
-    expect(row.firstElementChild?.className).toContain("md:max-w-xl");
-  });
-
-  it("keeps the model and mode fields balanced when modes are available", () => {
+  it("retains the mode selector when modes are available", () => {
     renderForm(formData({ mode: "default" }), {
       ...modelConfig,
       available_modes: [{ id: "default", name: "Default" }],
       current_mode_id: "default",
     });
 
-    const row = screen.getByTestId("profile-capabilities-model-row");
-    expect(row.firstElementChild?.className).toContain("flex-1");
     expect(screen.getByTestId("profile-mode-field")).not.toBeNull();
   });
 

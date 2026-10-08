@@ -60,6 +60,10 @@ func TestAgentTurnFailedEventReachesHandlerWithFailureIdentity(t *testing.T) {
 		TaskID: "task-1", SessionID: "session-1", AgentExecutionID: "execution-1",
 		TurnID: "turn-1", PromptGeneration: 9, ErrorMessage: "capacity",
 		PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+		CapacityContinuation: &streams.CapacityContinuationSnapshot{
+			Support: streams.CapacityContinuationCodexLiveSessionV1, PromptGeneration: 9,
+			EvidenceComplete: true, CompletedTools: 1,
+		},
 	}
 	if err := eventBus.Publish(ctx, events.AgentTurnFailed, bus.NewEvent(events.AgentTurnFailed, "test", payload)); err != nil {
 		t.Fatalf("publish retained failure: %v", err)
@@ -69,6 +73,9 @@ func TestAgentTurnFailedEventReachesHandlerWithFailureIdentity(t *testing.T) {
 		if got.PromptFailureDisposition != streams.PromptFailureDispositionRetainRuntime ||
 			got.PromptGeneration != 9 || got.TurnID != "turn-1" || got.ErrorMessage != "capacity" {
 			t.Fatalf("watcher changed retained failure identity: %+v", got)
+		}
+		if got.CapacityContinuation == nil || got.CapacityContinuation.PromptGeneration != 9 || got.CapacityContinuation.CompletedTools != 1 {
+			t.Fatalf("watcher changed capacity continuation evidence: %+v", got.CapacityContinuation)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("watcher did not dispatch agent.turn_failed")

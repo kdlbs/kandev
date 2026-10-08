@@ -25,7 +25,6 @@ func continuationFailureFixture(t *testing.T) (*Service, *mockMessageCreator, wa
 		})
 		svc.cancelAllTransientRetries()
 	})
-	svc.config.ProviderInterruptionContinuation = true
 	armTransientPromptEvidence(svc)
 	session, err := svc.repo.GetTaskSession(context.Background(), "s1")
 	require.NoError(t, err)
@@ -38,13 +37,13 @@ func continuationFailureFixture(t *testing.T) (*Service, *mockMessageCreator, wa
 	session.AgentProfileSnapshot = map[string]any{"model": "mock-fast", "auto_approve": false}
 	require.NoError(t, svc.repo.UpdateTaskSession(context.Background(), session))
 	return svc, mc, watcher.AgentEventData{TaskID: "t1", SessionID: "s1", OwnerKind: "task", AgentID: "cursor-acp", AgentExecutionID: "execution-1", PromptGeneration: 7, ErrorMessage: cursorRetriableConnectionStalled, EvidenceKnown: true, OutputObserved: true, EffectObserved: true,
-		ContinuationSafety: &streams.ContinuationSafetySnapshot{Support: streams.ContinuationNativeSavedHistoryV1, Known: true, PromptGeneration: 7}}
+		ContinuationSafety: &streams.ContinuationSafetySnapshot{Support: streams.ContinuationNativeSavedHistoryV1, Known: true, PromptGeneration: 7, CompletedReads: 1}}
 }
 
 // @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-001.1
-func TestInterruptionContinuationAdmission(t *testing.T) {
+func TestInterruptionContinuationAdmissionWithoutOptIn(t *testing.T) {
 	svc, mc, data := continuationFailureFixture(t)
-	require.True(t, svc.handleTransientFailure(context.Background(), data))
+	require.True(t, svc.handleTransientFailure(context.Background(), data), "safe supported evidence admits continuation by default")
 	require.Len(t, mc.sessionMessages, 1)
 	require.Equal(t, "continue", mc.sessionMessages[0].metadata["recovery_mode"])
 }
@@ -80,7 +79,7 @@ func TestInterruptionContinuationDispatchUsesNativeIdentity(t *testing.T) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	require.Len(t, mgr.capturedPrompts, 1)
-	require.Contains(t, mgr.capturedPrompts[0], "Continue the unfinished request")
+	require.Equal(t, "continue", mgr.capturedPrompts[0])
 	require.NotContains(t, mgr.capturedPrompts[0], "test original request")
 }
 
@@ -92,12 +91,11 @@ func TestInterruptionContinuationOwnershipContextCancellation(t *testing.T) {
 	require.ErrorIs(t, attempt.context().Err(), context.Canceled, "episode cancellation must reach the resume owner")
 }
 
-func TestInterruptionContinuationDisabledAndUnsafe(t *testing.T) {
+func TestInterruptionContinuationUnsafeAndUnsupported(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		mutate func(*Service, *watcher.AgentEventData)
 	}{
-		{"disabled", func(s *Service, _ *watcher.AgentEventData) { s.config.ProviderInterruptionContinuation = false }},
 		{"unknown saved profile", func(s *Service, _ *watcher.AgentEventData) {
 			session, err := s.repo.GetTaskSession(context.Background(), "s1")
 			require.NoError(t, err)
@@ -169,4 +167,63 @@ func TestInterruptionContinuationOwnershipConfigurationChange(t *testing.T) {
 	value, _ := svc.transientRetries.Load("s1")
 	require.NoError(t, svc.repo.SetSessionMetadataKey(context.Background(), "s1", models.SessionMetaKeySessionMode, "acceptEdits"))
 	require.Error(t, svc.validateContinuationOwner(context.Background(), "t1", "s1", value.(*transientRetryEntry)))
+}
+
+func TestInterruptionContinuationCompletedTools(t *testing.T) {
+	svc, mc, data := continuationFailureFixture(t)
+	data.ContinuationSafety = &streams.ContinuationSafetySnapshot{
+		Support:          streams.ContinuationNativeSavedHistoryV2,
+		Known:            true,
+		PromptGeneration: 7,
+		CompletedTools:   3,
+	}
+	require.True(t, svc.handleTransientFailure(context.Background(), data))
+	require.Len(t, mc.sessionMessages, 1)
+	require.Equal(t, "continue", mc.sessionMessages[0].metadata["recovery_mode"])
+
+	// Resource exhausted category also admits continuation
+	svc2, mc2, data2 := continuationFailureFixture(t)
+	data2.ErrorMessage = "Error: RetriableError: [resource_exhausted] Error"
+	data2.ProviderError = &streams.ProviderError{
+		Source:     streams.ProviderErrorSourceCursorACP,
+		ProviderID: "cursor-acp",
+		Message:    "Error: RetriableError: [resource_exhausted] Error",
+	}
+	data2.ContinuationSafety = &streams.ContinuationSafetySnapshot{
+		Support:          streams.ContinuationNativeSavedHistoryV2,
+		Known:            true,
+		PromptGeneration: 7,
+		CompletedTools:   2,
+	}
+	require.True(t, svc2.handleTransientFailure(context.Background(), data2))
+	require.Len(t, mc2.sessionMessages, 1)
+	require.Equal(t, "continue", mc2.sessionMessages[0].metadata["recovery_mode"])
+}
+
+func TestInterruptionContinuationHiddenContinue(t *testing.T) {
+	svc, mc, data := continuationFailureFixture(t)
+	mgr := svc.agentManager.(*mockAgentManager)
+	mgr.isAgentRunning = true
+	mgr.isAgentReadyFn = func(context.Context, string) bool { return true }
+	mgr.launchAgentFunc = func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		now := time.Now().UTC()
+		require.NoError(t, svc.repo.UpsertExecutorRunning(context.Background(), &models.ExecutorRunning{ID: "runtime-replacement", TaskID: "t1", SessionID: "s1", AgentExecutionID: "replacement-1", ResumeToken: "provider-session", Resumable: true, CreatedAt: now, UpdatedAt: now}))
+		_, _, err := svc.repo.UpdateTaskSessionStateIfCurrent(context.Background(), req.SessionID, models.TaskSessionStateStarting, models.TaskSessionStateWaitingForInput, "")
+		require.NoError(t, err)
+		return &executor.LaunchAgentResponse{AgentExecutionID: "replacement-1"}, nil
+	}
+	require.True(t, svc.handleTransientFailure(context.Background(), data))
+	value, _ := svc.transientRetries.Load("s1")
+	entry := value.(*transientRetryEntry)
+	require.True(t, entry.claim())
+	svc.retryTransientPrompt(entry.retryCtx, "t1", "s1", "execution-1")
+
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	require.Len(t, mgr.capturedPrompts, 1)
+	require.Equal(t, "continue", mgr.capturedPrompts[0])
+
+	for _, userMsg := range mc.userMessages {
+		require.NotEqual(t, "continue", userMsg.content, "internal continue must not create user messages")
+	}
 }

@@ -70,7 +70,7 @@ func TestBuildProbeRequestUsesHostUtilityInferenceConfig(t *testing.T) {
 		false,
 		agents.Command{},
 	)
-	require.Equal(t, []string{"opencode", "acp", "--print-logs", "--log-level", "ERROR"}, req.InferenceConfig.Command)
+	require.Equal(t, []string{"opencode", "acp", "--print-logs"}, req.InferenceConfig.Command)
 }
 
 func TestExecutePromptWithMCPIncludesRuntimeEnv(t *testing.T) {

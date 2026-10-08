@@ -442,6 +442,8 @@ export type Task = ActiveSubagentCountFields & {
   workflow_agent_overrides?: WorkflowAgentOverrides;
   position: number;
   title: string;
+  /** Card identifier (e.g. "KAN-42"); shown in place of the title where the UI calls for it. */
+  identifier?: string;
   description: string;
   /** True when the task was created in autopilot mode. Immutable after creation. */
   autopilot?: boolean;
@@ -635,6 +637,33 @@ export type TaskSessionWorktree = {
   created_at?: string;
 };
 
+/** Path-free durable progress for one managed workspace recovery attempt. */
+export type WorkspaceRecoveryProjection = {
+  task_id: string;
+  environment_id: string;
+  session_id: string;
+  operation_id: string;
+  attempt_id: string;
+  ownership_generation: string;
+  revision: string;
+  kind: string;
+  /** Error attempt that admitted a session-owned relocation, when available. */
+  error_stamp?: string;
+  state: string;
+  phase: string;
+  repository_id?: string;
+  repository_position: number;
+  repository_total: number;
+  completed_slots: number;
+  workspace_complete: boolean;
+  agent_ready: boolean;
+  runner_live: boolean;
+  started_at: string;
+  updated_at: string;
+  ended_at?: string | null;
+  reason_code?: string;
+};
+
 export type TaskSession = ActiveSubagentCountFields & {
   id: SessionId;
   task_id: TaskId;
@@ -675,6 +704,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   workspace_path?: string;
   worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
+  /** Latest path-free managed workspace recovery operation for this environment. */
+  workspace_recovery?: WorkspaceRecoveryProjection | null;
   state: TaskSessionState;
   /** Backend-owned runtime cancellation projection; API responses include it explicitly. */
   cancellation_pending?: boolean;
@@ -841,7 +872,12 @@ export type SidebarTaskQuery = {
     op: string;
     value: string | string[] | boolean;
   }>;
-  sort: { key: string; direction: string };
+  sort: {
+    key: string;
+    direction: string;
+    color?: string;
+    then_by?: Array<{ key: string; direction: string; color?: string }>;
+  };
   group: string;
   collapsed_group_keys: string[];
   collapsed_task_ids: string[];

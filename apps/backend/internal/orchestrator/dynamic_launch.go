@@ -115,6 +115,7 @@ func (d *dynamicTaskDownstream) Launch(
 			return dynamicruntime.DownstreamExecution{}, err
 		}
 	}
+	d.service.flushPendingDynamicStreakReset(ctx, d.sessionID, nil)
 	d.service.beginDynamicAttempt(d.sessionID)
 	taskID := ""
 	if d.task != nil {
@@ -129,21 +130,7 @@ func (d *dynamicTaskDownstream) Launch(
 	defer releaseDispatchCommit()
 	execution, err := d.service.executor.LaunchPreparedSession(dispatchCtx, d.task, d.sessionID, options)
 	if err != nil {
-		var classified *routingerr.Error
-		if errors.As(err, &classified) {
-			return dynamicruntime.DownstreamExecution{}, err
-		}
-		classified = routingerr.Classify(routingerr.Input{
-			Phase:      routingerr.PhaseProcessStart,
-			ProviderID: launch.ExecutionProfileID,
-			Stderr:     err.Error(),
-		})
-		// Unknown low-confidence launch failures are workspace/runtime errors,
-		// not provider failures. Let the ordinary launch recovery own them.
-		if classified.Confidence == routingerr.ConfLow {
-			return dynamicruntime.DownstreamExecution{}, err
-		}
-		return dynamicruntime.DownstreamExecution{}, fmt.Errorf("%w: %v", classified, err)
+		return dynamicruntime.DownstreamExecution{}, classifyDynamicLaunchFailure(err, launch.ExecutionProfileID)
 	}
 	d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID)
 	d.service.bindPromptAttemptToExecution(dispatchCtx, d.sessionID, execution.AgentExecutionID)
@@ -558,7 +545,7 @@ func (s *Service) launchConcretePreparedSession(
 	}
 	defer releaseDispatchCommit()
 	if options.StartAgent && (options.Prompt != "" || len(options.Attachments) > 0) {
-		s.beginInitialPromptAttempt(sessionID, false)
+		s.beginInitialPromptAttempt(ctx, sessionID, false)
 	}
 	execution, err := s.executor.LaunchPreparedSession(dispatchCtx, task, sessionID, options)
 	if execution != nil {
@@ -815,7 +802,7 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	guardHeld bool,
 ) dynamicFailureRouteResult {
 	unclassified := classified != nil && routingerr.ClassForCode(classified.Code) == routingerr.ClassUnclassified
-	if unclassified && !guardHeld && data.SessionID != "" {
+	if !guardHeld && data.SessionID != "" {
 		lock, release := s.acquireCancelInFlightGuard(data.SessionID)
 		lock.Lock()
 		defer func() {
@@ -827,6 +814,11 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 		}
 	}
 	data = s.withDynamicAttemptEvidence(data)
+	if !s.flushPendingDynamicStreakReset(ctx, data.SessionID, &data) {
+		if _, pending := s.pendingDynamicStreakResets.Load(data.SessionID); pending {
+			return dynamicFailureRouteResult{}
+		}
+	}
 	session, ok := s.dynamicFailureSession(ctx, data)
 	if !ok {
 		return dynamicFailureRouteResult{}
@@ -1391,24 +1383,6 @@ func (s *Service) launchDynamicRouteAction(ctx context.Context, sessionID string
 	}
 	succeeded = true
 	return nil
-}
-
-func (s *Service) dynamicFailureSession(
-	ctx context.Context,
-	data watcher.AgentEventData,
-) (*models.TaskSession, bool) {
-	if s.profileExecutionResolver == nil || data.SessionID == "" {
-		return nil, false
-	}
-	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
-	if err != nil || session == nil || session.RouteGeneration <= 0 || session.ExecutionProfileID == "" {
-		return nil, false
-	}
-	if session.AgentExecutionID != "" && data.AgentExecutionID != "" &&
-		session.AgentExecutionID != data.AgentExecutionID {
-		return nil, false
-	}
-	return session, true
 }
 
 func (s *Service) unclassifiedPromptEvidence(

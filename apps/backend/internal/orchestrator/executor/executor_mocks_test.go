@@ -522,7 +522,7 @@ func (m *mockRepository) UpdateTaskSession(ctx context.Context, session *models.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.updateTaskSessionCalls = append(m.updateTaskSessionCalls, session)
-	m.sessions[session.ID] = session
+	m.sessions[session.ID] = cloneMockTaskSession(session)
 	return nil
 }
 
@@ -547,7 +547,7 @@ func (m *mockRepository) UpdateTaskSessionIfCurrentState(
 	}
 	m.updateTaskSessionSnapshots = append(m.updateTaskSessionSnapshots, cloneMockTaskSession(session))
 	m.updateTaskSessionCalls = append(m.updateTaskSessionCalls, session)
-	m.sessions[session.ID] = session
+	m.sessions[session.ID] = cloneMockTaskSession(session)
 	return true, nil
 }
 
@@ -964,6 +964,9 @@ func (m *mockRepository) GetWorkspace(ctx context.Context, id string) (*models.W
 // Workspace operations
 func (m *mockRepository) CreateWorkspace(ctx context.Context, workspace *models.Workspace) error {
 	return nil
+}
+func (m *mockRepository) UpdateWorkspaceFields(_ context.Context, _ string, _ models.WorkspaceFieldUpdate, _ *time.Time) (*models.Workspace, error) {
+	return nil, nil
 }
 func (m *mockRepository) UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error {
 	return nil

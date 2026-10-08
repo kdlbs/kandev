@@ -187,3 +187,19 @@ Verification:
 
 Implementation and task checks are complete. The primary session handoff records
 the normal hook receipt and exact leased push to PR #3440.
+
+### Conflict and CI remediation
+
+Merged current main while preserving workflow script startup reconciliation,
+attempt-scoped cancellation cleanup ownership, and agent event continuity fields.
+Updated the cleanup regression for task-scoped callbacks. Workflow profile tests
+now open the Agent and Advanced summary sections through the existing page helpers.
+No rendered UI or public behavior changed in this remediation.
+
+Local verification: orchestrator, executor, and watcher race tests passed;
+changed-scope Go lint reported zero issues; web typecheck and changed-test ESLint
+passed; five frontend test files passed all 18 tests. The four failed or flaky CI
+browser cases passed three consecutive repetitions, 12 tests with retries disabled.
+Phone editor and settings coverage passed nine tests with retries disabled.
+Harness and specification validation passed. Exact pushed-head CI remains a
+delivery check owned by the primary session, not a claim made by this work order.

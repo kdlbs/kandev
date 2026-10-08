@@ -289,7 +289,7 @@ func TestManualRecoveryPreflightDoesNotDeadlockWorkspaceSingleflight(t *testing.
 		TaskID: taskID, SessionID: sessionID, TaskEnvironmentID: environmentID,
 		OwnerTaskID: taskID, OwnershipGeneration: 1, ExecutorType: string(models.ExecutorTypeWorktree),
 		SelectionSnapshot: info.RecoveryErrorObservation.SelectionSnapshot,
-		InspectionWait:    worktree.ManualRecoveryInspectionWait,
+		InspectionWait:    worktree.RecoveryInspectionWaitBudget,
 		Slots: []worktree.RecoverySlot{{
 			WorktreeID: worktreeID, RepositoryID: repositoryID, BranchSlug: "main", RepositoryPath: repositoryPath,
 		}},

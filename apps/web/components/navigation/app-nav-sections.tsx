@@ -213,6 +213,7 @@ export function AppNavSections({
         onNavigate={onNavigate}
         controls={controls}
         phoneNavigation={phoneNavigation}
+        layoutOwnsPluginDestinations={hasSavedSidebarLayout}
       />
     </>
   );
@@ -256,13 +257,18 @@ function UtilityNavSection({
   onNavigate,
   controls,
   phoneNavigation,
+  layoutOwnsPluginDestinations,
 }: {
   phoneNavigation: boolean;
   onNavigate: () => void;
   controls: AppNavDialogControls;
+  layoutOwnsPluginDestinations: boolean;
 }) {
   const { t } = useTranslation();
-  const allDestinations = useStaticDestinations("mobileMenu", MOBILE_MENU_UTILITY_SECTIONS);
+  // Workspace layout rows already include plugin insights.
+  const allDestinations = useStaticDestinations("mobileMenu", MOBILE_MENU_UTILITY_SECTIONS).filter(
+    (destination) => !layoutOwnsPluginDestinations || destination.source !== "plugin",
+  );
   const destinations = phoneNavigation
     ? [
         ...allDestinations.filter((item) => item.id === "settings"),

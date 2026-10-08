@@ -18,6 +18,15 @@ type managedRuntimeSelectionStore struct {
 	err       error
 }
 
+type managedRuntimeOpenCodeStore struct {
+	managedRuntimeSelectionStore
+	openCodeSelection managedruntime.OpenCodeSelection
+}
+
+func (s managedRuntimeOpenCodeStore) GetOpenCodeSelection(context.Context) (managedruntime.OpenCodeSelection, bool, error) {
+	return s.openCodeSelection, true, nil
+}
+
 func (s managedRuntimeSelectionStore) Get(
 	context.Context,
 	string,
@@ -87,6 +96,24 @@ func TestBuildAgentCommandFailsWhenActiveSelectionCannotBeRead(t *testing.T) {
 	)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("selection error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestBuildAgentCommandUsesSelectedOpenCodeFamilyAcrossExecutors(t *testing.T) {
+	manager := &Manager{commandBuilder: NewCommandBuilder(), logger: newTestLogger()}
+	manager.SetManagedRuntimeSelectionStore(managedRuntimeOpenCodeStore{openCodeSelection: managedruntime.OpenCodeSelection{
+		SchemaVersion: 1, Family: managedruntime.OpenCodeFamilyV2, Source: managedruntime.OpenCodeSourceManaged,
+		Package: "@opencode/cli", SelectedVersion: "2.0.18", AppliedDefaultVersion: "2.0.18", Revision: 1,
+	}})
+	openCode := agents.NewOpenCodeACP()
+	for _, executorType := range []models.ExecutorType{models.ExecutorTypeLocal, models.ExecutorTypeLocalDocker, models.ExecutorTypeSSH} {
+		cmds, err := manager.buildAgentCommandWithContext(context.Background(), &LaunchRequest{ExecutorType: string(executorType)}, nil, openCode, true)
+		if err != nil {
+			t.Fatalf("build %s command: %v", executorType, err)
+		}
+		if !strings.Contains(cmds.initial, "@opencode/cli@2.0.18") || !strings.Contains(cmds.initial, "acp --print-logs") || strings.Contains(cmds.initial, "--log-level") {
+			t.Fatalf("%s command = %q, want selected v2 package, version, and flags", executorType, cmds.initial)
+		}
 	}
 }
 
@@ -171,8 +198,22 @@ func TestRemotePreflightUsesResolvedManagedRuntimeVersion(t *testing.T) {
 		ManagedRuntimeVersion: "1.18.5",
 	}
 	got := buildRemotePreflightAgentCommand(req).Args()
-	want := []string{"npx", "--yes", managedRuntimePreferOfflineArg, "--prefix", "~/.kandev/managed-npm-runtime", "opencode-ai@1.18.5", "acp", "--print-logs", "--log-level", "ERROR"}
+	want := []string{"npx", "--yes", managedRuntimePreferOfflineArg, "--prefix", "~/.kandev/managed-npm-runtime", "opencode-ai@1.18.5", "acp", "--print-logs"}
 	if !strings.EqualFold(strings.Join(got, " "), strings.Join(want, " ")) {
+		t.Fatalf("remote preflight command = %#v, want %#v", got, want)
+	}
+}
+
+func TestRemotePreflightUsesResolvedOpenCodeFamily(t *testing.T) {
+	req := &ExecutorCreateRequest{
+		AgentConfig:           agents.NewOpenCodeACP(),
+		ManagedRuntimeVersion: "2.0.18",
+		ManagedRuntimeFamily:  managedruntime.OpenCodeFamilyV2,
+		ManagedRuntimeSource:  managedruntime.OpenCodeSourceManaged,
+	}
+	got := buildRemotePreflightAgentCommand(req).Args()
+	want := []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@opencode/cli@2.0.18", "acp", "--print-logs"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("remote preflight command = %#v, want %#v", got, want)
 	}
 }
