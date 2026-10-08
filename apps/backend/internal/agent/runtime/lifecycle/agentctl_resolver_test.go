@@ -197,19 +197,32 @@ func TestAgentctlResolverSingleflightsConcurrentDownloads(t *testing.T) {
 		ReleaseBaseURL: server.URL + "/releases/download",
 	})
 	platform := SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}
-	results := make(chan error, 2)
-	for range 2 {
-		go func() {
-			_, err := resolver.ResolveRemoteBinaryContext(context.Background(), platform, nil)
-			results <- err
-		}()
-	}
+	firstResult := make(chan error, 1)
+	go func() {
+		_, err := resolver.ResolveRemoteBinaryContext(context.Background(), platform, nil)
+		firstResult <- err
+	}()
 	<-entered
+	secondCacheMiss := make(chan struct{})
+	continueSecond := make(chan struct{})
+	secondResult := make(chan error, 1)
+	go func() {
+		_, err := resolver.ResolveRemoteBinaryContext(context.Background(), platform, func(step PrepareStep, _, _ int) {
+			if step.Status == PrepareStepRunning {
+				close(secondCacheMiss)
+				<-continueSecond
+			}
+		})
+		secondResult <- err
+	}()
+	<-secondCacheMiss
 	close(release)
-	for range 2 {
-		if err := <-results; err != nil {
-			t.Fatalf("ResolveRemoteBinaryContext: %v", err)
-		}
+	if err := <-firstResult; err != nil {
+		t.Fatalf("first ResolveRemoteBinaryContext: %v", err)
+	}
+	close(continueSecond)
+	if err := <-secondResult; err != nil {
+		t.Fatalf("second ResolveRemoteBinaryContext: %v", err)
 	}
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("download requests = %d, want 1", got)
