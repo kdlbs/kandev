@@ -17,6 +17,7 @@ import type {
   SessionUsageUpdatedPayload,
   SessionTodosPayload,
 } from "./session-runtime-payloads";
+import type { TurnChangeSetSummary } from "./turn-changes";
 
 export type MessageAddedPayload = {
   task_id: string;
@@ -317,6 +318,10 @@ export type SessionBackendMessageMap = {
   >;
   "session.turn.started": BackendMessage<"session.turn.started", TurnEventPayload>;
   "session.turn.completed": BackendMessage<"session.turn.completed", TurnEventPayload>;
+  "session.turn.changes.updated": BackendMessage<
+    "session.turn.changes.updated",
+    { task_id: string; session_id: string; change_set: TurnChangeSetSummary }
+  >;
   "session.turn.removed": BackendMessage<
     "session.turn.removed",
     { id: string; session_id: string; task_id: string }

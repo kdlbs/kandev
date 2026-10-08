@@ -19,6 +19,7 @@ const (
 	// (.21) and not one task.updated per task.
 	TaskReordered                  = "task.reordered"
 	SessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
+	SessionTurnChangesUpdated      = "session.turn.changes.updated"
 	// TaskDependenciesResolved fires when a task's last unresolved dependency
 	// completes successfully. Payload: {task_id, resolved_by_task_id}.
 	TaskDependenciesResolved = "task.dependencies_resolved"

@@ -623,6 +623,8 @@
   "showTheJumpControlAfterYour": "Show the jump control after your latest prompt scrolls above the transcript.",
   "showThePerSessionButtonThat": "Show the per-session button that temporarily turns transcript auto-scroll on or off. Hiding it does not change the default: new transcripts still auto-scroll.",
   "showTranscriptAutoScrollControl": "Show transcript auto-scroll control",
+  "showTurnChangedFiles": "Show changed files after each turn",
+  "showTurnChangedFilesDescription": "Show a file summary and diff beneath completed agent replies.",
   "showsKandevHostValuesOnlyCollection": "Shows Kandev host values only. Collection starts while a client displays them.",
   "simplifiedMetrics": "Simplified metrics",
   "sleepInhibitionActive": "Active while a task is starting or running.",

@@ -74,6 +74,7 @@ export default defineConfig({
         /ssh\/.*\.spec\.ts/,
         /kubernetes\/.*\.spec\.ts/,
         /kubernetes-compat\/.*\.spec\.ts/,
+        /git\/turn-changed-files-executors\.spec\.ts/,
         /office-routing-.*\.spec\.ts/,
         // Auth specs run in the dedicated `auth` project (see above).
         /auth\/.*\.spec\.ts/,
@@ -103,6 +104,7 @@ export default defineConfig({
         /remote-docker\/.*\.spec\.ts/,
         /ssh\/.*\.spec\.ts/,
         /kubernetes\/.*\.spec\.ts/,
+        /git\/turn-changed-files-executors\.spec\.ts/,
       ],
       use: { ...devices["Desktop Chrome"] },
       timeout: 180_000,

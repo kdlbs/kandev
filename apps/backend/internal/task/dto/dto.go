@@ -1594,13 +1594,22 @@ func FromTurn(turn *models.Turn) TurnDTO {
 		completedAt = &formatted
 	}
 
+	metadata := make(map[string]interface{}, len(turn.Metadata))
+	for key, value := range turn.Metadata {
+		if key != models.TurnMetaKeyTurnChangeActorUserID && key != models.TurnMetaKeyTurnChangeSyntheticActor {
+			metadata[key] = value
+		}
+	}
+	if len(metadata) == 0 {
+		metadata = nil
+	}
 	return TurnDTO{
 		ID:          turn.ID,
 		SessionID:   turn.TaskSessionID,
 		TaskID:      turn.TaskID,
 		StartedAt:   turn.StartedAt.UTC().Format(turnTimestampLayout),
 		CompletedAt: completedAt,
-		Metadata:    turn.Metadata,
+		Metadata:    metadata,
 		CreatedAt:   turn.CreatedAt.UTC().Format(turnTimestampLayout),
 		UpdatedAt:   turn.UpdatedAt.UTC().Format(turnTimestampLayout),
 	}

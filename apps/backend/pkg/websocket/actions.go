@@ -281,6 +281,7 @@ const (
 	ActionSessionTurnStarted            = "session.turn.started"
 	ActionSessionTurnCompleted          = "session.turn.completed"
 	ActionSessionTurnRemoved            = "session.turn.removed"
+	ActionSessionTurnChangesUpdated     = "session.turn.changes.updated"
 	ActionSessionAvailableCommands      = "session.available_commands"
 	ActionSessionModeChanged            = "session.mode_changed"
 	ActionSessionAgentCapabilities      = "session.agent_capabilities"

@@ -795,6 +795,14 @@ const TurnMetaKeyWorkflowStepIDAtStart = "workflow_step_id_at_start"
 // turn authority, so every current-turn resolution site excludes it.
 const TurnMetaKeyLifecycleOnly = "lifecycle_only"
 
+// TurnMetaKeyTurnChangeActorUserID preserves the initiating settings identity
+// for an admitted turn whose prompt is dispatched from a detached goroutine.
+const TurnMetaKeyTurnChangeActorUserID = "turn_change_actor_user_id"
+
+// TurnMetaKeyTurnChangeSyntheticActor preserves the single-user settings
+// authority when an admitted turn is dispatched asynchronously.
+const TurnMetaKeyTurnChangeSyntheticActor = "turn_change_synthetic_actor"
+
 // TurnMetaKeyErrorTerminated marks a turn that ended in a recoverable agent
 // failure. The failure's recovery/error entry is the turn's outcome, so a turn
 // carrying this marker reports had_output=true at completion even though a

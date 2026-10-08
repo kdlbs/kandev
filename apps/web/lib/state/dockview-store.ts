@@ -44,7 +44,11 @@ import type {
   LayoutPanel,
   LayoutState,
 } from "./layout-manager";
-import type { ChangeLayer, CommitDetailTarget } from "@/lib/state/diff-target-types";
+import type {
+  ChangeLayer,
+  CommitDetailTarget,
+  HistoricalTurnDiffTarget,
+} from "@/lib/state/diff-target-types";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
 import {
   performEnvSwitch,
@@ -307,8 +311,10 @@ type DockviewStore = {
   ) => void;
   /** Read-only output panel for the repository dev script. */
   addDevServerPanel: (groupId?: string) => void;
-  selectedDiff: { path: string; content?: string } | null;
-  setSelectedDiff: (diff: { path: string; content?: string } | null) => void;
+  selectedDiff: { path: string; content?: string; historical?: HistoricalTurnDiffTarget } | null;
+  setSelectedDiff: (
+    diff: { path: string; content?: string; historical?: HistoricalTurnDiffTarget } | null,
+  ) => void;
   scrollTarget: TranscriptScrollTarget | null;
   scrollTranscriptToMessage: (sessionId: string, messageId: string, title: string) => boolean;
   clearScrollTarget: (token: number) => void;

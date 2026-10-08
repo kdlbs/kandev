@@ -117,8 +117,8 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("read migrated settings: %v", err)
 	}
-	if settings.Revision != 1 {
-		t.Fatalf("migrated revision = %d, want 1", settings.Revision)
+	if settings.Revision != 2 {
+		t.Fatalf("migrated revision = %d, want 2", settings.Revision)
 	}
 	settings.AppStatusBarEnabled = true
 	settings.UpdatedAt = now.Add(time.Second)
@@ -126,8 +126,8 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("write migrated settings: %v", err)
 	}
-	if updated.Revision != 2 {
-		t.Fatalf("updated revision = %d, want 2", updated.Revision)
+	if updated.Revision != 3 {
+		t.Fatalf("updated revision = %d, want 3", updated.Revision)
 	}
 
 	replayedRepo, err := newSQLiteRepositoryWithDB(conn, conn)
@@ -138,8 +138,8 @@ func assertLegacySettingsRevisionMigration(t *testing.T, conn *sqlx.DB) {
 	if err != nil {
 		t.Fatalf("read settings after migration replay: %v", err)
 	}
-	if replayed.Revision != 2 {
-		t.Fatalf("revision after migration replay = %d, want 2", replayed.Revision)
+	if replayed.Revision != 3 {
+		t.Fatalf("revision after migration replay = %d, want 3", replayed.Revision)
 	}
 	if !replayed.AppStatusBarEnabled {
 		t.Fatal("status bar preference was not preserved across migration replay")

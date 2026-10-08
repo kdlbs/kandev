@@ -2360,6 +2360,7 @@ func (m *Manager) buildExecutionFromInstance(
 		execution.isResumedSession = true
 	}
 	execution.IsPassthrough = req.IsPassthrough
+	m.populateLaunchTurnChangeCheckouts(ctx, execution)
 	// Use the resolved runtime (set from rt.Name() above), matching
 	// promoteWorkspaceExecution's call site rather than re-deriving from the
 	// requested ExecutorType.

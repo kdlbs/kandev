@@ -624,6 +624,8 @@
   "showTheJumpControlAfterYour": "当最新提示滚动到记录上方后显示跳转控件。",
   "showThePerSessionButtonThat": "显示每个会话的按钮，用于临时开关记录自动滚动。隐藏该按钮不会改变默认行为：新记录仍会自动滚动。",
   "showTranscriptAutoScrollControl": "显示记录自动滚动控件",
+  "showTurnChangedFiles": "每轮结束后显示已更改的文件",
+  "showTurnChangedFilesDescription": "在已完成的智能体回复下方显示文件摘要和差异。",
   "showsKandevHostValuesOnlyCollection": "仅显示 Kandev 主机值。客户端显示这些值时才开始收集。",
   "simplifiedMetrics": "简化指标",
   "sleepInhibitionActive": "任务正在启动或运行时处于活动状态。",

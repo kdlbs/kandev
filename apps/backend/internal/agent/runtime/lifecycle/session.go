@@ -70,6 +70,8 @@ type SessionManager struct {
 	executionStore       *ExecutionStore
 	promptStarter        func(executionID string) (uint64, error)
 	initialPromptFailure func(failure InitialPromptFailure)
+	turnChangeAdmitted   func(context.Context, *AgentExecution, uint64) error
+	turnChangeFailed     func(context.Context, *AgentExecution, uint64, error)
 	historyManager       *SessionHistoryManager
 	attachmentReader     AttachmentReader
 	stopCh               <-chan struct{} // For graceful shutdown coordination
@@ -132,6 +134,14 @@ func (sm *SessionManager) SetPromptStarter(starter func(executionID string) (uin
 
 func (sm *SessionManager) SetInitialPromptFailureHandler(handler func(failure InitialPromptFailure)) {
 	sm.initialPromptFailure = handler
+}
+
+func (sm *SessionManager) SetTurnChangeCaptureCallbacks(
+	admitted func(context.Context, *AgentExecution, uint64) error,
+	failed func(context.Context, *AgentExecution, uint64, error),
+) {
+	sm.turnChangeAdmitted = admitted
+	sm.turnChangeFailed = failed
 }
 
 // InitializeResult contains the result of session initialization
@@ -1934,6 +1944,12 @@ func (sm *SessionManager) sendPrompt(
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
 	}
+	if sm.turnChangeAdmitted != nil {
+		if err := sm.turnChangeAdmitted(preparedCtx, execution, promptGeneration); err != nil {
+			sm.logger.Warn("failed to capture turn-change start checkpoint",
+				zap.String("execution_id", execution.ID), zap.Uint64("prompt_generation", promptGeneration), zap.Error(err))
+		}
+	}
 	if sm.beforePromptDispatchHook != nil {
 		sm.beforePromptDispatchHook()
 	}
@@ -1941,6 +1957,9 @@ func (sm *SessionManager) sendPrompt(
 		preparedCtx, execution, effectivePrompt, materializedAttachments,
 		promptGeneration, steer, callbacks.deliverySubmissionID,
 	); err != nil {
+		if sm.turnChangeFailed != nil {
+			sm.turnChangeFailed(preparedCtx, execution, promptGeneration, err)
+		}
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
 	}
@@ -2102,6 +2121,10 @@ func (sm *SessionManager) admitPrompt(execution *AgentExecution, validateStatus 
 	default:
 		execution.promptLifecycleMu.Lock()
 		if execution.promptSettlementGeneration != 0 {
+			execution.promptLifecycleMu.Unlock()
+			return 0, ErrPromptSettlementPending
+		}
+		if execution.turnChangeCaptureGeneration != 0 {
 			execution.promptLifecycleMu.Unlock()
 			return 0, ErrPromptSettlementPending
 		}

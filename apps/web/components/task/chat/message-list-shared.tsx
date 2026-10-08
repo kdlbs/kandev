@@ -5,7 +5,9 @@ import { Button } from "@kandev/ui/button";
 import { IconAlertCircle, IconX } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import type { Message, TaskSessionState } from "@/lib/types/http";
-import { type RenderItem } from "@/hooks/use-processed-messages";
+import type { TurnChangeSetSummary } from "@/lib/types/turn-changes";
+import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
+import { TASK_DESCRIPTION_SYNTHETIC_ID, type RenderItem } from "@/hooks/use-processed-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { ActivityChip } from "@/app/coordinator/copilot/activity-chip";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
@@ -49,6 +51,9 @@ export type MessageListProps = {
   sessionState?: TaskSessionState;
   worktreePath?: string;
   onOpenFile?: (path: string, repo?: string) => void;
+  onOpenHistoricalDiff?: (target: HistoricalTurnDiffTarget) => void;
+  turnChangeSummaries?: TurnChangeSetSummary[];
+  showTurnChangedFiles?: boolean;
   /** Render item key (see getItemKey) the unread "New" divider should
    *  appear immediately before; null/undefined renders no divider. */
   dividerBeforeItemKey?: string | null;

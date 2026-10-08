@@ -18,7 +18,7 @@ import (
 
 const (
 	workspaceInventoryRepoStatusFailed  = "failed"
-	workspaceInventoryRepoStatusDeleted = "deleted"
+	workspaceInventoryRepoStatusDeleted = statusDeleted
 )
 
 // RepairWorkspaceInventory atomically repairs one proven canonical slot and

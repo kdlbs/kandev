@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/registry"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
@@ -40,6 +41,7 @@ import (
 	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
+	taskchanges "github.com/kandev/kandev/internal/task/changes"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -195,6 +197,15 @@ func provideOrchestrator(
 	orchestratorSvc.SetSubagentContextRecorder(&subagentContextAdapter{svc: taskSvc})
 
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
+	turnChangeContent := taskchanges.NewContentService(taskRepo, nil)
+	turnChangeCoordinator := taskchanges.NewCoordinator(taskRepo, taskSvc, userSvc, turnChangeContent, nil)
+	if err := turnChangeCoordinator.ReconcileUnfinished(context.Background()); err != nil {
+		log.Warn("failed to reconcile unfinished turn-change captures", zap.Error(err))
+	}
+	agentruntime.InstallTurnChangeCaptureHandler(
+		lifecycleMgr,
+		&runtimeTurnChangeCaptureHandler{coordinator: turnChangeCoordinator, publisher: taskSvc},
+	)
 
 	// Route orchestrator task.updated events through the task service, which
 	// owns the canonical rich payload. Covers workflow transitions, workflow

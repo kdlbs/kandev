@@ -469,6 +469,10 @@ A fan-out can partially succeed. The UI continues after a failure and reports pe
 
 The Changes panel's session history is calculated relative to the session's recorded base commit or current merge base, so it focuses on commits created on the task branch. Kandev refreshes status and emits session Git updates after mutations, but the underlying Git repository remains authoritative.
 
+Turn changed-files cards show the repository interval for one agent turn. Kandev captures the start and end in the executor and stores the historical diff data with the task.
+
+Kandev does not rebuild an earlier diff from the current `HEAD` or working tree. Later edits, commits, and branch changes do not alter that turn's summary. See [Tasks and Workflows](tasks-and-workflows.md#show-changed-files-after-a-turn) for the user preference and navigation steps.
+
 The Changes toolbar shows a spinner while Git status or inline commit details load.
 If a read fails, it shows a warning and retries automatically with increasing
 delays. The panel keeps the last available file and history data visible while

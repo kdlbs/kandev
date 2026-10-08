@@ -11,6 +11,7 @@ import type { SelectedDiff } from "../task-layout";
 import type { DiffSheetMode } from "@/lib/state/diff-target-types";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { HistoricalTurnDiffViewer } from "../historical-turn-diff-viewer";
 
 const MOBILE_DIFF_SOURCE_FILTER_KEY = "mobile-diff-source-filter";
 
@@ -98,6 +99,7 @@ function deriveTitle(mode: DiffSheetMode | null, sourceTabs: SourceTab[]): strin
   }
   if (mode.kind === "file") return t("task:fileChangesTitle");
   if (mode.kind === "commit") return t("task:commitChangesTitle");
+  if (mode.kind === "historical") return t("task:turnChangesHistoricalTitle", { turn: "" });
   return "";
 }
 
@@ -129,7 +131,7 @@ function SheetHeader({
       <Button
         variant="ghost"
         size="sm"
-        className="px-2"
+        className="min-h-11 min-w-11 px-3"
         onClick={onClose}
         data-testid="mobile-diff-sheet-close"
       >
@@ -163,13 +165,17 @@ function SourceTabBar({
   );
 }
 
-function renderPanel(
-  mode: DiffSheetMode | null,
-  activeSource: ReviewSource,
-  selectedDiff: SelectedDiff | null,
-  onClearSelected: () => void,
-  onOpenFile?: (filePath: string, repo?: string) => void,
-): React.ReactNode {
+type RenderPanelProps = {
+  mode: DiffSheetMode | null;
+  activeSource: ReviewSource;
+  selectedDiff: SelectedDiff | null;
+  onClose: () => void;
+  onClearSelected: () => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
+};
+
+function renderPanel(props: RenderPanelProps): React.ReactNode {
+  const { mode, activeSource, selectedDiff, onClose, onClearSelected, onOpenFile } = props;
   if (!mode) return null;
   if (mode.kind === "commit") {
     return (
@@ -180,6 +186,9 @@ function renderPanel(
         fileNavigation={mode.fileNavigation}
       />
     );
+  }
+  if (mode.kind === "historical") {
+    return <HistoricalTurnDiffViewer target={mode.target} onClose={onClose} />;
   }
   const panelMode = mode.kind;
   const filePath = mode.kind === "file" ? mode.path : undefined;
@@ -251,8 +260,8 @@ export const MobileDiffSheet = memo(function MobileDiffSheet({
     [mode, sourceTabs, i18n.language],
   );
   const panelContent = useMemo(
-    () => renderPanel(mode, activeSource, selectedDiff, onClearSelected, onOpenFile),
-    [mode, activeSource, selectedDiff, onClearSelected, onOpenFile],
+    () => renderPanel({ mode, activeSource, selectedDiff, onClose, onClearSelected, onOpenFile }),
+    [mode, activeSource, selectedDiff, onClose, onClearSelected, onOpenFile],
   );
 
   return (

@@ -97,6 +97,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TurnStarted, ws.ActionSessionTurnStarted)
 	b.subscribe(eventBus, events.TurnCompleted, ws.ActionSessionTurnCompleted)
 	b.subscribe(eventBus, events.TurnRemoved, ws.ActionSessionTurnRemoved)
+	b.subscribe(eventBus, events.SessionTurnChangesUpdated, ws.ActionSessionTurnChangesUpdated)
 	b.subscribe(eventBus, events.SessionRemoved, ws.ActionSessionRemoved)
 	b.subscribe(eventBus, events.MessageQueueStatusChanged, ws.ActionMessageQueueStatusChanged)
 	b.subscribe(eventBus, events.GitHubTaskPRUpdated, ws.ActionGitHubTaskPRUpdated)
@@ -351,6 +352,11 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 			return nil
 		}
 	case ws.ActionSessionWorkspaceSourcesUpdated:
+		if sessionID != "" {
+			b.hub.BroadcastToSession(sessionID, msg)
+			return nil
+		}
+	case ws.ActionSessionTurnChangesUpdated:
 		if sessionID != "" {
 			b.hub.BroadcastToSession(sessionID, msg)
 			return nil

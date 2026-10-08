@@ -1096,14 +1096,15 @@ func TestGetWorkspaceInfoForSession_UsesRepositoryDefaultBranchIdentity(t *testi
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
 	createTestEnvironmentWithRepos(t, repo, "env-default-branch", "task-123", []*models.TaskEnvironmentRepo{
-		{ID: "session-worktree-default-branch", TaskEnvironmentID: "env-default-branch", WorktreeID: "worktree-default-branch", RepositoryID: "repo-default-branch", BranchSlug: "main", CreatedAt: now},
+		{ID: "session-worktree-default-branch", TaskEnvironmentID: "env-default-branch", WorktreeID: "worktree-default-branch", RepositoryID: "repo-default-branch", CreatedAt: now},
 	})
 
 	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-default-branch")
 	if err != nil {
 		t.Fatalf("GetWorkspaceInfoForSession: %v", err)
 	}
-	if got := info.WorkspaceRepositories[0]; got.WorktreeID != "worktree-default-branch" || got.BranchIdentitySlug != "main" {
+	if got := info.WorkspaceRepositories[0]; got.TaskEnvironmentRepoID != "session-worktree-default-branch" ||
+		got.WorktreeID != "worktree-default-branch" || got.BranchIdentitySlug != "main" {
 		t.Fatalf("default branch recovery identity = %+v, want persisted main worktree", got)
 	}
 }

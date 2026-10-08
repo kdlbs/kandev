@@ -624,6 +624,8 @@
   "showTheJumpControlAfterYour": "當最新提示滾動到記錄上方後顯示跳轉控制項。",
   "showThePerSessionButtonThat": "顯示每個工作階段的按鈕，用於臨時開關記錄自動滾動。隱藏該按鈕不會改變預設行為：新記錄仍會自動滾動。",
   "showTranscriptAutoScrollControl": "顯示記錄自動滾動控制項",
+  "showTurnChangedFiles": "每輪結束後顯示已更改的檔案",
+  "showTurnChangedFilesDescription": "在已完成的代理程式回覆下方顯示檔案摘要和差異。",
   "showsKandevHostValuesOnlyCollection": "僅顯示 Kandev 主機值。用戶端顯示這些值時才開始收集。",
   "simplifiedMetrics": "簡化指標",
   "sleepInhibitionActive": "任務正在啓動或執行時處於活動狀態。",
