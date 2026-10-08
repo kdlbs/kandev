@@ -1000,7 +1000,7 @@ func TestSSHExecutorStopInstanceAbandonsARemoteCommandThatWedgesAfterTheReading(
 
 	state := &sshSessionState{client: client, remoteDir: "/remote/session", remoteTaskDir: "/remote/task", pid: 4242}
 	exec.sessions["instance-1"] = state
-	var cleanupCalls, stopCalls int
+	var cleanupCalls int
 	exec.cleanupScript = func(ctx context.Context, client *ssh.Client, _ string, _ map[string]interface{}, _ map[string]string, _ SSHRemotePlatform, _ string, _ string) error {
 		cleanupCalls++
 		_, _, err := runSSHCommand(ctx, client, "true")

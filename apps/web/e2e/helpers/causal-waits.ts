@@ -134,8 +134,7 @@ export type WaitForWsOptions = {
   where?: (payload: Record<string, unknown>) => boolean;
 };
 
-export type WaitForWsResponseOptions = {
-  timeout?: number;
+export type WaitForWsResponseOptions = WaitForWsOptions & {
   /** Start the response timeout after this operation completes. */
   timeoutAfter?: Promise<unknown>;
 };
