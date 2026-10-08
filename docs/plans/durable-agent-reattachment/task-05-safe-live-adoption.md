@@ -1298,3 +1298,39 @@ The queue cause remains unconfirmed. Failed navigation attempts now attach the
 isolated backend log; waits and admission behavior are unchanged. Fresh hosted
 CI and its complete artifact audit remain pending after delivery. Native and
 targeted PostgreSQL/live-harness release gates remain open.
+
+
+### Empty Git scope identity remediation
+
+Hosted head `56d014af044b1dfbd8728dbd9a92d75653a88b1a` failed the
+expand-all browser check. Retries-disabled CI-image reproduction failed twice
+in five runs. Waiting for the mock turn to finish did not repair it and was
+removed. Browser event and store traces showed a delivered click followed by a
+section replacement as an empty comparison target alternated between `null`
+and an empty string. Empty scoped values now have one canonical representation;
+a real comparison-target change still replaces the scope.
+
+Validation in the primary conversation:
+
+- The final typed regression failed against the original helper, then passed
+  with the fix. `pnpm exec vitest run
+  lib/state/slices/session-runtime/git-status-display-state.test.ts` passed all
+  12 tests.
+- `pnpm exec vitest run lib/state/slices/session-runtime/
+  hooks/domains/session/` passed 979 tests in 102 files.
+- Focused ESLint and `pnpm run typecheck` passed. Public documentation review
+  found no changed command, configuration, UI entry point, or public contract.
+- After a fresh managed build, the CI runtime image with two CPUs, 4 GiB,
+  one worker, and the spec's retry override temporarily set to zero ran
+  `bash e2e/scripts/run-raw-e2e.sh --project=chromium --workers=1
+  e2e/tests/git/diff-expansion.spec.ts --repeat-each=5 --retries=0
+  --reporter=list --output=/owned-output`: 40 first-attempt passes. The override
+  and diagnostic probes were removed; the original spec is unchanged.
+- `E2E_PORT_OFFSET=0 pnpm e2e:run --host --no-build
+  --project mobile-chrome -- tests/git/mobile-diff-refresh-continuity.spec.ts
+  --workers=1 --retries=0` passed both phone cases on their first attempt.
+
+Other hosted navigation, preview-feedback, and hidden-backfill failures remain
+under investigation. Main integration, new-head CI and full artifact audit are
+pending. Native Windows/macOS containment and targeted durable-delivery
+PostgreSQL/live-harness release gates remain open.
