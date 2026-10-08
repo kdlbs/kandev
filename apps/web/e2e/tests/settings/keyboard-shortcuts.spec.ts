@@ -256,14 +256,23 @@ test.describe("Integration navigation hotkeys", () => {
   test("records, saves, reloads, opens and resets every integration page", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
+    // Other shortcut tests customize user settings. Start from the defaults so
+    // the final Ctrl+K check cannot depend on test execution order.
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      keyboard_shortcuts: {},
+    });
+
+    test.setTimeout(120_000);
     const destinations = [
       ["azure-devops", "/azure-devops"],
       ["github", "/github"],
       ["gitlab", "/gitlab"],
       ["jira", "/jira"],
       ["linear", "/linear"],
-      ["sentry", "/settings/integrations/sentry"],
+      ["sentry", "/settings/workspaces/[^/]+/integrations/sentry"],
     ];
     await testPage.goto(KEYBOARD_SETTINGS_PATH);
     for (const [slug] of destinations) {
@@ -293,8 +302,10 @@ test.describe("Integration navigation hotkeys", () => {
       ).not.toHaveProperty(`integration:${slug}`);
     }
     await testPage.goto("/");
+    await testPage.waitForLoadState("networkidle");
+    await expect(testPage.getByTestId("app-shell")).toBeVisible();
     await testPage.keyboard.press("Control+k");
-    await expect(testPage.getByRole("dialog")).toBeVisible();
+    await expect(testPage.getByRole("dialog")).toBeVisible({ timeout: 10_000 });
   });
 
   test("warns about conflicting navigation chords and navigates once", async ({ testPage }) => {

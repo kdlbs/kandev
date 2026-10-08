@@ -23,6 +23,7 @@ const wire = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => wire,
+  useWebSocketClient: () => wire,
   subscribeWebSocketClient: () => () => {},
 }));
 vi.mock("@/lib/api", async (original) => ({

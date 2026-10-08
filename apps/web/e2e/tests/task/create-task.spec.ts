@@ -103,7 +103,7 @@ test.describe("Task creation", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await kanban.createTaskButton.first().click();
+    await openCreateTaskDialog(testPage);
 
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
