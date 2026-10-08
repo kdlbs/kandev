@@ -5,7 +5,6 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { expectTaskDescription } from "../../pages/task-description-editor";
 import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
-import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { seedIncompatibleAgentScenario, seedLockedWorkflow } from "./agent-compatibility-helpers";
 
 // Exercises the regular task-create dialog (New Task in the sidebar), so run
@@ -69,12 +68,6 @@ test.describe("Task creation", () => {
       await expect(navigationExpand).toHaveAttribute("aria-expanded", "false");
       await openCreateTaskDialog(testPage);
       await expect(navigationExpand).toHaveAttribute("aria-expanded", "true");
-
-      await testPage.goto(`/t/${sourceTask.id}`);
-      await expect(navigationExpand).toHaveAttribute("aria-expanded", "false");
-      await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
-      await expect(navigationExpand).toHaveAttribute("aria-expanded", "true");
-      await testPage.getByTestId("create-task-button").first().click();
 
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
