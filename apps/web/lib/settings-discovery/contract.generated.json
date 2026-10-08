@@ -4807,6 +4807,21 @@
           "settings_href": "/settings/preferences"
         },
         {
+          "key": "user_settings.show_turn_changed_files",
+          "field_path": "show_turn_changed_files",
+          "label": "turn changed files",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "boolean",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences"
+        },
+        {
           "key": "user_settings.show_release_notification",
           "field_path": "show_release_notification",
           "label": "release notification",

@@ -89,3 +89,5 @@ Reserved queue labels are not user IDs. Do not infer a human actor from the defa
 Implemented default-on persistence, SQLite/PostgreSQL-compatible JSON backfill, authoritative policy resolution, boot/API mappings, General Conversation settings draft/save behavior, localization, and desktop/mobile preference coverage.
 
 Validation passed: focused backend user/model/DTO/service/store and boot-state tests; focused frontend settings/hydration tests (87 tests); `pnpm run typecheck`; `pnpm run i18n:check`; `pnpm run i18n:ratchet`; desktop Chromium and mobile-chrome preference E2E. PostgreSQL cases were discovered but skipped because `KANDEV_TEST_POSTGRES_DSN` is not configured.
+
+The settings-discovery catalog now also exposes `show_turn_changed_files` as a writable user preference and records it in the independent coverage inventory. Focused catalog parity and inventory tests passed after the PR CI check identified the missing descriptor.
