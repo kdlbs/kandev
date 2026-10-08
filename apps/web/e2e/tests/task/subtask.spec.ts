@@ -462,7 +462,10 @@ test.describe("MCP subtask creation", () => {
             childId = child.id;
             return (await apiClient.getTask(child.id)).parent_id === parentTaskId;
           },
-          { timeout: 60_000, message: "Waiting for the MCP child task to persist under its parent" },
+          {
+            timeout: 60_000,
+            message: "Waiting for the MCP child task to persist under its parent",
+          },
         )
         .toBe(true);
 

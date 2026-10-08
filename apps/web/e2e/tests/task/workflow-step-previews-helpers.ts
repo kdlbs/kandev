@@ -27,7 +27,8 @@ export async function expectWorkflowStepPreviewsLoaded(
 export async function expectStepsInOrder(page: Page, workflowId: string, stepNames: string[]) {
   const group = page.getByTestId("workflow-option-steps-" + workflowId);
   await expect(group).toBeVisible();
-  if (stepNames.length === 0) throw new Error(`Workflow ${workflowId} should have at least one step`);
+  if (stepNames.length === 0)
+    throw new Error(`Workflow ${workflowId} should have at least one step`);
   const names = stepNames.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
   const labels = group.getByText(new RegExp(`^(?:${names})$`));
   await expect(labels).toHaveText(stepNames, { timeout: 15_000 });
