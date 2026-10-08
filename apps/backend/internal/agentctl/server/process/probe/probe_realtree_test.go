@@ -273,12 +273,25 @@ func TestProbeRealTree_PreTurnReparentedWorkload_Settled(t *testing.T) {
 	}
 }
 
-// Required E2E case 3 (AC-DW-ORPHAN-001.11): re-validating an unchanged,
-// still-running candidate must succeed after a delay long enough to move
-// the wall clock. This must be a real-process-tree case: fakeProcessTableReader
-// replays stored processInfo values verbatim, so a re-read through it would
-// return an identical start time and pass even against an implementation
-// that re-derives the start time from a fresh /proc/uptime read each time.
+// delayedRevalidationReader keeps the real platform reads but pauses before
+// the raw start-time re-read, placing the delay between snapshot and
+// revalidation.
+type delayedRevalidationReader struct {
+	processTableReader
+	environmentReader
+	delay time.Duration
+}
+
+func (r delayedRevalidationReader) StartTimeDatum(pid int) (int64, error) {
+	time.Sleep(r.delay)
+	return r.environmentReader.StartTimeDatum(pid)
+}
+
+// Reviewer-requested test (AC-DW-ORPHAN-001.11): revalidating an unchanged,
+// still-running candidate must succeed after a delay between snapshot capture
+// and revalidation. This uses real process and environment reads; a fake reader
+// would return stored values verbatim and could hide a start-time value
+// re-derived from wall time.
 func TestProbeRealTree_ReparentedWorkloadRevalidatesAfterDelay(t *testing.T) {
 	skipUnlessOrphanAttributionSupported(t)
 
@@ -287,13 +300,16 @@ func TestProbeRealTree_ReparentedWorkloadRevalidatesAfterDelay(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	spawnReparentedWorkload(t, sessionID)
 
-	// The delay gives a re-deriving implementation room to drift: each
-	// linuxBootTime() call re-anchors to time.Now() against /proc/uptime,
-	// so two derivations of one unchanged process's start time disagree by
-	// roughly however long this sleep runs.
-	time.Sleep(200 * time.Millisecond)
-
-	got, err := ProbeBackgroundWorkloads(os.Getpid(), turnStart, sessionID)
+	reader := platformProcessTableReader()
+	envReader, ok := reader.(environmentReader)
+	if !ok {
+		t.Skip("probe: platform cannot read process environments")
+	}
+	got, err := probeWithReader(delayedRevalidationReader{
+		processTableReader: reader,
+		environmentReader:  envReader,
+		delay:              200 * time.Millisecond,
+	}, os.Getpid(), turnStart, sessionID)
 	if err != nil {
 		t.Fatalf("probe: %v", err)
 	}
