@@ -264,7 +264,9 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
 
     const toggle = testPage.getByRole("button", { name: "Toggle word wrap" }).first();
     await expect(toggle).toBeVisible({ timeout: 10_000 });
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
     await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
     await expect.poll(() => readDiffOverflow(testPage), { timeout: 10_000 }).toBe("scroll");
   });
