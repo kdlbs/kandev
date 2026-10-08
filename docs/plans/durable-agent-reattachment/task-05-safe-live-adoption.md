@@ -1382,3 +1382,40 @@ The intermittent preparation/navigation causes remain unconfirmed. Fresh-head
 hosted CI, reviews and the all-report audit remain pending; earlier-head CI is
 not a delivery receipt. No new feature flag, delegation, PR merge, or release
 approval. Native and targeted PostgreSQL/live-harness release gates stay open.
+
+### Preparation gate prerequisite remediation
+
+Hosted run `37797695064`, head `bde926610567cc0f27847b63c4bb0a0f942cc77b`,
+shard 9 job `113396605142` failed its first preparation-gate attempt and passed
+on retry. The attached backend log showed a worktree launch and successful
+preparation without a fetch. The test relied on the worker-scoped repository's
+mutable `pull_before_worktree` setting. It now reads that setting, explicitly
+enables fetching before launch, and restores the prior value in cleanup.
+Gate files are removed even when restoring the repository setting fails.
+
+- RED: temporarily set `pull_before_worktree: false` before the unchanged
+  gate setup; the CI-image test reproduced the exact 30-second gate failure.
+- GREEN: keep that disabled-fetch setup and run
+  `bash e2e/scripts/run-raw-e2e.sh --project=chromium --workers=1
+  e2e/tests/session/long-prepare-panels.spec.ts --repeat-each=5 --retries=0
+  --reporter=list --output=/owned-output`: five first-attempt passes.
+- Remove the temporary disabled-fetch setup and repeat the final fixture with
+  `--repeat-each=3`: three first-attempt passes. Both runs used the CI runtime
+  image, two CPUs, 4 GiB and one worker.
+- `pnpm exec eslint e2e/tests/session/long-prepare-panels.spec.ts` and
+  `pnpm run typecheck` passed after the final cleanup change.
+
+New main `b232b2931a330864975d90d867d320a3239db8e4` combines without conflicts.
+A temporary merge passed 1,025 web tests in 105 files and typecheck via
+`pnpm exec vitest run lib/state/slices/session-runtime/ hooks/domains/session/
+lib/services/session-launch-service.test.ts lib/ws/handlers/tasks.deleted.test.ts
+components/task/simple/task-chat.comment-send.test.tsx`. Its focused backend
+check, `go test -race ./internal/agent/runtime/dynamic
+./internal/agent/runtime/routingerr ./internal/agent/agents ./internal/orchestrator
+./internal/agent/runtime/lifecycle -run
+'Superseded|Stale|Failure|OpenCodeNative|Dynamic|Delivery|InitialTaskBrief' -count=1`,
+passed. The temporary merge worktree was removed without changing the branch.
+
+Other intermittent browser causes remain unconfirmed. New-head hosted CI,
+reviews and all-report audit remain pending. Native Windows/macOS containment
+and targeted durable-delivery PostgreSQL/live-harness gates remain open.
