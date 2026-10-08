@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { pollUntil } from "../../helpers/poll-until";
@@ -31,6 +32,81 @@ async function waitForRetryNotice(
 }
 
 test.describe("transient provider error (529 Overloaded) retry", () => {
+  test.afterEach(async ({ testPage, apiClient, backend }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    const sessionId = await new SessionPage(testPage)
+      .activeChat()
+      .getAttribute("data-session-id", { timeout: 1_000 })
+      .catch(() => null);
+    if (!sessionId) return;
+
+    // Retain first-attempt evidence without recording prompts, credentials,
+    // tool arguments, or arbitrary provider error data from the backend log.
+    const fields = [
+      "ts",
+      "level",
+      "msg",
+      "task_id",
+      "session_id",
+      "execution_id",
+      "agent_execution_id",
+      "prompt_generation",
+      "event_prompt_generation",
+      "session_state",
+      "stop_reason",
+      "attempt",
+      "is_error",
+    ];
+    const logs = (await fs.readFile(backend.logPath, "utf8").catch(() => ""))
+      .split("\n")
+      .flatMap((line) => {
+        try {
+          const objectStart = line.lastIndexOf("\t{");
+          const record = JSON.parse(
+            objectStart >= 0 ? line.slice(objectStart + 1) : line,
+          ) as Record<string, unknown>;
+          if (record.session_id !== sessionId) return [];
+          if (objectStart >= 0) {
+            const header = line.slice(0, objectStart).split("\t");
+            record.ts = header[0];
+            record.msg = header.at(-1);
+          }
+          return [
+            Object.fromEntries(
+              fields.filter((key) => key in record).map((key) => [key, record[key]]),
+            ),
+          ];
+        } catch {
+          return [];
+        }
+      })
+      .slice(-200);
+    const turns = await apiClient.listSessionTurns(sessionId).catch(() => null);
+    const history = await apiClient.listSessionMessages(sessionId).catch(() => null);
+    await testInfo.attach("transient-retry-settlement", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        sessionId,
+        logs,
+        turns: turns?.turns.map(({ id, started_at, completed_at }) => ({
+          id,
+          started_at,
+          completed_at,
+        })),
+        messages: history?.messages.map(({ id, turn_id, type, author_type, metadata }) => ({
+          id,
+          turn_id,
+          type,
+          author_type,
+          retrying: metadata?.retrying,
+          attempt: metadata?.attempt,
+          retry_in_seconds: metadata?.retry_in_seconds,
+          retry_at: metadata?.retry_at,
+        })),
+      }),
+    });
+  });
+
   test("shows the yellow retrying card, not the red error banner", async ({
     testPage,
     apiClient,
