@@ -13,6 +13,14 @@ import { dwell } from "../../helpers/causal-waits";
  * repository.
  */
 test.describe("Long prepare (slow git fetch)", () => {
+  test.afterEach(async ({ backend }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    await testInfo.attach("long-prepare-backend.log", {
+      path: backend.logPath,
+      contentType: "text/plain",
+    });
+  });
+
   test("file tree and terminal keep waiting and recover when fetch completes", async ({
     testPage,
     apiClient,

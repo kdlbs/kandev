@@ -17,6 +17,14 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
 // @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.3 AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.4 AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5
+test.afterEach(async ({ backend }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus) return;
+  await testInfo.attach("task-navigation-backend.log", {
+    path: backend.logPath,
+    contentType: "text/plain",
+  });
+});
+
 test("navigation branch setup leaves a dirty shared checkout untouched", async ({
   backend,
   seedData,

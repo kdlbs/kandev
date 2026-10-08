@@ -1334,3 +1334,51 @@ Other hosted navigation, preview-feedback, and hidden-backfill failures remain
 under investigation. Main integration, new-head CI and full artifact audit are
 pending. Native Windows/macOS containment and targeted durable-delivery
 PostgreSQL/live-harness release gates remain open.
+
+
+### Latest-main integration and hidden-backfill fixture
+
+Integrated main `33133eb0e0be5a11db123abad9b98a3ce796f40b` without conflicts
+at `65af9b42f111a5cb1c0225396c6994e215e1678d`. Its backend tree matches the
+previously validated synthetic `42ceb2fc5b565b9d7d623ff2043b54ba9fb47a67`.
+`pnpm exec vitest run lib/state/slices/session-runtime/ hooks/domains/session/`
+passed 986 tests in 102 files after integration. Focused ESLint and typecheck
+passed. Exact loader preflight against the integrated main base passed with
+74 work orders and 199 referenced documents; the older-base preflight is not
+valid for this delivery.
+
+Hosted hidden-tab backfill reproduced twice on the integrated branch. Tracing
+showed the periodic timer paused correctly; initial-history repair and mock
+`/slow` tool activity made an all-history-request count ambiguous. The fixture
+now establishes a conversation and starts one quiet `/sleep 60` turn. It waits
+for persisted RUNNING state and a visible refresh before hiding the document.
+It still checks a 12-second hidden window, foreground refresh, resumed periodic
+refresh, and a persistently RUNNING session. There is no automatic recovery,
+resubmission, new timeout allowance, or production visibility change.
+
+- `E2E_PORT_OFFSET=0 pnpm e2e:run --host --no-build --project chromium --
+  tests/chat/hidden-running-backfill.spec.ts --workers=1 --repeat-each=3
+  --retries=0`: three first-attempt passes.
+- The same spec in the CI runtime image, two CPUs, 4 GiB, one worker:
+  `bash e2e/scripts/run-raw-e2e.sh --project=chromium --workers=1
+  e2e/tests/chat/hidden-running-backfill.spec.ts --repeat-each=3 --retries=0
+  --reporter=list --output=/owned-output`: three first-attempt passes.
+- The CI-image command with `--project=mobile-chrome
+  e2e/tests/task/mobile-sidebar-shared-task-state.spec.ts --grep
+  "phone rejects old workspace pages" --repeat-each=3 --retries=0` passed
+  all three runs.
+- The CI-image command with `--project=chromium
+  e2e/tests/session/long-prepare-panels.spec.ts
+  e2e/tests/task/task-navigation-responsiveness.spec.ts --grep
+  "file tree and terminal keep waiting|Files stays usable" --repeat-each=3
+  --retries=0` passed six cases. Both specs now attach backend logs on failure.
+- Two hosted-failure reproductions of preview-feedback passed after main
+  integration. Their command selected `tests/preview/preview-feedback.spec.ts`
+  with `--grep "persists multi-route" --repeat-each=2 --retries=0` alongside
+  the other hosted desktop failures. That combined run was not green: it also
+  reproduced hidden-backfill twice and one navigation Git-hydration timeout.
+
+The intermittent preparation/navigation causes remain unconfirmed. Fresh-head
+hosted CI, reviews and the all-report audit remain pending; earlier-head CI is
+not a delivery receipt. No new feature flag, delegation, PR merge, or release
+approval. Native and targeted PostgreSQL/live-harness release gates stay open.
