@@ -392,7 +392,7 @@ test.describe("MCP subtask creation", () => {
     apiClient,
     seedData,
   }) => {
-    const subtaskTitle = "MCP-subtask-e2e-verify";
+    const subtaskTitle = `MCP-subtask-e2e-verify-${Date.now()}`;
     const settingsBefore = await apiClient.getUserSettings();
     const baselineLayout =
       settingsBefore.settings.sidebar_layouts_by_workspace?.[seedData.workspaceId];
@@ -449,18 +449,43 @@ test.describe("MCP subtask creation", () => {
 
       // 2. Sidebar task creation navigates directly to the parent session.
       await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+      const parentTaskId = new URL(testPage.url()).pathname.match(/^\/t\/([^/]+)/)?.[1];
+      expect(parentTaskId).toBeTruthy();
 
       // 3. Wait for the agent to complete — the MCP create_task call happens during execution
       const session = new SessionPage(testPage);
       await session.waitForLoad();
       await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-      // 4. Go back to kanban — subtask card should be visible with parent badge
-      await kanban.goto();
+      // 4. Confirm the created task is related to its parent and visible in the
+      // sidebar hierarchy, which is independent of the current Kanban workflow filter.
+      await expect
+        .poll(async () => {
+          const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+          return tasks.find((task) => task.title === subtaskTitle)?.id ?? null;
+        })
+        .not.toBeNull();
+      const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+      const child = tasks.find((task) => task.title === subtaskTitle);
+      expect(child).toBeDefined();
+      const childDetails = await apiClient.getTask(child!.id);
+      expect(childDetails.parent_id).toBe(parentTaskId);
 
-      const subtaskCard = kanban.taskCardByTitle(subtaskTitle);
-      await expect(subtaskCard).toBeVisible({ timeout: 10_000 });
-      await expect(subtaskCard.getByText("MCP Subtask Parent")).toBeVisible();
+      const sidebar = testPage.getByTestId("task-sidebar");
+      const parentRow = sidebar.locator(
+        `[data-testid="sidebar-task-item"][data-task-row-id="${parentTaskId}"]`,
+      );
+      await expect(parentRow).toBeVisible();
+      const subtaskToggle = parentRow.getByTestId("sidebar-subtask-toggle");
+      if ((await subtaskToggle.getAttribute("aria-expanded")) !== "true") {
+        await subtaskToggle.click();
+      }
+      await expect(subtaskToggle).toHaveAttribute("aria-expanded", "true");
+      const childRow = sidebar.locator(
+        `[data-testid="sidebar-task-item"][data-task-row-id="${child!.id}"]`,
+      );
+      await expect(childRow).toBeVisible({ timeout: 10_000 });
+      await expect(childRow).toContainText(subtaskTitle);
     } finally {
       const currentLayout = (await apiClient.getUserSettings()).settings
         .sidebar_layouts_by_workspace?.[seedData.workspaceId];

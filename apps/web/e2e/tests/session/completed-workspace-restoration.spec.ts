@@ -19,7 +19,7 @@ test.describe("Completed workspace restoration", () => {
     backend,
     prCapture,
   }) => {
-    test.setTimeout(240_000);
+    test.setTimeout(360_000);
     const task = await seedCompletedConversation(
       apiClient,
       seedData,

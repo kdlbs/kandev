@@ -383,8 +383,10 @@ export async function routeGitStatusRefresh(
     pendingNotificationCount() {
       return state.pendingNotifications.length;
     },
-    readyNotificationCount() {
-      return state.readyNotifications.length;
+    readyNotificationCount(sessionId?: string) {
+      return state.readyNotifications.filter(
+        ({ payload }) => !sessionId || payload?.session_id === sessionId,
+      ).length;
     },
     async waitForResponse(mode: string, afterCount = 0) {
       await expect

@@ -49,7 +49,18 @@ test.describe("Changes panel Git refresh recovery", () => {
 
       const status = session.changes.getByTestId("changes-refresh-status");
       await expect(status).toContainText("Loading changes...");
-      await expect(session.changes.getByText("Your changed files will appear here")).toHaveCount(0);
+      const emptyState = session.changes.getByText("Your changed files will appear here");
+      // A ready snapshot for this session can arrive before the held refresh;
+      // its empty state is valid while the next refresh is pending.
+      await expect
+        .poll(
+          async () =>
+            bridge.readyNotificationCount(task.session_id) > 0 || (await emptyState.count()) === 0,
+          {
+            message: "Hide the empty state until a ready Git membership snapshot is available",
+          },
+        )
+        .toBe(true);
       const toolbar = session.changes.locator(":scope > div").first();
       const pendingToolbarBox = await toolbar.boundingBox();
       const panelBox = await session.changes.boundingBox();
