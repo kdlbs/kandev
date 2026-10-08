@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	maxSidebarLayoutNodes          = 40
+	maxSidebarLayoutNodes          = 41
 	maxSidebarLayoutShortcutsGroup = 20
 	maxSidebarLayoutShortcutsTotal = 100
 	maxSidebarLayoutIDRunes        = 255
@@ -252,9 +252,47 @@ func projectSidebarLayouts(settings *models.UserSettings, ids []string) map[stri
 		case layout.Nodes == nil:
 			layout.Nodes = []models.SidebarLayoutNode{}
 		}
+		layout.Nodes = materializeCoordinatorNode(layout.Nodes)
 		projected[id] = layout
 	}
 	return projected
+}
+
+func materializeCoordinatorNode(nodes []models.SidebarLayoutNode) []models.SidebarLayoutNode {
+	for _, node := range nodes {
+		if node.Kind == models.SidebarLayoutNodeBuiltin && node.DestinationID == "coordinators" {
+			return nodes
+		}
+	}
+
+	usedIDs := make(map[string]struct{}, len(nodes))
+	for _, node := range nodes {
+		usedIDs[node.ID] = struct{}{}
+	}
+	coordinatorID := "coordinators"
+	for suffix := 1; ; suffix++ {
+		if _, exists := usedIDs[coordinatorID]; !exists {
+			break
+		}
+		coordinatorID = fmt.Sprintf("coordinators-%d", suffix)
+	}
+	coordinator := models.SidebarLayoutNode{
+		ID:            coordinatorID,
+		Kind:          models.SidebarLayoutNodeBuiltin,
+		Visible:       true,
+		DestinationID: "coordinators",
+	}
+	index := slices.IndexFunc(nodes, func(node models.SidebarLayoutNode) bool {
+		return node.DestinationID == "automations"
+	})
+	if index < 0 {
+		return append(slices.Clone(nodes), coordinator)
+	}
+	result := make([]models.SidebarLayoutNode, 0, len(nodes)+1)
+	result = append(result, nodes[:index]...)
+	result = append(result, coordinator)
+	result = append(result, nodes[index:]...)
+	return result
 }
 
 func maxInt64(value, minimum int64) int64 {

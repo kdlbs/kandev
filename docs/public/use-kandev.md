@@ -125,9 +125,12 @@ not apply to passthrough terminal sessions or manually stopped sessions.
 ## Customize the sidebar
 
 Open **Settings > Layout > Sidebar** to customize the optional navigation for the active
-workspace. You can hide or reorder Home, New Task, Inbox, Automations, Canvases, Integrations, and
-available plugin links. The setting belongs to your account and workspace, so it follows you
-across clients without changing another user's layout.
+workspace. You can hide or reorder Home, New Task, Inbox, Coordinators, Automations, Canvases,
+Integrations, and available plugin links. Coordinators appears when its workspace feature is
+enabled. Its visibility and position are independent of Automations. Settings retains your saved
+choice while a feature is unavailable and restores it when the feature is enabled again. The
+setting belongs to your account and workspace, so it follows you across clients without changing
+another user's layout.
 
 Create named shortcut sections for destinations, canvases, automations, and plugin links. Fold a
 section to keep its header icons visible, or open the labelled list to use a shortcut. Automation
@@ -136,7 +139,8 @@ icons show running, idle, or paused activity. Tasks stays in its fixed navigatio
 On a phone, open the menu and choose **Customize sidebar** to edit the same layout. Use the move controls to
 reorder entries or move a shortcut to another section. The workspace picker stays at the top.
 **New Task**, Home, quick actions, workspace tools, and shortcut sections appear before the task
-list. If you hide New Task, the Tasks heading keeps its create button. Expand **Integrations** to
+list. Coordinators follows its saved position among the workspace tools. If you hide New Task, the
+Tasks heading keeps its create button. Expand **Integrations** to
 see named provider links and integration settings, including when no provider is configured.
 Choose **GitHub**, then **Issues** in its view menu to browse issues.
 **Restore defaults** resets the draft for the
@@ -152,9 +156,10 @@ selected metadata and trailing details, with highlights for hover, selection, an
 New users get a small, centered **New Task** button, with **Quick Chat** and **Terminal** below it.
 Existing users keep the compact New Task row with fast action icons. Choose **New Task button style**
 and **Show fast action icons** in Sidebar settings to change these independently.
-With fast icons enabled, Terminal and Quick Chat sit beside New Task. Canvas settings and eligible
-integration shortcuts sit before their section chevrons. Named settings and provider links remain
-available when fast icons are hidden.
+With fast icons enabled, Terminal and Quick Chat sit beside New Task, and the Coordinator list
+action sits in its section header. When fast icons are hidden, the Coordinator list link stays in
+the section body. Canvas settings and eligible integration shortcuts sit before their section
+chevrons. Named settings and provider links remain available when fast icons are hidden.
 
 Right-click a navigation entry or empty navigation space to open **Sidebar settings**.
 Use this menu to show or hide entries, change the button style, or open Sidebar layout settings. Drag entries directly to reorder them. No drag handles appear.
