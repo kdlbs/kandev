@@ -62,6 +62,7 @@ import { CommandPreviewCard } from "@/app/settings/agents/[agentId]/profiles/[pr
 import { useAgentProfileSettings } from "@/app/settings/agents/[agentId]/profiles/[profileId]/use-agent-profile-settings";
 import { agentProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { isHandledApiError } from "@/lib/api/client";
+import { useCursorCloudModelConfig } from "@/components/settings/profile-edit/use-cursor-cloud-model-config";
 import { DynamicAgentProfileEditor } from "@/components/settings/dynamic-agent-profile-editor";
 
 export {
@@ -340,6 +341,7 @@ function ProfileEditor({
   const { t } = useTranslation();
   const { toast } = useToast();
   const [modelConfigResolutionPending, setModelConfigResolutionPending] = useState(false);
+  const resolvedModelConfig = useCursorCloudModelConfig(agent.id, modelConfig);
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const nativeCodexAvailable = useAppStore((state) => state.features?.codexAppServer ?? false);
   const nativeCodexUnavailable = agent.name === "codex-app-server" && !nativeCodexAvailable;
@@ -467,7 +469,7 @@ function ProfileEditor({
           savedProfile={savedProfile}
           isDirty={isDirty}
           updateDraft={updateDraft}
-          modelConfig={modelConfig}
+          modelConfig={resolvedModelConfig}
           permissionSettings={permissionSettings}
           passthroughConfig={passthroughConfig}
           secrets={secrets}

@@ -2727,6 +2727,49 @@ type RepositoryScript struct {
 // ExecutorType represents the executor runtime type.
 type ExecutorType string
 
+// ExecutionCapabilities describes operations supported by a selected managed
+// execution. A nil projection means the legacy executor contract applies.
+type ExecutionCapabilities struct {
+	Chat                 bool `json:"chat"`
+	Stop                 bool `json:"stop"`
+	FollowUp             bool `json:"follow_up"`
+	RemoteResults        bool `json:"remote_results"`
+	WorkspaceFiles       bool `json:"workspace_files"`
+	Terminal             bool `json:"terminal"`
+	GitMutation          bool `json:"git_mutation"`
+	LSP                  bool `json:"lsp"`
+	Preview              bool `json:"preview"`
+	ModelSwitch          bool `json:"model_switch"`
+	AgentProfileSwitch   bool `json:"agent_profile_switch"`
+	PermissionModeSwitch bool `json:"permission_mode_switch"`
+	PlanModeSwitch       bool `json:"plan_mode_switch"`
+}
+
+// SessionExecutionCapabilities projects capabilities from the persisted
+// executor snapshot. Ordinary executors retain their existing behavior and
+// therefore have no explicit projection.
+func SessionExecutionCapabilities(session *TaskSession) *ExecutionCapabilities {
+	if session == nil || session.ExecutorSnapshot == nil {
+		return nil
+	}
+	executorType := ""
+	for _, key := range []string{"executor_type", "type"} {
+		if value, ok := session.ExecutorSnapshot[key].(string); ok && value != "" {
+			executorType = value
+			break
+		}
+	}
+	if ExecutorType(executorType) != ExecutorTypeCursorCloud {
+		return nil
+	}
+	return &ExecutionCapabilities{
+		Chat:          true,
+		Stop:          true,
+		FollowUp:      true,
+		RemoteResults: true,
+	}
+}
+
 const (
 	ExecutorTypeLocal        ExecutorType = "local"
 	ExecutorTypeWorktree     ExecutorType = "worktree"
@@ -2736,6 +2779,7 @@ const (
 	ExecutorTypeSSH          ExecutorType = "ssh"
 	ExecutorTypeKubernetes   ExecutorType = "k8s"
 	ExecutorTypeMockRemote   ExecutorType = "mock_remote"
+	ExecutorTypeCursorCloud  ExecutorType = "cursor_cloud"
 	ExecutorTypePluginRemote ExecutorType = "plugin_remote"
 )
 
@@ -2744,7 +2788,8 @@ const (
 // These environments run shells inside the container/VM, not on the host.
 func IsRemoteExecutorType(t ExecutorType) bool {
 	switch t {
-	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeKubernetes, ExecutorTypeMockRemote, ExecutorTypePluginRemote:
+	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH,
+		ExecutorTypeKubernetes, ExecutorTypeMockRemote, ExecutorTypeCursorCloud, ExecutorTypePluginRemote:
 		return true
 	default:
 		return false
@@ -2770,6 +2815,8 @@ func (t ExecutorType) Runtime() agentruntime.Runtime {
 		return agentruntime.RuntimeSSH
 	case ExecutorTypeKubernetes:
 		return agentruntime.RuntimeKubernetes
+	case ExecutorTypeCursorCloud:
+		return agentruntime.RuntimeCursorCloud
 	case ExecutorTypePluginRemote:
 		return agentruntime.RuntimePluginRemote
 	default:

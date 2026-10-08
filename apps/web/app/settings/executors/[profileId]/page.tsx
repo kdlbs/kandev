@@ -32,6 +32,10 @@ import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness
 import { SSHTaskDirReclamationCard } from "@/components/settings/ssh-task-dir-reclamation-card";
 import { SpritesApiKeyCard } from "@/components/settings/profile-edit/sprites-api-key-card";
 import {
+  CursorCloudProfileSection,
+  useCursorCloudProfileSettings,
+} from "@/components/settings/profile-edit/cursor-cloud-profile-section";
+import {
   DockerSections,
   SpritesSections,
 } from "@/components/settings/profile-edit/profile-runtime-sections";
@@ -241,6 +245,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(() =>
     deriveSpritesSecretId(profile.env_vars),
   );
+  const cursorCloud = useCursorCloudProfileSettings(profile);
   const remoteAuth = useRemoteAuthState(profile);
   const gitIdentity = useGitIdentityState(runtime.isRemote, profile);
   const mcpPolicyErrorKey = useMemo(() => validateMcpPolicy(mcpPolicy), [mcpPolicy]);
@@ -269,10 +274,20 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     userNamespaces.resetUserNamespaces();
     resetEnvVars(profile.env_vars);
     setSpritesSecretId(deriveSpritesSecretId(profile.env_vars));
+    cursorCloud.reset();
     remoteAuth.reset();
     gitIdentity.reset();
     dockerNetworks.resetDockerNetworks();
-  }, [dockerNetworks, gitIdentity, profile, remoteAuth, resetEnvVars, runtime, userNamespaces]);
+  }, [
+    cursorCloud.reset,
+    dockerNetworks,
+    gitIdentity,
+    profile,
+    remoteAuth,
+    resetEnvVars,
+    runtime,
+    userNamespaces,
+  ]);
 
   return {
     ...runtime,
@@ -296,6 +311,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     placeholders,
     spritesSecretId,
     setSpritesSecretId,
+    ...cursorCloud,
     networkPolicyRules: remoteAuth.networkPolicyRules,
     setNetworkPolicyRules: remoteAuth.setNetworkPolicyRules,
     remoteCredentials: remoteAuth.remoteCredentials,
@@ -355,6 +371,9 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           onSecretIdChange={form.setSpritesSecretId}
           secrets={secrets}
         />
+      )}
+      {executor.type === "cursor_cloud" && (
+        <CursorCloudProfileSection profile={profile} secrets={secrets} settings={form} />
       )}
       {form.isDocker && (
         <DockerSections
@@ -476,12 +495,14 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
   const spritesTokenMissing = form.isSprites && !form.spritesSecretId;
   const memberReadOnly = form.isKubernetes && !canManageKubernetes;
   const sharedConfig = buildSaveConfig(form, profile.config);
+  const finalConfig =
+    executor.type === "cursor_cloud" ? form.applyToConfig(sharedConfig) : sharedConfig;
   const savePayload = {
     name: form.name.trim(),
     mcp_policy: form.mcpPolicy || undefined,
     config: form.isKubernetes
-      ? replaceKubernetesProfileConfig(sharedConfig, form.kubernetesProfile)
-      : sharedConfig,
+      ? replaceKubernetesProfileConfig(finalConfig, form.kubernetesProfile)
+      : finalConfig,
     prepare_script: form.prepareScript,
     cleanup_script: form.cleanupScript,
     env_vars: form.buildEnvVars(),

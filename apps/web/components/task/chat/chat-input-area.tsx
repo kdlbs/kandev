@@ -14,7 +14,7 @@ import {
   type ChatInputContainerHandle,
 } from "@/components/task/chat/chat-input-container";
 import { QueueAffordance } from "@/components/task/chat/queued-ghost-list";
-import { ComposerAgentStartHint } from "./composer-agent-start-hint";
+import { ComposerStatusNotices } from "./composer-status-notices";
 import {
   formatReviewCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
@@ -33,7 +33,6 @@ import { cn } from "@/lib/utils";
 import { useComposerWorkspace } from "@/hooks/domains/task/use-composer-workspace";
 import { t } from "@/lib/i18n";
 import { ChatStatusBar, ComposerCIStatus, resolveStatusRowTaskId } from "./chat-status-bar";
-import { DynamicRouteRecovery } from "./dynamic-route-recovery";
 import {
   hasPendingClarification,
   shouldHideChatInputForLaunchError,
@@ -41,7 +40,6 @@ import {
 } from "./types";
 import { toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
 import { toTaskPreviewFeedbackRefs } from "@/lib/preview-feedback-refs";
-import { PlanCommentMigrationNotice } from "@/components/task/plan-comment-migration-notice";
 import { PreviewFeedbackCollectionSurface } from "@/components/task/inspector/preview-feedback-collection";
 import {
   ComposerCollapseButton,
@@ -418,6 +416,8 @@ type ChatInputAreaProps = {
   hideAgentControls?: boolean;
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
+  externallyDisabled?: boolean;
+  externalDisabledReason?: string;
   placeholderOverride?: string;
   surfaceClassName?: string;
   /** Always-on affordance: scrolls the transcript to the top of the last
@@ -541,29 +541,6 @@ function PreviewFeedbackFallbackSurface({
       onOpenChange={panelState.setPreviewFeedbackOpen ?? setFallbackOpen}
       showTrigger={showTrigger}
     />
-  );
-}
-
-function ComposerStatusNotices({
-  panelState,
-  showAgentStartHint,
-  executorUnavailable,
-}: {
-  panelState: ChatPanelState;
-  showAgentStartHint: boolean;
-  executorUnavailable: boolean;
-}) {
-  return (
-    <>
-      <DynamicRouteRecovery session={panelState.session} />
-      <ComposerAgentStartHint
-        show={showAgentStartHint}
-        needsRecovery={panelState.needsRecovery}
-        executorUnavailable={executorUnavailable}
-        hasPendingClarification={Boolean(panelState.pendingClarification)}
-      />
-      <PlanCommentMigrationNotice {...panelState.planCommentMigration} />
-    </>
   );
 }
 

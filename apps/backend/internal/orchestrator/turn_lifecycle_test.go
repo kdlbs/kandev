@@ -412,6 +412,38 @@ func TestStartTurnIsIdempotentInMemory(t *testing.T) {
 	}
 }
 
+func TestStartTurnAdoptsDatabaseTurnWhenMemoryCacheIsStale(t *testing.T) {
+	svc, repo := newTurnLifecycleTestService(t)
+	ctx := context.Background()
+
+	stale, err := svc.turnService.StartTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("start stale turn: %v", err)
+	}
+	svc.activeTurns.Store("session1", stale.ID)
+	if err := svc.turnService.CompleteTurn(ctx, stale.ID); err != nil {
+		t.Fatalf("complete stale turn: %v", err)
+	}
+	current, err := svc.turnService.StartTurn(ctx, "session1")
+	if err != nil {
+		t.Fatalf("start current turn: %v", err)
+	}
+
+	turnID, created, _, err := svc.startTurnForSessionWithOwnershipChecked(ctx, "session1", false, nil)
+	if err != nil {
+		t.Fatalf("adopt current database turn: %v", err)
+	}
+	if turnID != current.ID || created {
+		t.Fatalf("adopted turn = (%q, %v), want (%q, false)", turnID, created, current.ID)
+	}
+	if cached, ok := svc.activeTurns.Load("session1"); !ok || cached != current.ID {
+		t.Fatalf("active turn cache = (%v, %v), want current turn %q", cached, ok, current.ID)
+	}
+	if turns := openTurnCount(t, repo, "session1"); turns != 1 {
+		t.Fatalf("open turn count = %d, want 1", turns)
+	}
+}
+
 func TestReservedTurnCannotBeAdoptedBeforePublication(t *testing.T) {
 	svc, repo := newTurnLifecycleTestService(t)
 	ctx := context.Background()

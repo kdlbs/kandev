@@ -239,6 +239,7 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 		{name: "vscode proxy deferred", method: http.MethodGet, path: "/vscode/s1/index.html"},
 		{name: "port proxy deferred", method: http.MethodGet, path: "/port-proxy/s1/3000"},
 		{name: "mcp deferred", method: http.MethodGet, path: "/mcp"},
+		{name: "managed MCP callback deferred to grant auth", method: http.MethodPost, path: "/api/v1/managed-agent-mcp/grant-1"},
 		{name: "spa shell", method: http.MethodGet, path: "/settings/system"},
 		{name: "static asset", method: http.MethodGet, path: "/assets/app.js"},
 		{

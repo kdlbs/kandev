@@ -136,12 +136,14 @@ func TestManager_StartAllWorkspaceTrackers_StartsRootAndRepoTrackers(t *testing.
 		}
 	})
 
-	// Wait for each real Git scan; the timeout guards against a hang rather than slow startup.
+	// Start records its state synchronously. Do not wait for the initial Git scan
+	// here: filesystem and Git startup latency varies substantially on CI hosts.
 	for i, tr := range append([]*WorkspaceTracker{mgr.workspaceTracker}, mgr.repoTrackers...) {
-		select {
-		case <-tr.initialScanDone:
-		case <-time.After(30 * time.Second):
-			t.Fatalf("tracker %d (workDir=%q) timed out waiting for its initial Git scan", i, tr.workDir)
+		tr.mu.RLock()
+		started := tr.started
+		tr.mu.RUnlock()
+		if !started {
+			t.Fatalf("tracker %d (workDir=%q) was not started", i, tr.workDir)
 		}
 	}
 

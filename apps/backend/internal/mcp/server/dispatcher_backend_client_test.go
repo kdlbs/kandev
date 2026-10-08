@@ -23,11 +23,13 @@ type fakeDispatcher struct {
 
 	calls                    []*ws.Message
 	trustedExternalTransport bool
+	trustedManagedTransport  bool
 }
 
 func (f *fakeDispatcher) Dispatch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	f.calls = append(f.calls, msg)
 	f.trustedExternalTransport = mcporigin.IsTrustedExternalTransport(ctx)
+	f.trustedManagedTransport = mcporigin.IsTrustedManagedTransport(ctx)
 	return f.resp, f.err
 }
 
@@ -39,6 +41,18 @@ func TestExternalDispatcherBackendClientAttestsTransport(t *testing.T) {
 
 	require.NoError(t, client.RequestPayload(context.Background(), "test.action", nil, nil))
 	assert.True(t, d.trustedExternalTransport)
+	assert.False(t, d.trustedManagedTransport)
+}
+
+func TestManagedDispatcherBackendClientUsesDistinctAttestation(t *testing.T) {
+	respMsg, err := ws.NewResponse("ignored", "test.action", map[string]bool{"ok": true})
+	require.NoError(t, err)
+	d := &fakeDispatcher{resp: respMsg}
+	client := NewManagedDispatcherBackendClient(d, newTestLogger(t))
+
+	require.NoError(t, client.RequestPayload(context.Background(), "test.action", nil, nil))
+	assert.False(t, d.trustedExternalTransport)
+	assert.True(t, d.trustedManagedTransport)
 }
 
 func TestDispatcherBackendClient_RoundTrip(t *testing.T) {

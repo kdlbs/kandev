@@ -40,6 +40,7 @@ describe("executor icons", () => {
   });
 
   it("returns human-readable labels for known executor types", () => {
+    expect(getExecutorLabel("cursor_cloud")).toBe("Cursor Cloud");
     expect(getExecutorLabel("local")).toBe("Local");
     expect(getExecutorLabel("worktree")).toBe("Worktree");
     expect(getExecutorLabel("local_docker")).toBe("Local Docker");

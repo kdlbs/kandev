@@ -13,7 +13,7 @@ func TestEveryDefaultRegistrationHasAnExplicitRuntimeUpdateCapability(t *testing
 	expected := map[string]string{
 		"claude-acp": "managed", "codex-acp": "managed", "codex-app-server": "managed", "copilot-acp": "managed", "gemini": "managed", "opencode-acp": "managed", "pi-acp": "managed", "muse-acp": "managed",
 		"auggie": "manual", "amp-acp": "manual", "qwen-acp": "manual", "iflow-acp": "manual", "droid-acp": "manual", "kilocode-acp": "manual", "cursor-acp": "manual", "kimi-acp": "manual", "minimax-acp": "manual", "kiro-acp": "manual", "qoder-acp": "manual", "trae-acp": "manual", "omp-acp": "manual", "devin-acp": "manual", "grok-acp": "manual", "hermes-acp": "manual", "goose-acp": "manual", "antigravity-acp": "manual",
-		"dynamic": "unsupported", "mock-agent": "unsupported",
+		"dynamic": "unsupported", "mock-agent": "unsupported", "cursor_cloud": "unsupported",
 	}
 	all := reg.List()
 	if len(all) != len(expected) {

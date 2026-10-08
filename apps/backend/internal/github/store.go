@@ -5254,6 +5254,15 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, iw *IssueWatch) error {
 	return err
 }
 
+// UpdateIssueWatchLastPolledAt records a completed poll without rewriting
+// configuration that may have changed while the provider request was in flight.
+func (s *Store) UpdateIssueWatchLastPolledAt(ctx context.Context, id string, lastPolledAt time.Time) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(
+		`UPDATE github_issue_watches SET last_polled_at = ?, updated_at = ? WHERE id = ?`),
+		lastPolledAt, lastPolledAt, id)
+	return err
+}
+
 // DeleteIssueWatch deletes an issue watch and all its associated dedup task rows.
 func (s *Store) DeleteIssueWatch(ctx context.Context, id string) error {
 	tx, err := s.db.BeginTx(ctx, nil)

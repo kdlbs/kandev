@@ -42,6 +42,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
 	"github.com/kandev/kandev/internal/coordinator"
+	"github.com/kandev/kandev/internal/cursorcloud"
 	"github.com/kandev/kandev/internal/db"
 	debughandlers "github.com/kandev/kandev/internal/debug"
 	dockerremote "github.com/kandev/kandev/internal/dockerremote"
@@ -1039,6 +1040,7 @@ type routeParams struct {
 	officeRepo                    *officesqlite.Repository
 	analyticsRepo                 analyticsrepository.Repository
 	orchestratorSvc               *orchestrator.Service
+	cursorCloudManager            *cursorCloudAgentManager
 	lifecycleMgr                  *lifecycle.Manager
 	loginMgr                      *loginpty.Manager
 	quickTerminalSvc              *quickterminal.Service
@@ -1647,6 +1649,7 @@ func resolveRepositoryIDForSessionSubpath(ctx context.Context, taskRepo *sqliter
 
 // registerTaskRoutes registers all task-related HTTP and WebSocket routes.
 func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, handoffSvc *taskservice.HandoffService) {
+	registerCursorCloudSubmissionRoutes(p.router, p.cursorCloudManager)
 	if attachmentSvc := p.taskSvc.AttachmentService(); attachmentSvc != nil {
 		taskhandlers.RegisterAttachmentRoutes(p.router, attachmentSvc, p.log)
 	} else {
@@ -1704,6 +1707,9 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	taskhandlers.RegisterRepositoryBranchPolicyRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	taskhandlers.RegisterExecutorProfileRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.agentList, p.log)
+	if p.features.CursorCloud {
+		cursorcloud.RegisterConfigRoutes(p.router, p.secretStore, true, nil)
+	}
 	taskhandlers.RegisterEnvironmentRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	var referenceValidators []entityrefs.SubmissionValidator
 	if p.services != nil && p.services.Mentions != nil && p.services.Mentions.Submission != nil {
@@ -2557,6 +2563,7 @@ func registerMCPAndDebugRoutes(
 	if p.services != nil && p.services.Coordinator != nil {
 		mcpScopeResolver.SetCoordinatorLookup(p.services.Coordinator)
 	}
+	registerCursorCloudManagedMCP(p, mcpScopeResolver)
 	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
 	if p.authSvc != nil {
 		p.lifecycleMgr.SetMCPIdentityScoper(mcpScopeResolver.Scope)

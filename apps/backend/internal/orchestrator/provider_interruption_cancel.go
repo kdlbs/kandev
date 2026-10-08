@@ -8,8 +8,11 @@ func (s *Service) retireContinuationForHumanDispatch(sessionID string) {
 	defer state.mu.Unlock()
 	defer release()
 	if value, ok := s.transientRetries.Load(sessionID); ok {
-		if entry, ok := value.(*transientRetryEntry); ok && entry.mode == recoveryModeContinue {
-			s.resetTransientRetryWithContextLocked(state, context.Background(), sessionID, true)
+		if entry, ok := value.(*transientRetryEntry); ok {
+			mode, _ := entry.recovery()
+			if mode == recoveryModeContinue {
+				s.resetTransientRetryWithContextLocked(state, context.Background(), sessionID, true)
+			}
 		}
 	}
 }

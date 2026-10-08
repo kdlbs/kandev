@@ -176,12 +176,13 @@ describe("OnboardingDialog executor discovery", () => {
     const cards = screen.getAllByTestId(/^onboarding-executor-card-/);
     const cardIds = cards.map((card) => card.getAttribute("data-executor-id"));
     const settingsExecutorIds = Object.keys(EXECUTOR_TYPE_MAP).filter(
-      (executorId) => executorId !== "remote_docker",
+      (executorId) => executorId !== "remote_docker" && executorId !== "cursor_cloud",
     );
 
     expect(cardIds[0]).toBe("worktree");
     expect([...cardIds].sort()).toEqual(settingsExecutorIds.sort());
     expect(screen.queryByTestId("onboarding-executor-card-remote_docker")).toBeNull();
+    expect(screen.queryByTestId("onboarding-executor-card-cursor_cloud")).toBeNull();
     expect(screen.queryByTestId("onboarding-executor-card-mock_remote")).toBeNull();
 
     for (const card of cards) {

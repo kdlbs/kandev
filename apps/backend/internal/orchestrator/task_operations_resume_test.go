@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -108,6 +109,107 @@ func TestGetTaskSessionStatus_AutoResumesNormalWaitingSession(t *testing.T) {
 	}
 	if resp.ResumeReason != "agent_not_running_fresh_start" {
 		t.Fatalf("expected ResumeReason=%q, got %q", "agent_not_running_fresh_start", resp.ResumeReason)
+	}
+}
+
+func TestGetTaskSessionStatus_DoesNotResumePromptReadyManagedSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "er1", SessionID: "session1", TaskID: "task1", Status: models.ExecutorRunningStatusReady,
+		Resumable: true, AgentExecutionID: "execution1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("upsert executor running: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		isAgentReadyFn:         func(context.Context, string) bool { return true },
+		remoteRuntimeStatus:    &executor.RemoteRuntimeStatus{RuntimeName: agentruntime.RuntimeCursorCloud},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus: %v", err)
+	}
+	if resp.NeedsResume {
+		t.Fatalf("prompt-ready managed session must not be passively resumed: %+v", resp)
+	}
+	if resp.IsAgentRunning {
+		t.Fatal("managed prompt readiness must not be reported as a local agent process")
+	}
+	if !resp.IsResumable {
+		t.Fatal("expected the durable managed session to remain resumable")
+	}
+}
+
+func TestSessionAlreadyPromptReadyDoesNotBypassLocalRecoveryWithoutExecution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		isAgentReadyFn:         func(context.Context, string) bool { return true },
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	if svc.sessionAlreadyPromptReady(ctx, "session1") {
+		t.Fatal("stale local readiness must not suppress recovery when no local execution exists")
+	}
+}
+
+func TestSessionAlreadyPromptReadyAcceptsManagedSessionWithoutLocalProcess(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "er1", SessionID: "session1", TaskID: "task1", Status: models.ExecutorRunningStatusReady,
+		Resumable: true, AgentExecutionID: "execution1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("upsert executor running: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		isAgentReadyFn:         func(context.Context, string) bool { return true },
+		remoteRuntimeStatus:    &executor.RemoteRuntimeStatus{RuntimeName: agentruntime.RuntimeCursorCloud},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	if !svc.sessionAlreadyPromptReady(ctx, "session1") {
+		t.Fatal("expected durable managed conversation to bypass local runtime resume")
+	}
+}
+
+func TestSessionAlreadyPromptReadyAcceptsLiveLocalExecution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "er1", SessionID: "session1", TaskID: "task1", Status: models.ExecutorRunningStatusReady,
+		Resumable: true, AgentExecutionID: "execution1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("upsert executor running: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		isAgentRunning:         true,
+		isAgentReadyFn:         func(context.Context, string) bool { return true },
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	if !svc.sessionAlreadyPromptReady(ctx, "session1") {
+		t.Fatal("expected a prompt-ready local execution to bypass recovery")
 	}
 }
 

@@ -113,6 +113,39 @@ func TestGetPromptGenerationForSessionUnknownSession(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoExecutionForSession)
 }
 
+func TestGetPromptAttemptEvidenceForSessionReturnsCurrentActivity(t *testing.T) {
+	mgr := newTestManager(t)
+	exec := &AgentExecution{ID: "exec-evidence", SessionID: "session-evidence"}
+	require.NoError(t, mgr.executionStore.Add(exec))
+	generation, err := mgr.BeginPrompt("exec-evidence")
+	require.NoError(t, err)
+	exec.markAgentActivity()
+
+	executionID, gotGeneration, evidence, found := mgr.GetPromptAttemptEvidenceForSession(
+		context.Background(), "session-evidence",
+	)
+
+	require.True(t, found)
+	require.Equal(t, "exec-evidence", executionID)
+	require.Equal(t, generation, gotGeneration)
+	require.True(t, evidence.EvidenceKnown)
+	require.True(t, evidence.OutputObserved)
+	require.True(t, evidence.EffectObserved)
+}
+
+func TestGetPromptAttemptEvidenceForSessionUnknownSession(t *testing.T) {
+	mgr := newTestManager(t)
+
+	executionID, generation, evidence, found := mgr.GetPromptAttemptEvidenceForSession(
+		context.Background(), "session-absent",
+	)
+
+	require.False(t, found)
+	require.Empty(t, executionID)
+	require.Zero(t, generation)
+	require.False(t, evidence.EvidenceKnown)
+}
+
 // TestGetPromptActivityForSessionReturnsTrackedSnapshot is the codex P1 gap
 // flagged during WO-38 Build round 7: GetPromptActivityForSession (the
 // primitive the stuck-signal watchdog reads to gate reclaims on real elapsed

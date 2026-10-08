@@ -27,6 +27,7 @@ export type FormResetters = {
   setPreferLocalExecutor: (value: boolean) => void;
   setWorkspacePath: (value: string) => void;
   setAutopilot: (value: boolean) => void;
+  setAutoCreatePR: (value: boolean) => void;
   setPriority: (value: TaskPriority) => void;
   setGitHubUrlError: (value: string | null) => void;
   setFreshBranchEnabled: (value: boolean) => void;
@@ -76,5 +77,6 @@ export function resetTaskForm(
   resetters.setPreferLocalExecutor(initialValues?.preferLocalExecutor ?? false);
   resetters.setWorkspacePath("");
   resetters.setAutopilot(false);
+  resetters.setAutoCreatePR(false);
   resetters.setPriority("medium");
 }

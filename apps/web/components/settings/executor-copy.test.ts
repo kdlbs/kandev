@@ -135,6 +135,7 @@ describe("create-page executor type registry", () => {
 
   it("keeps the persisted executor enum and backend ids out of the catalog", () => {
     expect(Object.keys(EXECUTOR_TYPE_MAP).sort()).toEqual([
+      "cursor_cloud",
       "k8s",
       "local",
       "local_docker",

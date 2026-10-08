@@ -471,6 +471,31 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
 }
 
 const MAX_TASK_DELETE_PREVIEW_ATTEMPTS = 3;
+const MAX_E2E_RESET_ATTEMPTS = 10;
+const MAX_TRANSIENT_E2E_RESET_ATTEMPTS = 4;
+
+function isTransientE2EWorktreeInspection(body: string): boolean {
+  return (
+    body.includes("exit status 128") &&
+    (body.includes("inspect worktrees before delete") ||
+      body.includes("capture worktree cleanup identities") ||
+      body.includes("capture cleanup identity"))
+  );
+}
+
+function e2EResetRetryAttempts(status: number, body: string): number {
+  if (status !== 500) return 0;
+  if (body.includes("task deletion is blocked by unresolved Cursor Cloud work")) {
+    return MAX_E2E_RESET_ATTEMPTS;
+  }
+  if (
+    body.includes("task has children at final deletion; retry the task deletion") ||
+    isTransientE2EWorktreeInspection(body)
+  ) {
+    return MAX_TRANSIENT_E2E_RESET_ATTEMPTS;
+  }
+  return 0;
+}
 
 /**
  * HTTP API client for seeding test data via the backend REST API.
@@ -708,6 +733,14 @@ export class ApiClient {
 
   async listAvailableAgents(): Promise<{ agents: AvailableAgent[]; total: number }> {
     return this.request("GET", "/api/v1/agents/available");
+  }
+
+  async createAgent(name: string): Promise<Agent> {
+    const agent = await this.request<Agent>("POST", "/api/v1/agents", { name });
+    return {
+      ...agent,
+      profiles: (agent.profiles ?? []).map(normalizeAgentProfile),
+    };
   }
 
   async createCustomTUIAgent(options: {
@@ -1338,6 +1371,7 @@ export class ApiClient {
       id: string;
       name: string;
       type: string;
+      status?: string;
       profiles?: Array<{ id: string; name: string }>;
       provider?: { plugin_id?: string; key?: string };
     }>;
@@ -1604,19 +1638,19 @@ export class ApiClient {
         return;
       }
 
-      const text = await response.text();
+      const errorText = await response.text();
       let isStalePreview = false;
       if (response.status === 409) {
         try {
-          const payload = JSON.parse(text) as { error?: unknown };
-          isStalePreview = payload.error === "task deletion preview is no longer current";
+          isStalePreview =
+            (JSON.parse(errorText) as { error?: string }).error ===
+            "task deletion preview is no longer current";
         } catch {
-          isStalePreview = false;
+          // Only the documented stale-preview payload is retryable.
         }
       }
-      if (!isStalePreview || attempt === MAX_TASK_DELETE_PREVIEW_ATTEMPTS - 1) {
-        throw new Error(`API DELETE ${deletePath} failed (${response.status}): ${text}`);
-      }
+      if (isStalePreview && attempt < MAX_TASK_DELETE_PREVIEW_ATTEMPTS - 1) continue;
+      throw new Error(`API DELETE ${deletePath} failed (${response.status}): ${errorText}`);
     }
   }
 
@@ -1646,28 +1680,22 @@ export class ApiClient {
   async e2eReset(workspaceId: string, keepWorkflowIds?: string[]): Promise<void> {
     const params = keepWorkflowIds?.length ? `?keep_workflows=${keepWorkflowIds.join(",")}` : "";
     const path = `/api/v1/e2e/reset/${workspaceId}${params}`;
-    for (let attempt = 0; attempt < 4; attempt += 1) {
+    for (let attempt = 0; attempt < MAX_E2E_RESET_ATTEMPTS; attempt += 1) {
       const response = await this.rawRequest("DELETE", path);
       if (response.ok) return;
 
       const body = await response.text();
-      const transientWorktreeInspection =
-        response.status === 500 &&
-        body.includes("exit status 128") &&
-        (body.includes("inspect worktrees before delete") ||
-          body.includes("capture worktree cleanup identities") ||
-          body.includes("capture cleanup identity"));
-      if (!transientWorktreeInspection || attempt === 3) {
+      const maxAttempts = e2EResetRetryAttempts(response.status, body);
+      if (maxAttempts === 0 || attempt + 1 >= maxAttempts) {
         throw new Error(`API DELETE ${path} failed (${response.status}): ${body}`);
       }
 
-      // A task cleanup worker can remove a checkout between the reset's
-      // inventory read and its dirty-worktree inspection. Retry the complete
-      // reset after the worker has had time to publish its deletion.
+      // Retry the full reset so it refreshes task inventory after cleanup races.
+      const retryIntervalMs = maxAttempts === MAX_E2E_RESET_ATTEMPTS ? 500 : 250;
       await dwell(
-        250 * (attempt + 1),
+        retryIntervalMs * (attempt + 1),
         "poll-interval",
-        "retry interval for the E2E reset after a transient worktree inspection race",
+        "retry interval for the E2E reset after a transient cleanup conflict",
       );
     }
   }
@@ -3990,7 +4018,7 @@ export class ApiClient {
 
   async updateExecutor(
     executorId: string,
-    patch: { name?: string; config?: Record<string, string> },
+    patch: { name?: string; config?: Record<string, string>; status?: "active" | "disabled" },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/executors/${executorId}`, patch);
   }

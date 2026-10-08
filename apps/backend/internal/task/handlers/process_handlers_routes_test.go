@@ -35,6 +35,68 @@ func newForeignProcessHandlers(t *testing.T, mgr *lifecycle.Manager) *ProcessHan
 	return &ProcessHandlers{service: svc, lifecycleMgr: mgr, logger: log}
 }
 
+type cursorCloudSessionRepo struct{ foreignSessionRepo }
+
+func (r *cursorCloudSessionRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
+	return &models.TaskSession{
+		ID: "sess-b", TaskID: "task-b", State: models.TaskSessionStateRunning,
+		ExecutorSnapshot: map[string]interface{}{"executor_type": string(models.ExecutorTypeCursorCloud)},
+	}, nil
+}
+
+func TestCursorCloudWorkspaceDenied(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	repo := &cursorCloudSessionRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &ProcessHandlers{service: svc, logger: log}
+
+	ctx, recorder := processRequestAs(t, "user-b", http.MethodGet,
+		"/api/v1/task-sessions/sess-b/processes", "")
+	h.httpListProcesses(ctx)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("cloud process-list status = %d, body = %s; want workspace action denial", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestCursorCloudRuntimeConfigurationIsUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	repo := &cursorCloudSessionRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &ProcessHandlers{service: svc, logger: log}
+
+	tests := []struct {
+		name string
+		path string
+		body string
+		call func(*gin.Context)
+	}{
+		{name: "model", path: "/api/v1/task-sessions/sess-b/set-model", body: `{"model_id":"another-model"}`, call: h.httpSetSessionModel},
+		{name: "mode", path: "/api/v1/task-sessions/sess-b/set-mode", body: `{"mode_id":"plan"}`, call: h.httpSetSessionMode},
+		{name: "config option", path: "/api/v1/task-sessions/sess-b/set-config-option", body: `{"config_id":"permission","value":"allow"}`, call: h.httpSetSessionConfigOption},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, recorder := processRequestAs(t, "user-b", http.MethodPost, tc.path, tc.body)
+			tc.call(ctx)
+			require.Equal(t, http.StatusNotFound, recorder.Code, "body: %s", recorder.Body.String())
+		})
+	}
+}
+
 // processRequestAs builds a request for sess-b carrying userID's identity.
 func processRequestAs(t *testing.T, userID, method, target, body string) (*gin.Context, *httptest.ResponseRecorder) {
 	t.Helper()

@@ -301,6 +301,23 @@ describe("auto-title creation helpers", () => {
 
     expect(payload.autopilot).toBeUndefined();
   });
+
+  it("includes automatic pull request creation only when explicitly enabled", () => {
+    const enabled = buildCreateTaskPayload({
+      ...AGENT_PAYLOAD_DEFAULTS,
+      trimmedTitle: "Cloud task",
+      trimmedDescription: "Implement the change",
+      autoCreatePR: true,
+    });
+    const disabled = buildCreateTaskPayload({
+      ...AGENT_PAYLOAD_DEFAULTS,
+      trimmedTitle: "Local task",
+      trimmedDescription: "Keep the default",
+    });
+
+    expect(enabled.auto_create_pr).toBe(true);
+    expect(disabled.auto_create_pr).toBeUndefined();
+  });
 });
 
 describe("buildCreateTaskPayload dependencies", () => {

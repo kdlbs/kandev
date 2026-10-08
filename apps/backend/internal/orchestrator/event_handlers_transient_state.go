@@ -26,8 +26,23 @@ func (s *Service) clearTransientRetryStateLocked(sessionID string, state *transi
 	s.lastTurnPrompt.Delete(sessionID)
 	v, ok := s.transientRetries.LoadAndDelete(sessionID)
 	if ok {
-		if entry, ok := v.(*transientRetryEntry); ok && entry.cancel != nil {
-			entry.cancel()
+		if entry, ok := v.(*transientRetryEntry); ok {
+			entry.mu.Lock()
+			failureData := entry.failureData
+			if failureData != nil && failureData.RecoveryMode != recoveryModeReplay {
+				failureData = nil
+			}
+			entry.failureData = nil
+			cancel := entry.cancel
+			entry.mu.Unlock()
+			if cancel != nil {
+				cancel()
+			}
+			if failureData != nil {
+				s.clearPromptAttemptEvidence(
+					sessionID, failureData.AgentExecutionID, failureData.PromptGeneration,
+				)
+			}
 		}
 	}
 	state.owned.Store(false)
@@ -149,9 +164,12 @@ func (s *Service) retireAndClearTransientRetryState(sessionID string) {
 func (s *Service) cancelAllTransientRetries() {
 	s.transientRetries.Range(func(key, value interface{}) bool {
 		if keyStr, ok := key.(string); ok {
-			if entry, ok := value.(*transientRetryEntry); ok && entry.mode == recoveryModeContinue {
-				s.retireContinuationOnShutdown(keyStr, entry)
-				return true
+			if entry, ok := value.(*transientRetryEntry); ok {
+				mode, _ := entry.recovery()
+				if mode == recoveryModeContinue {
+					s.retireContinuationOnShutdown(keyStr, entry)
+					return true
+				}
 			}
 			s.resetTransientRetry(keyStr)
 		}
@@ -185,10 +203,13 @@ func (s *Service) CancelTransientRetry(ctx context.Context, taskID, sessionID st
 		releaseNoticeState()
 		return s.cancelRetainedRuntimeRetry(ctx, taskID, sessionID, entry)
 	}
-	if hasEntry && entry.mode == recoveryModeContinue {
-		noticeState.mu.Unlock()
-		releaseNoticeState()
-		return s.cancelContinuationRetry(ctx, taskID, sessionID, entry)
+	if hasEntry {
+		mode, _ := entry.recovery()
+		if mode == recoveryModeContinue {
+			noticeState.mu.Unlock()
+			releaseNoticeState()
+			return s.cancelContinuationRetry(ctx, taskID, sessionID, entry)
+		}
 	}
 	s.resetTransientRetryWithContextLocked(noticeState, ctx, sessionID, true)
 	noticeState.mu.Unlock()

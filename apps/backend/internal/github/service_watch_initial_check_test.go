@@ -36,6 +36,75 @@ func TestCreateIssueWatch_InitialCheckDoesNotMutateTheReturnedWatch(t *testing.T
 	}
 }
 
+func TestCreateIssueWatch_InitialCheckDoesNotOverwriteConcurrentUpdate(t *testing.T) {
+	svc, store := setupWatchServiceTest(t)
+	client := &blockingIssueWatchCheckClient{
+		stubClient: &stubClient{},
+		entered:    make(chan struct{}, 1),
+		release:    make(chan struct{}),
+	}
+	svc.resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+		return client, AuthMethodPAT, nil
+	})
+
+	watch, err := svc.CreateIssueWatch(context.Background(), &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1",
+		Repos:       []RepoFilter{{Owner: "acme", Name: "widget"}},
+		Prompt:      "original prompt",
+	})
+	if err != nil {
+		t.Fatalf("create issue watch: %v", err)
+	}
+	defer func() {
+		select {
+		case <-client.release:
+		default:
+			close(client.release)
+		}
+	}()
+
+	select {
+	case <-client.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("initial issue check did not reach the provider")
+	}
+
+	updatedPrompt := "updated prompt"
+	disabled := false
+	if err := svc.UpdateIssueWatch(context.Background(), watch.ID, &UpdateIssueWatchRequest{
+		Prompt:  &updatedPrompt,
+		Enabled: &disabled,
+	}); err != nil {
+		t.Fatalf("update issue watch while initial check is blocked: %v", err)
+	}
+	close(client.release)
+	waitForIssueWatchPolled(t, store, watch.ID)
+
+	got, err := store.GetIssueWatch(context.Background(), watch.ID)
+	if err != nil {
+		t.Fatalf("get issue watch after initial check: %v", err)
+	}
+	if got.Prompt != updatedPrompt || got.Enabled {
+		t.Errorf("initial check overwrote concurrent update: prompt = %q, enabled = %v", got.Prompt, got.Enabled)
+	}
+}
+
+type blockingIssueWatchCheckClient struct {
+	*stubClient
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c *blockingIssueWatchCheckClient) ListIssues(ctx context.Context, _, _ string) ([]*Issue, error) {
+	c.entered <- struct{}{}
+	select {
+	case <-c.release:
+		return nil, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func TestCreateReviewWatch_InitialCheckDoesNotMutateTheReturnedWatch(t *testing.T) {
 	svc, store := setupWatchServiceTest(t)
 	ctx := context.Background()

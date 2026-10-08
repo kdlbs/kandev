@@ -637,6 +637,22 @@ export type TaskSessionWorktree = {
   created_at?: string;
 };
 
+export type ExecutionCapabilities = {
+  chat: boolean;
+  stop: boolean;
+  follow_up: boolean;
+  remote_results: boolean;
+  workspace_files: boolean;
+  terminal: boolean;
+  git_mutation: boolean;
+  lsp: boolean;
+  preview: boolean;
+  model_switch: boolean;
+  agent_profile_switch: boolean;
+  permission_mode_switch: boolean;
+  plan_mode_switch: boolean;
+};
+
 /** Path-free durable progress for one managed workspace recovery attempt. */
 export type WorkspaceRecoveryProjection = {
   task_id: string;
@@ -746,6 +762,7 @@ export type TaskSession = ActiveSubagentCountFields & {
   goal_reconciliation?: AgentGoalReconciliation;
   agent_profile_snapshot?: Record<string, unknown> | null;
   executor_snapshot?: Record<string, unknown> | null;
+  execution_capabilities?: ExecutionCapabilities | null;
   environment_snapshot?: Record<string, unknown> | null;
   repository_snapshot?: Record<string, unknown> | null;
   started_at: string;

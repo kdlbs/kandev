@@ -13,6 +13,9 @@ owners:
 
 The executor system owns the runtime environments that execute agent work,
 including local, container, and SSH execution boundaries.
+The draft [Cursor Cloud design](system-design/cursor-cloud.md) extends this boundary
+to managed remote agents without an agentctl workspace. Its
+[requirements](requirements/cursor-cloud.md) retain task and agent ownership boundaries.
 
 ## Ownership
 

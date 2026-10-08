@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -60,97 +61,108 @@ func shortenPreClaimTimeout(t *testing.T) {
 	t.Cleanup(func() { clarificationPreClaimTimeout = previous })
 }
 
-func TestResolverPreClaimIdentityUsesBoundedContextAndReturnsRetryableError(t *testing.T) {
-	shortenPreClaimTimeout(t)
-	repo := &preClaimBlockingMessageStore{
-		stubMessageStore: stubMessageStore{},
-		entered:          make(chan struct{}),
-	}
-	resolver := NewResolver(
-		NewStore(time.Minute),
-		repo,
-		nil,
-		&stubAuthorizer{},
-		nil,
-		nil,
-		nil,
-		logger.Default(),
-	)
+func runPreClaimTimeoutTest(t *testing.T, test func(*testing.T)) {
+	t.Helper()
+	synctest.Test(t, func(t *testing.T) {
+		shortenPreClaimTimeout(t)
+		test(t)
+	})
+}
 
-	_, claimed, err := resolver.ResolveBundle(context.Background(), "pending-preclaim-identity", Outcome{})
-	if claimed {
-		t.Fatal("identity timeout reported a claimed response")
-	}
-	if err == nil || !strings.Contains(err.Error(), "temporarily unavailable") {
-		t.Fatalf("identity timeout error = %v, want retryable temporary-unavailable classification", err)
-	}
-	if !repo.findHasDeadline {
-		t.Fatal("identity lookup received no pre-claim deadline")
-	}
+func TestResolverPreClaimIdentityUsesBoundedContextAndReturnsRetryableError(t *testing.T) {
+	runPreClaimTimeoutTest(t, func(t *testing.T) {
+		repo := &preClaimBlockingMessageStore{
+			stubMessageStore: stubMessageStore{},
+			entered:          make(chan struct{}),
+		}
+		resolver := NewResolver(
+			NewStore(time.Minute),
+			repo,
+			nil,
+			&stubAuthorizer{},
+			nil,
+			nil,
+			nil,
+			logger.Default(),
+		)
+
+		_, claimed, err := resolver.ResolveBundle(context.Background(), "pending-preclaim-identity", Outcome{})
+		if claimed {
+			t.Fatal("identity timeout reported a claimed response")
+		}
+		if err == nil || !strings.Contains(err.Error(), "temporarily unavailable") {
+			t.Fatalf("identity timeout error = %v, want retryable temporary-unavailable classification", err)
+		}
+		if !repo.findHasDeadline {
+			t.Fatal("identity lookup received no pre-claim deadline")
+		}
+	})
 }
 
 func TestResolverPreClaimClaimFailureDoesNotDeliver(t *testing.T) {
-	shortenPreClaimTimeout(t)
-	const pendingID = "pending-preclaim-claim"
-	repo := &stubMessageStore{messages: map[string][]*taskmodels.Message{
-		pendingID: {resolverDeliveryMessage(pendingID, "message-preclaim-claim", "turn-1")},
-	}}
-	creator := &preClaimBlockingMessageCreator{entered: make(chan struct{})}
-	resolver := NewResolver(
-		NewStore(time.Minute),
-		repo,
-		creator,
-		&stubAuthorizer{},
-		nil,
-		nil,
-		nil,
-		logger.Default(),
-	)
+	runPreClaimTimeoutTest(t, func(t *testing.T) {
+		const pendingID = "pending-preclaim-claim"
+		repo := &stubMessageStore{messages: map[string][]*taskmodels.Message{
+			pendingID: {resolverDeliveryMessage(pendingID, "message-preclaim-claim", "turn-1")},
+		}}
+		creator := &preClaimBlockingMessageCreator{entered: make(chan struct{})}
+		resolver := NewResolver(
+			NewStore(time.Minute),
+			repo,
+			creator,
+			&stubAuthorizer{},
+			nil,
+			nil,
+			nil,
+			logger.Default(),
+		)
 
-	_, claimed, err := resolver.ResolveBundle(context.Background(), pendingID, Outcome{
-		Answers: []Answer{{QuestionID: "q1", SelectedOptions: []string{"yes"}}},
+		_, claimed, err := resolver.ResolveBundle(context.Background(), pendingID, Outcome{
+			Answers: []Answer{{QuestionID: "q1", SelectedOptions: []string{"yes"}}},
+		})
+		if claimed {
+			t.Fatal("claim timeout reported a claimed response")
+		}
+		if err == nil || !strings.Contains(err.Error(), "temporarily unavailable") {
+			t.Fatalf("claim timeout error = %v, want retryable temporary-unavailable classification", err)
+		}
+		if creator.claimCalls != 1 || !creator.claimDeadline {
+			t.Fatalf("claim calls=%d deadline=%v, want one call with a deadline", creator.claimCalls, creator.claimDeadline)
+		}
+		if got := stringFromMetadata(repo.messages[pendingID][0].Metadata, metaStatusKey); got != string(StatusPending) {
+			t.Fatalf("status after pre-claim timeout = %q, want pending", got)
+		}
 	})
-	if claimed {
-		t.Fatal("claim timeout reported a claimed response")
-	}
-	if err == nil || !strings.Contains(err.Error(), "temporarily unavailable") {
-		t.Fatalf("claim timeout error = %v, want retryable temporary-unavailable classification", err)
-	}
-	if creator.claimCalls != 1 || !creator.claimDeadline {
-		t.Fatalf("claim calls=%d deadline=%v, want one call with a deadline", creator.claimCalls, creator.claimDeadline)
-	}
-	if got := stringFromMetadata(repo.messages[pendingID][0].Metadata, metaStatusKey); got != string(StatusPending) {
-		t.Fatalf("status after pre-claim timeout = %q, want pending", got)
-	}
 }
 
 func TestResolverExpiredPreClaimDeadlineWinsOverValidationError(t *testing.T) {
-	shortenPreClaimTimeout(t)
-	const pendingID = "pending-preclaim-validation"
-	repo := &stubMessageStore{messages: map[string][]*taskmodels.Message{
-		pendingID: {resolverDeliveryMessage(pendingID, "message-preclaim-validation", "turn-1")},
-	}}
-	resolver := NewResolver(
-		NewStore(time.Minute),
-		repo,
-		nil,
-		preClaimExpiredAuthorizer{},
-		nil,
-		nil,
-		nil,
-		logger.Default(),
-	)
+	runPreClaimTimeoutTest(t, func(t *testing.T) {
+		const pendingID = "pending-preclaim-validation"
+		repo := &stubMessageStore{messages: map[string][]*taskmodels.Message{
+			pendingID: {resolverDeliveryMessage(pendingID, "message-preclaim-validation", "turn-1")},
+		}}
+		resolver := NewResolver(
+			NewStore(time.Minute),
+			repo,
+			nil,
+			preClaimExpiredAuthorizer{},
+			nil,
+			nil,
+			nil,
+			logger.Default(),
+		)
 
-	_, claimed, err := resolver.ResolveBundle(context.Background(), pendingID, Outcome{})
-	if claimed {
-		t.Fatal("expired validation reported a claimed response")
-	}
-	if !IsPreClaimTimeoutError(err) {
-		t.Fatalf("expired validation error = %v, want pre-claim timeout classification", err)
-	}
-	if IsValidationError(err) {
-		t.Fatalf("expired validation retained validation classification: %v", err)
-	}
+		_, claimed, err := resolver.ResolveBundle(context.Background(), pendingID, Outcome{})
+		if claimed {
+			t.Fatal("expired validation reported a claimed response")
+		}
+		if !IsPreClaimTimeoutError(err) {
+			t.Fatalf("expired validation error = %v, want pre-claim timeout classification", err)
+		}
+		if IsValidationError(err) {
+			t.Fatalf("expired validation retained validation classification: %v", err)
+		}
+	})
 }
 
 func TestResolverCallerCancellationIsNotClassifiedAsPreClaimTimeout(t *testing.T) {

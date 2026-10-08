@@ -125,6 +125,10 @@ func (h *ProcessHandlers) httpStartProcess(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task session not found")
 		return
 	}
+	if err := h.service.AuthorizeSessionScope(c.Request.Context(), sessionID, authz.ScopeSessionExec); err != nil {
+		handleNotFound(c, h.logger, err, "task session not found")
+		return
+	}
 
 	repoID, repo, ok := h.resolveProcessRepository(c, session, body.RepositoryID, sessionID)
 	if !ok {
@@ -406,6 +410,9 @@ func (h *ProcessHandlers) httpListProcesses(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id is required"})
 		return
 	}
+	if h.denySessionAccess(c, sessionID) {
+		return
+	}
 	session, err := h.service.GetTaskSession(c.Request.Context(), sessionID)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task session not found")
@@ -441,6 +448,9 @@ func (h *ProcessHandlers) httpGetProcess(c *gin.Context) {
 	processID := c.Param("processId")
 	if sessionID == "" || processID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id and process_id are required"})
+		return
+	}
+	if h.denySessionAccess(c, sessionID) {
 		return
 	}
 	if _, err := h.service.GetTaskSession(c.Request.Context(), sessionID); err != nil {
@@ -505,8 +515,8 @@ func resolveScriptCommand(
 	}
 }
 
-// denySessionAccess reports whether the caller may not touch sessionID, having
-// already written the 404 response.
+// denySessionAccess reports whether the caller may not perform a workspace
+// operation for sessionID, having already written the 404 response.
 //
 // The session-keyed routes in this file resolve their execution with a bare
 // in-memory lookup (GetExecutionBySessionID / *BySessionID), which skips the
@@ -515,6 +525,10 @@ func resolveScriptCommand(
 // service.GetTaskSession first are already covered by its scoping.
 func (h *ProcessHandlers) denySessionAccess(c *gin.Context, sessionID string) bool {
 	if err := h.service.AuthorizeSessionAccess(c.Request.Context(), sessionID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return true
+	}
+	if err := h.service.AuthorizeSessionScope(c.Request.Context(), sessionID, authz.ScopeSessionExec); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return true
 	}

@@ -92,6 +92,28 @@ func TestCanvasFeatureFlagIsDisabledInEveryProfile(t *testing.T) {
 	}
 }
 
+func TestCursorCloudFeatureFlagIsDisabledInEveryProfile(t *testing.T) {
+	for _, profile := range []struct {
+		name     string
+		selector map[string]string
+	}{{name: "prod"}, {name: "dev", selector: map[string]string{"KANDEV_DEBUG_DEV_MODE": "true"}}, {name: "e2e", selector: map[string]string{"KANDEV_E2E_MOCK": "true"}}} {
+		t.Run(profile.name, func(t *testing.T) {
+			clearProfileSelectors(t)
+			clearProfilesYAMLVars(t)
+			for key, value := range profile.selector {
+				t.Setenv(key, value)
+			}
+			defaults, err := EnvironmentDefaults()
+			if err != nil {
+				t.Fatalf("EnvironmentDefaults: %v", err)
+			}
+			if got := defaults["KANDEV_FEATURES_CURSOR_CLOUD"]; got != "false" {
+				t.Fatalf("KANDEV_FEATURES_CURSOR_CLOUD = %q in %s, want false", got, profile.name)
+			}
+		})
+	}
+}
+
 func TestOfficeSessionIdentityIsAbsentFromEveryProfile(t *testing.T) {
 	for _, profile := range []struct {
 		name     string
@@ -404,6 +426,8 @@ func TestProfilesYAML_ContainsRequiredSections(t *testing.T) {
 		"debug:",
 		"KANDEV_FEATURES_OFFICE:",
 		"KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF:",
+		"KANDEV_FEATURES_CURSOR_CLOUD:",
+		"KANDEV_MOCK_CURSOR_CLOUD:",
 		"KANDEV_WEB_TITLE_PREFIX:",
 	} {
 		if !strings.Contains(yaml, section) {

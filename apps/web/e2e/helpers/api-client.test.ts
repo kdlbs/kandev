@@ -50,6 +50,127 @@ describe("ApiClient.createAgentProfile", () => {
   });
 });
 
+describe("ApiClient.createAgent", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("creates a saved agent row after the agent type becomes available", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
+        return Response.json({ interimSettingsInterlockToken: "test-token" });
+      }
+      if (url.endsWith("/api/v1/agents")) {
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toEqual({ name: "cursor_cloud" });
+        expect(init?.headers).toMatchObject({
+          "Content-Type": "application/json",
+          "X-Kandev-Interim-Settings-Interlock": "test-token",
+        });
+        return Response.json({
+          id: "saved-agent-id",
+          name: "cursor_cloud",
+          profiles: [],
+        });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const agent = await new ApiClient("http://backend.test").createAgent("cursor_cloud");
+
+    expect(agent.id).toBe("saved-agent-id");
+    expect(agent.name).toBe("cursor_cloud");
+    expect(agent.profiles).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ApiClient.deleteTask", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("refreshes a stale deletion preview before retrying cleanup", async () => {
+    const confirmations: string[] = [];
+    let previewCount = 0;
+    let deleteCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
+        return Response.json({ interimSettingsInterlockToken: "test-token" });
+      }
+      if (url.endsWith("/api/v1/tasks/delete-preflight")) {
+        previewCount += 1;
+        return Response.json({
+          confirmation_id: `confirmation-${previewCount}`,
+          requires_discard_consent: false,
+        });
+      }
+      if (url.endsWith("/api/v1/tasks/task-1") && init?.method === "DELETE") {
+        deleteCount += 1;
+        confirmations.push(
+          new Headers(init.headers).get("X-Kandev-Task-Delete-Confirmation") ?? "",
+        );
+        if (deleteCount === 1) {
+          return Response.json(
+            { error: "task deletion preview is no longer current" },
+            { status: 409 },
+          );
+        }
+        return Response.json({ success: true });
+      }
+      throw new Error(`unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new ApiClient("http://backend.test").deleteTask("task-1");
+
+    expect(previewCount).toBe(2);
+    expect(deleteCount).toBe(2);
+    expect(confirmations).toEqual(["confirmation-1", "confirmation-2"]);
+  });
+});
+
+describe("ApiClient.e2eReset", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    [
+      "a task hierarchy conflict",
+      "task has children at final deletion; retry the task deletion",
+      1,
+    ],
+    ["unresolved Cursor Cloud work", "task deletion is blocked by unresolved Cursor Cloud work", 4],
+  ])(
+    "retries after %s during reset",
+    async (_reason, errorMessage, failuresBeforeSuccess) => {
+      let resetCount = 0;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
+          return Response.json({ interimSettingsInterlockToken: "test-token" });
+        }
+        expect(String(input)).toContain("/api/v1/e2e/reset/workspace-1?keep_workflows=workflow-1");
+        expect(init?.method).toBe("DELETE");
+        resetCount += 1;
+        if (resetCount <= failuresBeforeSuccess) {
+          return new Response(JSON.stringify({ error: errorMessage }), { status: 500 });
+        }
+        return Response.json({ deleted_tasks: 2 });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await new ApiClient("http://backend.test").e2eReset("workspace-1", ["workflow-1"]);
+
+      expect(resetCount).toBe(failuresBeforeSuccess + 1);
+    },
+    10_000,
+  );
+});
+
 describe("ApiClient user settings", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

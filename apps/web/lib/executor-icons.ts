@@ -20,6 +20,7 @@ export const EXECUTOR_ICON_MAP: Record<string, typeof IconFolder> = {
   local_docker: IconBox,
   remote_docker: IconBox,
   sprites: IconCloud,
+  cursor_cloud: IconCloud,
   ssh: IconTerminal2,
   k8s: IconPackage,
 };
@@ -47,6 +48,7 @@ const EXECUTOR_LABEL_KEY_MAP: Record<string, string> = {
   local_docker: "executors:localDocker",
   remote_docker: "executors:remoteDocker",
   k8s: "executors:typeKubernetes",
+  cursor_cloud: "executors:cursorCloudTitle",
 };
 
 export function getExecutorLabel(type: string): string {

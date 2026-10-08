@@ -10,17 +10,32 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/remoteauth"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/cursorcloud"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 type taskAgentExecutorCompatibilityValidator struct {
-	profiles        agentProfileCompatibilityReader
-	agentRegistry   *registry.Registry
-	dynamicResolver profileExecutionValidator
+	profiles           agentProfileCompatibilityReader
+	agentRegistry      *registry.Registry
+	dynamicResolver    profileExecutionValidator
+	secretStore        secrets.SecretStore
+	cursorCloudEnabled bool
+	cursorCloudModels  cursorCloudModelValidator
 }
 
 type profileExecutionValidator interface {
 	ValidateProfile(context.Context, string) error
+}
+
+type cursorCloudModelValidator interface {
+	ValidateModel(context.Context, string, string) error
+}
+
+type cursorCloudModelValidatorFunc func(context.Context, string, string) error
+
+func (f cursorCloudModelValidatorFunc) ValidateModel(ctx context.Context, secretID, model string) error {
+	return f(ctx, secretID, model)
 }
 
 type agentProfileCompatibilityReader interface {
@@ -48,7 +63,10 @@ func (v taskAgentExecutorCompatibilityValidator) validateAgentFamily(
 		return nil, nil
 	}
 	registeredAgent, ok := v.agentRegistry.Get(settingsAgent.Name)
-	if !ok || registeredAgent == nil || !registeredAgent.Enabled() || agents.IsVirtualAgent(registeredAgent) {
+	if !ok || registeredAgent == nil || !registeredAgent.Enabled() {
+		return nil, fmt.Errorf("agent family %q cannot execute", settingsAgent.Name)
+	}
+	if _, managed := registeredAgent.(agents.ManagedRemoteAgent); !managed && agents.IsVirtualAgent(registeredAgent) {
 		return nil, fmt.Errorf("agent family %q cannot execute", settingsAgent.Name)
 	}
 	return registeredAgent, nil
@@ -80,6 +98,12 @@ func (v taskAgentExecutorCompatibilityValidator) ValidateAgentProfileForExecutor
 		// to a concrete candidate at launch.
 		return nil
 	}
+	if _, managed := registeredAgent.(agents.ManagedRemoteAgent); managed {
+		return v.validateManagedAgentProfileForExecutor(ctx, registeredAgent, profile, executor, executorProfile)
+	}
+	if executor.Type == models.ExecutorTypeCursorCloud {
+		return fmt.Errorf("executor type cursor_cloud only supports the cursor_cloud agent")
+	}
 	if !models.IsRemoteExecutorType(executor.Type) {
 		return nil
 	}
@@ -87,6 +111,58 @@ func (v taskAgentExecutorCompatibilityValidator) ValidateAgentProfileForExecutor
 		return fmt.Errorf("remote executor profile is required")
 	}
 	return validateRemoteAgentCredentials(registeredAgent, executorProfile)
+}
+
+func (v taskAgentExecutorCompatibilityValidator) validateManagedAgentProfileForExecutor(
+	ctx context.Context,
+	registeredAgent agents.Agent,
+	profile *agentsettingsmodels.AgentProfile,
+	executor *models.Executor,
+	executorProfile *models.ExecutorProfile,
+) error {
+	if registeredAgent.ID() != agents.CursorCloudAgentID || !v.cursorCloudEnabled {
+		return fmt.Errorf("managed agent runtime is unavailable")
+	}
+	if executor.Type != models.ExecutorTypeCursorCloud {
+		return fmt.Errorf("executor type cursor_cloud only supports its managed agent")
+	}
+	if executorProfile == nil {
+		return fmt.Errorf("executor profile is required for cursor_cloud")
+	}
+	secretID := strings.TrimSpace(executorProfile.Config[cursorcloud.ExecutorConfigSecretID])
+	callbackURL := strings.TrimSpace(executorProfile.Config[cursorcloud.ExecutorConfigCallbackURL])
+	if secretID == "" || v.secretStore == nil ||
+		secrets.ValidateGlobalReference(ctx, v.secretStore, secretID) != nil {
+		return fmt.Errorf("cursor cloud API key secret reference is unavailable")
+	}
+	if cursorcloud.ValidateCallbackURL(callbackURL) != nil {
+		return fmt.Errorf("cursor cloud callback URL is invalid")
+	}
+	modelValidator := v.cursorCloudModels
+	if modelValidator == nil {
+		modelValidator = cursorCloudModelValidatorFunc(func(ctx context.Context, secretID, model string) error {
+			return validateCursorCloudModel(ctx, v.secretStore, secretID, model)
+		})
+	}
+	if err := modelValidator.ValidateModel(ctx, secretID, profile.Model); err != nil {
+		return fmt.Errorf("cursor cloud model is unavailable")
+	}
+	return nil
+}
+
+func validateCursorCloudModel(ctx context.Context, store secrets.SecretStore, secretID, model string) error {
+	if err := secrets.ValidateGlobalReference(ctx, store, secretID); err != nil {
+		return fmt.Errorf("cursor cloud API key is unavailable")
+	}
+	apiKey, err := store.Reveal(ctx, secretID)
+	if err != nil || strings.TrimSpace(apiKey) == "" {
+		return fmt.Errorf("cursor cloud API key is unavailable")
+	}
+	client, err := cursorcloud.NewRuntimeClient(apiKey, true)
+	if err != nil {
+		return fmt.Errorf("cursor cloud is unavailable")
+	}
+	return cursorcloud.ValidateModel(ctx, client, model)
 }
 
 func validateRemoteAgentCredentials(agent agents.Agent, executorProfile *models.ExecutorProfile) error {

@@ -35,6 +35,12 @@ export function selectWorkspaceRepositories(
   return (workspaceId && itemsByWorkspaceId[workspaceId]) || EMPTY_REPOSITORIES;
 }
 
+export function shouldLoadWorkspaceRepositories(
+  task: Pick<Task, "workspace_id" | "primary_executor_type"> | null,
+): boolean {
+  return Boolean(task?.workspace_id && task.primary_executor_type !== "cursor_cloud");
+}
+
 export function shouldReservePageLevelMobileFeedbackOffset(params: {
   isMobile: boolean;
   hasTaskMoveError: boolean;

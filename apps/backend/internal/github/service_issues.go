@@ -279,7 +279,8 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 
 	now := time.Now().UTC()
 	watch.LastPolledAt = &now
-	_ = s.store.UpdateIssueWatch(ctx, watch)
+	watch.UpdatedAt = now
+	_ = s.store.UpdateIssueWatchLastPolledAt(ctx, watch.ID, now)
 
 	return newIssues, nil
 }

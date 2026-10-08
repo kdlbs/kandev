@@ -19,6 +19,13 @@ export type ExecutorTypeInfo = {
 };
 
 export const EXECUTOR_TYPE_MAP: Record<string, ExecutorTypeInfo> = {
+  // The dedicated creation page creates an executor row before its profile.
+  // This identity is used for route metadata, never as a persisted row ID.
+  cursor_cloud: {
+    executorId: "cursor_cloud",
+    labelKey: "executors:cursorCloudTitle",
+    descriptionKey: "executors:cursorCloudDescription",
+  },
   local: {
     executorId: "exec-local",
     labelKey: "executors:typeLocal",

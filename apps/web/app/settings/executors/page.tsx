@@ -65,6 +65,11 @@ type ExecutorTypeCard = {
 
 const EXECUTOR_TYPES: readonly ExecutorTypeCard[] = [
   {
+    type: "cursor_cloud",
+    labelKey: "executors:cursorCloudTitle",
+    descriptionKey: "executors:cursorCloudDescription",
+  },
+  {
     type: "local",
     labelKey: "executors:typeLocal",
     descriptionKey: "executors:hubDescriptionLocal",
@@ -96,6 +101,10 @@ const EXECUTOR_TYPES: readonly ExecutorTypeCard[] = [
     descriptionKey: "executors:hubDescriptionKubernetes",
   },
 ];
+
+function enabledExecutorTypes(cursorCloudEnabled: boolean) {
+  return EXECUTOR_TYPES.filter((e) => e.type !== "cursor_cloud" || cursorCloudEnabled);
+}
 
 function ExecutorIconBadge({ type }: { type: string }) {
   const Icon = EXECUTOR_ICON_MAP[type] ?? DefaultIcon;
@@ -243,6 +252,7 @@ export default function ExecutorsHubPage() {
   const allProfiles = useAllProfiles();
   const executors = useAppStore((state) => state.executors.items);
   const setExecutors = useAppStore((state) => state.setExecutors);
+  const cursorCloudEnabled = useAppStore((state) => state.features.cursorCloud);
   const role = useAppStore((state) => state.auth.user?.role);
   const canManageKubernetes = role === undefined || role === "admin";
   const pluginExecutors = executors.filter((executor) => executor.type === "plugin_remote");
@@ -318,7 +328,7 @@ export default function ExecutorsHubPage() {
         contentClassName="space-y-4 divide-y-0"
       >
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {EXECUTOR_TYPES.map((execType) => (
+          {enabledExecutorTypes(cursorCloudEnabled).map((execType) => (
             <CreateTypeCard
               key={execType.type}
               execType={execType}

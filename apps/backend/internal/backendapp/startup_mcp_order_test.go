@@ -202,7 +202,7 @@ func TestStartupMCPReadyBeforeRecoveryAndLaunch(t *testing.T) {
 	server, err := buildHTTPServer(
 		context.Background(), cfg, log, gateway, repos,
 		services, agentSettingsCtrl, lifecycleMgr, eventBus, orchestratorSvc,
-		nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil,
 		func(fn func() error) { t.Cleanup(func() { _ = fn() }) },
 		nil, systemSvc, nil, nil, dbPool, nil, nil, nil, nil,
 	)
@@ -311,7 +311,7 @@ func TestStartupOfficeDisabled_MountsStorageAndRetention(t *testing.T) {
 	server, err := buildHTTPServer(
 		context.Background(), cfg, log, gateway, repos,
 		services, agentSettingsCtrl, lifecycleMgr, eventBus, orchestratorSvc,
-		nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil,
 		func(fn func() error) { t.Cleanup(func() { _ = fn() }) },
 		nil, systemSvc, nil, nil, dbPool, nil, nil, nil, nil,
 	)

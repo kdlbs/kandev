@@ -25,7 +25,7 @@ func TestBuildHTTPServerAbortsWhenInterlockTokenGenerationFails(t *testing.T) {
 	server, err := buildHTTPServer(
 		context.Background(), &config.Config{}, testLogger(t),
 		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("buildHTTPServer error = %v, want %v", err, wantErr)
