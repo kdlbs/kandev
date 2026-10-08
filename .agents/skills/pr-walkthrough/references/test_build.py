@@ -183,14 +183,16 @@ class TestFeatureFlags(unittest.TestCase):
     def test_rejects_incomplete_and_contradictory_flag_evidence(self):
         invalid = [None, {}, {"coverage": "yes"}, {"summary": ""}, {"flags": {}},
                    {"flags": []}, {"off_ux": {}},
+                   {"off_ux": {"status": "none", "items": []}},
                    {"off_ux": {"status": "none", "items": [], "note": ""}},
                    {"off_ux": {"status": "none", "items": [{}], "note": "Checked"}},
                    {"off_ux": {"status": "changed", "items": []}}]
         for value in invalid:
             data = self.data()
-            data["feature_flags"] = value if value is None else {**data["feature_flags"], **value}
-            if value == {}:
-                data["feature_flags"] = {}
+            if value is None or value == {}:
+                data["feature_flags"] = value
+            else:
+                data["feature_flags"] = {**data["feature_flags"], **value}
             with self.subTest(value=value), self.assertRaises(build.BuildError):
                 build.build(data)
         for field in ("key", "change", "default", "enabled", "disabled", "file"):

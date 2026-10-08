@@ -35,6 +35,8 @@ class PRWalkthroughRenderTest(unittest.TestCase):
             for item in category.get("items", [])
         }
         manifest_paths.update(change["file"] for change in self.data["changes"])
+        manifest_paths.update(flag["file"] for flag in self.data["feature_flags"]["flags"])
+        manifest_paths.update(item["file"] for item in self.data["feature_flags"]["off_ux"]["items"])
         manifest = {
             "files": [{"path": path, "status": "M"} for path in sorted(manifest_paths)]
         }
