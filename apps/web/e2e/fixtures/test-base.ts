@@ -7,6 +7,7 @@ import { ApiClient } from "../helpers/api-client";
 import { dwell } from "../helpers/causal-waits";
 import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
+import { restoreSidebarLayout } from "../helpers/sidebar-layout";
 import type { WorkflowStep } from "../../lib/types/http";
 
 const DEFAULT_SIDEBAR_VIEW = {
@@ -362,6 +363,7 @@ export const test = backendFixture.extend<
       await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
       await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
       await apiClient.cleanupTestProfiles([seedData.agentProfileId]);
+      await restoreSidebarLayout(apiClient, seedData.workspaceId, undefined);
 
       await apiClient.saveUserSettings({
         workspace_id: seedData.workspaceId,

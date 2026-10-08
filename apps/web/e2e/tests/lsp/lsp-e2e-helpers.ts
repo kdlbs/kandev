@@ -266,6 +266,32 @@ export async function readSessionModelSnapshots(
   }, fileName);
 }
 
+async function openDesktopFileFromSearch(session: SessionPage, filePath: string): Promise<void> {
+  const searchInput = session.fileSearchInput();
+  const searchResult = session.fileSearchResult(filePath);
+  await expect
+    .poll(
+      async () => {
+        try {
+          await session.clickTab("Files", { force: true });
+          if (!(await searchInput.isVisible())) {
+            await session.fileSearchButton().click({ timeout: 2_000 });
+          }
+          if (!(await searchInput.isVisible())) return false;
+          await searchInput.fill(path.posix.basename(filePath), { timeout: 2_000 });
+          if (!(await searchResult.isVisible())) return false;
+          await searchResult.click({ timeout: 2_000 });
+          await searchInput.press("Escape", { timeout: 2_000 });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 30_000, intervals: [100, 500, 1000], message: "opening the file from search" },
+    )
+    .toBe(true);
+}
+
 export async function openDesktopFile(
   page: Page,
   session: SessionPage,
@@ -334,17 +360,7 @@ export async function openDesktopFile(
     .toBeTruthy();
 
   if (openMode === "search") {
-    await session.fileSearchButton().click();
-    const searchInput = session.fileSearchInput();
-    await expect(searchInput).toBeVisible({ timeout: 5_000 });
-    // Search matches the repository-relative path, while the task tree path
-    // may include a repository prefix. Query the exact filename so paths with
-    // spaces or punctuation remain searchable, then select by the exact path.
-    await searchInput.fill(path.posix.basename(filePath));
-    const searchResult = session.fileSearchResult(filePath);
-    await expect(searchResult).toBeVisible({ timeout: 15_000 });
-    await searchResult.click();
-    await searchInput.press("Escape");
+    await openDesktopFileFromSearch(session, filePath);
   }
   await expect(page.locator(".dv-default-tab", { hasText: path.basename(filePath) })).toBeVisible({
     timeout: 10_000,
