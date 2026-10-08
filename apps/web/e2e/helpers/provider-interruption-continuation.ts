@@ -97,6 +97,7 @@ export async function assertContinuationSettingRetired(page: Page, backend: Back
   const lastFeatureCard = settings.getByTestId("feature-toggle-features.office");
   await expect(lastFeatureCard).toBeVisible();
   await lastFeatureCard.scrollIntoViewIfNeeded();
+  await expect(lastFeatureCard).toBeInViewport();
 }
 
 export async function waitForContinuationMessage(

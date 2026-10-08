@@ -84,7 +84,9 @@ and does not report a successful recovery. The matching failure remains
 **Resolved** even when a separate success notice is missing from the loaded chat.
 A later failure keeps its own recovery controls.
 
-### Experimental interruption continuation
+<a id="experimental-interruption-continuation"></a>
+
+### Interruption continuation
 
 Interrupted conversation continuation is supported by default for eligible
 transient Cursor ACP failures. It can continue the unfinished request in the

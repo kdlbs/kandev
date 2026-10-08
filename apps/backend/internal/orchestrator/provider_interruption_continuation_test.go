@@ -41,14 +41,6 @@ func continuationFailureFixture(t *testing.T) (*Service, *mockMessageCreator, wa
 }
 
 // @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-001.1
-func TestInterruptionContinuationAdmission(t *testing.T) {
-	svc, mc, data := continuationFailureFixture(t)
-	require.True(t, svc.handleTransientFailure(context.Background(), data))
-	require.Len(t, mc.sessionMessages, 1)
-	require.Equal(t, "continue", mc.sessionMessages[0].metadata["recovery_mode"])
-}
-
-// @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-001.1
 func TestInterruptionContinuationAdmissionWithoutOptIn(t *testing.T) {
 	svc, mc, data := continuationFailureFixture(t)
 	require.True(t, svc.handleTransientFailure(context.Background(), data), "safe supported evidence admits continuation by default")
