@@ -525,10 +525,18 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
     }
 
     if (mobile) {
-      expect((await session.recoveryResumeButton().boundingBox())?.height).toBeGreaterThanOrEqual(
-        44,
-      );
-      expect((await restoreWorkspace.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await expect(session.recoveryResumeButton()).toBeVisible();
+      await expect(restoreWorkspace).toBeVisible();
+      await expect
+        .poll(() =>
+          session
+            .recoveryResumeButton()
+            .evaluate((element) => element.getBoundingClientRect().height),
+        )
+        .toBeGreaterThanOrEqual(44);
+      await expect
+        .poll(() => restoreWorkspace.evaluate((element) => element.getBoundingClientRect().height))
+        .toBeGreaterThanOrEqual(44);
     }
 
     await apiClient.updateAgentProfile(profile.id, {
