@@ -983,3 +983,65 @@ func TestAgentctlBinaryCandidatesOmitsHostFallbackForDifferentPlatform(t *testin
 		t.Fatalf("agentctlBinaryCandidates = %#v, want %#v", got, want)
 	}
 }
+
+func TestAgentctlResolverRechecksCacheAfterDelayedMiss(t *testing.T) {
+	const version = "1.2.3"
+	const commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	payload := []byte("one shared download")
+	bundle := t.TempDir()
+	home := t.TempDir()
+	writeResolverManifest(t, bundle, version, commit, "standard", "linux/amd64", payload)
+	compressed := gzipBytes(t, payload)
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		entered <- struct{}{}
+		<-release
+		_, _ = w.Write(compressed)
+	}))
+	defer server.Close()
+	resolver := NewAgentctlResolverWithOptions(newResolverTestLogger(t), AgentctlResolverOptions{
+		Version: version, Commit: commit, BundleDir: bundle, HomeDir: home,
+		ReleaseBaseURL: server.URL + "/releases/download",
+	})
+	platform := SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}
+	firstResult := make(chan error, 1)
+	go func() {
+		_, err := resolver.ResolveRemoteBinaryContext(context.Background(), platform, nil)
+		firstResult <- err
+	}()
+	<-entered
+	secondCacheMiss := make(chan struct{})
+	continueSecond := make(chan struct{})
+	secondResult := make(chan error, 1)
+	go func() {
+		_, err := resolver.ResolveRemoteBinaryContext(context.Background(), platform, func(step PrepareStep, _, _ int) {
+			if step.Status == PrepareStepRunning {
+				close(secondCacheMiss)
+				<-continueSecond
+			}
+		})
+		secondResult <- err
+	}()
+	<-secondCacheMiss
+	close(release)
+	if err := <-firstResult; err != nil {
+		t.Fatalf("first ResolveRemoteBinaryContext: %v", err)
+	}
+	close(continueSecond)
+	if err := <-secondResult; err != nil {
+		t.Fatalf("second ResolveRemoteBinaryContext: %v", err)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("download requests = %d, want 1", got)
+	}
+}
+
+type observedDoneContext struct {
+	context.Context
+	observed chan struct{}
+	once     sync.Once
+}
+
