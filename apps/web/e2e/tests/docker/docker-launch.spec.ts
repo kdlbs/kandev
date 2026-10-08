@@ -417,7 +417,8 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
 
     await expect(editor).toBeHidden({ timeout: 15_000 });
     const card = testPage.getByTestId("session-executor-failure-card");
-    await expect(card).toContainText("Executor stopped");
+    // Idle environments are admitted by the one-minute reconciliation sweep.
+    await expect(card).toContainText("Executor stopped", { timeout: 90_000 });
     await expect(session.recoveryResumeButton()).toBeHidden();
     const recheck = card.getByTestId("executor-recheck");
     await recheck.click();

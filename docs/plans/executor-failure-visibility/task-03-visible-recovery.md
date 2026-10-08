@@ -348,3 +348,21 @@ missing shared Go-cache artifacts. Rebuilding with the task-owned cache succeede
 but Docker fixture image creation failed before the scenario ran. The revised
 container scenario is therefore pending current-head CI verification; local setup
 failure is not a pass. The real Kubernetes acceptance gate remains open as well.
+
+### Idle Docker observation cadence
+
+The current-head container CI fixture failed the durable-card assertion in all
+three attempts because its five-second default timeout preceded the approved
+one-minute idle-environment reconciliation sweep. The assertion now waits up to
+90 seconds for admission, retaining every stopped-compute, read-only recheck,
+identity-preservation, and terminal recovery assertion. No production timing or
+recovery behavior changed.
+
+The focused real Docker scenario passed with retries disabled (one test, 1.8
+minutes total). Local verification used a disposable daemon with its own socket,
+data directory, and bridge; the existing daemon was not reconfigured. A temporary
+host-network fixture image build accommodated its isolated network policy, and
+that fixture source change was restored before delivery. The normal managed
+backend, web, and plugin builds had completed immediately before this run. The
+current-head CI Docker assertion supplies the red evidence; the earlier default
+daemon local attempt failed at image setup and is not assertion evidence.
