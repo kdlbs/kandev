@@ -1523,3 +1523,14 @@ The corresponding phone check,
 cases on first attempt in the same constrained image. Full specification lint,
 catalog validation and whitespace checks passed. Native and targeted live-state
 release gaps recorded above remain open.
+
+### Main 6c21e0ce22 integration
+
+Before the fixture follow-up push, main advanced to
+`6c21e0ce22406c39bd74ccb7123083ca273a6ec4` (task edit save retry, PR #4350).
+It combined without conflicts. The merged tree passed
+`pnpm exec vitest run components/task-create-dialog-save-retry.test.tsx`
+(all 10 cases), `pnpm run typecheck`, strict ESLint for
+`components/task-create-dialog-submit.tsx`, full specification lint, catalog
+validation (367 decisions, 1,479 specifications), and whitespace checks.
+This frontend-only integration does not close the native or live-state gates.
