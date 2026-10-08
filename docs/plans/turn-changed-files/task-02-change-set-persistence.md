@@ -3,7 +3,7 @@ id: turn-changed-files-02
 title: Typed change sets and database parity
 status: done
 wave: 2
-depends_on: []
+depends_on:
   - turn-changed-files-01
 plan: plan.md
 requirements:

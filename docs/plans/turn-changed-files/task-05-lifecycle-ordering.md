@@ -3,7 +3,7 @@ id: turn-changed-files-05
 title: Generation-bound admission and terminal capture fences
 status: done
 wave: 5
-depends_on: []
+depends_on:
   - turn-changed-files-01
   - turn-changed-files-02
   - turn-changed-files-03
@@ -85,3 +85,5 @@ Implemented generation-bound admission, terminal capture fences, checkout-manife
 ### Review follow-up (2026-10-08)
 
 The terminal assistant anchor now comes from durable per-generation assistant-message tracking and survives protocol correlation reset and no-newline flush; it is cleared only after durable finalization. Terminal ownership and accepted endpoints persist independently from compare/export, bounded failure settlement uses a fresh persistence context, and startup reconciliation settles unfinished rows without another capture. Automated task turns use policy/capture, while run-owned executions remain excluded. Overlap intervals are stored for both turns using checkout/worktree aliases. Focused lifecycle and coordinator tests passed for these cases; no new executor-matrix evidence was added.
+
+Terminal persistence retries now retain the same terminal identity and message anchor with capped exponential backoff until persistence succeeds or manager shutdown cancels the attempt. The generation fence remains closed during retries and opens after success. A focused race-enabled lifecycle test verifies retry, anchor removal, and successor admission.

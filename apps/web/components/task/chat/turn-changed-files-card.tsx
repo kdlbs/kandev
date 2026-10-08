@@ -95,7 +95,7 @@ function FolderRows({
     <div>
       <button
         type="button"
-        className="flex min-h-7 w-full min-w-0 items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-11"
+        className="flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-11"
         style={{ paddingInlineStart: `${12 + depth * 16}px` }}
         aria-expanded={isExpanded}
         onClick={() => onToggle(`${repositoryChangeId}:${folder.path}`)}
@@ -175,7 +175,7 @@ function FileRow({
   return (
     <button
       type="button"
-      className="flex min-h-7 w-full min-w-0 items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-11"
+      className="flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded px-2 text-left text-xs hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-11"
       style={{ paddingInlineStart: `${12 + depth * 16}px` }}
       onClick={onOpen}
       aria-label={t("task:turnChangesFileAccessibleLabel", {
@@ -339,7 +339,7 @@ function TurnChangesCardHeader({
           type="button"
           size="sm"
           variant="ghost"
-          className="h-7 min-h-7 px-2 text-xs [@media(pointer:coarse)]:min-h-11"
+          className="h-7 min-h-7 cursor-pointer px-2 text-xs [@media(pointer:coarse)]:min-h-11"
           onClick={onToggleAll}
           disabled={!hasRows}
         >
@@ -349,7 +349,7 @@ function TurnChangesCardHeader({
           type="button"
           size="sm"
           variant="secondary"
-          className="h-7 min-h-7 px-2 text-xs [@media(pointer:coarse)]:min-h-11"
+          className="h-7 min-h-7 cursor-pointer px-2 text-xs [@media(pointer:coarse)]:min-h-11"
           onClick={onOpenDiff}
           disabled={isExpired || isPending || isUnavailable || summary.file_count === 0}
           data-turn-change-open-diff
@@ -501,7 +501,7 @@ function RepositoryRows({
       <div key={repository.id} className="border-b border-border/40 last:border-b-0">
         <button
           type="button"
-          className="flex min-h-7 w-full items-center gap-2 px-3 text-left text-xs font-medium hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-11"
+          className="flex min-h-7 w-full cursor-pointer items-center gap-2 px-3 text-left text-xs font-medium hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-11"
           aria-expanded={isExpanded}
           onClick={() => onToggle(repository.id)}
         >
@@ -560,7 +560,7 @@ function LoadMoreButton({ loading, onClick }: { loading: boolean; onClick: () =>
         type="button"
         size="sm"
         variant="ghost"
-        className="h-7 min-h-7 px-2 text-xs [@media(pointer:coarse)]:min-h-11"
+        className="h-7 min-h-7 cursor-pointer px-2 text-xs [@media(pointer:coarse)]:min-h-11"
         disabled={loading}
         onClick={onClick}
       >

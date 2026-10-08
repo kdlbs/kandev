@@ -171,6 +171,42 @@ describe("turn change transcript fallback placement", () => {
     expect(turnChangeFallbackIndex(messageItems, "cancelled-turn", "2026-10-08T10:02:30Z")).toBe(1);
     expect(turnChangeFallbackIndex(messageItems, "turn-2")).toBe(2);
   });
+
+  it("ignores calendar-invalid wire timestamps when placing fallback cards", () => {
+    const malformedMessageItems = [
+      {
+        type: "message",
+        message: {
+          id: "before",
+          turn_id: "turn-before",
+          created_at: "2026-02-28T10:00:00Z",
+        } as Message,
+      },
+      {
+        type: "message",
+        message: {
+          id: "malformed",
+          turn_id: "turn-malformed",
+          created_at: "2026-02-30T10:00:00Z",
+        } as Message,
+      },
+      {
+        type: "message",
+        message: {
+          id: "after",
+          turn_id: "turn-after",
+          created_at: "2026-03-05T10:00:00Z",
+        } as Message,
+      },
+    ] as RenderItem[];
+
+    expect(
+      turnChangeFallbackIndex(malformedMessageItems, "cancelled", "2026-03-03T10:00:00Z"),
+    ).toBe(0);
+    expect(turnChangeFallbackIndex(messageItems, "invalid-terminal", "2026-02-30T10:02:30Z")).toBe(
+      2,
+    );
+  });
 });
 
 function touchEvent(type: "touchstart" | "touchmove", clientY: number): TouchEvent {

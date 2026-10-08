@@ -816,6 +816,8 @@ func (m *Manager) IsShuttingDown() bool {
 
 // closeStopCh closes the manager shutdown channel at most once.
 func (m *Manager) closeStopCh() {
+	m.turnChangeRetryMu.Lock()
+	defer m.turnChangeRetryMu.Unlock()
 	m.stopOnce.Do(func() { close(m.stopCh) })
 }
 

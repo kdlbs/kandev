@@ -112,7 +112,7 @@ const turnFileChangesTableStartDDL = `CREATE TABLE IF NOT EXISTS turn_file_chang
 `
 
 const turnFileChangesTableBooleanColumnsDDL = `	submodule BOOLEAN NOT NULL DEFAULT FALSE,
-	binary BOOLEAN NOT NULL DEFAULT FALSE,
+	is_binary BOOLEAN NOT NULL DEFAULT FALSE,
 `
 
 const turnFileChangesTableTailDDL = `	added_lines BIGINT,

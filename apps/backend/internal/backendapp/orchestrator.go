@@ -199,6 +199,7 @@ func provideOrchestrator(
 	orchestratorSvc.SetTurnService(newTurnServiceAdapter(taskSvc))
 	turnChangeContent := taskchanges.NewContentService(taskRepo, nil)
 	turnChangeCoordinator := taskchanges.NewCoordinator(taskRepo, taskSvc, userSvc, turnChangeContent, nil)
+	turnChangeCoordinator.SetLogger(log.Zap())
 	if err := turnChangeCoordinator.ReconcileUnfinished(context.Background()); err != nil {
 		log.Warn("failed to reconcile unfinished turn-change captures", zap.Error(err))
 	}

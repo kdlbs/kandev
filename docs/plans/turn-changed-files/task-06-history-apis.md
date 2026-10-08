@@ -3,7 +3,7 @@ id: turn-changed-files-06
 title: Summary history and authenticated historical reads
 status: done
 wave: 6
-depends_on: []
+depends_on:
   - turn-changed-files-02
   - turn-changed-files-04
   - turn-changed-files-05

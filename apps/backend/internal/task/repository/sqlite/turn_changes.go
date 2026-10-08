@@ -284,6 +284,52 @@ func (r *Repository) ListTurnRepositoryChanges(ctx context.Context, changeSetID 
 	return changes, nil
 }
 
+func (r *Repository) ListTurnRepositoryChangesForSets(ctx context.Context, changeSetIDs []string) (map[string][]*models.TurnRepositoryChangeSet, error) {
+	rowsBySet := make(map[string][]*models.TurnRepositoryChangeSet, len(changeSetIDs))
+	ids := make([]string, 0, len(changeSetIDs))
+	seen := make(map[string]struct{}, len(changeSetIDs))
+	for _, id := range changeSetIDs {
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+		rowsBySet[id] = nil
+	}
+	if len(ids) == 0 {
+		return rowsBySet, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	var changes []*models.TurnRepositoryChangeSet
+	err := r.ro.SelectContext(ctx, &changes, r.ro.Rebind(`
+		SELECT id, change_set_id, checkout_id, environment_repo_id, task_repository_id, repository_id,
+			worktree_id, display_name, repository_subpath, start_commit_oid, start_tree_oid, end_commit_oid,
+			end_tree_oid, hash_algorithm, start_captured_at, end_captured_at, start_ref, end_ref,
+			availability, reason, cleanup_pending, enumeration_complete, comparison_complete, content_complete,
+			overlap_intervals_json, created_at, updated_at
+		FROM turn_repository_changes
+		WHERE change_set_id IN (`+placeholders+`)
+		ORDER BY change_set_id, checkout_id, id
+	`), args...)
+	if err != nil {
+		return nil, err
+	}
+	for _, change := range changes {
+		if err := decodeTurnChangeOverlaps(change.OverlapIntervalsJSON, &change.OverlapIntervals); err != nil {
+			return nil, fmt.Errorf("decode repository change overlaps: %w", err)
+		}
+		rowsBySet[change.TurnChangeSetID] = append(rowsBySet[change.TurnChangeSetID], change)
+	}
+	return rowsBySet, nil
+}
+
 func (r *Repository) GetTurnRepositoryChange(ctx context.Context, changeSetID, repositoryChangeID string) (*models.TurnRepositoryChangeSet, error) {
 	change := &models.TurnRepositoryChangeSet{}
 	err := r.ro.GetContext(ctx, change, r.ro.Rebind(`
@@ -327,7 +373,7 @@ func (r *Repository) ListTurnFileChanges(ctx context.Context, changeSetID, repos
 	var files []*models.TurnFileChange
 	err := r.ro.SelectContext(ctx, &files, r.ro.Rebind(`
 		SELECT f.id, f.repository_change_id, f.checkout_id, f.path, f.path_bytes, f.old_path, f.old_path_bytes,
-			f.kind, f.old_blob_oid, f.new_blob_oid, f.old_mode, f.new_mode, f.submodule, f.binary,
+			f.kind, f.old_blob_oid, f.new_blob_oid, f.old_mode, f.new_mode, f.submodule, f.is_binary,
 			f.added_lines, f.deleted_lines, f.canonical_content_id, f.filtered_content_id, f.old_content_id, f.new_content_id,
 			f.content_availability, f.content_reason, f.content_truncated, f.canonical_content_bytes, f.created_at
 		FROM turn_file_changes f

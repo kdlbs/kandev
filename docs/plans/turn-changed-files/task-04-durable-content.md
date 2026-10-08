@@ -3,7 +3,7 @@ id: turn-changed-files-04
 title: Durable historical rendering and bounded retention
 status: done
 wave: 4
-depends_on: []
+depends_on:
   - turn-changed-files-02
   - turn-changed-files-03
 plan: plan.md

@@ -14,6 +14,8 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestCoordinatorPersistsPolicyAndCapturesBeforeDispatch(t *testing.T) {
@@ -58,6 +60,39 @@ func TestCoordinatorPersistsPolicyAndCapturesBeforeDispatch(t *testing.T) {
 
 	require.NoError(t, coordinator.Finish(ctx, Terminal{Admission: admission, At: time.Now()}, client))
 	require.Equal(t, 1, client.endCalls, "a duplicate terminal event must reuse the accepted result")
+}
+
+func TestLoadUnfinishedRepositoryRowsUsesOneBatchQuery(t *testing.T) {
+	store := newCoordinatorStore()
+	first := &models.TurnChangeSet{ID: "set-first"}
+	second := &models.TurnChangeSet{ID: "set-second"}
+	store.repositoryRows[first.ID] = []*models.TurnRepositoryChangeSet{{ID: "row-first", TurnChangeSetID: first.ID}}
+	store.repositoryRows[second.ID] = []*models.TurnRepositoryChangeSet{{ID: "row-second", TurnChangeSetID: second.ID}}
+
+	rows, err := NewCoordinator(store, nil, nil, nil, nil).loadUnfinishedRepositoryRows(context.Background(), []*models.TurnChangeSet{first, nil, second, first})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, store.batchListCalls)
+	require.Zero(t, store.singleListCalls)
+	require.Equal(t, "row-first", rows[first.ID][0].ID)
+	require.Equal(t, "row-second", rows[second.ID][0].ID)
+}
+
+func TestTerminalOverlapClosureFailureIsLogged(t *testing.T) {
+	store := newCoordinatorStore()
+	changeSet := &models.TurnChangeSet{ID: "set-overlap-log", TaskID: "task", TaskSessionID: "session"}
+	store.changeSets[changeSet.ID] = changeSet
+	store.unfinishedListErr = errors.New("overlap query failed")
+	core, logs := observer.New(zap.WarnLevel)
+	coordinator := NewCoordinator(store, nil, nil, nil, nil)
+	coordinator.SetLogger(zap.New(core))
+
+	_, err := coordinator.loadTerminalRepositoryRows(context.Background(), changeSet, Terminal{}, &coordinatorCheckpointClient{})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, logs.Len())
+	require.Equal(t, "failed to close admitted turn-change overlap intervals", logs.All()[0].Message)
+	require.Equal(t, changeSet.ID, logs.All()[0].ContextMap()["change_set_id"])
 }
 
 func TestCoordinatorDisabledPolicyDoesNotCallExecutorAndStillFinalizes(t *testing.T) {
@@ -541,6 +576,9 @@ type coordinatorStore struct {
 	files                     []models.TurnChangeFileContent
 	contentStatuses           map[string]bool
 	finalizeFailuresRemaining int
+	unfinishedListErr         error
+	singleListCalls           int
+	batchListCalls            int
 }
 
 func newCoordinatorStore() *coordinatorStore {
@@ -601,6 +639,7 @@ func (s *coordinatorStore) AdvanceTurnChangeSetPromptGeneration(_ context.Contex
 }
 
 func (s *coordinatorStore) ListTurnRepositoryChanges(_ context.Context, id string) ([]*models.TurnRepositoryChangeSet, error) {
+	s.singleListCalls++
 	rows := s.repositoryRows[id]
 	result := make([]*models.TurnRepositoryChangeSet, 0, len(rows))
 	for _, row := range rows {
@@ -610,7 +649,22 @@ func (s *coordinatorStore) ListTurnRepositoryChanges(_ context.Context, id strin
 	return result, nil
 }
 
+func (s *coordinatorStore) ListTurnRepositoryChangesForSets(_ context.Context, ids []string) (map[string][]*models.TurnRepositoryChangeSet, error) {
+	s.batchListCalls++
+	result := make(map[string][]*models.TurnRepositoryChangeSet, len(ids))
+	for _, id := range ids {
+		for _, row := range s.repositoryRows[id] {
+			copy := *row
+			result[id] = append(result[id], &copy)
+		}
+	}
+	return result, nil
+}
+
 func (s *coordinatorStore) ListUnfinishedTurnChangeSets(_ context.Context, _ int) ([]*models.TurnChangeSet, error) {
+	if s.unfinishedListErr != nil {
+		return nil, s.unfinishedListErr
+	}
 	var result []*models.TurnChangeSet
 	for _, changeSet := range s.changeSets {
 		if changeSet.TerminalAt == nil {

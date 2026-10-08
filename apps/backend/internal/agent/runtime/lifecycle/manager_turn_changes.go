@@ -11,6 +11,8 @@ import (
 
 const turnChangeTerminalCaptureTimeout = 20 * time.Second
 const turnChangeCancelRequestTimeout = 2 * time.Second
+const turnChangeRetryInitialDelay = 250 * time.Millisecond
+const turnChangeRetryMaximumDelay = 5 * time.Second
 
 func (m *Manager) admitTurnChangeCapture(ctx context.Context, execution *AgentExecution, generation uint64) error {
 	if m == nil || m.turnChangeCaptureHandler == nil || !eligibleTurnChangeExecution(execution) || generation == 0 {
@@ -107,17 +109,86 @@ func (m *Manager) finishTurnChangeCapture(execution *AgentExecution, event *agen
 	cancel()
 	execution.promptLifecycleMu.Lock()
 	if finishErr == nil {
-		execution.messageMu.Lock()
-		delete(execution.lastAssistantMessageIDByGeneration, event.PromptGeneration)
-		if len(execution.lastAssistantMessageIDByGeneration) == 0 {
-			execution.lastAssistantMessageIDByGeneration = nil
-		}
-		execution.messageMu.Unlock()
+		clearTurnChangeCaptureAnchor(execution, event.PromptGeneration)
 		finishTurnChangeCaptureLocked(execution, event.PromptGeneration)
+	} else {
+		m.retryTurnChangeCapture(execution, terminal)
 	}
-	// Keep the generation fence held if terminal persistence failed. A later
-	// retry or process restart can settle the row without admitting successor
-	// writes against an unrecorded boundary.
+}
+
+func (m *Manager) retryTurnChangeCapture(execution *AgentExecution, terminal TurnChangeTerminal) {
+	if m == nil || m.stopCh == nil || m.shuttingDown.Load() {
+		return
+	}
+	m.turnChangeRetryMu.Lock()
+	select {
+	case <-m.stopCh:
+		m.turnChangeRetryMu.Unlock()
+		return
+	default:
+	}
+	m.wg.Add(1)
+	m.turnChangeRetryMu.Unlock()
+
+	go func() {
+		defer m.wg.Done()
+		delay := turnChangeRetryInitialDelay
+		for {
+			timer := time.NewTimer(delay)
+			select {
+			case <-m.stopCh:
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+
+			client, release := execution.AcquireAgentCtlClient()
+			ctx, cancel := m.turnChangeRetryAttemptContext()
+			err := m.turnChangeCaptureHandler.FinishTurnChanges(ctx, terminal, client)
+			cancel()
+			release()
+			if err == nil {
+				execution.promptLifecycleMu.Lock()
+				clearTurnChangeCaptureAnchor(execution, terminal.PromptGeneration)
+				finishTurnChangeCaptureLocked(execution, terminal.PromptGeneration)
+				execution.promptLifecycleMu.Unlock()
+				return
+			}
+			m.logger.Warn("retrying failed terminal turn-change capture",
+				zap.String("execution_id", execution.ID),
+				zap.Uint64("prompt_generation", terminal.PromptGeneration),
+				zap.Error(err))
+			delay *= 2
+			if delay > turnChangeRetryMaximumDelay {
+				delay = turnChangeRetryMaximumDelay
+			}
+		}
+	}()
+}
+
+func (m *Manager) turnChangeRetryAttemptContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), turnChangeTerminalCaptureTimeout)
+	watchDone := make(chan struct{})
+	go func() {
+		select {
+		case <-m.stopCh:
+			cancel()
+		case <-watchDone:
+		}
+	}()
+	return ctx, func() {
+		close(watchDone)
+		cancel()
+	}
+}
+
+func clearTurnChangeCaptureAnchor(execution *AgentExecution, generation uint64) {
+	execution.messageMu.Lock()
+	delete(execution.lastAssistantMessageIDByGeneration, generation)
+	if len(execution.lastAssistantMessageIDByGeneration) == 0 {
+		execution.lastAssistantMessageIDByGeneration = nil
+	}
+	execution.messageMu.Unlock()
 }
 
 func beginTurnChangeCaptureLocked(execution *AgentExecution, generation uint64) {

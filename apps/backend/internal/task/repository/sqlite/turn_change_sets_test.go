@@ -197,6 +197,10 @@ func runTurnChangeSetSchemaReplayAndCAS(t *testing.T, repo *Repository) {
 	if err != nil || !accepted {
 		t.Fatalf("accept start = %t, %v; want accepted", accepted, err)
 	}
+	rowsBySet, err := repo.ListTurnRepositoryChangesForSets(ctx, []string{changeSet.ID, "missing-change-set", changeSet.ID, ""})
+	if err != nil || len(rowsBySet[changeSet.ID]) != 1 || len(rowsBySet["missing-change-set"]) != 0 {
+		t.Fatalf("batch repository changes = %#v, %v; want one row for the accepted set and none for missing set", rowsBySet, err)
+	}
 	start.StartCommitOID = "different"
 	accepted, err = repo.AcceptTurnChangeSetStart(ctx, changeSet.ID, 1, []models.TurnRepositoryChangeSet{start})
 	if err != nil || accepted {

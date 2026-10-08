@@ -6471,6 +6471,7 @@
       "show_todo_list_panel",
       "show_todo_list_panel_only_when_not_empty",
       "show_transcript_auto_scroll_control",
+      "show_turn_changed_files",
       "sidebar_active_view_id",
       "sidebar_draft",
       "sidebar_fast_actions_enabled",

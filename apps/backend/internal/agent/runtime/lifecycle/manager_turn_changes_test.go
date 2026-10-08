@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -322,7 +323,7 @@ func TestTerminalCaptureRetainsLastAssistantMessageAcrossFlushAndProtocolReset(t
 	}
 }
 
-func TestTerminalCaptureRetainsAssistantAnchorWhenPersistenceFails(t *testing.T) {
+func TestTerminalCaptureRetriesPersistenceAndReleasesFence(t *testing.T) {
 	manager := newTestManager(t)
 	execution := &AgentExecution{
 		ID: "execution-terminal-anchor-retry", TaskID: "task-terminal-anchor-retry",
@@ -337,21 +338,60 @@ func TestTerminalCaptureRetainsAssistantAnchorWhenPersistenceFails(t *testing.T)
 	execution.messageMu.Lock()
 	messageID := execution.lastAssistantMessageIDByGeneration[generation]
 	execution.messageMu.Unlock()
-	handler := &turnChangeCaptureBarrierHandler{
-		terminalEntered: make(chan TurnChangeTerminal, 1), finishErr: errors.New("terminal persistence unavailable"),
-	}
+	handler := &turnChangeCaptureRetryHandler{terminals: make(chan TurnChangeTerminal, 2)}
 	manager.SetTurnChangeCaptureHandler(handler)
 
 	require.True(t, manager.handleCompleteEvent(execution, &agentctl.AgentEvent{
 		Type: "complete", SessionID: execution.SessionID, TurnID: "turn-terminal-anchor-retry", PromptGeneration: generation,
 	}))
-	terminal := <-handler.terminalEntered
-	require.Equal(t, messageID, terminal.FinalAssistantMessageID)
+	firstTerminal := <-handler.terminals
+	require.Equal(t, messageID, firstTerminal.FinalAssistantMessageID)
+	select {
+	case retryTerminal := <-handler.terminals:
+		require.Equal(t, firstTerminal, retryTerminal)
+	case <-time.After(2 * time.Second):
+		t.Fatal("terminal persistence was not retried")
+	}
+	require.Eventually(t, func() bool {
+		execution.promptLifecycleMu.Lock()
+		defer execution.promptLifecycleMu.Unlock()
+		return execution.turnChangeCaptureGeneration == 0
+	}, 2*time.Second, 10*time.Millisecond, "successful retry did not release the generation fence")
 	execution.messageMu.Lock()
-	defer execution.messageMu.Unlock()
-	require.Equal(t, messageID, execution.lastAssistantMessageIDByGeneration[generation])
-	require.Equal(t, generation, execution.turnChangeCaptureGeneration)
+	_, anchorRetained := execution.lastAssistantMessageIDByGeneration[generation]
+	execution.messageMu.Unlock()
+	require.False(t, anchorRetained)
+	execution.promptLifecycleMu.Lock()
+	require.Zero(t, execution.turnChangeCaptureGeneration)
+	execution.promptLifecycleMu.Unlock()
+	nextGeneration, err := manager.BeginPrompt(execution.ID)
+	require.NoError(t, err)
+	require.Equal(t, generation+1, nextGeneration)
 }
+
+type turnChangeCaptureRetryHandler struct {
+	mu        sync.Mutex
+	attempts  int
+	terminals chan TurnChangeTerminal
+}
+
+func (h *turnChangeCaptureRetryHandler) AdmitTurnChanges(context.Context, TurnChangeAdmission, TurnChangeCheckpointClient) error {
+	return nil
+}
+
+func (h *turnChangeCaptureRetryHandler) FinishTurnChanges(_ context.Context, terminal TurnChangeTerminal, _ TurnChangeCheckpointClient) error {
+	h.mu.Lock()
+	h.attempts++
+	attempt := h.attempts
+	h.mu.Unlock()
+	h.terminals <- terminal
+	if attempt == 1 {
+		return errors.New("terminal persistence unavailable")
+	}
+	return nil
+}
+
+var _ TurnChangeCaptureHandler = (*turnChangeCaptureRetryHandler)(nil)
 
 type turnChangeCaptureBarrierHandler struct {
 	admitted         chan TurnChangeAdmission

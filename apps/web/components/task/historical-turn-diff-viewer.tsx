@@ -545,7 +545,7 @@ function ViewerNotice({
     <div className="p-4 text-sm text-muted-foreground" role={notice.role}>
       <p>{notice.text}</p>
       {notice.retry && (
-        <Button size="sm" variant="ghost" className="mt-2" onClick={retry}>
+        <Button size="sm" variant="ghost" className="mt-2 cursor-pointer" onClick={retry}>
           {t("task:turnChangesRetry")}
         </Button>
       )}
@@ -557,7 +557,13 @@ function LoadMoreButton({ loading, onClick }: { loading: boolean; onClick: () =>
   const { t } = useTranslation();
   return (
     <div className="p-3 text-center">
-      <Button size="sm" variant="ghost" onClick={onClick} disabled={loading}>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="cursor-pointer"
+        onClick={onClick}
+        disabled={loading}
+      >
         {loading ? loadingLabel(t) : t("task:turnChangesLoadMore")}
       </Button>
     </div>

@@ -143,7 +143,7 @@ type TurnFileChange struct {
 	OldMode               string                 `db:"old_mode" json:"old_mode,omitempty"`
 	NewMode               string                 `db:"new_mode" json:"new_mode,omitempty"`
 	Submodule             bool                   `db:"submodule" json:"submodule"`
-	Binary                bool                   `db:"binary" json:"binary"`
+	Binary                bool                   `db:"is_binary" json:"binary"`
 	AddedLines            *int64                 `db:"added_lines" json:"added_lines,omitempty"`
 	DeletedLines          *int64                 `db:"deleted_lines" json:"deleted_lines,omitempty"`
 	CanonicalContentID    string                 `db:"canonical_content_id" json:"-"`

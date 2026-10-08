@@ -3,7 +3,7 @@ id: turn-changed-files-09
 title: Executor qualification, performance evidence, and public docs
 status: in_progress
 wave: 9
-depends_on: []
+depends_on:
   - turn-changed-files-01
   - turn-changed-files-02
   - turn-changed-files-03
@@ -128,3 +128,5 @@ Targeted review regressions passed: six focused Go package groups, seven Vitest 
 - `cd apps/web && pnpm exec tsc --noEmit` and `pnpm run i18n:check` passed.
 - Desktop and mobile changed-files and settings E2Es passed after rebuilding the backend and E2E plugin fixture: two tests per viewport. The captured screenshots were refreshed and validated.
 - No completed full-suite rerun or cross-executor/performance qualification was performed for this remediation. A broad SQLite race run was cancelled before completion; the focused SQLite and process tests above passed. All qualification gaps listed above remain open, so this work order stays `in_progress`.
+
+An initial PR CI run found an invalid `binary` column identifier in PostgreSQL and stale generated settings-catalog snapshots; both are corrected (`is_binary` in the database schema and refreshed generated contracts). Eight work orders also had invalid list frontmatter for `depends_on`, which is corrected. Focused lifecycle, change-coordinator, SQLite repository, and transcript tests passed locally after these fixes. The PostgreSQL test DSN is absent locally, so the targeted PostgreSQL case skipped; fresh-head CI is the next check. No broad local suite was rerun. Kind/Kubernetes, Sprites, plugin executors, PostgreSQL-specific acceptance, transport timing, cold/slow storage, retention-growth evidence, and size/cancellation bounds remain open.

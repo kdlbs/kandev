@@ -411,7 +411,7 @@ func insertTurnChangeFile(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, file *m
 	_, err := tx.ExecContext(ctx, db.Rebind(`
 		INSERT INTO turn_file_changes (
 			id, repository_change_id, checkout_id, path, path_bytes, old_path, old_path_bytes,
-			kind, old_blob_oid, new_blob_oid, old_mode, new_mode, submodule, binary,
+			kind, old_blob_oid, new_blob_oid, old_mode, new_mode, submodule, is_binary,
 			added_lines, deleted_lines, content_availability, content_reason, content_truncated,
 			canonical_content_bytes, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -426,7 +426,7 @@ func findTurnChangeFile(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, repositor
 	file := &models.TurnFileChange{}
 	err := tx.GetContext(ctx, file, db.Rebind(`
 		SELECT id, repository_change_id, checkout_id, path, path_bytes, old_path, old_path_bytes,
-			kind, old_blob_oid, new_blob_oid, old_mode, new_mode, submodule, binary,
+			kind, old_blob_oid, new_blob_oid, old_mode, new_mode, submodule, is_binary,
 			added_lines, deleted_lines, canonical_content_id, filtered_content_id, old_content_id, new_content_id,
 			content_availability, content_reason, content_truncated, canonical_content_bytes, created_at
 		FROM turn_file_changes WHERE repository_change_id = ? AND path_bytes = ?

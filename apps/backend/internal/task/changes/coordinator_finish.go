@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/common/turnchanges"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	"go.uber.org/zap"
 )
 
 type terminalProgress struct {
@@ -189,6 +190,10 @@ func (c *Coordinator) loadTerminalRepositoryRows(
 	}
 	var overlapErr error
 	changeSet.OverlapIntervals, overlapErr = c.closeAdmittedOverlaps(changeSet.ID, terminal.At)
+	if overlapErr != nil {
+		c.logger.Warn("failed to close admitted turn-change overlap intervals",
+			zap.String("change_set_id", changeSet.ID), zap.Error(overlapErr))
+	}
 	if client == nil {
 		return nil, c.finalizeUnavailable(context.Background(), changeSet, terminal, models.TurnChangeReasonCheckoutUnavailable, client)
 	}
@@ -196,7 +201,6 @@ func (c *Coordinator) loadTerminalRepositoryRows(
 	if scopeErr != nil || !sameTurnChangeCheckoutsWithScopes(rows, terminal.Checkouts, scopes) {
 		return nil, c.finalizeUnavailable(context.Background(), changeSet, terminal, models.TurnChangeReasonCheckoutUnavailable, client)
 	}
-	_ = overlapErr
 	return rows, nil
 }
 

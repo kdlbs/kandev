@@ -16,6 +16,7 @@ import { useChatMotion } from "@/hooks/use-chat-motion";
 import { ChatMotionProvider } from "./chat-motion";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { Message, TaskSessionState } from "@/lib/types/http";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionTurnChanges } from "@/hooks/domains/session/use-turn-changes";
 import { TurnChangedFilesCard } from "./turn-changed-files-card";
@@ -860,15 +861,16 @@ export function turnChangeFallbackIndex(
     else if (item.type === "message" && item.message.turn_id === turnId) matchingTurnIndex = index;
   });
   if (matchingTurnIndex >= 0) return matchingTurnIndex;
-  const terminalTime = terminalAt ? Date.parse(terminalAt) : Number.NaN;
-  if (!Number.isFinite(terminalTime)) return items.length - 1;
+  const terminalTime = parseTurnTimestamp(terminalAt);
+  if (terminalTime === null) return items.length - 1;
   let lastBeforeTerminal = -1;
   items.forEach((item, index) => {
-    const messages = messagesInRenderItem(item);
-    const latestTime = Math.max(
-      ...messages.map((message) => Date.parse(message.created_at)).filter(Number.isFinite),
-    );
-    if (latestTime <= terminalTime) lastBeforeTerminal = index;
+    const latestTime = messagesInRenderItem(item).reduce<bigint | null>((latest, message) => {
+      const timestamp = parseTurnTimestamp(message.created_at);
+      if (timestamp === null) return latest;
+      return latest === null || timestamp > latest ? timestamp : latest;
+    }, null);
+    if (latestTime !== null && latestTime <= terminalTime) lastBeforeTerminal = index;
   });
   return lastBeforeTerminal;
 }

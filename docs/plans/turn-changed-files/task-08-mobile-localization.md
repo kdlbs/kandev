@@ -3,7 +3,7 @@ id: turn-changed-files-08
 title: Native mobile historical navigation and localized availability
 status: done
 wave: 8
-depends_on: []
+depends_on:
   - turn-changed-files-07
 plan: plan.md
 requirements:

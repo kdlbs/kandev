@@ -41,7 +41,7 @@ export function HistoricalViewerHeader({
           type="button"
           size="sm"
           variant="ghost"
-          className="h-7 min-h-7 px-2 text-xs [@media(pointer:coarse)]:min-h-11"
+          className="h-7 min-h-7 cursor-pointer px-2 text-xs [@media(pointer:coarse)]:min-h-11"
           onClick={onClose}
         >
           {t("task:close")}
@@ -120,7 +120,7 @@ export function HistoricalScopeSelect({
           type="button"
           size="sm"
           variant="ghost"
-          className="min-h-11 shrink-0 px-2 text-xs [@media(pointer:fine)]:min-h-8"
+          className="min-h-11 shrink-0 cursor-pointer px-2 text-xs [@media(pointer:fine)]:min-h-8"
           disabled={loading}
           onClick={onLoadMore}
         >

@@ -3,7 +3,7 @@ id: turn-changed-files-07
 title: Changed-files card and desktop historical diff selection
 status: done
 wave: 7
-depends_on: []
+depends_on:
   - turn-changed-files-06
 plan: plan.md
 requirements:

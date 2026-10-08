@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	"go.uber.org/zap"
 )
 
 type TurnReader interface {
@@ -69,6 +70,7 @@ type Coordinator struct {
 	content    *ContentService
 	now        func() time.Time
 	overlapMu  sync.Mutex
+	logger     *zap.Logger
 }
 
 const turnChangePersistenceTimeout = 3 * time.Second
@@ -81,7 +83,16 @@ func NewCoordinator(repo repository.TurnChangesRepository, turns TurnReader, pol
 	if now == nil {
 		now = time.Now
 	}
-	return &Coordinator{repository: repo, turns: turns, policies: policies, content: content, now: now}
+	return &Coordinator{repository: repo, turns: turns, policies: policies, content: content, now: now, logger: zap.NewNop()}
+}
+
+// SetLogger configures structured logging for coordinator diagnostics.
+func (c *Coordinator) SetLogger(logger *zap.Logger) {
+	if logger == nil {
+		c.logger = zap.NewNop()
+		return
+	}
+	c.logger = logger
 }
 
 // Admit persists the exact effective policy and, when enabled, a fresh
@@ -547,18 +558,18 @@ func (c *Coordinator) loadUnfinishedRepositoryRows(
 	ctx context.Context,
 	sets []*models.TurnChangeSet,
 ) (map[string][]*models.TurnRepositoryChangeSet, error) {
-	rowsBySet := make(map[string][]*models.TurnRepositoryChangeSet, len(sets))
+	ids := make([]string, 0, len(sets))
+	seen := make(map[string]struct{}, len(sets))
 	for _, set := range sets {
-		if set == nil {
-			continue
+		if set != nil && set.ID != "" {
+			if _, exists := seen[set.ID]; exists {
+				continue
+			}
+			seen[set.ID] = struct{}{}
+			ids = append(ids, set.ID)
 		}
-		rows, err := c.repository.ListTurnRepositoryChanges(ctx, set.ID)
-		if err != nil {
-			return nil, err
-		}
-		rowsBySet[set.ID] = rows
 	}
-	return rowsBySet, nil
+	return c.repository.ListTurnRepositoryChangesForSets(ctx, ids)
 }
 
 func recordOverlapsForCurrentRow(

@@ -3,7 +3,7 @@ id: turn-changed-files-03
 title: Executor-owned immutable Git capture
 status: done
 wave: 3
-depends_on: []
+depends_on:
   - turn-changed-files-02
 plan: plan.md
 requirements:

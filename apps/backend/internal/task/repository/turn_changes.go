@@ -15,6 +15,7 @@ type TurnChangesRepository interface {
 	ListTurnChangeSets(ctx context.Context, taskID, sessionID string, offset, limit int) ([]*models.TurnChangeSet, int, error)
 	ListUnfinishedTurnChangeSets(ctx context.Context, limit int) ([]*models.TurnChangeSet, error)
 	ListTurnRepositoryChanges(ctx context.Context, changeSetID string) ([]*models.TurnRepositoryChangeSet, error)
+	ListTurnRepositoryChangesForSets(ctx context.Context, changeSetIDs []string) (map[string][]*models.TurnRepositoryChangeSet, error)
 	GetTurnRepositoryChange(ctx context.Context, changeSetID, repositoryChangeID string) (*models.TurnRepositoryChangeSet, error)
 	ListTurnFileChanges(ctx context.Context, changeSetID, repositoryChangeID string, offset, limit int) ([]*models.TurnFileChange, int, error)
 	AcceptTurnChangeSetStart(ctx context.Context, changeSetID string, expectedRevision int64, repositories []models.TurnRepositoryChangeSet) (bool, error)
