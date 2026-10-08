@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo } from "react";
 import type React from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { FileTreeNode } from "@/lib/types/backend";
@@ -43,6 +43,8 @@ type FileBrowserTreeResult = {
   hideLoading: (path: string) => void;
   isLoading: (path: string) => boolean;
   collapseAll: () => void;
+  isCurrentTree: () => boolean;
+  refreshChanges: (changes: Array<{ path: string }>) => void;
 };
 
 function useMemoizedFileBrowserTreeResult(result: FileBrowserTreeResult) {
@@ -64,6 +66,8 @@ function useMemoizedFileBrowserTreeResult(result: FileBrowserTreeResult) {
       result.hideLoading,
       result.isLoading,
       result.collapseAll,
+      result.isCurrentTree,
+      result.refreshChanges,
     ],
   );
 }
@@ -231,11 +235,36 @@ function useFileChangeSubscription({
   const refreshes = useMemo(() => new FolderRefreshes(), [sessionId, resetKey, cacheBinding]);
   const ownerRef = useRef(refreshes);
   ownerRef.current = refreshes;
+  const subscribedRef = useRef(false);
+  const isCurrentTree = useCallback(
+    () =>
+      subscribedRef.current &&
+      ownerRef.current === refreshes &&
+      (!cacheBinding || cacheBinding.isCurrent()),
+    [refreshes, cacheBinding],
+  );
+  const refreshChanges = useCallback(
+    (changes: Array<{ path: string }>) => {
+      const client = getWebSocketClient();
+      if (!client || !isCurrentTree() || changes.length === 0) return;
+      applyFileChanges({
+        client,
+        sessionId,
+        expandedPaths: expandedPathsRef.current,
+        changes,
+        setTree,
+        setLoadState,
+        refreshes,
+        isCurrent: isCurrentTree,
+      });
+    },
+    [sessionId, expandedPathsRef, setTree, setLoadState, refreshes, isCurrentTree],
+  );
   useEffect(() => refreshes.committed());
-  useEffect(() => {
+  useLayoutEffect(() => {
     const client = getWebSocketClient();
     if (!client) return;
-    let current = true;
+    subscribedRef.current = true;
     const unsubscribe = client.on("session.workspace.file.changes", (msg) => {
       const changes = msg.payload?.changes;
       if (!changes || changes.length === 0) {
@@ -249,24 +278,15 @@ function useFileChangeSubscription({
           expandedPaths: expandedPathsRef.current.size,
           firstPaths: changes.slice(0, 3).map((c: { path: string }) => c.path),
         });
-      applyFileChanges({
-        client,
-        sessionId,
-        expandedPaths: expandedPathsRef.current,
-        changes,
-        setTree,
-        setLoadState,
-        refreshes,
-        isCurrent: () =>
-          current && ownerRef.current === refreshes && (!cacheBinding || cacheBinding.isCurrent()),
-      });
+      refreshChanges(changes);
     });
     return () => {
-      current = false;
+      subscribedRef.current = false;
       refreshes.retire();
       unsubscribe();
     };
-  }, [sessionId, resetKey, cacheBinding, expandedPathsRef, setTree, setLoadState, refreshes]);
+  }, [sessionId, expandedPathsRef, refreshes, refreshChanges]);
+  return { refreshChanges, isCurrentTree };
 }
 
 function useExpandedFileTree(tree: FileTreeNode | null) {
@@ -355,7 +375,7 @@ export function useFileBrowserTree(
     if (isLoadingTree || hasInitializedExpandedRef.current !== effectiveResetKey) return;
     setFilesPanelExpandedPaths(effectiveResetKey, Array.from(expandedPaths));
   }, [expandedPaths, effectiveResetKey, isLoadingTree]);
-  useFileChangeSubscription({
+  const { refreshChanges, isCurrentTree } = useFileChangeSubscription({
     sessionId,
     resetKey: effectiveResetKey,
     cacheBinding,
@@ -379,6 +399,8 @@ export function useFileBrowserTree(
     hideLoading,
     isLoading,
     collapseAll: treeApi.collapseAll,
+    refreshChanges,
+    isCurrentTree,
   });
 }
 
