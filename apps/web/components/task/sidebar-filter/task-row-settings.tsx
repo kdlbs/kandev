@@ -4,9 +4,8 @@ import { useMemo, useState } from "react";
 import {
   DndContext,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
   TouchSensor,
-  closestCenter,
   useSensor,
   useSensors,
   type DragEndEvent,
@@ -32,6 +31,8 @@ import {
 } from "@/lib/state/slices/ui/sidebar-task-row-presentation";
 import { SidebarSettingsDisclosure } from "./sidebar-settings-disclosure";
 import { sidebarSortHasKey } from "@/lib/sidebar/sidebar-sort-chain";
+import { SidebarReorderMenu } from "./sidebar-reorder-menu";
+import { createSidebarListCollisionDetection } from "./sidebar-reorder-collision";
 
 const DETAIL_LABEL_KEYS: Record<SidebarTaskRowDetail, string> = {
   relative_time: "task:taskRowRelativeTime",
@@ -53,23 +54,38 @@ const TRAILING_DESCRIPTION_KEYS: Record<SidebarTaskRowTrailing, string> = {
   none: "task:taskRowNothingDescription",
 };
 
+function taskRowDetailLabel(id: string, t: ReturnType<typeof useTranslation>["t"]) {
+  return t(DETAIL_LABEL_KEYS[id as SidebarTaskRowDetail] ?? "task:taskRowDetails");
+}
+
+function taskRowRelativeTimeDescriptionKey(sort: SortSpec) {
+  return sidebarSortHasKey(sort, "lastActivityAt")
+    ? "task:taskRowRelativeTimeLastActivity"
+    : "task:taskRowRelativeTimeLastUpdate";
+}
+
 function TaskRowSwitch({
   id,
   checked,
   onCheckedChange,
   ariaLabel,
   testId,
+  isDrawerLayout,
 }: {
   id: string;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   ariaLabel: string;
   testId: string;
+  isDrawerLayout: boolean;
 }) {
+  const targetClass = isDrawerLayout
+    ? "size-11"
+    : "size-7 max-md:size-11 [@media(pointer:coarse)]:size-11";
   return (
     <label
       htmlFor={id}
-      className="flex size-11 shrink-0 cursor-pointer items-center justify-center"
+      className={`flex shrink-0 cursor-pointer items-center justify-center ${targetClass}`}
       data-testid={testId}
     >
       <Switch
@@ -78,7 +94,11 @@ function TaskRowSwitch({
         checked={checked}
         onCheckedChange={onCheckedChange}
         aria-label={ariaLabel}
-        className="after:-inset-y-4"
+        className={
+          isDrawerLayout
+            ? "after:-inset-y-4"
+            : "max-md:after:-inset-y-4 [@media(pointer:coarse)]:after:-inset-y-4"
+        }
       />
     </label>
   );
@@ -98,17 +118,30 @@ export function reorderSidebarTaskRowDetails(
 function SortableDetailRow({
   detail,
   value,
+  isDrawerLayout,
   onToggle,
+  onMove,
 }: {
   detail: SidebarTaskRowDetail;
   value: SidebarTaskRowPresentation;
+  isDrawerLayout: boolean;
   onToggle: (detail: SidebarTaskRowDetail, checked: boolean) => void;
+  onMove: (offset: -1 | 1) => void;
 }) {
   const { t } = useTranslation();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: detail,
-  });
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: detail });
   const label = t(DETAIL_LABEL_KEYS[detail]);
+  const handleClass = isDrawerLayout
+    ? "size-11"
+    : "size-7 max-md:size-11 [@media(pointer:coarse)]:size-11";
 
   return (
     <div
@@ -119,10 +152,12 @@ function SortableDetailRow({
       data-dragging={isDragging ? "true" : undefined}
     >
       <button
+        ref={setActivatorNodeRef}
         type="button"
         aria-label={t("task:taskRowReorderHandle", { label })}
-        className="flex min-h-11 min-w-11 shrink-0 touch-none items-center justify-center text-muted-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={`flex shrink-0 touch-none items-center justify-center text-muted-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${handleClass}`}
         data-testid={`task-row-detail-handle-${detail}`}
+        data-vaul-no-drag={isDrawerLayout ? "" : undefined}
         {...attributes}
         {...listeners}
         aria-roledescription={t("task:taskRowReorderable")}
@@ -142,37 +177,148 @@ function SortableDetailRow({
           )}
         </span>
       </label>
+      <SidebarReorderMenu
+        label={label}
+        position={value.detailOrder.indexOf(detail) + 1}
+        count={value.detailOrder.length}
+        onMove={onMove}
+        isDrawerLayout={isDrawerLayout}
+        testId={`task-row-detail-more-${detail}`}
+      />
       <TaskRowSwitch
         id={`task-row-detail-${detail}-toggle`}
         checked={value.visibleDetails.includes(detail)}
         onCheckedChange={(checked) => onToggle(detail, checked)}
         ariaLabel={t("task:taskRowToggleDetail", { label })}
         testId={`task-row-detail-toggle-${detail}`}
+        isDrawerLayout={isDrawerLayout}
       />
     </div>
+  );
+}
+
+function TaskRowDetailList({
+  value,
+  detailOrder,
+  isDrawerLayout,
+  reorderScopeKey,
+  relativeTimeDescriptionKey,
+  sensors,
+  announcement,
+  detailLabel,
+  onToggle,
+  onMove,
+  onDragEnd,
+}: {
+  value: SidebarTaskRowPresentation;
+  detailOrder: SidebarTaskRowDetail[];
+  isDrawerLayout: boolean;
+  reorderScopeKey: string;
+  relativeTimeDescriptionKey: string;
+  sensors: ReturnType<typeof useSensors>;
+  announcement: string;
+  detailLabel: (id: string) => string;
+  onToggle: (detail: SidebarTaskRowDetail, checked: boolean) => void;
+  onMove: (detail: SidebarTaskRowDetail, offset: -1 | 1) => void;
+  onDragEnd: (event: DragEndEvent) => void;
+}) {
+  const { t } = useTranslation();
+  const collision = useMemo(createSidebarListCollisionDetection, []);
+
+  return (
+    <>
+      <DndContext
+        key={reorderScopeKey}
+        sensors={sensors}
+        collisionDetection={collision.detect}
+        onDragStart={collision.reset}
+        onDragEnd={(event) => {
+          const dropEvent = collision.isDropWithinCurrentVisibleBounds()
+            ? event
+            : { ...event, over: null };
+          onDragEnd(dropEvent);
+        }}
+        onDragCancel={collision.reset}
+        accessibility={{
+          screenReaderInstructions: { draggable: t("task:sidebarReorderInstructions") },
+          announcements: {
+            onDragStart: ({ active }) => {
+              const position = detailOrder.indexOf(String(active.id) as SidebarTaskRowDetail) + 1;
+              return t("task:sidebarReorderPickedUp", {
+                label: detailLabel(String(active.id)),
+                position,
+                count: detailOrder.length,
+              });
+            },
+            onDragOver: ({ active, over }) => {
+              if (!over) return;
+              return t("task:sidebarReorderMoved", {
+                label: detailLabel(String(active.id)),
+                position: detailOrder.indexOf(String(over.id) as SidebarTaskRowDetail) + 1,
+                count: detailOrder.length,
+              });
+            },
+            onDragEnd: ({ active, over }) => {
+              if (!over || !collision.isDropWithinCurrentVisibleBounds()) {
+                return t("task:sidebarReorderCancelled", {
+                  label: detailLabel(String(active.id)),
+                });
+              }
+              return t("task:sidebarReorderDropped", {
+                label: detailLabel(String(active.id)),
+                position: detailOrder.indexOf(String(over.id) as SidebarTaskRowDetail) + 1,
+              });
+            },
+            onDragCancel: ({ active }) =>
+              t("task:sidebarReorderCancelled", { label: detailLabel(String(active.id)) }),
+          },
+        }}
+      >
+        <SortableContext items={detailOrder} strategy={verticalListSortingStrategy}>
+          <div className="mt-1" data-sidebar-reorder-list="">
+            {detailOrder.map((detail) => (
+              <SortableDetailRow
+                key={detail}
+                detail={detail}
+                value={value}
+                isDrawerLayout={isDrawerLayout}
+                onToggle={onToggle}
+                onMove={(offset) => onMove(detail, offset)}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+      <p className="px-1 pt-1 text-[11px] text-muted-foreground">{t(relativeTimeDescriptionKey)}</p>
+      <div aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
+    </>
   );
 }
 
 function TaskRowDetailsSection({
   value,
   sort,
+  isDrawerLayout,
+  reorderScopeKey,
   onChange,
 }: {
   value: SidebarTaskRowPresentation;
   sort: SortSpec;
+  isDrawerLayout: boolean;
+  reorderScopeKey: string;
   onChange: (value: SidebarTaskRowPresentation) => void;
 }) {
   const { t } = useTranslation();
   const [announcement, setAnnouncement] = useState("");
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
-  const detailOrder = useMemo(() => [...value.detailOrder], [value.detailOrder]);
-  const relativeTimeDescriptionKey = sidebarSortHasKey(sort, "lastActivityAt")
-    ? "task:taskRowRelativeTimeLastActivity"
-    : "task:taskRowRelativeTimeLastUpdate";
+  const detailOrder = value.detailOrder;
+  const relativeTimeDescriptionKey = taskRowRelativeTimeDescriptionKey(sort);
 
   function update(next: Partial<SidebarTaskRowPresentation>) {
     onChange({ ...value, ...next });
@@ -189,6 +335,24 @@ function TaskRowDetailsSection({
       t("task:taskRowReordered", {
         label: t(DETAIL_LABEL_KEYS[activeId]),
         position: nextOrder.indexOf(activeId) + 1,
+      }),
+    );
+  }
+
+  function moveDetail(detail: SidebarTaskRowDetail, offset: -1 | 1) {
+    const index = detailOrder.indexOf(detail);
+    const destination = index + offset;
+    if (index < 0 || destination < 0 || destination >= detailOrder.length) return;
+    const target = detailOrder[destination];
+    if (!target) return;
+    const nextOrder = reorderSidebarTaskRowDetails(detailOrder, detail, target);
+    if (nextOrder === detailOrder) return;
+    update({ detailOrder: nextOrder });
+    setAnnouncement(
+      t("task:sidebarReorderMoved", {
+        label: t(DETAIL_LABEL_KEYS[detail]),
+        position: destination + 1,
+        count: detailOrder.length,
       }),
     );
   }
@@ -215,36 +379,24 @@ function TaskRowDetailsSection({
           onCheckedChange={(detailsEnabled) => update({ detailsEnabled })}
           ariaLabel={t("task:taskRowToggleDetails")}
           testId="task-row-details-toggle"
+          isDrawerLayout={isDrawerLayout}
         />
       </div>
       {value.detailsEnabled && (
-        <>
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext items={detailOrder} strategy={verticalListSortingStrategy}>
-              <div className="mt-1">
-                {detailOrder.map((detail) => (
-                  <SortableDetailRow
-                    key={detail}
-                    detail={detail}
-                    value={value}
-                    onToggle={handleToggle}
-                  />
-                ))}
-              </div>
-            </SortableContext>
-          </DndContext>
-          <p className="px-1 pt-1 text-[11px] text-muted-foreground">
-            {t(relativeTimeDescriptionKey)}
-          </p>
-        </>
+        <TaskRowDetailList
+          value={value}
+          detailOrder={detailOrder}
+          isDrawerLayout={isDrawerLayout}
+          reorderScopeKey={reorderScopeKey}
+          relativeTimeDescriptionKey={relativeTimeDescriptionKey}
+          sensors={sensors}
+          announcement={announcement}
+          detailLabel={(id) => taskRowDetailLabel(id, t)}
+          onToggle={handleToggle}
+          onMove={moveDetail}
+          onDragEnd={handleDragEnd}
+        />
       )}
-      <div aria-live="polite" className="sr-only">
-        {announcement}
-      </div>
     </div>
   );
 }
@@ -301,10 +453,14 @@ function TaskRowTrailingSelect({
 export function TaskRowSettings({
   value,
   sort,
+  isDrawerLayout = false,
+  reorderScopeKey = "default",
   onChange,
 }: {
   value: SidebarTaskRowPresentation;
   sort: SortSpec;
+  isDrawerLayout?: boolean;
+  reorderScopeKey?: string;
   onChange: (value: SidebarTaskRowPresentation) => void;
 }) {
   const { t } = useTranslation();
@@ -328,7 +484,13 @@ export function TaskRowSettings({
       className="border-b"
       contentClassName="space-y-2 pt-1"
     >
-      <TaskRowDetailsSection value={value} sort={sort} onChange={onChange} />
+      <TaskRowDetailsSection
+        value={value}
+        sort={sort}
+        isDrawerLayout={isDrawerLayout}
+        reorderScopeKey={reorderScopeKey}
+        onChange={onChange}
+      />
       <TaskRowTrailingSelect value={value} onChange={onChange} />
     </SidebarSettingsDisclosure>
   );

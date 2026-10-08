@@ -103,6 +103,11 @@ The MCP editor checks only that the value is a JSON object. Its presets cover st
 
 Profile edits apply when Kandev provisions a launch, but a Docker container or Sprite resume can reconnect to the already provisioned process, image, environment, credentials, and files. Kubernetes records a separate workload snapshot for each session; changing its profile affects new sessions, while an existing session and any replacement Pod keep that snapshot. Use **Reset Environment** or explicitly destroy the resource when a change must take effect on a fresh environment. Deleting or editing a profile does not tear down an already-running resource.
 
+An ordinary partial API save keeps each omitted prepare or cleanup script,
+including a newer value saved concurrently. Supplying a script replaces it;
+supplying an empty string clears it. The profile editor submits both scripts,
+so a stale full editor draft can still replace newer script values.
+
 ### Repository environment secrets
 
 Open a workspace repository's editor to add **Environment secrets** bindings. Each binding maps a POSIX environment key to a Global secret or a Workspace secret from that same workspace. A task receives the bindings from every repository attached to it, along with its selected executor profile environment. The resolved snapshot is available to repository setup scripts, the agent, child shells, and new terminal-panel terminals on supported executors.

@@ -227,6 +227,29 @@ describe("coordinator About-prefix tag: raw view", () => {
 });
 
 describe("coordinator About-prefix tag: fallbacks", () => {
+  it.each([
+    ["workflow", "About Sprint board [workflow:wf-1]: what is stuck?", "about Sprint board"],
+    ["task", "About KAN-9 [task:t-1]: what is stuck?", "about KAN-9"],
+    ["proposal", "About KAN-9 [proposal:p-1]: what is stuck?", "about KAN-9"],
+    ["stall", "About KAN-9 [stall:s-1]: what is stuck?", "about KAN-9"],
+  ])("reads a %s reference and hides the bracket", (_kind, content, tagText) => {
+    render(
+      <>
+        {renderUserMessageBody({
+          hasContent: true,
+          showRaw: false,
+          hasAttachments: false,
+          content,
+          taskId: "task-1",
+          taskOrigin: "coordinator",
+        })}
+      </>,
+    );
+
+    expect(screen.getByText("what is stuck?")).toBeTruthy();
+    expect(screen.getByTestId(TAG_TESTID).textContent).toBe(tagText);
+  });
+
   it("renders verbatim when the content has no ': ' separator", () => {
     render(
       <>

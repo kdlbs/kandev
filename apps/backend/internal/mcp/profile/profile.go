@@ -49,6 +49,9 @@ type Context struct {
 	Capabilities      []Capability       `json:"capabilities,omitempty"`
 	Providers         []string           `json:"providers,omitempty"`
 	ManagedToolPolicy *ManagedToolPolicy `json:"managed_tool_policy,omitempty"`
+	// CoordinatorToolPolicy is the tool list bound to a coordinator
+	// conversation; nil for every other surface.
+	CoordinatorToolPolicy *CoordinatorToolPolicy `json:"coordinator_tool_policy,omitempty"`
 }
 
 // ManagedToolPolicy is the backend-resolved authority for one retained plugin
@@ -176,6 +179,11 @@ func Normalize(c Context) Context {
 		slices.Sort(policy.AgentToolNames)
 		normalized.Surface = SurfaceManagedConversation
 		normalized.ManagedToolPolicy = &policy
+	}
+	if c.CoordinatorToolPolicy != nil && c.Surface == SurfaceCoordinator {
+		policy := *c.CoordinatorToolPolicy
+		policy.ToolNames = slices.Clone(c.CoordinatorToolPolicy.ToolNames)
+		normalized.CoordinatorToolPolicy = &policy
 	}
 	return normalized
 }

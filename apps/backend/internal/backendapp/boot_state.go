@@ -95,7 +95,7 @@ func bootInitialState(
 		activeID := ""
 		if ok {
 			activeID = builder.settingsWorkspaceID(ctx, req, workspaces)
-			builder.addWorkspaceStateFrom(workspaces, state, &activeID)
+			builder.addWorkspaceStateFrom(ctx, workspaces, state, &activeID)
 		}
 		builder.addUserSettingsState(ctx, state, activeID)
 		builder.addSettingsRouteState(ctx, state, route.Path)
@@ -162,6 +162,12 @@ func isLocalContextRoute(route webapp.RouteName) bool {
 	}
 }
 
+// bootItemsKey and bootActiveIDKey name the fields of a boot slice block.
+const (
+	bootItemsKey    = "items"
+	bootActiveIDKey = "activeId"
+)
+
 type bootStateBuilder struct {
 	p routeParams
 }
@@ -171,7 +177,7 @@ func (b bootStateBuilder) addWorkspaceState(ctx context.Context, state map[strin
 	if !ok {
 		return
 	}
-	b.addWorkspaceStateFrom(workspaces, state, activeID)
+	b.addWorkspaceStateFrom(ctx, workspaces, state, activeID)
 }
 
 // listBootWorkspaces returns the workspace snapshot a boot payload is built
@@ -189,24 +195,18 @@ func (b bootStateBuilder) listBootWorkspaces(ctx context.Context) ([]*taskmodels
 }
 
 func (b bootStateBuilder) addWorkspaceStateFrom(
+	ctx context.Context,
 	workspaces []*taskmodels.Workspace,
 	state map[string]any,
 	activeID *string,
 ) {
-	items := make([]taskdto.WorkspaceDTO, 0, len(workspaces))
-	for _, workspace := range workspaces {
-		if workspace == nil {
-			continue
-		}
-		items = append(items, taskdto.FromWorkspace(workspace))
-	}
 	var active any
 	if activeID != nil {
 		active = *activeID
 	}
 	state["workspaces"] = map[string]any{
-		"items":    items,
-		"activeId": active,
+		bootItemsKey:    b.workspaceItemStates(ctx, workspaces),
+		bootActiveIDKey: active,
 	}
 }
 

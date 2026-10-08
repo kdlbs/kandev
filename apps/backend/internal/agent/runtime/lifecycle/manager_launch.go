@@ -352,6 +352,15 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			metadata[mcpprofile.ManagedToolPolicyMetadataKey] = encoded
 		}
 	}
+	delete(metadata, mcpprofile.CoordinatorToolPolicyMetadataKey)
+	if req.McpProfile != nil && req.McpProfile.CoordinatorToolPolicy != nil {
+		encoded, err := mcpprofile.MarshalCoordinatorToolPolicy(*req.McpProfile.CoordinatorToolPolicy)
+		if err != nil {
+			metadata[mcpprofile.CoordinatorToolPolicyMetadataKey] = map[string]any{"invalid": true}
+		} else {
+			metadata[mcpprofile.CoordinatorToolPolicyMetadataKey] = encoded
+		}
+	}
 	putPrimaryCheckoutOptions(metadata, req)
 	for k, v := range req.ExecutorConfig {
 		if isTrustedExecutorConfigKey(k) {
@@ -359,6 +368,9 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			// or buggy task metadata payload can't swap out the SSH host /
 			// pinned fingerprint and pivot the launch to a different target.
 			metadata[k] = v
+			continue
+		}
+		if k == mcpprofile.CoordinatorToolPolicyMetadataKey {
 			continue
 		}
 		if _, exists := metadata[k]; !exists {
@@ -1077,6 +1089,7 @@ func (m *Manager) newProgressCallbackForPreparation(taskID, sessionID, preparati
 			StepKind:             step.Kind,
 			MCPProvider:          step.MCPProvider,
 			MCPServerID:          step.MCPServerID,
+			Diagnostic:           normalizeCursorMCPDiagnostic(step.Diagnostic),
 			RemotePlatform:       step.RemotePlatform,
 			FailureCode:          step.FailureCode,
 			StepCommand:          step.Command,
@@ -1147,7 +1160,11 @@ func persistedPrepareSteps(metadata map[string]interface{}) []PrepareStep {
 	if json.Unmarshal(data, &stored) != nil {
 		return nil
 	}
-	return append([]PrepareStep(nil), stored.Steps...)
+	steps := append([]PrepareStep(nil), stored.Steps...)
+	for index := range steps {
+		steps[index].Diagnostic = normalizeCursorMCPDiagnostic(steps[index].Diagnostic)
+	}
+	return steps
 }
 
 func (m *Manager) newPreparationAttemptRecorder(taskID, sessionID string) *prepareProgressRecorder {
@@ -1205,6 +1222,24 @@ func (r *prepareProgressRecorder) SeedSteps(steps []PrepareStep) {
 		r.seededSteps = len(r.steps)
 	}
 	r.mu.Unlock()
+}
+
+// RestoreSteps republishes the prior snapshot under this attempt's identity.
+func (r *prepareProgressRecorder) RestoreSteps(steps []PrepareStep) {
+	if len(steps) == 0 {
+		return
+	}
+	restored := append([]PrepareStep(nil), steps...)
+	r.mu.Lock()
+	r.steps = restored
+	r.seededSteps = 0
+	callback := r.callback
+	r.mu.Unlock()
+	if callback != nil {
+		for index, step := range restored {
+			callback(step, index, len(restored))
+		}
+	}
 }
 
 func (r *prepareProgressRecorder) UpdateStep(index int, step PrepareStep) {

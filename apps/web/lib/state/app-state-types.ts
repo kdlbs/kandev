@@ -724,7 +724,7 @@ export type AppState = KanbanSlice & {
 
 // Most callers hydrate a fully-shaped slice per top-level key (see
 // mergeInitialState / hydrateState), but `system` is a grab-bag of many
-// independently-fetched fields (info, diskUsage, updates, ...). Callers that
+// independently-fetched fields (info, updates, ...). Callers that
 // only have one piece of it (e.g. update notification settings from the
 // settings boot payload) must be able to pass a partial `system` object
 // without fabricating placeholder values for the rest.

@@ -36,6 +36,7 @@ export type SidebarViewEditorCurrent = {
 type Props = {
   current: SidebarViewEditorCurrent;
   isDrawerLayout: boolean;
+  reorderScopeKey: string;
   headerProps: ComponentProps<typeof ViewHeaderRow>;
   onUpdate: (patch: Partial<SidebarViewEditorCurrent>) => void;
   onAddFilter: () => void;
@@ -46,6 +47,7 @@ type Props = {
 export function SidebarViewEditor({
   current,
   isDrawerLayout,
+  reorderScopeKey,
   headerProps,
   onUpdate,
   onAddFilter,
@@ -91,6 +93,7 @@ export function SidebarViewEditor({
           value={current.sort}
           onChange={(sort) => onUpdate({ sort })}
           isDrawerLayout={isDrawerLayout}
+          reorderScopeKey={reorderScopeKey}
           warningCount={current.sortWarningCount ?? 0}
         />
       </SidebarSettingsDisclosure>
@@ -119,6 +122,8 @@ export function SidebarViewEditor({
       <TaskRowSettings
         value={current.taskRow}
         sort={current.sort}
+        isDrawerLayout={isDrawerLayout}
+        reorderScopeKey={reorderScopeKey}
         onChange={(taskRow) => onUpdate({ taskRow })}
       />
       <AutomaticColorSettings isDrawerLayout={isDrawerLayout} />

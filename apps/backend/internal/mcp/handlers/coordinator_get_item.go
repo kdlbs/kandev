@@ -112,6 +112,8 @@ func (h *Handlers) getCoordinatorStallItem(
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to read item", nil)
 	case task == nil || task.WorkspaceID != principal.WorkspaceID:
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target not found", nil)
+	case h.coordinatorSvc.Phase2() && !h.coordinatorWatchesWorkflow(ctx, principal, task.WorkflowID):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target not found", nil)
 	}
 	stall, err := h.coordinatorSvc.GetStall(ctx, principal.WorkspaceID, id)
 	if errors.Is(err, coordinator.ErrNotFound) {

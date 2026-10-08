@@ -1,11 +1,12 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import { waitForHttp } from "../../helpers/causal-waits";
+import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
 import { waitForSessionDone } from "../../helpers/session";
 import { expectControlHeight } from "../../helpers/control-sizing";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { SessionPage } from "../../pages/session-page";
 
 async function seedCompletedSession(testPage: Page, apiClient: ApiClient, seedData: SeedData) {
@@ -48,21 +49,30 @@ test.describe("Task control sizing", () => {
     await expectControlHeight(session.completedSessionNewAgentButton(), 28);
   });
 
-  test("task creation keeps touch sizing until the md breakpoint", async ({ testPage }) => {
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    const branchesOrWorkflowLoaded = waitForHttp(testPage, "GET", /\/workflows|\/repositories/);
-    await kanban.createTaskButton.first().click();
-    await branchesOrWorkflowLoaded;
-    await testPage.setViewportSize({ width: 700, height: 900 });
+  test("task creation keeps touch sizing until the md breakpoint", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const initialLayout = (await apiClient.getUserSettings()).settings
+      .sidebar_layouts_by_workspace?.[seedData.workspaceId];
+    try {
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
+      await kanban.createTaskButton.first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await testPage.setViewportSize({ width: 700, height: 900 });
 
-    const dialog = testPage.getByTestId("create-task-dialog");
-    await expect(dialog).toBeVisible();
-    await dialog.getByTestId("task-title-input").fill("Control sizing task");
-    await dialog.getByTestId("task-description-input").fill("Check task action geometry");
+      await dialog.getByTestId("task-title-input").fill("Control sizing task");
+      await dialog.getByTestId("task-description-input").fill("Check task action geometry");
 
-    const startButton = dialog.getByTestId("submit-start-agent");
-    await expect(startButton).toBeEnabled();
-    await expectControlHeight(startButton, 44);
+      const startButton = dialog.getByTestId("submit-start-agent");
+      await expect(startButton).toBeEnabled();
+      await expectControlHeight(startButton, 44);
+    } finally {
+      await restoreSidebarLayout(apiClient, seedData.workspaceId, initialLayout);
+    }
   });
 });

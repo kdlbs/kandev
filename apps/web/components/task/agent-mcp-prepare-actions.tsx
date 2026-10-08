@@ -13,6 +13,12 @@ import {
 } from "@/lib/api/domains/session-api";
 import { fetchTerminals, type TerminalInfo } from "@/lib/api/domains/user-shell-api";
 import { isAgentMcpAuthWarning } from "@/lib/prepare/agent-mcp-warning";
+import {
+  normalizeNativeMcpDiagnostic,
+  type NativeMCPDiagnostic,
+  type NativeMCPDiagnosticOperation,
+  type NativeMCPDiagnosticStage,
+} from "@/lib/prepare/native-mcp-diagnostic";
 import { cn } from "@/lib/utils";
 import type { PrepareStepInfo, UserShellInfo } from "@/lib/state/slices/session-runtime/types";
 
@@ -26,6 +32,25 @@ const FAILURE_LABEL_KEYS: Record<string, string> = {
   canceled: "task:agentMcpPreparationCanceled",
   stale: "task:agentMcpSelectionChanged",
 };
+
+const OPERATION_LABEL_KEYS: Record<NativeMCPDiagnosticOperation, string> = {
+  enable: "task:agentMcpDiagnosticOperationApproval",
+  list_tools: "task:agentMcpDiagnosticOperationListTools",
+};
+
+const STAGE_LABEL_KEYS: Record<NativeMCPDiagnosticStage, string> = {
+  resolve: "task:agentMcpDiagnosticStageResolve",
+  start: "task:agentMcpDiagnosticStageStart",
+  wait: "task:agentMcpDiagnosticStageWait",
+  cleanup: "task:agentMcpDiagnosticStageCleanup",
+  output: "task:agentMcpDiagnosticStageOutput",
+};
+
+function diagnosticOperationFailureLabelKey(diagnostic?: NativeMCPDiagnostic): string | undefined {
+  if (diagnostic?.operation === "enable") return "task:agentMcpApprovalCommandFailed";
+  if (diagnostic?.operation === "list_tools") return "task:agentMcpVerificationCommandFailed";
+  return undefined;
+}
 
 function userShellFromTerminalInfo(terminal: TerminalInfo, label: string): UserShellInfo | null {
   const terminalId = terminal.id ?? terminal.terminal_id;
@@ -70,8 +95,84 @@ async function resolveRecoveryShell(
   };
 }
 
-export function agentMcpFailureLabelKey(failureCode?: string): string {
+export function agentMcpFailureLabelKey(
+  failureCode?: string,
+  diagnostic?: NativeMCPDiagnostic,
+): string {
+  if (failureCode !== "authentication_required") {
+    const commandFailureKey = diagnosticOperationFailureLabelKey(diagnostic);
+    if (commandFailureKey) return commandFailureKey;
+  }
   return FAILURE_LABEL_KEYS[failureCode ?? ""] ?? "task:agentMcpConnectionFailed";
+}
+
+function NativeMcpDiagnosticDetails({ diagnostic }: { diagnostic: NativeMCPDiagnostic }) {
+  const { t } = useTranslation();
+  return (
+    <section
+      className="min-w-0 max-w-full space-y-1 rounded bg-muted/40 p-2"
+      data-testid="agent-mcp-diagnostic"
+    >
+      <p className="font-medium">{t("task:agentMcpErrorDetails")}</p>
+      <dl className="min-w-0 space-y-1">
+        <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-2">
+          <dt className="text-muted-foreground">{t("task:agentMcpDiagnosticOperation")}</dt>
+          <dd className="min-w-0 break-words">{t(OPERATION_LABEL_KEYS[diagnostic.operation])}</dd>
+        </div>
+        <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-2">
+          <dt className="text-muted-foreground">{t("task:agentMcpDiagnosticStage")}</dt>
+          <dd className="min-w-0 break-words">{t(STAGE_LABEL_KEYS[diagnostic.stage])}</dd>
+        </div>
+        {diagnostic.exitCode !== undefined && (
+          <div>
+            <dt className="sr-only">{t("task:agentMcpDiagnosticExitStatus")}</dt>
+            <dd>{t("task:agentMcpDiagnosticExitStatusValue", { code: diagnostic.exitCode })}</dd>
+          </div>
+        )}
+      </dl>
+      <p
+        className="min-w-0 max-w-full whitespace-pre-wrap break-words select-text"
+        data-testid="agent-mcp-diagnostic-message"
+      >
+        {diagnostic.message}
+      </p>
+      {diagnostic.cleanupMessage && (
+        <p className="min-w-0 max-w-full whitespace-pre-wrap break-words select-text">
+          <span className="text-muted-foreground">{t("task:agentMcpDiagnosticCleanupError")} </span>
+          {diagnostic.cleanupMessage}
+        </p>
+      )}
+    </section>
+  );
+}
+
+async function runAgentMcpRetry(
+  sessionId: string,
+  serverId: string,
+): Promise<{
+  ready: boolean;
+  diagnostic?: NativeMCPDiagnostic;
+  feedbackKey: string;
+}> {
+  try {
+    const result = await retryAgentMcpConnection(sessionId, serverId);
+    const diagnostic = normalizeNativeMcpDiagnostic(result.mcp_diagnostic);
+    return {
+      ready: result.status === "ready",
+      diagnostic,
+      feedbackKey:
+        result.status === "ready"
+          ? "task:agentMcpConnectionReady"
+          : agentMcpFailureLabelKey(result.reason_code ?? result.status, diagnostic),
+    };
+  } catch (error) {
+    return {
+      ready: false,
+      feedbackKey: isAgentMcpRecoveryBusyError(error)
+        ? agentMcpFailureLabelKey("session_busy")
+        : "task:agentMcpRecoveryFailed",
+    };
+  }
 }
 
 function RecoveryActionControls({
@@ -141,14 +242,22 @@ export function AgentMcpPrepareActions({
   taskId: string;
 }) {
   const { t } = useTranslation();
-  const { isFinePointer, usesDesktopWorkbench } = useResponsiveBreakpoint();
+  const { isFinePointer, isMobile, usesDesktopWorkbench } = useResponsiveBreakpoint();
   const store = useAppStoreApi();
   const addTerminalPanel = useDockviewStore((state) => state.addTerminalPanel);
   const [pending, setPending] = useState<"authenticate" | "retry" | null>(null);
   const [feedback, setFeedback] = useState("");
+  const [retryDiagnosticOverride, setRetryDiagnosticOverride] = useState<{
+    source: PrepareStepInfo;
+    diagnostic?: NativeMCPDiagnostic;
+  } | null>(null);
   const serverId = step.mcpServerId;
   const failed = step.status === "failed";
-  const buttonSize = isFinePointer ? "min-h-7" : "min-h-11 w-full";
+  const currentDiagnostic =
+    retryDiagnosticOverride?.source === step
+      ? retryDiagnosticOverride.diagnostic
+      : step.mcpDiagnostic;
+  const buttonSize = isFinePointer && !isMobile ? "min-h-7" : "min-h-11 w-full";
 
   const authenticate = async () => {
     if (!serverId || pending) return;
@@ -184,37 +293,37 @@ export function AgentMcpPrepareActions({
     setPending("retry");
     setFeedback("");
     try {
-      const result = await retryAgentMcpConnection(sessionId, serverId);
-      setFeedback(
-        result.status === "ready"
-          ? t("task:agentMcpConnectionReady")
-          : t(agentMcpFailureLabelKey(result.reason_code ?? result.status)),
-      );
-    } catch (error) {
-      setFeedback(
-        isAgentMcpRecoveryBusyError(error)
-          ? t(agentMcpFailureLabelKey("session_busy"))
-          : t("task:agentMcpRecoveryFailed"),
-      );
+      const result = await runAgentMcpRetry(sessionId, serverId);
+      setRetryDiagnosticOverride({
+        source: step,
+        diagnostic: result.ready ? undefined : (result.diagnostic ?? currentDiagnostic),
+      });
+      setFeedback(t(result.feedbackKey));
     } finally {
       setPending(null);
     }
   };
 
   if (!failed || !serverId) return null;
+  const isAuthWarning = isAgentMcpAuthWarning(step);
 
   return (
-    <div className="mt-2 space-y-2" data-testid="agent-mcp-recovery-actions">
+    <div
+      className="mt-2 min-w-0 max-w-full space-y-2"
+      data-testid="agent-mcp-recovery-actions"
+      data-mcp-server-id={serverId}
+    >
       <p
         role="status"
         aria-live="polite"
         className={cn(
           "text-xs",
-          isAgentMcpAuthWarning(step) ? "text-amber-700 dark:text-amber-400" : "text-destructive",
+          isAuthWarning ? "text-amber-700 dark:text-amber-400" : "text-destructive",
         )}
       >
-        {t(agentMcpFailureLabelKey(step.failureCode))}
+        {t(agentMcpFailureLabelKey(step.failureCode, currentDiagnostic))}
       </p>
+      {currentDiagnostic && <NativeMcpDiagnosticDetails diagnostic={currentDiagnostic} />}
       <RecoveryActionControls
         failureCode={step.failureCode}
         pending={pending}

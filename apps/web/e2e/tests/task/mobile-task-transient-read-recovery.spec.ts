@@ -139,6 +139,10 @@ test.describe("Mobile task transient read recovery", () => {
     await testPage.goto(`/t/${task.id}`);
     await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
 
+    const workspaceLayout = testPage.getByTestId("mobile-task-layout");
+    const beforeRefresh = await workspaceLayout.boundingBox();
+    expect(beforeRefresh).not.toBeNull();
+
     const taskPath = new RegExp(`/api/v1/tasks/${task.id}$`);
     let failedReads = 0;
     let markFailuresReturned: () => void = () => {};
@@ -168,6 +172,12 @@ test.describe("Mobile task transient read recovery", () => {
       const recoveryNotice = testPage.getByTestId("task-read-recovery-notice");
       await expect(recoveryNotice).toBeVisible();
       await expect(recoveryNotice).toContainText("Task details could not be refreshed");
+      await expect
+        .poll(async () => (await workspaceLayout.boundingBox())?.y)
+        .toBeCloseTo(beforeRefresh!.y, 1);
+      await expect
+        .poll(async () => (await workspaceLayout.boundingBox())?.height)
+        .toBeCloseTo(beforeRefresh!.height, 1);
       await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
       const retry = testPage.getByTestId("task-read-retry");
       const retryBox = await retry.boundingBox();
@@ -189,10 +199,17 @@ test.describe("Mobile task transient read recovery", () => {
       });
 
       const recoveredTaskRead = waitForHttp(testPage, "GET", taskPath);
+      await expect(retry).toBeEnabled();
       await retry.tap();
       const recoveredTaskResponse = await recoveredTaskRead;
       expect(recoveredTaskResponse.ok()).toBe(true);
       await expect(recoveryNotice).toHaveCount(0);
+      await expect
+        .poll(async () => (await workspaceLayout.boundingBox())?.y)
+        .toBeCloseTo(beforeRefresh!.y, 1);
+      await expect
+        .poll(async () => (await workspaceLayout.boundingBox())?.height)
+        .toBeCloseTo(beforeRefresh!.height, 1);
       await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
       expect(
         await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

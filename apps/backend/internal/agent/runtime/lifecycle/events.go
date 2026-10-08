@@ -314,6 +314,7 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 		RunSessionID:                    execution.RunSessionID,
 		RunAttempt:                      execution.RunAttempt,
 		AgentProfileID:                  execution.officeProfileID(),
+		ExecutionProfileID:              execution.AgentProfileID,
 		AgentType:                       execution.AgentID,
 		TaskID:                          execution.TaskID,
 		SessionID:                       execution.SessionID,

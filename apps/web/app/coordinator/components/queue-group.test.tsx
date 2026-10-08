@@ -92,3 +92,31 @@ describe("QueueGroup - section styling", () => {
     expect(rows.className).toContain("bg-card");
   });
 });
+
+describe("QueueGroup - Ready to merge with the phase-2 flag", () => {
+  const withPr: ReadonlyMap<string, TaskPR[]> = new Map([
+    [
+      "7",
+      [{ id: "p", task_id: "7", state: "open", pr_url: "https://example.test/pr/7" } as TaskPR],
+    ],
+  ]);
+  const props = {
+    group: "ready_to_merge" as const,
+    items: [item("7", "ready_to_merge")],
+    stepNameByTaskId: new Map<string, string>(),
+    prsByTaskId: withPr,
+  };
+
+  it("flag off: a seeded pr_url adds no Open the PR link and no header line", () => {
+    render(<QueueGroup {...props} canManage />);
+    expect(screen.getByText("KAN-7")).not.toBeNull();
+    expect(screen.queryByRole("link", { name: "Open the PR" })).toBeNull();
+    expect(screen.queryByText("Merging a pull request is always human.")).toBeNull();
+  });
+
+  it("flag on: the same row shows Open the PR and the header line", () => {
+    render(<QueueGroup {...props} phase2 canManage />);
+    expect(screen.getByRole("link", { name: "Open the PR" })).not.toBeNull();
+    expect(screen.getByText("Merging a pull request is always human.")).not.toBeNull();
+  });
+});

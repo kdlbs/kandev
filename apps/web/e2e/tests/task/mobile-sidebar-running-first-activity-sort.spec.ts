@@ -2,12 +2,14 @@ import { test, expect } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
 import { waitForSessionState } from "../../helpers/session";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { scrollSidebarFilterListTopIntoView, touchDragToPoint } from "../../helpers/touch-drag";
 import { SessionPage } from "../../pages/session-page";
 import {
   addColorAfterActivity,
   cleanupSidebarSortColors,
   expectSidebarRootOrder,
   openSidebarSortEditor,
+  moveSortRuleWithMenu,
   readPreviousSidebarColorPatch,
   readPreviousSidebarViewState,
   readTaskRunningSummary,
@@ -16,8 +18,10 @@ import {
   saveSidebarRunningRankView,
   saveSidebarSortView,
   seedSidebarRunningRankScenario,
+  waitForSidebarSortSync,
   waitForTaskRunningSummary,
   seedSidebarSortScenario,
+  touchDragSortRule,
 } from "./sidebar-running-first-activity-sort-helpers";
 
 // @covers AC-UI-SIDEBAR-RUNNING-ACTIVITY-001.1, .2, .4, .5, .8, .11, .13 AC-UI-SIDEBAR-GROUP-INDENT-001.1, .2, .3, .4, .5, .6
@@ -128,7 +132,102 @@ test("phone drawer edits and saves a touch-reachable sort chain and group inset"
     await expect(savedPopover.getByTestId("sort-rule-color-1")).toContainText("Red");
     await expect(savedPopover.getByTestId("sort-rule-key-2")).toContainText("Last activity");
 
-    await savedPopover.getByTestId("sort-rule-up-1").tap();
+    const readSortKeys = () =>
+      Promise.all([
+        savedPopover.getByTestId("sort-key-select").innerText(),
+        savedPopover.locator("[data-testid^='sort-rule-key-']").allTextContents(),
+      ]).then(([primary, secondary]) => [primary, ...secondary]);
+    const drawer = testPage.getByTestId("sidebar-filter-drawer");
+    await savedPopover.evaluate((element) => element.scrollTo(0, 0));
+    await waitForFiniteAnimations(savedPopover);
+    const drawerBeforeDownwardDrag = await drawer.boundingBox();
+    const firstHandle = savedPopover.getByTestId("sort-rule-handle-0");
+    await expect(firstHandle).toHaveAttribute("data-vaul-no-drag", "");
+    await touchDragSortRule(testPage, firstHandle, savedPopover.getByTestId("sort-rule-card-1"));
+    await expect.poll(readSortKeys).toEqual(["Color", "Running", "Last activity"]);
+    await expect(drawer).toBeVisible();
+    await waitForFiniteAnimations(savedPopover);
+    const drawerAfterDownwardDrag = await drawer.boundingBox();
+    expect(drawerBeforeDownwardDrag).not.toBeNull();
+    expect(drawerAfterDownwardDrag).not.toBeNull();
+    expect(Math.abs(drawerAfterDownwardDrag!.y - drawerBeforeDownwardDrag!.y)).toBeLessThan(1);
+    await moveSortRuleWithMenu(testPage, savedPopover, 2, "up");
+    await expect.poll(readSortKeys).toEqual(["Running", "Color", "Last activity"]);
+    await waitForSidebarSortSync(
+      testPage,
+      seedData.workspaceId,
+      ["running", "color", "lastActivityAt"],
+      "red",
+    );
+    const ruleList = savedPopover.locator("[data-sidebar-reorder-list]");
+    await scrollSidebarFilterListTopIntoView(ruleList);
+    await waitForFiniteAnimations(savedPopover);
+
+    const lastHandle = savedPopover.getByTestId("sort-rule-handle-2");
+    const scrollTop = await savedPopover.evaluate((element) => element.scrollTop);
+    await savedPopover.evaluate((element) => {
+      element.scrollTop += 24;
+    });
+    await waitForFiniteAnimations(ruleList);
+    const ruleListBox = await ruleList.boundingBox();
+    const editorBox = await savedPopover.boundingBox();
+    expect(ruleListBox).not.toBeNull();
+    expect(editorBox).not.toBeNull();
+    const outsideY = editorBox!.y + 4;
+    expect(outsideY).toBeGreaterThan(ruleListBox!.y);
+    expect(outsideY).toBeLessThan(editorBox!.y + 12);
+    await touchDragToPoint(
+      testPage,
+      lastHandle,
+      {
+        x: ruleListBox!.x + ruleListBox!.width / 2,
+        y: outsideY,
+      },
+      async () => {
+        await savedPopover.evaluate((element, previousScrollTop) => {
+          element.scrollTop = previousScrollTop;
+        }, scrollTop);
+      },
+    );
+    await waitForFiniteAnimations(ruleList);
+    await expect.poll(readSortKeys).toEqual(["Running", "Color", "Last activity"]);
+
+    await moveSortRuleWithMenu(testPage, savedPopover, 3, "up");
+    await expect.poll(readSortKeys).toEqual(["Running", "Last activity", "Color"]);
+    await waitForSidebarSortSync(
+      testPage,
+      seedData.workspaceId,
+      ["running", "lastActivityAt", "color"],
+      "red",
+    );
+    await moveSortRuleWithMenu(testPage, savedPopover, 2, "up");
+    await expect(savedPopover.getByTestId("sort-key-select")).toContainText("Last activity");
+    await expect(savedPopover.getByTestId("sort-rule-key-1")).toContainText("Running");
+    await waitForSidebarSortSync(
+      testPage,
+      seedData.workspaceId,
+      ["lastActivityAt", "running", "color"],
+      "red",
+    );
+    await moveSortRuleWithMenu(testPage, savedPopover, 1, "down");
+    await expect(savedPopover.getByTestId("sort-key-select")).toContainText("Running");
+    await waitForSidebarSortSync(
+      testPage,
+      seedData.workspaceId,
+      ["running", "lastActivityAt", "color"],
+      "red",
+    );
+    await moveSortRuleWithMenu(testPage, savedPopover, 3, "up");
+    await expect(savedPopover.getByTestId("sort-rule-key-1")).toContainText("Color");
+    await expect(savedPopover.getByTestId("sort-rule-key-2")).toContainText("Last activity");
+    await waitForSidebarSortSync(
+      testPage,
+      seedData.workspaceId,
+      ["running", "color", "lastActivityAt"],
+      "red",
+    );
+
+    await moveSortRuleWithMenu(testPage, savedPopover, 2, "up");
     await expectSidebarRootOrder(sheet, scenario.rootIds, [
       scenario.parent.id,
       scenario.idleRed.id,
@@ -161,7 +260,7 @@ test("phone drawer edits and saves a touch-reachable sort chain and group inset"
     await readdedColor.tap();
     await testPage.getByRole("option", { name: "Red", exact: true }).tap();
     await expect(readdedColor).toBeFocused();
-    await savedPopover.getByTestId("sort-rule-up-2").tap();
+    await moveSortRuleWithMenu(testPage, savedPopover, 3, "up");
     await expectSidebarRootOrder(sheet, scenario.rootIds, [
       scenario.parent.id,
       scenario.runningBlue.id,
@@ -234,9 +333,22 @@ test("phone drawer edits and saves a touch-reachable sort chain and group inset"
     const lastRule = finalEditor.popover.getByTestId("sort-rule-card-9");
     await lastRule.scrollIntoViewIfNeeded();
     await expect(lastRule).toBeInViewport();
-    for (const action of ["sort-rule-up-9", "sort-rule-down-9", "sort-rule-remove-9"]) {
+    for (const action of ["sort-rule-handle-9", "sort-rule-more-9", "sort-rule-remove-9"]) {
       const box = await finalEditor.popover.getByTestId(action).boundingBox();
       expect(box?.height).toBeGreaterThanOrEqual(44);
+      expect(box?.width).toBeGreaterThanOrEqual(44);
+    }
+    const lastCard = await lastRule.boundingBox();
+    const controlBoxes = await Promise.all(
+      ["sort-rule-handle-9", "sort-rule-more-9", "sort-rule-remove-9"].map((action) =>
+        finalEditor.popover.getByTestId(action).boundingBox(),
+      ),
+    );
+    for (const box of controlBoxes) {
+      expect(box?.x).toBeGreaterThanOrEqual(lastCard!.x);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(lastCard!.x + lastCard!.width);
+      expect(box?.y).toBeGreaterThanOrEqual(lastCard!.y);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(lastCard!.y + lastCard!.height);
     }
     const viewport = await testPage.evaluate(() => ({ width: innerWidth, height: innerHeight }));
     const drawerBox = await testPage.getByTestId("sidebar-filter-drawer").boundingBox();

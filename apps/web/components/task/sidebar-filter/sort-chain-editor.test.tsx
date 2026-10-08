@@ -29,7 +29,12 @@ it("adds, reorders, and removes individual desktop rules", () => {
   expect(onChange).toHaveBeenLastCalledWith(added);
   rerender(<SortChainEditor value={added} onChange={onChange} isDrawerLayout={false} />);
 
-  fireEvent.click(screen.getByTestId("sort-rule-up-2"));
+  fireEvent.pointerDown(screen.getByTestId("sort-rule-more-2"), {
+    button: 0,
+    pointerType: "mouse",
+  });
+  expect(onChange).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByTestId("sort-rule-more-2-move-up"));
   const reordered: SortSpec = {
     key: "running",
     direction: "desc",
@@ -47,6 +52,27 @@ it("adds, reorders, and removes individual desktop rules", () => {
     direction: "desc",
     thenBy: [{ key: "lastActivityAt", direction: "desc" }],
   });
+});
+
+it("keeps sort reordering and removal unavailable for a single rule", () => {
+  render(
+    <SortChainEditor
+      value={{ key: "running", direction: "desc" }}
+      onChange={vi.fn()}
+      isDrawerLayout={false}
+    />,
+  );
+
+  fireEvent.pointerDown(screen.getByTestId("sort-rule-more-0"), {
+    button: 0,
+    pointerType: "mouse",
+  });
+
+  expect(screen.getByTestId("sort-rule-more-0-move-up").getAttribute("aria-disabled")).toBe("true");
+  expect(screen.getByTestId("sort-rule-more-0-move-down").getAttribute("aria-disabled")).toBe(
+    "true",
+  );
+  expect((screen.getByTestId("sort-rule-remove-0") as HTMLButtonElement).disabled).toBe(true);
 });
 
 it("keeps Custom standalone and stacks phone cards with touch-sized controls", () => {
@@ -72,8 +98,8 @@ it("keeps Custom standalone and stacks phone cards with touch-sized controls", (
   expect(container.querySelector('[data-testid="sort-rule-card-0"]')?.className).toContain(
     "flex-col",
   );
-  for (const control of ["sort-rule-up-0", "sort-rule-down-0", "sort-rule-remove-0"]) {
-    expect(screen.getByTestId(control).className).toContain("min-h-11");
+  for (const control of ["sort-rule-more-0", "sort-rule-remove-0"]) {
+    expect(screen.getByTestId(control).className).toContain("size-11");
   }
   expect(screen.getByTestId("sort-add-rule-button").hasAttribute("disabled")).toBe(true);
 });
@@ -129,7 +155,8 @@ it("explains when unsupported stored rules were removed", () => {
   render(
     <SortChainEditor value={chain} onChange={vi.fn()} isDrawerLayout={false} warningCount={1} />,
   );
-  expect(screen.getByRole("status").textContent).toContain(
-    "Some unsupported sort rules were removed",
-  );
+  expect(
+    screen.getByText("Some unsupported sort rules were removed. Review the sort fields.")
+      .textContent,
+  ).toContain("Some unsupported sort rules were removed");
 });

@@ -65,6 +65,15 @@ func setInitialTaskBriefDescription(t *testing.T, repo *Repository, taskID, desc
 	}
 }
 
+func setInitialTaskBriefSessionReady(t *testing.T, repo *Repository, sessionID string) {
+	t.Helper()
+	if err := repo.UpdateTaskSessionState(
+		context.Background(), sessionID, models.TaskSessionStateWaitingForInput, "",
+	); err != nil {
+		t.Fatalf("set session ready: %v", err)
+	}
+}
+
 func initialTaskBriefMessage(taskID, sessionID, turnID, id, content string) *models.Message {
 	return &models.Message{
 		ID: id, TaskID: taskID, TaskSessionID: sessionID, TurnID: turnID,
@@ -90,6 +99,7 @@ func TestInitialTaskBriefAdmission(t *testing.T) {
 		brief     = "Original task brief"
 	)
 	seedForMsgTest(t, repo, taskID, sessionID, turnID)
+	setInitialTaskBriefSessionReady(t, repo, sessionID)
 	setInitialTaskBriefDescription(t, repo, taskID, brief)
 	writer := requireInitialTaskBriefMessageWriter(t, repo)
 
@@ -147,6 +157,7 @@ func TestInitialTaskBriefAdmissionRollbackAndStaleSnapshot(t *testing.T) {
 		brief     = "Stable task brief"
 	)
 	seedForMsgTest(t, repo, taskID, sessionID, turnID)
+	setInitialTaskBriefSessionReady(t, repo, sessionID)
 	setInitialTaskBriefDescription(t, repo, taskID, brief)
 	writer := requireInitialTaskBriefMessageWriter(t, repo)
 
@@ -235,6 +246,7 @@ func TestInitialTaskBriefAdmissionSerializesConcurrentFirstSends(t *testing.T) {
 		brief     = "Concurrent task brief"
 	)
 	seedForMsgTest(t, repo, taskID, sessionID, turnID)
+	setInitialTaskBriefSessionReady(t, repo, sessionID)
 	setInitialTaskBriefDescription(t, repo, taskID, brief)
 	writer := requireInitialTaskBriefMessageWriter(t, repo)
 	messages := []*models.Message{
@@ -290,6 +302,7 @@ func TestInitialTaskBriefAdmissionCompetesWithWorkflowFallback(t *testing.T) {
 		brief     = "Fallback race task brief"
 	)
 	seedForMsgTest(t, repo, taskID, sessionID, turnID)
+	setInitialTaskBriefSessionReady(t, repo, sessionID)
 	setInitialTaskBriefDescription(t, repo, taskID, brief)
 	writer := requireInitialTaskBriefMessageWriter(t, repo)
 	claimer, ok := any(repo).(promptHistoryClaimer)
@@ -349,6 +362,7 @@ func TestInitialTaskBriefAdmissionRespectsZeroValuedFallbackReservation(t *testi
 		brief     = "Reserved fallback task brief"
 	)
 	seedForMsgTest(t, repo, taskID, sessionID, turnID)
+	setInitialTaskBriefSessionReady(t, repo, sessionID)
 	setInitialTaskBriefDescription(t, repo, taskID, brief)
 	claimer := any(repo).(promptHistoryClaimer)
 	claimed, err := claimer.ClaimInitialPromptFallback(ctx, sessionID, promptHistoryIncarnation(t, repo, ctx, sessionID))
@@ -464,6 +478,7 @@ func TestInitialTaskBriefAdmissionSurvivesRepositoryRestart(t *testing.T) {
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID}); err != nil {
 		t.Fatalf("seed restart session: %v", err)
 	}
+	setInitialTaskBriefSessionReady(t, repo, sessionID)
 	if err := repo.CreateTurn(ctx, &models.Turn{ID: turnID, TaskSessionID: sessionID, TaskID: taskID}); err != nil {
 		t.Fatalf("seed restart turn: %v", err)
 	}

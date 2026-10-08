@@ -36,14 +36,15 @@ type UserMessageBodyOptions = {
 const COORDINATOR_ABOUT_PREFIX = "About ";
 const COORDINATOR_ABOUT_SEPARATOR = ": ";
 // i18n-exempt: stable, coordinator-agent-facing wire marker (English, not i18n), not rendered as-is.
-const COORDINATOR_REFERENCED_PREFIX_RE = /^About (.+?) \[(task|proposal|stall):([^\]\s]+)\]: /;
+const COORDINATOR_REFERENCED_PREFIX_RE =
+  /^About (.+?) \[(task|proposal|stall|workflow):([^\]\s]+)\]: /;
 
 type CoordinatorAboutPrefix = { id: string; remainder: string };
 
 /** Parses the referenced form, "About <id> [<kind>:<ref>]: ", added for
  *  `get_coordinator_item_kandev` reads (docs/specs/coordinator/system-design/
  *  copilot-panel.md#ask-about-this). `<id>` is the shortest run of non-newline
- *  characters followed by a bracketed `task`/`proposal`/`stall` reference and
+ *  characters followed by a bracketed `task`/`proposal`/`stall`/`workflow` reference and
  *  `: `, so an id containing its own `: `, `[` or `]` is still read back
  *  whole, and a second bracketed-looking sequence later in the message is
  *  never mistaken for the prefix's own. Returns `null` for content that does

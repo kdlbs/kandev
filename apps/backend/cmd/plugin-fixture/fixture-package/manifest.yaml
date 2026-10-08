@@ -198,7 +198,7 @@ ui:
   bundle: "/ui/bundle.js"
   keybindings:
     - id: open-demo
-      default: mod+shift+j
+      default: mod+alt+shift+j
       description: Open the demo modal
 
 config_schema:

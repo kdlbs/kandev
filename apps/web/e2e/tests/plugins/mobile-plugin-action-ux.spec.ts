@@ -246,4 +246,74 @@ test.describe("Plugin action UX, composer on phone", () => {
     await busyAction.tap();
     await expect(testPage.getByRole("tooltip")).toHaveCount(0);
   });
+
+  test("returns focus inside the phone parent surface after plugin modals close", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    statusBarBaseline = await captureAppStatusBarSettings(apiClient);
+    await installFixturePlugin(testPage);
+    await setAppStatusBarEnabled(apiClient, true);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Plugin modal focus return on phone",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await openTaskSession(testPage, task.id);
+    await testPage.getByTestId("app-nav-trigger").tap();
+
+    const pluginSection = testPage.getByTestId("mobile-plugin-nav-section");
+    const drawerAction = pluginSection.getByTestId("e2e-chat-top-bar-focus-action");
+    await expect(drawerAction).toBeVisible();
+    const drawerActionBox = await drawerAction.boundingBox();
+    expect(drawerActionBox).not.toBeNull();
+    expect(drawerActionBox!.height).toBeGreaterThanOrEqual(44);
+    expect(drawerActionBox!.width).toBeGreaterThanOrEqual(44);
+    await drawerAction.focus();
+    await testPage.keyboard.press("Enter");
+
+    const pluginDrawer = testPage.getByRole("dialog", { name: "Fixture task drawer" });
+    await expect(pluginDrawer).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await expect(pluginDrawer).toHaveCount(0);
+    await expect(pluginSection).toBeVisible();
+    await expect(drawerAction).toBeFocused();
+    await testPage.keyboard.press("Escape");
+
+    await testPage.goto("/");
+    await testPage.getByTestId("app-nav-trigger").tap();
+    await testPage.getByTestId("mobile-home-status-button").tap();
+    const statusDrawer = testPage.getByTestId("app-status-drawer");
+    await expect(statusDrawer).toBeVisible();
+    const rightRow = statusDrawer.locator(
+      '[data-status-item-id="plugin:kandev-plugin-e2e:app-status-bar-right:0"]',
+    );
+    const statusAction = rightRow.getByTestId("e2e-status-right-focus-action");
+    await expect(statusAction).toBeVisible();
+    const statusActionBox = await statusAction.boundingBox();
+    expect(statusActionBox).not.toBeNull();
+    expect(statusActionBox!.height).toBeGreaterThanOrEqual(44);
+    expect(statusActionBox!.width).toBeGreaterThanOrEqual(44);
+    await statusAction.focus();
+    await testPage.keyboard.press("Enter");
+
+    const statusModal = testPage.getByRole("dialog", { name: "Fixture status modal" });
+    await expect(statusModal).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await expect(statusModal).toHaveCount(0);
+    await expect(statusDrawer).toBeVisible();
+    await expect(statusAction).toBeFocused();
+    await expect
+      .poll(() => testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      .toBe(true);
+  });
 });

@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { createGitEnrichmentGate, type routeGitStatusRefresh } from "./git-status-refresh-helpers";
 
 export type DiffRenderer = "pierre-diffs" | "monaco";
@@ -221,14 +222,25 @@ async function waitForStableDiffAnchor(page: Page, renderer: DiffRenderer, fileP
 }
 
 async function touchSwipe(page: Page, target: Locator, distance: number) {
-  const bounds = await target.boundingBox();
-  if (!bounds || bounds.height < 80)
-    throw new Error("The diff should expose a touch scroll region");
+  await waitForFiniteAnimations(target);
   const viewport = page.viewportSize();
+  if (!viewport) throw new Error("The diff should expose a visible touch scroll region");
+  await expect
+    .poll(
+      async () => {
+        const bounds = await target.boundingBox();
+        if (!bounds || bounds.height < 80 || bounds.width < 1) return false;
+        const visibleTop = Math.max(bounds.y, 8);
+        const visibleBottom = Math.min(bounds.y + bounds.height, viewport.height - 8);
+        return visibleBottom - visibleTop >= 80;
+      },
+      { message: "The diff should expose a visible touch scroll region" },
+    )
+    .toBe(true);
+  const bounds = await target.boundingBox();
+  if (!bounds) throw new Error("The diff should expose a visible touch scroll region");
   const visibleTop = Math.max(bounds.y, 8);
-  const visibleBottom = Math.min(bounds.y + bounds.height, (viewport?.height ?? Infinity) - 8);
-  if (visibleBottom - visibleTop < 80)
-    throw new Error("The diff should expose a visible touch scroll region");
+  const visibleBottom = Math.min(bounds.y + bounds.height, viewport.height - 8);
   const x = bounds.x + bounds.width / 2;
   const startY = visibleBottom - 20;
   const endY = Math.max(visibleTop + 20, startY - distance);

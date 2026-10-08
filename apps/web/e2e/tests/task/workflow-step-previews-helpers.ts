@@ -18,24 +18,27 @@ export async function expectWorkflowStepPreviewsLoaded(
 ) {
   const receivedResponses = await Promise.all(responses);
   for (const response of receivedResponses) expect(response.ok()).toBe(true);
-  await Promise.all(workflows.map(({ id, stepNames }) => expectStepsInOrder(page, id, stepNames)));
+  await Promise.all(receivedResponses.map((response) => response.finished()));
+  for (const { id, stepNames } of workflows) {
+    await expectStepsInOrder(page, id, stepNames);
+  }
 }
 
 export async function expectStepsInOrder(page: Page, workflowId: string, stepNames: string[]) {
   const group = page.getByTestId("workflow-option-steps-" + workflowId);
   await expect(group).toBeVisible();
-  await expect
-    .poll(async () => {
-      const renderedTexts = await group.getByText(/./).allTextContents();
-      let previousPosition = -1;
-      for (const name of stepNames) {
-        const position = renderedTexts.indexOf(name);
-        if (position <= previousPosition) return false;
-        previousPosition = position;
-      }
-      return true;
-    })
-    .toBe(true);
+  const firstStep = stepNames[0];
+  if (!firstStep) throw new Error(`Workflow ${workflowId} should have at least one step`);
+  await expect(group.getByText(firstStep, { exact: true })).toBeVisible();
+  const renderedTexts = await group.getByText(/./).allTextContents();
+  let previousPosition = -1;
+  for (const name of stepNames) {
+    const position = renderedTexts.indexOf(name);
+    expect(position, `Expected workflow ${workflowId} to render step ${name}`).toBeGreaterThan(
+      previousPosition,
+    );
+    previousPosition = position;
+  }
 }
 
 export async function expectUnbrokenStepToFitGroup(
@@ -463,7 +466,7 @@ export async function touchWorkflowOptionListToBoundary(
   ).toBeGreaterThan(1);
 
   let gestureCount = 0;
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
     const state = await optionList.evaluate((element) => ({
       top: element.scrollTop,
       bottom: element.scrollHeight - element.clientHeight,

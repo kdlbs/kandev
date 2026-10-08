@@ -1002,6 +1002,15 @@ func (s *Service) GetMessage(ctx context.Context, id string) (*models.Message, e
 	return message, nil
 }
 
+// HasUserPromptHistory reports whether a session has accepted or reserved a
+// user prompt. The prompt sequence survives message deletion and restart.
+func (s *Service) HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error) {
+	if err := s.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionPrompt); err != nil {
+		return false, err
+	}
+	return s.messages.HasUserPromptHistory(ctx, sessionID)
+}
+
 // RehydrateMessagePayload resolves an externalized large tool-output
 // payload (see PayloadDigest) back into message.Metadata for the explicit,
 // single-message lazy-detail routes (e.g. httpGetShellOutput). Callers must

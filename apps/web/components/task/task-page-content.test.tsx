@@ -89,6 +89,16 @@ describe("TaskLoadErrorState", () => {
     expect(retry.hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("status").textContent).toContain("Retrying...");
   });
+
+  it("keeps routine background refreshes silent when task details are available", () => {
+    render(
+      <TaskNavigationReadFeedback
+        recovery={{ temporaryError: false, retrying: true, onRetry: vi.fn() }}
+      />,
+    );
+
+    expect(screen.queryByRole("status")).toBeNull();
+  });
 });
 
 describe("useTaskDetails temporary refresh failure", () => {

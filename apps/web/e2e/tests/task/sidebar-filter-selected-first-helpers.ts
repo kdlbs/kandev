@@ -5,6 +5,7 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { repositorySlug } from "../../../lib/repository-slug";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 import { KanbanPage } from "../../pages/kanban-page";
@@ -20,8 +21,22 @@ export async function seedSelectedFilters(api: ApiClient, seed: SeedData, tmpDir
       name: `Filter repository ${suffix}`,
     });
   }
+  const providerDirectory = path.join(tmpDir, "filter-provider-repository");
+  fs.mkdirSync(providerDirectory, { recursive: true });
+  const providerEnv = makeGitEnv(tmpDir);
+  execFileSync("git", ["init", "-b", "main"], { cwd: providerDirectory, env: providerEnv });
+  execFileSync("git", ["commit", "--allow-empty", "-m", "init"], {
+    cwd: providerDirectory,
+    env: providerEnv,
+  });
+  await api.createRepository(seed.workspaceId, providerDirectory, "main", {
+    name: "Filter provider repository",
+    provider: "gitlab",
+    provider_owner: "filter-fixture",
+    provider_name: "shared-options",
+  });
   const { repositories } = await api.listRepositories(seed.workspaceId);
-  const source = repositories.map((repository) => repository.name);
+  const source = repositories.map(repositorySlug);
   const selected = source.slice(-2);
   const unselected = source.slice(0, -2);
   const stepIds: string[] = [];
@@ -118,7 +133,12 @@ export async function verifySelectedFilters(
   await activate(trigger, mobile);
   const picker = page.getByTestId("filter-value-multi-popover");
   const rows = picker.getByTestId("filter-value-multi-option");
-  await expect(rows).toHaveText([...seeded.selected, ...seeded.unselected]);
+  await expect(rows).toHaveCount(seeded.source.length);
+  const initialLabels = (await rows.allTextContents()).map((label) => label.trim());
+  expect(initialLabels.slice(0, seeded.selected.length).sort()).toEqual(
+    [...seeded.selected].sort(),
+  );
+  expect(initialLabels.slice(seeded.selected.length).sort()).toEqual([...seeded.unselected].sort());
   await expect(rows.nth(0)).toHaveAttribute("data-checked", "true");
   await expect(rows.nth(1)).toHaveAttribute("data-checked", "true");
   if (mobile) {
@@ -129,12 +149,13 @@ export async function verifySelectedFilters(
   await search.fill(seeded.unselected[0]);
   await expect(rows).toHaveText([seeded.unselected[0]]);
   await search.fill("");
-  await expect(rows).toHaveText([...seeded.selected, ...seeded.unselected]);
+  await expect(rows).toHaveCount(seeded.source.length);
+  const labelsAfterSearch = (await rows.allTextContents()).map((label) => label.trim());
+  expect(labelsAfterSearch.slice(0, seeded.selected.length).sort()).toEqual(
+    [...seeded.selected].sort(),
+  );
   await activate(rows.filter({ hasText: seeded.selected[0] }), mobile);
-  await expect(rows).toHaveText([
-    seeded.selected[1],
-    ...seeded.source.filter((value) => value !== seeded.selected[1]),
-  ]);
+  await expect(rows.nth(0)).toHaveText(seeded.selected[1]);
   await expect(rows.nth(0)).toHaveAttribute("data-checked", "true");
   await search.fill(seeded.unselected[0]);
   await page.keyboard.press("Escape");

@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-07-19
-updated: 2026-10-07
+updated: 2026-10-08
 owners:
   - kandev
 ---
@@ -69,8 +69,8 @@ A failed live source still cannot authorize an unmarked persisted fallback.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.34:** An unavailable implicit comparison reference can make ancestry totals unavailable without invalidating independently successful per-file diffs.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.35:** A WebSocket connection admits at most four concurrent session Git refresh operations. Excess requests receive a correlated unavailable result without starting source work.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.36:** For every eligible tracked changed path in a stable observation, successful diff enrichment shall associate statistics and patch content with the exact repository-relative path in the file-membership snapshot, including Unicode, quoting characters, literal rename-like text, Git wildcard or pathspec-magic characters, tabs, newlines, and leading or trailing whitespace supported by the task filesystem. Actual renames shall enrich the destination path while preserving observed rename metadata. This applies independently to flattened, staged, and unstaged representations; binary and content-unchanged changes may legitimately have zero line counts.
-- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.37:** When Stage or Unstage receives a nonempty path list, each path shall select its literal repository-relative file or actual directory subtree in the selected repository. Wildcard and pathspec-magic characters in a filename shall not select additional files. Multiple paths shall retain their individual selections, including renamed and deleted entries. Every path outside the selections shall retain its index content and working-tree bytes.
-- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.38:** An empty Stage path list shall stage all changes in the selected repository, including deletions. An empty Unstage path list shall unstage all changes in that repository. Stage and Unstage shall preserve working-tree bytes for every file, whether the selection is explicit or empty.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.37:** When Stage or Unstage receives a nonempty path list, before or after the first commit, each path shall select its literal repository-relative file or actual directory subtree in the selected repository. Wildcard and pathspec-magic characters in a filename shall not select additional files. Multiple paths shall retain their individual selections, including renamed and deleted entries. Every path outside the selections shall retain its index content and working-tree bytes.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.38:** An empty Stage path list shall stage all changes in the selected repository, including deletions. An empty Unstage path list shall unstage all changes in that repository, including before its first commit. Stage and Unstage shall preserve working-tree bytes for every file, whether the selection is explicit or empty. Unstaging shall not create a commit.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.39:** A failed status or unavailable detail refresh shall schedule a delayed read retry while Changes remains active, focused, visible, and connected.
   Consecutive failures shall increase the delay to a bounded maximum.
   Retry shall preserve prior valid data and shall not change Git content, credentials, or transport.

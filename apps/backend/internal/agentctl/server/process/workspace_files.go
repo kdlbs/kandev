@@ -878,22 +878,16 @@ func (wt *WorkspaceTracker) CreateFile(reqPath string) error {
 
 // DeleteFile deletes a file or directory from the workspace.
 func (wt *WorkspaceTracker) DeleteFile(reqPath string) error {
-	path, err := wt.resolveMutationPath(reqPath)
+	path, err := wt.resolveEntryMutationSource(reqPath)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = path.root.Close() }()
 
-	if path.rel == "." {
-		if path.rootPath != wt.resolvedWorkDir() {
-			return fmt.Errorf("path outside workspace")
-		}
-		return fmt.Errorf("cannot delete workspace root")
-	}
 	runWorkspaceMutationBarrier()
 
 	// Check if file exists
-	info, err := path.root.Stat(path.rel)
+	info, err := path.root.Lstat(path.rel)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("file does not exist: %s", reqPath)
@@ -922,12 +916,12 @@ func (wt *WorkspaceTracker) RenameFile(oldPath, newPath string) error {
 		return fmt.Errorf("old_path and new_path are required")
 	}
 
-	oldResolved, err := wt.resolveMutationPath(oldPath)
+	oldResolved, err := wt.resolveEntryMutationSource(oldPath)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = oldResolved.root.Close() }()
-	newResolved, err := wt.resolveMutationPath(newPath)
+	newResolved, err := wt.resolveEntryMutationPath(newPath)
 	if err != nil {
 		return err
 	}
@@ -941,8 +935,11 @@ func (wt *WorkspaceTracker) RenameFile(oldPath, newPath string) error {
 	}
 	runWorkspaceMutationBarrier()
 
-	if err := validateSourceExistsRooted(oldResolved.root, oldResolved.rel, oldPath); err != nil {
-		return err
+	if _, err := oldResolved.root.Lstat(oldResolved.rel); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("path does not exist: %s", oldPath)
+		}
+		return fmt.Errorf("failed to stat path: %w", err)
 	}
 	if err := validateTargetAvailableRooted(newResolved.root, newResolved.rel, newPath); err != nil {
 		return err
@@ -1019,7 +1016,7 @@ func validateSourceExistsRooted(root *os.Root, relPath, reqPath string) error {
 }
 
 func validateTargetAvailableRooted(root *os.Root, relPath, reqPath string) error {
-	_, err := root.Stat(relPath)
+	_, err := root.Lstat(relPath)
 	if err == nil {
 		return fmt.Errorf("target already exists: %s", reqPath)
 	}

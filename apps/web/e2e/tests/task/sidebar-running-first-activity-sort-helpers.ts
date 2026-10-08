@@ -1,6 +1,8 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import type { ApiClient } from "../../helpers/api-client";
+import { touchDragBetween } from "../../helpers/touch-drag";
 import type { WsFrame, WsWatcher } from "../../helpers/causal-waits";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 import type {
@@ -308,6 +310,58 @@ export async function openSidebarSortEditor(page: Page, mobile: boolean) {
   return { filters, popover: filters.popover };
 }
 
+type SidebarSortRule = { key?: string; color?: string; thenBy?: SidebarSortRule[] };
+type SidebarWorkspaceState = {
+  activeViewId: string;
+  draft: { sort?: SidebarSortRule } | null;
+  syncPending?: boolean;
+  views: Array<{ id: string; sort: SidebarSortRule }>;
+};
+
+function matchesSidebarSort(
+  sidebar: SidebarWorkspaceState | null,
+  expectedKeys: string[],
+  expectedColor?: string,
+): boolean {
+  if (!sidebar || sidebar.syncPending === true) return false;
+  const activeView = sidebar.views.find((view) => view.id === sidebar.activeViewId);
+  const sort = sidebar.draft?.sort ?? activeView?.sort;
+  if (!sort) return false;
+  const rules = [{ key: sort.key, color: sort.color }, ...(sort.thenBy ?? [])];
+  if (rules.length !== expectedKeys.length) return false;
+  if (!rules.every((rule, index) => rule.key === expectedKeys[index])) return false;
+  if (expectedColor === undefined) return true;
+  return rules.some((rule) => rule.key === "color" && rule.color === expectedColor);
+}
+
+export async function waitForSidebarSortSync(
+  page: Page,
+  workspaceId: string,
+  expectedKeys: string[],
+  expectedColor?: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const sidebar = await page.evaluate((id) => {
+          const store = (
+            window as Window & {
+              __KANDEV_E2E_STORE__?: {
+                getState: () => {
+                  sidebarViewsByWorkspace?: Record<string, SidebarWorkspaceState>;
+                };
+              };
+            }
+          ).__KANDEV_E2E_STORE__;
+          return store?.getState().sidebarViewsByWorkspace?.[id] ?? null;
+        }, workspaceId);
+        return matchesSidebarSort(sidebar, expectedKeys, expectedColor);
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(true);
+}
+
 export async function chooseSortField(
   page: Page,
   popover: Locator,
@@ -323,10 +377,68 @@ export async function addColorAfterActivity(page: Page, popover: Locator): Promi
   await chooseSortField(page, popover, "sort-rule-key-2", "Color");
   await popover.getByTestId("sort-rule-color-2").click();
   await page.getByRole("option", { name: "Red", exact: true }).click();
-  await popover.getByTestId("sort-rule-up-2").click();
+  await moveSortRuleWithMenu(page, popover, 3, "up");
   await expect(popover.getByTestId("sort-key-select")).toContainText("Running");
   await expect(popover.getByTestId("sort-rule-key-1")).toContainText("Color");
   await expect(popover.getByTestId("sort-rule-key-2")).toContainText("Last activity");
+}
+
+export async function moveSortRuleWithMenu(
+  page: Page,
+  popover: Locator,
+  position: number,
+  direction: "up" | "down",
+): Promise<void> {
+  const trigger = popover.getByTestId(`sort-rule-more-${position - 1}`);
+  const move = page.getByTestId(`sort-rule-more-${position - 1}-move-${direction}`);
+  const menu = page.getByRole("menu");
+  if (await menu.count()) await expect(menu.first()).toBeHidden();
+  if (await page.evaluate(() => matchMedia("(pointer: coarse)").matches)) {
+    await trigger.tap();
+    await expect(move).toBeVisible();
+    await move.tap();
+  } else {
+    await trigger.click();
+    await expect(move).toBeVisible();
+    await move.click();
+  }
+  await expect(menu).toBeHidden();
+}
+
+export async function touchDragSortRule(
+  page: Page,
+  source: Locator,
+  target: Locator,
+): Promise<void> {
+  const targetTestId = await target.getAttribute("data-testid");
+  expect(targetTestId).not.toBeNull();
+  const sourceList = source.locator("xpath=ancestor::*[@data-sidebar-reorder-list][1]");
+  await expect(sourceList).toHaveCount(1);
+  const scopedTarget = sourceList.getByTestId(targetTestId!);
+  await expect(scopedTarget).toHaveCount(1);
+  await scopedTarget.scrollIntoViewIfNeeded();
+  await source.scrollIntoViewIfNeeded();
+  await waitForFiniteAnimations(sourceList);
+  await expect(source).toBeInViewport();
+  await expect(scopedTarget).toBeInViewport();
+  const sourceBox = await source.boundingBox();
+  const targetBox = await scopedTarget.boundingBox();
+  const listTop = await sourceList.evaluate((element) => element.getBoundingClientRect().top);
+  expect(sourceBox).not.toBeNull();
+  expect(targetBox).not.toBeNull();
+  expect(listTop).not.toBeNull();
+  const end = {
+    x: targetBox!.x + targetBox!.width / 2,
+    y: Math.max(targetBox!.y + 2, listTop! + 40),
+  };
+  await touchDragBetween(
+    page,
+    { x: sourceBox!.x + sourceBox!.width / 2, y: sourceBox!.y + sourceBox!.height / 2 },
+    end,
+    async () => {
+      await expect(page.locator('[data-dragging="true"]')).toHaveCount(1);
+    },
+  );
 }
 
 export async function sidebarRootOrder(surface: Locator, ids: string[]): Promise<string[]> {

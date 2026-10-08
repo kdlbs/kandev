@@ -3,6 +3,7 @@ import type {
   WorkspaceRestorationAttempt,
   WorkspaceRestorationState,
 } from "./workspace-restoration";
+import type { NativeMCPDiagnostic } from "@/lib/prepare/native-mcp-diagnostic";
 
 export type TerminalState = {
   terminals: Array<{ id: string; output: string[] }>;
@@ -484,6 +485,7 @@ export type PrepareStepInfo = {
   error?: string;
   warning?: string;
   warningDetail?: string;
+  mcpDiagnostic?: NativeMCPDiagnostic;
   startedAt?: string;
   endedAt?: string;
 };

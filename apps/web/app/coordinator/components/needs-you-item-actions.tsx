@@ -8,7 +8,66 @@ import { useCopilotStore } from "@/hooks/domains/coordinator/copilot-store";
 import { cn } from "@/lib/utils";
 import type { AttentionStall, AttentionTask, NeedsYouItem } from "@/lib/coordinator/attention";
 import type { CopilotItemRef } from "@/lib/coordinator/copilot-id";
+import { Spinner } from "@kandev/ui/spinner";
+import { usePhase2CardContext } from "../proposal-card/phase2-context";
+import { resumeStalledTask, useStallResume, type StallResumeEntry } from "../use-stall-resume";
 import { StallEvidenceContent } from "./stall-evidence-content";
+
+const NOT_RESUMABLE_STATES = new Set(["COMPLETED", "CREATED"]);
+
+/** The stalled task's primary session id when a resume can pick it up, else undefined. */
+export function resumableSessionId(task: AttentionTask): string | undefined {
+  const session = task.statusSummary?.primary_session;
+  if (!session?.id || (session.state && NOT_RESUMABLE_STATES.has(session.state))) return undefined;
+  return session.id;
+}
+
+type TFn = ReturnType<typeof useTranslation>["t"];
+
+function resumeStatusText(entry: StallResumeEntry | undefined, t: TFn): string {
+  if (entry?.phase === "resuming") return t("coordinator:resumeStatusResuming");
+  if (entry?.phase === "queued") return t("coordinator:resumeStatusQueued");
+  if (entry?.phase === "error") {
+    return entry.unknown ? t("coordinator:resumeErrorUnknown") : t("coordinator:resumeError");
+  }
+  return "";
+}
+
+function resumeLabel(entry: StallResumeEntry | undefined, t: TFn): string {
+  if (entry?.phase === "resuming") return t("coordinator:resuming");
+  if (entry?.phase === "queued") return t("coordinator:resumeQueued");
+  return t("coordinator:resume");
+}
+
+function ResumeAction({ task, sessionId }: { task: AttentionTask; sessionId: string }) {
+  const { t } = useTranslation();
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const entry = useStallResume(task.id);
+  const locked = entry !== undefined && entry.phase !== "error";
+  const status = resumeStatusText(entry, t);
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={locked}
+        className={cn("cursor-pointer", !isFinePointer && "min-h-11 min-w-11")}
+        onClick={() => resumeStalledTask(task.id, sessionId)}
+      >
+        {entry?.phase === "sending" && <Spinner aria-hidden="true" className="mr-1.5" />}
+        {resumeLabel(entry, t)}
+      </Button>
+      <span role="status" className="sr-only">
+        {entry?.phase === "error" ? "" : status}
+      </span>
+      {entry?.phase === "error" && (
+        <p role="alert" className="text-destructive w-full text-xs/relaxed">
+          {status}
+        </p>
+      )}
+    </>
+  );
+}
 
 function OpenTaskAction({ task }: { task: AttentionTask }) {
   const { t } = useTranslation();
@@ -42,6 +101,7 @@ function ShowEvidenceAction({ task, stall }: { task: AttentionTask; stall: Atten
 
 export type NeedsYouItemPrimaryActionsProps = {
   item: NeedsYouItem;
+  canManage?: boolean;
 };
 
 /**
@@ -49,10 +109,17 @@ export type NeedsYouItemPrimaryActionsProps = {
  * stall offers Open task and Show the evidence; a proposal offers neither
  * (AC-COORDINATOR-NEEDS-YOU-002.5/.6/.7/.8).
  */
-export function NeedsYouItemPrimaryActions({ item }: NeedsYouItemPrimaryActionsProps) {
+export function NeedsYouItemPrimaryActions({
+  item,
+  canManage = false,
+}: NeedsYouItemPrimaryActionsProps) {
+  const { enabled } = usePhase2CardContext();
   if (item.kind === "proposal") return null;
+  const sessionId =
+    item.kind === "stall" && enabled && canManage ? resumableSessionId(item.task) : undefined;
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {sessionId && <ResumeAction task={item.task} sessionId={sessionId} />}
       <OpenTaskAction task={item.task} />
       {item.kind === "stall" && <ShowEvidenceAction task={item.task} stall={item.stall} />}
     </div>

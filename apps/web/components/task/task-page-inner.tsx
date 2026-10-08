@@ -550,7 +550,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
           displayBranch={merged.worktreeBranch}
         >
           <div
-            className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background"
+            className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-background"
             style={hasPageLevelMobileFeedback ? PAGE_LEVEL_MOBILE_FEEDBACK_STYLE : undefined}
           >
             <TaskPageCommandSurfaces

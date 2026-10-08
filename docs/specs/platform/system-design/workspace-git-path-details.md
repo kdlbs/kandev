@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
 created: 2026-10-02
-updated: 2026-10-07
+updated: 2026-10-08
 owners:
   - kandev
 ---
@@ -90,8 +90,32 @@ Generic capped diffs retain their
 inherited environment, and empty-list mutations receive no selection override.
 
 For nonempty selections, Stage keeps `add --` and Unstage keeps `reset HEAD --`, followed by
-the literal path arguments. Empty selections keep `add -A` and `reset HEAD` respectively.
+the literal path arguments. Empty selections use `add -A` and `reset --` respectively.
+The explicit separator avoids revision/filename ambiguity before the first commit.
+Git supplies the default HEAD and handles an unborn branch against its empty tree;
+Kandev does not detect HEAD or introduce another command or fallback.
+The same unconditional command retains committed-repository reset behavior, including
+Git's existing whole-reset bookkeeping. Explicit selection retains its literal and
+case/environment rules. Unstage changes the index without changing working-file bytes
+or configuration, creating a commit, or moving the branch to another commit.
 Operator locking, refresh, result errors, admission and timeouts retain their existing owners.
+
+`useSessionGit` sends empty paths for repository and global Unstage all; global operation
+uses the existing repository waves. `use-git-operations.ts` serializes `paths: []` with
+repository scope into `worktree.unstage`. `GitHandlers.wsUnstage` and the runtime client's
+`GitUnstage` forward those values to the registered `POST /api/v1/git/unstage` route.
+`handleGitUnstage` resolves `GitUnstageRequest.Repo` through `gitOpForRepo` and
+`Manager.GitOperatorFor` before calling the same `GitOperator.Unstage`.
+These callers retain their wire contracts and refresh behavior.
+
+Real operator and registered HTTP regressions must cover empty and explicit selections
+before the first commit, committed additions/mixed edits, invalid empty entries, and
+independent repository index/working-byte preservation. Initial-repository tests also
+preserve file permissions, unborn HEAD, refs and config; committed controls preserve
+branch/tag identity and the established whole-reset bookkeeping rather than redefining it.
+See the [first-commit Unstage package](../../../plans/unstage-all-before-first-commit/plan.md).
+The [Git reset implementation](https://github.com/git/git/blob/v2.43.0/builtin/reset.c)
+documents the parser, unborn-tree and whole-reset behavior used here.
 
 All four per-file patch commands in `workspace_git_diff.go` use the same literal representation:
 flattened captured-HEAD-to-worktree, mixed index-to-worktree, single-layer cached fallback, and

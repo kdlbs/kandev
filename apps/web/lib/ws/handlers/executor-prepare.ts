@@ -7,11 +7,13 @@ import type {
   SessionPrepareState,
 } from "@/lib/state/slices/session-runtime/types";
 import { comparePreparationStartedAt } from "@/lib/prepare/preparation-attempt";
+import { normalizeNativeMcpDiagnostic } from "@/lib/prepare/native-mcp-diagnostic";
 
 const MCP_STEP_PREFIX = "agent_mcp_";
 
 function mapStep(step: NonNullable<PrepareCompletedPayload["steps"]>[number]): PrepareStepInfo {
   const isMcp = step.kind?.startsWith(MCP_STEP_PREFIX) === true;
+  const mcpDiagnostic = isMcp ? normalizeNativeMcpDiagnostic(step.mcp_diagnostic) : undefined;
   return {
     name: isMcp ? "" : step.name,
     kind: step.kind,
@@ -25,6 +27,7 @@ function mapStep(step: NonNullable<PrepareCompletedPayload["steps"]>[number]): P
     error: isMcp ? undefined : step.error,
     warning: isMcp ? undefined : step.warning,
     warningDetail: isMcp ? undefined : step.warning_detail,
+    ...(mcpDiagnostic ? { mcpDiagnostic } : {}),
     startedAt: step.started_at,
     endedAt: step.ended_at,
   };
@@ -72,6 +75,7 @@ function updateSteps(
     steps.push({ name: "", status: "pending" });
   }
   const isMcp = payload.step_kind?.startsWith(MCP_STEP_PREFIX) === true;
+  const mcpDiagnostic = isMcp ? normalizeNativeMcpDiagnostic(payload.mcp_diagnostic) : undefined;
   steps[payload.step_index] = {
     name: isMcp ? "" : payload.step_name,
     kind: payload.step_kind,
@@ -85,6 +89,7 @@ function updateSteps(
     error: isMcp ? undefined : payload.error,
     warning: isMcp ? undefined : payload.warning,
     warningDetail: isMcp ? undefined : payload.warning_detail,
+    ...(mcpDiagnostic ? { mcpDiagnostic } : {}),
     startedAt: payload.started_at,
     endedAt: payload.ended_at,
   };
