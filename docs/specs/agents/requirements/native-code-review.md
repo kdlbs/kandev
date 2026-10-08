@@ -9,18 +9,16 @@ owners:
 
 ## Overview
 
-Review feedback on agent-written code only reaches a Kandev user after they push and open a pull request, because every reviewer Kandev can reach today (CodeRabbit, Greptile, cubic) lives in GitHub CI. That leaves the working diff — the thing the user is actually looking at in the Changes/Review panel — unreviewed, gives nothing at all to GitLab, Azure DevOps, and local-only work, and never lands in Kandev's own review surface where anchored comments, reviewed hashes, and stale detection already live.
+Native review brings advisory findings to the working diff before a pull request,
+including GitLab, Azure DevOps, and local-only work. Findings reuse Kandev's
+anchored Changes/Review surface, reviewed hashes, and stale detection.
 
 ## Requirements
 
 ### REQ-AGENTS-NATIVE-CODE-REVIEW-001: Native Code Review
 
-**Intent:** Review feedback on agent-written code only reaches a Kandev user after they push and
-open a pull request, because every reviewer Kandev can reach today (CodeRabbit, Greptile, cubic)
-lives in GitHub CI. That leaves the working diff — the thing the user is actually looking at in the
-Changes/Review panel — unreviewed, gives nothing at all to GitLab, Azure DevOps, and local-only
-work, and never lands in Kandev's own review surface where anchored comments, reviewed hashes, and
-stale detection already live.
+**Intent:** Users can review the working diff and act on advisory findings inside
+Kandev, including local-only and non-GitHub work.
 
 #### Acceptance criteria
 
@@ -32,12 +30,20 @@ stale detection already live.
 - **AC-AGENTS-NATIVE-CODE-REVIEW-001.6:** The reviewing runtime is configurable independently of the agent that wrote the code. The on-demand path uses the effective profile selected by the built-in `code-review` utility agent; the workflow-step path can additionally name an agent profile directly. Both paths use the profile's complete launch and permission configuration as defined by [Profile-backed Utility Agents](utility-agent-profiles.md).
 - **AC-AGENTS-NATIVE-CODE-REVIEW-001.7:** For a multi-repository task, findings carry their repository and are grouped per repository exactly like the rest of the Changes panel.
 - **AC-AGENTS-NATIVE-CODE-REVIEW-001.8:** When the diff moves under a finding, the finding SHALL become **stale** rather than being dropped or rendered against unrelated code. Staleness reuses the per-file diff-hash mechanism that already drives review-mark staleness.
+- **AC-AGENTS-NATIVE-CODE-REVIEW-001.9:** When overlapping local disposition actions for one finding complete out of order, an older success or rejection shall not replace a newer acknowledged disposition in the card or open-findings overview. Resolve, Undo, and Dismiss remain available through their existing states on desktop and phones.
+- **AC-AGENTS-NATIVE-CODE-REVIEW-001.10:** While a newer disposition is pending, an older acknowledgement shall not replace its optimistic display. If the newer action fails, the finding shall return to the latest acknowledged local disposition by action initiation order, or its state before the overlap when none succeeded. A pending or rejected action shall not become the acknowledged rollback baseline. An older acknowledgement arriving after that failure shall update the baseline when no later action succeeded or remains pending.
+- **AC-AGENTS-NATIVE-CODE-REVIEW-001.11:** The overlap rules shall apply across separate views of the same finding sharing one client store. Actions on other findings, tasks, or client stores shall remain independent.
+- **AC-AGENTS-NATIVE-CODE-REVIEW-001.12:** A single current disposition action shall retain immediate optimistic feedback, publish the complete acknowledged finding on success, and restore its prior state on failure. Every rejected action shall retain the existing localized error toast and error description, including an older rejected action whose rollback is suppressed.
+- **AC-AGENTS-NATIVE-CODE-REVIEW-001.13:** When review clear, snapshot replacement, or supersession removes or replaces the locally action-owned finding before completion, that local completion shall not recreate or overwrite it. Ordinary snapshot replacement, unrelated finding updates, and updates for previously unseen findings shall retain their existing behavior.
+
+The local action publication design is [defined here](../system-design/native-code-review-action-publication.md).
 
 ## Migrated source detail
 
 ## Why
 
-Review feedback on agent-written code only reaches a Kandev user after they push and open a pull request, because every reviewer Kandev can reach today (CodeRabbit, Greptile, cubic) lives in GitHub CI. That leaves the working diff — the thing the user is actually looking at in the Changes/Review panel — unreviewed, gives nothing at all to GitLab, Azure DevOps, and local-only work, and never lands in Kandev's own review surface where anchored comments, reviewed hashes, and stale detection already live.
+See the overview for the native review outcome. GitHub CI reviewers remain
+complementary; they require a pushed pull request and do not populate this surface.
 
 ## What
 
@@ -214,6 +220,7 @@ Derived staleness is not persisted. A finding's `file_diff_hash` and `anchor_tex
 
 ## Out of scope
 
+- Ordering all review writers, backend request execution, live events, or separate browsers by local action initiation order. The overlap rules concern local action publication while those actions retain the displayed finding; they do not claim persisted data loss or a universal writer-order guarantee.
 - Auto-applying, staging, or committing a fix from a finding. `suggestion` is display-only in this iteration.
 - Replacing or duplicating GitHub CI reviewers. This runs earlier and is complementary; nothing here reads or writes GitHub review threads.
 - Reconciling findings with a pull request's review comments, in either direction.

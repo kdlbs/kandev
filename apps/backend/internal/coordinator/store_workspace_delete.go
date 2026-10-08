@@ -20,13 +20,18 @@ func (s *Store) DeleteWorkspaceState(ctx context.Context, workspaceID string) er
 
 	coordinatorQuery := `SELECT id FROM coordinators WHERE workspace_id = ? ORDER BY id`
 	if dialect.IsPostgres(s.db.DriverName()) {
-		coordinatorQuery += ` FOR UPDATE`
+		coordinatorQuery += forUpdateClause
 	}
 	var coordinatorIDs []string
 	if err := tx.SelectContext(ctx, &coordinatorIDs, tx.Rebind(coordinatorQuery), workspaceID); err != nil {
 		return fmt.Errorf("lock workspace coordinators: %w", err)
 	}
 
+	for _, table := range []string{"coordinator_watches", "coordinator_activity", "coordinator_standing_orders", "coordinator_goals"} {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM `+table+` WHERE workspace_id = ?`), workspaceID); err != nil {
+			return fmt.Errorf("delete workspace %s: %w", table, err)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM coordinator_stalls WHERE workspace_id = ?`), workspaceID); err != nil {
 		return fmt.Errorf("delete workspace stalls: %w", err)
 	}

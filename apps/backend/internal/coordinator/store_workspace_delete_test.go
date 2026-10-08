@@ -15,12 +15,12 @@ func seedWorkspaceCoordinatorState(t *testing.T, store *Store, workspaceID strin
 	c := newTestCoordinator(t, store, workspaceID)
 
 	pending := &Proposal{CoordinatorID: c.ID, WorkspaceID: workspaceID, Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, pending); err != nil {
+	if err := store.InsertProposal(ctx, pending, false); err != nil {
 		t.Fatalf("InsertProposal(pending): %v", err)
 	}
 
 	approving := &Proposal{CoordinatorID: c.ID, WorkspaceID: workspaceID, Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, approving); err != nil {
+	if err := store.InsertProposal(ctx, approving, false); err != nil {
 		t.Fatalf("InsertProposal(approving): %v", err)
 	}
 	if _, err := store.ClaimProposal(ctx, approving.ID, "token-approving", sampleSpec(), "user-1", time.Now().UTC()); err != nil {
@@ -28,7 +28,7 @@ func seedWorkspaceCoordinatorState(t *testing.T, store *Store, workspaceID strin
 	}
 
 	approved := &Proposal{CoordinatorID: c.ID, WorkspaceID: workspaceID, Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, approved); err != nil {
+	if err := store.InsertProposal(ctx, approved, false); err != nil {
 		t.Fatalf("InsertProposal(approved): %v", err)
 	}
 	if _, err := store.ClaimProposal(ctx, approved.ID, "token-approved", sampleSpec(), "user-1", time.Now().UTC()); err != nil {
@@ -39,7 +39,7 @@ func seedWorkspaceCoordinatorState(t *testing.T, store *Store, workspaceID strin
 	}
 
 	failed := &Proposal{CoordinatorID: c.ID, WorkspaceID: workspaceID, Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, failed); err != nil {
+	if err := store.InsertProposal(ctx, failed, false); err != nil {
 		t.Fatalf("InsertProposal(failed): %v", err)
 	}
 	if _, err := store.ClaimProposal(ctx, failed.ID, "token-failed", sampleSpec(), "user-1", time.Now().UTC()); err != nil {
@@ -50,7 +50,7 @@ func seedWorkspaceCoordinatorState(t *testing.T, store *Store, workspaceID strin
 	}
 
 	rejected := &Proposal{CoordinatorID: c.ID, WorkspaceID: workspaceID, Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, rejected); err != nil {
+	if err := store.InsertProposal(ctx, rejected, false); err != nil {
 		t.Fatalf("InsertProposal(rejected): %v", err)
 	}
 	if _, err := store.RejectProposal(ctx, rejected.ID, "no thanks", "user-1", time.Now().UTC()); err != nil {

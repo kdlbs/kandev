@@ -14,6 +14,41 @@ import { useTaskLaunchErrorContext } from "../task-launch-error-context";
 import { useRecoveryChoices, useRecoveryPresentation } from "./session-recovery-model";
 import { sessionRecoveryAction } from "./messages/action-message-recovery";
 import { ManagedCloneRelocationConfirmation } from "./managed-clone-relocation-confirmation";
+import { matchingAutomaticRecovery } from "@/lib/session-recovery-presentation";
+
+function useFocusComposerAfterRecoveryCard(ref: { current: HTMLDivElement | null }) {
+  useLayoutEffect(() => {
+    const node = ref.current;
+    return () => {
+      if (!node?.contains(document.activeElement)) return;
+      const panel = node.closest('[data-testid="session-chat"]');
+      requestAnimationFrame(() =>
+        panel?.querySelector<HTMLElement>('[contenteditable="true"]')?.focus(),
+      );
+    };
+  }, []);
+}
+
+function retryAutomaticRecovery(
+  recovery: ReturnType<typeof matchingAutomaticRecovery>,
+  clearNotice?: () => void,
+) {
+  const resume = recovery?.resumeSession();
+  if (!resume) return undefined;
+  return resume.then((success) => {
+    if (success) clearNotice?.();
+    return success;
+  });
+}
+
+function automaticInspectionRetry(
+  recovery: ReturnType<typeof matchingAutomaticRecovery>,
+  actions: SessionRecoveryActions,
+) {
+  if (actions.recoveryNoticeKind != null || recovery?.noticeKind !== "inspection_busy")
+    return undefined;
+  return () => retryAutomaticRecovery(recovery, actions.clearInspectionContentionNotice);
+}
 
 export function SessionRecoveryCard({
   model,
@@ -28,11 +63,24 @@ export function SessionRecoveryCard({
   const [relocationConfirmationOpen, setRelocationConfirmationOpen] = useState(false);
   const profileExists = useSessionProfileExists(model.sessionId);
   const projectionMatchesModel = workspaceRecoveryMatchesModel(model, actions.workspaceRecovery);
-  const recoveryActions = actionsForRecoveryModel(actions, projectionMatchesModel);
-  const choices = useRecoveryChoices(model, recoveryActions, profileExists, onNewSession, () =>
-    setRelocationConfirmationOpen(true),
-  );
   const context = useTaskLaunchErrorContext();
+  const automaticRecovery = matchingAutomaticRecovery(
+    context?.automaticRecovery,
+    context?.taskId,
+    model.sessionId,
+  );
+  const recoveryActions = {
+    ...actionsForRecoveryModel(actions, projectionMatchesModel),
+    recoveryNoticeKind: actions.recoveryNoticeKind ?? automaticRecovery?.noticeKind ?? null,
+  };
+  const choices = useRecoveryChoices({
+    model,
+    actions: recoveryActions,
+    profileExists,
+    onNewSession,
+    onRelocateRequested: () => setRelocationConfirmationOpen(true),
+    onInspectionRetry: automaticInspectionRetry(automaticRecovery, actions),
+  });
   const { copy, busy, busyAction, details, detailFields, failure } = useRecoveryPresentation(
     model,
     recoveryActions,
@@ -48,16 +96,7 @@ export function SessionRecoveryCard({
     actions.workspaceRecovery,
     projectionMatchesModel,
   );
-  useLayoutEffect(() => {
-    const node = ref.current;
-    return () => {
-      if (!node?.contains(document.activeElement)) return;
-      const panel = node.closest('[data-testid="session-chat"]');
-      requestAnimationFrame(() =>
-        panel?.querySelector<HTMLElement>('[contenteditable="true"]')?.focus(),
-      );
-    };
-  }, []);
+  useFocusComposerAfterRecoveryCard(ref);
   if (projectionMatchesModel && actions.workspaceRecovery?.agent_ready) return null;
   return (
     <div

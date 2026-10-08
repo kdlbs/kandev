@@ -11,18 +11,17 @@ import (
 
 func TestMockInterruptionContinuationWireError(t *testing.T) {
 	for _, tc := range []struct {
-		name, agentID                                                       string
-		enabled, attested, terminalEvent, orderedFailureAfterIO, emitOutput bool
+		name, agentID                                              string
+		completedTools                                             uint16
+		attested, terminalEvent, orderedFailureAfterIO, emitOutput bool
 	}{
-		{"enabled mock", mockAgentID, true, true, true, true, true},
-		{"disabled mock after output", mockAgentID, false, false, true, true, true},
-		{"disabled mock before output", mockAgentID, false, false, true, false, false},
-		{"untrusted provider marker", "other-acp", true, false, false, false, false},
+		{"supported mock after completed tool", mockAgentID, 1, true, true, true, true},
+		{"supported mock before output", mockAgentID, 0, true, true, false, false},
+		{"untrusted provider marker", "other-acp", 0, false, false, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, fake, conn := setupHandoffFakeAgent(t)
 			a.agentID, a.dialect, a.normalizer = tc.agentID, newACPDialect(tc.agentID), NewNormalizer(tc.agentID)
-			a.cfg.ProviderInterruptionContinuation = tc.enabled
 			fake.promptFailure = &sdk.RequestError{Code: -32603, Message: "peer disconnected before response", Data: map[string]any{"kandevMock": map[string]any{"continuationInterruption": true}}}
 			require.NoError(t, a.Initialize(t.Context()))
 			a.capabilities.LoadSession = true
@@ -67,7 +66,7 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 					errorIndex = i
 					if tc.attested {
 						require.True(t, event.ContinuationSafety.SafeFor(7))
-						require.Equal(t, uint16(1), event.ContinuationSafety.CompletedTools)
+						require.Equal(t, tc.completedTools, event.ContinuationSafety.CompletedTools)
 						require.Equal(t, streams.PromptFailureDispositionRetainRuntime, event.PromptFailureDisposition)
 					} else {
 						require.Nil(t, event.ContinuationSafety)

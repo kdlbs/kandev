@@ -86,22 +86,63 @@ export function recordHydratedGeneration(
 
 // Multiple lifecycle paths can hydrate the same session concurrently (for
 // example, the initial mount and a visibility refresh). Keep the shared
-// loading flag asserted until the last operation settles; an older request
-// must not make a newer request look idle.
-const inFlightFetchesBySession = new Map<string, number>();
+// loading flag asserted until the last visible operation settles; an older
+// request must not make a newer request look idle. Background refreshes are
+// counted too but never raise the flag, because the flag drives the
+// transcript's loading row.
+const inFlightFetchesBySession = new Map<string, { total: number; visible: number }>();
 
-function beginSessionFetch(sessionId: string): void {
-  inFlightFetchesBySession.set(sessionId, (inFlightFetchesBySession.get(sessionId) ?? 0) + 1);
+function beginSessionFetch(sessionId: string, visible: boolean): void {
+  const counts = inFlightFetchesBySession.get(sessionId) ?? { total: 0, visible: 0 };
+  inFlightFetchesBySession.set(sessionId, {
+    total: counts.total + 1,
+    visible: counts.visible + (visible ? 1 : 0),
+  });
 }
 
-function endSessionFetch(sessionId: string): boolean {
-  const remaining = (inFlightFetchesBySession.get(sessionId) ?? 1) - 1;
-  if (remaining > 0) {
-    inFlightFetchesBySession.set(sessionId, remaining);
-    return false;
+/** Releases one fetch and returns how many visible fetches are still in flight. */
+function endSessionFetch(sessionId: string, visible: boolean): number {
+  const counts = inFlightFetchesBySession.get(sessionId) ?? { total: 1, visible: visible ? 1 : 0 };
+  const next = {
+    total: counts.total - 1,
+    visible: Math.max(0, counts.visible - (visible ? 1 : 0)),
+  };
+  if (next.total > 0) inFlightFetchesBySession.set(sessionId, next);
+  else inFlightFetchesBySession.delete(sessionId);
+  return next.visible;
+}
+
+function hasMessagesOnScreen(store: SessionMessageStore, sessionId: string): boolean {
+  return (store.getState().messages?.bySession?.[sessionId]?.length ?? 0) > 0;
+}
+
+function announceFetchStart({
+  taskSessionId,
+  store,
+  setIsLoading,
+  setHistoryStatus,
+  setHistoryError,
+  lastFetchedSessionIdRef,
+  background,
+}: Pick<
+  DoFetchMessagesParams,
+  | "taskSessionId"
+  | "store"
+  | "setIsLoading"
+  | "setHistoryStatus"
+  | "setHistoryError"
+  | "lastFetchedSessionIdRef"
+> & { background: boolean }): boolean {
+  const silent = background && hasMessagesOnScreen(store, taskSessionId);
+  beginSessionFetch(taskSessionId, !silent);
+  if (silent) return true;
+  setIsLoading(true);
+  if (lastFetchedSessionIdRef.current !== taskSessionId) {
+    setHistoryStatus("loading");
+    setHistoryError(null);
   }
-  inFlightFetchesBySession.delete(sessionId);
-  return true;
+  store.getState().setMessagesLoading(taskSessionId, true);
+  return false;
 }
 
 function isInactive(isActive?: () => boolean): boolean {
@@ -134,6 +175,8 @@ type DoFetchMessagesParams = {
   hydrationRef?: SessionHydrationRef;
   hydrationKey?: string;
   options?: MessageFetchOptions;
+  /** Reconciles a transcript already on screen without visible loading feedback. */
+  background?: boolean;
 };
 
 export type MessageFetchOptions = {
@@ -157,16 +200,18 @@ export async function doFetchMessages({
   hydrationRef,
   hydrationKey,
   options,
+  background = false,
 }: DoFetchMessagesParams): Promise<boolean> {
   if (isInactive(isActive)) return false;
-  beginSessionFetch(taskSessionId);
-  setIsLoading(true);
-  const isInitialHistoryFetch = lastFetchedSessionIdRef.current !== taskSessionId;
-  if (isInitialHistoryFetch) {
-    setHistoryStatus("loading");
-    setHistoryError(null);
-  }
-  store.getState().setMessagesLoading(taskSessionId, true);
+  const silent = announceFetchStart({
+    taskSessionId,
+    store,
+    setIsLoading,
+    setHistoryStatus,
+    setHistoryError,
+    lastFetchedSessionIdRef,
+    background,
+  });
   if (initialFetchStartRef.current === null) {
     initialFetchStartRef.current = Date.now();
     setIsWaitingForInitialMessages(true);
@@ -178,7 +223,10 @@ export async function doFetchMessages({
       isActive,
       hydrationRef,
       hydrationKey,
-      () => setHistoryStatus("retrying"),
+      // A transient retry notice would shift a transcript that is already on screen.
+      () => {
+        if (!silent) setHistoryStatus("retrying");
+      },
       options,
     );
     if (isInactive(isActive)) return false;
@@ -191,13 +239,14 @@ export async function doFetchMessages({
     if (isInactive(isActive)) return false;
     if (onError) onError(error);
     else console.error("Failed to fetch messages:", error);
+    // A failure stays visible, even for a background refresh, so Retry is offered.
     setHistoryStatus("unavailable");
     setHistoryError(error);
     return false;
   } finally {
     const active = !isInactive(isActive);
-    if (endSessionFetch(taskSessionId)) {
-      store.getState().setMessagesLoading(taskSessionId, false);
+    if (endSessionFetch(taskSessionId, !silent) === 0) {
+      if (!silent) store.getState().setMessagesLoading(taskSessionId, false);
       if (!canFinalizeLoading || canFinalizeLoading()) setIsLoading(false);
     }
     if (active) setIsWaitingForInitialMessages(false);

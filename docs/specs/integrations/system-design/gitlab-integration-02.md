@@ -4,7 +4,7 @@ system: integrations
 requirements:
   - REQ-INTEGRATIONS-GITLAB-INTEGRATION-001
 created: 2026-05-04
-updated: 2026-08-05
+updated: 2026-10-08
 owners:
   - tbd
 ---
@@ -19,6 +19,76 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITLAB-I
 | Requirement | Design section |
 | --- | --- |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .11-.15) | [Discussion reply draft settlement](#discussion-reply-draft-settlement) |
+
+## Discussion reply draft settlement
+
+This correction extends the existing provider review contract, owned
+by Integrations. The
+[reply-draft work order](../../../plans/gitlab-reply-draft-preservation/task-01-preserve-reply-draft.md)
+contains implementation and verification scope. No independent UI owner or
+incident specification is introduced.
+Local implementation and targeted checks are complete; hosted review, CI and
+merge remain pending. The unrelated migrated design retains its draft status.
+
+### Local state boundary
+
+`apps/web/components/gitlab/mr-discussions-section.tsx` renders one
+`Discussion` per stable `discussion.id`. Each owns its `reply` state;
+`submitReply` captures that state before trimming and awaiting `onReply`.
+The textarea remains editable during the await.
+
+Capture the raw `reply` before dispatch and derive the existing trimmed body
+from that snapshot. Keep the nonblank gate. On successful settlement use a
+functional state update that compares the latest value with the captured raw
+snapshot: clear an exact match, otherwise return the latest value intact.
+Compare raw strings, not their trimmed bodies: a whitespace edit is unsent
+work even when the sent body would be identical. Exact restoration to the
+snapshot can clear; no edit history, sequence counter, shared draft store,
+request framework, or new pending policy is needed. A false result performs
+no draft write. State updaters remain pure.
+
+### Production consumer and refresh
+
+`MRDiscussionsSection` has one production consumer,
+`apps/web/components/gitlab/mr-detail-panel.tsx`. Its `discussionHandlers`
+binds workspace/project/IID/host and forwards the discussion ID and body to
+`createMRDiscussionNote` through `useMRActions.run("reply", ...)`.
+The API sends a POST to `/api/v1/gitlab/mrs/discussions/notes`, with the
+existing identity and `discussion_id` payload. These contracts do not change.
+
+`useMRActions` returns true after the POST, emits the existing translated
+success toast, and schedules `useMRFeedback.refresh`; it does not await the
+refresh. It returns false with an error toast after a rejected POST and
+releases `pendingAction` in either case. `useMRFeedback` retains cached
+feedback while refreshing the same identity. Stable discussion keys keep
+local drafts attached across replaced or reordered discussion objects.
+A delayed or rejected refresh is not a reply failure and does not write
+textarea state. Preserve the current hook and loading/error policy.
+
+### Verification and mobile boundary
+
+Author independent rendered regressions in
+`apps/web/components/gitlab/mr-discussions-section.reply-draft.test.tsx`.
+Mount the real section with real Tooltip/Toast/locale providers and real
+`useMRFeedback`, `useMRActions`, and `createMRDiscussionNote`; a small harness
+uses the same callback binding as the audited detail panel. Mock only global
+fetch transport. Hold POST and refresh responses independently, assert the
+actual request identity/body, editable textarea and pending Reply button,
+then settle responses and inspect the real textarea, notes and feedback.
+Do not mock production components, hooks, API functions or draft predicates.
+Use article-scoped selectors for distinct discussions and settle every held
+request before cleanup. The original protected discovery fixture is read-only
+evidence and must not be copied, imported, mutated or replayed.
+
+The correction is pure component state settlement. Desktop's existing
+`sm:flex-row` reply area and phone's stacked controls share the same state;
+there are no changes to rendered structure, touch, scrolling, navigation,
+breakpoints or copy. Targeted real-consumer component tests satisfy the
+mobile-parity pure-state exception; new Playwright coverage is unnecessary.
+No backend, persistence, security, telemetry, public API or operator guidance
+changes are needed. Part 1 and unrelated migrated sections retain their
+existing lifecycle.
 
 ## Migrated source detail
 

@@ -310,7 +310,7 @@ func TestStallDTOFields(t *testing.T) {
 // no fewer.
 func TestProposalConflictResponsePinsThreeKeys(t *testing.T) {
 	p := &Proposal{ID: "prop-1", CoordinatorID: "co-1", WorkspaceID: "ws-1", Status: ProposalStatusPending, Spec: ProposalSpec{Title: "x"}}
-	raw, err := json.Marshal(NewProposalConflictResponse(p))
+	raw, err := json.Marshal(NewProposalConflictResponse(p, false))
 	if err != nil {
 		t.Fatalf("Marshal() error: %v", err)
 	}

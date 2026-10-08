@@ -492,15 +492,16 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 	}
 	if sessionID != "" {
 		failure := watcher.AgentEventData{
-			TaskID:           taskID,
-			SessionID:        sessionID,
-			OwnerKind:        string(payload.OwnerKind),
-			AgentExecutionID: executionID,
-			AgentID:          payload.AgentID,
-			AgentProfileID:   payload.AgentProfileID,
-			PromptGeneration: payload.Data.PromptGeneration,
-			ErrorMessage:     payload.Data.Error,
-			ProviderError:    payload.Data.ProviderError,
+			TaskID:             taskID,
+			SessionID:          sessionID,
+			OwnerKind:          string(payload.OwnerKind),
+			AgentExecutionID:   executionID,
+			AgentID:            payload.AgentID,
+			AgentProfileID:     payload.AgentProfileID,
+			ExecutionProfileID: payload.ExecutionProfileID,
+			PromptGeneration:   payload.Data.PromptGeneration,
+			ErrorMessage:       payload.Data.Error,
+			ProviderError:      payload.Data.ProviderError,
 		}
 		if failure.ErrorMessage == "" {
 			failure.ErrorMessage = payload.Data.Text

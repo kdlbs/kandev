@@ -22,6 +22,7 @@ func LoadStepGraph(ctx context.Context, reader WorkflowStepReader, workflowID st
 			IsStart:          step.IsStartStep,
 			AllowManualMove:  step.AllowManualMove,
 			AutoStartOnEnter: step.HasOnEnterAction(workflowmodels.OnEnterAutoStartAgent),
+			CompletesOnEnter: step.CompleteTaskOnEnter,
 			PullFromStepID:   step.PullFromStepID,
 		}
 	}

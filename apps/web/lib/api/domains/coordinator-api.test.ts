@@ -1,21 +1,31 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
 import {
+  addStandingOrder,
   approveProposal,
   createCoordinator,
   deleteCoordinator,
   getCoordinator,
   getCoordinatorProfileUnavailable,
+  getGoal,
   getProposal,
   getProposalConflict,
   listCoordinators,
   listCoordinatorStalls,
   listProposals,
+  listStandingOrders,
+  markGoalMet,
   openConversation,
   patchCoordinator,
+  putGoal,
   rejectProposal,
+  restoreStandingOrder,
+  retireStandingOrder,
+  setGoalCriterionDone,
   type Coordinator,
+  isCreateTaskProposal,
   type Proposal,
+  type WireProposal,
 } from "./coordinator-api";
 
 const fetchSpy = vi.fn<typeof fetch>();
@@ -452,5 +462,165 @@ describe("getCoordinatorProfileUnavailable", () => {
     }
 
     expect(getCoordinatorProfileUnavailable(error)).toBeNull();
+  });
+});
+
+describe("phase-2 wire shapes", () => {
+  const base = {
+    id: PROPOSAL_ID,
+    coordinator_id: COORDINATOR_ID,
+    workspace_id: WORKSPACE_ID,
+    status: "pending" as const,
+    claimed_at: null,
+    task_id: null,
+    error: null,
+    reject_reason: null,
+    decided_by: null,
+    created_at: TIMESTAMP,
+    updated_at: TIMESTAMP,
+  };
+
+  it("narrows create_task and kind-less proposals to the create shape", () => {
+    const spec = {
+      title: "t",
+      description: "",
+      rationale: "",
+      workflow_id: "",
+      step_id: "",
+      repository_id: "",
+      source_task_id: "",
+    };
+    const legacy: WireProposal = { ...base, spec, final_spec: null };
+    const created: WireProposal = { ...base, kind: "create_task", spec, final_spec: null };
+    expect(isCreateTaskProposal(legacy)).toBe(true);
+    expect(isCreateTaskProposal(created)).toBe(true);
+  });
+
+  it("treats a known non-create kind and an unknown kind as other kinds", () => {
+    const move: WireProposal = { ...base, kind: "move", spec: { step_id: "s" }, final_spec: null };
+    const future: WireProposal = { ...base, kind: "reassign", spec: {}, final_spec: null };
+    expect(isCreateTaskProposal(move)).toBe(false);
+    expect(isCreateTaskProposal(future)).toBe(false);
+  });
+
+  it("reads the coordinator policy and watches fields", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        ...coordinator,
+        policy: { actions: { create_task: "propose" } },
+        policy_revision: 2,
+        watches: { scope: "selected", workflow_ids: ["wf-1"] },
+      }),
+    );
+    const got = await getCoordinator(WORKSPACE_ID, COORDINATOR_ID, OPTS);
+    expect(got.policy_revision).toBe(2);
+    expect(got.watches).toEqual({ scope: "selected", workflow_ids: ["wf-1"] });
+  });
+});
+
+describe("standing order client", () => {
+  const order = {
+    id: "o-1",
+    number: 1,
+    text: "Prefer small cards.",
+    created_at: TIMESTAMP,
+    created_by: "u-1",
+    retired_at: null,
+    last_applied_at: null,
+  };
+
+  it("lists active orders by default and retired ones on request", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ orders: [order] }));
+    await expect(listStandingOrders(WORKSPACE_ID, COORDINATOR_ID, OPTS)).resolves.toEqual({
+      orders: [order],
+    });
+    expect(fetchSpy.mock.calls[0][0]).toBe(`${COORDINATOR_PATH}/standing-orders`);
+
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ orders: [] }));
+    await listStandingOrders(WORKSPACE_ID, COORDINATOR_ID, { ...OPTS, includeRetired: true });
+    expect(fetchSpy.mock.calls[1][0]).toBe(`${COORDINATOR_PATH}/standing-orders?include=retired`);
+  });
+
+  it("posts the add body with the source proposal id when given", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(order, 201));
+    await addStandingOrder(
+      WORKSPACE_ID,
+      COORDINATOR_ID,
+      { text: "Prefer small cards.", source_proposal_id: "p-1" },
+      OPTS,
+    );
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${COORDINATOR_PATH}/standing-orders`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      text: "Prefer small cards.",
+      source_proposal_id: "p-1",
+    });
+  });
+
+  it("posts retire and restore to the order's routes", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ ...order, number: null }));
+    await retireStandingOrder(WORKSPACE_ID, COORDINATOR_ID, "o-1", OPTS);
+    expect(fetchSpy.mock.calls[0][0]).toBe(`${COORDINATOR_PATH}/standing-orders/o-1/retire`);
+    expect(fetchSpy.mock.calls[0][1]?.method).toBe("POST");
+
+    fetchSpy.mockResolvedValueOnce(jsonResponse(order));
+    await restoreStandingOrder(WORKSPACE_ID, COORDINATOR_ID, "o-1", OPTS);
+    expect(fetchSpy.mock.calls[1][0]).toBe(`${COORDINATOR_PATH}/standing-orders/o-1/restore`);
+  });
+});
+
+describe("goal client", () => {
+  const goal = {
+    id: "g-1",
+    coordinator_id: COORDINATOR_ID,
+    name: "Ship",
+    due_on: null,
+    status: "active",
+    criteria: [],
+    baseline: null,
+    set_at: TIMESTAMP,
+    met_at: null,
+    met_by: null,
+    created_at: TIMESTAMP,
+    updated_at: TIMESTAMP,
+  };
+
+  it("gets the goal read", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ active: goal, last_met: null, measures: null }));
+    const got = await getGoal(WORKSPACE_ID, COORDINATOR_ID, OPTS);
+    expect(got.active?.id).toBe("g-1");
+    expect(fetchSpy.mock.calls[0][0]).toBe(`${COORDINATOR_PATH}/goal`);
+  });
+
+  it("puts the goal body, keeping an explicit null due_on", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(goal));
+    await putGoal(
+      WORKSPACE_ID,
+      COORDINATOR_ID,
+      { goal_id: "g-1", name: "Ship", due_on: null, criteria: [{ text: "A" }] },
+      OPTS,
+    );
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${COORDINATOR_PATH}/goal`);
+    expect(init?.method).toBe("PUT");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      goal_id: "g-1",
+      name: "Ship",
+      due_on: null,
+      criteria: [{ text: "A" }],
+    });
+  });
+
+  it("posts a criterion toggle and mark met", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(goal));
+    await setGoalCriterionDone(WORKSPACE_ID, COORDINATOR_ID, "c-1", true, OPTS);
+    expect(fetchSpy.mock.calls[0][0]).toBe(`${COORDINATOR_PATH}/goal/criteria/c-1`);
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({ done: true });
+
+    fetchSpy.mockResolvedValueOnce(jsonResponse(goal));
+    await markGoalMet(WORKSPACE_ID, COORDINATOR_ID, "g-1", OPTS);
+    expect(fetchSpy.mock.calls[1][0]).toBe(`${COORDINATOR_PATH}/goal/met`);
+    expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body))).toEqual({ goal_id: "g-1" });
   });
 });

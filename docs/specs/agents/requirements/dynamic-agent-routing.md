@@ -2,7 +2,7 @@
 status: draft
 system: agents
 created: 2026-08-13
-updated: 2026-10-06
+updated: 2026-10-08
 owners:
   - cfl
 ---
@@ -29,6 +29,7 @@ Users often name profiles by the capability they want rather than a provider bra
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.7:** A concrete profile with `AutoFallback=true` is not an eligible dynamic candidate. The conductor is the only owner of cross-candidate fallback. An explicit `FallbackModel` remains part of the concrete profile's start-model policy. It does not advance the dynamic candidate list, and turn attribution records the model that ran.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.8:** Dynamic profiles and their concrete candidates participate in the existing profile-in-use dependency dialog. A dependency lookup failure blocks the change. Otherwise, the user can cancel or explicitly confirm deletion or disabling. Confirmed changes keep durable bindings unchanged: stale selected profiles fail closed, while stale or disabled candidates become ineligible and another configured candidate can be selected.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.9:** When a standalone dynamic-profile save completes while other profiles change, every unrelated profile shall retain its latest accepted state, including additions, updates, and removals. Every unrelated valid picker option shall remain available with its accepted label, enabled state, and revision, including options whose owner is temporarily absent from Agent settings. Desktop and phone shall share this behavior. A failed save shall not publish a replacement profile collection.
+- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.10:** A failure shall be charged only to the route generation and candidate that produced it. When the route has already recorded a successor while the predecessor execution still serves the session, a later failure of that predecessor execution shall not open the successor's circuit, advance the route, or change its generation or candidate.
 
 ### REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002: Repeated unclassified failure fallback
 

@@ -281,7 +281,12 @@ describe("read-only recovery presentation", () => {
             kind: "generic",
             error: { message: "Workspace recovery failed.", phase: "bootstrap" },
           }}
-          actions={{ ...actions, recoveryNotice: notice, manualRecoveryFailure: null }}
+          actions={{
+            ...actions,
+            recoveryNotice: notice,
+            recoveryNoticeKind: "workspace_read_only",
+            manualRecoveryFailure: null,
+          }}
           onNewSession={vi.fn()}
         />
       </StateProvider>,
@@ -429,6 +434,7 @@ it("keeps a typed startup cause and workspace status visible after read-only res
         actions={{
           ...actions,
           recoveryNotice: "Workspace restored in read-only mode",
+          recoveryNoticeKind: "workspace_read_only",
           manualRecoveryFailure: null,
         }}
         onNewSession={vi.fn()}

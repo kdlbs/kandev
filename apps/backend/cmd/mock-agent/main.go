@@ -500,7 +500,7 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if promptCtx.Err() != nil {
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	}
-	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn, Usage: mockPromptUsage(prompt)}, nil
 }
 
 func (a *mockAgent) sessionModel(sessionID acp.SessionId) string {

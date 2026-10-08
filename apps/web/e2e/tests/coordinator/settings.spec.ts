@@ -74,6 +74,7 @@ test.describe("Coordinators settings tab", () => {
     backend,
   }) => {
     test.setTimeout(90_000);
+    const releasePhase2 = await backend.useEnv({ KANDEV_FEATURES_COORDINATOR_PHASE2: "false" });
     const releaseFeature = await enableCoordinatorFeature(backend, apiClient, seedData.workspaceId);
 
     const dedicatedAgentProfileId = await createDedicatedAgentProfile(
@@ -217,6 +218,7 @@ test.describe("Coordinators settings tab", () => {
       await apiClient.deleteAgentProfile(dedicatedAgentProfileId, true).catch(() => undefined);
       await apiClient.deleteAgentProfile(passthroughAgentProfileId, true).catch(() => undefined);
       await releaseFeature();
+      await releasePhase2();
     }
   });
 });

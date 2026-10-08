@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -22,11 +23,17 @@ func TestManualRecoveryPreflightRequestsInspectionWaitWithoutDirtyAuthorization(
 		return nil, nil
 	})
 
-	_, err := executor.PreflightSessionWorktreeRecovery(context.Background(), session.TaskID, session, false)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	callerDeadline, ok := ctx.Deadline()
+	require.True(t, ok)
+	_, err := executor.PreflightSessionWorktreeRecovery(ctx, session.TaskID, session, false)
 	require.NoError(t, err)
 	require.NotEmpty(t, got.Slots)
 	require.True(t, got.SelectionSnapshot.Valid())
 	require.Len(t, got.SelectionSnapshot.Slots, 1)
-	require.Equal(t, worktree.ManualRecoveryInspectionWait, got.InspectionWait)
+	require.Equal(t, worktree.RecoveryInspectionWaitBudget, got.InspectionWait)
+	require.True(t, got.InspectionDeadline.Equal(callerDeadline),
+		"manual recovery preflight must retain the earlier caller deadline")
 	require.False(t, got.RelocateDirty, "waiting for an inspection must not authorize dirty relocation")
 }

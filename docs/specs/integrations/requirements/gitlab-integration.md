@@ -2,7 +2,7 @@
 status: active
 system: integrations
 created: 2026-05-04
-updated: 2026-10-06
+updated: 2026-10-08
 owners:
   - tbd
 ---
@@ -35,6 +35,24 @@ Criterion .9 is the pagination clarification delivered by the
 [workspace-pagination package](../../../plans/gitlab-workspace-pagination/plan.md).
 Its local implementation and behavioral verification are complete; hosted
 review, CI, and merge remain pending. Unrelated criteria retain their lifecycle.
+
+#### Discussion reply drafts
+
+The following clarification extends the existing GitLab review contract.
+Local implementation and targeted checks are complete in the
+[reply-draft package](../../../plans/gitlab-reply-draft-preservation/plan.md).
+Hosted review, CI and merge remain pending; unrelated criteria retain their
+existing lifecycle.
+
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.11:** When a user submits a nonblank discussion reply, only the trimmed text captured at submission shall be sent to that discussion. Empty or whitespace-only input shall not be submitted. The textarea shall remain editable while the reply is pending, with submission unavailable during the pending action.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.12:** When the reply succeeds, the textarea shall clear only if its current exact text equals the raw text captured at submission. A different current value shall be preserved exactly, including whitespace-only differences and an intentional clear. Text edited and then restored exactly to the submitted raw value is eligible to clear.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.13:** When the reply fails, the current textarea value shall remain intact, whether unchanged, edited, or cleared. After the pending action settles, a user can retry nonblank current text; retry shall send the current trimmed text, and its success shall obey the same clearing rule.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.14:** A successful reply shall keep the existing success feedback and refresh the review. While refreshed data retains the same discussion, its newer unsent text shall survive a delayed, successful, or failed refresh. A refresh failure shall not turn a successful reply into a failed submission or restore a successfully cleared draft.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.15:** Reply settlement shall affect only the submitted discussion's draft. Other discussion drafts shall remain intact, including when refreshed discussions are reordered. Desktop and phone shall share these draft semantics within the existing reply surface.
+
+This clarification excludes draft persistence after unmount, reload, or
+discussion removal, changes to MR/workspace switching, and changes to layout,
+copy, other review actions, or provider APIs.
 
 ## System design
 

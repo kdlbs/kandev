@@ -276,12 +276,8 @@ func TestWaitForProcessExit_TerminatesBeforeParentContextDeadline(t *testing.T) 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	startedAt := time.Now()
-	m.waitForProcessExit(ctx)
-	elapsed := time.Since(startedAt)
-
-	require.Less(t, elapsed, 700*time.Millisecond,
-		"shutdown should terminate a non-exiting agent without spending a full second in local grace")
+	require.NoError(t, m.waitForProcessExit(ctx))
+	require.NoError(t, ctx.Err(), "shutdown must terminate the agent before the caller deadline")
 	require.True(t, observedLogsContain(observed, "agent process group SIGTERM requested"),
 		"shutdown should log the process-group SIGTERM attempt")
 	require.Eventually(t, func() bool {

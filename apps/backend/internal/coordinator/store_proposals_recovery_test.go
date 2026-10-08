@@ -15,7 +15,7 @@ func TestListApprovingClaimedBefore_FiltersByCutoffAndOrders(t *testing.T) {
 
 	// Claimed well before cutoff: must be returned.
 	early := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, early); err != nil {
+	if err := store.InsertProposal(ctx, early, false); err != nil {
 		t.Fatalf("InsertProposal(early): %v", err)
 	}
 	earlyClaimedAt := cutoff.Add(-10 * time.Minute)
@@ -25,7 +25,7 @@ func TestListApprovingClaimedBefore_FiltersByCutoffAndOrders(t *testing.T) {
 
 	// Claimed just before cutoff: must be returned, and ordered after early.
 	late := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, late); err != nil {
+	if err := store.InsertProposal(ctx, late, false); err != nil {
 		t.Fatalf("InsertProposal(late): %v", err)
 	}
 	lateClaimedAt := cutoff.Add(-time.Minute)
@@ -35,7 +35,7 @@ func TestListApprovingClaimedBefore_FiltersByCutoffAndOrders(t *testing.T) {
 
 	// Claimed at or after cutoff: must not be returned.
 	atCutoff := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, atCutoff); err != nil {
+	if err := store.InsertProposal(ctx, atCutoff, false); err != nil {
 		t.Fatalf("InsertProposal(atCutoff): %v", err)
 	}
 	if _, err := store.ClaimProposal(ctx, atCutoff.ID, "token-at", sampleSpec(), "user-1", cutoff); err != nil {
@@ -44,7 +44,7 @@ func TestListApprovingClaimedBefore_FiltersByCutoffAndOrders(t *testing.T) {
 
 	// A pending row (never claimed): must not be returned.
 	pending := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, pending); err != nil {
+	if err := store.InsertProposal(ctx, pending, false); err != nil {
 		t.Fatalf("InsertProposal(pending): %v", err)
 	}
 
@@ -52,14 +52,14 @@ func TestListApprovingClaimedBefore_FiltersByCutoffAndOrders(t *testing.T) {
 	// returned too (every workspace, no scoping).
 	c2 := newTestCoordinator(t, store, "ws-2")
 	otherWorkspace := &Proposal{CoordinatorID: c2.ID, WorkspaceID: "ws-2", Spec: sampleSpec()}
-	if err := store.InsertProposal(ctx, otherWorkspace); err != nil {
+	if err := store.InsertProposal(ctx, otherWorkspace, false); err != nil {
 		t.Fatalf("InsertProposal(otherWorkspace): %v", err)
 	}
 	if _, err := store.ClaimProposal(ctx, otherWorkspace.ID, "token-other", sampleSpec(), "user-1", earlyClaimedAt); err != nil {
 		t.Fatalf("ClaimProposal(otherWorkspace): %v", err)
 	}
 
-	got, err := store.ListApprovingClaimedBefore(ctx, cutoff)
+	got, err := store.ListApprovingClaimedBefore(ctx, cutoff, false)
 	if err != nil {
 		t.Fatalf("ListApprovingClaimedBefore: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestListApprovingClaimedBefore_EmptyWhenNoneStuck(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
-	got, err := store.ListApprovingClaimedBefore(ctx, time.Now().UTC())
+	got, err := store.ListApprovingClaimedBefore(ctx, time.Now().UTC(), false)
 	if err != nil {
 		t.Fatalf("ListApprovingClaimedBefore: %v", err)
 	}

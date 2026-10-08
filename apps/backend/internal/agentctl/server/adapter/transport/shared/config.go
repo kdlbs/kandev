@@ -62,8 +62,7 @@ type Config struct {
 	NotificationQueueCapacity int
 
 	// PromptCancelJoinTimeout is an optional per-adapter ACP cancellation join bound.
-	PromptCancelJoinTimeout          time.Duration
-	ProviderInterruptionContinuation bool
+	PromptCancelJoinTimeout time.Duration
 
 	// ProviderGatewayAuth, when set, makes the ACP adapter authenticate the
 	// agent against an OpenAI-compatible gateway right after initialize.

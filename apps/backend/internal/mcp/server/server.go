@@ -863,6 +863,16 @@ func (s *Server) SetProfile(profileContext mcpprofile.Context) {
 	s.rebuildTools()
 }
 
+// sameCoordinatorToolPolicy compares two bindings by their marshalled form.
+func sameCoordinatorToolPolicy(left, right *mcpprofile.CoordinatorToolPolicy) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	l, lerr := mcpprofile.MarshalCoordinatorToolPolicy(*left)
+	r, rerr := mcpprofile.MarshalCoordinatorToolPolicy(*right)
+	return lerr == nil && rerr == nil && l == r
+}
+
 func sameProfile(left, right mcpprofile.Context) bool {
 	if left.Surface != right.Surface || len(left.Capabilities) != len(right.Capabilities) || len(left.Providers) != len(right.Providers) {
 		return false
@@ -876,6 +886,9 @@ func sameProfile(left, right mcpprofile.Context) bool {
 		if left.Providers[i] != right.Providers[i] {
 			return false
 		}
+	}
+	if !sameCoordinatorToolPolicy(left.CoordinatorToolPolicy, right.CoordinatorToolPolicy) {
+		return false
 	}
 	if (left.ManagedToolPolicy == nil) != (right.ManagedToolPolicy == nil) {
 		return false

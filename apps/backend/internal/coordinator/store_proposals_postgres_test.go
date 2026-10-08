@@ -28,7 +28,7 @@ func TestInsertProposal_Postgres_ConcurrentCapEnforcement(t *testing.T) {
 			defer wg.Done()
 			<-start
 			p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
-			err := store.InsertProposal(ctx, p)
+			err := store.InsertProposal(ctx, p, false)
 			switch {
 			case err == nil:
 				atomic.AddInt64(&succeeded, 1)
@@ -53,7 +53,7 @@ func TestInsertProposal_Postgres_ConcurrentCapEnforcement(t *testing.T) {
 		t.Fatalf("capped = %d, want %d", capped, attempts-maxOpenProposals)
 	}
 
-	count, err := store.CountOpenProposals(ctx, c.ID)
+	count, err := store.CountOpenProposals(ctx, c.ID, false)
 	if err != nil {
 		t.Fatalf("CountOpenProposals: %v", err)
 	}

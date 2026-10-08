@@ -19,6 +19,13 @@ const ACTIVITY_TYPES = new Set([
   "tool_search",
 ]);
 
+const PROPOSAL_TOOL_STEMS = new Set([
+  "propose_task",
+  "propose_resume",
+  "propose_message",
+  "propose_move",
+]);
+
 export type ActivityChipInfo = {
   count: number;
   failed: number;
@@ -89,7 +96,7 @@ export function deriveRunningTurn(args: {
 }
 
 function isProposal(message: Message): boolean {
-  return message.type === "tool_call" && kandevToolStemOf(message) === "propose_task";
+  return message.type === "tool_call" && PROPOSAL_TOOL_STEMS.has(kandevToolStemOf(message) ?? "");
 }
 
 /** The condition `ProposeTaskRenderer` uses to show the card. */

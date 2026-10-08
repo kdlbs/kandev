@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
@@ -18,11 +19,14 @@ import (
 // every scope it was called with, so tests can assert a read route never
 // authorizes with the manage scope (or vice versa).
 type fakeWorkspaceAuthorizer struct {
+	mu     sync.Mutex
 	err    error
 	scopes []authz.Scope
 }
 
 func (f *fakeWorkspaceAuthorizer) AuthorizeWorkspaceScope(_ context.Context, _ string, scope authz.Scope) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.scopes = append(f.scopes, scope)
 	return f.err
 }
@@ -245,7 +249,7 @@ func TestServiceListCoordinators(t *testing.T) {
 		if err := svc.store.InsertProposal(ctx, &Proposal{
 			CoordinatorID: created.ID, WorkspaceID: workspaceID,
 			Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
-		}); err != nil {
+		}, false); err != nil {
 			t.Fatalf("InsertProposal() unexpected error: %v", err)
 		}
 
@@ -294,7 +298,7 @@ func TestServiceListCoordinators(t *testing.T) {
 			if err := svc.store.InsertProposal(ctx, &Proposal{
 				CoordinatorID: busy.ID, WorkspaceID: workspaceID,
 				Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
-			}); err != nil {
+			}, false); err != nil {
 				t.Fatalf("InsertProposal() unexpected error: %v", err)
 			}
 		}
@@ -523,7 +527,7 @@ func TestServiceProposalReads(t *testing.T) {
 			CoordinatorID: created.ID, WorkspaceID: workspaceID,
 			Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
 		}
-		if err := svc.store.InsertProposal(ctx, proposal); err != nil {
+		if err := svc.store.InsertProposal(ctx, proposal, false); err != nil {
 			t.Fatalf("InsertProposal() unexpected error: %v", err)
 		}
 
@@ -563,7 +567,7 @@ func TestServiceProposalReads(t *testing.T) {
 			CoordinatorID: a.ID, WorkspaceID: workspaceID,
 			Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
 		}
-		if err := svc.store.InsertProposal(ctx, proposal); err != nil {
+		if err := svc.store.InsertProposal(ctx, proposal, false); err != nil {
 			t.Fatalf("InsertProposal() unexpected error: %v", err)
 		}
 		_, err = svc.GetProposal(ctx, workspaceID, b.ID, proposal.ID)
