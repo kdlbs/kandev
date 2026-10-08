@@ -37,6 +37,8 @@ Use `scripts/release/prepare-desktop-runtime.sh` and `scripts/release/verify-des
 - Native menus emit versioned `kandev-desktop-v1-*` events for SPA-owned context and navigation.
   Updater, notification, and external-link operations use narrow generated Tauri commands scoped
   to the owned loopback WebView; do not grant the SPA direct plugin permissions.
+- Release developer tools are enabled by the `desktop-runtime` Tauri feature and the main webview
+  builder. The native View menu opens the inspector; do not expose it through the SPA bridge.
 - Desktop launches force `KANDEV_SERVER_HOST=127.0.0.1`, prefer a stable desktop port with random fallback, and pass `KANDEV_BUNDLE_DIR` to the native launcher.
 - Desktop launches set `KANDEV_DESKTOP_NATIVE_NOTIFICATIONS=true` so the owned backend suppresses
   only its duplicate System notification provider.

@@ -1,12 +1,14 @@
 import { test, expect } from "../../fixtures/test-base";
+import { dwell } from "../../helpers/causal-waits";
 import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import type { AppState } from "@/lib/state/store";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 type MotionWindow = Window & {
   __KANDEV_E2E_STORE__?: { getState(): AppState };
   __chatMotionSamples?: { text: string; opacity: number; kind: string }[];
+  __chatScrollGeometryReads?: number;
 };
 
 async function observeMotion(page: Page) {
@@ -29,6 +31,58 @@ async function observeMotion(page: Page) {
       return animation;
     };
   });
+}
+
+async function withScrollHeightObservation(scroller: Locator, run: () => Promise<void>) {
+  await scroller.evaluate((element) => {
+    let prototype: object | null = Object.getPrototypeOf(element);
+    let getter: PropertyDescriptor["get"];
+    while (prototype && !getter) {
+      getter = Object.getOwnPropertyDescriptor(prototype, "scrollHeight")?.get;
+      prototype = Object.getPrototypeOf(prototype);
+    }
+    if (!getter) throw new Error("Could not observe the transcript scrollHeight getter");
+    const readScrollHeight = getter;
+    const win = element.ownerDocument.defaultView as MotionWindow;
+    win.__chatScrollGeometryReads = 0;
+    Object.defineProperty(element, "scrollHeight", {
+      configurable: true,
+      get: () => {
+        win.__chatScrollGeometryReads = (win.__chatScrollGeometryReads ?? 0) + 1;
+        return readScrollHeight.call(element);
+      },
+    });
+  });
+  try {
+    await run();
+  } finally {
+    await scroller.evaluate((element) => {
+      delete (element as unknown as { scrollHeight?: number }).scrollHeight;
+      delete (element.ownerDocument.defaultView as MotionWindow).__chatScrollGeometryReads;
+    });
+  }
+}
+
+async function scrollHeightReadCount(page: Page) {
+  return page.evaluate(() => (window as MotionWindow).__chatScrollGeometryReads ?? 0);
+}
+
+async function expectStableScrollGeometry(scroller: Locator) {
+  let previous = "";
+  let stableSamples = 0;
+  await expect
+    .poll(
+      async () => {
+        const geometry = await scroller.evaluate((el) =>
+          [el.scrollHeight, el.clientHeight, el.scrollTop].join(":"),
+        );
+        stableSamples = geometry === previous ? stableSamples + 1 : 0;
+        previous = geometry;
+        return stableSamples;
+      },
+      { intervals: [50], message: "transcript scroll geometry should settle" },
+    )
+    .toBeGreaterThanOrEqual(3);
 }
 
 export function chatMotionScenarios(mobile: boolean) {
@@ -75,6 +129,7 @@ export function chatMotionScenarios(mobile: boolean) {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await testPage.emulateMedia({ reducedMotion: "no-preference" });
     const task = await apiClient.createTaskWithAgent(
@@ -189,34 +244,106 @@ export function chatMotionScenarios(mobile: boolean) {
     const lastParagraph = session.activeChat().getByText("SCROLL-HISTORY 25", { exact: true });
     if (mobile) await lastParagraph.tap();
     else await lastParagraph.click();
-    const movement = await testPage.evaluate(async (sessionId) => {
-      const state = (window as MotionWindow).__KANDEV_E2E_STORE__!.getState();
-      const message = state.messages.bySession[sessionId].find(
-        (item) => item.content === "STATIC-PROSE 1",
-      )!;
-      const el = [...document.querySelectorAll<HTMLElement>(".chat-message-list")].find(
-        (node) => node.clientHeight > 0,
-      )!;
-      const start = el.scrollTop;
-      state.updateMessage({
-        ...message,
-        content:
-          message.content +
-          "\n\n" +
-          Array.from({ length: 20 }, (_, i) => `Streaming paragraph ${i}`).join("\n\n"),
-        updated_at: new Date().toISOString(),
-      });
-      const samples: number[] = [];
-      for (let i = 0; i < 24; i++) {
-        await new Promise(requestAnimationFrame);
-        samples.push(el.scrollTop);
-      }
-      return { start, samples, target: el.scrollHeight - el.clientHeight };
-    }, task.session_id);
-    expect(movement.samples.some((top) => top > movement.start && top < movement.target - 2)).toBe(
-      true,
-    );
-    expect(Math.abs(movement.samples.at(-1)! - movement.target)).toBeLessThan(3);
+    const zoomedPosition = await scroller.evaluate((el) => {
+      el.style.zoom = "1.125";
+      const target = el.scrollHeight - el.clientHeight;
+      el.scrollTop = target - 0.25;
+      return {
+        zoom: getComputedStyle(el).zoom,
+        top: el.scrollTop,
+        target: el.scrollHeight - el.clientHeight,
+      };
+    });
+    expect(zoomedPosition.zoom).toBe("1.125");
+    expect(Number.isInteger(zoomedPosition.top)).toBe(false);
+    expect(Math.abs(zoomedPosition.top - zoomedPosition.target)).toBeLessThan(1);
+    await withScrollHeightObservation(scroller, async () => {
+      const movement = await testPage.evaluate(async (sessionId) => {
+        const state = (window as MotionWindow).__KANDEV_E2E_STORE__!.getState();
+        const message = state.messages.bySession[sessionId].find(
+          (item) => item.content === "STATIC-PROSE 1",
+        )!;
+        const el = [...document.querySelectorAll<HTMLElement>(".chat-message-list")].find(
+          (node) => node.clientHeight > 0,
+        )!;
+        const start = el.scrollTop;
+        state.updateMessage({
+          ...message,
+          content:
+            message.content +
+            "\n\n" +
+            Array.from({ length: 20 }, (_, i) => `Streaming paragraph ${i}`).join("\n\n"),
+          updated_at: new Date().toISOString(),
+        });
+        const samples: number[] = [];
+        for (let i = 0; i < 24; i++) {
+          await new Promise(requestAnimationFrame);
+          samples.push(el.scrollTop);
+        }
+        return { start, samples, target: el.scrollHeight - el.clientHeight };
+      }, task.session_id);
+      expect(
+        movement.samples.some((top) => top > movement.start && top < movement.target - 2),
+      ).toBe(true);
+      expect(Math.abs(movement.samples.at(-1)! - movement.target)).toBeLessThan(3);
+      await expect
+        .poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
+        .toBeLessThan(2);
+      await expectStableScrollGeometry(scroller);
+      const readsAfterStreamSettlement = await scrollHeightReadCount(testPage);
+      await dwell(
+        testPage,
+        350,
+        "negative-assertion",
+        "verify transcript geometry reads stop after stream completion",
+      );
+      expect(await scrollHeightReadCount(testPage)).toBe(readsAfterStreamSettlement);
+
+      await testPage.evaluate((sessionId) => {
+        const state = (window as MotionWindow).__KANDEV_E2E_STORE__!.getState();
+        const message = state.messages.bySession[sessionId].find((item) =>
+          item.content.startsWith("STATIC-PROSE 1"),
+        )!;
+        state.updateMessage({
+          ...message,
+          content:
+            message.content +
+            "\n\n" +
+            Array.from({ length: 10 }, (_, i) => `LATE-GROWTH-${i + 1}`).join("\n\n"),
+          updated_at: new Date().toISOString(),
+        });
+      }, task.session_id);
+      await expect(session.activeChat().getByText("LATE-GROWTH-10", { exact: true })).toBeVisible();
+      await expect
+        .poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
+        .toBeLessThan(2);
+      await expectStableScrollGeometry(scroller);
+      const readsAfterLaterGrowth = await scrollHeightReadCount(testPage);
+      await dwell(
+        testPage,
+        350,
+        "negative-assertion",
+        "verify transcript geometry reads stop after later content growth",
+      );
+      expect(await scrollHeightReadCount(testPage)).toBe(readsAfterLaterGrowth);
+    });
+    await scroller.evaluate((el) => {
+      el.style.zoom = "";
+    });
+    await expectStableScrollGeometry(scroller);
+    await expect
+      .poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
+      .toBeLessThan(2);
+    if (prCapture.capturing) {
+      await prCapture.screenshot(
+        mobile ? "chat-scroll-settled-phone" : "chat-scroll-settled-desktop",
+        {
+          caption: mobile
+            ? "Phone transcript settled after later content growth"
+            : "Desktop transcript settled after later content growth",
+        },
+      );
+    }
     // Real input must release follow intent before the next delivery.
     if (mobile) {
       const box = (await scroller.boundingBox())!;
