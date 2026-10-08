@@ -2342,6 +2342,7 @@
   "sessionErrorPromptNotSent": "No",
   "sessionErrorPromptSent": "Yes",
   "resumeFailedWorkspaceReadOnly": "Workspace restored in read-only mode",
+  "workspaceRecoveryInspectionBusy": "This workspace is still being checked. Try resuming the session again.",
   "continueOnNewBranch": "Continue on a new branch",
   "restoreReadOnlyWorkspace": "Restore read-only workspace",
   "sessionRecoveryGuardInProgress": "This session's agent is still being reconciled after the backend restarted. This clears automatically; try again in a few seconds.",

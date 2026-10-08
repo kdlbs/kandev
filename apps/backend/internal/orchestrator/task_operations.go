@@ -3553,6 +3553,9 @@ func (s *Service) resumeTaskSessionWithContinuation(
 			if owned, _ := resumeCtx.Value(continuationOwnedContextKey{}).(bool); owned {
 				return execution, decorateResumeFailure(err)
 			}
+			if executor.IsSafeResumeInspectionDeferral(err) {
+				return nil, decorateResumeFailure(err)
+			}
 			persistBranchRecovery()
 			// Use resumeCtx (WithoutCancel) for the failure-recording writes too —
 			// if the caller's ctx was already cancelled (e.g. WS client navigated

@@ -2329,6 +2329,7 @@
   "sessionErrorPromptNotSent": "Não",
   "sessionErrorPromptSent": "Sim",
   "resumeFailedWorkspaceReadOnly": "Workspace restaurado em modo só de leitura",
+  "workspaceRecoveryInspectionBusy": "Este workspace ainda está a ser verificado. Tente retomar a sessão.",
   "continueOnNewBranch": "Continuar numa nova branch",
   "restoreReadOnlyWorkspace": "Restaurar workspace só de leitura",
   "sessionRecoveryGuardInProgress": "O agente desta sessão ainda está a ser reconciliado após o reinício do backend. Isto resolve-se automaticamente; tente novamente daqui a alguns segundos.",

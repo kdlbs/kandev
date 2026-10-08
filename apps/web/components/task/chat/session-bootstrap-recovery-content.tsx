@@ -57,24 +57,7 @@ function RecoveryCardNotices({
   );
 }
 
-function BootstrapRecoveryActions({
-  profileExists,
-  busyAction,
-  hasBranchRecovery,
-  blocked,
-  canRestore,
-  needsManagedCloneRelocation,
-  workspaceRecovery,
-  workspaceRecoveryRepositoryName,
-  workspaceRecoveryStatusCheck,
-  onCheckWorkspaceRecoveryStatus,
-  providerRestoredResumeEligible,
-  onResume,
-  onRestore,
-  onFreshStart,
-  onNewBranch,
-  onRelocate,
-}: {
+type BootstrapRecoveryActionProps = {
   profileExists: boolean;
   busyAction: SessionRecoveryBusyAction;
   hasBranchRecovery: boolean;
@@ -86,54 +69,102 @@ function BootstrapRecoveryActions({
   workspaceRecoveryStatusCheck: import("@/hooks/domains/session/use-session-recovery-actions").WorkspaceRecoveryStatusCheck;
   onCheckWorkspaceRecoveryStatus: () => void;
   providerRestoredResumeEligible: boolean;
+  inspectionBusy: boolean;
   onResume: () => void;
   onRestore: () => void;
   onFreshStart: () => void;
   onNewBranch: () => void;
   onRelocate: () => void;
-}) {
-  const { t } = useTranslation();
-  const actions: RecoveryChoice[] = needsManagedCloneRelocation
-    ? [
-        {
-          kind: "relocate_and_resume",
-          label: t("task:managedCloneRelocateResume"),
-          onClick: onRelocate,
-          testId: "managed-clone-relocate-button",
-        },
-      ]
-    : [
-        {
-          kind: "resume",
-          label: t("task:resume"),
-          disclosure: providerRestoredResumeEligible
-            ? t("task:providerRestoredResumeDisclosure")
-            : undefined,
-          onClick: onResume,
-          disabled: !profileExists,
-          testId: "recovery-resume-button",
-        },
-        {
-          kind: "restore",
-          label: t("task:restoreReadOnlyWorkspace"),
-          onClick: onRestore,
-          testId: "recovery-restore-workspace-button",
-        },
-        {
-          kind: "fresh_start",
-          label: t("task:startFreshSession"),
-          onClick: onFreshStart,
-          testId: "recovery-fresh-button",
-        },
-      ];
-  if (!needsManagedCloneRelocation && hasBranchRecovery)
+};
+
+function buildBootstrapRecoveryChoices(
+  {
+    profileExists,
+    hasBranchRecovery,
+    needsManagedCloneRelocation,
+    providerRestoredResumeEligible,
+    inspectionBusy,
+    onResume,
+    onRestore,
+    onFreshStart,
+    onNewBranch,
+    onRelocate,
+  }: BootstrapRecoveryActionProps,
+  t: ReturnType<typeof useTranslation>["t"],
+): RecoveryChoice[] {
+  if (inspectionBusy) {
+    return [
+      {
+        kind: "resume",
+        label: t("task:resume"),
+        onClick: onResume,
+        disabled: !profileExists,
+        testId: "recovery-resume-button",
+      },
+    ];
+  }
+  if (needsManagedCloneRelocation) {
+    return [
+      {
+        kind: "relocate_and_resume",
+        label: t("task:managedCloneRelocateResume"),
+        onClick: onRelocate,
+        testId: "managed-clone-relocate-button",
+      },
+    ];
+  }
+  const actions: RecoveryChoice[] = [
+    {
+      kind: "resume",
+      label: t("task:resume"),
+      disclosure: providerRestoredResumeEligible
+        ? t("task:providerRestoredResumeDisclosure")
+        : undefined,
+      onClick: onResume,
+      disabled: !profileExists,
+      testId: "recovery-resume-button",
+    },
+    {
+      kind: "restore",
+      label: t("task:restoreReadOnlyWorkspace"),
+      onClick: onRestore,
+      testId: "recovery-restore-workspace-button",
+    },
+    {
+      kind: "fresh_start",
+      label: t("task:startFreshSession"),
+      onClick: onFreshStart,
+      testId: "recovery-fresh-button",
+    },
+  ];
+  if (hasBranchRecovery)
     actions.push({
       kind: "resume_new_branch",
       label: t("task:continueOnNewBranch"),
       onClick: onNewBranch,
       testId: "recovery-new-branch-button",
     });
-  const preferred = preferredBootstrapRecoveryAction(needsManagedCloneRelocation, profileExists);
+  return actions;
+}
+
+function BootstrapRecoveryActions(props: BootstrapRecoveryActionProps) {
+  const {
+    busyAction,
+    blocked,
+    canRestore,
+    needsManagedCloneRelocation,
+    workspaceRecovery,
+    workspaceRecoveryRepositoryName,
+    workspaceRecoveryStatusCheck,
+    onCheckWorkspaceRecoveryStatus,
+    inspectionBusy,
+    profileExists,
+  } = props;
+  const { t } = useTranslation();
+  const actions = buildBootstrapRecoveryChoices(props, t);
+  const preferred = inspectionBusy
+    ? "resume"
+    : preferredBootstrapRecoveryAction(needsManagedCloneRelocation, profileExists);
   return (
     <RecoveryActions
       actions={canRestore ? actions : actions.filter((action) => action.kind !== "restore")}
@@ -163,6 +194,7 @@ export function RecoveryCardContent({
   error,
   profileExists,
   providerRestoredResumeEligible,
+  inspectionBusy,
   busyAction,
   hasBranchRecovery,
   blocked,
@@ -184,6 +216,7 @@ export function RecoveryCardContent({
   error: TaskStatusSummaryActiveError;
   profileExists: boolean;
   providerRestoredResumeEligible: boolean;
+  inspectionBusy: boolean;
   busyAction: SessionRecoveryBusyAction;
   hasBranchRecovery: boolean;
   blocked: boolean;
@@ -226,6 +259,7 @@ export function RecoveryCardContent({
       <BootstrapRecoveryActions
         profileExists={profileExists}
         providerRestoredResumeEligible={providerRestoredResumeEligible}
+        inspectionBusy={inspectionBusy}
         busyAction={busyAction}
         hasBranchRecovery={hasBranchRecovery}
         blocked={blocked}

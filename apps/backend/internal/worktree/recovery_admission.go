@@ -74,15 +74,58 @@ type RecoveryAdmissionRequest struct {
 	ErrorStamp             string
 	AllowBranchReplacement bool
 	RelocateDirty          bool
-	// InspectionWait allows only an outer manual preflight to wait for a
-	// read-only inspection lock. It does not authorize dirty relocation.
-	InspectionWait time.Duration
-	Slots          []RecoverySlot
+	// InspectionWait allows only an outer preflight to wait for a read-only
+	// inspection lock. It does not authorize dirty relocation.
+	InspectionWait     time.Duration
+	InspectionDeadline time.Time
+	Slots              []RecoverySlot
 }
 
-// ManualRecoveryInspectionWait is the maximum time a manual recovery
-// preflight may wait for a selected worktree inspection lock.
-const ManualRecoveryInspectionWait = 15 * time.Second
+// RecoveryInspectionWaitBudget bounds inspection waits across outer admission
+// steps in one logical resume request.
+const RecoveryInspectionWaitBudget = 15 * time.Second
+
+type recoveryInspectionDeadlineContextKey struct{}
+
+// WithRecoveryInspectionWait starts or preserves the bounded inspection
+// deadline for one logical request. Nested admissions cannot restart it.
+func WithRecoveryInspectionWait(ctx context.Context, maxWait time.Duration) (context.Context, time.Time) {
+	if ctx == nil || maxWait <= 0 {
+		return ctx, time.Time{}
+	}
+	if maxWait > RecoveryInspectionWaitBudget {
+		maxWait = RecoveryInspectionWaitBudget
+	}
+	deadline := time.Now().Add(maxWait)
+	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+		deadline = callerDeadline
+	}
+	if current, ok := ctx.Value(recoveryInspectionDeadlineContextKey{}).(time.Time); ok &&
+		!current.IsZero() && current.Before(deadline) {
+		deadline = current
+	}
+	return context.WithValue(ctx, recoveryInspectionDeadlineContextKey{}, deadline), deadline
+}
+
+func recoveryInspectionDeadline(ctx context.Context, maxWait time.Duration) time.Time {
+	if maxWait <= 0 {
+		return time.Time{}
+	}
+	if maxWait > RecoveryInspectionWaitBudget {
+		maxWait = RecoveryInspectionWaitBudget
+	}
+	deadline := time.Now().Add(maxWait)
+	if ctx != nil {
+		if current, ok := ctx.Value(recoveryInspectionDeadlineContextKey{}).(time.Time); ok &&
+			!current.IsZero() && current.Before(deadline) {
+			deadline = current
+		}
+		if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+			deadline = callerDeadline
+		}
+	}
+	return deadline
+}
 
 // RecoveryAdmission retains the environment authority and per-worktree locks
 // until the caller crosses the external workspace-start boundary.
@@ -972,16 +1015,10 @@ func (m *Manager) lockRecoverySlots(ctx context.Context, req *RecoveryAdmissionR
 	sort.Slice(sorted, func(i, j int) bool {
 		return recoverySlotKey(req.Slots[sorted[i]]) < recoverySlotKey(req.Slots[sorted[j]])
 	})
-	wait := req.InspectionWait
-	if wait > ManualRecoveryInspectionWait {
-		wait = ManualRecoveryInspectionWait
-	}
-	var waitDeadline time.Time
-	if wait > 0 {
-		waitDeadline = time.Now().Add(wait)
-		if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(waitDeadline) {
-			waitDeadline = callerDeadline
-		}
+	waitDeadline := recoveryInspectionDeadline(ctx, req.InspectionWait)
+	if req.InspectionWait > 0 && !req.InspectionDeadline.IsZero() &&
+		req.InspectionDeadline.Before(waitDeadline) {
+		waitDeadline = req.InspectionDeadline
 	}
 	selection := snapshotRecoverySlotIdentities(req, indices)
 	locks := make([]*sync.Mutex, 0, len(sorted))
@@ -1069,9 +1106,6 @@ func waitForRecoveryInspectionLock(ctx context.Context, lock *sync.Mutex, deadli
 	for {
 		if err := ctx.Err(); err != nil {
 			return recoveryInspectionWaitError(err)
-		}
-		if !deadline.IsZero() && !time.Now().Before(deadline) {
-			return &RecoveryInspectionContentionError{}
 		}
 		if lock.TryLock() {
 			if err := ctx.Err(); err != nil {
