@@ -270,6 +270,48 @@ No API, schema, flag, global coordinator, cache, or architectural ownership
 change is introduced. Existing per-session ownership is enforced locally;
 the paired design preserves the constraint without a new ADR.
 
+##### Plan implementation action settlement
+
+The [plan implementation draft package](../../../plans/plan-implementation-draft-preservation/plan.md)
+extends enforcement of `004.4`–`.6` to `useImplementPlanRunner` in
+`hooks/domains/kanban/use-plan-actions.ts` and `useImplementFresh` in
+`hooks/domains/kanban/use-implement-fresh.ts`. Capture the initiating
+`ChatInputContainerHandle`, its accepted-payload callback, and the unaugmented
+composer text and attachment descriptors before the first asynchronous request.
+The agent prompt adds the implementation system block; that augmented prompt is
+not the composer payload used for matching.
+
+After successful delivery, invoke only the captured `clearAcceptedPayload`
+callback with that captured payload. Its existing committed-visit admission,
+trimmed markdown comparison, and attachment matching own all editor, state,
+height, history, and browser-tab storage clearing. Do not fetch a new callback
+from the mutable ref at completion, fall back to raw `clear()`, or independently
+delete saved content. An unavailable callback has no clearing authority.
+Newer text or changed attachment descriptors preserve the draft under this
+accepted-payload policy; ordinary submit's text-only attachment-change policy
+remains separate and unchanged.
+
+`ChatInputArea` reaches the runner through `usePlanActions`,
+`useComposerProps`, `ChatInputContainer`, the shared body and desktop/phone
+toolbars. `PlanPanelHeader` invokes the same runner without a composer ref;
+neither implementation branch may erase a draft on its behalf. The
+next-workflow-step branch uses `proceed()` and does not perform this clearing.
+Keep its policy unchanged. Fresh implementation retains profile/executor
+inheritance, primary assignment, marker publication and active-session change.
+Let the captured callback refuse a retired visit if activation replaces the
+editor; do not move activation or add writes to retired storage to force a clear.
+The same-session marker, optional plan-mode change, message UUID, context files,
+attachment readiness, transport timeouts and error reporting remain unchanged.
+
+Deferred real-composer tests must directly assert live text, saved text, non-null
+rich JSON and saved attachments before and after acknowledgement, then remount
+to verify restoration. Exercise the first-party `ChatInputArea` action wiring,
+both toolbars, fresh option and the no-ref plan toolbar with production
+providers/store/editor. Mock only external WS/fetch transport. Existing isolated
+runner tests retain request/side-effect coverage but cannot prove draft safety.
+This is the same state/data-only mobile exception; no geometry or browser proof
+is claimed. No new ownership service, public handle API or ADR is needed.
+
 ### PR feedback coordination
 
 Implements `REQ-UI-SESSION-REFRESH-EFFICIENCY-005`.

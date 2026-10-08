@@ -828,6 +828,11 @@ Regular tasks have one shared Markdown plan, not a collection of named documents
    - After Kandev accepts either action, it removes the delivered comments from the plan and every composer.
 6. Choose **Implement** for the current session or **Implement in fresh agent**. Kandev saves the draft and marks it as sent for implementation. The action stays disabled while a composer attachment is uploading or failed. After implementation starts, the button is disabled for that plan.
 
+If you add a composer instruction when starting implementation, Kandev clears
+that draft only after acceptance and while its text and attachments still match.
+Edits made while implementation starts remain available when you return to that
+session. Starting from the Plan panel leaves an unsent composer draft intact.
+
 Each plan comment supports up to 64 KiB of feedback and 256 KiB of selected
 text. A plan supports up to 100 pending comments and 1 MiB of combined feedback
 and selected text. The complete message, including formatted comments, must
