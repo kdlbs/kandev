@@ -288,15 +288,24 @@ mobile fork-comparison test could not read the linked worktree's `.git` pointer
 from the Docker container. The downloaded shard manifest no longer matched the
 current test catalog, so its file assignment was replayed directly.
 
-The base later advanced to `db0348d1623ea9dc06e28c85afbcba9e4c087c06`. No
-files changed between those base revisions overlap the PR's changed-file set.
-On synthetic merge `d5e946c24cf5b38b7cf2b948185b817195556d63` (head
+The base then advanced to `db0348d1623ea9dc06e28c85afbcba9e4c087c06`. No
+files changed between `c40f6d96d726b8ff765c038ceabacf50405ba9be` and that base
+overlap the PR's changed-file set. On synthetic merge
+`d5e946c24cf5b38b7cf2b948185b817195556d63` (head
 `8e296c1d0d0046208654700214c4fb504da63d70`, base `db0348d1623ea9dc06e28c85afbcba9e4c087c06`),
 the desktop and mobile queue-admission cases both passed with retries disabled
 (2 passed, 49.6s). Docker was unavailable to the runner, so this focused replay
-used host mode. These local replays do not replace exact-head PR checks, and the
-PostgreSQL parity test remains unverified because `KANDEV_TEST_POSTGRES_DSN` is
-unset.
+used host mode.
+
+During the subsequent full PR check run, `main` advanced to
+`1257838968f5c92305a858427cdf723a87b0a882`. No files changed between
+`db0348d1623ea9dc06e28c85afbcba9e4c087c06` and this base overlap the PR's
+changed-file set. On synthetic merge `8ab712b5b58889b41a335d5a9977dcd30ba68475`
+(head `b6b3fd7ff488abfba3529d3031de27f3017160a1`, base
+`1257838968f5c92305a858427cdf723a87b0a882`), both queue-admission cases passed
+with zero retries (2 passed, 45.3s). Docker was unavailable, so the replay used
+host mode. Local replays do not replace exact-head PR checks, and PostgreSQL
+parity remains unverified because `KANDEV_TEST_POSTGRES_DSN` is unset.
 
 ## Risks
 

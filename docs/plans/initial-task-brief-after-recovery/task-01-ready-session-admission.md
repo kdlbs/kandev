@@ -225,12 +225,21 @@ not resolve the linked worktree's host `.git` pointer. The current catalog had
 also moved past the downloaded CI manifest, so the assigned file list was
 replayed directly.
 
-The latest base is `db0348d1623ea9dc06e28c85afbcba9e4c087c06`; the files changed
-since `c40f6d96d726b8ff765c038ceabacf50405ba9be` do not overlap the PR's changed
-files. On synthetic merge `d5e946c24cf5b38b7cf2b948185b817195556d63` (head
+At the time, the latest base was `db0348d1623ea9dc06e28c85afbcba9e4c087c06`;
+the files changed since `c40f6d96d726b8ff765c038ceabacf50405ba9be` did not
+overlap the PR's changed files. On synthetic merge
+`d5e946c24cf5b38b7cf2b948185b817195556d63` (head
 `8e296c1d0d0046208654700214c4fb504da63d70`), the desktop case
 `reconciles without duplicating a queued message` passed in 22.2s and the mobile
 case `reconciles through a touch submit` passed in 22.4s (2 passed, 49.6s,
 zero retries). Docker was unavailable, so the focused replay used host mode.
-These results do not replace the exact-head PR check result. PostgreSQL parity
-remains unverified.
+
+During the subsequent full PR check run, `main` advanced to
+`1257838968f5c92305a858427cdf723a87b0a882`; the files changed since
+`db0348d1623ea9dc06e28c85afbcba9e4c087c06` did not overlap the PR's changed
+files. On synthetic merge `8ab712b5b58889b41a335d5a9977dcd30ba68475` (head
+`b6b3fd7ff488abfba3529d3031de27f3017160a1`),
+`reconciles without duplicating a queued message` passed in 17.5s and
+`reconciles through a touch submit` passed in 22.9s (2 passed, 45.3s, zero
+retries). Docker was unavailable, so the replay used host mode. These results do
+not replace exact-head PR checks. PostgreSQL parity remains unverified.
