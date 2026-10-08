@@ -805,7 +805,7 @@ func (r *SSHExecutor) StopInstance(ctx context.Context, instance *ExecutorInstan
 	// Use the same SSH client we used for CreateInstance — if it's still
 	// alive we can kill the remote agentctl gracefully; otherwise just drop
 	// the connection on the floor.
-	if classification == sshTransportAnswering && state.client != nil {
+	if classification == sshTransportAnswering && state.client != nil && !r.isTransportLost(state) {
 		stopRemote := r.stopRemote
 		if stopRemote == nil {
 			stopRemote = stopRemoteAgentctl
