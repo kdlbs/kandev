@@ -51,6 +51,9 @@ export async function touchDragBetween(
         },
       ],
     });
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
   }
   await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await client.detach();

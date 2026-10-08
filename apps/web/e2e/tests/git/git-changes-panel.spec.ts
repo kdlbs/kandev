@@ -1472,12 +1472,24 @@ test.describe("Git Changes Panel", () => {
   }) => {
     const profile = await createStandardProfile(apiClient, "Git Amend Profile");
 
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Amend Test", profile.id, {
-      description: "Testing amend commit",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Amend Test",
+      profile.id,
+      {
+        description: "Testing amend commit",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+        timeout: 60_000,
+        message: "Waiting for the Git amend task workspace",
+      })
+      .toBe("ready");
 
     const session = await openTaskSession(testPage, "Git Amend Test");
 

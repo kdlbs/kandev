@@ -85,6 +85,7 @@ test("coarse pointer grows the reveal control and keeps the reveal usable by tou
     .locator('[data-testid="folder-picker-popover"][data-state="open"]')
     .last();
   await expect(picker).toBeVisible();
+  await waitForFiniteAnimations(picker);
   const control = picker.getByTestId("directory-browser-show-hidden");
   const toggle = picker.getByRole("switch", { name: "Hidden folders" });
 
@@ -151,6 +152,7 @@ test("a breadcrumb too long to fit keeps the reveal control inside the popover",
     .locator('[data-testid="folder-picker-popover"][data-state="open"]')
     .last();
   await expect(picker).toBeVisible();
+  await waitForFiniteAnimations(picker);
 
   const control = picker.getByTestId("directory-browser-show-hidden");
   const measure = async () => {

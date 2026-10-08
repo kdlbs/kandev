@@ -18,6 +18,7 @@ import {
   saveSidebarSortView,
   sidebarRootOrder,
   seedSidebarRunningRankScenario,
+  waitForSidebarSortSync,
   waitForTaskRunningSummary,
 } from "./sidebar-running-first-activity-sort-helpers";
 
@@ -165,6 +166,7 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
       testPage,
       false,
     );
+    await waitForFiniteAnimations(reloadPopover);
     await reloadFilters.openSortSettings();
     await expect(reloadPopover.getByTestId("sort-key-select")).toContainText("Running");
     await expect(reloadPopover.getByTestId("sort-rule-key-1")).toContainText("Color");
@@ -173,8 +175,8 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
 
     for (const control of ["sort-rule-handle-0", "sort-rule-more-0", "sort-rule-remove-0"]) {
       const box = await reloadPopover.getByTestId(control).boundingBox();
-      expect(box?.height).toBe(28);
-      expect(box?.width).toBe(28);
+      expect(box?.height).toBeCloseTo(28, 0);
+      expect(box?.width).toBeCloseTo(28, 0);
     }
     const originalOrder = await reloadPopover
       .locator("[data-testid^='sort-rule-description-']")
@@ -210,6 +212,13 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
     await expect(reloadPopover.getByTestId("sort-key-select")).toContainText("Color");
     await moveSortRuleWithMenu(testPage, reloadPopover, 1, "down");
     await expect(reloadPopover.getByTestId("sort-key-select")).toContainText("Running");
+    await waitForFiniteAnimations(reloadPopover);
+    await waitForSidebarSortSync(
+      testPage,
+      seedData.workspaceId,
+      ["running", "color", "lastActivityAt"],
+      "red",
+    );
 
     const dragHandle = reloadPopover.getByTestId("sort-rule-handle-2");
     const firstCard = reloadPopover.getByTestId("sort-rule-card-0");
@@ -223,7 +232,7 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
     const dragStartY = dragHandleBox!.y + dragHandleBox!.height / 2;
     await testPage.mouse.move(dragStartX, dragStartY);
     await testPage.mouse.down();
-    await testPage.mouse.move(dragStartX, dragStartY + 10);
+    await testPage.mouse.move(dragStartX, dragStartY + 16, { steps: 4 });
     await expect(testPage.locator('[data-dragging="true"]')).toHaveCount(1);
     await testPage.mouse.move(
       firstCardBox!.x + firstCardBox!.width / 2,

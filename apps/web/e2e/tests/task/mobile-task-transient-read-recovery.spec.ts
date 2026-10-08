@@ -189,6 +189,7 @@ test.describe("Mobile task transient read recovery", () => {
       });
 
       const recoveredTaskRead = waitForHttp(testPage, "GET", taskPath);
+      await expect(retry).toBeEnabled();
       await retry.tap();
       const recoveredTaskResponse = await recoveredTaskRead;
       expect(recoveredTaskResponse.ok()).toBe(true);
