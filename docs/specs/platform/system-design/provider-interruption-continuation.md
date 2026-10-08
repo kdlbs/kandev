@@ -2,7 +2,7 @@
 status: current
 system: platform
 created: 2026-10-02
-updated: 2026-10-05
+updated: 2026-10-08
 requirements:
   - REQ-PLATFORM-INTERRUPTION-CONTINUATION-001
   - REQ-PLATFORM-INTERRUPTION-CONTINUATION-002
@@ -20,15 +20,21 @@ settlement, cancellation, and visible status. Agents owns tested native restorat
 and ordered provider tool outcomes; Tasks owns turn and message records.
 
 The [completed-tool continuation decision](../../../decisions/2026-10-05-hidden-completed-tool-continuation.md)
-amends the earlier read-only admission boundary. This draft changes the current
-implementation: successful foreground tool completion permits a new internal
+amends the earlier read-only admission boundary. Successful foreground tool
+completion permits a new internal
 `continue` turn even after shell, write, or MCP work. It never permits original
 prompt replay. The [runtime continuity contract](transient-turn-runtime-continuity.md)
 preserves proven usable ACP runtimes. [Provider error recovery](provider-error-recovery.md)
 owns truthful diagnostic projection and deterministic error categorization.
 
+The [graduation decision](../../../decisions/2026-10-08-unconditional-interruption-continuation.md)
+makes supported continuation normal recovery in every profile. Availability no
+longer depends on an installation toggle; provider capability and prompt safety
+remain the admission boundary. Its implementation is tracked separately from
+the completed continuation packages.
+
 The [capacity amendment](transient-turn-runtime-continuity.md#capacity-recovery-admission) uses a separate policy for completed effects on a retained runtime.
-Its live-runtime support does not satisfy this document's native restoration capability or read-only safety predicate.
+Its live-runtime support does not satisfy this document's native restoration capability or versioned foreground-outcome predicate.
 
 ## Requirement mapping
 
@@ -116,7 +122,7 @@ V2 support is declared ready; mock success alone does not establish it.
 ## Admission
 
 `handleTransientFailure` remains the sole concrete-profile retry owner. Preserve
-`promptAttemptPreResultSafe` for original replay. For an enabled supported native
+`promptAttemptPreResultSafe` for original replay. For a supported native
 conversation, choose continuation after output/tools when:
 
 1. The foreground prompt has settled and notification ordering is complete.
@@ -201,15 +207,36 @@ Use the same metadata and localization contract in both layouts. New copy goes
 through all seven supported language catalogs and generated Traditional Chinese.
 ASCII outcome previews and desktop/mobile checks are in the delivery plan.
 
-## Rollout, persistence, and observability
+## Availability, persistence, and observability
 
-Reuse `features.providerInterruptionContinuation` and
-`KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION`, with restart-required,
-high-risk experimental metadata. Update its read-only description to match
-completion-based admission. Keep prod/dev/e2e defaults and frontend defaults off.
-Environment > SQLite override > profile precedence and all disabled entry gates
-remain intact. Error-categorization correction applies regardless of this toggle.
-This package neither promotes the flag nor changes the live installation.
+Remove `features.providerInterruptionContinuation` and
+`KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION` from live profile,
+`FeaturesConfig`, runtime-registry, boot feature-state, and frontend-default
+contracts. Append their exact identities to `retiredRuntimeFlagIdentities`;
+retain existing override rows as inert data. Old YAML, environment, or override
+values must not affect continuation. Other runtime flags retain their existing
+precedence and restart semantics.
+
+Remove the corresponding boolean from `orchestrator.Config`, backend composition,
+`AgentctlStartupConfig`, agentctl server/instance configuration, process adapter
+configuration, and shared transport configuration. Default-on behavior must not
+depend on a propagated true value or a replacement opt-in. Managed and standalone
+agentctl collect bounded safety evidence whenever the dialect, native capability,
+session identity, and active prompt support it. Keep historical-load suppression,
+captured permission ownership, notification ordering, and generation fencing.
+
+Remove only the availability conditions from continuation admission, permission
+tracking, safety poisoning, and final dispatch-owner validation. Keep all safety,
+task ownership, profile, queue, cancellation, and provider-version conditions.
+New consumers continue to reject missing or unknown evidence from old remote
+helpers; removal of the toggle does not invent support for those helpers.
+Old JSON fields received by new components have no semantic effect.
+
+There is no active `disabled` continuation refusal. Existing persisted records
+may still describe a historical disabled installation; preserve their display
+compatibility without keeping a live flag or mutating old messages. Upgrade does
+not reconstruct or restart an abandoned process-local recovery episode. This
+delivery does not mutate or restart the user's live instance.
 
 There are no new tables, migrations, or durable retry jobs. Notices remain
 projections. Backend restart retires process-local recovery without redispatch;
@@ -221,10 +248,12 @@ Identifiers never become metric labels.
 
 ## Validation and delivery
 
-[The delivery plan](../../../plans/cursor-hidden-continuation/plan.md) owns exact
-commands and regression mappings. Retain the completed October 2/3 plans as
+[The graduation plan](../../../plans/provider-interruption-continuation-graduation/plan.md)
+owns flag removal, default-behavior checks, and public guidance updates.
+[The completed continuation plan](../../../plans/cursor-hidden-continuation/plan.md)
+retains its native compatibility evidence and historical results. Retain the completed October 2/3 plans as
 historical results; their V1 read-only and long-instruction assertions are
-superseded only where this draft explicitly changes the contract. Test actual
+superseded only where the completed-tool contract explicitly changes them. Test actual
 provider category, V1/V2 omission/skew, universal completion admission, exact hidden
 payload, same native identity, shared budget, cancellation, human supersession,
 reload/pagination/second viewer, and ordinary visible user `continue`. Keep the
