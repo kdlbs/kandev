@@ -351,14 +351,15 @@ test.describe("sidebar scrolling", () => {
     await dialog.getByRole("combobox").fill(targetTask.title);
     const option = dialog.getByRole("option").filter({ hasText: targetTask.title });
     await expect(option).toBeVisible({ timeout: 10_000 });
+    const revealCue = expect(targetRow).toHaveClass(/task-sidebar-row-reveal/, { timeout: 5_000 });
     await option.click();
+    await revealCue;
 
     await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.id}$`));
     await expect(session.activeSidebarTaskItem(targetTask.title).first()).toHaveAttribute(
       "aria-current",
       "true",
     );
-    await expect(targetRow).toHaveClass(/task-sidebar-row-reveal/, { timeout: 1_000 });
     await expect
       .poll(
         async () => {

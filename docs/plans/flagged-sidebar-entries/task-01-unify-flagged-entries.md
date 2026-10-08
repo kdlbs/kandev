@@ -133,6 +133,8 @@ Run these commands sequentially from the repository root:
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm e2e:run --project chromium tests/settings/sidebar-flagged-entries.spec.ts tests/settings/sidebar-direct-customization.spec.ts)
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/settings/mobile-sidebar-flagged-entries.spec.ts tests/settings/mobile-sidebar-direct-customization.spec.ts)
+(cd apps/web && pnpm e2e:run --host --no-build --shards 1 -- --project=chromium --workers=1 --retries=0 --repeat-each=3 tests/task/sidebar-scroll-preservation.spec.ts --grep "reveals a command-selected task")
+(cd apps/web && pnpm e2e:run --host --no-build --shards 1 -- --project=mobile-chrome --workers=1 --retries=0 tests/settings/mobile-config-chat-restart.spec.ts)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 python3 scripts/list-docs.py validate
@@ -221,3 +223,10 @@ E2E checks passed 2/2 tests; the focused phone sidebar and plugin metadata E2E
 checks passed 2/2 tests. Typecheck, changed-file ESLint, and Prettier passed.
 These fixes preserve the documented navigation behavior, so no requirement,
 design, or public-guide change was needed.
+
+The full E2E retry summary also exposed a timing-sensitive sidebar cue assertion
+and a subpixel touch-target measurement. The sidebar test now observes the cue
+while task selection is in progress, and the phone measurements round CSS
+pixels before checking the 44px target. Retries-disabled repetitions passed
+9/9 sidebar tests and 3/3 repeated mobile refresh tests; the full Configuration
+Chat restart spec passed 2/2 tests.
