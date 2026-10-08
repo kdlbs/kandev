@@ -307,13 +307,21 @@ type AgentFamilyResolver interface {
 
 // PromptReferenceExpander resolves "@name" saved-prompt references embedded in
 // an effective prompt and returns both the expanded prompt and the exact
-// server-generated block content. Implemented by promptservice.Service.
+// server-generated block content. It can also extend an accepted context with
+// references from newly composed text without re-resolving accepted content.
+// Implemented by promptservice.Service.
 type PromptReferenceExpander interface {
 	AppendReferenceExpansionsWithContext(
 		ctx context.Context,
 		prompt string,
 		log *zap.Logger,
 	) (expandedPrompt, trustedContext string)
+	AppendReferenceExpansionsToTrustedContext(
+		ctx context.Context,
+		prompt string,
+		trustedContext string,
+		log *zap.Logger,
+	) string
 }
 
 // DirectPromptPreparer canonicalizes a user-submitted structured prompt before

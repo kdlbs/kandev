@@ -1534,3 +1534,68 @@ It combined without conflicts. The merged tree passed
 `components/task-create-dialog-submit.tsx`, full specification lint, catalog
 validation (367 decisions, 1,479 specifications), and whitespace checks.
 This frontend-only integration does not close the native or live-state gates.
+
+### Main 5aa06bcefe and two hosted browser flakes
+
+Main advanced through `5aa06bcefe02b6ce7b7c321f7092efe89f0c8992`: task-title
+prompt substitution, confirmed review-comment delivery, and walkthrough flag
+coverage. The merge combined without conflicts. No history rewrite was used.
+
+On the preceding head, E2E run `37828766078` failed shard 4 job
+`113504389161` because the held sidebar response test counted two requests
+instead of one. Shard 8 job `113504388987` failed because the mobile PR
+drawer remained mounted after its close tap. Both passed on retry. The report
+merge job `113537842867` correctly propagated those failures. Only successful
+retry traces were retained; the mobile failure screenshot follows task cleanup
+and cannot establish the pre-cleanup selected-task state.
+
+Both unchanged full specs passed nine first attempts each in three fresh CI
+image workers. The exact hosted timing causes remain unconfirmed. The sidebar
+fixture now starts in its active view, waits for shared workflow coverage, then
+selects the archived view before holding that view's first response. It keeps
+the one-request/two-request and safe live-row assertions. The mobile feedback
+case waits for the drawer's finite opening animation before its close tap.
+Failure-only backend logs were added. No production behavior, assertion
+timeout, forced interaction, or retry policy changed.
+
+After rebuilding `build-runtime`, `build-mock-agent`, `e2e-plugin-package`, and
+`pnpm run build:vite`, the isolated runtime image ran with two CPUs, 4 GiB and
+one worker. The first attempted updated browser run stopped at the stale
+mock-agent preflight; it executed no tests and is not a passing receipt.
+The freshness guard stayed enabled. Fresh commands:
+
+- `bash e2e/scripts/run-raw-e2e.sh --project=chromium
+  e2e/tests/task/sidebar-shared-task-state.spec.ts --repeat-each=3
+  --retries=0 --trace=retain-on-failure --reporter=list
+  --output=/owned/sidebar-5aa06-green-fresh`: nine first-attempt passes.
+- `bash e2e/scripts/run-raw-e2e.sh --project=mobile-chrome
+  e2e/tests/task/mobile-sidebar-shared-task-state.spec.ts
+  e2e/tests/task/mobile-task-switch-efficiency.spec.ts --repeat-each=3
+  --retries=0 --trace=retain-on-failure --reporter=list
+  --output=/owned/mobile-5aa06-green`: 18 first-attempt passes.
+- `pnpm exec vitest run components/task/dockview-review-dialog.delivery.test.tsx
+  hooks/domains/kanban/use-sidebar-task-page.test.tsx
+  lib/sidebar/sidebar-task-page-cache.test.ts`: 55 tests in three files passed.
+- `go test -race ./internal/orchestrator ./internal/prompts/service -run
+  'TaskTitle|WorkflowPrompt|PromptLaunch|SavedPrompt|TrustedContext|Recovery|Delivery'
+  -count=1`: passed; the prompt-service filter selected no tests.
+  `go test -race ./internal/prompts/service -count=1` passed the full package.
+- `pnpm run typecheck`, strict ESLint for the four changed E2E files,
+  `python3 scripts/lint-spec-files.py --all`,
+  `python3 scripts/list-docs.py validate`, and whitespace checks passed.
+  The catalog includes 367 decisions and 1,482 specifications.
+
+The preceding head's PostgreSQL job `113489664152` exhausted its global
+20-minute Go test budget without an assertion failure. Its authorized retry,
+job `113514560057`, passed. This is a retry receipt, not proof of the original
+timeout's cause or completion of the targeted durable-delivery release gate.
+Fresh hosted CI, review state and all 20 report artifacts must still be checked
+after pushing. Native Windows/macOS containment and targeted durable-delivery
+PostgreSQL/live-harness release gates remain open. No new public contract was
+introduced by these test-only adjustments.
+
+The optional whole-tree `pnpm exec vitest run` was stopped after more than
+11 minutes while still active. It emitted child-process fixture connection
+errors but produced no final verdict. It is not a passing receipt. The focused
+55-test suite above passed; the complete hosted frontend suite remains a gate.
+Exact-base documentation coverage passed: 74 work orders, 199 loaded documents.
