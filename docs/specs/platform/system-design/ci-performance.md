@@ -154,6 +154,21 @@ Retain every exact path, diff, repository, message, cache and no-op assertion;
 worker timeout, unavailable detail or supersession must still fail the fixture.
 Keep production deadlines, cancellation tests and the Go package deadlock alarm.
 
+The mode-transition fixture in `workspace_poll_mode_loop_test.go` separates the
+two-second immediate-scan admission check from scan completion. Capture completed
+`MonitorTickStats` after paused initialization and drain stale `tickDone`. Within
+two seconds of the real fast-mode transition, require either `monitorRunning` or
+an increased completed-scan count, so a short completed tick cannot be missed.
+Keep both fast intervals at 30 seconds: their regular timer cannot satisfy admission.
+Then receive the causally admitted scan's `tickDone`, retaining tracker cancellation
+and the real file-change notification assertion with its existing two-second bound.
+The fixture completion guard uses the existing 60-second status-observation
+budget plus three existing ten-second Git command budgets (quick state twice and
+file listing once). This 90-second guard is a fixture failure bound, not a production
+whole-tick guarantee: admission queue wait and subprocess cleanup are separate.
+ROOT accepted this qualification for this owned test guard. Timeout or cancellation
+remains failure; do not infer a tracker deadline or enlarge package/job timeouts.
+
 The [first-commit Unstage package](../../../plans/unstage-all-before-first-commit/plan.md)
 owns this bounded delivery dependency. Its two failed Windows attempts provide
 partial scheduling evidence, not a successful full-suite performance comparison.

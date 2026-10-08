@@ -15,19 +15,20 @@ legacy_specs: []
 
 ## Overview
 
-The first-commit Unstage correction, real-Git regressions and reviewed Windows
-process-cohort amendment are published in READY PR4313 at frozen
-`7bcbec5b8882c8ef177623fe8c521d40ba6f56e3`. Both new operator functions passed
-in the two earlier Windows attempts. The current native Windows job exposed an
-additional unchanged fixture timestamp assertion; hosted delivery remains pending.
+The first-commit Unstage correction, real-Git regressions, Windows process-cohort
+amendment and isolated timestamp fixture are published in READY PR4313 at frozen
+`8403d17daab69882db2e7f4857e25007c13b6281`. Natural native Windows timestamp
+coverage and FULL18 review passed. The process job failed an unchanged immediate
+mode-transition notification fixture; its full inventory and joined cohorts were
+retained without a full-suite PASS or latency-cause claim.
 
-This amendment keeps ONE sequential work order for the bounded test/CI dependencies
-below. ROOT reviewed and released the process amendment after DESIGN END 04:05:42.
-Its local checks, normal publication and lease return are complete. ROOT first released
-authoring of the timestamp fixture correction and later released validation/publication
-after qualifying child78's explicit return. Child77 now owns the sole heavy lease.
-The same work order's local implementation is complete; hosted delivery remains pending.
-No merge authority.
+ROOT reviewed the four-file fixture candidate after AUTHORING_END and later released
+this SAME ONE sequential order with the sole heavy lease. The bounded fixture-only
+mode-transition correction now has causal wake-disabled overlay RED, affected count10
+race GREEN, three unchanged paused/fast controls and full CHANGED lint PASS. No
+production/shared helper/workflow or other fixture changed in this correction.
+Documentation/actual19-path coverage, normal hooked publication and qualified lease
+return follow. New-head hosted gates remain pending; no merge authority.
 
 ## Ownership and evidence
 
@@ -359,3 +360,72 @@ Catalog363/1437, all-spec lint, actual18-path coverage (covered/errors[]) and di
 whitespace passed, original7210 joined415baa/0/group2401993 absent. Normal active
 hooks/publication follow; new-head native
 fixture and complete cohort coverage, required gates/parents/review remain pending.
+
+## Immediate mode-transition dependency: authoring only
+
+At frozen8403, the natural native Windows timestamp test passed and authenticated
+App347564 FULL ALL18 review completed without actionable findings. Windows process
+job113159794671/run37730879950/attempt1 failed an unchanged monitor mode-transition
+notification assertion. The configured wait was TWO seconds, not the whole case's
+5.28-second duration. Process767/probe16 inventory, disjoint392/391 cohorts and exact
+783 terminal roots are proven; both original cohorts joined exits0/1, no package
+timeout observed, reportComplete=false. Own Unstage functions passed. Cause remains
+unproved and Windows retry budget exhausted; no merge-ready claim.
+
+ROOT first authorized authoring and subsequently released this fixture-only correction. It keeps
+two-second immediate admission, joining real scan completion separately before the
+unchanged two-second real notification assertion. Existing monitorRunning/completed
+MonitorTickStats catch long or short ticks; stale tickDone is drained after paused
+initialization, then the actual admitted completion is received. Both fast timers
+remain30 seconds, preventing the timer from satisfying admission. No shared helper,
+production, policy, workflow or other fixture is changed.
+
+The accepted90-second completion guard uses status observation60 plus three
+Git command budgets10 each. Queue wait and process cleanup are additional; this is
+an owned fixture failure/cancellation guard, not a production whole-tick guarantee.
+ROOT qualified this boundary and later released SAME-order implementation with the
+sole global local-heavy lease. Task01 records the disposable wake-disabled overlay
+RED, exact affected positive/control commands and one corrected-source CHANGED lint.
+Results are pending until each original execution is actually joined.
+
+SAME one order is in_progress for this authoring dependency. Four candidate paths
+(test, owning CI design, manifest and Task01) are unstaged/uncommitted. Original64810
+and deadlines remain intact; joined diagnostic receipts/raw native evidence retained.
+AUTHORING_END preceded ROOT's later explicit sole-heavy implementation release.
+No hosted retry or MERGE authority follows; callback/queue is never a progress gate.
+
+
+### Mode-transition released local results
+
+ROOT later reviewed the exact four-file candidate and accepted90 seconds solely as
+an owned TEST failure/cancellation guard, not a production aggregate deadline or
+queue/cleanup/failure-cause assurance. Its receipt is
+`/tmp/kandev-root-child77-mode-fixture-review-20261008.json`; the later same-primary
+release granted sole local-heavy implementation. No production/shared helper/workflow
+or other fixture source changed.
+
+ONE disposable Go-overlay negative/count1 failed the exact two-second admission
+assertion: case2.08s/package2.126s, original72826 joined719e15/exit1/group2890115
+absent, wall10.237s. It retained timer drain/fast mode check but returned before
+CAS/tick; this is causal wake-property RED, not a compiler/cleanup/90s-timeout result.
+Only owned overlay JSON/source were removed after join; production bytes preserved.
+Affected positive/count10 passed race/package2.187s, original74101 joined610362/0,
+group2892230 absent/wall9.806s. Exactly the three planned unchanged paused/fast
+controls passed race/package2.499s, original86763 joined87e467/0/group2894939 absent,
+wall4.157s. The single exact-base full CHANGED lint passed zero issues, original84190
+joined044456/0/group2896471 absent/wall12.814s. No passing Unstage/API/helper/clock
+replay or package/job timeout increase occurred. Natural new-head Windows evidence
+is still required; local checks cannot prove the hosted failure's latency cause.
+
+Documentation/actual19-path coverage, normal active hooks/publication and original
+observer64810 join precede heavy return. Current8403/full18/native clock PASS and
+failed process evidence become historical after correction publication. Required
+contexts, three parents, full actual-file review and complete native cohort coverage
+remain delivery gates; no hosted rerun or merge authority.
+
+
+Documentation gates passed: catalog363/1437, all-spec lint, actual19-path delivery
+coverage (covered/errors[]) and whitespace, original25938 joined6b4490/0,
+group2901835 absent/wall1.401s. No unchanged validator/public/product test replay.
+Public docs need no change for this fixture-only synchronization correction. Normal
+active-hook publication follows; all hosted outcomes remain separately qualified.

@@ -29,10 +29,12 @@ Make empty-list Unstage work before the first commit using the smallest uncondit
 Git argv correction. Independently authored real operator and registered HTTP regressions
 must establish causal RED, then GREEN with selected-file and committed compatibility.
 
-The initial implementation and reviewed process-cohort amendment are complete and
-published. This SAME order is reopened for the authoring-only native timestamp
-dependency below; historical commands/results must not be replayed. Only a LATER
-ROOT heavy grant authorizes its checks, hooks or another published head.
+The initial implementation, process-cohort amendment and timestamp fixture are
+published at8403. ROOT later reviewed/released the exact mode-transition fixture
+correction in this SAME order; affected causal RED/GREEN, three controls and full
+CHANGED lint passed. Normal documentation/hooks/publication and qualified heavy
+return follow; new-head hosted gates remain pending. Historical passing controls
+must not be replayed; no hosted rerun or merge authority follows.
 
 ## In scope
 
@@ -484,3 +486,112 @@ New-head native fixture RUNPASS,
 complete process/probe inventory/two25m cohort joins/coverage, required six contexts,
 three successful parents and substantive full actual-file review remain hosted gates.
 The published-head review is historical after this fixup; no merge-ready claim yet.
+
+### Immediate mode-transition scan dependency: authoring checkpoint
+
+ROOT authorized DESIGN/AUTHORING ONLY for the same order after current-head
+Windows process job113159794671/run37730879950/attempt1 failed the unchanged
+`TestMonitorLoop_TransitionToFastTriggersImmediateScan` notification assertion.
+Its notification wait is TWO seconds; 5.28 seconds is total case duration.
+Base202d48/current8403 source bytes match. The raw stream shows no package timeout.
+Inventory is process767 plus probe16 native top-level identities. Cohorts392/391
+are disjoint and complete; their actual terminal identity coverage equals inventory.
+Both started before either original Wait joined, exits0/1; reportComplete=false
+truthfully reflects this sole assertion failure. Unstage regressions passed in both
+cohorts; the corrected native timestamp fixture separately passed naturally on Windows.
+These facts do not prove a transient failure or a successful full process suite.
+
+Released ownership is only the body of this exact test in
+`apps/backend/internal/agentctl/server/process/workspace_poll_mode_loop_test.go`,
+plus this SAME order, manifest and owning CI design explanation. No production,
+shared helper, workflow, Unstage regression or other fixture changes are authorized.
+After paused initial scan, capture completed scan count and drain stale tickDone.
+Within the original two-second bound after switching fast, observe monitorRunning
+or a completed-count advance, including a tick shorter than the observation interval.
+The two unchanged 30-second timers cannot establish this admission assertion.
+Then join the actual admitted scan through tickDone/cancellation before retaining
+the existing real subscription notification assertion and its two-second wait.
+
+ROOT accepted the completion guard workspaceGitStatusObserveTimeout + 3*gitCommandTimeout,
+currently90 seconds: status observation60 plus quick-state Git twice/file-list once10
+each. This is an explicit fixture guard, NOT a normative whole-tick production bound;
+queue admission and subprocess cleanup are additional. ROOT explicitly qualified
+this owned TEST failure/cancellation guard in the later implementation release;
+no latency, whole-tick deadline or failure-cause claim follows.
+The notification remains a required real event; tick completion alone cannot pass.
+Paused setup, file bytes, long fast intervals, subscription and tracker cleanup remain.
+
+Sequential validation released by ROOT after the completed authoring turn:
+
+1. ROOT reviewed the exact four-file diff at8403 and accepted the guard qualification.
+   SAME order is in_progress under child77 sole global local-heavy release.
+2. Negative control: create an owned disposable Go overlay of workspace_monitor.go
+   that retains mode-change timer drain/fast check but returns false before its
+   monitorRunning CAS/monitorTick call. Execute ONLY the changed test with that
+   overlay and require the new admission assertion to fail at two seconds. Neither
+   notification nor the regular30-second timer can turn it into success. Retain and
+   join the original command, restore/remove only owned overlay artifacts. No permanent
+   production mutation, fake monitor, protected-proof copy or passing-control replay.
+3. Positive affected test count10 and focused unchanged PausedSuppressesNotifications,
+   FastPolls and FastToPausedStopsPolling controls, exact commands below. Retain actual
+   joins/PIDgroups/UTC bounds. No passing Unstage/API/helper/clock fixture replay.
+4. ONE actual corrected-source full CHANGED lint at exactbase202d48, normal owning
+   documentation/actual-path coverage and whitespace gates, active hooks/publication
+   only after explicit release. Stop and checkpoint resource/unknown/out-of-scope
+   failures; exhausted Windows hosted rerun budget and MERGE NONE remain intact.
+
+Released affected positive command (explicit Go1.26.0/Node24.21.0 PATH, bash login=false):
+
+```bash
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB timeout --signal=TERM --kill-after=10s 3m go test -trimpath -tags fts5 -race -p=1 -count=10 -timeout=3m -run '^TestMonitorLoop_TransitionToFastTriggersImmediateScan$' ./internal/agentctl/server/process)
+```
+
+Negative uses the same anchored test/count1 with `-overlay=<owned-absolute-overlay.json>`;
+expected Go exit1 plus exact admission failure, not compiler/timeout/canned success.
+Focused controls use the same flags/bounds/count1 and selector
+`^TestMonitorLoop_(PausedSuppressesNotifications|FastPolls|FastToPausedStopsPolling)$`.
+Full CHANGED lint uses the already recorded exactbase202d48/concurrency2/allowserial,
+GOMAX2/GOMEM1GiB/CLI5m/GNU6m/kill10 command, no automatic retry.
+
+Original observer64810/group2424195 remains intact with original inner cutoff06:39:57Z,
+GNU06:40:57Z/kill06:41:07Z. All diagnostic reads actually joined; no new heavy handle.
+Current8403/FULL18 review and natural clock-fixture PASS are retained current evidence;
+they become historical only after an authorized correction is later published.
+At AUTHORING_END the candidate was unstaged/uncommitted and no checks had run.
+ROOT subsequently reviewed/released implementation; actual results follow.
+
+
+### Mode-transition released local results
+
+ROOT later reviewed the exact four-file candidate and accepted90 seconds solely as
+an owned TEST failure/cancellation guard, not a production aggregate deadline or
+queue/cleanup/failure-cause assurance. Its receipt is
+`/tmp/kandev-root-child77-mode-fixture-review-20261008.json`; the later same-primary
+release granted sole local-heavy implementation. No production/shared helper/workflow
+or other fixture source changed.
+
+ONE disposable Go-overlay negative/count1 failed the exact two-second admission
+assertion: case2.08s/package2.126s, original72826 joined719e15/exit1/group2890115
+absent, wall10.237s. It retained timer drain/fast mode check but returned before
+CAS/tick; this is causal wake-property RED, not a compiler/cleanup/90s-timeout result.
+Only owned overlay JSON/source were removed after join; production bytes preserved.
+Affected positive/count10 passed race/package2.187s, original74101 joined610362/0,
+group2892230 absent/wall9.806s. Exactly the three planned unchanged paused/fast
+controls passed race/package2.499s, original86763 joined87e467/0/group2894939 absent,
+wall4.157s. The single exact-base full CHANGED lint passed zero issues, original84190
+joined044456/0/group2896471 absent/wall12.814s. No passing Unstage/API/helper/clock
+replay or package/job timeout increase occurred. Natural new-head Windows evidence
+is still required; local checks cannot prove the hosted failure's latency cause.
+
+Documentation/actual19-path coverage, normal active hooks/publication and original
+observer64810 join precede heavy return. Current8403/full18/native clock PASS and
+failed process evidence become historical after correction publication. Required
+contexts, three parents, full actual-file review and complete native cohort coverage
+remain delivery gates; no hosted rerun or merge authority.
+
+
+Documentation gates passed: catalog363/1437, all-spec lint, actual19-path delivery
+coverage (covered/errors[]) and whitespace, original25938 joined6b4490/0,
+group2901835 absent/wall1.401s. No unchanged validator/public/product test replay.
+Public docs need no change for this fixture-only synchronization correction. Normal
+active-hook publication follows; all hosted outcomes remain separately qualified.
