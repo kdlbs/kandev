@@ -49,17 +49,28 @@ export async function backendRuntimeUpdateSummary(
       return frame;
     });
   const availabilityWindowCheckStartedAt = Date.now();
-  const restart = Promise.resolve().then(() =>
-    backend.restart({
-      KANDEV_MOCK_AGENT: "true",
-      KANDEV_E2E_RUNTIME_UPDATE_LATEST_VERSION: "99.0.0",
-    }),
-  );
-  const reconnectSubscription = ws.waitForResponse("user.subscribe", {
-    timeout: 30_000,
-    timeoutAfter: restart,
+  const disconnected = page
+    .waitForFunction(
+      () =>
+        (
+          window as Window & { __KANDEV_E2E_STORE__?: { getState: () => AppState } }
+        ).__KANDEV_E2E_STORE__?.getState().connection.status !== "connected",
+      undefined,
+      { timeout: 15_000, message: "backend restart must disconnect the app WebSocket" },
+    )
+    .then(
+      () => undefined,
+      (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+    );
+  // Let Playwright register the state wait before the backend drops the socket.
+  await page.evaluate(() => undefined);
+  await backend.restart({
+    KANDEV_MOCK_AGENT: "true",
+    KANDEV_E2E_RUNTIME_UPDATE_LATEST_VERSION: "99.0.0",
   });
-  await Promise.all([restart, reconnectSubscription]);
+  const disconnectError = await disconnected;
+  if (disconnectError) throw disconnectError;
+  await waitForWebSocketConnected(page, 30_000);
 
   const outcomeEvent = ws.waitForEvent(SUMMARY_EVENT, {
     timeout: 15_000,
