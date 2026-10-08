@@ -161,8 +161,8 @@ func TestRetryTransientPromptRechecksLifecycleEvidenceBeforeReplay(t *testing.T)
 			recovery = message.metadata
 		}
 	}
-	if recovery == nil || recovery["recovery_reason"] != "disabled" {
-		t.Fatalf("manual recovery metadata = %v, want disabled continuation after observed work", recovery)
+	if recovery == nil || recovery["recovery_reason"] != continuationRefusalMissingEvidence {
+		t.Fatalf("manual recovery metadata = %v, want missing continuation evidence after observed work", recovery)
 	}
 }
 
