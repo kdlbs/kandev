@@ -13,12 +13,14 @@ import (
 )
 
 const (
-	maxSidebarLayoutNodes          = 41 // +1 over the legacy 40-node limit to absorb a materialized Coordinator entry
-	maxSidebarLayoutShortcutsGroup = 20
-	maxSidebarLayoutShortcutsTotal = 100
-	maxSidebarLayoutIDRunes        = 255
-	maxSidebarLayoutBytes          = 256 * 1024
-	maxSidebarLayoutNameRunes      = 60
+	maxSidebarLayoutNodes           = 41 // +1 over the legacy 40-node limit to absorb a materialized Coordinator entry
+	maxSidebarLayoutShortcutsGroup  = 20
+	maxSidebarLayoutShortcutsTotal  = 100
+	maxSidebarLayoutIDRunes         = 255
+	maxSidebarLayoutBytes           = 256 * 1024
+	maxSidebarLayoutNameRunes       = 60
+	sidebarCoordinatorDestinationID = "coordinators"
+	sidebarCoordinatorDefaultNodeID = sidebarCoordinatorDestinationID
 )
 
 // validateSidebarLayoutPatch checks the request shape and the caller's
@@ -271,7 +273,7 @@ func materializeCoordinatorNode(nodes []models.SidebarLayoutNode) []models.Sideb
 	for _, node := range nodes {
 		usedIDs[node.ID] = struct{}{}
 	}
-	coordinatorID := "coordinators"
+	coordinatorID := sidebarCoordinatorDefaultNodeID
 	for suffix := 1; ; suffix++ {
 		if _, exists := usedIDs[coordinatorID]; !exists {
 			break
@@ -282,7 +284,7 @@ func materializeCoordinatorNode(nodes []models.SidebarLayoutNode) []models.Sideb
 		ID:            coordinatorID,
 		Kind:          models.SidebarLayoutNodeBuiltin,
 		Visible:       true,
-		DestinationID: "coordinators",
+		DestinationID: sidebarCoordinatorDestinationID,
 	}
 	index := slices.IndexFunc(nodes, func(node models.SidebarLayoutNode) bool {
 		return node.DestinationID == "automations"
@@ -299,7 +301,7 @@ func materializeCoordinatorNode(nodes []models.SidebarLayoutNode) []models.Sideb
 
 func hasCoordinatorNode(nodes []models.SidebarLayoutNode) bool {
 	for _, node := range nodes {
-		if node.Kind == models.SidebarLayoutNodeBuiltin && node.DestinationID == "coordinators" {
+		if node.Kind == models.SidebarLayoutNodeBuiltin && node.DestinationID == sidebarCoordinatorDestinationID {
 			return true
 		}
 	}

@@ -83,7 +83,7 @@ func TestSidebarLayoutPatchIsScopedAndRevisionChecked(t *testing.T) {
 	}
 	var hasCoordinator bool
 	for _, node := range resetLayout.Nodes {
-		if node.DestinationID == "coordinators" && node.Visible {
+		if node.DestinationID == sidebarCoordinatorDestinationID && node.Visible {
 			hasCoordinator = true
 			break
 		}
@@ -141,7 +141,7 @@ func TestProjectSidebarLayoutsMaterializesCoordinatorWithoutMovingSavedNodes(t *
 	}
 
 	projected := projectSidebarLayouts(settings, []string{"workspace-1"})["workspace-1"]
-	wantIDs := []string{"home", "canvases", "coordinators", "automations", "integrations"}
+	wantIDs := []string{"home", "canvases", sidebarCoordinatorDefaultNodeID, "automations", "integrations"}
 	if len(projected.Nodes) != len(wantIDs) {
 		t.Fatalf("projected %d nodes, want %d: %+v", len(projected.Nodes), len(wantIDs), projected.Nodes)
 	}
@@ -150,7 +150,7 @@ func TestProjectSidebarLayoutsMaterializesCoordinatorWithoutMovingSavedNodes(t *
 			t.Errorf("node %d = %q, want %q", index, projected.Nodes[index].ID, wantID)
 		}
 	}
-	if projected.Nodes[1].Visible || projected.Nodes[2].DestinationID != "coordinators" || !projected.Nodes[2].Visible {
+	if projected.Nodes[1].Visible || projected.Nodes[2].DestinationID != sidebarCoordinatorDestinationID || !projected.Nodes[2].Visible {
 		t.Fatalf("projected existing hidden choice or coordinator default incorrectly: %+v", projected.Nodes)
 	}
 	if projected.Revision != saved.Revision {
@@ -167,7 +167,7 @@ func TestGetUserSettingsMaterializesCoordinatorWithoutPersisting(t *testing.T) {
 		Revision: 5,
 		Nodes: []models.SidebarLayoutNode{
 			{ID: "home", Kind: models.SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "home"},
-			{ID: "coordinators", Kind: models.SidebarLayoutNodeBuiltin, Visible: false, DestinationID: "coordinators"},
+			{ID: sidebarCoordinatorDefaultNodeID, Kind: models.SidebarLayoutNodeBuiltin, Visible: false, DestinationID: sidebarCoordinatorDestinationID},
 			{ID: "automations", Kind: models.SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "automations"},
 		},
 	}
@@ -183,7 +183,7 @@ func TestGetUserSettingsMaterializesCoordinatorWithoutPersisting(t *testing.T) {
 		t.Fatal(err)
 	}
 	layout := got.SidebarLayoutsByWorkspace["workspace-1"]
-	if len(layout.Nodes) != len(saved.Nodes) || layout.Nodes[1].ID != "coordinators" || layout.Nodes[1].Visible {
+	if len(layout.Nodes) != len(saved.Nodes) || layout.Nodes[1].ID != sidebarCoordinatorDefaultNodeID || layout.Nodes[1].Visible {
 		t.Fatalf("existing coordinator choice was moved or changed: %+v", layout.Nodes)
 	}
 	if len(repo.upsertLog()) != 0 || repo.snapshot().Revision != 0 {
@@ -203,7 +203,7 @@ func TestProjectSidebarLayoutsAppendsCoordinatorWhenAutomationsAreAbsent(t *test
 		SidebarLayoutsByWorkspace: map[string]models.SidebarLayout{"workspace-1": saved},
 	}, []string{"workspace-1"})["workspace-1"]
 
-	if got := projected.Nodes[len(projected.Nodes)-1].DestinationID; got != "coordinators" {
+	if got := projected.Nodes[len(projected.Nodes)-1].DestinationID; got != sidebarCoordinatorDestinationID {
 		t.Fatalf("last projected destination = %q, want coordinators", got)
 	}
 	if projected.Nodes[1].ID != "custom" || !projected.Nodes[1].Visible {
@@ -216,7 +216,7 @@ func TestProjectSidebarLayoutsAvoidsCoordinatorIDCollisionWithShortcutGroup(t *t
 		Version: models.SidebarLayoutVersion,
 		Nodes: []models.SidebarLayoutNode{
 			{
-				ID:      "coordinators",
+				ID:      sidebarCoordinatorDefaultNodeID,
 				Kind:    models.SidebarLayoutNodeShortcuts,
 				Visible: true,
 				Name:    "Pinned",
@@ -242,10 +242,10 @@ func TestProjectSidebarLayoutsAvoidsCoordinatorIDCollisionWithShortcutGroup(t *t
 		t.Fatalf("projected nodes = %+v, want saved group, Coordinator, and Automations", projected.Nodes)
 	}
 	group, coordinator := projected.Nodes[0], projected.Nodes[1]
-	if group.ID != "coordinators" || group.Kind != models.SidebarLayoutNodeShortcuts || group.Name != "Pinned" || len(group.Shortcuts) != 1 {
+	if group.ID != sidebarCoordinatorDefaultNodeID || group.Kind != models.SidebarLayoutNodeShortcuts || group.Name != "Pinned" || len(group.Shortcuts) != 1 {
 		t.Fatalf("saved shortcut group changed: %+v", group)
 	}
-	if coordinator.ID != "coordinators-1" || coordinator.Kind != models.SidebarLayoutNodeBuiltin || coordinator.DestinationID != "coordinators" {
+	if coordinator.ID != "coordinators-1" || coordinator.Kind != models.SidebarLayoutNodeBuiltin || coordinator.DestinationID != sidebarCoordinatorDestinationID {
 		t.Fatalf("materialized Coordinator = %+v, want a collision-free builtin identity", coordinator)
 	}
 }
@@ -309,7 +309,7 @@ func TestProjectedLegacyFortyNodeLayoutCanSaveCoordinatorVisibility(t *testing.T
 
 	coordinatorIndex := -1
 	for index, node := range projected.Nodes {
-		if node.DestinationID == "coordinators" {
+		if node.DestinationID == sidebarCoordinatorDestinationID {
 			coordinatorIndex = index
 			projected.Nodes[index].Visible = false
 			break
