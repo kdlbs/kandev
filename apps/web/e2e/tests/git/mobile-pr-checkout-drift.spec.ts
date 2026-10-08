@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import { test, expect, restoreSeedRepositoryOrigin, type SeedData } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
 import { SessionPage } from "../../pages/session-page";
 import { expectBoundedTimeline, scrollChangesToEnd } from "./large-changes-helpers";
 import path from "node:path";
@@ -150,6 +151,27 @@ function recoveryBranches(git: GitHelper): string[] {
     .split(/\r?\n/)
     .map((branch) => branch.trim())
     .filter(Boolean);
+}
+
+function contributionOperationResponseCount(
+  traffic: ReturnType<typeof attachGatewayTrafficCapture>,
+): number {
+  return traffic.frames.filter(
+    (frame) =>
+      frame.direction === "received" &&
+      frame.type === "response" &&
+      frame.action === "worktree.use_contribution",
+  ).length;
+}
+
+async function waitForContributionOperationResponse(
+  traffic: ReturnType<typeof attachGatewayTrafficCapture>,
+  previousCount: number,
+  message: string,
+): Promise<void> {
+  await expect
+    .poll(() => contributionOperationResponseCount(traffic), { timeout: 30_000, message })
+    .toBeGreaterThan(previousCount);
 }
 
 function restoreContributionHistoryRepository(
@@ -570,6 +592,7 @@ test.describe("Mobile rewritten contribution history", () => {
     });
     await apiClient.ensureTaskSession(task.id);
 
+    const gatewayTraffic = attachGatewayTrafficCapture(testPage);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -635,14 +658,26 @@ test.describe("Mobile rewritten contribution history", () => {
     const dialog = testPage.getByTestId("remote-contribution-resolution-dialog");
     await expect(dialog).toContainText("replaces the current task checkout history");
     await expect(dialog).toContainText(history.publishedHead);
+    const responsesBeforeDirtyCheckoutAttempt = contributionOperationResponseCount(gatewayTraffic);
     await dialog.getByTestId("remote-contribution-confirm").tap();
+    await waitForContributionOperationResponse(
+      gatewayTraffic,
+      responsesBeforeDirtyCheckoutAttempt,
+      "Wait for the dirty-checkout contribution response before asserting its error",
+    );
     await expect(dialog).toContainText("Commit or discard your local changes");
     expect(git.getCurrentSha()).toBe(history.localHead);
     expect(git.exec("git status --porcelain").trim()).toContain("mobile-local-rebase-dirty.txt");
     expect(recoveryBranches(git)).toEqual(recoveryBefore);
 
     git.deleteFile("mobile-local-rebase-dirty.txt");
+    const responsesBeforeCleanCheckoutAttempt = contributionOperationResponseCount(gatewayTraffic);
     await dialog.getByTestId("remote-contribution-confirm").tap();
+    await waitForContributionOperationResponse(
+      gatewayTraffic,
+      responsesBeforeCleanCheckoutAttempt,
+      "Wait for the clean-checkout contribution response before asserting completion",
+    );
     await expect(dialog).toHaveCount(0);
     expect(git.getCurrentSha()).toBe(history.publishedHead);
     expect(git.exec("git status --porcelain").trim()).toBe("");

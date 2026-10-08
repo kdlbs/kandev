@@ -173,10 +173,15 @@ test("keeps the desktop next-step form open when clicking a checkbox label", asy
   await expect(form).toBeVisible();
 
   await form.hover();
+  const skipCheckbox = form.getByTestId("workflow-move-skip-step-prompt");
+  // The hover popover remains open while a field has focus. Focus the custom
+  // checkbox before activating its label so the interaction is stable even
+  // when the pointer crosses the popover boundary during the click.
+  await skipCheckbox.focus();
   await form.getByText("Skip the step prompt", { exact: true }).click();
 
+  await expect(skipCheckbox).toBeChecked();
   await expect(form).toBeVisible();
-  await expect(form.getByTestId("workflow-move-skip-step-prompt")).toBeChecked();
 });
 
 test("skip step prompt with instructions delivers only the instructions", async ({
