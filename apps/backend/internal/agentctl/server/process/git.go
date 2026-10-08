@@ -1035,7 +1035,7 @@ func (g *GitOperator) Stage(ctx context.Context, paths []string) (*GitOperationR
 }
 
 // Unstage unstages files from the index using git reset.
-// If paths is empty, unstages all changes (git reset HEAD).
+// If paths is empty, unstages all changes (git reset --).
 func (g *GitOperator) Unstage(ctx context.Context, paths []string) (*GitOperationResult, error) {
 	if !g.tryLock("unstage") {
 		return nil, ErrOperationInProgress
@@ -1050,7 +1050,7 @@ func (g *GitOperator) Unstage(ctx context.Context, paths []string) (*GitOperatio
 	var environmentOverrides map[string]string
 	if len(paths) == 0 {
 		// Unstage all changes
-		args = []string{"reset", "HEAD"}
+		args = []string{"reset", "--"}
 	} else {
 		// Unstage specific files
 		args = []string{"reset", "HEAD", "--"}
