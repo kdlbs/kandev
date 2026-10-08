@@ -119,15 +119,23 @@ and settlement guards, not a promise of retention across navigation.
 
 ## Desktop and phone verification
 
-Use the `/mobile-parity` pure state/data exception: no rendered composition,
-copy, classes, touch behavior, scroll owner, breakpoint or navigation changes.
-The existing `CommitDialog` and `CommitBodyField` are the shipped surface and
-remain shared. A new mobile Playwright scenario or browser build is unnecessary
-for this correction. Native rendered integration tests must exercise controls,
-pending/failure/success and dismiss/reopen outcomes. Parameterize the shared
-flow at desktop and phone window sizes, and change viewport during a pending
-edit without remounting. Happy-dom proves state/control outcomes, not browser
-geometry, touch ergonomics or live backend Git behavior. No such claims are made.
+The production correction changes state ownership inside the existing
+`CommitDialog` and `CommitBodyField`; composition, copy, classes, touch targets,
+scrolling, breakpoints and navigation remain unchanged. Native rendered tests
+prove shared state semantics at desktop/phone sizes, including viewport changes
+while pending. Happy-dom does not prove browser geometry or live Git behavior.
+
+Hosted E2E evidence exposed an integration consequence: the retained failed
+modal correctly intercepts background chat clicks until dismissed. The existing
+Git-hook rejection scenario must explicitly dismiss, reopen and verify exact raw
+title/body, then dismiss before inspecting chat details and requesting Fix.
+Therefore the pure state/data exception alone is insufficient for this delivery.
+A focused managed fresh-build browser run exercises that same scenario at desktop
+1280px and native phone composition at 393px and 767px. Phone cases use the shipped
+bottom navigation and `MobileChangesPanel`, then return to Chat after dismissal.
+ROOT explicitly authorized viewport parameterization in the existing chromium
+project; this is phone composition/reachability coverage with a fine pointer,
+not Pixel-device, touch geometry or a layout redesign claim.
 
 Keep real `VcsDialogsProvider`, StateProvider/createAppStore, ToastProvider,
 TooltipProvider, `useSessionGit`, `useGitOperations` and `useGitWithFeedback` in

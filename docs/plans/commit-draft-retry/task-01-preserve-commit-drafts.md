@@ -79,14 +79,41 @@ blocker needs a separate ROOT scope extension.
 
 ## Mobile parity and rendered evidence
 
-Apply the pure state/data exception described in the [design](../../specs/workspaces/system-design/commit-draft-retry.md#desktop-and-phone-verification).
-Rendered structure/copy/classes and touch/navigation/scrolling are unchanged;
-no layout preview or new mobile Playwright test is required. Parameterize the
-native recovery flow at desktop (1280 by 800) and phone (393 by 851) window sizes
-and exercise a viewport change while pending without remount. Assert inputs,
-checkbox, scope label, commit disabled/loading, error toast, dismissal/reopen
-and successful reset, not only hook state. These checks prove shared state
-semantics, not actual phone geometry or live backend Git execution.
+The production scope remains state-only within unchanged rendered surfaces.
+Native component tests cover shared state at desktop/phone sizes and a pending
+viewport transition. Hosted integration failure now requires focused browser
+coverage beyond that exception; see the updated [design](../../specs/workspaces/system-design/commit-draft-retry.md#desktop-and-phone-verification).
+
+ROOT's corrective scope grant owns only the existing hook-rejection scenario in
+`e2e/tests/git/git-commit.spec.ts`: assert raw title/body retention and enabled
+Cancel after failure; dismiss/reopen and recheck the same bytes; dismiss again;
+retain every original chat summary, collapsed output, Technical details, Fix,
+user-prompt and agent-response assertion. Parameterize desktop 1280px and phone
+393px/767px in the existing chromium project, using shipped Changes/Chat bottom
+navigation on phones. No production, composition, assertion weakening, forced
+click, timeout or retry change. This proves native phone composition with a fine
+pointer, not Pixel-device touch geometry. No separate mobile owner/order.
+
+All original read handles and observer 25812 must actually join before the one
+fresh managed run below. The original observer naturally reached its deadline,
+actual join 7a4e5e exit2, group711830 absent; no stop signal was needed. Hosted
+jobs remain untouched. Run once under ROOT's exclusive heavy84 lease, Node4GiB,
+one shard/worker and retries0; timeout/resource/transport/unknown failures or
+failures outside the owned fixture checkpoint ROOT before retry.
+
+```bash
+GOMAXPROCS=2 NODE_OPTIONS=--max-old-space-size=4096 timeout --kill-after=10s 20m scripts/run-quiet e2e --summary -- corepack pnpm@9.15.9 --dir apps/web e2e:run --host --shards 1 --project chromium e2e/tests/git/git-commit.spec.ts -- --grep 'failed commit shows error in chat with Fix button' --workers=1 --retries=0
+(cd apps/web && NODE_OPTIONS=--max-old-space-size=4096 timeout --kill-after=10s 6m corepack pnpm@9.15.9 exec eslint --max-warnings 0 e2e/tests/git/git-commit.spec.ts)
+```
+
+Do not replay the 50 passing unit tests or full changed lint/backend suites.
+Web typecheck explicitly excludes `e2e`; localization guards exclude test copy.
+No typecheck/i18n replay is required for this test-only correction. Check changed
+docs/catalog/actual coverage and normal active hooks, then create a new commit
+and push promptly. Review new-head automatic FULL coverage before requesting any
+necessary gap fill. Return heavy only after all original/new handles join and
+fresh owned groups are absent, then start the one authorized corrected-head
+90-minute observer. Hosted retry and merge still require separate ROOT grants.
 
 ## Sequence and verification
 
@@ -131,7 +158,9 @@ git status --short
 pre-script; inspect status and retain only owned changes. No generated-file,
 lockfile or package-config edits are planned. All changed/new test suites are
 named above; the existing helper/payload tests are narrow compatibility controls.
-No frontend/backend/full Vitest/E2E/build rerun is admitted.
+No broad frontend/backend/full Vitest/E2E rerun is admitted. The later
+ROOT-authorized focused fresh-build integration command above is the sole
+browser/build exception.
 
 Run actual documentation coverage preflight from repo root. It loads the
 four-file package and checks real changed paths, including untracked additions:
@@ -166,9 +195,10 @@ after the public how-to edit during implementation.
 - `apps/web/hooks/use-git-with-feedback.ts`
 - `apps/web/hooks/use-git-with-feedback.test.tsx` (new)
 - `docs/public/sessions-and-review.md` (small existing commit how-to note)
+- `apps/web/e2e/tests/git/git-commit.spec.ts` (ROOT-authorized causal scenario only)
 - The paired requirement/system design, manifest and this work order.
 
-Consumers, use-session-git, use-git-operations, existing tests, state store and
+Consumers, use-session-git, use-git-operations, other existing tests, state store and
 backend are read-only inputs/controls. No changes to them are planned.
 
 ## Dependencies
@@ -269,4 +299,25 @@ a native-level install join or rerun it. No other native handle exception.
 Rendered controls at desktop/phone sizes prove shared state semantics with
 mocked transports, not browser geometry or live backend Git. Partial successful
 Git writes remain completed. No backend/API/other Git operation change,
-abort/rollback, persistence, broad suite, browser/build or scope expansion.
+abort/rollback, persistence or broad suite. The later explicitly authorized
+focused fresh-build browser correction is recorded below.
+
+## Corrective integration checkpoint
+
+The original local implementation/results above remain valid historical evidence.
+ROOT amended this same order after the exact hosted hook rejection failed all
+three attempts because the intentionally retained modal blocked background chat.
+Focused managed fresh-build correction passed all three cases at 1280px, 393px
+and 767px (one worker, retries0), native23619/start e10a69/actual join1ebd67
+exit0. Backend/web/plugin builds were fresh; browser assertions retained every
+original chat/Fix check. Full raw log: /tmp/kandev-run.e2e.wGkU1UfU.log. Group
+1024527 was absent after actual subprocess wait/reap. This adds real live Git
+hook rejection and native phone navigation coverage, not touch geometry.
+Protected ROOT proof is unchanged. Original observer ended on deadline, not pass.
+
+Affected eslint19104/start e48ad0/join cff121 exit0 passed. Documentation
+catalog/spec lint and actual complete twelve-path PR coverage12091/start9bb83b/
+join64712e exit0 passed, coverage covered/errors empty. Public documentation
+already explains failed draft dismissal/reopening; this test-only amendment
+changes no user contract and needs no additional public edit. No prior unit
+suite, typecheck, i18n or public-validator suite was replayed.

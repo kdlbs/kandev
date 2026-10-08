@@ -18,7 +18,8 @@ existing public how-to. ROOT reviewed the concrete four-file package and sent a
 later explicit implementation release in
 task `d3fa44a4-db3f-4e3d-9d61-82dbfb0f57e5`, primary session
 `ad44d4cc-4a7f-4f81-9f7b-0a405be2d66d`. Local implementation and task-defined
-checks are complete. Publication, hosted evidence and a separately authorized
+checks passed. A hosted E2E finding requires the narrow test-only correction
+below, now verified at all three widths. Publication, hosted evidence and a separately authorized
 merge remain external delivery gates. The completed design turn made no product
 edits, test/install/build/browser runs, commits or publications.
 
@@ -62,13 +63,14 @@ the return value; useSessionGit fan-out and WebSocket contracts stay intact.
 
 ## Desktop and phone state semantics
 
-The `/mobile-parity` pure state/data exception applies. Existing `CommitDialog`
-and `CommitBodyField` remain the surface on both viewports; rendered composition,
-copy, classes, scrolling, touch targets, navigation and breakpoint behavior are
-unchanged. No ASCII layout redesign or new Playwright/build run is required.
-The work order requires actual native rendered controls at desktop/phone window
-sizes and viewport changes during a pending draft. These are component-state
-checks, not browser geometry, touch or real backend Git proof.
+The production change retains the existing `CommitDialog` and `CommitBodyField`
+composition, copy, classes, scrolling, touch targets, navigation and breakpoints.
+Component tests prove shared state semantics, not browser geometry or live Git.
+The actual hosted hook-rejection failure additionally requires browser integration
+coverage: dismiss the intentionally retained modal before background chat actions.
+The same existing scenario runs at 1280px, 393px and 767px, using shipped phone
+Changes/Chat navigation. ROOT authorized this focused chromium viewport selection
+instead of a new mobile file/project. No touch-device or geometry claim is made.
 
 ## Accepted ROOT evidence
 
@@ -114,12 +116,16 @@ existing controls ran once as scoped compatibility checks.
 
 ## E2E evidence boundary
 
-User flow evidence comes from the real rendered provider through its real Git
-hooks to mocked transport, including opening, entering fields, submission,
-error feedback, dismissal/reopening and retry. No browser E2E is planned under
-the narrow mobile exception; no live Git hook, browser layout, backend or
-permission coverage is claimed. A discovered rendered/transport redesign
-blocker must checkpoint ROOT rather than silently adding browser/build work.
+The original component evidence uses real providers and hooks with mocked
+transport. Hosted run 37787894133, job 113360049681, failed the existing
+`git-commit.spec.ts` hook-rejection scenario in all three attempts at the background
+Technical details click. Raw logs and all three page contexts identify the retained
+commit textarea/modal intercepting pointer events. The scenario must assert raw
+failure retention and enabled Cancel, dismiss/reopen and recheck the same draft,
+dismiss again, then preserve every original summary, hidden-output, Technical
+details, Fix, prompt and agent-response assertion. The single owning work order
+is reopened for this ROOT-authorized test-only correction and one focused managed
+fresh-build run. No production change or hosted retry is authorized by this finding.
 
 ## Public documentation audit
 
@@ -200,3 +206,24 @@ merge verification remain external until they actually occur; see the work order
 - Multi-repository partial success is not rollback. Retry uses current status.
 - The one pinned frozen install completed after release and heavy-lease admission,
   with its bounded native-handle recovery exception recorded above.
+
+## Hosted integration correction results
+
+ROOT amended the same sequential order for the causal modal-obstruction failure.
+One focused managed fresh-build run passed 3/3 tests at desktop1280px and native
+phone393px/767px, one worker and retries0: native23619/start e10a69/actual
+join1ebd67 exit0, group1024527 absent. The existing scenario now checks raw
+whitespace/newline title/body, enabled dismissal, reopen with the same draft,
+then dismissal before all original chat summary/output/details/Fix/agent-response
+assertions. Phone cases use shipped bottom navigation and MobileChangesPanel.
+These are real browser/live rejecting Git hook outcomes with a fine pointer;
+no touch-device geometry is claimed. The old observer25812 reached deadline,
+actual join7a4e5e exit2, group711830 absent, and was not replaced before joining.
+No earlier passing50 unit tests were replayed. Web typecheck excludes e2e and
+localization guards exclude test copy; the correction needs affected eslint,
+document traceability and normal hooks, not repeated typecheck/i18n suites.
+
+Affected E2E eslint passed. Catalog/spec lint and actual twelve-path PR
+documentation coverage passed with covered status and errors empty. The public
+retry note already owns dismiss/reopen behavior; the test-only correction
+requires no additional public document change.
