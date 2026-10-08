@@ -2,6 +2,8 @@
 
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { useOfficeModeState } from "@/hooks/use-in-office";
 import { useAppStore } from "@/components/state-provider";
 import { useSidebarShortcutCatalog } from "./use-sidebar-shortcut-catalog";
 import { useShortcutActivity } from "./use-shortcut-activity";
@@ -14,22 +16,22 @@ const BUILTIN_LABEL_KEYS: Record<string, string> = {
   automations: "common:automations",
   canvases: "canvases:canvases",
   integrations: "common:integrations",
+  inbox: "sidebar:inbox",
+  needs_you_inbox: "sidebar:inbox",
 };
 
 export function useHasSavedSidebarLayout(): boolean {
   return useAppStore((state) => {
     const workspaceId = state.workspaces.activeId;
-    // The boot payload contains a projected default for every accessible
-    // workspace. Revision zero means the user has never selected a custom
-    // layout, so keep the legacy navigation path for that workspace.
-    return Boolean(
-      workspaceId && state.userSettings.sidebarLayoutsByWorkspace?.[workspaceId]?.revision > 0,
-    );
+    return Boolean(workspaceId);
   });
 }
 
 export function useSidebarLayoutNavigation({ active = true }: { active?: boolean } = {}) {
   const { t } = useTranslation();
+  const inOffice = useOfficeModeState() === "office";
+  const needsYouInbox = useFeature("needsYouInbox");
+  const canvasesEnabled = useFeature("canvases");
   const workspaceId = useAppStore((state) => state.workspaces.activeId ?? undefined);
   const savedLayout = useAppStore((state) => {
     const activeWorkspaceId = state.workspaces.activeId;
@@ -39,7 +41,7 @@ export function useSidebarLayoutNavigation({ active = true }: { active?: boolean
   });
   const catalog = useSidebarShortcutCatalog({ active });
   const layout = useMemo(() => fromApiSidebarLayout(savedLayout), [savedLayout]);
-  const projection = useMemo(
+  const rawProjection = useMemo(
     () =>
       projectSidebarLayout(layout, catalog.catalog, {
         unavailableLabel: t("common:unavailable"),
@@ -48,6 +50,29 @@ export function useSidebarLayoutNavigation({ active = true }: { active?: boolean
         ),
       }),
     [catalog.catalog, layout, t],
+  );
+  const projection = useMemo(
+    () => ({
+      ...rawProjection,
+      nodes: rawProjection.nodes
+        .filter((node) => {
+          if (node.destinationId === "inbox") return inOffice;
+          if (node.destinationId === "needs_you_inbox") return needsYouInbox;
+          if (node.destinationId === "canvases") return canvasesEnabled && !inOffice;
+          if (
+            inOffice &&
+            (node.destinationId === "integrations" || node.destinationId === "automations")
+          )
+            return false;
+          return node.kind !== "plugin" || node.available !== false;
+        })
+        .map((node) =>
+          node.destinationId === "needs_you_inbox" && inOffice
+            ? { ...node, label: t("sidebar:needsYouInbox") }
+            : node,
+        ),
+    }),
+    [rawProjection, inOffice, needsYouInbox, canvasesEnabled, t],
   );
   const automationIds = useMemo(() => {
     const ids = new Set<string>();

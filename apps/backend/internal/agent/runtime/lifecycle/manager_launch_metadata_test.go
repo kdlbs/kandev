@@ -322,6 +322,46 @@ func TestBuildLaunchMetadataProjectsWorktreeAndRepoFields(t *testing.T) {
 		"the single-repo base branch is recorded under the empty key for single-repo trackers")
 }
 
+func TestBuildLaunchMetadataProjectsTrustedPrimaryRepositoryContext(t *testing.T) {
+	const repositoryConfiguredKey = "repository_configured"
+	metadata := buildLaunchMetadata(&LaunchRequest{
+		Metadata: map[string]interface{}{
+			repositoryConfiguredKey:   true,
+			MetadataKeyRepositoryPath: "/task-supplied/path",
+		},
+		Repositories: []RepoLaunchSpec{
+			{RepositoryID: "primary", RepositoryPath: "/repos/primary"},
+			{RepositoryID: "secondary", RepositoryPath: "/repos/secondary"},
+		},
+	}, "", "", "")
+
+	require.Equal(t, true, metadata[repositoryConfiguredKey])
+	require.Equal(t, "/repos/primary", metadata[MetadataKeyRepositoryPath])
+
+	freeTask := buildLaunchMetadata(&LaunchRequest{
+		Metadata: map[string]interface{}{
+			repositoryConfiguredKey:   true,
+			MetadataKeyRepositoryPath: "/task-supplied/path",
+		},
+		ExecutorConfig:   map[string]string{MetadataKeyRepositoryPath: "/executor-supplied/path"},
+		WorkspaceFolders: []WorkspaceFolderSpec{{Name: "notes", LocalPath: "/folders/notes"}},
+	}, "", "", "")
+	require.Equal(t, false, freeTask[repositoryConfiguredKey])
+	require.NotContains(t, freeTask, MetadataKeyRepositoryPath)
+}
+
+func TestPromotionWithoutRepositorySpecsPreservesTrustedRepositoryContext(t *testing.T) {
+	primary := t.TempDir()
+	execution := &AgentExecution{metadata: map[string]interface{}{
+		MetadataKeyRepositoryConfigured: true,
+		MetadataKeyRepositoryPath:       primary,
+	}}
+	applyLaunchRepositoryContextToExecution(execution, &LaunchRequest{})
+	path, available := cursorMCPSourceRepository(execution)
+	require.True(t, available)
+	require.Equal(t, primary, path)
+}
+
 func TestBuildLaunchMetadataOmitsEmptyOptionalKeys(t *testing.T) {
 	metadata := buildLaunchMetadata(&LaunchRequest{}, "", "", "")
 
@@ -363,6 +403,56 @@ func TestCollectRemoteContributionsMultiRepoKeysSiblings(t *testing.T) {
 		"the first repository owns the workspace root")
 	require.Equal(t, second.CanonicalURL, bindings["gadget-hotfix"].CanonicalURL,
 		"siblings use the same deterministic key as base-branch projection")
+}
+
+func TestPluginRemoteRepositoryMetadataUsesMaterializedWorkspacePaths(t *testing.T) {
+	firstContribution := validTestRemoteContribution(7, "contributor/widget")
+	secondContribution := validTestRemoteContribution(9, "contributor/gadget")
+	firstDestination := lifecycleTestContributionDestination("200")
+	secondDestination := lifecycleTestContributionDestination("201")
+	comparisonTarget := lifecycleTestQualifiedPRBase().Target
+	req := &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypePluginRemote),
+		Repositories: []RepoLaunchSpec{
+			{
+				RepoName: "widget", BaseBranch: "main", RemoteContribution: &firstContribution,
+				ContributionDestination: &firstDestination, ComparisonTarget: &comparisonTarget,
+			},
+			{
+				RepoName: "gadget", BaseBranch: "main", CheckoutBranch: "feature/next",
+				RemoteContribution: &secondContribution, ContributionDestination: &secondDestination,
+				ComparisonTarget: &comparisonTarget,
+			},
+		},
+	}
+
+	wantKeys := []string{"widget-main", "gadget-feature-next"}
+	bindings, err := collectRemoteContributions(req)
+	require.NoError(t, err)
+	assertLifecycleWorkspaceKeys(t, bindings, wantKeys)
+	destinations, err := collectContributionDestinations(req)
+	require.NoError(t, err)
+	assertLifecycleWorkspaceKeys(t, destinations, wantKeys)
+	targets, err := collectComparisonTargets(req)
+	require.NoError(t, err)
+	assertLifecycleWorkspaceKeys(t, targets, wantKeys)
+	require.Equal(t, map[string]string{"widget-main": "main", "gadget-feature-next": "main"}, collectBaseBranches(req))
+
+	workspaceTargets, err := comparisonTargetsFromWorkspaceRepositories([]WorkspaceRepositorySpec{
+		{RepoName: "widget", BaseBranch: "main", ComparisonTarget: &comparisonTarget},
+		{RepoName: "gadget", BaseBranch: "main", CheckoutBranch: "feature/next", ComparisonTarget: &comparisonTarget},
+	}, string(models.ExecutorTypePluginRemote))
+	require.NoError(t, err)
+	assertLifecycleWorkspaceKeys(t, workspaceTargets, wantKeys)
+}
+
+func assertLifecycleWorkspaceKeys[V any](t *testing.T, got map[string]V, want []string) {
+	t.Helper()
+	keys := make([]string, 0, len(got))
+	for key := range got {
+		keys = append(keys, key)
+	}
+	require.ElementsMatch(t, want, keys)
 }
 
 func TestCollectRemoteContributionsRejectsConflictingBindings(t *testing.T) {

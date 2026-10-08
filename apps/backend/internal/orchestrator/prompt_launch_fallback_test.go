@@ -3,13 +3,19 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/queue"
+	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -21,6 +27,187 @@ import (
 )
 
 const launchFallbackPrompt = "Follow @principles and @operator-voice."
+
+func TestPromptTask_InitialTaskBriefAfterRecovery(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const (
+		taskID         = "task-initial-brief-recovery"
+		sessionID      = "session-initial-brief-recovery"
+		stepID         = "step-initial-brief-recovery"
+		brief          = "Original recovery brief: preserve the task context."
+		instruction    = "Continue in the recovered conversation."
+		workflowPrompt = "Do not reapply this workflow template during recovery."
+		savedPrompt    = "Follow @recovery-rules while continuing."
+	)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	dbTask, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("failed to load task: %v", err)
+	}
+	dbTask.WorkflowStepID = stepID
+	if err := repo.UpdateTask(ctx, dbTask); err != nil {
+		t.Fatalf("failed to set workflow step: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("failed to load recovered session: %v", err)
+	}
+	session.AgentExecutionID = "exec-before-restart"
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update recovered session: %v", err)
+	}
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-before-restart")
+
+	var launchCalls atomic.Int32
+	launchPrompts := make(chan string, 4)
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		promptErr:              lifecycle.ErrExecutionNotFound,
+		isAgentRunningFn: func(context.Context, string) bool {
+			return launchCalls.Load() > 0
+		},
+		isAgentReadyFn: func(context.Context, string) bool {
+			return launchCalls.Load() > 0
+		},
+		launchAgentFunc: func(_ context.Context, request *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			call := launchCalls.Add(1)
+			launchPrompts <- request.TaskDescription
+			if call == 1 {
+				launchSessionID := request.SessionID
+				go func() {
+					tick := time.NewTicker(5 * time.Millisecond)
+					defer tick.Stop()
+					timeout := time.After(5 * time.Second)
+					for {
+						select {
+						case <-tick.C:
+							current, getErr := repo.GetTaskSession(context.Background(), launchSessionID)
+							if getErr == nil && current != nil && current.State == models.TaskSessionStateStarting {
+								current.State = models.TaskSessionStateWaitingForInput
+								current.UpdatedAt = time.Now().UTC()
+								_ = repo.UpdateTaskSession(context.Background(), current)
+								return
+							}
+						case <-timeout:
+							return
+						}
+					}
+				}()
+			}
+			return &executor.LaunchAgentResponse{
+				AgentExecutionID: fmt.Sprintf("exec-recovered-%d", call),
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{
+		ID: taskID, Title: "Recovered task", Description: brief, State: v1.TaskStateInProgress,
+	}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf1", Name: "Recovery", Prompt: workflowPrompt,
+	}
+	promptService := newPromptServiceForLaunchFallbackTest(t)
+	acceptedPromptDefinition, err := promptService.CreatePrompt(ctx, "recovery-rules", "Accepted recovery rules v1.")
+	require.NoError(t, err)
+	preparedPrompt, acceptedPromptContext := promptService.AppendReferenceExpansionsWithContext(
+		ctx, brief+"\n\n"+instruction+"\n\n"+savedPrompt, nil,
+	)
+	reference := v1.EntityReference{
+		Version:  v1.EntityReferenceVersion,
+		Ref:      "kandev://workspace/ws1/task/other-task",
+		Provider: "kandev", Kind: "task", ID: "other-task", Title: "Related task",
+		URL: "/t/other-task", Scope: "ws1",
+	}
+	references := []v1.EntityReference{reference}
+	acceptedEntityContext := EntityReferenceContext(references)
+	preparedPrompt = AppendEntityReferenceContext(preparedPrompt, references)
+	combinedPrompt := sysprompt.InjectKandevContextWithOptions(
+		taskID, sessionID, preparedPrompt, sysprompt.KandevContextOptions{},
+		acceptedEntityContext, acceptedPromptContext,
+	)
+	changedDefinition := "Changed recovery rules v2."
+	_, err = promptService.UpdatePrompt(ctx, acceptedPromptDefinition.ID, nil, &changedDefinition)
+	require.NoError(t, err)
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	svc.promptExpander = promptService
+	exec := executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = exec
+	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, testLogger(), scheduler.DefaultSchedulerConfig())
+
+	if _, err := svc.ResumeTaskSessionAndPromptWithPromptContext(
+		ctx, taskID, sessionID, combinedPrompt, "", false, nil,
+		acceptedPromptContext, true, references, true,
+	); err != nil {
+		t.Fatalf("ResumeTaskSessionAndPrompt after recovery: %v", err)
+	}
+	if got := launchCalls.Load(); got != 2 {
+		t.Fatalf("expected resume plus missing-runtime fallback launches, got %d", got)
+	}
+	<-launchPrompts // The lazy resume launch has no prompt.
+	freshPrompt := <-launchPrompts
+	if strings.Count(freshPrompt, brief) != 1 || strings.Count(freshPrompt, instruction) != 1 {
+		t.Fatalf("fresh launch prompt %q must contain the brief and instruction once", freshPrompt)
+	}
+	if strings.Contains(freshPrompt, workflowPrompt) {
+		t.Fatalf("fresh launch reapplied the workflow template: %q", freshPrompt)
+	}
+	if strings.Count(freshPrompt, "Accepted recovery rules v1.") != 1 || strings.Contains(freshPrompt, changedDefinition) {
+		t.Fatalf("fresh launch lost or re-expanded the accepted saved prompt: %q", freshPrompt)
+	}
+	if strings.Count(freshPrompt, acceptedEntityContext) != 1 {
+		t.Fatalf("fresh launch lost or duplicated validated entity context: %q", freshPrompt)
+	}
+	if len(agentMgr.capturedPromptCalls) != 1 {
+		t.Fatalf("expected one failed PromptAgent attempt before fallback, got %d", len(agentMgr.capturedPromptCalls))
+	}
+
+	const (
+		emptyTaskID    = "task-initial-brief-recovery-empty-context"
+		emptySessionID = "session-initial-brief-recovery-empty-context"
+		emptyPrompt    = "Follow @late-recovery-rules after the restart."
+		lateDefinition = "Definition added after accepting the empty snapshot."
+	)
+	seedTaskAndSession(t, repo, emptyTaskID, emptySessionID, models.TaskSessionStateWaitingForInput)
+	emptySession, err := repo.GetTaskSession(ctx, emptySessionID)
+	require.NoError(t, err)
+	emptySession.AgentExecutionID = "exec-before-restart-empty-context"
+	emptySession.AgentProfileID = "profile1"
+	require.NoError(t, repo.UpdateTaskSession(ctx, emptySession))
+	seedExecutorRunning(t, repo, emptySessionID, emptyTaskID, "exec-before-restart-empty-context")
+	taskRepo.tasks[emptyTaskID] = &v1.Task{
+		ID: emptyTaskID, Title: "Recovered task without saved-prompt expansion", State: v1.TaskStateInProgress,
+	}
+	preparedEmptyPrompt, emptyPromptReferenceContext := promptService.AppendReferenceExpansionsWithContext(
+		ctx, emptyPrompt, nil,
+	)
+	require.Empty(t, emptyPromptReferenceContext)
+	preparedEmptyPrompt = sysprompt.InjectKandevContext(
+		emptyTaskID, emptySessionID, preparedEmptyPrompt, false,
+	)
+	_, err = promptService.CreatePrompt(ctx, "late-recovery-rules", lateDefinition)
+	require.NoError(t, err)
+	launchCalls.Store(0)
+	priorPromptAttempts := len(agentMgr.capturedPromptCalls)
+	if _, err := svc.PromptTaskWithPromptContext(
+		ctx, emptyTaskID, emptySessionID, preparedEmptyPrompt, "", false, nil,
+		"", true, nil, false,
+	); err != nil {
+		t.Fatalf("PromptTask after recovery with an accepted empty saved-prompt snapshot: %v", err)
+	}
+	if got := launchCalls.Load(); got != 2 {
+		t.Fatalf("expected resume plus fresh-runtime fallback for accepted empty context, got %d launches", got)
+	}
+	<-launchPrompts // The lazy resume launch has no prompt.
+	emptyFreshPrompt := <-launchPrompts
+	require.Contains(t, emptyFreshPrompt, "@late-recovery-rules")
+	require.NotContains(t, emptyFreshPrompt, lateDefinition)
+	require.Len(t, agentMgr.capturedPromptCalls, priorPromptAttempts+1)
+}
 
 type failedPromptReferenceExpander struct{}
 

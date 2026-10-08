@@ -14,6 +14,41 @@ import { useTaskLaunchErrorContext } from "../task-launch-error-context";
 import { useRecoveryChoices, useRecoveryPresentation } from "./session-recovery-model";
 import { sessionRecoveryAction } from "./messages/action-message-recovery";
 import { ManagedCloneRelocationConfirmation } from "./managed-clone-relocation-confirmation";
+import { matchingAutomaticRecovery } from "@/lib/session-recovery-presentation";
+
+function useFocusComposerAfterRecoveryCard(ref: { current: HTMLDivElement | null }) {
+  useLayoutEffect(() => {
+    const node = ref.current;
+    return () => {
+      if (!node?.contains(document.activeElement)) return;
+      const panel = node.closest('[data-testid="session-chat"]');
+      requestAnimationFrame(() =>
+        panel?.querySelector<HTMLElement>('[contenteditable="true"]')?.focus(),
+      );
+    };
+  }, []);
+}
+
+function retryAutomaticRecovery(
+  recovery: ReturnType<typeof matchingAutomaticRecovery>,
+  clearNotice?: () => void,
+) {
+  const resume = recovery?.resumeSession();
+  if (!resume) return undefined;
+  return resume.then((success) => {
+    if (success) clearNotice?.();
+    return success;
+  });
+}
+
+function automaticInspectionRetry(
+  recovery: ReturnType<typeof matchingAutomaticRecovery>,
+  actions: SessionRecoveryActions,
+) {
+  if (actions.recoveryNoticeKind != null || recovery?.noticeKind !== "inspection_busy")
+    return undefined;
+  return () => retryAutomaticRecovery(recovery, actions.clearInspectionContentionNotice);
+}
 
 export function SessionRecoveryCard({
   model,
@@ -27,25 +62,42 @@ export function SessionRecoveryCard({
   const ref = useRef<HTMLDivElement>(null);
   const [relocationConfirmationOpen, setRelocationConfirmationOpen] = useState(false);
   const profileExists = useSessionProfileExists(model.sessionId);
-  const choices = useRecoveryChoices(model, actions, profileExists, onNewSession, () =>
-    setRelocationConfirmationOpen(true),
-  );
+  const projectionMatchesModel = workspaceRecoveryMatchesModel(model, actions.workspaceRecovery);
   const context = useTaskLaunchErrorContext();
-  const { copy, busy, busyAction, details, failure } = useRecoveryPresentation(
+  const automaticRecovery = matchingAutomaticRecovery(
+    context?.automaticRecovery,
+    context?.taskId,
+    model.sessionId,
+  );
+  const recoveryActions = {
+    ...actionsForRecoveryModel(actions, projectionMatchesModel),
+    recoveryNoticeKind: actions.recoveryNoticeKind ?? automaticRecovery?.noticeKind ?? null,
+  };
+  const choices = useRecoveryChoices({
     model,
-    actions,
+    actions: recoveryActions,
+    profileExists,
+    onNewSession,
+    onRelocateRequested: () => setRelocationConfirmationOpen(true),
+    onInspectionRetry: automaticInspectionRetry(automaticRecovery, actions),
+  });
+  const { copy, busy, busyAction, details, detailFields, failure } = useRecoveryPresentation(
+    model,
+    recoveryActions,
     context,
   );
-  useLayoutEffect(() => {
-    const node = ref.current;
-    return () => {
-      if (!node?.contains(document.activeElement)) return;
-      const panel = node.closest('[data-testid="session-chat"]');
-      requestAnimationFrame(() =>
-        panel?.querySelector<HTMLElement>('[contenteditable="true"]')?.focus(),
-      );
-    };
-  }, []);
+  const workspaceRecoveryRelevant = isWorkspaceRecoveryRelevant(
+    model,
+    actions,
+    projectionMatchesModel,
+    choices,
+  );
+  const workspaceRecoveryForActions = workspaceRecoveryForProgress(
+    actions.workspaceRecovery,
+    projectionMatchesModel,
+  );
+  useFocusComposerAfterRecoveryCard(ref);
+  if (projectionMatchesModel && actions.workspaceRecovery?.agent_ready) return null;
   return (
     <div
       ref={ref}
@@ -59,6 +111,7 @@ export function SessionRecoveryCard({
         model={model}
         actions={actions}
         choices={choices}
+        workspaceRecoveryRelevant={workspaceRecoveryRelevant}
         profileExists={profileExists}
         copy={copy}
         failure={failure}
@@ -70,10 +123,17 @@ export function SessionRecoveryCard({
           busyAction={busyAction}
           preferred={preferredRecoveryAction(model, profileExists)}
           blocked={Boolean(actions.guardDetails && !actions.guardDetails.retryable)}
+          workspaceRecovery={workspaceRecoveryForActions}
+          workspaceRecoveryReadyApplies={projectionMatchesModel}
+          workspaceRecoveryRepositoryName={actions.workspaceRecoveryRepositoryName}
+          workspaceRecoveryStatusCheck={
+            workspaceRecoveryRelevant ? actions.workspaceRecoveryStatusCheck : "idle"
+          }
+          onCheckWorkspaceRecoveryStatus={() => void actions.checkWorkspaceRecoveryStatus()}
         />
         <AdditionalActions model={model} taskId={context?.taskId} />
         <div className="mt-3 min-w-0 border-t border-border pt-1 [&_pre]:bg-muted">
-          <SessionErrorDetails>{details}</SessionErrorDetails>
+          <SessionErrorDetails structuredFields={detailFields}>{details}</SessionErrorDetails>
         </div>
         <ActionMessageDetails
           metadata={model.metadata ? { ...model.metadata, error_output: undefined } : undefined}
@@ -90,10 +150,50 @@ export function SessionRecoveryCard({
   );
 }
 
+function workspaceRecoveryMatchesModel(
+  model: ActiveSessionRecovery,
+  projection: SessionRecoveryActions["workspaceRecovery"],
+) {
+  return Boolean(
+    model.stamp &&
+    projection?.session_id === model.sessionId &&
+    projection.error_stamp === model.stamp,
+  );
+}
+
+function actionsForRecoveryModel(
+  actions: SessionRecoveryActions,
+  projectionMatchesModel: boolean,
+): SessionRecoveryActions {
+  return projectionMatchesModel ? actions : { ...actions, workspaceRecovery: null };
+}
+
+function isWorkspaceRecoveryRelevant(
+  model: ActiveSessionRecovery,
+  actions: SessionRecoveryActions,
+  projectionMatchesModel: boolean,
+  choices: ReturnType<typeof useRecoveryChoices>,
+) {
+  return (
+    model.kind === "managed_clone_relocation_required" ||
+    Boolean(actions.managedCloneRecoveryStamp) ||
+    projectionMatchesModel ||
+    choices.some((choice) => choice.kind === "relocate_and_resume")
+  );
+}
+
+function workspaceRecoveryForProgress(
+  projection: SessionRecoveryActions["workspaceRecovery"],
+  projectionMatchesModel: boolean,
+) {
+  return projectionMatchesModel || projection?.runner_live ? projection : null;
+}
+
 function RecoveryCardHeader({
   model,
   actions,
   choices,
+  workspaceRecoveryRelevant,
   profileExists,
   copy,
   failure,
@@ -101,12 +201,18 @@ function RecoveryCardHeader({
   model: ActiveSessionRecovery;
   actions: SessionRecoveryActions;
   choices: ReturnType<typeof useRecoveryChoices>;
+  workspaceRecoveryRelevant: boolean;
   profileExists: boolean;
   copy: ReturnType<typeof useRecoveryPresentation>["copy"];
   failure: string;
 }) {
   const { t } = useTranslation();
-  const { summary, suppressSummary } = recoveryHeaderCopy(copy, actions, failure);
+  const { summary, suppressSummary } = recoveryHeaderCopy(
+    copy,
+    actions,
+    failure,
+    workspaceRecoveryRelevant,
+  );
   return (
     <div className="flex min-w-0 gap-3 border-b border-amber-500/20 bg-amber-500/5 p-3 dark:bg-amber-500/10 md:p-4">
       <IconAlertTriangle
@@ -131,6 +237,7 @@ function RecoveryCardHeader({
             {summary}
           </p>
         )}
+        <RecoveryStatusNotices copy={copy} />
         {model.kind === "provider_quota_limited" && model.metadata?.model_id && (
           <p className="mt-1 text-xs text-muted-foreground">
             {t("chat:providerQuotaModel", { model: model.metadata.model_id })}
@@ -146,16 +253,62 @@ function RecoveryCardHeader({
   );
 }
 
+function RecoveryStatusNotices({
+  copy,
+}: {
+  copy: ReturnType<typeof useRecoveryPresentation>["copy"];
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {copy.noPromptSent ? (
+        <p
+          className="mt-1 break-words text-xs text-muted-foreground"
+          data-testid="session-bootstrap-no-prompt"
+        >
+          {t("task:sessionBootstrapNoPromptSent")}
+        </p>
+      ) : null}
+      {copy.workspaceStatus ? (
+        <p
+          className="mt-1 break-words text-xs text-muted-foreground"
+          data-testid="session-recovery-workspace-status"
+        >
+          {copy.workspaceStatus}
+        </p>
+      ) : null}
+      {copy.freshStartWarning ? (
+        <p
+          className="mt-1 break-words text-xs text-muted-foreground"
+          data-testid="session-recovery-fresh-start-warning"
+        >
+          {t("task:sessionRecoveryFreshStartWarning")}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 function recoveryHeaderCopy(
   copy: ReturnType<typeof useRecoveryPresentation>["copy"],
   actions: SessionRecoveryActions,
   failure: string,
+  workspaceRecoveryRelevant: boolean,
 ) {
+  if ((actions.workspaceRecoveryStatusCheck ?? "idle") !== "idle") {
+    return { summary: "", suppressSummary: true };
+  }
+  if (actions.workspaceRecovery && workspaceRecoveryRelevant) {
+    return { summary: "", suppressSummary: true };
+  }
   const hasDistinctGuidance = Boolean(
     actions.recoveryError || actions.branchDetails || actions.guardDetails,
   );
+  let summary = actions.recoveryNotice ?? copy.summary;
+  if (hasDistinctGuidance) summary = failure;
+  if (copy.hasTypedSelectionCause) summary = copy.summary;
   return {
-    summary: hasDistinctGuidance ? failure : (actions.recoveryNotice ?? copy.summary),
+    summary,
     suppressSummary: !copy.showSummary && !hasDistinctGuidance,
   };
 }

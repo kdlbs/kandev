@@ -17,6 +17,10 @@ var ErrExecutionNotFound = errors.New("execution not found")
 // to the execution and prompt that were captured.
 var ErrPromptActivityNotOwned = errors.New("prompt activity no longer owned")
 
+// ErrPromptSettlementPending means a retained turn failure is still being
+// delivered to its durable owner, so a successor prompt cannot be admitted.
+var ErrPromptSettlementPending = errors.New("prompt failure settlement pending")
+
 // ErrExecutionAlreadyExistsForSession is returned by Add when the session
 // already maps to a different execution. The previous behavior was to silently
 // overwrite the bySession index, which orphaned the prior execution: the
@@ -47,6 +51,13 @@ type ExecutionStore struct {
 	bySession   map[string]string // sessionID -> executionID
 	byContainer map[string]string // containerID -> executionID
 	mu          sync.RWMutex
+}
+
+type promptLifecycleSnapshot struct {
+	execution            *AgentExecution
+	generation           uint64
+	dispatchedGeneration uint64
+	completedGeneration  uint64
 }
 
 // NewExecutionStore creates a new ExecutionStore with initialized maps.
@@ -241,6 +252,22 @@ func (s *ExecutionStore) ActivePromptGeneration(executionID string) uint64 {
 	return gen
 }
 
+func (s *ExecutionStore) promptLifecycleSnapshot(executionID string) (promptLifecycleSnapshot, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	execution, exists := s.executions[executionID]
+	if !exists {
+		return promptLifecycleSnapshot{}, false
+	}
+	return promptLifecycleSnapshot{
+		execution:            execution,
+		generation:           execution.promptGeneration,
+		dispatchedGeneration: execution.dispatchedPromptGeneration,
+		completedGeneration:  execution.promptCompletionGeneration,
+	}, true
+}
+
 // ExecutionReference identifies one registered execution without requiring a
 // later lookup through the session index. Both IDs are captured from the same
 // execution-store snapshot so a caller can keep targeting the original
@@ -338,6 +365,9 @@ func (s *ExecutionStore) BeginPrompt(executionID string) (uint64, error) {
 	current, exists := s.executions[executionID]
 	if !exists || current != execution {
 		return 0, ErrExecutionNotFound
+	}
+	if current.promptSettlementGeneration != 0 {
+		return 0, ErrPromptSettlementPending
 	}
 	return beginExecutionPromptLocked(current), nil
 }

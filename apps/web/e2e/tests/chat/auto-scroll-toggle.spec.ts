@@ -402,15 +402,15 @@ test.describe("Transcript auto-scroll toggle", () => {
       )
       .toBeLessThan(10);
 
-    // A reader-owned position must survive the same tab round trip. Dispatch
-    // a native scroll event so both the transcript coordinator and the
-    // generic panel restorer capture the exact reader position.
-    const targetScrollTop = await firstList.evaluate((el) => {
-      const target = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-      el.scrollTop = target;
-      el.dispatchEvent(new Event("scroll"));
-      return el.scrollTop;
-    });
+    // A reader-owned position must survive the same tab round trip. Use a real
+    // wheel event so the active auto-follow motion yields to reader intent.
+    const initialScrollTop = await firstList.evaluate((el) => el.scrollTop);
+    await firstList.hover();
+    await testPage.mouse.wheel(0, -1000);
+    await expect
+      .poll(() => firstList.evaluate((el) => el.scrollTop))
+      .toBeLessThan(initialScrollTop - 100);
+    const targetScrollTop = await firstList.evaluate((el) => el.scrollTop);
     expect(targetScrollTop).toBeGreaterThan(100);
     await expect
       .poll(

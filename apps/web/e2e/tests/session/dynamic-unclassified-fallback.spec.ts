@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import {
   DYNAMIC_FALLBACK_DRAFT,
   DYNAMIC_FALLBACK_SUCCESS,
+  cleanupDynamicFallbackProfiles,
   createDynamicFallbackProfile,
   expectCurrentCandidate,
   retryCurrentDynamicCandidate,
@@ -22,12 +23,16 @@ test.describe("dynamic unclassified fallback", () => {
     const releaseFeature = await backend.useEnv({
       KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING: "true",
     });
+    const createdDynamicProfileIds: string[] = [];
+    const createdCandidateProfileIds: string[] = [];
 
     try {
       const enabled = await createDynamicFallbackProfile(apiClient, seedData, {
         name: "Unclassified desktop core",
         enabled: true,
       });
+      createdDynamicProfileIds.push(enabled.dynamicProfile.id);
+      createdCandidateProfileIds.push(enabled.secondCandidate.id);
       const savedPolicy = enabled.dynamicProfile.dynamic?.candidates[0]?.policies;
       if (!savedPolicy) throw new Error("Dynamic profile did not return its candidate policy");
       await apiClient.updateAgentProfile(enabled.dynamicProfile.id, {
@@ -125,6 +130,8 @@ test.describe("dynamic unclassified fallback", () => {
           name: `Unclassified desktop ${options.suffix}`,
           enabled: options.enabled,
         });
+        createdDynamicProfileIds.push(profile.dynamicProfile.id);
+        createdCandidateProfileIds.push(profile.secondCandidate.id);
         if (options.veto) {
           await apiClient.updateWorkflowStep(seedData.startStepId, {
             disable_unclassified_fallback: true,
@@ -187,10 +194,21 @@ test.describe("dynamic unclassified fallback", () => {
         enabled: true,
       });
     } finally {
-      await apiClient.updateWorkflowStep(seedData.startStepId, {
-        disable_unclassified_fallback: false,
-      });
-      await releaseFeature();
+      try {
+        try {
+          await apiClient.updateWorkflowStep(seedData.startStepId, {
+            disable_unclassified_fallback: false,
+          });
+        } finally {
+          await cleanupDynamicFallbackProfiles(
+            apiClient,
+            createdDynamicProfileIds,
+            createdCandidateProfileIds,
+          );
+        }
+      } finally {
+        await releaseFeature();
+      }
     }
   });
 });

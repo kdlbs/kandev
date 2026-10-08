@@ -19,6 +19,18 @@ export function SessionExecutorFailureCard({
   episode: ExecutorFailureEpisode;
 }) {
   const recovery = useExecutorFailure(taskId, episode);
+  return <SessionExecutorFailureCardView taskId={taskId} episode={episode} recovery={recovery} />;
+}
+
+export function SessionExecutorFailureCardView({
+  taskId,
+  episode,
+  recovery,
+}: {
+  taskId: string;
+  episode: ExecutorFailureEpisode;
+  recovery: ReturnType<typeof useExecutorFailure>;
+}) {
   const [expanded, setExpanded] = useState(false);
   const { t } = useTranslation();
   const failure = recovery.episode;

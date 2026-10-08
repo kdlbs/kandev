@@ -176,9 +176,12 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		return nil, fmt.Errorf("unsupported session settings policy: %d", settingsPolicy)
 	}
 	rt := agentConfig.Runtime()
+	if err := validateRequiredNativeConversation(ctx, existingSessionID, rt.SessionConfig.NativeSessionResume); err != nil {
+		return nil, err
+	}
 	if settingsPolicy == SessionSettingsPolicyProviderRestored &&
 		(!rt.SessionConfig.NativeSessionResume || existingSessionID == "") {
-		return nil, fmt.Errorf("provider-restored recovery requires a native resumable session identity")
+		return nil, fmt.Errorf("native conversation restore requires a native resumable session identity")
 	}
 	sm.logger.Info("initializing ACP session",
 		zap.String("agent_type", agentConfig.ID()),
@@ -195,7 +198,7 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		sm.logger.Error("ACP initialize failed",
 			zap.String("agent_type", agentConfig.ID()),
 			zap.Error(err))
-		return nil, fmt.Errorf("initialize failed: %w", err)
+		return nil, &SessionInitializationPhaseError{Phase: SessionInitializationPhaseACPInitialize, Cause: err}
 	}
 
 	result := &InitializeResult{
@@ -244,12 +247,12 @@ func (sm *SessionManager) createOrLoadSession(
 		if err == nil {
 			return sessionID, "restored", nil
 		}
-		if settingsPolicy == SessionSettingsPolicyProviderRestored {
-			sm.logger.Warn("session/load failed during provider-restored recovery, preserving session identity",
+		if settingsPolicy == SessionSettingsPolicyProviderRestored || requiredNativeConversationID(ctx) != "" {
+			sm.logger.Warn("session/load failed during native conversation restore, preserving session identity",
 				zap.String("agent_type", agentConfig.ID()),
 				zap.String("existing_session_id", existingSessionID),
 				zap.Error(err))
-			return "", "unknown", fmt.Errorf("provider-restored recovery could not load the stored session: %w", err)
+			return "", "unknown", fmt.Errorf("native conversation restore could not load the stored session: %w", err)
 		}
 		// If the underlying ACP connection is dead (peer disconnected, context
 		// cancelled), session/new on the same client will return the same
@@ -271,6 +274,15 @@ func (sm *SessionManager) createOrLoadSession(
 		if !isSessionLoadFallbackErr(err, existingSessionID) {
 			sm.logger.Warn("session/load failed with an inconclusive error, preserving session identity",
 				zap.String("agent_type", agentConfig.ID()),
+				zap.String("existing_session_id", existingSessionID),
+				zap.String("reason", err.Error()))
+			return "", "unknown", err
+		}
+		if agentConfig.ID() == agents.OpenCodeACPAgentID {
+			// OpenCode can migrate its on-disk conversation data between runtime
+			// families. A load failure does not prove that the saved conversation
+			// is disposable, so never replace its native session ID implicitly.
+			sm.logger.Warn("OpenCode session/load failed, preserving saved conversation identity",
 				zap.String("existing_session_id", existingSessionID),
 				zap.String("reason", err.Error()))
 			return "", "unknown", err
@@ -553,7 +565,9 @@ func strictAuggieTaskStartModelPolicy(
 	execution *AgentExecution,
 	agentConfig agents.Agent,
 ) StartModelPolicy {
-	if execution == nil || execution.TaskScope != TaskLaunchScopeTask || execution.IsPassthrough ||
+	if execution == nil ||
+		(execution.TaskScope != TaskLaunchScopeTask && execution.TaskScope != TaskLaunchScopeAutomation) ||
+		execution.IsPassthrough ||
 		agentConfig == nil || agentConfig.ID() != "auggie" {
 		return policy
 	}
@@ -656,6 +670,9 @@ func (sm *SessionManager) initializeACPConnection(
 	client, releaseClient = execution.AcquireAgentCtlClient()
 	if client == nil {
 		return ctx, nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
+	}
+	if execution.RequiredNativeConversationID != "" {
+		ctx = context.WithValue(ctx, requiredNativeConversationKey{}, execution.RequiredNativeConversationID)
 	}
 	result, err := sm.InitializeSessionWithSettingsPolicy(
 		ctx, client, agentConfig, execution.ACPSessionID, execution.WorkspacePath, mcpServers,
@@ -873,22 +890,59 @@ func (sm *SessionManager) applyExplicitSessionMode(ctx context.Context, executio
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
-		return fmt.Errorf("requested permission mode %q cannot be applied: agentctl client is unavailable", mode)
+		return permissionModeBootstrapFailure(
+			execution, mode, "", models.AgentErrorCauseCodePermissionModeFailed,
+			models.AgentErrorCauseReasonClientUnavailable,
+			fmt.Errorf("requested permission mode %q cannot be applied: agentctl client is unavailable", mode),
+		)
 	}
 	result, err := client.SetMode(ctx, sessionID, mode)
 	if err != nil {
-		return fmt.Errorf("apply requested permission mode %q before the first prompt: %w", mode, err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		return permissionModeBootstrapFailure(
+			execution, mode, "", models.AgentErrorCauseCodePermissionModeFailed,
+			models.AgentErrorCauseReasonApplicationFailed,
+			fmt.Errorf("apply requested permission mode %q before the first prompt: %w", mode, err),
+		)
 	}
 	if !result.Confirmed || result.Effective == "" {
-		return fmt.Errorf("requested permission mode %q was not confirmed by the agent; the first prompt was not sent", mode)
+		return permissionModeBootstrapFailure(
+			execution, mode, result.Effective, models.AgentErrorCauseCodePermissionModeUnconfirmed,
+			models.AgentErrorCauseReasonConfirmationMissing,
+			fmt.Errorf("requested permission mode %q was not confirmed by the agent; the first prompt was not sent", mode),
+		)
 	}
 	if result.Effective != mode {
-		return fmt.Errorf("requested permission mode %q was not applied; agent reported %q and the first prompt was not sent", mode, result.Effective)
+		return permissionModeBootstrapFailure(
+			execution, mode, result.Effective, models.AgentErrorCauseCodePermissionModeMismatch,
+			models.AgentErrorCauseReasonEffectiveMismatch,
+			fmt.Errorf("requested permission mode %q was not applied; agent reported %q and the first prompt was not sent", mode, result.Effective),
+		)
 	}
 	sm.logger.Info("session mode confirmed before first prompt",
 		zap.String("execution_id", execution.ID), zap.String("session_id", sessionID),
 		zap.String("requested_mode", mode), zap.String("effective_mode", result.Effective))
 	return nil
+}
+
+func permissionModeBootstrapFailure(
+	execution *AgentExecution,
+	requestedMode, effectiveMode, code, reason string,
+	cause error,
+) *BootstrapFailure {
+	promptNotSent := true
+	return &BootstrapFailure{
+		Operation:     bootstrapOperation(execution),
+		Code:          code,
+		Reason:        reason,
+		Detail:        bootstrapFailureDetail(code),
+		RequestedMode: requestedMode,
+		EffectiveMode: effectiveMode,
+		PromptNotSent: &promptNotSent,
+		Cause:         cause,
+	}
 }
 
 func sortedConfigOptionKeys(options map[string]string) []string {
@@ -1278,6 +1332,13 @@ func (sm *SessionManager) waitForPromptDone(
 				// hitting a real agent failure.
 				if isCancelReleaseError(signal.Error) {
 					return nil, fmt.Errorf("%w: %s: %w", ErrAgentReported, signal.Error, ErrCancelEscalated)
+				}
+				if signal.PromptFailureDisposition == streams.PromptFailureDispositionRetainRuntime &&
+					signal.PromptFailureDisposition.Valid() {
+					return nil, &RetainedPromptFailureError{
+						Message:     signal.Error,
+						Disposition: signal.PromptFailureDisposition,
+					}
 				}
 				return nil, fmt.Errorf("%w: %s", ErrAgentReported, signal.Error)
 			}
@@ -1875,7 +1936,13 @@ func (sm *SessionManager) admitPrompt(execution *AgentExecution, validateStatus 
 			return 0, err
 		}
 	default:
-		promptGeneration = beginExecutionPrompt(execution)
+		execution.promptLifecycleMu.Lock()
+		if execution.promptSettlementGeneration != 0 {
+			execution.promptLifecycleMu.Unlock()
+			return 0, ErrPromptSettlementPending
+		}
+		promptGeneration = beginExecutionPromptLocked(execution)
+		execution.promptLifecycleMu.Unlock()
 	}
 	execution.messageMu.Lock()
 	execution.resetStreamingStateLocked()
@@ -1909,28 +1976,72 @@ func waitForPendingDispatchedPrompt(ctx context.Context, execution *AgentExecuti
 	if !execution.dispatchedPromptPending.Load() {
 		return nil
 	}
+	generation := execution.promptGenerationSnapshot()
 	timer := time.NewTimer(pendingDispatchedPromptWaitTimeout)
 	defer timer.Stop()
-	select {
-	case <-execution.promptDoneCh:
-		execution.dispatchedPromptPending.Store(false)
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		// Prefer a completion that arrived at the timeout boundary. If no
-		// signal is available, retain the gate for cancellation escalation.
+	for {
 		select {
-		case <-execution.promptDoneCh:
-			execution.dispatchedPromptPending.Store(false)
-			return nil
-		default:
-			return &PendingDispatchedPromptTimeoutError{
-				ExecutionID: execution.ID,
-				Timeout:     pendingDispatchedPromptWaitTimeout,
+		case signal := <-execution.promptDoneCh:
+			if err, accepted := acceptPendingPromptSignal(execution, generation, signal); accepted || err != nil {
+				return err
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			// Prefer a matching completion that arrived at the timeout boundary.
+			// Stale signals cannot release a later generation's dispatch gate.
+			for {
+				select {
+				case signal := <-execution.promptDoneCh:
+					if err, accepted := acceptPendingPromptSignal(execution, generation, signal); accepted || err != nil {
+						return err
+					}
+				default:
+					return &PendingDispatchedPromptTimeoutError{
+						ExecutionID: execution.ID,
+						Timeout:     pendingDispatchedPromptWaitTimeout,
+					}
+				}
 			}
 		}
 	}
+}
+
+func acceptPendingPromptSignal(
+	execution *AgentExecution,
+	generation uint64,
+	signal PromptCompletionSignal,
+) (error, bool) {
+	if signal.PromptGeneration != generation {
+		if current := execution.promptGenerationSnapshot(); current != generation {
+			return ErrPromptActivityNotOwned, false
+		}
+		return nil, false
+	}
+	if execution.promptGenerationSnapshot() != generation {
+		return ErrPromptActivityNotOwned, false
+	}
+	execution.dispatchedPromptPending.Store(false)
+	return nil, true
+}
+
+func (sm *SessionManager) markDispatchedPromptPending(execution *AgentExecution, generation uint64) {
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+
+	if sm.executionStore != nil {
+		snapshot, exists := sm.executionStore.promptLifecycleSnapshot(execution.ID)
+		if !exists || snapshot.execution != execution || snapshot.generation != generation ||
+			snapshot.dispatchedGeneration != generation || snapshot.completedGeneration == generation {
+			return
+		}
+	} else if generation == 0 || execution.promptGeneration != generation ||
+		execution.dispatchedPromptGeneration != generation ||
+		execution.promptCompletionGeneration == generation {
+		return
+	}
+
+	execution.dispatchedPromptPending.Store(true)
 }
 
 func (sm *SessionManager) finishAcceptedPrompt(
@@ -1941,7 +2052,7 @@ func (sm *SessionManager) finishAcceptedPrompt(
 	promptGeneration uint64,
 ) (*PromptResult, error) {
 	if dispatchOnly {
-		execution.dispatchedPromptPending.Store(true)
+		sm.markDispatchedPromptPending(execution, promptGeneration)
 	}
 	if onDispatched != nil {
 		onDispatched()

@@ -1,6 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import { seedTaskTreeActivityScenario } from "./sidebar-task-tree-activity-sort-helpers";
+import {
+  seedTaskTreeActivityScenario,
+  exerciseRepeatedTreeActivity,
+} from "./sidebar-task-tree-activity-sort-helpers";
 
 // @covers AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-002.1, .2, .5, .6
 test("desktop sidebar ranks a parent by its active child and keeps row-local times", async ({
@@ -40,4 +43,5 @@ test("desktop sidebar ranks a parent by its active child and keeps row-local tim
   expect(parentTime).toBeTruthy();
   expect(childTime).toBeTruthy();
   expect(Date.parse(childTime!)).toBeGreaterThan(Date.parse(parentTime!));
+  await exerciseRepeatedTreeActivity(session.sidebar, apiClient, { parent, child, peer });
 });

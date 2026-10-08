@@ -2,7 +2,7 @@ import type { StateCreator } from "zustand";
 import type { AutomationsSlice, AutomationsSliceState } from "./types";
 
 export const defaultAutomationsState: AutomationsSliceState = {
-  automations: { items: [], loaded: false, loading: false, triggerTypes: {} },
+  automations: { byWorkspace: {}, items: [], loaded: false, loading: false, triggerTypes: {} },
   automationRuns: { byAutomationId: {}, loading: {}, mutationEpoch: {}, deleting: {} },
 };
 
@@ -33,6 +33,8 @@ function createAutomationsActions(
     addAutomation: (automation) =>
       set((draft) => {
         draft.automations.items.unshift(automation);
+        const list = draft.automations.byWorkspace?.[automation.workspace_id];
+        if (list?.loaded) list.items.unshift(automation);
       }),
     updateAutomation: (automation) =>
       set((draft) => {
@@ -40,10 +42,57 @@ function createAutomationsActions(
         if (idx >= 0) {
           draft.automations.items[idx] = automation;
         }
+        const list = draft.automations.byWorkspace?.[automation.workspace_id];
+        const scopedIndex = list?.items.findIndex((item) => item.id === automation.id) ?? -1;
+        if (list && scopedIndex >= 0) list.items[scopedIndex] = automation;
       }),
     removeAutomation: (id) =>
       set((draft) => {
         draft.automations.items = draft.automations.items.filter((a) => a.id !== id);
+        for (const list of Object.values(draft.automations.byWorkspace ?? {})) {
+          list.items = list.items.filter((item) => item.id !== id);
+        }
+      }),
+  };
+}
+
+function createListActions(
+  set: ImmerSet,
+  get: () => AutomationsSlice,
+): Pick<AutomationsSlice, "beginAutomationsList" | "finishAutomationsList"> {
+  return {
+    beginAutomationsList: (workspaceId, refresh = false) => {
+      const current = get().automations.byWorkspace?.[workspaceId];
+      if (!refresh && (current?.loaded || current?.loading)) return null;
+      const generation = (current?.generation ?? 0) + 1;
+      set((draft) => {
+        const lists = (draft.automations.byWorkspace ??= {});
+        lists[workspaceId] = {
+          items: current?.items ?? [],
+          loaded: current?.loaded ?? false,
+          loading: true,
+          generation,
+        };
+        draft.automations.loading = true;
+      });
+      return generation;
+    },
+    finishAutomationsList: (workspaceId, generation, items) =>
+      set((draft) => {
+        const list = draft.automations.byWorkspace?.[workspaceId];
+        if (!list || list.generation !== generation) return;
+        if (items !== undefined) {
+          list.items = items.filter((item) => item.workspace_id === workspaceId);
+        } else if (!list.loaded) {
+          list.items = [];
+        }
+        list.loaded = true;
+        list.loading = false;
+        draft.automations.items = [...list.items];
+        draft.automations.loaded = true;
+        draft.automations.loading = Object.values(draft.automations.byWorkspace ?? {}).some(
+          (entry) => entry.loading,
+        );
       }),
   };
 }
@@ -132,6 +181,7 @@ export const createAutomationsSlice: StateCreator<
 > = (set, get, _api) => ({
   ...defaultAutomationsState,
   ...createAutomationsActions(set),
+  ...createListActions(set, get),
   ...createRunsActions(set, get),
   beginTriggerTypes: (workspaceId) => {
     const current = get().automations.triggerTypes[workspaceId];

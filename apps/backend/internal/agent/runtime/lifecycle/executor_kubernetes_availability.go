@@ -10,13 +10,13 @@ func kubernetesPodAvailabilityReason(pod *corev1.Pod) string {
 	reason := ""
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.DisruptionTarget && condition.Status == corev1.ConditionTrue && condition.Reason == "DeletionByTaintManager" {
-			return "WorkerUnavailable"
+			return models.ExecutorReasonWorkerUnavailable
 		}
 		if condition.Type != corev1.PodReady || condition.Status == corev1.ConditionTrue {
 			continue
 		}
 		if condition.Reason == "NodeNotReady" || condition.Reason == "NodeStatusUnknown" {
-			return "WorkerUnavailable"
+			return models.ExecutorReasonWorkerUnavailable
 		}
 		reason = "PodNotReady"
 	}

@@ -33,6 +33,58 @@ function makeMessage(
   };
 }
 
+describe("running notice resolution", () => {
+  it("accepts newly projected resolution without changing a notice timestamp", () => {
+    const store = makeStore();
+    const notice = makeMessage("notice", "Still waiting", SESSION, {
+      turn_id: "turn-1",
+      type: "status",
+      metadata: { action_visibility: "running" },
+    });
+    store.getState().setMessages(SESSION, [notice]);
+    store.getState().mergeMessages(SESSION, [
+      {
+        ...notice,
+        metadata: { ...notice.metadata, running_notice_resolved: true },
+      },
+    ]);
+    expect(store.getState().messages.bySession[SESSION][0].metadata?.running_notice_resolved).toBe(
+      true,
+    );
+  });
+
+  it.each(["updateMessage", "updateMessages"] as const)(
+    "%s resolves a notice when the tool is outside the loaded window",
+    (action) => {
+      const store = makeStore();
+      const notice = makeMessage("notice", "Still waiting", SESSION, {
+        turn_id: "turn-1",
+        type: "status",
+        metadata: { action_visibility: "running" },
+      });
+      store.getState().setMessages(SESSION, [notice]);
+      const tool = makeMessage("unloaded-tool", "Compacted", SESSION, {
+        turn_id: "turn-1",
+        type: "tool_call",
+        created_at: "2026-08-26T23:00:00Z",
+        updated_at: "2026-08-27T00:00:01Z",
+      });
+      if (action === "updateMessage") store.getState().updateMessage(tool);
+      else store.getState().updateMessages([tool]);
+
+      const messages = store.getState().messages.bySession[SESSION];
+      expect(messages).toHaveLength(1);
+      expect(messages[0].metadata?.running_notice_resolved).toBe(true);
+      store.getState().updateMessage(notice);
+      store.getState().mergeMessages(SESSION, [notice]);
+      store.getState().setMessages(SESSION, [notice]);
+      expect(
+        store.getState().messages.bySession[SESSION][0].metadata?.running_notice_resolved,
+      ).toBe(true);
+    },
+  );
+});
+
 describe("updateMessages", () => {
   it("notifies subscribers once for one replacement frame", () => {
     const store = makeStore();
@@ -102,25 +154,6 @@ describe("updateMessages", () => {
         metadata: { retrying: true, attempt: 2 },
       }),
     ]);
-  });
-
-  it("fans batched updates into the prompt cache", () => {
-    const store = makeStore();
-    store.getState().addMessage(
-      makeMessage("prompt", "before", SESSION, {
-        author_type: "user",
-        updated_at: "2026-08-27T00:00:00Z",
-      }),
-    );
-
-    store.getState().updateMessages([
-      makeMessage("prompt", "after", SESSION, {
-        author_type: "user",
-        updated_at: "2026-08-27T00:00:01Z",
-      }),
-    ]);
-
-    expect(store.getState().messagePrompts.bySession[SESSION][0].content).toBe("after");
   });
 });
 

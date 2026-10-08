@@ -29,14 +29,16 @@ const (
 
 // Terminal is a persisted ordinary user terminal.
 type Terminal struct {
-	ID             string        `db:"id"`
-	TaskID         string        `db:"task_id"`
-	EnvironmentID  string        `db:"environment_id"`
-	Seq            int           `db:"seq"`
-	CustomName     *string       `db:"custom_name"`
-	State          TerminalState `db:"state"`
-	InitialCommand string        `db:"initial_command"`
-	CreatedAt      time.Time     `db:"created_at"`
+	ID                     string        `db:"id"`
+	TaskID                 string        `db:"task_id"`
+	EnvironmentID          string        `db:"environment_id"`
+	Seq                    int           `db:"seq"`
+	CustomName             *string       `db:"custom_name"`
+	State                  TerminalState `db:"state"`
+	InitialCommand         string        `db:"initial_command"`
+	InitialCommandOnce     bool          `db:"initial_command_once"`
+	InitialCommandConsumed bool          `db:"initial_command_consumed"`
+	CreatedAt              time.Time     `db:"created_at"`
 }
 
 // DisplayName returns the user-facing label: custom_name if set, else the

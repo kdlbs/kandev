@@ -107,6 +107,9 @@ export async function selectAgentIfNeeded(dialog: Locator, page: Page) {
     await expect(option).toBeVisible({ timeout: 2_000 });
     await option.click();
     await expect(selector).not.toContainText("Select agent", { timeout: 2_000 });
+    await expect(page.getByTestId("quick-chat-agent-picker-content")).toBeHidden({
+      timeout: 5_000,
+    });
   }).toPass({ timeout: 10_000, intervals: [250, 500, 1_000] });
 }
 
@@ -128,6 +131,10 @@ export async function waitForQuickChatComposerReady(dialog: Locator): Promise<Lo
  * so checking editability alone can submit a message too early.
  */
 export async function waitForQuickChatDirectInput(dialog: Locator): Promise<void> {
+  await expect(dialog.getByTestId("chat-input-area")).toHaveAttribute("data-input-mode", "direct", {
+    timeout: 15_000,
+  });
+  await expect(dialog.getByTestId("submit-message-button")).toBeEnabled({ timeout: 15_000 });
   const idlePlaceholder = dialog
     .locator(
       '[data-placeholder="Continue working on the task..."]:visible, [data-placeholder="Continue working on the plan..."]:visible, [data-placeholder="Continue working on the file..."]:visible',
@@ -138,16 +145,32 @@ export async function waitForQuickChatDirectInput(dialog: Locator): Promise<void
   await expect(editor).toBeEditable({ timeout: 15_000 });
 }
 
-export async function startQuickChatFromSetup(dialog: Locator, page: Page) {
+export async function startQuickChatFromSetup(
+  dialog: Locator,
+  page: Page,
+  openingPrompt = "Please get ready for my next question.",
+) {
   await selectAgentIfNeeded(dialog, page);
-  await expect(dialog.getByTestId("quick-chat-start")).toBeEnabled({ timeout: 10_000 });
-  await dialog.getByTestId("quick-chat-start").click();
+  const response = page.waitForResponse(
+    (candidate) =>
+      candidate.request().method() === "POST" &&
+      new URL(candidate.url()).pathname.endsWith("/quick-chat"),
+  );
+  await dialog.getByTestId("task-description-input").fill(openingPrompt);
+  await expect(dialog.getByTestId("quick-chat-send")).toBeEnabled({ timeout: 10_000 });
+  await dialog.getByTestId("quick-chat-send").click();
+  const started = (await (await response).json()) as {
+    task_id: string;
+    session_id: string;
+  };
 
   // The composer is intentionally editable during STARTING, so editability
   // alone is no longer a readiness signal. Wait for the submit gate to clear
   // before callers begin a turn; this keeps tests from typing into a draft that
   // cannot yet be submitted.
   await waitForQuickChatComposerReady(dialog);
+  await waitForQuickChatDirectInput(dialog);
+  return started;
 }
 
 export async function openQuickChatWithAgent(page: Page, navigateHome = true): Promise<Locator> {
@@ -164,21 +187,16 @@ export async function openQuickChatWithAgent(page: Page, navigateHome = true): P
 
 export async function sendQuickChatMessage(dialog: Locator, page: Page, text: string) {
   const editor = dialog.locator(".tiptap.ProseMirror");
-  // With eager init, the agent boots during picker -> tab transition and the
-  // input can briefly toggle disabled while the FE store catches up. The whole
-  // fill + submit must retry as one unit: after a reopen the conversation can
-  // still be loading, so a fill can land on an editor that remounts (wiping
-  // the text) before the submit click. A successful send clears the editor
-  // synchronously, so each iteration either sends once and exits or sends
-  // nothing and retries.
+  // Retry draft preparation across eager-init remounts. Submission is performed
+  // once because the draft clears asynchronously after the acknowledgement.
   await expect(async () => {
     await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 1_000 });
     await editor.click({ timeout: 1_000 });
     await editor.fill(text, { timeout: 1_000 });
     await expect(editor).toHaveText(text, { timeout: 1_000 });
-    await dialog.getByTestId("submit-message-button").click({ timeout: 1_000 });
-    await expect(editor).toHaveText("", { timeout: 2_000 });
   }).toPass({ timeout: 30_000, intervals: [250, 500, 1_000] });
+  await dialog.getByTestId("submit-message-button").click();
+  await expect(editor).toHaveText("", { timeout: 15_000 });
 }
 
 export async function readQuickChatViewportLayout(dialog: Locator) {

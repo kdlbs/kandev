@@ -30,6 +30,7 @@ import (
 const (
 	pluginExecutorInventoryMaxBytes    = 32 << 10
 	pluginExecutorRuntimePort          = 8765
+	pluginExecutorWorkspacePath        = "/workspace"
 	pluginExecutorPhaseAllocating      = "allocating"
 	pluginExecutorPhaseArtifactStaging = "artifact_staging"
 	pluginExecutorPhaseBootstrapping   = "bootstrapping"
@@ -44,6 +45,8 @@ const (
 	pluginExecutorStateUnknown         = "unknown"
 	pluginExecutorStateUnavailable     = "unavailable"
 	pluginExecutorRetentionBounded     = "bounded"
+	pluginExecutorCleanupReasonTask    = "task_cleanup"
+	pluginExecutorCleanupReasonLaunch  = "launch_failed"
 )
 
 type PluginExecutorLaunch struct {
@@ -74,7 +77,7 @@ type PluginExecutorInventoryStore interface {
 	ListExecutorsRunningPluginRemote(context.Context) ([]*models.ExecutorRunning, error)
 }
 
-type pluginEndpointClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, string, error)
+type pluginControlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string) (*agentctl.ControlClient, string, error)
 type pluginRecoveredAgentctlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, error)
 type pluginAgentctlReadinessCheck func(context.Context, *agentctl.Client) error
 
@@ -83,7 +86,7 @@ type PluginRemoteExecutor struct {
 	logger                     *logger.Logger
 	profileLoader              PluginExecutorProfileLoader
 	inventoryStore             PluginExecutorInventoryStore
-	newAgentctlClient          pluginEndpointClientFactory
+	newAgentctlControlClient   pluginControlClientFactory
 	newRecoveredAgentctlClient pluginRecoveredAgentctlClientFactory
 	ready                      pluginAgentctlReadinessCheck
 }
@@ -108,6 +111,7 @@ type pluginExecutorInventory struct {
 	OperationID            string                                `json:"operation_id"`
 	InputDigest            string                                `json:"input_digest"`
 	RuntimeIdentity        string                                `json:"runtime_identity,omitempty"`
+	InstancePort           uint32                                `json:"instance_port,omitempty"`
 	Phase                  string                                `json:"phase"`
 	Resource               *pluginsdk.ExecutorResourceDescriptor `json:"resource,omitempty"`
 	Platform               string                                `json:"platform,omitempty"`
@@ -125,7 +129,7 @@ func NewPluginRemoteExecutor(operations PluginExecutorProviderOperations, log *l
 		log = logger.Default()
 	}
 	runtime := &PluginRemoteExecutor{operations: operations, logger: log.WithFields(zap.String("runtime", string(executor.NamePluginRemote)))}
-	runtime.newAgentctlClient = createPluginEndpointClient
+	runtime.newAgentctlControlClient = createPluginEndpointControlClient
 	runtime.newRecoveredAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
 		return agentctl.NewEndpointClient(ctx, resolver, log,
 			agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token))
@@ -134,17 +138,19 @@ func NewPluginRemoteExecutor(operations PluginExecutorProviderOperations, log *l
 	return runtime
 }
 
-func createPluginEndpointClient(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, nonce string) (*agentctl.Client, string, error) {
-	client, err := agentctl.NewEndpointClient(ctx, resolver, log, agentctl.WithExecutionID(executionID))
+// createPluginEndpointControlClient performs the bootstrap handshake with agentctl's
+// control server and returns the credential its instances accept.
+func createPluginEndpointControlClient(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, nonce string) (*agentctl.ControlClient, string, error) {
+	control, err := agentctl.NewEndpointControlClient(ctx, resolver, log)
 	if err != nil {
 		return nil, "", err
 	}
-	token, err := client.BootstrapHandshake(ctx, nonce)
+	token, err := control.Handshake(ctx, nonce)
 	if err != nil {
-		client.Close()
+		control.Close()
 		return nil, "", err
 	}
-	return client, token, nil
+	return control, token, nil
 }
 
 func (r *PluginRemoteExecutor) Name() executor.Name { return executor.NamePluginRemote }
@@ -172,6 +178,7 @@ func (r *PluginRemoteExecutor) CreateInstance(ctx context.Context, req *Executor
 	if err != nil {
 		return nil, err
 	}
+	r.uploadPluginExecutorAgentCredentials(ctx, client, launch.request)
 	return r.finishPluginExecutorLaunch(ctx, launch, resource, client, token)
 }
 
@@ -248,10 +255,12 @@ func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, laun
 	}
 	resource := provisioned.GetResource()
 	if provisioned.GetError() != nil {
-		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource)
+		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
+			"provision_rejected", pluginExecutorProviderError(provisioned.GetError()))
 	}
 	if err := validatePluginExecutorResourceForProvider(launch.profile.Provider, resource); err != nil {
-		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource)
+		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
+			"resource_descriptor", err)
 	}
 	launch.inventory.Resource = resource
 	launch.inventory.StateVersion = resource.GetStateVersion()
@@ -260,22 +269,50 @@ func (r *PluginRemoteExecutor) provisionPluginExecutor(ctx context.Context, laun
 	launch.inventory.Capabilities = intersectPluginExecutorCapabilities(launch.profile.Provider.Capabilities, resource.GetCapabilities(), resource.GetRetention())
 	launch.inventory.Phase = pluginExecutorPhaseProvisioned
 	if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
-		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource)
+		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
+			"provision_checkpoint", err)
 	}
 	return resource, nil
 }
 
+// startPluginExecutorAgentctl handshakes with agentctl's control server, creates the
+// session's instance, and returns a client bound to the instance port.
 func (r *PluginRemoteExecutor) startPluginExecutorAgentctl(ctx context.Context, launch *pluginExecutorLaunchState, resource *pluginsdk.ExecutorResourceDescriptor) (*agentctl.Client, string, error) {
-	connectionResolver := r.connectionResolver(launch.operationContext, resource)
-	client, token, err := r.newAgentctlClient(ctx, connectionResolver, r.logger, launch.request.InstanceID, launch.nonce)
+	fail := func(stage string, err error) (*agentctl.Client, string, error) {
+		return nil, "", r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource, stage, err)
+	}
+	control, token, err := r.newAgentctlControlClient(ctx, r.connectionResolver(launch.operationContext, resource, pluginExecutorRuntimePort), r.logger, launch.nonce)
 	if err != nil {
-		return nil, "", r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource)
+		return fail("control_handshake", err)
+	}
+	instancePort, err := createPluginAgentctlInstance(ctx, control, launch.request)
+	control.Close()
+	if err != nil {
+		return fail("instance_create", err)
+	}
+	launch.inventory.InstancePort = instancePort
+	client, err := agentctl.NewEndpointClient(ctx, r.connectionResolver(launch.operationContext, resource, instancePort), r.logger,
+		agentctl.WithExecutionID(launch.request.InstanceID), agentctl.WithAuthToken(token))
+	if err != nil {
+		return fail("instance_connect", err)
 	}
 	if err := r.ready(ctx, client); err != nil {
 		client.Close()
-		return nil, "", r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource)
+		return fail("agentctl_health", err)
 	}
 	return client, token, nil
+}
+
+func createPluginAgentctlInstance(ctx context.Context, control *agentctl.ControlClient, req *ExecutorCreateRequest) (uint32, error) {
+	instanceReq := agentctlInstanceRequest(req, pluginExecutorWorkspacePath)
+	created, err := control.CreateInstance(ctx, &instanceReq)
+	if err != nil {
+		return 0, err
+	}
+	if created.Port <= 0 || created.Port > 65535 {
+		return 0, errors.New("agentctl created an instance without a usable port")
+	}
+	return uint32(created.Port), nil
 }
 
 func (r *PluginRemoteExecutor) finishPluginExecutorLaunch(ctx context.Context, launch *pluginExecutorLaunchState, resource *pluginsdk.ExecutorResourceDescriptor, client *agentctl.Client, token string) (*ExecutorInstance, error) {
@@ -283,14 +320,15 @@ func (r *PluginRemoteExecutor) finishPluginExecutorLaunch(ctx context.Context, l
 	launch.inventory.Generation++
 	if err := checkpointPluginExecutor(ctx, launch.request, launch.inventory); err != nil {
 		client.Close()
-		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource)
+		return nil, r.cleanupAfterPluginExecutorFailure(ctx, launch.request, launch.operationContext, launch.inventory, resource,
+			"ready_checkpoint", err)
 	}
 	metadata := clonePluginExecutorMetadata(launch.request.Metadata)
 	metadata[MetadataKeyPluginExecutor] = launch.inventory
 	return &ExecutorInstance{
 		InstanceID: launch.request.InstanceID, TaskID: launch.request.TaskID, SessionID: launch.request.SessionID,
 		RuntimeName: agentruntime.RuntimePluginRemote, Client: client,
-		WorkspacePath: "/workspace", Metadata: metadata, AuthToken: token,
+		WorkspacePath: pluginExecutorWorkspacePath, Metadata: metadata, AuthToken: token,
 		ReleaseRuntimeInventory: launch.request.ReleaseRuntimeInventory,
 	}, nil
 }
@@ -528,18 +566,21 @@ func checkpointPluginExecutor(ctx context.Context, req *ExecutorCreateRequest, i
 	return req.CheckpointRuntimeInventory(ctx, map[string]interface{}{MetadataKeyPluginExecutor: inventory})
 }
 
-func (r *PluginRemoteExecutor) connectionResolver(operationContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor) agentctl.ConnectionLeaseResolver {
+func (r *PluginRemoteExecutor) connectionResolver(operationContext *pluginsdk.ExecutorProviderRequestContext, resource *pluginsdk.ExecutorResourceDescriptor, runtimePort uint32) agentctl.ConnectionLeaseResolver {
 	return func(ctx context.Context) (*agentctl.ConnectionLease, error) {
 		requestContext := proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext)
 		requestContext.Deadline = time.Now().Add(15 * time.Second).UTC().Format(time.RFC3339Nano)
 		response, err := r.operations.ResolveExecutorConnection(ctx, &pluginsdk.ResolveExecutorConnectionRequest{
-			Context: requestContext, Resource: resource, Purpose: "agentctl", RuntimePort: pluginExecutorRuntimePort,
+			Context: requestContext, Resource: resource, Purpose: "agentctl", RuntimePort: runtimePort,
 		})
-		if err != nil || response == nil || response.GetLease() == nil {
+		if err != nil || response == nil {
 			return nil, errors.New("provider connection lease is unavailable")
 		}
 		if response.GetError() != nil {
-			return nil, errors.New("provider connection lease was rejected")
+			return nil, fmt.Errorf("provider connection lease was rejected: %w", pluginExecutorProviderError(response.GetError()))
+		}
+		if response.GetLease() == nil {
+			return nil, errors.New("provider connection lease is unavailable")
 		}
 		lease := response.GetLease()
 		expiresAt, err := time.Parse(time.RFC3339Nano, lease.GetExpiresAt())
@@ -619,16 +660,27 @@ func (r *PluginRemoteExecutor) recoverOrRetainFailedProvision(
 		_ = checkpointPluginExecutor(ctx, req, inventory)
 		return errors.New("plugin executor allocation outcome is unknown; cleanup inventory was retained")
 	}
-	return r.cleanupAfterPluginExecutorFailure(ctx, req, operationContext, inventory, resource)
+	return r.cleanupAfterPluginExecutorFailure(ctx, req, operationContext, inventory, resource, "provision_recovered", provisionErr)
 }
 
+// cleanupAfterPluginExecutorFailure logs the failed launch stage and removes the
+// provisioned resource. The returned error names only the cleanup outcome.
 func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 	ctx context.Context,
 	req *ExecutorCreateRequest,
 	operationContext *pluginsdk.ExecutorProviderRequestContext,
 	inventory pluginExecutorInventory,
 	resource *pluginsdk.ExecutorResourceDescriptor,
+	stage string,
+	cause error,
 ) error {
+	if cause != nil {
+		r.logger.Warn("plugin executor launch gate failed",
+			zap.String("stage", stage),
+			zap.String("execution_id", req.InstanceID),
+			zap.String("session_id", req.SessionID),
+			zap.String("cause_type", fmt.Sprintf("%T", cause)))
+	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	claim, claimErr := r.acquirePluginExecutorCleanupClaim(cleanupCtx, req.TaskID, req.SessionID, inventory)
@@ -643,7 +695,7 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 	cleanupContext := proto.Clone(operationContext).(*pluginsdk.ExecutorProviderRequestContext)
 	cleanupContext.Deadline = time.Now().Add(30 * time.Second).UTC().Format(time.RFC3339Nano)
 	response, err := r.operations.DestroyExecutorEnvironment(cleanupCtx, &pluginsdk.DestroyExecutorEnvironmentRequest{
-		Context: cleanupContext, Resource: resource, CleanupReason: "launch_failed", CleanupClaim: claim.OperationID,
+		Context: cleanupContext, Resource: resource, CleanupReason: pluginExecutorCleanupReasonLaunch, CleanupClaim: claim.OperationID,
 	})
 	if err == nil && response != nil && response.GetConfirmedAbsent() {
 		inventory.Resource = resource
@@ -663,6 +715,10 @@ func (r *PluginRemoteExecutor) cleanupAfterPluginExecutorFailure(
 	}
 	r.logger.Warn("plugin executor cleanup remains pending", zap.String("execution_id", req.InstanceID))
 	return errors.New("plugin executor launch failed; resource cleanup remains pending")
+}
+
+func pluginExecutorProviderError(providerErr *pluginsdk.ExecutorProviderError) error {
+	return fmt.Errorf("provider error %q (%s)", providerErr.GetCode(), providerErr.GetMessageId())
 }
 
 var _ ExecutorBackend = (*PluginRemoteExecutor)(nil)

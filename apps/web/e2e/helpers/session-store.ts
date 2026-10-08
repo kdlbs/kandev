@@ -4,10 +4,21 @@ type E2EStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
     getState: () => {
       taskSessions: { items: Record<string, Record<string, unknown>> };
+      taskSessionsByTask: {
+        loadingByTaskId: Record<string, boolean | undefined>;
+        loadedByTaskId: Record<string, boolean | undefined>;
+      };
       tasks: { activeSessionId: string | null };
+      connection: { status: string };
       quickChat: { activeSessionId: string | null };
-      sessionAgentctl: { itemsBySessionId: Record<string, { status?: string }> };
+      sessionModels: {
+        bySessionId: Record<string, SessionModelsData | undefined>;
+      };
+      sessionAgentctl: {
+        itemsBySessionId: Record<string, { status?: string; agentExecutionId?: string }>;
+      };
       setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
+      setSessionModels: (sessionId: string, data: SessionModelsData) => void;
       setAuthState: (state: {
         mode: string;
         authenticated: boolean;
@@ -35,6 +46,21 @@ type AvailableCommand = {
   name: string;
   description?: string;
   input_hint?: string;
+  kind?: string;
+  action?: {
+    kind: string;
+    config_id: string;
+    value: string;
+    reset_value: string;
+  };
+};
+
+type SessionModelsData = {
+  currentModelId: string;
+  models: unknown[];
+  configOptions: unknown[];
+  confirmedConfigOptions?: Record<string, string>;
+  [key: string]: unknown;
 };
 
 /**
@@ -92,19 +118,56 @@ export async function waitForSessionAgentctlReady(
 export async function waitForActiveSessionForegroundActivity(
   page: Page,
   activity: "generating" | "background" | null,
+  targetSessionId?: string,
 ): Promise<void> {
   await page.waitForFunction(
-    (expected) => {
+    ({ expected, sessionId: targetSessionId }) => {
       const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
       if (!store) return false;
       const state = store.getState();
-      const sessionId = state.tasks.activeSessionId;
+      const sessionId = targetSessionId ?? state.tasks.activeSessionId;
       if (!sessionId) return false;
       const current = state.taskSessions.items[sessionId]?.foreground_activity;
       return expected === null ? current == null : current === expected;
     },
-    activity,
+    { expected: activity, sessionId: targetSessionId },
     { timeout: 20_000 },
+  );
+}
+
+/** Wait until the connected task page has no session-list hydration in flight. */
+export async function waitForTaskSessionsSettled(page: Page, taskId: string): Promise<void> {
+  await page.waitForFunction(
+    (targetTaskId) => {
+      const state = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState();
+      return Boolean(
+        state &&
+        state.connection.status === "connected" &&
+        state.taskSessionsByTask.loadedByTaskId[targetTaskId] === true &&
+        state.taskSessionsByTask.loadingByTaskId[targetTaskId] !== true,
+      );
+    },
+    taskId,
+    { timeout: 20_000, message: `Sessions for task ${taskId} did not settle after reconnect` },
+  );
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve())),
+      ),
+  );
+  await page.waitForFunction(
+    (targetTaskId) => {
+      const state = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState();
+      return Boolean(
+        state &&
+        state.connection.status === "connected" &&
+        state.taskSessionsByTask.loadedByTaskId[targetTaskId] === true &&
+        state.taskSessionsByTask.loadingByTaskId[targetTaskId] !== true,
+      );
+    },
+    taskId,
+    { timeout: 20_000, message: `Sessions for task ${taskId} did not remain settled` },
   );
 }
 
@@ -134,25 +197,29 @@ export async function waitForActiveSessionSupportsSteering(
 export async function seedActiveSessionForegroundActivity(
   page: Page,
   activity: "generating" | "background" | null,
+  targetSessionId?: string,
 ): Promise<void> {
-  await page.evaluate((nextActivity) => {
-    const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
-    if (!store) {
-      throw new Error("E2E store bridge missing — is __KANDEV_E2E_EXPOSE_STORE__ set?");
-    }
-    store.setState((state) => {
-      const sessionId = store.getState().tasks.activeSessionId;
-      if (!sessionId) throw new Error("No active session is available in the E2E store");
-      const session = state.taskSessions.items[sessionId];
-      if (!session) throw new Error(`Session ${sessionId} not found in store`);
-      // Intentionally skip the activity epoch: this stale projection predates
-      // the current backend process and its reconnect events.
-      state.taskSessions.items[sessionId] = {
-        ...session,
-        foreground_activity: nextActivity,
-      };
-    });
-  }, activity);
+  await page.evaluate(
+    ({ nextActivity, targetSessionId }) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) {
+        throw new Error("E2E store bridge missing — is __KANDEV_E2E_EXPOSE_STORE__ set?");
+      }
+      store.setState((state) => {
+        const sessionId = targetSessionId ?? store.getState().tasks.activeSessionId;
+        if (!sessionId) throw new Error("No active session is available in the E2E store");
+        const session = state.taskSessions.items[sessionId];
+        if (!session) throw new Error(`Session ${sessionId} not found in store`);
+        // Intentionally skip the activity epoch: this stale projection predates
+        // the current backend process and its reconnect events.
+        state.taskSessions.items[sessionId] = {
+          ...session,
+          foreground_activity: nextActivity,
+        };
+      });
+    },
+    { nextActivity: activity, targetSessionId },
+  );
 }
 
 /** Wait for the backend-owned cancellation projection on the active session. */
@@ -322,6 +389,42 @@ export async function seedAvailableCommands(
     },
     { sid: sessionId, commandList: commands },
   );
+}
+
+export async function seedConfirmedConfigOptions(
+  page: Page,
+  sessionId: string,
+  options: Record<string, string>,
+): Promise<void> {
+  await page.evaluate(
+    ({ sid, confirmedOptions }) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) {
+        throw new Error("E2E store bridge missing — is __KANDEV_E2E_EXPOSE_STORE__ set?");
+      }
+      const current = store.getState().sessionModels.bySessionId[sid] ?? {
+        currentModelId: "",
+        models: [],
+        configOptions: [],
+      };
+      store.getState().setSessionModels(sid, {
+        ...current,
+        confirmedConfigOptions: confirmedOptions,
+      });
+    },
+    { sid: sessionId, confirmedOptions: options },
+  );
+}
+
+export async function getSessionAgentExecutionId(
+  page: Page,
+  sessionId: string,
+): Promise<string | null> {
+  return page.evaluate((sid) => {
+    const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+    const executionId = store?.getState().sessionAgentctl.itemsBySessionId[sid]?.agentExecutionId;
+    return typeof executionId === "string" ? executionId : null;
+  }, sessionId);
 }
 
 /**

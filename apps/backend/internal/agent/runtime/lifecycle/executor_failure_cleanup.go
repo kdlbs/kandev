@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const executorCleanupFailedReason = "cleanup_failed"
+
 func (m *Manager) cleanupStaleExecutionWithCause(ctx context.Context, execution *AgentExecution) error {
 	prompt, startup := execution.promptGenerationSnapshot(), execution.startupAttemptSnapshot()
 	cleanupErr := m.cleanupStaleExecution(ctx, execution)
@@ -43,5 +45,5 @@ func executorCleanupFailureReason(err error) string {
 	if strings.Contains(message, "status 401") || strings.Contains(message, "HTTP 401") {
 		return "cleanup_unauthorized"
 	}
-	return "cleanup_failed"
+	return executorCleanupFailedReason
 }

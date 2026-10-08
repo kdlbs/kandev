@@ -44,6 +44,11 @@ const mocks = vi.hoisted(() => ({
   getTaskPlan: vi.fn(),
 }));
 
+vi.mock("./preview-plan-recovery", () => ({
+  PreviewRecoveryRegion: ({ viewMode }: { viewMode: string }) =>
+    viewMode === "plan" ? <div data-testid="preview-plan-recovery" /> : null,
+}));
+
 vi.mock("./task-chat-panel", () => ({
   TaskChatPanel: (props: Record<string, unknown>) => {
     mocks.taskChatPanelProps = props;
@@ -244,6 +249,8 @@ function setTaskPlansState(patch: Partial<TaskPlansState>) {
 }
 
 type TestAppState = FakeAppState & {
+  taskSessions: { items: Record<string, TaskSession> };
+  messages: { bySession: Record<string, never[]> };
   kanban: {
     tasks: Array<{ id: string; primarySessionId: string | null }>;
   };
@@ -265,6 +272,8 @@ vi.mock("@/components/state-provider", () => ({
     useStore(fakeStore, (state) =>
       selector({
         ...state,
+        taskSessions: { items: mocks.taskSessionItems },
+        messages: { bySession: {} },
         agentProfiles: { items: mocks.agentProfiles },
         kanban: {
           tasks: mocks.kanbanTasks.map((task) => ({
@@ -343,6 +352,38 @@ afterEach(() => {
 });
 
 describe("PreviewSessionBody delivery", () => {
+  it("keeps automatic recovery reachable while Plan replaces the chat", () => {
+    mocks.sessions = [makeSession("session-a", { state: "FAILED" })];
+    mocks.useTaskSessions.mockReturnValue({ sessions: mocks.sessions, isLoaded: true });
+    mocks.getTaskPlan.mockResolvedValue(null);
+    mocks.taskSessionItems = { "session-a": mocks.sessions[0] };
+    const resumeSession = vi.fn();
+    mocks.useSessionResumption.mockReturnValue({
+      resumptionState: "error",
+      requestIdentity: {
+        taskId: TASK_ID,
+        sessionId: "session-a",
+        generation: 1,
+        attemptId: 1,
+      },
+      error: "Session recovery failed",
+      notice: null,
+      recoveryFailure: {
+        outcome: "recovery_failed",
+        resumeError: "Resume failed",
+        restoreError: "Restore failed",
+      },
+      resumeSession,
+    });
+    render(<PreviewSessionTabs taskId={TASK_ID} sessionId="session-a" />);
+    expect(screen.queryByTestId("session-recovery-error")).toBeNull();
+    fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
+    expect(screen.queryByTestId("session-recovery-error")).toBeNull();
+    expect(screen.getByTestId("preview-plan-recovery")).toBeTruthy();
+    fireEvent.mouseDown(screen.getByTestId(SESSION_A_TAB_TESTID), { button: 0 });
+    expect(screen.queryByTestId("session-recovery-error")).toBeNull();
+  });
+
   it("uses TaskChatPanel's queue-aware shared delivery path", () => {
     render(<PreviewSessionBody session={session} taskId={TASK_ID} />);
 

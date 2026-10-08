@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -109,8 +110,9 @@ const processStderrDrainTimeout = time.Second
 
 // Manager manages the agent subprocess
 type Manager struct {
-	cfg    *config.InstanceConfig
-	logger *logger.Logger
+	cfg             *config.InstanceConfig
+	logger          *logger.Logger
+	managedGitTools installedManagedGitTools
 
 	// Process state
 	cmd                *exec.Cmd
@@ -127,10 +129,11 @@ type Manager struct {
 	exitErr            atomic.Value // error
 
 	// Stderr buffering for error context
-	stderrBuffer    []string
-	stderrMu        sync.RWMutex
-	stderrConsumer  adapter.StderrLineConsumer
-	stderrSanitizer adapter.StderrLineSanitizer
+	stderrBuffer          []string
+	stderrBufferTruncated bool
+	stderrMu              sync.RWMutex
+	stderrConsumer        adapter.StderrLineConsumer
+	stderrSanitizer       adapter.StderrLineSanitizer
 
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
@@ -150,7 +153,9 @@ type Manager struct {
 	// by workspace operations and repository-child discovery. It is guarded by
 	// repoTrackersMu so a rebind snapshots its proposed policy before creating
 	// replacement trackers.
-	workspaceSourceRoots []string
+	workspaceSourceRoots           []string
+	workspaceFileExclusions        []string
+	workspaceFileExclusionRevision uint64
 	// rescanMu serializes RescanRepositories calls so two concurrent
 	// rescans can't both observe an empty tracker set and double-bootstrap
 	// (or both append duplicate trackers for the same new child). The
@@ -272,13 +277,8 @@ type Manager struct {
 	// attachedCount is the live count of backend event-stream connections
 	// (see attachment.go). Zero value correctly starts an instance detached.
 	attachedCount atomic.Int32
-	// turnOutcomeRecorder and turnOutcomeInstanceID back retained-outcome
-	// wiring (see turn_outcome.go). Both are guarded by mu: set once by
-	// SetTurnOutcomeRecorder before any goroutine that could read them is
-	// spawned (instance.Manager.CreateInstance calls it immediately after
-	// constructing this Manager, before Start can be reached), then read
-	// from forwardUpdates and sendUpdateBlocking's callers, neither of which
-	// otherwise holds mu.
+	// turnOutcomeMu guards recorder wiring independently of lifecycle transitions.
+	turnOutcomeMu         sync.RWMutex
 	turnOutcomeRecorder   TurnOutcomeRecorder
 	turnOutcomeInstanceID string
 	startMu               sync.Mutex
@@ -289,6 +289,10 @@ type Manager struct {
 	lifetimeCtx           context.Context
 	lifetimeCancel        context.CancelFunc
 	mainReapPending       atomic.Bool
+	startupEvidenceMu     sync.Mutex
+	startupGeneration     uint64
+	startupEvidence       *types.ManagedStartupEvidence
+	startupEvidenceDone   chan struct{}
 	// stopChClosed guards close(stopCh), which is the only part of teardown
 	// that is not naturally idempotent. It is reset wherever stopCh itself is
 	// created so the flag always describes the current channel — a Start that
@@ -410,6 +414,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	m := &Manager{
 		cfg:                  cfg,
 		logger:               log.WithFields(zap.String("component", "process-manager")),
+		managedGitTools:      installedManagedGitToolsFromEnvironment(cfg.AgentEnv),
 		updatesCh:            make(chan adapter.AgentEvent, updatesChannelCapacity),
 		pendingPermissions:   make(map[string]*PendingPermission),
 		lifetimeCtx:          lifetimeCtx,
@@ -484,6 +489,65 @@ func (m *Manager) SetWorkspaceSourceRoots(roots []string) {
 			tracker.SetAllowedSourceRoots(canonical)
 		}
 	}
+}
+
+// SetWorkspaceFileExclusions installs exact trusted recovery-artifact paths
+// on every current tracker. The update is serialized with tracker rescans so
+// newly created trackers inherit the same filter.
+func (m *Manager) SetWorkspaceFileExclusions(paths []string) {
+	canonical := canonicalWorkspaceFileExclusions(paths)
+	m.rescanMu.Lock()
+	defer m.rescanMu.Unlock()
+	m.repoTrackersMu.Lock()
+	if sameStringSlice(m.workspaceFileExclusions, canonical) {
+		m.repoTrackersMu.Unlock()
+		return
+	}
+	m.workspaceFileExclusions = canonical
+	m.workspaceFileExclusionRevision++
+	trackers := append([]*WorkspaceTracker{m.workspaceTracker}, m.repoTrackers...)
+	m.repoTrackersMu.Unlock()
+	m.workspaceTrackersMu.Lock()
+	for _, tracker := range m.workspaceTrackersBySubpath {
+		trackers = append(trackers, tracker)
+	}
+	m.workspaceTrackersMu.Unlock()
+	for _, tracker := range trackers {
+		if tracker != nil {
+			tracker.SetRecoveryArtifactExclusions(canonical)
+		}
+	}
+}
+
+func canonicalWorkspaceFileExclusions(paths []string) []string {
+	set := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			continue
+		}
+		clean := filepath.Clean(path)
+		if clean != string(filepath.Separator) {
+			set[clean] = struct{}{}
+		}
+	}
+	canonical := make([]string, 0, len(set))
+	for path := range set {
+		canonical = append(canonical, path)
+	}
+	sort.Strings(canonical)
+	return canonical
+}
+
+func (m *Manager) currentWorkspaceFileExclusions() []string {
+	m.repoTrackersMu.RLock()
+	defer m.repoTrackersMu.RUnlock()
+	return append([]string(nil), m.workspaceFileExclusions...)
+}
+
+func (m *Manager) currentWorkspaceFileExclusionRevision() uint64 {
+	m.repoTrackersMu.RLock()
+	defer m.repoTrackersMu.RUnlock()
+	return m.workspaceFileExclusionRevision
 }
 
 // SetUserInputRequestHandler configures protocol-native question routing before
@@ -1288,16 +1352,23 @@ func (m *Manager) JoinRepoPath(subpath, path string) (string, error) {
 
 // Start starts the agent process
 func (m *Manager) Start(ctx context.Context) error {
+	_, err := m.StartWithGeneration(ctx)
+	return err
+}
+
+// StartWithGeneration starts the agent process and returns the generation
+// created by this call while startup remains serialized against replacement.
+func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 	release, err := m.admitStart()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer release()
 
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
-		return fmt.Errorf("agent is already running")
+		return 0, fmt.Errorf("agent is already running")
 	}
 
 	// A previous lifecycle may still be live: an agent that exited on its own
@@ -1316,39 +1387,47 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	if err := config.ValidateCommandArgs(m.cfg.AgentArgs); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
 
 	// Build adapter config and create protocol adapter
 	if err := m.buildAdapterConfig(); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
 
 	// One-shot adapters manage their own subprocess per prompt.
 	// Skip process creation — the adapter spawns processes in Prompt().
 	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
-		return m.startOneShot()
+		if err := m.startOneShot(); err != nil {
+			return 0, err
+		}
+		return m.ProcessGeneration(), nil
 	}
 
 	// Assemble final command (does not start the process yet)
 	if err := m.buildFinalCommand(); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
+	return m.startManagedProcess()
+}
 
+func (m *Manager) startManagedProcess() (uint64, error) {
 	// Set up stdin/stdout/stderr pipes (must happen before process starts)
 	if err := m.startProcessPipes(); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
 
+	m.ClearStderrBuffer()
 	// Start the subprocess now that pipes are connected
 	if err := m.cmd.Start(); err != nil {
 		_ = m.closeStderrPipe()
 		m.status.Store(StatusError)
-		return formatAgentStartError(err, m.cfg.AgentEnv)
+		return 0, formatAgentStartError(err, m.cfg.AgentEnv)
 	}
+	processGeneration := m.beginManagedStartupGeneration()
 	if err := m.closeStderrWriter(); err != nil {
 		m.logger.Debug("failed to close parent stderr pipe", zap.Error(err))
 	}
@@ -1357,7 +1436,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		reapErr := killAndWaitStartedCommand(m.cmd)
 		_ = m.closeStderrReader()
 		m.status.Store(StatusError)
-		return errors.Join(fmt.Errorf("failed to install agent process lifecycle: %w", err), reapErr)
+		return 0, errors.Join(fmt.Errorf("failed to install agent process lifecycle: %w", err), reapErr)
 	}
 	m.processLifecycle = processLifecycle
 
@@ -1380,15 +1459,15 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 		_ = m.closeStderrReader()
 		m.status.Store(StatusError)
-		return errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
+		return 0, errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
 
 	// Start stderr reader and exit waiter. Keep the completion channel local to
 	// this process generation so a delayed reader cannot signal a replacement.
-	stderrDone := make(chan struct{})
+	stderrDone := make(chan stderrReadResult, 1)
 	m.wg.Add(2)
 	go m.readStderr(stderrDone)
-	go m.waitForExit(stderrDone)
+	go m.waitForExitGeneration(stderrDone, processGeneration)
 
 	// Forward adapter updates to our channel
 	m.wg.Add(1)
@@ -1407,7 +1486,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.status.Store(StatusRunning)
 	m.logger.Info("agent process started", zap.Int("pid", m.cmd.Process.Pid))
 
-	return nil
+	return processGeneration, nil
 }
 
 // startOneShot initialises a one-shot adapter without spawning a long-lived subprocess.
@@ -1818,7 +1897,7 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 
 	// Compose the environment before changing any other configuration so a
 	// malformed indexed Git block leaves the instance fully unchanged.
-	mergedEnv, err := composeConfiguredAgentEnvironment(m.cfg.AgentEnv, env, replaceEnv)
+	mergedEnv, err := composeConfiguredAgentEnvironmentWithManagedGitTools(m.cfg.AgentEnv, env, replaceEnv, m.managedGitTools)
 	if err != nil {
 		return fmt.Errorf("compose configured agent environment: %w", err)
 	}
@@ -1850,9 +1929,29 @@ func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent
 	return nil
 }
 
-func composeConfiguredAgentEnvironment(current []string, overlay map[string]string, replaceIndexed bool) ([]string, error) {
+type installedManagedGitTools struct {
+	helperPath string
+	shimDir    string
+	bashEnv    string
+}
+
+func installedManagedGitToolsFromEnvironment(env []string) installedManagedGitTools {
+	values := environmentMapFromSlice(env)
+	return installedManagedGitTools{
+		helperPath: values[githubauth.CredentialHelperPathEnv],
+		shimDir:    values[githubauth.CredentialCLIShimDirEnv],
+		bashEnv:    values[githubauth.CredentialCLIBashEnvEnv],
+	}
+}
+
+func composeConfiguredAgentEnvironmentWithManagedGitTools(current []string, overlay map[string]string, replaceIndexed bool, tools installedManagedGitTools) ([]string, error) {
 	base := environmentMapFromSlice(current)
 	managed := base[githubauth.CredentialBrokerURLEnv] != "" || base[githubauth.CredentialLeaseEnv] != ""
+	config.DeactivateManagedGitTools(
+		base,
+		base[githubauth.CredentialCLIShimDirEnv],
+		base[githubauth.CredentialCLIBashEnvEnv],
+	)
 	removeObsoleteManagedCredentialEnvironment(base)
 	filtered, err := gitconfigenv.Filter(base, func(index int, entries []gitconfigenv.Entry) bool {
 		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value) &&
@@ -1877,6 +1976,7 @@ func composeConfiguredAgentEnvironment(current []string, overlay map[string]stri
 	if err != nil {
 		return nil, err
 	}
+	activateManagedGitToolsForCurrentAuthorization(merged, tools)
 	keys := make([]string, 0, len(merged))
 	for key := range merged {
 		keys = append(keys, key)
@@ -1887,6 +1987,27 @@ func composeConfiguredAgentEnvironment(current []string, overlay map[string]stri
 		result = append(result, key+"="+merged[key])
 	}
 	return result, nil
+}
+
+func activateManagedGitToolsForCurrentAuthorization(env map[string]string, tools installedManagedGitTools) {
+	if env[githubauth.CredentialBrokerURLEnv] == "" || env[githubauth.CredentialLeaseEnv] == "" {
+		return
+	}
+	if env[githubauth.CredentialHelperPathEnv] == "" {
+		env[githubauth.CredentialHelperPathEnv] = tools.helperPath
+	}
+	shimDir := tools.shimDir
+	if shimDir == "" {
+		shimDir = env[githubauth.CredentialCLIShimDirEnv]
+	}
+	bashEnv := tools.bashEnv
+	if bashEnv == "" {
+		bashEnv = env[githubauth.CredentialCLIBashEnvEnv]
+	}
+	// Incoming snapshots can already carry managed PATH and BASH_ENV entries.
+	// Unwrap those owned entries before rebuilding the active environment.
+	config.DeactivateManagedGitTools(env, shimDir, bashEnv)
+	config.ActivateManagedGitTools(env, shimDir, bashEnv)
 }
 
 func removeObsoleteManagedCredentialEnvironment(env map[string]string) {
@@ -2051,6 +2172,17 @@ func (m *Manager) GetAdapter() adapter.AgentAdapter {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.adapter
+}
+
+// GetAdapterForGeneration validates and captures the adapter while startup is
+// serialized, so a stale request cannot select a replacement process adapter.
+func (m *Manager) GetAdapterForGeneration(generation uint64) (adapter.AgentAdapter, bool) {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+	if generation != 0 && generation != m.ProcessGeneration() {
+		return nil, false
+	}
+	return m.GetAdapter(), true
 }
 
 // GetSessionID returns the current session ID from the adapter.
@@ -2581,13 +2713,19 @@ func waitForProcessGroupExit(ctx context.Context, pid int) bool {
 	}
 }
 
+type stderrReadResult struct {
+	readErr   error
+	sawOutput bool
+}
+
 // readStderr reads and logs stderr from the agent.
-func (m *Manager) readStderr(stderrDone chan<- struct{}) {
+func (m *Manager) readStderr(stderrDone chan<- stderrReadResult) {
 	defer m.wg.Done()
-	defer close(stderrDone)
 
 	scanner := bufio.NewScanner(m.stderr)
+	result := stderrReadResult{}
 	for scanner.Scan() {
+		result.sawOutput = true
 		rawLine := stripANSI(scanner.Text())
 		if m.stderrConsumer != nil {
 			// Protocol-specific consumers inspect the line in memory. Their
@@ -2596,12 +2734,12 @@ func (m *Manager) readStderr(stderrDone chan<- struct{}) {
 			m.stderrConsumer.ConsumeStderrLine(rawLine)
 		}
 
-		line, keep := rawLine, true
-		if m.stderrSanitizer != nil {
-			line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
-		}
+		line, keep := safeManagedNpmStderrLine(rawLine)
 		if !keep {
-			line, keep = safeManagedNpmStderrLine(rawLine)
+			line, keep = rawLine, true
+			if m.stderrSanitizer != nil {
+				line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
+			}
 		}
 		if !keep || line == "" {
 			continue
@@ -2612,22 +2750,27 @@ func (m *Manager) readStderr(stderrDone chan<- struct{}) {
 		m.appendStderr(line)
 	}
 
-	if err := scanner.Err(); err != nil {
-		m.logger.Debug("stderr reader error", zap.Error(err))
+	result.readErr = scanner.Err()
+	if result.readErr != nil {
+		m.logger.Debug("stderr reader error", zap.Error(result.readErr))
 	}
+	stderrDone <- result
+	close(stderrDone)
 }
 
-func (m *Manager) waitForStderrDrain(stderrDone <-chan struct{}) {
+func (m *Manager) waitForStderrDrain(stderrDone <-chan stderrReadResult) (complete bool, sawOutput bool) {
 	if stderrDone == nil {
-		return
+		return false, false
 	}
 	timer := time.NewTimer(processStderrDrainTimeout)
 	defer timer.Stop()
 	select {
-	case <-stderrDone:
+	case result, ok := <-stderrDone:
+		return ok && result.readErr == nil, !ok || result.sawOutput
 	case <-timer.C:
 		m.logger.Warn("timed out waiting for agent stderr to drain")
 		_ = m.closeStderrReader()
+		return false, true
 	}
 }
 
@@ -2650,6 +2793,7 @@ func (m *Manager) appendStderr(line string) {
 	if len(m.stderrBuffer) >= defaultStderrBufferSize {
 		// Ring buffer: drop oldest line
 		m.stderrBuffer = m.stderrBuffer[1:]
+		m.stderrBufferTruncated = true
 	}
 	m.stderrBuffer = append(m.stderrBuffer, cleanLine)
 }
@@ -2664,15 +2808,28 @@ func (m *Manager) GetRecentStderr() []string {
 	return result
 }
 
+func (m *Manager) managedStartupStderrSnapshot() ([]string, bool) {
+	m.stderrMu.RLock()
+	defer m.stderrMu.RUnlock()
+	result := make([]string, len(m.stderrBuffer))
+	copy(result, m.stderrBuffer)
+	return result, !m.stderrBufferTruncated
+}
+
 // ClearStderrBuffer clears the stderr buffer (e.g., after successful operation)
 func (m *Manager) ClearStderrBuffer() {
 	m.stderrMu.Lock()
 	defer m.stderrMu.Unlock()
 	m.stderrBuffer = nil
+	m.stderrBufferTruncated = false
 }
 
 // waitForExit waits for the process to exit
-func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
+func (m *Manager) waitForExit(stderrDone <-chan stderrReadResult) {
+	m.waitForExitGeneration(stderrDone, m.ProcessGeneration())
+}
+
+func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, generation uint64) {
 	defer m.wg.Done()
 	defer close(m.doneCh)
 
@@ -2682,9 +2839,12 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 	err := m.cmd.Wait()
 	// Wait has observed process exit; now bound the reader drain in case a child
 	// process inherited the stderr writer and kept the pipe open.
-	m.waitForStderrDrain(stderrDone)
+	stderrComplete, stderrPresent := m.waitForStderrDrain(stderrDone)
 	_ = m.closeStderrReader()
 	intentionalStop := m.Status() == StatusStopping
+	recentStderr, stderrRetainedComplete := m.managedStartupStderrSnapshot()
+	evidence := newManagedStartupEvidence(generation, err, intentionalStop, stderrComplete, stderrRetainedComplete, stderrPresent, recentStderr)
+	m.recordManagedStartupEvidence(evidence)
 
 	switch {
 	case intentionalStop:
@@ -2698,7 +2858,6 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 			m.exitCode.Store(int32(exitCode))
 		}
 		// Include recent stderr for better error diagnostics
-		recentStderr := m.GetRecentStderr()
 		m.logger.Error("agent process exited with error",
 			zap.Error(err),
 			zap.Int("exit_code", exitCode),
@@ -2720,8 +2879,10 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 			Type:  adapter.EventTypeError,
 			Error: errorMsg,
 			Data: map[string]any{
-				"exit_code":     exitCode,
-				"recent_stderr": recentStderr,
+				"exit_code":          exitCode,
+				"recent_stderr":      recentStderr,
+				"process_generation": generation,
+				"startup_evidence":   evidence,
 			},
 		})
 	default:
@@ -2782,7 +2943,16 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		zap.String("tool_call_id", req.ToolCallID),
 		zap.Bool("auto_approve", m.cfg.AutoApprovePermissions))
 
-	if m.RequiresManagedToolPolicy() {
+	// A coordinator session's agentctl instance does not consult its own
+	// blanket AutoApprovePermissions flag or the generic "any kandev tool"
+	// injected-MCP approval; only the exact seven-tool coordinator allowlist
+	// decides (docs/specs/coordinator/system-design/copilot.md#permission-policy).
+	switch {
+	case m.cfg.McpMode == mcpmode.Coordinator:
+		if response, approved := m.autoApproveCoordinatorPermission(req); approved {
+			return response, nil
+		}
+	case m.RequiresManagedToolPolicy():
 		if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
 			return response, nil
 		}
@@ -2796,16 +2966,12 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		return &adapter.PermissionResponse{Cancelled: true}, nil
 	}
 
-	// The backend must persist the selected option before it resolves the live
-	// request. Keep the provider waiting here until that durable claim succeeds.
+	// A coordinator session never takes the blanket or injected-tool approval:
+	// only its allowlist above decides, and anything else waits for a person.
 	var autoApproveOption *adapter.PermissionOption
-	if m.cfg.AutoApprovePermissions {
-		if decision, approved := m.autoApprovePermission(req); approved {
-			autoApproveOption = &decision.option
-		}
-	}
-	if autoApproveOption == nil {
-		if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+	if m.cfg.McpMode != mcpmode.Coordinator {
+		var response *adapter.PermissionResponse
+		if autoApproveOption, response = m.nonCoordinatorAutoApproval(req); response != nil {
 			return response, nil
 		}
 	}
@@ -2890,6 +3056,23 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 type autoApprovalDecision struct {
 	response *adapter.PermissionResponse
 	option   adapter.PermissionOption
+}
+
+// nonCoordinatorAutoApproval returns either the option the blanket
+// auto-approve selected, or an immediate response for an injected Kandev tool.
+// The backend must persist a selected option before it resolves the live
+// request, so the caller keeps the provider waiting until that durable claim
+// succeeds.
+func (m *Manager) nonCoordinatorAutoApproval(req *adapter.PermissionRequest) (*adapter.PermissionOption, *adapter.PermissionResponse) {
+	if m.cfg.AutoApprovePermissions {
+		if decision, approved := m.autoApprovePermission(req); approved {
+			return &decision.option, nil
+		}
+	}
+	if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+		return nil, response
+	}
+	return nil, nil
 }
 
 func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (autoApprovalDecision, bool) {

@@ -97,7 +97,6 @@ function renderPage(tasksListShowDetails: boolean) {
     >
       <TasksPageClient
         workspaces={[]}
-        initialWorkflows={[]}
         initialRepositories={[]}
         initialTasks={[]}
         initialTotal={0}

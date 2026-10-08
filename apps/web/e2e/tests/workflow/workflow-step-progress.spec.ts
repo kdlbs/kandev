@@ -136,7 +136,13 @@ test.describe("Workflow step progress", () => {
           timeout: 15_000,
         })
         .toBe(targetStep.id);
-      await expect(disclosure).toBeHidden();
+      const currentStep = trigger.getByTestId("workflow-step-Review");
+      await expect(currentStep).toHaveAttribute("aria-current", "step");
+      await expect(currentStep.locator("[data-marker-state]")).toHaveAttribute(
+        "data-marker-state",
+        "current",
+      );
+      await expect(move).toHaveCount(0);
     } finally {
       releaseMove();
       await testPage.unroute(moveRoute);
@@ -164,7 +170,7 @@ test.describe("Workflow step progress", () => {
     await new SessionPage(testPage).waitForLoad();
 
     const stepper = testPage.locator('[data-testid="workflow-stepper"]:visible').first();
-    const targetTrigger = stepper.getByTestId(`workflow-step-${targetStep.name}`);
+    const targetTrigger = stepper.getByTestId("workflow-step-Review");
     await expect(targetTrigger).toBeVisible();
     await expect(stepper.getByTestId("workflow-stepper-minimal")).toHaveCount(0);
 

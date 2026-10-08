@@ -328,7 +328,8 @@ func (m *Manager) captureCleanupHeadOID(ctx context.Context, wt *Worktree) (stri
 	// so the path and branch identity are observed consistently.
 	releasePath, err := acquireWorktreeTargetPath(ctx, wt.Path)
 	if err != nil {
-		return "", false, fmt.Errorf("lock cleanup identity path for %s: %w", wt.ID, err)
+		return "", false, fmt.Errorf("lock cleanup identity path for %s: %w", wt.ID,
+			classifyCleanupInspectionError(CleanupInspectionStageCommit, err))
 	}
 	defer releasePath()
 
@@ -368,7 +369,8 @@ func (m *Manager) captureCleanupHeadOID(ctx context.Context, wt *Worktree) (stri
 			}
 			return oid, found, nil
 		}
-		return "", false, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
+		return "", false, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID,
+			classifyWorktreeCleanupInspectionError(CleanupInspectionStageCommit, err, wt))
 	}
 	oid, err := parseCleanupCommitOID(output)
 	if err != nil {

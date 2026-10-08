@@ -173,6 +173,7 @@ export function NoAuthPanel({
           agentName={agentName}
           description={loginCommand?.description}
           command={loginCommand?.cmd}
+          variants={loginCommand?.variants}
           onLoginSuccess={() => {
             void onRefresh();
           }}

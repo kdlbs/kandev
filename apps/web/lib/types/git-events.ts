@@ -11,6 +11,13 @@ type GitEventBase = {
 
 // Git status data
 export type GitStatusData = {
+  status_state?: "ready" | "loading" | "unavailable";
+  files_complete?: boolean;
+  detail_state?: "pending" | "ready" | "unavailable";
+  error_code?: string;
+  tracker_id?: string;
+  tracker_epoch?: number;
+  snapshot_revision?: number;
   branch: string;
   remote_branch: string | null;
   head_commit?: string;

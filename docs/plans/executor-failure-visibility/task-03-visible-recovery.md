@@ -313,3 +313,19 @@ inline phone recovery. The recovered example copy now describes history rather
 than directing users to nonexistent active error controls. No production instance
 or Kubernetes resource was changed. The original real Kubernetes Pod-loss gate
 remains open; task 03 and the overall plan remain in progress and uncommitted.
+
+
+### PR #4345 review remediation (2026-10-08)
+
+The ready PR reconciles current runtime conversation guards, retained prompt failures, and sidebar running-session projection without discarding executor episodes. New regressions cover unsupported-runtime disconnect fallbacks, unavailable ownership authority, Docker not-found versus API failure, retained Remote Docker inspection, graceful Pod deletion, bounded inspection paging, background startup reconciliation, and unverified launch safety. Ownership uncertainty never authorizes prompt queuing, cleanup, or replay.
+
+Desktop and mobile visibility scenarios pass, including restoring the composer from an HTTP recheck before websocket delivery, persisted outage guidance, and the fresh-conversation recovery notice. Both scenarios restore user settings. The isolated Kubernetes acceptance test uses the composer card and inline technical disclosure. Public docs now name Show details on that card. Korean joins the complete locale set.
+
+The status-summary projector avoids durable executor reads for unrelated events after initial hydration; the regression and full projector suite pass. The public documentation, localization, frontend unit/type/lint, specification, lifecycle, reconciliation, SQL persistence, backend app, and orchestrator contract checks pass. Full backend lint and the real isolated Kubernetes Pod-loss gate remain in progress; broad package-suite timeouts are not claimed as passes. Refreshed desktop/mobile screenshots are isolated synthetic examples, with local terminal output hidden.
+
+
+The renewed real Kubernetes attempt first encountered a missing default Docker bridge during the image's permission-only build step. The fixture now builds with `--network none` and successfully creates an isolated control plane. A transient backend fixture setup timeout passed on the diagnostic retry. Image import still failed before the loss assertions, and automatic cluster cleanup also failed. The exact fixture-owned node was then verified by its cluster label and removed; its image is absent and its backend port is closed. The main instance and its resources were untouched. This is an infrastructure-blocked acceptance gate, not a pass. Expanded backend executor, reconciliation, projection, and model regressions pass; the full projection suite also passes.
+
+Full backend lint (`./...`, comparison base `56cc19514e20b1c78c366005a9358ba9a8857393`, five-minute deadline) passed with zero new issues after cache warming. The successful run completed in 1m50s. Earlier loading timeouts and the interrupted stalled analyzer run remain failed attempts, not passes.
+
+The first normal merge commit was blocked by the hook resolver after the remote main ref advanced beyond the recorded merge input. Its old equality check selected the pre-merge branch point and reported upstream-only lint findings. The resolver now accepts an incoming merge commit that remains an ancestor of the canonical base ref. Regression coverage verifies both remote-ref advancement and rejection of an unrelated merge input. The resolver tests and shell syntax checks pass; no hook was bypassed and no unrelated upstream source was modified for those findings.

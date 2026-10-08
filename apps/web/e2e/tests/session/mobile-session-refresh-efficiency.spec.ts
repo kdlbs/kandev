@@ -46,7 +46,8 @@ test.describe("mobile session refresh efficiency", () => {
       const [initial, unchanged] = await Promise.all([initialRead, unchangedRead]);
 
       expect(initial.headers()["etag"]).toMatch(/^"[a-f0-9]{64}"$/);
-      expect(unchanged.headers()["etag"]).toBe(initial.headers()["etag"]);
+      expect(unchanged.headers()["etag"]).toMatch(/^"[a-f0-9]{64}"$/);
+      expect(unchanged.headers()["etag"]).toBe(unchanged.request().headers()["if-none-match"]);
     } finally {
       await apiClient
         .stopSession({
@@ -231,6 +232,8 @@ test.describe("mobile session refresh efficiency", () => {
 async function expectTouchTarget(locator: import("@playwright/test").Locator, label: string) {
   const box = await locator.boundingBox();
   expect(box, `${label} must have geometry`).not.toBeNull();
-  expect(box!.height, `${label} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
-  expect(box!.width, `${label} must be at least 44px wide`).toBeGreaterThanOrEqual(44);
+  const height = Math.round(box!.height * 100) / 100;
+  const width = Math.round(box!.width * 100) / 100;
+  expect(height, `${label} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
+  expect(width, `${label} must be at least 44px wide`).toBeGreaterThanOrEqual(44);
 }

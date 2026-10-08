@@ -13,6 +13,7 @@ const TURN_COMPLETED = "session.turn.completed";
 const NOTIFICATION = "notification";
 const TURN_STARTED_AT = "2026-07-23T10:00:00.000Z";
 const TURN_COMPLETED_AT = "2026-07-23T10:01:00.000Z";
+const FAILED_TURN_ID = "turn-failed";
 const WORKSPACE_ID = "workspace-1";
 
 type TurnTestState = SessionSlice & {
@@ -45,7 +46,12 @@ function makeStore(
   );
 }
 
-function turn(id: string, startedAt: string, completedAt?: string): TurnEventPayload {
+function turn(
+  id: string,
+  startedAt: string,
+  completedAt?: string,
+  evidence: Pick<TurnEventPayload, "metadata" | "had_output"> = {},
+): TurnEventPayload {
   return {
     id,
     session_id: SESSION_ID,
@@ -54,7 +60,32 @@ function turn(id: string, startedAt: string, completedAt?: string): TurnEventPay
     completed_at: completedAt,
     created_at: startedAt,
     updated_at: completedAt ?? startedAt,
+    ...evidence,
   };
+}
+
+function addTurnUserPrompt(store: ReturnType<typeof makeStore>, turnId: string): void {
+  store.getState().addMessage({
+    id: `user-${turnId}`,
+    session_id: SESSION_ID,
+    task_id: TASK_ID,
+    turn_id: turnId,
+    author_type: "user",
+    content: "Please continue.",
+    type: "message",
+    created_at: TURN_STARTED_AT,
+  } as never);
+}
+
+function emptyTurnNoticeCount(store: ReturnType<typeof makeStore>, turnId: string): number {
+  return (
+    store
+      .getState()
+      .messages.bySession[
+        SESSION_ID
+      ]?.filter((message) => message.turn_id === turnId && message.metadata?.empty_turn === true)
+      .length ?? 0
+  );
 }
 
 function send(
@@ -205,6 +236,78 @@ describe("session turn WebSocket handlers", () => {
     send(store, TURN_COMPLETED, turn("turn-1", TURN_STARTED_AT, completed));
     expect(store.getState().turns.activeBySession[SESSION_ID]).toBeNull();
     expect(store.getState().turns.bySession[SESSION_ID][0].completed_at).toBe(completed);
+  });
+
+  it.each([
+    ["synthetic lifecycle history", { lifecycle_only: true }],
+    ["recoverable failure outcome", { error_terminated: true }],
+  ])("does not add empty-turn feedback for %s", (_name, metadata) => {
+    const store = makeStore();
+    addTurnUserPrompt(store, "turn-1");
+
+    send(
+      store,
+      TURN_COMPLETED,
+      turn("turn-1", TURN_STARTED_AT, TURN_COMPLETED_AT, { metadata, had_output: false }),
+    );
+
+    expect(emptyTurnNoticeCount(store, "turn-1")).toBe(0);
+  });
+
+  it.each(["failure before completion", "completion before failure"])(
+    "keeps a correlated failed turn's completion quiet when %s",
+    (order) => {
+      const store = makeStore();
+      addTurnUserPrompt(store, FAILED_TURN_ID);
+      const failureMessage = {
+        id: "startup-failure",
+        session_id: SESSION_ID,
+        task_id: TASK_ID,
+        turn_id: FAILED_TURN_ID,
+        author_type: "agent",
+        content: "The agent could not start.",
+        type: "status",
+        metadata: { recovery_actions: true, error_stamp: "startup-attempt" },
+        created_at: TURN_COMPLETED_AT,
+      } as never;
+      if (order === "failure before completion") store.getState().addMessage(failureMessage);
+
+      send(
+        store,
+        TURN_COMPLETED,
+        turn(FAILED_TURN_ID, TURN_STARTED_AT, TURN_COMPLETED_AT, {
+          metadata: { error_terminated: true },
+          had_output: false,
+        }),
+      );
+      if (order === "completion before failure") store.getState().addMessage(failureMessage);
+
+      expect(emptyTurnNoticeCount(store, FAILED_TURN_ID)).toBe(0);
+    },
+  );
+
+  it("still announces a real empty turn after a different startup failure in the same session", () => {
+    const store = makeStore();
+    store.getState().addMessage({
+      id: "old-startup-failure",
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      turn_id: "turn-old",
+      author_type: "agent",
+      content: "The saved model was unavailable.",
+      type: "status",
+      metadata: { recovery_actions: true, error_stamp: "older-attempt" },
+      created_at: TURN_STARTED_AT,
+    } as never);
+    addTurnUserPrompt(store, "turn-new");
+
+    send(
+      store,
+      TURN_COMPLETED,
+      turn("turn-new", TURN_COMPLETED_AT, "2026-07-23T10:02:00.000Z", { had_output: false }),
+    );
+
+    expect(emptyTurnNoticeCount(store, "turn-new")).toBe(1);
   });
 
   it("preserves cancelled tool-call status when the containing turn completes", () => {

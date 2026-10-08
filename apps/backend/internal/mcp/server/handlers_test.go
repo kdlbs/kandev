@@ -1116,7 +1116,7 @@ func TestGetTaskPlan_ExplicitTaskIDForwardedNotBound(t *testing.T) {
 
 	assert.False(t, result.IsError)
 	assert.Equal(t, ws.ActionMCPGetTaskPlan, backend.lastAction)
-	payload, ok := backend.lastPayload.(map[string]string)
+	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "task-B", payload["task_id"], "explicit task_id must reach the backend, not the bound task")
 }
@@ -1150,7 +1150,7 @@ func TestGetTaskPlan_FallsBackToBoundTask(t *testing.T) {
 	result := callTool(t, s, "get_task_plan_kandev", map[string]interface{}{})
 
 	assert.False(t, result.IsError)
-	payload, ok := backend.lastPayload.(map[string]string)
+	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "task-A", payload["task_id"])
 }

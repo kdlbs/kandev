@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -257,6 +258,108 @@ func TestPluginExecutorEndpointBootstrapHandshake(t *testing.T) {
 	}
 }
 
+func TestPluginExecutorLeasedControlHandshakeAndInstanceCreation(t *testing.T) {
+	type observedCall struct {
+		path          string
+		authorization string
+		lease         string
+	}
+	var calls []observedCall
+	var redirects atomic.Int32
+	server, dependencies, endpoint := newPluginExecutorTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirect-target" {
+			redirects.Add(1)
+			return
+		}
+		calls = append(calls, observedCall{path: r.URL.Path, authorization: r.Header.Get("Authorization"), lease: r.Header.Get("X-Provider-Lease")})
+		switch r.URL.Path {
+		case "/auth/handshake":
+			if r.Header.Get("Authorization") != "" {
+				http.Error(w, "handshake must not have a token", http.StatusUnauthorized)
+				return
+			}
+			var request struct {
+				Nonce string `json:"nonce"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Nonce != "control-nonce" {
+				http.Error(w, "invalid nonce", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"token":"issued-control-token"}`))
+		case "/api/v1/instances":
+			var request struct {
+				ID        string `json:"id"`
+				SessionID string `json:"session_id"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				http.Error(w, "invalid request", http.StatusBadRequest)
+				return
+			}
+			if request.ID == "redirect" {
+				http.Redirect(w, r, "https://redirect.example/credential-check", http.StatusFound)
+				return
+			}
+			if r.Header.Get("Authorization") != "Bearer issued-control-token" || request.ID != "execution-control-1" || request.SessionID != "session-control-1" {
+				http.Error(w, "invalid control request", http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":"execution-control-1","port":41234}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	now := time.Now()
+	var current atomic.Int64
+	current.Store(now.UnixNano())
+	var leases atomic.Int32
+	resolver := func(context.Context) (*ConnectionLease, error) {
+		generation := leases.Add(1)
+		return &ConnectionLease{
+			BaseURL: endpoint, HTTPHeaders: http.Header{"X-Provider-Lease": {fmt.Sprintf("lease-%d", generation)}},
+			ExpiresAt: time.Unix(0, current.Load()).Add(2 * time.Minute), Generation: strconv.Itoa(int(generation)),
+		}, nil
+	}
+	control, err := newEndpointControlClient(
+		context.Background(), resolver, newTestLogger(), dependencies,
+		func() time.Time { return time.Unix(0, current.Load()) },
+	)
+	if err != nil {
+		t.Fatalf("newEndpointControlClient(): %v", err)
+	}
+
+	token, err := control.Handshake(context.Background(), "control-nonce")
+	if err != nil || token != "issued-control-token" || control.AuthToken() != token {
+		t.Fatalf("Handshake() = %q, %v; stored token = %q", token, err, control.AuthToken())
+	}
+	created, err := control.CreateInstance(context.Background(), &CreateInstanceRequest{ID: "execution-control-1", SessionID: "session-control-1"})
+	if err != nil || created == nil || created.Port != 41234 {
+		t.Fatalf("CreateInstance() = %#v, %v", created, err)
+	}
+	if len(calls) != 2 || calls[0].authorization != "" || calls[1].authorization != "Bearer issued-control-token" ||
+		calls[0].lease != "lease-1" || calls[1].lease != "lease-1" {
+		t.Fatalf("control requests = %+v, want handshake then authenticated create with the provider lease", calls)
+	}
+
+	current.Store(now.Add(91 * time.Second).UnixNano())
+	if _, err := control.CreateInstance(context.Background(), &CreateInstanceRequest{ID: "execution-control-1", SessionID: "session-control-1"}); err != nil {
+		t.Fatalf("CreateInstance() after lease expiry: %v", err)
+	}
+	if leases.Load() != 2 || calls[len(calls)-1].lease != "lease-2" || calls[len(calls)-1].authorization != "Bearer issued-control-token" {
+		t.Fatalf("refreshed control request = %+v, lease calls=%d", calls[len(calls)-1], leases.Load())
+	}
+	if _, err := control.CreateInstance(context.Background(), &CreateInstanceRequest{ID: "redirect"}); !errors.Is(err, errCrossOriginRedirect) {
+		t.Fatalf("cross-origin redirect error = %v, want errCrossOriginRedirect", err)
+	}
+	if redirects.Load() != 0 {
+		t.Fatalf("cross-origin redirect reached target %d times", redirects.Load())
+	}
+}
+
 func TestPluginExecutorTransportMatrix(t *testing.T) {
 	type observedRequest struct {
 		path          string
@@ -431,6 +534,7 @@ func newPluginExecutorTestServer(t *testing.T, handler http.Handler) (*httptest.
 	certificate := tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 	server := httptest.NewUnstartedServer(handler)
 	server.TLS = &tls.Config{Certificates: []tls.Certificate{certificate}}
+	server.EnableHTTP2 = true
 	server.StartTLS()
 	t.Cleanup(server.Close)
 

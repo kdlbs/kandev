@@ -206,6 +206,12 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.managedSessionDeletionBarrierTx(ctx, tx, running.SessionID); err != nil {
+		return err
+	}
+	if err := r.managedDeletionBarrierTx(ctx, tx, running.TaskID); err != nil {
+		return err
+	}
 
 	if running.TaskID != "" {
 		if lockErr := kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), running.TaskID); lockErr != nil &&

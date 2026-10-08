@@ -77,6 +77,13 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(ws.isFromOffice).toBe(true);
   });
 
+  it("carries the card identifier through both task shapes, defaulting to undefined", () => {
+    const withIdentifier = toKanbanTask(httpDTO({ identifier: "KAN-42" }));
+    expect(withIdentifier.identifier).toBe("KAN-42");
+    expect(toKanbanTask(wsPayload({ identifier: "KAN-42" })).identifier).toBe("KAN-42");
+    expect(toKanbanTask(httpDTO()).identifier).toBeUndefined();
+  });
+
   it("carries workspace identity and archived state through both task shapes", () => {
     const archivedAt = "2026-08-04T10:00:00Z";
     const http = toKanbanTask(httpDTO({ archived_at: archivedAt } as Partial<TaskLike>));

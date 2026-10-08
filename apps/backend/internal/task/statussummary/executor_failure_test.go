@@ -54,3 +54,19 @@ func TestExecutorFailureSummaryRejectsUnboundedEvidence(t *testing.T) {
 	summary := TaskStatusSummary{ExecutorFailure: episode}
 	require.Error(t, summary.Validate(), "failure diagnostics must respect the task-row transport budget")
 }
+
+func TestExecutorFailureProjectionAvoidsUnrelatedEventReads(t *testing.T) {
+	reads := 0
+	projector := NewProjector(ProjectorConfig{Store: newProjectorTestStore(), ResolveWorkspace: func(context.Context, string) (string, error) { return "workspace", nil }, LoadExecutorFailure: func(context.Context, string) (*models.ExecutorFailureEpisode, error) {
+		reads++
+		now := time.Now().UTC()
+		return &models.ExecutorFailureEpisode{ID: "episode", TaskID: "task", Revision: 1, State: "active", FirstObservedAt: now, LastObservedAt: now, Observation: &models.ExecutorObservation{Outcome: "terminated", ObservedAt: now, Workspace: "unknown"}}, nil
+	}})
+	data := map[string]any{"task_id": "task", "workspace_id": "workspace"}
+	require.NoError(t, projector.HandleEvent(t.Context(), &bus.Event{Type: events.TaskUpdated, Data: data}))
+	require.Equal(t, 1, reads)
+	require.NoError(t, projector.HandleEvent(t.Context(), &bus.Event{Type: events.TaskStateChanged, Data: data}))
+	require.Equal(t, 1, reads, "task state events do not change executor episodes")
+	require.NoError(t, projector.HandleEvent(t.Context(), &bus.Event{Type: events.TaskUpdated, Data: data}))
+	require.Equal(t, 2, reads, "episode mutation notifications must reload durable evidence")
+}

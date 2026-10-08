@@ -137,5 +137,6 @@
   "filterListLimit": "篩選條件 {{filter}} 的選項過多。最多可選擇 {{limit}} 項。",
   "filterValueLimit": "篩選條件 {{filter}} 中的值過長。請限制在 {{limit}} 位元組以內。",
   "filterInvalid": "篩選條件 {{filter}} 無效。請檢查其值和運算子。",
-  "filterCountLimit": "此檢視的篩選條件過多。最多可使用 {{limit}} 個。"
+  "filterCountLimit": "此檢視的篩選條件過多。最多可使用 {{limit}} 個。",
+  "filtersActive": "篩選已啟用"
 }

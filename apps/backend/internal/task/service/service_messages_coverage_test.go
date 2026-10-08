@@ -22,6 +22,39 @@ type admissionOrderMessageRepository struct {
 	events []string
 }
 
+type promptHistoryMessageRepository struct {
+	repository.MessageRepository
+	hasHistory bool
+	err        error
+	seenID     string
+}
+
+func (r *promptHistoryMessageRepository) HasUserPromptHistory(
+	_ context.Context,
+	sessionID string,
+) (bool, error) {
+	r.seenID = sessionID
+	return r.hasHistory, r.err
+}
+
+func TestHasUserPromptHistoryDelegatesAndReturnsReadErrors(t *testing.T) {
+	repo := &promptHistoryMessageRepository{hasHistory: true}
+	svc := &Service{messages: repo}
+	hasHistory, err := svc.HasUserPromptHistory(context.Background(), "session-prompt-history")
+	if err != nil {
+		t.Fatalf("HasUserPromptHistory: %v", err)
+	}
+	if !hasHistory || repo.seenID != "session-prompt-history" {
+		t.Fatalf("history = %v, queried session = %q", hasHistory, repo.seenID)
+	}
+
+	wantErr := errors.New("history read failed")
+	repo.err = wantErr
+	if _, err := svc.HasUserPromptHistory(context.Background(), "session-prompt-history"); !errors.Is(err, wantErr) {
+		t.Fatalf("HasUserPromptHistory error = %v, want %v", err, wantErr)
+	}
+}
+
 func (r *admissionOrderMessageRepository) AcquirePlanCommentAdmission(
 	ctx context.Context,
 	_ string,

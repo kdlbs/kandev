@@ -65,6 +65,7 @@ const createDraftProfile = (
   ...buildDefaultPermissions(permissionSettings ?? {}),
   cliPassthrough: false,
   cursorMcpAuthEnabled: true,
+  cursorPluginsMcpEnabled: true,
   cliFlags: seedDefaultCLIFlags(permissionSettings ?? {}),
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),

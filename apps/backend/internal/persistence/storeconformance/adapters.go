@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/delivery"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
@@ -124,6 +125,7 @@ var schemaInitializers = map[string]testconformance.Scenario{
 	"workflow-sync":         workflowSyncSchema,
 	"office-config-sync":    officeConfigSyncSchema,
 	"automation":            automationSchema,
+	"coordinator":           coordinatorSchema,
 }
 
 func schemaInitializerFor(descriptor requiredstores.Descriptor) testconformance.Scenario {
@@ -487,6 +489,19 @@ func automationSchema(s testconformance.ScenarioContext) error {
 	}
 	if _, err := automation.NewStore(s.DB, s.DB); err != nil {
 		return fmt.Errorf("automation schema: %w", err)
+	}
+	return nil
+}
+
+func coordinatorSchema(s testconformance.ScenarioContext) error {
+	if err := taskSchema(s); err != nil {
+		return err
+	}
+	if err := agentSettingsSchema(s); err != nil {
+		return err
+	}
+	if _, err := coordinator.NewStore(s.DB, s.DB); err != nil {
+		return fmt.Errorf("coordinator schema: %w", err)
 	}
 	return nil
 }

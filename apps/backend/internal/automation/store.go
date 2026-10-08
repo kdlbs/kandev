@@ -1506,6 +1506,21 @@ func (s *Store) MarkRunFailedByTaskID(ctx context.Context, taskID, errMsg string
 	return s.updateRunTerminalStatus(ctx, taskID, RunStatusFailed, errMsg)
 }
 
+// MarkDeferredRunFailedByTaskID closes an unbound run when its queued task is deleted.
+// This update does not take the automation lock because task deletion can run
+// inside automation cleanup that already holds that lock.
+func (s *Store) MarkDeferredRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error {
+	if taskID == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE automation_runs SET status = ?, error_message = ?
+		WHERE task_id = ? AND status = ?
+			AND COALESCE(session_id, '') = '' AND COALESCE(turn_id, '') = ''`),
+		string(RunStatusFailed), errMsg, taskID, string(RunStatusTriggered))
+	return err
+}
+
 // MarkRunSucceededByTaskID flips the most recent task_created run for a task
 // into the succeeded state. Used when an automation-launched agent completes
 // without error.

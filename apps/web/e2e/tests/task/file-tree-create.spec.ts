@@ -21,7 +21,7 @@ async function setupTask(
   testPage: Page,
   apiClient: ApiClient,
   seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string },
-  options: { profileName: string; taskTitle: string; requiredPath?: string },
+  options: { profileName: string; taskTitle: string },
 ) {
   const profile = await createStandardProfile(apiClient, options.profileName);
   const task = await apiClient.createTaskWithAgent(
@@ -36,48 +36,12 @@ async function setupTask(
     },
   );
 
-  if (options.requiredPath) {
-    let workspacePath = "";
-    await expect
-      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
-        timeout: 30_000,
-        message: `Waiting for ${options.taskTitle} task environment to be ready`,
-      })
-      .toBe("ready");
-    await expect
-      .poll(
-        async () => {
-          const environment = await apiClient.getTaskEnvironment(task.id);
-          const repositoryWorktree = environment?.repos?.find(
-            (repository) => repository.repository_id === seedData.repositoryId,
-          )?.worktree_path;
-          // A task environment may expose the task root in workspace_path and
-          // the repository checkout in repos[].worktree_path. The repository
-          // id can be absent during the first materialization snapshot, so
-          // include every advertised repository path until the exact fixture
-          // file identifies the correct checkout.
-          const candidatePaths = [
-            repositoryWorktree,
-            ...(environment?.repos ?? []).map((repository) => repository.worktree_path),
-            environment?.workspace_path,
-            environment?.worktree_path,
-          ].filter(
-            (candidate, index, paths): candidate is string =>
-              Boolean(candidate) && paths.indexOf(candidate) === index,
-          );
-          workspacePath =
-            candidatePaths.find((candidate) =>
-              fs.existsSync(path.join(candidate, options.requiredPath!)),
-            ) ?? "";
-          return workspacePath !== "";
-        },
-        {
-          timeout: 90_000,
-          message: `Waiting for ${options.requiredPath} in the ${options.taskTitle} worktree`,
-        },
-      )
-      .toBe(true);
-  }
+  await expect
+    .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+      timeout: 30_000,
+      message: `Waiting for ${options.taskTitle} task environment to be ready`,
+    })
+    .toBe("ready");
 
   // The task API is authoritative here. Direct navigation avoids a Kanban
   // card being replaced while the task snapshot is still settling.
@@ -127,7 +91,6 @@ test.describe("File tree create file", () => {
     const session = await setupTask(testPage, apiClient, seedData, {
       profileName: "ft-create-root",
       taskTitle: "FT Create Root",
-      requiredPath: "seed.ts",
     });
 
     await session.fileTree.waitForFileTreeNode("seed.ts", 45_000);
@@ -160,7 +123,6 @@ test.describe("File tree create file", () => {
     const session = await setupTask(testPage, apiClient, seedData, {
       profileName: "ft-create-select-all",
       taskTitle: "FT Create Select All",
-      requiredPath: "select-all-alpha.ts",
     });
     await session.fileTree.waitForFileTreeNode("select-all-alpha.ts", 45_000);
 
@@ -198,7 +160,6 @@ test.describe("File tree create file", () => {
     const session = await setupTask(testPage, apiClient, seedData, {
       profileName: "ft-create-folder",
       taskTitle: "FT Create In Folder",
-      requiredPath: "scope/existing.ts",
     });
 
     // Expand the folder so it becomes the "active folder" for handleStartCreate.
@@ -231,7 +192,6 @@ test.describe("File tree create file", () => {
     const session = await setupTask(testPage, apiClient, seedData, {
       profileName: "ft-create-implicit",
       taskTitle: "FT Create Implicit Folder",
-      requiredPath: "seed.ts",
     });
 
     await session.fileTree.waitForFileTreeNode("seed.ts", 45_000);
@@ -261,7 +221,6 @@ test.describe("File tree create file", () => {
     const session = await setupTask(testPage, apiClient, seedData, {
       profileName: "ft-create-cancel",
       taskTitle: "FT Create Cancel",
-      requiredPath: "seed.ts",
     });
 
     await session.fileTree.waitForFileTreeNode("seed.ts", 45_000);

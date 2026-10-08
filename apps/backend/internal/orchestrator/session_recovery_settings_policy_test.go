@@ -209,7 +209,11 @@ func TestResumeTaskSessionWithOptionsRechecksProviderRestoredEligibilityUnderAtt
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.repo = &sessionStateSequenceRepo{
 		sessionExecutorStore: repo,
-		states:               []models.TaskSessionState{models.TaskSessionStateFailed, models.TaskSessionStateWaitingForInput},
+		states: []models.TaskSessionState{
+			models.TaskSessionStateFailed,
+			models.TaskSessionStateFailed,
+			models.TaskSessionStateWaitingForInput,
+		},
 	}
 
 	_, err = svc.ResumeTaskSessionWithOptions(ctx, session.TaskID, session.ID, executor.ResumeOptions{

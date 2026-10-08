@@ -87,7 +87,8 @@ git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null || die "base ref 
 if [ "$comparison_base" = true ]; then
 	merge_head=$(git rev-parse --verify MERGE_HEAD 2>/dev/null || true)
 	base_tip=$(git rev-parse --verify --quiet "$base_ref^{commit}")
-	if [ -n "$merge_head" ] && [ "$merge_head" = "$base_tip" ]; then
+	# An active base merge pins its input even if the remote-tracking ref advances.
+	if [ -n "$merge_head" ] && git merge-base --is-ancestor "$merge_head" "$base_tip"; then
 		printf '%s\n' "$merge_head"
 	else
 		merge_base=$(git merge-base HEAD "$base_ref" 2>/dev/null) || die "base ref has no merge base with HEAD: $base_ref"

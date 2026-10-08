@@ -12,6 +12,12 @@ Shared vocabulary for Office specifications. Terms are grouped by the capability
 that defines them; a capability's requirement documents reference this file
 rather than restating a definition, so one term cannot drift between documents.
 
+## Related systems
+
+- **Workspace coordinator:** not Office's coordinator role. A feature-flagged
+  core page for regular Kanban workspaces that lists what needs a person and
+  proposes tasks a person decides; see [Coordinator](../coordinator/README.md).
+
 ## Budget enforcement
 
 Defined by [Office: Pre-Launch Budget Enforcement](requirements/budget-enforcement.md)

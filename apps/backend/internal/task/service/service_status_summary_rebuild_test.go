@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -64,6 +65,22 @@ type cancelingRejectStatusSummaryRepository struct {
 	summary      *statussummary.TaskStatusSummary
 	cancel       context.CancelFunc
 	compareCalls int
+}
+
+type cancelAfterSummaryWriteRepository struct {
+	repository.TaskStatusSummaryRepository
+	cancel context.CancelFunc
+}
+
+func (r cancelAfterSummaryWriteRepository) CompareAndUpdateTaskStatusSummary(
+	ctx context.Context,
+	stored *statussummary.StoredTaskStatusSummary,
+) (bool, error) {
+	accepted, err := r.TaskStatusSummaryRepository.CompareAndUpdateTaskStatusSummary(ctx, stored)
+	if accepted && err == nil {
+		r.cancel()
+	}
+	return accepted, err
 }
 
 type exhaustingStatusSummaryRepository struct {
@@ -324,6 +341,32 @@ func TestReconcileTaskStatusSummariesRepairsMissingTaskOnce(t *testing.T) {
 	if published = eventBus.GetPublishedEvents(); len(published) != 1 {
 		t.Fatalf("events after no-op reconcile = %+v, want no duplicate", published)
 	}
+}
+
+func TestReconcileTaskStatusSummaryPublishesCommittedWriteAfterCancellation(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	createTaskWithoutRepositories(t, context.Background(), repo)
+	svc.statusSummaries = cancelAfterSummaryWriteRepository{TaskStatusSummaryRepository: repo, cancel: cancel}
+	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
+
+	summaries, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		[]*models.Task{task},
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{},
+	)
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotNil(t, summaries[task.ID], "the committed summary remains reflected in the result map")
+	persisted, loadErr := repo.LoadTaskStatusSummaries(context.Background(), []string{task.ID})
+	require.NoError(t, loadErr)
+	require.NotNil(t, persisted[task.ID], "the summary write completed before the request was canceled")
+	published := eventBus.GetPublishedEvents()
+	require.Len(t, published, 1)
+	require.Equal(t, events.TaskStatusSummaryUpdated, published[0].Type)
 }
 
 func TestReconcileTaskStatusSummariesRebuildsCompletionGate(t *testing.T) {
@@ -624,8 +667,11 @@ func TestStatusSummaryActivityRebuildBackfillsAndPreservesNewerStoredValue(t *te
 		t.Fatalf("reconcile newer status summary: %v", err)
 	}
 	preserved := got["task-1"]
-	if preserved == nil || preserved.Revision != stored.Revision || preserved.LastActivityAt == nil || !preserved.LastActivityAt.Equal(newer) {
-		t.Fatalf("newer stored activity = %+v, want revision %d at %v", preserved, stored.Revision, newer)
+	if preserved == nil || preserved.Revision != stored.Revision+1 || preserved.LastActivityAt == nil || !preserved.LastActivityAt.Equal(newer) {
+		t.Fatalf("repaired newer summary = %+v, want revision %d preserving activity at %v", preserved, stored.Revision+1, newer)
+	}
+	if preserved.HasRunningSession == nil || *preserved.HasRunningSession {
+		t.Fatalf("repaired running flag = %v, want explicit false", preserved.HasRunningSession)
 	}
 }
 
@@ -722,6 +768,7 @@ func TestReconcileTaskStatusSummariesReReadsPendingAfterCASRejection(t *testing.
 			WorkspaceID: "ws-1",
 			Summary: statussummary.TaskStatusSummary{
 				Revision:          5,
+				HasRunningSession: summaryBoolPtr(false),
 				PendingAction:     string(models.TaskPendingActionClarification),
 				QueuedPromptCount: 9,
 			},
@@ -769,6 +816,8 @@ func TestReconcileTaskStatusSummariesReReadsPendingAfterCASRejection(t *testing.
 	}
 }
 
+func summaryBoolPtr(value bool) *bool { return &value }
+
 func TestReconcileExistingSummaryStopsBeforeRetryWhenContextIsCanceled(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -800,6 +849,7 @@ func TestReconcileExistingSummaryStopsBeforeRetryWhenContextIsCanceled(t *testin
 		"",
 		time.Time{},
 		false,
+		runningSessionObservation{},
 	)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("reconcileExistingSummary error = %v, want context canceled", err)

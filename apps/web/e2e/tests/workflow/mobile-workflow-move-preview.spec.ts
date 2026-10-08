@@ -1,5 +1,6 @@
 import type { Request } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { dwell } from "../../helpers/causal-waits";
 import { waitForLatestSessionDone } from "../../helpers/session";
@@ -113,6 +114,7 @@ test.describe("mobile: workflow move preview", () => {
         await expect(preview).toContainText("Reuse current session");
         await expect(preview).toContainText("mock-fast");
         expect(requestCount).toBe(1);
+        await waitForFiniteAnimations(drawer);
 
         const move = row.getByTestId(`workflow-step-disclosure-move-${targetStep.id}`);
         await expect(move).toBeVisible();

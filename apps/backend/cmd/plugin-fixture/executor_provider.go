@@ -38,7 +38,6 @@ const (
 	fixtureBarrierUnconfirmedCleanupOnce = "unconfirmed-cleanup-once"
 	fixtureExecutorLifetime              = 8 * time.Hour
 	fixtureLeaseLifetime                 = 2 * time.Minute
-	fixtureRuntimePort                   = 8765
 )
 
 var _ pluginsdk.ExecutorProviderPlugin = (*fixturePlugin)(nil)
@@ -162,7 +161,7 @@ func (p *fixturePlugin) InspectExecutorEnvironment(ctx context.Context, req *plu
 }
 
 func (p *fixturePlugin) ResolveExecutorConnection(ctx context.Context, req *pluginsdk.ResolveExecutorConnectionRequest) (*pluginsdk.ResolveExecutorConnectionResponse, error) {
-	if req.GetPurpose() != "agentctl" || req.GetRuntimePort() != fixtureRuntimePort {
+	if req.GetPurpose() != "agentctl" || req.GetRuntimePort() == 0 || req.GetRuntimePort() > 65535 {
 		return &pluginsdk.ResolveExecutorConnectionResponse{Error: fixtureProviderError("unsupported_connection", "provider.fixture.unsupportedConnection")}, nil
 	}
 	if err := ctx.Err(); err != nil {

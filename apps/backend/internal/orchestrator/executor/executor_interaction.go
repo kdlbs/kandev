@@ -409,12 +409,12 @@ func (e *Executor) StopExecution(ctx context.Context, executionID string, reason
 		zap.String("reason", reason),
 		zap.Bool("force", force))
 	if err := e.agentManager.StopAgentWithReason(ctx, executionID, reason, force); err != nil {
+		if errors.Is(err, lifecycle.ErrExecutionNotFound) || errors.Is(err, runtimeapi.ErrNotFound) {
+			return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
+		}
 		e.logger.Warn("failed to stop agent by execution id",
 			zap.String("agent_execution_id", executionID),
 			zap.Error(err))
-		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
-			return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
-		}
 		return fmt.Errorf("%w: stop execution %q: %w", ErrExecutionNotFound, executionID, err)
 	}
 	return nil
@@ -1051,7 +1051,7 @@ func (e *Executor) switchModel(
 	if err != nil {
 		return nil, err
 	}
-	recoveryAdmission, err := e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, req.ExecutorType, false)
+	recoveryAdmission, err := e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, req.ExecutorType, false, 0, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1370,6 +1370,18 @@ func (e *Executor) registerInitialPromptDispatchCallbacks(
 		return fmt.Errorf("failed to register initial prompt dispatch callbacks: %w", err)
 	}
 	return nil
+}
+
+func (e *Executor) registerInitialPromptCallbacks(
+	executionID string,
+	beforeAdmission func(executionID string) error,
+	onDispatched func(executionID string),
+	onFailure func(),
+) error {
+	if beforeAdmission != nil {
+		return e.registerInitialPromptAdmissionCallbacks(executionID, beforeAdmission, onDispatched, onFailure)
+	}
+	return e.registerInitialPromptDispatchCallbacks(executionID, onDispatched, onFailure)
 }
 
 // buildSwitchModelRequest constructs a LaunchAgentRequest for a model switch, applying

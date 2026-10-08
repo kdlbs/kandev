@@ -55,6 +55,11 @@ type messageAddSwitchRepo struct {
 	failReload                   bool
 	taskGetCalls                 int
 	preflightErr                 error
+	hasUserPromptHistory         bool
+	promptHistoryErr             error
+	promptHistoryCalls           int
+	promptHistoryBarrier         chan struct{}
+	promptHistoryBarrierAfter    int
 }
 
 func (r *messageAddSwitchRepo) messageCount() int {

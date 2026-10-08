@@ -29,6 +29,11 @@ func Resolve(config *ProfileConfig, policy Policy) ([]ResolvedServer, []string, 
 	return resolved, warnings, nil
 }
 
+// ResolveSingleServer resolves a single server definition against an executor policy.
+func ResolveSingleServer(name string, server ServerDef, policy Policy) (*ResolvedServer, []string, error) {
+	return resolveServer(name, server, policy)
+}
+
 // resolveServer resolves a single server entry against the policy.
 // Returns (nil, warnings, nil) when the server should be skipped.
 // Returns (nil, warnings, err) on a fatal configuration error.

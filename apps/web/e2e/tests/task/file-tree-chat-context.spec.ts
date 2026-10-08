@@ -23,11 +23,12 @@ async function setupDesktopContextTask(
     makeGitEnv(backend.tmpDir),
   );
   git.exec("git checkout main");
+  git.exec("git pull --ff-only origin main");
   git.createFile(filePath, "# Context file\n");
   git.createFile(`${directoryPath}/nested.txt`, "directory content\n");
   git.stageAll();
   git.commit(`add chat context fixtures ${suffix}`);
-  git.exec("git push origin main");
+  git.pushMainWithRetry();
 
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -95,16 +96,18 @@ test.describe("File tree chat context", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
     await session.clickTab("Files");
-    await session.fileTree.waitForFileTreeNode(filePath, 30_000);
-    await session.fileTree.waitForFileTreeNode(directoryPath, 30_000);
 
     const addNodeToContext = async (nodePath: string) => {
+      // File-tree rows are virtualized. Reveal each row immediately before
+      // interacting so a later reveal cannot recycle its DOM node.
+      await session.fileTree.waitForFileTreeNode(nodePath, 30_000);
       await session.fileTreeNode(nodePath).click({ button: "right" });
       await expect(session.fileTreeAddToChatContextMenuItem()).toBeVisible();
       await session.fileTreeAddToChatContextMenuItem().click();
     };
 
     await addNodeToContext(filePath);
+    await session.fileTree.waitForFileTreeNode(directoryPath, 30_000);
     await session.fileTreeNode(directoryPath).click({ button: "right" });
     await expect(session.fileTreeAddToChatContextMenuItem()).toBeVisible();
     await prCapture.screenshot("desktop-file-tree-menu", {

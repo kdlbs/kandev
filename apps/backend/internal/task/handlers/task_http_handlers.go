@@ -148,7 +148,9 @@ func (h *TaskHandlers) httpListTasks(c *gin.Context) {
 	}
 	taskDTOs, err := h.toTaskDTOsWithSessionInfo(c.Request.Context(), tasks)
 	if err != nil {
-		h.logger.Error("failed to enrich tasks with status summaries", zap.Error(err))
+		if !isRequestCancellation(c.Request.Context(), err) {
+			h.logger.Error("failed to enrich tasks with status summaries", zap.Error(err))
+		}
 		handleNotFound(c, h.logger, err, "tasks not found")
 		return
 	}
@@ -193,7 +195,9 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 
 	taskDTOs, err := h.toTaskDTOsWithSessionInfo(c.Request.Context(), tasks)
 	if err != nil {
-		h.logger.Error("failed to enrich tasks with session info", zap.Error(err))
+		if !isRequestCancellation(c.Request.Context(), err) {
+			h.logger.Error("failed to enrich tasks with session info", zap.Error(err))
+		}
 		handleNotFound(c, h.logger, err, "tasks not found")
 		return
 	}
@@ -219,35 +223,59 @@ func buildTaskDTOsWithSessionInfo(
 	if len(tasks) == 0 {
 		return []dto.TaskDTO{}, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	taskIDs := make([]string, len(tasks))
 	for i, t := range tasks {
 		taskIDs[i] = t.ID
 	}
 	sessionsByTask, err := svc.BatchGetSessionsForTasks(ctx, taskIDs)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	primarySessionInfoMap, err := svc.GetPrimarySessionInfoForTasks(ctx, taskIDs)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(ctx, svc, sessionsByTask)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if pendingErr != nil {
 		log.Warn("failed to load pending actions for task list, using empty map", zap.Error(pendingErr))
 		pendingActionsBySession = map[string]models.TaskPendingAction{}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	statusSummaries, summaryErr := svc.GetTaskStatusSummaries(ctx, taskIDs)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if summaryErr != nil {
 		log.Warn("failed to load task status summaries, using coarse task fields", zap.Error(summaryErr))
 		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
 	}
-	if summaryErr == nil && pendingErr == nil {
-		reconciledSummaries, reconcileErr := svc.ReconcileTaskStatusSummaries(
-			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
+	if summaryErr == nil {
+		var reconcileErr error
+		statusSummaries, reconcileErr = reconcileTaskStatusSummariesAfterRevision(
+			ctx, svc, log, tasks, taskIDs, statusSummaries,
 		)
-		statusSummaries = reconciledSummaries
 		if reconcileErr != nil {
-			log.Warn("failed to reconcile task status summaries", zap.Error(reconcileErr))
+			return nil, reconcileErr
 		}
 	}
 	// Stamp the authoritative per-task queued prompt count onto every summary.
@@ -256,17 +284,35 @@ func buildTaskDTOsWithSessionInfo(
 	// projector may not have observed every queue mutation yet). Never
 	// fabricate a summary here — a synthetic summary would make the frontend
 	// treat summary fields as authoritative and hide the coarse fallbacks.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	queuedByTask, queuedErr := svc.CountPendingQueuedByTaskIDs(ctx, taskIDs)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if queuedErr != nil {
 		log.Warn("failed to load queued prompt counts for task list, omitting badges", zap.Error(queuedErr))
 	}
 	// Dependency state is derived, never stored, so it is computed per read. One
 	// batched call for the whole list: a per-task query would add a round trip
 	// per card to every board load.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	dependencyViews := svc.BuildDependencyViews(ctx, tasks)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	// Runner-mutability verdict is likewise derived, never stored, and must
 	// not fan out per task.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	runnerViews := svc.BuildRunnerMutabilityViews(ctx, tasks)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		sessions := sessionsByTask[task.ID]
@@ -320,7 +366,49 @@ func buildTaskDTOsWithSessionInfo(
 		}
 		result = append(result, taskDTO)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return result, nil
+}
+
+func reconcileTaskStatusSummariesAfterRevision(
+	ctx context.Context,
+	svc *service.Service,
+	log *logger.Logger,
+	tasks []*models.Task,
+	taskIDs []string,
+	statusSummaries map[string]*statussummary.TaskStatusSummary,
+) (map[string]*statussummary.TaskStatusSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// The summary revision fences repairs, so observations used for a repair
+	// must be captured after that revision.
+	sessions, err := svc.BatchGetSessionsForTasks(ctx, taskIDs)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if err != nil {
+		log.Warn("failed to refresh task sessions for status summary reconciliation", zap.Error(err))
+		return statusSummaries, nil
+	}
+	pendingActions, err := pendingActionsForInputCapableSessions(ctx, svc, sessions)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if err != nil {
+		log.Warn("failed to refresh pending actions for status summary reconciliation", zap.Error(err))
+		return statusSummaries, nil
+	}
+	reconciled, err := svc.ReconcileTaskStatusSummaries(ctx, tasks, sessions, pendingActions, statusSummaries)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if err != nil {
+		log.Warn("failed to reconcile task status summaries", zap.Error(err))
+	}
+	return reconciled, nil
 }
 
 type sessionInfoFields struct {
@@ -460,6 +548,15 @@ func (h *TaskHandlers) taskSessionDTOWithPendingActions(
 	result := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
 	dto.EnrichParkedProjection(&result, h.parkedProjection)
+	if session != nil && session.TaskEnvironmentID != "" {
+		operation, runnerLive, recoveryErr := h.service.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
+		if recoveryErr != nil {
+			h.logger.Warn("get task session workspace recovery projection failed",
+				zap.String("session_id", session.ID), zap.Error(recoveryErr))
+		} else {
+			dto.EnrichWorkspaceRecovery(&result, operation, runnerLive)
+		}
+	}
 	actions, revisions, err := read(
 		ctx,
 		[]string{session.ID},
@@ -1023,6 +1120,10 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 
 	title := strings.TrimSpace(body.Title)
 	description := strings.TrimSpace(body.Description)
+	if body.StartAgent && len(description) > models.MaxInitialPromptSubmissionBytes {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "initial task prompt exceeds the maximum size"})
+		return
+	}
 	// Trimmed once here so the value ValidateAssigneeAgentProfile looks up
 	// and the value the runner seat is written under are identical — a
 	// padded ID that passed validation must not be stored un-trimmed, where
@@ -1074,7 +1175,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Autopilot:                             body.Autopilot,
 		Priority:                              body.Priority,
 		State:                                 body.State,
-		Repositories:                          convertToServiceRepos(repos),
+		Repositories:                          convertTaskRepositories(body.Repositories != nil, repos),
 		Position:                              body.Position,
 		Metadata:                              metadata,
 		DeferredLaunch:                        deferredLaunch,
@@ -1598,14 +1699,22 @@ func (h *TaskHandlers) prepareStartAgentSession(
 	body httpCreateTaskRequest,
 	resolvedStepID string,
 ) *startAgentDispatch {
+	submission, err := models.NewInitialPromptSubmission(
+		strings.TrimSpace(body.Description), body.PlanMode, body.Attachments,
+	)
+	if err != nil {
+		h.logger.Error("failed to capture initial task submission", zap.Error(err), zap.String("task_id", taskID))
+		return nil
+	}
 	prepResp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
-		InitialPromptPreview: models.NewInitialPromptPreview(strings.TrimSpace(body.Description), body.Attachments),
-		TaskID:               taskID,
-		Intent:               orchestrator.IntentPrepare,
-		AgentProfileID:       body.AgentProfileID,
-		ExecutorID:           body.ExecutorID,
-		ExecutorProfileID:    body.ExecutorProfileID,
-		WorkflowStepID:       resolvedStepID,
+		InitialPromptPreview:    models.NewInitialPromptPreview(strings.TrimSpace(body.Description), body.Attachments),
+		InitialPromptSubmission: submission,
+		TaskID:                  taskID,
+		Intent:                  orchestrator.IntentPrepare,
+		AgentProfileID:          body.AgentProfileID,
+		ExecutorID:              body.ExecutorID,
+		ExecutorProfileID:       body.ExecutorProfileID,
+		WorkflowStepID:          resolvedStepID,
 		// The async IntentStartCreated dispatch below carries the prompt. Mark
 		// this as a deferred start so a passthrough profile is not eagerly
 		// launched here with an empty prompt (which would pre-empt that
@@ -1790,7 +1899,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		Description:    description,
 		Priority:       body.Priority,
 		State:          body.State,
-		Repositories:   convertUpdateRepositories(body.Repositories != nil, repos),
+		Repositories:   convertTaskRepositories(body.Repositories != nil, repos),
 		Position:       body.Position,
 		Metadata:       body.Metadata,
 		ParentID:       body.ParentID,
@@ -2198,6 +2307,7 @@ type httpStartQuickChatRequest struct {
 	AgentProfileID    string                         `json:"agent_profile_id,omitempty"`
 	ExecutorID        string                         `json:"executor_id,omitempty"`
 	Prompt            string                         `json:"prompt,omitempty"`
+	Attachments       []v1.MessageAttachment         `json:"attachments,omitempty"`
 	AutoTitle         bool                           `json:"auto_title,omitempty"`
 	LocalPath         string                         `json:"local_path,omitempty"`
 	RepositoryName    string                         `json:"repository_name,omitempty"`
@@ -2229,6 +2339,16 @@ func (body *httpStartQuickChatRequest) validateRepositories() error {
 			return fmt.Errorf("repository %q can only be selected once", repo.RepositoryID)
 		}
 		seen[repo.RepositoryID] = struct{}{}
+	}
+	return nil
+}
+
+func validateQuickChatOpeningPayload(prompt string, attachments []v1.MessageAttachment) error {
+	if err := validateAttachments(attachments); err != nil {
+		return err
+	}
+	if len(attachments) > 0 && strings.TrimSpace(prompt) == "" {
+		return errors.New("prompt is required when attachments are provided")
 	}
 	return nil
 }
@@ -2321,6 +2441,10 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if err := validateQuickChatOpeningPayload(body.Prompt, body.Attachments); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	ctx := c.Request.Context()
 
@@ -2361,22 +2485,20 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		Intent:         orchestrator.IntentStart,
 		AgentProfileID: params.agentProfileID,
 		ExecutorID:     params.executorID,
+		Prompt:         body.Prompt,
+		Attachments:    body.Attachments,
 	})
 	if err != nil {
-		// Rollback: delete the ephemeral task to prevent orphans. Use a fresh
-		// background context — the request context may already be cancelled
-		// (e.g. client aborted, deadline exceeded), and we still want cleanup
-		// to run. TaskDeleteTimeout matches the other DeleteTask call sites
-		// in this file so a future change to the constant covers this path too.
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
-		defer cancel()
-		if deleteErr := h.service.DeleteTaskWithLifecycle(rollbackCtx, task.ID); deleteErr != nil {
-			h.logger.Error("failed to rollback quick chat task",
-				zap.String("task_id", task.ID),
-				zap.Error(deleteErr))
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.TaskDeleteTimeout)
+		restoreErr := h.service.RestoreLaunchMessageAttachments(
+			rollbackCtx, task.ID, "", body.Attachments,
+		)
+		cancel()
+		if restoreErr != nil {
+			h.logger.Error("failed to restore quick chat attachments after launch failure",
+				zap.String("task_id", task.ID), zap.Error(restoreErr))
 		}
-		h.logger.Error("failed to start quick chat session", zap.Error(err), zap.String("task_id", task.ID))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
+		h.respondQuickChatLaunchFailure(c, task.ID, err, restoreErr == nil)
 		return
 	}
 
@@ -2392,6 +2514,71 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 	})
 }
 
+func (h *TaskHandlers) respondQuickChatLaunchFailure(
+	c *gin.Context,
+	taskID string,
+	launchErr error,
+	attachmentsRestored bool,
+) {
+	retentionCtx, cancelRetention := context.WithTimeout(
+		context.WithoutCancel(c.Request.Context()), constants.TaskDeleteTimeout,
+	)
+	defer cancelRetention()
+	retainedSessionID, lookupErr := h.quickChatRetainedSessionID(retentionCtx, taskID)
+	if lookupErr != nil {
+		h.logger.Error("failed to determine quick chat session retention",
+			zap.Error(lookupErr), zap.String("task_id", taskID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
+		return
+	}
+
+	if retainedSessionID != "" {
+		h.logger.Error("failed to start quick chat session (retained created session)",
+			zap.Error(launchErr),
+			zap.String("task_id", taskID),
+			zap.String("session_id", retainedSessionID))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":      "failed to start session",
+			"task_id":    taskID,
+			"session_id": retainedSessionID,
+		})
+		return
+	}
+	if !attachmentsRestored {
+		h.logger.Error("retaining quick chat task after attachment restore failure",
+			zap.Error(launchErr), zap.String("task_id", taskID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
+		return
+	}
+
+	rollbackCtx, cancelRollback := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
+	defer cancelRollback()
+	if deleteErr := h.service.DeleteTaskWithLifecycle(rollbackCtx, taskID); deleteErr != nil {
+		h.logger.Error("failed to rollback quick chat task",
+			zap.String("task_id", taskID), zap.Error(deleteErr))
+	}
+	h.logger.Error("failed to start quick chat session", zap.Error(launchErr), zap.String("task_id", taskID))
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
+}
+
+// Failed lookups cannot establish that a task is safe to remove.
+func (h *TaskHandlers) quickChatRetainedSessionID(ctx context.Context, taskID string) (string, error) {
+	primary, primaryErr := h.service.GetPrimarySession(ctx, taskID)
+	if primaryErr == nil && primary != nil {
+		return primary.ID, nil
+	}
+	sessions, err := h.service.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	for _, session := range sessions {
+		if session != nil {
+			return session.ID, nil
+		}
+	}
+	return "", nil
+}
+
 // httpQuickChatSession is one restorable quick-chat tab.
 type httpQuickChatSession struct {
 	SessionID      string `json:"session_id"`
@@ -2405,8 +2592,10 @@ type httpQuickChatSession struct {
 // httpListQuickChatSessionsResponse mirrors the quick-chat slice of the boot
 // payload so a running client can resync its tab strip without a full reload.
 type httpListQuickChatSessionsResponse struct {
-	Sessions     []httpQuickChatSession `json:"sessions"`
-	TaskSessions []dto.TaskSessionDTO   `json:"task_sessions"`
+	Sessions                    []httpQuickChatSession `json:"sessions"`
+	TaskSessions                []dto.TaskSessionDTO   `json:"task_sessions"`
+	ConfigChatRestartPending    bool                   `json:"config_chat_restart_pending"`
+	ConfigChatRetiringSessionID string                 `json:"config_chat_retiring_session_id,omitempty"`
 }
 
 // httpListQuickChatSessions returns the workspace's restorable quick-chat tabs.
@@ -2414,14 +2603,16 @@ type httpListQuickChatSessionsResponse struct {
 // (re)connect to converge on the server's list instead of drifting apart.
 func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 	workspaceID := c.Param("id")
-	items, err := h.service.ListQuickChatSessions(c.Request.Context(), workspaceID)
+	items, retiringSessionID, err := h.listQuickChatsWithRestart(c.Request.Context(), workspaceID)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workspace not found")
 		return
 	}
 	response := httpListQuickChatSessionsResponse{
-		Sessions:     make([]httpQuickChatSession, 0, len(items)),
-		TaskSessions: make([]dto.TaskSessionDTO, 0, len(items)),
+		Sessions:                    make([]httpQuickChatSession, 0, len(items)),
+		TaskSessions:                make([]dto.TaskSessionDTO, 0, len(items)),
+		ConfigChatRestartPending:    retiringSessionID != "",
+		ConfigChatRetiringSessionID: retiringSessionID,
 	}
 	for _, item := range items {
 		response.Sessions = append(response.Sessions, httpQuickChatSession{
@@ -2435,6 +2626,15 @@ func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 		sessionDTO := dto.FromTaskSession(item.Session)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
+		if item.Session != nil && item.Session.TaskEnvironmentID != "" {
+			operation, runnerLive, recoveryErr := h.service.WorkspaceRecoveryProjection(c.Request.Context(), item.Session.TaskEnvironmentID)
+			if recoveryErr != nil {
+				h.logger.Warn("get quick chat workspace recovery projection failed",
+					zap.String("session_id", item.Session.ID), zap.Error(recoveryErr))
+			} else {
+				dto.EnrichWorkspaceRecovery(&sessionDTO, operation, runnerLive)
+			}
+		}
 		response.TaskSessions = append(response.TaskSessions, sessionDTO)
 	}
 	c.JSON(http.StatusOK, response)
@@ -2442,9 +2642,10 @@ func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 
 // httpStartConfigChatRequest is the request body for starting a config chat session.
 type httpStartConfigChatRequest struct {
-	AgentProfileID string `json:"agent_profile_id,omitempty"`
-	ExecutorID     string `json:"executor_id,omitempty"`
-	Prompt         string `json:"prompt,omitempty"`
+	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
+	ExecutorID     string                 `json:"executor_id,omitempty"`
+	Prompt         string                 `json:"prompt,omitempty"`
+	Attachments    []v1.MessageAttachment `json:"attachments,omitempty"`
 }
 
 // httpStartConfigChat creates an ephemeral task with config_mode and prepares a session.
@@ -2481,6 +2682,10 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
+	if err := validateQuickChatOpeningPayload(body.Prompt, body.Attachments); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	ctx := c.Request.Context()
 
@@ -2489,6 +2694,12 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "workspace not found")
 		return
 	}
+	release, admitted := h.configChatAdmission.begin(workspaceID, "")
+	if !admitted {
+		c.JSON(http.StatusConflict, configChatRestartFailure{Code: "config_chat_restart_busy", Stage: "validate"})
+		return
+	}
+	defer release()
 
 	agentProfileID, executorID, metadata := resolveConfigChatDefaults(body, workspace)
 	if agentProfileID == "" {
@@ -2520,7 +2731,7 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 		// profile isn't eagerly launched here with an empty prompt. With no
 		// prompt there is no follow-up, so keep the eager upgrade that gives the
 		// terminal a PTY to attach to.
-		DeferredStart: body.Prompt != "",
+		DeferredStart: strings.TrimSpace(body.Prompt) != "",
 	})
 	if err != nil {
 		h.deleteTaskOnError(task.ID, "config chat", err)
@@ -2531,9 +2742,40 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 	sessionID := resp.SessionID
 
 	// If a prompt was provided, launch the agent asynchronously so it starts
-	// processing immediately. The frontend receives WS updates when it starts.
-	if body.Prompt != "" {
-		go h.launchConfigChatAgent(task.ID, sessionID, agentProfileID, body.Prompt)
+	// processing immediately. Wait for launch admission before returning so the
+	// frontend does not clear an opening payload that failed to dispatch.
+	if strings.TrimSpace(body.Prompt) != "" {
+		launchCtx, cancel := context.WithTimeout(
+			context.WithoutCancel(ctx), constants.AgentLaunchTimeout,
+		)
+		defer cancel()
+		launchResult := make(chan error, 1)
+		go func() {
+			launchResult <- h.launchConfigChatAgent(
+				launchCtx, task.ID, sessionID, agentProfileID, body.Prompt, body.Attachments,
+			)
+		}()
+		if launchErr := <-launchResult; launchErr != nil {
+			rollbackCtx, rollbackCancel := context.WithTimeout(
+				context.WithoutCancel(ctx), constants.TaskDeleteTimeout,
+			)
+			restoreErr := h.service.RestoreLaunchMessageAttachments(
+				rollbackCtx, task.ID, sessionID, body.Attachments,
+			)
+			if restoreErr != nil {
+				h.logger.Error("failed to restore config chat attachments after launch failure",
+					zap.String("task_id", task.ID), zap.Error(restoreErr))
+			} else if deleteErr := h.service.DeleteTaskWithLifecycle(rollbackCtx, task.ID); deleteErr != nil {
+				h.logger.Error("failed to rollback config chat task",
+					zap.String("task_id", task.ID), zap.Error(deleteErr))
+			}
+			rollbackCancel()
+			h.logger.Error("failed to start config chat agent",
+				zap.Error(launchErr), zap.String("task_id", task.ID),
+				zap.String("session_id", sessionID))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
+			return
+		}
 	}
 
 	h.logger.Info("config chat session created",
@@ -2558,27 +2800,24 @@ func (h *TaskHandlers) deleteTaskOnError(taskID, label string, err error) {
 }
 
 func (h *TaskHandlers) launchConfigChatAgent(
+	ctx context.Context,
 	taskID, sessionID, agentProfileID, prompt string,
-) {
-	startCtx, cancel := context.WithTimeout(
-		context.Background(), constants.AgentLaunchTimeout,
-	)
-	defer cancel()
-	launchResp, err := h.orchestrator.LaunchSession(startCtx, &orchestrator.LaunchSessionRequest{
+	attachments []v1.MessageAttachment,
+) error {
+	launchResp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
 		TaskID:         taskID,
 		Intent:         orchestrator.IntentStartCreated,
 		SessionID:      sessionID,
 		AgentProfileID: agentProfileID,
 		Prompt:         prompt,
+		Attachments:    attachments,
 	})
 	if err != nil {
-		h.logger.Error("failed to start config chat agent",
-			zap.Error(err), zap.String("task_id", taskID),
-			zap.String("session_id", sessionID))
-		return
+		return err
 	}
 	h.logger.Info("config chat agent started",
 		zap.String("task_id", taskID),
 		zap.String("session_id", launchResp.SessionID),
 		zap.String("execution_id", launchResp.AgentExecutionID))
+	return nil
 }

@@ -1,7 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { waitForSessionDone } from "../../helpers/session";
 import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 import { KanbanPage } from "../../pages/kanban-page";
+import { seedRemainingStepColors } from "./change-workflow-color-helpers";
 import {
   seedWorkflowAgentOverrideFixture,
   waitForNewWorkflowProfileSession,
@@ -10,6 +12,74 @@ import {
 } from "./task-workflow-agent-overrides-helpers";
 
 test.describe("Change workflow", () => {
+  // @covers AC-TASKS-CHANGE-WORKFLOW-001.9
+  test("shows step colors in destination options and the selected value", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }, testInfo) => {
+    const destination = await apiClient.createWorkflow(seedData.workspaceId, "Colored steps");
+    const analysis = await apiClient.createWorkflowStep(destination.id, "Analysis", 0);
+    const implement = await apiClient.createWorkflowStep(destination.id, "Implement", 1);
+    for (const [id, color] of [
+      [analysis.id, "bg-blue-500"],
+      [implement.id, "bg-green-500"],
+    ]) {
+      expect(
+        (await apiClient.rawRequest("PUT", `/api/v1/workflow/steps/${id}`, { color })).ok,
+      ).toBe(true);
+    }
+    const remainingColors = await seedRemainingStepColors(apiClient, destination.id);
+    const other = await apiClient.createWorkflow(seedData.workspaceId, "Another destination");
+    const incoming = await apiClient.createWorkflowStep(other.id, "Incoming", 0);
+    const task = await apiClient.createTask(seedData.workspaceId, "Step color task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto(seedData.workflowId);
+    await kanban.openTaskActionsMenu(task.id);
+    await kanban.openChangeWorkflowForm();
+    const form = new ChangeWorkflowPage(testPage);
+    await expect(form.desktopDialog).toBeVisible();
+    await form.chooseWorkflow(destination.id);
+    await form.expectStepOptionColor(analysis.id, "var(--color-blue-500)");
+    await form.expectStepOptionColor(implement.id, "var(--color-green-500)");
+    await testPage.screenshot({
+      path: testInfo.outputPath("desktop-step-colors.png"),
+      animations: "disabled",
+    });
+    if (prCapture.capturing) {
+      await waitForFiniteAnimations(testPage.locator("body"));
+      await prCapture.screenshot("desktop-step-colors", {
+        caption: "Destination step colors in the desktop Change workflow picker",
+      });
+    }
+    // Reviewer-requested coverage of the existing palette and fallback CSS.
+    for (const step of remainingColors) {
+      await form.expectStepOptionColor(step.id, step.cssColor);
+      await form.chooseStep(step.id);
+      await form.expectSelectedStepColor(step.cssColor);
+    }
+    await form.chooseStep(analysis.id);
+    await form.expectSelectedStepColor("var(--color-blue-500)");
+    await form.expectStepOptionColor(implement.id, "var(--color-green-500)");
+    await testPage.getByPlaceholder("Search steps...").fill("Implement");
+    await expect(testPage.getByRole("option", { name: "Analysis", exact: true })).toBeHidden();
+    await form.chooseStep(implement.id);
+    await form.expectSelectedStepColor("var(--color-green-500)");
+    await form.chooseWorkflow(other.id);
+    const stepTrigger = form.form.getByTestId("change-workflow-step");
+    await expect(stepTrigger).toContainText("Select a step");
+    await expect(stepTrigger.locator(".rounded-full")).toHaveCount(0);
+    await form.chooseStep(incoming.id);
+    await form.submit();
+    await expect(form.desktopDialog).toBeHidden();
+    await waitForWorkflowStep(apiClient, task.id, incoming.id);
+    expect((await apiClient.getTask(task.id)).workflow_id).toBe(other.id);
+  });
+
   test("updates an open task page after a move from another client", async ({
     testPage,
     apiClient,

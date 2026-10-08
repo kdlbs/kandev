@@ -9,11 +9,13 @@ import { waitForArchiveCancelledSession, waitForSessionDone } from "../../helper
 import {
   prepareArchiveRecoverySession,
   seedWorktreeRecoveryFixture,
+  waitForCascadeArchiveCleanup,
 } from "../../helpers/session-resume-recovery";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("archived session recovery", () => {
   test("keeps archived history read-only, then resumes the same session after unarchive", async ({
+    backend,
     testPage,
     apiClient,
     seedData,
@@ -41,6 +43,7 @@ test.describe("archived session recovery", () => {
       sessionId,
       "Waiting for archive cancellation to mark the recovery session",
     );
+    await waitForCascadeArchiveCleanup(backend.tmpDir, fixture.task.id);
 
     const requests = captureGatewayRequests(testPage);
     await testPage.goto(`/t/${fixture.task.id}`);
@@ -103,6 +106,7 @@ test.describe("archived session recovery", () => {
   });
 
   test("honors prevent-auto-start after an archived task is unarchived", async ({
+    backend,
     testPage,
     apiClient,
     seedData,
@@ -125,6 +129,7 @@ test.describe("archived session recovery", () => {
         sessionId,
         "Waiting for archive cancellation to mark the preference session",
       );
+      await waitForCascadeArchiveCleanup(backend.tmpDir, fixture.task.id);
 
       const requests = captureGatewayRequests(testPage);
       await testPage.goto(`/t/${fixture.task.id}`);
@@ -139,8 +144,8 @@ test.describe("archived session recovery", () => {
       );
       await testPage.getByTestId("task-unarchive-button").click();
       await unarchiveResponse;
-      await expect(testPage.getByTestId("task-unarchive-button")).toHaveCount(0);
       await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
+      await expect(testPage.getByTestId("task-unarchive-button")).toHaveCount(0);
       expect(
         sessionLaunchRequests(requests, sessionId).map((request) => request.payload.intent),
       ).toEqual([]);
@@ -150,6 +155,7 @@ test.describe("archived session recovery", () => {
   });
 
   test("keeps both automatic recovery causes behind an accessible disclosure", async ({
+    backend,
     testPage,
     apiClient,
     seedData,
@@ -171,6 +177,7 @@ test.describe("archived session recovery", () => {
       sessionId,
       "Waiting for archive cancellation to mark the feedback session",
     );
+    await waitForCascadeArchiveCleanup(backend.tmpDir, fixture.task.id);
 
     await routeRecoveryFailureAndRetry(testPage, {
       taskId: fixture.task.id,

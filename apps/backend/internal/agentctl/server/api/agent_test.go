@@ -261,6 +261,33 @@ func TestHandleWSInitialize_NoAdapter(t *testing.T) {
 	}
 }
 
+func TestHandleWSInitializeRejectsMismatchedProcessGenerationBeforeAdapterAccess(t *testing.T) {
+	s := newTestServer(t)
+	msg, err := ws.NewRequest("req-stale", "agent.initialize", InitializeRequest{
+		ClientName:        "test",
+		ClientVersion:     "1.0.0",
+		ProcessGeneration: 7,
+	})
+	if err != nil {
+		t.Fatalf("create initialize request: %v", err)
+	}
+
+	resp := s.handleWSInitialize(context.Background(), msg)
+	if resp.Type != ws.MessageTypeError {
+		t.Fatalf("response type = %q, want error", resp.Type)
+	}
+	var payload ws.ErrorPayload
+	if err := resp.ParsePayload(&payload); err != nil {
+		t.Fatalf("parse initialize error: %v", err)
+	}
+	if !strings.Contains(payload.Message, "process generation changed") {
+		t.Fatalf("error = %q, want stale process generation", payload.Message)
+	}
+	if _, ok := payload.Details["startup_evidence"]; ok {
+		t.Fatal("stale initialize request received evidence from another generation")
+	}
+}
+
 func TestHandleWSNewSession_NoAdapter(t *testing.T) {
 	s := newTestServer(t)
 	ctx := context.Background()

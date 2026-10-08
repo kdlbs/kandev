@@ -30,7 +30,8 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
-	ID string
+	RequiredNativeConversationID string
+	ID                           string
 	// ResumeAttemptID identifies the immutable recovery attempt that created or
 	// started this execution. It is copied onto every lifecycle callback so a
 	// delayed callback cannot be accepted by a replacement attempt.
@@ -85,9 +86,15 @@ type AgentExecution struct {
 	// FailureCode and FailureDetails carry a bounded, structured startup
 	// diagnostic to the orchestrator. They remain separate from the generic
 	// error message so user-facing recovery can choose a stable presentation.
-	FailureCode    string
-	FailureDetails string
-	ProviderError  *streams.ProviderError
+	FailureCode            string
+	FailureDetails         string
+	StartupFailureReason   string
+	StartupFailureAttempts int
+	StartupFailureNPMCode  string
+	startupFailureMu       sync.RWMutex
+	ProviderError          *streams.ProviderError
+	bootMessageMu          sync.Mutex
+	bootMessageFinalized   bool
 	// metadata is unexported on purpose: it is touched from the launch, prompt
 	// and stop paths concurrently, so all access must go through the metadataMu
 	// helpers in execution_metadata.go.
@@ -103,6 +110,12 @@ type AgentExecution struct {
 	// promptCompletionGeneration prevents duplicate terminal events for the
 	// same prompt from replacing the first terminal outcome or provider error.
 	promptCompletionGeneration uint64
+	// promptSettlementGeneration fences successor admission until the durable
+	// turn owner acknowledges this generation and its waiter has been released.
+	// These fields are protected by promptLifecycleMu.
+	promptSettlementGeneration               uint64
+	promptSettlementAcknowledgedGeneration   uint64
+	promptSettlementWaiterReleasedGeneration uint64
 	// dispatchedPromptGeneration is the generation of the prompt that has been
 	// accepted by agentctl and is still in flight. It is set only after the
 	// ordinary prompt's triggerPrompt succeeds and reset by beginExecutionPrompt.
@@ -151,12 +164,14 @@ type AgentExecution struct {
 
 	// PrepareResult carries the environment preparation result back to the caller
 	// so it can be persisted synchronously before UpdateTaskSession clobbers metadata.
-	PrepareResult *EnvPrepareResult `json:"-"`
+	PrepareResult           *EnvPrepareResult `json:"-"`
+	prepareProgressRecorder *prepareProgressRecorder
 
 	// agentctl client for this execution
 	agentctl                  *agentctl.Client
 	agentctlOverride          atomic.Pointer[agentctl.Client]
 	agentctlLifecycleMu       sync.RWMutex
+	agentctlSourceMu          sync.RWMutex
 	remoteInstanceLifecycleMu sync.Mutex
 	// contextResetMu owns the reset attempt boundary. While a session reset is
 	// in flight, fresh-session setup events are retained until the lifecycle
@@ -222,17 +237,11 @@ type AgentExecution struct {
 	isResumedSession bool
 
 	// Buffers for accumulating agent response during a prompt
-	messageBuffer strings.Builder
-	// messageBufferDiagnostic is the ProviderDiagnosticCandidate value of the
-	// chunk(s) currently held in messageBuffer (legacy no-protocol-ID path).
-	// A chunk whose marker differs from this flag forces an immediate flush of
-	// the buffered segment first, so a diagnostic chunk's marker is never
-	// merged away by concatenation with ordinary output.
-	messageBufferDiagnostic bool
-	thinkingBuffer          strings.Builder
-	messageMu               sync.Mutex
-	streamMu                sync.Mutex
-	stream                  *streamCoalescer
+	messageBuffer  strings.Builder
+	thinkingBuffer strings.Builder
+	messageMu      sync.Mutex
+	streamMu       sync.Mutex
+	stream         *streamCoalescer
 
 	// Legacy streaming message tracking for agents that omit protocol message IDs.
 	// These are set when we create a streaming message and cleared on tool_call/complete.
@@ -378,13 +387,16 @@ const (
 )
 
 // TaskLaunchScope records the canonical owner of a task session at launch.
-// Unknown is retained for legacy callers and never opts into task-only policy.
+// Automation task failure and concurrency remain owned by the coordinator, so
+// automation launches do not opt into interactive retained-turn settlement.
+// Unknown is retained for legacy callers and opts into no scope-specific policy.
 type TaskLaunchScope string
 
 const (
-	TaskLaunchScopeUnknown TaskLaunchScope = ""
-	TaskLaunchScopeTask    TaskLaunchScope = "task"
-	TaskLaunchScopeOffice  TaskLaunchScope = "office"
+	TaskLaunchScopeUnknown    TaskLaunchScope = ""
+	TaskLaunchScopeTask       TaskLaunchScope = "task"
+	TaskLaunchScopeOffice     TaskLaunchScope = "office"
+	TaskLaunchScopeAutomation TaskLaunchScope = "automation"
 )
 
 // OwnerSnapshot returns the immutable durable owner carried by this
@@ -542,12 +554,32 @@ func (e *AgentExecution) officeProfileID() string {
 
 // PromptCompletionSignal carries the result from a complete event or disconnect.
 type PromptCompletionSignal struct {
-	ExecutorInterrupted bool
-	StopReason          string
-	IsError             bool
-	Error               string
-	PromptGeneration    uint64
-	StartupGeneration   uint64
+	ExecutorInterrupted      bool
+	StopReason               string
+	IsError                  bool
+	Error                    string
+	PromptFailureDisposition streams.PromptFailureDisposition
+	PromptGeneration         uint64
+	StartupGeneration        uint64
+}
+
+// RetainedPromptFailureError marks a failed prompt whose lifecycle event owns
+// the durable turn settlement. Callers must not settle the session a second
+// time while that event is being processed.
+type RetainedPromptFailureError struct {
+	Message     string
+	Disposition streams.PromptFailureDisposition
+}
+
+func (e *RetainedPromptFailureError) Error() string {
+	if e == nil || e.Message == "" {
+		return ErrAgentReported.Error()
+	}
+	return e.Message
+}
+
+func (e *RetainedPromptFailureError) Unwrap() error {
+	return ErrAgentReported
 }
 
 func (e *AgentExecution) promptGenerationSnapshot() uint64 {
@@ -768,6 +800,12 @@ func (e *AgentExecution) startupAttemptSnapshot() uint64 {
 	return e.startupAttemptGeneration
 }
 
+// StartupAttemptGeneration returns the generation that fences callbacks from
+// the execution's active startup and stream attempt.
+func (e *AgentExecution) StartupAttemptGeneration() uint64 {
+	return e.startupAttemptSnapshot()
+}
+
 func (e *AgentExecution) restoreSessionSettingsSource(
 	sourceGeneration uint64,
 	attemptID string,
@@ -930,12 +968,30 @@ func (ae *AgentExecution) AcquireAgentCtlClient() (*agentctl.Client, func()) {
 	return client, ae.agentctlLifecycleMu.RUnlock
 }
 
+// withAgentCtlClient keeps a workspace callback scoped to the client that
+// opened its stream. Holding the read lease through callback publication
+// fences it against a concurrent client replacement or detach.
+func (ae *AgentExecution) withAgentCtlClient(client *agentctl.Client, callback func()) bool {
+	if ae == nil || client == nil || callback == nil {
+		return false
+	}
+	ae.agentctlSourceMu.RLock()
+	defer ae.agentctlSourceMu.RUnlock()
+	if ae.currentAgentCtlClient() != client {
+		return false
+	}
+	callback()
+	return true
+}
+
 // replaceAgentctlClient atomically publishes a replacement connection while
 // retaining the construction-time field for test/source compatibility.
 func (ae *AgentExecution) replaceAgentctlClient(client *agentctl.Client) *agentctl.Client {
 	if ae == nil || client == nil {
 		return nil
 	}
+	ae.agentctlSourceMu.Lock()
+	defer ae.agentctlSourceMu.Unlock()
 	previous := ae.currentAgentCtlClient()
 	ae.agentctlOverride.Store(client)
 	return previous
@@ -947,6 +1003,8 @@ func (ae *AgentExecution) detachAgentctlClient() {
 	if ae == nil {
 		return
 	}
+	ae.agentctlSourceMu.Lock()
+	defer ae.agentctlSourceMu.Unlock()
 	ae.agentctl = nil
 	ae.agentctlOverride.Store(nil)
 }
@@ -1325,12 +1383,13 @@ type RouteOverride struct {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
-	TaskID                string
-	TaskScope             TaskLaunchScope
-	SessionSettingsPolicy SessionSettingsPolicy
-	WorkspaceID           string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
-	SessionID             string
-	TaskEnvironmentID     string // Env this session belongs to (shared across sessions in same task)
+	RequiredNativeConversationID string
+	TaskID                       string
+	TaskScope                    TaskLaunchScope
+	SessionSettingsPolicy        SessionSettingsPolicy
+	WorkspaceID                  string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
+	SessionID                    string
+	TaskEnvironmentID            string // Env this session belongs to (shared across sessions in same task)
 	// WorkspaceReuseRequired selects attach-only environment preparation.
 	WorkspaceReuseRequired bool
 	// AllowBranchReplacement is an explicit user-selected recovery permission.
@@ -1530,12 +1589,15 @@ type AgentProfileInfo struct {
 	AutoFallback bool
 	// RequireExactModel makes the configured model an explicit identity
 	// requirement. False preserves compatible pre-PR behavior.
-	RequireExactModel    bool
-	AllowIndexing        bool // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
-	CLIPassthrough       bool
-	CursorMCPAuthEnabled bool
-	NativeSessionResume  bool // Agent supports ACP session/load for resume
-	SupportsMCP          bool
+	RequireExactModel       bool
+	AllowIndexing           bool // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
+	CLIPassthrough          bool
+	CursorMCPAuthEnabled    bool
+	CursorPluginsMCPEnabled bool
+	MCPSelectionMode        string
+	MCPSelectedServers      []string
+	NativeSessionResume     bool // Agent supports ACP session/load for resume
+	SupportsMCP             bool
 	// CLIFlags is the resolved user-configurable list of CLI flags for this
 	// profile. Passed verbatim to cliflags.Resolve at launch time.
 	CLIFlags []settingsmodels.CLIFlag
@@ -1588,6 +1650,9 @@ type WorkspaceInfo struct {
 	TaskID            string
 	SessionID         string // Task session ID (from task_sessions table)
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	// RecoveryErrorObservation captures session and owner identity before
+	// selected-workspace inspection so a refusal can be conditionally recorded.
+	RecoveryErrorObservation *models.WorkspaceRecoveryErrorObservation
 	// EnvironmentOwnerTaskID and OwnershipGeneration are the durable identity
 	// used to guard host worktree recovery across inherited environments.
 	EnvironmentOwnerTaskID string
@@ -1636,6 +1701,14 @@ type WorkspaceInfo struct {
 	RuntimeName      agentruntime.Runtime   // Runtime name from ExecutorRunning record
 	AgentExecutionID string                 // Previous execution ID (for remote reconnect)
 	Metadata         map[string]interface{} // Additional metadata (reconnect flags)
+
+	// McpMode carries the MCP tool mode to an agentctl instance the lifecycle
+	// builds from WorkspaceInfo alone (workspace-only restore/admission),
+	// which never passes through the executor's mode resolvers. Set by
+	// GetWorkspaceInfoForSession from the task row alone: mcpmode.Coordinator
+	// for a coordinator-origin task, empty otherwise
+	// (docs/specs/coordinator/system-design/copilot.md#fail-closed).
+	McpMode string
 }
 
 // WorkspaceInfoProvider provides workspace information for tasks

@@ -1,5 +1,6 @@
 import { expect } from "@playwright/test";
 import type { BrowserContext } from "@playwright/test";
+import path from "node:path";
 import { backendFixture as test } from "../../fixtures/backend";
 import { acceptInvite, createInviteToken, login, setupAdmin } from "../../helpers/auth";
 
@@ -27,7 +28,10 @@ test.describe.serial("organization units", () => {
   let memberId = "";
 
   test.beforeAll(async ({ backend, browser }) => {
-    await backend.restart({ KANDEV_FEATURES_AUTH: "true" });
+    await backend.restart({
+      KANDEV_FEATURES_AUTH: "true",
+      KANDEV_DATABASE_PATH: path.join(backend.tmpDir, "kandev-auth-org-units.db"),
+    });
 
     adminContext = await browser.newContext({ baseURL: backend.frontendUrl });
     await setupAdmin(adminContext, backend.baseUrl, ADMIN);

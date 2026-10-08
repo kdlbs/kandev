@@ -16,7 +16,7 @@ const (
 )
 
 func newCursorACPDialect() acpDialect {
-	return acpDialect{mcpToolCall: parseCursorMCPToolCall}
+	return acpDialect{mcpToolCall: parseCursorMCPToolCall, continuationSupport: streams.ContinuationNativeSavedHistoryV2}
 }
 
 func parseCursorMCPToolCall(_ map[string]any, rawInput any) (mcpToolCallFrame, bool) {

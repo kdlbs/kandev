@@ -82,8 +82,10 @@ function EmptyChangesPanel() {
   );
 }
 
-function ChangesPanelTimeline(props: ChangesPanelTimelineContentProps) {
-  if (!props.hasAnything) return <EmptyChangesPanel />;
+function ChangesPanelTimeline(
+  props: ChangesPanelTimelineContentProps & Pick<ChangesPanelBodyProps, "gitStatus">,
+) {
+  if (!props.hasAnything) return props.gitStatus.membershipReady ? <EmptyChangesPanel /> : null;
   return <ChangesPanelTimelineContent {...props} />;
 }
 
@@ -97,6 +99,7 @@ export function ChangesPanelBody(props: ChangesPanelBodyProps) {
     props.prFiles.length,
     props.hasUnstaged,
     props.hasStaged,
+    props.gitStatus.membershipReady,
   ].join(":");
   return (
     <PanelBody scroll={false} className="flex flex-col overflow-hidden">

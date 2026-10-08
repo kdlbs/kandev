@@ -47,6 +47,8 @@ const (
 	AvailabilityReasonAgentctlExited = client.AvailabilityReasonAgentctlExited
 )
 
+type RetainedPromptFailureError = lifecycle.RetainedPromptFailureError
+type WorkspaceRecoveryProjectionError = lifecycle.WorkspaceRecoveryProjectionError
 type BackgroundWorkloadProbeResult = client.ProbeResult
 
 const (
@@ -55,8 +57,16 @@ const (
 	BackgroundWorkloadProbeResultUnknown = client.ProbeResultUnknown
 )
 
+type CursorMCPAuthenticationSpec = lifecycle.CursorMCPAuthenticationSpec
+type CursorMCPRetryResult = lifecycle.CursorMCPRetryResult
+
 // ErrNoExecutionForSession reports that a session has no live execution.
-var ErrNoExecutionForSession = lifecycle.ErrNoExecutionForSession
+var (
+	ErrNoExecutionForSession              = lifecycle.ErrNoExecutionForSession
+	ErrCursorMCPAuthenticationUnsupported = lifecycle.ErrCursorMCPAuthenticationUnsupported
+	ErrCursorMCPRecoverySessionBusy       = lifecycle.ErrCursorMCPRecoverySessionBusy
+	ErrCursorMCPRecoveryUnavailable       = lifecycle.ErrCursorMCPRecoveryUnavailable
+)
 
 // SessionExecutionControl is the runtime seam for looking up an execution by
 // session and applying a provider-supported session mode.

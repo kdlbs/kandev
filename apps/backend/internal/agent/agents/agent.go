@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -108,6 +109,13 @@ type ManagedNPMRuntimeAgent interface {
 	ManagedNPMRuntime() ManagedNPMRuntimeSpec
 }
 
+// SelectedRuntimeInstallCommandProvider builds the Settings install command
+// for an install-wide runtime selection. Managed installs should prepare the
+// selected cache entry; native installs may update their standalone package.
+type SelectedRuntimeInstallCommandProvider interface {
+	SettingsInstallCommand(managedruntime.OpenCodeSelection) (Command, error)
+}
+
 // PassthroughAgent is an optional capability for agents that support CLI passthrough mode.
 type PassthroughAgent interface {
 	PassthroughConfig() PassthroughConfig
@@ -132,6 +140,8 @@ type NativeBinaryAgent interface {
 type LoginCommand struct {
 	// Cmd is the command + args to spawn, e.g. []string{"claude", "auth", "login"}.
 	Cmd []string
+	// Variants are server-owned command choices selected by opaque identifiers.
+	Variants map[string][]string
 	// Description renders above the terminal as a one-line hint, e.g.
 	// "Authenticate with your Anthropic account."
 	Description string
@@ -231,6 +241,12 @@ type CommandOptions struct {
 	// ManagedRuntimeVersion is an internal exact version override for trusted
 	// managed npm ACP runtimes. Empty uses the built-in exact version pin.
 	ManagedRuntimeVersion string
+	// ManagedRuntimeFamily and ManagedRuntimeSource carry the validated
+	// install-wide OpenCode choice into command construction.
+	ManagedRuntimeFamily managedruntime.OpenCodeFamily
+	ManagedRuntimeSource managedruntime.OpenCodeSource
+	// NativeRuntimeVersion is the observed version of a native OpenCode binary.
+	NativeRuntimeVersion string
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.
@@ -250,6 +266,9 @@ type PassthroughOptions struct {
 	// commands, which lifecycle.CommandBuilder appends centrally, passthrough
 	// agents opt in by appending these tokens in BuildPassthroughCommand.
 	CLIFlagTokens []string
+	// BaseCommand overrides the agent's default interactive CLI when the
+	// install-wide runtime selection resolves to a managed distribution.
+	BaseCommand Command
 }
 
 // RuntimeConfig holds Docker / standalone runtime settings.

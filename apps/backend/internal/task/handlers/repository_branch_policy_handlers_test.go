@@ -25,6 +25,11 @@ import (
 )
 
 func newRepositoryBranchPolicyTestRouter(t *testing.T, workspaceName string) (*gin.Engine, *ws.Dispatcher, *taskrepo.Repository) {
+	router, dispatcher, repo, _ := newRepositoryBranchPolicyTestRouterWithBus(t, workspaceName)
+	return router, dispatcher, repo
+}
+
+func newRepositoryBranchPolicyTestRouterWithBus(t *testing.T, workspaceName string) (*gin.Engine, *ws.Dispatcher, *taskrepo.Repository, *bus.MemoryEventBus) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "branch-policies.db"))
@@ -47,13 +52,15 @@ func newRepositoryBranchPolicyTestRouter(t *testing.T, workspaceName string) (*g
 
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	require.NoError(t, err)
+	eventBus := bus.NewMemoryEventBus(log)
+	t.Cleanup(eventBus.Close)
 	svc := service.NewService(service.Repos{
 		Workspaces: repo, RepoEntities: repo, BranchPolicies: repo,
-	}, bus.NewMemoryEventBus(log), log, service.RepositoryDiscoveryConfig{})
+	}, eventBus, log, service.RepositoryDiscoveryConfig{})
 	router := gin.New()
 	dispatcher := ws.NewDispatcher()
 	RegisterRepositoryBranchPolicyRoutes(router, dispatcher, svc, log)
-	return router, dispatcher, repo
+	return router, dispatcher, repo, eventBus
 }
 
 func initBranchPolicyGitRepository(t *testing.T) string {

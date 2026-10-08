@@ -116,7 +116,7 @@ func TestHTTPListQuickChatSessionsEmptyIsArray(t *testing.T) {
 	h.httpListQuickChatSessions(c)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.JSONEq(t, `{"sessions":[],"task_sessions":[]}`, rec.Body.String())
+	assert.JSONEq(t, `{"sessions":[],"task_sessions":[],"config_chat_restart_pending":false}`, rec.Body.String())
 }
 
 // TestQuickChatRoutesAreRegistered proves the resync endpoint is reachable

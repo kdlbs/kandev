@@ -246,7 +246,7 @@ WORKDIR /workspace
       path.join(context, "mock-agent-linux-amd64"),
     );
     fs.cpSync(WEB_DIST_DIR, path.join(context, "web-dist"), { recursive: true });
-    execFileSync("docker", ["build", "--tag", tag, "--file", "-", context], {
+    execFileSync("docker", ["build", "--network", "none", "--tag", tag, "--file", "-", context], {
       input: dockerfile,
       timeout: 300_000,
       stdio: process.env.E2E_DEBUG ? ["pipe", "inherit", "inherit"] : ["pipe", "ignore", "inherit"],

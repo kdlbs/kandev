@@ -12,6 +12,7 @@ import (
 
 	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree/copyfiles"
 )
 
@@ -198,6 +199,28 @@ func TestShipRemoteCopyfilesForLaunch_SingleRepoUsesTopLevelSpec(t *testing.T) {
 	steps := rec.Steps()
 	if len(steps) != 1 || steps[0].Name != "Copy 1 ignored file" {
 		t.Errorf("steps = %+v, want one 'Copy 1 ignored file'", steps)
+	}
+}
+
+func TestShipRemoteCopyfilesForLaunch_PluginRemoteUsesMaterializedPrimaryPath(t *testing.T) {
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, ".env"), []byte("X=1"), 0o600); err != nil {
+		t.Fatalf("write source file: %v", err)
+	}
+	var received client.CopyFilesRequest
+	url := stubCopyFilesServer(t, func(req client.CopyFilesRequest) client.CopyFilesResponse {
+		received = req
+		return client.CopyFilesResponse{Copied: []string{".env"}}
+	})
+	rec := newPrepareProgressRecorder(nil)
+	shipRemoteCopyfilesForLaunch(context.Background(), logger.Default(), &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypePluginRemote),
+		RepositoryID: "repo-1", RepositoryPath: src, RepoName: "widget", BaseBranch: "main",
+		CheckoutBranch: "feature/next", CopyFiles: ".env",
+	}, clientForStub(t, url), rec.Callback(0), rec)
+
+	if received.Repo != "widget-feature-next" {
+		t.Fatalf("plugin copy-files destination = %q, want the materialized primary directory", received.Repo)
 	}
 }
 

@@ -38,6 +38,7 @@ import (
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/profiles"
 	"github.com/kandev/kandev/internal/startup"
+	"github.com/kandev/kandev/internal/task/inventoryrepair"
 
 	// Event bus
 	"github.com/kandev/kandev/internal/events"
@@ -254,6 +255,10 @@ func Run(args []string, build BuildInfo) int {
 	// backend cannot reconcile or migrate the live home before its bind fails.
 	owner, err := acquireRuntimeStateOwnership(cfg)
 	if err != nil {
+		if errors.Is(err, inventoryrepair.ErrRepairPending) {
+			fmt.Fprintf(os.Stderr, "Backend startup refused: %v\n", err)
+			return 1
+		}
 		writeDesktopStartupConflictMarker(os.Stderr, cfg, err)
 		fmt.Fprintf(os.Stderr,
 			"Failed to acquire backend runtime-state ownership: %v; use a separate KANDEV_HOME_DIR for an intentional second instance\n",
@@ -318,7 +323,14 @@ func acquireRuntimeStateOwnership(cfg *config.Config) (*ownershiplock.Owner, err
 	if err != nil {
 		return nil, fmt.Errorf("resolve backend runtime-state ownership: %w", err)
 	}
-	return ownershiplock.Acquire(targets)
+	owner, err := ownershiplock.Acquire(targets)
+	if err != nil {
+		return nil, err
+	}
+	if err := inventoryrepair.CheckPendingTargets(targets); err != nil {
+		return nil, errors.Join(err, owner.Close())
+	}
+	return owner, nil
 }
 
 // setBuildInfo stamps the package-level build variables with the provided
@@ -614,6 +626,9 @@ func startAgentInfrastructure(
 		func() bool { return services.Auth != nil && services.Auth.Mode() != auth.ModeDisabled },
 		log,
 	)
+	if services.Coordinator != nil {
+		mcpScopeResolver.SetCoordinatorLookup(services.Coordinator)
+	}
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
@@ -631,6 +646,7 @@ func startAgentInfrastructure(
 		mcpScopeResolver.ScopePrincipal,
 		recoveryDeadlineStart,
 		inheritedRecordScope,
+		services.Task,
 		services.Task,
 		services.Task,
 		repos.Task,
@@ -695,6 +711,7 @@ func startAgentInfrastructure(
 	lifecycleMgr.SetSessionSettingsSnapshotWriter(repos.Task)
 	if services.Plugins != nil {
 		lifecycleMgr.SetPluginExecutorProfileLoader(services.Task)
+		lifecycleMgr.SetPluginRuntimeAPIURL(pluginRuntimeAPIURL(cfg))
 		services.Plugins.SetExecutorProviderInventoryReader(repos.Task)
 		pluginExecutor := lifecycle.NewPluginRemoteExecutor(services.Plugins, log)
 		pluginExecutor.SetRecoveryDependencies(services.Task, repos.Task)
@@ -764,6 +781,10 @@ func startAgentInfrastructure(
 	// Watcher dispatch self-heals a binding whose repository was soft-deleted
 	// after the watch was configured, instead of creating an orphan task row.
 	orchestratorSvc.SetRepositoryChecker(&repositoryLookupAdapter{svc: services.Task})
+	if services.Coordinator != nil {
+		orchestratorSvc.SetCoordinatorLookup(services.Coordinator)
+		orchestratorSvc.SetCoordinatorStandingInstructionsReader(coordinatorStandingInstructionsReader(services.Coordinator, log))
+	}
 
 	// Wire the watcher-dependency enumerator into the agent settings
 	// controller so the profile-delete UI can surface "this will also
@@ -1096,6 +1117,7 @@ func startGatewayAndServe(
 	}
 	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, orchestratorSvc, log))
 	gateway.Hub.SetSessionGitDataProvider(buildSessionGitDataProvider(repos.Task, lifecycleMgr, log))
+	gateway.Hub.SetSessionGitRefreshProvider(buildSessionGitRefreshProvider(repos.Task, lifecycleMgr, log))
 	gateway.Hub.SetConversationSourceReader(services.Task)
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
 
@@ -1129,6 +1151,21 @@ func startGatewayAndServe(
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
+	agentSettingsController.SetOpenCodeMigrationGuard(func(ctx context.Context) (context.Context, func(), error) {
+		activationCtx, releaseLifecycle, err := lifecycleMgr.AcquireOpenCodeMigration(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		releaseUtility, err := hostUtilityMgr.AcquireRuntimeMaintenance(activationCtx, "opencode-acp")
+		if err != nil {
+			releaseLifecycle()
+			return nil, nil, err
+		}
+		return activationCtx, func() {
+			releaseUtility()
+			releaseLifecycle()
+		}, nil
+	})
 	profileReconciler := agentsettingscontroller.NewProfileReconciler(hostUtilityMgr, agentRegistry, repos.AgentSettings, log)
 
 	// Wire Host.InvokeUtilityAgent at the first point where the sessionless
@@ -1236,13 +1273,17 @@ func startGatewayAndServe(
 	// ============================================
 	// HTTP SERVER (Router & MCP Route Registration)
 	// ============================================
+	e2eRuntimeUpdateHooks := newE2ERuntimeUpdateHooks()
+	if e2eRuntimeUpdateHooks != nil {
+		agentSettingsController.SetRuntimeUpdateStatusResolver(e2eRuntimeUpdateHooks.resolveLatestVersion)
+	}
 	// Build the real router and register all handlers, which wires the real
 	// dispatcher into lifecycleMgr.SetMCPHandler and installs MCP scope handlers
 	// BEFORE lifecycleMgr.Start recovers sessions.
-	builtServer, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
+	builtServer, err := buildHTTPServer(ctx, cfg, log, gateway, repos, services, agentSettingsController,
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, notificationSvc, msgCreator, agentRegistry, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
-		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
+		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, e2eRuntimeUpdateHooks, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
 		closeBoundListeners(server, listeners, log)
@@ -1390,11 +1431,11 @@ func startGatewayAndServe(
 
 	services.Task.StartAutoArchiveLoop(ctx)
 	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)
-	services.Task.ReconcileExecutorFailures(ctx)
 	services.Task.StartSessionReconciliationLoop(ctx)
 	services.Task.StartQuickChatExpirationLoop(ctx)
 
 	hostUtilityCtx, hostUtilityCancel := context.WithCancel(ctx)
+	hostUtilityReady := make(chan struct{})
 	var hostUtilityWG sync.WaitGroup
 	hostUtilityWG.Add(1)
 	go func() {
@@ -1402,6 +1443,7 @@ func startGatewayAndServe(
 		if err := hostUtilityMgr.Start(hostUtilityCtx); err != nil {
 			log.Warn("host utility manager bootstrap error", zap.Error(err))
 		}
+		close(hostUtilityReady)
 		// Reconcile profiles against fresh probe results — seeds defaults for
 		// newly probed agents, heals stale profile models/modes, cleans up
 		// orphans referencing removed agents.
@@ -1452,6 +1494,20 @@ func startGatewayAndServe(
 			}
 		})
 	}
+	agentSettingsController.SetRuntimeUpdateNotifier(notificationSvc)
+	var runtimeUpdateReadiness <-chan struct{} = hostUtilityReady
+	if e2eRuntimeUpdateHooks != nil {
+		runtimeUpdateReadiness = e2eRuntimeUpdateHooks.startupReadiness(ctx, hostUtilityReady)
+	}
+	stopRuntimeUpdates := agentSettingsController.StartRuntimeUpdateBackground(ctx, runtimeUpdateReadiness)
+	stopRuntimeUpdatesCleanup := func() error { stopRuntimeUpdates(); return nil }
+	addCleanup(stopRuntimeUpdatesCleanup)
+	restoreCleanups = append(restoreCleanups, stopRuntimeUpdatesCleanup)
+	gateway.Hub.AddUserSubscriptionListener(func(string) {
+		if err := agentSettingsController.ReplayRuntimeUpdateNotices(ctx); err != nil && ctx.Err() == nil {
+			log.Debug("runtime update replay unavailable")
+		}
+	})
 	systemSvc.StartBackground(ctx)
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })
 	gateways.RegisterSystemNotifications(processRuntimeContext(ctx), eventBus, gateway.Hub, log)
@@ -2803,6 +2859,7 @@ func resolvedHTTPPort(cfg *config.Config) int {
 // buildHTTPServer creates the HTTP server with all middleware and routes
 // registered against the gateway and service layer.
 func buildHTTPServer(
+	ctx context.Context,
 	cfg *config.Config,
 	log *logger.Logger,
 	gateway *gateways.Gateway,
@@ -2813,6 +2870,7 @@ func buildHTTPServer(
 	eventBus bus.EventBus,
 	orchestratorSvc *orchestrator.Service,
 	notificationCtrl *notificationcontroller.Controller,
+	runtimeUpdateNotifier e2eRuntimeUpdateNotifier,
 	msgCreator *messageCreatorAdapter,
 	agentRegistry *registry.Registry,
 	hostUtilityMgr *hostutility.Manager,
@@ -2823,6 +2881,7 @@ func buildHTTPServer(
 	temporaryArtifacts *tempartifacts.Registry,
 	dbPool *db.Pool,
 	agentRuntimeAvailability *agentctlclient.Availability,
+	e2eRuntimeUpdateHooks *e2eRuntimeUpdateHooks,
 	sshReachabilityPoller *reachabilitypkg.Poller,
 	progress *startup.Reporter,
 	persistenceHealth ...*requiredstores.Health,
@@ -2909,6 +2968,7 @@ func buildHTTPServer(
 		return err
 	})
 	registerRoutes(routeParams{
+		ctx:                           ctx,
 		router:                        router,
 		gateway:                       gateway,
 		taskSvc:                       services.Task,
@@ -2929,6 +2989,8 @@ func buildHTTPServer(
 		dbPool:                        dbPool,
 		persistenceHealth:             requiredHealth,
 		agentSettingsController:       agentSettingsController,
+		runtimeUpdateNotifier:         runtimeUpdateNotifier,
+		e2eRuntimeUpdateHooks:         e2eRuntimeUpdateHooks,
 		agentSettingsRepo:             repos.AgentSettings,
 		agentList:                     agentRegistry,
 		agentRegistry:                 agentRegistry,

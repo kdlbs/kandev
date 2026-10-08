@@ -191,6 +191,46 @@ export function WorkspaceSection({
   );
 }
 
+function GoCacheBusyCleanupPolicy({
+  settings,
+  pending,
+  isDirty,
+  onChange,
+}: Pick<PolicySectionProps, "settings" | "pending" | "onChange"> & { isDirty: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <SettingRow
+        title={t("system:storageGoCacheAllowBusyLabel")}
+        description={t("system:storageGoCacheAllowBusyDescription")}
+        help={t("system:storageGoCacheAllowBusyHelp")}
+        control={
+          <Switch
+            checked={settings.go_cache.allow_cleanup_while_busy}
+            disabled={pending}
+            onCheckedChange={(allow_cleanup_while_busy) =>
+              onChange({
+                ...settings,
+                go_cache: { ...settings.go_cache, allow_cleanup_while_busy },
+              })
+            }
+            aria-label={t("system:storageGoCacheAllowBusyLabel")}
+            data-testid="storage-go-cache-allow-busy"
+            data-settings-dirty={isDirty}
+            className="max-md:!h-11 max-md:!w-11 max-md:!bg-transparent max-md:justify-start max-md:pl-[10px] [@media(pointer:coarse)]:!h-11 [@media(pointer:coarse)]:!w-11 [@media(pointer:coarse)]:!bg-transparent [@media(pointer:coarse)]:justify-start [@media(pointer:coarse)]:pl-[10px] before:absolute before:left-2 before:top-1/2 before:h-[16.6px] before:w-7 before:-translate-y-1/2 before:rounded-full before:bg-input before:content-[''] data-checked:before:bg-primary dark:data-unchecked:before:bg-input/80 [&_[data-slot=switch-thumb]]:z-10"
+          />
+        }
+      />
+      <p
+        className="py-3 text-sm text-amber-700 dark:text-amber-400"
+        data-testid="storage-go-cache-busy-warning"
+      >
+        {t("system:storageGoCacheBusyWarning")}
+      </p>
+    </>
+  );
+}
+
 export function GoCacheSection({
   settings,
   savedSettings,
@@ -213,12 +253,17 @@ export function GoCacheSection({
     savedSettings,
     (value) => value.go_cache.max_bytes,
   );
+  const busyCleanupDirty = settingIsDirty(
+    settings,
+    savedSettings,
+    (value) => value.go_cache.allow_cleanup_while_busy,
+  );
   return (
     <PolicySection
       sectionId="go-cache"
       title={t("system:storageGoBuildCache")}
       description={t("system:storageGoCacheSectionDescription")}
-      isDirty={enabledDirty || maxBytesDirty}
+      isDirty={enabledDirty || maxBytesDirty || busyCleanupDirty}
     >
       <SettingRow
         title={t("system:storageManagedGoCache")}
@@ -256,6 +301,12 @@ export function GoCacheSection({
           isDirty={maxBytesDirty}
         />
       </div>
+      <GoCacheBusyCleanupPolicy
+        settings={settings}
+        pending={pending}
+        isDirty={busyCleanupDirty}
+        onChange={onChange}
+      />
       {capabilities.go_cache_adoption_available && (
         <StorageAdoptionField
           path={adoptionPath}

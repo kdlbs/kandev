@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -18,8 +19,8 @@ func cloneExecutorFailure(e *models.ExecutorFailureEpisode) *models.ExecutorFail
 	return &c
 }
 
-func (p *Projector) refreshExecutorFailure(ctx context.Context, taskID string, state *projectionState) (bool, error) {
-	if p.loadExecutorFailure == nil {
+func (p *Projector) refreshExecutorFailure(ctx context.Context, taskID, eventType string, state *projectionState) (bool, error) {
+	if p.loadExecutorFailure == nil || (state.current != nil && eventType != events.TaskUpdated) {
 		return false, nil
 	}
 	latest, err := p.loadExecutorFailure(ctx, taskID)

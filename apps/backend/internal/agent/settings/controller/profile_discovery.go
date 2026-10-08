@@ -59,6 +59,7 @@ func (c *Controller) FetchProfileDynamicModels(
 	caps := result.Capabilities
 	resp.Status = string(caps.Status)
 	resp.ContextRevision = result.ContextRevision
+	resp.RuntimeInfo = caps.RuntimeInfo
 	if caps.Error != "" {
 		message := profileFailureMessage(caps.Status)
 		resp.Error = &message

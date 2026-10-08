@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -117,6 +118,10 @@ func main() {
 // are gated on this negotiated advertisement, so the mock must earn eligibility
 // the same way a real bridge does or E2E would prove nothing about the gate.
 func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
+	traceACP("initialize", "", nil)
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("E2E_MOCK_AGENT_FAIL_INITIALIZE")), "true") {
+		return acp.InitializeResponse{}, errors.New("mock ACP initialization failed by E2E fixture")
+	}
 	var meta map[string]any
 	if mockPromptQueueingEnabled() {
 		meta = map[string]any{
@@ -126,7 +131,10 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 	return acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		AgentCapabilities: acp.AgentCapabilities{
-			LoadSession:     true,
+			LoadSession: true,
+			PromptCapabilities: acp.PromptCapabilities{
+				Image: true,
+			},
 			McpCapabilities: acp.McpCapabilities{Sse: true},
 			SessionCapabilities: acp.SessionCapabilities{
 				Close: &acp.SessionCloseCapabilities{},
@@ -357,6 +365,10 @@ func ptr(s string) *string {
 // is only reached on resume, so no resumed-guard is needed here (unlike TUI).
 func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	traceACP("session_load", string(req.SessionId), nil)
+	traceACP("resume", string(req.SessionId), nil)
+	if err := mockContinuationRestoreFailure(req.SessionId); err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
 	if parseFailOnResumeFlag() {
 		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: refusing resume for session %s (--fail-on-resume), exiting 1\n", os.Getpid(), req.SessionId)
 		os.Exit(1)
@@ -417,7 +429,11 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
 	promptCtx, cancelPrompt := context.WithCancel(ctx)
 	prompt := extractPromptText(req.Prompt)
-	traceACP("prompt", string(req.SessionId), map[string]string{"prompt": prompt})
+	promptBlocks, _ := json.Marshal(summarizeACPPromptBlocks(req.Prompt))
+	traceACP("prompt", string(req.SessionId), map[string]string{
+		"prompt":        prompt,
+		"prompt_blocks": string(promptBlocks),
+	})
 	acceptanceMarker, cancelHoldPrompt := cancelHoldAcceptanceMarker(prompt)
 	var cancelHold chan struct{}
 	if cancelHoldPrompt {
@@ -458,6 +474,12 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if resp, err, handled := a.handleDynamicUnclassifiedFallback(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
+	if resp, err, handled := a.handleMockInterruptionContinuation(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
+	if resp, err, handled := a.handleRetainedCapacity(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	// The /overloaded scenario must surface a real prompt-time ACP *error*
 	// (a JSON-RPC error response), which handlePrompt's emitter cannot do —
 	// so intercept it here and return the error from Prompt directly.
@@ -478,7 +500,7 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if promptCtx.Err() != nil {
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	}
-	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn, Usage: mockPromptUsage(prompt)}, nil
 }
 
 func (a *mockAgent) sessionModel(sessionID acp.SessionId) string {
@@ -653,7 +675,9 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 		}
 	}
 	_ = os.Remove(overloadedCounterPath(req.SessionId))
+	clearRetainedCapacityCounters(req.SessionId)
 	_ = os.Remove(transportLostCounterPath(req.SessionId))
+	_ = os.Remove(mockContinuationPath(req.SessionId))
 	if dynamicFallbackCounterID == "" {
 		_ = os.Remove(dynamicUnclassifiedFallbackCounterPath(req.SessionId))
 	}

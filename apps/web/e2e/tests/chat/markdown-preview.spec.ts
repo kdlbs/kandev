@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { type Page } from "@playwright/test";
-import { test, expect } from "../../fixtures/test-base";
+import { expect, resetSeedRepositoryCheckout, test } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -9,6 +10,7 @@ import {
   selectMarkdownPreviewRange,
   selectMarkdownPreviewText,
 } from "../../helpers/markdown-preview";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
 const MARKDOWN_CONTENT = `# Hello World
@@ -44,6 +46,7 @@ async function seedTaskWithSession(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
+  repositoryId = seedData.repositoryId,
 ): Promise<{ session: SessionPage; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -53,7 +56,7 @@ async function seedTaskWithSession(
       description: "/e2e:simple-message",
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
+      repository_ids: [repositoryId],
     },
   );
   await testPage.goto(`/t/${task.id}`);
@@ -93,8 +96,7 @@ async function openFileInCode(
 ): Promise<void> {
   await session.clickTab("Files");
   await expect(session.files).toBeVisible({ timeout: 5_000 });
-  const fileRow = session.files.getByText(fileName);
-  await expect(fileRow).toBeVisible({ timeout: 10_000 });
+  const fileRow = await session.fileTree.waitForFileTreeNode(fileName, 30_000);
   await fileRow.click();
 
   const editorTab = testPage.locator(`.dv-default-tab:has-text('${fileName}')`);
@@ -103,7 +105,11 @@ async function openFileInCode(
 }
 
 test.describe("Markdown preview", () => {
-  test.describe.configure({ retries: 1, timeout: 120_000 });
+  test.describe.configure({ retries: 0, timeout: 120_000 });
+
+  test.beforeEach(({ backend, seedData }) => {
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+  });
 
   test("toggle markdown preview in file editor", async ({
     testPage,
@@ -334,8 +340,18 @@ test.describe("Markdown preview", () => {
     seedData,
     backend,
   }) => {
-    // Create a markdown file as an untracked file — it will show in Changes
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    // Keep this diff fixture separate from files left by earlier tests in the worker repo.
+    const repoDir = fs.mkdtempSync(path.join(backend.tmpDir, "repos", "markdown-diff-preview-"));
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execFileSync("git", ["init", "-b", "main"], { cwd: repoDir, env: gitEnv });
+    fs.writeFileSync(path.join(repoDir, "README.md"), "Markdown diff preview fixture\n");
+    execFileSync("git", ["add", "README.md"], { cwd: repoDir, env: gitEnv });
+    execFileSync("git", ["commit", "-m", "init"], { cwd: repoDir, env: gitEnv });
+    const repository = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
+      name: "Markdown Diff Preview E2E",
+    });
+
+    // Create a markdown file as an untracked file — it will show in Changes.
     const filePath = path.join(repoDir, "preview-from-diff.md");
     fs.writeFileSync(filePath, "# Preview From Diff\n\nThis file was created for the diff test.");
 
@@ -344,6 +360,7 @@ test.describe("Markdown preview", () => {
       apiClient,
       seedData,
       "Markdown Diff Preview Test",
+      repository.id,
     );
 
     // Open Changes panel — the untracked .md file should appear in the file list.

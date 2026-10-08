@@ -17,6 +17,9 @@ import { waitForSessionState } from "./session";
 import { SessionPage } from "../pages/session-page";
 import { readSessionRuntimeIdentity } from "./session-resume-prompt-queue";
 
+const EMPTY_TURN_NO_OUTPUT_NOTICE = "The agent finished without producing any output.";
+const EMPTY_TURN_COMMAND_HINT = /without the leading slash/i;
+
 type ACPTraceEvent = {
   event: string;
   session_id: string;
@@ -230,6 +233,57 @@ function readTaskSessionMetadata(tmpDir: string, sessionId: string): Record<stri
   }
 }
 
+function readLatestProviderRestoredNoticeMetadata(
+  tmpDir: string,
+  sessionId: string,
+): Record<string, unknown> | undefined {
+  const db = new DatabaseSync(path.join(tmpDir, "kandev.db")) as unknown as SqliteTestDatabase;
+  try {
+    const row = db
+      .prepare(
+        `SELECT metadata FROM task_session_messages
+         WHERE task_session_id = ? AND type = 'status'
+           AND metadata LIKE '%resume_settings_provider_restored%'
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(sessionId) as { metadata?: unknown } | undefined;
+    if (!row) return undefined;
+    const metadata = typeof row.metadata === "string" ? JSON.parse(row.metadata) : row.metadata;
+    return metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? (metadata as Record<string, unknown>)
+      : undefined;
+  } finally {
+    db.close();
+  }
+}
+
+async function expectProviderRestoredResumeNotice(
+  page: Page,
+  tmpDir: string,
+  sessionId: string,
+  expectedCount: number,
+) {
+  const notice = page.getByTestId("provider-restored-resume-success");
+  await expect(notice).toHaveCount(expectedCount);
+  const latestNotice = notice.last();
+  const metadata = readLatestProviderRestoredNoticeMetadata(tmpDir, sessionId);
+  expect(metadata).toBeDefined();
+  if (metadata?.effective_model_known === true) {
+    const model = metadata.effective_model_name ?? metadata.effective_model_id;
+    if (typeof model !== "string" || model === "") {
+      throw new Error("confirmed provider model metadata must include a display value");
+    }
+    await expect(latestNotice).toContainText(`Session resumed with ${model}.`);
+  } else {
+    await expect(latestNotice).toContainText(
+      "Session resumed. Your previous conversation was preserved.",
+    );
+  }
+  await expect(latestNotice).toContainText("Your previous conversation was preserved.");
+  await expect(latestNotice).toContainText("Saved mode and model selections remain unchanged");
+  await expect(latestNotice).toContainText("restored permission mode may differ");
+}
+
 function seedUnadvertisedSessionRuntimeOverrides(tmpDir: string, sessionId: string) {
   const metadata = readTaskSessionMetadata(tmpDir, sessionId);
   const db = new DatabaseSync(path.join(tmpDir, "kandev.db")) as unknown as SqliteTestDatabase;
@@ -388,6 +442,22 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
       timeout: 60_000,
     });
 
+    const startupRecoveryCard = session.activeChat().getByTestId("session-recovery-card");
+    await expect(
+      startupRecoveryCard.getByRole("heading", { name: "Saved model unavailable" }),
+    ).toBeVisible();
+    await expect(startupRecoveryCard).toContainText("unlisted-e2e-model");
+    await expect(startupRecoveryCard.getByTestId("session-bootstrap-no-prompt")).toBeVisible();
+    await expect(
+      startupRecoveryCard.getByTestId("session-recovery-fresh-start-warning"),
+    ).toContainText("uses your saved selections");
+    await expect(session.activeChat()).not.toContainText(EMPTY_TURN_NO_OUTPUT_NOTICE);
+    await page.reload();
+    await session.waitForLoad();
+    await expect(
+      session.activeChat().getByRole("heading", { name: "Saved model unavailable" }),
+    ).toBeVisible();
+    await expect(session.activeChat()).not.toContainText(EMPTY_TURN_NO_OUTPUT_NOTICE);
     await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
     const disclosure = session.activeChat().getByTestId("provider-restored-resume-disclosure");
     await expect(disclosure).toBeVisible();
@@ -433,10 +503,19 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
       })
       .toMatchObject({ type: "response" });
     await expect(
-      page.getByText("Workspace restored in read-only mode", { exact: true }).filter({
-        visible: true,
-      }),
-    ).toHaveCount(1, { timeout: 15_000 });
+      recoveryCard.getByRole("heading", { name: "Saved model unavailable" }),
+    ).toBeVisible();
+    await expect(recoveryCard.getByTestId("session-recovery-workspace-status")).toContainText(
+      "read-only mode",
+      { timeout: 15_000 },
+    );
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "FAILED",
+      message: "read-only recovery should settle before Resume is requested",
+      timeout: 60_000,
+    });
     if (options.prCapture?.capturing) {
       await waitForFiniteAnimations(recoveryCard);
       await options.prCapture.screenshot("read-only-recovery-card", {
@@ -477,13 +556,20 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
         },
       )
       .toBe("error");
-    await expect(recoveryCard.getByRole("heading")).toHaveText("Session startup needs attention");
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "FAILED",
+      message: "the rejected provider load should settle before Resume is retried",
+      timeout: 60_000,
+    });
+    await expect(recoveryCard.getByRole("heading")).toHaveText(
+      /^(Saved model unavailable|Session startup needs attention)$/,
+    );
     await expect(session.recoveryResumeButton()).toBeVisible();
-    await expect(
-      session
-        .activeChat()
-        .getByText("Session resumed without mode/model overrides.", { exact: true }),
-    ).toHaveCount(0);
+    await expect(session.activeChat().getByTestId("provider-restored-resume-success")).toHaveCount(
+      0,
+    );
 
     await apiClient.updateAgentProfile(profile.id, {
       cli_flags: [
@@ -501,18 +587,20 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
     await expect(session.recoveryResumeButton()).toBeDisabled();
     if (!mobile) {
       await page.keyboard.press("Enter");
-      await expect.poll(() => recovery.requestCounts.resume ?? 0).toBe(2);
     }
+    await expect.poll(() => recovery.requestCounts.resume ?? 0).toBe(2);
     await expect
       .poll(
-        () =>
-          capturedSessionRecoveryResponseType(recovery.requestIds, recovery.responses, "resume"),
+        () => {
+          const requestId = recovery.requestIds.resume;
+          return requestId ? recovery.responses.get(requestId) : undefined;
+        },
         {
           timeout: 60_000,
           message: "the explicit Resume request should settle",
         },
       )
-      .toBe("response");
+      .toMatchObject({ type: "response" });
     expect(capturedSessionRecoveryRequest(recovery.requests, "resume")).toMatchObject({
       task_id: task.id,
       session_id: sessionId,
@@ -520,9 +608,9 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
       settings_policy: "provider_restored",
     });
     await session.waitForChatIdle({ timeout: 60_000 });
-    await expect(session.activeChat()).toContainText(
-      "Session resumed without mode/model overrides.",
-    );
+    await expectProviderRestoredResumeNotice(page, backend.tmpDir, sessionId, 1);
+    const firstSuccessNotice = session.activeChat().getByTestId("provider-restored-resume-success");
+    const firstSuccessNoticeText = await firstSuccessNotice.locator("p").allTextContents();
     await expect(session.idleInput()).toBeVisible();
     await expect(recoveryCard).toHaveCount(0);
 
@@ -563,6 +651,7 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
     }
     await activate(planMode, mobile);
     await expect(modeSelector).toContainText("Plan Mock", { timeout: 15_000 });
+    await expect(firstSuccessNotice.locator("p")).toHaveText(firstSuccessNoticeText);
 
     await expect
       .poll(() => readACPTrace(tracePath), {
@@ -616,9 +705,7 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
     expect(trace[nextPromptIndex].session_id).toBe(originalIdentity.acpSessionId);
 
     if (options.prCapture?.capturing) {
-      const successNotice = session
-        .activeChat()
-        .getByText("Session resumed without mode/model overrides.", { exact: true });
+      const successNotice = session.activeChat().getByTestId("provider-restored-resume-success");
       await successNotice.scrollIntoViewIfNeeded();
       await expect(successNotice).toBeVisible();
       await expect(successNotice).toBeInViewport();
@@ -634,13 +721,85 @@ export async function runSessionResumeSettingsRecoveryE2E(options: {
 
     await page.reload();
     await session.waitForLoad();
-    await expect(
-      session
-        .activeChat()
-        .getByText("Session resumed without mode/model overrides.", { exact: true }),
-    ).toHaveCount(1, {
-      timeout: 30_000,
+    await expectProviderRestoredResumeNotice(page, backend.tmpDir, sessionId, 1);
+    expect(seedUnadvertisedSessionRuntimeOverrides(backend.tmpDir, sessionId)).toEqual(
+      savedOverrides,
+    );
+
+    const beforeLaterStrictResumeLoads = readACPTrace(tracePath).filter(
+      (event) => event.event === "session_load",
+    ).length;
+    const stopAfterRecovery = await apiClient.stopSession({
+      session_id: sessionId,
+      reason: "Verify a later strict resume failure keeps its own recovery controls",
+      force: true,
     });
+    expect(stopAfterRecovery.success).toBe(true);
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "CANCELLED",
+      message: "The recovered provider conversation should stop without losing its identity",
+      timeout: 60_000,
+    });
+    try {
+      await apiClient.launchSession({ task_id: task.id, session_id: sessionId }, 60_000);
+    } catch {
+      // Strict startup is expected to reject the same saved selections again.
+    }
+    await expect
+      .poll(
+        () => readACPTrace(tracePath).filter((event) => event.event === "session_load").length,
+        {
+          timeout: 60_000,
+          message: "the later strict resume should load the preserved ACP conversation",
+        },
+      )
+      .toBeGreaterThan(beforeLaterStrictResumeLoads);
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "FAILED",
+      message: "The later strict resume should fail on the unchanged saved selections",
+      timeout: 60_000,
+    });
+    const laterRecoveryCard = session.activeChat().getByTestId("session-recovery-card");
+    await expect(
+      laterRecoveryCard.getByRole("heading", { name: "Saved model unavailable" }),
+    ).toBeVisible();
+    await expect(session.recoveryResumeButton()).toBeVisible();
+    await expect(
+      session.activeChat().getByTestId("session-recovery-resolved").first(),
+    ).toBeVisible();
+    await expectProviderRestoredResumeNotice(page, backend.tmpDir, sessionId, 1);
+    expect(readTaskSessionMetadata(backend.tmpDir, sessionId).runtime_config_overrides).toEqual(
+      savedOverrides,
+    );
+    expect((await readSessionRuntimeIdentity(apiClient, task.id, sessionId)).acpSessionId).toBe(
+      originalIdentity.acpSessionId,
+    );
+
+    await activate(session.recoveryResumeButton(), mobile);
+    await expect.poll(() => recovery.requestCounts.resume ?? 0).toBe(3);
+    await expect
+      .poll(
+        () => {
+          const requestId = recovery.requestIds.resume;
+          return requestId ? recovery.responses.get(requestId) : undefined;
+        },
+        {
+          timeout: 60_000,
+          message: "provider-restored recovery should succeed again after the later strict failure",
+        },
+      )
+      .toMatchObject({ type: "response" });
+    await session.waitForChatIdle({ timeout: 60_000 });
+    await expectProviderRestoredResumeNotice(page, backend.tmpDir, sessionId, 2);
+    await expect(session.recoveryResumeButton()).toHaveCount(0);
+
+    await sendRecoveryPrompt(session, mobile, "/e2e:empty-turn");
+    await expect(session.activeChat()).toContainText(EMPTY_TURN_COMMAND_HINT, { timeout: 30_000 });
+    await expect(session.activeChat()).not.toContainText(EMPTY_TURN_NO_OUTPUT_NOTICE);
     await assertNoDocumentHorizontalOverflow(page, "reloaded provider-restored recovery notice");
   } catch (error) {
     await attachRecoveryDiagnostics({

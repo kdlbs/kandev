@@ -12,9 +12,12 @@ owners:
 
 Saved prompts can be referenced in user messages with an `@name` alias. The
 transcript already presents recognized aliases as prompt chips, but the same
-message content is rendered differently in the anchored last-prompt bar and
-Prompt history. Consistent presentation lets users identify referenced prompt
-content regardless of which transcript surface they are reading.
+message content is rendered differently in the anchored last-prompt bar.
+Consistent presentation lets users identify referenced prompt content
+regardless of which transcript surface they are reading. Plugins render
+single-line prompt rows through the Host capability this contract exposes;
+the removed built-in panel is described by
+[Prompt History Leaves Core](../../plugins/requirements/prompt-history-extraction.md).
 
 ## Terminology
 
@@ -31,14 +34,14 @@ content regardless of which transcript surface they are reading.
 surfaces without changing the message content sent to agents.
 
 **User story:** As a task reader, I want saved prompt aliases to look the same
-in the transcript, pinned last-prompt bar, and Prompt history, so that I can
-recognize referenced prompts while reviewing any surface.
+in the transcript and pinned last-prompt bar, so that I can recognize
+referenced prompts while reviewing any surface.
 
 #### Acceptance criteria
 
 - **AC-UI-PROMPT-ALIAS-001.1:** When a user message contains an alias matching a
-  saved prompt, the transcript, anchored last-prompt bar, and Prompt history
-  shall render that alias as the same prompt chip, including its saved-prompt
+  saved prompt, the transcript and anchored last-prompt bar shall render that
+  alias as the same prompt chip, including its saved-prompt
   name metadata and hover preview when the saved prompt has content.
 - **AC-UI-PROMPT-ALIAS-001.2:** When a user message contains an unrecognized
   `@` token, each surface shall leave it as ordinary text using the existing
@@ -48,15 +51,17 @@ recognize referenced prompts while reviewing any surface.
   existing Markdown structures supported by the transcript renderer. Rich
   Markdown code spans and link destinations shall remain ordinary rendered
   content, while aliases in link labels may use the chip's visual treatment
-  without creating nested interactive controls. The pinned and history surfaces
-  shall preserve their current compact, expandable, and scrollable behavior.
+  without creating nested interactive controls. The pinned surface shall
+  preserve its current compact, expandable, and scrollable behavior.
 - **AC-UI-PROMPT-ALIAS-001.4:** Updating the saved prompt collection shall update
-  alias chip recognition and hover content in mounted pinned or history views;
+  alias chip recognition and hover content in mounted pinned views;
   the fix shall not alter persisted message text, prompt expansion semantics, or
   the raw-message view.
 - **AC-UI-PROMPT-ALIAS-001.5:** The presentation shall remain available on
-  desktop and phone Prompt history surfaces, while preserving the existing
-  desktop-only visibility rule for the anchored last-prompt bar.
+  desktop and phone task transcript surfaces, while preserving the existing
+  desktop-only visibility rule for the anchored last-prompt bar. The Host
+  capability that lets plugins render the same chip
+  (`host.ui.PromptMentionText`) remains available.
 
 ### REQ-UI-PROMPT-ALIAS-002: Editable references in task creation
 
@@ -108,7 +113,7 @@ This extends the reusable alias presentation contract beyond transcript views.
   and removal targets shall each measure at least 44px in both dimensions.
   Both controls shall stay inside the same chip border with distinct hit areas.
   Activating removal shall not open a preview or submit the form.
-  Desktop transcript, pinned-prompt, and history chip sizing shall remain unchanged.
+  Desktop transcript and pinned-prompt chip sizing shall remain unchanged.
 
 ## Out of scope
 

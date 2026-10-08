@@ -19,6 +19,7 @@ const (
 	kubernetesStatusCompleted = "completed"
 	kubernetesStatusFailed    = "failed"
 	kubernetesStatusUnknown   = "unknown"
+	kubernetesStatusStopping  = "stopping"
 	kubernetesStatusPVCName   = "pvc_name"
 	kubernetesStatusWorkspace = "workspace_mode"
 )
@@ -162,7 +163,7 @@ func kubernetesRemotePodState(
 		}
 	}
 	if projection.state != kubernetesStatusFailed && projection.state != kubernetesStatusCompleted {
-		if reason := kubernetesPodAvailabilityReason(pod); reason != "" {
+		if reason := kubernetesPodAvailabilityReason(pod); reason != "" && (projection.state != kubernetesStatusStopping || reason == models.ExecutorReasonWorkerUnavailable) {
 			projection.state, projection.ready, projection.reason = kubernetesStatusUnknown, false, reason
 			projection.message = ""
 		}
@@ -185,7 +186,7 @@ func kubernetesPodPhaseProjection(pod *corev1.Pod) kubernetesPodStatusProjection
 		state: kubernetesStatusUnknown, reason: pod.Status.Reason, message: pod.Status.Message,
 	}
 	if pod.DeletionTimestamp != nil {
-		projection.state = "stopping"
+		projection.state = kubernetesStatusStopping
 		return projection
 	}
 	switch pod.Status.Phase {
@@ -242,7 +243,7 @@ var _ RemoteStatusProvider = (*KubernetesExecutor)(nil)
 func kubernetesPodControlPreflight(pod *corev1.Pod, mainContainer string) error {
 	state, _, _, _, _, _ := kubernetesRemotePodState(pod, mainContainer)
 	observation := kubernetesExecutorObservation(pod, mainContainer, time.Now().UTC())
-	if state != kubernetesStatusFailed && state != kubernetesStatusCompleted && state != "stopping" && !observation.ReportedUnavailable() {
+	if state != kubernetesStatusFailed && state != kubernetesStatusCompleted && state != kubernetesStatusStopping && !observation.ReportedUnavailable() {
 		return nil
 	}
 	return &ExecutorUnavailableError{Observation: observation}

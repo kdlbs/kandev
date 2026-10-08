@@ -1,9 +1,15 @@
 import { test, expect } from "../../fixtures/test-base";
+import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import path from "node:path";
 import {
   assertProgressiveNavigation,
+  seedNavigationBranch,
   seedNavigationTasks,
   showNavigationFiles,
 } from "./task-navigation-helpers";
+import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { routeNavigationResponses } from "../../helpers/navigation-response-hold";
 import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
@@ -11,6 +17,62 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
 // @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.3 AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.4 AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5
+test("navigation branch setup leaves a dirty shared checkout untouched", async ({
+  backend,
+  seedData,
+}) => {
+  const sharedGit = new GitHelper(seedData.repositoryPath, makeGitEnv(backend.tmpDir));
+  const sharedState = {
+    branch: sharedGit.exec("git branch --show-current"),
+    status: sharedGit.exec("git status --porcelain"),
+  };
+  const fixtureBackend = {
+    ...backend,
+    tmpDir: mkdtempSync(path.join(backend.tmpDir, "navigation-dirty-")),
+  };
+  const repositoryPath = path.join(fixtureBackend.tmpDir, "repos", "e2e-repo");
+  mkdirSync(path.dirname(repositoryPath), { recursive: true });
+  execFileSync("git", ["clone", seedData.repositoryRemoteURL, repositoryPath], {
+    env: makeGitEnv(fixtureBackend.tmpDir),
+  });
+  const git = new GitHelper(repositoryPath, makeGitEnv(fixtureBackend.tmpDir));
+  const originalBranch = git.exec("git branch --show-current").trim();
+  const dirtyBranch = `e2e-navigation-dirty-${randomUUID()}`;
+  const mainFile = git.exec("git show origin/main:walkthrough_base.txt");
+  git.exec(`git checkout -b ${dirtyBranch} origin/main`);
+  const committedBranchFile = `${mainFile}committed navigation branch state\n`;
+  git.modifyFile("walkthrough_base.txt", committedBranchFile);
+  git.stageFile("walkthrough_base.txt");
+  git.commit("seed divergent navigation checkout");
+  git.modifyFile(
+    "walkthrough_base.txt",
+    `${committedBranchFile}navigation fixture dirty-checkout sentinel\n`,
+  );
+  let seededBranch: string | undefined;
+  try {
+    seededBranch = seedNavigationBranch(fixtureBackend);
+    expect(git.exec("git branch --show-current").trim()).toBe(dirtyBranch);
+    expect(git.exec("git diff -- walkthrough_base.txt")).toContain(
+      "navigation fixture dirty-checkout sentinel",
+    );
+    expect(git.exec(`git ls-remote --heads origin ${seededBranch}`)).toContain(seededBranch);
+    expect({
+      branch: sharedGit.exec("git branch --show-current"),
+      status: sharedGit.exec("git status --porcelain"),
+    }).toEqual(sharedState);
+  } finally {
+    git.exec("git restore -- walkthrough_base.txt");
+    git.exec(`git checkout ${originalBranch}`);
+    git.exec(`git branch -D ${dirtyBranch}`);
+    if (seededBranch) {
+      git.exec(`git push origin --delete ${seededBranch}`);
+      if (git.exec(`git branch --list ${seededBranch}`).trim())
+        git.exec(`git branch -D ${seededBranch}`);
+    }
+    rmSync(fixtureBackend.tmpDir, { recursive: true, force: true });
+  }
+});
+
 test("Files stays usable during restoration, retry, and return navigation", async ({
   testPage,
   apiClient,

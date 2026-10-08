@@ -348,6 +348,61 @@ func contributionPreflightDisplayLabel(key string) string {
 	return key
 }
 
+func cloneBootMessageForUpdate(message *models.Message) *models.Message {
+	clone := *message
+	clone.Metadata = make(map[string]interface{}, len(message.Metadata))
+	for key, value := range message.Metadata {
+		clone.Metadata[key] = value
+	}
+	return &clone
+}
+
+func (m *Manager) updateBootMessage(
+	execution *AgentExecution,
+	message *models.Message,
+	final bool,
+	update func(*models.Message),
+) {
+	if message == nil || m.bootMessageService == nil {
+		return
+	}
+	if execution != nil {
+		execution.bootMessageMu.Lock()
+		defer execution.bootMessageMu.Unlock()
+		if execution.bootMessageFinalized && !final {
+			return
+		}
+		if final {
+			execution.bootMessageFinalized = true
+		}
+	}
+	if message.Metadata == nil {
+		message.Metadata = make(map[string]interface{})
+	}
+	update(message)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := m.bootMessageService.UpdateMessage(ctx, cloneBootMessageForUpdate(message)); err != nil {
+		if final {
+			m.logger.Warn("failed to update agent boot message",
+				zap.String("message_id", message.ID),
+				zap.Error(err))
+		} else {
+			m.logger.Debug("failed to update agent boot message",
+				zap.String("message_id", message.ID),
+				zap.Error(err))
+		}
+	}
+}
+
+func (m *Manager) updateBootMessageStartupRetryProgress(execution *AgentExecution, message *models.Message) {
+	m.updateBootMessage(execution, message, false, func(message *models.Message) {
+		message.Metadata["startup_retrying"] = true
+		message.Metadata["startup_retry_attempt"] = 2
+		message.Metadata["startup_retry_max_attempts"] = 2
+	})
+}
+
 // pollAgentStderr polls the agent's stderr buffer every 2 seconds and updates the boot message.
 func (m *Manager) pollAgentStderr(execution *AgentExecution, msg *models.Message, stopCh chan struct{}) {
 	ticker := time.NewTicker(2 * time.Second)
@@ -377,14 +432,10 @@ func (m *Manager) pollAgentStderr(execution *AgentExecution, msg *models.Message
 
 			if len(lines) > lastLineCount {
 				lastLineCount = len(lines)
-				msg.Content = strings.Join(lines, "\n")
-				ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
-				if updateErr := m.bootMessageService.UpdateMessage(ctx2, msg); updateErr != nil {
-					m.logger.Debug("failed to update boot message with stderr",
-						zap.String("message_id", msg.ID),
-						zap.Error(updateErr))
-				}
-				cancel2()
+				content := strings.Join(lines, "\n")
+				m.updateBootMessage(execution, msg, false, func(message *models.Message) {
+					message.Content = content
+				})
 			}
 		}
 	}
@@ -408,29 +459,28 @@ func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Mes
 		client, releaseClient := execution.AcquireAgentCtlClient()
 		var lines []string
 		var err error
+		stderrSnapshotAvailable := client != nil
 		if client != nil {
 			lines, err = client.GetAgentStderr(ctx)
 			releaseClient()
 		}
 		cancel()
-		if err == nil && len(lines) > 0 {
-			msg.Content = strings.Join(lines, "\n")
+		if stderrSnapshotAvailable && err == nil {
+			content := strings.Join(lines, "\n")
+			m.updateBootMessage(execution, msg, true, func(message *models.Message) {
+				message.Content = content
+			})
 		}
 	}
 
-	msg.Metadata["status"] = status
-	msg.Metadata["completed_at"] = time.Now().UTC().Format(time.RFC3339Nano)
-	if status == containerStateExited {
-		msg.Metadata["exit_code"] = 0
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if updateErr := m.bootMessageService.UpdateMessage(ctx, msg); updateErr != nil {
-		m.logger.Warn("failed to update boot message with final status",
-			zap.String("message_id", msg.ID),
-			zap.Error(updateErr))
-	}
+	m.updateBootMessage(execution, msg, true, func(message *models.Message) {
+		message.Metadata["status"] = status
+		message.Metadata["completed_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+		delete(message.Metadata, "startup_retrying")
+		if status == containerStateExited {
+			message.Metadata["exit_code"] = 0
+		}
+	})
 }
 
 // buildEnvForExecution builds environment variables for any runtime.
@@ -513,25 +563,54 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 }
 
 func (m *Manager) prepareManagedGoCacheEnvironment(ctx context.Context, req *LaunchRequest) error {
-	if req == nil || m.managedGoCache == nil || !isHostLocalExecutor(req.ExecutorType) {
+	if req == nil {
 		return nil
 	}
+	if req.Metadata != nil {
+		managedMetadata := make(map[string]interface{}, len(req.Metadata))
+		for key, value := range req.Metadata {
+			managedMetadata[key] = value
+		}
+		delete(managedMetadata, managedGoCacheMetadataKey)
+		req.Metadata = managedMetadata
+	}
+	req.managedGoCachePath = ""
+	warnFallback := func(reason string) {
+		fields := []zap.Field{zap.String("reason", reason)}
+		if req.TaskID != "" {
+			fields = append(fields, zap.String("task_id", req.TaskID))
+		}
+		if req.SessionID != "" {
+			fields = append(fields, zap.String("session_id", req.SessionID))
+		}
+		m.logger.Warn("managed Go cache preparation skipped; continuing without managed override", fields...)
+	}
+	if m.managedGoCache == nil || !isHostLocalExecutor(req.ExecutorType) {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	env, err := m.managedGoCache.ExecutionEnvironment(ctx)
+	if contextErr := ctx.Err(); contextErr != nil {
+		return contextErr
+	}
 	if err != nil {
-		return fmt.Errorf("prepare managed Go cache: %w", err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("prepare managed Go cache: %w", err)
+		}
+		warnFallback("preparation_failed")
+		return nil
 	}
 	path := env["GOCACHE"]
 	if path == "" {
 		return nil
 	}
 	if !filepath.IsAbs(path) {
-		return fmt.Errorf("managed GOCACHE must be absolute: %q", path)
+		warnFallback("invalid_output")
+		return nil
 	}
 	path = filepath.Clean(path)
-	if req.Env == nil {
-		req.Env = make(map[string]string)
-	}
-	req.Env["GOCACHE"] = path
 	if req.Metadata == nil {
 		req.Metadata = make(map[string]interface{})
 	}
@@ -578,6 +657,14 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 		m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlError, execution, err.Error())
 		return
 	}
+	// Comparison configuration must arrive before readiness exposes workspace
+	// access or the cached poll mode starts fresh Git scans.
+	client, releaseClient = execution.AcquireAgentCtlClient()
+	if client != nil {
+		m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
+		m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
+		releaseClient()
+	}
 	execution.MarkAgentctlReady()
 
 	elapsed := time.Since(opStart)
@@ -595,17 +682,6 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	// default slow poll mode even though the frontend already sent focus,
 	// and git state updates take up to 30s to reach the UI.
 	m.flushCachedPollMode(execution.SessionID)
-	// Seed the workspace's per-repo base-branch map. LaunchRequest metadata
-	// only carries it on the full launch path, so workspaces created by an
-	// agent starting on an already-prepared workspace, or by lazy recovery
-	// after a restart, would otherwise have none — and their branch diff stat
-	// would silently fall back to an integration branch.
-	client, releaseClient = execution.AcquireAgentCtlClient()
-	if client != nil {
-		m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
-		m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
-		releaseClient()
-	}
 	// Use the timeout context for event publishing instead of a fresh Background context
 	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
 }

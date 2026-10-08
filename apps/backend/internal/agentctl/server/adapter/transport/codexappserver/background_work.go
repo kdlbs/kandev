@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -104,7 +105,13 @@ func (a *Adapter) ListBackgroundWorkloads(ctx context.Context, sessionID string)
 	now := time.Now().UTC()
 
 	// Background terminals
-	for _, term := range a.backgrounds {
+	termIDs := make([]string, 0, len(a.backgrounds))
+	for id := range a.backgrounds {
+		termIDs = append(termIDs, id)
+	}
+	sort.Strings(termIDs)
+	for _, id := range termIDs {
+		term := a.backgrounds[id]
 		workloads = append(workloads, streams.WorkloadRunObservation{
 			SessionID:    threadID,
 			WorkID:       term.ItemID,
@@ -119,7 +126,13 @@ func (a *Adapter) ListBackgroundWorkloads(ctx context.Context, sessionID string)
 	}
 
 	// Subagents
-	for childThreadID, binding := range a.children {
+	childIDs := make([]string, 0, len(a.children))
+	for id := range a.children {
+		childIDs = append(childIDs, id)
+	}
+	sort.Strings(childIDs)
+	for _, childThreadID := range childIDs {
+		binding := a.children[childThreadID]
 		status := a.childStatuses[binding.toolCallID]
 		if status == "" {
 			status = a.childStatuses[childThreadID]

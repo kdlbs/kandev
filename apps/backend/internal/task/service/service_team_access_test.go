@@ -441,6 +441,71 @@ func TestCallerOwnedMessageUsesAuthenticatedAuthor(t *testing.T) {
 }
 
 // A lookup failure must never read as "granted".
+// A coordinator conversation task's message.add requires workspace.manage,
+// not the ordinary session.prompt every other task accepts
+// (docs/specs/coordinator/system-design/copilot.md#attended-only,
+// AC-COORDINATOR-COPILOT-002.3): a workspace.read/session.prompt-only
+// collaborator is refused and starts no turn, while a workspace.manage owner
+// succeeds.
+func TestCoordinatorConversationMessageRequiresWorkspaceManage(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedTeamWorkspace(t, repo, true)
+	if err := repo.CreateTask(context.Background(), &models.Task{
+		ID: "task-coordinator-convo", WorkspaceID: "ws-team", Title: "Coordinator: Nova",
+		IsEphemeral: true, Origin: models.TaskOriginCoordinator, State: v1.TaskStateCreated, Priority: "medium",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: "session-coordinator-convo", TaskID: "task-coordinator-convo", State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("create task session: %v", err)
+	}
+	request := &CreateMessageRequest{
+		TaskSessionID: "session-coordinator-convo", TaskID: "task-coordinator-convo",
+		Content: "why is this here",
+	}
+
+	collaborator := ctxAsRole("user-bruno", authn.RoleMember)
+	if _, err := svc.CreateMessageIdempotent(collaborator, "coordinator-convo-message-1", request); !IsForbidden(err) {
+		t.Fatalf("collaborator (workspace.read + session.prompt) = %v, want ErrForbidden", err)
+	}
+
+	owner := ctxAsRole("user-ana", authn.RoleMember)
+	if _, err := svc.CreateMessageIdempotent(owner, "coordinator-convo-message-2", request); err != nil {
+		t.Fatalf("owner (workspace.manage) CreateMessageIdempotent = %v, want success", err)
+	}
+}
+
+// session.launch is a separate transport from message.add, and must enforce
+// the same attended-only restriction: a coordinator conversation task's turn
+// can only be started by a manager (workspace.manage), never by a
+// session.prompt-only collaborator (docs/specs/coordinator/system-design/
+// copilot.md#attended-only, AC-COORDINATOR-COPILOT-002.3).
+// AuthorizeTaskPromptScope is the chokepoint backendapp wires into the
+// orchestrator's task-prompt checker for session.launch, so this proves the
+// scope upgrade independently of the message.add transport.
+func TestCoordinatorConversationLaunchRequiresWorkspaceManage(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedTeamWorkspace(t, repo, true)
+	if err := repo.CreateTask(context.Background(), &models.Task{
+		ID: "task-coordinator-launch", WorkspaceID: "ws-team", Title: "Coordinator: Nova",
+		IsEphemeral: true, Origin: models.TaskOriginCoordinator, State: v1.TaskStateCreated, Priority: "medium",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	collaborator := ctxAsRole("user-bruno", authn.RoleMember)
+	if err := svc.AuthorizeTaskPromptScope(collaborator, "task-coordinator-launch"); !IsForbidden(err) {
+		t.Fatalf("collaborator (workspace.read + session.prompt) AuthorizeTaskPromptScope = %v, want ErrForbidden", err)
+	}
+
+	owner := ctxAsRole("user-ana", authn.RoleMember)
+	if err := svc.AuthorizeTaskPromptScope(owner, "task-coordinator-launch"); err != nil {
+		t.Fatalf("owner (workspace.manage) AuthorizeTaskPromptScope = %v, want success", err)
+	}
+}
+
 func TestAuthorizationFailsClosedOnLookupError(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedTeamWorkspace(t, repo, false)

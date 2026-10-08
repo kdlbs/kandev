@@ -35,6 +35,7 @@ export function useSettingsBreadcrumbs(pathname: string): SettingsBreadcrumbs {
   const settingsAgents = useAppStore((s) => s.settingsAgents.items);
   const executors = useAppStore((s) => s.executors.items);
   const automations = useAppStore((s) => s.automations.items);
+  const automationLists = useAppStore((s) => s.automations.byWorkspace);
 
   const values = useMemo<CrumbValues>(
     () => ({
@@ -57,9 +58,8 @@ export function useSettingsBreadcrumbs(pathname: string): SettingsBreadcrumbs {
 
       automationName: ({ workspaceId, automationId }) => {
         if (!automationId) return null;
-        const automation = automations.find((item) => item.id === automationId);
-        // The store holds one workspace's automations at a time (`useAutomations`
-        // refetches on switch), so a hit from another workspace is stale data.
+        const scoped = workspaceId ? automationLists?.[workspaceId]?.items : undefined;
+        const automation = (scoped ?? automations).find((item) => item.id === automationId);
         if (!automation || (workspaceId && automation.workspace_id !== workspaceId)) return null;
         return automation.name;
       },
@@ -93,7 +93,16 @@ export function useSettingsBreadcrumbs(pathname: string): SettingsBreadcrumbs {
       pluginName: ({ pluginId }) =>
         pluginId ? (pluginRegistry.getPluginName(pluginId) ?? null) : null,
     }),
-    [workspaces, availableAgents, settingsAgents, executors, automations, pluginRegistry, t],
+    [
+      workspaces,
+      availableAgents,
+      settingsAgents,
+      executors,
+      automations,
+      automationLists,
+      pluginRegistry,
+      t,
+    ],
   );
 
   return resolveSettingsBreadcrumbs(pathname, t, values);

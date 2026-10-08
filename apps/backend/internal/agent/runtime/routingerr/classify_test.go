@@ -92,6 +92,122 @@ func TestClassify_ProviderRules(t *testing.T) {
 	}
 }
 
+// @covers AC-AGENTS-CLAUDE-SESSION-LIMIT-001.1
+func TestClassifyClaudeSessionLimit(t *testing.T) {
+	resetInjection()
+	for _, tc := range []struct {
+		name  string
+		phase Phase
+		text  string
+	}{
+		{
+			name:  "observed notice during streaming",
+			phase: PhaseStreaming,
+			text:  "Internal error: You've hit your session limit · resets 11:10am (Europe/Helsinki)",
+		},
+		{
+			name:  "curly apostrophe during prompt send",
+			phase: PhasePromptSend,
+			text:  "You've hit your session limit",
+		},
+		{
+			name:  "you have with case and whitespace differences",
+			phase: PhaseStreaming,
+			text:  "YOU   HAVE hit\tyour session   limit. Resets 11am (Europe/Helsinki)",
+		},
+		{
+			name:  "curly apostrophe and case differences",
+			phase: PhasePromptSend,
+			text:  "YOU’VE HIT YOUR SESSION LIMIT",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := Classify(Input{Phase: tc.phase, ProviderID: "claude-acp", Stderr: tc.text})
+			if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh || e.Class != ClassHard {
+				t.Fatalf("classification = %+v, want high-confidence hard quota_limited", e)
+			}
+			if e.ClassifierRule != "claude.stderr.session_limit.v1" {
+				t.Fatalf("classifier rule = %q, want claude.stderr.session_limit.v1", e.ClassifierRule)
+			}
+			if !e.FallbackAllowed || !e.AutoRetryable || e.UserAction {
+				t.Fatalf("session-limit recovery flags violated: %+v", e)
+			}
+		})
+	}
+}
+
+// @covers AC-AGENTS-CLAUDE-SESSION-LIMIT-001.7
+func TestClassifyClaudeSessionLimitRejectsUnrelatedText(t *testing.T) {
+	resetInjection()
+	for _, tc := range []struct {
+		name     string
+		provider string
+		text     string
+		want     Code
+	}{
+		{name: "different provider", provider: "codex-acp", text: "You've hit your session limit", want: CodeAgentRuntime},
+		{name: "bare phrase", provider: "claude-acp", text: "session limit", want: CodeAgentRuntime},
+		{name: "approaching limit", provider: "claude-acp", text: "You're approaching your session limit", want: CodeAgentRuntime},
+		{name: "limit suffix", provider: "claude-acp", text: "You've hit your session limitless", want: CodeAgentRuntime},
+		{name: "rate limit remains transient", provider: "claude-acp", text: "You've hit your rate limit", want: CodeRateLimited},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := Classify(Input{Phase: PhaseStreaming, ProviderID: tc.provider, Stderr: tc.text})
+			if e.Code != tc.want {
+				t.Fatalf("classification = %+v, want %s", e, tc.want)
+			}
+			if tc.want == CodeRateLimited && e.Class != ClassTransient {
+				t.Fatalf("rate-limit class = %s, want transient", e.Class)
+			}
+		})
+	}
+}
+
+// @covers AC-AGENTS-CLAUDE-SESSION-LIMIT-001.5
+func TestClassifyClaudeResetHintPrecedence(t *testing.T) {
+	resetInjection()
+	structured := time.Date(2030, time.January, 2, 4, 5, 0, 0, time.UTC)
+	e := Classify(Input{
+		Phase:      PhaseStreaming,
+		ProviderID: "claude-acp",
+		Stderr:     "You've hit your session limit · resets 11:10am (Europe/Helsinki)",
+		ResetHint:  &structured,
+	})
+	if e.Code != CodeQuotaLimited || e.ResetHint == nil || !e.ResetHint.Equal(structured) {
+		t.Fatalf("classification = %+v, want quota with structured reset hint %v", e, structured)
+	}
+}
+
+// @covers AC-AGENTS-CLAUDE-SESSION-LIMIT-001.4
+func TestClassifyClaudeInvalidResetClockKeepsQuotaClassification(t *testing.T) {
+	resetInjection()
+	e := Classify(Input{
+		Phase:      PhaseStreaming,
+		ProviderID: "claude-acp",
+		Stderr:     "You've hit your session limit · resets 13:70am (Europe/Helsinki)",
+	})
+	if e.Code != CodeQuotaLimited || e.Class != ClassHard || e.Confidence != ConfHigh || !e.FallbackAllowed {
+		t.Fatalf("classification = %+v, want hard quota despite invalid clock", e)
+	}
+	if e.ResetHint != nil {
+		t.Fatalf("ResetHint = %v, want no hint for invalid clock", e.ResetHint)
+	}
+}
+
+// @covers AC-AGENTS-CLAUDE-SESSION-LIMIT-001.5
+func TestClassifyClaudeStructuredHTTPStatusPrecedence(t *testing.T) {
+	resetInjection()
+	e := Classify(Input{
+		Phase:      PhaseStreaming,
+		ProviderID: "claude-acp",
+		HTTPStatus: http.StatusPaymentRequired,
+		Stderr:     "You've hit your session limit · resets 11:10am (Europe/Helsinki)",
+	})
+	if e.Code != CodeSubscriptionRequired || e.ClassifierRule != "http.402" {
+		t.Fatalf("classification = %+v, want structured HTTP 402 precedence", e)
+	}
+}
+
 func TestClassify_ProviderNeutralTransientSignals(t *testing.T) {
 	resetInjection()
 	cases := []struct {
@@ -219,6 +335,114 @@ func TestClassify_OpenCodePeriodUsageLimitsAreHighConfidenceQuota(t *testing.T) 
 		if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh {
 			t.Fatalf("classification of %q = %+v, want high-confidence quota_limited", stderr, e)
 		}
+	}
+}
+
+func TestClassify_OpenCodeWeeklyResetClockDoesNotBecomeDailyHint(t *testing.T) {
+	resetInjection()
+	e := Classify(Input{
+		Phase:      PhaseStreaming,
+		ProviderID: "opencode-acp",
+		Stderr:     "AI_APICallError: Weekly usage limit reached · resets 11am (America/New_York)",
+	})
+	if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh {
+		t.Fatalf("classification = %+v, want high-confidence quota_limited", e)
+	}
+	if e.ResetHint != nil {
+		t.Fatalf("ResetHint = %v, want no daily hint for a weekly reset notice", e.ResetHint)
+	}
+}
+
+func TestClassify_OpenCodeCreditLimitReachedIsHighConfidenceQuota(t *testing.T) {
+	resetInjection()
+	cases := []struct {
+		name   string
+		stderr string
+	}{
+		{"observed DevPass message", "AI_APICallError: Dev Plan credit limit reached. Upgrade your plan or wait for renewal on 10/08/2026 Or enable pay-as-you-go overflow in your DevPass dashboard to keep going past your allowance"},
+		{"plural credits exhausted", "AI_APICallError: out of credits"},
+		{"singular credit exhausted", "AI_APICallError: out of credit"},
+		{"insufficient plural credits", "AI_APICallError: insufficient credits for this request"},
+		{"insufficient singular credit", "AI_APICallError: insufficient credit"},
+		{"insufficient balance", "AI_APICallError: insufficient balance"},
+		{"case insensitive", "AI_APICallError: CREDIT LIMIT REACHED"},
+		{"variable whitespace", "AI_APICallError: out\t of  credits"},
+		{"payment with exhausted allowance", "AI_APICallError: payment required: credit limit reached"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := Classify(Input{
+				Phase:      PhaseStreaming,
+				ProviderID: "opencode-acp",
+				Stderr:     tc.stderr,
+			})
+			if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh || e.Class != ClassHard {
+				t.Fatalf("classification = %+v, want high-confidence hard quota_limited", e)
+			}
+			if e.ClassifierRule != "opencode.stderr.credit.v1" {
+				t.Fatalf("classifier rule = %s, want opencode.stderr.credit.v1", e.ClassifierRule)
+			}
+			if !e.FallbackAllowed || !e.AutoRetryable || e.UserAction {
+				t.Fatalf("credit exhaustion recovery flags violated: %+v", e)
+			}
+		})
+	}
+}
+
+func TestClassify_OpenCodeCreditRuleRejectsUnrelatedText(t *testing.T) {
+	resetInjection()
+	cases := []struct {
+		name     string
+		provider string
+		stderr   string
+	}{
+		{"bare credit", "opencode-acp", "credit"},
+		{"bare credits", "opencode-acp", "credits"},
+		{"purchase suggestion", "opencode-acp", "Visit the dashboard to purchase more credits"},
+		{"allowance remains", "opencode-acp", "Your credit limit is approaching"},
+		{"leading word boundary", "opencode-acp", "discredit limit reached"},
+		{"trailing word boundary", "opencode-acp", "out of creditsuffix"},
+		{"credit word suffix", "opencode-acp", "insufficient creditworthiness"},
+		{"other provider", "codex-acp", "credit limit reached"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := Classify(Input{Phase: PhaseStreaming, ProviderID: tc.provider, Stderr: tc.stderr})
+			if e.Code != CodeAgentRuntime || e.Confidence != ConfLow || e.FallbackAllowed {
+				t.Fatalf("unrelated credit text must retain ambiguous post-start recovery: %+v", e)
+			}
+		})
+	}
+}
+
+func TestClassify_OpenCodePaymentRequiredNeedsUserAction(t *testing.T) {
+	resetInjection()
+	cases := []struct {
+		name       string
+		stderr     string
+		httpStatus int
+		wantRule   string
+	}{
+		{"plain payment error", "AI_APICallError: payment required to continue", 0, "opencode.stderr.subscription.v1"},
+		{"case and whitespace", "AI_APICallError: PAYMENT\tREQUIRED", 0, "opencode.stderr.subscription.v1"},
+		{"unrelated credit mention", "payment required: update your credit card", 0, "opencode.stderr.subscription.v1"},
+		{"HTTP status precedes credit text", "AI_APICallError: credit limit reached", http.StatusPaymentRequired, "http.402"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := Classify(Input{
+				Phase:      PhaseStreaming,
+				ProviderID: "opencode-acp",
+				Stderr:     tc.stderr,
+				HTTPStatus: tc.httpStatus,
+			})
+			if e.Code != CodeSubscriptionRequired || e.Confidence != ConfHigh || e.ClassifierRule != tc.wantRule {
+				t.Fatalf("payment classification = %+v, want high-confidence subscription_required via %s", e, tc.wantRule)
+			}
+			if !e.UserAction || e.AutoRetryable || !e.FallbackAllowed {
+				t.Fatalf("payment recovery flags violated: %+v", e)
+			}
+		})
 	}
 }
 

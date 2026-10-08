@@ -57,6 +57,9 @@ func (s *Service) validateSidebarLayoutPatch(
 }
 
 func validateSidebarLayout(layout models.SidebarLayout) error {
+	if layout.NavigationHeight != nil && (*layout.NavigationHeight < 0 || *layout.NavigationHeight > 1600) {
+		return fmt.Errorf("sidebar navigation height must be between 0 and 1600 pixels")
+	}
 	if layout.Version != models.SidebarLayoutVersion {
 		return fmt.Errorf("sidebar layout version %d is unsupported", layout.Version)
 	}
@@ -192,7 +195,7 @@ func validateSidebarShortcutTarget(target models.SidebarShortcutTarget) error {
 
 func isProtectedSidebarDestination(id string) bool {
 	switch id {
-	case "tasks", "inbox", "needs_you_inbox":
+	case "tasks":
 		return true
 	default:
 		return false

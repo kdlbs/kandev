@@ -1,4 +1,5 @@
 import { defineConfig, globalIgnores } from "eslint/config";
+import tanstackQuery from "@tanstack/eslint-plugin-query";
 import js from "@eslint/js";
 import reactHooks from "eslint-plugin-react-hooks";
 import sonarjs from "eslint-plugin-sonarjs";
@@ -55,6 +56,17 @@ const eslintConfig = defineConfig([
         "warn",
         { varsIgnorePattern: "^_", argsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" },
       ],
+    },
+  },
+  {
+    files: ["**/*.ts", "**/*.tsx"],
+    plugins: { "@tanstack/query": tanstackQuery },
+    // no-void-query-fn needs TypeScript parser services, which this config does not enable.
+    rules: {
+      "@tanstack/query/exhaustive-deps": "error",
+      "@tanstack/query/no-rest-destructuring": "warn",
+      "@tanstack/query/no-unstable-deps": "error",
+      "@tanstack/query/stable-query-client": "error",
     },
   },
   // Hardcoded user-facing strings. An ERROR, REPO-WIDE.

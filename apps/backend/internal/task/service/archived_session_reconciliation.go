@@ -49,6 +49,7 @@ func (s *Service) StartSessionReconciliationLoop(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Minute)
 	go func() {
 		defer ticker.Stop()
+		s.ReconcileExecutorFailures(ctx)
 		for {
 			select {
 			case <-ctx.Done():

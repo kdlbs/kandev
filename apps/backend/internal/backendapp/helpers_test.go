@@ -118,7 +118,48 @@ func decodePayload(t *testing.T, raw json.RawMessage) map[string]interface{} {
 	return payload
 }
 
-func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
+func TestAppendAvailableCommandsMessagePreservesProviderMetadata(t *testing.T) {
+	action := &streams.AvailableCommandAction{
+		Kind: "set_config_option", ConfigID: "collaboration_mode", Value: "plan", ResetValue: "default",
+	}
+	commands := []streams.AvailableCommand{{
+		Name: "$retro", Kind: "skill", Description: "Run the skill", InputHint: "context", Action: action,
+	}}
+	result := appendAvailableCommandsMessageForCommands("session-1", &models.TaskSession{TaskID: "task-1"}, commands, nil)
+	if len(result) != 1 {
+		t.Fatalf("notifications = %d, want 1", len(result))
+	}
+	if result[0].Action != ws.ActionSessionAvailableCommands {
+		t.Fatalf("action = %q", result[0].Action)
+	}
+	var payload struct {
+		AvailableCommands []streams.AvailableCommand `json:"available_commands"`
+	}
+	if err := json.Unmarshal(result[0].Payload, &payload); err != nil {
+		t.Fatalf("decode reconnect payload: %v", err)
+	}
+	if len(payload.AvailableCommands) != 1 || payload.AvailableCommands[0].Name != "$retro" || payload.AvailableCommands[0].Kind != "skill" || payload.AvailableCommands[0].InputHint != "context" || payload.AvailableCommands[0].Action == nil || *payload.AvailableCommands[0].Action != *action {
+		t.Fatalf("reconnect commands = %#v", payload.AvailableCommands)
+	}
+}
+
+func TestAppendAvailableCommandsMessageNilLifecycleManagerPreservesResult(t *testing.T) {
+	var lifecycleMgr *lifecycle.Manager
+	existing := &ws.Message{Action: "existing"}
+	result := []*ws.Message{existing}
+
+	got := appendAvailableCommandsMessage(
+		"session-1",
+		&models.TaskSession{TaskID: "task-1"},
+		lifecycleMgr,
+		result,
+	)
+	if len(got) != 1 || got[0] != existing {
+		t.Fatalf("messages = %#v, want the original result unchanged", got)
+	}
+}
+
+func TestBuildGitStatusNotificationHidesUnknownAncestryEvidenceWhileDetailsArePending(t *testing.T) {
 	msg := buildGitStatusNotification("session-1", "env-1", "web", client.GitStatusResult{
 		Branch:           "feature/rewrite",
 		RemoteBranch:     "origin/feature/rewrite",
@@ -129,6 +170,10 @@ func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
 		RemoteAhead:      2,
 		RemoteBehind:     3,
 		RemoteHeadCommit: "remote-head",
+		StatusState:      "ready",
+		FilesComplete:    true,
+		DetailState:      "pending",
+		ErrorCode:        "source_timeout",
 	})
 	if msg == nil {
 		t.Fatal("buildGitStatusNotification returned nil")
@@ -142,14 +187,20 @@ func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
 		t.Fatalf("status payload = %#v, want an object", payload["status"])
 	}
 	for key, want := range map[string]interface{}{
-		"head_commit":        "local-head",
-		"base_commit":        "base-head",
-		"remote_ahead":       float64(2),
-		"remote_behind":      float64(3),
-		"remote_head_commit": "remote-head",
+		"status_state":   "ready",
+		"files_complete": true,
+		"detail_state":   "pending",
+		"error_code":     "source_timeout",
+		"head_commit":    "local-head",
+		"base_commit":    "base-head",
 	} {
 		if got := status[key]; got != want {
 			t.Errorf("status[%q] = %#v, want %#v", key, got, want)
+		}
+	}
+	for _, key := range []string{"ahead", "behind", "remote_ahead", "remote_behind", "remote_head_commit", "branch_additions", "branch_deletions"} {
+		if _, exists := status[key]; exists {
+			t.Errorf("pending detail status leaked unconfirmed field %q: %#v", key, status[key])
 		}
 	}
 }
@@ -2073,22 +2124,23 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	t.Cleanup(func() { _ = workflowSvc.Close() })
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
-			Workspaces:       taskRepo,
-			Tasks:            taskRepo,
-			TaskRepos:        taskRepo,
-			Workflows:        taskRepo,
-			Messages:         taskRepo,
-			Turns:            taskRepo,
-			Sessions:         taskRepo,
-			GitSnapshots:     taskRepo,
-			RepoEntities:     taskRepo,
-			RepositorySets:   taskRepo,
-			Executors:        taskRepo,
-			Environments:     taskRepo,
-			TaskEnvironments: taskRepo,
-			Reviews:          taskRepo,
-			StatusSummaries:  taskRepo,
-			WorkspaceFolders: taskRepo,
+			Workspaces:         taskRepo,
+			Tasks:              taskRepo,
+			TaskRepos:          taskRepo,
+			Workflows:          taskRepo,
+			Messages:           taskRepo,
+			Turns:              taskRepo,
+			Sessions:           taskRepo,
+			GitSnapshots:       taskRepo,
+			RepoEntities:       taskRepo,
+			RepositorySets:     taskRepo,
+			Executors:          taskRepo,
+			Environments:       taskRepo,
+			TaskEnvironments:   taskRepo,
+			RecoveryOperations: taskRepo,
+			Reviews:            taskRepo,
+			StatusSummaries:    taskRepo,
+			WorkspaceFolders:   taskRepo,
 		},
 		eventBus,
 		log,

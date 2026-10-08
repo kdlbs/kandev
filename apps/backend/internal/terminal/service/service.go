@@ -11,6 +11,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -38,6 +40,16 @@ const (
 const (
 	KindOrdinary = "ordinary"
 )
+
+const (
+	cursorMCPAuthenticationPendingTTL  = 5 * time.Minute
+	maxCursorMCPAuthenticationAttempts = 512
+)
+
+type cursorMCPAuthenticationAttempt struct {
+	createdAt time.Time
+	started   bool
+}
 
 // ErrNotManaged is returned by rename/park/resume/destroy when the caller
 // hands in a non-ordinary terminal id (bottom-panel or script-*). The WS
@@ -73,6 +85,8 @@ type Service struct {
 	pty         PTYBackend
 	taskEnvRepo taskEnvironmentReader
 	log         *logger.Logger
+	authMu      sync.Mutex
+	authPending map[string]cursorMCPAuthenticationAttempt
 }
 
 // New constructs a Service.
@@ -102,12 +116,144 @@ func IsManaged(id string) bool {
 type ListItem struct {
 	ID             string  `json:"id"`
 	Kind           string  `json:"kind"`
+	EnvironmentID  string  `json:"-"`
 	Seq            int     `json:"seq"`
 	DisplayName    string  `json:"display_name"`
 	CustomName     *string `json:"custom_name"`
 	State          string  `json:"state"`
 	PTYStatus      string  `json:"pty_status"`
-	InitialCommand string  `json:"initial_command,omitempty"`
+	InitialCommand string  `json:"-"`
+}
+
+// ShellLaunchInfo is the trusted server-side metadata needed to open an
+// ordinary terminal. InitialCommand stays out of terminal-list wire DTOs.
+type ShellLaunchInfo struct {
+	Label              string
+	InitialCommand     string
+	InitialCommandOnce bool
+}
+
+// ShellLaunchInfo returns launch metadata for an ordinary terminal owned by
+// taskID and environmentID. The terminal ID alone is never sufficient to
+// cross task or environment boundaries.
+func (s *Service) ShellLaunchInfo(ctx context.Context, taskID, environmentID, id string) (ShellLaunchInfo, error) {
+	term, err := s.requireOwnership(ctx, taskID, id)
+	if err != nil {
+		return ShellLaunchInfo{}, err
+	}
+	if term.EnvironmentID != environmentID {
+		return ShellLaunchInfo{}, ErrTaskMismatch
+	}
+	return ShellLaunchInfo{
+		Label: term.DisplayName(), InitialCommand: term.InitialCommand,
+		InitialCommandOnce: term.InitialCommandOnce,
+	}, nil
+}
+
+// ClaimShellLaunchInfo returns launch metadata and atomically claims an
+// explicitly one-shot command. Reconnects still receive the terminal label,
+// but never receive a consumed authentication command.
+func (s *Service) ClaimShellLaunchInfo(ctx context.Context, taskID, environmentID, id string) (ShellLaunchInfo, error) {
+	term, err := s.requireOwnership(ctx, taskID, id)
+	if err != nil {
+		return ShellLaunchInfo{}, err
+	}
+	if term.EnvironmentID != environmentID {
+		return ShellLaunchInfo{}, ErrTaskMismatch
+	}
+	initialCommand := term.InitialCommand
+	if term.InitialCommandOnce {
+		claimed, err := s.repo.ConsumeInitialCommandOnce(ctx, taskID, environmentID, id)
+		if err != nil {
+			return ShellLaunchInfo{}, err
+		}
+		if !claimed {
+			initialCommand = ""
+		}
+	}
+	return ShellLaunchInfo{
+		Label: term.DisplayName(), InitialCommand: initialCommand,
+		InitialCommandOnce: term.InitialCommandOnce,
+	}, nil
+}
+
+// MarkCursorMCPAuthenticationAttemptPending records the short period between
+// creating a login terminal and its first shell start. This lets concurrent
+// authenticate requests share one terminal without reusing completed logins.
+func (s *Service) MarkCursorMCPAuthenticationAttemptPending(terminalID string) {
+	if !IsManaged(terminalID) {
+		return
+	}
+	now := time.Now()
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	s.pruneCursorMCPAuthenticationAttemptsLocked(now)
+	if len(s.authPending) >= maxCursorMCPAuthenticationAttempts {
+		var oldestID string
+		var oldest time.Time
+		for id, attempt := range s.authPending {
+			if oldestID == "" || attempt.createdAt.Before(oldest) {
+				oldestID, oldest = id, attempt.createdAt
+			}
+		}
+		delete(s.authPending, oldestID)
+	}
+	if s.authPending == nil {
+		s.authPending = make(map[string]cursorMCPAuthenticationAttempt)
+	}
+	s.authPending[terminalID] = cursorMCPAuthenticationAttempt{createdAt: now}
+}
+
+// MarkCursorMCPAuthenticationAttemptStarted records that the terminal's
+// persisted login command has been handed to its shell. Process liveness then
+// determines whether a later authenticate request should reuse the terminal.
+func (s *Service) MarkCursorMCPAuthenticationAttemptStarted(terminalID string) {
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	attempt, ok := s.authPending[terminalID]
+	if ok {
+		attempt.started = true
+		s.authPending[terminalID] = attempt
+	}
+}
+
+// MarkCursorMCPAuthenticationAttemptFailed clears only the short pending
+// marker. A later explicit Authenticate can create a new one-shot terminal;
+// automatic reconnects still cannot replay its consumed command.
+func (s *Service) MarkCursorMCPAuthenticationAttemptFailed(terminalID string) {
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	delete(s.authPending, terminalID)
+}
+
+// CursorMCPAuthenticationAttemptPending reports whether a matching terminal
+// has not yet started its command. Completed/started attempts are reusable
+// only while their PTY is live.
+func (s *Service) CursorMCPAuthenticationAttemptPending(terminalID string) bool {
+	now := time.Now()
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	s.pruneCursorMCPAuthenticationAttemptsLocked(now)
+	attempt, ok := s.authPending[terminalID]
+	return ok && !attempt.started
+}
+
+func (s *Service) pruneCursorMCPAuthenticationAttemptsLocked(now time.Time) {
+	for id, attempt := range s.authPending {
+		if now.Sub(attempt.createdAt) >= cursorMCPAuthenticationPendingTTL {
+			delete(s.authPending, id)
+		}
+	}
+}
+
+// TerminalListInitialCommand returns a command safe for terminal-list APIs.
+// Native MCP login commands are recovered from storage by the server-side
+// WebSocket path and are never reflected to clients.
+func TerminalListInitialCommand(terminalID, command string) string {
+	if strings.HasPrefix(terminalID, "shell-") {
+		return ""
+	}
+	return command
 }
 
 // Create inserts a new ordinary user terminal for taskID. Generates the
@@ -115,8 +261,19 @@ type ListItem struct {
 // PTY backend so the lazy-start path on first WS stream connect finds the
 // entry.
 func (s *Service) Create(ctx context.Context, taskID, envID, initialCommand string) (*models.Terminal, error) {
+	return s.create(ctx, taskID, envID, initialCommand, false)
+}
+
+// CreateWithOneShotInitialCommand persists a command that can be handed to a
+// shell only once. Native login terminals use this so reconnecting a closed
+// sign-in process cannot launch another login automatically.
+func (s *Service) CreateWithOneShotInitialCommand(ctx context.Context, taskID, envID, initialCommand string) (*models.Terminal, error) {
+	return s.create(ctx, taskID, envID, initialCommand, true)
+}
+
+func (s *Service) create(ctx context.Context, taskID, envID, initialCommand string, once bool) (*models.Terminal, error) {
 	id := "shell-" + uuid.New().String()
-	term, err := s.repo.Create(ctx, taskID, envID, id, initialCommand)
+	term, err := s.repo.CreateWithInitialCommandOnce(ctx, taskID, envID, id, initialCommand, once)
 	if err != nil {
 		return nil, err
 	}
@@ -144,6 +301,7 @@ func (s *Service) List(ctx context.Context, taskID string, includeParked bool) (
 		items = append(items, ListItem{
 			ID:             r.ID,
 			Kind:           KindOrdinary,
+			EnvironmentID:  r.EnvironmentID,
 			Seq:            r.Seq,
 			DisplayName:    r.DisplayName(),
 			CustomName:     r.CustomName,

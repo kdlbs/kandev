@@ -14,6 +14,7 @@ import (
 func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 	tests := []struct {
 		name    string
+		agentID string
 		message string
 	}{
 		{
@@ -40,6 +41,11 @@ func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 		{
 			name:    "unstructured missing rollout phrase",
 			message: "internal error: no rollout found for thread id saved-session",
+		},
+		{
+			name:    "OpenCode missing saved session",
+			agentID: "opencode-acp",
+			message: "Resource not found",
 		},
 	}
 
@@ -71,8 +77,12 @@ func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 			}
 			waitForWSConnected(t, mock)
 
+			agentID := tt.agentID
+			if agentID == "" {
+				agentID = "test-agent"
+			}
 			agentConfig := &testAgent{
-				id:      "test-agent",
+				id:      agentID,
 				enabled: true,
 				runtimeConfig: &agents.RuntimeConfig{
 					Cmd:      agents.NewCommand("test-agent"),

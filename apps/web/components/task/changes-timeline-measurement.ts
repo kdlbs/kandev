@@ -1,3 +1,5 @@
+import type { Virtualizer } from "@tanstack/react-virtual";
+
 export type ChangesTimelineAnchor = {
   key: string;
   index: number;
@@ -6,6 +8,43 @@ export type ChangesTimelineAnchor = {
 
 type TimelineRow = { key: string };
 type MeasuredItem = { index: number; start: number; end: number };
+
+export function refreshChangesTimelineMeasurements(
+  viewport: HTMLDivElement | null,
+  virtualizer: Virtualizer<HTMLDivElement, HTMLDivElement>,
+): void {
+  const measurements = Array.from(
+    viewport?.querySelectorAll<HTMLDivElement>("[data-changes-timeline-row]") ?? [],
+  ).flatMap((element) => {
+    const index = Number(element.dataset.index);
+    if (
+      !element.isConnected ||
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index >= virtualizer.options.count
+    ) {
+      return [];
+    }
+    const key = virtualizer.options.getItemKey(index);
+    if (element.dataset.changesRowKey !== key) return [];
+    const size = element.offsetHeight || virtualizer.itemSizeCache.get(key);
+    return size !== undefined && size > 0 ? [{ element, index, key, size }] : [];
+  });
+
+  // Unchanged mounted rows will not receive another observer entry after cache invalidation.
+  virtualizer.measure();
+  // Rebuild estimated offsets synchronously before restoring the mounted row sizes.
+  virtualizer.getVirtualItems();
+  for (const { element, index, key, size } of measurements) {
+    if (
+      element.isConnected &&
+      index < virtualizer.options.count &&
+      virtualizer.options.getItemKey(index) === key
+    ) {
+      virtualizer.resizeItem(index, size);
+    }
+  }
+}
 
 export function observeChangesTimelinePresentationChanges(
   element: HTMLElement,

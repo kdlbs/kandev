@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -195,6 +196,13 @@ func TestHasActiveResetTurn_ReservedPromptOnly(t *testing.T) {
 func TestResetAgentContext_ActiveTurnAllowsSuccessorPrompt(t *testing.T) {
 	svc, repo, manager, session := newActiveResetTestService(t)
 	manager.isAgentRunning = true
+	manager.cancelAgentEntered = make(chan struct{}, 1)
+	manager.cancelAgentBlock = make(chan struct{})
+	var releaseOnce sync.Once
+	releaseCancellation := func() { releaseOnce.Do(func() { close(manager.cancelAgentBlock) }) }
+	t.Cleanup(releaseCancellation)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
 	manager.promptAgentFunc = func(
 		_ context.Context,
 		_ string,
@@ -206,10 +214,42 @@ func TestResetAgentContext_ActiveTurnAllowsSuccessorPrompt(t *testing.T) {
 		return &executor.PromptResult{}, nil
 	}
 	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
-	svc.messageCreator = &mockMessageCreator{}
 
-	if !svc.resetAgentContext(context.Background(), "task1", session, "Successor") {
-		t.Fatal("resetAgentContext returned false")
+	resetDone := make(chan bool, 1)
+	go func() {
+		resetDone <- svc.resetAgentContext(context.Background(), "task1", session, "Successor")
+	}()
+	select {
+	case <-manager.cancelAgentEntered:
+	case <-time.After(time.Second):
+		t.Fatal("reset did not enter cancellation")
+	}
+	requireResetEvents(t, manager.events, "cancel")
+	select {
+	case event := <-manager.events:
+		t.Fatalf("provider operation %q started before cancellation completed", event)
+	default:
+	}
+	manager.mu.Lock()
+	restartsBeforeCancellation := len(manager.restartProcessCalls)
+	promptsBeforeCancellation := len(manager.capturedPrompts)
+	manager.mu.Unlock()
+	if restartsBeforeCancellation != 0 || promptsBeforeCancellation != 0 {
+		t.Fatalf("provider work began before cancellation completed: resets=%d prompts=%d",
+			restartsBeforeCancellation, promptsBeforeCancellation)
+	}
+	if len(messages.userMessages) != 0 {
+		t.Fatalf("internal cancellation created %d user messages before step start", len(messages.userMessages))
+	}
+
+	releaseCancellation()
+	select {
+	case resetOK := <-resetDone:
+		if !resetOK {
+			t.Fatal("resetAgentContext returned false")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("context reset did not finish after cancellation completion")
 	}
 	resetSession, err := svc.repo.GetTaskSession(context.Background(), "session1")
 	if err != nil {
@@ -229,7 +269,20 @@ func TestResetAgentContext_ActiveTurnAllowsSuccessorPrompt(t *testing.T) {
 		t.Fatalf("auto-start successor prompt: %v", err)
 	}
 
-	requireResetEvents(t, manager.events, "cancel", "reset", "prompt")
+	requireResetEvents(t, manager.events, "reset", "prompt")
+	manager.mu.Lock()
+	capturedPrompts := append([]string(nil), manager.capturedPrompts...)
+	restartsAfterPrompt := len(manager.restartProcessCalls)
+	manager.mu.Unlock()
+	if restartsAfterPrompt != 1 {
+		t.Fatalf("provider reset calls = %d, want 1", restartsAfterPrompt)
+	}
+	if len(capturedPrompts) != 1 || !strings.Contains(capturedPrompts[0], "successor prompt") {
+		t.Fatalf("destination prompts = %#v, want one prompt containing the step text", capturedPrompts)
+	}
+	if len(messages.userMessages) != 1 || !strings.Contains(messages.userMessages[0].content, "successor prompt") {
+		t.Fatalf("auto-start user messages = %#v, want one distinct destination prompt", messages.userMessages)
+	}
 }
 
 func TestResetAgentContext_CancelFailureStopsProviderReset(t *testing.T) {

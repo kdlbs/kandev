@@ -74,7 +74,9 @@ existing non-phone consumers rather than changing their global semantics.
 Use `useResponsiveBreakpoint().isMobile` before pointer-specific routing.
 Phones remain phones with a mouse attached; 640-767px must not fall through the
 global menu CSS breakpoint. At 768px and wider, preserve each caller's existing
-fine/coarse-pointer behavior.
+fine/coarse-pointer behavior. File deletion explicitly opts into the compact
+Drawer for coarse pointers at any width. Other callers retain the width-based
+default. Boundary cancellation follows the effective surface and target identity.
 
 | Origin | Phone destination | Cancellation destination |
 | --- | --- | --- |
@@ -290,7 +292,8 @@ ordering, disabled/duplicate submission, and rejection after dismissal.
 Each adoption work order owns mobile Playwright scenarios for its real entry
 points and the existing desktop regression command. The shared geometry checks
 cover 320px, configured Pixel 5, 767px, and landscape phone widths; a separate
-coarse-pointer 768px case proves the unchanged tablet boundary. Long names,
+default coarse-pointer 768px case proves the unchanged tablet boundary.
+File actions also cover the opt-in coarse-pointer Drawer at 820px. Long names,
 Portuguese/pseudo copy, dark/light themes, safe-area padding, finite animation
 settlement, one active scroll owner, focus return, and horizontal overflow are
 tested on the active surface. Desktop and phone projects run separately through

@@ -145,7 +145,10 @@ export async function createQueuedSessionOwnershipScenario(
   seedData: SeedData,
   name: string,
 ): Promise<QueuedSessionOwnershipScenario> {
-  const { profileA, profileB } = await createWorkflowAgentProfiles(apiClient);
+  const { profileA, profileB } = await createWorkflowAgentProfiles(
+    apiClient,
+    seedData.agentProfileId,
+  );
   const workflow = await apiClient.createWorkflow(seedData.workspaceId, `${name} workflow`);
   const sourceStep = await apiClient.createWorkflowStep(workflow.id, "Source", 0, {
     is_start_step: true,

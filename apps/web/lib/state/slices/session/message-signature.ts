@@ -63,7 +63,7 @@ export function signatureOf(message: Message): string {
   const cached = signatureCache.get(message);
   if (cached !== undefined) return cached;
   const signature = message.updated_at
-    ? `u:${message.updated_at}:p${message.prompt_index ?? ""}:r${JSON.stringify(payloadRetentionMarker(message.metadata))}`
+    ? `u:${message.updated_at}:p${message.prompt_index ?? ""}:r${JSON.stringify(payloadRetentionMarker(message.metadata))}:n${message.metadata?.running_notice_resolved === true}`
     : contentHashSignature(message);
   signatureCache.set(message, signature);
   return signature;
@@ -89,6 +89,12 @@ export function reconcileMessages(prev: Message[] | undefined, next: Message[]):
   // Carry forward a known prompt_index when the incoming payload omits it.
   const carried = next.map((message) => {
     const previous = prevById.get(message.id);
+    if (
+      previous?.metadata?.running_notice_resolved === true &&
+      message.metadata?.running_notice_resolved !== true
+    ) {
+      message = { ...message, metadata: { ...message.metadata, running_notice_resolved: true } };
+    }
     if (
       previous &&
       payloadRetentionMarker(previous.metadata) &&

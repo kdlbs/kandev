@@ -177,3 +177,9 @@ var ErrStepChanged = errors.New("step_changed")
 // duplicate id list, or an id that names a task outside the named step/band.
 // Unlike ErrStepChanged this implies nothing about the persisted order.
 var ErrInvalidReorder = errors.New("invalid_reorder")
+
+// ErrRepositoryBranchPolicyNameConflict reports a duplicate policy name in its repository.
+var ErrRepositoryBranchPolicyNameConflict = errors.New("repository branch policy name already used")
+
+// ErrTaskHierarchyConflict means a child arrived before final parent deletion.
+var ErrTaskHierarchyConflict = errors.New("task has children at final deletion; retry the task deletion")

@@ -77,7 +77,7 @@ func (r *KubernetesExecutor) kubernetesWorkspaceRetention(ctx context.Context, i
 		return models.ExecutorOutcomeUnknown
 	}
 	if pvc.Status.Phase == corev1.ClaimBound {
-		return "retained"
+		return models.WorkspaceRetained
 	}
 	return models.ExecutorOutcomeUnknown
 }

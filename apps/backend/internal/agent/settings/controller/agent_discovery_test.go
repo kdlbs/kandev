@@ -118,6 +118,46 @@ func TestAvailableAgentIgnoresMismatchedManagedRuntimeSelection(t *testing.T) {
 	}
 }
 
+type opencodeDiscoverySelectionStore struct {
+	*recoverySelectionStore
+	selection managedruntime.OpenCodeSelection
+}
+
+func (s *opencodeDiscoverySelectionStore) GetOpenCodeSelection(context.Context) (managedruntime.OpenCodeSelection, bool, error) {
+	return s.selection, true, nil
+}
+
+func TestAvailableOpenCodeRuntimeMetadataUsesSelectedFamily(t *testing.T) {
+	openCode := agents.NewOpenCodeACP()
+	store := &opencodeDiscoverySelectionStore{
+		recoverySelectionStore: newRecoverySelectionStore(),
+		selection: managedruntime.OpenCodeSelection{
+			SchemaVersion:         1,
+			Family:                managedruntime.OpenCodeFamilyV2,
+			Source:                managedruntime.OpenCodeSourceManaged,
+			Package:               managedruntime.OpenCodeV2Package,
+			SelectedVersion:       "2.0.19",
+			AppliedDefaultVersion: "2.0.18",
+			Revision:              3,
+		},
+	}
+	controller := newTestController(map[string]agents.Agent{openCode.ID(): openCode})
+	controller.SetManagedRuntimeSelectionStore(store)
+	controller.SetRuntimeUpdater(&fakeRuntimeUpdater{
+		current:      hostutility.AgentCapabilities{AgentVersion: "2.0.19"},
+		currentFound: true,
+	})
+
+	item := controller.buildRuntimeUpdateDTO(context.Background(), openCode, true)
+	if item == nil {
+		t.Fatal("runtime metadata missing")
+	}
+	if item.Package != managedruntime.OpenCodeV2Package || item.DefaultVersion != "2.0.18" ||
+		item.ActiveVersion != "2.0.19" || item.EffectiveVersion != "2.0.19" {
+		t.Fatalf("OpenCode runtime metadata = %+v, want selected v2 package and version", item)
+	}
+}
+
 func TestAvailableACPInferenceAgentIsDynamicBeforeProbeSnapshot(t *testing.T) {
 	ag := agents.NewMockAgent()
 	ag.SetEnabled(true)

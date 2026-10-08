@@ -16,6 +16,10 @@ Make every workflow option show its steps independently of board navigation.
 One sequential work order delivered the loader, UI states, and regression tests.
 Implementation is complete under Task 01.
 
+The [workflow picker scrolling package](../task-create-workflow-scroll/plan.md)
+records issue #4073 and owns the later AC-001.7 input regression coverage.
+Task 01 remains complete for its original AC-001.1 through AC-001.6 scope.
+
 Tasks owns this contract because it owns task creation and workflow definitions.
 The existing launch-preview requirement covers the selected destination, not
 all option previews. This package adds the missing behavior as a separate,

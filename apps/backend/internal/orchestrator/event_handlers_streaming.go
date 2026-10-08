@@ -82,6 +82,13 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
+	if eventType == agentEventComplete &&
+		payload.Data.PromptFailureDisposition == streams.PromptFailureDispositionRetainRuntime {
+		// The following AgentTurnFailed event owns this failed turn's durable
+		// settlement. A complete stream frame must not park the session or clear
+		// its prompt evidence before that synchronous owner callback can run.
+		return
+	}
 	terminalCompleteStream := false
 	var observedOutput, observedEffect bool
 
@@ -109,10 +116,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		}
 	}
 	switch eventType {
-	case "message_streaming":
-		// Claude ACP emits some provider failures as a diagnostic message chunk
-		// immediately before the session/prompt RPC error. Track those chunks
-		// separately so the matching typed failure can still be safely routed.
+	case streams.EventTypeMessageChunk:
+		if payload.Data.Role == "user" {
+			break
+		}
 		if payload.Data.ProviderDiagnosticCandidate {
 			s.observeProviderDiagnostic(
 				payload.SessionID,
@@ -127,17 +134,17 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 				payload.SessionID,
 				eventExecutionID,
 				payload.Data.PromptGeneration,
-				strings.TrimSpace(payload.Data.Text) != "",
+				observedOutput,
 				false,
 			)
 		}
-	case "thinking_streaming":
+	case streams.EventTypeReasoning:
 		observedOutput = strings.TrimSpace(payload.Data.Text) != ""
 		s.observePromptAttempt(
 			payload.SessionID,
 			eventExecutionID,
 			payload.Data.PromptGeneration,
-			strings.TrimSpace(payload.Data.Text) != "",
+			observedOutput,
 			false,
 		)
 	case agentEventToolCall, agentEventToolUpdate:
@@ -151,10 +158,17 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		)
 	}
 	if observedOutput || observedEffect {
-		s.clearDynamicUnclassifiedStreakForEvent(ctx, watcher.AgentEventData{
+		resetEvent := watcher.AgentEventData{
 			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
 			AgentExecutionID: eventExecutionID, PromptGeneration: payload.Data.PromptGeneration,
-		}, true)
+		}
+		s.markDynamicStreakResetPending(resetEvent)
+		if eventType == agentEventToolCall {
+			s.flushPendingDynamicStreakReset(ctx, sessionID, &resetEvent)
+		}
+	}
+	if observedOutput && s.markForegroundGenerating(sessionID, eventExecutionID) {
+		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 	}
 	if eventType == agentEventComplete {
 		defer s.clearPromptAttemptEvidence(
@@ -178,6 +192,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	// Handle different event types
 	switch eventType {
+	case streams.EventTypeMessageChunk, streams.EventTypeReasoning:
+		return
+
 	case "message_streaming":
 		s.handleMessageStreamingEvent(ctx, payload)
 
@@ -475,15 +492,16 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 	}
 	if sessionID != "" {
 		failure := watcher.AgentEventData{
-			TaskID:           taskID,
-			SessionID:        sessionID,
-			OwnerKind:        string(payload.OwnerKind),
-			AgentExecutionID: executionID,
-			AgentID:          payload.AgentID,
-			AgentProfileID:   payload.AgentProfileID,
-			PromptGeneration: payload.Data.PromptGeneration,
-			ErrorMessage:     payload.Data.Error,
-			ProviderError:    payload.Data.ProviderError,
+			TaskID:             taskID,
+			SessionID:          sessionID,
+			OwnerKind:          string(payload.OwnerKind),
+			AgentExecutionID:   executionID,
+			AgentID:            payload.AgentID,
+			AgentProfileID:     payload.AgentProfileID,
+			ExecutionProfileID: payload.ExecutionProfileID,
+			PromptGeneration:   payload.Data.PromptGeneration,
+			ErrorMessage:       payload.Data.Error,
+			ProviderError:      payload.Data.ProviderError,
 		}
 		if failure.ErrorMessage == "" {
 			failure.ErrorMessage = payload.Data.Text
@@ -809,14 +827,6 @@ func (s *Service) handleStreamingEventKind(
 // handleMessageStreamingEvent handles streaming message events for real-time text updates.
 // It creates a new message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
 func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
-	// Keep the private ownership estimate current for accounting. Only genuine
-	// output flips it; empty/invalid frames and provider-diagnostic transport
-	// text are discarded below (mirroring the lifecycle-tier suppression in
-	// Manager.recordActivity).
-	if payload.Data.Text != "" && !payload.Data.ProviderDiagnosticCandidate &&
-		s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
-		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
-	}
 	s.handleStreamingEventKind(ctx, payload, "message",
 		s.messageCreator.AppendAgentMessage,
 		s.messageCreator.CreateAgentMessageStreaming)
@@ -825,11 +835,6 @@ func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *life
 // handleThinkingStreamingEvent handles streaming thinking events for real-time reasoning updates.
 // It creates a new thinking message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
 func (s *Service) handleThinkingStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
-	// Keep the private ownership estimate current for accounting. Empty/invalid
-	// frames are discarded downstream.
-	if payload.Data.Text != "" && s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
-		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
-	}
 	s.handleStreamingEventKind(ctx, payload, "thinking message",
 		s.messageCreator.AppendThinkingMessage,
 		s.messageCreator.CreateThinkingMessageStreaming)
@@ -1458,6 +1463,126 @@ func (s *Service) transitionTaskSessionState(
 	return true, nextState, nil
 }
 
+type resumeStateAttemptUpdater interface {
+	UpdateTaskSessionResumeStateIfCurrentAttempt(
+		context.Context,
+		string,
+		string,
+		string,
+		models.TaskSessionState,
+		models.TaskSessionState,
+		string,
+		bool,
+		bool,
+		bool,
+		interface{},
+	) (bool, time.Time, error)
+}
+
+// rollbackResumeFailureIfCurrentAttempt restores a failed resume only while
+// its startup attempt still owns STARTING, then publishes that committed
+// transition through the normal session event path.
+func (s *Service) rollbackResumeFailureIfCurrentAttempt(
+	ctx context.Context,
+	request executor.ResumeFailureRollbackRequest,
+) (bool, error) {
+	if s.messageQueue != nil {
+		heldSessionID, _ := ctx.Value(sessionPromptAdmissionContextKey{}).(string)
+		if heldSessionID != request.SessionID {
+			var changed bool
+			var rollbackErr error
+			err := s.withSessionPromptAdmission(ctx, request.SessionID, func(admittedCtx context.Context) error {
+				changed, rollbackErr = s.rollbackResumeFailureIfCurrentAttempt(admittedCtx, request)
+				return rollbackErr
+			})
+			if rollbackErr != nil {
+				return changed, rollbackErr
+			}
+			return changed, err
+		}
+	}
+
+	return s.rollbackResumeFailureAdmitted(ctx, request)
+}
+
+func (s *Service) rollbackResumeFailureAdmitted(
+	ctx context.Context,
+	request executor.ResumeFailureRollbackRequest,
+) (bool, error) {
+	current, err := s.repo.GetTaskSession(ctx, request.SessionID)
+	if err != nil {
+		return false, fmt.Errorf("get session before resume rollback: %w", err)
+	}
+	if current == nil {
+		return false, fmt.Errorf("get session before resume rollback: session %q is nil", request.SessionID)
+	}
+	if current.State != request.ExpectedState {
+		return false, nil
+	}
+	updater, ok := s.repo.(resumeStateAttemptUpdater)
+	if !ok {
+		return false, fmt.Errorf("session repository does not support attempt-fenced resume rollback")
+	}
+	var restore bool
+	var snapshotPresent bool
+	var snapshotValue interface{}
+	if request.CredentialSnapshot != nil {
+		restore = true
+		snapshotPresent = request.CredentialSnapshot.Present
+		snapshotValue = request.CredentialSnapshot.Value
+	}
+	changed, updatedAt, err := updater.UpdateTaskSessionResumeStateIfCurrentAttempt(
+		ctx,
+		request.TaskID,
+		request.SessionID,
+		request.AttemptID,
+		request.ExpectedState,
+		request.NextState,
+		request.ErrorMessage,
+		true,
+		restore,
+		snapshotPresent,
+		snapshotValue,
+	)
+	if err != nil || !changed {
+		return changed, err
+	}
+	s.releaseCeilingReservation(request.SessionID)
+	updatedAt = updatedAt.UTC()
+	fallback := taskSessionAfterStateWrite(current, request.NextState, request.ErrorMessage, updatedAt)
+	if restore {
+		fallback.Metadata = cloneSessionMetadata(current.Metadata)
+		if snapshotPresent {
+			fallback.Metadata[models.SessionMetaKeyGitCredentialSnapshot] = snapshotValue
+		} else {
+			delete(fallback.Metadata, models.SessionMetaKeyGitCredentialSnapshot)
+		}
+	}
+	refreshed := s.refreshTaskSessionOr(ctx, request.SessionID, fallback)
+	s.publishAcceptedTaskSessionState(
+		ctx,
+		request.TaskID,
+		request.SessionID,
+		request.ExpectedState,
+		request.NextState,
+		request.ErrorMessage,
+		&updatedAt,
+		refreshed,
+	)
+	return true, nil
+}
+
+func cloneSessionMetadata(metadata map[string]interface{}) map[string]interface{} {
+	if metadata == nil {
+		return make(map[string]interface{})
+	}
+	clone := make(map[string]interface{}, len(metadata))
+	for key, value := range metadata {
+		clone[key] = value
+	}
+	return clone
+}
+
 // transitionBootstrapFailure commits the typed error and FAILED state through
 // the repository's execution-fenced boundary before publishing the accepted
 // transition. The prompt admission guard serializes this terminal settlement
@@ -1559,16 +1684,19 @@ func (s *Service) persistBootstrapFailureMessage(
 	// Bootstrap failures occur before any turn started, so there is no failed
 	// turn to attach to — resolve the turn lazily via the empty turn ID.
 	return s.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
-		TaskID:           taskID,
-		SessionID:        sessionID,
-		AgentExecutionID: agentExecutionID,
-		ErrorMessage:     errorValue.Message,
-		FailureCode:      errorValue.Code,
-		FailureDetails:   errorValue.Details,
-		Phase:            errorValue.Phase,
-		AttemptID:        errorValue.AttemptID,
-		ErrorStamp:       errorValue.Stamp(),
-		Causes:           errorValue.Causes,
+		TaskID:                 taskID,
+		SessionID:              sessionID,
+		AgentExecutionID:       agentExecutionID,
+		ErrorMessage:           errorValue.Message,
+		FailureCode:            errorValue.Code,
+		FailureDetails:         errorValue.Details,
+		StartupFailureReason:   errorValue.StartupReason,
+		StartupFailureAttempts: errorValue.StartupAttempts,
+		StartupFailureNPMCode:  errorValue.StartupNPMCode,
+		Phase:                  errorValue.Phase,
+		AttemptID:              errorValue.AttemptID,
+		ErrorStamp:             errorValue.Stamp(),
+		Causes:                 errorValue.Causes,
 	}, "")
 }
 
@@ -4066,6 +4194,10 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 			return
 		}
 	}
+	configOptionsSource := ""
+	if data, ok := payload.Data.Data.(map[string]interface{}); ok {
+		configOptionsSource = stringFromMap(data, "config_options_source")
+	}
 	if providerRestored {
 		s.persistProviderRestoredSessionModelsSnapshot(
 			ctx, sessionID, identity,
@@ -4082,10 +4214,12 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 		TaskID:                payload.TaskID,
 		SessionID:             sessionID,
 		AgentID:               payload.AgentID,
+		AgentExecutionID:      payload.ExecutionID,
 		CurrentModelID:        payload.Data.CurrentModelID,
 		SessionSettingsPolicy: s.sessionSettingsProjectionPolicy(ctx, sessionID, identity, payload.Data.SessionSettingsPolicy),
 		Models:                payload.Data.SessionModels,
 		ConfigOptions:         payload.Data.ConfigOptions,
+		ConfigOptionsSource:   configOptionsSource,
 		ConfigOptionsSettled:  settled,
 		ConfigBaseline:        configBaseline,
 		Timestamp:             time.Now().UTC().Format(time.RFC3339),

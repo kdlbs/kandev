@@ -1,8 +1,11 @@
+import { releasePortalScrollRestoration } from "@/lib/layout/panel-portal-host";
+
 export const TASK_ROW_DOM_ATTR = "data-task-row-id";
 export const TASK_SIDEBAR_SCROLL_SELECTOR = '[data-testid="task-sidebar-scroll"]';
 export const TASK_ROW_REVEAL_CLASS = "task-sidebar-row-reveal";
 
 const MAX_TASK_NAVIGATION_ATTEMPTS = 60;
+const STABLE_VISIBLE_FRAME_COUNT = 3;
 const TASK_ROW_REVEAL_DURATION_MS = 1400;
 let latestNavigationRequestId = 0;
 let latestCueId = 0;
@@ -11,6 +14,7 @@ type ActiveTaskRowCue = {
   cueId: number;
   row: HTMLElement;
   timeoutId: number;
+  resizeObserver?: ResizeObserver;
 };
 
 let activeTaskRowCue: ActiveTaskRowCue | null = null;
@@ -21,6 +25,7 @@ export function cancelSidebarTaskReveal(): void {
   if (!activeTaskRowCue) return;
 
   window.clearTimeout(activeTaskRowCue.timeoutId);
+  activeTaskRowCue.resizeObserver?.disconnect();
   activeTaskRowCue.row.classList.remove(TASK_ROW_REVEAL_CLASS);
   activeTaskRowCue = null;
 }
@@ -64,10 +69,10 @@ function isInsideViewport(row: HTMLElement, viewport: HTMLElement): boolean {
   const rowRect = row.getBoundingClientRect();
   const viewportRect = viewport.getBoundingClientRect();
   return (
-    rowRect.top >= viewportRect.top &&
-    rowRect.bottom <= viewportRect.bottom &&
-    rowRect.left >= viewportRect.left &&
-    rowRect.right <= viewportRect.right
+    rowRect.top >= viewportRect.top - 1 &&
+    rowRect.bottom <= viewportRect.bottom + 1 &&
+    rowRect.left >= viewportRect.left - 1 &&
+    rowRect.right <= viewportRect.right + 1
   );
 }
 
@@ -87,10 +92,47 @@ function prefersReducedMotion(): boolean {
   );
 }
 
+function scrollTaskRow(row: HTMLElement): void {
+  row.scrollIntoView({
+    behavior: prefersReducedMotion() ? "auto" : "smooth",
+    block: "center",
+    inline: "nearest",
+  });
+}
+
+function observeCueViewport(row: HTMLElement, viewport: HTMLElement, cueId: number) {
+  if (typeof ResizeObserver === "undefined") return undefined;
+  let previous = viewport.getBoundingClientRect();
+  let previousContentHeight = viewport.scrollHeight;
+  const observer = new ResizeObserver(() => {
+    if (
+      activeTaskRowCue?.cueId !== cueId ||
+      !row.isConnected ||
+      row.getAttribute("aria-current") === "false"
+    )
+      return;
+    const current = viewport.getBoundingClientRect();
+    const contentHeight = viewport.scrollHeight;
+    if (
+      current.width === previous.width &&
+      current.height === previous.height &&
+      contentHeight === previousContentHeight
+    )
+      return;
+    previous = current;
+    previousContentHeight = contentHeight;
+    if (!isInsideViewport(row, viewport)) scrollTaskRow(row);
+  });
+  observer.observe(viewport);
+  if (viewport.firstElementChild) observer.observe(viewport.firstElementChild);
+  return observer;
+}
+
 /** Restarts the short-lived cue on the latest command-selected row. */
-function cueTaskRow(row: HTMLElement): void {
+function cueTaskRow(row: HTMLElement, viewport: HTMLElement): void {
   if (activeTaskRowCue) {
     window.clearTimeout(activeTaskRowCue.timeoutId);
+    activeTaskRowCue.resizeObserver?.disconnect();
     activeTaskRowCue.row.classList.remove(TASK_ROW_REVEAL_CLASS);
   }
 
@@ -102,10 +144,79 @@ function cueTaskRow(row: HTMLElement): void {
 
   const timeoutId = window.setTimeout(() => {
     if (activeTaskRowCue?.cueId !== cueId) return;
+    activeTaskRowCue.resizeObserver?.disconnect();
     row.classList.remove(TASK_ROW_REVEAL_CLASS);
     activeTaskRowCue = null;
   }, TASK_ROW_REVEAL_DURATION_MS);
-  activeTaskRowCue = { cueId, row, timeoutId };
+  activeTaskRowCue = {
+    cueId,
+    row,
+    timeoutId,
+    resizeObserver: observeCueViewport(row, viewport, cueId),
+  };
+}
+
+type TaskRowVisibilityState = {
+  portalScrollRestoreReleased: boolean;
+  scrollRequested: boolean;
+  visibleFrames: number;
+  previousGeometry: [number, number, number, number, number] | null;
+  scrollGeometry: [number, number, number] | null;
+};
+
+function updateTaskRowVisibility(
+  match: { row: HTMLElement; viewport: HTMLElement },
+  state: TaskRowVisibilityState,
+): boolean {
+  if (!state.portalScrollRestoreReleased) {
+    releasePortalScrollRestoration(match.viewport);
+    state.portalScrollRestoreReleased = true;
+  }
+  if (!isInsideViewport(match.row, match.viewport)) {
+    const viewportRect = match.viewport.getBoundingClientRect();
+    const scrollGeometry: [number, number, number] = [
+      viewportRect.width,
+      viewportRect.height,
+      match.viewport.scrollHeight,
+    ];
+    const sameScrollTarget = state.scrollGeometry?.every(
+      (value, index) => value === scrollGeometry[index],
+    );
+    // Growth changes the scroll target even before pending motion brings the row into view.
+    if (state.previousGeometry !== null || !sameScrollTarget) state.scrollRequested = false;
+    state.visibleFrames = 0;
+    state.previousGeometry = null;
+    if (!state.scrollRequested) {
+      match.row.scrollIntoView({
+        behavior: prefersReducedMotion() ? "auto" : "smooth",
+        block: "nearest",
+        inline: "nearest",
+      });
+      state.scrollRequested = true;
+      state.scrollGeometry = scrollGeometry;
+    }
+    return false;
+  }
+
+  const rowRect = match.row.getBoundingClientRect();
+  const viewportRect = match.viewport.getBoundingClientRect();
+  const geometry: [number, number, number, number, number] = [
+    rowRect.top,
+    rowRect.bottom,
+    viewportRect.top,
+    viewportRect.bottom,
+    match.viewport.scrollTop,
+  ];
+  const geometryStable = state.previousGeometry?.every(
+    (value, index) => Math.abs(value - geometry[index]) <= 0.5,
+  );
+  state.visibleFrames = geometryStable ? state.visibleFrames + 1 : 1;
+  state.previousGeometry = geometry;
+  if (state.visibleFrames < STABLE_VISIBLE_FRAME_COUNT) return false;
+
+  releasePortalScrollRestoration(match.viewport);
+  cueTaskRow(match.row, match.viewport);
+  return true;
 }
 
 /**
@@ -124,6 +235,13 @@ export function revealSidebarTask(
   const requestId = ++latestNavigationRequestId;
   return new Promise((resolve) => {
     let attempts = 0;
+    const visibilityState: TaskRowVisibilityState = {
+      portalScrollRestoreReleased: false,
+      scrollRequested: false,
+      visibleFrames: 0,
+      previousGeometry: null,
+      scrollGeometry: null,
+    };
     const tick = () => {
       if (requestId !== latestNavigationRequestId) {
         resolve(false);
@@ -132,20 +250,13 @@ export function revealSidebarTask(
 
       const match = findVisibleTaskRow(taskId);
       if (match) {
-        if (requestId !== latestNavigationRequestId) {
-          resolve(false);
+        if (updateTaskRowVisibility(match, visibilityState)) {
+          resolve(true);
           return;
         }
-        if (!isInsideViewport(match.row, match.viewport)) {
-          match.row.scrollIntoView({
-            behavior: prefersReducedMotion() ? "auto" : "smooth",
-            block: "center",
-            inline: "nearest",
-          });
-        }
-        cueTaskRow(match.row);
-        resolve(true);
-        return;
+      } else {
+        visibilityState.visibleFrames = 0;
+        visibilityState.previousGeometry = null;
       }
 
       attempts += 1;
@@ -155,6 +266,6 @@ export function revealSidebarTask(
       }
       requestFrame(tick);
     };
-    tick();
+    requestFrame(tick);
   });
 }

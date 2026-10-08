@@ -4,7 +4,7 @@ system: system-page
 requirements:
   - REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001
 created: 2026-07-14
-updated: 2026-08-12
+updated: 2026-10-02
 owners:
   - cfl
 ---
@@ -19,6 +19,12 @@ This design preserves the technical source detail for `REQ-SYSTEM-PAGE-STORAGE-M
 | Requirement | Design section |
 | --- | --- |
 | `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001` | [Migrated source detail](#migrated-source-detail) |
+
+## Current Go-cache policy
+
+The current [Go cache reclamation design](go-cache-reclamation.md) owns the busy-cleanup setting
+and direct deletion. Existing settings and historical quarantine records retain their prior
+compatibility rules.
 
 ## Migrated source detail
 
@@ -342,6 +348,9 @@ distinct `DELETE ALL NOW` confirmation because it removes the configured restore
   entry untouched and reports `workspace_recovery.status=failed`.
 - An invalid or unreadable settings object falls back to disabled scheduling, reports a health
   warning, and does not run destructive maintenance.
+- Managed-cache launch preparation uses the optional
+  [lifecycle integration](managed-go-cache-launch-fallback.md).
+  This fallback does not change the maintenance failure rules.
 - A managed Go-cache cleanup failure leaves either the original cache or its quarantined rename
   intact; it never recursively deletes outside the configured owned path.
 - An active Go-cache quarantine generation defers another rotation without failing maintenance.

@@ -40,6 +40,7 @@ async function seedMobileLayout(
   apiClient: ApiClient,
   workspaceId: string,
   homeVisible = true,
+  newTaskVisible = true,
 ): Promise<void> {
   const current = await apiClient.getUserSettings();
   const expectedRevision =
@@ -53,7 +54,7 @@ async function seedMobileLayout(
         revision: expectedRevision,
         nodes: [
           { id: "home", kind: "builtin", visible: homeVisible, destination_id: "home" },
-          { id: "new-task", kind: "builtin", visible: true, destination_id: "new_task" },
+          { id: "new-task", kind: "builtin", visible: newTaskVisible, destination_id: "new_task" },
           { id: "automations", kind: "builtin", visible: true, destination_id: "automations" },
           { id: "canvases", kind: "builtin", visible: true, destination_id: "canvases" },
           { id: "integrations", kind: "builtin", visible: true, destination_id: "integrations" },
@@ -81,7 +82,7 @@ async function addMobileShortcut(page: Page, label: string): Promise<void> {
 
 test.describe("Sidebar customization on phone", () => {
   // @covers AC-UI-SIDEBAR-CUSTOMIZATION-005.5 AC-UI-MOBILE-MENU-007.4
-  test("first visibility edit keeps populated Tasks before workspace tools", async ({
+  test("first visibility edit keeps workspace tools before populated Tasks", async ({
     testPage,
     apiClient,
     seedData,
@@ -127,7 +128,7 @@ test.describe("Sidebar customization on phone", () => {
     await expect(menu.locator("[data-task-row-id]")).toHaveCount(3);
     for (const width of [360, 393, 767]) {
       await testPage.setViewportSize({ width, height: 851 });
-      expect((await tasks.boundingBox())!.y).toBeLessThan((await automations.boundingBox())!.y);
+      expect((await automations.boundingBox())!.y).toBeLessThan((await tasks.boundingBox())!.y);
       expect((await automations.boundingBox())!.y).toBeLessThan((await plugins.boundingBox())!.y);
       expect(await menu.locator("nav").evaluate((el) => getComputedStyle(el).overflowY)).toBe(
         "auto",
@@ -220,6 +221,56 @@ test.describe("Sidebar customization on phone", () => {
   });
 });
 
+// @covers AC-UI-NAV-HIERARCHY-003.2 AC-UI-NAV-HIERARCHY-003.4
+test("hiding the primary action preserves task creation without rewriting the layout", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await seedMobileLayout(apiClient, seedData.workspaceId, true, false);
+  const saved = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+    seedData.workspaceId
+  ];
+  await testPage.goto("/tasks");
+  await testPage.getByTestId("app-nav-trigger").tap();
+  const menu = testPage.getByTestId("app-nav-sheet");
+  await expect(menu.getByTestId("mobile-new-task-button")).toHaveCount(0);
+  const fallback = menu.getByRole("button", { name: "New task", exact: true });
+  await expect(fallback).toBeVisible();
+  await fallback.tap();
+  await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+  expect(
+    (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+      seedData.workspaceId
+    ],
+  ).toEqual(saved);
+});
+
+test("default phone canvases expand as a tool group", async ({ testPage, apiClient, backend }) => {
+  const release = await backend.useEnv({ KANDEV_FEATURES_CANVASES: "true" });
+  const workspace = await apiClient.createWorkspace("Canvas navigation");
+  try {
+    await testPage.goto(`/tasks?workspaceId=${workspace.id}`);
+    await testPage.getByTestId("app-nav-trigger").tap();
+    const menu = testPage.getByTestId("app-nav-sheet");
+    const toggle = menu.getByRole("button", { name: "Canvases", exact: true });
+    const setup = menu.getByTestId("mobile-workspace-canvases-settings");
+    await expect(toggle).toHaveAttribute("aria-controls", /.+/);
+    const controlsId = (await toggle.getAttribute("aria-controls"))!;
+    const content = setup.locator("xpath=..");
+    await expect(content).toHaveAttribute("id", controlsId);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(setup).toBeHidden();
+    await toggle.tap();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(setup).toBeVisible();
+    await expect(testPage).toHaveURL(/\/tasks\?workspaceId=/);
+  } finally {
+    await apiClient.deleteWorkspace(workspace.id, workspace.name);
+    await release();
+  }
+});
+
 for (const homeVisible of [true, false]) {
   test(`saved phone layout preserves unified task access with Home visible=${homeVisible}`, async ({
     testPage,
@@ -252,12 +303,12 @@ for (const homeVisible of [true, false]) {
       expect(order.indexOf("mobile-quick-chat-button")).toBe(order.indexOf("Home") + 1);
     }
     await expect(menu.getByRole("link", { name: /^(Tasks|Threads)$/ })).toHaveCount(0);
-    await expect(layout.getByRole("button", { name: "New Task", exact: true })).toHaveCount(0);
+    await expect(layout.getByTestId("mobile-new-task-button")).toHaveCount(1);
     const tasks = menu.getByTestId("mobile-navigation-tasks-toggle");
     await expect(tasks).toBeVisible();
     const automations = menu.getByRole("button", { name: "Automations", exact: true });
     // @covers AC-UI-MOBILE-MENU-007.2 AC-UI-SIDEBAR-CUSTOMIZATION-005.5
-    expect((await tasks.boundingBox())!.y).toBeLessThan((await automations.boundingBox())!.y);
+    expect((await automations.boundingBox())!.y).toBeLessThan((await tasks.boundingBox())!.y);
     const integrations = layout.getByRole("button", { name: "Integrations", exact: true });
     const github = layout.getByRole("link", { name: "GitHub", exact: true });
     await expect(integrations).toHaveAttribute("aria-expanded", "false");

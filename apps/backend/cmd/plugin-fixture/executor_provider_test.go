@@ -71,6 +71,12 @@ func TestPluginExecutorFixtureContract(t *testing.T) {
 	response := fixtureHTTPSRequest(t, plugin, connection.GetLease(), "fixture-request-one")
 	require.Equal(t, "fixture-request-one", response)
 
+	instanceLease, err := plugin.ResolveExecutorConnection(context.Background(), &pluginsdk.ResolveExecutorConnectionRequest{
+		Context: ctx, Resource: provisioned.GetResource(), Purpose: "agentctl", RuntimePort: 41001,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, instanceLease.GetLease(), "agentctl instance ports must be leasable")
+
 	rotated, err := plugin.ResolveExecutorConnection(context.Background(), connectionRequest)
 	require.NoError(t, err)
 	require.NotEqual(t, connection.GetLease().GetGeneration(), rotated.GetLease().GetGeneration())
@@ -150,7 +156,7 @@ func TestPluginExecutorFixtureFailureBarriersAreRetryable(t *testing.T) {
 
 	t.Setenv(fixtureExecutorBarrierEnv, fixtureBarrierUnavailableLeaseOnce)
 	request := &pluginsdk.ResolveExecutorConnectionRequest{
-		Context: ctx, Resource: provisioned.GetResource(), Purpose: "agentctl", RuntimePort: fixtureRuntimePort,
+		Context: ctx, Resource: provisioned.GetResource(), Purpose: "agentctl", RuntimePort: 8765,
 	}
 	blocked, err := plugin.ResolveExecutorConnection(context.Background(), request)
 	require.NoError(t, err)

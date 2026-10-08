@@ -49,6 +49,20 @@ describe("setTaskSessionsForTask prepare backfill", () => {
             status: "ok",
             started_at: TS,
           },
+          {
+            name: "raw approval name",
+            kind: "agent_mcp_approval",
+            mcp_server_id: "server-a",
+            status: "failed",
+            error: "raw error",
+            output: "raw output",
+            mcp_diagnostic: {
+              operation: "enable",
+              stage: "start",
+              kind: "start_failed",
+              message: "exec: executable unavailable",
+            },
+          },
         ],
       },
     });
@@ -66,6 +80,18 @@ describe("setTaskSessionsForTask prepare backfill", () => {
         failureCode: "timeout",
         status: "ok",
         startedAt: TS,
+      },
+      {
+        name: "",
+        kind: "agent_mcp_approval",
+        mcpServerId: "server-a",
+        status: "failed",
+        mcpDiagnostic: {
+          operation: "enable",
+          stage: "start",
+          kind: "start_failed",
+          message: "exec: executable unavailable",
+        },
       },
     ]);
   });

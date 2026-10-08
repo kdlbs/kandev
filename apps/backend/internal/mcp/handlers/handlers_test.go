@@ -2970,17 +2970,19 @@ func TestResolveTaskRepositories_OfficeSubtaskParent_Allowed(t *testing.T) {
 	require.NoError(t, err)
 
 	rootResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
-		WorkspaceID: "ws-office",
-		Title:       "Root office task",
-		ProjectID:   "proj-1",
+		WorkspaceID:  "ws-office",
+		Title:        "Root office task",
+		ProjectID:    "proj-1",
+		Repositories: []service.TaskRepositoryInput{},
 	})
 	root := rootResult.Task
 	require.NoError(t, err)
 	childResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
-		WorkspaceID: "ws-office",
-		ParentID:    root.ID,
-		Title:       "Office subtask",
-		ProjectID:   "proj-1",
+		WorkspaceID:  "ws-office",
+		ParentID:     root.ID,
+		Title:        "Office subtask",
+		ProjectID:    "proj-1",
+		Repositories: []service.TaskRepositoryInput{},
 	})
 	child := childResult.Task
 	require.NoError(t, err)

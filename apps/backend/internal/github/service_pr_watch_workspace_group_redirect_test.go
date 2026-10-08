@@ -59,8 +59,8 @@ func (m *multiTaskIssueStore) GetRepository(_ context.Context, _ string) (*taskm
 	return nil, errors.New("not implemented")
 }
 
-func (m *multiTaskIssueStore) UpdateTaskMetadata(
-	_ context.Context, _ string, _ map[string]interface{},
+func (m *multiTaskIssueStore) UpdateTaskGitHubIssue(
+	_ context.Context, _ string, _ *taskmodels.TaskGitHubIssueLink,
 ) (*taskmodels.Task, error) {
 	return nil, errors.New("not implemented")
 }

@@ -31,6 +31,7 @@ type TestRow = { key: string; index: number };
 type GroupedTestRow = { key: string; group: string; kind: string; repository?: string };
 type DeepGroupedTestRow = { key: string; section: string; repository: string; commit: string };
 type FocusFallbackRow = { key: string; section: string; label: string };
+const SCROLL_VIEWPORT_TEST_ID = "scroll-viewport";
 const TIMELINE_ROW_SELECTOR = "[data-changes-timeline-row]";
 
 const resizeObservers: ControlledResizeObserver[] = [];
@@ -75,7 +76,7 @@ class ControlledResizeObserver {
   }
 }
 
-function TestViewport({ rows }: { rows: TestRow[] }) {
+function TestViewport({ rows, estimate = 28 }: { rows: TestRow[]; estimate?: number }) {
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
   return (
     <div
@@ -86,7 +87,7 @@ function TestViewport({ rows }: { rows: TestRow[] }) {
       <ChangesTimelineViewport
         rows={rows}
         scrollElement={scrollElement}
-        estimateSize={() => 28}
+        estimateSize={() => estimate}
         renderRow={(row) => <div data-testid={`timeline-row-${row.index}`}>{row.index}</div>}
       />
     </div>
@@ -321,7 +322,7 @@ it("remeasures rows when width, locale, font, or pointer mode changes and preser
   const measure = virtualizerTestHooks.measure;
   const rows = Array.from({ length: 200 }, (_, index) => ({ key: `row-${index}`, index }));
   render(<TestViewport rows={rows} />);
-  const scrollViewport = screen.getByTestId("scroll-viewport");
+  const scrollViewport = screen.getByTestId(SCROLL_VIEWPORT_TEST_ID);
   act(() => resizeObservers.forEach((observer) => observer.emit()));
   await waitFor(() => expect(screen.getByTestId("timeline-row-0")).toBeTruthy());
   Object.defineProperty(scrollViewport, "scrollHeight", { configurable: true, value: 5_600 });
@@ -353,13 +354,71 @@ it("remeasures rows when width, locale, font, or pointer mode changes and preser
   expect(scrollViewport.scrollTop).toBe(anchorScrollTop);
 });
 
+// @covers AC-UI-BOUNDED-CHANGES-001.6
+it.each(["font", "locale", "width", "pointer"] as const)(
+  "preserves measured row spacing after %s invalidation without new row observations",
+  async (trigger) => {
+    const fontEvents = new EventTarget();
+    Object.defineProperty(document, "fonts", { configurable: true, value: fontEvents });
+    const pointerMode = new EventTarget();
+    let coarsePointer = false;
+    Object.defineProperty(pointerMode, "matches", { get: () => coarsePointer });
+    vi.stubGlobal("matchMedia", () => pointerMode);
+    const heights = [24, 52, 24, 36, 24];
+    const rows = heights.map((_, index) => ({ key: `measured-${index}`, index }));
+    const view = render(<TestViewport rows={rows} estimate={34} />);
+    act(() => {
+      resizeObservers.forEach((observer) =>
+        observer.emitTarget(screen.getByTestId(SCROLL_VIEWPORT_TEST_ID), 800, 600),
+      );
+    });
+    const wrappers = Array.from(
+      view.container.querySelectorAll<HTMLDivElement>(TIMELINE_ROW_SELECTOR),
+    );
+    wrappers.forEach((wrapper, index) => {
+      Object.defineProperty(wrapper, "offsetHeight", { configurable: true, value: heights[index] });
+    });
+    act(() => {
+      wrappers.forEach((wrapper, index) => {
+        resizeObservers.forEach((observer) => observer.emitTarget(wrapper, 800, heights[index]));
+      });
+    });
+    const positions = () => wrappers.map((wrapper) => wrapper.style.transform);
+    const expected = [0, 24, 76, 100, 136].map((top) => `translateY(${top}px)`);
+    await waitFor(() => expect(positions()).toEqual(expected));
+    virtualizerTestHooks.measure.mockClear();
+    const previousLanguage = document.documentElement.lang;
+    try {
+      act(() => {
+        if (trigger === "font") fontEvents.dispatchEvent(new Event("loadingdone"));
+        if (trigger === "locale") document.documentElement.lang = `${previousLanguage}-changed`;
+        if (trigger === "width") {
+          resizeObservers.forEach((observer) =>
+            observer.emitTarget(screen.getByTestId(SCROLL_VIEWPORT_TEST_ID), 640, 600),
+          );
+        }
+        if (trigger === "pointer") {
+          coarsePointer = true;
+          pointerMode.dispatchEvent(new Event("change"));
+        }
+      });
+      await waitFor(() => {
+        expect(virtualizerTestHooks.measure).toHaveBeenCalled();
+        expect(positions()).toEqual(expected);
+      });
+    } finally {
+      document.documentElement.lang = previousLanguage;
+    }
+  },
+);
+
 it("bounds 50,000 working rows and keeps the final row reachable", async () => {
   const rows = Array.from({ length: 50_000 }, (_, index) => ({
     key: `row-${index}`,
     index,
   }));
   const view = render(<TestViewport rows={rows} />);
-  const scrollViewport = screen.getByTestId("scroll-viewport");
+  const scrollViewport = screen.getByTestId(SCROLL_VIEWPORT_TEST_ID);
 
   act(() => resizeObservers.forEach((observer) => observer.emit()));
   await waitFor(() => expect(screen.getByTestId("timeline-row-0")).toBeTruthy());

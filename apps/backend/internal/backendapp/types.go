@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
 	canvasservice "github.com/kandev/kandev/internal/canvas"
+	"github.com/kandev/kandev/internal/coordinator"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
 	"github.com/kandev/kandev/internal/gitcredentials"
@@ -153,6 +154,10 @@ type Services struct {
 	// Mode() == ModeDisabled and the middleware injects the synthetic identity.
 	Auth                    *authservice.Service
 	SessionHostnameResolver *hostnames.Resolver
+	// Coordinator is the workspace-coordinator service (CRUD, proposals-read,
+	// stalls-read). Nil while features.coordinator is disabled; the backing
+	// store is still always constructed (requiredstores catalog entry).
+	Coordinator *coordinator.Service
 }
 
 type schedulerStopper interface {

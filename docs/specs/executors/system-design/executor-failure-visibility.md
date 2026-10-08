@@ -147,7 +147,8 @@ Deduplicate by physical resource and generation, inspect with bounded concurrenc
 (maximum eight) and cancellation, and reuse one observation for attached sessions.
 Include retained idle environments with zero tracked executions. Exclude completed
 cleanup/deleted environments; intentional parked compute is not a failure. Startup
-runs the same read-only pass with bounded work, then periodic reconciliation catches
+starts the same bounded read-only pass inside the background reconciliation loop
+without delaying readiness; periodic reconciliation catches
 remaining rows. Fetch current connection config while preserving recorded workload
 identity. No Pod/PVC, worker, or environment creation occurs in this pass.
 
@@ -341,3 +342,16 @@ worker is not safely recoverable on another node merely because it is Bound. The
 shared desktop dialog and phone drawer show connection uncertainty, connectivity
 repair guidance and separate workspace-access uncertainty. No hardware or OOM
 cause is inferred, and no node/event permission becomes mandatory.
+
+Inspection covers typed local, Docker and Kubernetes observations. SSH, Sprites
+and plugin runtimes retain their existing disconnect owner until they supply
+physical evidence. A deleting Pod retains stopping semantics unless explicit
+worker-unavailability evidence makes liveness unknown. Docker not-found is scoped
+to the recorded container identity; other daemon errors remain unknown. Retained
+remote Docker inventory can open a temporary read-only inspection connection,
+without provisioning, registering an execution or resuming an agent. Each page
+bounds individual reads and separately bounds persistence so a slow target cannot
+starve later inventory. The composer selects its surface from the same accepted
+HTTP recheck result as its card, independent of WebSocket delivery.
+
+When disconnect ownership cannot be read, retain an explicitly unverified status and retry only the existing agent streams. Do not admit resource-loss evidence without authority, infer process death, replay a prompt, or provision an executor.

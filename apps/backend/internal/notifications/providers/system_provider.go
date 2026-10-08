@@ -74,7 +74,8 @@ func (p *SystemProvider) Send(ctx context.Context, message Message) error {
 	if err != nil {
 		return err
 	}
-	if err := p.sendNotification(ctx, cfg, message.Title, message.Body); err != nil {
+	title, body := localizedSystemMessage(cfg, message)
+	if err := p.sendNotification(ctx, cfg, title, body); err != nil {
 		return err
 	}
 	if cfg.SoundEnabled {
@@ -88,6 +89,7 @@ type systemConfig struct {
 	SoundFile    string
 	AppName      string
 	IconPath     string
+	Locale       string
 	TimeoutMS    int
 }
 
@@ -97,6 +99,7 @@ func parseSystemConfig(raw map[string]interface{}) (systemConfig, error) {
 		SoundFile:    "",
 		AppName:      "Kandev",
 		IconPath:     "",
+		Locale:       systemNotificationLocale(),
 		TimeoutMS:    10000,
 	}
 	if raw == nil {
@@ -124,7 +127,25 @@ func applySystemConfigFields(cfg *systemConfig, raw map[string]interface{}) erro
 	if err := parseIconPath(cfg, raw); err != nil {
 		return err
 	}
+	if err := parseLocale(cfg, raw); err != nil {
+		return err
+	}
 	return parseTimeoutMS(cfg, raw)
+}
+
+func parseLocale(cfg *systemConfig, raw map[string]interface{}) error {
+	value, ok := raw["locale"]
+	if !ok {
+		return nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("locale must be a string")
+	}
+	if locale := strings.TrimSpace(text); locale != "" {
+		cfg.Locale = locale
+	}
+	return nil
 }
 
 func parseSoundEnabled(cfg *systemConfig, raw map[string]interface{}) error {
@@ -225,6 +246,67 @@ func (p *SystemProvider) sendNotification(ctx context.Context, cfg systemConfig,
 		return p.sendWindowsNotification(ctx, cfg, title, body)
 	default:
 		return fmt.Errorf("system notifications not supported on %s", runtime.GOOS)
+	}
+}
+
+func systemNotificationLocale() string {
+	for _, key := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return "en"
+}
+
+func localizedSystemMessage(cfg systemConfig, message Message) (string, string) {
+	if len(message.RuntimeUpdates) < 2 {
+		return message.Title, message.Body
+	}
+	count := len(message.RuntimeUpdates)
+	switch systemMessageLanguage(cfg.Locale) {
+	case "pt":
+		return fmt.Sprintf("%d atualizações de runtime de agentes disponíveis", count), "Reveja as versões de runtime em Definições > Agentes."
+	case "zh-cn":
+		return fmt.Sprintf("有 %d 个代理运行时更新可用", count), "请在“设置”>“代理”中查看运行时版本。"
+	case "zh-hk":
+		return fmt.Sprintf("有 %d 個代理執行環境更新可用", count), "請前往「設定」>「代理」查看執行環境版本。"
+	case "zh-tw":
+		return fmt.Sprintf("有 %d 個代理執行環境更新可用", count), "請前往「設定」>「代理」檢視執行環境版本。"
+	case "ja":
+		return fmt.Sprintf("エージェントランタイムの更新が%d件あります", count), "設定 > エージェントでランタイムのバージョンを確認してください。"
+	case "ko":
+		return fmt.Sprintf("에이전트 런타임 업데이트 %d개를 사용할 수 있습니다", count), "설정 > 에이전트에서 런타임 버전을 확인하세요."
+	default:
+		return message.Title, message.Body
+	}
+}
+
+func systemMessageLanguage(locale string) string {
+	value := strings.ToLower(strings.TrimSpace(locale))
+	value = strings.SplitN(value, ".", 2)[0]
+	value = strings.SplitN(value, "@", 2)[0]
+	value = strings.ReplaceAll(value, "_", "-")
+	switch {
+	case strings.HasPrefix(value, "pt"):
+		return "pt"
+	case value == "zh",
+		strings.HasPrefix(value, "zh-cn"),
+		strings.HasPrefix(value, "zh-sg"),
+		strings.HasPrefix(value, "zh-hans"):
+		return "zh-cn"
+	case strings.HasPrefix(value, "zh-hk"),
+		strings.HasPrefix(value, "zh-mo"),
+		strings.HasPrefix(value, "zh-hant-hk"),
+		strings.HasPrefix(value, "zh-hant-mo"):
+		return "zh-hk"
+	case strings.HasPrefix(value, "zh-tw"), strings.HasPrefix(value, "zh-hant"):
+		return "zh-tw"
+	case strings.HasPrefix(value, "ja"):
+		return "ja"
+	case strings.HasPrefix(value, "ko"):
+		return "ko"
+	default:
+		return "en"
 	}
 }
 

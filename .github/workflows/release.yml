@@ -22,6 +22,7 @@ name: release
 #  11. publish-npm       — publish kandev@X.Y.Z + @kdlbs/runtime-*@X.Y.Z to npmjs
 #  12. update-homebrew-tap — push updated Formula/kandev.rb to kdlbs/homebrew-kandev
 #  13. update-scoop-bucket — push updated bucket/kandev.json to kdlbs/scoop-kandev
+#  14. notify-contributors — optional notices after every Stable channel succeeds
 #
 # npm publishing uses Trusted Publishers (OIDC) — no NPM_TOKEN required.
 # Each package (kandev + 5 @kdlbs/runtime-* packages) must have this workflow
@@ -77,6 +78,10 @@ on:
         required: false
         default: ""
         type: string
+      notify_contributors:
+        description: "Notify external contributors after every Stable channel succeeds"
+        type: boolean
+        default: false
 
 # A Stable tag is pushed before its npm job is ready. Serializing whole runs
 # prevents a Nightly from using the previous npm baseline during that window.
@@ -985,6 +990,14 @@ jobs:
         with:
           name: canonical-remote-helpers
           path: dist/remote-helper-artifact
+      - name: Restore canonical helper executable modes
+        run: |
+          set -euo pipefail
+          chmod 0755 \
+            dist/remote-helper-artifact/bin/agentctl-linux-amd64 \
+            dist/remote-helper-artifact/bin/agentctl-linux-arm64 \
+            dist/remote-helper-artifact/bin/agentctl-darwin-amd64 \
+            dist/remote-helper-artifact/bin/agentctl-darwin-arm64
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: web-bundle
@@ -2092,10 +2105,20 @@ jobs:
           path: dist/desktop-artifacts
           merge-multiple: true
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Download canonical remote helpers
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: canonical-remote-helpers
           path: dist/remote-helper-artifact
+
+      - name: Restore canonical helper executable modes
+        run: |
+          set -euo pipefail
+          chmod 0755 \
+            dist/remote-helper-artifact/bin/agentctl-linux-amd64 \
+            dist/remote-helper-artifact/bin/agentctl-linux-arm64 \
+            dist/remote-helper-artifact/bin/agentctl-darwin-amd64 \
+            dist/remote-helper-artifact/bin/agentctl-darwin-arm64
 
       - name: Verify staged release assets
         env:
@@ -2905,3 +2928,27 @@ jobs:
           bash scripts/release/update-scoop-bucket.sh \
             "${{ needs.prepare.outputs.version }}" \
             "${{ needs.prepare.outputs.tag }}"
+
+  notify-contributors:
+    name: Notify release contributors
+    needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket]
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        inputs.notify_contributors &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.publish-release.result == 'success' &&
+        needs.publish-npm.result == 'success' &&
+        needs.update-homebrew-tap.result == 'success' &&
+        needs.update-scoop-bucket.result == 'success'
+      }}
+    uses: ./.github/workflows/notify-release-contributors.yml
+    with:
+      release_tag: ${{ needs.prepare.outputs.tag }}
+      dry_run: false
+    permissions:
+      contents: read
+      pull-requests: write

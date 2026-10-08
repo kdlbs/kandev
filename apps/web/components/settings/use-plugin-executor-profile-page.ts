@@ -26,6 +26,7 @@ import {
 } from "@/lib/api/domains/settings-api";
 import { upsertExecutorProfile } from "@/components/settings/profile-edit/profile-edit-page-chrome";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
+import { usePluginExecutorCredentials } from "@/components/settings/plugin-executor-credentials";
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -59,6 +60,7 @@ export function usePluginExecutorProfileData(
   const [clearedSecrets, setClearedSecrets] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const credentials = usePluginExecutorCredentials(currentProfile);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,6 +119,7 @@ export function usePluginExecutorProfileData(
     setClearedSecrets,
     loading,
     loadError,
+    credentials,
   };
 }
 
@@ -164,7 +167,10 @@ async function persistPluginExecutorProfile({
   try {
     const updated = await updateExecutorProfile(executor.id, profile.id, {
       name: data.name.trim(),
-      config: serializeExecutorProfileValues(data.parsed.fields, data.values, data.clearedSecrets),
+      config: {
+        ...serializeExecutorProfileValues(data.parsed.fields, data.values, data.clearedSecrets),
+        ...data.credentials.config,
+      },
     });
     const updatedSchema = parseExecutorProfileSchema(updated.provider?.profile_schema);
     const updatedValues = buildExecutorProfileValues(updatedSchema.fields, updated.config);
@@ -278,7 +284,8 @@ export function usePluginExecutorProfileSave({
   const dirty =
     data.name !== data.initialName ||
     !sameValues(data.values, data.initialValues) ||
-    Object.values(data.clearedSecrets).some(Boolean);
+    Object.values(data.clearedSecrets).some(Boolean) ||
+    data.credentials.dirty;
   const unavailableReason = executorProviderUnavailableReason(
     data.currentProfile.provider,
     true,
@@ -290,12 +297,14 @@ export function usePluginExecutorProfileSave({
     name: data.name,
     values: data.values,
     clearedSecrets: data.clearedSecrets,
+    credentials: data.credentials.config,
   });
 
   const discard = useCallback(() => {
     data.setName(data.initialName);
     data.setValues(data.initialValues);
     data.setClearedSecrets({});
+    data.credentials.reset();
     setFieldErrors({});
     setError(null);
   }, [data]);

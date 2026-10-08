@@ -82,7 +82,7 @@ type DockerExecutor struct {
 	// newClientFunc creates the Docker client. Defaults to docker.NewClient.
 	// Override in tests to simulate failures.
 	newClientFunc   func(config.DockerConfig, *logger.Logger) (*docker.Client, error)
-	brokerPreflight func(context.Context, brokerAgentctlProcessClient, string, map[string]string) error
+	brokerPreflight func(context.Context, agentctlProcessClient, string, map[string]string) error
 
 	// endpoints resolves container ports for the reconnect path. Nil means
 	// the daemon shares the backend's network, so a published port is

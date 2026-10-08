@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,9 +58,9 @@ func TestDispatchKanbanAgentErrorTrigger_R1BusDrivenFailureDispatches(t *testing
 	}
 }
 
-// TestDispatchKanbanAgentErrorTrigger_R2ManagedRuntimeNpmFailureDispatches verifies
-// workflow recovery for managed-runtime package resolution failures.
-func TestDispatchKanbanAgentErrorTrigger_R2ManagedRuntimeNpmFailureDispatches(t *testing.T) {
+// TestDispatchKanbanAgentErrorTrigger_ManagedRuntimeStartupFailureDispatches verifies
+// workflow recovery for exhausted managed-runtime startup recovery.
+func TestDispatchKanbanAgentErrorTrigger_ManagedRuntimeStartupFailureDispatches(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
@@ -73,18 +74,18 @@ func TestDispatchKanbanAgentErrorTrigger_R2ManagedRuntimeNpmFailureDispatches(t 
 	svc, logs := newAgentErrorTestService(t, repo, stepGetter, func(s *Service) { s.engineDecisions = decisions })
 	captured := agentErrorCapturePayload(t, svc, engine.ActionClearDecisions)
 
-	npmErr := fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
-		Code:    routingerr.CodeManagedRuntimeNpmResolution,
-		Details: "npm error code ETARGET",
+	startupErr := fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+		Code:    routingerr.CodeManagedRuntimeStartup,
+		Details: "reason=npm_transient attempts=2 npm_code=ECONNRESET",
 	})
-	handled := svc.handleAgentStartFailed(ctx, "t1", "s1", "exec-1", npmErr, false)
+	handled := svc.handleAgentStartFailed(ctx, "t1", "s1", "exec-1", startupErr, false)
 
 	if !handled {
-		t.Fatal("expected handled=true for a managed npm runtime startup failure")
+		t.Fatal("expected handled=true for a managed runtime startup failure")
 	}
 	waitForFailureRecovery(t, svc)
 	if decisions.clearCalls != 1 {
-		t.Fatalf("clearCalls = %d, want 1 (R2's npm-resolution branch must reach the real dispatch)", decisions.clearCalls)
+		t.Fatalf("clearCalls = %d, want 1 (managed startup failures must reach the real dispatch)", decisions.clearCalls)
 	}
 	if got := filterLogs(logs, msgAgentErrorDispatched); len(got) != 1 {
 		t.Fatalf("got %d dispatch INFO records, want 1", len(got))
@@ -92,7 +93,7 @@ func TestDispatchKanbanAgentErrorTrigger_R2ManagedRuntimeNpmFailureDispatches(t 
 	if len(*captured) != 1 {
 		t.Fatalf("got %d payload(s), want 1", len(*captured))
 	}
-	wantMsg := "managed npm runtime failed to prepare"
+	wantMsg := "managed runtime startup failed"
 	if got := (*captured)[0]; got.FailedSessionID != "s1" || got.ErrorMessage != wantMsg {
 		t.Errorf("payload = %+v, want FailedSessionID=s1 ErrorMessage=%q", got, wantMsg)
 	}
@@ -134,6 +135,53 @@ func TestDispatchKanbanAgentErrorTrigger_R3AuthErrorDispatches(t *testing.T) {
 	wantMsg := "authentication required: please log in"
 	if got := (*captured)[0]; got.FailedSessionID != "s1" || got.ErrorMessage != wantMsg {
 		t.Errorf("payload = %+v, want FailedSessionID=s1 ErrorMessage=%q", got, wantMsg)
+	}
+}
+
+func TestDispatchKanbanAgentErrorTrigger_ManagedStartupCausePreservesAuthRecovery(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		Events: wfmodels.StepEvents{OnAgentError: []wfmodels.GenericAction{{Type: wfmodels.GenericActionClearDecisions}}},
+	}
+	decisions := &spyDecisionStore{}
+	svc, logs := newAgentErrorTestService(t, repo, stepGetter, func(s *Service) { s.engineDecisions = decisions })
+	captured := agentErrorCapturePayload(t, svc, engine.ActionClearDecisions)
+	startupErr := &routingerr.ManagedRuntimeStartupError{
+		Code:     routingerr.CodeManagedRuntimeStartup,
+		Details:  "reason=retry_initialize_failed attempts=2",
+		Reason:   "retry_initialize_failed",
+		Attempts: 2,
+		Cause:    errors.New("Authentication required: please log in"),
+	}
+
+	if !svc.handleAgentStartFailed(ctx, "t1", "s1", "exec-1", startupErr, false) {
+		t.Fatal("expected managed startup error with an auth cause to be handled")
+	}
+	waitForFailureRecovery(t, svc)
+	if decisions.clearCalls != 1 || len(*captured) != 1 {
+		t.Fatalf("auth recovery dispatches = %d decisions, %d payloads; want one each", decisions.clearCalls, len(*captured))
+	}
+	if got := filterLogs(logs, "agent start failure is auth error, treating as recoverable"); len(got) != 1 {
+		t.Fatalf("auth recovery log count = %d, want 1", len(got))
+	}
+	if got := filterLogs(logs, "managed runtime startup failure is recoverable"); len(got) != 0 {
+		t.Fatalf("auth cause entered generic managed-runtime recovery: %#v", got)
+	}
+	if got := (*captured)[0].ErrorMessage; !strings.Contains(got, "Authentication required") {
+		t.Fatalf("recovery dispatch lost the final auth diagnostic: %q", got)
+	}
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load recovered session: %v", err)
+	}
+	lastErr, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok || lastErr.Code != string(routingerr.CodeAuthRequired) ||
+		lastErr.StartupReason != "retry_initialize_failed" || lastErr.StartupAttempts != 2 {
+		t.Fatalf("persisted auth startup failure = %#v, want auth code, final reason, and two attempts", lastErr)
 	}
 }
 

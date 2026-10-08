@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -17,19 +18,21 @@ func sourceProfile() *models.AgentProfile {
 	failureThreshold := 4
 	lastRun := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	return &models.AgentProfile{
-		ID:                "source-1",
-		AgentID:           "agent-1",
-		Name:              "Default",
-		AgentDisplayName:  "Claude Code",
-		Model:             "claude-sonnet",
-		FallbackModel:     "claude-haiku",
-		AutoFallback:      true,
-		RequireExactModel: true,
-		Mode:              "plan",
-		ConfigOptions:     map[string]string{"effort": "high"},
-		AllowIndexing:     true,
-		AutoApprove:       true,
-		CLIPassthrough:    true,
+		ID:                      "source-1",
+		AgentID:                 "agent-1",
+		Name:                    "Default",
+		AgentDisplayName:        "Claude Code",
+		Model:                   "claude-sonnet",
+		FallbackModel:           "claude-haiku",
+		AutoFallback:            true,
+		RequireExactModel:       true,
+		Mode:                    "plan",
+		ConfigOptions:           map[string]string{"effort": "high"},
+		AllowIndexing:           true,
+		AutoApprove:             true,
+		CLIPassthrough:          true,
+		CursorMCPAuthEnabled:    false,
+		CursorPluginsMCPEnabled: true,
 		CLIFlags: []models.CLIFlag{
 			{Description: "Allow all tools", Flag: "--allow-all-tools", Enabled: true},
 			{Description: "Custom", Flag: "--my-flag value", Enabled: false},
@@ -84,6 +87,8 @@ func duplicateSetup(source *models.AgentProfile) (*Controller, *fakeStore) {
 // TestDuplicateProfile_CopiesFullConfiguration verifies every configuration field (office enrichment and deprecated legacy columns included) survives duplication while runtime state is reset.
 func TestDuplicateProfile_CopiesFullConfiguration(t *testing.T) {
 	source := sourceProfile()
+	source.MCPSelectionMode = "selected"
+	source.MCPSelectedServers = []string{"plugin-atlassian-atlassian", "github"}
 	ctrl, st := duplicateSetup(source)
 
 	result, err := ctrl.DuplicateProfile(context.Background(), DuplicateProfileRequest{ID: source.ID})
@@ -93,6 +98,9 @@ func TestDuplicateProfile_CopiesFullConfiguration(t *testing.T) {
 
 	if result.ID == source.ID || result.ID == "" {
 		t.Fatalf("copy ID = %q, want a fresh non-empty ID", result.ID)
+	}
+	if result.CursorMCPAuthEnabled != source.CursorMCPAuthEnabled || result.CursorPluginsMCPEnabled != source.CursorPluginsMCPEnabled {
+		t.Errorf("copy Cursor MCP gates = auth:%v plugins:%v, want auth:%v plugins:%v", result.CursorMCPAuthEnabled, result.CursorPluginsMCPEnabled, source.CursorMCPAuthEnabled, source.CursorPluginsMCPEnabled)
 	}
 	if result.Name != "Default Copy" {
 		t.Errorf("copy name = %q, want %q", result.Name, "Default Copy")
@@ -164,6 +172,9 @@ func TestDuplicateProfile_CopiesFullConfiguration(t *testing.T) {
 	}
 	if stored.MigratedFrom != "" {
 		t.Errorf("legacy field must not be copied: migrated_from=%q", stored.MigratedFrom)
+	}
+	if stored.MCPSelectionMode != source.MCPSelectionMode || !reflect.DeepEqual(stored.MCPSelectedServers, source.MCPSelectedServers) {
+		t.Errorf("MCP selection was not copied: mode=%q servers=%#v", stored.MCPSelectionMode, stored.MCPSelectedServers)
 	}
 }
 

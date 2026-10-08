@@ -9,10 +9,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -410,6 +412,87 @@ func TestInitialize_ServerError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "agent not running") {
 		t.Fatalf("expected 'agent not running' error, got: %v", err)
+	}
+	var initializeErr *InitializeError
+	if !errors.As(err, &initializeErr) {
+		t.Fatalf("error type = %T, want *InitializeError", err)
+	}
+	if initializeErr.StartupEvidence != nil {
+		t.Fatalf("legacy response evidence = %#v, want nil", initializeErr.StartupEvidence)
+	}
+}
+
+func TestInitializeStartupEvidence(t *testing.T) {
+	const generation = 43
+	var gotGeneration atomic.Uint64
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		if msg.Action != "agent.initialize" {
+			t.Errorf("action = %q, want agent.initialize", msg.Action)
+		}
+		var request struct {
+			ProcessGeneration uint64 `json:"process_generation"`
+		}
+		if err := msg.ParsePayload(&request); err != nil {
+			t.Errorf("parse initialize request: %v", err)
+		}
+		gotGeneration.Store(request.ProcessGeneration)
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "process exited", map[string]any{
+			"startup_evidence": map[string]any{
+				"process_generation":      generation,
+				"exit_disposition":        "ordinary_exit",
+				"exit_code":               1,
+				"npm_code":                "ECONNRESET",
+				"collection_complete":     true,
+				"npm_diagnostic_present":  true,
+				"npm_diagnostic_complete": true,
+			},
+		})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+	c.processGeneration = generation
+
+	_, err := c.Initialize(context.Background(), "kandev", "1.0.0")
+	if err == nil {
+		t.Fatal("expected initialize failure")
+	}
+	var initializeErr *InitializeError
+	if !errors.As(err, &initializeErr) {
+		t.Fatalf("error type = %T, want *InitializeError", err)
+	}
+	if got := gotGeneration.Load(); got != generation {
+		t.Fatalf("initialize process_generation = %d, want %d", got, generation)
+	}
+	if initializeErr.StartupEvidence == nil ||
+		initializeErr.StartupEvidence.ProcessGeneration != generation ||
+		initializeErr.StartupEvidence.NPMCode != "ECONNRESET" ||
+		!initializeErr.StartupEvidence.NPMDiagnosticPresent ||
+		!initializeErr.StartupEvidence.NPMDiagnosticComplete ||
+		initializeErr.StartupEvidence.ExitDisposition != types.ManagedStartupExitOrdinary {
+		t.Fatalf("startup evidence = %#v, want generation %d and ECONNRESET", initializeErr.StartupEvidence, generation)
+	}
+}
+
+func TestStartStoresProcessGenerationWithoutChangingReturnValue(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/start" {
+			t.Errorf("path = %q, want /api/v1/start", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"success":true,"command":"claude acp","process_generation":17}`))
+	}))
+	defer server.Close()
+	c := &Client{baseURL: server.URL, httpClient: server.Client(), logger: newTestLogger()}
+
+	command, err := c.Start(context.Background())
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if command != "claude acp" {
+		t.Fatalf("Start() command = %q, want %q", command, "claude acp")
+	}
+	if c.processGeneration != 17 {
+		t.Fatalf("stored process generation = %d, want 17", c.processGeneration)
 	}
 }
 
@@ -984,10 +1067,13 @@ func TestStreamUpdates_DisconnectCleansPending(t *testing.T) {
 
 	// Add a pending request
 	ch := make(chan *ws.Message, 1)
+	c.mu.Lock()
+	streamConn := c.agentStreamConn
+	c.mu.Unlock()
 	c.pendingMu.Lock()
 	c.pendingRequests["pending-test"] = ch
 	c.pendingRequestConns = make(map[string]*websocket.Conn)
-	c.pendingRequestConns["pending-test"] = c.agentStreamConn
+	c.pendingRequestConns["pending-test"] = streamConn
 	c.pendingMu.Unlock()
 
 	// Wait for disconnect
@@ -1009,6 +1095,64 @@ func TestStreamUpdates_DisconnectCleansPending(t *testing.T) {
 	if count != 0 {
 		t.Fatalf("expected 0 pending requests after disconnect, got %d", count)
 	}
+}
+
+func TestHasAgentStreamBecomesFalseBeforeDisconnectCallbacksDrain(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	closePeer := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		payload, _ := json.Marshal(AgentEvent{Type: streams.EventTypeMessageChunk, Text: "queued"})
+		_ = conn.WriteMessage(websocket.TextMessage, payload)
+		<-closePeer
+	}))
+	defer server.Close()
+
+	handlerStarted := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	disconnected := make(chan struct{})
+	c := &Client{
+		baseURL:         server.URL,
+		httpClient:      &http.Client{Timeout: 5 * time.Second},
+		logger:          newTestLogger(),
+		pendingRequests: make(map[string]chan *ws.Message),
+	}
+	if err := c.StreamUpdates(context.Background(), func(AgentEvent) {
+		close(handlerStarted)
+		<-releaseHandler
+	}, nil, func(error) { close(disconnected) }); err != nil {
+		t.Fatalf("StreamUpdates: %v", err)
+	}
+	select {
+	case <-handlerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("event handler did not start")
+	}
+	close(closePeer)
+
+	deadline := time.Now().Add(time.Second)
+	for c.HasAgentStream() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if c.HasAgentStream() {
+		t.Fatal("HasAgentStream remained true after the websocket read loop observed disconnect")
+	}
+	select {
+	case <-disconnected:
+		t.Fatal("disconnect callback ran before the ordered event worker drained")
+	default:
+	}
+	close(releaseHandler)
+	select {
+	case <-disconnected:
+	case <-time.After(time.Second):
+		t.Fatal("disconnect callback did not run after the event worker drained")
+	}
+	c.Close()
 }
 
 // TestReadUpdatesStream_BlockedHandlerDoesNotStarveResponse is the regression

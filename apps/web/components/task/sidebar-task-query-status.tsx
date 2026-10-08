@@ -40,7 +40,7 @@ export function SidebarTaskQueryStatus({
     );
   if (!pending || !hasPage) return null;
   return (
-    <div role="status" className="px-2 py-1 text-xs text-muted-foreground">
+    <div role="status" className="sr-only">
       {t("sidebar:queryRefreshing")}
     </div>
   );

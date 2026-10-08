@@ -6,22 +6,27 @@ import { useTranslation } from "react-i18next";
 import { IconChevronDown } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
-import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
+import {
+  formatSessionErrorDetails,
+  type SessionErrorDetailsField,
+} from "@/lib/session-error-details";
 
 export function SessionErrorDetails({
   children,
   label,
   testId,
   textTestId,
+  structuredFields,
 }: {
   children: string;
   label?: string;
   testId?: string;
   textTestId?: string;
+  structuredFields?: readonly SessionErrorDetailsField[];
 }) {
   const { t } = useTranslation();
   const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
-  const sanitized = sanitizeSessionErrorDetails(children, 4097);
+  const sanitized = formatSessionErrorDetails(children, structuredFields ?? [], 4097);
   const text =
     sanitized.length > 4096
       ? `${sanitized.slice(0, 4096).replace(/[\uD800-\uDBFF]$/u, "")}\n${t("task:outputTruncated")}`

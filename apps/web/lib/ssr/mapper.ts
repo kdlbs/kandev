@@ -100,6 +100,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         workspaceId: snapshotTaskWorkspaceId(task, snapshot.workflow.workspace_id),
         workflowId: snapshot.workflow.id,
         workflowStepId,
+        identifier: task.identifier,
         workflowAgentOverrides: task.workflow_agent_overrides,
         title: task.title,
         description: task.description ?? undefined,
@@ -166,6 +167,13 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
       isLoading: false,
       steps: snapshot.steps.map(snapshotWorkflowStep),
       tasks,
+      taskCoverage: snapshot.task_coverage
+        ? {
+            ...snapshot.task_coverage,
+            complete:
+              snapshot.task_coverage.complete && tasks.length === snapshot.task_coverage.total,
+          }
+        : undefined,
     },
   };
 }

@@ -58,101 +58,109 @@ export function executorFailureVisibilityScenario() {
     seedData,
     backend,
   }, testInfo) => {
+    const { settings: previousSettings } = await apiClient.getUserSettings();
     await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
-      "Executor failure evidence",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
-    );
-    expect(task.session_id).toBeTruthy();
-    await waitForSessionDone(apiClient, task.id, task.session_id!, "fixture completed");
-    const episode = seedEpisode(path.join(backend.tmpDir, "kandev.db"), task.id);
-    const session = new SessionPage(testPage);
-    await testPage.goto(`/t/${task.id}`);
-    await session.waitForLoad();
-    const strip = testPage.getByTestId("session-executor-failure-card");
-    await test.step("durable failure strip on task load", async () => {
-      const summary = await apiClient.listTasks(seedData.workspaceId);
-      const current = summary.tasks.find((candidate) => candidate.id === task.id);
-      expect(current?.status_summary).toMatchObject({ executor_failure: { id: episode.id } });
-      await expect(strip).toContainText("Executor evicted");
-    });
-    await testPage.reload();
-    await session.waitForLoad();
-    await expect(strip).toContainText("Executor evicted");
-    const collapsed = await strip.boundingBox();
-    expect(collapsed).not.toBeNull();
-    expect(collapsed!.y).toBeGreaterThan(testPage.viewportSize()!.height / 2);
-    const opener = testPage.getByTestId("executor-failure-expand");
-    await opener.click();
-    const details = testPage.getByTestId("executor-failure-details");
-    await expect(strip).toContainText("12Gi");
-    await expect(testPage.getByTestId("task-shared-error")).toHaveCount(0);
-    await expect(testPage.getByRole("dialog")).toHaveCount(0);
-    await expect(details).toContainText("persistent volume");
-    await expect(details).toContainText("conversation recovery is unverified");
-    await expect(details).not.toContainText("out of memory");
-    await expect(details.getByRole("button", { name: /resume|reset/i })).toHaveCount(0);
-    await testPage.getByTestId("executor-recheck").click();
-    await expect(strip.getByRole("status")).toContainText("Cannot verify");
-    await expect(strip).toContainText("Executor evicted");
-    await assertNoDocumentHorizontalOverflow(testPage);
-    if (testInfo.project.name === "mobile-chrome") {
-      const box = await strip.boundingBox();
-      expect(box).not.toBeNull();
-      expect(box!.width).toBeLessThanOrEqual(testPage.viewportSize()!.width);
-      expect(box!.height).toBeLessThanOrEqual(testPage.viewportSize()!.height / 2 + 1);
-      const recheckBox = await testPage.getByTestId("executor-recheck").boundingBox();
-      expect(recheckBox!.height).toBeGreaterThanOrEqual(44);
-    }
-    await testPage.route(`**/api/v1/tasks/${task.id}/executor-failure/recheck`, async (route) => {
-      const body = route.request().postDataJSON();
-      expect(body).toEqual({ episode_id: episode.id, revision: 1 });
-      const db = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
-      try {
-        db.exec("PRAGMA busy_timeout=10000");
-        db.prepare(
-          "UPDATE executor_failure_episodes SET state='resolved',current_outcome='healthy',revision=2,resolved_at=? WHERE id=?",
-        ).run(new Date().toISOString(), episode.id);
-      } finally {
-        db.close();
-      }
-      await route.fulfill({
-        json: { ...episode, state: "resolved", revision: 2, current_outcome: "healthy" },
+    try {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Executor failure evidence",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      expect(task.session_id).toBeTruthy();
+      await waitForSessionDone(apiClient, task.id, task.session_id!, "fixture completed");
+      const episode = seedEpisode(path.join(backend.tmpDir, "kandev.db"), task.id);
+      const session = new SessionPage(testPage);
+      await testPage.goto(`/t/${task.id}`);
+      await session.waitForLoad();
+      const strip = testPage.getByTestId("session-executor-failure-card");
+      await test.step("durable failure strip on task load", async () => {
+        const summary = await apiClient.listTasks(seedData.workspaceId);
+        const current = summary.tasks.find((candidate) => candidate.id === task.id);
+        expect(current?.status_summary).toMatchObject({ executor_failure: { id: episode.id } });
+        await expect(strip).toContainText("Executor evicted");
       });
-    });
-    await testPage.getByTestId("executor-recheck").click();
-    await expect(strip).toHaveCount(0);
-    await apiClient.seedSessionMessage(task.session_id!, {
-      type: "status",
-      content: "",
-      metadata: {
-        executor_recovery: true,
-        provider_conversation: "fresh",
-        workspace: "retained",
-        workspace_observed_at: episode.observation.observed_at,
-      },
-    });
-    await testPage.reload();
-    await session.waitForLoad();
-    await expect(strip).toHaveCount(0);
-    const history = testPage.getByTestId("executor-recovery-history");
-    await expect(history).toHaveAttribute("role", "alert");
-    await expect(history.getByRole("heading")).toContainText("Executor recovery confirmed");
-    await expect(history).toContainText("A new provider conversation was started");
-    await expect(testPage.getByTestId("executor-recovery-history")).toContainText(
-      "persistent volume was retained",
-    );
-    await expect(testPage.getByTestId("executor-recovery-history")).toContainText(
-      "Executor recovery confirmed",
-    );
-    await assertNoDocumentHorizontalOverflow(testPage);
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(strip).toContainText("Executor evicted");
+      const collapsed = await strip.boundingBox();
+      expect(collapsed).not.toBeNull();
+      expect(collapsed!.y).toBeGreaterThan(testPage.viewportSize()!.height / 2);
+      const opener = testPage.getByTestId("executor-failure-expand");
+      await opener.click();
+      const details = testPage.getByTestId("executor-failure-details");
+      await expect(strip).toContainText("12Gi");
+      await expect(testPage.getByTestId("task-shared-error")).toHaveCount(0);
+      await expect(testPage.getByRole("dialog")).toHaveCount(0);
+      await expect(details).toContainText("persistent volume");
+      await expect(details).toContainText("conversation recovery is unverified");
+      await expect(details).not.toContainText("out of memory");
+      await expect(details.getByRole("button", { name: /resume|reset/i })).toHaveCount(0);
+      await testPage.getByTestId("executor-recheck").click();
+      await expect(strip.getByRole("status")).toContainText("Cannot verify");
+      await expect(strip).toContainText("Executor evicted");
+      await assertNoDocumentHorizontalOverflow(testPage);
+      if (testInfo.project.name === "mobile-chrome") {
+        const box = await strip.boundingBox();
+        expect(box).not.toBeNull();
+        expect(box!.width).toBeLessThanOrEqual(testPage.viewportSize()!.width);
+        expect(box!.height).toBeLessThanOrEqual(testPage.viewportSize()!.height / 2 + 1);
+        const recheckBox = await testPage.getByTestId("executor-recheck").boundingBox();
+        expect(recheckBox!.height).toBeGreaterThanOrEqual(44);
+      }
+      await testPage.route(`**/api/v1/tasks/${task.id}/executor-failure/recheck`, async (route) => {
+        const body = route.request().postDataJSON();
+        expect(body).toEqual({ episode_id: episode.id, revision: 1 });
+        const db = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
+        try {
+          db.exec("PRAGMA busy_timeout=10000");
+          db.prepare(
+            "UPDATE executor_failure_episodes SET state='resolved',current_outcome='healthy',revision=2,resolved_at=? WHERE id=?",
+          ).run(new Date().toISOString(), episode.id);
+        } finally {
+          db.close();
+        }
+        await route.fulfill({
+          json: { ...episode, state: "resolved", revision: 2, current_outcome: "healthy" },
+        });
+      });
+      await testPage.getByTestId("executor-recheck").click();
+      await expect(strip).toHaveCount(0);
+      await expect(session.anyIdleInput()).toBeVisible();
+      await apiClient.seedSessionMessage(task.session_id!, {
+        type: "status",
+        content: "",
+        metadata: {
+          executor_recovery: true,
+          provider_conversation: "fresh",
+          workspace: "retained",
+          workspace_observed_at: episode.observation.observed_at,
+        },
+      });
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(strip).toHaveCount(0);
+      const history = testPage.getByTestId("executor-recovery-history");
+      await expect(history).toHaveAttribute("role", "alert");
+      await expect(history.getByRole("heading")).toContainText("Executor recovery confirmed");
+      await expect(history).toContainText("A new provider conversation was started");
+      await expect(testPage.getByTestId("executor-recovery-history")).toContainText(
+        "persistent volume was retained",
+      );
+      await expect(testPage.getByTestId("executor-recovery-history")).toContainText(
+        "Executor recovery confirmed",
+      );
+      await assertNoDocumentHorizontalOverflow(testPage);
+    } finally {
+      await apiClient.saveUserSettings({
+        prevent_auto_start_agent_on_open: previousSettings.prevent_auto_start_agent_on_open,
+      });
+    }
   });
   // @covers AC-EXECUTORS-FAILURE-VISIBILITY-001.2, .6, .13
   test("worker outage retains uncertainty and separate workspace guidance after reload", async ({

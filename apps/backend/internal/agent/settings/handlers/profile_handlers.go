@@ -92,6 +92,13 @@ func (h *Handlers) httpUpdateProfileMcpConfig(c *gin.Context) {
 	h.broadcastProfileMCPConfigUpdated(profileID, resp.WorkspaceID)
 }
 
+func profileValidationMessage(err error, requiredValue, missingMessage string) string {
+	if strings.TrimSpace(requiredValue) == "" {
+		return missingMessage
+	}
+	return err.Error()
+}
+
 type createProfileRequest = dto.ProfileCreateRequest
 
 func (h *Handlers) httpCreateProfile(c *gin.Context) {
@@ -102,7 +109,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 	}
 	body.AgentID = c.Param("id")
 	if err := body.Validate(); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "profile name is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": profileValidationMessage(err, body.Name, "profile name is required")})
 		return
 	}
 	resp, err := h.controller.CreateProfile(c.Request.Context(), controller.CreateProfileRequestFromDTO(body))
@@ -143,7 +150,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 	body.ID = c.Param("id")
 	body.Force = c.Query("force") == queryTrue
 	if err := body.Validate(); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "profile id is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": profileValidationMessage(err, body.ID, "profile id is required")})
 		return
 	}
 	if body.Name != nil && strings.TrimSpace(*body.Name) == "" {

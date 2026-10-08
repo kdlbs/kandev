@@ -10,7 +10,7 @@ import (
 )
 
 // InspectExecutor reads recorded resource status without refreshing control,
-// reconnecting transports, creating resources, or loading provider conversations.
+// reconnecting agent streams, creating resources, or loading provider conversations.
 func (m *Manager) InspectExecutor(ctx context.Context, target models.ExecutorObservationTarget) (*models.ExecutorObservation, error) {
 	now := time.Now().UTC()
 	unknown := &models.ExecutorObservation{Outcome: models.ExecutorOutcomeUnknown, Runtime: target.Runtime, ResourceKey: target.ResourceKey, ObservedAt: now, Workspace: models.ExecutorOutcomeUnknown}
@@ -133,14 +133,14 @@ func (m *Manager) existingExecutorLaunchError(ctx context.Context, execution *Ag
 	}
 	target, err := m.executorObservationTarget(ctx, execution)
 	if err != nil {
-		return duplicate
+		return &ExecutorUnavailableError{Observation: &models.ExecutorObservation{Runtime: string(execution.RuntimeName), ResourceKey: target.ResourceKey, Outcome: models.ExecutorOutcomeUnknown, ObservedAt: time.Now().UTC(), Reason: models.ExecutorReasonStatusUnverified, Workspace: models.ExecutorOutcomeUnknown}}
 	}
 	observation, err := m.InspectExecutor(ctx, target)
 	if observation == nil || observation.Outcome == models.ExecutorOutcomeHealthy {
 		return duplicate
 	}
 	if err != nil || (observation.Outcome == models.ExecutorOutcomeUnknown && !observation.ReportedUnavailable()) {
-		observation.Reason = "StatusUnverified"
+		observation.Reason = models.ExecutorReasonStatusUnverified
 		observation.Message = ""
 		return &ExecutorUnavailableError{Observation: observation}
 	}
@@ -160,6 +160,9 @@ func (m *Manager) existingExecutorLaunchError(ctx context.Context, execution *Ag
 func (m *Manager) supportsExecutorInspection(runtime agentruntime.Runtime) bool {
 	if runtime == agentruntime.RuntimeStandalone {
 		return m.localExecutorInspector != nil
+	}
+	if runtime != agentruntime.RuntimeDocker && runtime != agentruntime.RuntimeRemoteDocker && runtime != agentruntime.RuntimeKubernetes {
+		return false
 	}
 	if m.executorRegistry == nil {
 		return false

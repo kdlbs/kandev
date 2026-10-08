@@ -27,6 +27,7 @@ export type TaskLaunchErrorContextValue = {
   statusSummary?: TaskStatusSummary | null;
   repositories?: TaskRepository[];
   automaticRecovery?: SessionRecoveryOwner | null;
+  automaticRecoveryOwnerSessionId?: string | null;
   /** Claims one assertive announcement for a task error stamp. */
   claimTaskErrorAnnouncement?: (stamp: string) => boolean;
 };

@@ -322,8 +322,8 @@ func (s *Service) fetchUnwatchedTaskPRsPerPR(
 	if explicitRefresh {
 		statusCtx = withWorkflowAttentionCollector(ctx, func(
 			collectorCtx context.Context, collectorClient Client, owner, repo string, pr *PR,
-		) (*WorkflowAttention, error) {
-			return s.collectWorkflowAttention(
+		) (*workflowObservation, error) {
+			return s.collectWorkflowObservation(
 				collectorCtx, collectorClient, resolved.CacheScope, owner, repo, pr,
 			)
 		})

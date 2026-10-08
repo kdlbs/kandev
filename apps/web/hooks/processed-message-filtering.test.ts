@@ -6,6 +6,7 @@ import {
   hasFailedAgentBootAfter,
   hasSessionRecoveryResolutionAfter,
   hasSuccessfulAgentBootAfter,
+  isSelectionFailureRecoveryMetadata,
   isSuccessfulScriptExecutionMetadata,
 } from "./processed-message-filtering";
 
@@ -92,6 +93,22 @@ describe("hasSuccessfulAgentBootAfter", () => {
     const later = { ...bootMessage("2026-05-30T00:02:00Z"), type: "message" } as Message;
     expect(hasSuccessfulAgentBootAfter([bootMessage(AFTER), later], ERROR_AT)).toBe(true);
   });
+
+  it("uses only authoritative metadata for stamped recovery rows", () => {
+    const success = providerRestoredSuccess("failure-1");
+    const metadata = {
+      recovery_resolutions: [
+        { error_stamp: "failure-1", resolved_at: AFTER, attempt_id: "resume-1" },
+      ],
+    };
+    expect(hasSuccessfulAgentBootAfter([success], ERROR_AT, "failure-1", true, metadata)).toBe(
+      true,
+    );
+    expect(hasSuccessfulAgentBootAfter([success], ERROR_AT, "failure-2", true, metadata)).toBe(
+      false,
+    );
+    expect(hasSuccessfulAgentBootAfter([success], ERROR_AT, "failure-1", true)).toBe(false);
+  });
 });
 
 describe("recovery resolution metadata", () => {
@@ -111,7 +128,80 @@ describe("recovery resolution metadata", () => {
       false,
     );
   });
+
+  it("uses an authoritative stamp-specific resolution when the success row is absent", () => {
+    const metadata = {
+      recovery_resolved_at: AFTER,
+      recovery_resolutions: [
+        { error_stamp: "failure-1", resolved_at: AFTER, attempt_id: "resume-1" },
+      ],
+    };
+    expect(
+      hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-1", undefined, true),
+    ).toBe(true);
+    expect(
+      hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-2", undefined, true),
+    ).toBe(false);
+  });
+
+  it("does not let a transcript notice or global timestamp settle a stamped failure", () => {
+    const notice = providerRestoredSuccess("failure-1");
+    const metadata = { recovery_resolved_at: AFTER };
+    expect(hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-1", [notice], true)).toBe(
+      false,
+    );
+    expect(hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-2", [], true)).toBe(
+      false,
+    );
+  });
+
+  it("rejects malformed resolution records and oversized host attempt references", () => {
+    const metadata = {
+      recovery_resolved_at: AFTER,
+      recovery_resolutions: [
+        { error_stamp: "failure-1", resolved_at: AFTER, attempt_id: "resume-99999999999999999999" },
+        { error_stamp: "failure-1", resolved_at: AFTER, attempt_id: "resume-started" },
+      ],
+    };
+    expect(hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-1")).toBe(false);
+  });
+
+  it("keeps a successor failure unresolved when only its predecessor was settled", () => {
+    const metadata = {
+      recovery_resolved_at: AFTER,
+      recovery_resolutions: [
+        { error_stamp: "failure-1", resolved_at: AFTER, attempt_id: "resume-1" },
+      ],
+    };
+    expect(hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-1")).toBe(true);
+    expect(hasSessionRecoveryResolutionAfter(metadata, AFTER, "successor-failure")).toBe(false);
+  });
 });
+
+describe("selection failure correlation", () => {
+  it("requires an exact occurrence link only for typed model and mode failures", () => {
+    expect(isSelectionFailureRecoveryMetadata({ causes: [{ code: "model_unavailable" }] })).toBe(
+      true,
+    );
+    expect(isSelectionFailureRecoveryMetadata({ code: "permission_mode_mismatch" })).toBe(true);
+    expect(
+      isSelectionFailureRecoveryMetadata({ causes: [{ code: "transport_unavailable" }] }),
+    ).toBe(false);
+  });
+});
+
+function providerRestoredSuccess(resolvedErrorStamp: string): Message {
+  return baseMessage({
+    id: `resume-success-${resolvedErrorStamp}`,
+    type: "status",
+    created_at: AFTER,
+    metadata: {
+      variant: "resume_settings_provider_restored",
+      attempt_id: "resume-2",
+      resolved_error_stamp: resolvedErrorStamp,
+    },
+  });
+}
 
 describe("isSuccessfulScriptExecutionMetadata", () => {
   it("uses the shared exited-zero success rule", () => {

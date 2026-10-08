@@ -45,6 +45,8 @@ export type ProfileFormData = {
   command_prefix?: string;
   env_vars?: { key: string; value?: string; secret_id?: string }[];
   provider_kind?: string;
+  cursor_mcp_auth_enabled?: boolean;
+  cursor_plugins_mcp_enabled?: boolean;
 } & Record<PermissionKey, boolean>;
 
 function CustomProviderModelInput({

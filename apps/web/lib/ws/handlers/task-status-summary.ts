@@ -130,11 +130,17 @@ function sidebarQuerySummaryChanged(
   next: TaskStatusSummary,
 ): boolean {
   if (executorFailureChanged(current, next)) return true;
-  if ((current?.last_activity_at ?? null) !== (next.last_activity_at ?? null)) return true;
-  if ((current?.primary_session?.state ?? null) !== (next.primary_session?.state ?? null))
-    return true;
-  if (hasDiff(current) !== hasDiff(next)) return true;
-  return hasPullRequest(current) !== hasPullRequest(next);
+  return sidebarQuerySummaryKey(current) !== sidebarQuerySummaryKey(next);
+}
+
+function sidebarQuerySummaryKey(summary: TaskStatusSummary | null | undefined): string {
+  return JSON.stringify([
+    summary?.last_activity_at ?? null,
+    summary?.primary_session?.state ?? null,
+    summary?.has_running_session ?? null,
+    hasDiff(summary),
+    hasPullRequest(summary),
+  ]);
 }
 
 function hasDiff(summary: TaskStatusSummary | null | undefined): boolean {

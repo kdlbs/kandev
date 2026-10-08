@@ -41,7 +41,9 @@ func (s *Service) ReconcileExecutorFailures(ctx context.Context) {
 	for range 4 {
 		workers.Go(func() {
 			for index := range jobs {
-				results[index].observation, _ = s.inspectExecutorObservation(passCtx, targets[index])
+				inspectCtx, cancelInspect := context.WithTimeout(passCtx, 5*time.Second)
+				results[index].observation, _ = s.inspectExecutorObservation(inspectCtx, targets[index])
+				cancelInspect()
 			}
 		})
 	}
@@ -50,20 +52,22 @@ func (s *Service) ReconcileExecutorFailures(ctx context.Context) {
 	}
 	close(jobs)
 	workers.Wait()
+	writeCtx, cancelWrite := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelWrite()
 	for index, target := range targets {
-		if passCtx.Err() != nil {
+		if ctx.Err() != nil {
 			return
 		}
 		observation := results[index].observation
-		_, changed, err := store.ObserveExecutorFailure(passCtx, target, observation)
+		_, changed, err := store.ObserveExecutorFailure(writeCtx, target, observation)
 		if err != nil {
 			s.logger.Debug("executor observation admission rejected", zap.String("task_id", target.TaskID), zap.Error(err))
 		} else {
 			if changed {
-				s.PublishTaskUpdatedByID(passCtx, target.TaskID)
-				s.publishExecutorFailureHistory(passCtx, target.TaskID)
+				s.PublishTaskUpdatedByID(writeCtx, target.TaskID)
+				s.publishExecutorFailureHistory(writeCtx, target.TaskID)
 			}
-			s.settleExecutorFailureSessions(passCtx, target, observation)
+			s.settleExecutorFailureSessions(writeCtx, target, observation)
 		}
 		s.executorObservationCursor = target.Cursor
 	}

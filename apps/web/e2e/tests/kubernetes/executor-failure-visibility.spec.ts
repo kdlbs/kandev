@@ -149,13 +149,15 @@ test("retains workspace and durable missing Pod evidence after backend restart",
     const session = new SessionPage(testPage);
     await testPage.goto(`/t/${task.id}`);
     await session.waitForLoad();
-    await expect(testPage.getByTestId("task-shared-error")).toContainText("Executor stopped");
-    await testPage.getByTestId("task-shared-error-details").click();
+    const card = testPage.getByTestId("session-executor-failure-card");
+    await expect(card).toContainText("Executor no longer available");
+    await card.getByTestId("executor-failure-expand").click();
     const details = testPage.getByTestId("executor-failure-details");
+    await details.locator("summary").click();
     await expect(details).toContainText("PodNotFound");
     await testPage.getByTestId("executor-recheck").click();
     await expect(testPage.getByTestId("executor-recheck")).toBeEnabled();
-    await expect(testPage.getByTestId("task-shared-error")).toBeVisible();
+    await expect(card).toBeVisible();
     expect((await waitForKubernetesPVC(cluster, task.id, sessionId)).metadata.uid).toBe(
       pvc.metadata.uid,
     );

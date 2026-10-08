@@ -104,21 +104,31 @@ function renderForm(
   cursorMcpAuthSupported = false,
 ) {
   return render(
-    <TooltipProvider>
-      <ProfileFormFields
-        profile={profile}
-        baselineProfile={profile}
-        onChange={onChange}
-        modelConfig={config}
-        permissionSettings={{}}
-        passthroughConfig={null}
-        agentName={mockAgentName}
-        capabilityProfileId="test-profile"
-        cursorMcpAuthSupported={cursorMcpAuthSupported}
-      />
-    </TooltipProvider>,
+    <StateProvider>
+      <TooltipProvider>
+        <ProfileFormFields
+          profile={profile}
+          baselineProfile={profile}
+          onChange={onChange}
+          modelConfig={config}
+          permissionSettings={{}}
+          passthroughConfig={null}
+          agentName={mockAgentName}
+          capabilityProfileId="test-profile"
+          cursorMcpAuthSupported={cursorMcpAuthSupported}
+        />
+      </TooltipProvider>
+    </StateProvider>,
   );
 }
+
+it("keeps a single refresh action when the profile advertises modes", () => {
+  renderForm(formData(), {
+    ...modelConfig,
+    available_modes: [{ id: "default", name: "Default" }],
+  });
+  expect(screen.getAllByTestId("profile-refresh-capabilities")).toHaveLength(1);
+});
 
 function renderStatefulForm(
   profile: ProfileFormData,
@@ -147,9 +157,11 @@ function renderStatefulForm(
   }
 
   return render(
-    <TooltipProvider>
-      <StatefulForm />
-    </TooltipProvider>,
+    <StateProvider>
+      <TooltipProvider>
+        <StatefulForm />
+      </TooltipProvider>
+    </StateProvider>,
   );
 }
 
@@ -354,22 +366,13 @@ describe("ProfileFormFields model options", () => {
     });
   });
 
-  it("constrains a single start model field on desktop", () => {
-    renderForm(formData());
-
-    const row = screen.getByTestId("profile-capabilities-model-row");
-    expect(row.firstElementChild?.className).toContain("md:max-w-xl");
-  });
-
-  it("keeps the model and mode fields balanced when modes are available", () => {
+  it("retains the mode selector when modes are available", () => {
     renderForm(formData({ mode: "default" }), {
       ...modelConfig,
       available_modes: [{ id: "default", name: "Default" }],
       current_mode_id: "default",
     });
 
-    const row = screen.getByTestId("profile-capabilities-model-row");
-    expect(row.firstElementChild?.className).toContain("flex-1");
     expect(screen.getByTestId("profile-mode-field")).not.toBeNull();
   });
 
@@ -645,5 +648,28 @@ describe("ProfileFormFields save coordination", () => {
     await waitFor(() => expect(saveButton.hasAttribute("disabled")).toBe(false));
     fireEvent.click(saveButton);
     await waitFor(() => expect(save).toHaveBeenCalledOnce());
+  });
+});
+
+describe("ProfileFormFields Cursor MCP preferences", () => {
+  it("renders Cursor plugin MCP import preference when supported and toggles it", () => {
+    const onChange = vi.fn();
+    renderForm(formData({ cursor_plugins_mcp_enabled: true }), modelConfig, onChange, true);
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Import local Cursor plugin MCP servers",
+    });
+    expect(checkbox).toBeDefined();
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(checkbox);
+    expect(onChange).toHaveBeenCalledWith({ cursor_plugins_mcp_enabled: false });
+  });
+
+  it("hides Cursor plugin MCP import preference when not supported", () => {
+    renderForm(formData(), modelConfig, vi.fn(), false);
+    expect(
+      screen.queryByRole("checkbox", { name: "Import local Cursor plugin MCP servers" }),
+    ).toBeNull();
   });
 });

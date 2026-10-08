@@ -154,7 +154,10 @@ test.describe("Workflow move preview", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const { agentId, profileA, profileB } = await createWorkflowAgentProfiles(apiClient);
+    const { agentId, profileA, profileB } = await createWorkflowAgentProfiles(
+      apiClient,
+      seedData.agentProfileId,
+    );
     const profileC = await apiClient.createAgentProfile(agentId, "Profile C (new)", {
       model: "mock-fast",
     });

@@ -177,11 +177,13 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		}
 
 		parentID := req.GetString("parent_id", "")
+		parentIsSelf := false
 		if parentID == "self" {
 			if s.taskID == "" {
 				return mcp.NewToolResultError("cannot use 'self' as parent_id: no current task context"), nil
 			}
 			parentID = s.taskID
+			parentIsSelf = true
 		}
 		workspaceID := req.GetString("workspace_id", "")
 		workflowID := req.GetString("workflow_id", "")
@@ -211,6 +213,12 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		}
 		if s.sessionID != "" && s.taskID != "" {
 			payload["source_session_id"] = s.sessionID
+		}
+		if parentIsSelf {
+			// This is an internal server-owned intent marker. The backend still
+			// authenticates the current session and verifies that parent_id is
+			// the authenticated caller task before applying self placement.
+			payload["parent_is_self"] = true
 		}
 		if externalID := req.GetString("external_id", ""); externalID != "" {
 			payload["external_id"] = externalID
@@ -1322,7 +1330,15 @@ func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
 
-		payload := map[string]string{"task_id": taskID}
+		arguments, marshalErr := json.Marshal(req.GetArguments())
+		if marshalErr != nil {
+			return mcp.NewToolResultError("invalid plan read arguments"), nil
+		}
+		options, parseErr := taskcontract.ParsePlanReadOptions(arguments)
+		if parseErr != nil {
+			return mcp.NewToolResultError(parseErr.Error()), nil
+		}
+		payload := planReadRequestPayload(taskID, options)
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskPlan, payload, &result); err != nil {
 			return mcp.NewToolResultError(planToolError(err)), nil
@@ -1357,6 +1373,20 @@ func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+func planReadRequestPayload(taskID string, options taskcontract.PlanReadOptions) map[string]interface{} {
+	payload := map[string]interface{}{"task_id": taskID}
+	if options.Offset != nil {
+		payload["offset"] = *options.Offset
+	}
+	if options.Limit != nil {
+		payload["limit"] = *options.Limit
+	}
+	if options.ExpectedVersion != nil {
+		payload["expected_version"] = *options.ExpectedVersion
+	}
+	return payload
 }
 
 func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {

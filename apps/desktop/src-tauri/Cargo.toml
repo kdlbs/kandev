@@ -1,6 +1,6 @@
 [package]
 name = "kandev-desktop"
-version = "0.96.0"
+version = "0.97.0"
 default-run = "kandev-desktop"
 description = "Kandev desktop shell"
 authors = ["Kandev"]

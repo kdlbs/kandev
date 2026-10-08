@@ -104,9 +104,9 @@ func TestQuerySidebarTaskPageHydratesTaskRepositoryLinks(t *testing.T) {
 func TestBuildSidebarTaskPageContinuationMarkersAreScopedToPageBoundaries(t *testing.T) {
 	query := sidebarTaskQuery(1)
 	rows := []sidebarPageRow{
-		{taskID: "root", groupKey: "all", groupPosition: 1},
-		{taskID: "first-child", groupKey: "all", parentID: "off-page-parent", parentTitle: "Parent", depth: 1, groupPosition: 2},
-		{taskID: "second-child", groupKey: "all", parentID: "off-page-parent", parentTitle: "Parent", depth: 1, groupPosition: 3},
+		{taskID: "root", groupKey: "all"},
+		{taskID: "first-child", groupKey: "all", parentID: "off-page-parent", parentTitle: "Parent", depth: 1, continuesGroup: true},
+		{taskID: "second-child", groupKey: "all", parentID: "off-page-parent", parentTitle: "Parent", depth: 1, continuesGroup: true},
 	}
 	result := buildSidebarTaskPageResult("workspace", query, models.SidebarTaskViewPreferences{}, 1, 3, 3, 1,
 		[]sidebarGroupRow{{groupKey: "all", groupLabel: "All", count: 3}}, rows, nil)

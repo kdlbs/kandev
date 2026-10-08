@@ -6,6 +6,7 @@ import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { defaultState } from "@/lib/state/default-state";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import type { LayoutState } from "@/lib/state/layout-manager";
 import type { TaskSession, TaskId } from "@/lib/types/http";
 import { makeReorderingAutoSessionApi } from "./dockview-session-tabs.test-utils";
 import { useAutoSessionTab } from "./dockview-session-tabs";
@@ -52,7 +53,12 @@ function renderHookWithHydratedSessions() {
 
 afterEach(() => {
   cleanup();
-  useDockviewStore.setState({ api: null });
+  useDockviewStore.setState({
+    api: null,
+    currentLayoutEnvId: null,
+    preMaximizeLayout: null,
+    maximizedGroupId: null,
+  });
 });
 
 describe("useAutoSessionTab", () => {
@@ -70,7 +76,102 @@ describe("useAutoSessionTab", () => {
       expect.arrayContaining([`session:${ACTIVE_SESSION_ID}`, `session:${SIBLING_SESSION_ID}`]),
     );
   });
+});
 
+describe("useAutoSessionTab maximize hydration", () => {
+  it("reconciles saved maximize panels when session loading completes without changing ids", () => {
+    const { api } = makeReorderingAutoSessionApi();
+    const activePanelId = `session:${ACTIVE_SESSION_ID}`;
+    const siblingPanelId = `session:${SIBLING_SESSION_ID}`;
+    const stalePanelId = "session:saved-stale";
+    const preMaximizeLayout = {
+      columns: [
+        {
+          id: "center",
+          groups: [
+            {
+              id: "center",
+              panels: [
+                {
+                  id: activePanelId,
+                  component: "chat",
+                  title: "Agent",
+                  params: { sessionId: ACTIVE_SESSION_ID },
+                },
+                {
+                  id: siblingPanelId,
+                  component: "chat",
+                  title: "Sibling",
+                  params: { sessionId: SIBLING_SESSION_ID },
+                },
+                {
+                  id: stalePanelId,
+                  component: "chat",
+                  title: "Stale",
+                  params: { sessionId: "saved-stale" },
+                },
+              ],
+              activePanel: activePanelId,
+            },
+          ],
+        },
+      ],
+    } satisfies LayoutState;
+    useDockviewStore.setState({
+      api: api as DockviewApi,
+      currentLayoutEnvId: "env-a",
+      preMaximizeLayout,
+    });
+    capturedStore = null;
+
+    render(
+      <StateProvider
+        initialState={{
+          ...defaultState,
+          tasks: {
+            ...defaultState.tasks,
+            activeTaskId: TASK_ID,
+            activeSessionId: ACTIVE_SESSION_ID,
+          },
+          taskSessionsByTask: {
+            ...defaultState.taskSessionsByTask,
+            itemsByTaskId: {
+              [TASK_ID]: [
+                { id: ACTIVE_SESSION_ID } as TaskSession,
+                { id: SIBLING_SESSION_ID } as TaskSession,
+              ],
+            },
+            loadedByTaskId: { [TASK_ID]: false },
+          },
+        }}
+      >
+        <FocusHarness />
+      </StateProvider>,
+    );
+
+    expect(capturedStore).not.toBeNull();
+    const store = capturedStore as unknown as StoreApi<AppState>;
+    const initialSessionIds = store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID] ?? [];
+    act(() => {
+      store.setState({
+        taskSessionsByTask: {
+          ...store.getState().taskSessionsByTask,
+          itemsByTaskId: { [TASK_ID]: initialSessionIds },
+          loadedByTaskId: { [TASK_ID]: true },
+        },
+      });
+    });
+
+    const restoredPanelIds =
+      useDockviewStore
+        .getState()
+        .preMaximizeLayout?.columns[0]?.groups[0]?.panels.map((panel) => panel.id) ?? [];
+    expect(restoredPanelIds).toEqual(expect.arrayContaining([activePanelId, siblingPanelId]));
+    expect(restoredPanelIds).not.toContain(stalePanelId);
+  });
+});
+
+describe("useAutoSessionTab focus requests", () => {
   it("subscribes to a same-session focus request and acknowledges after activation", () => {
     const { api, activationSequence, centerActivePanelId } = makeReorderingAutoSessionApi("files");
     const route = {

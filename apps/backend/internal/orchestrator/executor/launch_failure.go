@@ -15,6 +15,13 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+// RecordEarlyLaunchFailure preserves typed recovery details for a prepared
+// session whose launch failed before entering LaunchPreparedSession. The state
+// transition is conditional, so an already settled session keeps its history.
+func (e *Executor) RecordEarlyLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error) error {
+	return e.handleEarlyLaunchFailure(ctx, taskID, sessionID, "", launchErr)
+}
+
 type launchFailureClassification struct {
 	code    string
 	message string
@@ -200,20 +207,22 @@ func bootstrapFailureCause(launchErr error, fromResume bool) ([]models.AgentErro
 	var failure *agentruntime.BootstrapFailure
 	if errors.As(launchErr, &failure) && failure != nil {
 		operation := failure.Operation
-		if operation == "" && fromResume {
-			operation = models.AgentErrorCauseOperationResume
+		if operation == "" {
+			operation = models.AgentErrorCauseOperationStart
+			if fromResume {
+				operation = models.AgentErrorCauseOperationResume
+			}
 		}
-		if operation != models.AgentErrorCauseOperationResume &&
+		if operation != models.AgentErrorCauseOperationStart &&
+			operation != models.AgentErrorCauseOperationResume &&
 			operation != models.AgentErrorCauseOperationRestoreWorkspace {
 			return nil, ""
 		}
-		code := failure.SafeCode()
-		detail := failure.SafeDetail()
-		return models.NormalizeAgentErrorCauses([]models.AgentErrorCause{{
-			Operation: operation,
-			Code:      code,
-			Detail:    detail,
-		}}), code
+		cause, ok := failure.SafeAgentErrorCause(operation)
+		if !ok {
+			return nil, ""
+		}
+		return models.NormalizeAgentErrorCauses([]models.AgentErrorCause{cause}), cause.Code
 	}
 	if !fromResume {
 		return nil, ""

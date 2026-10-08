@@ -199,6 +199,7 @@ func TestQuerySidebarTaskPageOrdersActivityByInstant(t *testing.T) {
 				{ID: "fractional-new", WorkspaceID: workspaceID, Title: "Fractional new", CreatedAt: base, UpdatedAt: base},
 				{ID: "offset-old", WorkspaceID: workspaceID, Title: "Offset old", CreatedAt: base, UpdatedAt: base},
 				{ID: "offset-new", WorkspaceID: workspaceID, Title: "Offset new", CreatedAt: base, UpdatedAt: base},
+				{ID: "space-new", WorkspaceID: workspaceID, Title: "Space new", CreatedAt: base, UpdatedAt: base},
 				{ID: "tree-root", WorkspaceID: workspaceID, Title: "Tree root", CreatedAt: base, UpdatedAt: base},
 				{ID: "tree-child", WorkspaceID: workspaceID, ParentID: "tree-root", Title: "Tree child", CreatedAt: base, UpdatedAt: base},
 				{ID: "same-instant", WorkspaceID: workspaceID, Title: "Same instant", CreatedAt: base, UpdatedAt: base},
@@ -227,6 +228,7 @@ func TestQuerySidebarTaskPageOrdersActivityByInstant(t *testing.T) {
 				"fractional-new":   "2026-09-26T12:00:00.9Z",
 				"offset-old":       "2026-09-26T13:00:00+01:00",
 				"offset-new":       "2026-09-26T12:00:01Z",
+				"space-new":        "2026-09-26 12:00:01Z",
 				"tree-root":        "2026-09-26T11:00:00.12Z",
 				"tree-child":       "2026-09-26T12:00:00.12+01:00",
 				"same-instant":     "2026-09-26T11:00:00.12Z",
@@ -262,6 +264,7 @@ func TestQuerySidebarTaskPageOrdersActivityByInstant(t *testing.T) {
 			}
 			assertBefore("fractional-new", "fractional-whole")
 			assertBefore("offset-new", "offset-old")
+			assertBefore("space-new", "fractional-new")
 			assertBefore("instant-newer", "tree-root")
 			assertBefore("tree-root", "instant-older")
 			assertBefore("invalid-day-31", "invalid-day-30")

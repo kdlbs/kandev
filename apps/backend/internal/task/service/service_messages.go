@@ -659,12 +659,21 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 	return message, nil
 }
 
+// authorizeMessageCreate enforces session.prompt for an ordinary task, and
+// workspace.manage instead for a coordinator conversation task
+// (docs/specs/coordinator/system-design/copilot.md#attended-only,
+// AC-COORDINATOR-COPILOT-002.3): a reader may see the conversation but only a
+// manager may message the coordinator and start a turn.
 func (s *Service) authorizeMessageCreate(ctx context.Context, req *CreateMessageRequest) error {
 	if req == nil || req.AuthorType == createdByAgent {
 		return nil
 	}
 	if req.TaskID != "" {
-		return s.AuthorizeTaskSessionPromptAccess(ctx, req.TaskID, req.TaskSessionID)
+		scope, err := s.coordinatorPromptScope(ctx, req.TaskID)
+		if err != nil {
+			return err
+		}
+		return s.authorizeTaskSessionScope(ctx, req.TaskID, req.TaskSessionID, scope)
 	}
 	return s.AuthorizeSessionScope(ctx, req.TaskSessionID, authz.ScopeSessionPrompt)
 }
@@ -993,6 +1002,15 @@ func (s *Service) GetMessage(ctx context.Context, id string) (*models.Message, e
 	return message, nil
 }
 
+// HasUserPromptHistory reports whether a session has accepted or reserved a
+// user prompt. The prompt sequence survives message deletion and restart.
+func (s *Service) HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error) {
+	if err := s.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionPrompt); err != nil {
+		return false, err
+	}
+	return s.messages.HasUserPromptHistory(ctx, sessionID)
+}
+
 // RehydrateMessagePayload resolves an externalized large tool-output
 // payload (see PayloadDigest) back into message.Metadata for the explicit,
 // single-message lazy-detail routes (e.g. httpGetShellOutput). Callers must
@@ -1024,7 +1042,11 @@ func (s *Service) ListMessages(ctx context.Context, sessionID string) ([]*models
 	if err := s.AuthorizeSessionAccess(ctx, sessionID); err != nil {
 		return nil, err
 	}
-	return s.messages.ListMessages(ctx, sessionID)
+	messages, err := s.messages.ListMessages(ctx, sessionID)
+	if err == nil {
+		err = s.projectRunningNotices(ctx, messages)
+	}
+	return messages, err
 }
 
 // ListMessagesPaginated returns messages for a session with pagination options.
@@ -1040,7 +1062,7 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 	if limit > MaxMessagesPageSize {
 		limit = MaxMessagesPageSize
 	}
-	return s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
+	messages, hasMore, err := s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
 		Limit:       limit,
 		Before:      req.Before,
 		After:       req.After,
@@ -1050,6 +1072,10 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 		TaskID:      req.TaskID,
 		Around:      req.Around,
 	})
+	if err == nil {
+		err = s.projectRunningNotices(ctx, messages)
+	}
+	return messages, hasMore, err
 }
 
 // ListMessagesForPlugin returns messages matching the plugin Host data API

@@ -1,7 +1,13 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
+import {
+  expectDefaultWorkspaceViewSortAndIndent,
+  expectWorkspaceViewSortAndIndent,
+  setWorkspaceViewSortAndIndent,
+} from "./sidebar-workspace-view-sort-helpers";
 
 // @covers AC-UI-WORKSPACE-SIDEBAR-VIEWS-001.1, .2, .4, .6
+// @covers AC-UI-SIDEBAR-RUNNING-ACTIVITY-001.5 AC-UI-SIDEBAR-GROUP-INDENT-001.4
 test("desktop task views stay with their workspace after switching and reload", async ({
   testPage,
   apiClient,
@@ -22,6 +28,7 @@ test("desktop task views stay with their workspace after switching and reload", 
       ].views.some((view) => view.name === "Workspace A view"),
     )
     .toBe(true);
+  await setWorkspaceViewSortAndIndent(apiClient, seedData.workspaceId, "Workspace A view");
 
   await testPage.getByTestId("sidebar-workspace-trigger").click();
   await testPage.getByTestId(`sidebar-workspace-item-${other.id}`).click();
@@ -48,6 +55,11 @@ test("desktop task views stay with their workspace after switching and reload", 
   await picker.expectActiveViewChip("Workspace A view");
   await picker.openViewPicker();
   await expect(picker.chipByName("Workspace B view")).toHaveCount(0);
+  const { settings } = await apiClient.getUserSettings();
+  const viewsA = settings.sidebar_views_by_workspace[seedData.workspaceId].views;
+  const viewsB = settings.sidebar_views_by_workspace[other.id].views;
+  expectWorkspaceViewSortAndIndent(viewsA.find((view) => view.name === "Workspace A view"));
+  expectDefaultWorkspaceViewSortAndIndent(viewsB.find((view) => view.name === "Workspace B view"));
   await testPage.screenshot({
     path: testInfo.outputPath("workspace-sidebar-desktop.png"),
     animations: "disabled",

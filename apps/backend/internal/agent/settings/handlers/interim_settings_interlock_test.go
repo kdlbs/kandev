@@ -31,6 +31,7 @@ func TestRegisterRoutesRejectsMutationWithoutInterimSettingsInterlock(t *testing
 	}
 }
 
+// @covers AC-AGENTS-RUNTIME-NOTIFY-002.1
 func TestRegisterRoutesProtectsEveryStateChangingAgentSettingsRoute(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
@@ -52,6 +53,7 @@ func TestRegisterRoutesProtectsEveryStateChangingAgentSettingsRoute(t *testing.T
 		{method: http.MethodPost, path: "/api/v1/agents/agent-1/profiles"},
 		{method: http.MethodPost, path: "/api/v1/agent-install/agent-1"},
 		{method: http.MethodPost, path: "/api/v1/agent-update/agent-1"},
+		{method: http.MethodPatch, path: "/api/v1/agent-update/agent-1/automatic"},
 		{method: http.MethodPatch, path: "/api/v1/agent-profiles/profile-1"},
 		{method: http.MethodDelete, path: "/api/v1/agent-profiles/profile-1"},
 		{method: http.MethodPost, path: "/api/v1/agent-profiles/profile-1/duplicate"},

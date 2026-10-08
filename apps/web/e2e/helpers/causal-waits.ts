@@ -134,6 +134,12 @@ export type WaitForWsOptions = {
   where?: (payload: Record<string, unknown>) => boolean;
 };
 
+export type WaitForWsResponseOptions = {
+  timeout?: number;
+  /** Start the response timeout after this operation completes. */
+  timeoutAfter?: Promise<unknown>;
+};
+
 export type WsWatcher = {
   /**
    * Resolve on the next server-pushed notification carrying this `action`.
@@ -145,7 +151,7 @@ export type WsWatcher = {
    * arming* gets its reply, correlated by frame `id`. Rejects if the backend
    * answers with an `error` frame.
    */
-  waitForResponse(action: string, options?: { timeout?: number }): Promise<WsFrame>;
+  waitForResponse(action: string, options?: WaitForWsResponseOptions): Promise<WsFrame>;
 };
 
 function decodeFrame(payload: string | Buffer | Uint8Array): WsFrame | null {
@@ -248,15 +254,16 @@ function waitForEvent(
 function waitForResponse(
   channels: Channels,
   action: string,
-  options: { timeout?: number },
+  options: WaitForWsResponseOptions,
 ): Promise<WsFrame> {
-  const { timeout = DEFAULT_TIMEOUT } = options;
+  const { timeout = DEFAULT_TIMEOUT, timeoutAfter } = options;
   return new Promise<WsFrame>((resolve, reject) => {
     const requestIds = new Set<string>();
     const wait = armWsWait(
       timeout,
       () => `watchWs.waitForResponse: no reply to "${action}" within ${timeout}ms`,
       reject,
+      timeoutAfter,
     );
     wait.listen(channels.sent, (frame) => {
       if (frame.action === action && frame.id) requestIds.add(frame.id);
@@ -286,25 +293,48 @@ function armWsWait(
   timeout: number,
   message: () => string,
   reject: (error: Error) => void,
+  timeoutAfter?: Promise<unknown>,
 ): ArmedWait {
   const registered: Array<[Set<FrameListener>, FrameListener]> = [];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let disposed = false;
   const unregister = () => {
     for (const [channel, listener] of registered) channel.delete(listener);
     registered.length = 0;
   };
-  const timer = setTimeout(() => {
+  const expire = () => {
+    if (disposed) return;
+    disposed = true;
     unregister();
     reject(new Error(message()));
-  }, timeout);
+  };
+  const startTimer = () => {
+    if (disposed || timer !== undefined) return;
+    timer = setTimeout(expire, timeout);
+  };
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    if (timer !== undefined) clearTimeout(timer);
+    unregister();
+  };
+
+  if (timeoutAfter) {
+    void timeoutAfter.then(startTimer, (error: unknown) => {
+      if (disposed) return;
+      dispose();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    });
+  } else {
+    startTimer();
+  }
+
   return {
     listen(channel, listener) {
       registered.push([channel, listener]);
       channel.add(listener);
     },
-    dispose() {
-      clearTimeout(timer);
-      unregister();
-    },
+    dispose,
   };
 }
 

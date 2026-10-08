@@ -95,12 +95,18 @@ func seededTerminalService(t *testing.T) *terminalservice.Service {
 		t.Fatalf("terminal repo: %v", err)
 	}
 	svc := terminalservice.New(repo, noopPTYBackend{}, nil)
-	if _, err := svc.Create(context.Background(), ownTaskID, ownEnvID, "echo mine"); err != nil {
+	ownTerm, err := svc.Create(context.Background(), ownTaskID, ownEnvID, "echo mine")
+	if err != nil {
 		t.Fatalf("seed own terminal: %v", err)
 	}
-	if _, err := svc.Create(context.Background(), foreignTaskID, foreignEnvID, leakMarker); err != nil {
+	ownName := "echo mine"
+	_ = svc.Rename(context.Background(), ownTaskID, ownTerm.ID, &ownName)
+	foreignTerm, err := svc.Create(context.Background(), foreignTaskID, foreignEnvID, leakMarker)
+	if err != nil {
 		t.Fatalf("seed foreign terminal: %v", err)
 	}
+	foreignName := leakMarker
+	_ = svc.Rename(context.Background(), foreignTaskID, foreignTerm.ID, &foreignName)
 	return svc
 }
 

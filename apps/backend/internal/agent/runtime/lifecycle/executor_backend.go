@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentkubernetes "github.com/kandev/kandev/internal/agent/kubernetes"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -198,11 +199,13 @@ const (
 	MetadataKeyWorktreeBranch = "worktree_branch"
 
 	// Remote executor metadata keys
-	MetadataKeyRepositoryPath  = "repository_path"
-	MetadataKeySetupScript     = "setup_script"
-	MetadataKeyCleanupScript   = "cleanup_script"
-	MetadataKeyRepoSetupScript = "repository_setup_script"
-	MetadataKeyBaseBranch      = "base_branch"
+	MetadataKeyRepositoryPath = "repository_path"
+	// MetadataKeyRepositoryConfigured is set by launch from RepoSpecs, not task metadata.
+	MetadataKeyRepositoryConfigured = "repository_configured"
+	MetadataKeySetupScript          = "setup_script"
+	MetadataKeyCleanupScript        = "cleanup_script"
+	MetadataKeyRepoSetupScript      = "repository_setup_script"
+	MetadataKeyBaseBranch           = "base_branch"
 	// MetadataKeyBaseBranches stores a map[string]string (RepositoryName →
 	// base branch ref) for per-repo diff-stat resolution inside agentctl.
 	// The empty key "" applies to the root / single-repo tracker.
@@ -661,6 +664,9 @@ type ExecutorCreateRequest struct {
 	// launch. Remote executors use it during preflight before agentctl receives
 	// the final command.
 	ManagedRuntimeVersion string
+	ManagedRuntimeFamily  managedruntime.OpenCodeFamily
+	ManagedRuntimeSource  managedruntime.OpenCodeSource
+	NativeRuntimeVersion  string
 	PreviousExecutionID   string   // Non-empty when reconnecting to a previous execution
 	McpMode               string   // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
 	McpProviders          []string // Normalized provider capabilities attached to the task

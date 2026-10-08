@@ -147,8 +147,15 @@ func TestIdleSuspensionReplaysBufferedAgentEventsWhenCancelled(t *testing.T) {
 	if err := mgr.CancelIdleSuspension(ctx, execution.SessionID, execution.ID); err != nil {
 		t.Fatalf("cancel idle suspension: %v", err)
 	}
-	if got := len(eventBus.getStreamEvents()); got != 1 {
-		t.Fatalf("replayed stream events = %d, want 1 after suspension cancellation", got)
+	streamed := eventBus.getStreamEvents()
+	if len(streamed) != 2 {
+		t.Fatalf("replayed stream events = %d, want original evidence and transcript projection after suspension cancellation", len(streamed))
+	}
+	if streamed[0].Data.Type != "message_chunk" || streamed[0].Data.Text != "completion that crossed the suspension boundary\n" {
+		t.Fatalf("replayed original evidence = %+v, want buffered message_chunk", streamed[0].Data)
+	}
+	if streamed[1].Data.Type != "message_streaming" {
+		t.Fatalf("replayed transcript projection = %+v, want message_streaming", streamed[1].Data)
 	}
 }
 
@@ -186,8 +193,15 @@ func TestSuspendIdleReplaysEventsWhenCandidateValidationFails(t *testing.T) {
 	if err := <-result; err == nil {
 		t.Fatal("candidate validation unexpectedly succeeded")
 	}
-	if got := len(eventBus.getStreamEvents()); got != 1 {
-		t.Fatalf("replayed stream events after rejected claim = %d, want 1", got)
+	streamed := eventBus.getStreamEvents()
+	if len(streamed) != 2 {
+		t.Fatalf("replayed stream events after rejected claim = %d, want original evidence and transcript projection", len(streamed))
+	}
+	if streamed[0].Data.Type != "message_chunk" || streamed[0].Data.Text != "completion before rejected suspension\n" {
+		t.Fatalf("replayed original evidence = %+v, want buffered message_chunk", streamed[0].Data)
+	}
+	if streamed[1].Data.Type != "message_streaming" {
+		t.Fatalf("replayed transcript projection = %+v, want message_streaming", streamed[1].Data)
 	}
 }
 
@@ -2242,7 +2256,7 @@ func TestHandleCompleteEventMarkState_ErrorDoesNotRemoveExecution(t *testing.T) 
 		Data:  map[string]interface{}{"is_error": true},
 	}
 
-	mgr.handleCompleteEventMarkState(execution, errorEvent, true, nil)
+	callCompletionStateWithStartupLease(t, mgr, execution, errorEvent, true, nil)
 
 	// Execution must still be in the store so the orchestrator can clean it up
 	if _, found := mgr.executionStore.Get("exec-1"); !found {
@@ -2262,7 +2276,7 @@ func TestHandleCompleteEventMarkState_SuccessKeepsExecution(t *testing.T) {
 		Type: "complete",
 	}
 
-	mgr.handleCompleteEventMarkState(execution, successEvent, false, nil)
+	callCompletionStateWithStartupLease(t, mgr, execution, successEvent, false, nil)
 
 	got, found := mgr.executionStore.Get("exec-1")
 	if !found {

@@ -6,6 +6,13 @@ export type AgentErrorCause = {
   operation?: string;
   code?: string;
   detail?: string;
+  reason?: string;
+  requested_model?: string;
+  effective_model?: string;
+  attempted_model?: string;
+  requested_mode?: string;
+  effective_mode?: string;
+  prompt_not_sent?: boolean;
 };
 
 export type TaskStatusSummaryActiveError = {
@@ -56,6 +63,8 @@ export type TaskStatusSummary = {
     id: string;
     state: TaskSessionState;
   } | null;
+  /** Task-wide RUNNING evidence. Undefined identifies a legacy summary. */
+  has_running_session?: boolean;
   foreground_activity?: ForegroundActivity;
   active_subagent_count?: number;
   pending_action?: TaskPendingAction;
@@ -82,6 +91,12 @@ export type TaskStatusSummary = {
     auto_fix_enabled?: boolean;
     auto_merge_enabled?: boolean;
     has_merge_conflicts?: boolean;
+    workflow_approval_required?: boolean;
+    workflow_approval_stale?: boolean;
+    workflow_approval_pr_number?: number;
+    workflow_approval_repository?: string;
+    merge_conflict_pr_number?: number;
+    merge_conflict_repository?: string;
     aggregate_state?: string;
     state?: string;
     number?: number;

@@ -36,8 +36,7 @@ test.describe("Completed conversation resume", () => {
     await expect(session.completedSessionNewAgentButton()).toBeVisible();
 
     await session.clickTab("Files");
-    const fileNode = session.fileTreeNode(RETAINED_WORKSPACE_FILE);
-    await expect(fileNode).toBeVisible({ timeout: 60_000 });
+    const fileNode = await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 60_000);
     await fileNode.click();
     const viewer = testPage.locator(".monaco-editor:visible").first();
     await expect(viewer).toBeVisible({ timeout: 15_000 });
@@ -52,7 +51,7 @@ test.describe("Completed conversation resume", () => {
     await session.showSessionContext();
     await expect(session.completedSessionBanner()).toBeVisible({ timeout: 30_000 });
     await session.clickTab("Files");
-    await expect(session.fileTreeNode(RETAINED_WORKSPACE_FILE)).toBeVisible({ timeout: 60_000 });
+    await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 60_000);
     await session.clickSessionChatTab();
     const afterReload = await apiClient.listTaskSessions(task.id);
     expect(afterReload.sessions).toHaveLength(before.sessions.length);
@@ -64,7 +63,7 @@ test.describe("Completed conversation resume", () => {
     await testPage.reload();
     await session.showSessionContext();
     await session.clickTab("Files");
-    await expect(session.fileTreeNode(RETAINED_WORKSPACE_FILE)).toBeVisible({ timeout: 60_000 });
+    await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 60_000);
     await session.clickSessionChatTab();
     await expect(session.completedSessionBanner()).toBeVisible({ timeout: 30_000 });
 

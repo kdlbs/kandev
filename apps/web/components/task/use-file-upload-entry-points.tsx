@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/toast-provider";
 import { useFileUpload, type UploadFilesResult } from "@/hooks/use-file-upload";
@@ -23,6 +23,13 @@ export function useFileUploadEntryPoints(sessionId: string | null) {
   const destinationRef = useRef<string>("");
   const pickerSessionRef = useRef<string | null>(sessionId);
   const [, setPickerOpen] = useState(false);
+  const reportingScopeRef = useRef<symbol | null>(null);
+  useLayoutEffect(() => {
+    reportingScopeRef.current = Symbol();
+    return () => {
+      reportingScopeRef.current = null;
+    };
+  }, [sessionId]);
 
   const { uploads, conflicts, uploadFiles, resolveConflicts, cancelConflicts } =
     useFileUpload(sessionId);
@@ -69,7 +76,10 @@ export function useFileUploadEntryPoints(sessionId: string | null) {
       setPickerOpen(false);
       if (!files || files.length === 0) return;
       if (pickerSessionRef.current !== sessionId) return;
-      report(await uploadFiles(destinationRef.current, files));
+      const scope = reportingScopeRef.current;
+      if (!scope) return;
+      const result = await uploadFiles(destinationRef.current, files);
+      if (reportingScopeRef.current === scope) report(result);
     },
     [sessionId, uploadFiles, report],
   );

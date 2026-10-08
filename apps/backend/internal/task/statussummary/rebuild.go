@@ -30,22 +30,28 @@ type RebuildGit struct {
 // It deliberately does not expose the full provider record to the summary
 // package or to the WebSocket payload.
 type PullRequestInput struct {
-	Key                   string
-	State                 string
-	Number                int
-	URL                   string
-	ReviewState           string
-	ChecksState           string
-	MergeableState        string
-	HasMergeConflicts     *bool
-	MergeQueueState       string
-	UnresolvedReviewCount int
-	PendingReviewCount    int
-	RequiredReviews       int
-	ChecksTotal           int
-	ChecksPassing         int
-	AutoFixEnabled        bool
-	AutoMergeEnabled      bool
+	Key                      string
+	Owner                    string
+	Repo                     string
+	State                    string
+	Number                   int
+	URL                      string
+	ReviewState              string
+	ChecksState              string
+	MergeableState           string
+	HasMergeConflicts        *bool
+	MergeQueueState          string
+	UnresolvedReviewCount    int
+	PendingReviewCount       int
+	RequiredReviews          int
+	ChecksTotal              int
+	ChecksPassing            int
+	AutoFixEnabled           bool
+	AutoMergeEnabled         bool
+	HeadSHA                  string
+	WorkflowAttentionState   string
+	WorkflowAttentionHeadSHA string
+	WorkflowAttentionStale   bool
 }
 
 // RebuildInput contains the authoritative bounded facts available from
@@ -53,7 +59,10 @@ type PullRequestInput struct {
 // observed by its corresponding boolean so an unavailable optional provider
 // does not masquerade as an authoritative empty value.
 type RebuildInput struct {
-	Sessions         []RebuildSession
+	Sessions []RebuildSession
+	// SessionsObserved distinguishes a complete empty snapshot from an
+	// unavailable or partial session source.
+	SessionsObserved bool
 	TaskError        *ActiveErrorSummary
 	ExecutorFailure  *models.ExecutorFailureEpisode
 	PendingActions   map[string]string
@@ -79,6 +88,7 @@ type RebuildInput struct {
 func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 	state := &projectionState{
 		sessions:               make(map[string]sessionObservation, len(input.Sessions)),
+		sessionsObserved:       input.SessionsObserved,
 		pending:                make(map[string]string, len(input.PendingActions)),
 		pendingRequests:        make(map[string]pendingRequestIdentity),
 		errors:                 make(map[string]*ActiveErrorSummary),

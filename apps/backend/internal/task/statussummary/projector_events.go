@@ -23,6 +23,8 @@ func (p *Projector) applySourceEventLocked(state *projectionState, eventType str
 		sourceChanged = p.applyTaskUpdatedEventLocked(state, data)
 	case events.TaskSessionStateChanged:
 		sourceChanged = p.applySessionEventLocked(state, data)
+	case events.SessionRemoved:
+		sourceChanged = p.removeSessionEventLocked(state, data)
 	case events.TaskSessionActivityChanged:
 		sourceChanged = p.applyActivityEventLocked(state, data)
 	case events.TaskSessionErrorChanged:
@@ -393,6 +395,7 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	current := state.current
 	previousLastActivityAt := cloneTimePtr(state.lastActivityAt)
 	state.sessions = make(map[string]sessionObservation)
+	state.sessionsObserved = false
 	state.activityObserved = false
 	state.lastActivityAt = previousLastActivityAt
 	state.pending = make(map[string]string)
@@ -502,12 +505,25 @@ func (p *Projector) restoreSessionObservations(
 		errorsBySession[sessionID] = activeError
 	}
 	state.sessions = sessions
+	state.sessionsObserved = true
 	state.activityObserved = snapshot.ActivityObserved
 	if snapshot.ErrorsObserved {
 		state.errors = errorsBySession
 		state.errorsObserved = true
 	}
 	return nil
+}
+
+func (p *Projector) removeSessionEventLocked(state *projectionState, data map[string]interface{}) bool {
+	sessionID := strings.TrimSpace(firstString(data, "session_id", "id"))
+	if sessionID == "" {
+		return false
+	}
+	delete(state.sessions, sessionID)
+	delete(state.errors, sessionID)
+	delete(state.clearedErrorStamps, sessionID)
+	p.clearPendingLocked(state, sessionID)
+	return true
 }
 
 func (p *Projector) restoreTaskLaunchError(
@@ -835,19 +851,27 @@ func (p *Projector) applyPREventLocked(state *projectionState, data map[string]i
 		state.prBaseline = nil
 		state.prObserved = true
 	}
+	attention, _ := data["workflow_attention"].(map[string]interface{})
+	attentionStale, _ := attention["stale"].(bool)
 	observation := pullRequestObservation{
-		state:                 stringField(data, "state"),
-		number:                intValueOrZero(data["pr_number"]),
-		url:                   stringField(data, "pr_url"),
-		reviewState:           stringField(data, "review_state"),
-		checksState:           stringField(data, "checks_state"),
-		mergeableState:        stringField(data, "mergeable_state"),
-		hasMergeConflicts:     boolPointerField(data, "has_merge_conflicts"),
-		mergeQueueState:       stringField(data, "merge_queue_state"),
-		unresolvedReviewCount: intValueOrZero(data["unresolved_review_threads"]),
-		pendingReviewCount:    intValueOrZero(data["pending_review_count"]),
-		checksTotal:           intValueOrZero(data["checks_total"]),
-		checksPassing:         intValueOrZero(data["checks_passing"]),
+		state:                    stringField(data, "state"),
+		owner:                    stringField(data, "owner"),
+		repo:                     stringField(data, "repo"),
+		number:                   intValueOrZero(data["pr_number"]),
+		url:                      stringField(data, "pr_url"),
+		reviewState:              stringField(data, "review_state"),
+		checksState:              stringField(data, "checks_state"),
+		mergeableState:           stringField(data, "mergeable_state"),
+		hasMergeConflicts:        boolPointerField(data, "has_merge_conflicts"),
+		mergeQueueState:          stringField(data, "merge_queue_state"),
+		unresolvedReviewCount:    intValueOrZero(data["unresolved_review_threads"]),
+		pendingReviewCount:       intValueOrZero(data["pending_review_count"]),
+		checksTotal:              intValueOrZero(data["checks_total"]),
+		checksPassing:            intValueOrZero(data["checks_passing"]),
+		headSHA:                  boundedWorkflowValue(stringField(data, "head_sha")),
+		workflowAttentionState:   boundedWorkflowValue(stringField(attention, "state")),
+		workflowAttentionHeadSHA: boundedWorkflowValue(stringField(attention, "head_sha")),
+		workflowAttentionStale:   attentionStale,
 	}
 	// PR refresh events do not carry the per-PR automation switches. Preserve
 	// the last authoritative values from the CI-options projection instead of

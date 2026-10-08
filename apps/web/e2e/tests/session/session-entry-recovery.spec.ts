@@ -14,7 +14,7 @@ async function createEntryTask(apiClient: ApiClient, seedData: SeedData, title: 
 }
 
 test.describe("session entry recovery", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test("completes entry when status and subscription acknowledgements take seven seconds", async ({
     testPage,
@@ -76,11 +76,19 @@ test.describe("session entry recovery", () => {
     test.setTimeout(150_000);
     const proxy = await routeSessionEntryRecovery(testPage);
     const task = await createEntryTask(apiClient, seedData, `History recovery ${Date.now()}`);
+    const sessionId = task.session_id;
+    if (!sessionId) throw new Error("expected a session for the history-recovery task");
 
-    proxy.dropNextResponses("message.list", 2);
+    proxy.dropNextResponses("message.list", 2, { sessionId });
 
     const session = await openTaskSession(testPage, task.id);
     const historyNotice = session.activeChat().getByTestId("session-history-unavailable");
+    await expect
+      .poll(() => proxy.droppedResponseCount("message.list"), {
+        timeout: 45_000,
+        message: "Waiting for both message.list responses to be dropped for this session",
+      })
+      .toBe(2);
     await expect(historyNotice).toBeVisible({ timeout: 45_000 });
     await expect(
       session.activeChat().getByText("No messages yet. Start the conversation!", { exact: true }),

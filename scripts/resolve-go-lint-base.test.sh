@@ -148,6 +148,14 @@ git -C "$merge_repo" switch -q feature
 printf '%s\n' "$merge_base_tip" > "$merge_repo/.git/MERGE_HEAD"
 expect_eq 'base merge keeps incoming tip' "$merge_base_tip" "$(cd "$merge_repo" && "$RESOLVER" --comparison-base)"
 
+merge_advanced_tip=$(git -C "$merge_repo" commit-tree "$(git -C "$merge_repo" rev-parse "$merge_base_tip^{tree}")" -p "$merge_base_tip" -m later-base-advance)
+git -C "$merge_repo" update-ref refs/remotes/origin/main "$merge_advanced_tip"
+expect_eq 'active merge survives base ref advance' "$merge_base_tip" "$(cd "$merge_repo" && "$RESOLVER" --comparison-base)"
+
+printf '%s\n' "$(git -C "$merge_repo" rev-parse HEAD)" > "$merge_repo/.git/MERGE_HEAD"
+merge_fork=$(git -C "$merge_repo" merge-base HEAD refs/remotes/origin/main)
+expect_eq 'unrelated merge keeps fork baseline' "$merge_fork" "$(cd "$merge_repo" && "$RESOLVER" --comparison-base)"
+
 if [ "$status" -eq 0 ]; then
 	echo 'All Go lint base resolver checks passed.'
 fi

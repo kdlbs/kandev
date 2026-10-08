@@ -36,7 +36,7 @@ function useSavedRepositoryDiscovery(workspaceId: string | null) {
     setAddingHome(true);
     try {
       await addDesktopDiscoveryRootAction("~");
-      await discovery.load();
+      await discovery.synchronizeAfterRootMutation("load");
     } catch (error) {
       toast({
         title: t("workspaces:failedToDiscoverRepositories"),

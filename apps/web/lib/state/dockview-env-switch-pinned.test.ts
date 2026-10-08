@@ -8,6 +8,8 @@ import { performEnvSwitch, type EnvSwitchParams } from "./dockview-env-switch";
 vi.mock("@/lib/local-storage", () => ({
   getEnvLayout: vi.fn(() => null),
   getManualRightWidth: vi.fn(() => null),
+  getSessionStorage: vi.fn((_key: string, fallback: unknown) => fallback),
+  setSessionStorage: vi.fn(),
 }));
 
 vi.mock("./dockview-layout-builders", () => ({

@@ -10,8 +10,9 @@ import type { EntityReference } from "@/lib/types/entity-reference";
 import type { TaskPlanCommentRef, TaskPreviewFeedbackRef } from "@/lib/types/http";
 import { useChatInputContainer } from "./use-chat-input-container";
 import { useTaskLaunchErrorContext } from "../task-launch-error-context";
+import { useExecutorFailure } from "@/hooks/use-executor-failure";
 import { executorFailureForComposer } from "@/lib/executor-failure";
-import { SessionExecutorFailureCard } from "./session-executor-failure-card";
+import { SessionExecutorFailureCardView } from "./session-executor-failure-card";
 import { SessionRecoveryCard } from "./session-recovery-card";
 import { useSessionComposerRecovery } from "./session-recovery-context";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
@@ -54,6 +55,8 @@ export type ChatInputContainerHandle = {
   getValue: () => string;
   getSelectionStart: () => number;
   insertText: (text: string, from: number, to: number) => void;
+  clearAcceptedPayload?: (payload: Pick<ChatSubmitPayload, "message" | "attachments">) => boolean;
+  restoreStagedAttachments?: (attachments: MessageAttachment[]) => void;
   clear: () => void;
   getAttachments: () => MessageAttachment[];
 };
@@ -367,6 +370,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       failureContext?.statusSummary?.executor_failure,
       sessionId,
     );
+    const executorRecovery = useExecutorFailure(taskId ?? "", executorFailure);
     const recoveryActions = useChatInputRecoveryActions(
       taskId,
       sessionId,
@@ -381,8 +385,14 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       taskDescription,
     });
 
-    if (executorFailure && taskId)
-      return <SessionExecutorFailureCard taskId={taskId} episode={executorFailure} />;
+    if (executorFailure && executorRecovery.episode?.state === "active" && taskId)
+      return (
+        <SessionExecutorFailureCardView
+          taskId={taskId}
+          episode={executorFailure}
+          recovery={executorRecovery}
+        />
+      );
 
     if (
       shouldHideChatInputForLaunchError({

@@ -50,6 +50,14 @@ function buildMultiRepoReviewFiles(
   return files;
 }
 
+function getUnlistedRootStatus(
+  reviewGitStatus: GitStatusEntry | undefined,
+  statusByRepo: Array<{ repository_name: string; status: GitStatusEntry }>,
+): GitStatusEntry | undefined {
+  if (!reviewGitStatus?.files || reviewGitStatus.repository_name !== "") return undefined;
+  return statusByRepo.some((entry) => entry.repository_name === "") ? undefined : reviewGitStatus;
+}
+
 export function buildReviewGitStatusFiles(
   reviewGitStatus: GitStatusEntry | undefined,
   statusByRepo: Array<{ repository_name: string; status: GitStatusEntry }>,
@@ -57,10 +65,14 @@ export function buildReviewGitStatusFiles(
   cumulativeRepositoryNames: Iterable<string> = [],
 ): ReviewGitStatusFiles {
   const named = statusByRepo.filter((entry) => entry.repository_name !== "");
+  // In multi-repo tasks the legacy slot mirrors the latest repository update.
+  // Trust it as root only when its explicit repository_name is empty.
+  const legacyRootStatus = getUnlistedRootStatus(reviewGitStatus, statusByRepo);
   const isMultiRepo = isReviewMultiRepo(
     taskRepositoryCount,
     statusByRepo
       .map((entry) => entry.repository_name)
+      .concat(legacyRootStatus ? [""] : [])
       .concat(Array.from(cumulativeRepositoryNames)),
   );
   if (!isMultiRepo) {
@@ -86,7 +98,10 @@ export function buildReviewGitStatusFiles(
     };
   }
 
-  const files = buildMultiRepoReviewFiles(statusByRepo);
+  const normalizedStatuses = legacyRootStatus
+    ? [{ repository_name: "", status: legacyRootStatus }, ...statusByRepo]
+    : statusByRepo;
+  const files = buildMultiRepoReviewFiles(normalizedStatuses);
   return {
     files: Object.keys(files).length > 0 ? files : null,
     isMultiRepo: true,

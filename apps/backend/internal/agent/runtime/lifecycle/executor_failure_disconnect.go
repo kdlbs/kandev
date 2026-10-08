@@ -15,11 +15,8 @@ func (m *Manager) SetExecutorObservationHandler(handler func(context.Context, mo
 }
 
 func (m *Manager) inspectManagedDisconnect(execution *AgentExecution, promptGeneration, startupGeneration uint64) bool {
-	if m.executorObservationHandler == nil || !execution.isSessionInitialized() {
+	if m.executorObservationHandler == nil || !execution.isSessionInitialized() || m.IsShuttingDown() || !m.supportsExecutorInspection(execution.RuntimeName) {
 		return false
-	}
-	if m.IsShuttingDown() {
-		return true
 	}
 	key := fmt.Sprintf("%s:%d:%d", execution.ID, startupGeneration, promptGeneration)
 	if _, loaded := m.executorDisconnectInspections.LoadOrStore(key, struct{}{}); loaded {
@@ -99,6 +96,7 @@ func (m *Manager) classifyExecutorDisconnect(execution *AgentExecution, prompt, 
 	defer cancel()
 	target, err := m.executorObservationTarget(ctx, execution)
 	if err != nil {
+		m.retainUnverifiedExecutorDisconnect(execution, prompt, startup, target, err)
 		return
 	}
 	for attempt := 0; attempt < 2; attempt++ {
@@ -139,6 +137,18 @@ func (m *Manager) classifyExecutorDisconnect(execution *AgentExecution, prompt, 
 		}
 	}
 	m.storeRemoteStatus(execution.SessionID, &RemoteStatus{RuntimeName: execution.RuntimeName, State: models.ExecutorOutcomeUnknown, LastCheckedAt: time.Now().UTC(), ErrorMessage: "executor status unavailable"})
+}
+
+func (m *Manager) retainUnverifiedExecutorDisconnect(execution *AgentExecution, prompt, startup uint64, target models.ExecutorObservationTarget, err error) {
+	if m.disconnectStillCurrent(execution, prompt, startup) {
+		observedAt := time.Now().UTC()
+		observation := &models.ExecutorObservation{Runtime: string(execution.RuntimeName), ResourceKey: target.ResourceKey, Outcome: models.ExecutorOutcomeUnknown, ObservedAt: observedAt, Reason: models.ExecutorReasonStatusUnverified, Workspace: models.ExecutorOutcomeUnknown}
+		m.storeRemoteStatus(execution.SessionID, &RemoteStatus{RuntimeName: execution.RuntimeName, State: models.ExecutorOutcomeUnknown, LastCheckedAt: observedAt, Observation: observation})
+		m.logger.Debug("executor disconnect authority unavailable", zap.String("execution_id", execution.ID), zap.Error(err))
+		if m.streamManager != nil {
+			m.streamManager.ReconnectAll(execution)
+		}
+	}
 }
 
 func (m *Manager) localExecutorObservationTarget(ctx context.Context, execution *AgentExecution, target models.ExecutorObservationTarget) (models.ExecutorObservationTarget, error) {

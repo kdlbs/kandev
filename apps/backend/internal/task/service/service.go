@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
@@ -456,6 +457,7 @@ type Repos struct {
 	SubagentContexts              repository.SubagentContextRepository
 	Usage                         repository.UsageRepository
 	BackgroundWork                repository.BackgroundWorkRepository
+	RecoveryOperations            repository.TaskEnvironmentRecoveryOperationRepository
 	AgentProfiles                 AgentProfileReader
 	AgentProfileExecutorValidator AgentProfileExecutorValidator
 }
@@ -497,9 +499,14 @@ type Service struct {
 	subagentContexts                repository.SubagentContextRepository
 	usage                           repository.UsageRepository
 	backgroundWork                  repository.BackgroundWorkRepository
+	recoveryOperations              repository.TaskEnvironmentRecoveryOperationRepository
+	recoveryOperationRunnerID       string
+	recoveryOperationMu             sync.Mutex
+	recoveryOperationRunners        map[string]*workspaceRecoveryRunner
 	agentProfiles                   AgentProfileReader
 	agentProfileExecutorValidator   AgentProfileExecutorValidator
 	workspacePolicyAttacher         WorkspacePolicyAttacher
+	projectRepositorySourceReader   ProjectRepositorySourceReader
 	autoArchiveCoordinator          AutoArchiveCoordinator
 	workflowTaskArchiveCoordinator  WorkflowTaskArchiveCoordinator
 	taskLifecycleCoordinator        TaskLifecycleCoordinator
@@ -629,6 +636,7 @@ type Service struct {
 	// acquisition re-reads and corrects for it instead of locking a step the
 	// task has already left. Nil in production.
 	bulkMoveBeforeLockForTest             func()
+	cleanupWorkerLifecycleMu              sync.Mutex
 	cleanupWorkerMu                       sync.Mutex
 	archiveReclaimBackfillMu              sync.Mutex
 	archiveReclaimBackfillAfterWorktreeID string
@@ -737,6 +745,12 @@ func (s *Service) SetWorkspacePolicyAttacher(attacher WorkspacePolicyAttacher) {
 	s.workspacePolicyAttacher = attacher
 }
 
+// SetProjectRepositorySourceReader wires the Office-owned project source
+// lookup used when a root task omits its repository selection.
+func (s *Service) SetProjectRepositorySourceReader(reader ProjectRepositorySourceReader) {
+	s.projectRepositorySourceReader = reader
+}
+
 // SetTaskLifecycleCoordinator installs the canonical destructive task
 // transition used by automatic cleanup callers.
 func (s *Service) SetTaskLifecycleCoordinator(coordinator TaskLifecycleCoordinator) {
@@ -788,7 +802,7 @@ func (s *Service) SetWorkflowTaskArchiveCoordinator(coordinator WorkflowTaskArch
 
 // NewService creates a new task service
 func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discoveryConfig RepositoryDiscoveryConfig) *Service {
-	return &Service{
+	svc := &Service{
 		workspaces:                    repos.Workspaces,
 		tasks:                         repos.Tasks,
 		taskRepos:                     repos.TaskRepos,
@@ -814,6 +828,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		subagentContexts:              repos.SubagentContexts,
 		usage:                         repos.Usage,
 		backgroundWork:                repos.BackgroundWork,
+		recoveryOperations:            repos.RecoveryOperations,
 		agentProfiles:                 repos.AgentProfiles,
 		agentProfileExecutorValidator: repos.AgentProfileExecutorValidator,
 		eventBus:                      eventBus,
@@ -838,6 +853,9 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		pendingActionSnapshotValues:     make(map[string]pendingActionProjectionState),
 		lastPendingActionProjections:    make(map[string]pendingActionProjectionState),
 	}
+	svc.recoveryOperationRunnerID = uuid.NewString()
+	svc.recoveryOperationRunners = make(map[string]*workspaceRecoveryRunner)
+	return svc
 }
 
 // SetWorktreeCleanup sets the worktree cleanup handler for task deletion.

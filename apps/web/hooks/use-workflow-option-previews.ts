@@ -110,13 +110,15 @@ export function useWorkflowOptionPreviews(
   workspaceId: string | null | undefined,
   open: boolean,
   workflowIds: string[],
+  refreshKey: number | string = 0,
 ): {
   previews: Record<string, WorkflowOptionPreview>;
   retry: (workflowId: string) => void;
 } {
   const workflowIdsKey = JSON.stringify([...new Set(workflowIds)].sort());
   const normalizedWorkflowIds = JSON.parse(workflowIdsKey) as string[];
-  const scopeIdentity = open && workspaceId ? JSON.stringify([workspaceId, workflowIdsKey]) : null;
+  const scopeIdentity =
+    open && workspaceId ? JSON.stringify([workspaceId, workflowIdsKey, refreshKey]) : null;
   const [generation, setGeneration] = useState({ scopeIdentity, value: 0 });
   const currentGeneration =
     generation.scopeIdentity === scopeIdentity ? generation.value : generation.value + 1;

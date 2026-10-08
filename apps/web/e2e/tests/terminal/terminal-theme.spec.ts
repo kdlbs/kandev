@@ -52,10 +52,15 @@ test.describe("adaptive terminal themes", () => {
     await xterm.click();
     await expect(helperTextarea).toBeFocused();
 
+    const viewportBeforeCommand = await readTerminalViewportY(host);
     await session.typeInTerminal("seq 1 500");
     await expect.poll(() => readTerminalHostBuffer(host)).toContain("500");
+    await expect
+      .poll(() => readTerminalViewportY(host), {
+        message: "The terminal should scroll to the end after the command fills its buffer",
+      })
+      .toBeGreaterThan(viewportBeforeCommand);
     const bottomViewportY = await readTerminalViewportY(host);
-    expect(bottomViewportY).toBeGreaterThan(0);
     const runningMarker = "TERMINAL_THEME_RUNNING";
     await testPage.keyboard.type(`sleep 10; printf ${runningMarker}`);
     await testPage.keyboard.press("Enter");

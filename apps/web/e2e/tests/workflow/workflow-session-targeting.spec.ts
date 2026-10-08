@@ -30,7 +30,10 @@ test.describe("Workflow session targeting", () => {
     apiClient,
     seedData,
   }) => {
-    const { profileA, profileB } = await createWorkflowAgentProfiles(apiClient);
+    const { profileA, profileB } = await createWorkflowAgentProfiles(
+      apiClient,
+      seedData.agentProfileId,
+    );
     const workflow = await apiClient.createWorkflow(
       seedData.workspaceId,
       "Desktop Session Targets",
@@ -95,7 +98,10 @@ test.describe("Workflow session targeting", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const { profileA, profileB } = await createWorkflowAgentProfiles(apiClient);
+    const { profileA, profileB } = await createWorkflowAgentProfiles(
+      apiClient,
+      seedData.agentProfileId,
+    );
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Initial Target Runtime");
     const plan = await apiClient.createWorkflowStep(workflow.id, "Plan", 0);
     const luna = await apiClient.createWorkflowStep(workflow.id, "Luna", 1);
@@ -178,7 +184,7 @@ test.describe("Workflow session targeting", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const { profileA } = await createWorkflowAgentProfiles(apiClient);
+    const { profileA } = await createWorkflowAgentProfiles(apiClient, seedData.agentProfileId);
     const workflow = await apiClient.createWorkflow(
       seedData.workspaceId,
       "Same Profile Topbar Session",
@@ -264,7 +270,10 @@ test.describe("Workflow session targeting", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const { agentId, profileA, profileB } = await createWorkflowAgentProfiles(apiClient);
+    const { agentId, profileA, profileB } = await createWorkflowAgentProfiles(
+      apiClient,
+      seedData.agentProfileId,
+    );
     const profileC = await apiClient.createAgentProfile(agentId, "Profile C (medium)", {
       model: "mock-fast",
     });
@@ -332,7 +341,7 @@ test.describe("Workflow session targeting", () => {
     apiClient,
     seedData,
   }) => {
-    const { profileA } = await createWorkflowAgentProfiles(apiClient);
+    const { profileA } = await createWorkflowAgentProfiles(apiClient, seedData.agentProfileId);
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Repair Session Target");
     const source = await apiClient.createWorkflowStep(workflow.id, "Implement", 0);
     const review = await apiClient.createWorkflowStep(workflow.id, "Review", 1);

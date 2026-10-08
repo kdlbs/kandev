@@ -615,6 +615,13 @@ export async function seedTaskCanvas(
   };
 }
 
+export function removeCanvasSource(workspacePath: string, canvasId: string): void {
+  fs.rmSync(path.join(workspacePath, ".kandev", "canvases", canvasId), {
+    recursive: true,
+    force: true,
+  });
+}
+
 export async function waitForTaskCanvas(
   apiClient: ApiClient,
   taskId: string,
@@ -661,43 +668,47 @@ export async function publishTaskCanvas({
   sourceOptions,
 }: PublishTaskCanvasOptions): Promise<CanvasRecord> {
   const workspacePath = await waitForSessionWorkspace(apiClient, taskId, taskSessionId);
-  writeCanvasSource(workspacePath, canvas, sourceOptions);
-  const sourcePath = `.kandev/canvases/${canvas.id}`;
-  const publishScript = `e2e:mcp:kandev:publish_canvas_kandev(${JSON.stringify({
-    canvas_id: canvas.id,
-    source_path: sourcePath,
-  })})`;
-  if (useMobileSubmit) {
-    await session.sendMessageViaButton(publishScript);
-  } else {
-    await session.sendMessage(publishScript);
+  try {
+    writeCanvasSource(workspacePath, canvas, sourceOptions);
+    const sourcePath = `.kandev/canvases/${canvas.id}`;
+    const publishScript = `e2e:mcp:kandev:publish_canvas_kandev(${JSON.stringify({
+      canvas_id: canvas.id,
+      source_path: sourcePath,
+    })})`;
+    if (useMobileSubmit) {
+      await session.sendMessageViaButton(publishScript);
+    } else {
+      await session.sendMessage(publishScript);
+    }
+    // The release poll below is the authoritative completion signal. Waiting
+    // for the chat composer is an unrelated UI settle condition and can time
+    // out while the publish request is still being processed.
+    let publishedCanvas: CanvasRecord | null = null;
+    await expect
+      .poll(
+        async () => {
+          publishedCanvas = await getCanvas(apiClient, canvas.id);
+          return Boolean(
+            publishedCanvas?.pending_release ||
+            publishedCanvas?.active_release_id ||
+            publishedCanvas?.active_release_status,
+          );
+        },
+        { timeout: 30_000, message: "The mock agent did not publish the canvas package." },
+      )
+      .toBe(true);
+    if (!publishedCanvas) throw new Error("The canvas publish response was empty.");
+    await waitForSessionDone(
+      apiClient,
+      taskId,
+      taskSessionId,
+      "The canvas publishing session did not finish before interaction coverage.",
+      45_000,
+    );
+    return publishedCanvas;
+  } finally {
+    removeCanvasSource(workspacePath, canvas.id);
   }
-  // The release poll below is the authoritative completion signal. Waiting
-  // for the chat composer is an unrelated UI settle condition and can time
-  // out while the publish request is still being processed.
-  let publishedCanvas: CanvasRecord | null = null;
-  await expect
-    .poll(
-      async () => {
-        publishedCanvas = await getCanvas(apiClient, canvas.id);
-        return Boolean(
-          publishedCanvas?.pending_release ||
-          publishedCanvas?.active_release_id ||
-          publishedCanvas?.active_release_status,
-        );
-      },
-      { timeout: 30_000, message: "The mock agent did not publish the canvas package." },
-    )
-    .toBe(true);
-  if (!publishedCanvas) throw new Error("The canvas publish response was empty.");
-  await waitForSessionDone(
-    apiClient,
-    taskId,
-    taskSessionId,
-    "The canvas publishing session did not finish before interaction coverage.",
-    45_000,
-  );
-  return publishedCanvas;
 }
 
 export async function approvePendingCanvas(

@@ -33,10 +33,6 @@ export function compareActivityTimestamps(a: string, b: string): number {
   return a.localeCompare(b);
 }
 
-function laterActivity(a: string, b: string): string {
-  return compareActivityTimestamps(a, b) >= 0 ? a : b;
-}
-
 function buildIncludedTaskGraph(
   tasks: TaskSwitcherItem[],
   subTasksByParentId: Map<string, TaskSwitcherItem[]>,
@@ -143,7 +139,9 @@ function resolveComponentActivity(
   components: string[][],
   graph: ComponentGraph,
   tasksById: Map<string, TaskSwitcherItem>,
+  compare: (a: string, b: string) => number,
 ): string[] {
+  const laterActivity = (a: string, b: string) => (compare(a, b) >= 0 ? a : b);
   const latestByComponent = components.map((members) =>
     members.reduce(
       (latest, taskId) => laterActivity(latest, taskActivitySortValue(tasksById.get(taskId)!)),
@@ -174,6 +172,7 @@ function resolveComponentActivity(
 export function resolveTaskTreeActivity(
   tasks: TaskSwitcherItem[],
   subTasksByParentId: Map<string, TaskSwitcherItem[]>,
+  compare = compareActivityTimestamps,
 ): Map<string, string> {
   const taskGraph = buildIncludedTaskGraph(tasks, subTasksByParentId);
   const finishOrder = buildFinishOrder(taskGraph.taskIds, taskGraph.childrenById);
@@ -186,6 +185,7 @@ export function resolveTaskTreeActivity(
     components,
     componentGraph,
     taskGraph.tasksById,
+    compare,
   );
   return new Map(
     Array.from(componentByTaskId, ([taskId, componentId]) => [

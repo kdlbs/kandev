@@ -233,3 +233,45 @@ describe("removeRoutingProfileReferences", () => {
     expect(updated?.role_tiers).toEqual({});
   });
 });
+
+describe("ApiClient.cleanupTestProfiles", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("preserves Office-owned and seed profiles while deleting test profiles", async () => {
+    const deleted: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/api/v1/app-state") {
+          return Response.json({ interimSettingsInterlockToken: "test-token" });
+        }
+        if (url.pathname === "/api/v1/agents") {
+          return Response.json({
+            agents: [
+              {
+                id: "mock-agent",
+                name: "Mock Agent",
+                profiles: [
+                  { id: "office-snake", workspace_id: "office-workspace" },
+                  { id: "office-camel", workspaceId: "office-workspace" },
+                  { id: "seed" },
+                  { id: "test-profile" },
+                ],
+              },
+            ],
+            total: 1,
+          });
+        }
+        if (init?.method === "DELETE") {
+          deleted.push(url.pathname);
+          return Response.json({ success: true });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    await new ApiClient("http://backend.test").cleanupTestProfiles(["seed"]);
+    expect(deleted).toEqual(["/api/v1/agent-profiles/test-profile"]);
+  });
+});

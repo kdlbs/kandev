@@ -28,6 +28,7 @@ import {
   splitReviewFileKey as splitFileKey,
   suppressAvailableGitlinkFiles,
 } from "./types";
+import { createReviewToggleHandler } from "./review-dialog-handlers";
 import { t } from "@/lib/i18n";
 
 /**
@@ -300,15 +301,8 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
     // This ensures proper timing after the section expands
   }, []);
 
-  const handleToggleReviewed = useCallback(
-    (key: string, reviewed: boolean) => {
-      if (reviewed) {
-        // Look up by composite key so two same-name files in different repos
-        // don't share their reviewed/diff-hash.
-        const file = allFiles.find((f) => reviewFileKey(f) === key);
-        markReviewed(key, file ? hashDiff(file.diff) : "");
-      } else markUnreviewed(key);
-    },
+  const handleToggleReviewed = useMemo(
+    () => createReviewToggleHandler(allFiles, markReviewed, markUnreviewed),
     [allFiles, markReviewed, markUnreviewed],
   );
 

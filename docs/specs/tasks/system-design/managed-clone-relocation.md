@@ -6,6 +6,7 @@ requirements:
   - REQ-TASKS-MANAGED-CLONE-RELOCATION-002
   - REQ-TASKS-MANAGED-CLONE-RELOCATION-003
 created: 2026-09-27
+updated: 2026-10-08
 owners:
   - kandev
 ---
@@ -65,6 +66,41 @@ Do not reset or alter the original worktree. Revalidate branch and HEAD before
 publishing the replacement. The ordinary admission check then validates the
 new worktree against the current source clone before the agent can start.
 
+## Unchanged legacy source admission
+
+For AC-TASKS-MANAGED-CLONE-RELOCATION-001.5 and .001.6, distinguish a layout
+candidate from the repository's registered source. The computed workspace path
+alone does not establish that a source-clone change occurred.
+
+Before requiring `ExpectedDestinationPath` to exist, the shared worktree
+inspection checks whether `Worktree.RepositoryPath` resolves to either exact
+legacy candidate in `ManagedCloneRelocationProof` (`ExpectedSourcePath` or
+`LegacyOwnerNameSourcePath`). Resolve existing paths, require containment under
+the managed root, verify the provider origin, and require the checkout's actual
+Git common directory to be that clone's `.git`. Keep ordinary linked-worktree
+registration, branch, and ownership validation in place. Main-checkout admission
+uses the same source selection and directory identity rule, retaining ordinary
+main-checkout HEAD validation, including valid detached commits. Only linked
+worktrees require the persisted branch registration proof. Cancellation and
+operational inspection errors propagate without falling back to reuse.
+
+This verified match is unchanged-source reuse. Do not require, create, or inspect
+the computed workspace destination, acquire a relocation claim, rewrite database
+paths, or run transfer-only filter/submodule/cleanliness checks. Preserve the
+normal credentials policy. Canonicalize filesystem paths without treating every
+case-insensitive string match as the same directory on case-sensitive systems.
+
+If that exact legacy match is absent, keep the existing destination validation
+and relocation path, including refusal when the registered workspace destination
+is missing. Never substitute a legacy clone for a missing current destination.
+Every selected slot must pass: an unchanged legacy slot cannot hide a foreign,
+missing, or relocation-required sibling. GitHub and GitLab share this proof;
+other provider types retain their existing handling.
+
+This restores the existing source-change boundary in the relocation ADR; it
+introduces no repository migration or new credential ownership rule. The repair
+of a live installation is not an implementation template for automatic recovery.
+
 ## Authority and publication
 
 Reuse `task_environment_recovery_claims`, the owner-generation fence, the
@@ -110,6 +146,181 @@ limit. Unsupported special files, unreadable entries, conflicts, and changed
 snapshots stop before publication. Do not silently fall back to a remote or
 task base branch when the exact commit is unavailable.
 
+## Permission-only blocked snapshot continuation
+
+This extension implements AC-TASKS-MANAGED-CLONE-RELOCATION-002.5. It uses the
+[shared snapshot mode policy](worktree-metadata-recovery.md#snapshot-permission-preservation)
+and the [retry boundary decision](../../../decisions/2026-10-04-permission-only-snapshot-retry.md).
+Implementation and verification are recorded in the
+[permission fix package](../../../plans/workspace-recovery-permissions/plan.md).
+
+Ordinary resume, restore, fresh start, and automatic metadata recovery must not
+reopen a blocked snapshot. A new `relocate_and_resume` request supplies the
+existing current error stamp and authorization. No new UI control, action,
+runtime flag, session state, or database table is required.
+
+`recoveryOperationIDsForSlot` can recognize a provisional retry candidate only
+for explicit dirty relocation. The adjacent recovery record must have `blocked`
+state, an empty manifest, and the historical reason
+`recovery snapshot does not match original checkout`. Its task, worktree,
+original path, and valid operation ID must match the canonical slot and the
+managed-clone relocation record. The latter must still be `materialized`.
+The reason string is a format discriminator, never sufficient authorization.
+Read-only candidate recognition cannot change records or release claims.
+Merge operation IDs through the existing selected-inventory rule.
+Conflicting operations remain refused.
+
+After acquiring the existing durable environment claim and both filesystem
+operation locks, reread the records and current failure authorization.
+Require unchanged owner generation, session binding, complete canonical
+inventory, verified source/destination clones, recorded branch, and exact HEAD.
+Require the recorded replacement to remain a clean, unpublished worktree at
+its captured branch and commit. Refuse edits to that replacement.
+Generic `adoptRecoveryRecord` must continue to reject blocked records.
+The specialized dirty-transfer entry owns the retry proof under the same
+snapshot lock. It must not release the lock between proof and transition.
+
+Compare the original and failed snapshot through pinned no-follow directory
+handles. Exclude only the checkout root `.git`. Require identical relative
+entry sets, entry types, regular-file bytes, and symlink targets. Permit only
+special bits absent from the failed snapshot and ordinary permission bits
+removed from regular files. Directory ordinary permissions must match.
+No snapshot entry can add permissions. At least one permission difference
+must exist. Historical copied ownership does not authorize source ownership.
+Read the required set-ID identity from the current verified original.
+Repeated source checks include mode and required UID/GID to detect drift.
+Unreadable entries, special files, path substitution, cancellation, content
+changes, and unrelated reasons refuse without changing either retained copy.
+Stream comparison with bounded memory, existing I/O deadlines, and cancellation.
+Do not add an arbitrary file-count limit that rejects normal build trees.
+
+Add one optional `mode_retry` object to `recoveryRecord`. It records format
+version 1, the previous snapshot path, previous error and timestamp, and a
+new deterministic path: `<original>.kandev-recovery-<operation-id>-modes-v1`.
+The record retains its existing operation ID. Atomically replace the blocked
+record with `snapshotting` and this retry provenance only after all proofs pass.
+Keep the old snapshot untouched. Reject an occupied new path unless the durable
+retry record already owns it. A crash before the record write leaves the old
+blocked record. A crash afterward follows the existing snapshotting protocol,
+which can rebuild only the new incomplete snapshot. Never remove the old copy.
+
+`prepareRecoverySnapshot` then creates a fresh snapshot from the original.
+Keep full manifest checks, the set-ID identity checks, restoration, and the
+claim-aware inventory compare-and-swap. Resume the existing deterministic
+replacement rather than creating another branch or operation. A second blocked
+failure with `mode_retry` present does not authorize another automatic rebuild.
+Rematerializing retries retain their existing verified manifest rule.
+Completed and unrelated blocked records retain their existing treatment.
+
+Every selected slot must pass preflight before any record transition.
+Successful earlier slots remain authoritative after a later failure.
+No agent starts until the complete inventory validates. A successful relaunch
+retires only its matching error stamp and preserves the provider resume token.
+A stale or failed request leaves the current actionable error visible.
+Record reason categories through the existing sanitized failure and relocation
+outcome paths. Never log file bytes, UID/GID details, or absolute paths in public
+errors. No install-wide startup scan or claim expiry is added.
+
+## Inspection contention and explicit preflight
+
+This section defines admission for AC-TASKS-MANAGED-CLONE-RELOCATION-001.1,
+.001.3, .002.1, and .003.1. The implementation is recorded in the
+[convergence package](../../../plans/managed-clone-recovery-convergence/plan.md).
+
+Ordinary Resume reaches `PreflightSessionWorktreeRecovery` before the lifecycle
+singleflight. Its inspection can collide with Files, Changes, or commit requests
+that reconstruct workspace access inside that flight. An occupied inspection
+mutex does not establish checkout corruption.
+
+`RecoveryAdmissionRequest` has a separate inspection-wait policy. Manual recovery
+preflight and outer resume admission outside lifecycle execution creation select
+it. The outer-resume extension is implemented in the
+[task-opening contention package](../../../plans/task-open-inspection-contention/plan.md).
+The [inspection-contention design](worktree-metadata-recovery.md#inspection-contention-during-resume)
+defines its shared deadline and failure bookkeeping. This policy
+grants no dirty-relocation permission. `RelocateDirty`, operation stamps, and
+durable claims retain their current meanings. Lifecycle launch and workspace
+reconstruction return immediate lock refusal. They do not wait for an admission
+that can later join their own singleflight.
+
+Outer preflight waits for at most 15 seconds, or the caller's remaining
+deadline, whichever is shorter. It uses cancellation-aware acquisition in
+stable slot order and releases earlier locks on cancellation or timeout.
+The existing 30-second ordinary recovery client deadline remains unchanged.
+Capture the selected session binding, environment owner and generation, and the
+canonical membership of every active environment-repository row before waiting.
+Include unmaterialized slots and their registered repository identity and path.
+Replacement-session preparation can occur before the session row is inserted.
+Record that session as absent and verify it remains absent after the wait; still
+bind its intended session identity to the captured environment. Existing sessions
+must remain persisted with the same environment binding.
+After acquiring the original worktree locks, reread this complete snapshot and
+reject any drift before inspection or mutation. Do not add a newly discovered
+slot to the waiting operation; it requires a new admission with its own locks.
+Then re-resolve the original canonical worktree slots and verify their branch,
+path, source, and repository identity.
+
+Represent inspection contention with a distinct typed internal error.
+Ordinary background callers fail promptly. An outer wait that expires returns
+a bounded, path-free conflict response and leaves its existing error active.
+Do not report metadata corruption, evict a claim, stop a runtime, or authorize
+transfer because a mutex is occupied. An acquired mutex does not replace
+the existing durable claim and liveness checks.
+
+## Durable workspace recovery error projection
+
+This section implements AC-TASKS-MANAGED-CLONE-RELOCATION-002.1, .002.4,
+and .003.1 through the existing session error contract.
+
+Dirty relocation refusal can originate in manual resume preflight,
+`launchRestoreWorkspace`, or lifecycle workspace reconstruction used by background
+read requests. All three paths must converge on the same durable session error.
+Keep filesystem classification in the worktree manager. Keep session persistence
+and event publication in the task service. Lifecycle must not import that service.
+
+Provide a narrow injected lifecycle reporter for verified
+`ManagedCloneRelocationRequiredError` results. The task service supplies it during
+backend composition. Capture session, selected environment, owner generation,
+the complete canonical active repository inventory, state, execution identity,
+and current error stamp before workspace inspection.
+Manual preflight and restore use the same task-service projection operation.
+The reporter does not inspect unrelated environments or retry Git operations.
+
+Reuse `last_agent_error`, `managed_clone_relocation_required`,
+`relocate_and_resume`, and the existing stamp contract. Record no new lifecycle
+state and add no schema or runtime flag. A CANCELLED session remains CANCELLED.
+An absent typed error, including a legacy `error_message` alone, is a supported input.
+
+Use a conditional repository write to preserve successor state. Extend the
+existing metadata compare-and-swap machinery only where its predicates are
+insufficient. Match the captured state, execution identity, selected environment,
+owner generation, complete selected slot membership, each worktree identity and
+path, and the registered repository identity and path in the write transaction.
+Use the task-before-environment and slot/repository row-locking conventions used
+by environment inventory mutation. Inventory drift defeats both a new write and
+reuse of an active relocation stamp.
+Do not reuse bootstrap failure settlement, which changes a session to FAILED.
+If a newer error, resumed execution, or ownership change wins, publish nothing.
+Repeated detections for the same unchanged inventory reuse the active relocation
+stamp and do not append another history entry or notification.
+
+Publish `TaskSessionErrorChanged` after a successful write, using the existing
+status-summary rebuild path. Preserve unrelated metadata, retained error history,
+provider resume tokens, and task-scoped errors. A persistence failure returns
+a sanitized error without an actionable stamp or agent startup. Event-publication
+failure follows existing logging policy; reload still reads the durable record.
+
+`wsLaunchSession` must preserve relocation conflict details for restore failures,
+as `wsRecoverSession` already does. The restore action hook must consume those
+details with its existing operation fence. A late restore response must not
+replace a newer card or create a second recovery surface.
+
+The current projection, response, reload, and reconnect must expose the same
+stamp and eligible action. Inspect every selected slot before publishing recovery
+success. Retire only the matching error after relocation and relaunch succeed.
+For mixed inventories, an unchanged healthy slot cannot hide a dirty mismatch
+or an invalid sibling. Refusal leaves all original checkouts available.
+
 ## Failure and restart
 
 The durable operation record holds a stable ID, selected environment and owner
@@ -121,6 +332,69 @@ stays active until every selected slot validates and the relaunch succeeds.
 Neither a cancelled session nor a fresh agent profile bypasses the check.
 Publication also re-reads the current repository path so a second clone move
 cannot redirect an in-flight operation.
+
+## Completed relocation continuity
+
+This section implements AC-TASKS-MANAGED-CLONE-RELOCATION-001.7.
+The task environment owns continuity after replacement publication.
+The relocation journal records a completed transfer, not a permanent checkout
+commit constraint. The original relocation boundary remains unchanged.
+
+`Manager.AdmitRecovery` inspects the complete selected repository inventory
+before `reconcilePublishedManagedCloneRelocations`. Keep that ordering.
+`matchesPublishedManagedCloneRelocation` currently accepts both `materialized`
+and `complete` records. `verifyPublishedManagedCloneRelocation` then requires
+the current HEAD to equal the captured transfer commit for both states.
+That comparison wrongly rejects later work in a completed replacement.
+
+Distinguish the two states before applying transfer proofs:
+
+- A `materialized` record still needs restart reconciliation. Preserve exact
+  HEAD, destination clone, operation identity, and claim verification.
+  Changed replacement work must remain a refusal.
+- A `complete` record describes historical transfer evidence. Validate the
+  current checkout against its canonical environment slot and registered source.
+  Require a valid current commit, Git registration, branch, provider identity,
+  managed clone identity, selected owner, and generation through ordinary
+  admission. Do not require equality or ancestry with the historical HEAD.
+  An amend or rebase can replace that history legitimately.
+
+Completed admission must not reset HEAD, replay a snapshot, copy files,
+relocate again, or require the former source clone. It must not require clean
+files, an old commit object, or the original branch history solely for journal
+reconciliation. Existing branch-loss and identity checks still apply.
+Retain original worktrees, snapshots, and historical journal values.
+
+Read the durable claim before any reconciliation effect. An unrelated claim
+remains a conflict and must not be released. A completed record alone never
+authorizes claim cleanup. Existing operation, session, environment, generation,
+and exclusion checks must prove authority for a matching leftover claim.
+When all records already agree and no claim remains, ordinary reuse does not
+rewrite journals or repeat original retention.
+
+A crash can leave a complete replacement journal with an incomplete companion
+journal or an unreleased matching claim. Reconcile only that operation's
+remaining bookkeeping under existing locks and fences. Preserve the historical
+HEAD and current checkout bytes. Do not restore historical content to satisfy
+the journal. An unreadable or conflicting record remains a refusal.
+
+All selected slots must validate before agent startup or recovery success.
+A valid completed slot cannot hide an invalid or unfinished sibling.
+Keep the final lifecycle launch admission guard and executor exclusions.
+Cancellation and operational Git errors remain errors.
+
+Existing `complete` journals use the same format and need no data migration.
+The fix applies on ordinary reuse after an upgrade to the corrected binary.
+It requires no feature toggle, provider setting, startup scan, or manual edit.
+Successful resume retires only the matching current failure through existing
+session recovery behavior. Read-only restore starts no agent and preserves
+provider resume identity.
+
+Real-Git tests cover later commits, amended or rebased history, local edits,
+restart, existing complete records, and mixed repository inventories.
+SQLite-backed executor and service tests cover resume and workspace restore.
+Use isolated fixtures and replace only external provider startup with a
+recording runtime. Never copy a live task or edit its recovery records.
 
 ## Security
 
@@ -166,5 +440,26 @@ metric labels.
 
 ## Related decisions
 
+- [Proposed recovery operation storage](../../../decisions/2026-10-05-managed-clone-recovery-operation-storage.md)
 - [Managed clone relocation boundary](../../../decisions/2026-09-27-managed-clone-relocation-boundary.md)
 - [Worktree metadata recovery boundary](../../../decisions/2026-09-10-worktree-metadata-recovery-boundary.md)
+
+## Implementation plans
+
+- [Recovery progress and workspace presentation](../../../plans/managed-clone-recovery-experience/plan.md) (draft)
+- [Snapshot permissions and blocked retry](../../../plans/workspace-recovery-permissions/plan.md)
+
+- [Original relocation package](../../../plans/managed-clone-relocation/plan.md)
+- [Unchanged legacy clone admission](../../../plans/legacy-clone-resume/plan.md)
+- [Resume and workspace recovery convergence](../../../plans/managed-clone-recovery-convergence/plan.md)
+- [Completed relocation continuity](../../../plans/completed-relocation-continuity/plan.md)
+
+## Proposed operation storage and presentation extension
+
+The [draft extension](managed-clone-relocation-experience.md) defines private
+artifact placement, durable progress, and repository labels for this same
+capability. When accepted and implemented, it changes adjacent artifact placement
+for new clone-relocation operations only. Existing adjacent records remain
+readable, including permission-only retry provenance. The extension adds progress
+storage; earlier statements about no new schema describe the existing error and
+permission fixes. This proposal does not weaken admission or preservation.

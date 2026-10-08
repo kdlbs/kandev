@@ -17,6 +17,7 @@ import (
 
 type mcpCreateTaskRequest struct {
 	ParentID               string               `json:"parent_id"`
+	ParentIsSelf           bool                 `json:"parent_is_self"`
 	SourceTaskID           string               `json:"source_task_id"`
 	SourceSessionID        string               `json:"source_session_id"`
 	WorkspaceID            string               `json:"workspace_id"`
@@ -39,6 +40,7 @@ type mcpCreateTaskRequest struct {
 
 type mcpCreateTaskAdmission struct {
 	discardInheritedSourceRepositories bool
+	parentResolution                   *mcpCreateTaskParentResolution
 }
 
 type mcpCreateTaskAdmissionError struct {
@@ -70,6 +72,12 @@ func (h *Handlers) admitMCPCreateTask(
 			"MCP task creation requires a trusted session or external transport",
 		)
 	}
+	if req.ParentIsSelf && (trustedExternal || (hasPrincipal && principal.IsAutomation())) {
+		return mcpCreateTaskAdmission{}, denyMCPCreateTask(
+			ws.ErrorCodeForbidden,
+			"parent_id=self placement is available only to session-bound Kanban task callers",
+		)
+	}
 	if h.taskSvc == nil {
 		return mcpCreateTaskAdmission{}, denyMCPCreateTask(
 			ws.ErrorCodeInternalError,
@@ -94,7 +102,16 @@ func (h *Handlers) admitMCPCreateTask(
 	if err := h.validateMCPKanbanPrincipal(ctx, principal, req); err != nil {
 		return mcpCreateTaskAdmission{}, err
 	}
-	return h.admitMCPDestination(ctx, req, principal.WorkspaceID, true)
+	parentResolution, err := h.resolveMCPCreateTaskSelfPlacement(ctx, principal, req)
+	if err != nil {
+		return mcpCreateTaskAdmission{}, err
+	}
+	admission, err := h.admitMCPDestination(ctx, req, principal.WorkspaceID, true)
+	if err != nil {
+		return mcpCreateTaskAdmission{}, err
+	}
+	admission.parentResolution = parentResolution
+	return admission, nil
 }
 
 func (h *Handlers) admitExternalMCPCreateTask(

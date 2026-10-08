@@ -56,9 +56,14 @@ The hook result supplies the state to `use-chat-panel-state.ts`, `task-chat-pane
 A successful snapshot alone establishes history initialization, including a successful empty snapshot.
 
 `doFetchMessages` in `use-session-message-fetch.ts` must not clear messages on rejection or mark failed hydration as successful.
-Preserve message reconciliation, prompt-history independence, draft state, and scroll anchoring.
+Preserve message reconciliation, the plugin conversation facade's projection independence, draft state, and scroll anchoring.
 An obsolete response cannot overwrite another session or clear a newer episode's error.
 Partial live messages remain visible while initial reconciliation is pending.
+
+A background reconcile (`doFetchMessages` with `background: true`: the turn-end refresh and core conversation gap recovery) is silent when the session already has messages on screen.
+It skips the hook's loading state, the `loading` and `retrying` history states, and the shared store loading flag, because that flag drives the transcript's inline loading row.
+In-flight bookkeeping counts total and visible fetches separately, so the flag clears when the last visible fetch settles even while a silent one continues.
+A failure still sets `unavailable` and offers Retry, so a stale transcript is never left without notice.
 
 ## Presentation
 

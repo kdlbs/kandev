@@ -667,44 +667,75 @@ func (m *Manager) probeWithCommand(
 	refresh bool,
 	command agents.Command,
 ) AgentCapabilities {
+	return m.probeWithOverrides(ctx, inst, ia, refresh, command, "", nil, nil)
+}
+
+func (m *Manager) probeWithOverrides(
+	ctx context.Context,
+	inst *instance,
+	ia agents.InferenceAgent,
+	refresh bool,
+	command agents.Command,
+	workDir string,
+	env map[string]string,
+	stripEnv []string,
+) AgentCapabilities {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	resolvedCommand, err := m.resolveInferenceCommand(probeCtx, inst.agentType, ia, command)
+	req := buildProbeRequest(inst, ia, refresh, command)
+	if workDir != "" {
+		req.InferenceConfig.WorkDir = workDir
+	}
+	if len(env) > 0 {
+		if req.InferenceConfig.Env == nil {
+			req.InferenceConfig.Env = make(map[string]string)
+		}
+		for key, value := range env {
+			req.InferenceConfig.Env[key] = value
+		}
+	}
+	if len(stripEnv) > 0 {
+		req.InferenceConfig.StripEnv = append(req.InferenceConfig.StripEnv, stripEnv...)
+	}
+	resp, resolvedCommand, err := m.probeManagedRuntime(probeCtx, inst, ia, command, req)
 	if err != nil {
 		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
 	}
-
-	req := buildProbeRequest(inst, ia, refresh, resolvedCommand)
-	resp, err := m.probeManagedRuntime(probeCtx, inst, ia, resolvedCommand, req)
-	if err != nil {
-		return probeFailureCapabilities(inst.agentType, StatusFailed, err.Error(), 0, time.Now())
-	}
-	return capabilitiesFromProbe(inst.agentType, resp, time.Now())
+	caps := capabilitiesFromProbe(inst.agentType, resp, time.Now())
+	stampConfiguredRuntimeVersion(&caps, ia, resolvedCommand)
+	return caps
 }
 
 func (m *Manager) probeManagedRuntime(
 	ctx context.Context,
 	inst *instance,
 	ia agents.InferenceAgent,
-	command agents.Command,
+	override agents.Command,
 	req *agentctlutil.ProbeRequest,
-) (*agentctlutil.ProbeResponse, error) {
-	release, err := inst.acquireOperation(ctx, false)
+) (*agentctlutil.ProbeResponse, agents.Command, error) {
+	command, release, err := m.acquireInferenceCommand(ctx, inst, ia, override)
 	if err != nil {
-		return nil, err
+		return nil, command, err
 	}
+	req = cloneProbeRequestWithCommand(req, command)
 	resp, err := inst.client.Probe(ctx, req)
 	release()
 	if err != nil || resp.Success || resp.FailureCode != agentctlutil.ProbeFailureManagedRuntimeNPMResolution {
-		return resp, err
+		return resp, command, err
 	}
 
 	release, err = inst.acquireOperation(ctx, true)
 	if err != nil {
-		return resp, nil
+		return resp, command, nil
 	}
 	defer release()
-	return m.recoverManagedRuntimeProbe(ctx, inst, ia, command, req, resp), nil
+	command, err = m.resolveInferenceCommand(ctx, inst.agentType, ia, override)
+	if err != nil {
+		m.log.Warn("could not resolve selected runtime for probe recovery", zap.Error(err))
+		return resp, command, nil
+	}
+	req = cloneProbeRequestWithCommand(req, command)
+	return m.recoverManagedRuntimeProbe(ctx, inst, ia, command, req, resp), command, nil
 }
 
 func (m *Manager) recoverManagedRuntimeProbe(
@@ -715,12 +746,25 @@ func (m *Manager) recoverManagedRuntimeProbe(
 	failedRequest *agentctlutil.ProbeRequest,
 	initial *agentctlutil.ProbeResponse,
 ) *agentctlutil.ProbeResponse {
+	if ctx.Err() != nil {
+		return initial
+	}
 	managed, ok := ia.(agents.ManagedNPMRuntimeAgent)
 	if !ok {
 		return initial
 	}
 	spec := managed.ManagedNPMRuntime()
-	retryCommand, packageSpec, ok := managedRuntimeProbeRetry(failedCommand, spec)
+	if openCode, ok := ia.(*agents.OpenCodeACP); ok {
+		if reader, hasSelection := m.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader); hasSelection {
+			selected, err := openCode.ResolveSelectedRuntimeWithReader(ctx, reader)
+			if err != nil {
+				m.log.Warn("could not resolve selected OpenCode runtime for probe recovery", zap.Error(err))
+				return initial
+			}
+			spec = selected.Spec
+		}
+	}
+	retryCommand, _, ok := managedRuntimeProbeRetry(failedCommand, spec)
 	if !ok {
 		return initial
 	}
@@ -728,16 +772,6 @@ func (m *Manager) recoverManagedRuntimeProbe(
 		zap.String("agent_type", inst.agentType),
 		zap.String("recovery_scope", "host_capability_probe"),
 		zap.Int("attempt", 1))
-	failedConfig := failedRequest.InferenceConfig
-	if err := inst.client.RepairManagedRuntimeCacheWithEnvironment(
-		ctx, packageSpec, failedConfig.Env, failedConfig.StripEnv,
-	); err != nil {
-		m.log.Warn("managed runtime host capability probe cache repair failed",
-			zap.String("agent_type", inst.agentType),
-			zap.String("recovery_scope", "host_capability_probe"),
-			zap.Error(err))
-		return initial
-	}
 	response, err := inst.client.Probe(ctx, cloneProbeRequestWithCommand(failedRequest, retryCommand))
 	if err != nil {
 		m.log.Warn("managed runtime host capability probe retry failed",
@@ -814,6 +848,7 @@ func capabilitiesFromProbe(agentType string, resp *agentctlutil.ProbeResponse, n
 		AgentType:       agentType,
 		AgentName:       resp.AgentName,
 		AgentVersion:    resp.AgentVersion,
+		RuntimeInfo:     resp.RuntimeInfo,
 		Status:          StatusOK,
 		ProtocolVersion: resp.ProtocolVersion,
 		LoadSession:     resp.LoadSession,
@@ -849,6 +884,41 @@ func capabilitiesFromProbe(agentType string, resp *agentctlutil.ProbeResponse, n
 	return caps
 }
 
+func stampConfiguredRuntimeVersion(caps *AgentCapabilities, ia agents.InferenceAgent, command agents.Command) {
+	if caps == nil || caps.RuntimeInfo == nil {
+		return
+	}
+	managed, ok := ia.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return
+	}
+	packageName := managed.ManagedNPMRuntime().Package
+	if packageName == "" {
+		return
+	}
+	version := ""
+	for _, arg := range command.Args() {
+		prefix := packageName + "@"
+		if !strings.HasPrefix(arg, prefix) || managedruntime.ValidateExactPackageSpec(arg) != nil {
+			continue
+		}
+		candidate := strings.TrimPrefix(arg, prefix)
+		if _, err := managedruntime.ParseStableVersion(candidate); err == nil {
+			version = candidate
+		}
+	}
+	if version == "" {
+		return
+	}
+	for index := range caps.RuntimeInfo.Components {
+		component := &caps.RuntimeInfo.Components[index]
+		if component.Role == agents.RuntimeComponentBridge && component.Package == packageName {
+			component.EffectiveVersion = version
+			return
+		}
+	}
+}
+
 // resolveInferenceCommand selects the trusted exact host version for ordinary
 // probes and prompts. A non-empty override is reserved for candidate probes.
 func (m *Manager) resolveInferenceCommand(
@@ -868,6 +938,11 @@ func (m *Manager) resolveInferenceCommand(
 	ag, ok := ia.(agents.Agent)
 	if !ok || m.managedRuntimeSelections == nil {
 		return command, nil
+	}
+	openCode, isOpenCode := ag.(*agents.OpenCodeACP)
+	reader, hasSelectionReader := m.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader)
+	if isOpenCode && hasSelectionReader {
+		return m.resolveOpenCodeInferenceCommand(ctx, openCode, reader)
 	}
 	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
 	if !ok {
@@ -891,6 +966,54 @@ func (m *Manager) resolveInferenceCommand(
 	return spec.ACPCommand(version), nil
 }
 
+func (m *Manager) resolveOpenCodeInferenceCommand(
+	ctx context.Context,
+	openCode *agents.OpenCodeACP,
+	reader managedruntime.OpenCodeSelectionReader,
+) (agents.Command, error) {
+	selection, err := openCode.ResolveSelectedRuntimeWithReader(ctx, reader)
+	if err != nil {
+		return agents.Command{}, fmt.Errorf("resolve OpenCode runtime selection: %w", err)
+	}
+	if selection.Source != managedruntime.OpenCodeSourceNative || !selection.Spec.NativeBinaryOnPath() {
+		return selection.Spec.ACPCommand(selection.Version), nil
+	}
+	return nativeOpenCodeInferenceCommand(ctx, selection.Spec.NativeBinary)
+}
+
+func nativeOpenCodeInferenceCommand(ctx context.Context, binary string) (agents.Command, error) {
+	native, found, err := agents.DetectOpenCodeNativeRuntime(ctx)
+	if err != nil {
+		return agents.Command{}, err
+	}
+	if !found {
+		return agents.Command{}, errors.New("selected native OpenCode runtime is unavailable")
+	}
+	args, err := agents.OpenCodeACPArgsForVersion(native.Version)
+	if err != nil {
+		return agents.Command{}, err
+	}
+	return agents.NewCommand(append([]string{binary}, args...)...), nil
+}
+
+func (m *Manager) acquireInferenceCommand(
+	ctx context.Context,
+	inst *instance,
+	ia agents.InferenceAgent,
+	override agents.Command,
+) (agents.Command, func(), error) {
+	release, err := inst.acquireOperation(ctx, false)
+	if err != nil {
+		return agents.Command{}, nil, err
+	}
+	command, err := m.resolveInferenceCommand(ctx, inst.agentType, ia, override)
+	if err != nil {
+		release()
+		return agents.Command{}, nil, err
+	}
+	return command, release, nil
+}
+
 const modelConfigResolveTimeout = 60 * time.Second
 
 func buildProbeRequest(
@@ -905,8 +1028,9 @@ func buildProbeRequest(
 		probeCommand = command
 	}
 	return &agentctlutil.ProbeRequest{
-		AgentID: inst.agentType,
-		Refresh: refresh,
+		AgentID:            inst.agentType,
+		Refresh:            refresh,
+		RuntimeObservation: runtimeObservationDescriptor(ia, cfg, probeCommand),
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
 			Protocol:        cfg.Protocol,
 			Command:         probeCommand.Args(),
@@ -917,6 +1041,111 @@ func buildProbeRequest(
 			OperatorDefined: cfg.OperatorDefined,
 		},
 	}
+}
+
+func runtimeObservationDescriptor(
+	ia agents.InferenceAgent,
+	cfg *agents.InferenceConfig,
+	command agents.Command,
+) *agents.RuntimeObservationDescriptor {
+	if cfg == nil || (cfg.Protocol != "" && cfg.Protocol != agent.ProtocolACP) {
+		return nil
+	}
+	registered, ok := ia.(agents.Agent)
+	if !ok {
+		return nil
+	}
+	bridge := runtimeObservationBridgeDescriptor(ia, registered, cfg, command)
+	descriptor := &agents.RuntimeObservationDescriptor{Bridge: bridge}
+	if provider, ok := ia.(agents.RuntimeObservationAgent); ok {
+		component := provider.RuntimeProviderObservation()
+		descriptor.Provider = &component
+	}
+	return descriptor
+}
+
+func runtimeObservationBridgeDescriptor(
+	ia agents.InferenceAgent,
+	registered agents.Agent,
+	cfg *agents.InferenceConfig,
+	command agents.Command,
+) agents.RuntimeComponentDescriptor {
+	bridge := agents.RuntimeComponentDescriptor{
+		Name:   registered.DisplayName(),
+		Source: agents.RuntimeComponentUnknown,
+		Owner:  agents.RuntimeComponentOwnerUnknown,
+	}
+	if managed, ok := ia.(agents.ManagedNPMRuntimeAgent); ok {
+		return managedRuntimeObservationBridge(bridge, managed, registered, command)
+	}
+	if cfg.OperatorDefined || !slices.Equal(command.Args(), cfg.Command.Args()) {
+		return bridge
+	}
+	if _, ok := registered.(agents.RuntimeReleaseAgent); !ok {
+		return bridge
+	}
+	capability := agents.RuntimeUpdateCapabilities(registered)
+	if capability.Management != "manual" || capability.Owner != "external" {
+		return bridge
+	}
+	bridge.Source = agents.RuntimeComponentExternal
+	bridge.Owner = agents.RuntimeComponentOwnerExternal
+	bridge.GuidanceURL = capability.Source.GuidanceURL
+	return bridge
+}
+
+func managedRuntimeObservationBridge(
+	bridge agents.RuntimeComponentDescriptor,
+	managed agents.ManagedNPMRuntimeAgent,
+	registered agents.Agent,
+	command agents.Command,
+) agents.RuntimeComponentDescriptor {
+	spec := managed.ManagedNPMRuntime()
+	if spec.NativeBinary != "" && slices.Equal(command.Args(), spec.NativeCommand().Args()) {
+		bridge.Source = agents.RuntimeComponentExternal
+		bridge.Owner = agents.RuntimeComponentOwnerExternal
+		bridge.GuidanceURL = runtimeManualGuidanceURL(registered)
+		return bridge
+	}
+	if managedRuntimeCommandVersion(command, spec) == "" {
+		return bridge
+	}
+	bridge.Package = spec.Package
+	bridge.Source = agents.RuntimeComponentManaged
+	bridge.Owner = agents.RuntimeComponentOwnerKandev
+	return bridge
+}
+
+func runtimeManualGuidanceURL(registered agents.Agent) string {
+	if releaseAgent, ok := registered.(agents.RuntimeReleaseAgent); ok {
+		return releaseAgent.RuntimeReleaseSource().GuidanceURL
+	}
+	capability := agents.RuntimeUpdateCapabilities(registered)
+	if capability.Management == "manual" {
+		return capability.Source.GuidanceURL
+	}
+	return ""
+}
+
+func managedRuntimeCommandVersion(command agents.Command, spec agents.ManagedNPMRuntimeSpec) string {
+	if spec.Package == "" {
+		return ""
+	}
+	args := command.Args()
+	prefix := spec.Package + "@"
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, prefix) || managedruntime.ValidateExactPackageSpec(arg) != nil {
+			continue
+		}
+		version := strings.TrimPrefix(arg, prefix)
+		if _, err := managedruntime.ParseStableVersion(version); err != nil {
+			continue
+		}
+		if slices.Equal(args, spec.ACPCommand(version).Args()) {
+			return version
+		}
+	}
+	return ""
 }
 
 func inferenceConfigForHostUtility(ia agents.InferenceAgent) *agents.InferenceConfig {

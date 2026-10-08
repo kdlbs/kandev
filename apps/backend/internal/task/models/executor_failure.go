@@ -141,7 +141,11 @@ func (o *ExecutorObservation) ConfirmedLoss() bool {
 
 const WorkspaceRetained = "retained"
 
+const ExecutorReasonWorkerUnavailable = "WorkerUnavailable"
+
+const ExecutorReasonStatusUnverified = "StatusUnverified"
+
 // ReportedUnavailable preserves explicit worker evidence without claiming process death.
 func (o *ExecutorObservation) ReportedUnavailable() bool {
-	return o != nil && o.Runtime == "k8s" && o.Outcome == ExecutorOutcomeUnknown && o.Reason == "WorkerUnavailable"
+	return o != nil && o.Runtime == "k8s" && o.Outcome == ExecutorOutcomeUnknown && o.Reason == ExecutorReasonWorkerUnavailable
 }

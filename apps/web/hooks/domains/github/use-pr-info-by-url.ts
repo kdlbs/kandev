@@ -210,6 +210,18 @@ function finalizeRequest(refs: Refs, url: string, request: RequestIdentity): voi
   refs.abortersRef.current.delete(url);
 }
 
+function invalidateRegistryCache(refs: Refs, setState: SetState): void {
+  // Fence every old callback before cancellation can settle its request.
+  for (const [url, sequence] of refs.seqRef.current) {
+    refs.seqRef.current.set(url, sequence + 1);
+  }
+  refs.inFlightRef.current.clear();
+  refs.loadedRef.current.clear();
+  for (const controller of refs.abortersRef.current.values()) controller.abort();
+  refs.abortersRef.current.clear();
+  setState({});
+}
+
 function runGitHubInfoRequest(args: {
   workspaceId: string;
   refs: Refs;
@@ -410,8 +422,8 @@ export function usePRInfoByURL(workspaceId: string | null): UsePRInfoByURLResult
       const url = rawUrl.trim();
       if (!url || !workspaceId) return;
       if (registryVersionRef.current !== registryVersion) {
+        invalidateRegistryCache(refsRef.current, setState);
         registryVersionRef.current = registryVersion;
-        loadedRef.current.delete(url);
       }
       if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
       const pr = parseGitHubPrUrl(url);
