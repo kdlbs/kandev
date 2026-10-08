@@ -97,9 +97,16 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	if execution.SessionID == "" {
 		return m.startAgentProcess(ctx, executionID)
 	}
-	_, err := m.doCoalescedExecution(ctx, execution.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+	start := func(sharedCtx context.Context) (interface{}, error) {
 		return nil, m.startAgentProcess(sharedCtx, executionID)
-	})
+	}
+	coalesceKey := execution.SessionID
+	if attemptID := ResumeAttemptIDFromContext(ctx); attemptID != "" {
+		coalesceKey += "\x00" + attemptID
+		_, err := m.doAttemptCoalescedExecution(ctx, coalesceKey, start)
+		return err
+	}
+	_, err := m.doCoalescedExecution(ctx, coalesceKey, start)
 	return err
 }
 
@@ -110,6 +117,9 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}
 	defer func() {
 		if retErr == nil {
+			return
+		}
+		if execution.startupStopWasRequested() {
 			return
 		}
 		_, _, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
@@ -172,7 +182,17 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if isPassthrough {
 		return m.startPassthroughExecution(operationCtx, execution, profileInfo)
 	}
-	execution.beginStartupAttemptWithID(ResumeAttemptIDFromContext(operationCtx))
+	startupGeneration := execution.beginStartupAttemptWithID(ResumeAttemptIDFromContext(operationCtx))
+	startupCtx, cancelStartup := context.WithCancel(operationCtx)
+	if !execution.registerStartupCancellation(startupGeneration, cancelStartup) {
+		cancelStartup()
+		return context.Canceled
+	}
+	defer func() {
+		execution.clearStartupCancellation(startupGeneration)
+		cancelStartup()
+	}()
+	operationCtx = startupCtx
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	releaseClient()
 	if client == nil {
@@ -196,12 +216,16 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	err = client.WaitForReady(operationCtx, 60*time.Second)
 	releaseClient()
 	if err != nil {
-		m.updateExecutionError(executionID, "agentctl not ready: "+err.Error())
+		if !execution.startupStopWasRequested() {
+			m.updateExecutionError(executionID, "agentctl not ready: "+err.Error())
+		}
 		return fmt.Errorf("agentctl not ready: %w", err)
 	}
 	err = m.preflightRemoteContributionPushes(operationCtx, execution)
 	if err != nil {
-		m.updateExecutionError(executionID, "contribution push preflight failed: "+err.Error())
+		if !execution.startupStopWasRequested() {
+			m.updateExecutionError(executionID, "contribution push preflight failed: "+err.Error())
+		}
 		return err
 	}
 

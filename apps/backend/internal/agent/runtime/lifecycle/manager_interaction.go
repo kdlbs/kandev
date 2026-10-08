@@ -1235,6 +1235,14 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		}
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	detachForRemoteShutdown := reason == StopReasonBackendShutdown && execution.RuntimeName == executor.NamePluginRemote
+	detachForSurvivingStandalone := m.agentSurvivalEnabled && reason == StopReasonBackendShutdown &&
+		execution.RuntimeName == executor.NameStandalone && !isPassthroughExecution(execution)
+	if !detachForRemoteShutdown && !detachForSurvivingStandalone {
+		// Interrupt startup before waiting for runtime lifecycle serialization. A
+		// late ACP load must not outlive the stop that owns this execution.
+		execution.cancelStartupForStop()
+	}
 	execution.remoteInstanceLifecycleMu.Lock()
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
@@ -1270,11 +1278,10 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// backend process owns, so it dies with the backend regardless, and
 	// detaching would leave an executors_running row claiming a live agent
 	// with no agent.stopped published. See isPassthroughExecution.
-	if reason == StopReasonBackendShutdown && execution.RuntimeName == executor.NamePluginRemote {
+	if detachForRemoteShutdown {
 		return m.detachAgentExecution(executionID, execution)
 	}
-	if m.agentSurvivalEnabled && reason == StopReasonBackendShutdown &&
-		execution.RuntimeName == executor.NameStandalone && !isPassthroughExecution(execution) {
+	if detachForSurvivingStandalone {
 		return m.detachAgentExecution(executionID, execution)
 	}
 

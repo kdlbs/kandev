@@ -3,6 +3,7 @@
 import type { WorkflowStep } from "@/lib/types/http";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { Label } from "@kandev/ui/label";
 import { SettingsPromptEditor } from "./settings-prompt-editor";
 import {
@@ -15,15 +16,13 @@ export function StepPromptSection({
   step,
   savedStep,
   localPrompt,
-  onLocalPromptChange,
-  debouncedUpdatePrompt,
+  onPromptChange,
   readOnly,
 }: {
   step: WorkflowStep;
   savedStep?: WorkflowStep;
   localPrompt: string;
-  onLocalPromptChange: (prompt: string) => void;
-  debouncedUpdatePrompt: (prompt: string) => void;
+  onPromptChange: (prompt: string) => void;
   readOnly: boolean;
 }) {
   const { t } = useTranslation();
@@ -47,10 +46,12 @@ export function StepPromptSection({
               key={template.labelKey}
               type="button"
               onClick={() => {
-                onLocalPromptChange(template.prompt);
-                debouncedUpdatePrompt(template.prompt);
+                onPromptChange(template.prompt);
               }}
-              className="cursor-pointer rounded-md border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className={controlSizingClassName(
+                "standard",
+                "cursor-pointer rounded-md border border-border bg-muted/50 px-2 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+              )}
             >
               {t(template.labelKey)}
             </button>
@@ -61,8 +62,7 @@ export function StepPromptSection({
         value={localPrompt}
         onChange={(value) => {
           if (readOnly) return;
-          onLocalPromptChange(value);
-          debouncedUpdatePrompt(value);
+          onPromptChange(value);
         }}
         language="markdown"
         readOnly={readOnly}

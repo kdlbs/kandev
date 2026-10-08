@@ -65,8 +65,7 @@ test.describe("Workflow agent profile", () => {
     const firstStepId = seedData.steps[0]?.id;
     expect(firstStepName).toBeDefined();
     expect(firstStepId).toBeDefined();
-    const stepNode = page.stepNodeByName(card, firstStepName!);
-    await stepNode.click();
+    await page.selectStep(card, firstStepName!);
 
     // The step config panel should be visible with the "Agent Profile Override" select
     const stepProfileSelect = page.stepAgentProfileSelect(card);

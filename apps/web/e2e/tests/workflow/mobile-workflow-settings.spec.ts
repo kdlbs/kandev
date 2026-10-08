@@ -1,5 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
-import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+import { WorkflowSettingsPage, openStepSection } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow settings on mobile", () => {
   test("keeps the workflow reorder handle inside the card with a touch-sized target", async ({
@@ -119,6 +119,7 @@ test.describe("Workflow settings on mobile", () => {
 
     const agentProfileHelpId = `${workStep.id}-agent-profile-help`;
     const originalSessionHelpId = `${workStep.id}-override-original-session-help`;
+    await openStepSection(card, "advanced", true);
     const helpOrder = await card
       .locator(`[data-testid="${agentProfileHelpId}"], [data-testid="${originalSessionHelpId}"]`)
       .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-testid")));
@@ -185,13 +186,15 @@ test.describe("Workflow settings on mobile", () => {
     const card = await page.findWorkflowCard("Mobile Child Completion Settings");
     await expect(card).toBeVisible();
     await page.stepNodeByName(card, "Waiting").click();
+    const panel = card.getByTestId(`workflow-step-panel-${waitStep.id}`);
+    await openStepSection(panel, "automation", true);
 
-    const childCompletionSelect = card.getByTestId(
-      `${waitStep.id}-children-completed-transition-select`,
-    );
-    await expect(childCompletionSelect).toBeVisible();
-    await childCompletionSelect.click();
-    await testPage.getByRole("option", { name: "Move to next step" }).click();
+    await page.addEditorAction("on_children_completed", "move_to_next", true);
+    await page.backFromEditorAction(true);
+    const childCompletionAction = panel
+      .getByTestId("workflow-action-list-on_children_completed")
+      .getByRole("button", { name: /select action 1/i });
+    await expect(childCompletionAction).toBeVisible();
 
     const beforeSave = await apiClient.listWorkflowSteps(workflow.id);
     expect(
@@ -213,8 +216,8 @@ test.describe("Workflow settings on mobile", () => {
     const viewportWidth = await testPage.evaluate(() => window.innerWidth);
     const editorControls = [
       card.getByPlaceholder("Step name"),
-      childCompletionSelect,
-      card.getByRole("button", { name: "Delete", exact: true }),
+      childCompletionAction,
+      panel.getByTestId("workflow-section-toggle-automation"),
     ];
     for (const control of editorControls) {
       const box = await control.boundingBox();
@@ -325,7 +328,8 @@ test.describe("Workflow settings on mobile", () => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
     const card = await page.findWorkflowCard("Mobile WIP Guidance");
-    await page.selectStep(card, "Review", true);
+    const panel = await page.selectStep(card, "Review", true);
+    await openStepSection(panel, "board", true);
 
     const guidanceHelp = card.getByTestId(`${reviewStep.id}-pull-from-guidance-help`);
     await expect(guidanceHelp).toBeVisible();

@@ -115,7 +115,8 @@ func waitAgentctlProcess(
 func agentctlProcessResult(process *agentctl.ProcessInfo) ([]byte, bool, error) {
 	if process.Status != agentctltypes.ProcessStatusExited &&
 		process.Status != agentctltypes.ProcessStatusFailed &&
-		process.Status != agentctltypes.ProcessStatusStopped {
+		process.Status != agentctltypes.ProcessStatusStopped &&
+		process.Status != agentctltypes.ProcessStatusTimedOut {
 		return nil, false, nil
 	}
 	var output strings.Builder

@@ -268,6 +268,28 @@ func (m *Manager) doCoalescedExecution(
 	return awaitCoalescedResult(ctx, result)
 }
 
+func (m *Manager) doAttemptCoalescedExecution(
+	ctx context.Context,
+	key string,
+	operation func(context.Context) (interface{}, error),
+) (interface{}, error) {
+	result := m.ensureExecutionGroup.DoChan(key, func() (interface{}, error) {
+		sharedCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		if m.stopCh != nil {
+			go func() {
+				select {
+				case <-m.stopCh:
+					cancel()
+				case <-sharedCtx.Done():
+				}
+			}()
+		}
+		return operation(sharedCtx)
+	})
+	return awaitCoalescedResult(ctx, result)
+}
+
 func (m *Manager) coalescedExecutionContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	// The shared context owns caller-independent cancellation only. Runtime
 	// launch phases start their own deadlines after environment resolution, and

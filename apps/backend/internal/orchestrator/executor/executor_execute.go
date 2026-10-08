@@ -582,7 +582,7 @@ func (e *Executor) stopFailedStartExecutionIfCurrentAttempt(
 	if owned || cleanupSafe {
 		if e.onCancelledResumeExecutionCleanup != nil {
 			e.onCancelledResumeExecutionCleanup(ctx, taskID, sessionID, agentExecutionID, expectedStartAttemptID)
-		} else {
+		} else if e.claimForcedExecutionCleanup(sessionID, agentExecutionID) {
 			e.stopFailedStartExecution(ctx, agentExecutionID, phase)
 		}
 	}

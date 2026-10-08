@@ -1,6 +1,10 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearNavigationBlockerForTests, setNavigationBlocker } from "./navigation-guard";
+import {
+  clearNavigationBlockerForTests,
+  markCurrentNavigationRoute,
+  setNavigationBlocker,
+} from "./navigation-guard";
 import { useParams, usePathname, useRouter, useSearchParams } from "./client-router";
 
 const NAV_POSITION_KEY = "__kandevNavigationPosition";
@@ -153,5 +157,22 @@ describe("client router adapter", () => {
       expect(intents).toHaveLength(2);
       expect(go).toHaveBeenCalled();
     });
+  });
+});
+
+describe("shallow editor navigation", () => {
+  it("keeps selections outside the dirty-page guard", () => {
+    const basePath = "/settings/workspaces/workspace-1/workflows/workflow-1";
+    setLocation(basePath);
+    markCurrentNavigationRoute(basePath);
+    const blocker = vi.fn();
+    setNavigationBlocker(blocker);
+    vi.stubGlobal("scrollTo", vi.fn());
+    const { result } = renderHook(() => useRouter());
+
+    act(() => result.current.push(`${basePath}?step=step-1&tab=automation`, { shallow: true }));
+
+    expect(window.location.search).toBe("?step=step-1&tab=automation");
+    expect(blocker).not.toHaveBeenCalled();
   });
 });

@@ -35,6 +35,7 @@ const (
 	// reports and skips, not a build-time compile failure — configuration is
 	// operator-editable and survives template changes.
 	OnEnterEnsureParticipantSeat OnEnterActionType = "ensure_participant_seat"
+	OnEnterRunScript             OnEnterActionType = "run_script"
 
 	// OnEnterRunCodeReview starts a native code-review pass over the task's
 	// changed files when it enters the step, so a review can sit between an
@@ -72,6 +73,7 @@ const (
 	OnTurnCompleteMoveToPrevious  OnTurnCompleteActionType = "move_to_previous"
 	OnTurnCompleteMoveToStep      OnTurnCompleteActionType = "move_to_step"
 	OnTurnCompleteDisablePlanMode OnTurnCompleteActionType = "disable_plan_mode"
+	OnTurnCompleteRunScript       OnTurnCompleteActionType = "run_script"
 )
 
 // OnEnterAction represents an action to execute when entering a step.
@@ -91,6 +93,7 @@ type OnExitActionType string
 
 const (
 	OnExitDisablePlanMode OnExitActionType = "disable_plan_mode"
+	OnExitRunScript       OnExitActionType = "run_script"
 )
 
 // OnExitAction represents an action to execute when leaving a step.

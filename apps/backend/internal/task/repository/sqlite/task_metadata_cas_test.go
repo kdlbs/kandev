@@ -366,6 +366,45 @@ func assertPendingOnlyMarkerRetained(t *testing.T, ctx context.Context, repo *Re
 	}
 }
 
+func runManualMoveLifecycleCompletionContract(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := context.Background()
+	const (
+		fromStepID = "source-current"
+		occurrence = "occurrence-current"
+		staleOccur = "occurrence-stale"
+	)
+	if err := repo.SetTaskMetadataKey(ctx, casTaskID, models.MetaKeyManualMoveLifecyclePending,
+		map[string]interface{}{"from_step_id": fromStepID, "occurrence_id": occurrence}); err != nil {
+		t.Fatalf("seed current manual move marker: %v", err)
+	}
+
+	completed, err := repo.CompleteManualMoveLifecycleIfCurrent(ctx, casTaskID, fromStepID, staleOccur)
+	if err != nil {
+		t.Fatalf("complete stale manual move marker: %v", err)
+	}
+	if completed {
+		t.Fatal("stale manual move completion must not win")
+	}
+	if _, present := metadataValue(t, repo, models.MetaKeyManualMoveLifecyclePending); !present {
+		t.Fatal("stale completion removed the current pending marker")
+	}
+
+	completed, err = repo.CompleteManualMoveLifecycleIfCurrent(ctx, casTaskID, fromStepID, occurrence)
+	if err != nil {
+		t.Fatalf("complete current manual move marker: %v", err)
+	}
+	if !completed {
+		t.Fatal("current manual move completion must win")
+	}
+	if _, present := metadataValue(t, repo, models.MetaKeyManualMoveLifecyclePending); present {
+		t.Fatal("current completion left the pending marker")
+	}
+	if _, present := metadataValue(t, repo, models.MetaKeyManualMoveLifecycleCompleted); !present {
+		t.Fatal("current completion did not leave the completed marker")
+	}
+}
+
 func newRepoForMetadataCASTests(t *testing.T) *Repository {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "metadata-cas-test.db"))
@@ -393,6 +432,8 @@ func TestSetTaskMetadataKeyIfPresentSQLite(t *testing.T) {
 	runMetadataNoActiveSessionContract(t, repo)
 	runInterruptedMarkerCASContract(t, repo)
 	runRecoveryMarkerCASContract(t, repo)
+	runManualMoveLifecycleMarkerContract(t, repo)
+	runManualMoveLifecycleCompletionContract(t, repo)
 }
 
 // The JSON patch and its presence predicate are written per dialect, so SQLite
@@ -436,6 +477,7 @@ func TestClearManualMoveLifecycleMarkersPreservesActivityPostgres(t *testing.T) 
 		"other_key": "keep me",
 	})
 	runManualMoveLifecycleMarkerContract(t, repo)
+	runManualMoveLifecycleCompletionContract(t, repo)
 }
 
 func newPostgresMetadataCASRepo(t *testing.T, db *sqlx.DB) *Repository {

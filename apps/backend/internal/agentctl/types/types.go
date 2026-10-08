@@ -105,12 +105,14 @@ const (
 	ProcessStatusExited   = streams.ProcessStatusExited
 	ProcessStatusFailed   = streams.ProcessStatusFailed
 	ProcessStatusStopped  = streams.ProcessStatusStopped
+	ProcessStatusTimedOut = streams.ProcessStatusTimedOut
 
 	// Process kinds
 	ProcessKindAgentPassthrough = streams.ProcessKindAgentPassthrough
 	ProcessKindCustom           = streams.ProcessKindCustom
 	ProcessKindCleanup          = streams.ProcessKindCleanup
 	ProcessKindDev              = streams.ProcessKindDev
+	ProcessKindWorkflowScript   = streams.ProcessKindWorkflowScript
 )
 
 // PermissionRequest represents a permission request from the agent.

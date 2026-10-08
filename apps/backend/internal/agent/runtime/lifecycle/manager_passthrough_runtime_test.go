@@ -136,6 +136,29 @@ func TestMarkPassthroughRunningPublishesOnceAndGuards(t *testing.T) {
 		"an already-running execution must not publish a duplicate AgentRunning event")
 }
 
+func TestSetPromptTurnIDReleasesPassthroughResetStartupGate(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := &AgentExecution{
+		ID:                                "exec-pty",
+		SessionID:                         "session-pty",
+		PassthroughProcessID:              "pty-replacement",
+		passthroughInitialPromptProcessID: "pty-replacement",
+		Status:                            v1.AgentStatusRunning,
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	// The fresh PTY's first idle signal is startup, not completion of the
+	// workflow prompt that has not been written yet.
+	mgr.handlePassthroughTurnComplete(execution.SessionID, execution.PassthroughProcessID)
+	require.Equal(t, v1.AgentStatusRunning, execution.Status)
+
+	require.NoError(t, mgr.SetPromptTurnID(context.Background(), execution.ID, "turn-1"))
+	require.Empty(t, execution.passthroughInitialPromptProcessID)
+
+	mgr.handlePassthroughTurnComplete(execution.SessionID, execution.PassthroughProcessID)
+	require.Equal(t, v1.AgentStatusReady, execution.Status)
+}
+
 func TestPreparePassthroughRunningDefersAndSnapshotsPublication(t *testing.T) {
 	mgr, eventBus := createTestManagerWithTracking()
 	startedAt := time.Date(2026, 8, 31, 8, 0, 0, 0, time.UTC)

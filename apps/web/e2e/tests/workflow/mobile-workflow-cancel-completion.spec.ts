@@ -4,7 +4,7 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { waitForActiveSessionCancellationPendingOrSettled } from "../../helpers/session-store";
 import { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
-import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+import { WorkflowSettingsPage, openStepSection } from "../../pages/workflow-settings-page";
 
 async function tapCancelButton(session: SessionPage) {
   const button = session.activeChat().getByTestId("cancel-agent-button");
@@ -94,6 +94,7 @@ test.describe("mobile: cancelled turn completion", () => {
     await settings.goto(seedData.workspaceId);
     const reloadedCard = await settings.findWorkflowCard("Mobile Cancel Completion");
     const reloadedPanel = await settings.selectStep(reloadedCard, "Working", true);
+    await openStepSection(reloadedPanel, "advanced", true);
     await expect(
       reloadedPanel.getByRole("checkbox", {
         name: "Run completion actions when a turn is cancelled",

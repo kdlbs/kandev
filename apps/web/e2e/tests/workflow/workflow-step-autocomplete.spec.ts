@@ -1,5 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
-import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+import { WorkflowSettingsPage, openStepSection } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow step prompt autocomplete", () => {
   test("shows autocomplete suggestions when typing {{ in step prompt editor", async ({
@@ -15,6 +15,8 @@ test.describe("Workflow step prompt autocomplete", () => {
     // Click first step to open config panel
     const stepNodes = card.locator(".group.relative");
     await stepNodes.first().click();
+    await openStepSection(card, "instructions");
+    await openStepSection(card, "agent");
 
     // Wait for the ScriptEditor (Monaco) to mount inside the step config panel
     const monacoEditor = card.locator(".monaco-editor");
@@ -55,6 +57,8 @@ test.describe("Workflow step prompt autocomplete", () => {
 
     const stepNodes = card.locator(".group.relative");
     await stepNodes.first().click();
+    await openStepSection(card, "instructions");
+    await openStepSection(card, "agent");
 
     const monacoEditor = card.locator(".monaco-editor");
     await expect(monacoEditor).toBeVisible({ timeout: 10_000 });
@@ -94,6 +98,8 @@ test.describe("Workflow step prompt autocomplete", () => {
       // Click first step to open config panel
       const stepNodes = card.locator(".group.relative");
       await stepNodes.first().click();
+      await openStepSection(card, "instructions");
+      await openStepSection(card, "agent");
 
       // Wait for the ScriptEditor (Monaco) to mount inside the step config panel
       const monacoEditor = card.locator(".monaco-editor");
@@ -146,6 +152,8 @@ test.describe("Workflow step prompt autocomplete", () => {
     // Click first step to open config panel
     const stepNodes = card.locator(".group.relative");
     await stepNodes.first().click();
+    await openStepSection(card, "instructions");
+    await openStepSection(card, "agent");
 
     // Find the step agent profile select
     const agentSelect = card.getByTestId("step-agent-profile-select");
@@ -203,6 +211,7 @@ test.describe("Workflow step prompt autocomplete", () => {
     // Click the same step again
     const reloadedSteps = reloadedCard.locator(".group.relative");
     await reloadedSteps.first().click();
+    await openStepSection(reloadedCard, "agent");
 
     const reloadedSelect = reloadedCard.getByTestId("step-agent-profile-select");
     await expect(reloadedSelect).toBeVisible();

@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { settledBoundingBox } from "../../helpers/settled-box";
-import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+import { WorkflowSettingsPage, openStepSection } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow cycle guardrails on mobile", () => {
   test("keeps a blocking cycle readable above the dialog action", async ({
@@ -10,12 +10,20 @@ test.describe("Workflow cycle guardrails on mobile", () => {
     const settings = new WorkflowSettingsPage(testPage);
     await settings.goto(seedData.workspaceId);
     await settings.createWorkflow("Mobile blocked draft", "Custom", true);
-    const card = await settings.findWorkflowCard("Mobile blocked draft");
 
-    await settings.setAutoStart(card, "Todo", true, true);
-    await settings.setTurnCompleteTransition(card, "Todo", "Move to next step", true);
-    await settings.setAutoStart(card, "In Progress", true, true);
-    await settings.setTurnCompleteTransition(card, "In Progress", "Move to previous step", true);
+    await settings.selectEditorStep("Todo", true);
+    await openStepSection(testPage, "automation", true);
+    await settings.addEditorAction("on_enter", "auto_start_agent", true);
+    await settings.backFromEditorAction(true);
+    await settings.addEditorAction("on_turn_complete", "move_to_next", true);
+    await settings.backFromEditorAction(true);
+    await settings.backToEditorJourney();
+    await settings.selectEditorStep("In Progress", true);
+    await openStepSection(testPage, "automation", true);
+    await settings.addEditorAction("on_enter", "auto_start_agent", true);
+    await settings.backFromEditorAction(true);
+    await settings.addEditorAction("on_turn_complete", "move_to_previous", true);
+    await settings.backFromEditorAction(true);
     await settings.submitSaveChanges(true);
 
     const dialog = settings.cycleGuardDialog;
@@ -58,11 +66,18 @@ test.describe("Workflow cycle guardrails on mobile", () => {
     const settings = new WorkflowSettingsPage(testPage);
     await settings.goto(seedData.workspaceId);
     await settings.createWorkflow(workflowName, "Custom", true);
-    const card = await settings.findWorkflowCard(workflowName);
 
-    await settings.setAutoStart(card, "Todo", true, true);
-    await settings.setTurnCompleteTransition(card, "Todo", "Move to next step", true);
-    await settings.setTurnCompleteTransition(card, "In Progress", "Move to previous step", true);
+    await settings.selectEditorStep("Todo", true);
+    await openStepSection(testPage, "automation", true);
+    await settings.addEditorAction("on_enter", "auto_start_agent", true);
+    await settings.backFromEditorAction(true);
+    await settings.addEditorAction("on_turn_complete", "move_to_next", true);
+    await settings.backFromEditorAction(true);
+    await settings.backToEditorJourney();
+    await settings.selectEditorStep("In Progress", true);
+    await openStepSection(testPage, "automation", true);
+    await settings.addEditorAction("on_turn_complete", "move_to_previous", true);
+    await settings.backFromEditorAction(true);
     await settings.submitSaveChanges(true);
 
     const dialog = settings.cycleGuardDialog;

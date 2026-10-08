@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -133,6 +135,201 @@ func TestStartAgentProcessFailureAbortsInitialPromptDispatchHold(t *testing.T) {
 	}
 	if !failureCalled {
 		t.Fatal("initial prompt failure callback was not called when agent startup failed")
+	}
+}
+
+func TestStopAgentCancelsInFlightStartupBeforeWaitingForLifecycleLock(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.profileResolver = &mockAgentProfileResolver{cliPassthrough: false}
+	healthStarted := make(chan struct{})
+	healthCancelled := make(chan struct{})
+	releaseHealth := make(chan struct{})
+	var releaseHealthOnce sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			http.NotFound(w, r)
+			return
+		}
+		close(healthStarted)
+		select {
+		case <-r.Context().Done():
+			close(healthCancelled)
+		case <-releaseHealth:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(server.Close)
+	host, portText, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatalf("parse agentctl test URL: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse agentctl test port: %v", err)
+	}
+	execution := &AgentExecution{
+		ID:             "exec-stop-during-startup",
+		SessionID:      "session-stop-during-startup",
+		AgentCommand:   "agent",
+		AgentProfileID: "profile-stop-during-startup",
+		agentctl:       agentctl.NewClient(host, port, newTestLogger()),
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("seed execution: %v", err)
+	}
+	initialPromptFailureCalled := false
+	if err := mgr.RegisterInitialPromptDispatchCallbacks(execution.ID, nil, func() {
+		initialPromptFailureCalled = true
+	}); err != nil {
+		t.Fatalf("register initial prompt callback: %v", err)
+	}
+	startDone := make(chan error, 1)
+	go func() { startDone <- mgr.StartAgentProcess(context.Background(), execution.ID) }()
+	select {
+	case <-healthStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("startup did not reach the blocked agentctl readiness request")
+	}
+	startupGeneration := execution.startupAttemptSnapshot()
+
+	execution.remoteInstanceLifecycleMu.Lock()
+	lockHeld := true
+	t.Cleanup(func() {
+		releaseHealthOnce.Do(func() { close(releaseHealth) })
+		if lockHeld {
+			execution.remoteInstanceLifecycleMu.Unlock()
+		}
+	})
+	stopDone := make(chan error, 1)
+	go func() {
+		stopDone <- mgr.StopAgentWithReason(
+			context.Background(), execution.ID, "cancelled resume startup", true,
+		)
+	}()
+
+	select {
+	case <-healthCancelled:
+	case err := <-stopDone:
+		t.Fatalf("stop returned before startup cancellation: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("stop did not cancel startup before waiting for the lifecycle lock")
+	}
+
+	select {
+	case err := <-stopDone:
+		t.Fatalf("stop passed the held lifecycle lock: %v", err)
+	default:
+	}
+	if err := <-startDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("startup error = %v, want context.Canceled", err)
+	}
+	if initialPromptFailureCalled {
+		t.Fatal("intentional startup cancellation invoked the initial-prompt failure callback")
+	}
+	execution.remoteInstanceLifecycleMu.Unlock()
+	lockHeld = false
+
+	select {
+	case err := <-stopDone:
+		if err != nil {
+			t.Fatalf("stop execution: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stop did not finish after releasing the lifecycle lock")
+	}
+	if execution.acceptsStartupAttempt(startupGeneration) {
+		t.Fatal("stopped execution still accepted callbacks from its startup attempt")
+	}
+}
+
+func TestStartAgentProcessSeparatesAndCancelsResumeAttemptFlights(t *testing.T) {
+	firstRequest := make(chan struct{}, 1)
+	secondRequest := make(chan struct{}, 1)
+	requestCancelled := make(chan int, 2)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			http.NotFound(w, r)
+			return
+		}
+		requestID := int(requests.Add(1))
+		if requestID == 1 {
+			firstRequest <- struct{}{}
+		} else {
+			secondRequest <- struct{}{}
+		}
+		<-r.Context().Done()
+		requestCancelled <- requestID
+	}))
+
+	mgr := newTestManager(t)
+	mgr.profileResolver = &mockAgentProfileResolver{cliPassthrough: false}
+	host, portText, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatalf("parse agentctl test URL: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse agentctl test port: %v", err)
+	}
+	execution := &AgentExecution{
+		ID:             "exec-resume-attempt-flights",
+		SessionID:      "session-resume-attempt-flights",
+		AgentCommand:   "agent",
+		AgentProfileID: "profile-resume-attempt-flights",
+		agentctl:       agentctl.NewClient(host, port, newTestLogger()),
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("seed execution: %v", err)
+	}
+	ctxOld, cancelOld := context.WithCancel(WithResumeAttemptID(context.Background(), "resume-old"))
+	ctxNew, cancelNew := context.WithCancel(WithResumeAttemptID(context.Background(), "resume-new"))
+	t.Cleanup(func() {
+		cancelOld()
+		cancelNew()
+		mgr.closeStopCh()
+		server.Close()
+	})
+	startOldDone := make(chan error, 1)
+	go func() { startOldDone <- mgr.StartAgentProcess(ctxOld, execution.ID) }()
+	select {
+	case <-firstRequest:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first resume attempt did not reach agentctl readiness")
+	}
+
+	startNewDone := make(chan error, 1)
+	go func() { startNewDone <- mgr.StartAgentProcess(ctxNew, execution.ID) }()
+	select {
+	case <-secondRequest:
+	case <-time.After(2 * time.Second):
+		t.Fatal("replacement resume attempt joined the cancelled startup flight")
+	}
+
+	cancelOld()
+	select {
+	case requestID := <-requestCancelled:
+		if requestID != 1 {
+			t.Fatalf("cancelled request = %d, want old attempt request 1", requestID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelling the old attempt did not cancel its agentctl request")
+	}
+	cancelNew()
+	select {
+	case requestID := <-requestCancelled:
+		if requestID != 2 {
+			t.Fatalf("cancelled request = %d, want replacement attempt request 2", requestID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelling the replacement attempt did not cancel its agentctl request")
+	}
+
+	if err := <-startOldDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("old startup error = %v, want context.Canceled", err)
+	}
+	if err := <-startNewDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("replacement startup error = %v, want context.Canceled", err)
 	}
 }
 
