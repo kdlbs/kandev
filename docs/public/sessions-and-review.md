@@ -86,10 +86,10 @@ A later failure keeps its own recovery controls.
 
 ### Experimental interruption continuation
 
-**Interrupted conversation continuation** is off by default. When enabled, a
-supported transient Cursor ACP provider failure can continue the unfinished request in
-the same saved conversation after output or completed foreground tools. Kandev
-sends an internal continue instruction, preserves the transcript, and keeps
+Interrupted conversation continuation is supported by default for eligible
+transient Cursor ACP failures. It can continue the unfinished request in the
+same saved conversation after output or completed foreground tools. Kandev sends
+a hidden internal continue instruction, preserves the transcript, and keeps
 previous results. It does not resend the original request or create a replacement
 conversation automatically.
 
@@ -107,15 +107,7 @@ unsupported agents also require manual recovery. New human work takes priority.
 Backend restart retires the old automatic notice without launching a
 continuation or interrupting adopted live work.
 
-To try this on a selected installation, enable
-**Interrupted conversation continuation** (`features.providerInterruptionContinuation`)
-under **Settings > System > Feature Toggles**, then restart Kandev. Alternatively set
-`KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION=true` before startup. An
-explicit environment value takes precedence over the persisted toggle, which
-takes precedence over the shipped profile. To roll back, disable the toggle or
-set that environment variable to `false`, then restart. The flag is experimental,
-high risk, and off in production, development, and E2E profiles. No exactly-once
-execution guarantee is implied.
+No exactly-once execution guarantee is implied.
 
 **Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. The session entry remains visible until the session resumes successfully. Kandev uses stacked touch-sized actions on phones. A failure in another session remains in that session's history.
 

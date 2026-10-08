@@ -25,7 +25,6 @@ func continuationFailureFixture(t *testing.T) (*Service, *mockMessageCreator, wa
 		})
 		svc.cancelAllTransientRetries()
 	})
-	svc.config.ProviderInterruptionContinuation = true
 	armTransientPromptEvidence(svc)
 	session, err := svc.repo.GetTaskSession(context.Background(), "s1")
 	require.NoError(t, err)
@@ -45,6 +44,14 @@ func continuationFailureFixture(t *testing.T) (*Service, *mockMessageCreator, wa
 func TestInterruptionContinuationAdmission(t *testing.T) {
 	svc, mc, data := continuationFailureFixture(t)
 	require.True(t, svc.handleTransientFailure(context.Background(), data))
+	require.Len(t, mc.sessionMessages, 1)
+	require.Equal(t, "continue", mc.sessionMessages[0].metadata["recovery_mode"])
+}
+
+// @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-001.1
+func TestInterruptionContinuationAdmissionWithoutOptIn(t *testing.T) {
+	svc, mc, data := continuationFailureFixture(t)
+	require.True(t, svc.handleTransientFailure(context.Background(), data), "safe supported evidence admits continuation by default")
 	require.Len(t, mc.sessionMessages, 1)
 	require.Equal(t, "continue", mc.sessionMessages[0].metadata["recovery_mode"])
 }
@@ -92,12 +99,11 @@ func TestInterruptionContinuationOwnershipContextCancellation(t *testing.T) {
 	require.ErrorIs(t, attempt.context().Err(), context.Canceled, "episode cancellation must reach the resume owner")
 }
 
-func TestInterruptionContinuationDisabledAndUnsafe(t *testing.T) {
+func TestInterruptionContinuationUnsafeAndUnsupported(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		mutate func(*Service, *watcher.AgentEventData)
 	}{
-		{"disabled", func(s *Service, _ *watcher.AgentEventData) { s.config.ProviderInterruptionContinuation = false }},
 		{"unknown saved profile", func(s *Service, _ *watcher.AgentEventData) {
 			session, err := s.repo.GetTaskSession(context.Background(), "s1")
 			require.NoError(t, err)

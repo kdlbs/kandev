@@ -493,8 +493,6 @@ type OfficeConfig struct {
 //
 // See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
 type FeaturesConfig struct {
-	// ProviderInterruptionContinuation enables conservative native conversation recovery.
-	ProviderInterruptionContinuation bool `mapstructure:"provider_interruption_continuation" json:"providerInterruptionContinuation"`
 
 	// LSPBrowserContinuity gates runtime-owned language-server leases that stay
 	// connected across browser attachment loss. Off in every embedded profile.

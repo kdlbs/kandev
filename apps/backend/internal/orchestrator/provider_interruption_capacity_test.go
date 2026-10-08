@@ -58,7 +58,6 @@ func capacityContinuationFailureFixture(t *testing.T) (*Service, *mockAgentManag
 	mgr.getACPSessionIDForSessionFunc = func(string) (string, bool) {
 		return "provider-session", true
 	}
-	svc.config.ProviderInterruptionContinuation = false
 	data.AgentID = "codex-acp"
 	data.AgentProfileID = "profile-1"
 	data.ErrorMessage = "Selected model is at capacity. Please try a different model."

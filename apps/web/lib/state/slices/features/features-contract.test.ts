@@ -16,8 +16,8 @@ function backendFeatureKeys(source: string): string[] {
 }
 
 describe("feature flag repository contract", () => {
-  it("keeps interrupted-conversation continuation disabled by default", () => {
-    expect(defaultFeatureFlags).toHaveProperty("providerInterruptionContinuation", false);
+  it("omits the graduated interrupted-conversation continuation flag", () => {
+    expect(defaultFeatureFlags).not.toHaveProperty("providerInterruptionContinuation");
   });
   it("omits retired Office session identity from frontend defaults", () => {
     expect(defaultFeatureFlags).not.toHaveProperty("officeSessionIdentity");
