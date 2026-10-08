@@ -32,15 +32,16 @@ export async function backendRuntimeUpdateSummary(
       summaryReceived.value = true;
       return frame;
     });
-  const reconnectSubscription = ws.waitForResponse("user.subscribe", {
-    timeout: 30_000,
-  });
   const availabilityWindowCheckStartedAt = Date.now();
-  await backend.restart({
+  const restart = backend.restart({
     KANDEV_MOCK_AGENT: "true",
     KANDEV_E2E_RUNTIME_UPDATE_LATEST_VERSION: "99.0.0",
   });
-  await reconnectSubscription;
+  const reconnectSubscription = ws.waitForResponse("user.subscribe", {
+    timeout: 30_000,
+    timeoutAfter: restart,
+  });
+  await Promise.all([restart, reconnectSubscription]);
 
   const outcomeEvent = ws.waitForEvent(SUMMARY_EVENT, {
     timeout: 15_000,

@@ -223,7 +223,7 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
     const dragStartY = dragHandleBox!.y + dragHandleBox!.height / 2;
     await testPage.mouse.move(dragStartX, dragStartY);
     await testPage.mouse.down();
-    await testPage.mouse.move(dragStartX, dragStartY + 12, { steps: 4 });
+    await testPage.mouse.move(dragStartX, dragStartY + 10);
     await expect(testPage.locator('[data-dragging="true"]')).toHaveCount(1);
     await testPage.mouse.move(
       firstCardBox!.x + firstCardBox!.width / 2,
