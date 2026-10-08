@@ -106,6 +106,15 @@ wait for every dispatched request to settle before batch failure feedback and
 final reconciliation. An unexpected callback rejection must not abandon accepted
 or still-pending siblings. There is no retry or remote undo.
 
+At each confirmed success, before queueing tree publication, supersede only the
+existing pending tickets for that mapping's affected folders. Reuse
+`changedFolders` and `nearestExpandedFolder` rules in `file-browser-refresh.ts`
+through the actual subscription owner's guarded invalidation callback. Do not
+issue reads at this boundary or retire unrelated tickets. A pre-acceptance root
+or destination reply cannot erase the accepted row while a sibling remains
+pending; a genuine later workspace refresh acquires fresh tickets and remains
+authoritative. Keep the single final reconciliation after full settlement.
+
 For a confirmed success, use a functional update against the latest tree. Capture
 only that mapping's source node identity before dispatch. If it is still the same
 node, its destination parent exists, and its exact destination is unoccupied,
@@ -162,7 +171,10 @@ it stays there after settlement. Cover no-event mixed outcomes, both completion
 orders and both accepted source positions, all-success/all-failure controls,
 `success: false`, and transport rejection normalized by the real hook. Also cover
 unrelated authoritative addition/removal/metadata and newer affected-path data,
-failed reconciliation reads, and exact captured collision targets. Observe the
+failed reconciliation reads, and exact captured collision targets. Hold old
+root/destination replies before acceptance, release them while the sibling is
+pending, then reject final reads; accepted DOM/cache paths must survive while
+an unrelated pending folder read and later authoritative updates remain valid. Observe the
 actual retained result by remounting the browser within the same providers/store
 while its next tree read is held; release all owned reads/timers in teardown.
 Tests must not reproduce the settlement predicate or mock internal owners.

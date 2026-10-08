@@ -14,12 +14,14 @@ const MOVED_ALPHA = "dest/alpha.txt";
 const MOVED_BETA = "dest/beta.txt";
 const REFUSAL = "rename refused";
 const TOASTS = "toast-container";
+const SUITE = "file move settlement";
+const OTHER_KEEP = "other/keep.txt";
 
 beforeEach(setupTransport);
 afterEach(disposeScenarios);
 
 // @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.15 AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.16
-describe("file move settlement", () => {
+describe(SUITE, () => {
   it("retains accepted file after authoritative refresh before sibling failure", async () => {
     const browser = await startScenario();
     await browser.drag();
@@ -102,7 +104,55 @@ describe("file move settlement", () => {
   });
 });
 
-describe("file move settlement", () => {
+describe(SUITE, () => {
+  it("supersedes pre-acceptance reads while a sibling is pending and final reads fail", async () => {
+    const browser = await startScenario(
+      folder("", [file(ALPHA), file(BETA), folder("dest"), folder("other", [file(OTHER_KEEP)])]),
+    );
+    await browser.expand("other");
+    browser.replaceServer(
+      folder("", [
+        file(ALPHA),
+        file(BETA),
+        folder("dest"),
+        folder("other", [file(OTHER_KEEP, 42), file("other/added.txt")]),
+      ]),
+    );
+    browser.holdReads();
+    await browser.notify([ALPHA, MOVED_ALPHA, OTHER_KEEP]);
+    const oldReads = [...browser.reads];
+    expect(oldReads.map(({ path }) => path).sort()).toEqual(["", "dest", "other"]);
+    await browser.drag();
+    await browser.settle(0, true);
+    expect(browser.accepted).toEqual([MOVED_ALPHA]);
+    expect(browser.row(MOVED_ALPHA)).not.toBeNull();
+    expect(browser.row(ALPHA)).toBeNull();
+    await browser.releaseReads(oldReads);
+    expect(browser.row(MOVED_ALPHA)).not.toBeNull();
+    expect(browser.row(ALPHA)).toBeNull();
+    expect(browser.row("other/added.txt")).not.toBeNull();
+    expect(
+      browser
+        .cachedTree()
+        ?.children?.find((node) => node.path === "other")
+        ?.children?.find((node) => node.path === OTHER_KEEP)?.size,
+    ).toBe(42);
+    browser.failReads();
+    await browser.settle(1, false);
+    expect(browser.accepted).toEqual([MOVED_ALPHA]);
+    expect(browser.row(MOVED_ALPHA)).not.toBeNull();
+    expect(browser.row(ALPHA)).toBeNull();
+    expect(browser.row(BETA)).not.toBeNull();
+    expect(
+      browser
+        .cachedTree()
+        ?.children?.find((node) => node.path === "dest")
+        ?.children?.map((node) => node.path),
+    ).toEqual([MOVED_ALPHA]);
+  });
+});
+
+describe(SUITE, () => {
   it("preserves unrelated authoritative addition removal and metadata", async () => {
     const browser = await startScenario(
       folder("", [file(ALPHA), file(BETA), file("remove.txt"), file("keep.txt"), folder("dest")]),
@@ -170,7 +220,7 @@ describe("file move settlement", () => {
   });
 });
 
-describe("file move settlement", () => {
+describe(SUITE, () => {
   it("retains exact captured collision targets and descendant prefixes", async () => {
     const browser = await startScenario(
       folder("", [

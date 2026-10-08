@@ -76,6 +76,7 @@ export function executeMoveFiles(
       try {
         const ok = await onRenameFile(target.oldPath, target.newPath);
         if (ok && treeState.isCurrentTree()) {
+          treeState.invalidateChanges([{ path: target.oldPath }, { path: target.newPath }]);
           treeState.setTree((current) =>
             current && treeState.isCurrentTree() ? publishAcceptedMove(current, target) : current,
           );

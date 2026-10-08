@@ -139,28 +139,34 @@ needed. Revisit only if implementation introduces an actual public contract.
 
 - [x] [Task 01: Settle each file move without replacing newer tree state](task-01-settle-file-moves.md)
 
-Dependency order: Task01 only, `done`, sequential, same primary.
+Dependency order: Task01 only, `done` for local implementation/checks, sequential, same primary.
 ROOT released the reviewed package after the actual design END, with local-heavy79
 ONLY granted. Merge remains separately gated. Receipt:
 `/tmp/kandev-root-child79-reviewed-design-20261008.json`.
 
 ## Verification results
 
-The permanent suite passes18/18 rendered integration cases. Six existing affected
-suites passed44/44 tests in their original affected run and were not replayed.
-Two independently authored mixed cases first failed at final location assertions;
-an additional directory completion-order assertion exposed and protects sibling
-identity retention. Typecheck, zero-warning affected ESLint, Prettier, i18n
-catalog/copy checks and the changed-source ratchet pass. Compiler/fixture/lint
-corrections stayed within owned tests and the local settlement helper.
+The final corrective affected run passes44/44 in four focused files:19 rendered
+integration cases and25 existing refresh/apply/render-identity controls. The
+original six existing suites44/44 retain their historical passing evidence;
+unchanged tree/cache/utility suites were not replayed. Two independently authored
+mixed cases initially qualified causal RED. The corrective old-read ordering
+also qualified causal RED after accepted wire/DOM evidence and settled initial
+reads. Its GREEN proves affected older reads cannot erase accepted A while B is
+pending, unrelated folder metadata still publishes, and failed final reads
+preserve accepted DOM/cache state. Later-authoritative controls remain valid.
 
-Final catalog (363 decisions/1437 specifications), all-spec lint and actual
-changed-file documentation coverage PASS (`covered`, errors[]); direct work-order
-reference validation also has errors[]. All local originals joined with groups
-absent. Task01 implementation/local validation is complete.
-Task01 records exact commands, outcomes, scoped exceptions and the retained
-execution ledger. No full suite, browser/build/E2E or backend checks were run.
-Local completion will not claim hosted CI/review or merged completion.
+Typecheck, zero-warning changed ESLint, Prettier, i18n catalog/copy checks and
+staged ratchet pass. Final catalog363 decisions/1437 specifications, all-spec
+lint and actual ALL10 PR-path documentation coverage PASS (`covered`, errors[]);
+direct work-order validation has errors[]. Routine lint corrections stayed in
+the owned regression suite. All local originals are retained and actually joined
+with owned groups absent before publication/lease return.
+
+Task01 local implementation/checks are complete; exact commands and historical
+versus corrective evidence are in the work order and execution ledger. Hosted
+and merged completion remain external gates. No full suite, browser/build/E2E
+or backend checks were run.
 
 ## Resource and delivery boundaries
 
@@ -211,3 +217,23 @@ absent-board readback, checksum-proved proof release and refill.
 - A rejected transport response is unknown disk outcome, not rollback proof.
 - Pending rows now remain at their last known location; acceptance/refresh moves
   them. This visible timing choice is explicit and introduces no new control.
+
+## Approved causal review correction
+
+ROOT source-verified Greptile4215879422 on the published implementation and
+released the sole corrective local-heavy79 lease. This repairs the already
+approved accepted-results contract. Before a sibling settles, an affected read
+started before acceptance must not restore the old location. Supersede its
+existing folder ticket at confirmed success, before tree publication, using
+shared changed-folder grouping. Preserve unrelated tickets and genuine later
+workspace data; keep one final reconciliation and the current/cache guards.
+
+ROOT explicitly extended immediate ownership to `file-browser-refresh.ts`
+for this affected-ticket invalidation seam and existing hook glue. The original
+observer was ownership-verified, stopped and actually joined with exit143;
+that stop has no CI verdict and cancelled/retried no hosted job. All review read
+handles joined before corrective tests. The original18/44 verification is
+historical for the first published head; corrective RED/GREEN and affected checks
+passed as recorded in Task01. Optional naming/constant/unused-utility polish remains deferred.
+No main-only rebase or test replay after child77's normal main merge. Publication,
+new-head observer and merge still follow ROOT's external gates.

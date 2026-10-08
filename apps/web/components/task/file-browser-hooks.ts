@@ -13,7 +13,7 @@ import { useTreeLoader } from "./file-browser-tree-loader";
 import { useFileTreeState } from "./file-browser-tree-state";
 import type { FileTreeCacheBinding } from "./file-browser-tree-cache";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
-import { applyFileChanges, FolderRefreshes } from "./file-browser-refresh";
+import { applyFileChanges, invalidateFileChanges, FolderRefreshes } from "./file-browser-refresh";
 
 const debugLoad = createDebugLogger("file-browser:load");
 const debugChanges = createDebugLogger("file-browser:changes");
@@ -44,6 +44,7 @@ type FileBrowserTreeResult = {
   isLoading: (path: string) => boolean;
   collapseAll: () => void;
   isCurrentTree: () => boolean;
+  invalidateChanges: (changes: Array<{ path: string }>) => void;
   refreshChanges: (changes: Array<{ path: string }>) => void;
 };
 
@@ -67,6 +68,7 @@ function useMemoizedFileBrowserTreeResult(result: FileBrowserTreeResult) {
       result.isLoading,
       result.collapseAll,
       result.isCurrentTree,
+      result.invalidateChanges,
       result.refreshChanges,
     ],
   );
@@ -243,6 +245,13 @@ function useFileChangeSubscription({
       (!cacheBinding || cacheBinding.isCurrent()),
     [refreshes, cacheBinding],
   );
+  const invalidateChanges = useCallback(
+    (changes: Array<{ path: string }>) => {
+      if (!isCurrentTree()) return;
+      invalidateFileChanges({ changes, expandedPaths: expandedPathsRef.current }, refreshes);
+    },
+    [expandedPathsRef, refreshes, isCurrentTree],
+  );
   const refreshChanges = useCallback(
     (changes: Array<{ path: string }>) => {
       const client = getWebSocketClient();
@@ -286,7 +295,7 @@ function useFileChangeSubscription({
       unsubscribe();
     };
   }, [sessionId, expandedPathsRef, refreshes, refreshChanges]);
-  return { refreshChanges, isCurrentTree };
+  return { refreshChanges, invalidateChanges, isCurrentTree };
 }
 
 function useExpandedFileTree(tree: FileTreeNode | null) {
@@ -375,7 +384,7 @@ export function useFileBrowserTree(
     if (isLoadingTree || hasInitializedExpandedRef.current !== effectiveResetKey) return;
     setFilesPanelExpandedPaths(effectiveResetKey, Array.from(expandedPaths));
   }, [expandedPaths, effectiveResetKey, isLoadingTree]);
-  const { refreshChanges, isCurrentTree } = useFileChangeSubscription({
+  const { refreshChanges, invalidateChanges, isCurrentTree } = useFileChangeSubscription({
     sessionId,
     resetKey: effectiveResetKey,
     cacheBinding,
@@ -400,6 +409,7 @@ export function useFileBrowserTree(
     isLoading,
     collapseAll: treeApi.collapseAll,
     refreshChanges,
+    invalidateChanges,
     isCurrentTree,
   });
 }

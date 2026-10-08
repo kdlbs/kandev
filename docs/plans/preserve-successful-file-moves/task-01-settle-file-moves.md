@@ -73,6 +73,9 @@ Production ownership is bounded to:
   import the production execution helper rather than grow this610-line file.
 - `apps/web/components/task/file-browser-move.ts`: extracted actual move path,
   using existing `file-tree-utils.ts` functions and the exact captured mapping.
+- `apps/web/components/task/file-browser-refresh.ts`: ROOT-approved corrective
+  seam to invalidate affected existing FolderRefreshes tickets using the same
+  changed-folder grouping, with no new registry or reads.
 - `apps/web/components/task/file-browser-hooks.ts`: immediate shared refresh
   callback/current-tree ownership through `useFileChangeSubscription` and
   `useFileBrowserTree`, including stable result dependencies.
@@ -295,7 +298,7 @@ reconciliation must share event ordering, and failed reads must not erase rows.
 Transport rejection is not evidence that disk stayed unchanged. Fixture initial
 reads and every deferred sibling must settle for RED/GREEN to be causal.
 
-## Results
+## Original published results
 
 Implemented the actual gesture consumer, extracted settlement helper and shared
 subscription refresh callbacks. Accepted publication checks the latest source
@@ -327,3 +330,70 @@ browser/build/E2E/backend test, foreign cleanup or protected-proof replay.
 Publication/hosted observer/merge evidence remains in the external task plan;
 MERGE NONE until the separate ROOT serial grant. Mobile and public documentation
 assessment above remains valid.
+
+### Corrective review work
+
+Greptile4215879422 identifies a valid older-read race in confirmed publication.
+ROOT explicitly released its correction in this same owner/work order, including
+`file-browser-refresh.ts`'s immediate ticket seam. Before any corrective test,
+the original observer was ownership-verified and actually joined after the
+ROOT-authorized stop (exit143, no CI verdict); all review reads also joined.
+
+Add the meaningful real-rendered case `supersedes pre-acceptance reads while a
+sibling is pending and final reads fail`. Hold actual subscribed root/destination
+replies before acceptance, accept A through the actual operations transport,
+release old replies while B remains pending, and then fail final reads as B
+fails. Assert accepted DOM/cache paths and unrelated pending folder metadata.
+Existing later-authoritative-change controls must remain valid. Invalidate only
+affected current tickets before queueing accepted tree publication; do not fetch
+at acceptance, blanket-retire tickets, or add a second registry/abort policy.
+
+Exact corrective payloads (each under the retained runner, serially):
+
+```bash
+# RED cap120s, before the ticket seam changes.
+corepack pnpm@9.15.9 exec vitest run --project browser-locales --maxWorkers=1 --no-file-parallelism components/task/file-browser-move-settlement.test.tsx -t '^file move settlement supersedes pre-acceptance reads while a sibling is pending and final reads fail$'
+# GREEN cap180s, only immediate affected concerns.
+corepack pnpm@9.15.9 exec vitest run --project browser-locales --maxWorkers=1 --no-file-parallelism components/task/file-browser-move-settlement.test.tsx components/task/file-browser-refresh-freshness.test.ts components/task/file-browser-apply-changes.test.ts components/task/file-browser-render-identity.test.tsx
+# Changed source/test lint and formatting, cap120s each.
+corepack pnpm@9.15.9 exec eslint --max-warnings 0 components/task/file-browser-refresh.ts components/task/file-browser-hooks.ts components/task/file-browser-move.ts components/task/file-browser-move-settlement.test.tsx
+corepack pnpm@9.15.9 exec prettier --check components/task/file-browser-refresh.ts components/task/file-browser-hooks.ts components/task/file-browser-move.ts components/task/file-browser-move-settlement.test.tsx
+```
+
+These run from `apps/web` with the same pinned Node4GiB configuration. The
+existing typecheck/i18n/docs payloads and caps apply. Final coverage consumes
+ALL actual PR-base-to-working-tree paths (base `4d24f78d5fbabf0b36bcbaacf410f46ab2fd4c27`),
+including the original committed implementation and this correction, rather
+than only the corrective delta. No triggering path is fabricated.
+
+Use cap120s/Node4GiB anchored new-case RED, then cap180s/one-worker GREEN of only
+the changed rendered suite and immediately affected refresh/apply/render-identity
+suites. Run exact changed ESLint/Prettier, normal web typecheck, i18n, docs and
+actual all-path documentation coverage under the existing caps. Reconcile final
+counts/results and live PR validation before a normal NEW commit/push. No broad
+44-test replay, backend/browser/build/E2E, optional cleanup, amend or rebase.
+Corrective RED06 qualifies the accepted-write/old-read ordering: initial reads
+settled, actual rename A accepted and destination row present before releasing
+older root/destination replies; the destination assertion then failed while B
+remained pending (actual Vitest1/wrapper0). GREEN05 passed44/44 in four focused
+files:19 rendered cases plus25 refresh/apply/render-identity controls. The new
+case also publishes unrelated folder metadata and retains accepted DOM/cache
+paths when final reads reject. This is not a replay of the original six-suite44.
+
+Minimum test-only lint corrections split the added case into a same-prefix
+suite and name repeated literals. The fourth suite crossed the enforced string
+threshold, so naming its unchanged prefix was necessary for zero-warning lint;
+optional naming/unused-utility cleanup remains deferred. Affected ESLint and
+Prettier pass. Normal web typecheck (including unchanged generated release/changelog files),
+i18n checks and staged ratchet pass (2 added +3 modified guarded files,643-entry
+allowlist intact). Catalog363/1437 and all-spec lint pass. Actual ALL10 PR paths
+report `covered`/errors[] and direct work-order validation errors[].
+Prior results above remain historical for the first published head. External
+task plan retains all original handles and gates.
+
+
+Corrective local implementation and verification are complete. The preserved
+external receipts record RED06 actual1, GREEN05 actual0, all affected checks
+actual0, normal publication and review/observer gates. Hosted and merged
+completion remain separately gated; no CI verdict is inferred from the stopped
+original observer. No new dependency installation or backend checks occurred.
