@@ -25,6 +25,7 @@ pages retain their existing routes and behavior.
 | AC-EXECUTORS-PROFILE-EDITOR-001.13 through .15 | Current catalogue publication |
 | AC-EXECUTORS-PROFILE-EDITOR-001.16 through .18 | Normal creation catalogue publication |
 | AC-EXECUTORS-PROFILE-EDITOR-001.19, .20 | Executor policy acknowledgement publication |
+| AC-EXECUTORS-PROFILE-EDITOR-001.21 through .24 | Connection save catalogue publication |
 
 ## Components and navigation
 
@@ -460,6 +461,77 @@ architecture or operational boundary warrants an ADR. Public executor and MCP
 guides retain the same configuration and user steps; this repair restores their
 existing behavior.
 
+## Connection save catalogue publication
+
+`useSaveExecutorConnection` serves the SSH connection page at
+`app/settings/executors/ssh/[executorId]/page.tsx` and
+`RemoteDockerConnectionSection`. `updateExecutor` in `settings-api.ts` returns
+`Promise<void>` even though PATCH returns an executor DTO. Keep that adapter
+contract. The subsequent `listExecutors` attaches profiles; its successful
+result must never replace the shared catalogue from this save hook.
+
+### Membership and field ownership
+
+| Publication input | Owned values |
+| --- | --- |
+| Current owning AppStore, read at publication | All executor membership/order, every profile and sibling executor, target type/status/provider/system/timestamps |
+| Matching refreshed target | Target name and config keys without observed changes during this invocation; server-read normalization includes fingerprint |
+| Submitted form/builder, only if refresh fails or target is omitted | Same eligible name/config fields; no normalized-value claim |
+| Current target fields observed changing | Current name and individual config-key values/presence, including removals and later restoration |
+
+The backend `Service.UpdateExecutor` persists full submitted config and emits
+`executor.updated` before returning. `registerExecutorsHandlers` merges updates
+over current items; `registerExecutorProfileHandlers` separately changes nested
+profiles. Event delivery need not precede HTTP completion. This hook preserves
+observed transitions, without correlating its own save echo or arbitrating
+unobserved server writes. Remote Docker's existing builder retains non-SSH
+config; submission semantics remain with that builder.
+
+### Invocation-local observation and publication
+
+Before awaiting PATCH, snapshot the current target and subscribe to this
+invocation's store. Track name changes and a set of changed config keys by
+comparing successive target values, including own-property presence across the
+union of keys. Keep touched keys even if a value later returns to its original
+value. Profile/metadata-only updates must not mark unchanged connection fields.
+Remember target absence: an initially missing, removed, or removed-and-readded
+target is ineligible for this invocation's publication. Membership always comes
+from the current catalogue. No global revision, handler or store action changes.
+
+After PATCH succeeds, retain the list request. Select only its target ID's
+name/config. Refresh rejection or a missing target selects submitted name/config
+instead. In one synchronous turn, read current items, map only an eligible
+existing target, and publish through existing `setExecutors`. No await separates
+read and write. Start config from the current target: for every untouched key in
+the union of current and selected config, apply selected presence/value (absence
+deletes); retain every touched key from current. Adopt selected name only when
+untouched. Preserve all other target fields and profiles verbatim. Config absence
+and empty config mean no selected keys; do not infer missing executor membership.
+
+Dispose the observer in `finally` around transport/publication, before awaiting
+`onSaved`. Dispose on PATCH failure too; no failure publication or callback.
+After successful persistence/publication, await `onSaved` exactly once. Keep its
+rejection outside the refresh catch. In-flight work retains its captured store;
+unmount does not redirect it into another provider or prevent a successful save.
+No retries, timers or subscriptions beyond a save invocation are introduced.
+
+### Callers, consequences and verification
+
+The SSH page's callback still reloads its separate route resource and remounts
+the connection card by fingerprint. Remote Docker receives the updated executor
+from its subscribed owner. Keep trust gating, save contributor and callback
+behavior. Real component regressions must prove normalized pinned values and
+save failure through these callers, alongside hook/store/registered-event tests.
+Task-create/subtask fallback projection and actual `useExecutorProfileOptions`
+remain the consumers described in Current catalogue publication; render their
+labels and assert eligibility, membership and current owner metadata.
+
+Desktop and phone share these catalogue outcomes. Unchanged composition, copy,
+touch, scrolling and breakpoints permit the mobile-parity state/data exception:
+rendered caller/options tests without new Playwright/build work. Reassess if a
+viewport interaction changes. Public instructions and screenshots remain accurate.
+Existing store ownership and this local rationale need no new ADR.
+
 ## Implementation plans
 
 - [Unified profile editor](../../../plans/executor-profile-editor-unification/plan.md)
@@ -467,3 +539,4 @@ existing behavior.
 - [Preserve the current catalogue during profile mutations](../../../plans/executor-profile-catalogue-preservation/plan.md)
 - [Preserve choices during built-in profile creation](../../../plans/executor-profile-create-catalogue-preservation/plan.md)
 - [Preserve choices during executor policy saves](../../../plans/executor-policy-catalogue-preservation/plan.md)
+- [Preserve choices during connection refresh](../../../plans/executor-connection-catalogue-preservation/plan.md)

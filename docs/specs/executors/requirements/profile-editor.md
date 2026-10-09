@@ -11,8 +11,8 @@ owners:
 ## Overview
 
 Users need the same profile controls regardless of how they reach an executor
-profile. Creation, editing, and executor policy saves must retain independently
-received catalogue choices. The executor system owns this contract because it
+profile. Creation, editing, executor policy and connection saves must retain
+independently received catalogue choices. The executor system owns this contract because it
 owns profiles and their available settings.
 
 ## Requirements
@@ -44,6 +44,11 @@ owns profiles and their available settings.
 - **AC-EXECUTORS-PROFILE-EDITOR-001.19:** When an executor MCP-policy save succeeds, every unrelated current executor and profile shall retain additions, updates, and removals received while the save was pending. Newly available eligible choices shall remain available in desktop and phone task creation and subtask choices; deleted choices shall remain absent, including when the catalogue contains both retained and removed entries. Applying the policy acknowledgement shall not restore an executor removed during the request.
 - **AC-EXECUTORS-PROFILE-EDITOR-001.20:** An executor MCP-policy save shall retain its submitted policy and existing system-executor payload restrictions. Success shall publish the accepted policy and use it as the saved baseline; an unchanged submitted draft matching that baseline shall become clean. A newer draft shall remain intact and dirty when it differs from the accepted baseline. A normalized response shall supply the accepted baseline without replacing the current raw draft. Failure shall preserve the current catalogue, unsaved draft, dirty state, and existing failed-save indication.
 
+- **AC-EXECUTORS-PROFILE-EDITOR-001.21:** A successful saved SSH or Remote Docker connection save shall retain every current executor and profile addition, update, and removal received while saving or refreshing. Each unrelated current entry and the saved executor's current profiles and non-connection metadata shall remain intact. Removed entries shall remain absent, including a removed saved executor. Mixed catalogues shall retain live choices while excluding deleted choices in desktop and phone task creation and subtask destinations.
+- **AC-EXECUTORS-PROFILE-EDITOR-001.22:** A successful connection refresh shall publish the saved executor's server-read name and configuration, including a normalized pinned host fingerprint, for fields without a later observed change during that save. Each name or configuration-key change observed during the save shall remain current, including explicit clearing and a value changed and restored. Profile-only changes shall not prevent unchanged connection fields from receiving normalization. A removed and subsequently reintroduced executor shall not receive the earlier save's publication.
+- **AC-EXECUTORS-PROFILE-EDITOR-001.23:** When connection persistence succeeds but refresh fails or omits the saved executor, the save shall remain successful. Submitted name and configuration shall supply unchanged fields without undoing observed changes or restoring removed entries. The existing post-save callback shall run once, after catalogue publication, and its asynchronous completion or failure shall retain its existing meaning. Connection trust, validation, authorization, save coordination, and Remote Docker configuration unrelated to the connection shall retain their existing behavior.
+- **AC-EXECUTORS-PROFILE-EDITOR-001.24:** A failed connection persistence request shall reject without publishing submitted or refreshed values or invoking the post-save callback. Current live catalogue changes shall remain visible, and the existing rendered form and save coordinator shall report failure and retain the recoverable draft.
+
 ## Related requirements
 
 The [card-spacing requirement](../../ui/requirements/executor-settings-card-spacing.md)
@@ -61,6 +66,8 @@ editor reachability without redesigning those controls.
 - Restoring an executor removed during creation, arbitration against a newer update of the accepted target, repairing previously duplicated catalogue rows, or redesigning live notification writers and separate SSH, Remote Docker, Kubernetes, or plugin creation flows.
 - Executor-policy save versus newer same-executor server writes, policy validation redesign, executor deletion and profile-card refresh publication, or request lifetime and navigation redesign.
 
+- Connection server-write arbitration, stale full-config submission prevention, global snapshot freshness, or changes to connection-page reload ownership. Connection saves preserve observed client changes; they do not impose an ordering on unobserved server writes.
+
 ## Implementation plans
 
 - [Unified profile editor](../../../plans/executor-profile-editor-unification/plan.md)
@@ -68,3 +75,4 @@ editor reachability without redesigning those controls.
 - [Preserve the current catalogue during profile mutations](../../../plans/executor-profile-catalogue-preservation/plan.md)
 - [Preserve choices during built-in profile creation](../../../plans/executor-profile-create-catalogue-preservation/plan.md)
 - [Preserve choices during executor policy saves](../../../plans/executor-policy-catalogue-preservation/plan.md)
+- [Preserve choices during connection refresh](../../../plans/executor-connection-catalogue-preservation/plan.md)
