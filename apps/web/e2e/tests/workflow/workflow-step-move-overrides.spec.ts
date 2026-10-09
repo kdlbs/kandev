@@ -17,7 +17,10 @@ import {
 
 type SpecApiClient = Parameters<typeof seedMoveOverrideFixture>[1];
 
-/** @covers AC-UI-COMPOSER-ACTION-WRAP-001.1, .3, .5 */
+/**
+ * Verifies phone target size and mouse activation while preserving compact desktop placement.
+ * @covers AC-UI-COMPOSER-ACTION-WRAP-001.1, .3, .4, .5
+ */
 test("keeps the workflow action right-aligned on a phone with a mouse and on desktop", async ({
   testPage,
   apiClient,

@@ -63,7 +63,10 @@ async function expectTargetStep(
     .toBe(targetStepId);
 }
 
-/** @covers AC-UI-COMPOSER-ACTION-WRAP-001.2, .3, .4 */
+/**
+ * Verifies wrapped touch targets stay reachable on the right and still move the task.
+ * @covers AC-UI-COMPOSER-ACTION-WRAP-001.2, .3, .4
+ */
 test("keeps the wrapped mobile workflow action on the right and moves the task", async ({
   testPage,
   apiClient,

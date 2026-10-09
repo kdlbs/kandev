@@ -166,3 +166,7 @@ geometry helper, and desktop spec; catalog validation, spec lint, and diff check
 passed. The system design and plan now explicitly cover the fine-pointer phone
 target. Fresh desktop, mouse-phone, and touch-phone screenshots are captured for
 PR publication. Remote CI and review completion remain pending for the new head.
+The touch and mouse regression cases also describe their behavioral contracts
+in addition to their acceptance-criterion tags. ESLint and Prettier passed after
+these comment-only additions; the production implementation and browser results
+above are unchanged.
