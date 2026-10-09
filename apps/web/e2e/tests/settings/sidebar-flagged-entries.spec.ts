@@ -81,9 +81,11 @@ test("customizes Coordinator independently and retains its choice while the feat
 
     await sidebar.getByTestId("sidebar-node-home").click({ button: "right" });
     await menu.getByTestId("sidebar-visibility-coordinators").click();
+    await expect(menu).toBeHidden();
     await expect(sidebar.getByTestId("sidebar-node-coordinators")).toBeVisible();
     await expect(sidebar.getByTestId("sidebar-coordinators-empty")).toBeVisible();
-    await sidebar.getByTestId("sidebar-node-coordinators").click({ button: "right" });
+    await sidebar.getByTestId("sidebar-node-home").click({ button: "right" });
+    await expect(menu).toBeVisible();
     await menu.getByRole("menuitemcheckbox", { name: "Show fast action icons" }).click();
     await expect(sidebar.getByTestId("coordinators-open-list")).toBeVisible();
     await expect(sidebar.getByTestId("coordinators-open-list-body")).toHaveCount(0);
