@@ -265,7 +265,7 @@ function ChatStatusBarActions({
           nextStepName={nextStepName}
           onProceed={onProceed}
           isMoving={isMoving}
-          className="h-6"
+          className="h-6 max-md:min-h-11 max-md:min-w-11"
           testId="proceed-next-step"
         />
       )}

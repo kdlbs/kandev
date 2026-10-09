@@ -30,6 +30,8 @@ change, then prove the wrapped action still moves the task.
 `ChatStatusBarActions` layout and the plan's focused mobile/desktop geometry
 scenarios. Keep component tests unless a meaningful behavioral adjustment is
 needed. Record red/green evidence and compare rendered layout with UI-01.
+The workflow action must also meet the shared 44px phone target contract with
+either pointer, retaining its compact 24px height on fine-pointer desktop.
 
 ## Out of scope
 
@@ -146,3 +148,21 @@ comments only; the rendered layout and test behavior retain the results above.
 ESLint and Prettier passed for the three affected TypeScript files, and spec
 validation and diff checks passed. Remote CI and reviewer verification remain
 pending for the follow-up commit.
+
+Further review follow-up: CodeRabbit identified the fine-pointer phone action's
+24px height. The extended 360px browser case failed with an expected minimum of
+44px and an actual height of 24px before the production edit. This caller now
+applies a 44px minimum height and width below 768px. The geometry check asserts
+44px targets for fine-pointer phones, 24px desktop height, and center-point
+reachability. The fine-pointer test also clicks the wrapped action at 360px and
+verifies its move request and committed destination.
+
+Post-fix validation passed: the same three Vitest suites passed 60 tests;
+`pnpm e2e:run --host --project chromium tests/workflow/workflow-step-move-overrides.spec.ts -- --retries=0`
+passed all 6 tests in 45.9s, and the mobile-chrome command with `--no-build`
+passed all 4 tests in 28.8s. Mobile reused the production assets rebuilt by the
+desktop command. ESLint and Prettier passed for the affected production file,
+geometry helper, and desktop spec; catalog validation, spec lint, and diff checks
+passed. The system design and plan now explicitly cover the fine-pointer phone
+target. Fresh desktop, mouse-phone, and touch-phone screenshots are captured for
+PR publication. Remote CI and review completion remain pending for the new head.

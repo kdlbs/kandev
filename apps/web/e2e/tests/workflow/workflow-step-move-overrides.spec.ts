@@ -41,12 +41,13 @@ test("keeps the workflow action right-aligned on a phone with a mouse and on des
       },
     );
     for (const { width, wrapped } of [
+      { width: 360, wrapped: true },
       { width: 393, wrapped: true },
       { width: 767 },
       { width: 768 },
       { width: 1440, wrapped: false },
     ]) {
-      const label = width === 393 ? "Open pull request for review" : "Open PR";
+      const label = width < 767 ? "Open pull request for review" : "Open PR";
       await apiClient.updateWorkflowStep(fixture.targetStepId, { name: label });
       await testPage.setViewportSize({ width, height: 900 });
       const chat = fixture.session.activeChat();
@@ -54,9 +55,21 @@ test("keeps the workflow action right-aligned on a phone with a mouse and on des
       await revealTranscriptControls(chat);
       await expectComposerActionLayout(chat, {
         wrapped,
-        touch: false,
+        touch: width < 768,
       });
     }
+    await apiClient.updateWorkflowStep(fixture.targetStepId, {
+      name: "Open pull request for review",
+    });
+    await testPage.setViewportSize({ width: 360, height: 900 });
+    const chat = fixture.session.activeChat();
+    await expect(chat.getByTestId("proceed-next-step")).toHaveText("Open pull request for review");
+    await revealTranscriptControls(chat);
+    await expectComposerActionLayout(chat, { wrapped: true, touch: true });
+    const request = waitForMoveRequest(testPage, fixture.taskId);
+    await chat.getByTestId("proceed-next-step").click();
+    expect((await request).postDataJSON().workflow_step_id).toBe(fixture.targetStepId);
+    await waitForStepCommitted(apiClient, fixture.taskId, fixture.targetStepId);
   } finally {
     await apiClient.saveUserSettings({
       show_transcript_auto_scroll_control: settings.show_transcript_auto_scroll_control ?? false,

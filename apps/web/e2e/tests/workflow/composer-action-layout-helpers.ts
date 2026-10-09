@@ -66,7 +66,19 @@ export async function expectComposerActionLayout(
   if (touch) {
     expect(proceedBox.width).toBeGreaterThanOrEqual(44);
     expect(proceedBox.height).toBeGreaterThanOrEqual(44);
+  } else {
+    expect(proceedBox.height).toBeCloseTo(24, 0);
   }
+  await expect
+    .poll(() =>
+      proceed.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return element.contains(
+          document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2),
+        );
+      }),
+    )
+    .toBe(true);
   await expect(actions).toHaveCSS("justify-content", "flex-end");
   await assertNoDocumentHorizontalOverflow(chat.page());
 }

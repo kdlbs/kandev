@@ -29,6 +29,8 @@ Follow `PassthroughStatusRow`'s wrapping action-group pattern in
 `ChatStatusBarActions`: end justification with a bounded maximum width. Preserve
 DOM order and existing handlers. Extend the workflow move fixture for rendered
 coverage, using genuine transcript controls and disposable test data.
+Keep the phone workflow action at a minimum of 44px in each dimension with
+either pointer, while retaining the existing 24px desktop height.
 
 ## ASCII UI preview
 
@@ -81,7 +83,9 @@ phone width. Include a longer fitting label. Check computed end justification at
 destination. For .1/.3/.5, extend
 `workflow-step-move-overrides.spec.ts` with a narrow fine-pointer phone-width
 check and wide desktop single-line check. Reuse shared geometry helpers only if
-both suites need them.
+both suites need them. Require the fine-pointer action's 44px target at 360px,
+393px, and 767px, and its 24px desktop height at 768px and 1440px. Verify the
+button center is reachable and click the fine-pointer action at 360px.
 
 ## Work orders
 

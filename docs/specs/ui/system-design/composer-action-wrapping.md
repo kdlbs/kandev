@@ -39,10 +39,12 @@ ends against the action group's right edge, which the outer auto margin aligns
 with the toolbar's right content edge.
 
 Use the same end justification at every width. It does not change the
-single-line order or control sizes; it also works in a narrow desktop pane
+single-line order; it also works in a narrow desktop pane
 without JavaScript measurement, additional responsive state, or forcing every
-phone toolbar into two rows. Leave the workflow button's touch sizing and
-visibility rules with their existing owners.
+phone toolbar into two rows. Give this workflow-action caller a 44px minimum
+height and width below the canonical 768px phone boundary, including with a
+fine pointer. Retain its 24px desktop height. Pointer-specific popover/Drawer
+behavior and visibility rules remain with their existing owners.
 
 ## Mobile contract
 
@@ -55,8 +57,8 @@ visibility rules with their existing owners.
   additional content needed to locate it. This adjustment needs no overlay.
 - Scroll and viewport: retain the transcript as the scroll owner and the existing
   composer/safe-area placement. Add no fixed positioning or nested scroller.
-- Touch and state: preserve existing phone/coarse-pointer hit targets and shared
-  workflow handlers. Width-driven phone alignment also applies to fine pointers.
+- Touch and state: phone hit targets meet the 44px minimum with either pointer;
+  existing coarse-pointer targets and shared workflow handlers are preserved.
 - Desktop: retain the current compact controls and single-line placement when
   there is enough space.
 
@@ -66,10 +68,12 @@ Rendered Playwright geometry is the regression evidence. With real transcript
 controls present, first prove that the workflow action occupies a later line,
 then compare its right bound to the toolbar's content right bound within one
 CSS pixel. Check its full hitbox inside the row, touch dimensions, and document
-overflow. Activate it and verify the destination step via the existing fixture.
+overflow. At phone widths, verify the button center is a reachable hit target
+with either pointer. Activate it and verify the destination step via the existing fixture.
 
 Cover the configured phone viewport, 360px, and the 767/768px boundary; add a
-narrow fine-pointer case and a wide desktop single-line case. Measure computed
+narrow fine-pointer case with a 44px target and click, and desktop cases with a
+24px height and wide single-line order. Measure computed
 end justification as well as geometry. Component tests retain the existing
 no-content spacer case and move-gating coverage, but class assertions alone
 cannot establish rendered wrapping.
