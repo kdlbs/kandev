@@ -257,3 +257,32 @@ Task 02 supplies the test file both use.
 - **Asserting the settlement and forgetting the launch.** The defect is a
   duplicate execution. A test that checks the run reached a terminal state but
   never checks the attempt count would pass against the bug.
+
+
+## CI follow-up results (2026-10-07)
+
+A delayed stream disconnect could replace an already-completed prompt outcome
+with failure. `TestStreamDisconnectDoesNotReplaceCompletedPromptOutcome` failed
+before the fix with status `FAILED` instead of `READY`. Disconnect settlement
+now respects the completion generation of a settled ready
+prompt; an unsettled durable submission
+still follows reconciliation. This does not complete the remaining work order.
+
+`GOMAXPROCS=4 go test -trimpath -race -count=5 -timeout=10m
+./internal/agent/runtime/lifecycle -run
+'Test(StreamDisconnect|UncertainDeliveryDisconnect|HandleAgentEvent_DelayedCompleted|TransientTurnFailureDoesNotOverrideRuntimeDisconnect)'`
+passed from `apps/backend`. The first full-suite run exposed an overbroad
+guard for retained failed turns; the guard was narrowed to ready prompts with no pending owner settlement and
+that existing regression was included in the final focused race command. The
+taskless-routine browser case passed five
+first attempts with `--retries=0 --repeat-each=5`. Fresh hosted verification
+remains pending; native containment and targeted durable-delivery PostgreSQL
+release checks remain open.
+
+
+Final local checks also passed `GOMAXPROCS=4 go test -trimpath -timeout=15m
+./internal/agent/runtime/lifecycle/...` (148 seconds for lifecycle) and
+`GOMAXPROCS=4 golangci-lint run ./...
+--new-from-rev=6e34553023eadde1f6f51fc4e6583d04d0e2b7dc --timeout=10m
+--allow-serial-runners` (zero issues), both from `apps/backend`. Five mobile
+session recovery cases passed on first attempts after a fresh build.

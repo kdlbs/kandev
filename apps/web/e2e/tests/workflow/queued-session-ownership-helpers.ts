@@ -176,6 +176,7 @@ export async function createQueuedSessionOwnershipScenario(
   });
   const sourceSessionId = await waitForWorkflowProfileSession(apiClient, target.id, profileA.id);
 
+  const capacityMarker = `${name} capacity holder accepted`;
   const filler = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     `${name} capacity holder`,
@@ -184,28 +185,51 @@ export async function createQueuedSessionOwnershipScenario(
       workflow_id: workflow.id,
       workflow_step_id: sourceStep.id,
       repository_ids: [seedData.repositoryId],
-      description: "/slow 120s",
+      description: `/e2e:cancel-hold ${capacityMarker}`,
     },
   );
   if (!filler.session_id) throw new Error("capacity-holder task did not return a session_id");
-  await waitForSessionState(apiClient, filler.id, filler.session_id, "RUNNING");
+  try {
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(filler.session_id!);
+          return messages.some(
+            (message) =>
+              message.author_type === "agent" && message.content.trim() === capacityMarker,
+          );
+        },
+        { timeout: 30_000, message: "capacity holder must acknowledge its live prompt" },
+      )
+      .toBe(true);
+    await waitForSessionState(apiClient, filler.id, filler.session_id, "RUNNING");
 
-  await apiClient.moveTask(target.id, workflow.id, destinationStep.id);
-  const queue = await waitForLaunchQueue(apiClient, seedData.workspaceId, target.id);
-  if (!queue.session_id)
-    throw new Error("queued workflow launch did not identify a destination session");
+    await apiClient.moveTask(target.id, workflow.id, destinationStep.id);
+    const queue = await waitForLaunchQueue(apiClient, seedData.workspaceId, target.id);
+    if (!queue.session_id)
+      throw new Error("queued workflow launch did not identify a destination session");
 
-  await waitForSessionState(apiClient, target.id, queue.session_id, "CREATED");
-  await waitForTaskState(apiClient, target.id, "SCHEDULING");
+    await waitForSessionState(apiClient, target.id, queue.session_id, "CREATED");
+    await waitForTaskState(apiClient, target.id, "SCHEDULING");
 
-  return {
-    taskId: target.id,
-    taskTitle,
-    workflowId: workflow.id,
-    sourceSessionId,
-    destinationSessionId: queue.session_id,
-    fillerSessionId: filler.session_id,
-    queue,
-    destinationProfileName: profileB.name,
-  };
+    return {
+      taskId: target.id,
+      taskTitle,
+      workflowId: workflow.id,
+      sourceSessionId,
+      destinationSessionId: queue.session_id,
+      fillerSessionId: filler.session_id,
+      queue,
+      destinationProfileName: profileB.name,
+    };
+  } catch (error) {
+    await apiClient
+      .stopSession({
+        session_id: filler.session_id,
+        reason: "queued-session-ownership setup cleanup",
+        force: true,
+      })
+      .catch(() => undefined);
+    throw error;
+  }
 }

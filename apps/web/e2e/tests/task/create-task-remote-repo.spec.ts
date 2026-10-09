@@ -182,7 +182,11 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await restoreSidebarLayout(apiClient, seedData.workspaceId, initialLayout);
   });
 
-  test("keeps the unified input fixed while repositories load", async ({ testPage, apiClient }) => {
+  test("keeps the unified input fixed while repositories load", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     await seedAccessibleRepos(apiClient);
     let releaseRepos = () => undefined;
     const reposGate = new Promise<void>((resolve) => {
@@ -194,6 +198,18 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     });
 
     const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const divider = testPage.getByTestId("sidebar-navigation-divider");
+    await divider.focus();
+    await divider.press("Home");
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+            seedData.workspaceId
+          ]?.navigation_height,
+      )
+      .toBe(0);
     await openCreateDialog(testPage, kanban);
     await clickRemoteMode(testPage);
     await testPage.getByTestId("remote-repo-chip-trigger").first().click();

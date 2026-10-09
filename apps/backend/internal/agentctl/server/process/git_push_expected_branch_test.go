@@ -40,6 +40,7 @@ func setupPushRemotesRepo(t *testing.T) (repoDir, originDir, backupDir string, o
 	runGit(t, repoDir, "commit", "-m", "task change")
 
 	tracker := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	t.Cleanup(tracker.Stop)
 	tracker.SetBaseBranch("main")
 	return repoDir, originDir, backupDir, NewGitOperator(repoDir, newTestLogger(t), tracker)
 }
@@ -251,6 +252,7 @@ func TestGitOperatorPushToNamedRemoteSkipsBaselinePublication(t *testing.T) {
 	runGit(t, repoDir, "commit", "-m", "seed")
 	runGit(t, repoDir, "checkout", "-b", "feature/work")
 	tracker := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	t.Cleanup(tracker.Stop)
 	tracker.SetBaseBranch("main")
 	operator := NewGitOperator(repoDir, newTestLogger(t), tracker)
 

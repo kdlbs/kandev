@@ -207,3 +207,62 @@ multi-repository recovery passed 2/2. Targeted single-repository desktop and
 phone cases each passed 1/1. Public documentation tests passed 62/62 and all
 47 published pages validated. Spec/catalog validation and `git diff --check`
 passed. The PostgreSQL gate remains blocked because its test DSN is unset.
+
+
+### PR #3598 integration validation, 2026-10-07
+
+Integrated main `330e02a` with the durable-session branch. Stopped recovery
+retains uncertain-delivery controls and explicit history continuation while
+also rendering attempt-scoped workspace recovery progress. Hook success clears
+both continuation and relocation state. Backend launch settlement retains
+continuation checkpoints and managed-clone resume outcomes.
+
+- `GOMAXPROCS=4 go test -p 2 -count=1 -timeout=15m ./internal/orchestrator/...
+  ./internal/task/repository/sqlite/... ./internal/worktree/...` passed.
+- `GOMAXPROCS=4 golangci-lint run ./... --allow-serial-runners
+  --new-from-rev=330e02a47808c11ca315ae30456fcce7f4806db5 --timeout=8m` passed
+  with zero issues.
+- Focused banner, recovery hook, service, guard, workspace projection, and
+  agent-only witness Vitest batches passed (62, 13, 57, and 32 tests respectively).
+- Full web typecheck passed after reconciling new fixture fields and the nullable
+  error stamp. Focused ESLint passed with zero warnings.
+- Fresh managed desktop build: sidebar selected ordering plus session branch
+  and dirty-clone recovery passed 3/3 with retries disabled.
+- The combined retries-disabled desktop reproduction passed 20/21: both
+  multi-repository recovery cases, fork comparison recovery, preview tabs, and
+  remote picker cases passed. The startup test failure was repaired and verified
+  separately in its owning work order.
+- Full shard discovery, catalog/spec lint, documentation coverage (59 work
+  orders), public documentation tests (62), and 47 published pages passed.
+
+PostgreSQL durable recovery and native Windows/macOS release gates remain open.
+Hosted results for earlier head `c900e727` are historical failing evidence, not
+validation of this integrated tree.
+
+Focused recovery race check passed:
+`GOMAXPROCS=4 go test -trimpath -race -p 2 -count=1 -timeout=10m
+./internal/orchestrator -run 'Recovery|Continuation'`. Final documentation
+coverage includes 63 work orders, with no errors.
+
+Managed mobile verification passed seven cases with retries disabled: both
+multi-repository recovery cases, dirty single-repository relocation, both
+startup queue cases, remote URL staging, and provider filter ordering. Command:
+`pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project mobile-chrome
+tests/task/mobile-sidebar-filter-selected-first.spec.ts
+tests/session/mobile-multi-repo-session-resume-recovery.spec.ts
+tests/session/mobile-session-resume-turn-start.spec.ts
+tests/session/mobile-session-resume-recovery.spec.ts
+tests/task/mobile-create-task-remote-repo.spec.ts -- --grep
+'selected options first|multi-repository|resumed workflow turn start|moves the dirty worktree|stages a pasted URL'
+--retries=0`.
+
+Final fresh-build desktop regression command passed all four cases:
+`pnpm --dir apps/web e2e:run --host --shards 1 --project chromium
+tests/task/sidebar-filter-selected-first.spec.ts
+tests/session/session-resume-turn-start.spec.ts
+tests/task/create-task-remote-repo.spec.ts
+tests/session/session-resume-recovery.spec.ts -- --grep
+'prioritize selections|direct message once|unified input fixed|moves a dirty managed worktree'
+--retries=0`. Extracted unchanged recovery-error markup into a small component
+to satisfy the merged function-size limit; all 94 affected component tests
+passed. Full typecheck, i18n, specification lint, and coverage passed afterward.

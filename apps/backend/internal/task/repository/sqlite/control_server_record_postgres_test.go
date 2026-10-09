@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/testutil"
 )
@@ -34,6 +35,7 @@ func TestPostgresControlServerRecordRoundTrips(t *testing.T) {
 		CredentialSecretID: "secret-ref-1",
 		Capabilities:       []string{"resume", "diagnostics"},
 		DiagnosticLogPath:  "/home/kandev/logs/agentctl-diagnostic.log",
+		ProcessIdentity:    processidentity.Identity{PID: 4312, GroupID: 4312, SessionID: 4312, BirthToken: "linux:boot-id:8765"},
 	}
 	if err := repo.UpsertControlServerRecord(ctx, first); err != nil {
 		t.Fatalf("UpsertControlServerRecord(first): %v", err)
@@ -48,8 +50,29 @@ func TestPostgresControlServerRecordRoundTrips(t *testing.T) {
 		got.CredentialSecretID != first.CredentialSecretID || got.DiagnosticLogPath != first.DiagnosticLogPath {
 		t.Fatalf("got = %#v, want match of %#v", got, first)
 	}
+	if got.ProcessIdentity != first.ProcessIdentity {
+		t.Fatalf("ProcessIdentity = %#v, want %#v", got.ProcessIdentity, first.ProcessIdentity)
+	}
 	if len(got.Capabilities) != 2 || got.Capabilities[0] != "resume" || got.Capabilities[1] != "diagnostics" {
 		t.Fatalf("Capabilities = %#v, want [resume diagnostics]", got.Capabilities)
+	}
+	for _, column := range []string{"process_birth_token", "process_session_id", "process_group_id", "process_id"} {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE control_server_records DROP COLUMN "+column); err != nil {
+			t.Fatalf("drop %s to model prior schema: %v", column, err)
+		}
+	}
+	if err := repo.runMigrations(ctx); err != nil {
+		t.Fatalf("upgrade prior control server schema: %v", err)
+	}
+	if err := repo.runMigrations(ctx); err != nil {
+		t.Fatalf("replay control server schema upgrade: %v", err)
+	}
+	legacy, err := repo.GetControlServerRecord(ctx)
+	if err != nil {
+		t.Fatalf("read upgraded legacy control server record: %v", err)
+	}
+	if legacy.ProcessIdentity != (processidentity.Identity{}) {
+		t.Fatalf("legacy ProcessIdentity = %#v, want unknown", legacy.ProcessIdentity)
 	}
 
 	time.Sleep(2 * time.Millisecond)
@@ -59,6 +82,7 @@ func TestPostgresControlServerRecordRoundTrips(t *testing.T) {
 		ServerIdentity:     "server-identity-2",
 		CredentialSecretID: "secret-ref-2",
 		DiagnosticLogPath:  "/home/kandev/logs/agentctl-diagnostic.log",
+		ProcessIdentity:    processidentity.Identity{PID: 5522, GroupID: 5522, SessionID: 5522, BirthToken: "linux:boot-id:9922"},
 	}
 	if err := repo.UpsertControlServerRecord(ctx, second); err != nil {
 		t.Fatalf("UpsertControlServerRecord(second): %v", err)
@@ -70,6 +94,9 @@ func TestPostgresControlServerRecordRoundTrips(t *testing.T) {
 	}
 	if got2.Endpoint != second.Endpoint || got2.ServerIdentity != second.ServerIdentity {
 		t.Fatalf("got2 = %#v, want the rewritten (second) record", got2)
+	}
+	if got2.ProcessIdentity != second.ProcessIdentity {
+		t.Fatalf("ProcessIdentity = %#v, want %#v", got2.ProcessIdentity, second.ProcessIdentity)
 	}
 	// Compared at microsecond granularity because PostgreSQL TIMESTAMP stores
 	// microseconds while Go's time.Time carries nanoseconds, so the first

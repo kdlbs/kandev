@@ -1,4 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { waitForSessionDone } from "../../helpers/session";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import {
   openConfigurationChat,
@@ -35,6 +37,7 @@ test.describe("Mobile Configuration Chat restart", () => {
     );
     const refresh = dialog.getByRole("button", { name: "Refresh status", exact: true });
     await expect(refresh).toHaveCount(1);
+    await waitForFiniteAnimations(dialog);
     expect((await refresh.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     await capture.screenshot("phone-expanded-restart-recovery", {
       caption: "Phone expanded Configuration Chat offers a touch-sized status refresh",
@@ -109,9 +112,16 @@ test.describe("Mobile Configuration Chat restart", () => {
     const replacement = await confirmConfigurationChatRestart(testPage, panel, true);
     expect(replacement.session_id).not.toBe(old.session_id);
     await expect(panel.getByText("phone old response", { exact: true })).toHaveCount(0);
-    await expect
-      .poll(async () => (await apiClient.getTaskSession(replacement.session_id)).session.state)
-      .toBe("WAITING_FOR_INPUT");
+    await waitForSessionDone(
+      apiClient,
+      replacement.task_id,
+      replacement.session_id,
+      "Replacement configuration session initialized",
+      30_000,
+    );
+    expect((await apiClient.getTaskSession(replacement.session_id)).session.state).toBe(
+      "WAITING_FOR_INPUT",
+    );
     const { turns } = await apiClient.listSessionTurns(replacement.session_id);
     expect(turns.filter((turn) => turn.metadata?.lifecycle_only !== true)).toEqual([]);
     expect(turns.every((turn) => Boolean(turn.completed_at))).toBe(true);

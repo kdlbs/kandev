@@ -3,6 +3,7 @@ status: current
 system: workspaces
 requirements:
   - REQ-WORKSPACES-SETTINGS-UPDATES-001
+  - REQ-WORKSPACES-SETTINGS-UPDATES-002
 ---
 
 # Workspace settings update system design
@@ -19,6 +20,7 @@ authoritative for their independent contracts.
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-WORKSPACES-SETTINGS-UPDATES-001` | Admission and presence; persistence seam; observations; compatibility; verification |
+| `REQ-WORKSPACES-SETTINGS-UPDATES-002` | Current catalogue publication; client compatibility inventory; independent client verification |
 
 ## Verified baseline path
 
@@ -27,7 +29,8 @@ authoritative for their independent contracts.
 with its saved baseline and includes only changed name, default executor,
 default agent profile, and idle policy fields. `updateWorkspaceAction` in
 `apps/web/app/actions/workspaces.ts` forwards optional values by JSON to
-`PATCH /api/v1/workspaces/:id`. Neither needs a change.
+`PATCH /api/v1/workspaces/:id`. Payload construction and that action remain
+unchanged; the separate acknowledgement publication is extended below.
 
 `RegisterWorkspaceRoutes` registers that REST route and
 `ws.ActionWorkspaceUpdate` on the dispatcher. Both construct pointer-bearing
@@ -186,9 +189,11 @@ boolean values, and rollback under the existing isolated-schema harness. See
 the [single work order](../../../plans/preserve-workspace-settings-updates/task-01-persist-settings-fields.md)
 for exact commands, test names, and release gates.
 
-This repair has no rendered layout, touch, navigation, scrolling, store, or API
-shape change. Desktop and phone use the same existing save builder and backend
-contract; backend registered-flow evidence is the causal parity check. No new
+The backend repair for requirement 001 has no rendered layout, touch, navigation,
+scrolling, store, or API shape change. The separate client publication extension
+for requirement 002 is described below. For requirement 001, desktop and phone
+use the same existing save builder and backend contract; backend registered-flow
+evidence is the causal parity check. No new
 browser test, UI preview, or product build is required. Shared Go/SQL code has
 no platform-specific branch: execute narrow new cases on the existing hosted
 Windows native suite to establish native database/scanner compatibility. Linux
@@ -201,6 +206,121 @@ setting, operation, or API explanation for this repair. Public documentation
 changes are unnecessary for the design package and expected bounded fix;
 record that assessment in delivery. Executor parking and reach policies are
 not redefined. Internal contracts and delivery records are the four artifacts.
+
+## Current catalogue publication
+
+Requirement 002 extends only the client acknowledgement boundary. The existing
+current backend design and every requirement-001 contract above remain intact.
+The [catalogue preservation work order](../../../plans/workspace-save-catalogue-preservation/task-01-preserve-current-workspaces.md)
+records independent causal integration evidence and the two-file implementation.
+Hosted review and merge remain separately gated in the delivery plan.
+
+`WorkspaceEditPage` in `app/settings/workspace/[id]/page.tsx` renders
+`WorkspaceEditClient`. `useWorkspaceEditForm` constructs
+`buildWorkspaceSaveHandler` and registers it through
+`useWorkspaceFormSaveContributor`. `SettingsSaveProvider.saveAll` retains the
+submitted callback while awaiting its real `useRequest(updateWorkspaceAction)`
+PATCH. Registered `registerWorkspacesHandlers` notifications publish independently
+through `store.setState`. `AppSidebarWorkspacePicker` reads that same store.
+
+Before the repair, the save handler awaited PATCH and then mapped the `workspaces`
+array captured when it was built. A registered `workspace.created` can already have added a
+visible switcher choice; that earlier array replaces it on acceptance. The
+qualified evidence establishes client catalogue loss and accepted target save,
+not backend deletion or any delete-route consequence. The existing backend
+partial-update seam does not protect a later client whole-array replacement.
+
+The immediate form caller supplies the existing `useAppStoreApi` to
+`WorkspaceSaveHandlerOptions`, following the shipped Office appearance/Configuration
+Chat idiom. Its narrow shape is
+`getState: () => Pick<AppState, "workspaces" | "setWorkspaces">`. After the
+successful await, the handler reads this owning provider's current
+`workspaces.items` and current setter immediately before publication. Keep read, map, and setter
+synchronous with no await or deferred scheduling between them. Do not add a
+singleton, second store, generic updater API, or revision framework.
+
+Map current rows by the acknowledged target ID. Preserve row order and every
+nonmatching row. Spread the matching current row, then apply exactly the
+existing projection: `name`, nullable `default_executor_id`,
+`default_environment_id`, `default_agent_profile_id`,
+`acp_idle_suspension_enabled`, and `acp_idle_timeout_minutes`. Keep existing
+null coalescing on the three default IDs. Do not spread the entire response over
+the catalogue row: that would widen ownership to description, scopes, owner,
+unit, configuration default, and timestamps. A map cannot insert an absent
+row; this does not define target-deletion lifecycle or navigation behavior.
+
+Keep `setCurrentWorkspace`'s existing functional response merge and
+`setSavedState`'s existing accepted-response/draft fallbacks in their existing
+success path. Keep local drafts, contributor IDs/revisions, no-dirty return,
+error toast/rethrow, permissions, validation, and navigation intact. Do not
+change `buildWorkspaceUpdates`, API payload, backend routes, schemas, store
+slice, WS handlers, picker markup, or response/event types. Same-target settings
+revision arbitration remains excluded; accepted projected fields keep their
+existing behavior even if another target update arrives during PATCH.
+
+`setWorkspaces` updates items and retains non-null active identity; it does not
+reset `activeIdRevision`. Tests must observe the identity and revision current
+at publication, including an intervening real `setActiveWorkspace` action. Do
+not invent selection behavior for an empty/missing target catalogue.
+
+## Client compatibility inventory
+
+Read-only audit at the qualified source baseline:
+
+| Consumer | Existing behavior and disposition |
+| --- | --- |
+| `workspace-edit-save.ts` / immediate `workspace-edit-client.tsx` caller | Sole production changes; current-store read on accepted Save |
+| `buildWorkspaceUpdates` / `updateWorkspaceAction` | Optional changed fields and real PATCH stay unchanged |
+| `SettingsSaveProvider` / navigation guard | Submitted revisions, error state, newer edits, and route protection remain consumer contracts |
+| Registered `workspace.created/updated/deleted` | Real current-store writers retained; integration stimuli, no handler edits |
+| `AppSidebarWorkspacePicker` / `navigation/app-nav-sheet.tsx` | Desktop/shared phone consumers of current catalogue; unchanged choices/selection composition |
+| `useWorkspaceDeleteDraft` in the immediate caller | Captured filter remains read-only; no causal qualification or delete-route claim in this package |
+| `workspaces-page-client.tsx` creation | Captured prepend observed read-only; separate route not admitted by this proof |
+| `WorkspacePlacementCard` / `placeWorkspace` | Immediate named move with its own API, local draft/rollback; no settings coordinator migration |
+| Office `buildSaveAppearanceHandler` and `ConfigChatAgentSection` | Already read owning current store after await; do not remigrate corrected callers |
+| Configuration Chat `saveDefaultConfigProfile` / `useUpdateWorkspaceInStore` | Existing best-effort partial default save with current-store updater; read-only, no change |
+| Backend partial settings, exact administration, full writes, placement writers | Existing requirement-001 inventory and contracts remain unchanged |
+
+The bounded inventory was repeated after implementation release with no scope
+expansion. A similar captured array alone supplies no authority to expand
+production ownership.
+Checkpoint an unexpected caller or required boundary change with ROOT.
+
+## Independent client verification, mobile, and documentation
+
+Use one independently authored permanent
+`app/settings/workspace/workspace-edit-save.integration.test.tsx`, optionally
+with a colocated `.test-helpers.tsx` for fixture size. Mount the real Page,
+StateProvider/createAppStore, real routing, ToastProvider, TooltipProvider,
+SettingsSaveProvider, and AppSidebarWorkspacePicker. Drive the actual Name and
+settings controls and coordinator, real API action/useRequest, and registered
+workspace notification handlers. Only external fetch/WS delivery is simulated;
+no product component, store, coordinator, router, action, or UI primitive mocks.
+A small observer may expose the real owning store/coordinator without replacing
+production behavior. Strict transport routing must reject unexpected requests.
+
+The work order names the criterion-to-case matrix and exact commands. Addition,
+update, and removal overlaps require independent causal failing evidence before
+production edits. Observe current-store values and actual rendered switcher rows
+both before and after resolving the held PATCH; assert the accepted target too.
+Use independent metadata/selection, unchanged success, pristine, rejection/newer
+edit, accepted/newer edit, and payload-presence controls. No protected ROOT proof
+source is read, copied, imported, or replayed. Additional claims require their
+own causal coverage rather than a broadened assertion on an unrelated route.
+
+Mobile parity uses the skill's pure state/data exception: unchanged JSX,
+composition, copy, touch targets, scrolling, navigation, and breakpoints share
+this publication path. The shipped phone `AppNavSheet` uses the real picker.
+Targeted real component/provider evidence satisfies this bounded repair; no new
+Playwright case, UI preview, screenshot, or product build is planned. Any rendered
+or navigation change invalidates this assessment and requires a ROOT checkpoint.
+
+Public procedures remain accurate: workspace defaults in
+`docs/public/tasks-and-workflows.md`, placement in `docs/public/team-access.md`,
+and the README/screenshot catalogue need no new operation, label, API, or image.
+Internal contracts and the four-file package describe the repair. The implemented diff retains
+this assessment; no public documentation edit or new ADR is needed for the local
+current-store idiom.
 
 ## Related contracts and decisions
 

@@ -3,6 +3,7 @@ import {
   expectCompositorMotionPaused,
   expectCompositorPulse,
 } from "../../helpers/animation-assertions";
+import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 
 test("keeps the busy task composer glow animated until the turn settles", async ({
@@ -27,7 +28,9 @@ test("keeps the busy task composer glow animated until the turn settles", async 
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
 
+  if (!task.session_id) throw new Error("expected an active session for the animation test");
   await session.sendMessage("/slow 8s");
+  await waitForActiveSessionForegroundActivity(testPage, "generating", task.session_id);
   const glow = session.activeChat().getByTestId("chat-input-glow");
   await expectCompositorPulse(glow);
 

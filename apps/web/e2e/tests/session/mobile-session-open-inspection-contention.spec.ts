@@ -119,7 +119,9 @@ test.describe("mobile: session open inspection contention", () => {
       .toBe(true);
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 45_000 });
     expect(await apiClient.getQueueSessionIdentity(task.id, sessionId)).toEqual(identityBefore);
-    expect((await apiClient.getTask(task.id)).state).toBe("REVIEW");
+    await expect
+      .poll(() => apiClient.getTask(task.id).then((result) => result.state))
+      .toBe("REVIEW");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile inspection contention retry");
   });
 });

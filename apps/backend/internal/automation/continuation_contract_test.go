@@ -8,6 +8,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type deferredDispatchError struct{}
+
+func (deferredDispatchError) Error() string { return "session recovery required" }
+
+func (deferredDispatchError) DispatchDeferred() string { return "native_session_unavailable" }
+
 func TestAutomationSchemaIncludesContinuationAndRunBindingColumns(t *testing.T) {
 	store := setupTestStore(t)
 
@@ -350,4 +356,26 @@ func TestDispatchRunBindsExactIdentityAndRejectsStoppedAdmission(t *testing.T) {
 	})
 	require.ErrorIs(t, err, ErrAutomationRunNotDispatchable)
 	require.False(t, called)
+}
+
+func TestDispatchRunLeavesDeferredRecoveryOpen(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-1", Name: "deferred", Enabled: true, MaxConcurrentRuns: 1}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	run := &AutomationRun{AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTriggered}
+	require.NoError(t, svc.store.CreateRun(ctx, run))
+
+	called := false
+	err := svc.DispatchRun(ctx, run.ID, ThreadActionCreated, "created", func() (RunDispatch, error) {
+		called = true
+		return RunDispatch{}, deferredDispatchError{}
+	})
+
+	require.True(t, called)
+	require.ErrorIs(t, err, deferredDispatchError{})
+	got, getErr := svc.store.GetRun(ctx, run.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, RunStatusTriggered, got.Status)
+	require.Empty(t, got.TaskID)
 }

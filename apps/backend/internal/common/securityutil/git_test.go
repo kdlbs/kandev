@@ -2,6 +2,25 @@ package securityutil
 
 import "testing"
 
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.12
+func TestIsKnownSafeGitFlagAllowsSubmoduleShort(t *testing.T) {
+	if !IsKnownSafeGitFlag("--submodule=short") {
+		t.Fatal("the short gitlink comparison flag must be allowed")
+	}
+}
+
+func TestIsKnownSafeGitFlagRejectsSubmoduleVariants(t *testing.T) {
+	for _, flag := range []string{
+		"--submodule", "--submod", "--submodule=", "--submodule=log", "--submodule=diff",
+		"--submodule=other", "--submodule=short-extra", "--submodules=short",
+		" --submodule=short", "--submodule=short ", "--submodule=short\t", "--submodule=short\n",
+	} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Errorf("unsupported submodule flag %q admitted", flag)
+		}
+	}
+}
+
 // @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.47
 func TestIsKnownSafeGitFlagDiscardStatus(t *testing.T) {
 	for _, flag := range []string{"-z", "--untracked-files=no"} {

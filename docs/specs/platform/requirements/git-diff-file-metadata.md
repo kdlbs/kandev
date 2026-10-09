@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-10-02
-updated: 2026-10-05
+updated: 2026-10-09
 owners:
   - kandev
 ---
@@ -26,6 +26,8 @@ Cumulative comparisons must retain built-in patch data when a user's Git setup
 selects an external diff helper.
 Commit and cumulative comparisons must also retain actual file bytes when
 repository attributes select a text converter, even if its output hides changes.
+Submodule display preferences must not hide or replace a parent repository's
+gitlink change in these comparisons.
 The [workspace status contract](workspace-git-status.md) separately owns live
 porcelain membership, staged/unstaged facets, and detail enrichment.
 
@@ -49,6 +51,8 @@ of arbitrary path and content bytes.
 - **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.9:** Cumulative comparison reads shall not execute configured or environment-selected external diff helpers and shall not change repository configuration, HEAD, refs, index, worktree state, or the caller's helper environment settings.
 - **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.10:** With repository attributes selecting a configured text converter, every commit and cumulative comparison shall return the same built-in patch data from actual file bytes, exact file membership, paths, statuses, line counts, and metadata as a comparison without that converter. This applies when converter output changes or suppresses the patch, to committed and dirty tracked changes, binary and empty-file changes, genuinely empty comparisons, and repository-selected and aggregate reads. Existing comparison bases, byte and file limits, truncation counts, and skip reasons shall retain their behavior.
 - **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.11:** Commit and cumulative comparison reads shall not execute selected text converters and shall not change repository configuration or attributes, HEAD, refs, index, or worktree content/state. Configured converters remain available to other Git operations under their existing contracts.
+- **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.12:** With default, short, log, or inline-diff submodule display preferences, commit and cumulative comparisons shall retain each changed parent gitlink's exact path, short gitlink patch with the old/new commit identities, status, and line counts. Forward and backward pointer updates, additions, and deletions shall remain inspectable; a gitlink-only commit shall not appear to have no changed files because of a display preference. Ordinary file changes, genuinely empty comparisons, and existing metadata and budgets shall retain their behavior.
+- **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.13:** Normalizing parent gitlink display shall preserve repository-selected isolation, aggregate repository-qualified identities, and separate initialized child comparisons against their parent-recorded anchors. It shall not mutate configuration, HEAD, refs, index, or worktree state, change comparison bases or API shapes, or alter existing Review suppression of a parent gitlink row when child file diffs are available.
 
 ## Cross-surface outcome
 
@@ -58,7 +62,7 @@ required. Provider-only history remains governed by its existing source contract
 
 ## Out of scope
 
-- Git invocation or flag-validation changes beyond per-comparison display-color suppression, built-in cumulative patch selection, and text-conversion suppression for commit and cumulative patches; shared environment policy, history-provider, rename-detection, other readers' text conversion, or comparison-base changes.
+- Git invocation or flag-validation changes beyond per-comparison display-color suppression, built-in cumulative patch selection, text-conversion suppression, and short parent gitlink display for commit and cumulative patches; shared environment policy, history-provider, rename-detection, other readers' display or text conversion, or comparison-base changes.
 - Live workspace porcelain parsing, NUL numstat parsing, literal path selection, and worktree mutations.
 - Frontend layout, file-navigation changes, new status enums, or transport schemas.
 
@@ -69,3 +73,4 @@ required. Provider-only history remains governed by its existing source contract
 - [Plain comparison output repair package](../../../plans/git-comparison-plain-output/plan.md)
 - [Built-in cumulative patch repair package](../../../plans/git-cumulative-built-in-patch/plan.md)
 - [Actual-byte comparison patch repair package](../../../plans/git-comparison-textconv/plan.md)
+- [Submodule comparison format repair package](../../../plans/git-submodule-comparison-format/plan.md)

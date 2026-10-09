@@ -117,6 +117,32 @@ The recovery card places the recommended action first and shows every available 
 
 Failures during task or workspace preparation appear as one task error strip below the task header and above the session and Plan tabs. The strip remains visible when you switch sessions or tabs and disappears only after task recovery succeeds. Select **Show details** to open the available guarded actions in a desktop dialog or phone drawer.
 
+If Kandev cannot prove that the native conversation is available, it keeps the
+session blocked and shows **Continue from saved context** when that action is
+safe. This action starts a new native conversation from bounded Kandev history.
+It does not restore private harness state, running tools, or old provider paths.
+Kandev does not resend a prompt when its outcome is uncertain. Resolve the
+recovery notice before sending new work.
+
+When a compatible agentctl process survives a backend restart, Kandev first
+checks its delivery identity and durable cursor, then replays committed events
+before it accepts new work. This delivery recovery is automatic and separate
+from the executor setting that controls whether the agent process survives.
+If the delivery evidence is missing or inconsistent, Kandev keeps the session
+blocked and preserves Stop and the available recovery action.
+
+If delivery is interrupted and the prompt outcome is uncertain, the recovery
+card shows **Retry connection** and **Stop**. Retry connection reconnects the
+original stream and replays committed output from its durable cursor. It does
+not resend the prompt or start a replacement conversation. Legacy streams use
+bounded intake and can show the same uncertain state when their missing output
+cannot be replayed.
+
+Kandev can replace the local agent runtime while the backend and browser
+connection stay active. This restores runtime service only. A session with an
+uncertain prompt outcome remains blocked until you resolve its recovery card.
+Runtime recovery does not resend that prompt or resolve its external effects.
+
 Stopping a turn does not itself run the next queued message. If pending rows remain, Kandev sets their session's **Auto-run** switch to OFF. Expand the queue and turn Auto-run ON when you want FIFO processing to continue.
 
 The expanded queue also lets you pause or discard stale work. Its compact header places the **Auto-run** and **Auto-merge** pills beside the queue count. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
@@ -474,7 +500,13 @@ Reviewed state is stored per session. Kandev also stores the diff hash: if the f
 
 **Whole-file feedback:** Select **Comment on file** in a file header, or in its file actions menu on a phone. Add feedback without selecting lines, including for deleted, renamed, or non-text files. Saved comments appear above the diff, where you can edit or delete them. File comments join line comments in **Fix comments** and the chat composer.
 
-Pending line and file comments are scoped to the current review session but persist only in that browser's `sessionStorage`; they are not synced to the backend or another browser. Select **Fix comments** to send the accumulated file, line, source, and comment context to the agent and close the review dialog. If the agent is busy, normal session queuing applies. The UI clears pending comments immediately after starting the fire-and-forget send; if that request later fails, it shows an error but does not restore them. Copy important feedback before sending. Reopen the current diff before sending old feedback: a valid line number can still refer to different code after a rewrite.
+Pending line and file comments are scoped to the current review session but persist only in that browser's `sessionStorage`; they are not synced to the backend or another browser. Select **Fix comments** to send the accumulated file, line, source, and comment context to the agent. If the agent is busy, normal session queuing applies.
+
+While delivery is pending, **Fix comments** is disabled and your notes remain available. After acknowledgement, Kandev removes only unchanged submitted notes and closes Review if no pending review notes remain. Notes you edit or add while waiting stay available for your next send.
+
+If sending fails or the connection is unavailable, Kandev shows an error and preserves your notes so you can retry. A connection error or timeout can leave delivery uncertain; Kandev does not resend automatically. Inspect the conversation before resending to see whether your feedback already arrived.
+
+You can still close Review while waiting. Reopen the current diff before sending old feedback: a valid line number can still refer to different code after a rewrite.
 
 ## Generate a walkthrough
 
@@ -588,6 +620,7 @@ Before moving a task to done:
 - **New Agent has no profiles:** create a profile compatible with the task executor. A profile for another executor is intentionally hidden.
 - **Summary or generated text fails:** configure the corresponding utility agent with an enabled ACP profile in **Settings > Utility Agents**. Repair any stale or disabled profile binding before retrying.
 - **Resume fails:** start fresh when the executor no longer has resumable session state, then supply a summary or copy the relevant context.
+- **Delivery outcome is uncertain:** use **Retry connection** on the session card. It reconnects to the accepted work and does not send the prompt again. A Stop request can remain unconfirmed while the original process is unreachable, so wait for Kandev to receive terminal evidence before sending the same work again.
 - **A peer message never arrives:** check the target session state and ID. Running sessions queue messages; failed or cancelled sessions reject them. Expand the queue chip and check Auto-run: turn it ON for normal FIFO processing, use a row's Send Now for targeted priority, or remove stale work. For a full queue, remove or clear pending rows before retrying; an admin can also review the install-wide limit under **Settings > Preferences > Task Behavior > Runtime**.
 - **Changes is empty:** select the correct repository and comparison, then confirm the agent wrote inside the materialized task path.
 - **Review marks became stale:** the underlying diff changed. Re-review the new hash before marking the file complete.

@@ -39,7 +39,7 @@ test.describe("Changes panel Git refresh recovery", () => {
       },
     );
     if (!task.session_id) throw new Error("The Git loading task should have a session identity");
-    const bridge = await routeGitStatusRefresh(testPage);
+    const bridge = await routeGitStatusRefresh(testPage, { holdReadyNotifications: true });
     bridge.holdFreshGitRefreshRequests();
 
     try {
@@ -70,6 +70,7 @@ test.describe("Changes panel Git refresh recovery", () => {
 
       const priorFreshResponses = bridge.responseCount("fresh");
       gate.release();
+      bridge.releaseReadyGitStatusNotifications();
       bridge.releaseFreshGitRefreshRequests();
       const response = await bridge.waitForResponse("fresh", priorFreshResponses);
       expect(response.success).toBe(true);
@@ -81,6 +82,7 @@ test.describe("Changes panel Git refresh recovery", () => {
       });
     } finally {
       gate.dispose();
+      bridge.releaseReadyGitStatusNotifications();
       bridge.releaseFreshGitRefreshRequests();
     }
   });

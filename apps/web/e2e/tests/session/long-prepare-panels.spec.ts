@@ -13,6 +13,14 @@ import { dwell } from "../../helpers/causal-waits";
  * repository.
  */
 test.describe("Long prepare (slow git fetch)", () => {
+  test.afterEach(async ({ backend }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    await testInfo.attach("long-prepare-backend.log", {
+      path: backend.logPath,
+      contentType: "text/plain",
+    });
+  });
+
   test("file tree and terminal keep waiting and recover when fetch completes", async ({
     testPage,
     apiClient,
@@ -33,9 +41,11 @@ test.describe("Long prepare (slow git fetch)", () => {
     );
     expect(repositoryResponse.ok).toBeTruthy();
     const repository = (await repositoryResponse.json()) as { pull_before_worktree?: boolean };
-    fs.writeFileSync(gateFile, JSON.stringify({ startedFile, releaseFile, subcommand: "fetch" }));
 
     try {
+      // The worker repository is shared across specs. Fetch must be enabled
+      // explicitly so earlier repository edits cannot bypass this gate.
+      fs.writeFileSync(gateFile, JSON.stringify({ startedFile, releaseFile, subcommand: "fetch" }));
       await apiClient.updateRepository(seedData.repositoryId, { pull_before_worktree: true });
       // Force the worktree executor path; otherwise the task resolves with an
       // empty executor_type and runEnvironmentPreparer short-circuits, meaning
@@ -85,15 +95,20 @@ test.describe("Long prepare (slow git fetch)", () => {
       fs.writeFileSync(releaseFile, "release");
       await expect(fileTreeWaiting).toBeHidden({ timeout: 30_000 });
       await expect(fileTreeManual).toHaveCount(0);
+      await session.clickTab("Files");
+      await expect(testPage.getByTestId("file-tree-node").first()).toBeVisible({ timeout: 30_000 });
     } finally {
       // Always release Git before removing the gate, including failed tests.
       fs.writeFileSync(releaseFile, "release");
-      if (fs.existsSync(gateFile)) fs.unlinkSync(gateFile);
-      // Keep the unique release flag until worker cleanup so a held Git process
-      // cannot miss it between polling intervals.
-      await apiClient.updateRepository(seedData.repositoryId, {
-        pull_before_worktree: repository.pull_before_worktree ?? false,
-      });
+      try {
+        await apiClient.updateRepository(seedData.repositoryId, {
+          pull_before_worktree: repository.pull_before_worktree === true,
+        });
+      } finally {
+        if (fs.existsSync(gateFile)) fs.unlinkSync(gateFile);
+        // Keep the unique release flag until worker cleanup so a held Git process
+        // cannot miss it between polling intervals.
+      }
     }
   });
 });

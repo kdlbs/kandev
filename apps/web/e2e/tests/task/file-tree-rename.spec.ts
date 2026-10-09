@@ -10,11 +10,9 @@ import { dwell, watchWs } from "../../helpers/causal-waits";
 // Inline rename lives in file-context-menu.tsx (useFileRename + TreeNodeName).
 // Entry points (today, in product code):
 //   - Right-click -> "Rename" menu item
-//   - The input is focused immediately after isRenaming=true, while blur-commit is
-//     gated by a 400ms ref so the initial focus handoff does not fire onBlur.
+//   - The input is focused after rename mode mounts, and losing focus commits.
 // Commit on Enter, cancel on Escape, commit on blur.
-// We test the user-visible flow only (no direct DOM hacks), so the 400ms
-// blur gate is exercised implicitly.
+// We test the user-visible flow only (no direct DOM hacks).
 
 async function setupTask(args: {
   testPage: Page;
@@ -100,6 +98,8 @@ test.describe("File tree inline rename", () => {
       requiredPath: "rename-me.ts",
     });
 
+    // Root rows are virtualized. Reveal this file through the tree's bounded
+    // scroll helper before opening its context menu.
     const node = await session.fileTree.waitForFileTreeNode("rename-me.ts");
 
     const input = await startRenameViaContextMenu(testPage, node);

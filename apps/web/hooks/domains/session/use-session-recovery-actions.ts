@@ -8,6 +8,7 @@ import type { TaskSession } from "@/lib/types/http";
 import {
   asRecoveryError,
   branchRecoveryDetails,
+  contextContinuationDetails,
   getWorkspaceRecoveryStatus,
   managedCloneRelocationRecoveryDetails,
   recoveryInspectionBusyDetails,
@@ -17,12 +18,15 @@ import {
   sessionRecoveryGuardDetails,
   sessionRecoveryGuardMessage,
   type BranchRecoveryDetails,
+  type ContextContinuationDetails,
   type SessionRecoveryAction,
   type SessionRecoveryGuardDetails,
 } from "@/lib/services/session-recovery-service";
 import type { SessionRecoveryNoticeKind } from "./use-session-resumption";
 import {
   useRecoveryOperationFence,
+  isOlderWorkspaceRecoveryProjection,
+  workspaceRecoveryMatchesFailure,
   type RecoveryOperation,
 } from "./session-recovery-operation-fence";
 
@@ -73,36 +77,6 @@ type WorkspaceRecoveryStatusRead = {
   resolved: boolean;
   projection: import("@/lib/types/http").WorkspaceRecoveryProjection | null;
 };
-
-type WorkspaceRecoveryProjection = import("@/lib/types/http").WorkspaceRecoveryProjection;
-
-function compareDecimalIdentity(left: string, right: string): number | null {
-  if (!/^\d+$/.test(left) || !/^\d+$/.test(right)) return left === right ? 0 : null;
-  const normalizedLeft = left.replace(/^0+(?=\d)/, "");
-  const normalizedRight = right.replace(/^0+(?=\d)/, "");
-  if (normalizedLeft.length !== normalizedRight.length)
-    return normalizedLeft.length < normalizedRight.length ? -1 : 1;
-  if (normalizedLeft === normalizedRight) return 0;
-  return normalizedLeft < normalizedRight ? -1 : 1;
-}
-
-function isOlderWorkspaceRecoveryProjection(
-  incoming: WorkspaceRecoveryProjection,
-  current: WorkspaceRecoveryProjection | null,
-): boolean {
-  if (!current || incoming.environment_id !== current.environment_id) return false;
-  const generationOrder = compareDecimalIdentity(
-    incoming.ownership_generation,
-    current.ownership_generation,
-  );
-  if (generationOrder !== null && generationOrder !== 0) return generationOrder < 0;
-  if (incoming.ownership_generation !== current.ownership_generation) return true;
-  const revisionOrder = compareDecimalIdentity(incoming.revision, current.revision);
-  const sameAttempt =
-    incoming.operation_id === current.operation_id && incoming.attempt_id === current.attempt_id;
-  if (!sameAttempt) return revisionOrder === null || revisionOrder <= 0;
-  return revisionOrder !== null && revisionOrder < 0;
-}
 
 type RecoveryFailureAssociation = {
   managedClone: ReturnType<typeof managedCloneRelocationRecoveryDetails>;
@@ -243,6 +217,9 @@ export function useSessionRecoveryActions({
   const [restoreError, setRestoreError] = useState<Error | null>(null);
   const [branchDetails, setBranchDetails] = useState<BranchRecoveryDetails | null>(null);
   const [guardDetails, setGuardDetails] = useState<SessionRecoveryGuardDetails | null>(null);
+  const [continuationDetails, setContinuationDetails] = useState<ContextContinuationDetails | null>(
+    null,
+  );
   const [managedCloneRecoveryStamp, setManagedCloneRecoveryStamp] = useState<string | null>(null);
   const [lastFailedAction, setLastFailedAction] = useState<SessionRecoveryAction | null>(null);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
@@ -261,6 +238,7 @@ export function useSessionRecoveryActions({
     setRestoreError(null);
     setBranchDetails(null);
     setGuardDetails(null);
+    setContinuationDetails(null);
     setManagedCloneRecoveryStamp(null);
     setLastFailedAction(null);
     setRecoveryNotice(null);
@@ -363,6 +341,7 @@ export function useSessionRecoveryActions({
       setRestoreError(null);
       setBranchDetails(guard ? null : branchRecoveryDetails(cause));
       setGuardDetails(guard);
+      setContinuationDetails(contextContinuationDetails(cause));
       setLastFailedAction(action);
       setRecoveryNotice(null);
       setRecoveryNoticeKind(null);
@@ -413,6 +392,7 @@ export function useSessionRecoveryActions({
     setRestoreError(null);
     setBranchDetails(null);
     setGuardDetails(null);
+    setContinuationDetails(null);
     setManagedCloneRecoveryStamp(null);
     setLastFailedAction(null);
     setRecoveryNotice(null);
@@ -506,6 +486,7 @@ export function useSessionRecoveryActions({
       setRestoreError(null);
       setBranchDetails(null);
       setGuardDetails(null);
+      setContinuationDetails(null);
       setManagedCloneRecoveryStamp(null);
       setLastFailedAction(null);
       setRecoveryNotice(t("task:resumeFailedWorkspaceReadOnly"));
@@ -574,13 +555,16 @@ export function useSessionRecoveryActions({
     return handleRecover(lastFailedAction ?? "resume");
   }, [handleRecover, lastFailedAction]);
 
-  const handleNewBranch = useCallback(() => {
-    return handleRecover("resume_new_branch");
-  }, [handleRecover]);
+  const handleNewBranch = useCallback(() => handleRecover("resume_new_branch"), [handleRecover]);
 
   const handleManagedCloneRelocation = useCallback(() => {
     return handleRecover("relocate_and_resume");
   }, [handleRecover]);
+
+  const handleContinueFromHistory = useCallback(
+    () => handleRecover("continue_from_history"),
+    [handleRecover],
+  );
 
   return {
     busyAction: sharedBusyAction ?? busyAction,
@@ -591,13 +575,12 @@ export function useSessionRecoveryActions({
       localResultIsCurrent,
       managedCloneRecoveryStamp,
     ),
+    continuationDetails: currentRecoveryValue(localResultIsCurrent, continuationDetails),
     workspaceRecovery,
-    workspaceRecoveryMatchesCurrentFailure: Boolean(
-      workspaceRecovery?.session_id === sessionId &&
-      errorStamp &&
-      workspaceRecovery.error_stamp === errorStamp &&
-      !workspaceRecovery.workspace_complete &&
-      !workspaceRecovery.agent_ready,
+    workspaceRecoveryMatchesCurrentFailure: workspaceRecoveryMatchesFailure(
+      workspaceRecovery,
+      sessionId,
+      errorStamp,
     ),
     workspaceRecoveryRepositoryName,
     workspaceRecoveryStatusCheck,
@@ -613,6 +596,7 @@ export function useSessionRecoveryActions({
     handleRetry,
     handleNewBranch,
     handleManagedCloneRelocation,
+    handleContinueFromHistory,
   };
 }
 

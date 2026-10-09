@@ -203,8 +203,8 @@ type AgentRunSummaryDTO struct {
 	// CommentID is set for runs triggered by a task comment so the
 	// frontend can deeplink the row to the originating comment.
 	CommentID string `json:"comment_id,omitempty"`
-	// RoutineID is set for runs triggered by a routine cron fire so
-	// the frontend can deeplink the row to the routine.
+	// RoutineID identifies the routine that triggered the run so the
+	// frontend can deeplink the row to the routine.
 	RoutineID   string `json:"routine_id,omitempty"`
 	RequestedAt string `json:"requested_at"`
 	ClaimedAt   string `json:"claimed_at,omitempty"`

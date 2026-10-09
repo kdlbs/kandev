@@ -5,11 +5,72 @@ import (
 	"errors"
 	"testing"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 )
+
+type retainedDeliveryTestManager struct {
+	*durableDeliveryTestAgentManager
+	submissionID string
+	onSubmission func(context.Context, string)
+}
+
+func (m *retainedDeliveryTestManager) PromptAgentWithAdmissionCallbackAndSubmissionID(
+	ctx context.Context, executionID, prompt string, attachments []v1.MessageAttachment,
+	dispatchOnly bool, beforeAdmission func() error, onDispatched func(), submissionID string,
+) (*executor.PromptResult, error) {
+	m.submissionID = submissionID
+	m.onSubmission(ctx, submissionID)
+	return m.PromptAgentWithAdmissionCallback(ctx, executionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched)
+}
+
+func TestRetainedContinuationPersistsSubmissionBeforeDispatch(t *testing.T) {
+	svc, _, data := continuationFailureFixture(t)
+	t.Cleanup(svc.cancelAllTransientRetries)
+	base := installContinuationRestoreFixture(t, svc)
+	base.currentPromptExecutionID = "execution-1"
+	repo := svc.repo.(*sqliterepo.Repository)
+	mgr := &retainedDeliveryTestManager{
+		durableDeliveryTestAgentManager: &durableDeliveryTestAgentManager{
+			mockAgentManager: base, advertised: true,
+			capability: agentruntime.DurableDeliveryCapability{Version: journal.CurrentVersion, Durable: true},
+		},
+		onSubmission: func(ctx context.Context, id string) {
+			stored, err := repo.GetAgentDeliverySubmission(ctx, id)
+			require.NoError(t, err)
+			require.Equal(t, "s1", stored.SessionID)
+			require.Equal(t, models.DeliverySubmissionDispatching, stored.State)
+		},
+	}
+	svc.agentManager = mgr
+	svc.executor = executor.NewExecutor(mgr, repo, testLogger(), executor.ExecutorConfig{})
+	require.NoError(t, repo.UpsertExecutorRunning(context.Background(), &models.ExecutorRunning{
+		ID: "runtime-original", TaskID: "t1", SessionID: "s1", AgentExecutionID: "execution-1", Status: "ready",
+	}))
+	data.AgentProfileID = "profile-1"
+	data.PromptFailureDisposition = streams.PromptFailureDispositionRetainRuntime
+	require.True(t, svc.handleTransientFailure(context.Background(), data))
+	value, ok := svc.transientRetries.Load("s1")
+	require.True(t, ok)
+	entry := value.(*transientRetryEntry)
+	t.Cleanup(entry.cancel)
+	require.True(t, entry.claim())
+	svc.retryTransientPrompt(entry.retryCtx, "t1", "s1", "execution-1")
+
+	require.Contains(t, mgr.submissionID, "prompt:continuation:")
+	stored, err := repo.GetAgentDeliverySubmission(context.Background(), mgr.submissionID)
+	require.NoError(t, err)
+	require.Equal(t, models.DeliverySubmissionDispatching, stored.State,
+		"dispatch acceptance must wait for the durable terminal event before settlement")
+	require.Len(t, base.capturedPromptCalls, 1)
+	require.True(t, base.capturedPromptCalls[0].DispatchOnly)
+}
 
 func TestContinuationUsesRetainedRuntime(t *testing.T) {
 	svc, _, data := continuationFailureFixture(t)
@@ -69,6 +130,36 @@ func TestRetainedContinuationQueuedUserWorkWins(t *testing.T) {
 	require.Empty(t, mgr.stopAgentWithReasonArgs)
 	require.Empty(t, mgr.stopAgentArgs)
 	require.Empty(t, mgr.capturedPromptCalls, "the automatic continuation must yield to queued human work")
+}
+
+func TestRetainedContinuationCancellationPersistsWaitingState(t *testing.T) {
+	svc, _, data := continuationFailureFixture(t)
+	mgr := installContinuationRestoreFixture(t, svc)
+	mgr.currentPromptExecutionID = "execution-1"
+	require.NoError(t, svc.repo.UpsertExecutorRunning(context.Background(), &models.ExecutorRunning{
+		ID: "runtime-original", TaskID: "t1", SessionID: "s1", AgentExecutionID: "execution-1", Status: "ready",
+	}))
+	data.AgentProfileID = "profile-1"
+	data.PromptFailureDisposition = streams.PromptFailureDispositionRetainRuntime
+	require.True(t, svc.handleTransientFailure(context.Background(), data))
+	value, ok := svc.transientRetries.Load("s1")
+	require.True(t, ok)
+	entry := value.(*transientRetryEntry)
+	t.Cleanup(entry.cancel)
+	require.True(t, entry.claim())
+	svc.retryTransientPrompt(entry.retryCtx, "t1", "s1", "execution-1")
+	session, err := svc.repo.GetTaskSession(context.Background(), "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateRunning, session.State)
+
+	require.True(t, svc.CancelTransientRetry(context.Background(), "t1", "s1"))
+	session, err = svc.repo.GetTaskSession(context.Background(), "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+	require.Equal(t, "provider-session", session.DownstreamACPSessionID)
+	require.Equal(t, int32(1), mgr.cancelAgentCalls.Load())
+	require.Empty(t, mgr.stopAgentArgs)
+	require.Empty(t, mgr.stopAgentWithReasonArgs)
 }
 
 func TestContinuationCancellationSettlesWithoutWorkflowCompletion(t *testing.T) {

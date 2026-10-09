@@ -113,6 +113,12 @@ func (r *Repository) readSidebarTaskPage(
 		return nil, err
 	}
 	pageRows := pageResult.rows
+	if err := loadSidebarPageQueuePositions(ctx, tx, r, pageRows); err != nil {
+		return nil, err
+	}
+	if err := snapshot.checkpoint("queue"); err != nil {
+		return nil, err
+	}
 	totalTasks, totalVisible, totalGroups, page := pageResult.totalTasks, pageResult.totalVisible, pageResult.totalGroups, pageResult.page
 	if !pageResult.hasSummary {
 		summarySQL := baseSQL + pageCTEs + ` SELECT total_tasks, total_visible_tasks, total_groups FROM page_summary`

@@ -21,6 +21,9 @@ func (s *Service) queueAndDrainLifecyclePrompt(
 	if s.messageQueue == nil {
 		return "", fmt.Errorf("message queue is not configured")
 	}
+	if err := s.checkSessionRecoveryBlock(ctx, session.ID); err != nil {
+		return "", err
+	}
 	identity, err := s.resolveQueueIdentityForSession(ctx, session)
 	if err != nil || identity.TaskID != taskID {
 		if err != nil {

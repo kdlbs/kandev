@@ -202,3 +202,93 @@ Completed in the primary session. Retained provider failures render as truthful 
   ```
 - Backend build and frontend pseudo-locale QA build passed during implementation.
 - Public documentation validation, documentation catalog/specification checks, the actual-change work-order coverage preflight, and `git diff --check` are recorded in the completed manifest.
+
+
+### Hosted continuation observation follow-up, 2026-10-06
+
+Run `37460626206`, shard 2 job `112264886182`, expected the five-second
+continuation countdown to remain in the same phase after a reload and another
+viewer loaded. Its attempts instead observed a completed continuation or the
+valid reconnecting phase. The initial countdown assertion remains. Each later
+viewer now observes either the persisted pending card or the exact completed
+continuation answer. The independent checks still require exactly two prompts,
+one completed side effect, one ACP initialization/new session, no load or resume,
+no retained failure entry, and the unchanged execution identity. No failure card
+is accepted as successful continuation. Product behavior and budgets are unchanged.
+
+- Managed desktop targeted run, three independent repetitions with retries disabled: all six scroll/continuation cases passed in 1.1 minutes.
+- Final full-suite and hosted receipts are recorded below when complete.
+
+- Final exact-source desktop check: `cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project chromium tests/session/transient-turn-runtime-continuity.spec.ts tests/chat/auto-scroll-toggle.spec.ts -- --retries 0 --trace=retain-on-failure`: all sixteen cases passed in 5.4 minutes, including native retry exhaustion and the positive held-tail observation. No retry was exercised. Full web ESLint, focused ESLint, and the web typecheck passed.
+
+### Initial-view timing and picker interaction repair
+
+The expanded no-retry desktop batch reproduced two fixture failures. The
+model-change case left the correctly persistent picker open and timed out
+before sending its follow-up. Closing it with Escape and asserting it hidden
+made the same-runtime case pass in 20.6 seconds, retaining all final native
+identity and prompt-count assertions.
+
+The initial completed-tools viewer also arrived after the five-second
+countdown ended. Its snapshot showed the valid running continuation card, not
+a failed continuation. The earlier observation repair above retained that
+initial countdown assumption; this follow-up supersedes it. Initial, reloaded
+and second viewers should all observe the persisted pending card or the exact
+completed answer. The final trace remains authoritative for two prompts, one
+original command, one completed side effect, one initialization/new session,
+no native load/resume, and unchanged execution identity. A temporary count of
+one prompt before viewer loading is not required after continuation has begun.
+Rebuilt verification passed all 12 cases across three independent repetitions,
+with retries disabled. No timeout, retry or production policy changed.
+
+
+`KANDEV_RUN_QUIET_DIR=/root/.cache/kandev-pr3598-quiet-owned E2E_DEBUG=1 E2E_PORT_OFFSET=0 GOMAXPROCS=4 scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --project chromium -- tests/session/transient-turn-runtime-continuity.spec.ts --retries=0 --repeat-each=3 --trace=retain-on-failure`
+passed 12 tests in 11.7 minutes after rebuilding backend, web assets and the
+fixture plugin. Each repetition preserved native identity and exact prompt
+and completed-effect counts. One earlier expanded run passed the cancellation
+and exhaustion body assertions but failed in its final backend restart. Its
+startup output was removed during worker cleanup; the cause is unconfirmed.
+The three debug repetitions retained startup output and did not reproduce it.
+Fresh hosted CI remains required; no failure or cleanup error was suppressed.
+
+
+### Phone continuation and cancellation timing follow-up
+
+A no-retry phone run reproduced the same expired-phase assumption in the
+second viewer after continuation had already completed. Desktop and phone now
+share the pending-card-or-exact-completed-answer observer. The initial viewer
+retains its original 30-second observation budget; later viewers retain the
+existing default budget. Three desktop completed-tools repetitions passed
+with retries disabled after extracting that observer. Native prompt, tool
+effect and runtime identity assertions remain unchanged. The independent
+phone cancellation case retains its 44-pixel touch-target and overflow checks.
+
+Another no-retry phone run reached cancellation after the first retry had
+already started because the fault preceded initial browser loading. The
+cancellation fixtures now open a simple native conversation, wait for the
+real composer, and submit the capacity fault through that composer. They
+require zero dispatched retries and exactly two native prompts (the opening
+prompt and the deliberately failed prompt), with one initialization/new
+session and no load/resume. No artificial timer, transport gate, retry or
+production policy was introduced.
+
+
+Final no-retry phone integration check:
+`KANDEV_RUN_QUIET_DIR=/root/.cache/kandev-pr3598-quiet-owned E2E_PORT_OFFSET=0 GOMAXPROCS=4 scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome -- tests/task/mobile-threads-view.spec.ts tests/task/mobile-threads-swipe.spec.ts tests/task/mobile-create-task-workflow-agent-overrides.spec.ts tests/session/mobile-port-forwarding.spec.ts tests/pr/mobile-pr-watcher-missing-branch.spec.ts tests/task/mobile-launch-failure-recovery.spec.ts tests/session/mobile-transient-turn-runtime-continuity.spec.ts --retries=0 --trace=retain-on-failure`
+passed all 21 cases in 10.7 minutes. This covers the shared seed-origin fixture,
+phone cancellation before any retry dispatch, continuation across viewers,
+retry exhaustion, launch recovery, port actions and native thread navigation.
+Web typecheck, full web ESLint, all twelve changed TypeScript files' Prettier
+checks, and the five seed-origin/swipe unit regressions passed on this source.
+These results do not close manual release gates or substitute for pushed-head CI.
+
+
+Final desktop native-runtime check:
+`KANDEV_RUN_QUIET_DIR=/root/.cache/kandev-pr3598-quiet-owned E2E_PORT_OFFSET=0 GOMAXPROCS=4 scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --project chromium -- tests/session/transient-turn-runtime-continuity.spec.ts --retries=0 --trace=retain-on-failure`
+passed all four cases in 3.7 minutes after the shared observer and causal
+cancellation setup. Actual retry counts, exact native prompt counts, retained
+execution identity, completed-effect counts and backend restart cleanup passed.
+The earlier isolated cleanup startup failure remains unconfirmed; this result
+does not claim a production startup fix. Catalog/full spec lint and coverage
+preflight passed: 57 work orders against merged main, 65 against the recorded
+PR base, with zero coverage errors.
