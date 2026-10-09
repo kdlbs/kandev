@@ -1,3 +1,4 @@
+import { verifyInterruptedContinuation } from "../../helpers/interrupted-continuation";
 import { expect, test } from "../../fixtures/test-base";
 import {
   observeAgentRuntimeAvailability,
@@ -24,8 +25,10 @@ test.describe("Agent runtime replacement", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
+    backend,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(300_000);
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Agent runtime replacement keeps this task open",
@@ -81,5 +84,12 @@ test.describe("Agent runtime replacement", () => {
     ).toBeVisible({ timeout: 30_000 });
     await expect(session.chat.getByTestId("recovery-stop-button")).toBeEnabled();
     await expect(session.chat.getByText("Slow response complete", { exact: false })).toHaveCount(0);
+    if (!task.session_id) throw new Error("missing interrupted session");
+    await verifyInterruptedContinuation(testPage, apiClient, task.id, task.session_id, {
+      capture: prCapture,
+      viewport: "desktop",
+      seedData,
+      fixtureRoot: backend.tmpDir,
+    });
   });
 });

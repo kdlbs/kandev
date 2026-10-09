@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"time"
 )
 
@@ -12,23 +13,25 @@ const (
 	AgentDeliveryRecoveryUncertain    = "uncertain"
 	AgentDeliveryRecoveryRecovered    = "recovered"
 	AgentDeliveryRecoverySettled      = "settled"
+	AgentDeliveryRecoveryContinued    = "continued"
 )
 
 // AgentDeliveryRecovery is the persisted UI and admission snapshot for one
 // immutable prompt whose transport is being reconciled or whose outcome is
 // uncertain. Revision is assigned by the repository's compare-and-set write.
 type AgentDeliveryRecovery struct {
-	Phase             string    `json:"phase"`
-	Revision          int64     `json:"revision"`
-	SessionID         string    `json:"session_id"`
-	AgentExecutionID  string    `json:"agent_execution_id"`
-	SubmissionID      string    `json:"submission_id"`
-	StreamID          string    `json:"stream_id"`
-	IncarnationID     string    `json:"incarnation_id"`
-	HarnessGeneration int64     `json:"harness_generation"`
-	PromptGeneration  uint64    `json:"prompt_generation"`
-	Message           string    `json:"message,omitempty"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	OriginalRuntime   processidentity.Identity `json:"original_runtime,omitempty"`
+	Phase             string                   `json:"phase"`
+	Revision          int64                    `json:"revision"`
+	SessionID         string                   `json:"session_id"`
+	AgentExecutionID  string                   `json:"agent_execution_id"`
+	SubmissionID      string                   `json:"submission_id"`
+	StreamID          string                   `json:"stream_id"`
+	IncarnationID     string                   `json:"incarnation_id"`
+	HarnessGeneration int64                    `json:"harness_generation"`
+	PromptGeneration  uint64                   `json:"prompt_generation"`
+	Message           string                   `json:"message,omitempty"`
+	UpdatedAt         time.Time                `json:"updated_at"`
 }
 
 // LoadAgentDeliveryRecovery decodes the typed recovery view from session
@@ -136,3 +139,13 @@ const (
 	RecoveryBlockOpen     = "open"
 	RecoveryBlockResolved = "resolved"
 )
+
+// InterruptedContinuationCommit binds a verified native restore to its admitted instruction.
+type InterruptedContinuationCommit struct {
+	Recovery             AgentDeliveryRecovery
+	Generation           HarnessSessionGeneration
+	CandidateExecutionID string
+	BlockID              string
+	SnapshotID           string
+	ContentHash          string
+}

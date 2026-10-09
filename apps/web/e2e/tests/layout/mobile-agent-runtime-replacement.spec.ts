@@ -1,3 +1,4 @@
+import { verifyInterruptedContinuation } from "../../helpers/interrupted-continuation";
 import { expect, test } from "../../fixtures/test-base";
 import {
   observeAgentRuntimeAvailability,
@@ -25,8 +26,10 @@ test.describe("Mobile agent runtime replacement", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
+    backend,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(300_000);
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile agent runtime replacement keeps this task open",
@@ -75,5 +78,12 @@ test.describe("Mobile agent runtime replacement", () => {
     const stopBox = await stop.boundingBox();
     expect(stopBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     await assertNoDocumentHorizontalOverflow(testPage, "mobile runtime replacement");
+    if (!task.session_id) throw new Error("missing interrupted session");
+    await verifyInterruptedContinuation(testPage, apiClient, task.id, task.session_id, {
+      capture: prCapture,
+      viewport: "phone",
+      seedData,
+      fixtureRoot: backend.tmpDir,
+    });
   });
 });

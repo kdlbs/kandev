@@ -93,7 +93,7 @@ func (r *Repository) lockAgentDeliveryRecoveryOwnerTx(
 	sessionQuery := `SELECT COALESCE(er.agent_execution_id, ''), ts.queue_incarnation_id, ts.metadata
 		FROM task_sessions ts LEFT JOIN executors_running er ON er.session_id = ts.id WHERE ts.id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
-		sessionQuery += forUpdateClause
+		sessionQuery += " FOR UPDATE OF ts"
 	}
 	var executionID string
 	owner := &agentDeliveryRecoveryTxOwner{}
