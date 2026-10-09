@@ -123,3 +123,18 @@ The Linux smoke observed conflict launcher PID `2837251` and temporary GUI PIDs 
 Native macOS multi-window acceptance remains pending; this implementation host is Linux. Documentation validation results are recorded in [the implementation plan](plan.md#verification-results).
 
 PR fixup validation reran the desktop E2E smoke successfully with conflict launcher PID `3261479` and GUI PIDs `3262949` and `3267663`.
+
+CI remediation on 2026-10-07 fixed smoke-owned process-group shutdown before
+artifact removal. Two subprocess regressions failed against the previous helper:
+a backend still writing after its desktop parent exits, and an already-exited
+parent with a live backend. Cleanup now signals and drains the exact owned group,
+ignores exited zombies, and escalates a process that ignores graceful shutdown.
+This changes the test harness only; independent product window lifetimes remain
+unchanged.
+
+Validation: `node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs` passed
+28 tests, including the two shutdown regressions and forced termination.
+`cd apps && pnpm --filter @kandev/desktop e2e` rebuilt the desktop app and passed
+startup, release-shaped bundle, and two-window recovery/child-reaping checks.
+A prior direct invocation used a stale desktop binary and failed before health;
+it is superseded by the rebuilt smoke. Fresh hosted CI remains pending.

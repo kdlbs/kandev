@@ -58,6 +58,33 @@ func TestErrSessionWorkspaceNotReady_UnrelatedError(t *testing.T) {
 	}
 }
 
+func TestPrepareExecutionCreateRequestRetainsSessionJournalOwnership(t *testing.T) {
+	for _, sessionID := range []string{"session-1", ""} {
+		t.Run(sessionID, func(t *testing.T) {
+			mgr := newTestManager(t)
+			mgr.dataDir = t.TempDir()
+			prepared, err := mgr.prepareExecutionCreateRequest(context.Background(), "task-1", &WorkspaceInfo{
+				SessionID: sessionID, TaskEnvironmentID: "environment-1", AgentID: "auggie",
+				DeliveryIncarnationID: "incarnation-1", DeliveryHarnessGeneration: 3, DeliveryStreamID: "incarnation-1:g3",
+				ExecutorType: string(models.ExecutorTypeLocal), WorkspacePath: t.TempDir(),
+			}, "execution-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner := sessionID
+			if owner == "" {
+				owner = "environment-1"
+			}
+			if prepared.request.DurableJournalHostRoot != mgr.dataDir || prepared.request.DurableJournalOwnerID != owner {
+				t.Fatalf("restored journal root/owner = %q/%q, want %q/%q", prepared.request.DurableJournalHostRoot, prepared.request.DurableJournalOwnerID, mgr.dataDir, owner)
+			}
+			if prepared.request.DeliveryIncarnationID != "incarnation-1" || prepared.request.DeliveryHarnessGeneration != 3 || prepared.request.DeliveryStreamID != "incarnation-1:g3" {
+				t.Fatalf("workspace restore lost durable delivery identity: %+v", prepared.request)
+			}
+		})
+	}
+}
+
 func TestPrepareExecutionCreateRequest_ReuseRequiredDockerUsesEnvironmentControlToken(t *testing.T) {
 	mgr := newTestManager(t)
 	store := newInMemorySecretStore()

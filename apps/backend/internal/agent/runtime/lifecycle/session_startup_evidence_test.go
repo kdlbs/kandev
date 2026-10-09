@@ -63,7 +63,7 @@ func TestInitializeFailurePhase(t *testing.T) {
 				},
 			}
 			_, err := sessionManager.InitializeSession(
-				context.Background(), client, agentConfig, tt.existingSession, "/workspace", nil,
+				context.Background(), nil, client, agentConfig, tt.existingSession, "/workspace", nil,
 			)
 			if err == nil {
 				t.Fatal("expected injected failure")

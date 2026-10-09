@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "../../fixtures/test-base";
 import { attachGatewayTrafficCapture, type GatewayTrafficFrame } from "../../helpers/ws-traffic";
 import { dwell } from "../../helpers/causal-waits";
+import { waitForSessionDone, waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 const RUNNING_WINDOW_MS = 12_000;
@@ -38,28 +39,44 @@ test.describe("running message backfill visibility", () => {
       "Hidden running backfill",
       seedData.agentProfileId,
       {
-        description: "/slow 60s",
+        description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
       },
     );
-    await expect
-      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions[0]?.state ?? null, {
-        timeout: 30_000,
-        message: "session did not start running",
-      })
-      .toBe("RUNNING");
-    const sessionId = (await apiClient.listTaskSessions(task.id)).sessions[0].id;
-
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+    const sessionId = task.session_id;
+    await waitForSessionDone(apiClient, task.id, sessionId, "Initial conversation turn settled");
     await testPage.goto(`/t/${task.id}`);
-    await new SessionPage(testPage).waitForLoad();
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(
+      session.chat.getByText("This is a simple mock response for e2e testing.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      session.chat.locator('[data-placeholder="Continue working on the task..."]'),
+    ).toBeVisible();
+    const editor = session.chat.locator(".tiptap.ProseMirror:visible").first();
+    await expect(editor).toBeEditable();
+    // Establish history before a quiet turn so startup and tool reads cannot
+    // be mistaken for ticks from the running backfill timer.
+    await editor.fill("/sleep 60");
+    await session.submitMessageWithKeyboard(editor);
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "RUNNING",
+      message: "Quiet turn did not start running",
+      timeout: 30_000,
+    });
+    const visibleBaseline = sentMessageListCount(capture.frames, sessionId);
     await expect
       .poll(() => sentMessageListCount(capture.frames, sessionId), {
         timeout: 15_000,
         message: "visible running session never refreshed its messages",
       })
-      .toBeGreaterThan(1);
+      .toBeGreaterThan(visibleBaseline);
 
     await setDocumentVisibility(testPage, "hidden");
     const hiddenBaseline = sentMessageListCount(capture.frames, sessionId);

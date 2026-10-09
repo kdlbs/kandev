@@ -41,6 +41,21 @@ func (f *fakePromptReferenceExpander) AppendReferenceExpansionsWithContext(
 		fakeResolvedPromptReferenceContext
 }
 
+func (f *fakePromptReferenceExpander) AppendReferenceExpansionsToTrustedContext(
+	_ context.Context,
+	prompt string,
+	trustedContext string,
+	_ *zap.Logger,
+) string {
+	if !strings.Contains(prompt, "@") {
+		return trustedContext
+	}
+	if trustedContext == "" {
+		return fakeResolvedPromptReferenceContext
+	}
+	return trustedContext + "\n\n" + fakeResolvedPromptReferenceContext
+}
+
 func TestBuildWorkflowPrompt_ReplacesTaskPromptPlaceholder(t *testing.T) {
 	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
 	step := &wfmodels.WorkflowStep{

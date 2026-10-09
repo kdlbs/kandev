@@ -667,7 +667,11 @@ func emitError(e *emitter, model string) {
 func emitCrash(e *emitter, model string) {
 	randomDelay(model)
 	e.text("Processing your request...")
-	randomDelay(model)
+	// SessionUpdate notifications are not acknowledged by ACP. Give the
+	// backend time to persist the final visible update before terminating the
+	// process, especially when the mock agent is running under a loaded E2E
+	// shard.
+	fixedDelay(500)
 	fmt.Fprintln(os.Stderr, "mock-agent: simulating crash (exit 1)")
 	os.Exit(1)
 }

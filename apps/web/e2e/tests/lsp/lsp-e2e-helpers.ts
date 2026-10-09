@@ -266,6 +266,14 @@ export async function readSessionModelSnapshots(
   }, fileName);
 }
 
+async function openDesktopFileSearch(session: SessionPage): Promise<"search" | false> {
+  const searchInput = session.fileSearchInput();
+  if (await searchInput.isVisible()) return "search";
+  if (!(await session.fileSearchButton().isVisible())) return false;
+  await session.fileSearchButton().click({ timeout: 2_000 });
+  return (await searchInput.isVisible()) ? "search" : false;
+}
+
 export async function openDesktopFile(
   page: Page,
   session: SessionPage,
@@ -304,13 +312,13 @@ export async function openDesktopFile(
           await session.clickTab("Files", { force: true });
           if (!(await session.files.isVisible())) return false;
           if (await session.fileSearchInput().isVisible()) {
-            await session.fileSearchInput().press("Escape");
-            return false;
+            openMode = "search";
+            return openMode;
           }
           for (let index = 1; index < pathSegments.length; index++) {
             const ancestor = session.fileTreeNode(pathSegments.slice(0, index).join("/"));
             if (!(await ancestor.isVisible())) {
-              openMode = (await session.fileSearchButton().isVisible()) ? "search" : false;
+              openMode = await openDesktopFileSearch(session);
               return openMode;
             }
             if ((await ancestor.locator(".tabler-icon-chevron-right").count()) > 0) {
@@ -322,7 +330,7 @@ export async function openDesktopFile(
             openMode = "tree";
             return openMode;
           }
-          openMode = (await session.fileSearchButton().isVisible()) ? "search" : false;
+          openMode = await openDesktopFileSearch(session);
           return openMode;
         } catch {
           openMode = false;
@@ -334,7 +342,6 @@ export async function openDesktopFile(
     .toBeTruthy();
 
   if (openMode === "search") {
-    await session.fileSearchButton().click();
     const searchInput = session.fileSearchInput();
     await expect(searchInput).toBeVisible({ timeout: 5_000 });
     // Search matches the repository-relative path, while the task tree path

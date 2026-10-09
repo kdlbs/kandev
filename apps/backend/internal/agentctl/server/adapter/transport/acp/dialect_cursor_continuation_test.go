@@ -11,13 +11,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-001.2
+func TestCursorContinuationEvidenceWithoutOptIn(t *testing.T) {
+	t.Setenv("KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION", "false")
+	a, turn := newCursorPromptTurn(t, 7)
+	a.capabilities.LoadSession = true
+	a.sessionID = "session-1"
+	var notification acpsdk.SessionNotification
+	require.NoError(t, json.Unmarshal([]byte(`{"sessionId":"session-1","update":{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed","rawInput":{"path":"fixture.txt"}}}`), &notification))
+	a.handleACPUpdate(notification, 7)
+
+	snapshot := a.continuationSafetySnapshot(turn)
+	require.NotNil(t, snapshot, "supported prompts collect evidence without an installation opt-in")
+	require.True(t, snapshot.SafeFor(7))
+	require.Equal(t, uint16(1), snapshot.CompletedTools)
+}
+
 // @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-001.1
 func TestCursorContinuationEvidenceTerminalOutput(t *testing.T) {
 	a, fake, conn := setupHandoffFakeAgent(t)
 	a.agentID = cursorAgentID
 	a.normalizer = NewNormalizer(cursorAgentID)
 	a.dialect = newACPDialect(cursorAgentID)
-	a.cfg.ProviderInterruptionContinuation = true
 	require.NoError(t, a.Initialize(t.Context()))
 	a.capabilities.LoadSession = true
 	_, err := a.NewSession(t.Context(), nil)
@@ -60,7 +75,6 @@ func TestCursorContinuationEvidenceRPCFailureRetiresAsyncCompletion(t *testing.T
 	a, fake, _ := setupHandoffFakeAgent(t)
 	a.agentID = mockAgentID
 	a.dialect = newACPDialect(mockAgentID)
-	a.cfg.ProviderInterruptionContinuation = true
 	fake.promptFailure = &acpsdk.RequestError{Code: -32603, Message: "peer disconnected before response", Data: map[string]any{"kandevMock": map[string]any{"continuationInterruption": true}}}
 	require.NoError(t, a.Initialize(t.Context()))
 	a.capabilities.LoadSession = true
@@ -119,7 +133,6 @@ func TestCursorContinuationEvidenceToolOutcomes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			a, turn := newCursorPromptTurn(t, 7)
-			a.cfg.ProviderInterruptionContinuation = true
 			a.capabilities.LoadSession = true
 			a.sessionID = "session-1"
 			for _, frame := range tc.frames {
@@ -151,7 +164,6 @@ func TestCursorContinuationEvidenceV1ReadOnlyWireSkew(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			a, turn := newCursorPromptTurn(t, 7)
 			a.dialect.continuationSupport = streams.ContinuationNativeSavedHistoryV1
-			a.cfg.ProviderInterruptionContinuation = true
 			a.capabilities.LoadSession = true
 			a.sessionID = "session-1"
 			for _, frame := range tc.frames {
@@ -171,7 +183,6 @@ func TestCursorContinuationEvidenceV1ReadOnlyWireSkew(t *testing.T) {
 // @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-001.2
 func TestCursorContinuationEvidenceBoundsAndFences(t *testing.T) {
 	a, turn := newCursorPromptTurn(t, 7)
-	a.cfg.ProviderInterruptionContinuation = true
 	a.capabilities.LoadSession = true
 	a.sessionID = "session-1"
 	require.True(t, a.continuationSafetySnapshot(turn).SafeFor(7))
@@ -187,16 +198,12 @@ func TestCursorContinuationEvidenceBoundsAndFences(t *testing.T) {
 	a.poisonContinuationSafety()
 	require.False(t, a.continuationSafetySnapshot(turn).SafeFor(7), "permission/background uncertainty stays unsafe")
 	require.True(t, snapshot.SafeFor(7), "published snapshot is immutable")
-	a.cfg.ProviderInterruptionContinuation = false
-	require.Nil(t, a.continuationSafetySnapshot(turn))
-	a.cfg.ProviderInterruptionContinuation = true
 	a.dialect = newACPDialect("other")
 	require.Nil(t, a.continuationSafetySnapshot(turn))
 }
 
 func TestCursorContinuationEvidenceOverflow(t *testing.T) {
 	a, turn := newCursorPromptTurn(t, 7)
-	a.cfg.ProviderInterruptionContinuation = true
 	a.capabilities.LoadSession = true
 	a.sessionID = "session-1"
 	for i := 0; i < 257; i++ {
@@ -209,7 +216,6 @@ func TestCursorContinuationEvidenceOverflow(t *testing.T) {
 
 func TestCursorContinuationEvidencePermissionSessionFence(t *testing.T) {
 	a, turn := newCursorPromptTurn(t, 7)
-	a.cfg.ProviderInterruptionContinuation = true
 	a.capabilities.LoadSession = true
 	a.sessionID = "current-session"
 	_, err := a.handlePermissionRequest(t.Context(), &PermissionRequest{SessionID: "predecessor-session", ToolCallID: "old-tool"})

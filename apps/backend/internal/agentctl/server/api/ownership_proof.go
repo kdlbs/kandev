@@ -2,10 +2,12 @@ package api
 
 import (
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/common/ownershipproof"
+	"github.com/kandev/kandev/internal/common/processidentity"
 )
 
 // ProveOwnership returns one proof per credential currently acceptable to
@@ -52,8 +54,12 @@ func (m *ControlServer) handleOwnershipProve(c *gin.Context) {
 // They are filesystem paths, so they are served here, behind authentication,
 // rather than on the unauthenticated identity endpoint.
 func (m *ControlServer) handleOwnershipDetails(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
+	details := gin.H{
 		"home_dir":            m.cfg.HomeDir,
 		"diagnostic_log_path": m.cfg.DiagnosticLogPath,
-	})
+	}
+	if identity, err := processidentity.Capture(os.Getpid()); err == nil {
+		details["process_identity"] = identity
+	}
+	c.JSON(http.StatusOK, details)
 }

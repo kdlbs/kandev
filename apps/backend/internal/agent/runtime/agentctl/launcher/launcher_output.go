@@ -35,11 +35,7 @@ func (l *Launcher) pipeOutput(name string, input io.Reader) {
 			discarding = true
 			record = record[:0]
 			if !warnedOversized {
-				l.logger.Warn(
-					"discarded oversized agentctl log record",
-					zap.String("stream", name),
-					zap.Int("limit_bytes", pipeOutputRecordLimitBytes),
-				)
+				l.logOversizedRecord(name)
 				warnedOversized = true
 			}
 		}
@@ -77,8 +73,22 @@ func (l *Launcher) pipeOutput(name string, input io.Reader) {
 	}
 }
 
+func (l *Launcher) logOversizedRecord(name string) {
+	if name == "stderr" {
+		l.captureDiagnostic("discarded oversized agentctl log record")
+	}
+	l.logger.Warn(
+		"discarded oversized agentctl log record",
+		zap.String("stream", name),
+		zap.Int("limit_bytes", pipeOutputRecordLimitBytes),
+	)
+}
+
 func (l *Launcher) forwardChildLogRecord(name string, record []byte) {
 	line := bytes.TrimSuffix(record, []byte{'\r'})
+	if name == "stderr" {
+		l.captureDiagnostic(string(line))
+	}
 	level, message := childLogRecord(string(line))
 	if level == "" {
 		if name == "stderr" {

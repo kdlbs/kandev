@@ -189,3 +189,16 @@ passed after those changes:
 - `(cd apps/web && pnpm run typecheck)`: passed.
 
 Final documentation validation and coverage results are recorded in the plan.
+
+
+### PR #3598 CI remediation, 2026-10-07
+
+The agent-only message witness exposed an incorrect ordering in the desktop
+test: it waited for the response while native resume was deliberately delayed,
+then expected STARTING. The test now checks startup and the single transition
+first, then observes the agent response after readiness. The unchanged test
+failed locally with retries disabled in the combined reproduction batch.
+`pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project chromium
+tests/session/session-resume-turn-start.spec.ts -- --retries=0 --repeat-each=3`
+passed all three runs after the repair. Identity, single-response, transition,
+and native boot-count assertions remain intact.

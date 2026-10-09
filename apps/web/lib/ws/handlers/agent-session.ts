@@ -23,6 +23,7 @@ import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fiel
 import { t } from "@/lib/i18n";
 import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
+import { sessionStateConfirmsAgentctlExecutionReady } from "@/lib/session-state";
 import {
   sanitizeWorkspaceRestorationDetails,
   type WorkspaceRestorationAttempt,
@@ -36,11 +37,6 @@ const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
   "CANCELLED",
   "FAILED",
 ]);
-
-// States that imply agentctl is up and processing (or has fully processed) input.
-// If we observe a session in one of these, agentctl must be ready even if we
-// missed the agentctl_ready WS event (e.g. it fired before our subscription).
-const AGENT_LIVE_STATES: ReadonlySet<TaskSessionState> = new Set(["RUNNING", "WAITING_FOR_INPUT"]);
 
 export function isTerminalSessionState(state: TaskSessionState | undefined): boolean {
   return !!state && TERMINAL_SESSION_STATES.has(state);
@@ -134,9 +130,19 @@ function maybePromoteAgentctlReady(
   newState: TaskSessionState | undefined,
   timestamp: string | undefined,
 ): void {
-  if (!newState || !AGENT_LIVE_STATES.has(newState)) return;
-  const current = store.getState().sessionAgentctl?.itemsBySessionId?.[sessionId];
-  if (current?.status === "ready") return;
+  const state = store.getState();
+  const current = state.sessionAgentctl?.itemsBySessionId?.[sessionId];
+  const session = state.taskSessions?.items?.[sessionId];
+  if (
+    !sessionStateConfirmsAgentctlExecutionReady(
+      newState,
+      session?.agent_execution_id,
+      current?.agentExecutionId,
+    )
+  ) {
+    return;
+  }
+  if (current?.status === "ready" && !current.startingExecutionId) return;
   store.getState().setSessionAgentctlStatus(sessionId, {
     status: "ready",
     agentExecutionId: current?.agentExecutionId,
@@ -927,8 +933,13 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
           .getState()
           .invalidateConfirmedConfigOptions(
             sessionId,
-            agentctl?.status === "starting" ? agentctl.agentExecutionId : undefined,
+            agentctl?.startingExecutionId ??
+              (agentctl?.status === "starting" ? agentctl.agentExecutionId : undefined),
           );
+        if (agentctl?.startingExecutionId) {
+          const { startingExecutionId: _startingExecutionId, ...status } = agentctl;
+          store.getState().setSessionAgentctlStatus(sessionId, status);
+        }
       }
 
       // A confirmed RUNNING transition clears the resume-skipped marker

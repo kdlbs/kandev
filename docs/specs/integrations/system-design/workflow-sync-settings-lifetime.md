@@ -2,29 +2,33 @@
 status: current
 system: integrations
 created: 2026-10-06
+updated: 2026-10-09
 requirements:
   - REQ-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002
+  - REQ-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003
 owners:
   - kandev
 ---
 
-# Workflow Sync Settings Lifetime
+# Workflow Sync Settings Lifetime and Save Drafts
 
 ## Purpose and ownership
 
 This bounded design extends the existing
 [workflow-sync owner](../requirements/gitlab-workflow-sync.md#req-integrations-gitlab-workflow-sync-002-settings-lifetime).
 Integrations owns the provider-aware settings outcome for both GitHub and GitLab.
-The existing requirement is a 12,841-byte combined migrated contract without a
-paired design. Extend its normative requirements and keep this new technical
-supplement limited to frontend lifetime; migrating provider/backend detail is
+The existing requirement is a combined migrated contract. Keep this technical
+supplement limited to frontend lifetime and Save draft acknowledgement;
+migrating provider/backend detail is
 outside this change. The integration README's boundary and migration record
 remain accurate. No duplicate incident requirement or reusable UI contract is
 introduced. The [authorization specification](../../tasks/requirements/workflow-sync-workspace-authz.md)
 continues to own authorization, with no changes here.
 
-The [plan](../../../plans/retire-workflow-sync-navigation/plan.md) records delivery
-and private evidence references. This local fix needs no ADR: this design
+The [lifetime plan](../../../plans/retire-workflow-sync-navigation/plan.md) records
+the earlier delivered scope. The new
+[Save draft plan](../../../plans/preserve-workflow-sync-save-drafts/plan.md)
+records the bounded extension and its independent evidence. This local fix needs no ADR: this design
 preserves its rationale without imposing a new framework or repository-wide
 ownership convention. [ADR 0021](../../../decisions/0021-go-served-spa-with-boot-state.md)
 remains the SPA boundary.
@@ -63,6 +67,12 @@ and preserve current first-save, provider-switch and removal dismissal.
 | .4 | Pending controls |
 | .5, .6, .8 | Settlement and compatibility |
 | .7 | Immediate dialog completion |
+
+REQ-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003 maps .1-.5 to
+[Save draft acknowledgement](#save-draft-acknowledgement), .6 to that section and
+[Immediate dialog completion](#immediate-dialog-completion), and .7 to
+[Responsive and documentation audit](#responsive-and-documentation-audit)
+and the unchanged operation boundaries below.
 
 ## Committed owner and admission
 
@@ -118,7 +128,7 @@ No new global ordering or writer revision is part of this design.
 | --- | --- | --- |
 | Initial GET | Config/form reset; initial error toast; loading finalizer | Suppress publication/finalizer |
 | Background GET | Config/status only, silent failure; no form reset | Suppress publication |
-| Save | Existing payload trim/provider shape; config/reset, success/error toast | Preserve admitted true/false; suppress presentation/finalizer |
+| Save | Existing payload trim/provider shape; canonical config, conditional draft adoption, success/error toast | Preserve admitted true/false; suppress presentation/finalizer |
 | Remove | Clear config/reset, toast, refresh; true/false | Preserve admitted true/false; suppress presentation/refresh |
 | Force sync | Config/reset, outcome toast; refresh for changed result; syncing finalizer | Preserve Promise<void> outcome; suppress presentation/refresh/finalizer |
 
@@ -128,9 +138,10 @@ the unchanged API. A resolved force response containing `error` remains an
 accepted HTTP outcome whose current toast reports that sync error. No mutation
 is re-targeted to the new workspace, undone, or described as cancelled.
 
-Preserve current same-workspace reset-on-save semantics, including edits made
-while saving. The accepted same-hook sentinel motivates lifetime checks; it
-does not justify adding draft arbitration. Preserve current happy/error cases,
+The earlier lifetime-only scope preserved reset-on-save even for pending edits.
+REQ-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003 now separately extends that one reset
+boundary through the local acknowledgement below; lifetime admission is not a
+draft revision or an ordering policy. Preserve current happy/error cases,
 provider payloads, parsing, background status-only refresh, and existing API
 return shapes. Use no global cache, transport abort, backend/DB/schema changes,
 global event ordering, feature toggle, new copy, or navigation redesign.
@@ -161,7 +172,69 @@ using the smallest controller-only addition if necessary; no API/outcome shape
 change is required. Updating `onOpenChange` within the same dialog must not
 allow an old closure to publish through a superseded callback. The current
 completion should use the committed callback. This is consumer glue for this
-contract, not a generic dialog refactor or a new draft-edit policy.
+contract, not a generic dialog refactor. The Save draft rule below adds a
+separate condition to successful save dismissal without changing removal.
+
+## Save draft acknowledgement
+
+The actual immediate consumer is `WorkflowSyncSection`, which creates one
+`useWorkflowSync(workspaceId)` controller and passes it to the keyed
+`WorkflowSyncDialog`. Production search finds no other controller/action caller
+and no Workflow Sync settings-save contributor. The hook currently owns
+structured form and displayed URL separately. Invalid URL edits change the URL
+without changing parsed form identifiers, so form-only or payload-only equality
+cannot satisfy the new contract. Save currently resets both at success, and the
+dialog closes on the truthful boolean, losing a newer draft twice.
+
+Use one immutable local draft containing the existing full `WorkflowSyncFormState`
+and raw displayed URL. Maintain a private latest-draft snapshot through admitted
+edit/reset operations, outside render and outside React functional updaters.
+Each operation computes its next draft purely, publishes the snapshot and
+React state together, and never mutates a captured submitted draft. This keeps
+multiple input edits in one batch visible to acknowledgement without relying on
+a stale render closure or a layout effect that has not yet run. Speculative
+renders do not update the snapshot. Lifetime guards still refuse retired input
+callbacks before they touch it; existing initial/load/Delete/Sync now resets
+update both members through the same private publication boundary.
+
+An admitted Save captures the full raw draft corresponding to its existing
+captured form/payload before dispatch; it does not switch a retained current
+callback to a newer payload. Preserve `savePayload` trimming and provider shape.
+At successful response settlement, first require the existing active lifetime.
+Always publish `setConfig(saved)` for that current owner and retain success
+feedback. Compare every raw field and URL against the latest local draft before
+canonical adoption. Use explicit scalar equality (including the numeric and
+boolean fields), not dirty-against-config or normalized-payload equality.
+If equal, reset the editable draft from the canonical server config. If unequal,
+retain the entire latest draft, including invalid URL and inactive-provider
+identifiers; do not merge canonical values into selected fields. Equality is a
+value rule: reverting to the old stored baseline differs from the submitted
+draft, whereas editing back to the exact submitted raw values permits adoption.
+
+Keep `handleSave()`'s `Promise<boolean>` shape and no-argument callers. The
+smallest consumer addition is an optional controller-local, read-only
+`onDraftAccepted` notification emitted only when that successful current
+acknowledgement admits canonical adoption, at the pre-reset boundary. The real
+dialog records that admission in the invocation's local flag, then closes only
+when the boolean is true, the flag was set, and the existing open/controller
+completion remains active. The notification is presentation glue; its handling
+must not convert an accepted transport success into false. Do not emit it for
+failure, retired settlement or a preserved draft. No API response changes,
+generic completion object, shared coordinator or revision counter is needed.
+
+Do not compare the dialog's post-await rendered draft with the original draft:
+normalization changes form/URL after successful adoption and would wrongly block
+ordinary closing. Do not reuse the removal target generation for Save: config
+publication, first Save and provider switching legitimately change it. Removal's
+private pre-reset callback and all existing pending/lifetime guards remain
+independent. Explicit close/reopen still suppresses dismissal; acknowledgement
+does not itself open anything. Failure leaves config and draft as before, emits
+the existing error and returns false. Subsequent Save uses the retained draft.
+
+This is a local technical choice whose rationale fits this existing design;
+it imposes no repo-wide convention and needs no ADR. Implementation may adjust
+private helper names after independent RED, but must preserve this complete raw
+comparison and pre-normalization admission boundary.
 
 ## Responsive and documentation audit
 
@@ -174,10 +247,20 @@ component transport-boundary tests exercise both existing branches, including
 phone failure/retry; no new mobile Playwright suite or ASCII layout is needed.
 This guards retirement-triggered reload without changing intended navigation.
 
+The Save draft extension uses the same state/data-only exception while component
+composition remains unchanged. New real Section/Dialog transport regressions
+exercise preservation and ordinary closing at 390/1024, with hook regressions
+for complete raw fields and truthful outcomes. No browser/build, geometry
+claim, ASCII redesign or new Playwright test is required for this boundary.
+
 Public-doc audit covers `docs/public/workflow-sync.md`, root README and
 `docs/screenshots.md`. The guide's configuration, Save, Sync now, removal,
 API, and polling instructions remain accurate. No new copy, screenshots,
 operator steps or public-guide edit is needed. Reaudit after implementation.
+
+The new acknowledgement also adds no operator procedure: the public how-to's
+Save-then-Sync-now guidance and stored-field/API reference remain correct. Keep
+draft preservation in this requirement/design; do not invent recovery steps.
 
 ## Causal verification boundary
 
@@ -194,3 +277,13 @@ closed/reopened dialog, old success/reject/finalizers, newest-current control
 ownership and every current happy/error/refresh control. The
 [single work order](../../../plans/retire-workflow-sync-navigation/task-01-retire-settings-completions.md)
 owns the exact matrix, commands and receipt discipline.
+
+For the new Save draft contract, use the separate
+[single sequential work order](../../../plans/preserve-workflow-sync-save-drafts/task-01-preserve-save-drafts.md).
+Independently author genuine real Section/Dialog/hook/providers regressions,
+mocking only external `fetchJson`, with test-owned fixtures in recognized
+`.test.tsx` files. Assert newer full raw draft and actual dialog state, accepted
+canonical config, truthful outcome, subsequent payload, baseline revert,
+unchanged normalization/closing and rejection/retry. Existing lifetime, parsing,
+URL redisplay and contributor controls remain scoped compatibility evidence;
+their earlier passing counts are not evidence for this new work.

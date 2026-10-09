@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
@@ -20,7 +20,7 @@ export async function createContinuationFixture(
   apiClient: ApiClient,
   seedData: SeedData,
   scenario: string,
-  options: { enabled?: boolean; env?: Record<string, string>; executorProfileId?: string } = {},
+  options: { env?: Record<string, string>; executorProfileId?: string } = {},
 ) {
   const tracePath = path.join(backend.tmpDir, `continuation-${Date.now()}.jsonl`);
   let profileId = "";
@@ -37,7 +37,6 @@ export async function createContinuationFixture(
   try {
     await backend.restart({
       ...options.env,
-      KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION: String(options.enabled ?? true),
       KANDEV_DEBUG_PPROF_ENABLED: "true",
     });
     const { agents } = await apiClient.listAgents();
@@ -72,6 +71,33 @@ export async function createContinuationFixture(
     }
     throw error;
   }
+}
+
+export async function assertContinuationSettingRetired(page: Page, backend: BackendContext) {
+  const [registryResponse, featuresResponse] = await Promise.all([
+    page.request.get(`${backend.baseUrl}/api/v1/runtime-flags`),
+    page.request.get(`${backend.baseUrl}/api/v1/features`),
+  ]);
+  expect(registryResponse.ok()).toBe(true);
+  expect(featuresResponse.ok()).toBe(true);
+
+  const registry = (await registryResponse.json()) as { flags: Array<{ key: string }> };
+  const features = (await featuresResponse.json()) as Record<string, unknown>;
+  expect(registry.flags.map((flag) => flag.key)).not.toContain(
+    "features.providerInterruptionContinuation",
+  );
+  expect(features).not.toHaveProperty("providerInterruptionContinuation");
+
+  await page.goto("/settings/system/feature-toggles");
+  const settings = page.getByTestId("feature-toggles-settings");
+  await expect(settings).toBeVisible();
+  await expect(
+    settings.getByText("Interrupted conversation continuation", { exact: true }),
+  ).toHaveCount(0);
+  const lastFeatureCard = settings.getByTestId("feature-toggle-features.office");
+  await expect(lastFeatureCard).toBeVisible();
+  await lastFeatureCard.scrollIntoViewIfNeeded();
+  await expect(lastFeatureCard).toBeInViewport();
 }
 
 export async function waitForContinuationMessage(

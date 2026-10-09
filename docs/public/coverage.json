@@ -18,11 +18,13 @@
       "sources": [
         "apps/cli/bin/native-shim.js",
         "apps/backend/internal/launcher/launcher.go",
-        "apps/desktop/src-tauri/src/lib.rs"
+        "apps/desktop/src-tauri/src/lib.rs",
+        "apps/desktop/src-tauri/src/main.rs"
       ],
       "tests": [
         "apps/cli/bin/native-shim.test.mjs",
-        "apps/desktop/e2e/desktop-launch-smoke.test.mjs"
+        "apps/desktop/e2e/desktop-launch-smoke.test.mjs",
+        "apps/desktop/src-tauri/src/shell.rs"
       ]
     },
     {

@@ -241,17 +241,20 @@ export function shouldRenderStoppedSessionBanner(input: {
   isCompleted: boolean;
   executorUnavailable: boolean;
   launchErrorOwned?: boolean;
+  uncertainDelivery?: boolean;
 }): boolean {
   return (
-    !input.launchErrorOwned && (input.isFailed || input.isCompleted || input.executorUnavailable)
+    (input.uncertainDelivery && !input.isCompleted) ||
+    (!input.launchErrorOwned && (input.isFailed || input.isCompleted || input.executorUnavailable))
   );
 }
 
 export function shouldHideChatInputForLaunchError(input: {
   isFailed: boolean;
   launchErrorOwned?: boolean;
+  uncertainDelivery?: boolean;
 }): boolean {
-  return input.launchErrorOwned === true && input.isFailed;
+  return input.launchErrorOwned === true && input.isFailed && !input.uncertainDelivery;
 }
 
 /** Matches one rendered error surface to the task-owned launch error. */

@@ -218,3 +218,20 @@ go test -race -v ./internal/agentctl/server/process -run 'Test(WorkspaceTracker|
 
 These checks validate the handoff repair, not a physical network transition.
 Current-head CI and review results must still be refreshed after publication.
+
+2026-10-07 required-CI discovery repair: the disabled-continuation desktop case
+contained two declarations of the same `session` variable in one scope.
+The duplicate navigation/declaration was also present on merged main. Removed
+only the redundant second navigation; all metadata, native-no-replay and
+manual-recovery UI assertions remain. The exact CI catalog command failed
+before this edit and passed afterward:
+`pnpm --dir apps/web exec tsx e2e/scripts/plan-shards.ts --web-root
+"$PWD/apps/web" --output-dir <owned-cache-directory>`.
+The failure occurred during shard discovery after all product builds passed.
+The focused managed browser scenario passed its first attempt with retries
+disabled after a fresh host build:
+`pnpm --dir apps/web e2e:run --host --project chromium --
+e2e/tests/session/provider-interruption-continuation.spec.ts
+--grep "disabled continuation" --retries=0 --trace=retain-on-failure`.
+Catalog/spec lint, focused browser ESLint and the 59-work-order coverage
+preflight passed. Pushed-head CI remains an external pending gate.

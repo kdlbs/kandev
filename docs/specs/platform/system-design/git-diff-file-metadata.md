@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-GIT-DIFF-FILE-METADATA-001
 created: 2026-10-02
-updated: 2026-10-05
+updated: 2026-10-09
 owners:
   - kandev
 ---
@@ -36,6 +36,39 @@ literal selection, and porcelain-owned workspace classification.
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.6, .7 | Plain comparison output; Callers and transport |
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.8, .9 | Built-in cumulative patches; Callers and transport |
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.10, .11 | Actual-byte comparison patches; Callers and transport |
+| AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.12, .13 | Short parent gitlink patches; Callers and transport |
+
+## Short parent gitlink patches
+
+The prerequisite is exact safe-flag admission: add only `--submodule=short`
+to the exact argument list in `securityutil.IsKnownSafeGitFlag`
+(`apps/backend/internal/common/securityutil/git.go`). It is absent at the
+qualified baseline. Reject abbreviated names, other values, extra suffixes,
+empty values and whitespace variants. Do not admit a `--submodule` prefix,
+bypass validation, or change global Git configuration/environment policy.
+
+Pass the exact flag after the subcommand and before the ref in ONLY the two
+existing patch argument lists in `git_log.go`: `GitOperator.ShowCommit` and
+`GitOperator.GetCumulativeDiff`. The no-patch commit metadata query, history
+queries and all other Git producers retain their current arguments. Preserve
+`--first-parent`, `--no-color`, `--no-textconv`, cumulative `--no-ext-diff`,
+fixed `a/` and `b/` prefixes, managed execution, captured environment,
+admission, cancellation and budgets.
+
+With `diff.submodule=log`, Git emits a submodule log instead of the parent
+gitlink's unified patch section. `splitDiffSections` therefore supplies no
+parent file to the existing parser. Inline child diff display is likewise
+unsuitable for a parent file identity. Select short gitlink patches at these
+producers rather than parsing additional formats or treating child file
+patches as parent files. The existing parser already handles the short
+`Subproject commit` patch, mode 160000, and added/deleted/modified statuses.
+
+Initialized child repositories still use their own operators and parent-recorded
+comparison anchors under the [nested scope decision](../../../decisions/2026-08-05-nested-submodules-as-repository-scopes.md).
+The [submodule Review contract](../../ui/requirements/submodule-review.md)
+continues to own discovery, repository routing, and suppression of the parent
+gitlink row when child file diffs are available. Parent and child API data remain
+distinct. A missing parent patch does not imply the entire aggregate is empty.
 
 ## Plain comparison output
 
@@ -163,7 +196,7 @@ application instance, browser, database, or external service is needed.
 
 ## Preserved contracts
 
-Apart from the plain-output flags, cumulative external-diff suppression and these two producers' text-conversion suppression, keep Git argv/environments, first-parent and root behavior, genuinely empty
+Apart from the plain-output flags, cumulative external-diff suppression, these two producers' text-conversion suppression and short gitlink display, keep Git argv/environments, first-parent and root behavior, genuinely empty
 results, fixed prefixes, exact paths and patch bytes, line counts and aggregates,
 per-file/total/file-count limits, skip reasons, and all response shapes.
 Workspace mutation and history-provider code are outside this helper's boundary.
@@ -266,3 +299,38 @@ there is no browser, database, application launch or new transport contract.
 The source-data-only mobile exception applies. The existing Git operations
 how-to/reference guidance remains accurate; no public guide edit is required.
 Delivery is in the [one-work-order text-converter package](../../../plans/git-comparison-textconv/plan.md).
+
+Submodule regressions are independently authored in new process and registered
+HTTP test files; reuse accepted discovery receipts without importing or replaying
+the discovery source. Native Git fixtures use disposable parent/child repositories,
+actual gitlink commits and no shell helper. Compare explicit file identities,
+statuses, counts and old/new commit IDs with raw Git short-patch oracles that
+also disable color, external diff and text conversion. Do not use the production
+parser as the oracle or accept equality of two empty results.
+
+Keep the matrix bounded: forward updates under unset/short/log/diff preferences;
+backward updates, additions and deletions under log with short controls; an
+ordinary file under log; a dirty tracked gitlink; a root gitlink addition and a
+genuinely empty comparison. Existing focused first-parent, prefixes, uncapped
+commit and cumulative-budget tests retain their owners and provide compatibility
+evidence once, rather than replaying sibling packages in full.
+
+Registered selected commit/cumulative reads and aggregate cumulative reads use
+independent repositories with the same gitlink path but different child commit
+IDs and parent bases. Aggregate requests include the required `base` query
+parameter while each scope resolves its own stored base. Assert selected
+isolation, NUL-qualified aggregate keys, exact `repository_name`/`path`/`base_ref`,
+and `is_submodule` only on child-scope files. An initialized child's actual file
+patch remains separate and anchored to its parent's original gitlink. Snapshot
+configuration bytes, HEAD, refs, index entries, and worktree status/content in
+all owned scopes around production reads; resolve linked child Git paths rather
+than assuming `.git` is a directory. Install fixture environment isolation before
+operator/manager capture. No server port, browser, database or application launch
+is required.
+
+The pure-data mobile exception applies: existing desktop/phone composition,
+copy, navigation, touch behavior and scrolling are unchanged. Public audit of
+Git operations, sessions/Review, feature status, WebSocket guidance, README and
+screenshots found the existing metadata, nested-scope and read-only descriptions
+remain accurate. No public guide edit or new ADR is needed. Delivery is in the
+[submodule comparison format package](../../../plans/git-submodule-comparison-format/plan.md).

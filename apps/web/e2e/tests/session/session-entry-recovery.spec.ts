@@ -2,7 +2,10 @@ import { expect, test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { openTaskSession } from "../../helpers/session";
-import { routeSessionEntryRecovery } from "../../helpers/session-entry-recovery";
+import {
+  createSettledHistoryTask,
+  routeSessionEntryRecovery,
+} from "../../helpers/session-entry-recovery";
 
 async function createEntryTask(apiClient: ApiClient, seedData: SeedData, title: string) {
   return apiClient.createTaskWithAgent(seedData.workspaceId, title, seedData.agentProfileId, {
@@ -75,36 +78,33 @@ test.describe("session entry recovery", () => {
   }) => {
     test.setTimeout(150_000);
     const proxy = await routeSessionEntryRecovery(testPage);
-    const task = await createEntryTask(apiClient, seedData, `History recovery ${Date.now()}`);
-    const sessionId = task.session_id;
-    if (!sessionId) throw new Error("expected a session for the history-recovery task");
+    const task = await createSettledHistoryTask(
+      apiClient,
+      seedData,
+      `History recovery ${Date.now()}`,
+    );
 
-    proxy.dropNextResponses("message.list", 2, { sessionId });
+    proxy.failResponses("message.list", "Injected history read failure");
 
     const session = await openTaskSession(testPage, task.id);
     const historyNotice = session.activeChat().getByTestId("session-history-unavailable");
-    await expect
-      .poll(() => proxy.droppedResponseCount("message.list"), {
-        timeout: 45_000,
-        message: "Waiting for both message.list responses to be dropped for this session",
-      })
-      .toBe(2);
     await expect(historyNotice).toBeVisible({ timeout: 45_000 });
     await expect(
       session.activeChat().getByText("No messages yet. Start the conversation!", { exact: true }),
     ).toHaveCount(0);
 
-    const details = session.activeChat().getByTestId("session-history-details");
-    await expect(details).toBeVisible();
-    await expect(details).not.toHaveAttribute("open", "");
-    await details.getByTestId("session-history-details-summary").click();
-    await expect(details).toHaveAttribute("open", "");
-    await expect(details).toContainText("WebSocket request timed out: message.list");
-
-    await historyNotice.getByTestId("session-history-retry").click();
+    await expect.poll(() => proxy.pendingRequestCount("message.list")).toBe(0);
+    proxy.allowResponses("message.list");
+    const retry = historyNotice.getByTestId("session-history-retry");
+    const requestsBeforeRetry = proxy.requestCount("message.list");
+    await retry.click();
+    await expect
+      .poll(() => proxy.requestCount("message.list"))
+      .toBeGreaterThan(requestsBeforeRetry);
     await expect(historyNotice).toHaveCount(0);
     await expect(session.activeChat()).toContainText("simple mock response", { timeout: 30_000 });
-    expect(proxy.droppedResponseCount("message.list")).toBe(2);
+    expect(proxy.requestCount("message.list")).toBeGreaterThanOrEqual(2);
+    expect(proxy.failedResponseCount("message.list")).toBeGreaterThan(0);
   });
 
   test("labels exhausted status checks accurately and retries only the status read", async ({

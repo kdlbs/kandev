@@ -131,3 +131,40 @@ Public documentation: `docs/public/tasks-and-workflows.md` describes the control
 next to the source table, and `docs/public/desktop-app.md` distinguishes the
 in-app browser from the operating system picker. Neither mentions symbolic-link
 browsing or tilde expansion.
+
+
+### 2026-10-06 CI fixture remediation
+
+The desktop helper now waits for the session page and activates Files before
+opening workspace actions. CI had selected Changes, leaving the Files control
+mounted but invisible. A controlled inactive-panel reproduction failed at the
+click; activating Files passed with the same bounded click budget. Temporary
+reproduction controls were removed. Product behavior and public documentation
+are unchanged.
+
+Checks from `apps/web` on the combined main/PR tree:
+
+- `pnpm e2e:run --host --no-build --project chromium -- tests/task/directory-browser-hidden-folders.spec.ts tests/chat/message-queue.spec.ts tests/session/long-prepare-panels.spec.ts tests/workflow/workflow-session-targeting.spec.ts --grep 'Directory browser hidden folders|Send Now resumes Auto-run|file tree and terminal keep waiting|delivers a source-step target' --retries=0`: seven passed, including all four directory-browser cases.
+- `pnpm e2e:run --host --no-build --project mobile-chrome -- tests/task/mobile-directory-browser-hidden-folders.spec.ts --retries=0`: two passed.
+- `pnpm exec eslint e2e/tests/task/directory-browser-hidden-folders.spec.ts` and `pnpm exec prettier --check e2e/tests/task/directory-browser-hidden-folders.spec.ts`: passed.
+- `pnpm run typecheck` and `pnpm run lint`: passed.
+
+Hosted verification remains pending until the remediation head passes CI.
+
+
+### Phone geometry CI follow-up, 2026-10-06
+
+Run `37460626206`, shard 6 job `112264886098`, failed the reveal-control
+height assertion by 1.7129 pixels while the popover's opening scale animation
+was still running. The coarse-pointer case now waits for the same finite
+animation settlement already used by the neighboring breadcrumb case before
+measuring geometry. It exercises a one-second duration on the existing
+production animation to make this timing regression deterministic. The
+44-pixel target, one-pixel tolerance, touch interactions, and test deadline
+are unchanged. Production CSS and behavior are unchanged.
+
+- RED: the slower production opening animation failed the original sizing assertion by 2.1582 pixels, with retries disabled.
+- GREEN: `cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/task/mobile-directory-browser-hidden-folders.spec.ts -- --repeat-each 3 --retries 0 --trace=retain-on-failure`: all six cases passed in 46.8 seconds, covering three independent repetitions of both phone cases.
+- Focused Prettier and ESLint passed. Hosted verification follows the next pushed head.
+
+- Desktop parity: `cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project chromium tests/task/directory-browser-hidden-folders.spec.ts -- --retries 0`: all four cases passed in 30.9 seconds.

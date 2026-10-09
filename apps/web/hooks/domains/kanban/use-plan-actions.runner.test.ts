@@ -88,7 +88,8 @@ function makeChatRef(value = "ship it") {
         getSelectionStart: () => 0,
         insertText: vi.fn(),
         getAttachments: (): MessageAttachment[] => [],
-        clear,
+        clear: vi.fn(),
+        clearAcceptedPayload: clear,
       },
     },
     clear,
@@ -144,7 +145,8 @@ describe("useImplementPlanRunner same-session path", () => {
     expect(mockSetTaskPlan).toHaveBeenCalledWith(TASK_ID, plan);
     expect(handlePlanModeChange).toHaveBeenCalledWith(false);
     expect(clear).toHaveBeenCalledTimes(1);
-    expect(mockSetChatDraftContent).toHaveBeenCalledWith(SESSION_ID, null);
+    expect(clear).toHaveBeenCalledWith({ message: "ship it", attachments: [] });
+    expect(mockSetChatDraftContent).not.toHaveBeenCalled();
     expect(mockWsRequest).toHaveBeenNthCalledWith(
       2,
       "session.set_plan_mode",

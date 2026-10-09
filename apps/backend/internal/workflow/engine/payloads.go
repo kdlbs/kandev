@@ -12,9 +12,11 @@ package engine
 
 // OnCommentPayload accompanies TriggerOnComment.
 type OnCommentPayload struct {
-	CommentID string
-	AuthorID  string
-	Body      string
+	CommentID                     string
+	AuthorID                      string
+	Body                          string
+	RetryWorkflowStepID           string
+	RetryWorkflowStepTransitionID int64
 }
 
 // OnBlockerResolvedPayload accompanies TriggerOnBlockerResolved.

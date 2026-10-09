@@ -5,6 +5,7 @@ requirements:
   - REQ-TWS-001
   - REQ-TWS-002
   - REQ-TWS-005
+  - REQ-TWS-006
 ---
 
 # Typed workflow review state system design
@@ -161,6 +162,39 @@ matters, because the prompt build tests for `{{task_prompt}}` **after**
 interpolation, one line below the step-prompt call site
 (`buildWorkflowPromptWithTrustedContext`, `task_operations.go:1971`), so damaging it
 would silently drop the base prompt.
+
+### Task title inputs
+
+REQ-TWS-006 reuses the two call sites above, cited by function name rather than
+line because it was written against a later base than this inventory. The title
+comes from the orchestrator's existing `s.repo.GetTask(ctx, taskID)`; no new
+repository method or schema is needed (NFR-2). The lookup runs only when a
+template contains `{task_title}` and the task identifier is non-empty, so
+templates without the token pay nothing (NFR-3).
+
+Ordering is the design constraint. In the step path, `stepPromptBodyWithOptions`
+substitutes `{task_id}` and then the first `{{task_prompt}}` over the step
+template, and saved-prompt expansion later runs over the assembled prompt. A
+title substituted before that pass would have its own text re-scanned, so a
+title containing `{{task_prompt}}` would capture the base prompt. The step path
+therefore replaces `{task_title}` with a per-build random sentinel before
+`stepPromptBodyWithOptions` and swaps the title in afterwards. The sentinel
+cannot occur in the base prompt, so only positions authored in the step template
+receive the title, and `stepPromptBodyWithOptions` is unchanged. In
+`workflowInstructionsBlock` the title is substituted after `{task_id}` and
+`{step_entry_number}`, before the end-marker strip, so no sentinel is needed
+there. Saved-prompt expansion still sees the title, matching how it treats the
+base prompt (AC-TWS-006.9) when the prompt is not already prepared.
+
+A direct chat message is prepared before the orchestrator adds workflow text.
+The preparation result is an acceptance-time snapshot, including an empty
+result, so the orchestrator must not resolve that message again. When a title
+is inserted after preparation, the orchestrator resolves references from the
+title text only and adds new definitions to the trusted context. A reference
+already present in the accepted context keeps its accepted definition. This
+preserves the direct-message acceptance contract while supporting title
+references in prepared chat launches. Passthrough sessions still skip hidden
+saved-prompt expansion.
 
 ## E2E decision input
 

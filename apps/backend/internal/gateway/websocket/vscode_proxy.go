@@ -11,15 +11,17 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // proxyEntry caches the upstream endpoint and lease generation used by a proxy.
 type proxyEntry struct {
-	proxy      *httputil.ReverseProxy
-	target     string
-	generation string
+	proxy        *httputil.ReverseProxy
+	target       string
+	generation   string
+	runtimeEpoch uint64
 }
 
 // VscodeProxyHandler reverse-proxies HTTP and WebSocket traffic to code-server
@@ -61,10 +63,17 @@ func (h *VscodeProxyHandler) HandleVscodeProxy(c *gin.Context) {
 		return
 	}
 
-	proxy, err := h.resolveProxy(c, sessionID)
+	proxy, agentctlClient, err := h.resolveProxy(c, sessionID)
 	if err != nil {
 		return // error already written to response
 	}
+	boundCtx, cancel, err := agentctlClient.RuntimeBoundContext(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agent runtime unavailable"})
+		return
+	}
+	defer cancel()
+	c.Request = c.Request.WithContext(boundCtx)
 
 	// Strip the /vscode/:sessionId prefix from the request path
 	originalPath := c.Request.URL.Path
@@ -105,40 +114,46 @@ func (h *VscodeProxyHandler) HandleVscodeProxy(c *gin.Context) {
 }
 
 // resolveProxy reuses a cached proxy only while its endpoint and lease generation match.
-func (h *VscodeProxyHandler) resolveProxy(c *gin.Context, sessionID string) (*httputil.ReverseProxy, error) {
+func (h *VscodeProxyHandler) resolveProxy(c *gin.Context, sessionID string) (*httputil.ReverseProxy, *agentruntime.AgentCtlClient, error) {
 	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found or no active execution"})
-		return nil, fmt.Errorf("session not found")
+		return nil, nil, fmt.Errorf("session not found")
 	}
 
 	agentctlClient, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if agentctlClient == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl client not available"})
-		return nil, fmt.Errorf("agentctl client not available")
+		return nil, nil, fmt.Errorf("agentctl client not available")
 	}
 	generation, err := agentctlClient.ConnectionGeneration(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl connection is unavailable"})
-		return nil, fmt.Errorf("resolve agentctl connection generation: %w", err)
+		return nil, nil, fmt.Errorf("resolve agentctl connection generation: %w", err)
+	}
+	if !agentctlClient.RuntimeCurrent() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agent runtime unavailable"})
+		return nil, nil, fmt.Errorf("agent runtime unavailable")
 	}
 	baseURL := agentctlClient.BaseURL()
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if entry, ok := h.proxies[sessionID]; ok && entry.target == baseURL && entry.generation == generation {
+	runtimeEpoch := agentctlClient.RuntimeEpoch()
+	if entry, ok := h.proxies[sessionID]; ok && entry.target == baseURL && entry.generation == generation &&
+		entry.runtimeEpoch == runtimeEpoch && agentctlClient.RuntimeCurrent() {
 		h.logger.Debug("reusing cached vscode proxy",
 			zap.String("session_id", sessionID),
 			zap.String("target", entry.target))
-		return entry.proxy, nil
+		return entry.proxy, agentctlClient, nil
 	}
 
 	vscodeStatus, err := agentctlClient.VscodeStatus(c.Request.Context())
 	if err != nil {
 		h.logger.Error("failed to get vscode status", zap.Error(err), zap.String("session_id", sessionID))
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to get vscode status"})
-		return nil, err
+		return nil, nil, err
 	}
 	h.logger.Debug("resolved vscode upstream status",
 		zap.String("session_id", sessionID),
@@ -150,24 +165,26 @@ func (h *VscodeProxyHandler) resolveProxy(c *gin.Context, sessionID string) (*ht
 
 	if vscodeStatus.Status != "running" {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "code-server is not running"})
-		return nil, fmt.Errorf("code-server not running")
+		return nil, nil, fmt.Errorf("code-server not running")
 	}
 
 	target, err := url.Parse(baseURL)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to resolve agentctl target"})
-		return nil, err
+		return nil, nil, err
 	}
 
 	proxy := h.createProxy(sessionID, target, agentctlClient.ProxyTransport())
-	h.proxies[sessionID] = &proxyEntry{proxy: proxy, target: baseURL, generation: generation}
+	h.proxies[sessionID] = &proxyEntry{
+		proxy: proxy, target: baseURL, generation: generation, runtimeEpoch: runtimeEpoch,
+	}
 
 	h.logger.Info("created vscode proxy for session",
 		zap.String("session_id", sessionID),
 		zap.String("execution_id", execution.ID),
 		zap.Stringer("runtime", execution.RuntimeName),
 		zap.String("target", baseURL))
-	return proxy, nil
+	return proxy, agentctlClient, nil
 }
 
 // createProxy builds a reverse proxy for the given target URL.
