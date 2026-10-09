@@ -410,6 +410,7 @@ test.describe("Multi-PR CI popover", () => {
     const activeTab = session.prMultiPopoverTab(OWNER, "web", 42);
     const inactiveTab = session.prMultiPopoverTab(OWNER, "api", 77);
     await testPage.evaluate(() => document.fonts.ready);
+    await waitForFiniteAnimations(session.prTopbarPopover());
     for (const tab of [activeTab, inactiveTab]) {
       const wrapper = tab.locator("..");
       const remove = wrapper.getByTestId(/^pr-popover-remove-/);

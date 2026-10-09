@@ -123,3 +123,10 @@ Completed on 2026-10-09.
 - Desktop PR E2E passed: 14 tests, including pending unlink feedback, tab geometry, hover/focus reveal, and fine/coarse pointer cases.
 - Mobile PR E2E passed: 12 tests, including unlink, terminal sibling removal, drawer behavior, and overflow checks.
 - Focused component tests, typecheck, targeted ESLint, i18n ratchet, production web build, catalog validation, full specification lint, and `git diff --check` passed.
+
+### PR fixup results
+
+- CI shard 5 exposed a tab-width measurement race with the popover's opening scale animation. The same assertion failed in two of four local runs with retries disabled.
+- Wait for finite popover animations before capturing the geometry baseline. Keep the original width and containment assertions.
+- The focused geometry scenario passed ten consecutive runs with retries disabled. The complete multi-PR popover spec passed all ten tests with retries disabled, including phone-width and coarse-pointer controls.
+- Targeted ESLint and Prettier passed. Exact-head remote checks remain pending until the remediation is pushed and CI finishes.
