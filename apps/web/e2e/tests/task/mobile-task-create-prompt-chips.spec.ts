@@ -244,8 +244,10 @@ test("long prompt chips remain usable across coarse-pointer widths", async ({
       await editor.press("ControlOrMeta+End");
       await editor.pressSequentially(` and @${LONG_PROMPT_NAME}`);
       await expect(menu).toBeVisible();
+      await expectTaskDescription(editor, `@${LONG_PROMPT_NAME} and @${LONG_PROMPT_NAME}`);
       await expect(promptOption).toBeVisible();
       await promptOption.tap();
+      await expectTaskDescription(editor, `@${LONG_PROMPT_NAME} and @${LONG_PROMPT_NAME}`);
 
       const references = dialog.getByTestId("task-prompt-reference");
       await expect(references).toHaveCount(2);

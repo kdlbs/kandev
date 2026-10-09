@@ -17,7 +17,9 @@ type GatewayFrame = {
 type SocketMessage = string | Buffer;
 type DeferredRecoveryState = {
   retryRequestId: string | undefined;
+  retryObserved: boolean;
   deferredReadiness: string[];
+  retrySucceeded: boolean;
 };
 
 function parseGatewayFrame(value: string): GatewayFrame | null {
@@ -57,17 +59,15 @@ function deferWorkspaceReadiness(
   frame: GatewayFrame | null,
   part: string,
   sessionId: string,
-  failRestores: boolean,
   state: DeferredRecoveryState,
 ): boolean {
   if (frame?.action !== "session.agentctl_ready" || frame.payload?.session_id !== sessionId) {
     return false;
   }
-  if (failRestores) {
+  if (!state.retrySucceeded) {
     state.deferredReadiness.push(part);
     return true;
   }
-  state.deferredReadiness = [];
   return false;
 }
 
@@ -86,8 +86,11 @@ function forwardSuccessfulWorkspaceRetry(
 
   state.retryRequestId = undefined;
   forwarded.push(part);
-  if (frame.payload?.success === true) forwarded.push(...state.deferredReadiness);
-  state.deferredReadiness = [];
+  if (frame.payload?.success === true) {
+    state.retrySucceeded = true;
+    forwarded.push(...state.deferredReadiness);
+    state.deferredReadiness = [];
+  }
   return true;
 }
 
@@ -97,12 +100,18 @@ export async function failWorkspaceRestoresUntilReleased(
   taskId: string,
   sessionId: string,
   failureMessage = "workspace restore failed for e2e",
-): Promise<{ wasConsumed: () => boolean; allowNextRestores: () => void }> {
+): Promise<{
+  wasConsumed: () => boolean;
+  retryWasRequested: () => boolean;
+  allowNextRestores: () => void;
+}> {
   let failRestores = true;
   let wasConsumed = false;
   const recoveryState: DeferredRecoveryState = {
     retryRequestId: undefined,
+    retryObserved: false,
     deferredReadiness: [],
+    retrySucceeded: false,
   };
 
   await page.routeWebSocket(/\/ws$/, (socket) => {
@@ -123,6 +132,7 @@ export async function failWorkspaceRestoresUntilReleased(
         }
         if (!failRestores && isTargetWorkspaceRestore(frame, taskId, sessionId)) {
           recoveryState.retryRequestId = frame.id;
+          recoveryState.retryObserved = true;
         }
         if (part.trim()) forwarded.push(part);
       }
@@ -137,7 +147,7 @@ export async function failWorkspaceRestoresUntilReleased(
       const forwarded: string[] = [];
       for (const part of message.split("\n")) {
         const frame = parseGatewayFrame(part.trim());
-        if (deferWorkspaceReadiness(frame, part, sessionId, failRestores, recoveryState)) continue;
+        if (deferWorkspaceReadiness(frame, part, sessionId, recoveryState)) continue;
         if (forwardSuccessfulWorkspaceRetry(frame, part, recoveryState, forwarded)) continue;
         if (part.trim()) forwarded.push(part);
       }
@@ -147,6 +157,7 @@ export async function failWorkspaceRestoresUntilReleased(
 
   return {
     wasConsumed: () => wasConsumed,
+    retryWasRequested: () => recoveryState.retryObserved,
     allowNextRestores: () => {
       failRestores = false;
     },
