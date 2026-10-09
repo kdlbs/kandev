@@ -2,6 +2,7 @@ import { expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { getMockAgent } from "../../helpers/agent-fixtures";
 import type { SeedData } from "../../fixtures/test-base";
+import { hasPendingWorkflowMove } from "../../helpers/workflow-move-state";
 
 export type WorkflowAgentOverrideFixture = {
   agentId: string;
@@ -136,7 +137,7 @@ export async function waitForWorkflowMoveLifecycle(apiClient: ApiClient, taskId:
       async () => {
         const task = await apiClient.getTask(taskId);
         const metadata = task.metadata ?? {};
-        return Object.hasOwn(metadata, "manual_move_lifecycle_pending") ? "busy" : "idle";
+        return hasPendingWorkflowMove(metadata) ? "busy" : "idle";
       },
       { timeout: 30_000, message: `task ${taskId} did not finish its workflow move lifecycle` },
     )
