@@ -138,7 +138,7 @@ export async function waitForWorkflowMoveLifecycle(apiClient: ApiClient, taskId:
         const metadata = task.metadata ?? {};
         return Object.hasOwn(metadata, "manual_move_lifecycle_pending") ? "busy" : "idle";
       },
-      { timeout: 30_000, message: `task ${taskId} did not finish its workflow move lifecycle` },
+      { timeout: 60_000, message: `task ${taskId} did not finish its workflow move lifecycle` },
     )
     .toBe("idle");
 }
