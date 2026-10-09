@@ -6705,6 +6705,9 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		!options.initialTaskBriefDispatchOwner && options.claimEntryID == "" {
 		return nil, ErrInitialTaskBriefDispatchPending
 	}
+	if options.deliverySubmissionID == "" {
+		options.deliverySubmissionID = "prompt:" + uuid.NewString()
+	}
 	if options.cancellationFence == nil {
 		_, revision := s.CancellationPendingSnapshot(sessionID)
 		options.cancellationFence = &promptCancellationFence{revision: revision}
