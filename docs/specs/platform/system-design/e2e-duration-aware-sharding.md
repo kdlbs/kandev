@@ -73,11 +73,13 @@ manifest fails before test execution.
 
 The report job remains responsible for merged reports, the next timing-profile
 candidate, retry summaries, and predicted-versus-actual shard diagnostics.
-The aggregate gate retains its current cancellation and failure semantics.
+The report job owns the required `E2E Tests Passed` check. It joins all required
+jobs and rejects failures, cancellations, unexpected skips, and missing reports.
+A successful irrelevant-change verdict skips report processing and passes the check.
 
 ## Execution flow
 
-1. The change-detection job decides whether the E2E workflow is required.
+1. The hosted change-detection job allocates runners and decides whether E2E is required.
 2. The build job installs dependencies, builds the backend and web artifacts,
    packages the plugin fixture, resolves the eligible `main` profile, and
    creates validated manifests for both cohorts.
@@ -89,7 +91,8 @@ The aggregate gate retains its current cancellation and failure semantics.
 5. The report job merges blobs, records setup and execution diagnostics,
    creates the retry and flake summaries, and publishes a new profile only
    when the run is an eligible successful `main` result.
-6. The required gate evaluates the final job results.
+6. The same report job validates dependency results and required evidence before
+   the required check succeeds. There is no separate post-report gate job.
 
 ## Browser cache contract
 
@@ -153,7 +156,7 @@ The report preserves these distinct measurements:
 - dependency installation;
 - runtime image startup and browser provisioning;
 - Playwright test execution per shard;
-- report merge and aggregate-gate delay.
+- report merge and required-check scheduling delay.
 
 Predicted-versus-actual shard data remains keyed by cohort and shard number.
 It includes the planning mode, unknown and warm counts, target duration, and

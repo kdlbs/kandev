@@ -112,3 +112,13 @@ and records unknowns instead of treating missing jobs or logs as zero time.
 The report uses read-only data from runs 34355720657, 34025129928,
 34689871445, 34027695660, 34687600985, and 34692849510. Temporary raw logs
 and downloaded artifacts remain outside the repository.
+
+## October follow-up
+
+The completed September report remains historical evidence.
+[October evidence](evidence-2026-10-08.md) extends the sample with three PRs and a full frontend inventory.
+Task 07 owns repeatable cost reporting; Task 10 owns the bounded E2E fixture follow-up.
+The current E2E producer uses unqualified artifact names, so the attempt-qualified download recipe above is not currently executable.
+For an attempt-1 historical sample, correlate artifact creation times and embedded run metadata with attempt-specific job intervals.
+For reruns without sufficient provenance, report artifact attribution as unknown and retain job/step measurements only.
+Do not claim that this package already added attempt-qualified artifacts.
