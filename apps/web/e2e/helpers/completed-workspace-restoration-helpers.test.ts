@@ -1,6 +1,6 @@
 import type { Page, WebSocketRoute } from "@playwright/test";
 import { expect, it, vi } from "vitest";
-import { failWorkspaceRestoresUntilReleased } from "./completed-workspace-restoration-helpers";
+import { failWorkspaceRestoresUntilReleased } from "../tests/session/completed-workspace-restoration-helpers";
 
 vi.mock("@playwright/test", () => ({ expect: vi.fn() }));
 
