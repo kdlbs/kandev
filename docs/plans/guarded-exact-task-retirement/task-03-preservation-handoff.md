@@ -47,14 +47,23 @@ and SHA-256 digests. Queue bodies, archive bytes, paths, credentials, and
 provider tokens stay outside the retirement receipt.
 
 1. Read the retained source manifest by exact old-task identity. Validate that
-   every manifest row names the same old task and recorded workspace,
-   environment, worktree, and repository identity. Missing, malformed, stale,
-   foreign, or absent-worktree evidence is `UNKNOWN`.
+   every manifest row names the same old task and recorded environment,
+   worktree, and repository identity. Validate workspace authorization against
+   the retained cleanup snapshot's workspace ID; manifest rows contain no
+   workspace field. Missing, malformed, stale, foreign, or absent-worktree
+   evidence is `UNKNOWN`.
 2. Require a platform-verified immutable archive-byte receipt that binds both
-   the exact old-task ID and replacement-task ID, the manifest digest, complete
-   file/link/metadata inventory, and a successful byte rehash. A caller path
-   or source-manifest hash alone is never proof. Its absence is
-   `UNKNOWN/ARCHIVE_BYTES_UNVERIFIED`.
+   exact task IDs, the repository/environment/worktree identities, manifest
+   and Git-index digests, complete file/link/metadata inventory, and a
+   successful source-byte rehash. It must also bind the preserved commit OIDs
+   and independently verified reachability evidence for those exact commits,
+   including the repository/ref identity and observed generation. Include
+   those identities, verification results, and generations in the evidence
+   digest so later cleanup can revalidate them before claiming any operation.
+   Missing, stale, or contradictory commit/reachability evidence is `UNKNOWN`;
+   proven unpreserved or unreachable commits are `BLOCKED`. A caller path or
+   source-manifest hash alone is never proof. Without the immutable archive
+   receipt, return `UNKNOWN/ARCHIVE_BYTES_UNVERIFIED`.
 3. Obtain a read-only FIFO snapshot for every old-session incarnation. Each
    item contributes its stable entry ID, position, body hash, attachment
    identities and digests, and a digest of its delivery settings. The
@@ -65,7 +74,18 @@ provider tokens stay outside the retirement receipt.
    session incarnation. Any unread item, missing acknowledgement, reordered
    item, duplicate-body substitution, changed attachment or delivery settings,
    or changed snapshot is `BLOCKED` or `UNKNOWN`; no implicit replay is allowed.
-4. Read one exact pending-move census per old session through the #3155
+4. Inventory ordinary in-flight dispatch claims and SendNow claims for every
+   exact old-session incarnation, including sources removed from the FIFO.
+   Bind claim/attempt IDs, source entry IDs and ordering, session and operation
+   generations, acceptance state, delivery protocol/submission identity, and
+   payload/body/attachment/settings digests. Each claim needs an exact terminal
+   disposition; acceptance alone does not prove replacement preservation or
+   acknowledgement. Undisposed claims are `BLOCKED`; missing, stale, foreign,
+   or contradictory claim evidence is `UNKNOWN`. The adapter must be read-only:
+   never restore, recover, acknowledge, dispatch, or mutate schema. Existing
+   recovery listing is not a read-only census. Until independently reviewed
+   claim-inspection contracts exist, dispatch evidence remains `UNKNOWN`.
+5. Read one exact pending-move census per old session through the #3155
    contract. `found: false` is a terminal absence receipt only when the live
    Coordinator and reachability predicates are satisfied. A found row remains
    `BLOCKED/PENDING_MOVE_REQUIRES_EXACT_DISPOSITION` until an independently
@@ -81,14 +101,22 @@ identity mismatch, stale generation, or unimplemented integration is
 - Source manifest: reject task/workspace/environment/worktree/repository
   mismatch, missing index digest, absent worktree, and a manifest-only claim
   without an immutable archive-byte receipt.
-- Archive receipt: reject a byte-digest or replacement-ID mismatch, unverified
-  archive location, incomplete metadata inventory, and unpushed/unreachable
-  commit evidence.
+- Archive receipt: reject byte/index-digest or task/repository/environment/
+  worktree-ID mismatch, unverified archive location, incomplete metadata
+  inventory, missing commit OIDs or reachability proof, and unpushed/unreachable
+  commit evidence. Assert commit/ref/generation changes alter the evidence
+  digest and invalidate the receipt before any later cleanup claim.
 - FIFO handoff: assert deterministic `(session incarnation, position, entry
   ID)` ordering and one-to-one source-to-intake acknowledgement mapping; reject
   changed, omitted, duplicated, reordered, hash-mismatched, attachment- or
   delivery-setting-mismatched entries, duplicate-body substitution, and a
   receipt without a replacement durable acknowledgement.
+- Dispatch claims: an empty FIFO with an ordinary or SendNow claim still
+  blocks without its exact terminal disposition. Cover accepted-but-not-
+  acknowledged claims, absent or stale claim generations, changed attempts or
+  submission/payload identities, omitted SendNow sources, and foreign session
+  incarnations. Unavailable read-only inspection is `UNKNOWN`. Assert no
+  recovery, acknowledgement, dispatch, or schema mutation for every outcome.
 - Pending moves: map an authorized #3155 `found: false` census to a terminal
   absence receipt; map `found: true` to `BLOCKED`; map authorization, stale,
   or unavailable census outcomes to `UNKNOWN`. Assert no queue, session, task,
@@ -108,7 +136,8 @@ The immediate external gate is PR #3155, owned by the pending-move control
 plane: it must merge its read-only exact census and fenced cancellation
 contract into the intended base before W03 can consume a terminal move
 disposition. Independently, no current contract supplies the immutable
-archive-byte receipt or the replacement-bound ordered FIFO acknowledgement;
-those are W03 adapter work still to be designed and implemented after the
-branch incorporates the merged source-manifest baseline. Until both are
-present, W03 remains fail-closed and W04-W07 remain out of scope.
+archive-byte receipt, replacement-bound ordered FIFO acknowledgement, or
+read-only exact dispatch-claim census; those are W03 adapter work still to be
+designed and implemented after the branch incorporates the merged
+source-manifest baseline. Until all are present, W03 remains fail-closed and
+W04-W07 remain out of scope.
