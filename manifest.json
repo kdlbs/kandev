@@ -1,0 +1,77 @@
+{
+  "head": "339ebd67d4874fca88b073b8a0b52535f231a4aa",
+  "assets": [
+    {
+      "name": "chromium-executor-failure",
+      "type": "screenshot",
+      "format": "png",
+      "file": "executor-failure-visibility--chromium-executor-failure.png",
+      "test": "executor-failure-visibility.spec.ts",
+      "caption": "Executor failure and inline recovery guidance"
+    },
+    {
+      "name": "chromium-executor-recovered",
+      "type": "screenshot",
+      "format": "png",
+      "file": "executor-failure-visibility--chromium-executor-recovered.png",
+      "test": "executor-failure-visibility.spec.ts",
+      "caption": "Recovery notice identifies a fresh provider conversation"
+    },
+    {
+      "name": "kanban-native-confirmation-handoff",
+      "type": "screenshot",
+      "format": "png",
+      "file": "managed-task-commands--kanban-native-confirmation-handoff.png",
+      "test": "managed-task-commands.spec.ts",
+      "caption": "Task deletion stays in its native confirmation after the task menu closes."
+    },
+    {
+      "name": "chromium-automatic-recovery-workspace",
+      "type": "screenshot",
+      "format": "png",
+      "file": "automatic-recovery-owner--chromium-automatic-recovery-workspace.png",
+      "test": "automatic-recovery-owner.spec.ts",
+      "caption": "The unavailable workspace links to the same session recovery card."
+    },
+    {
+      "name": "kanban-confirmation-handoff",
+      "type": "screenshot",
+      "format": "png",
+      "file": "mobile-menu-backdrops--kanban-confirmation-handoff.png",
+      "test": "mobile-menu-backdrops.spec.ts",
+      "caption": "The task menu yields to the native confirmation without trapping the page."
+    },
+    {
+      "name": "mobile-chrome-executor-failure",
+      "type": "screenshot",
+      "format": "png",
+      "file": "executor-failure-visibility--mobile-chrome-executor-failure.png",
+      "test": "executor-failure-visibility.spec.ts",
+      "caption": "Executor failure and inline recovery guidance"
+    },
+    {
+      "name": "mobile-chrome-executor-recovered",
+      "type": "screenshot",
+      "format": "png",
+      "file": "executor-failure-visibility--mobile-chrome-executor-recovered.png",
+      "test": "executor-failure-visibility.spec.ts",
+      "caption": "Recovery notice identifies a fresh provider conversation"
+    },
+    {
+      "name": "mobile-chrome-automatic-recovery-workspace",
+      "type": "screenshot",
+      "format": "png",
+      "file": "automatic-recovery-owner--mobile-chrome-automatic-recovery-workspace.png",
+      "test": "automatic-recovery-owner.spec.ts",
+      "caption": "The unavailable workspace links to the same session recovery card."
+    },
+    {
+      "name": "mobile-chrome-automatic-recovery-owner",
+      "type": "screenshot",
+      "format": "png",
+      "file": "automatic-recovery-owner--mobile-chrome-automatic-recovery-owner.png",
+      "test": "automatic-recovery-owner.spec.ts",
+      "caption": "One recovery card retains both automatic failure causes."
+    }
+  ]
+}
