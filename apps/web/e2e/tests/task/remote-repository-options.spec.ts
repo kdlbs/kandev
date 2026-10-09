@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { openCreateTaskDialog } from "../../helpers/create-task-dialog";
 import { KanbanPage } from "../../pages/kanban-page";
 
 test("remote repository gear applies task-only settings and cancels draft edits", async ({
@@ -20,7 +21,7 @@ test("remote repository gear applies task-only settings and cancels draft edits"
   await apiClient.mockGitHubAddBranches("checkout-options", "repo", [{ name: "main" }]);
   const kanban = new KanbanPage(testPage);
   await kanban.goto();
-  await kanban.createTaskButton.first().click();
+  await openCreateTaskDialog(testPage);
   await testPage.getByTestId("source-mode-remote").click();
   await expect(testPage.getByTestId("repository-options-trigger")).toHaveCount(0);
   await testPage.getByTestId("remote-repo-chip-trigger").first().click();
@@ -98,7 +99,7 @@ test("remote repository gear applies task-only settings and cancels draft edits"
     download_mode: "on_demand",
     sparse_directories: ["extensions/my-extension", "packages/shared"],
   });
-  await kanban.createTaskButton.first().click();
+  await openCreateTaskDialog(testPage);
   await testPage.getByTestId("source-mode-remote").click();
   await expect(testPage.getByTestId("repository-options-trigger")).toHaveCount(0);
   await expect(testPage.getByTestId("repository-options-summary")).toHaveCount(0);
