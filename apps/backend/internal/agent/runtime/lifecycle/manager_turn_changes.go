@@ -15,6 +15,27 @@ const turnChangeCancelRequestTimeout = 2 * time.Second
 const turnChangeRetryInitialDelay = 250 * time.Millisecond
 const turnChangeRetryMaximumDelay = 5 * time.Second
 
+// A completed prompt can publish readiness before its immutable endpoint is
+// persisted. Successors wait for that fence before claiming a new generation.
+func (sm *SessionManager) waitForTurnChangeCapture(ctx context.Context, execution *AgentExecution) error {
+	execution.promptLifecycleMu.Lock()
+	done := execution.turnChangeCaptureDone
+	execution.promptLifecycleMu.Unlock()
+	if done == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, turnChangeTerminalCaptureTimeout)
+	defer cancel()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-sm.stopCh:
+		return context.Canceled
+	}
+}
+
 func (m *Manager) admitTurnChangeCapture(ctx context.Context, execution *AgentExecution, generation uint64) error {
 	if m == nil || m.turnChangeCaptureHandler == nil || !eligibleTurnChangeExecution(execution) || generation == 0 {
 		return nil

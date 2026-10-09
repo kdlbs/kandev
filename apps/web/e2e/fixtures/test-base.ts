@@ -409,6 +409,9 @@ export const test = backendFixture.extend<
         // test renders cards with data-testid="pipeline-task-<id>" instead of
         // "task-card-<id>", breaking taskCardByTitle locators.
         kanban_view_mode: "",
+        // Column visibility belongs to each test, including the seeded workflow
+        // that survives reset. Hidden columns must not conceal later tasks.
+        kanban_hidden_step_ids: {},
         // Keep startup routing deterministic for tests that open bare home.
         startup_page: "task_overview",
         // Reset to the default (off). Prevent-auto-start tests flip this via

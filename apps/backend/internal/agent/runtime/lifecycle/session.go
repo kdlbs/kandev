@@ -1904,6 +1904,9 @@ func (sm *SessionManager) sendPrompt(
 	if err := waitForPendingDispatchedPrompt(ctx, execution); err != nil {
 		return nil, err
 	}
+	if err := sm.waitForTurnChangeCapture(ctx, execution); err != nil {
+		return nil, err
+	}
 
 	// Drain any stale signal left in the channel by a prior dispatch-only prompt
 	// whose completion arrived after SendPrompt returned. Without this, the next

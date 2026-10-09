@@ -39,6 +39,9 @@ func TestPromptAdmissionCaptureRunsBeforeProviderDispatch(t *testing.T) {
 	}
 	execution.setPromptTurnID("turn-capture-admission")
 	require.NoError(t, manager.executionStore.Add(execution))
+	execution.promptLifecycleMu.Lock()
+	beginTurnChangeCaptureLocked(execution, 1)
+	execution.promptLifecycleMu.Unlock()
 	handler := &turnChangeCaptureBarrierHandler{
 		admitted: make(chan TurnChangeAdmission, 1), releaseAdmission: make(chan struct{}),
 	}
@@ -49,6 +52,16 @@ func TestPromptAdmissionCaptureRunsBeforeProviderDispatch(t *testing.T) {
 		_, err := manager.PromptAgent(context.Background(), execution.ID, "prompt", nil, true)
 		promptDone <- err
 	}()
+	select {
+	case err := <-promptDone:
+		t.Fatalf("successor rejected while predecessor capture was pending: %v", err)
+	case <-handler.admitted:
+		t.Fatal("successor admission crossed predecessor capture fence")
+	case <-time.After(50 * time.Millisecond):
+	}
+	execution.promptLifecycleMu.Lock()
+	finishTurnChangeCaptureLocked(execution, 1)
+	execution.promptLifecycleMu.Unlock()
 	var admission TurnChangeAdmission
 	select {
 	case admission = <-handler.admitted:
