@@ -8,8 +8,10 @@ requirements:
   - REQ-PLATFORM-CI-PERFORMANCE-004
   - REQ-PLATFORM-CI-PERFORMANCE-005
   - REQ-PLATFORM-CI-PERFORMANCE-006
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001
 system_design:
   - ../../specs/platform/system-design/ci-performance.md
+  - ../../specs/platform/system-design/durable-agent-delivery.md
 legacy_specs: []
 ---
 
@@ -161,6 +163,7 @@ No browser E2E is needed for CI-only behavior. Existing application E2E coverage
 - [x] [Task 08: Remove redundant scheduling stages](task-08-reduce-scheduling-stages.md)
 - [x] [Task 09: Avoid application E2E for independent Go test changes](task-09-skip-go-test-only-e2e.md)
 - [x] [Task 10: Attribute E2E fixture and planner costs](task-10-profile-e2e-fixture-costs.md)
+- [x] [Task 11: Reject journal operations after shutdown](task-11-journal-shutdown.md)
 
 ## Execution and evidence
 
@@ -293,7 +296,7 @@ Local validation:
 
 A later hosted run passed the original diff-continuity shard and all frontend
 and backend checks, but shard 2 failed the session-dialog cancel test. Home
-showed a different empty workflow while the seeded task remained in the sidebar.
+showed an empty board while the seeded task remained in the sidebar.
 The two board-based cases now navigate with the seeded workflow ID. The cancel
 case also seeds a conflicting remembered workflow and restores that preference
 and disposable workflow in `finally`. This precondition reproduced the same
@@ -303,3 +306,16 @@ Existing dialog, session-count, and board-navigation assertions are retained.
 `pnpm --dir apps/web e2e:run --host --no-build --project chromium tests/session/new-session-dialog.spec.ts --retries=0` passed all nine cases. Typecheck,
 focused ESLint/Prettier, and the diff check passed. A new hosted run remains
 pending the second remediation push.
+
+The following hosted run exposed a separate agentctl crash in the global queue
+navigation test. Its backend log records journal replay dereferencing a nil
+bbolt database after source-session shutdown. The shared runtime exited and
+released the capacity-holder session. [Task 11](task-11-journal-shutdown.md)
+guards journal transactions under the existing lifetime lock and preserves the
+browser assertions. The replay regression reproduced the same panic before the
+fix. All 14 closure cases, the full journal suite, and focused agent-stream
+integration tests pass under the race detector. Both queue-navigation cases
+and the session-ownership case pass without retries after a fresh managed build.
+The main merge was conflict-free; 48 workflow/gate tests, Actionlint, harness
+validation, documentation coverage, and Go lint passed. Hosted verification remains
+pending the next remediation push.

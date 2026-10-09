@@ -17,7 +17,7 @@ func (j *Journal) HasUnresolvedSubmissions(ctx context.Context) (bool, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 	var unresolved bool
-	err := j.db.View(func(tx *bolt.Tx) error {
+	err := j.viewLocked(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -53,7 +53,7 @@ func (j *Journal) ListSubmissions(ctx context.Context, sessionID string) ([]Subm
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 	var submissions []Submission
-	err := j.db.View(func(tx *bolt.Tx) error {
+	err := j.viewLocked(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -84,7 +84,7 @@ func (j *Journal) RetireSubmission(ctx context.Context, id string, recoveryGener
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 	var retired Submission
-	err := j.db.Update(func(tx *bolt.Tx) error {
+	err := j.updateLocked(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -148,7 +148,7 @@ func (j *Journal) PutSubmission(ctx context.Context, submission Submission) (Sub
 		submission.State = SubmissionPrepared
 	}
 	duplicate := false
-	err := j.db.Update(func(tx *bolt.Tx) error {
+	err := j.updateLocked(func(tx *bolt.Tx) error {
 		journalBytes, err := decodeInt64(tx.Bucket(bucketMeta).Get(keyJournalBytes))
 		if err != nil {
 			return err
@@ -305,7 +305,7 @@ func (j *Journal) GetSubmission(ctx context.Context, id string) (Submission, err
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 	var submission Submission
-	err := j.db.View(func(tx *bolt.Tx) error {
+	err := j.viewLocked(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -328,7 +328,7 @@ func (j *Journal) HasUnresolvedWork(ctx context.Context) (bool, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 	var unresolved bool
-	err := j.db.View(func(tx *bolt.Tx) error {
+	err := j.viewLocked(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -376,7 +376,7 @@ func (j *Journal) TransitionSubmission(ctx context.Context, id string, next Subm
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 	var submission Submission
-	err := j.db.Update(func(tx *bolt.Tx) error {
+	err := j.updateLocked(func(tx *bolt.Tx) error {
 		var err error
 		submission, err = j.transitionSubmissionTx(ctx, tx, id, next, updatedAt)
 		return err
