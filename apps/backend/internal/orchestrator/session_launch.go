@@ -1313,6 +1313,15 @@ func (s *Service) RecoverSessionWithOptions(
 	if err != nil {
 		return nil, err
 	}
+	if action == recoveryActionResume {
+		block, blockErr := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
+		if blockErr != nil {
+			return nil, blockErr
+		}
+		if block != nil && block.Reason == durableDeliveryUnresolvedReason {
+			return nil, &sessionRecoveryRequiredError{Block: block}
+		}
+	}
 	if action == recoveryActionRepairWorkspaceInventory && strings.TrimSpace(options.IdempotencyKey) == "" {
 		return nil, models.ErrWorkspaceInventoryRecoveryInvalid
 	}
