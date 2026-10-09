@@ -115,6 +115,11 @@ workload generation. Persisted initial inventory is the baseline; absence of a
 baseline means unknown restart history, not a new restart. Expected maintenance
 uses exact operation/resource identity from the existing operation owner. User
 stop/shutdown intent is captured before disconnect and is separate from event locks.
+Established-session inspection suppresses disconnect callbacks during intentional
+stop or idle suspension. Queued classification revalidates that intent, and
+reconnection shares the instance lifecycle fence with teardown. A failed stop
+releases suppression so subsequent observation and explicit recovery remain
+available; a successful stop cannot reconnect its deliberately closed streams.
 Missing credentials, RBAC denial, timeout, identity mismatch, and missing resource
 are distinct; only verified NotFound for the recorded identity means missing.
 No watch implementation is required: reuse GET inspection and the existing loop.

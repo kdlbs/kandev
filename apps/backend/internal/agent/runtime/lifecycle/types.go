@@ -304,6 +304,7 @@ type AgentExecution struct {
 	dispatchedPromptPending    atomic.Bool
 	idleSuspensionMu           sync.Mutex
 	idleSuspensionInProgress   atomic.Bool
+	intentionalStopInProgress  atomic.Bool
 	idleSuspensionAgentStopped atomic.Bool
 	idleSuspensionEvents       []idleSuspensionEvent
 	// Initial-prompt callbacks are installed before StartAgentProcess for

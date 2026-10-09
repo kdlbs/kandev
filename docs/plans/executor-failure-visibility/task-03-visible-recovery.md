@@ -465,5 +465,28 @@ made the repaired discovery assertion fail; the source was restored exactly.
 Lint and formatting passed. Regenerated manifests select both recovery wrappers
 and no helper paths. Independent Playwright list discovery for all 14 normal
 shards matched every assigned project/spec count exactly. The ordered, exact-CI
-source browser reproduction remains in progress to investigate the separate
-job-cap cancellations; this coverage correction does not claim to repair them.
+source browser reproduction was stopped after preserving the independent
+intentional-stop race evidence below; this coverage correction does not claim
+to repair the job-cap cancellations.
+
+### Intentional-stop disconnect race remediation
+
+Exact-source ordered browser reproduction captured intentional agent deletion
+followed by the new healthy-disconnect reconnection waiting ten seconds for the
+deleted instance. The run was interrupted after preserving that evidence (127
+passed, one skipped, one interrupted, 160 not run); it is not a full shard pass.
+The concurrent main run completed all 14 normal shards within the existing cap.
+A lifecycle stop regression reproduced two extra inspections during teardown.
+The fix suppresses classification during intentional stop and idle suspension,
+revalidates queued callbacks, and serializes stream reconnection with teardown.
+Successful and failed stop cases, unexpected healthy disconnect, and uncertainty
+coverage passed. Failed stops release suppression for a later recovery. Changed
+Go lint passed. The full lifecycle package passed (114.908 seconds), and the
+focused user-stop, cleanup, failed-stop, and disconnect cases passed under the
+race detector (2.452 seconds). Catalog and specification validation passed.
+All 27 focused desktop/mobile browser cases passed with retries disabled,
+including all nine cases whose earlier CI attempt failed. The independent
+mobile navigation geometry assertion now waits for the finite sheet entrance
+animation before measuring its unchanged 44-pixel minimum touch target. Both
+mobile failure areas passed three repetitions each with retries disabled (six
+cases, 1.4 minutes). Remote CI remains a separate delivery gate.

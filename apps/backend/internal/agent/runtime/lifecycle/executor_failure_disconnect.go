@@ -15,6 +15,9 @@ func (m *Manager) SetExecutorObservationHandler(handler func(context.Context, mo
 }
 
 func (m *Manager) inspectManagedDisconnect(execution *AgentExecution, promptGeneration, startupGeneration uint64) bool {
+	if execution.intentionalStopInProgress.Load() || execution.idleSuspensionInProgress.Load() {
+		return true
+	}
 	if m.executorObservationHandler == nil || !execution.isSessionInitialized() || m.IsShuttingDown() || !m.supportsExecutorInspection(execution.RuntimeName) {
 		return false
 	}
@@ -36,7 +39,7 @@ func (m *Manager) inspectManagedDisconnect(execution *AgentExecution, promptGene
 
 func (m *Manager) disconnectStillCurrent(execution *AgentExecution, prompt, startup uint64) bool {
 	current, ok := m.executionStore.GetBySessionID(execution.SessionID)
-	return ok && current == execution && !m.IsShuttingDown() && execution.startupAttemptSnapshot() == startup && execution.promptGenerationSnapshot() == prompt
+	return ok && current == execution && !m.IsShuttingDown() && !execution.intentionalStopInProgress.Load() && !execution.idleSuspensionInProgress.Load() && execution.startupAttemptSnapshot() == startup && execution.promptGenerationSnapshot() == prompt
 }
 
 func (m *Manager) executorObservationTarget(ctx context.Context, execution *AgentExecution) (models.ExecutorObservationTarget, error) {
@@ -92,6 +95,9 @@ func (m *Manager) completeExecutorObservationTarget(ctx context.Context, executi
 }
 
 func (m *Manager) classifyExecutorDisconnect(execution *AgentExecution, prompt, startup uint64) {
+	if !m.disconnectStillCurrent(execution, prompt, startup) {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 	target, err := m.executorObservationTarget(ctx, execution)
@@ -112,10 +118,7 @@ func (m *Manager) classifyExecutorDisconnect(execution *AgentExecution, prompt, 
 		}
 		if executorDisconnectObservationReady(observation, err, attempt == 1) {
 			if observation.Outcome == models.ExecutorOutcomeHealthy {
-				m.storeRemoteStatus(execution.SessionID, &RemoteStatus{RuntimeName: execution.RuntimeName, State: "running", LastCheckedAt: observation.ObservedAt, Observation: observation})
-				if m.streamManager != nil {
-					m.streamManager.ReconnectAll(execution)
-				}
+				m.reconnectExecutorAfterDisconnect(execution, prompt, startup, &RemoteStatus{RuntimeName: execution.RuntimeName, State: "running", LastCheckedAt: observation.ObservedAt, Observation: observation})
 				return
 			}
 			if err = m.executorObservationHandler(ctx, target, observation); err != nil {
@@ -143,11 +146,21 @@ func (m *Manager) retainUnverifiedExecutorDisconnect(execution *AgentExecution, 
 	if m.disconnectStillCurrent(execution, prompt, startup) {
 		observedAt := time.Now().UTC()
 		observation := &models.ExecutorObservation{Runtime: string(execution.RuntimeName), ResourceKey: target.ResourceKey, Outcome: models.ExecutorOutcomeUnknown, ObservedAt: observedAt, Reason: models.ExecutorReasonStatusUnverified, Workspace: models.ExecutorOutcomeUnknown}
-		m.storeRemoteStatus(execution.SessionID, &RemoteStatus{RuntimeName: execution.RuntimeName, State: models.ExecutorOutcomeUnknown, LastCheckedAt: observedAt, Observation: observation})
 		m.logger.Debug("executor disconnect authority unavailable", zap.String("execution_id", execution.ID), zap.Error(err))
-		if m.streamManager != nil {
-			m.streamManager.ReconnectAll(execution)
-		}
+		m.reconnectExecutorAfterDisconnect(execution, prompt, startup, &RemoteStatus{RuntimeName: execution.RuntimeName, State: models.ExecutorOutcomeUnknown, LastCheckedAt: observedAt, Observation: observation})
+	}
+}
+
+// Reconnection and intentional teardown share the instance lifecycle fence.
+func (m *Manager) reconnectExecutorAfterDisconnect(execution *AgentExecution, prompt, startup uint64, status *RemoteStatus) {
+	execution.remoteInstanceLifecycleMu.Lock()
+	defer execution.remoteInstanceLifecycleMu.Unlock()
+	if !m.disconnectStillCurrent(execution, prompt, startup) {
+		return
+	}
+	m.storeRemoteStatus(execution.SessionID, status)
+	if m.streamManager != nil {
+		m.streamManager.ReconnectAll(execution)
 	}
 }
 

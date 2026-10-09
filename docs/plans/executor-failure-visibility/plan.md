@@ -1,6 +1,6 @@
 ---
 created: 2026-09-30
-status: completed
+status: in_progress
 requirements:
   - REQ-EXECUTORS-FAILURE-VISIBILITY-001
 system_design:
@@ -14,7 +14,8 @@ legacy_specs: []
 
 Preserve actionable executor evidence, then admit durable scoped episodes and
 settle only proven lost executions, then expose tested recovery guidance on every
-task surface. Work orders are sequential. Implementation and local acceptance are complete; PR CI and review remain delivery gates.
+task surface. Work orders are sequential. Initial implementation and local acceptance are complete. PR CI remediation
+and review remain active delivery gates; Task 03 records the affected checks.
 Backend and frontend regressions, rendered acceptance and final checks are tracked
 in each work order. No production task or cluster resources are used for testing.
 

@@ -74,3 +74,15 @@ The focused planner tests passed as part of the 15-test tooling run.
 Review remediation replaced source-regex counting with Playwright's discovered
 project/test catalog. The planner now matches all 2,103 discovered tests (1,989
 normal and 114 container tests after the new cleanup regression cases).
+
+### Shared-scenario ownership correction
+
+CI coverage inspection found helper-defined tests keyed by their definition file
+instead of the runnable importing spec. Catalog discovery and blob timing now
+retain the outer owning spec through nested helper suites. All 27 focused
+planner, runner, and timing tests passed. A mutation restoring definition-file
+precedence failed the ownership regression. Independent Playwright discovery
+verified every assigned project/spec count across all 14 normal manifests; both
+desktop and mobile executor recovery wrappers are selected and helper paths are
+absent. Formatting, lint, catalog, and specification checks passed. This repairs
+selection coverage without changing shard counts or job timeouts.

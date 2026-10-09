@@ -14,6 +14,7 @@ import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { holdPluginInstallResponse } from "../../helpers/plugin-install";
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 
 const PLUGIN_ID = "kandev-plugin-e2e";
 const NAV_ITEM_ID = "e2e-hello";
@@ -116,6 +117,8 @@ test.describe("Mobile plugin navigation", () => {
     const navItem = testPage.getByTestId(`mobile-plugin-nav-item-${NAV_ITEM_ID}`);
     await expect(navItem).toBeVisible();
     await expect(navItem).toHaveText(/Hello E2E/);
+    // Measure the touch target after the sheet entrance transform has settled.
+    await waitForFiniteAnimations(testPage.locator("body"));
     expect((await navItem.boundingBox())?.height).toBeGreaterThanOrEqual(44);
 
     // Saved layouts own plugin destinations, so scroll the projected row into

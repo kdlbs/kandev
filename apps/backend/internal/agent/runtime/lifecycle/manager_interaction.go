@@ -1253,6 +1253,8 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		return err
 	}
 	defer activityLease.Release()
+	execution.intentionalStopInProgress.Store(true)
+	defer execution.intentionalStopInProgress.Store(false)
 	// Keep the execution's running activity lease until backend teardown
 	// succeeds. A failed stop remains retryable, so maintenance must not treat
 	// a potentially live runtime as idle. RemoveExecution releases the lease on
