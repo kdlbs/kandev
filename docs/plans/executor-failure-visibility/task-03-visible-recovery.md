@@ -651,3 +651,30 @@ planning supplement focused browser tests so unexecuted fixtures are parsed too.
 The final native capture build passed using a task-owned Go cache after a shared
 cache file disappeared during compilation. No shared cache was cleared and no
 test timeout, retry setting, or source gate was weakened.
+
+The tenth-head CI report audit covered all twenty shard reports and matching
+retry metadata. It found three underlying browser failures; the four failed
+check rows included report and suite aggregates. All current failures were
+reproduced with retries disabled before remediation:
+
+- A preceding workflow-navigation test persisted a hidden Review column in the
+  shared worker. Per-test settings now clear hidden columns. The packaged
+  provider test uses the native Add panel path when the saved layout does not
+  retain its review tab. The ordered two-test reproduction passed afterwards.
+- Retained-runtime retry accounting now compares the recorded retry count with
+  capacity-failing ACP prompts, excluding the earlier successful turn and the
+  initial failed dispatch. Cancellation and all five exhausted retries passed
+  while preserving the original runtime and conversation identity assertions.
+- The workspace dropdown inside the phone task picker added a second modal
+  owner. Closing the enclosing picker during selection could leave pointer
+  input blocked. The existing Drawer/Sheet now owns modality; the dropdown is
+  nonmodal. A real component regression failed with the original modal menu
+  and passed with the fix. Phone and desktop shared-workspace browser suites
+  each passed all three cases. Their trigger checks observe actual hit targets
+  before normal taps rather than forcing interaction through an overlay.
+
+The workspace-picker correction follows the existing workspace-sidebar UI
+contract and its shipped Drawer/Sheet composition. It changes no labels, sizes,
+scroll ownership, data semantics, or recovery policy. Current-head lint,
+typecheck, full discovery, documentation validation and fresh remote CI remain
+delivery checks; successful local reproduction is not a remote CI verdict.

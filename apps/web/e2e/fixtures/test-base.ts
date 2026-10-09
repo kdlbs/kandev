@@ -424,6 +424,9 @@ export const test = backendFixture.extend<
         // selection, and a stale selection can hide default-priority tasks in
         // unrelated tests that run later in the same worker.
         kanban_priority_filter_tokens: [],
+        // Column visibility is persisted across pages in the shared worker.
+        // Each test starts with every workflow column available.
+        kanban_hidden_step_ids: {},
         tasks_list_sort: "updated_desc",
         tasks_list_group: "state",
       });
@@ -654,6 +657,7 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
       // selection, and a stale selection can hide default-priority tasks in
       // unrelated tests that run later in the same worker.
       kanban_priority_filter_tokens: [],
+      kanban_hidden_step_ids: {},
       task_create_last_used: {
         repository_id: seedData.repositoryId,
         branch: "main",

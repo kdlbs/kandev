@@ -124,6 +124,9 @@ fixed controls and internal task-list scroll remain; chips scroll horizontally
 inside their row, with no page overflow. Reuse its safe-area and dynamic-height
 handling, keyboard dismissal, touch controls and focus return. Workspace context
 selects data in shared hooks rather than a separate mobile state model.
+The workspace dropdown inside the task picker is nonmodal. The enclosing Drawer
+or Sheet owns focus and pointer isolation; selecting a workspace and closing the
+picker must leave the page interactive.
 No new visible labels are required; any necessary error/empty-state copy follows
 all locale and i18n checks. See plan previews for scoped contents.
 

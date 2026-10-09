@@ -61,7 +61,22 @@ export async function anchorTask(api: ApiClient, seed: SeedData) {
 export async function surface(page: Page, mobile: boolean) {
   const session = new SessionPage(page);
   await session.waitForLoad();
-  if (mobile) await page.getByTestId("mobile-task-picker-trigger").tap();
+  if (mobile) {
+    const trigger = page.getByTestId("mobile-task-picker-trigger");
+    await expect
+      .poll(() =>
+        trigger.evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          const target = document.elementFromPoint(
+            bounds.x + bounds.width / 2,
+            bounds.y + bounds.height / 2,
+          );
+          return target !== null && element.contains(target);
+        }),
+      )
+      .toBe(true);
+    await trigger.tap();
+  }
   const rows = mobile ? page.getByRole("dialog", { name: "Tasks", exact: true }) : session.sidebar;
   await expect(rows).toBeVisible();
   return { session, rows };

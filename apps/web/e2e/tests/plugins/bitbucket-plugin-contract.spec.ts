@@ -211,10 +211,23 @@ test.describe("Bitbucket plugin contract", () => {
     await row.getByRole("button", { name: "Enable" }).click();
     await expect(row.getByText("Active", { exact: true })).toBeVisible();
     await testPage.goto(`/t/${task.id}`);
-    // Re-enabling restores the provider registration, but must not override
-    // the native per-session rule that a previously offered review panel stays
-    // dismissed until the user opens it again.
-    await testPage.getByText("Bitbucket Pull Request #42", { exact: true }).click();
+    // Wait for the provider to register through its other review's native
+    // menu entry. A saved layout can retain this review's tab; otherwise the
+    // user reopens the previously offered panel from Add panel.
+    await session.addPanelButton().click();
+    await expect(
+      testPage.getByRole("menuitem", { name: "Bitbucket Pull Request #43", exact: true }),
+    ).toBeVisible();
+    const reopenReview = testPage.getByRole("menuitem", {
+      name: "Bitbucket Pull Request #42",
+      exact: true,
+    });
+    if (await reopenReview.isVisible()) {
+      await reopenReview.click();
+    } else {
+      await testPage.keyboard.press("Escape");
+      await testPage.getByText("Bitbucket Pull Request #42", { exact: true }).click();
+    }
     await expect(testPage.getByTestId("fixture-review-panel-desktop")).toBeVisible();
   });
 });

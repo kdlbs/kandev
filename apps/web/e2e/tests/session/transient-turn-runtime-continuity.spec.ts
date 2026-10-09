@@ -294,10 +294,16 @@ test("desktop: idle cancellation and retry exhaustion preserve the live runtime 
       const disposition = scenario === "cancel" ? "cancelled" : "exhausted";
       const failure = await waitForRetainedTurnFailure(apiClient, fixture.sessionId, disposition);
       assertRetainedFailureMessage(failure);
-      const promptCount = readMockACPTrace(fixture.tracePath).filter(
+      const prompts = readMockACPTrace(fixture.tracePath).filter(
         (record) => record.event === "prompt",
-      ).length;
-      expect(failure.metadata?.attempts_started).toBe(promptCount - 1);
+      );
+      const capacityPrompts = prompts.filter((record) =>
+        record.prompt?.includes(`/capacity-${scenario}`),
+      );
+      expect(capacityPrompts.length).toBeGreaterThan(0);
+      // Retries exclude the failing turn's first dispatch and any earlier
+      // successful turn used to establish an idle conversation.
+      expect(failure.metadata?.attempts_started).toBe(capacityPrompts.length - 1);
       if (scenario === "exhaust") expect(failure.metadata?.attempts_started).toBe(5);
       await expectRetainedTurnReady(session);
       const feedback = session.activeChat().getByTestId("retained-turn-recovery-feedback");
@@ -307,7 +313,7 @@ test("desktop: idle cancellation and retry exhaustion preserve the live runtime 
       expect(await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId)).toBe(
         executionId,
       );
-      assertRetainedACPTrace(fixture.tracePath, promptCount);
+      assertRetainedACPTrace(fixture.tracePath, prompts.length);
     } finally {
       await fixture.dispose();
     }

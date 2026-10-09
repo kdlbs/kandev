@@ -30,6 +30,7 @@ test("phone accepts safe first rows during three live invalidations", async ({
   await exerciseSharedFirstResponse(testPage, apiClient, seedData, true);
 });
 
+// @covers AC-UI-WORKSPACE-SIDEBAR-VIEWS-001.6
 test("phone rejects old workspace pages and recovers shared coverage after reconnect", async ({
   testPage,
   apiClient,
