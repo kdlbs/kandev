@@ -53,6 +53,70 @@ func TestInterruptedContinuationRequiresVerifiedTerminationAndRevision(t *testin
 
 func TestInterruptedResumeDispatchesOnlyNewInstructionOnce(t *testing.T) {
 	ctx := context.Background()
+	svc, request, launches := interruptedResumeFixture(t)
+	repo := svc.repo.(*sqliterepo.Repository)
+	manager := svc.agentManager.(*interruptedRecoveryManager).mockAgentManager
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	result, err := svc.ResumeInterruptedSession(ctx, "t1", "s1", request)
+	require.NoError(t, err)
+	require.Equal(t, SessionDeliveryRecoveryOutcome("continued"), result.Outcome, "native restore must also accept the new instruction")
+	result, err = svc.ResumeInterruptedSession(ctx, "t1", "s1", request)
+	require.NoError(t, err)
+	require.Equal(t, SessionDeliveryRecoveryOutcome("continued"), result.Outcome)
+	require.Equal(t, 1, *launches)
+	require.Equal(t, []string{request.Instruction}, manager.capturedPrompts)
+	messages, err := repo.ListMessages(ctx, "s1")
+	require.NoError(t, err)
+	require.Len(t, messages, 2, "accepted continuation must persist one user instruction alongside the original")
+	var continuation *models.Message
+	for _, message := range messages {
+		if message.Content == request.Instruction {
+			require.Nil(t, continuation, "new instruction must appear once")
+			continuation = message
+		}
+	}
+	require.NotNil(t, continuation)
+	require.Equal(t, models.MessageAuthorUser, continuation.AuthorType)
+	require.NotEmpty(t, continuation.TurnID)
+	old, err := repo.GetAgentDeliverySubmission(ctx, "old")
+	require.NoError(t, err)
+	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, old.State)
+	stored, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, session.TaskEnvironmentID, stored.TaskEnvironmentID)
+
+	restarted := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), svc.agentManager)
+	batch, err := restarted.ResumeInterruptedSessions(ctx, []InterruptedSessionBatchItem{
+		{TaskID: "t1", SessionID: "s1", InterruptedSessionResumeRequest: request},
+		{TaskID: "missing", SessionID: "missing", InterruptedSessionResumeRequest: request},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, batch.Completed)
+	require.Equal(t, SessionDeliveryRecoveryContinued, batch.Results[0].Outcome)
+	require.Equal(t, SessionDeliveryRecoveryBlocked, batch.Results[1].Outcome)
+	require.Equal(t, 1, *launches)
+	require.Equal(t, []string{request.Instruction}, manager.capturedPrompts, "batch retries after restart must retain acceptance")
+	messages, err = repo.ListMessages(ctx, "s1")
+	require.NoError(t, err)
+	require.Len(t, messages, 2, "retries must not duplicate the saved instruction")
+	request.Instruction = "different instruction with same key"
+	result, err = svc.ResumeInterruptedSession(ctx, "t1", "s1", request)
+	require.NoError(t, err)
+	require.Equal(t, SessionDeliveryRecoveryBlocked, result.Outcome)
+	require.Len(t, manager.capturedPrompts, 1)
+}
+
+func (m *interruptedRecoveryManager) DurableDeliveryCapabilityForExecution(_ context.Context, executionID string) (lifecycle.DurableDeliveryCapability, bool) {
+	return lifecycle.DurableDeliveryCapability{Version: 1, Durable: true, Unresolved: executionID != "new-execution"}, true
+}
+
+func (m *interruptedRecoveryManager) PromptAgentWithAdmissionCallbackAndSubmissionID(ctx context.Context, executionID, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, beforeAdmission func() error, onDispatched func(), submissionID string) (*executor.PromptResult, error) {
+	return m.PromptAgentWithAdmissionCallback(ctx, executionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched)
+}
+
+func interruptedResumeFixture(t *testing.T) (*Service, InterruptedSessionResumeRequest, *int) {
+	ctx := context.Background()
 	svc, _, _ := continuationFailureFixture(t)
 	svc.logger, _ = logger.NewFromZap(zaptest.NewLogger(t))
 	repo := svc.repo.(*sqliterepo.Repository)
@@ -88,59 +152,5 @@ func TestInterruptedResumeDispatchesOnlyNewInstructionOnce(t *testing.T) {
 		return &executor.LaunchAgentResponse{AgentExecutionID: "new-execution"}, nil
 	}
 	request := InterruptedSessionResumeRequest{Acknowledge: true, RecoveryRevision: recovery.Revision, RecoveryIdentity: SessionDeliveryRecoveryIdentity{SubmissionID: "old", StreamID: "stream", IncarnationID: session.QueueIncarnationID, HarnessGeneration: 1, PromptGeneration: 1}, Instruction: "Inspect the retained changes and continue from them", IdempotencyKey: "resume-one"}
-	result, err := svc.ResumeInterruptedSession(ctx, "t1", "s1", request)
-	require.NoError(t, err)
-	require.Equal(t, SessionDeliveryRecoveryOutcome("continued"), result.Outcome, "native restore must also accept the new instruction")
-	result, err = svc.ResumeInterruptedSession(ctx, "t1", "s1", request)
-	require.NoError(t, err)
-	require.Equal(t, SessionDeliveryRecoveryOutcome("continued"), result.Outcome)
-	require.Equal(t, 1, launches)
-	require.Equal(t, []string{request.Instruction}, manager.capturedPrompts)
-	messages, err := repo.ListMessages(ctx, "s1")
-	require.NoError(t, err)
-	require.Len(t, messages, 2, "accepted continuation must persist one user instruction alongside the original")
-	var continuation *models.Message
-	for _, message := range messages {
-		if message.Content == request.Instruction {
-			require.Nil(t, continuation, "new instruction must appear once")
-			continuation = message
-		}
-	}
-	require.NotNil(t, continuation)
-	require.Equal(t, models.MessageAuthorUser, continuation.AuthorType)
-	require.NotEmpty(t, continuation.TurnID)
-	old, err := repo.GetAgentDeliverySubmission(ctx, "old")
-	require.NoError(t, err)
-	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, old.State)
-	stored, err := repo.GetTaskSession(ctx, "s1")
-	require.NoError(t, err)
-	require.Equal(t, session.TaskEnvironmentID, stored.TaskEnvironmentID)
-
-	restarted := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), svc.agentManager)
-	batch, err := restarted.ResumeInterruptedSessions(ctx, []InterruptedSessionBatchItem{
-		{TaskID: "t1", SessionID: "s1", InterruptedSessionResumeRequest: request},
-		{TaskID: "missing", SessionID: "missing", InterruptedSessionResumeRequest: request},
-	})
-	require.NoError(t, err)
-	require.Equal(t, 2, batch.Completed)
-	require.Equal(t, SessionDeliveryRecoveryContinued, batch.Results[0].Outcome)
-	require.Equal(t, SessionDeliveryRecoveryBlocked, batch.Results[1].Outcome)
-	require.Equal(t, 1, launches)
-	require.Equal(t, []string{request.Instruction}, manager.capturedPrompts, "batch retries after restart must retain acceptance")
-	messages, err = repo.ListMessages(ctx, "s1")
-	require.NoError(t, err)
-	require.Len(t, messages, 2, "retries must not duplicate the saved instruction")
-	request.Instruction = "different instruction with same key"
-	result, err = svc.ResumeInterruptedSession(ctx, "t1", "s1", request)
-	require.NoError(t, err)
-	require.Equal(t, SessionDeliveryRecoveryBlocked, result.Outcome)
-	require.Len(t, manager.capturedPrompts, 1)
-}
-
-func (m *interruptedRecoveryManager) DurableDeliveryCapabilityForExecution(_ context.Context, executionID string) (lifecycle.DurableDeliveryCapability, bool) {
-	return lifecycle.DurableDeliveryCapability{Version: 1, Durable: true, Unresolved: executionID != "new-execution"}, true
-}
-
-func (m *interruptedRecoveryManager) PromptAgentWithAdmissionCallbackAndSubmissionID(ctx context.Context, executionID, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, beforeAdmission func() error, onDispatched func(), submissionID string) (*executor.PromptResult, error) {
-	return m.PromptAgentWithAdmissionCallback(ctx, executionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched)
+	return svc, request, &launches
 }

@@ -21,12 +21,39 @@ type ContinueOptions = {
   failureMessage: string;
 };
 const pending = new Map<string, Promise<InterruptedRecoveryCheckpoint>>();
+const checkpointOwners = new Map<string, symbol>();
 const checkpointKey = (taskId: string, sessionId: string) =>
   `kandev:interrupted-recovery:${taskId}:${sessionId}`;
+
+export function interruptedRecoveryKey(observed: SessionDeliveryRecoveryResponse) {
+  const identity = observed.recovery_identity;
+  return JSON.stringify([
+    observed.task_id,
+    observed.session_id,
+    identity?.submission_id,
+    identity?.stream_id,
+    identity?.incarnation_id,
+    identity?.harness_generation,
+    identity?.prompt_generation,
+  ]);
+}
+
+function checkpointMatches(
+  value: InterruptedRecoveryCheckpoint,
+  observed: SessionDeliveryRecoveryResponse,
+) {
+  return (
+    interruptedRecoveryKey({ ...observed, recovery_identity: value.request.recovery_identity }) ===
+      interruptedRecoveryKey(observed) &&
+    (value.request.recovery_revision === observed.recovery_revision ||
+      value.result?.outcome === "continued")
+  );
+}
 
 export function readInterruptedCheckpoint(
   taskId: string,
   sessionId: string,
+  observed?: SessionDeliveryRecoveryResponse,
 ): InterruptedRecoveryCheckpoint | null {
   try {
     const raw = window.sessionStorage.getItem(checkpointKey(taskId, sessionId));
@@ -49,6 +76,7 @@ export function readInterruptedCheckpoint(
     )
       return null;
     if (value.result && !sessionDeliveryRecoveryResponse(value.result)) return null;
+    if (observed && !checkpointMatches(value, observed)) return null;
     return value;
   } catch {
     return null;
@@ -67,26 +95,31 @@ function persistCheckpoint(value: InterruptedRecoveryCheckpoint, failureMessage:
 }
 
 export function continueInterruptedSession(options: ContinueOptions) {
-  const key = checkpointKey(options.taskId, options.sessionId);
+  const key = interruptedRecoveryKey(options.observed);
   const existing = pending.get(key);
   if (existing) return existing;
-  const operation = runInterruptedContinuation(options).finally(() => pending.delete(key));
+  const storageKey = checkpointKey(options.taskId, options.sessionId);
+  const owner = Symbol();
+  checkpointOwners.set(storageKey, owner);
+  const ownsCheckpoint = () => checkpointOwners.get(storageKey) === owner;
+  const operation = runInterruptedContinuation(options, ownsCheckpoint).finally(() => {
+    pending.delete(key);
+    if (ownsCheckpoint()) checkpointOwners.delete(storageKey);
+  });
   pending.set(key, operation);
   return operation;
 }
 
-async function prepareCheckpoint(options: ContinueOptions): Promise<InterruptedRecoveryCheckpoint> {
+async function prepareCheckpoint(
+  options: ContinueOptions,
+  ownsCheckpoint: () => boolean,
+): Promise<InterruptedRecoveryCheckpoint> {
   const { taskId, sessionId, observed, instruction, acknowledged, failureMessage } = options;
   if (!validContinuationInstruction(instruction, acknowledged)) {
     throw new Error(failureMessage);
   }
-  const previous = readInterruptedCheckpoint(taskId, sessionId);
-  if (
-    previous &&
-    previous.request.recovery_revision === observed.recovery_revision &&
-    JSON.stringify(previous.request.recovery_identity) ===
-      JSON.stringify(observed.recovery_identity)
-  ) {
+  const previous = readInterruptedCheckpoint(taskId, sessionId, observed);
+  if (previous) {
     if (previous.request.instruction !== instruction) throw new Error(failureMessage);
     return previous;
   }
@@ -96,10 +129,11 @@ async function prepareCheckpoint(options: ContinueOptions): Promise<InterruptedR
     action: "retry_connection",
     failureMessage,
   });
+  if (!ownsCheckpoint()) throw new Error(failureMessage);
   if (current && current.outcome !== "uncertain") {
     window.sessionStorage.setItem(
       `${checkpointKey(taskId, sessionId)}:result`,
-      JSON.stringify(current),
+      JSON.stringify({ observed, result: current }),
     );
     throw Object.assign(new Error(failureMessage), { deliveryRecovery: current });
   }
@@ -109,7 +143,7 @@ async function prepareCheckpoint(options: ContinueOptions): Promise<InterruptedR
     !current.allowed_actions?.includes("resume_interrupted") ||
     !current.recovery_identity ||
     current.recovery_revision !== observed.recovery_revision ||
-    JSON.stringify(current.recovery_identity) !== JSON.stringify(observed.recovery_identity)
+    interruptedRecoveryKey(current) !== interruptedRecoveryKey(observed)
   ) {
     throw new Error(failureMessage);
   }
@@ -128,8 +162,9 @@ async function prepareCheckpoint(options: ContinueOptions): Promise<InterruptedR
   return value;
 }
 
-async function runInterruptedContinuation(options: ContinueOptions) {
-  const checkpoint = await prepareCheckpoint(options);
+async function runInterruptedContinuation(options: ContinueOptions, ownsCheckpoint: () => boolean) {
+  const checkpoint = await prepareCheckpoint(options, ownsCheckpoint);
+  if (!ownsCheckpoint()) throw new Error(options.failureMessage);
   const client = getWebSocketClient();
   if (!client) throw new Error(options.failureMessage);
   // Each item uses the bounded batch endpoint so progress and saved results
@@ -147,22 +182,33 @@ async function runInterruptedContinuation(options: ContinueOptions) {
     throw new Error(options.failureMessage);
   }
   const completed = { ...checkpoint, result };
-  persistCheckpoint(completed, options.failureMessage);
+  if (
+    readInterruptedCheckpoint(options.taskId, options.sessionId)?.request.idempotency_key ===
+    checkpoint.request.idempotency_key
+  )
+    persistCheckpoint(completed, options.failureMessage);
   return completed;
 }
 
 export function readInterruptedRecoveryResult(
   taskId: string,
   sessionId: string,
+  observed?: SessionDeliveryRecoveryResponse,
 ): SessionDeliveryRecoveryResponse | null {
-  const checkpoint = readInterruptedCheckpoint(taskId, sessionId);
+  const checkpoint = readInterruptedCheckpoint(taskId, sessionId, observed);
   if (checkpoint?.result) return checkpoint.result;
   try {
-    const result = sessionDeliveryRecoveryResponse(
-      JSON.parse(
-        window.sessionStorage.getItem(`${checkpointKey(taskId, sessionId)}:result`) ?? "null",
-      ),
+    const saved = JSON.parse(
+      window.sessionStorage.getItem(`${checkpointKey(taskId, sessionId)}:result`) ?? "null",
     );
+    if (
+      !saved ||
+      (observed &&
+        (!saved.observed ||
+          interruptedRecoveryKey(saved.observed) !== interruptedRecoveryKey(observed)))
+    )
+      return null;
+    const result = sessionDeliveryRecoveryResponse(saved.result);
     return result?.task_id === taskId && result.session_id === sessionId ? result : null;
   } catch {
     return null;

@@ -134,3 +134,10 @@ Completed on 2026-10-09.
 - The canonical chat message for that instruction uses a stable snapshot-derived ID and the accepted turn ID. Retained output is projected once without lifecycle callbacks; Retry also settles a previously projected terminal when its recovery block is already resolved.
 
 Linux process-termination proof was exercised locally. Darwin and Windows host behavior and real provider CLI continuation remain platform checks; unsupported process proof fails closed.
+
+PR review follow-up:
+
+- Prepared continuation checkpoints now retry through the current admission gates. Accepted checkpoints can finish failed bookkeeping from the canonical acceptance message without another prompt. Missing acceptance evidence remains blocked. Focused race regressions passed.
+- The runtime accepts an orchestrator-admitted first instruction only when its canonical identity, owner, generation, dispatch attempt, and payload match, and the execution has not dispatched a prompt. Launch-handoff and admission-callback regressions passed; duplicate dispatch and foreign ownership remain blocked.
+- Three desktop CI scenarios and the phone Configuration Chat scenario reproduced the initial-admission failure before the fix. All four passed after the fix through the managed browser runner.
+- The final exact five-package SQLite race run passed: lifecycle 133.808 seconds, orchestrator 183.684 seconds, handlers 5.746 seconds, executor 10.428 seconds, and repository results in the retained test log. SQL guard, SQLite store conformance, and changed-scope Go lint passed. Storage contracts did not change in this review follow-up; the earlier isolated PostgreSQL results remain the package evidence.

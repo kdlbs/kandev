@@ -2,7 +2,9 @@ import { beforeEach, expect, it, vi } from "vitest";
 import {
   continueInterruptedSession,
   readInterruptedCheckpoint,
+  readInterruptedRecoveryResult,
 } from "./interrupted-session-recovery";
+const SESSION_RECOVER = "session.recover";
 const mocks = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("@/lib/ws/connection", () => ({ getWebSocketClient: () => ({ request: mocks.request }) }));
 const observed = {
@@ -33,7 +35,7 @@ beforeEach(() => {
 });
 it("persists the instruction before dispatch and retries the same checkpoint after a lost response", async () => {
   mocks.request.mockImplementation(async (action, payload) => {
-    if (action === "session.recover") return observed;
+    if (action === SESSION_RECOVER) return observed;
     expect(readInterruptedCheckpoint("task", "session")?.request.instruction).toBe(
       options.instruction,
     );
@@ -42,7 +44,7 @@ it("persists the instruction before dispatch and retries the same checkpoint aft
   });
   await expect(continueInterruptedSession(options)).rejects.toThrow("connection lost");
   mocks.request.mockImplementation(async (action) =>
-    action === "session.recover"
+    action === SESSION_RECOVER
       ? observed
       : {
           completed: 1,
@@ -62,7 +64,7 @@ it("rejects a changed revision and missing acknowledgment before dispatch", asyn
     "failed",
   );
   expect(readInterruptedCheckpoint("task", "session")).toBeNull();
-  expect(mocks.request.mock.calls.every(([action]) => action === "session.recover")).toBe(true);
+  expect(mocks.request.mock.calls.every(([action]) => action === SESSION_RECOVER)).toBe(true);
 });
 
 it("preserves the authoritative blocked reason without sending a continuation", async () => {
@@ -76,4 +78,101 @@ it("preserves the authoritative blocked reason without sending a continuation", 
     deliveryRecovery: { reason: "missing_canonical_submission" },
   });
   expect(mocks.request).toHaveBeenCalledTimes(1);
+});
+
+it("isolates saved requests and results from a later interruption of the same session", async () => {
+  mocks.request.mockImplementation(async (action) =>
+    action === SESSION_RECOVER
+      ? observed
+      : { completed: 1, results: [{ ...observed, outcome: "continued" }] },
+  );
+  await continueInterruptedSession(options);
+  const later = {
+    ...observed,
+    recovery_revision: 6,
+    recovery_identity: {
+      ...observed.recovery_identity,
+      submission_id: "next",
+      harness_generation: 2,
+    },
+  };
+  expect(readInterruptedCheckpoint("task", "session", later)).toBeNull();
+  expect(readInterruptedRecoveryResult("task", "session", later)).toBeNull();
+  expect(
+    readInterruptedRecoveryResult("task", "session", { ...observed, recovery_revision: 5 })
+      ?.outcome,
+  ).toBe("continued");
+});
+
+it("does not let an old response overwrite a newer interruption checkpoint", async () => {
+  let finishOld!: (value: unknown) => void;
+  const later = {
+    ...observed,
+    recovery_revision: 6,
+    recovery_identity: {
+      ...observed.recovery_identity,
+      submission_id: "next",
+      harness_generation: 2,
+    },
+  };
+  mocks.request.mockImplementation(async (action, payload) => {
+    if (action === SESSION_RECOVER) return mocks.request.mock.calls.length === 1 ? observed : later;
+    if (payload.items[0].recovery_identity.submission_id === "old")
+      return new Promise((resolve) => {
+        finishOld = resolve;
+      });
+    return { completed: 1, results: [{ ...later, outcome: "continued" }] };
+  });
+  const old = continueInterruptedSession(options);
+  await vi.waitFor(() => expect(finishOld).toBeTypeOf("function"));
+  const nextOperation = continueInterruptedSession({
+    ...options,
+    observed: later,
+    instruction: "New instruction",
+  });
+  try {
+    expect(nextOperation).not.toBe(old);
+    const next = await nextOperation;
+    expect(next.request.instruction).toBe("New instruction");
+  } finally {
+    finishOld({ completed: 1, results: [{ ...observed, outcome: "continued" }] });
+    await old;
+  }
+  expect(readInterruptedCheckpoint("task", "session", later)?.request.instruction).toBe(
+    "New instruction",
+  );
+});
+
+it("does not dispatch or save a stale preflight after a newer interruption completes", async () => {
+  let finishOld!: (value: unknown) => void;
+  const later = {
+    ...observed,
+    recovery_revision: 6,
+    recovery_identity: {
+      ...observed.recovery_identity,
+      submission_id: "next",
+      harness_generation: 2,
+    },
+  };
+  mocks.request.mockImplementation(async (action) => {
+    if (action === SESSION_RECOVER && !finishOld)
+      return new Promise((resolve) => {
+        finishOld = resolve;
+      });
+    if (action === SESSION_RECOVER) return later;
+    return { completed: 1, results: [{ ...later, outcome: "continued" }] };
+  });
+  const old = continueInterruptedSession(options);
+  const rejected = expect(old).rejects.toThrow("failed");
+  await continueInterruptedSession({
+    ...options,
+    observed: later,
+    instruction: "Current instruction",
+  });
+  finishOld(observed);
+  await rejected;
+  expect(readInterruptedCheckpoint("task", "session", later)?.request.instruction).toBe(
+    "Current instruction",
+  );
+  expect(mocks.request.mock.calls.filter(([action]) => action !== SESSION_RECOVER)).toHaveLength(1);
 });
