@@ -352,3 +352,78 @@ the own versioned task plan. Original collector6859 remains attached across
 push; prior-head review coverage is historical once the new head is published.
 Same-turn authorized hosted continuation requires all current readiness gates;
 MERGE NONE until distinct ROOT serial static grant. Task delivery is incomplete.
+
+## Scoped CI remediation: continuity test positioning
+
+The hosted Pierre continuity case repeatedly failed its existing visible-anchor
+assertion after prior preview fixtures left committed diff entries. A matched
+private three-commit fixture reproduces the 14-file review inventory and line
+counts without replaying preview scenarios or starting preview servers. All
+three bounded repetitions fail: the initial scroll clamps against lazy
+placeholders, then preceding diffs expand and leave 140 target rows below the
+viewport with zero intersections until the unchanged 30-second assertion fails.
+
+This same work order now includes a test-only CI correction in
+`git-refresh-continuity-helpers.ts`, the existing desktop continuity spec and
+one immediate private-history fixture helper. Preserve all existing visible
+anchor, reading-state, count and refresh assertions, timeouts and strict flaky
+policy. No product UI, renderer, backend, API or fixture architecture changes.
+
+First confirm permanent matched-history RED on the original helper. Then align
+using the scroll root and target's current rectangles during readiness polling,
+so lazy preceding layout changes cannot leave the selected diff out of view.
+Validate the corrected Pierre desktop case, the affected Monaco desktop case
+and existing Pierre mobile touch case, one resource-bounded invocation at a
+time. Test-only changes may use managed `--no-build` after the proven fresh
+same-head backend, Vite and plugin build; never bypass freshness guards.
+Run applicable changed-file lint, type, discovery, doc/reference and whitespace
+checks, then active normal hooks and a new fixup commit/push. No backend test or
+full-backend lint replay applies to this E2E/docs-only correction.
+
+The matched-context diagnostic establishes causal RED; the permanent regression
+and affected controls pass after the test-helper correction. Hosted CI on the
+new published candidate remains a separate delivery gate. ROOT separately releases hosted observation after
+explicit local-heavy return and END/WFI. Hosted retry budgets remain spent;
+this correction does not authorize another rerun, review request or merge.
+
+### CI-remediation checkpoint
+
+Matched-context diagnostic: three causal visible-anchor failures with 14 files,
+140 target metadata rows and zero viewport intersections after lazy preceding
+layout expansion. Permanent stable-history regression: one causal RED on the
+original helper, then three Pierre desktop GREEN repetitions after current
+rectangle alignment moved into the existing readiness poll. Monaco desktop
+and Pierre mobile touch controls each pass once without retries. Existing
+assertions, timeouts and strict flaky policy remain unchanged.
+
+Changed-file ESLint passes. The task-local E2E typecheck first failed because its
+external configuration omitted installed Node types and existing Vite/Window
+ambient declarations; that failed receipt is preserved. After correcting only
+that task-local configuration, the check exposes seven diagnostics in unchanged
+shared E2E dependencies: one missing store-exposure Window declaration in
+`test-base.ts`, four duplicate implementations in `api-client.ts` and two in
+`session-page.ts`. These files are outside the approved correction scope.
+Exact source/base comparisons and original joined failure receipts are saved
+in the own task plan. No errors are suppressed or treated as a passing check.
+
+ROOT independently verified that all three diagnostic-owning files match the
+actual PR base and frozen head byte-for-byte, and that normal web `tsconfig.json`
+explicitly excludes E2E. This task-created expanded typecheck is not an existing
+product gate. Both failed harness receipts remain FAILED; no clean typecheck,
+suppression, compiler weakening or shared-fixture repair is claimed. No third
+custom typecheck or unchanged production type/backend replay was run.
+
+Formatting passes. Final scoped discovery finds exactly the Pierre desktop,
+Monaco desktop and Pierre mobile cases with no discovery errors. The permanent
+regression extends the existing desktop case with three private preview-history
+commits and 14 diff sections; private HEAD is restored afterward. All existing
+visible-anchor, count, reading-state, refresh and strict-flake assertions remain.
+The shared helper now aligns the target and root rectangles inside the existing
+30-second readiness poll, so lazy placeholder height changes are observed before
+reading position is chosen. No product source, UI or renderer changes apply.
+
+Local implementation is complete. Document/reference/coverage checks and normal
+active-hook fixup publication finish the local handoff. Actual publication and
+hook receipts are preserved in the own task plan. Hosted new-head CI and semantic
+review require a later ROOT release after explicit local-heavy return and END.
+No hosted retry, review request, observer or merge is authorized in this turn.

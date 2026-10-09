@@ -1,3 +1,4 @@
+import { seedContinuityPreviewHistory } from "./git-continuity-preview-history";
 import { test, expect } from "../../fixtures/test-base";
 import {
   createStandardProfile,
@@ -111,6 +112,7 @@ test.describe("desktop Git diff refresh continuity", () => {
       const git = new GitHelper(repositoryPath, makeGitEnv(backend.tmpDir));
       git.exec("git reset --hard HEAD");
       git.exec("git clean -fd");
+      const restorePreviewHistory = seedContinuityPreviewHistory(git);
       git.createFile(PREFIX_PATH, prefixContent(16, "prefix-before"));
       git.createFile(TARGET_PATH, targetContent(INITIAL_MARKER));
 
@@ -143,6 +145,7 @@ test.describe("desktop Git diff refresh continuity", () => {
         await openAllChangesDiff(changes, testPage);
 
         const diffRoot = testPage.getByTestId("review-diff-scroll");
+        await expect(diffRoot.locator("[data-review-file-key]")).toHaveCount(14);
         const targetSection = diffRoot.locator(
           `[data-review-file-key="${encodeURIComponent(TARGET_PATH)}"]`,
         );
@@ -248,6 +251,7 @@ test.describe("desktop Git diff refresh continuity", () => {
         });
       } finally {
         gate.dispose();
+        restorePreviewHistory();
       }
     });
   }
