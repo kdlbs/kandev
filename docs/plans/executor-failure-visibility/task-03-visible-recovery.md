@@ -1,7 +1,7 @@
 ---
 id: "03-visible-recovery"
 title: "Deliver visible recovery and regression evidence"
-status: completed
+status: in_progress
 wave: 3
 depends_on:
   - "02-durable-episodes"
@@ -445,3 +445,25 @@ admission made the repaired refresh case fail at its physical-state assertion
 before final verification. Go and browser-test lint passed. Documentation and
 specification validation passed. No rendered copy changed. Remote CI/review
 readiness remains a separate delivery gate for the pushed head.
+
+### Shared-scenario CI coverage correction
+
+The executor/container shards passed at the published fixup head with zero
+retries (145 passed, seven skipped). Several normal browser shards reached their
+45-minute job cap; their cancellation is not a passing test result. Comparison
+with the selected successful main timing baseline and an exact-source ordered
+reproduction are separate from the coverage correction below.
+
+Manifest inspection and a read-only Playwright selection exposed shared scenario
+tests keyed by their helper definition path rather than the runnable importing
+spec. This omitted the desktop and mobile executor recovery scenarios from the
+CI file selection. A real Playwright discovery fixture reproduced the mismatch;
+blob timing regression reproduced the inconsistent file key. Catalog and timing
+collection now retain the outer owning spec through nested helper suites. The
+27 affected planner, runner, and timing tests passed. Reverting catalog ownership
+made the repaired discovery assertion fail; the source was restored exactly.
+Lint and formatting passed. Regenerated manifests select both recovery wrappers
+and no helper paths. Independent Playwright list discovery for all 14 normal
+shards matched every assigned project/spec count exactly. The ordered, exact-CI
+source browser reproduction remains in progress to investigate the separate
+job-cap cancellations; this coverage correction does not claim to repair them.

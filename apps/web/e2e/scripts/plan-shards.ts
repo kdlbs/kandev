@@ -128,7 +128,7 @@ function collectSpecCounts(
   for (const rawSpec of specs) {
     if (!rawSpec || typeof rawSpec !== "object") continue;
     const spec = rawSpec as PlaywrightListSpec;
-    const fileValue = typeof spec.file === "string" ? spec.file : suiteFile;
+    const fileValue = typeof suiteFile === "string" ? suiteFile : spec.file;
     if (typeof fileValue !== "string") continue;
     const file = normalizeReportPath(fileValue);
     const tests = Array.isArray(spec.tests) ? spec.tests : [];
@@ -147,10 +147,12 @@ function collectPlaywrightCounts(
   suites: PlaywrightListSuite[],
   allowedProjects: ReadonlySet<string>,
   counts: Map<string, { project: string; file: string; testCount: number }>,
+  ownerFile?: string,
 ): void {
   for (const suite of suites) {
-    collectSpecCounts(suite.specs, suite.file, allowedProjects, counts);
-    collectPlaywrightCounts(asSuites(suite.suites), allowedProjects, counts);
+    const file = ownerFile ?? (typeof suite.file === "string" ? suite.file : undefined);
+    collectSpecCounts(suite.specs, file, allowedProjects, counts);
+    collectPlaywrightCounts(asSuites(suite.suites), allowedProjects, counts, file);
   }
 }
 

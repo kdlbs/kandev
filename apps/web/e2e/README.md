@@ -256,6 +256,11 @@ project/file units with a deterministic longest-processing-time planner. Matrix
 jobs pass the assigned files to `run-planned-shard.sh`; they do not use ordinal
 Playwright `--shard` selection.
 
+Shared scenario functions are catalogued under the spec file that imports and
+registers them. The helper's definition path must not become a manifest file:
+Playwright selects runnable spec files, and helper paths can silently omit the
+scenario. Timing profiles use that same owning spec path.
+
 Successful `main` runs publish `e2e-timing-profile`, which stores bounded
 first-attempt passing samples keyed by project, file, and full test title. The
 next planning job downloads that artifact when available. New files use the

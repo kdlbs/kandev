@@ -20,7 +20,7 @@ function event(method: string, params: Record<string, unknown>): string {
   return JSON.stringify({ method, params });
 }
 
-function reportJsonl(): string {
+function reportJsonl(definitionFile = "tests/chat/example.spec.ts"): string {
   const project = {
     name: "chromium",
     suites: [
@@ -31,7 +31,7 @@ function reportJsonl(): string {
           {
             testId: "test-1",
             title: "shows the conversation",
-            location: { file: "tests/chat/example.spec.ts", line: 10, column: 1 },
+            location: { file: definitionFile, line: 10, column: 1 },
           },
         ],
       },
@@ -81,6 +81,15 @@ describe("e2e timing collection", () => {
       durationSeconds: 1.2,
     });
     expect(observations[1]?.retry).toBe(1);
+  });
+
+  it("keys shared-helper timings by the runnable owning spec", () => {
+    const observations = parseBlobReportJsonl(reportJsonl("helpers/shared-scenario.ts"));
+
+    expect(observations[0]).toMatchObject({
+      file: "tests/chat/example.spec.ts",
+      key: "chromium::tests/chat/example.spec.ts::shows the conversation",
+    });
   });
 
   it("reads an unpacked blob report", () => {

@@ -5,7 +5,7 @@ requirements:
   - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-001
   - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-002
 created: 2026-08-30
-updated: 2026-08-30
+updated: 2026-10-09
 owners:
   - kandev
 ---
@@ -65,6 +65,12 @@ manifests. It obtains the latest eligible successful-`main` profile, discovers
 the catalog from the authoritative Playwright configuration, and produces
 explicit file selections. The planner continues to use longest-processing-time
 bin packing at project/file granularity with deterministic tie-breaking.
+
+Catalog files and timing keys identify the runnable owning spec file. A test
+declared by an imported shared scenario retains its outer file-suite owner;
+the helper's definition location is diagnostic metadata, not a runner file
+selection. Both catalog discovery and blob timing collection preserve that
+owner through nested suites, so shared scenarios remain selected and timed.
 
 The normal and container matrix jobs download only their cohort manifest. They
 do not add ordinal Playwright sharding as a hidden fallback. An unavailable

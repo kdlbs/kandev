@@ -70,9 +70,18 @@ describe("duration-aware shard planning", () => {
       ].join("\n"),
     );
     fs.writeFileSync(
+      path.join(webRoot, "e2e", "shared-scenario.ts"),
+      [
+        'import { test } from "@playwright/test";',
+        'export function registerScenario() { test("shared helper works", async () => {}); }',
+      ].join("\n"),
+    );
+    fs.writeFileSync(
       path.join(testDir, "example.spec.ts"),
       [
         'import { test } from "@playwright/test";',
+        'import { registerScenario } from "../../shared-scenario";',
+        "registerScenario();",
         'test.describe("suite", () => {',
         "  test.beforeEach(async () => {});",
         '  test("works", async () => {});',
@@ -88,7 +97,7 @@ describe("duration-aware shard planning", () => {
       expect.objectContaining({
         project: "chromium",
         file: "tests/chat/example.spec.ts",
-        testCount: 4,
+        testCount: 5,
         fileHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       }),
     ]);
