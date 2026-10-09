@@ -94,10 +94,15 @@ func (transport *runtimeBindingTransport) RoundTrip(request *http.Request) (*htt
 		cancel()
 		return response, nil
 	}
-	response.Body = &runtimeBoundResponseBody{
+	body := &runtimeBoundResponseBody{
 		ReadCloser: response.Body,
 		guard:      transport.guard,
 		cancel:     cancel,
+	}
+	if duplex, ok := response.Body.(io.ReadWriteCloser); ok {
+		response.Body = &runtimeBoundDuplexBody{runtimeBoundResponseBody: body, writer: duplex}
+	} else {
+		response.Body = body
 	}
 	return response, nil
 }
@@ -120,6 +125,21 @@ func (body *runtimeBoundResponseBody) Close() error {
 	err := body.ReadCloser.Close()
 	body.cancel()
 	return err
+}
+
+// Upgraded HTTP bodies must retain their writable side for reverse proxies.
+// Both directions remain fenced by the runtime generation.
+type runtimeBoundDuplexBody struct {
+	*runtimeBoundResponseBody
+	writer io.Writer
+}
+
+func (body *runtimeBoundDuplexBody) Write(p []byte) (int, error) {
+	if err := body.guard.checkCurrent(); err != nil {
+		_ = body.Close()
+		return 0, err
+	}
+	return body.writer.Write(p)
 }
 
 // WithRuntimeLease binds every HTTP request and websocket opened by the client

@@ -1,6 +1,6 @@
 import { expect, test } from "../../fixtures/test-base";
 import { routeSessionOpenInspectionContention } from "../../helpers/session-open-inspection-contention";
-import { waitForSessionState } from "../../helpers/session";
+import { waitForRestorableSessionWorkspace, waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("session open inspection contention", () => {
@@ -49,19 +49,7 @@ test.describe("session open inspection contention", () => {
       message: "Waiting for the retained session to stop before recovery",
     });
 
-    // Cancellation is persisted before detached runtime teardown finishes.
-    // Open only when status inspection can actually restore the retained workspace.
-    await expect
-      .poll(
-        () =>
-          apiClient.wsRequest("task.session.status", { task_id: task.id, session_id: sessionId }),
-        { timeout: 30_000 },
-      )
-      .toMatchObject({
-        is_agent_running: false,
-        needs_workspace_restore: true,
-        auto_resume_allowed: true,
-      });
+    await waitForRestorableSessionWorkspace(apiClient, task.id, sessionId);
 
     const proxy = await routeSessionOpenInspectionContention(testPage, {
       taskId: task.id,

@@ -157,7 +157,7 @@ Post-merge validation passed: focused race tests for lifecycle, checkpoint proce
 The first post-merge CI run exposed a fixture inventory mismatch: upstream now lists missing tables individually, and the v0.93.0 manifest omitted the six turn-history tables. The exact SQLite upgrade assertion failed locally before the manifest correction. Afterwards the full SQLite conformance suite passed under `-race`, and upgrade/manifest tests passed with a disposable PostgreSQL 16 DSN. The archived SQL fixtures were not changed; their missing-table metadata now matches the combined required-store catalog.
 
 - [x] Reproduce storage and mobile FIFO failures without retries and fix successor admission across the terminal capture fence.
-- [ ] Verify the complete failed E2E shards and all additional failures from the remaining remote jobs.
+- [x] Finish the ordered failed-shard replays and inspect all additional failures; follow-up corrections are tracked below.
 
 The post-merge E2E run exposed a capture-admission race. Completion published readiness while the immutable endpoint still held its generation fence. Immediate follow-ups received a settlement error, which durable delivery classified as an unknown outcome. Prompt admission now waits for capture completion before claiming its generation. Cancellation, shutdown, and the bounded wait preserve the existing fence. The admission regression failed before this fix and passed afterwards; the cancellation cases and repeated race checks also passed.
 
@@ -172,3 +172,22 @@ Post-fix evidence: full lifecycle package passed; capture-admission cancellation
 The mobile inspection-contention test reproduced a stop/readiness race in its setup. `session.stop` persists cancellation before detached runtime teardown ends. Reloading during teardown can truthfully report the old execution as running and skip automatic workspace restoration. Both viewport tests now poll the real status API for a stopped, restorable workspace before reloading. The original restore-request, retry, conversation-identity, and draft assertions remain unchanged. Five consecutive mobile runs passed without retries.
 
 Desktop recovery and Pierre diff reading/refresh continuity each passed three repetitions without retries. The diff failure did not reproduce in the isolated run or these repetitions; no renderer change was made. The fresh-head CI run remains the remote acceptance check.
+
+### Additional ordered replay findings
+
+- [x] Reproduce disabled embedded-editor controls with API-created sessions that omit executor identity. Select the real local executor in the two VS Code fixtures; capability checks stay unchanged. The toolbar case passed three repetitions after the correction. The rebuilt file-opening flow now passes, including its editor tab; repeated verification is in progress.
+- [x] Verify the shared stopped-workspace readiness helper in terminal restoration and desktop/mobile recovery scenarios.
+- [x] Rerun the affected mobile cases with explicit separated ports; marketplace and managed-runtime scenarios passed twice. Quick Chat passes in the isolated desktop run.
+- [ ] Complete fresh-head remote CI and review verification after the follow-up push.
+
+The concurrent local runs were not fully isolated: Playwright worker restarts/repetitions advance backend ports, and one replay used a process-derived offset. Logs recorded bind conflicts on port 18109, and a marketplace setup request reached a different workspace database. Those collided cases do not count as product failures or passing acceptance evidence. Quick Chat cancellation passed three later diagnostic repetitions; the temporary diagnostic code was removed. The full ordered replays are partial evidence, not clean-suite claims.
+
+The terminal restoration case also navigated after cancellation but before runtime teardown. It now uses the same real-status readiness predicate as the two inspection-contention tests. Both restore-request and stopped-agent assertions remain intact.
+
+The two later ordered replays finished with 234 passes/four failures and 211 passes/three failures/two tests not run. The latter includes one spec-configured retry despite the runner's `--retries=0`. These totals include the disclosed environment collisions and are not clean-suite claims.
+
+Eight focused mobile scenarios passed with explicit, separated ports: marketplace install, managed-runtime retry/exhaustion, and inspection-contention recovery, repeated twice. The managed-runtime helper now changes a persisted native OpenCode choice to managed execution for its disposable fixture and restores the original choice on cleanup. Removing the binary from PATH alone does not change that durable selection.
+
+The deeper VS Code file-opening test exposed a real proxy defect after the local-executor fixture correction. Backend logs recorded HTTP 502 with `101 switching protocols response with non-writable body`. The runtime lease transport wrapped every response as read-only, hiding the write side required for a WebSocket upgrade. It now preserves duplex bodies and fences writes against retired generations. A real WebSocket proxy regression failed before the fix; it now passes alongside write-after-retirement coverage and repeated race checks. Temporary browser diagnostics were removed. Rebuilt desktop validation is in progress.
+
+After restoring WebSocket upgrades, the file-open flow exposed a Linux IPC lookup defect. The installed code-server uses `XDG_RUNTIME_DIR` when set, while Kandev searched only the temp directory. A regression with live sockets in both locations selected the wrong directory before the fix and the runtime directory afterwards. Lookup now matches code-server's platform rule, with existing temp-directory tests isolated from the host's XDG setting. Focused VS Code process race tests and lint passed. The full runtime-client suite and targeted gateway proxy race tests also passed.

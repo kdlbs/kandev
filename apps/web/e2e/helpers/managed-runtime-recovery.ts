@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import { DatabaseSync } from "./node-sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -9,6 +10,39 @@ import type { AgentProfile } from "../../lib/types/http-agents";
 export const MANAGED_RUNTIME_CACHE_ROOT = "/tmp/kandev-managed-npm-cache";
 const MANAGED_RUNTIME_AGENT_NAME = "opencode-acp";
 const MANAGED_RUNTIME_TEST_MODEL = "opencode/big-pickle";
+const OPENCODE_SELECTION_KEY = "managed_runtime.opencode.selection";
+const nativeSelections = new WeakMap<BackendContext, string>();
+
+function selectManagedRuntime(backend: BackendContext, restore = false): void {
+  const database = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
+  try {
+    database.exec("PRAGMA busy_timeout = 10000");
+    if (restore) {
+      const original = nativeSelections.get(backend);
+      if (original === undefined) return;
+      database
+        .prepare("UPDATE settings SET value = ? WHERE key = ?")
+        .run(original, OPENCODE_SELECTION_KEY);
+      nativeSelections.delete(backend);
+      return;
+    }
+    const row = database
+      .prepare("SELECT value FROM settings WHERE key = ?")
+      .get(OPENCODE_SELECTION_KEY) as { value: string } | undefined;
+    if (!row) throw new Error("OpenCode runtime selection must exist before managed-runtime setup");
+    const selection = JSON.parse(row.value);
+    if (selection.source !== "native") return;
+    nativeSelections.set(backend, row.value);
+    selection.source = "managed";
+    selection.selected_version = "";
+    selection.revision += 1;
+    database
+      .prepare("UPDATE settings SET value = ? WHERE key = ?")
+      .run(JSON.stringify(selection), OPENCODE_SELECTION_KEY);
+  } finally {
+    database.close();
+  }
+}
 
 export function managedRuntimeExecutionCacheKey(packageSpec: string): string {
   return createSha512(packageSpec).slice(0, 16);
@@ -74,6 +108,8 @@ export async function prepareManagedRuntimeProfile(
   const pathWithoutNativeOpenCode = inheritedPath.filter(
     (directory) => !fs.existsSync(path.join(directory, "opencode")),
   );
+  // Native choice survives PATH changes; this fixture specifically exercises managed npm.
+  selectManagedRuntime(backend);
   await backend.restart({
     KANDEV_MOCK_AGENT: "true",
     NPM_CONFIG_CACHE: MANAGED_RUNTIME_CACHE_ROOT,
@@ -156,6 +192,7 @@ export async function prepareManagedRuntimeProfile(
 
 /** Restore the normal e2e-only mock registry after a managed-runtime test. */
 export async function restoreE2EAgentRegistry(backend: BackendContext): Promise<void> {
+  selectManagedRuntime(backend, true);
   await backend.restart();
 }
 

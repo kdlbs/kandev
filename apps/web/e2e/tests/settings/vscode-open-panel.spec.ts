@@ -75,6 +75,10 @@ async function seedTaskWithSession(
   title: string,
   repositoryIds: string[] = [seedData.repositoryId],
 ): Promise<{ session: SessionPage; sessionId: string }> {
+  const { executors } = await apiClient.listExecutors();
+  const localExecutor = executors.find((executor) => executor.type === "local");
+  if (!localExecutor) throw new Error("The embedded editor fixture requires a local executor");
+
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -84,6 +88,7 @@ async function seedTaskWithSession(
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: repositoryIds,
+      executor_id: localExecutor.id,
     },
   );
 
