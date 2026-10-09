@@ -189,7 +189,14 @@ export async function seedIdleSession(
       repository_ids: [seedData.repositoryId],
     },
   );
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+  const sessionId = task.session_id;
+  if (!sessionId) throw new Error("createTaskWithAgent did not return a session_id");
+  await pollUntil(
+    () => apiClient.listSessionTurns(sessionId),
+    ({ turns }) => turns.length > 0 && turns.every((turn) => Boolean(turn.completed_at)),
+    30_000,
+    "Waiting for the initial session turn to complete",
+  );
   const session = await openTaskSession(testPage, task.id);
   await session.waitForChatIdle({ timeout: 30_000 });
   await session.composerReady();
