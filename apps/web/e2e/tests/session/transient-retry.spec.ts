@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { pollUntil } from "../../helpers/poll-until";
@@ -31,6 +33,17 @@ async function waitForRetryNotice(
 }
 
 test.describe("transient provider error (529 Overloaded) retry", () => {
+  test.describe.configure({ retries: 0 });
+
+  test.afterEach(async ({ backend }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    for (const logPath of [backend.logPath, path.join(backend.tmpDir, "backend-process.log")]) {
+      if (fs.existsSync(logPath)) {
+        await testInfo.attach(path.basename(logPath), { path: logPath, contentType: "text/plain" });
+      }
+    }
+  });
+
   test("shows the yellow retrying card, not the red error banner", async ({
     testPage,
     apiClient,
