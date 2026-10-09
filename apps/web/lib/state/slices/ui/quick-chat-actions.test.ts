@@ -330,6 +330,21 @@ describe("quick terminal tabs", () => {
     expect(terminalState(store).activeKind).toBe("terminal");
   });
 
+  it("invalidates in-flight terminal resyncs after local lifecycle changes", () => {
+    const store = makeStore();
+    const actions = withTerminalActions(store);
+    const revision = store.getState().quickChat.syncRevisionByWorkspace[WORKSPACE_A] ?? 0;
+
+    const tabId = actions.createQuickTerminal(WORKSPACE_A);
+    expect(store.getState().quickChat.syncRevisionByWorkspace[WORKSPACE_A]).toBe(revision + 1);
+
+    actions.updateQuickTerminal(tabId, { status: "running", sessionId: "pty-1" });
+    expect(store.getState().quickChat.syncRevisionByWorkspace[WORKSPACE_A]).toBe(revision + 2);
+
+    actions.removeQuickTerminal(tabId);
+    expect(store.getState().quickChat.syncRevisionByWorkspace[WORKSPACE_A]).toBe(revision + 3);
+  });
+
   it("keeps terminal selection per workspace and does not overwrite the last terminal", () => {
     const store = makeStore();
     const actions = withTerminalActions(store);

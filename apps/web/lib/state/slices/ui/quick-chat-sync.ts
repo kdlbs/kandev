@@ -311,17 +311,20 @@ export function reconcileQuickTerminalTabs(
 ): QuickChatState {
   const otherWorkspaces = state.terminalTabs.filter((tab) => tab.workspaceId !== workspaceId);
   const serverById = new Map(serverTabs.map((tab) => [tab.tabId, tab]));
-  const pendingLocal = state.terminalTabs.filter(
-    (tab) =>
-      tab.workspaceId === workspaceId &&
-      !serverById.has(tab.tabId) &&
-      tab.status === "connecting" &&
-      !tab.sessionId,
-  );
+  const pendingLocal = state.terminalTabs.filter((tab) => {
+    if (tab.workspaceId !== workspaceId || tab.status !== "connecting" || tab.sessionId) {
+      return false;
+    }
+    const serverTab = serverById.get(tab.tabId);
+    return !serverTab || (serverTab.status === "exited" && !serverTab.sessionId);
+  });
+  const pendingIds = new Set(pendingLocal.map((tab) => tab.tabId));
 
   const nextTabs = [
     ...otherWorkspaces,
-    ...[...serverTabs].sort((a, b) => a.sequence - b.sequence),
+    ...[...serverTabs]
+      .sort((a, b) => a.sequence - b.sequence)
+      .filter((tab) => !pendingIds.has(tab.tabId)),
     ...pendingLocal,
   ];
   const validIds = new Set(nextTabs.map((tab) => tab.tabId));

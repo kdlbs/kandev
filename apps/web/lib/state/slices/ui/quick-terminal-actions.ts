@@ -107,6 +107,8 @@ function createQuickTerminalDraft(quickChat: QuickChatState, workspaceId: string
   };
   quickChat.terminalTabs.push(tab);
   activateTerminalDraft(quickChat, tab);
+  quickChat.syncRevisionByWorkspace[workspaceId] =
+    (quickChat.syncRevisionByWorkspace[workspaceId] ?? 0) + 1;
   return tab.tabId;
 }
 
@@ -148,6 +150,8 @@ export function buildQuickTerminalActions(set: ImmerSet) {
           if (!update.error) delete tab.error;
           else tab.error = update.error;
         }
+        draft.quickChat.syncRevisionByWorkspace[tab.workspaceId] =
+          (draft.quickChat.syncRevisionByWorkspace[tab.workspaceId] ?? 0) + 1;
       }),
     activateQuickTerminal: (tabId: string, workspaceId: string) =>
       set((draft) => {
@@ -162,6 +166,8 @@ export function buildQuickTerminalActions(set: ImmerSet) {
         if (index === -1) return;
         const closing = draft.quickChat.terminalTabs[index];
         draft.quickChat.terminalTabs.splice(index, 1);
+        draft.quickChat.syncRevisionByWorkspace[closing.workspaceId] =
+          (draft.quickChat.syncRevisionByWorkspace[closing.workspaceId] ?? 0) + 1;
         const replacement = findTerminalFallback(
           draft.quickChat.terminalTabs,
           closing.workspaceId,
