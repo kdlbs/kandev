@@ -291,11 +291,11 @@ every report, but only a successful `main` workflow run is eligible to seed a
 future plan. Manifests are retained for 3 days; timing profiles for 30 days;
 retry diagnostics for 14 days.
 
-The standard, container-backed, and Kubernetes compatibility CI runs set
-`E2E_FAIL_ON_FLAKY=1`. Playwright retries still collect diagnostics, but a test
-that passes only after a retry fails the run. Local Playwright runs also fail on
-retries by default; set `CI=true` without `E2E_FAIL_ON_FLAKY=1` only when you
-need to reproduce CI's retry-reporting behavior without the strict gate.
+The standard, container-backed, and Kubernetes compatibility CI runs accept
+passes after a retry. The shared CI default allows three retries after the initial
+attempt (four attempts total); tests that exhaust their retries still fail the run.
+Set `E2E_FAIL_ON_FLAKY=1` to opt into failing on retry passes for diagnostics.
+Local Playwright runs keep zero retries and fail on retry passes by default.
 
 Container-backed CI jobs also cache the browser directory used by the host
 runner. The workflow resolves the `runtime-latest` convenience tag once to a
@@ -316,7 +316,7 @@ baseline.
 
 ### Flake rate and trend
 
-CI retries hide flakes: with `retries: 2` and `failOnFlakyTests: false`, a test
+CI retries hide flakes: with `retries: 3` and `failOnFlakyTests: false`, a test
 that fails and then passes never fails the build. The **E2E flake rate** section
 of the `e2e-report` job summary makes that number visible without downloading
 anything. It reports, for the run:

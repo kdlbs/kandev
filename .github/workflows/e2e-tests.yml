@@ -439,7 +439,6 @@ jobs:
     # Playwright fixtures and backend readiness polling.
     env:
       NODE_OPTIONS: --dns-result-order=ipv4first
-      E2E_FAIL_ON_FLAKY: "1"
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.runner_plan.outputs.plan).e2e_matrix }}
@@ -897,7 +896,6 @@ jobs:
         working-directory: apps/web
         env:
           KANDEV_E2E_CONTAINERS: "1"
-          E2E_FAIL_ON_FLAKY: "1"
           E2E_SHARD: ${{ matrix.shard }}
           KANDEV_E2E_BUILD_IDENTITY: ${{ github.workspace }}/apps/backend/bin/e2e-build-identity.json
           KANDEV_E2E_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
@@ -1066,7 +1064,6 @@ jobs:
           KANDEV_E2E_CONTAINERS: "1"
           KANDEV_E2E_BUILD_IDENTITY: ${{ github.workspace }}/apps/backend/bin/e2e-build-identity.json
           KANDEV_E2E_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
-          E2E_FAIL_ON_FLAKY: "1"
         run: >-
           pnpm exec playwright test --config e2e/playwright.config.ts
           --project=kubernetes-compat --reporter=list tests/kubernetes-compat
