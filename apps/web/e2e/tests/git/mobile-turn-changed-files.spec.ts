@@ -3,6 +3,8 @@ import { waitForDiffText, waitForDiffTextAbsent } from "./diff-update-helpers";
 import { seedUntrackedFileTask } from "./diff-update-helpers";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import {
+  assertHistoricalSelectorStyle,
+  assertLatestTurnCardInView,
   enableTurnChangedFiles,
   openFirstTurnChangesDiff,
   readTurnChangeHistory,
@@ -25,6 +27,7 @@ test.describe("mobile historical turn changed files", () => {
       const { session, sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
       await waitForTurnChangeCount(apiClient, sessionId, 1);
       await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(1);
+      await assertLatestTurnCardInView(session);
 
       await session.sendMessageViaButton("/e2e:untracked-file-modify");
       await waitForTurnChangeCount(apiClient, sessionId, 2);
@@ -52,6 +55,20 @@ test.describe("mobile historical turn changed files", () => {
       if (prCapture.capturing) await waitForFiniteAnimations(drawer);
       const viewer = drawer.getByTestId("historical-turn-diff");
       await expect(viewer).toBeVisible();
+      await assertHistoricalSelectorStyle(viewer, true);
+      await waitForDiffText(testPage, "INITIAL_CONTENT");
+      await testPage.screenshot({ path: test.info().outputPath("historical-selectors.png") });
+      await testPage.emulateMedia({ colorScheme: "dark" });
+      await expect(testPage.locator("html")).toHaveClass(/dark/);
+      await expect
+        .poll(() =>
+          viewer
+            .locator("diffs-container")
+            .first()
+            .evaluate((element) => getComputedStyle(element).colorScheme),
+        )
+        .toBe("dark");
+      await testPage.screenshot({ path: test.info().outputPath("historical-selectors-dark.png") });
       const changeSetId = await viewer.getAttribute("data-change-set-id");
       expect(changeSetId).toBeTruthy();
       const history = await readTurnChangeHistory(apiClient, sessionId);

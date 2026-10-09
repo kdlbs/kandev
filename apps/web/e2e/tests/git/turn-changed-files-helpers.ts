@@ -1,5 +1,6 @@
 import { expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import type { Locator } from "@playwright/test";
 import type { SessionPage } from "../../pages/session-page";
 
 type TurnChangeHistoryResponse = {
@@ -88,4 +89,49 @@ export async function openFirstTurnChangesDiff(session: SessionPage) {
   await expect(firstCard).toContainText("untracked_test.txt");
   await firstCard.getByRole("button", { name: "Open diff" }).click();
   return firstCard;
+}
+
+export async function assertHistoricalSelectorStyle(viewer: Locator, touch = false) {
+  const selectors = viewer.getByRole("combobox");
+  await expect(selectors).toHaveCount(2);
+  for (const selector of await selectors.all()) {
+    const geometry = await selector.evaluate((element) => {
+      const arrow = element.parentElement!.querySelector("svg")!;
+      const bounds = element.getBoundingClientRect();
+      const arrowBounds = arrow?.getBoundingClientRect();
+      return {
+        font: getComputedStyle(element).fontSize,
+        height: bounds.height,
+        touchTarget: matchMedia("(max-width: 767px), (pointer: coarse)").matches,
+        outerFont: getComputedStyle(
+          element
+            .closest("[data-testid=historical-turn-diff]")!
+            .querySelector("input[type=checkbox]")!.parentElement!,
+        ).fontSize,
+        arrowInset: arrowBounds ? bounds.right - arrowBounds.right : 0,
+        paddingRight: parseFloat(getComputedStyle(element).paddingRight),
+      };
+    });
+    expect(geometry.height).toBeCloseTo(geometry.touchTarget ? 44 : 28, 0);
+    expect(geometry.arrowInset).toBeGreaterThanOrEqual(8);
+    expect(geometry.paddingRight).toBeGreaterThanOrEqual(28);
+    expect(geometry.font).toBe(touch ? "16px" : geometry.outerFont);
+  }
+}
+
+export async function assertLatestTurnCardInView(session: SessionPage) {
+  const card = session.activeChat().getByTestId("turn-changed-files-card").last();
+  await expect(card).toContainText("untracked_test.txt");
+  await expect
+    .poll(
+      () =>
+        card.evaluate((element) => {
+          const scroll = element.closest(".chat-message-list")!;
+          return Math.round(
+            element.getBoundingClientRect().bottom - scroll.getBoundingClientRect().bottom,
+          );
+        }),
+      { message: "latest changed-files card should be inside the transcript viewport" },
+    )
+    .toBeLessThanOrEqual(0);
 }

@@ -1,3 +1,4 @@
+import { IconChevronDown } from "@tabler/icons-react";
 import { formatDateTime } from "@/lib/i18n/formats";
 import { Button } from "@kandev/ui/button";
 import { turnChangeRepositoryOptionName } from "@/lib/turn-changes/tree";
@@ -99,10 +100,10 @@ export function HistoricalScopeSelect({
   const visibleSummaries = summaries.filter((summary) => projectTurnChangeSummary(summary).visible);
   return (
     <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
-      <label className="min-w-0 flex-1">
+      <label className="relative block min-w-0 flex-1">
         <span className="sr-only">{t("task:turnChangesScope")}</span>
         <select
-          className="h-7 min-h-7 w-full rounded-md border bg-background px-2 text-sm max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+          className="h-7 min-h-7 w-full appearance-none rounded-md border bg-background pl-2 pr-8 text-xs max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           aria-label={t("task:turnChangesScope")}
           value={scopeValue}
           onChange={(event) => onSelect(event.target.value)}
@@ -118,6 +119,10 @@ export function HistoricalScopeSelect({
             </option>
           ))}
         </select>
+        <IconChevronDown
+          aria-hidden="true"
+          className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+        />
       </label>
       {hasMore && (
         <Button
@@ -158,10 +163,10 @@ export function FileSelectionControls({
   return (
     <div className="shrink-0 border-b px-3 py-2">
       <div className="flex flex-col gap-2 md:flex-row md:items-center">
-        <label className="min-w-0 flex-1">
+        <label className="relative block min-w-0 flex-1">
           <span className="sr-only">{t("task:turnChangesSelectFile")}</span>
           <select
-            className="min-h-11 w-full min-w-0 rounded-md border bg-background px-2 text-sm md:min-h-7 [@media(pointer:coarse)]:min-h-11"
+            className="h-7 min-h-7 w-full min-w-0 appearance-none rounded-md border bg-background pl-2 pr-8 text-xs max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
             aria-label={t("task:turnChangesSelectFile")}
             value={selectedFile?.id ?? ""}
             onChange={(event) => onSelect(event.target.value)}
@@ -180,6 +185,10 @@ export function FileSelectionControls({
               </option>
             ))}
           </select>
+          <IconChevronDown
+            aria-hidden="true"
+            className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+          />
         </label>
         <label className="flex min-h-11 items-center gap-2 text-xs md:min-h-7 [@media(pointer:coarse)]:min-h-11">
           <input

@@ -141,6 +141,8 @@ The card does not claim exclusive agent authorship.
   Known shared-checkout overlap shall have a visible attribution note.
 - **AC-TASKS-TURN-CHANGES-005.9:** Streaming, pagination, reconnect, and checkpoint updates shall preserve card placement and the reader's scroll position.
   Existing bottom-follow behavior shall remain authoritative.
+  When bottom-follow owns the viewport, delayed summaries and file rows shall stay in view after completion and reload.
+  Manual reading, disabled auto-scroll, and explicit message navigation shall retain their positions.
 
 ### REQ-TASKS-TURN-CHANGES-006: Existing desktop and mobile diff surfaces
 
@@ -152,6 +154,8 @@ The card does not claim exclusive agent authorship.
   Both shall open the exact turn and optional checkout/file from the card.
 - **AC-TASKS-TURN-CHANGES-006.2:** Diff navigation shall offer Current changes, Latest captured turn, and captured historical turns.
   Stable session turn order and useful timestamps shall identify turns.
+  Turn and file selectors shall match adjacent desktop control text and keep their chevrons inset from the edge.
+  Phone and touch controls shall retain their minimum targets and input anti-zoom font rule.
   An explicit historical selection shall not follow later turns or silently fall back to current changes.
 - **AC-TASKS-TURN-CHANGES-006.3:** Header totals, file lists, and patches shall use the same endpoint pair.
   A visible whitespace filter shall change rendering only, preserving canonical totals.

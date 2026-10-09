@@ -6,6 +6,8 @@ import {
 } from "./diff-update-helpers";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import {
+  assertHistoricalSelectorStyle,
+  assertLatestTurnCardInView,
   enableTurnChangedFiles,
   openFirstTurnChangesDiff,
   readTurnChangeHistory,
@@ -28,6 +30,7 @@ test.describe("historical turn changed files", () => {
       const { session, sessionId } = await seedUntrackedFileTask(testPage, apiClient, seedData);
       await waitForTurnChangeCount(apiClient, sessionId, 1);
       await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(1);
+      await assertLatestTurnCardInView(session);
 
       await session.sendMessage("/e2e:untracked-file-modify");
       await waitForTurnChangeCount(apiClient, sessionId, 2);
@@ -44,6 +47,7 @@ test.describe("historical turn changed files", () => {
       await session.waitForLoad();
       await session.waitForChatIdle();
       await expect(session.activeChat().getByTestId("turn-changed-files-card")).toHaveCount(2);
+      await assertLatestTurnCardInView(session);
       const history = await readTurnChangeHistory(apiClient, sessionId);
       const orderedHistory = [...(history.change_sets ?? [])].sort(
         (left, right) => left.turn_ordinal - right.turn_ordinal,
@@ -68,6 +72,20 @@ test.describe("historical turn changed files", () => {
       await openFirstTurnChangesDiff(session);
       const viewer = testPage.getByTestId("historical-turn-diff");
       await expect(viewer).toBeVisible();
+      await assertHistoricalSelectorStyle(viewer);
+      await waitForDiffText(testPage, "INITIAL_CONTENT");
+      await testPage.screenshot({ path: test.info().outputPath("historical-selectors.png") });
+      await testPage.emulateMedia({ colorScheme: "dark" });
+      await expect(testPage.locator("html")).toHaveClass(/dark/);
+      await expect
+        .poll(() =>
+          viewer
+            .locator("diffs-container")
+            .first()
+            .evaluate((element) => getComputedStyle(element).colorScheme),
+        )
+        .toBe("dark");
+      await testPage.screenshot({ path: test.info().outputPath("historical-selectors-dark.png") });
       await expect(viewer).toContainText("untracked_test.txt");
       await waitForDiffText(testPage, "INITIAL_CONTENT");
       await waitForDiffTextAbsent(testPage, "MODIFIED_CONTENT");
@@ -105,7 +123,14 @@ test("recovers a failed file list instead of claiming no files", async ({
   await testPage.route("**/turn-changes/*/repositories/*/files?*", (route) =>
     route.fulfill({ status: 503, json: { error: "QA transient failure" } }),
   );
+  const failedFiles = testPage.waitForResponse(
+    (response) =>
+      response.url().includes("/repositories/") &&
+      response.url().includes("/files?") &&
+      response.status() === 503,
+  );
   await testPage.reload();
+  await failedFiles;
   const card = testPage.getByTestId("turn-changed-files-card");
   await expect(card.getByRole("alert")).toBeVisible();
   await card.getByRole("button", { name: "Open diff", exact: true }).click();

@@ -219,3 +219,29 @@ Evidence logs: `/tmp/pr4332-final-desktop-complete.log`, `/tmp/kandev-run.e2e.y9
 CI caught the environment inventory omitted from the Linux editor IPC fix. The host runtime directory must remain available to code-server; socket tests explicitly select isolated directories. The inventory now records that exemption. The existing guard failed before the correction. This changes test metadata only; editor behavior and the earlier browser evidence remain unchanged.
 
 Both exact CI commands passed locally under their poisoned environment values: `go test -race ./internal/gitlab/... ./internal/agentctl/server/process/...` (process package: 263.5 seconds) and `go test -race ./internal/github/...` (69.3 seconds). Logs: `/tmp/pr4332-ambient-env-{red,green}.log` and `/tmp/pr4332-ambient-github-green.log`.
+
+
+### Selector and transcript-follow UX follow-up
+
+- [x] Give both historical selectors an inset chevron and match adjacent desktop control text.
+- [x] Preserve bottom-follow through delayed changed-files card growth after completion and reload.
+- [x] Preserve manual reading, disabled auto-scroll, and explicit navigation positions.
+- [x] Verify desktop and native mobile drawer behavior, geometry, and screenshots.
+
+Reuse the existing historical viewer and full-height mobile diff drawer. Keep native selection, 28px desktop controls, 44px phone/touch controls, and the mobile anti-zoom font floor. The transcript remains its single scroll owner. Delayed card content must follow only when bottom-follow owns the view.
+
+The selectors use an 8px chevron inset and 32px text clearance. Desktop text is 12px, matching the whitespace control. Phone inputs retain the 16px anti-zoom floor and 44px targets. Desktop and phone checks passed in light and dark themes before the final scroll correction.
+
+Scroll diagnosis found two event-order races. A native scroll event could revoke bottom-follow after asynchronous card growth, although no reader gesture occurred. A content resize could also arrive while history loading blocked follow and be discarded. The existing scroll controller now preserves owned follow and retries a pending resize after the loading guard clears. It adds no observer, timer, or layout polling. Manual-reader and explicit-navigation guards remain authoritative.
+
+Both regressions failed before their corrections. The final focused scroll, motion, and viewport suites passed 116 tests. Evidence: `/tmp/pr4332-scroll-pending-red.log`, `/tmp/pr4332-scroll-pending-green.log`, and `/tmp/pr4332-scroll-motion-green.log`. Browser tracing reproduced the reload gap with follow enabled and resize callbacks blocked; `/tmp/pr4332-scroll-diag2.log` records that diagnosis. Temporary instrumentation was removed. Desktop and mobile delayed-load/reload checks passed on the combined correction. The same runs passed desktop error/retry and narrow-pointer cases and mobile manual-reader/disabled-follow cases, but failed the new dark diff-theme assertion.
+
+
+The dark-theme browser check found the shared diff worker retained light-theme tokens after the surrounding viewer became dark. This made its file header hard to read. The worker now produces both supported theme variants; each viewer selects its current color scheme without asynchronously replacing the shared cache. The desktop and mobile assertions check the rendered diff host, not only the page theme class. Evidence before correction: `/tmp/pr4332-ux-green-desktop.log` and `/tmp/pr4332-ux-green-mobile.log`.
+
+Final theme verification passed on desktop and mobile: `/tmp/pr4332-ux-theme-desktop.log` and `/tmp/pr4332-ux-theme-mobile.log`. Visually inspected both dark viewers and the mobile card-follow screenshot. The dark file header is readable, selector arrows are inset, and the latest card clears the composer. Changed-file ESLint, production build, and document/specification checks passed. The earlier full scroll/motion test results remain valid; only shared theme configuration changed afterward.
+
+- [ ] Push this UX correction and republish screenshots from the committed version.
+- [ ] Confirm terminal CI and review disposition at that pushed head.
+
+Work order 09 remains open for its recorded executor, storage, retention, and broader performance qualification. These focused UI checks do not close those gaps.

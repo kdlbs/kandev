@@ -653,13 +653,19 @@ function useFollowIntent({
   isNearBottomRef: React.RefObject<boolean>;
   cancelMotion: () => void;
 }) {
-  const resyncIsNearBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el || !isVisibleRef.current || isAnimating()) return;
-    isNearBottomRef.current =
-      el.scrollHeight - el.scrollTop - el.clientHeight < (userReading.current ? 3 : 100);
-    if (isNearBottomRef.current) userReading.current = false;
-  }, [scrollRef, isAnimating, userReading]);
+  const resyncIsNearBottom = useCallback(
+    (preserveFollow = false) => {
+      const el = scrollRef.current;
+      if (!el || !isVisibleRef.current || isAnimating()) return;
+      // Delayed content growth cannot revoke bottom-follow without reader input.
+      // Explicit navigation releases still reconcile against the actual geometry.
+      if (preserveFollow && isNearBottomRef.current && !userReading.current) return;
+      isNearBottomRef.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight < (userReading.current ? 3 : 100);
+      if (isNearBottomRef.current) userReading.current = false;
+    },
+    [scrollRef, isAnimating, userReading],
+  );
   const markNotNearBottom = useCallback(() => {
     cancelMotion();
     isNearBottomRef.current = false;
@@ -801,7 +807,7 @@ function usePersistedTranscriptScroll({
   scrollRef: React.RefObject<HTMLDivElement | null>;
   sessionId: string | null;
   storeApi: ReturnType<typeof useAppStoreApi>;
-  resyncIsNearBottom: () => void;
+  resyncIsNearBottom: (preserveFollow?: boolean) => void;
   enabled: boolean;
   isWorking: boolean;
   isVisible: boolean;
@@ -867,7 +873,7 @@ function usePersistedTranscriptScroll({
      * coalesced persistence of the scroll position. */
     const onScroll = () => {
       if (!isVisibleRef.current || latestSessionIdRef.current !== sessionId) return;
-      resyncIsNearBottom();
+      resyncIsNearBottom(enabled);
       // A layout change can clamp a disabled transcript's scrollTop and emit a
       // native scroll event. Only adopt an offset when a recent user gesture
       // explains the movement; otherwise the layout effect must restore the

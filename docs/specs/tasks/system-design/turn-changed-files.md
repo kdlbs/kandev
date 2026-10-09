@@ -375,6 +375,8 @@ Availability projection:
 | Expired nonzero summary | Counts, History expired explanation, disabled Open diff |
 | Known overlap | Shared checkout note with interval detail |
 
+Delayed card growth uses the transcript content ResizeObserver. A native scroll event cannot revoke existing bottom-follow ownership without reader intent. Explicit navigation releases still reconcile against viewport geometry. Content resize events blocked by history loading are retained and retried on the next render when the existing follow guards permit it. This covers both late summaries and asynchronous file rows without extra observers or layout polling.
+
 ## Historical navigation
 
 Add `HistoricalTurnDiffTarget` to dependency-neutral `diff-target-types.ts`:

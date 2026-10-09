@@ -303,6 +303,7 @@ function AutoScrollHarness({
   isVisible = true,
   sessionId = null,
   metrics,
+  initialPlacementPending = false,
 }: {
   isWorking: boolean;
   hasUnreadDivider: boolean;
@@ -313,6 +314,7 @@ function AutoScrollHarness({
   isVisible?: boolean;
   sessionId?: string | null;
   metrics?: NativeScrollMetrics;
+  initialPlacementPending?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const useAutoScrollWithVisibility = useAutoScroll as unknown as (
@@ -325,13 +327,18 @@ function AutoScrollHarness({
     sessionId,
     enabled,
     motionEnabled,
+    initialPlacementPending,
     hasUnreadDivider,
     isProgrammaticScrollLocked: NEVER_LOCKED,
     isVisible,
   });
   useNativeScrollMetrics(scrollRef, metrics);
   if (markRef) markRef.current = markNotNearBottom;
-  return <div ref={scrollRef} data-testid={AUTO_SCROLL_CONTAINER_TEST_ID} />;
+  return (
+    <div ref={scrollRef} data-testid={AUTO_SCROLL_CONTAINER_TEST_ID}>
+      <div data-chat-content />
+    </div>
+  );
 }
 
 /** Stubs scrollHeight (1000) and clientHeight (400) onto an element. */
@@ -2107,13 +2114,17 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
   });
 
   it("does not follow the bottom when work starts with an unread divider", () => {
-    const { rerender } = render(<AutoScrollHarness isWorking={false} hasUnreadDivider={true} />);
+    const markRef: { current?: () => void } = {};
+    const { rerender } = render(
+      <AutoScrollHarness isWorking={false} hasUnreadDivider={true} markRef={markRef} />,
+    );
     const scrollContainer = document.querySelector<HTMLElement>(
       `[data-testid="${AUTO_SCROLL_CONTAINER_TEST_ID}"]`,
     );
     if (!scrollContainer) throw new Error("auto-scroll container did not render");
     setScrollMetrics(scrollContainer);
     scrollContainer.scrollTop = 123;
+    markRef.current!();
     scrollContainer.dispatchEvent(new Event("scroll"));
 
     rerender(<AutoScrollHarness isWorking={true} hasUnreadDivider={true} />);
@@ -3340,3 +3351,73 @@ describe("missing prompt row scope", () => {
     view.unmount();
   });
 });
+
+it.each([
+  { enabled: true, reading: false, pending: false, expected: 900 },
+  { enabled: true, reading: false, pending: true, expected: 900 },
+  { enabled: true, reading: true, pending: true, expected: 570 },
+  { enabled: false, reading: false, pending: true, expected: 600 },
+])(
+  "handles delayed card growth with enabled=$enabled reading=$reading pending=$pending",
+  ({ enabled, reading, pending, expected }) => {
+    let contentResize: (() => void) | undefined;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(private callback: ResizeObserverCallback) {}
+        observe(element: Element) {
+          if (element.hasAttribute("data-chat-content")) {
+            contentResize = () => this.callback([], this as unknown as ResizeObserver);
+          }
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+    try {
+      const view = render(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          metrics={metrics}
+          enabled={enabled}
+          initialPlacementPending={pending}
+        />,
+      );
+      const container = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      Object.defineProperty(container, "scrollTop", {
+        configurable: true,
+        get: () => metrics.scrollTop,
+        set: (value: number) => {
+          metrics.scrollTop = Math.max(
+            0,
+            Math.min(value, metrics.scrollHeight - metrics.clientHeight),
+          );
+        },
+      });
+      act(() => {
+        if (reading) {
+          container.dispatchEvent(new WheelEvent("wheel", { deltaY: -30 }));
+          metrics.scrollTop = 570;
+        }
+        metrics.scrollHeight = 1300;
+        container.dispatchEvent(new Event("scroll"));
+        contentResize?.();
+      });
+      view.rerender(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          metrics={metrics}
+          enabled={enabled}
+          initialPlacementPending={false}
+        />,
+      );
+      expect(metrics.scrollTop).toBe(expected);
+    } finally {
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+  },
+);
