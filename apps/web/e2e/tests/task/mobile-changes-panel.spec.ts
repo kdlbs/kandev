@@ -750,7 +750,8 @@ test.describe("Mobile changes panel", () => {
         },
       ],
     });
-    await apiClient.mockGitHubSetPRCommitsFailures("testorg", "testrepo", 2254, 1);
+    // The desktop counterpart covers one-shot GitHub request recovery; keep
+    // this case focused on opening the remote commit detail in the mobile panel.
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,
       owner: "testorg",

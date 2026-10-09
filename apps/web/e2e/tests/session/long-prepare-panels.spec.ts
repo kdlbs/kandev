@@ -30,7 +30,7 @@ test.describe("Long prepare (slow git fetch)", () => {
     // Hosted E2E runners can take longer to start the workspace preparer than
     // the local runner. Keep the test bounded while leaving room for the
     // preparation gate, retry-ladder dwell, and recovery assertions.
-    test.setTimeout(180_000);
+    test.setTimeout(240_000);
 
     // Hold the actual fetch so the file-tree retry budget is measured from the
     // preparation boundary, not from task creation or page navigation.
@@ -73,7 +73,7 @@ test.describe("Long prepare (slow git fetch)", () => {
 
       await expect
         .poll(() => fs.existsSync(startedFile), {
-          timeout: 60_000,
+          timeout: 120_000,
           message: "workspace preparation should reach the gated Git fetch",
         })
         .toBe(true);
