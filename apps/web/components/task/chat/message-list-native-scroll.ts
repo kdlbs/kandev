@@ -84,6 +84,25 @@ export function resolvePaginationStopReason(
   return boundaryUnchanged ? "visible-boundary-unchanged" : "visible-boundary-added";
 }
 
+type TranscriptScrollGeometry = {
+  scrollTop: number;
+  scrollHeight: number;
+};
+
+function readTranscriptScrollGeometry(element: HTMLElement): TranscriptScrollGeometry {
+  return { scrollTop: element.scrollTop, scrollHeight: element.scrollHeight };
+}
+
+export function shouldPreserveFollowOnScroll(
+  previous: TranscriptScrollGeometry,
+  current: TranscriptScrollGeometry,
+): boolean {
+  const scrollTopDelta = current.scrollTop - previous.scrollTop;
+  if (Math.abs(scrollTopDelta) <= 2) return true;
+  const contentGrowth = current.scrollHeight - previous.scrollHeight;
+  return contentGrowth > 0 && Math.abs(scrollTopDelta - contentGrowth) <= 2;
+}
+
 function resolvePaginationSettleReason(
   result: LazyLoadSentinelSettleResult,
   boundaryUnchanged: boolean,
@@ -653,18 +672,34 @@ function useFollowIntent({
   isNearBottomRef: React.RefObject<boolean>;
   cancelMotion: () => void;
 }) {
+  const lastScrollGeometryRef = useRef<TranscriptScrollGeometry | null>(null);
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (element) lastScrollGeometryRef.current = readTranscriptScrollGeometry(element);
+  }, [scrollRef]);
   const resyncIsNearBottom = useCallback(
     (preserveFollow = false) => {
       const el = scrollRef.current;
       if (!el || !isVisibleRef.current || isAnimating()) return;
+      const currentGeometry = readTranscriptScrollGeometry(el);
+      const previousGeometry = lastScrollGeometryRef.current;
+      lastScrollGeometryRef.current = currentGeometry;
       // Delayed content growth cannot revoke bottom-follow without reader input.
       // Explicit navigation releases still reconcile against the actual geometry.
-      if (preserveFollow && isNearBottomRef.current && !userReading.current) return;
+      if (
+        preserveFollow &&
+        isNearBottomRef.current &&
+        !userReading.current &&
+        previousGeometry &&
+        shouldPreserveFollowOnScroll(previousGeometry, currentGeometry)
+      ) {
+        return;
+      }
       isNearBottomRef.current =
         el.scrollHeight - el.scrollTop - el.clientHeight < (userReading.current ? 3 : 100);
       if (isNearBottomRef.current) userReading.current = false;
     },
-    [scrollRef, isAnimating, userReading],
+    [scrollRef, isVisibleRef, isAnimating, userReading, isNearBottomRef],
   );
   const markNotNearBottom = useCallback(() => {
     cancelMotion();

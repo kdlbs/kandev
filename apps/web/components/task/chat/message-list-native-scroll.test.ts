@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { resolveCompetingInitialScrollOwner } from "./message-list-native-scroll";
+import {
+  resolveCompetingInitialScrollOwner,
+  shouldPreserveFollowOnScroll,
+} from "./message-list-native-scroll";
 
 const noProgrammaticLock = () => false;
 
@@ -56,5 +59,43 @@ describe("resolveCompetingInitialScrollOwner", () => {
         isProgrammaticScrollLocked: noProgrammaticLock,
       }),
     ).toBeNull();
+  });
+});
+
+describe("shouldPreserveFollowOnScroll", () => {
+  it("does not treat an explicit position change as content-driven movement", () => {
+    expect(
+      shouldPreserveFollowOnScroll(
+        { scrollTop: 1400, scrollHeight: 2000 },
+        { scrollTop: 0, scrollHeight: 2000 },
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps follow when delayed content grows without moving the viewport", () => {
+    expect(
+      shouldPreserveFollowOnScroll(
+        { scrollTop: 800, scrollHeight: 1000 },
+        { scrollTop: 800, scrollHeight: 1200 },
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps follow when native anchoring moves with inserted content", () => {
+    expect(
+      shouldPreserveFollowOnScroll(
+        { scrollTop: 800, scrollHeight: 1000 },
+        { scrollTop: 1000, scrollHeight: 1200 },
+      ),
+    ).toBe(true);
+  });
+
+  it("does not preserve follow when scroll movement is unrelated to content growth", () => {
+    expect(
+      shouldPreserveFollowOnScroll(
+        { scrollTop: 800, scrollHeight: 1000 },
+        { scrollTop: 500, scrollHeight: 1200 },
+      ),
+    ).toBe(false);
   });
 });
