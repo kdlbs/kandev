@@ -3,6 +3,7 @@ import { waitForSessionDone } from "./session";
 import { SessionPage } from "../pages/session-page";
 import type { Page } from "@playwright/test";
 import { assertNoDocumentHorizontalOverflow } from "./layout-assertions";
+import type { PrAssetCapture } from "./pr-asset-capture";
 
 export function automaticRecoveryOwnerScenario() {
   test("automatic recovery has one owner without bootstrap metadata", async ({
@@ -56,7 +57,7 @@ export function automaticRecoveryOwnerScenario() {
     await expect(
       testPage.getByText("Earlier recovery history stays available", { exact: true }),
     ).toBeVisible();
-    await revealRecoveryFromFiles(testPage, testInfo.project.name === "mobile-chrome");
+    await revealRecoveryFromFiles(testPage, testInfo.project.name, prCapture);
     await assertNoDocumentHorizontalOverflow(testPage, "automatic recovery owner");
     if (testInfo.project.name === "mobile-chrome") {
       const box = await card.getByTestId("recovery-resume-button").boundingBox();
@@ -66,7 +67,7 @@ export function automaticRecoveryOwnerScenario() {
       path: testInfo.outputPath("automatic-recovery-owner.png"),
       fullPage: true,
     });
-    await prCapture.screenshot("automatic-recovery-owner", {
+    await prCapture.screenshot(`${testInfo.project.name}-automatic-recovery-owner`, {
       caption: "One recovery card retains both automatic failure causes.",
     });
     const resume = card.getByTestId("recovery-resume-button");
@@ -82,7 +83,8 @@ export function automaticRecoveryOwnerScenario() {
   });
 }
 
-async function revealRecoveryFromFiles(page: Page, mobile: boolean) {
+async function revealRecoveryFromFiles(page: Page, project: string, capture: PrAssetCapture) {
+  const mobile = project === "mobile-chrome";
   if (mobile)
     await page
       .getByTestId("session-mobile-bottom-nav")
@@ -93,6 +95,10 @@ async function revealRecoveryFromFiles(page: Page, mobile: boolean) {
     .getByTestId("files-panel")
     .getByRole("link", { name: "View recovery", exact: true });
   await expect(link).toHaveCount(1);
+  await expect(link).toBeVisible();
+  await capture.screenshot(`${project}-automatic-recovery-workspace`, {
+    caption: "The unavailable workspace links to the same session recovery card.",
+  });
   if (mobile) await link.tap();
   else await link.click();
   await expect(page.getByTestId("session-recovery-card")).toBeFocused();

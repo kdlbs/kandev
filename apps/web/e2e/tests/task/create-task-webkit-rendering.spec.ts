@@ -15,6 +15,12 @@ async function openCreateTaskDialog(
 ): Promise<Locator> {
   const kanban = new KanbanPage(testPage);
   await kanban.goto();
+  const sidebar = testPage.getByTestId("app-sidebar");
+  if ((await sidebar.getAttribute("data-collapsed")) === "true") {
+    await sidebar.getByRole("button", { name: "Expand sidebar", exact: true }).click();
+  }
+  await expect(sidebar).toHaveAttribute("data-collapsed", "false");
+  await expect(testPage.getByTestId("app-sidebar-layout")).toHaveCSS("width", "320px");
   await beforeOpen?.();
   await kanban.createTaskButton.first().click();
   const dialog = testPage.getByTestId("create-task-dialog");

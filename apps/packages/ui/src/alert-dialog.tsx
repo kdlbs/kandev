@@ -5,21 +5,42 @@ import { AlertDialog as AlertDialogPrimitive } from "radix-ui";
 
 import { cn } from "./lib/utils";
 import { Button } from "./button";
+import {
+  DIALOG_CLOSE_RECOVERY_MS,
+  finishClosingDialogAnimations,
+  subscribeDialogCloseRecovery,
+} from "./lib/dialog-body-lock";
 import { handleDialogDefaultActionKeyDown } from "./lib/dialog-default-action";
 
-function AlertDialog({ ...props }: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
-  React.useEffect(() => {
-    return () => {
-      // Safety cleanup: Radix AlertDialog sets pointer-events: none on body
-      // when modal. If unmounted mid-close (e.g. layout rebuild), Radix never
-      // finishes cleanup. Check the actual body state at unmount time.
-      if (document.body.style.pointerEvents === "none") {
-        document.body.style.removeProperty("pointer-events");
-      }
-    };
-  }, []);
-
-  return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
+function AlertDialog({
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof AlertDialogPrimitive.Root>) {
+  const finishClosingAnimations = React.useCallback(
+    () => finishClosingDialogAnimations(document),
+    [],
+  );
+  React.useEffect(
+    () => () => {
+      finishClosingAnimations();
+    },
+    [finishClosingAnimations],
+  );
+  React.useEffect(() => subscribeDialogCloseRecovery(document), []);
+  const handleOpenChange = React.useCallback(
+    (open: boolean) => {
+      onOpenChange?.(open);
+      if (!open) window.setTimeout(finishClosingAnimations, DIALOG_CLOSE_RECOVERY_MS);
+    },
+    [finishClosingAnimations, onOpenChange],
+  );
+  return (
+    <AlertDialogPrimitive.Root
+      data-slot="alert-dialog"
+      onOpenChange={handleOpenChange}
+      {...props}
+    />
+  );
 }
 
 function AlertDialogTrigger({

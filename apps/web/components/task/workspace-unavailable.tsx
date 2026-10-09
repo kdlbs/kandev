@@ -149,13 +149,25 @@ function useUnavailableOwner(
     candidate.stamp
       ? candidateSession
       : null;
+  const automaticSessionOwner = automaticRecoverySessionOwner(context, dependentSession);
   const sessionOwner =
     correlatedRestore && context?.automaticRecoveryOwnerSessionId === correlatedRestore
       ? correlatedRestore
-      : durableSessionOwner;
+      : (automaticSessionOwner ?? durableSessionOwner);
   const { ownerId: restoreOwnerId, invalidateOwner } = useWorkspaceRecoveryOwner(restoration);
   const ownerId = sessionOwner ? `session-recovery-${sessionOwner}` : restoreOwnerId;
   return { context, sessionOwner, ownerId, invalidateOwner };
+}
+
+function automaticRecoverySessionOwner(
+  context: ReturnType<typeof useTaskLaunchErrorContext>,
+  sessionId: string | null | undefined,
+) {
+  return sessionId &&
+    context?.automaticRecovery?.recoveryFailure?.outcome === "recovery_failed" &&
+    context.automaticRecoveryOwnerSessionId === sessionId
+    ? sessionId
+    : null;
 }
 
 function correlatedRestorationSession(

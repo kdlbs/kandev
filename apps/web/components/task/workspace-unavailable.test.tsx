@@ -175,3 +175,22 @@ it("routes automatic restore failure to the composer without bootstrap metadata"
   expect(screen.getByTestId(WORKSPACE_RETRY_ID)).toBeTruthy();
   ownerContext.current = null;
 });
+
+it("routes a failed-session pane to its automatic recovery owner without bootstrap metadata", () => {
+  const revealSessionRecovery = vi.fn();
+  ownerContext.current = {
+    taskId: "task-1",
+    automaticRecoveryOwnerSessionId: "session-1",
+    automaticRecovery: { recoveryFailure: { outcome: "recovery_failed" } },
+    revealSessionRecovery,
+  };
+  const { rerender } = render(
+    <WorkspaceUnavailable failedSessionId="session-1" error="dependent failure" />,
+  );
+  fireEvent.click(screen.getByRole("link", { name: VIEW_RECOVERY }));
+  expect(revealSessionRecovery).toHaveBeenCalledWith("session-1");
+  expect(screen.queryByText(DETAILS_LABEL)).toBeNull();
+  rerender(<WorkspaceUnavailable failedSessionId="session-2" error="independent failure" />);
+  expect(screen.queryByRole("link", { name: VIEW_RECOVERY })).toBeNull();
+  expect(screen.getByText(DETAILS_LABEL)).toBeTruthy();
+});

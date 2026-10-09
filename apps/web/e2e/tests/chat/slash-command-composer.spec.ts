@@ -260,8 +260,14 @@ test.describe("Slash command composer", () => {
     apiClient,
     seedData,
   }) => {
-    const notifications = await routeGatewayNotifications(testPage);
     const task = await createReadyTask(apiClient, seedData, "Startup Plan Mode Snapshot");
+    const notifications = await routeGatewayNotifications(
+      testPage,
+      (frame) =>
+        frame.type === "notification" &&
+        frame.payload?.session_id === task.session_id &&
+        ["session.available_commands", "session.models_updated"].includes(frame.action ?? ""),
+    );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
     const session = await openTaskChat(testPage, task.id);

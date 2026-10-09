@@ -24,6 +24,8 @@ export const DIALOG_CLOSE_RECOVERY_MS = 400;
 const CLOSING_DIALOG_PARTS = [
   '[data-state="closed"][data-slot="dialog-content"]',
   '[data-state="closed"][data-slot="dialog-overlay"]',
+  '[data-state="closed"][data-slot="alert-dialog-content"]',
+  '[data-state="closed"][data-slot="alert-dialog-overlay"]',
 ].join(",");
 
 type VisibilitySubscription = {

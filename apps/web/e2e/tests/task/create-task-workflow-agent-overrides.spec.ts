@@ -1,5 +1,6 @@
 import { expect, test } from "../../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";
+import { waitForSessionDone } from "../../helpers/session";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
@@ -202,6 +203,12 @@ test.describe("task-specific workflow agent overrides", () => {
         .poll(() => apiClient.getTask(runtimeTask.id).then((task) => task.primary_session_id))
         .toBe(initialSessionId);
       await waitForWorkflowMoveLifecycle(apiClient, runtimeTask.id);
+      await waitForSessionDone(
+        apiClient,
+        runtimeTask.id,
+        initialSessionId,
+        "Review session becomes idle before its proceed control is available",
+      );
       await testPage.reload();
       await sessionPage.waitForLoad();
 

@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForSessionDone } from "../../helpers/session";
 import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
@@ -9,9 +10,8 @@ import type { Page } from "@playwright/test";
  * Seed a task using the diff-expansion-setup mock scenario and navigate to
  * its session page, waiting for the agent turn to complete.
  *
- * The scenario writes a 50-line file, commits it, then modifies two lines far
- * apart (line 3 and line 48).  The diff viewer will show two separate hunks
- * with ~44 collapsed lines between them.
+ * The scenario commits a 200-line file and changes lines 50 and 150. Wait for
+ * the entire seed turn before interacting with the resulting diff scope.
  */
 async function seedExpansionTask(
   testPage: Page,
@@ -41,6 +41,12 @@ async function seedExpansionTask(
     session.chat.getByText("diff-expansion-setup complete", { exact: false }),
   ).toBeVisible({ timeout: 45_000 });
 
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "Diff fixture commit and agent turn complete before expansion",
+  );
   return session;
 }
 
@@ -139,7 +145,7 @@ async function hoverUntilGutterSlotAppears(testPage: Page) {
 }
 
 test.describe("Diff expansion — Pierre Diffs provider", () => {
-  test.describe.configure({ retries: 2, timeout: 120_000 });
+  test.describe.configure({ timeout: 120_000 });
 
   test("diff viewer background matches app --background (regression for pierre 1.1.22 selector rename)", async ({
     testPage,

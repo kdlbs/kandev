@@ -323,6 +323,13 @@ using the zh-Hant generator and pseudo checks; no new literal UI copy.
 | SSH | Recorded host/process identity and current transport | Proven process exit only; disconnected host is unknown |
 | Sprites / plugin remote | Existing supported status capability | Normalize supported terminal facts; otherwise unknown, no invented Kubernetes details or new plugin protocol |
 
+A terminal local agent row clears its process handle without implying shared
+controller loss. The same owned terminal execution may use the attached local
+controller identity for inspection before explicit stale-agent cleanup. The
+recorded runtime, task/execution identity, attachment timestamp and controller
+availability must still match. Live or rotated rows cannot use this fallback;
+unknown or terminated controller evidence continues to block relaunch.
+
 No new runtime flag or provider retry authority. The incident observer is read-only;
 all existing recovery fences remain. Recheck open PR #3849 admission changes and the
 worker-compatibility sibling before implementation; planned maintenance intent must

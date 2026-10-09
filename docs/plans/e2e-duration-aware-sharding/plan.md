@@ -1,5 +1,10 @@
 ---
-spec: ../../specs/platform/requirements/e2e-duration-aware-sharding.md
+requirements:
+  - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-001
+  - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-002
+system_design:
+  - ../../specs/platform/system-design/e2e-duration-aware-sharding.md
+legacy_specs: []
 created: 2026-08-10
 status: in_progress
 ---

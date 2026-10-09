@@ -175,13 +175,16 @@ func (m *Manager) localExecutorObservationTarget(ctx context.Context, execution 
 	if err != nil {
 		return target, err
 	}
-	if row == nil || row.AgentExecutionID != execution.ID || row.LocalPID <= 0 {
+	if row == nil || row.TaskID != execution.TaskID || row.AgentExecutionID != execution.ID {
 		return target, fmt.Errorf("local controller ownership changed")
 	}
-	target.LocalPID = row.LocalPID
+	target.LocalPID = m.localObservationPID(execution, row)
+	if target.LocalPID <= 0 {
+		return target, fmt.Errorf("local controller identity unavailable")
+	}
 	target.AuthoritySessionID = execution.SessionID
 	target.ExpectedExecutorUpdatedAt = row.UpdatedAt
-	target.ResourceKey = fmt.Sprintf("local-pid:%d", row.LocalPID)
+	target.ResourceKey = fmt.Sprintf("local-pid:%d", target.LocalPID)
 	return m.completeExecutorObservationTarget(ctx, execution, target)
 }
 
@@ -202,7 +205,7 @@ func (m *Manager) legacyExecutorObservationTarget(ctx context.Context, execution
 		resource = getMetadataString(row.Metadata, MetadataKeyKubernetesPodUID)
 	}
 	if execution.RuntimeName == agentruntime.RuntimeStandalone {
-		resource = fmt.Sprintf("local-pid:%d", row.LocalPID)
+		resource = fmt.Sprintf("local-pid:%d", m.localObservationPID(execution, row))
 	}
 	if resource != target.ResourceKey {
 		return target, fmt.Errorf("executor resource ownership changed")
@@ -214,4 +217,14 @@ func (m *Manager) legacyExecutorObservationTarget(ctx context.Context, execution
 // Explicit worker uncertainty is actionable only after the disconnect grace.
 func executorDisconnectObservationReady(observation *models.ExecutorObservation, err error, afterGrace bool) bool {
 	return err == nil && observation != nil && (observation.Outcome != models.ExecutorOutcomeUnknown || (afterGrace && observation.ReportedUnavailable()))
+}
+
+// Terminal agent rows clear their process handle while their shared controller
+// remains attached. Only the same terminal execution may use that controller's
+// identity; the inspector still verifies its attachment generation and status.
+func (m *Manager) localObservationPID(execution *AgentExecution, row *models.ExecutorRunning) int {
+	if row.LocalPID == 0 && row.Runtime == agentruntime.RuntimeStandalone && isTerminalStatus(execution.Status) && isTerminalExecutorRunningStatus(row.Status) {
+		return m.resolveLocalPID(execution)
+	}
+	return row.LocalPID
 }

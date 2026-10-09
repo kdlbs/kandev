@@ -64,6 +64,7 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
 
   return (
     <DropdownMenu
+      modal={false}
       open={effectiveMenuOpen}
       onOpenChange={(open) => {
         if (!open && isProcessing) return;

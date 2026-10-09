@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -135,4 +136,51 @@ func TestExecutorFailureUnverifiedAuthorityLaunchDoesNotClaimLiveAgent(t *testin
 	var unavailable *ExecutorUnavailableError
 	require.ErrorAs(t, err, &unavailable)
 	require.Equal(t, "StatusUnverified", unavailable.Observation.Reason)
+}
+
+func TestExecutorFailureTerminalLocalAgentKeepsControllerAuthorityForRecovery(t *testing.T) {
+	for _, outcome := range []string{models.ExecutorOutcomeHealthy, models.ExecutorOutcomeTerminated, models.ExecutorOutcomeUnknown} {
+		t.Run(outcome, func(t *testing.T) {
+			mgr := newTestManager(t)
+			mgr.standaloneHostPID.Store(42)
+			mgr.SetExecutorRunningWriter(&synchronizedRunningWriter{running: &models.ExecutorRunning{TaskID: "task", SessionID: "session", Runtime: agentruntime.RuntimeStandalone, AgentExecutionID: "execution", Status: models.ExecutorRunningStatusFailed, UpdatedAt: time.Now().UTC()}})
+			mgr.SetLocalExecutorInspector(func(target models.ExecutorObservationTarget) *models.ExecutorObservation {
+				require.EqualValues(t, 42, target.LocalPID)
+				require.Equal(t, "local-pid:42", target.ResourceKey)
+				return &models.ExecutorObservation{Outcome: outcome, ResourceKey: target.ResourceKey}
+			})
+			execution := &AgentExecution{ID: "execution", TaskID: "task", SessionID: "session", RuntimeName: agentruntime.RuntimeStandalone, Status: v1.AgentStatusFailed}
+			err := mgr.existingExecutorLaunchError(t.Context(), execution)
+			if outcome == models.ExecutorOutcomeHealthy {
+				require.ErrorIs(t, err, ErrAgentAlreadyRunning, "healthy controller permits the existing explicit stale-agent cleanup path")
+			} else {
+				require.NotErrorIs(t, err, ErrAgentAlreadyRunning, "unknown or lost controller must still block cleanup/relaunch")
+				var unavailable *ExecutorUnavailableError
+				require.ErrorAs(t, err, &unavailable)
+			}
+		})
+	}
+}
+
+func TestExecutorFailureLocalControllerFallbackRejectsLiveOrRotatedAgentRows(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		status       v1.AgentStatus
+		rowExecution string
+		runtime      agentruntime.Runtime
+	}{{"live_agent", v1.AgentStatusReady, "execution", agentruntime.RuntimeStandalone}, {"rotated_agent", v1.AgentStatusFailed, "replacement", agentruntime.RuntimeStandalone}, {"remote_row", v1.AgentStatusFailed, "execution", agentruntime.RuntimeKubernetes}} {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := newTestManager(t)
+			mgr.standaloneHostPID.Store(42)
+			mgr.SetExecutorRunningWriter(&synchronizedRunningWriter{running: &models.ExecutorRunning{TaskID: "task", SessionID: "session", Runtime: tc.runtime, AgentExecutionID: tc.rowExecution, Status: models.ExecutorRunningStatusFailed, UpdatedAt: time.Now().UTC()}})
+			mgr.SetLocalExecutorInspector(func(models.ExecutorObservationTarget) *models.ExecutorObservation {
+				t.Fatal("unowned controller evidence must not be read")
+				return nil
+			})
+			err := mgr.existingExecutorLaunchError(t.Context(), &AgentExecution{ID: "execution", TaskID: "task", SessionID: "session", RuntimeName: agentruntime.RuntimeStandalone, Status: tc.status})
+			require.NotErrorIs(t, err, ErrAgentAlreadyRunning)
+			var unavailable *ExecutorUnavailableError
+			require.ErrorAs(t, err, &unavailable)
+		})
+	}
 }

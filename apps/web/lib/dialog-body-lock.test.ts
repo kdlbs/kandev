@@ -108,3 +108,16 @@ describe("finishClosingDialogAnimations", () => {
     expect(finishClosingDialogAnimations(document)).toBe(false);
   });
 });
+
+it("finishes a closing alert dialog without mutating a second open modal's lock", () => {
+  const closing = animation();
+  const open = animation();
+  mountContent("closed", "alert-dialog-content", [closing]);
+  mountContent("open", DIALOG_CONTENT, [open]);
+  lockBody();
+
+  expect(finishClosingDialogAnimations(document)).toBe(true);
+  expect(closing.finish).toHaveBeenCalledOnce();
+  expect(open.finish).not.toHaveBeenCalled();
+  expect(isLocked()).toBe(true);
+});

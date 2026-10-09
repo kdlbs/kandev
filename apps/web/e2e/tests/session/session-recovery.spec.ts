@@ -100,8 +100,6 @@ async function seedStaleContextWindow(testPage: Page): Promise<void> {
 const CRASH_RECOVERY_TIMEOUT = 170_000;
 
 test.describe("Session recovery", () => {
-  test.describe.configure({ retries: 1 });
-
   test("cancelling delayed resume fences the old work before a retry", async ({
     testPage,
     apiClient,

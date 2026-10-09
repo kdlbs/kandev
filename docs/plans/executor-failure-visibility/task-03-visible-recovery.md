@@ -490,3 +490,56 @@ mobile navigation geometry assertion now waits for the finite sheet entrance
 animation before measuring its unchanged 44-pixel minimum touch target. Both
 mobile failure areas passed three repetitions each with retries disabled (six
 cases, 1.4 minutes). Remote CI remains a separate delivery gate.
+
+### Recovery owner and terminal-agent CI remediation
+
+The next published-head CI run completed every normal shard within its existing
+job limit. All six container shards passed (145 passed, seven skipped, no
+retries), and backend/frontend checks passed. The remaining browser failure was
+an automatic recovery workspace pane without its session recovery link; the
+complete blob audit also identified six retry-resolved scenarios. Documentation
+coverage rejected legacy shard work-order metadata. Aggregate browser gates
+correctly remained red.
+
+A workspace-only automatic failure now resolves its matching session owner even
+when boot status metadata is absent. An unrelated session and an independent
+workspace restoration attempt retain their own errors. The missing-link unit
+regression failed before the correction and passed afterwards. Desktop and phone
+browser scenarios passed without retries.
+
+Repeated isolated fixtures reproduced fresh recovery incorrectly blocked after
+ordinary agent crash: terminal local agent inventory clears its process handle,
+while its controller remains attached. Observation now uses that controller only
+for the same owned terminal standalone execution and still verifies attachment
+and availability. Healthy-controller recovery, unknown/terminated-controller
+blocking, live-row rejection, rotated execution rejection and remote-row rejection
+have focused regression coverage. The full lifecycle package passed (118.126
+seconds); the final boundary cases passed under the race detector.
+
+Native Kanban task menus no longer compete with their confirmation's modal
+pointer lock. A 60-second closing-menu animation made the original lock failure
+deterministic; four corrected desktop repetitions passed with retries disabled.
+Context menus keep their existing interaction policy. Alert-dialog recovery now
+uses Radix's closing-animation cleanup and preserves another modal's lock when an
+unrelated closed root unmounts. Six phone confirmation/body-lock cases passed
+without retries. The 53 focused frontend regressions passed across eight files.
+
+Controlled command snapshots exclude only late real snapshots for their own
+session. Other notifications, sessions, binary frames and malformed frames still
+flow. Workflow preview waits for the reused review session to become idle; diff
+fixtures wait for the complete seeding turn; dialog geometry setup expands the
+actual sidebar before clicking its visible New Task control. These fixture fixes
+do not inflate timeouts or force clicks. Suite-local retry overrides were removed
+so an explicit no-retry run remains authoritative. Legacy shard plan metadata was
+migrated to its existing requirement/design references and passed the validator
+from the trusted base.
+
+No new product copy or public command/configuration contract was added in this
+fixup batch. Existing public executor/recovery guidance remains accurate. Remote
+CI, review disposition and final-commit screenshots remain delivery gates.
+
+Final affected browser verification passed all 12 cases (two repetitions of each
+of the six CI failure scenarios, 3.7 minutes) with retries disabled. Final
+frontend typecheck, localization ratchet, changed-file lint, trusted-base
+coverage validation, catalog validation and specification lint passed. The final
+controller ownership matrix passed under the race detector (1.526 seconds).

@@ -69,6 +69,11 @@ test.describe("managed task commands", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
     await expect(kanban.taskCardByTitle(createInput.title)).toBeVisible();
+    // Exercise a closing menu that outlives the fast confirmation action.
+    await testPage.addStyleTag({
+      content:
+        '[data-state="closed"][data-slot="dropdown-menu-content"] { animation-duration: 60s !important; }',
+    });
     await kanban.openTaskActionsMenu(taskId);
     await testPage.getByRole("menuitem", { name: "Delete", exact: true }).click();
     const staleDialog = testPage.getByRole("alertdialog");

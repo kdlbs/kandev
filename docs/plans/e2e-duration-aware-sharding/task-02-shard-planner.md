@@ -6,7 +6,13 @@ wave: 2
 depends_on:
   - "01-timing-profile"
 plan: "plan.md"
-spec: "../../specs/platform/requirements/e2e-duration-aware-sharding.md"
+requirements:
+  - REQ-PLATFORM-E2E-DURATION-AWARE-SHARDING-001
+acceptance_criteria:
+  - AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-001.1
+  - AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-001.2
+system_design:
+  - ../../specs/platform/system-design/e2e-duration-aware-sharding.md
 ---
 
 # Task 02: Generate duration-aware shard manifests
