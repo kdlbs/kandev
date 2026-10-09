@@ -60,6 +60,87 @@ func (r *Repository) SetTaskMetadataKeyIfDifferentStamp(
 	return r.setMetadataKeyIfStamp(ctx, "tasks", "task", taskID, key, newStamp, value, metadataCASDifferent)
 }
 
+// RecordSessionRecoveryResolution atomically appends one bounded, exact-stamp
+// successful recovery record while serializing metadata updates for the row.
+func (r *Repository) RecordSessionRecoveryResolution(
+	ctx context.Context,
+	sessionID string,
+	resolution models.SessionRecoveryResolution,
+) (bool, error) {
+	items := models.NormalizeSessionRecoveryResolutions([]models.SessionRecoveryResolution{resolution})
+	if len(items) != 1 {
+		return false, nil
+	}
+	resolution = items[0]
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	raw, err := r.lockSessionRecoveryResolutionMetadata(ctx, tx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	var metadata map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return false, fmt.Errorf("failed to parse session metadata: %w", err)
+	}
+	var existing []models.SessionRecoveryResolution
+	if encoded := metadata[models.SessionMetaKeyRecoveryResolutions]; len(encoded) > 0 {
+		if err := json.Unmarshal(encoded, &existing); err != nil {
+			existing = nil
+		}
+	}
+	for _, item := range models.NormalizeSessionRecoveryResolutions(existing) {
+		if item.ErrorStamp == resolution.ErrorStamp {
+			if err := tx.Commit(); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+	}
+	merged := models.NormalizeSessionRecoveryResolutions(append(existing, resolution))
+	payload, err := json.Marshal(merged)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize recovery resolutions: %w", err)
+	}
+	result, err := tx.ExecContext(
+		ctx,
+		r.db.Rebind(metadataKeyUpdateQuery("task_sessions", r.db.DriverName())),
+		metadataKeyUpdateArgs(
+			r.db.DriverName(),
+			models.SessionMetaKeyRecoveryResolutions,
+			string(payload),
+			r.nowUTC(),
+			sessionID,
+		)...,
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if rows == 0 {
+		return false, fmt.Errorf("agent session not found: %s", sessionID)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *Repository) lockSessionRecoveryResolutionMetadata(ctx context.Context, tx *sqlx.Tx, sessionID string) (string, error) {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		lockKey := "session-recovery-resolution:" + sessionID
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+			return "", fmt.Errorf("lock session recovery resolution: %w", err)
+		}
+	}
+	return r.lockMetadataRow(ctx, tx, "task_sessions", "agent session", sessionID)
+}
+
 func (r *Repository) setMetadataKeyIfStamp(
 	ctx context.Context,
 	table, entityName, entityID, key, expectedStamp string,
@@ -193,6 +274,38 @@ func (r *Repository) CommitBootstrapFailureIfCurrentExecution(
 	expectedStamp string,
 	errorValue models.LastAgentError,
 ) (bool, time.Time, error) {
+	return r.commitBootstrapFailureIfCurrentExecution(
+		ctx, taskID, sessionID, agentExecutionID, expectedState, expectedStamp, nil, errorValue,
+	)
+}
+
+// CommitBootstrapFailureIfCurrentAttempt adds the persisted start-attempt ID to
+// the execution and error-stamp predicates. Session activity can advance the
+// row revision during startup, and a retry can reuse an execution ID.
+func (r *Repository) CommitBootstrapFailureIfCurrentAttempt(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	expectedState models.TaskSessionState,
+	expectedStamp string,
+	expectedStartAttemptID string,
+	errorValue models.LastAgentError,
+) (bool, time.Time, error) {
+	if expectedStartAttemptID == "" {
+		return false, time.Time{}, nil
+	}
+	return r.commitBootstrapFailureIfCurrentExecution(
+		ctx, taskID, sessionID, agentExecutionID, expectedState, expectedStamp, &expectedStartAttemptID, errorValue,
+	)
+}
+
+func (r *Repository) commitBootstrapFailureIfCurrentExecution(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	expectedState models.TaskSessionState,
+	expectedStamp string,
+	expectedStartAttemptID *string,
+	errorValue models.LastAgentError,
+) (bool, time.Time, error) {
 	payload, err := json.Marshal(errorValue)
 	if err != nil {
 		return false, time.Time{}, fmt.Errorf("failed to serialize bootstrap failure: %w", err)
@@ -208,7 +321,7 @@ func (r *Repository) CommitBootstrapFailureIfCurrentExecution(
 	now := r.nowUTC()
 	completedAt := now
 	query, args := bootstrapFailureCommitQuery(r.db.DriverName(), string(payload), errorValue.Message, now, completedAt,
-		taskID, sessionID, agentExecutionID, string(expectedState), expectedStamp)
+		taskID, sessionID, agentExecutionID, string(expectedState), expectedStamp, expectedStartAttemptID)
 	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, time.Time{}, err
@@ -246,7 +359,12 @@ func lockTaskSessionRow(ctx context.Context, tx *sqlx.Tx, sessionID string) (boo
 func bootstrapFailureCommitQuery(
 	driver, payload, errorMessage string, now, completedAt time.Time,
 	taskID, sessionID, agentExecutionID, expectedState, expectedStamp string,
+	expectedStartAttemptID *string,
 ) (string, []interface{}) {
+	startAttemptPredicate := ""
+	if expectedStartAttemptID != nil {
+		startAttemptPredicate = " AND " + startAttemptIDPredicate(driver)
+	}
 	if dialect.IsPostgres(driver) {
 		base := postgresMetadataObject
 		stamp := "COALESCE(NULLIF(jsonb_extract_path_text(" + base + ", 'last_agent_error', 'stamp'), ''), jsonb_extract_path_text(" + base + ", 'last_agent_error', 'occurred_at') || ':' || jsonb_extract_path_text(" + base + ", 'last_agent_error', 'message'))"
@@ -254,7 +372,7 @@ func bootstrapFailureCommitQuery(
 			UPDATE task_sessions
 			SET metadata = jsonb_set(` + base + `, '{last_agent_error}', ?::jsonb, true)::text,
 				state = ?, error_message = ?, completed_at = ?, updated_at = ?
-			WHERE id = ? AND task_id = ? AND state = ?
+			WHERE id = ? AND task_id = ? AND state = ?` + startAttemptPredicate + `
 				AND EXISTS (
 					SELECT 1 FROM executors_running
 					WHERE session_id = ? AND agent_execution_id = ?
@@ -265,8 +383,12 @@ func bootstrapFailureCommitQuery(
 				)
 		`
 		args := []interface{}{payload, models.TaskSessionStateFailed, errorMessage, completedAt, now,
-			sessionID, taskID, expectedState, sessionID, agentExecutionID,
-			expectedStamp, expectedStamp, expectedStamp}
+			sessionID, taskID, expectedState}
+		if expectedStartAttemptID != nil {
+			args = append(args, *expectedStartAttemptID)
+		}
+		args = append(args, sessionID, agentExecutionID,
+			expectedStamp, expectedStamp, expectedStamp)
 		return query, args
 	}
 
@@ -276,7 +398,7 @@ func bootstrapFailureCommitQuery(
 		UPDATE task_sessions
 		SET metadata = json_set(` + base + `, '$.last_agent_error', json(?)),
 			state = ?, error_message = ?, completed_at = ?, updated_at = ?
-		WHERE id = ? AND task_id = ? AND state = ?
+		WHERE id = ? AND task_id = ? AND state = ?` + startAttemptPredicate + `
 			AND EXISTS (
 				SELECT 1 FROM executors_running
 				WHERE session_id = ? AND agent_execution_id = ?
@@ -287,7 +409,18 @@ func bootstrapFailureCommitQuery(
 			)
 	`
 	args := []interface{}{payload, models.TaskSessionStateFailed, errorMessage, completedAt, now,
-		sessionID, taskID, expectedState, sessionID, agentExecutionID,
-		expectedStamp, expectedStamp, expectedStamp}
+		sessionID, taskID, expectedState}
+	if expectedStartAttemptID != nil {
+		args = append(args, *expectedStartAttemptID)
+	}
+	args = append(args, sessionID, agentExecutionID,
+		expectedStamp, expectedStamp, expectedStamp)
 	return query, args
+}
+
+func startAttemptIDPredicate(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return "jsonb_extract_path_text(" + postgresMetadataObject + ", 'agent_start_attempt_id') = ?"
+	}
+	return "json_extract(" + sqliteMetadataObject + ", '$.agent_start_attempt_id') = ?"
 }

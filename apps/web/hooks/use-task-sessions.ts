@@ -4,7 +4,7 @@ import { listTaskSessions } from "@/lib/api";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
-import { captureTaskSessionActivityEpochs } from "@/lib/state/slices/session/activity-epochs";
+import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 
 const EMPTY_SESSIONS: TaskSession[] = [];
 
@@ -33,7 +33,7 @@ async function hydrateTaskSessions({
   const stateAtRequestStart = getStoreState();
   const sessionsAtRequestStart = storedTaskSessions(() => stateAtRequestStart, taskId);
   const sessionIdsAtRequestStart = new Set(sessionsAtRequestStart.map((session) => session.id));
-  const activityEpochsAtRequestStart = captureTaskSessionActivityEpochs(
+  const hydrationEpochsAtRequestStart = captureTaskSessionHydrationEpochs(
     stateAtRequestStart,
     taskId,
   );
@@ -47,7 +47,7 @@ async function hydrateTaskSessions({
     setTaskSessionsForTask(
       taskId,
       [...fetchedSessions, ...sessionsAddedDuringLoad],
-      activityEpochsAtRequestStart,
+      hydrationEpochsAtRequestStart,
     );
     getStoreState().reconcileWorkflowSessionFocus?.(taskId);
     return sessionsAddedDuringLoad.length > 0;
@@ -58,7 +58,7 @@ async function hydrateTaskSessions({
     // the activity-epoch guard still applies, then expose the retryable error.
     const currentSessions = storedTaskSessions(getStoreState, taskId);
     if (!force && currentSessions.length > 0) {
-      setTaskSessionsForTask(taskId, currentSessions, activityEpochsAtRequestStart);
+      setTaskSessionsForTask(taskId, currentSessions, hydrationEpochsAtRequestStart);
       getStoreState().reconcileWorkflowSessionFocus?.(taskId);
     }
     setTaskSessionsError(taskId, error instanceof Error ? error.message : String(error));

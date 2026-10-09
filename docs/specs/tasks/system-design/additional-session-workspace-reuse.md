@@ -7,6 +7,7 @@ requirements:
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003
   - REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-004
 created: 2026-08-30
+updated: 2026-10-02
 owners:
   - kandev
 ---
@@ -128,6 +129,15 @@ does not read file contents or alter the index, HEAD, branch, tracked files, or
 untracked files. Remote executors validate through their executor-owned
 inventory contract rather than host filesystem inspection.
 
+The [worktree recovery](worktree-metadata-recovery.md) operation can restore a
+missing canonical checkout before attachment under its exclusive recovery claim.
+Attach-only preparation remains read-only.
+
+The [managed clone relocation](managed-clone-relocation.md) operation can
+establish a new canonical worktree before this admission check. It holds its own
+environment claim and leaves admission read-only. A failed relocation cannot
+make an invalid checkout ready.
+
 The lifecycle manager retains a defense-in-depth guard: if a repo-backed
 `WorkspaceInfo` reaches execution creation without the validated-environment
 marker and exact selected environment identity, it refuses to create the
@@ -174,6 +184,29 @@ No schema migration is required. A successful resume under this contract also
 self-heals an environment path written incorrectly by the former fallback
 order, provided the canonical worktree inventory remains valid.
 
+Successful resume also persists the session's raw workspace binding after
+`persistTaskEnvironment` supplies the final environment identity and path.
+`bindSessionToTaskEnvironment` changes an in-memory value. That change requires
+a subsequent guarded repository write before resume reports success or starts
+the agent process. This applies to agent resume and workspace-only resume.
+
+The credential boundary still persists `STARTING` before credential issuance.
+The final binding write uses the current state and startup-attempt guards. If
+`LaunchAgent` returns after the same attempt advances from `STARTING` to
+`RUNNING` or `WAITING_FOR_INPUT`, persistence may retry against that observed
+state only while the captured attempt still owns it. The atomic state and
+attempt predicate rejects cancellation, terminal states, and a replaced
+attempt. Failure prevents agent startup and uses the existing owned-execution
+cleanup and resume rollback path.
+
+The environment-projected path cannot prove that this write occurred.
+`GetTaskSessionWorkspacePathsByTaskEnvironment` reads the raw session column
+for Git source validation. Verification therefore inspects persisted values
+independently of the mutable launch object and effective session projection.
+The canonical root and exact active repository worktrees remain the only
+eligible paths. Missing raw bindings remain unavailable until an authorized
+successful lifecycle operation records them.
+
 Task-session reads project the linked environment workspace before the legacy
 session-local path. The Files panel and other workspace consumers use that
 effective `workspace_path`, with `worktree_path` retained as the primary
@@ -204,6 +237,20 @@ historical records but cannot become the current task change projection.
   environment failure handling.
 
 ## Verification
+
+Resume coverage includes an initially empty raw session path and both agent
+and workspace-only materialization. Frozen write snapshots and repository
+integration checks prove that the final binding reaches persistent storage.
+Persistence-error and superseded-attempt cases prove that no agent starts
+through a failed final write. Existing credential-boundary checks retain
+their ordering assertions.
+
+Desktop and phone Changes regressions resume a disposable failed session,
+create a dirty file, reload the task, and verify fresh file membership.
+The browser checks use real backend refresh responses. They do not inject a
+successful status or rely on a later file mutation to recover the panel.
+The [resume binding repair plan](../../../plans/resume-workspace-binding/plan.md)
+records implementation scope and exact commands.
 
 The orchestrator unit boundary covers all workspace-path precedence cases,
 including workspace-only recovery with a source repository present. A session

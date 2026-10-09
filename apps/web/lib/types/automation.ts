@@ -17,10 +17,31 @@ export type RunStatus =
   | "skipped"
   | "archived"
   | "cancelled";
+export type ManagedDeliveryStatus =
+  | "pending_delivery"
+  | "accepted"
+  | "running"
+  | "completed"
+  | "failed"
+  | "paused"
+  | "uncertain"
+  | "unavailable";
 
 export type ContinuationPolicy = "new_task" | "reuse_thread";
-export type TaskMode = "automation_run" | "normal_task";
+export type TaskMode = "automation_run" | "normal_task" | "managed_conversation";
 export type RepositoryMode = "workspace_default" | "selected" | "none";
+
+export type ManagedConversationDestination = {
+  plugin_id: string;
+  instance_key: string;
+  revision: number;
+};
+
+export type ManagedConversationDestinationOption = ManagedConversationDestination & {
+  plugin_name: string;
+  paused: boolean;
+  unavailable_reason?: string;
+};
 
 export type AutomationRepository = {
   repository_id: string;
@@ -46,6 +67,7 @@ export type Automation = {
   max_concurrent_runs: number;
   /** How later firings get their task and conversation context. */
   continuation_policy?: ContinuationPolicy;
+  managed_destination?: ManagedConversationDestination;
   last_triggered_at: string | null;
   created_at: string;
   updated_at: string;
@@ -96,6 +118,7 @@ export type AutomationRun = {
   session_id?: string;
   /** Exact provider turn represented by this run when a session is shared. */
   turn_id?: string;
+  delivery_status?: ManagedDeliveryStatus;
   thread_action?: "created" | "resumed" | "replaced";
   thread_reason?: string;
   /** Snapshot of the rendered task title at admission time. */
@@ -226,6 +249,7 @@ export type CreateAutomationRequest = {
   workspace_id: string;
   name: string;
   description?: string;
+  enabled?: boolean;
   workflow_id: string;
   workflow_step_id: string;
   agent_profile_id: string;
@@ -236,6 +260,7 @@ export type CreateAutomationRequest = {
   task_title_template?: string;
   max_concurrent_runs?: number;
   continuation_policy?: ContinuationPolicy;
+  managed_destination?: ManagedConversationDestination;
   task_mode?: TaskMode;
   repository_mode?: RepositoryMode;
   triggers?: Array<{
@@ -259,6 +284,7 @@ export type UpdateAutomationRequest = {
   enabled?: boolean;
   max_concurrent_runs?: number;
   continuation_policy?: ContinuationPolicy;
+  managed_destination?: ManagedConversationDestination;
   task_mode?: TaskMode;
   repository_mode?: RepositoryMode;
 };

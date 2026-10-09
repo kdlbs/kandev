@@ -73,6 +73,76 @@ func TestBootMessageAdapterResumedMessageDoesNotLeaveActiveTurn(t *testing.T) {
 	}
 }
 
+func TestBootMessageAdapterFreshStartupTurn(t *testing.T) {
+	for _, withPrompt := range []bool{false, true} {
+		name := "blank"
+		if withPrompt {
+			name = "with_prompt"
+		}
+		t.Run(name, func(t *testing.T) {
+			harness := newBootStateTestHarness(t)
+			ctx := context.Background()
+			if err := harness.taskRepo.CreateWorkspace(ctx, &models.Workspace{
+				ID:   "workspace-1",
+				Name: "Workspace",
+			}); err != nil {
+				t.Fatalf("CreateWorkspace: %v", err)
+			}
+			if err := harness.taskRepo.CreateTask(ctx, &models.Task{
+				ID:          "task-1",
+				WorkspaceID: "workspace-1",
+				Title:       "Task",
+				Priority:    "medium",
+			}); err != nil {
+				t.Fatalf("CreateTask: %v", err)
+			}
+			if err := harness.taskRepo.CreateTaskSession(ctx, &models.TaskSession{
+				ID:     "session-1",
+				TaskID: "task-1",
+				State:  models.TaskSessionStateWaitingForInput,
+			}); err != nil {
+				t.Fatalf("CreateTaskSession: %v", err)
+			}
+
+			var expectedTurn *models.Turn
+			if withPrompt {
+				var err error
+				expectedTurn, err = harness.taskSvc.StartTurn(ctx, "session-1")
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			message, err := (&bootMsgAdapter{svc: harness.taskSvc}).CreateMessage(ctx, &lifecycle.BootMessageRequest{
+				TaskSessionID: "session-1", TaskID: "task-1", AuthorType: "agent", Type: "script_execution",
+				Metadata: map[string]interface{}{"script_type": "agent_boot", "is_resuming": false},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			active, err := harness.taskSvc.GetActiveTurn(ctx, "session-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			turn, err := harness.taskSvc.GetTurn(ctx, message.TurnID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if withPrompt {
+				if active == nil || active.ID != expectedTurn.ID || turn.ID != expectedTurn.ID {
+					t.Fatalf("prompt turn replaced: active=%+v, boot=%+v, expected=%+v", active, turn, expectedTurn)
+				}
+				return
+			}
+			if active != nil {
+				t.Fatalf("blank startup created active turn %q", active.ID)
+			}
+			if turn.CompletedAt == nil || turn.Metadata[models.TurnMetaKeyLifecycleOnly] != true {
+				t.Fatalf("blank boot diagnostic must use completed lifecycle turn: %+v", turn)
+			}
+		})
+	}
+}
+
 // TestDetectBranchRemote_ReturnsConfiguredUpstream covers the happy path: a
 // branch with an explicit `branch.<name>.remote` config returns that remote
 // (covers fork-workflow repos whose primary remote is named "upstream",

@@ -7,6 +7,7 @@ import type {
   LayoutState,
 } from "./layout-manager/types";
 import { LAYOUT_PINNED_MIN_PX } from "./layout-manager/caps";
+import { filterLayoutStateByComponents } from "./layout-manager/sanitize-serialized-layout";
 import { getPinnedWidth } from "./layout-manager/sizing";
 
 export const HIDDEN_RIGHT_PANE_METADATA_KEY = "kandevHiddenRightPane";
@@ -312,11 +313,16 @@ function isHiddenRightPane(value: unknown): value is HiddenRightPane {
   return isValidHiddenContext(value.context);
 }
 
-/** Read and validate optional recovery metadata from an env layout record. */
+/** Read, validate, and prune optional recovery metadata from an env layout record.
+ *  A retained column whose panels are all unrenderable can never be restored, so
+ *  both the control state and the restore see it as absent. */
 export function readHiddenRightPane(record: object | null): HiddenRightPane | null {
   if (!isRecord(record)) return null;
   const value = record[HIDDEN_RIGHT_PANE_METADATA_KEY];
-  return isHiddenRightPane(value) ? value : null;
+  if (!isHiddenRightPane(value)) return null;
+  const prunedColumn = filterLayoutStateByComponents({ columns: [value.column] }).columns[0];
+  if (!prunedColumn) return null;
+  return prunedColumn === value.column ? value : { ...value, column: prunedColumn };
 }
 
 /** Remove app-owned metadata before passing a record to Dockview. */
@@ -489,13 +495,15 @@ export function restoreRightPane(
   const usedPanelIds = new Set(panelIdsInLayout(layout));
   const column = filterColumn(hiddenRightPane.column, usedPanelIds);
   if (!column) return null;
+  const prunedColumn = filterLayoutStateByComponents({ columns: [column] }).columns[0];
+  if (!prunedColumn) return null;
 
   const columns = [...layout.columns];
   const insertionIndex = Math.min(hiddenRightPane.sourceIndex, columns.length);
-  columns.splice(insertionIndex, 0, column);
+  columns.splice(insertionIndex, 0, prunedColumn);
   const restored = {
     ...layout,
-    columns: rebalanceRestoredFlexWidths(columns, column.id, options),
+    columns: rebalanceRestoredFlexWidths(columns, prunedColumn.id, options),
   };
   return isValidLayoutState(restored) ? restored : null;
 }

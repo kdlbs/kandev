@@ -38,6 +38,7 @@ export type KanbanCardActionProps = {
   isDeleting?: boolean;
   isArchiving?: boolean;
   menuTriggerRef?: RefObject<HTMLButtonElement | null>;
+  onPRMenuOpenChange?: (open: boolean) => void;
 };
 
 type DraggableCardState = {
@@ -193,6 +194,7 @@ function KanbanCardActionSlot({
   isDeleting,
   isArchiving,
   menuTriggerRef,
+  onPRMenuOpenChange,
 }: KanbanCardActionProps & { isMultiSelectMode?: boolean }) {
   if (isMultiSelectMode) return null;
   return (
@@ -204,6 +206,7 @@ function KanbanCardActionSlot({
       isDeleting={isDeleting}
       isArchiving={isArchiving}
       menuTriggerRef={menuTriggerRef}
+      onPRMenuOpenChange={onPRMenuOpenChange}
     />
   );
 }
@@ -230,6 +233,7 @@ export function KanbanCardShell({
   isPickedUpForReorder,
   menuEntries,
   menuTriggerRef,
+  onPRMenuOpenChange,
 }: KanbanCardShellProps) {
   const showCheckbox = isMultiSelectMode || !!isSelected;
   const style = {
@@ -286,6 +290,7 @@ export function KanbanCardShell({
                   isDeleting={isDeleting}
                   isArchiving={isArchiving}
                   menuTriggerRef={menuTriggerRef}
+                  onPRMenuOpenChange={onPRMenuOpenChange}
                 />
               }
             />

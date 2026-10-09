@@ -13,8 +13,23 @@ import {
 } from "./dynamic-targets";
 import { executorProfileSettingsPath } from "../settings/executor-settings-routes";
 
+function workspaceSubpages(coordinatorEnabled: boolean): Array<[string, string]> {
+  const subpages: Array<[string, string]> = [
+    ["repositories", "sidebar:repositories"],
+    ["workflows", "workflows:workflows"],
+    ["automations", "common:automations"],
+    ["integrations", "common:integrations"],
+    ["secrets", "settings:secrets"],
+  ];
+  if (coordinatorEnabled) {
+    subpages.push(["coordinators", "coordinator:coordinators"]);
+  }
+  return subpages;
+}
+
 function workspaceDefinitions(
   workspaces: SettingsDiscoveryContext["workspaces"],
+  coordinatorEnabled: boolean,
 ): SettingsDiscoveryDefinition[] {
   const entries: SettingsDiscoveryDefinition[] = [];
   for (const [workspaceIndex, workspace] of workspaces.entries()) {
@@ -49,13 +64,7 @@ function workspaceDefinitions(
         order: order + index + 1,
       });
     }
-    for (const [index, [suffix, labelKey]] of [
-      ["repositories", "sidebar:repositories"],
-      ["workflows", "workflows:workflows"],
-      ["automations", "common:automations"],
-      ["integrations", "common:integrations"],
-      ["secrets", "settings:secrets"],
-    ].entries()) {
+    for (const [index, [suffix, labelKey]] of workspaceSubpages(coordinatorEnabled).entries()) {
       entries.push({
         id: `${workspaceId}:${suffix}`,
         kind: "page",
@@ -186,7 +195,7 @@ function executorProfileDefinitions(
 
 function dynamicDefinitions(context: SettingsDiscoveryContext): SettingsDiscoveryDefinition[] {
   return [
-    ...workspaceDefinitions(context.workspaces),
+    ...workspaceDefinitions(context.workspaces, context.coordinatorEnabled ?? false),
     ...agentProfileDefinitions(context.agents),
     ...executorProfileDefinitions(context.executors),
   ];

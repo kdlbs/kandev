@@ -124,7 +124,6 @@ function RenameForm({
         value={draft}
         onChange={(event) => onDraftChange(Array.from(event.target.value).slice(0, 200).join(""))}
         aria-invalid={Boolean(error)}
-        className="min-h-11"
       />
       {error && (
         <p role="alert" className="text-sm text-destructive">
@@ -132,10 +131,10 @@ function RenameForm({
         </p>
       )}
       <div className="flex gap-2 justify-end">
-        <Button type="button" variant="outline" className="min-h-11" onClick={onCancel}>
+        <Button type="button" variant="outline" onClick={onCancel}>
           {t("common:cancel")}
         </Button>
-        <Button type="submit" className="min-h-11" disabled={saving}>
+        <Button type="submit" disabled={saving}>
           {t("common:save")}
         </Button>
         <span role="status" className="sr-only">

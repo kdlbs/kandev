@@ -38,6 +38,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.WorkflowStepCreated, ws.ActionWorkflowStepCreated)
 	b.subscribe(eventBus, events.WorkflowStepUpdated, ws.ActionWorkflowStepUpdated)
 	b.subscribe(eventBus, events.WorkflowStepDeleted, ws.ActionWorkflowStepDeleted)
+	b.subscribe(eventBus, events.PromptsChanged, ws.ActionPromptsChanged)
 	b.subscribe(eventBus, events.AgentProfileCreated, ws.ActionAgentProfileCreated)
 	b.subscribe(eventBus, events.AgentProfileUpdated, ws.ActionAgentProfileUpdated)
 	b.subscribe(eventBus, events.AgentProfileDeleted, ws.ActionAgentProfileDeleted)

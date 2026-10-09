@@ -1,5 +1,4 @@
 import { test, expect } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
@@ -35,12 +34,8 @@ async function createTaskAndNavigate(
     )
     .toBe(true);
 
-  const kanban = new KanbanPage(testPage);
-  await kanban.goto();
-  const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 10_000 });
-  await card.click();
-  await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+  await testPage.goto(`/t/${task.id}`);
+  await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}`));
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();

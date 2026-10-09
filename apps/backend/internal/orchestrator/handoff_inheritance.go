@@ -32,6 +32,12 @@ func (s *Service) SetWorkspaceMaterializer(m WorkspaceMaterializer) {
 	s.workspaceMaterializer = m
 }
 
+func (s *Service) markWorkspaceGroupMaterialized(ctx context.Context, taskID string) {
+	if s.workspaceMaterializer != nil {
+		s.workspaceMaterializer.MarkOwnerSessionMaterialized(ctx, taskID)
+	}
+}
+
 // propagateInheritedEnvironment is the launch-time consumer of the
 // workspace policy persisted by office task-handoffs phase 4. When the
 // task's metadata.workspace.mode is "inherit_parent" or "shared_group"
@@ -78,9 +84,7 @@ func (s *Service) propagateInheritedEnvironment(ctx context.Context, task *v1.Ta
 	// Whether or not this task has a workspace policy, the task itself
 	// may be the owner of a workspace group (e.g. a parent task launching
 	// after its child created the group). Try to mark.
-	if s.workspaceMaterializer != nil {
-		s.workspaceMaterializer.MarkOwnerSessionMaterialized(ctx, task.ID)
-	}
+	s.markWorkspaceGroupMaterialized(ctx, task.ID)
 	return nil
 }
 

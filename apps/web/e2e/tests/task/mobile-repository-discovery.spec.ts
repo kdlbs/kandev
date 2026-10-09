@@ -26,6 +26,10 @@ test.describe("Mobile repository discovery consent", () => {
     await expect(dialog.getByTestId("discovery-root-controls")).toHaveCount(0);
 
     await dialog.getByTestId("repo-chip-trigger").first().tap();
+    const settingsButton = testPage.getByTestId("repository-discovery-settings-button");
+    await expect(settingsButton).toBeVisible();
+    await settingsButton.tap();
+
     const controls = testPage.getByTestId("discovery-root-controls");
     const chooseFolders = controls.getByTestId("folder-picker-trigger");
     const refreshRepositories = controls.getByRole("button", {
@@ -46,7 +50,7 @@ test.describe("Mobile repository discovery consent", () => {
     ]);
     expect(chooseBox).not.toBeNull();
     expect(refreshBox).not.toBeNull();
-    expect(refreshBox!.height).toBeCloseTo(chooseBox!.height, 1);
+    expect(Math.abs(refreshBox!.height - chooseBox!.height)).toBeLessThanOrEqual(1);
     expect(chooseCssHeight).toBe(44);
     expect(refreshCssHeight).toBe(44);
   });

@@ -30,13 +30,30 @@ test.describe("Docker task-host LSP", () => {
 
     const statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
     await expect(statusButton).toHaveAttribute("data-lsp-language", "kotlin");
+    const completionRequests: string[] = [];
+    testPage.on("websocket", (socket) => {
+      if (!socket.url().includes("/lsp/")) return;
+      socket.on("framesent", (frame) => {
+        if (typeof frame.payload !== "string") return;
+        try {
+          const message = JSON.parse(frame.payload) as { method?: string };
+          if (message.method === "textDocument/completion") completionRequests.push(message.method);
+        } catch {
+          // Ignore protocol frames that are not standalone JSON-RPC messages.
+        }
+      });
+    });
     await performLspAction(testPage, "start");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 30_000 });
     await expectFakeLspMarkerCount(testPage, 1, 30_000);
 
-    const editor = testPage.locator(".monaco-editor:visible");
-    await editor.click();
+    await testPage.keyboard.press("Escape");
+    const editorInput = testPage.locator(".monaco-editor:visible .native-edit-context");
+    await expect(editorInput).toBeAttached();
+    await editorInput.focus();
+    await expect(editorInput).toBeFocused();
     await testPage.keyboard.press("Control+Space");
+    await expect.poll(() => completionRequests.length, { timeout: 15_000 }).toBeGreaterThan(0);
     await expect(testPage.locator(".suggest-widget")).toContainText("fakeGreeting", {
       timeout: 15_000,
     });
@@ -211,6 +228,7 @@ test.describe("Docker task-host LSP", () => {
     );
     await expect.poll(activeModelUri).toBe(authoritativeModelUri);
 
+    await testPage.keyboard.press("Escape");
     const editorContent = testPage.locator(".monaco-editor:visible .view-lines");
     await editorContent.click();
     await testPage.keyboard.press("Control+End");

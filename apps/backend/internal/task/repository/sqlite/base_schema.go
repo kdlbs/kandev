@@ -31,6 +31,8 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
+		r.initSessionContinuitySchema,
+		r.initAgentDeliverySchema,
 		r.initDynamicRoutingSchema,
 		r.initStepTransitionsSchema,
 		r.initStepEntriesSchema,
@@ -43,6 +45,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initReviewSchema,
 		r.initTaskReviewSchema,
 		r.initClarificationInboxSidecarSchema,
+		r.initBackgroundWorkSchema,
 		r.migrateExecutorProfiles,
 		r.migrateTaskSessions,
 		r.ensureDefaultWorkspace,
@@ -52,8 +55,11 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.healBuiltinWorkflowStepFlags,
 		r.healBuiltinWorkflowStepParticipantSeats,
 		r.healBuiltinWorkflowStepOnAgentError,
+		r.healBuiltinWorkflowStepOnCommentFanOut,
 		r.normalizeTaskWorktreeOwnership,
 		r.ensureTaskEnvironmentRecoveryClaimsSchema,
+		r.ensureTaskEnvironmentRecoveryArtifactsSchema,
+		r.ensureTaskEnvironmentRecoveryOperationsSchema,
 		r.ensureArchivedBranchCandidatesIndex,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
@@ -62,6 +68,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.ensureWorkspaceIndexes,
 		r.ensureMessageMetadataIndexes,
 		r.ensurePromptOrderIndex,
+		r.initWorkspaceInventoryRecoverySchema,
 		r.initConversationSourceSchema,
 		r.cleanupLegacyConversationJournal,
 	}
@@ -81,6 +88,87 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("startup schema canceled after step %d: %w", index, err)
 		}
+	}
+	return nil
+}
+
+func (r *Repository) ensureTaskEnvironmentRecoveryArtifactsSchema() error {
+	if err := r.migrate.Apply("task_environment_recovery_artifacts.table", `
+		CREATE TABLE IF NOT EXISTS task_environment_recovery_artifacts (
+			task_environment_id TEXT NOT NULL,
+			operation_id TEXT NOT NULL,
+			worktree_id TEXT NOT NULL,
+			owner_task_id TEXT NOT NULL,
+			ownership_generation BIGINT NOT NULL,
+			session_id TEXT NOT NULL,
+			executor_type TEXT NOT NULL,
+			repository_id TEXT NOT NULL,
+			original_path TEXT NOT NULL,
+			replacement_id TEXT NOT NULL,
+			replacement_path TEXT NOT NULL,
+			layout_version INTEGER NOT NULL,
+			provenance TEXT NOT NULL,
+			artifact_paths_json TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			PRIMARY KEY (task_environment_id, operation_id, worktree_id),
+			FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE
+		)`); err != nil {
+		return fmt.Errorf("create task environment recovery artifact registry: %w", err)
+	}
+	if err := r.migrate.Apply("task_environment_recovery_artifacts.owner_index", `
+		CREATE INDEX IF NOT EXISTS idx_task_environment_recovery_artifacts_owner
+			ON task_environment_recovery_artifacts(owner_task_id, ownership_generation, task_environment_id)`); err != nil {
+		return fmt.Errorf("create task environment recovery artifact index: %w", err)
+	}
+	if err := r.migrate.Apply("task_environment_recovery_artifacts.identities", `
+		ALTER TABLE task_environment_recovery_artifacts
+			ADD COLUMN artifact_identities_json TEXT NOT NULL DEFAULT '{}'`); err != nil {
+		return fmt.Errorf("add task environment recovery artifact identities: %w", err)
+	}
+	if err := r.migrate.Err(); err != nil {
+		return fmt.Errorf("required task recovery artifact migration: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) ensureTaskEnvironmentRecoveryOperationsSchema() error {
+	if err := r.migrate.Apply("task_environment_recovery_operations.table", `
+		CREATE TABLE IF NOT EXISTS task_environment_recovery_operations (
+			task_environment_id TEXT PRIMARY KEY,
+			owner_task_id TEXT NOT NULL,
+			ownership_generation BIGINT NOT NULL,
+			session_id TEXT NOT NULL,
+			operation_id TEXT NOT NULL,
+			attempt_id TEXT NOT NULL,
+			error_stamp TEXT NOT NULL DEFAULT '',
+			kind TEXT NOT NULL,
+			revision BIGINT NOT NULL,
+			runner_instance_id TEXT NOT NULL,
+			state TEXT NOT NULL,
+			phase TEXT NOT NULL,
+			repository_id TEXT NOT NULL DEFAULT '',
+			repository_position INTEGER NOT NULL DEFAULT 0,
+			repository_total INTEGER NOT NULL DEFAULT 0,
+			completed_slots INTEGER NOT NULL DEFAULT 0,
+			workspace_complete BOOLEAN NOT NULL DEFAULT FALSE,
+			agent_ready BOOLEAN NOT NULL DEFAULT FALSE,
+			selected_repository_ids_json TEXT NOT NULL,
+			started_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			ended_at TIMESTAMP,
+			reason_code TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE
+		)`); err != nil {
+		return fmt.Errorf("create task environment recovery operation table: %w", err)
+	}
+	if err := r.migrate.Apply("task_environment_recovery_operations_runner_index", `
+		CREATE INDEX IF NOT EXISTS idx_task_environment_recovery_operations_runner
+			ON task_environment_recovery_operations(state, runner_instance_id, task_environment_id)`); err != nil {
+		return fmt.Errorf("create task environment recovery operation index: %w", err)
+	}
+	if err := r.migrate.Err(); err != nil {
+		return fmt.Errorf("required task recovery operation migration: %w", err)
 	}
 	return nil
 }
@@ -112,6 +200,39 @@ func (r *Repository) ensureTaskEnvironmentRecoveryClaimsSchema() error {
 		return fmt.Errorf("required task recovery claim migration: %w", err)
 	}
 	return nil
+}
+
+const workspaceInventoryRecoverySchemaDDL = `
+	CREATE TABLE IF NOT EXISTS workspace_inventory_recovery_receipts (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		task_environment_id TEXT NOT NULL,
+		task_repository_id TEXT NOT NULL,
+		environment_repo_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		idempotency_key TEXT NOT NULL,
+		request_hash TEXT NOT NULL,
+		result_code TEXT NOT NULL,
+		receipt_json TEXT NOT NULL,
+		post_repair_matched BOOLEAN NOT NULL DEFAULT FALSE,
+		post_repair_verified_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL,
+		UNIQUE(task_id, idempotency_key),
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_workspace_inventory_recovery_environment
+		ON workspace_inventory_recovery_receipts(task_environment_id, created_at);
+
+	CREATE INDEX IF NOT EXISTS idx_workspace_inventory_recovery_environment_repo
+		ON workspace_inventory_recovery_receipts(task_id, environment_repo_id, created_at);
+`
+
+func (r *Repository) initWorkspaceInventoryRecoverySchema() error {
+	_, err := r.db.Exec(workspaceInventoryRecoverySchemaDDL)
+	return err
 }
 
 // ensureArchivedBranchCandidatesIndex runs after ownership normalization so
@@ -220,6 +341,10 @@ const controlServerRecordSchemaDDL = `
 		credential_secret_id TEXT NOT NULL,
 		capabilities TEXT NOT NULL DEFAULT '[]',
 		diagnostic_log_path TEXT NOT NULL,
+		process_id INTEGER NOT NULL DEFAULT 0,
+		process_group_id INTEGER NOT NULL DEFAULT 0,
+		process_session_id INTEGER NOT NULL DEFAULT 0,
+		process_birth_token TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
@@ -280,6 +405,16 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 	if _, err := r.db.ExecContext(r.migrationContext(), lookupIndex); err != nil {
 		return err
 	}
+	// Keep inbox scans proportional to clarification history, not every message.
+	clarificationBundlesIndex := fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS idx_messages_clarification_bundle
+		ON task_session_messages((%s), task_session_id)
+		WHERE type = 'clarification_request'`,
+		dialect.JSONExtract(driver, "metadata", "pending_id"),
+	)
+	if _, err := r.db.ExecContext(r.migrationContext(), clarificationBundlesIndex); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -330,6 +465,7 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 		profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
 		profile_session_end_policy TEXT NOT NULL DEFAULT 'park',
+		disable_unclassified_fallback INTEGER NOT NULL DEFAULT 0,
 		stage_type TEXT NOT NULL DEFAULT 'custom',
 		session_target TEXT,
 		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
@@ -404,6 +540,8 @@ const infraSchemaDDL = `
 		default_environment_id TEXT DEFAULT '',
 		default_agent_profile_id TEXT DEFAULT '',
 		default_config_agent_profile_id TEXT DEFAULT '',
+		acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0),
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
@@ -447,6 +585,8 @@ const infraSchemaDDL = `
 		executor_id TEXT NOT NULL,
 		runtime TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'starting',
+		idle_suspension_state TEXT NOT NULL DEFAULT '',
+		idle_suspension_policy_updated_at TIMESTAMP,
 		resumable INTEGER NOT NULL DEFAULT 0,
 		resume_token TEXT DEFAULT '',
 		agent_execution_id TEXT DEFAULT '',
@@ -846,7 +986,7 @@ func (r *Repository) backfillInitialPlanRevisions() error {
 	for _, x := range pending {
 		authorKind := x.createdBy
 		// Match CreateTaskPlan (plan.go) and the task_plan_revisions column DEFAULT 'agent'.
-		if authorKind != "user" && authorKind != authorKindAgent {
+		if authorKind != authorKindUser && authorKind != authorKindAgent {
 			authorKind = authorKindAgent
 		}
 		_, err := r.db.ExecContext(r.migrationContext(), r.db.Rebind(`
@@ -1245,6 +1385,8 @@ const sessionWorktreeSchemaDDL = `
 		worktree_branch_owner TEXT NOT NULL DEFAULT 'unknown',
 		worktree_integration_ref TEXT NOT NULL DEFAULT '',
 		worktree_recovery_head_sha TEXT NOT NULL DEFAULT '',
+		worktree_source_clone_path TEXT NOT NULL DEFAULT '',
+		worktree_source_common_dir TEXT NOT NULL DEFAULT '',
 		worktree_branch_compacted_at TIMESTAMP,
 		position INTEGER DEFAULT 0,
 		error_message TEXT DEFAULT '',

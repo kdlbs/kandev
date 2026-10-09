@@ -108,10 +108,11 @@ Trace current callers of `usePendingDiffComments` and `DiffComment` before edits
 
 ## Failure, compatibility, and security
 
-Keep the current send contracts. In particular, Fix comments currently clears
-pending feedback when its fire-and-forget send starts and reports a later
-failure without restoring it. Do not claim this task repairs that behavior.
-Other composer routes retain their current success/error semantics. Reuse
+Fix comments now follows the [review comment delivery design](review-comment-delivery.md):
+await acknowledgement before removing unchanged submitted rows, preserve
+rejected or unavailable sends for deliberate retry, and retain edits made
+while delivery is pending. Other composer routes retain their current
+success/error semantics. Reuse
 existing safe comment rendering; never enable raw HTML. Pending text retains
 sessionStorage's existing browser-local limitations. No new telemetry is needed.
 

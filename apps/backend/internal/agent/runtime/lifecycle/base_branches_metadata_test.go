@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // TestCollectBaseBranches_MultiRepo verifies the per-repo map populated for
@@ -22,6 +23,36 @@ func TestCollectBaseBranches_MultiRepo(t *testing.T) {
 	}
 	got := collectBaseBranches(req)
 	want := map[string]string{"alpha": "main", "beta": "develop"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("collectBaseBranches = %v, want %v", got, want)
+	}
+}
+
+func TestCollectBaseBranchesRemoteExecutorKeepsPrimaryAtRoot(t *testing.T) {
+	req := &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypeRemoteDocker),
+		Repositories: []RepoLaunchSpec{
+			{RepoName: "widget", BaseBranch: "main", CheckoutBranch: "feature/primary"},
+			{RepoName: "gadget", BaseBranch: "release/next", CheckoutBranch: "feature/next"},
+		},
+	}
+	got := collectBaseBranches(req)
+	want := map[string]string{"": "main", "gadget-feature-next": "release/next"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("collectBaseBranches = %v, want %v", got, want)
+	}
+}
+
+func TestCollectBaseBranchesPluginRemoteUsesMaterializedRepositoryPaths(t *testing.T) {
+	req := &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypePluginRemote),
+		Repositories: []RepoLaunchSpec{
+			{RepoName: "widget", BaseBranch: "main", CheckoutBranch: "feature/primary"},
+			{RepoName: "gadget", BaseBranch: "release/next", CheckoutBranch: "feature/next"},
+		},
+	}
+	got := collectBaseBranches(req)
+	want := map[string]string{"widget-feature-primary": "main", "gadget-feature-next": "release/next"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("collectBaseBranches = %v, want %v", got, want)
 	}

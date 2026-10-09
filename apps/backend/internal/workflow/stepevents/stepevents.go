@@ -82,6 +82,7 @@ func payload(step *models.WorkflowStep) map[string]interface{} {
 		"session_target":                models.CloneWorkflowSessionTarget(step.SessionTarget),
 		"profile_session_start_policy":  string(step.ProfileSessionStartPolicy),
 		"profile_session_end_policy":    string(step.ProfileSessionEndPolicy),
+		"disable_unclassified_fallback": step.DisableUnclassifiedFallback,
 		"stage_type":                    string(step.StageType),
 		"auto_advance_requires_signal":  step.AutoAdvanceRequiresSignal,
 		"cancel_triggers_turn_complete": step.CancelTriggersTurnComplete,

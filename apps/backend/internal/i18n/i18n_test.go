@@ -23,6 +23,8 @@ func TestNormalize(t *testing.T) {
 		{"zh-HK", "zh-hk"},
 		{"ja", "ja"},
 		{"ja-JP", "ja"},
+		{"ko", "ko"},
+		{"ko-KR", "ko"},
 		{localePtPT, localePtPT},
 		{"pt-PT", localePtPT},
 		{"pseudo", "pseudo"},
@@ -58,6 +60,9 @@ func TestTranslatesAndFallsBack(t *testing.T) {
 	}
 	if japanese := T("ja", "webapp.shellUnavailable"); japanese == en {
 		t.Fatalf("ja message should differ from en, both %q", en)
+	}
+	if korean := T("ko", "webapp.shellUnavailable"); korean == en {
+		t.Fatalf("ko message should differ from en, both %q", en)
 	}
 	if portuguese := T(localePtPT, "webapp.shellUnavailable"); portuguese == en {
 		t.Fatalf("pt-pt message should differ from en, both %q", en)
@@ -142,7 +147,7 @@ func TestCatalogsHaveMatchingKeys(t *testing.T) {
 	t.Parallel()
 	load()
 	source := catalogs[DefaultLocale]
-	for _, locale := range []string{"pseudo", "zh-cn", "zh-tw", "zh-hk", "ja", localePtPT} {
+	for _, locale := range []string{"pseudo", "zh-cn", "zh-tw", "zh-hk", "ja", "ko", localePtPT} {
 		translated := catalogs[locale]
 		if len(translated) != len(source) {
 			t.Fatalf("%s catalog has %d keys, want %d", locale, len(translated), len(source))
@@ -273,6 +278,44 @@ func TestFromRequest(t *testing.T) {
 		r.Header.Set("Accept-Language", "ja-JP,en;q=0.8")
 		if got := FromRequest(r); got != "ja" {
 			t.Fatalf("got %q, want ja", got)
+		}
+	})
+
+	t.Run("ko cookie wins over accept-language", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.AddCookie(&http.Cookie{Name: LocaleCookie, Value: "ko"})
+		r.Header.Set("Accept-Language", "en")
+		if got := FromRequest(r); got != "ko" {
+			t.Fatalf("got %q, want ko", got)
+		}
+	})
+
+	t.Run("ko-KR cookie collapses onto ko", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.AddCookie(&http.Cookie{Name: LocaleCookie, Value: "ko-KR"})
+		r.Header.Set("Accept-Language", "en")
+		if got := FromRequest(r); got != "ko" {
+			t.Fatalf("got %q, want ko", got)
+		}
+	})
+
+	t.Run("accept-language selects ko", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Accept-Language", "ko;q=1.0, en;q=0.5")
+		if got := FromRequest(r); got != "ko" {
+			t.Fatalf("got %q, want ko", got)
+		}
+	})
+
+	t.Run("accept-language ko-KR collapses onto ko", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Accept-Language", "ko-KR,en;q=0.8")
+		if got := FromRequest(r); got != "ko" {
+			t.Fatalf("got %q, want ko", got)
 		}
 	})
 

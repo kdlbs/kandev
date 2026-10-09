@@ -33,8 +33,15 @@ test.describe("Agents", () => {
 
   test("update agent name persists", async ({ officeApi, officeSeed }) => {
     await officeApi.updateAgent(officeSeed.agentId, { name: "CEO Updated" });
-    const agent = await officeApi.getAgent(officeSeed.agentId);
-    expect((agent as Record<string, unknown>).name).toBe("CEO Updated");
+    try {
+      const agent = await officeApi.getAgent(officeSeed.agentId);
+      expect((agent as Record<string, unknown>).name).toBe("CEO Updated");
+    } finally {
+      // The office fixture is shared by this worker. Restore the onboarding
+      // name so later specs can select the seeded agent without depending on
+      // test order.
+      await officeApi.updateAgent(officeSeed.agentId, { name: "CEO" });
+    }
   });
 
   test("delete agent removes it from list", async ({ officeApi, officeSeed }) => {

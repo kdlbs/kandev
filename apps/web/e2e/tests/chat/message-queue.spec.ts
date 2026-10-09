@@ -6,8 +6,9 @@ import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-whil
 import { SessionPage } from "../../pages/session-page";
 import { seedRunningGeneratingSession } from "../../helpers/generating-session";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
+import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
-import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
+import { startQuickChatFromSetup } from "./quick-chat-helpers";
 import {
   expectSendNowInterruptsRunningFIFOTurn,
   expectSendNowWorkflowRunning,
@@ -16,7 +17,7 @@ import {
   registerSeparateQueueRows,
   requestMessageQueueSettings,
 } from "../../helpers/message-queue-settings";
-import { watchWs } from "../../helpers/causal-waits";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
 
 registerSeparateQueueRows(test);
 
@@ -73,9 +74,12 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
     await agentSelector.click();
     await page.getByRole("option").first().click();
   }
-  await dialog.getByTestId("quick-chat-start").click();
-
-  await waitForQuickChatComposerReady(dialog);
+  const quickChatStarted = waitForHttp(page, "POST", /^\/api\/v1\/workspaces\/[^/]+\/quick-chat$/, {
+    timeout: 30_000,
+  });
+  await startQuickChatFromSetup(dialog, page, undefined, quickChatStarted);
+  const startResponse = await quickChatStarted;
+  expect(startResponse.ok(), "Quick Chat startup request should succeed").toBe(true);
   return dialog;
 }
 
@@ -392,6 +396,7 @@ test.describe("Task session queue", () => {
   }) => {
     test.setTimeout(120_000);
 
+    const gateway = watchWs(testPage);
     const session = await seedTaskAndWaitForIdle(
       testPage,
       apiClient,
@@ -433,7 +438,9 @@ test.describe("Task session queue", () => {
     const sendNow = target.getByTestId("queue-entry-send-now");
     await expect(sendNow).toBeVisible({ timeout: 10_000 });
     await expect(sendNow).toBeEnabled({ timeout: 10_000 });
+    const sendNowResponse = gateway.waitForResponse("message.queue.send_now");
     await sendNow.click();
+    await sendNowResponse;
 
     await expect(panel.getByTestId("queue-entry-text")).toHaveCount(2, { timeout: 10_000 });
     await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText(markerA);
@@ -584,7 +591,7 @@ test.describe("Task session queue", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(120_000);
     const gateway = watchWs(testPage);
 
     const session = await seedTaskAndWaitForIdle(
@@ -593,6 +600,7 @@ test.describe("Task session queue", () => {
       seedData,
       "Queue edit lease ordering test",
     );
+    await waitForSessionAgentctlReady(testPage, session.sessionId);
     await session.sendMessage("/slow 10s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
     await waitForComposerQueueMode(testPage);

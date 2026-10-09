@@ -48,7 +48,7 @@ import { useSessionLiveSyncSubscriptions } from "./use-session-live-sync";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { mapOfficeTaskToTask } from "./map-office-task";
-import { captureTaskSessionActivityEpochs } from "@/lib/state/slices/session/activity-epochs";
+import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 
 type IssueDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -144,7 +144,7 @@ type IssueDetailData = {
 };
 
 type OrderedIssueDetailData = IssueDetailData & {
-  activityEpochsAtRequestStart: Readonly<Record<string, number>>;
+  hydrationEpochsAtRequestStart: ReturnType<typeof captureTaskSessionHydrationEpochs>;
 };
 
 // ---------------------------------------------------------------------------
@@ -180,14 +180,14 @@ async function fetchIssueDetailData(workspaceId: string, id: string): Promise<Is
 }
 
 async function fetchOrderedIssueDetailData(
-  state: Parameters<typeof captureTaskSessionActivityEpochs>[0],
+  state: Parameters<typeof captureTaskSessionHydrationEpochs>[0],
   workspaceId: string,
   id: string,
 ): Promise<OrderedIssueDetailData> {
-  const activityEpochsAtRequestStart = captureTaskSessionActivityEpochs(state, id);
+  const hydrationEpochsAtRequestStart = captureTaskSessionHydrationEpochs(state, id);
   return {
     ...(await fetchIssueDetailData(workspaceId, id)),
-    activityEpochsAtRequestStart,
+    hydrationEpochsAtRequestStart,
   };
 }
 
@@ -520,7 +520,7 @@ function useIssueDetailState(id: string) {
       if (detail.rawSessions) {
         store
           .getState()
-          .setTaskSessionsForTask(id, detail.rawSessions, detail.activityEpochsAtRequestStart);
+          .setTaskSessionsForTask(id, detail.rawSessions, detail.hydrationEpochsAtRequestStart);
       }
       if (detail.comments) setComments(detail.comments);
     },
@@ -677,6 +677,7 @@ function IssueDetailContent({ params }: IssueDetailPageProps) {
   const { id } = use(params);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const preferredSessionId = searchParams.get("session_id") ?? undefined;
   // Office shell defaults to simple. Both `?advanced` (Phase 7) and the
   // legacy `?mode=advanced` flip to advanced.
   const mode: TaskBodyMode = resolveTaskBodyMode(
@@ -738,7 +739,11 @@ function IssueDetailContent({ params }: IssueDetailPageProps) {
   };
 
   const advancedSlot = hasSession ? (
-    <TaskAdvancedMode task={task} onToggleSimple={() => setMode("simple")} />
+    <TaskAdvancedMode
+      task={task}
+      onToggleSimple={() => setMode("simple")}
+      preferredSessionId={preferredSessionId}
+    />
   ) : (
     <OfficeSimplePane
       task={task}

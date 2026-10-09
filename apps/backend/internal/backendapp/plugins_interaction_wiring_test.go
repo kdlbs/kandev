@@ -24,7 +24,7 @@ import (
 // constructed.
 func TestSetInteractionResponderIsWiredOutsideOfficeGate(t *testing.T) {
 	const wiringCall = "SetInteractionResponder"
-	const officeGate = "initOfficeServices"
+	const officeGate = "constructOfficeServices"
 
 	entries, err := os.ReadDir(".")
 	if err != nil {

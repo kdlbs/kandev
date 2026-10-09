@@ -113,6 +113,12 @@ func IsKnownSafeGitFlag(arg string) bool {
 		"--", // Path separator - everything after this is treated as paths, not flags
 		"--rebase",
 		"--abort",
+		"--no-color",
+		"--no-ext-diff",
+		"--no-textconv",
+		"--submodule=short",
+		"-z",
+		"--untracked-files=no",
 	}
 	for _, safe := range exactFlags {
 		if arg == safe {

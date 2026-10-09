@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { waitForDiffText, waitForDiffTextAbsent } from "./diff-update-helpers";
+import { scrollChangesToEnd } from "./large-changes-helpers";
 
 // ---------------------------------------------------------------------------
 // Git helper for E2E tests - runs git commands in the test repository
@@ -498,6 +499,7 @@ test.describe("Git Changes Panel", () => {
     await session.clickTab("Changes");
     await session.expandChangesSection("unstaged-files-section");
     const row = testPage.getByTestId(`file-row-${filePath}`);
+    await scrollChangesToEnd(testPage, `file-row-${filePath}`);
     const stage = row.getByTitle("Stage file");
     await expect(stage).toBeVisible();
     expect((await stage.boundingBox())!.height).toBeLessThanOrEqual(24);
@@ -516,12 +518,14 @@ test.describe("Git Changes Panel", () => {
       .getByRole("navigation")
       .getByRole("button", { name: /Changes$/ })
       .click();
+    await scrollChangesToEnd(testPage, `file-row-${filePath}`);
     await expect(row.getByRole("button", { name: "Show more actions" })).toBeVisible();
     await expect(row.getByText(filePath, { exact: true })).toHaveCSS("white-space", "normal");
     await expect(stage).toHaveCount(0);
 
     await testPage.setViewportSize({ width: 768, height: 851 });
     await session.clickTab("Changes");
+    await scrollChangesToEnd(testPage, `file-row-${filePath}`);
     await expect(stage).toBeVisible();
     expect((await stage.boundingBox())!.height).toBeLessThanOrEqual(24);
     await expect(row.getByRole("button", { name: "Show more actions" })).toHaveCount(0);
@@ -1081,12 +1085,16 @@ test.describe("Git Changes Panel", () => {
     const commitRow = testPage.getByTestId(`commit-row-${sha.slice(0, 7)}`);
     await expect(commitRow).toBeVisible({ timeout: 10_000 });
 
-    // Click the commit to open its diff
-    await commitRow.click();
+    // Use the explicit action to open the historical commit detail.
+    await commitRow.getByTestId(`commit-open-${sha.slice(0, 7)}`).click();
 
     // The diff view should open showing the commit message and file changes
     // Look for the commit message (which uniquely identifies this diff view)
-    await expect(session.changes.getByText("Add diff test file")).toBeVisible({ timeout: 10_000 });
+    await expect(
+      testPage.getByTestId("commit-detail-content").getByText("Add diff test file"),
+    ).toBeVisible({
+      timeout: 10_000,
+    });
 
     // Additionally verify the diff shows the actual file content (lines added).
     // Pierre Diffs renders in a shadow DOM — check all diffs-container elements
@@ -1239,9 +1247,9 @@ test.describe("Git Changes Panel", () => {
     await expect(row.getByText("+0", { exact: true })).toHaveCount(0);
     await expect(row.getByText("-0", { exact: true })).toHaveCount(0);
     await row.hover();
-    await expect(row.getByRole("button")).toHaveCount(0);
+    await expect(row.getByTestId(`commit-open-${remoteSha.slice(0, 7)}`)).toBeVisible();
 
-    await row.click();
+    await row.getByTestId(`commit-open-${remoteSha.slice(0, 7)}`).click();
     await expect(testPage.getByText(remoteMessage).last()).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByText("Remote Author")).toBeVisible({ timeout: 10_000 });
     await testPage.waitForFunction(
@@ -1306,7 +1314,8 @@ test.describe("Git Changes Panel", () => {
     // Verify the commit message is shown
     await expect(session.changes.getByText("Add file to revert")).toBeVisible({ timeout: 5_000 });
 
-    // Click the revert button (hover action on the commit row)
+    // Center the row before hover so click auto-scrolling cannot hide its actions.
+    await commitRow.evaluate((row) => row.scrollIntoView({ block: "center", inline: "nearest" }));
     await commitRow.hover();
     const revertButton = commitRow.getByRole("button", { name: "Revert commit" });
     await expect(revertButton).toBeVisible({ timeout: 5_000 });
@@ -1464,12 +1473,24 @@ test.describe("Git Changes Panel", () => {
   }) => {
     const profile = await createStandardProfile(apiClient, "Git Amend Profile");
 
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Amend Test", profile.id, {
-      description: "Testing amend commit",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Amend Test",
+      profile.id,
+      {
+        description: "Testing amend commit",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+        timeout: 60_000,
+        message: "Waiting for the Git amend task workspace",
+      })
+      .toBe("ready");
 
     const session = await openTaskSession(testPage, "Git Amend Test");
 
@@ -1504,6 +1525,7 @@ test.describe("Git Changes Panel", () => {
     await expect(session.changes.getByText("Original message")).toBeVisible({ timeout: 5_000 });
 
     // Click the amend button (hover action on commit row)
+    await commitRow.evaluate((row) => row.scrollIntoView({ block: "center", inline: "nearest" }));
     await commitRow.hover();
     const amendButton = commitRow.getByRole("button", { name: "Amend commit message" });
     await expect(amendButton).toBeVisible({ timeout: 5_000 });
@@ -2010,6 +2032,18 @@ test.describe("Git Changes Panel", () => {
           (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__?.getPanel("diff-viewer"),
         );
       });
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate(() => {
+            type Api = { getPanel: (id: string) => unknown };
+            return Boolean(
+              (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__?.getPanel("changes"),
+            );
+          }),
+        { timeout: 10_000, message: "the Changes panel is not registered in Dockview yet" },
+      )
+      .toBe(true);
     expect(await diffViewerOpen(), "no cumulative diff panel before clicking Diff").toBe(false);
 
     // Click the "Diff" button in the header to open the cumulative diff view
@@ -2465,6 +2499,9 @@ test.describe("Git Changes Panel", () => {
     await session.waitForChatIdle({ timeout: 45_000 });
     git.exec(`git checkout -B ${providerBranch} ${localHead}`);
     git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
     await session.clickTab("Changes");
 
     const changes = testPage.getByTestId("changes-panel");
@@ -2482,20 +2519,34 @@ test.describe("Git Changes Panel", () => {
     await expect(
       providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
     ).toHaveAttribute("aria-expanded", "false");
-    await expect(localSection.locator('[data-testid^="commit-row-"]')).toHaveCount(6);
+    await expect(
+      localSection.getByTestId("local-checkout-commits-section-collapse-toggle"),
+    ).toContainText("(6)");
     await providerSection.getByTestId("current-pr-commits-section-collapse-toggle").click();
-    await expect(providerSection.locator('[data-commit-provenance="current_pr"]')).toHaveCount(15);
-    await expect(localSection.locator('[data-commit-provenance="local_checkout"]')).toHaveCount(6);
+    await expect(
+      providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
+    ).toContainText("(15)");
     await expect(
       providerSection.locator('[data-commit-provenance="current_pr"]').first(),
     ).toHaveAttribute("title", "Current PR commit");
     await expect(
       localSection.locator('[data-commit-provenance="local_checkout"]').first(),
     ).toHaveAttribute("title", "Local checkout commit");
-    await expect(providerSection.locator('[data-testid^="commit-row-"]')).toHaveCount(15);
-    await expect(providerSection.locator('[data-testid^="commit-row-"]').first()).toContainText(
-      "Rewritten provider commit 15",
+    const firstProviderCommit = providerSection
+      .locator('[data-testid^="commit-row-"]')
+      .filter({ hasText: "Rewritten provider commit 15" });
+    const lastProviderCommit = providerSection.locator(
+      '[data-testid^="commit-row-"]:has([title="Rewritten provider commit 1"])',
     );
+    const firstProviderToggle = firstProviderCommit.getByTestId("commit-toggle");
+    const lastProviderToggle = lastProviderCommit.getByTestId("commit-toggle");
+    await testPage.keyboard.press("ArrowDown");
+    await expect(firstProviderToggle).toBeFocused();
+    for (let index = 1; index < 15; index += 1) {
+      await testPage.keyboard.press("ArrowDown");
+    }
+    await expect(lastProviderCommit).toBeVisible();
+    await expect(lastProviderToggle).toBeFocused();
 
     // A rewritten provider history must not label the preserved checkout as
     // six unpushed commits, and reading the panel must not mutate the checkout.
@@ -2732,7 +2783,7 @@ test.describe("Git Changes Panel", () => {
     await testPage.keyboard.press("Enter");
     await expect(providerToggle).toHaveAttribute("aria-expanded", "false");
     await localToggle.focus();
-    for (let index = 0; index < 8; index += 1) {
+    for (let index = 0; index < 20; index += 1) {
       if (await providerToggle.evaluate((element) => document.activeElement === element)) break;
       await testPage.keyboard.press("Tab");
     }
@@ -2950,6 +3001,7 @@ test.describe("Git Changes Panel", () => {
         author_login: "local-ahead-author",
         repo_owner: "testorg",
         repo_name: "testrepo",
+        head_sha: providerHead,
       },
     ]);
     await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 903, [
@@ -2971,14 +3023,19 @@ test.describe("Git Changes Panel", () => {
       head_branch: "feature/local-ahead",
       base_branch: "main",
       author_login: "local-ahead-author",
+      head_sha: providerHead,
     });
 
+    // Put the task worktree on the contribution branch before the first page
+    // load. The session Git snapshot is read during hydration, so changing the
+    // branch after navigation can leave the contribution policy on its
+    // temporary "provider unavailable" state until another status event.
+    git.exec(`git checkout -B ${providerBranch} ${localHead}`);
+    git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
-    git.exec(`git checkout -B ${providerBranch} ${localHead}`);
-    git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
     await session.clickTab("Changes");
     const changes = testPage.getByTestId("changes-panel");
     await expect(changes.getByTestId("commits-section")).toBeVisible({ timeout: 30_000 });
@@ -2990,7 +3047,9 @@ test.describe("Git Changes Panel", () => {
     await changes.getByRole("button", { name: "Review" }).click();
     const reviewDialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(reviewDialog).toBeVisible({ timeout: 15_000 });
-    await expect(reviewDialog.getByTestId("vcs-primary-push")).toBeVisible({ timeout: 15_000 });
+    // Provider commits load independently from the local Changes panel. Wait
+    // for the push control to become actionable before opening its menu.
+    await expect(reviewDialog.getByTestId("vcs-primary-push")).toBeEnabled({ timeout: 45_000 });
     await reviewDialog.getByRole("button", { name: "Open VCS options" }).click();
     const openMenu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
     const pushAction = openMenu

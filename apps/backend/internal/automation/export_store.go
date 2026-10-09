@@ -60,6 +60,7 @@ func (s *Store) ListAutomationsForExportTx(ctx context.Context, tx *sqlx.Tx, wor
 	for _, a := range automations {
 		a.Triggers = triggersByAutomation[a.ID]
 		a.RepositoryIDs = repoIDsByAutomation[a.ID]
+		hydrateManagedDestination(a)
 	}
 	return automations, nil
 }

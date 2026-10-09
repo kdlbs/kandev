@@ -1,0 +1,17 @@
+{
+  "codexVersion": "codex-cli 0.154.0",
+  "upstreamCommit": "36eab01061df3cde5f95ec20a526777b430091ba",
+  "source": "codex-rs/app-server-protocol/schema/typescript/ServerRequest.ts",
+  "methods": [
+    "item/commandExecution/requestApproval",
+    "item/fileChange/requestApproval",
+    "item/tool/requestUserInput",
+    "mcpServer/elicitation/request",
+    "item/permissions/requestApproval",
+    "item/tool/call",
+    "account/chatgptAuthTokens/refresh",
+    "attestation/generate",
+    "applyPatchApproval",
+    "execCommandApproval"
+  ]
+}

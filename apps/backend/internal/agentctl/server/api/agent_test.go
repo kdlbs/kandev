@@ -261,6 +261,33 @@ func TestHandleWSInitialize_NoAdapter(t *testing.T) {
 	}
 }
 
+func TestHandleWSInitializeRejectsMismatchedProcessGenerationBeforeAdapterAccess(t *testing.T) {
+	s := newTestServer(t)
+	msg, err := ws.NewRequest("req-stale", "agent.initialize", InitializeRequest{
+		ClientName:        "test",
+		ClientVersion:     "1.0.0",
+		ProcessGeneration: 7,
+	})
+	if err != nil {
+		t.Fatalf("create initialize request: %v", err)
+	}
+
+	resp := s.handleWSInitialize(context.Background(), msg)
+	if resp.Type != ws.MessageTypeError {
+		t.Fatalf("response type = %q, want error", resp.Type)
+	}
+	var payload ws.ErrorPayload
+	if err := resp.ParsePayload(&payload); err != nil {
+		t.Fatalf("parse initialize error: %v", err)
+	}
+	if !strings.Contains(payload.Message, "process generation changed") {
+		t.Fatalf("error = %q, want stale process generation", payload.Message)
+	}
+	if _, ok := payload.Details["startup_evidence"]; ok {
+		t.Fatal("stale initialize request received evidence from another generation")
+	}
+}
+
 func TestHandleWSNewSession_NoAdapter(t *testing.T) {
 	s := newTestServer(t)
 	ctx := context.Background()
@@ -546,8 +573,11 @@ type promptErrorAdapter struct {
 
 type mcpCaptureAdapter struct {
 	promptErrorAdapter
-	newSessionServers  []types.McpServer
-	loadSessionServers []types.McpServer
+	newSessionServers    []types.McpServer
+	loadSessionServers   []types.McpServer
+	loadSettingsPolicy   streams.SessionSettingsPolicy
+	configSettingsPolicy streams.SessionSettingsPolicy
+	configOptionCalls    int
 }
 
 type mcpResultCaptureAdapter struct{ mcpCaptureAdapter }
@@ -573,9 +603,16 @@ func (a *mcpCaptureAdapter) NewSession(_ context.Context, servers []types.McpSer
 	return "new-session", nil
 }
 
-func (a *mcpCaptureAdapter) LoadSession(_ context.Context, sessionID string, servers []types.McpServer) error {
+func (a *mcpCaptureAdapter) LoadSession(ctx context.Context, sessionID string, servers []types.McpServer) error {
 	a.sessionID = sessionID
 	a.loadSessionServers = append([]types.McpServer(nil), servers...)
+	a.loadSettingsPolicy = streams.SessionSettingsPolicyFromContext(ctx)
+	return nil
+}
+
+func (a *mcpCaptureAdapter) SetConfigOption(ctx context.Context, _, _ string) error {
+	a.configOptionCalls++
+	a.configSettingsPolicy = streams.SessionSettingsPolicyFromContext(ctx)
 	return nil
 }
 
@@ -704,6 +741,83 @@ func TestHandleWSLoadSession_InjectsLocalKandevMCPServers(t *testing.T) {
 		t.Fatalf("response type = %q, want %q", resp.Type, ws.MessageTypeResponse)
 	}
 	assertLocalKandevMCPServers(t, capture.loadSessionServers)
+}
+
+func TestHandleWSLoadSessionCarriesHostSettingsPolicy(t *testing.T) {
+	s := newTestServer(t)
+	capture := &mcpCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(capture)
+
+	msg, err := ws.NewRequest("req-load", "agent.session.load", LoadSessionRequest{
+		SessionID: "existing-session", SessionSettingsPolicy: streams.SessionSettingsPolicyProviderRestored,
+	})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if resp := s.handleWSLoadSession(context.Background(), msg); resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("response type = %q, want %q", resp.Type, ws.MessageTypeResponse)
+	}
+	if capture.loadSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+		t.Fatalf("adapter policy = %q, want provider_restored", capture.loadSettingsPolicy)
+	}
+}
+
+func TestHandleWSLoadSessionRejectsUnknownSettingsPolicyBeforeLoad(t *testing.T) {
+	s := newTestServer(t)
+	capture := &mcpCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(capture)
+
+	msg, err := ws.NewRequest("req-load", "agent.session.load", map[string]any{
+		"session_id": "existing-session", "session_settings_policy": "unknown",
+	})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if resp := s.handleWSLoadSession(context.Background(), msg); resp.Type != ws.MessageTypeError {
+		t.Fatalf("response type = %q, want %q", resp.Type, ws.MessageTypeError)
+	}
+	if capture.sessionID != "" || capture.loadSessionServers != nil {
+		t.Fatalf("invalid settings policy reached adapter: %+v", capture)
+	}
+}
+
+func TestHandleWSSetConfigOptionCarriesHostSettingsPolicy(t *testing.T) {
+	s := newTestServer(t)
+	capture := &mcpCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(capture)
+
+	msg, err := ws.NewRequest("req-config", "agent.session.set_config_option", map[string]any{
+		"config_id": "reasoning_effort", "value": "high",
+		"session_settings_policy": streams.SessionSettingsPolicyProviderRestored,
+	})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if resp := s.handleWSSetConfigOption(context.Background(), msg); resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("response type = %q, want %q", resp.Type, ws.MessageTypeResponse)
+	}
+	if capture.configSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+		t.Fatalf("adapter policy = %q, want provider_restored", capture.configSettingsPolicy)
+	}
+}
+
+func TestHandleWSSetConfigOptionRejectsUnknownSettingsPolicy(t *testing.T) {
+	s := newTestServer(t)
+	capture := &mcpCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(capture)
+
+	msg, err := ws.NewRequest("req-config", "agent.session.set_config_option", map[string]any{
+		"config_id": "reasoning_effort", "value": "high", "session_settings_policy": "unknown",
+	})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if resp := s.handleWSSetConfigOption(context.Background(), msg); resp.Type != ws.MessageTypeError {
+		t.Fatalf("response type = %q, want %q", resp.Type, ws.MessageTypeError)
+	}
+	if capture.configOptionCalls != 0 {
+		t.Fatalf("invalid settings policy reached adapter %d times", capture.configOptionCalls)
+	}
 }
 
 func TestMCPToolCatalogRemainsAvailableAfterAgentSessionLoad(t *testing.T) {

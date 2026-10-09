@@ -37,6 +37,32 @@ func TestDefinitionsIncludeOfficeExperimentalMetadata(t *testing.T) {
 	}
 }
 
+func TestRemoteExecutorPluginsFlagIsRetired(t *testing.T) {
+	const key = "features.remoteExecutorPlugins"
+	const envVar = "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS"
+	if _, ok := DefinitionByKey(key); ok {
+		t.Fatalf("%s remains active after remote executor plugins graduated", key)
+	}
+	for _, def := range Definitions() {
+		if def.EnvVar == envVar {
+			t.Fatalf("definition %q still binds %s", def.Key, envVar)
+		}
+	}
+	defaults, err := profiles.FeatureFlagDefaults()
+	if err != nil {
+		t.Fatalf("profiles.FeatureFlagDefaults: %v", err)
+	}
+	if _, ok := defaults["remote_executor_plugins"]; ok {
+		t.Fatal("remote_executor_plugins remains in shipped profile defaults")
+	}
+	for _, identity := range retiredRuntimeFlagIdentities {
+		if identity.key == key && identity.envVar == envVar {
+			return
+		}
+	}
+	t.Fatalf("retired runtime flag identity (%s, %s) is missing", key, envVar)
+}
+
 func TestDefinitionsIncludeDynamicAgentRoutingMetadata(t *testing.T) {
 	def, ok := DefinitionByKey("features.dynamicAgentRouting")
 	if !ok {

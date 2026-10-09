@@ -1,3 +1,5 @@
+import { buildSessionModelsState } from "@/lib/state/slices/session-runtime/model-hydration";
+import { resolveTaskRoute } from "@/lib/routing/resolve-task-route";
 import {
   fetchWorkflowSnapshot,
   fetchTask,
@@ -27,6 +29,12 @@ import { latestIncompleteTurnId } from "@/lib/state/slices/session/turn-actions"
 import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 import type { AppState } from "@/lib/state/store";
 import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
+import type { TaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
+import type { StoreApi } from "zustand";
+import {
+  getAgentListResourceScope,
+  type AgentListResponse,
+} from "@/hooks/domains/settings/agent-list-resource";
 // Aliased: `t` is the Terminal parameter name throughout this module.
 import { t as translate } from "@/lib/i18n";
 
@@ -154,6 +162,7 @@ type BuildSessionPageStateParams = {
   turns?: Awaited<ReturnType<typeof listSessionTurns>>["turns"];
   userSettingsResponse?: UserSettingsResponse | null;
   messagesResponse?: ListMessagesResponse | null;
+  taskSessionsLoaded?: boolean;
 };
 
 /**
@@ -244,7 +253,7 @@ function buildResourceState(p: BuildSessionPageStateParams) {
 
 /** Builds the session-page hydration slice (task sessions, turns, models) for the page's task. */
 function buildSessionState(p: BuildSessionPageStateParams) {
-  const { task, sessionId, allSessions, activeSession, turns } = p;
+  const { task, sessionId, allSessions, activeSession, turns, taskSessionsLoaded = true } = p;
   // Prefer the full active session payload (with agent_profile_snapshot) over
   // its summary entry in allSessions so the model selector can resolve the
   // persisted model on first render without flashing the agent default.
@@ -255,11 +264,15 @@ function buildSessionState(p: BuildSessionPageStateParams) {
   return {
     taskSessions: { items: itemsBySessionId },
     ...buildSessionModelsState(activeSession),
-    taskSessionsByTask: {
-      itemsByTaskId: { [task.id]: allSessions },
-      loadingByTaskId: { [task.id]: false },
-      loadedByTaskId: { [task.id]: true },
-    },
+    ...(taskSessionsLoaded
+      ? {
+          taskSessionsByTask: {
+            itemsByTaskId: { [task.id]: allSessions },
+            loadingByTaskId: { [task.id]: false },
+            loadedByTaskId: { [task.id]: true },
+          },
+        }
+      : {}),
     ...(turns !== undefined
       ? {
           turns: sessionId
@@ -292,123 +305,6 @@ function buildSessionState(p: BuildSessionPageStateParams) {
     environmentIdBySessionId: Object.fromEntries(
       allSessions.filter((s) => s.task_environment_id).map((s) => [s.id, s.task_environment_id!]),
     ),
-  };
-}
-
-/** Returns the value narrowed to its string-valued entries, or undefined when none qualify. */
-function stringMap(value: unknown): Record<string, string> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const entries = Object.entries(value).filter(
-    (entry): entry is [string, string] => typeof entry[1] === "string",
-  );
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-}
-
-/** Returns the value as a plain record when it is a non-array object; otherwise undefined. */
-function objectMap(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-/** Returns the value when it is a string; otherwise undefined. */
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-/** Filters an array down to its plain-object items, or returns [] for non-arrays. */
-function objectList(value: unknown): Record<string, unknown>[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
-    : [];
-}
-
-/** Maps a raw ACP model record to the display shape, defaulting missing strings to "". */
-function mapSessionModel(model: Record<string, unknown>) {
-  return {
-    modelId: stringValue(model.model_id) ?? "",
-    name: stringValue(model.name) ?? "",
-    description: stringValue(model.description),
-    usageMultiplier: stringValue(model.usage_multiplier),
-  };
-}
-
-/**
- * Maps a raw ACP config option, preferring the runtime (or override) value over
- * the option's own current_value and defaulting type to "select" when absent.
- */
-function mapSessionConfigOption(
-  option: Record<string, unknown>,
-  runtimeOptions: Record<string, string>,
-) {
-  const id = stringValue(option.id) ?? "";
-  return {
-    type: stringValue(option.type) ?? "select",
-    id,
-    name: stringValue(option.name) ?? "",
-    description: stringValue(option.description),
-    currentValue: runtimeOptions[id] ?? stringValue(option.current_value) ?? "",
-    category: stringValue(option.category),
-    options: Array.isArray(option.options)
-      ? (option.options as { value: string; name: string; description?: string }[])
-      : undefined,
-  };
-}
-
-/**
- * Extracts the ACP model-state snapshot, runtime config, and overrides from a
- * session's metadata; returns {} when the session or its snapshot is missing.
- */
-function sessionModelHydrationMetadata(session: TaskSession | null) {
-  if (!session) return {};
-  const snapshot = objectMap(session.metadata?.acp_model_state);
-  if (!snapshot) return {};
-  return {
-    session,
-    snapshot,
-    runtime: objectMap(session.metadata?.runtime_config),
-    overrides: objectMap(session.metadata?.runtime_config_overrides),
-  };
-}
-
-/**
- * Builds the sessionModels slice (current model, available models, config
- * options) for a session from its ACP hydration metadata; {} when nothing
- * resolvable exists.
- */
-function buildSessionModelsState(session: TaskSession | null) {
-  const metadata = sessionModelHydrationMetadata(session);
-  if (!metadata.session || !metadata.snapshot) return {};
-  const { snapshot, runtime, overrides } = metadata;
-  const runtimeOptions = {
-    ...stringMap(runtime?.config_options),
-    ...stringMap(overrides?.config_options),
-  };
-  const currentModelId =
-    stringValue(overrides?.model) ??
-    stringValue(runtime?.model) ??
-    stringValue(snapshot.current_model_id) ??
-    "";
-  const models = objectList(snapshot.models)
-    .map(mapSessionModel)
-    .filter((model) => !!model.modelId);
-  const configOptions = objectList(snapshot.config_options)
-    .map((option) => mapSessionConfigOption(option, runtimeOptions))
-    .filter((option) => !!option.id);
-  if (!currentModelId && models.length === 0 && configOptions.length === 0) return {};
-
-  return {
-    sessionModels: {
-      bySessionId: {
-        [metadata.session.id]: {
-          currentModelId,
-          models,
-          configOptions,
-          configOptionsSettled: snapshot.config_options_settled === true,
-          configBaseline: stringMap(metadata.session.metadata?.acp_config_baseline),
-        },
-      },
-    },
   };
 }
 
@@ -448,13 +344,13 @@ export async function fetchSessionData(sessionId: string): Promise<FetchedSessio
   ]);
 
   const optionalHydration = beginOptionalHydration();
-  return fetchSessionDataFromTask(
-    task,
-    sessionId,
-    allSessionsResponse,
-    Promise.resolve({ status: "fulfilled", value: { session: activeSession } }),
+  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse, {
+    activeSessionResponse: Promise.resolve({
+      status: "fulfilled",
+      value: { session: activeSession },
+    }),
     optionalHydration,
-  );
+  });
 }
 
 /**
@@ -462,37 +358,119 @@ export async function fetchSessionData(sessionId: string): Promise<FetchedSessio
  * seeding task-only data when no session exists yet and otherwise enriching via
  * the shared optional-hydration pipeline.
  */
-export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSessionData> {
-  const [task, allSessionsResponse] = await Promise.all([
-    fetchTask(taskId, { cache: "no-store" }),
-    listTaskSessions(taskId, { cache: "no-store" }),
-  ]);
-  const sessions = allSessionsResponse.sessions ?? [];
-
-  const sessionId = task.primary_session_id ?? sessions[0]?.id;
+export async function fetchSessionDataForTask(
+  taskId: string,
+  requestedSessionId?: string,
+): Promise<FetchedSessionData> {
+  const { task, allSessionsResponse, sessionId } = await resolveTaskRoute(
+    taskId,
+    requestedSessionId,
+  );
   if (!sessionId) {
-    // No sessions yet — fetch task/workspace data so the store is seeded and
-    // the auto-start hook can fire immediately without a client-side crash.
     return fetchTaskDataOnly(task, allSessionsResponse);
   }
 
-  // Refetch the active session via the single-session endpoint to get
-  // agent_profile_snapshot, which the list endpoint strips. See
-  // BuildSessionPageStateParams.activeSession for the SSR-flicker rationale.
-  // All remaining enrichment shares this deadline so no optional request can
-  // extend route loading beyond the configured bound.
   const optionalHydration = beginOptionalHydration();
   const { fetchTaskSession } = await import("@/lib/api");
   const activeSessionResponse = optionalHydration.load("active session snapshot", () =>
     fetchTaskSession(sessionId, { cache: "no-store" }),
   );
-  return fetchSessionDataFromTask(
-    task,
-    sessionId,
-    allSessionsResponse,
+  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse, {
     activeSessionResponse,
     optionalHydration,
+  });
+}
+
+/** Client navigation leaves optional enrichment to the mounted domain hooks. */
+export async function fetchTaskNavigationData(
+  taskId: string,
+  requestedSessionId?: string,
+): Promise<FetchedSessionData> {
+  const { task, allSessionsResponse, sessionId } = await resolveTaskRoute(
+    taskId,
+    requestedSessionId,
   );
+  return {
+    task,
+    sessionId: sessionId ?? null,
+    initialState: buildSessionPageState({
+      task,
+      sessionId: sessionId ?? null,
+      allSessions: allSessionsResponse.sessions,
+      activeSession: null,
+    }),
+    initialTerminals: [],
+  };
+}
+
+function resolveTaskSessionId(
+  task: Task,
+  allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
+  requestedSessionId?: string,
+) {
+  const sessions = allSessionsResponse.sessions ?? [];
+  const ownedSessions = sessions.filter((session) => session.task_id === task.id);
+  const requestedSession = requestedSessionId
+    ? ownedSessions.find((session) => session.id === requestedSessionId)
+    : undefined;
+  const primarySession = task.primary_session_id
+    ? ownedSessions.find((session) => session.id === task.primary_session_id)
+    : undefined;
+  return requestedSession?.id ?? primarySession?.id ?? ownedSessions[0]?.id ?? null;
+}
+
+/** Builds task identity and lightweight session state before optional resources settle. */
+export function buildTaskNavigationShellData(
+  identity: TaskNavigationIdentity,
+  requestedSessionId?: string,
+): FetchedSessionData {
+  const { task, allSessionsResponse } = identity;
+  const allSessions = (allSessionsResponse.sessions ?? []).filter(
+    (session) => session.task_id === task.id,
+  );
+  const sessionId = identity.sessionListUnavailable
+    ? (requestedSessionId ?? task.primary_session_id ?? null)
+    : resolveTaskSessionId(task, allSessionsResponse, requestedSessionId);
+  return {
+    task,
+    sessionId,
+    initialState: buildSessionPageState({
+      task,
+      sessionId,
+      allSessions,
+      activeSession: null,
+      taskSessionsLoaded: !identity.sessionListUnavailable,
+    }),
+    initialTerminals: [],
+  };
+}
+
+/** Loads full session and optional convenience state after task identity is visible. */
+export async function fetchTaskNavigationEnrichment(
+  identity: TaskNavigationIdentity,
+  requestedSessionId?: string,
+  options: { store?: StoreApi<AppState> } = {},
+): Promise<FetchedSessionData> {
+  const { task } = identity;
+  const allSessionsResponse = identity.sessionListUnavailable
+    ? await listTaskSessions(task.id, { cache: "no-store" })
+    : identity.allSessionsResponse;
+  const sessionId = resolveTaskSessionId(task, allSessionsResponse, requestedSessionId);
+  const loadAgentList = options.store
+    ? () => getAgentListResourceScope(options.store!).ensure()
+    : () => listAgents({ cache: "no-store" });
+  if (!sessionId) return fetchTaskDataOnly(task, allSessionsResponse, loadAgentList);
+
+  const optionalHydration = beginOptionalHydration();
+  const { fetchTaskSession } = await import("@/lib/api");
+  const activeSessionResponse = optionalHydration.load("active session snapshot", () =>
+    fetchTaskSession(sessionId, { cache: "no-store" }),
+  );
+  return fetchSessionDataFromTask(task, sessionId, allSessionsResponse, {
+    activeSessionResponse,
+    optionalHydration,
+    loadAgentList,
+  });
 }
 
 /**
@@ -504,6 +482,7 @@ export async function fetchSessionDataForTask(taskId: string): Promise<FetchedSe
 async function fetchTaskDataOnly(
   task: Task,
   allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
+  loadAgentList: () => Promise<AgentListResponse> = () => listAgents({ cache: "no-store" }),
 ): Promise<FetchedSessionData> {
   const optionalHydration = beginOptionalHydration();
   const results = await Promise.all([
@@ -514,7 +493,7 @@ async function fetchTaskDataOnly(
         ? fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" })
         : Promise.resolve({ steps: [], tasks: [] } as unknown as WorkflowSnapshot),
     ),
-    optionalHydration.load("agents", () => listAgents({ cache: "no-store" })),
+    optionalHydration.load("agents", loadAgentList),
     optionalHydration.load("repositories", () =>
       listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
     ),
@@ -633,9 +612,14 @@ async function fetchSessionDataFromTask(
   task: Task,
   sessionId: string,
   allSessionsResponse: Awaited<ReturnType<typeof listTaskSessions>>,
-  activeSessionResponse: Promise<OptionalHydrationResult<{ session?: TaskSession | null }>>,
-  optionalHydration: ReturnType<typeof beginOptionalHydration>,
+  options: {
+    activeSessionResponse: Promise<OptionalHydrationResult<{ session?: TaskSession | null }>>;
+    optionalHydration: ReturnType<typeof beginOptionalHydration>;
+    loadAgentList?: () => Promise<AgentListResponse>;
+  },
 ): Promise<FetchedSessionData> {
+  const { activeSessionResponse, optionalHydration } = options;
+  const loadAgentList = options.loadAgentList ?? (() => listAgents({ cache: "no-store" }));
   // User shells are env-scoped — look up this session's task_environment_id
   // from the already-fetched session list. Sessions w/o env (legacy) skip
   // the terminal SSR fetch; the boot-time heal pass + WS-driven user_shell.list
@@ -650,7 +634,7 @@ async function fetchSessionDataFromTask(
         ? fetchWorkflowSnapshot(task.workflow_id, { cache: "no-store" })
         : Promise.resolve({ steps: [], tasks: [] } as unknown as WorkflowSnapshot),
     ),
-    optionalHydration.load("agents", () => listAgents({ cache: "no-store" })),
+    optionalHydration.load("agents", loadAgentList),
     optionalHydration.load("repositories", () =>
       listRepositories(task.workspace_id, { includeScripts: true }, { cache: "no-store" }),
     ),

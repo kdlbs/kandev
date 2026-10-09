@@ -14,18 +14,23 @@ const {
   discoverRepositoriesAction,
   getRepositoryDiscoveryAction,
   refreshRepositoryDiscoveryAction,
+  addDesktopDiscoveryRootAction,
   refreshRepositories,
 } = vi.hoisted(() => {
-  const discover = vi.fn().mockResolvedValue({ repositories: [] });
+  const discover = vi.fn().mockResolvedValue({ repositories: [], desktop_runtime: true });
   return {
     attachTaskWorkspaceSources: vi.fn(),
     discoverRepositoriesAction: discover,
     getRepositoryDiscoveryAction: discover,
     refreshRepositoryDiscoveryAction: discover,
+    addDesktopDiscoveryRootAction: vi.fn().mockResolvedValue({}),
     refreshRepositories: vi.fn().mockResolvedValue(undefined),
   };
 });
 
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+}));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile }),
 }));
@@ -52,6 +57,7 @@ vi.mock("@/app/actions/workspaces", () => ({
   discoverRepositoriesAction,
   getRepositoryDiscoveryAction,
   refreshRepositoryDiscoveryAction,
+  addDesktopDiscoveryRootAction,
 }));
 
 async function finishClose(surface: HTMLElement, isDrawer: boolean) {
@@ -201,7 +207,10 @@ describe("AddWorkspaceSourcesDialog repository discovery", () => {
     openRepositoryMenu();
     await selectRepositoryMenuItem("Workspace repository");
     fireEvent.click(screen.getByTestId("repo-chip-trigger"));
+    expect(screen.getByTestId("repository-discovery-settings-button")).toBeTruthy();
+    expect(screen.queryByTestId("repository-discovery-controls")).toBeNull();
 
+    fireEvent.click(screen.getByTestId("repository-discovery-settings-button"));
     expect(screen.getByTestId("repository-discovery-controls")).toBeTruthy();
   });
 });

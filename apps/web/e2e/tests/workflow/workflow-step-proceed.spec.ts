@@ -1,8 +1,56 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { routeMainWebSocketWithPromptDrop } from "../../helpers/ws-drop";
+import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import {
+  BOARD_CONTEXT_TASK_TITLE,
+  FEATURE_TASK_TITLE,
+  seedCrossWorkflowProceedScenario,
+} from "./workflow-cross-workflow-proceed-helpers";
 
 test.describe("Manual proceed to next workflow step", () => {
+  test("uses the task workflow when another board is selected", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const scenario = await seedCrossWorkflowProceedScenario(apiClient, seedData);
+    const featureSnapshot = waitForHttp(
+      testPage,
+      "GET",
+      new RegExp(`/api/v1/workflows/${scenario.featureWorkflow.id}/snapshot$`),
+    );
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await featureSnapshot;
+
+    await expect(kanban.taskCardByTitle(BOARD_CONTEXT_TASK_TITLE)).toBeVisible();
+    await expect(kanban.taskCardByTitle(FEATURE_TASK_TITLE)).not.toBeVisible();
+    await kanban.taskCardByTitle(BOARD_CONTEXT_TASK_TITLE).click();
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const featureTaskRow = session.sidebarTaskItem(FEATURE_TASK_TITLE);
+    await expect(featureTaskRow).toBeVisible();
+    await featureTaskRow.click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${scenario.featureTask.id}(?:\\?|$)`));
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    await expect(session.stepperStep("Analysis")).toHaveAttribute("aria-current", "step");
+    const proceedButton = session.proceedNextStepButton();
+    await expect(proceedButton).toContainText("Implement");
+    await proceedButton.click();
+
+    await expect
+      .poll(async () => (await apiClient.getTask(scenario.featureTask.id)).workflow_step_id, {
+        timeout: 15_000,
+      })
+      .toBe(scenario.implementStep.id);
+    await expect(session.stepperStep("Implement")).toHaveAttribute("aria-current", "step");
+  });
+
   test("shows next step action for an idle signal-gated transition", async ({
     testPage,
     apiClient,
@@ -200,22 +248,36 @@ test.describe("Manual proceed to next workflow step", () => {
     // Change the live session after launch. These values intentionally differ
     // from the profile defaults so reset coverage exercises the live caches.
     await modelTrigger.click();
+    const modelSaved = waitForHttp(testPage, "POST", /\/set-config-option$/, {
+      predicate: (response) =>
+        response.ok() && response.request().postDataJSON().config_id === "model",
+    });
     await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+    await modelSaved;
     await expect(modelTrigger).toContainText("Mock Smart", { timeout: 5_000 });
-    await modelTrigger.click();
+    await expect(testPage.getByTestId("config-option-trigger-effort")).toBeVisible();
     await testPage.getByTestId("config-option-trigger-effort").click();
+    const effortSaved = waitForHttp(testPage, "POST", /\/set-config-option$/, {
+      predicate: (response) => response.ok(),
+    });
     await testPage.getByRole("button", { name: "Max", exact: true }).click();
+    await effortSaved;
     await expect(modelTrigger).toHaveText("Mock Smart / Max", { timeout: 5_000 });
     await testPage.keyboard.press("Escape");
 
     await modeTrigger.click();
+    const modeSaved = waitForHttp(testPage, "POST", /\/set-mode$/, {
+      predicate: (response) => response.ok(),
+    });
     await testPage.getByRole("menuitem", { name: /^Plan Mock/ }).click();
+    await modeSaved;
     await expect(modeTrigger).toHaveText("Plan Mock", { timeout: 5_000 });
 
     await session.proceedNextStepButton().click();
     await expect(session.stepperStep("Reset")).toHaveAttribute("aria-current", "step", {
       timeout: 15_000,
     });
+    await session.expectChatResponseVisible("reset complete");
     await session.waitForChatIdle({ timeout: 30_000 });
     await expect(modelTrigger).toHaveText("Mock Smart / Max", { timeout: 15_000 });
     await expect(modeTrigger).toHaveText("Plan Mock", { timeout: 15_000 });
@@ -352,7 +414,7 @@ test.describe("Manual proceed to next workflow step", () => {
       const nextName = steps[i + 1].name;
 
       // Wait for agent to complete in current step
-      await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+      await session.waitForChatIdle({ timeout: 30_000 });
 
       // Stepper shows current step
       await expect(session.stepperStep(currentName)).toHaveAttribute("aria-current", "step", {
@@ -374,7 +436,7 @@ test.describe("Manual proceed to next workflow step", () => {
     }
 
     // On Done step: proceed button should NOT be visible (final step)
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.proceedNextStepButton()).not.toBeVisible({ timeout: 5_000 });
   });
 });

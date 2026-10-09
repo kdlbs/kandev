@@ -100,6 +100,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.runOnlyPendingTimers();
   vi.useRealTimers();
 });
 
@@ -142,6 +143,43 @@ describe("useWorkflowMovePreview request lifecycle", () => {
     );
     expect(result.current.status).toBe("success");
     expect(result.current.preview?.workflow_step_id).toBe(FIRST_STEP_ID);
+  });
+
+  it("reuses a completed preview when a second surface opens after the first closes", async () => {
+    const taskId = "task-staggered-preview-surface";
+    previewWorkflowMoveMock.mockResolvedValueOnce(makePreview(FIRST_STEP_ID));
+    const first = renderHook(() =>
+      useWorkflowMovePreview({
+        taskId,
+        workflowId: WORKFLOW_ID,
+        workflowStepId: FIRST_STEP_ID,
+        enabled: true,
+      }),
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+      await Promise.resolve();
+    });
+    expect(previewWorkflowMoveMock).toHaveBeenCalledOnce();
+    expect(first.result.current.status).toBe("success");
+    first.unmount();
+
+    const second = renderHook(() =>
+      useWorkflowMovePreview({
+        taskId,
+        workflowId: WORKFLOW_ID,
+        workflowStepId: FIRST_STEP_ID,
+        enabled: true,
+      }),
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+      await Promise.resolve();
+    });
+
+    expect(previewWorkflowMoveMock).toHaveBeenCalledOnce();
+    expect(second.result.current.status).toBe("success");
   });
 
   it("includes the task's draft workflow-agent mapping in the preview request", async () => {

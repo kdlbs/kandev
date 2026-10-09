@@ -52,7 +52,23 @@ func TestKubernetesTaskPodRejectsDifferentProfile(t *testing.T) {
 	req.Metadata[MetadataKeyExecutorProfileID] = "different-profile"
 	_, err := f.runtime.CreateInstance(context.Background(), req)
 	require.ErrorIs(t, err, models.ErrWorkspaceReuseUnsafe)
+	require.ErrorContains(t, err, "executor/profile identity differs from the retained Kubernetes runtime")
 	require.Len(t, f.resources.createdPods, 1)
+}
+
+func TestKubernetesTaskPodMissingRetainedCredentialsExplainsReuseRefusal(t *testing.T) {
+	f := newTaskPodFixture(t)
+	instance := f.launch(t, 1)
+	record, err := f.repo.GetKubernetesEnvironment(context.Background(), "environment-1")
+	require.NoError(t, err)
+	record.ControlSecretID = ""
+	req := taskPodRequest(1)
+	req.Metadata = cloneKubernetesMetadata(instance.Metadata)
+
+	err = f.runtime.attachKubernetesEnvironmentRequest(context.Background(), req, record)
+
+	require.ErrorIs(t, err, models.ErrWorkspaceReuseUnsafe)
+	require.ErrorContains(t, err, "retained Kubernetes control credentials are missing")
 }
 
 type taskPodLegacyStore struct {

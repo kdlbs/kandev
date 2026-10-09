@@ -339,6 +339,18 @@ func (h *Handlers) httpCreateRequest(c *gin.Context) {
 // (handleAskUserQuestion) call this so validation never drifts between paths.
 // Returns "" on success or an error message describing the first failure.
 func NormalizeAndValidateQuestions(questions []Question) string {
+	return normalizeAndValidateQuestions(questions, false)
+}
+
+// NormalizeAndValidateQuestionsAllowFreeTextOnly permits a question with no
+// options only when its allow_custom_text field is explicitly true. The MCP
+// bridge uses this for native protocols that can request text-only answers;
+// HTTP and ordinary MCP requests keep the established 2..6 option contract.
+func NormalizeAndValidateQuestionsAllowFreeTextOnly(questions []Question) string {
+	return normalizeAndValidateQuestions(questions, true)
+}
+
+func normalizeAndValidateQuestions(questions []Question, allowFreeTextOnly bool) string {
 	if len(questions) == 0 {
 		return "questions must contain at least 1 question"
 	}
@@ -357,6 +369,9 @@ func NormalizeAndValidateQuestions(questions []Question) string {
 		if questions[i].Prompt == "" {
 			return fmt.Sprintf("question %d is missing required 'prompt'", i+1)
 		}
+		if allowFreeTextOnly && len(questions[i].Options) == 0 && questions[i].AllowCustomText != nil && *questions[i].AllowCustomText {
+			continue
+		}
 		if len(questions[i].Options) < 2 {
 			return fmt.Sprintf("question %d must have at least 2 options", i+1)
 		}
@@ -370,6 +385,10 @@ func NormalizeAndValidateQuestions(questions []Question) string {
 		}
 	}
 	return ""
+}
+
+func clarificationAllowsCustomText(question Question) bool {
+	return question.AllowCustomText == nil || *question.AllowCustomText
 }
 
 // authorizeBundleAccessOrRespond authorizes pendingID via AuthorizeBundleAccess

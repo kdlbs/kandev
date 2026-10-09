@@ -378,6 +378,31 @@ func (s *AttachmentService) OpenClaimed(ctx context.Context, id, taskID, session
 	return file, attachment.Name, attachment.MimeType, attachment.SizeBytes, nil
 }
 
+// ResolveClaimed returns the canonical registry record for one task-owned
+// attachment. A session-scoped claim may be unbound until the task's first
+// session is created, but a claim for another task or session is rejected.
+func (s *AttachmentService) ResolveClaimed(
+	ctx context.Context,
+	id, taskID, sessionID string,
+) (*models.TaskMessageAttachment, error) {
+	attachment, err := s.repo.GetMessageAttachment(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if attachment == nil || attachment.State != models.AttachmentStateClaimed ||
+		attachment.TaskID != taskID || (attachment.SessionID != "" && attachment.SessionID != sessionID) {
+		return nil, ErrAttachmentForbidden
+	}
+	if strings.TrimSpace(attachment.WorkspaceID) == "" ||
+		ValidateAttachmentMetadata(attachment.Name, attachment.MimeType, attachment.Kind, attachment.DeliveryMode) != nil ||
+		attachment.SizeBytes < 0 || attachment.SizeBytes > MaxAttachmentBytes ||
+		attachment.StorageKey == "" || filepath.Base(attachment.StorageKey) != attachment.StorageKey {
+		return nil, ErrAttachmentInvalid
+	}
+	canonical := *attachment
+	return &canonical, nil
+}
+
 func (s *AttachmentService) Delete(ctx context.Context, ownerID, id string) error {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()
@@ -437,6 +462,27 @@ func (s *AttachmentService) RestoreQueued(
 		return errors.New("queued attachment admission is unavailable")
 	}
 	return repo.RestoreQueuedMessageAttachments(ctx, ids, ownerID, taskID, sessionID, queueID)
+}
+
+// RestoreLaunchClaim returns unreferenced launch attachments to staging after
+// synchronous launch admission fails, so an explicit retry can reuse the files.
+func (s *AttachmentService) RestoreLaunchClaim(
+	ctx context.Context,
+	ownerID, taskID, sessionID string,
+	ids []string,
+) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	repo, ok := s.repo.(repository.LaunchAttachmentRollbackRepository)
+	if !ok {
+		return errors.New("launch attachment rollback is unavailable")
+	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	return repo.RestoreLaunchMessageAttachments(
+		ctx, ids, ownerID, taskID, sessionID, time.Now().UTC().Add(AttachmentStagedTTL),
+	)
 }
 
 // Release removes claimed descriptors that are no longer referenced by a

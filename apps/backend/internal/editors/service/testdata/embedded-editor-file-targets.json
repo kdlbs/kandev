@@ -1,0 +1,14 @@
+[
+  { "name": "ordinary coordinates", "input": { "path": "src/plain.ts", "line": 17, "column": 5 }, "target": { "path": "src/plain.ts", "line": 17, "col": 5 }, "url": "internal://vscode?column=5&goto=src%2Fplain.ts&line=17" },
+  { "name": "colon coordinates", "input": { "path": "src/name:part.ts", "line": 17, "column": 5 }, "target": { "path": "src/name:part.ts", "line": 17, "col": 5 }, "url": "internal://vscode?column=5&goto=src%2Fname%3Apart.ts&line=17" },
+  { "name": "numeric colon without coordinates", "input": { "path": "notes:2026", "line": 0, "column": 0 }, "target": { "path": "notes:2026", "line": 0, "col": 0 }, "url": "internal://vscode?goto=notes%3A2026" },
+  { "name": "canonical returned path", "input": { "path": "src/sub/../name:part.ts", "line": 17, "column": 5 }, "target": { "path": "src/name:part.ts", "line": 17, "col": 5 }, "url": "internal://vscode?column=5&goto=src%2Fname%3Apart.ts&line=17" },
+  { "name": "numeric colon line only", "input": { "path": "notes:2026", "line": 17, "column": 0 }, "target": { "path": "notes:2026", "line": 17, "col": 0 }, "url": "internal://vscode?goto=notes%3A2026&line=17" },
+  { "name": "column without line", "input": { "path": "notes:2026", "line": 0, "column": 5 }, "target": { "path": "notes:2026", "line": 0, "col": 0 }, "url": "internal://vscode?goto=notes%3A2026" },
+  { "name": "space without coordinates", "input": { "path": "src/space name.ts", "line": 0, "column": 0 }, "target": { "path": "src/space name.ts", "line": 0, "col": 0 }, "url": "internal://vscode?goto=src%2Fspace+name.ts" },
+  { "name": "Unicode coordinates", "input": { "path": "src/café.ts", "line": 17, "column": 5 }, "target": { "path": "src/café.ts", "line": 17, "col": 5 }, "url": "internal://vscode?column=5&goto=src%2Fcaf%C3%A9.ts&line=17" },
+  { "name": "literal percent sequences", "input": { "path": "src/literal%3A%25.ts", "line": 0, "column": 0 }, "target": { "path": "src/literal%3A%25.ts", "line": 0, "col": 0 }, "url": "internal://vscode?goto=src%2Fliteral%253A%2525.ts" },
+  { "name": "literal query punctuation", "input": { "path": "src/plus+query&=?#name.ts", "line": 17, "column": 5 }, "target": { "path": "src/plus+query&=?#name.ts", "line": 17, "col": 5 }, "url": "internal://vscode?column=5&goto=src%2Fplus%2Bquery%26%3D%3F%23name.ts&line=17" },
+  { "name": "negative coordinates", "input": { "path": "notes:2026", "line": -17, "column": -5 }, "target": { "path": "notes:2026", "line": 0, "col": 0 }, "url": "internal://vscode?goto=notes%3A2026" },
+  { "name": "nonpositive column", "input": { "path": "src/plain.ts", "line": 17, "column": -5 }, "target": { "path": "src/plain.ts", "line": 17, "col": 0 }, "url": "internal://vscode?goto=src%2Fplain.ts&line=17" }
+]

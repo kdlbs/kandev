@@ -17,6 +17,8 @@ The agent system owns this contract because it owns persisted profile policy.
 Task and Office execution consume that policy. This specification amends
 PR #3473 and is implemented by the profile policy and recovery designs.
 
+The scoped [Auggie task recovery amendment](explicit-resume-settings.md) takes precedence for Auggie task start/resume and explicit recovery. Other consumers retain the policy below.
+
 ## Terminology
 
 - **Strict profile:** a profile with Require exact model explicitly enabled.

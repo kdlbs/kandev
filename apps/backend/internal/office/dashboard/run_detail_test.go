@@ -11,8 +11,8 @@ import (
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/office/dashboard"
-	officemodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // runDetailDeps wires a fresh in-memory repo for run-detail tests.
@@ -47,7 +47,7 @@ func seedRunDetailRun(
 ) string {
 	t.Helper()
 	ctx := context.Background()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: agentID,
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"` + taskID + `"}`,
@@ -130,6 +130,55 @@ func TestListAgentRunsPaged_FirstPageNoCursor(t *testing.T) {
 	}
 }
 
+func TestListAgentRunsPaged_IncludesPersistedRoutineID(t *testing.T) {
+	deps := newRunDetailDeps(t)
+	run := &runsmodels.Run{
+		AgentProfileID: "agent-1",
+		Reason:         "routine_dispatch_event",
+		Payload:        `{"agent_profile_id":"agent-1"}`,
+		Status:         "queued",
+		RoutineID:      "routine-1",
+	}
+	if err := deps.repo.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	response, err := dashboard.ListAgentRunsPaged(context.Background(), deps.repo, "agent-1", "", "", 10)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(response.Runs) != 1 {
+		t.Fatalf("want one run, got %d", len(response.Runs))
+	}
+	if got := response.Runs[0].RoutineID; got != "routine-1" {
+		t.Fatalf("routine_id = %q, want persisted routine ID", got)
+	}
+}
+
+func TestListAgentRunsPaged_FallsBackToRoutineIDInPayload(t *testing.T) {
+	deps := newRunDetailDeps(t)
+	run := &runsmodels.Run{
+		AgentProfileID: "agent-1",
+		Reason:         "routine_dispatch_event",
+		Payload:        `{"routine_id":"routine-legacy"}`,
+		Status:         "queued",
+	}
+	if err := deps.repo.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	response, err := dashboard.ListAgentRunsPaged(context.Background(), deps.repo, "agent-1", "", "", 10)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(response.Runs) != 1 {
+		t.Fatalf("want one run, got %d", len(response.Runs))
+	}
+	if got := response.Runs[0].RoutineID; got != "routine-legacy" {
+		t.Fatalf("routine_id = %q, want legacy payload routine ID", got)
+	}
+}
+
 func TestListAgentRunsPaged_LastPageHasNoCursor(t *testing.T) {
 	deps := newRunDetailDeps(t)
 	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
@@ -164,7 +213,7 @@ func TestListAgentRunsPaged_EmptyAgent(t *testing.T) {
 func TestListAgentRunsPaged_UsesSourceTaskForCommentLinks(t *testing.T) {
 	deps := newRunDetailDeps(t)
 	ctx := context.Background()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-1",
 		Reason:         "task_comment",
 		Payload:        `{"task_id":"target-task","source_task_id":"source-task","comment_id":"cm-source"}`,
@@ -193,7 +242,7 @@ func TestListAgentRunsPaged_UsesSourceTaskForCommentLinks(t *testing.T) {
 func TestListAgentRunsPaged_UsesSourceTaskWithoutCommentID(t *testing.T) {
 	deps := newRunDetailDeps(t)
 	ctx := context.Background()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-1",
 		Reason:         "approval_resolved",
 		Payload:        `{"task_id":"target-task","source_task_id":"source-task"}`,

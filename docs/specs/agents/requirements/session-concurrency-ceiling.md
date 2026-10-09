@@ -69,6 +69,18 @@ bounded instance capacity, so that one installation does not overload its host.
   trigger retry of eligible ceiling-deferred launches without losing their
   payload, entry ownership, or original queue time. Disabling shall not stop the
   retry mechanism or bypass workflow WIP and task eligibility checks.
+- **AC-AGENTS-SESSION-CEILING-001.10:** When the ceiling refuses the start of an
+  admitted automation run, the system shall keep the run open, holding its
+  concurrency slot, and keep its task and deferred start. The replayed start
+  shall bind its session and turn to that run, regardless of workflow-step
+  auto-start eligibility. A replay that fails for a non-ceiling reason, or a
+  dropped start, shall fail the run; a replay whose session launched but could
+  not be bound shall also stop that session. A start whose run is no longer
+  open shall be dropped without launching. This includes a record that
+  AC-AGENTS-SESSION-CEILING-001.5 preserved after its replay failed the run,
+  so the next sweep drops it instead of replaying it. If the task is deleted
+  while its start waits, the unbound run shall fail and release its concurrency
+  slot.
 
 ### REQ-AGENTS-SESSION-CEILING-002: Configure automatic session capacity
 

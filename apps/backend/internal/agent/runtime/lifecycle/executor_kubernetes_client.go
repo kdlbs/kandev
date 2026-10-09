@@ -43,7 +43,7 @@ type kubernetesRuntimeClient struct {
 }
 
 type kubernetesRuntimeClientFactory func(kubeexecutor.ExecutorConfig) (*kubernetesRuntimeClient, error)
-type kubernetesAgentctlBinaryResolver func(kubeexecutor.Platform) ([]byte, error)
+type kubernetesAgentctlBinaryResolver func(context.Context, *ExecutorCreateRequest, kubeexecutor.Platform) ([]byte, error)
 
 func newKubernetesRuntimeClient(config kubeexecutor.ExecutorConfig) (*kubernetesRuntimeClient, error) {
 	client, err := kubeexecutor.NewClient(config, kubeexecutor.ConfigLoader{}, nil)

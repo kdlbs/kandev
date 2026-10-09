@@ -51,9 +51,7 @@ export function NotInstalledBadge() {
 }
 
 /**
- * An integration that is connected — credentials stored and the last health
- * check passed. The settings tree showed this before it became a menu; this is
- * the same pill at menu scale.
+ * An integration that is connected and enabled for the row's workspace.
  */
 export function IntegrationEnabledBadge() {
   const { t } = useTranslation();

@@ -1,5 +1,7 @@
 # Template used by update-homebrew-tap.sh. Placeholder strings are replaced at
 # release time before this formula is pushed to kdlbs/homebrew-kandev.
+require "json"
+
 class Kandev < Formula
   desc "Manage tasks, orchestrate agents, review changes, and ship value"
   homepage "https://github.com/kdlbs/kandev"
@@ -39,6 +41,11 @@ class Kandev < Formula
 
   test do
     assert_equal "v#{version}", shell_output("#{bin}/kandev --version").strip
+    manifest_path = libexec/"remote-helpers.json"
+    manifest = JSON.parse(manifest_path.read)
+    assert_equal 1, manifest.fetch("schema_version")
+    assert_equal "standard", manifest.fetch("variant")
+    assert_equal "v#{version}", manifest.fetch("version")
 
     ENV["KANDEV_HOME_DIR"] = testpath.to_s
     ENV["KANDEV_DATABASE_PATH"] = (testpath/"kandev.db").to_s

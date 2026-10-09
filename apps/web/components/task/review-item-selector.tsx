@@ -59,6 +59,7 @@ export function ReviewItemSelector({
       <DropdownMenuContent
         align="start"
         data-testid="review-item-selector-menu"
+        data-mobile-review-selector-menu="true"
         className="max-h-[calc(100dvh-1rem)] w-80 max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain sm:max-h-80"
       >
         <DropdownMenuLabel>{t("integrations:chooseReview")}</DropdownMenuLabel>

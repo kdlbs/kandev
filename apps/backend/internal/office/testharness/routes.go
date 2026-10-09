@@ -100,6 +100,7 @@ func RegisterRoutes(
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 	g.POST("/tasks", seedTaskHandler(repo, log))
+	g.POST("/tasks/:id/management-claim", seedTaskManagementClaimHandler(repo, log))
 	g.POST("/task-sessions", seedTaskSessionHandler(repo, eventBus, log))
 	g.DELETE("/task-sessions/:id", deleteTaskSessionHandler(repo, eventBus, log))
 	g.POST("/messages", seedMessageHandler(repo, taskSvc, eventBus, log))

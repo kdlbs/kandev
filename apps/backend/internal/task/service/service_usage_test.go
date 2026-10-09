@@ -133,6 +133,40 @@ func TestGetTaskSessionUsageTotals_MismatchedPairAndUnknownSession(t *testing.T)
 	}
 }
 
+func TestListTaskSessionUsageTurns_AuthorizesAndPagesByTurn(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+	for _, turnID := range []string{"turn-a", "turn-b"} {
+		event := &models.TaskUsageEvent{
+			UsageEventID: "evt-" + turnID, TaskID: "task-b", SessionID: "sess-b", TurnID: turnID,
+			TokensIn: 10, TokensTotal: 10, TokensOut: int64Ptr(0), CostSource: "unpriced", ContractVersion: 1,
+		}
+		if err := repo.CreateTaskUsageEvent(context.Background(), event); err != nil {
+			t.Fatalf("CreateTaskUsageEvent(%s): %v", turnID, err)
+		}
+	}
+	if _, _, err := svc.ListTaskSessionUsageTurns(ctxAs("user-a"), "task-b", "sess-b", 0, 10); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("foreign turn listing error = %v, want not found", err)
+	}
+	page, cursor, err := svc.ListTaskSessionUsageTurns(ctxAs("user-b"), "task-b", "sess-b", 0, 1)
+	if err != nil {
+		t.Fatalf("first usage turn page: %v", err)
+	}
+	if len(page) != 1 || page[0].TurnID != "turn-b" || cursor <= 0 {
+		t.Fatalf("first page = %#v, cursor %d; want newest turn-b and positive cursor", page, cursor)
+	}
+	page, _, err = svc.ListTaskSessionUsageTurns(ctxAs("user-b"), "task-b", "sess-b", cursor, 1)
+	if err != nil || len(page) != 1 || page[0].TurnID != "turn-a" {
+		t.Fatalf("second usage turn page = %#v, err %v; want older turn-a", page, err)
+	}
+	rows, err := svc.GetTaskSessionUsageTurn(ctxAs("user-b"), "task-b", "sess-b", "turn-a")
+	if err != nil || len(rows) != 1 || rows[0].TurnID != "turn-a" {
+		t.Fatalf("turn detail = %#v, err %v; want one authorized row", rows, err)
+	}
+}
+
+func int64Ptr(v int64) *int64 { return &v }
+
 func TestGetTaskUsageTotals_ZeroUsageReturnsZeroedTotals(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedScopedWorkspaces(t, repo)

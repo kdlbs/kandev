@@ -10,8 +10,8 @@ import (
 
 func TestProtocolDeclaresAdditivePluginAndHostMethods(t *testing.T) {
 	services := pluginv1.File_kandev_plugin_v1_plugin_proto.Services()
-	assertServiceMethods(t, services.ByName("Plugin"), "HandleAction", "SearchEntityReferences", "AuthorizeEntityReference", "ResolveGitCredential", "GetGitCredentialBinding")
-	assertServiceMethods(t, services.ByName("Host"), "ListExecutorProfiles", "PreviewPluginOwnedTaskTree", "DeletePluginOwnedTaskTree")
+	assertServiceMethods(t, services.ByName("Plugin"), "HandleAction", "SearchEntityReferences", "AuthorizeEntityReference", "ResolveGitCredential", "GetGitCredentialBinding", "ValidateExecutorProfile", "ProvisionExecutorEnvironment", "RecoverExecutorOperation", "AttachExecutorEnvironment", "InspectExecutorEnvironment", "ResolveExecutorConnection", "DestroyExecutorEnvironment")
+	assertServiceMethods(t, services.ByName("Host"), "ListExecutorProfiles", "PreviewPluginOwnedTaskTree", "DeletePluginOwnedTaskTree", "CheckpointExecutorResource", "ReportExecutorProgress", "ReadExecutorRuntimeArtifact")
 	assertMessageFields(t, "PluginActionRequest", "action_key", "context", "body")
 	assertMessageFields(t, "PluginActionResponse", "body", "headers", "status")
 	assertMessageFields(t, "VerifiedActionContext", "actor_id", "workspace_id", "task_id", "repository_id", "session_id", "head_branch")
@@ -31,6 +31,11 @@ func TestProtocolDeclaresAdditivePluginAndHostMethods(t *testing.T) {
 	assertMessageOmitsFields(t, "UpdateTaskRequest", "labels")
 	assertMessageFields(t, "RemoteRepositoryDescriptor", "provider_id", "provider_host", "owner_or_project", "provider_repository_id", "name", "clone_url", "provider_scope")
 	assertMessageFields(t, "DeletePluginOwnedTaskTreeProgress", "deleted_task_ids")
+	assertMessageFields(t, "ExecutorProviderRequestContext", "plugin_id", "installation_id", "provider_key", "contract_version", "operation_id", "execution_id", "environment_generation")
+	assertMessageFields(t, "ExecutorProfileSnapshot", "profile_id", "config", "secret_values")
+	assertMessageFields(t, "ExecutorResourceDescriptor", "resource_handle", "state_json", "platform", "capabilities", "expires_at")
+	assertMessageFields(t, "ExecutorConnectionLease", "base_url", "http_headers", "websocket_headers", "expires_at")
+	assertMessageOmitsFields(t, "ExecutorConnectionLease", "authorization_header")
 }
 
 func TestReleasedTaskLabelsGeneratedSourceCompatibility(t *testing.T) {

@@ -1,5 +1,5 @@
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, render } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GridSpinner } from "./grid-spinner";
 
@@ -8,8 +8,13 @@ const CUBE_SELECTOR = ".spinner-grid-cube";
 const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
 const originalVisibilityState = Object.getOwnPropertyDescriptor(document, "visibilityState");
 
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   if (originalAnimate) {
     Object.defineProperty(HTMLElement.prototype, "animate", originalAnimate);
@@ -22,6 +27,10 @@ afterEach(() => {
     Reflect.deleteProperty(document, "visibilityState");
   }
 });
+
+function flushAnimationSetup() {
+  act(() => vi.runAllTimers());
+}
 
 function installComputedAnimationStyles(easing = "ease-in-out") {
   vi.spyOn(window, "getComputedStyle").mockImplementation((element) => {
@@ -62,6 +71,56 @@ function makeAnimation() {
   } as unknown as Animation;
 }
 
+describe("GridSpinner deferred setup", () => {
+  it("keeps CSS motion until after the first frame without synchronous style reads", () => {
+    installComputedAnimationStyles();
+    const animate = installAnimate();
+    const { container } = render(<GridSpinner />);
+
+    expect(window.getComputedStyle).not.toHaveBeenCalled();
+    expect(animate).not.toHaveBeenCalled();
+    expect(container.querySelector<HTMLElement>(CUBE_SELECTOR)?.style.animation).toBe("");
+
+    flushAnimationSetup();
+    expect(animate).toHaveBeenCalledTimes(9);
+  });
+
+  it("cancels deferred setup if the spinner disappears before the first frame", () => {
+    installComputedAnimationStyles();
+    const animate = installAnimate();
+    const { unmount } = render(<GridSpinner />);
+    unmount();
+    flushAnimationSetup();
+
+    expect(window.getComputedStyle).not.toHaveBeenCalled();
+    expect(animate).not.toHaveBeenCalled();
+  });
+
+  it("cancels promotion when unmounted between the frame and its deferred task", () => {
+    installComputedAnimationStyles();
+    const animate = installAnimate();
+    const view = render(<GridSpinner />);
+    act(() => vi.advanceTimersToNextFrame());
+    expect(animate).not.toHaveBeenCalled();
+    view.unmount();
+    flushAnimationSetup();
+    expect(window.getComputedStyle).not.toHaveBeenCalled();
+    expect(animate).not.toHaveBeenCalled();
+  });
+
+  it("keeps newly promoted effects paused if visibility changed before promotion", () => {
+    installComputedAnimationStyles();
+    const animations = Array.from({ length: 9 }, () => makeAnimation());
+    let animationIndex = 0;
+    installAnimate(() => animations[animationIndex++]);
+    render(<GridSpinner />);
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    flushAnimationSetup();
+    for (const animation of animations) expect(animation.playState).toBe("paused");
+  });
+});
+
 describe("GridSpinner", () => {
   it("pauses and resumes all owned cube effects with document visibility", () => {
     installComputedAnimationStyles();
@@ -70,6 +129,7 @@ describe("GridSpinner", () => {
     installAnimate(() => animations[animationIndex++]);
 
     const { container } = render(<GridSpinner />);
+    flushAnimationSetup();
     const cubes = Array.from(container.querySelectorAll<HTMLElement>(CUBE_SELECTOR));
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
@@ -95,6 +155,7 @@ describe("GridSpinner", () => {
     const animate = installAnimate();
 
     const { container } = render(<GridSpinner className="text-primary" />);
+    flushAnimationSetup();
 
     const status = container.querySelector<HTMLElement>('[role="status"]');
     expect(status?.getAttribute("aria-label")).toBe("Loading");
@@ -125,6 +186,7 @@ describe("GridSpinner", () => {
     Reflect.deleteProperty(HTMLElement.prototype, "animate");
 
     const { container } = render(<GridSpinner />);
+    flushAnimationSetup();
 
     const cubes = Array.from(container.querySelectorAll<HTMLElement>(CUBE_SELECTOR));
     expect(cubes).toHaveLength(9);
@@ -152,6 +214,7 @@ describe("GridSpinner lifecycle", () => {
     const animate = installAnimate();
 
     render(<GridSpinner />);
+    flushAnimationSetup();
 
     expect(animate.mock.calls[0]?.[1]).toEqual({
       delay: 200,
@@ -168,6 +231,7 @@ describe("GridSpinner lifecycle", () => {
     const animate = installAnimate(() => animations[animationIndex++]);
 
     const { rerender } = render(<GridSpinner className="opacity-50" />);
+    flushAnimationSetup();
     rerender(<GridSpinner className="opacity-75" />);
 
     expect(animate).toHaveBeenCalledTimes(9);
@@ -183,6 +247,7 @@ describe("GridSpinner lifecycle", () => {
     });
 
     const { container } = render(<GridSpinner />);
+    flushAnimationSetup();
 
     const cubes = Array.from(container.querySelectorAll<HTMLElement>(CUBE_SELECTOR));
     expect(animate).toHaveBeenCalledTimes(2);
@@ -211,6 +276,7 @@ describe("GridSpinner lifecycle", () => {
     installAnimate(() => animations[animationIndex++]);
 
     const { unmount } = render(<GridSpinner />);
+    flushAnimationSetup();
     unmount();
 
     for (const animation of animations) {

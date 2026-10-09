@@ -41,7 +41,10 @@ vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: mockRequest }),
 }));
 
-vi.mock("@/lib/api/domains/kanban-api", () => ({ deleteTask: mockDeleteTask }));
+vi.mock("@/lib/api/domains/kanban-api", () => ({
+  deleteTask: mockDeleteTask,
+  deleteTaskAfterUserAction: mockDeleteTask,
+}));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>

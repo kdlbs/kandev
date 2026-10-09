@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { test, expect, kubernetesProfileConfig } from "../../fixtures/kubernetes-test-base";
+import { runWithBackendRecovery } from "../../fixtures/test-base";
 import {
   execInKubernetesPod,
   waitForKubernetesPod,
@@ -9,6 +10,12 @@ import {
 } from "../../helpers/kubernetes";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
+import { watchWs } from "../../helpers/causal-waits";
+import { sanitizeSessionErrorDetails } from "../../../lib/session-error-details";
+
+function isFetchTransportError(error: unknown): boolean {
+  return error instanceof TypeError && /fetch failed|network error/i.test(error.message);
+}
 
 // Repeated real-cluster setup can exhaust the job before failure artifacts are written.
 test.describe.configure({ retries: 0 });
@@ -83,14 +90,67 @@ for (const restart of [false, true]) {
       expect((await waitForKubernetesPVC(cluster, task.id, sessionId)).metadata.uid).toBe(
         claim.metadata.uid,
       );
-      if (restart) await backend.restart();
+      if (restart) {
+        const restartLogOffset = fs.readFileSync(backend.logPath, "utf8").length;
+        await backend.restart();
+        await expect
+          .poll(
+            () =>
+              fs
+                .readFileSync(backend.logPath, "utf8")
+                .slice(restartLogOffset)
+                .split("\n")
+                .some(
+                  (line) =>
+                    line.includes(task.id) &&
+                    line.includes(sessionId) &&
+                    line.includes("session reconciled for lazy recovery"),
+                ),
+            {
+              timeout: 30_000,
+              message: "Waiting for startup session reconciliation after backend restart",
+            },
+          )
+          .toBe(true);
+        await expect
+          .poll(
+            async () => {
+              let environment: Awaited<ReturnType<typeof apiClient.getTaskEnvironment>>;
+              try {
+                environment = await apiClient.getTaskEnvironment(task.id);
+              } catch (error) {
+                // A request can lose its connection while the restarted backend is settling.
+                // Treat only transport errors as a pending poll; API and decoding errors must fail.
+                if (isFetchTransportError(error)) return "transport-unavailable";
+                throw error;
+              }
+              if (!environment) return "missing";
+              const hasInvalidRepository = (environment.repos ?? []).some(
+                (repo) => repo.status === "failed" || repo.status === "deleted",
+              );
+              if (environment.status === "ready" && !hasInvalidRepository) return "ready";
+              return `${environment.status}:${hasInvalidRepository ? "invalid-repository" : "pending"}`;
+            },
+            {
+              timeout: 90_000,
+              message: "Waiting for the Kubernetes workspace to become reusable after restart",
+            },
+          )
+          .toBe("ready");
+      }
+      const ws = watchWs(testPage);
       await testPage.goto(`/t/${task.id}`);
       await session.waitForLoad();
       await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
-      await session.recoveryResumeButton().click({ timeout: 30_000 });
+      const [recovery] = await Promise.all([
+        ws.waitForResponse("session.recover", { timeout: 30_000 }).catch((error: unknown) => {
+          throw new Error(sanitizeSessionErrorDetails(error));
+        }),
+        session.recoveryResumeButton().click({ timeout: 30_000 }),
+      ]);
+      expect(recovery.payload.success).toBe(true);
       const editor = session.activeChat().getByTestId("chat-input-editor");
       await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 90_000 });
-      await expect(session.submitButton()).toBeEnabled({ timeout: 90_000 });
       await expect(session.recoveryResumeButton()).toHaveCount(0);
       await waitForTaskSessionState(apiClient, task.id, sessionId, "WAITING_FOR_INPUT", 90_000);
       const reply = restart ? "recovered-after-restart" : "recovered-after-failure";
@@ -107,8 +167,22 @@ for (const restart of [false, true]) {
       await waitForKubernetesResourceAbsent(cluster, "pod", pod.metadata.name);
       await waitForKubernetesResourceAbsent(cluster, "persistentvolumeclaim", claim.metadata.name);
     } finally {
-      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false });
-      await apiClient.deleteExecutorProfile(profile.id);
+      try {
+        await runWithBackendRecovery(backend, () =>
+          apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false }),
+        );
+      } finally {
+        await runWithBackendRecovery(backend, async () => {
+          const { executors } = await apiClient.listExecutors();
+          // A lost DELETE response can mean the profile is already gone.
+          const profileStillExists = executors.some(
+            (executor) =>
+              executor.id === seedData.executorId &&
+              executor.profiles?.some(({ id }) => id === profile.id),
+          );
+          if (profileStillExists) await apiClient.deleteExecutorProfile(profile.id);
+        });
+      }
     }
   });
 }

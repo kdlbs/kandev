@@ -732,6 +732,7 @@ type associateTaskPRRequest struct {
 	ReviewState                           string     `json:"review_state"`
 	ChecksState                           string     `json:"checks_state"`
 	MergeableState                        string     `json:"mergeable_state"`
+	HasMergeConflicts                     *bool      `json:"has_merge_conflicts,omitempty"`
 	MergeQueueState                       string     `json:"merge_queue_state"`
 	MergeQueuePosition                    *int       `json:"merge_queue_position,omitempty"`
 	MergeQueueEstimatedTimeToMergeSeconds *int       `json:"merge_queue_estimated_time_to_merge_seconds,omitempty"`
@@ -805,6 +806,7 @@ func buildTaskPRFromRequest(req *associateTaskPRRequest, now time.Time) *TaskPR 
 		ReviewState:                           req.ReviewState,
 		ChecksState:                           req.ChecksState,
 		MergeableState:                        req.MergeableState,
+		HasMergeConflicts:                     req.HasMergeConflicts,
 		MergeQueueState:                       req.MergeQueueState,
 		MergeQueuePosition:                    req.MergeQueuePosition,
 		MergeQueueEstimatedTimeToMergeSeconds: req.MergeQueueEstimatedTimeToMergeSeconds,
@@ -863,6 +865,8 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 		BaseBranch:                            req.BaseBranch,
 		AuthorLogin:                           req.AuthorLogin,
 		MergeableState:                        req.MergeableState,
+		HasMergeConflicts:                     req.HasMergeConflicts,
+		HasMergeConflictsObserved:             req.HasMergeConflicts != nil,
 		RepoOwner:                             req.Owner,
 		RepoName:                              req.Repo,
 		Additions:                             req.Additions,

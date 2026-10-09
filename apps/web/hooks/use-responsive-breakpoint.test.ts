@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useResponsiveBreakpoint } from "./use-responsive-breakpoint";
 
@@ -66,6 +66,7 @@ describe("useResponsiveBreakpoint", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
   });
 
@@ -125,5 +126,41 @@ describe("useResponsiveBreakpoint", () => {
 
     notifyResize(1024, "fine");
     expect(result.current.isFinePointer).toBe(true);
+  });
+
+  it("does not read viewport geometry or media queries on ordinary consumer rerenders", () => {
+    const first = renderHook(() => useResponsiveBreakpoint());
+    const second = renderHook(() => useResponsiveBreakpoint());
+    const snapshot = first.result.current;
+    const readWidth = vi.fn(() => 1024);
+    Object.defineProperty(window, "innerWidth", { configurable: true, get: readWidth });
+    vi.mocked(window.matchMedia).mockClear();
+
+    first.rerender();
+    second.rerender();
+
+    expect(first.result.current).toBe(snapshot);
+    expect(second.result.current).toBe(snapshot);
+    expect(readWidth).not.toHaveBeenCalled();
+    expect(window.matchMedia).not.toHaveBeenCalled();
+
+    notifyResize(767, "coarse");
+    expect(first.result.current.isMobile).toBe(true);
+    expect(second.result.current).toBe(first.result.current);
+    first.unmount();
+    notifyResize(900, "fine");
+    expect(second.result.current.breakpoint).toBe("compactDesktop");
+    second.unmount();
+    expect(listeners.size).toBe(0);
+  });
+
+  it("reads the current viewport after all consumers have unmounted", () => {
+    const first = renderHook(() => useResponsiveBreakpoint());
+    first.unmount();
+    setViewport(390, "coarse");
+
+    const second = renderHook(() => useResponsiveBreakpoint());
+    expect(second.result.current.isMobile).toBe(true);
+    expect(second.result.current.isFinePointer).toBe(false);
   });
 });

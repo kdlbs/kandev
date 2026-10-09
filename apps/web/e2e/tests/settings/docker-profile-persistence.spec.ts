@@ -206,6 +206,65 @@ test.describe("Docker executor profile persistence", () => {
     }
   });
 
+  /**
+   * The network card writes three keys. An untouched card must write none, so
+   * a profile saved without it keeps behaving exactly as it did before the
+   * card existed.
+   *
+   * @covers AC-EXECUTORS-DOCKER-NETWORKS-003.1
+   * @covers AC-EXECUTORS-DOCKER-NETWORKS-003.4
+   */
+  test("container networks persist through Save and reload", async ({ testPage, apiClient }) => {
+    const exec = await apiClient.createExecutor("e2e-networks-persistence", "local_docker");
+    const profile = await apiClient.createExecutorProfile(exec.id, {
+      name: "networks",
+      config: { image_tag: "kandev-agent:e2e" },
+    });
+    await testPage.route("**/api/v1/docker/containers?*", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: '{"containers":[]}',
+      });
+    });
+
+    try {
+      await testPage.goto(`/settings/executors/${profile.id}`);
+      const primary = testPage.locator("#docker-primary-network");
+      await expect(primary).toHaveValue("");
+
+      // Saving without touching the card must not introduce any network key.
+      await expect
+        .poll(async () => (await apiClient.getExecutorProfile(exec.id, profile.id)).config)
+        .not.toHaveProperty("docker_network");
+
+      await primary.fill("lab-bridge");
+      await testPage.locator("#docker-primary-gw-priority").fill("10");
+      await testPage.getByRole("button", { name: "Add network" }).click();
+      await testPage.locator("#docker-additional-network-0").fill("lan-macvlan");
+      await testPage.locator("#docker-additional-priority-0").fill("-10");
+
+      await testPage
+        .getByTestId("settings-floating-save")
+        .getByRole("button", { name: "Save changes" })
+        .click();
+      await expect
+        .poll(async () => (await apiClient.getExecutorProfile(exec.id, profile.id)).config)
+        .toMatchObject({
+          docker_network: "lab-bridge",
+          docker_network_gw_priority: "10",
+          docker_additional_networks: '[{"name":"lan-macvlan","gw_priority":-10}]',
+        });
+
+      await testPage.reload();
+      await expect(testPage.locator("#docker-primary-network")).toHaveValue("lab-bridge");
+      await expect(testPage.locator("#docker-additional-network-0")).toHaveValue("lan-macvlan");
+      await expect(testPage.locator("#docker-additional-priority-0")).toHaveValue("-10");
+    } finally {
+      await apiClient.deleteExecutor(exec.id).catch(() => {});
+    }
+  });
+
   test("user namespace support persists through Save and reload", async ({
     testPage,
     apiClient,

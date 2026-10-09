@@ -415,7 +415,9 @@ describe("Pill popover", () => {
     expect(content).not.toBeNull();
     expect(screen.getByTestId("clipping-host").contains(content)).toBe(false);
   });
+});
 
+describe("Pill toolbar actions", () => {
   it("activates an optional toolbar action with a pointer", () => {
     const onAction = vi.fn();
     render(
@@ -456,5 +458,32 @@ describe("Pill popover", () => {
     expect(screen.getByRole("button", { name: CREATE_REPOSITORY })).toBeTruthy();
     expect(screen.queryByRole("option", { name: CREATE_REPOSITORY })).toBeNull();
     expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("renders multiple toolbar actions in order", () => {
+    const onAction1 = vi.fn();
+    const onAction2 = vi.fn();
+    render(
+      <Pill
+        icon={<span aria-hidden="true" />}
+        value=""
+        placeholder="repository"
+        options={[]}
+        onSelect={vi.fn()}
+        searchPlaceholder="Search repositories..."
+        emptyMessage="No repositories"
+        actions={[
+          { label: "Action One", testId: "action-1", onSelect: onAction1 },
+          { label: "Action Two", testId: "action-2", onSelect: onAction2 },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("repository"));
+    expect(screen.getByTestId("action-1")).toBeTruthy();
+    expect(screen.getByTestId("action-2")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("action-2"));
+    expect(onAction2).toHaveBeenCalledOnce();
+    expect(onAction1).not.toHaveBeenCalled();
   });
 });

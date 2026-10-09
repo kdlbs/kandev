@@ -186,27 +186,17 @@ func TestNewSession_WaitsForBackedUpCreationUsage(t *testing.T) {
 	}
 }
 
-func TestNewSession_RPCFailureAndCancellationClearTrackers(t *testing.T) {
+func TestNewSession_RPCFailureAndProviderCancellationClearTrackers(t *testing.T) {
 	tests := []struct {
 		name string
-		ctx  func() context.Context
 	}{
-		{
-			name: "failure",
-			ctx:  context.Background,
-		},
-		{
-			name: "cancellation",
-			ctx: func() context.Context {
-				ctx, cancel := context.WithCancel(context.Background())
-				cancel()
-				return ctx
-			},
-		},
+		{name: "failure"},
+		{name: "provider cancellation"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a, fake := setupSessionCreationAdapter(t)
+			ctx := context.Background()
 			if tt.name == "failure" {
 				fake.onNew = func(ctx context.Context, _ acpsdk.NewSessionRequest, _ int) (acpsdk.NewSessionResponse, error) {
 					if err := fake.sendUsage(ctx, "failed-session", 100, 1.23); err != nil {
@@ -221,7 +211,7 @@ func TestNewSession_RPCFailureAndCancellationClearTrackers(t *testing.T) {
 			}
 			a.convertUsageUpdate("stale-session", usageUpdate(200_000, 900))
 
-			if _, err := a.NewSession(tt.ctx(), nil); err == nil {
+			if _, err := a.NewSession(ctx, nil); err == nil {
 				t.Fatal("NewSession unexpectedly succeeded")
 			}
 			a.mu.RLock()

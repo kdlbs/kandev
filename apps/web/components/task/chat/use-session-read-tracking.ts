@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useTaskRouteSessionHydrated } from "@/components/task/task-route-session-hydration";
 import { markSessionRead } from "@/lib/api/domains/session-api";
 import { createDebugLogger } from "@/lib/debug/log";
 
@@ -181,6 +182,8 @@ export function useSessionReadTracking(
   initialMessagesLoading = false,
 ): string | null {
   const store = useAppStoreApi();
+  const routeSessionHydrated = useTaskRouteSessionHydrated();
+  const trackedVisible = isVisible && routeSessionHydrated;
   const updateSessionReadCursor = useAppStore((state) => state.updateSessionReadCursor);
   const unreadDividerEnabled = useAppStore((state) => state.userSettings.unreadDivider);
   // Reactive (not store.getState()) so a session that hasn't loaded into the
@@ -199,7 +202,7 @@ export function useSessionReadTracking(
   // immutable so live messages cannot create a new boundary mid-visit.
   const [visit, setVisit] = useState<Visit | null>(null);
 
-  if (unreadDividerEnabled && isVisible && sessionId && sessionLoaded) {
+  if (unreadDividerEnabled && trackedVisible && sessionId && sessionLoaded) {
     if (visit?.sessionId !== sessionId) {
       const priorCursor =
         store.getState().taskSessions.items[sessionId]?.last_read_message_id ?? null;
@@ -224,17 +227,17 @@ export function useSessionReadTracking(
       setAnchor(null);
       return;
     }
-    if (isVisible) return;
+    if (trackedVisible) return;
     const timer = setTimeout(() => {
       setVisit(null);
       setAnchor(null);
     }, 300);
     return () => clearTimeout(timer);
-  }, [isVisible, unreadDividerEnabled, visit]);
+  }, [trackedVisible, unreadDividerEnabled, visit]);
 
   useReadTrackingEffects({
     sessionId,
-    isVisible,
+    isVisible: trackedVisible,
     latestMessageId,
     unreadDividerEnabled,
     visit,
@@ -242,5 +245,5 @@ export function useSessionReadTracking(
     updateSessionReadCursor,
   });
 
-  return visibleAnchor(unreadDividerEnabled, isVisible, anchor, sessionId);
+  return visibleAnchor(unreadDividerEnabled, trackedVisible, anchor, sessionId);
 }

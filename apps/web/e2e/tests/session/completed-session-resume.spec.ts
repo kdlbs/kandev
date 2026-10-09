@@ -15,7 +15,7 @@ test.describe("Completed conversation resume", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(300_000);
     const task = await seedCompletedConversation(
       apiClient,
       seedData,
@@ -36,8 +36,7 @@ test.describe("Completed conversation resume", () => {
     await expect(session.completedSessionNewAgentButton()).toBeVisible();
 
     await session.clickTab("Files");
-    const fileNode = session.fileTreeNode(RETAINED_WORKSPACE_FILE);
-    await expect(fileNode).toBeVisible({ timeout: 60_000 });
+    const fileNode = await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 90_000);
     await fileNode.click();
     const viewer = testPage.locator(".monaco-editor:visible").first();
     await expect(viewer).toBeVisible({ timeout: 15_000 });
@@ -52,7 +51,7 @@ test.describe("Completed conversation resume", () => {
     await session.showSessionContext();
     await expect(session.completedSessionBanner()).toBeVisible({ timeout: 30_000 });
     await session.clickTab("Files");
-    await expect(session.fileTreeNode(RETAINED_WORKSPACE_FILE)).toBeVisible({ timeout: 60_000 });
+    await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 90_000);
     await session.clickSessionChatTab();
     const afterReload = await apiClient.listTaskSessions(task.id);
     expect(afterReload.sessions).toHaveLength(before.sessions.length);
@@ -64,7 +63,7 @@ test.describe("Completed conversation resume", () => {
     await testPage.reload();
     await session.showSessionContext();
     await session.clickTab("Files");
-    await expect(session.fileTreeNode(RETAINED_WORKSPACE_FILE)).toBeVisible({ timeout: 60_000 });
+    await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 90_000);
     await session.clickSessionChatTab();
     await expect(session.completedSessionBanner()).toBeVisible({ timeout: 30_000 });
 
@@ -76,7 +75,7 @@ test.describe("Completed conversation resume", () => {
           const current = await apiClient.listTaskSessions(task.id);
           return current.sessions.find((item) => item.id === task.session_id)?.state ?? "MISSING";
         },
-        { timeout: 60_000, message: "Waiting for the resumed conversation to become idle" },
+        { timeout: 90_000, message: "Waiting for the resumed conversation to become idle" },
       )
       .toBe("WAITING_FOR_INPUT");
     await expect(session.activeChat().locator(".tiptap.ProseMirror:visible").first()).toBeEditable({

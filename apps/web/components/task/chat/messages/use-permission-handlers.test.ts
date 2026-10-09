@@ -272,3 +272,72 @@ describe("handleReject", () => {
     expect(firstPayload().option_id).toBeUndefined();
   });
 });
+
+describe("provider-offered Codex decisions", () => {
+  const offered = [
+    {
+      option_id: "codex-choice-0",
+      name: "Approve once",
+      kind: "allow_once" as const,
+      metadata: { codex_app_server: true, codex_decision: "accept" },
+    },
+    {
+      option_id: "codex-choice-1",
+      name: "Approve with command policy",
+      kind: "allow_always" as const,
+      metadata: {
+        codex_app_server: true,
+        codex_decision: "accept_with_execpolicy_amendment",
+      },
+    },
+    {
+      option_id: "codex-choice-2",
+      name: "Cancel turn",
+      kind: "reject_once" as const,
+      metadata: { codex_app_server: true, codex_decision: "cancel" },
+    },
+  ];
+
+  it("translates offered structured choices and responds with the selected ID", async () => {
+    const result = renderHandlers(makePermissionMessage(offered));
+    expect(result.current.offeredChoices.map((choice) => choice.label)).toEqual([
+      "Approve",
+      "Approve with command rule",
+      "Cancel",
+    ]);
+
+    await act(async () => {
+      result.current.handleOfferedChoice("codex-choice-1");
+    });
+
+    expect(firstPayload().option_id).toBe("codex-choice-1");
+    expect(firstPayload().cancelled).toBeFalsy();
+    expect(firstPayload().rejected).toBeFalsy();
+  });
+
+  it("keeps offered rejection and cancellation outcomes distinct", async () => {
+    const deny = {
+      option_id: "codex-deny",
+      name: "Deny",
+      kind: "reject_once" as const,
+      metadata: { codex_app_server: true, codex_decision: "decline" },
+    };
+    const cancel = offered[2];
+    const result = renderHandlers(makePermissionMessage([deny, cancel]));
+
+    await act(async () => {
+      result.current.handleOfferedChoice(deny.option_id);
+    });
+    expect(firstPayload().option_id).toBe(deny.option_id);
+    expect(firstPayload().rejected).toBe(true);
+    expect(firstPayload().cancelled).toBeFalsy();
+
+    requestMock.mockClear();
+    await act(async () => {
+      result.current.handleOfferedChoice(cancel.option_id);
+    });
+    expect(firstPayload().option_id).toBeUndefined();
+    expect(firstPayload().rejected).toBeFalsy();
+    expect(firstPayload().cancelled).toBe(true);
+  });
+});

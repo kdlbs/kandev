@@ -12,6 +12,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { makePRCheckRun, makePRWorkflowRun } from "../../helpers/pr-checks";
 
 const OWNER = "acme";
 const REPO = "demo";
@@ -459,6 +460,153 @@ test.describe("mobile PR CI chip drawer", () => {
 
     await expect(session.prStatusChip()).toHaveAttribute("data-pr-number", "100");
     await expect(session.prMultiPopoverRemove(OWNER, REPO, PR_NUMBER)).toHaveCount(0);
+    await expect(session.prStatusChipDrawer()).toHaveCount(0);
+  });
+
+  test("current PR checks: drawer shows the selected run and cancellation-only state", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(150_000);
+    const headSHA = "mobile-current-pr-checks-head";
+    const identity = {
+      number: PR_NUMBER,
+      headSHA,
+      headBranch: "feat/mobile-drawer",
+      headRepoOwner: "contributor",
+      headRepoName: "demo-fork",
+    };
+    const taskId = await seedTaskWithPR({
+      apiClient,
+      seedData,
+      title: "current PR checks: mobile drawer parity",
+      prOverrides: {
+        head_sha: headSHA,
+        head_repo_owner: identity.headRepoOwner,
+        head_repo_name: identity.headRepoName,
+        checks_state: "failure",
+        checks_total: 2,
+        checks_passing: 0,
+      },
+    });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: [
+        makePRCheckRun({
+          id: 9001,
+          suiteId: 2001,
+          name: "Preview / deploy-fork",
+          status: "completed",
+          conclusion: "cancelled",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/990/deploy",
+        }),
+        makePRCheckRun({
+          id: 9002,
+          suiteId: 2001,
+          name: "Preview / update-description-fork",
+          status: "completed",
+          conclusion: "cancelled",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/990/description",
+        }),
+        makePRCheckRun({
+          id: 9011,
+          suiteId: 2002,
+          name: "Preview / package",
+          status: "in_progress",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/991/package",
+        }),
+        makePRCheckRun({
+          id: 9010,
+          suiteId: 2002,
+          name: "Preview / lint",
+          status: "completed",
+          conclusion: "success",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/991/lint",
+        }),
+      ],
+      workflow_runs: [
+        makePRWorkflowRun({
+          id: 990,
+          suiteId: 2001,
+          identity,
+          status: "completed",
+          conclusion: "cancelled",
+          url: "https://github.com/acme/demo/actions/runs/990",
+        }),
+        makePRWorkflowRun({
+          id: 991,
+          suiteId: 2002,
+          identity,
+          status: "in_progress",
+          url: "https://github.com/acme/demo/actions/runs/991",
+        }),
+      ],
+    });
+
+    let session = await openTask(testPage, taskId);
+    await expect(session.prStatusChip()).toBeVisible({ timeout: 15_000 });
+    await session.tapPRStatusChip();
+    let drawer = session.prStatusChipDrawer();
+    const inProgress = drawer.locator("[data-testid='pr-check-group'][data-kind='in_progress']");
+    await expect(inProgress).toBeVisible();
+    await expect(inProgress.getByTestId("pr-check-group-count")).toHaveText("1");
+    await expect(drawer.locator("[data-testid='pr-check-group'][data-kind='failed']")).toHaveCount(
+      0,
+    );
+    if (prCapture.capturing) {
+      await expect(drawer.getByTestId("pr-popover-updated-at")).toBeVisible({ timeout: 10_000 });
+      await expect(drawer.getByTestId("pr-popover-updating")).toHaveCount(0);
+      await waitForFiniteAnimations(drawer);
+      await prCapture.screenshot("current-pr-checks-phone", {
+        caption: "Phone drawer showing current workflow progress without superseded failures",
+      });
+    }
+    const currentRunPopup = testPage.waitForEvent("popup");
+    await drawer.getByTestId("pr-workflow-open").click();
+    const openedCurrentRun = await currentRunPopup;
+    await expect(openedCurrentRun).toHaveURL(
+      "https://github.com/acme/demo/actions/runs/991/package",
+    );
+    await openedCurrentRun.close();
+    await session.prStatusChipDrawerClose().tap();
+    await expect(session.prStatusChipDrawer()).toHaveCount(0);
+
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: [
+        makePRCheckRun({
+          id: 9021,
+          suiteId: 2003,
+          name: "Preview / deploy-fork",
+          status: "completed",
+          conclusion: "cancelled",
+          htmlUrl: "https://github.com/acme/demo/actions/runs/992/deploy",
+        }),
+      ],
+      workflow_runs: [
+        makePRWorkflowRun({
+          id: 992,
+          suiteId: 2003,
+          identity,
+          status: "completed",
+          conclusion: "cancelled",
+          url: "https://github.com/acme/demo/actions/runs/992",
+        }),
+      ],
+    });
+    await testPage.reload();
+    session = await openTask(testPage, taskId);
+    await session.tapPRStatusChip();
+    drawer = session.prStatusChipDrawer();
+    await expect(drawer.getByTestId("pr-checks-empty")).toHaveText("Checks not successful");
+    await expect(drawer.locator("[data-testid='pr-check-group']")).toHaveCount(0);
+    await session.prStatusChipDrawerClose().tap();
     await expect(session.prStatusChipDrawer()).toHaveCount(0);
   });
 });

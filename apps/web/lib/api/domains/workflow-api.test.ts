@@ -13,6 +13,19 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("normalizeWorkflowTemplate", () => {
   it("preserves template step identities used by transition references", () => {
+    const step = {
+      id: "in-progress",
+      name: "In Progress",
+      position: 0,
+      agent_profile_id: "profile-a",
+      profile_session_start_policy: "new" as const,
+      profile_session_end_policy: "park" as const,
+      disable_unclassified_fallback: true,
+      complete_task_on_enter: false,
+      events: {
+        on_turn_complete: [{ type: "move_to_step" as const, config: { step_id: "review" } }],
+      },
+    };
     const template = normalizeWorkflowTemplate({
       id: "template-1",
       name: "Review flow",
@@ -20,18 +33,7 @@ describe("normalizeWorkflowTemplate", () => {
       created_at: "",
       updated_at: "",
       default_steps: [
-        {
-          id: "in-progress",
-          name: "In Progress",
-          position: 0,
-          agent_profile_id: "profile-a",
-          profile_session_start_policy: "new",
-          profile_session_end_policy: "park",
-          complete_task_on_enter: false,
-          events: {
-            on_turn_complete: [{ type: "move_to_step", config: { step_id: "review" } }],
-          },
-        },
+        step,
         { id: "review", name: "Review", position: 1, complete_task_on_enter: true },
       ],
     });
@@ -41,6 +43,7 @@ describe("normalizeWorkflowTemplate", () => {
       agent_profile_id: "profile-a",
       profile_session_start_policy: "new",
       profile_session_end_policy: "park",
+      disable_unclassified_fallback: true,
     });
   });
 });

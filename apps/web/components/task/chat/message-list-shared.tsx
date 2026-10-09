@@ -7,6 +7,7 @@ import { GridSpinner } from "@/components/grid-spinner";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import { TASK_DESCRIPTION_SYNTHETIC_ID, type RenderItem } from "@/hooks/use-processed-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
+import { ActivityChip } from "@/app/coordinator/copilot/activity-chip";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
 import { PrepareProgress } from "@/components/session/prepare-progress";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -60,6 +61,8 @@ export type MessageListProps = {
   /** Called whenever the first message stops being fully visible (`true`) or
    * becomes fully visible again (`false`). */
   onFirstMessageHiddenChange?: (isHidden: boolean) => void;
+  /** Called when transcript rows extend below the current viewport. */
+  onLatestVisibilityChange?: (isVisible: boolean) => void;
   /** Rendered as the first child inside the scroll container, sticky at its
    * top — the desktop-only, opt-in anchored last-prompt bar. `null`/`undefined`
    * when the setting is off or on mobile. */
@@ -89,6 +92,10 @@ export type MessageListHandle = {
     messageId: string,
     options?: { align?: "start" | "center"; behavior?: "smooth" | "auto" },
   ) => boolean;
+  /** Navigates to the newest rendered transcript content and takes focus. */
+  scrollToLatest: () => boolean;
+  /** Claims transcript position before async older-page navigation starts. */
+  claimReaderPosition?: () => void;
 };
 
 /** Render key for a transcript item: `item.id` for turn-group, prepare-
@@ -284,6 +291,20 @@ export function isElementFullyVisible(container: HTMLElement, target: HTMLElemen
   const t = target.getBoundingClientRect();
   const tolerance = 0.5;
   return t.top >= c.top - tolerance && t.bottom <= c.bottom + tolerance;
+}
+
+/** True when rendered transcript content extends below its viewport. */
+export function hasTranscriptContentBelowViewport(params: {
+  hasContent: boolean;
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+  tolerance?: number;
+}): boolean {
+  return (
+    params.hasContent &&
+    params.scrollHeight - params.scrollTop - params.clientHeight > (params.tolerance ?? 8)
+  );
 }
 
 /** Pixel offset to reserve at the top of the transcript for the anchored
@@ -624,6 +645,22 @@ export const MessageItem = memo(function MessageItem({
   }
   if (item.type === "agent_error_notice") {
     return <LastAgentErrorNotice sessionId={item.sessionId} error={item.error} />;
+  }
+  if (item.type === "turn_group" && item.activityChip) {
+    return (
+      <ActivityChip
+        group={item}
+        chip={item.activityChip}
+        sessionId={sessionId}
+        permissionsByToolCallId={permissionsByToolCallId}
+        childrenByParentToolCallId={childrenByParentToolCallId}
+        taskId={taskId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+        streamingMessageId={streamingMessageId}
+        onScrollToMessage={onScrollToMessage}
+      />
+    );
   }
   if (item.type === "turn_group") {
     const isContainingTurnActive = Boolean(activeTurnId && item.turnId === activeTurnId);

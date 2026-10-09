@@ -155,3 +155,116 @@ func TestTaskEnvironmentRecoveryClaimRejectsStaleOwnership(t *testing.T) {
 		t.Fatalf("stale generation error = %v, want ErrTaskEnvironmentOwnershipChanged", err)
 	}
 }
+
+func TestTaskEnvironmentRecoveryClaimAllowsOnlyRequestingSessionRuntime(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	const (
+		taskID        = "task-recovery-current-runtime"
+		environmentID = "environment-recovery-current-runtime"
+		sessionID     = "session-recovery-current-runtime"
+	)
+	seedRecoveryClaimEnvironment(t, repo, taskID, environmentID)
+	for _, id := range []string{sessionID, "session-recovery-other-runtime"} {
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID: id, TaskID: taskID, TaskEnvironmentID: environmentID, State: models.TaskSessionStateCancelled,
+		}); err != nil {
+			t.Fatalf("create terminal session %s: %v", id, err)
+		}
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: sessionID, SessionID: sessionID, TaskID: taskID, AgentExecutionID: "execution-current", Status: "ready",
+	}); err != nil {
+		t.Fatalf("create requesting session runtime: %v", err)
+	}
+
+	request := recoveryClaimRequest(environmentID, taskID, sessionID, "operation-current-runtime", 1)
+	if _, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, request); !errors.Is(err, recoveryclaim.ErrBusy) {
+		t.Fatalf("claim with requesting session runtime when not allowed = %v, want ErrBusy", err)
+	}
+	request.AllowCurrentSessionRuntime = true
+	claim, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, request)
+	if err != nil {
+		t.Fatalf("claim with requesting session runtime: %v", err)
+	}
+	if err := repo.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim); err != nil {
+		t.Fatalf("release claim with requesting session runtime: %v", err)
+	}
+
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "session-recovery-other-runtime", SessionID: "session-recovery-other-runtime",
+		TaskID: taskID, AgentExecutionID: "execution-other", Status: "ready",
+	}); err != nil {
+		t.Fatalf("create other session runtime: %v", err)
+	}
+	request.OperationID = "operation-current-runtime-other-consumer"
+	if _, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, request); !errors.Is(err, recoveryclaim.ErrBusy) {
+		t.Fatalf("claim with another session runtime error = %v, want ErrBusy", err)
+	}
+}
+
+func TestTaskEnvironmentRecoveryClaimAllowsStoppedRuntime(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	const (
+		taskID        = "task-recovery-stopped-runtime"
+		environmentID = "environment-recovery-stopped-runtime"
+		sessionID     = "session-recovery-stopped-runtime"
+	)
+	seedRecoveryClaimEnvironment(t, repo, taskID, environmentID)
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: environmentID, State: models.TaskSessionStateCancelled,
+	}); err != nil {
+		t.Fatalf("create cancelled session: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: sessionID, SessionID: sessionID, TaskID: taskID,
+		Status: models.ExecutorRunningStatusStopped, ResumeToken: "saved-resume-token", Resumable: true,
+	}); err != nil {
+		t.Fatalf("create stopped resumable runtime: %v", err)
+	}
+
+	claim, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx,
+		recoveryClaimRequest(environmentID, taskID, sessionID, "operation-stopped-runtime", 1))
+	if err != nil {
+		t.Fatalf("claim with stopped resumable runtime: %v", err)
+	}
+	if err := repo.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim); err != nil {
+		t.Fatalf("release recovery claim: %v", err)
+	}
+}
+
+func TestTaskEnvironmentRecoveryClaimAcceptsOnlyItsActiveCleanupJob(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	const (
+		taskID        = "task-recovery-cleanup-authority"
+		environmentID = "environment-recovery-cleanup-authority"
+		sessionID     = "session-recovery-cleanup-authority"
+	)
+	seedRecoveryClaimEnvironment(t, repo, taskID, environmentID)
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: taskID, TaskEnvironmentID: environmentID}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, &models.TaskResourceCleanupJob{
+		ID: "cleanup-job-recovery-authority", OperationID: "cleanup-op-recovery-authority", TaskID: taskID,
+		Trigger: models.TaskResourceCleanupTriggerReconcile, State: models.TaskResourceCleanupStatePrepared,
+		ResourceSnapshot: `{}`,
+	}); err != nil {
+		t.Fatalf("create cleanup barrier: %v", err)
+	}
+	request := recoveryClaimRequest(environmentID, taskID, sessionID, "operation-recovery-cleanup-authority", 1)
+	request.CleanupJobID = "cleanup-job-recovery-authority"
+	claim, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, request)
+	if err != nil {
+		t.Fatalf("acquire recovery claim under matching cleanup job: %v", err)
+	}
+	if err := repo.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim); err != nil {
+		t.Fatalf("release recovery claim: %v", err)
+	}
+
+	request.CleanupJobID = "other-cleanup-job"
+	if _, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, request); !errors.Is(err, repoerrors.ErrTaskCleanupInProgress) {
+		t.Fatalf("claim under another cleanup job = %v, want ErrTaskCleanupInProgress", err)
+	}
+}

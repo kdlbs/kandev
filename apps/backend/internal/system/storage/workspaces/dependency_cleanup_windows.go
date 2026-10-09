@@ -141,6 +141,20 @@ func openWindowsDependencyHandleWithDisposition(
 	disposition uint32,
 	createOption uint32,
 ) (windows.Handle, error) {
+	return openWindowsDependencyHandleWithSharing(
+		parent, name, desiredAccess, disposition, createOption,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+	)
+}
+
+func openWindowsDependencyHandleWithSharing(
+	parent windows.Handle,
+	name string,
+	desiredAccess uint32,
+	disposition uint32,
+	createOption uint32,
+	shareMode uint32,
+) (windows.Handle, error) {
 	objectName, err := windows.NewNTUnicodeString(name)
 	if err != nil {
 		return 0, err
@@ -161,7 +175,7 @@ func openWindowsDependencyHandleWithDisposition(
 		&ioStatus,
 		&allocationSize,
 		0,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		shareMode,
 		disposition,
 		createOption|windowsDependencyOpenOptions,
 		0,

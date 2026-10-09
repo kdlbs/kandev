@@ -44,6 +44,7 @@ interface ComboboxProps {
   value: string;
   onValueChange: (value: string) => void;
   ariaLabel?: string;
+  ariaDescribedBy?: string;
   dropdownLabel?: string;
   placeholder?: string;
   searchPlaceholder?: string;
@@ -166,6 +167,7 @@ function ComboboxTrigger({
   options,
   value,
   ariaLabel,
+  ariaDescribedBy,
   open,
   disabled,
   touchTarget,
@@ -180,6 +182,7 @@ function ComboboxTrigger({
   options: ComboboxOption[];
   value: string;
   ariaLabel?: string;
+  ariaDescribedBy?: string;
   open: boolean;
   disabled: boolean;
   touchTarget: boolean;
@@ -199,6 +202,7 @@ function ComboboxTrigger({
         variant="ghost"
         role="combobox"
         aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
         aria-expanded={open}
         className={cn(
           controlSizingClassName("standard"),
@@ -275,6 +279,7 @@ export const Combobox = memo(function Combobox({
   value,
   onValueChange,
   ariaLabel,
+  ariaDescribedBy,
   dropdownLabel,
   placeholder = t("common:selectOption"),
   searchPlaceholder = t("common:searchPlaceholder"),
@@ -313,6 +318,7 @@ export const Combobox = memo(function Combobox({
         options={options}
         value={value}
         ariaLabel={ariaLabel}
+        ariaDescribedBy={ariaDescribedBy}
         open={open}
         disabled={disabled}
         touchTarget={touchTarget}

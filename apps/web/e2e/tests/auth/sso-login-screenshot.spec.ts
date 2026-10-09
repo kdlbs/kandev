@@ -26,7 +26,10 @@ test.describe.serial("sso login screenshot", () => {
 
   test.beforeAll(async ({ backend }) => {
     fs.mkdirSync(SHOT_DIR, { recursive: true });
-    await backend.restart({ KANDEV_FEATURES_AUTH: "true" });
+    await backend.restart({
+      KANDEV_FEATURES_AUTH: "true",
+      KANDEV_DATABASE_PATH: path.join(backend.tmpDir, "kandev-auth-sso-login.db"),
+    });
   });
 
   test.afterAll(async ({ backend }) => {

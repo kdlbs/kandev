@@ -62,6 +62,7 @@ func (s *Service) runFactoryReset(ctx context.Context) (map[string]interface{}, 
 	if s.PersistenceUnavailable != nil {
 		s.PersistenceUnavailable()
 	}
+	s.InvalidateDatabase()
 
 	if s.OrchestratorShutdown != nil {
 		s.OrchestratorShutdown()

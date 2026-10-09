@@ -1,5 +1,7 @@
 import type { Locator } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { expectControlHeight } from "../../helpers/control-sizing";
 import { GITLAB_HOST, GITLAB_PROJECT, gitLabMR } from "../../helpers/gitlab";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
@@ -215,6 +217,12 @@ test.describe("Task-create dependency selector", () => {
 
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog.getByTestId("task-edit-dependencies")).toBeVisible();
+    await waitForFiniteAnimations(dialog);
+    const dependencyInfo = dialog.getByTestId("task-edit-dependency-info");
+    await expect(dependencyInfo).toBeVisible();
+    expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+    // @covers AC-UI-CONTROL-SIZING-001.2
+    await expectControlHeight(dependencyInfo, 24);
     await prCapture.screenshot("desktop-task-dependency-edit-dialog", {
       caption: "Desktop task edit dialog with predecessor dependencies",
     });

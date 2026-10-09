@@ -393,6 +393,12 @@
           "markdownDescription": "Enables the show_native_notification command without any pre-configured scope."
         },
         {
+          "description": "Enables the startup conflict action to open an isolated temporary test instance.",
+          "type": "string",
+          "const": "allow-start-temporary-test-instance",
+          "markdownDescription": "Enables the startup conflict action to open an isolated temporary test instance."
+        },
+        {
           "description": "Denies the check_for_updates command without any pre-configured scope.",
           "type": "string",
           "const": "deny-check-for-updates",

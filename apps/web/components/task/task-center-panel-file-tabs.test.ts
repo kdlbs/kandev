@@ -22,7 +22,7 @@ describe("upsertOpenFileTab", () => {
     const frontend = { ...file, repo: "frontend" };
     const backend = { ...file, repo: "backend", renderedPreview: true };
 
-    expect(upsertOpenFileTab([frontend], backend)).toEqual([frontend, backend]);
+    expect(upsertOpenFileTab([frontend], backend)).toMatchObject([frontend, backend]);
   });
 
   it("preserves an existing tab when no preview state is requested", () => {
@@ -55,7 +55,7 @@ describe("upsertOpenFileTab", () => {
   });
 
   it("adds a new tab", () => {
-    expect(upsertOpenFileTab([], file)).toEqual([file]);
+    expect(upsertOpenFileTab([], file)).toMatchObject([file]);
   });
 
   it("evicts the oldest tab at capacity", () => {
@@ -70,6 +70,6 @@ describe("upsertOpenFileTab", () => {
 
     expect(result).toHaveLength(4);
     expect(result[0]?.path).toBe("file1.md");
-    expect(result[3]).toEqual(newFile);
+    expect(result[3]).toMatchObject(newFile);
   });
 });

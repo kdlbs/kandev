@@ -13,8 +13,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/processidentity"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
@@ -43,7 +46,10 @@ func registerE2EResetRoutes(
 	automationSvc *automation.Service,
 	githubSvc *github.Service,
 	gitlabSvc *gitlab.Service,
+	coordinatorSvc *coordinator.Service,
 	eventBus bus.EventBus,
+	agentRuntimeAvailability *agentruntime.RuntimeOwner,
+	lifecycleMgr agentruntime.SessionExecutionControl,
 	log *logger.Logger,
 ) {
 	mockMode := os.Getenv("KANDEV_MOCK_AGENT")
@@ -52,7 +58,13 @@ func registerE2EResetRoutes(
 	}
 
 	api := router.Group("/api/v1/e2e")
-	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, githubSvc, gitlabSvc, log))
+	if os.Getenv("KANDEV_E2E_MOCK") == "true" && agentRuntimeAvailability != nil {
+		api.POST("/agent-runtime/kill-child", handleE2EKillAgentRuntimeChild(agentRuntimeAvailability))
+	}
+	if os.Getenv("KANDEV_E2E_MOCK") == "true" && lifecycleMgr != nil {
+		api.POST("/agent-runtime/disconnect-session-stream", handleE2EDisconnectSessionAgentStream(lifecycleMgr))
+	}
+	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, githubSvc, gitlabSvc, coordinatorSvc, log))
 	if githubSvc != nil {
 		api.POST("/tasks/:id/remote-contribution", handleE2EAttachGitHubContribution(repo, taskSvc, githubSvc, log))
 	}
@@ -91,6 +103,70 @@ func registerE2EResetRoutes(
 	api.PATCH("/tasks/:id/origin", handleE2ESetTaskOrigin(repo, log))
 
 	log.Info("registered E2E endpoints (test-only)")
+}
+
+type e2eDisconnectSessionAgentStreamRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+func handleE2EDisconnectSessionAgentStream(manager agentruntime.SessionExecutionControl) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		var req e2eDisconnectSessionAgentStreamRequest
+		if err := ctx.ShouldBindJSON(&req); err != nil || req.SessionID == "" {
+			ctx.JSON(http.StatusBadRequest, gin.H{errKey: "session_id is required"})
+			return
+		}
+		execution, ok := manager.GetExecutionBySessionID(req.SessionID)
+		if !ok || execution.DeliveryMode != agentruntime.DurableDeliveryV1 {
+			ctx.JSON(http.StatusNotFound, gin.H{errKey: "durable delivery session is not running"})
+			return
+		}
+		client, releaseClient := execution.AcquireAgentCtlClient()
+		defer releaseClient()
+		if client == nil || !client.HasAgentStream() {
+			ctx.JSON(http.StatusConflict, gin.H{errKey: "agent updates stream is not connected"})
+			return
+		}
+		client.CloseUpdatesStream()
+		ctx.JSON(http.StatusAccepted, gin.H{"disconnected": true})
+	}
+}
+
+func handleE2EKillAgentRuntimeChild(owner *agentruntime.RuntimeOwner) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		lease, err := owner.Acquire(ctx.Request.Context())
+		if err != nil {
+			ctx.JSON(http.StatusConflict, gin.H{"error": "local agent runtime is not available"})
+			return
+		}
+		defer lease.Close()
+
+		identity := lease.ProcessIdentity()
+		if identity.Validate() != nil || identity.PID != lease.ProcessID() || lease.CheckCurrent() != nil {
+			ctx.JSON(http.StatusConflict, gin.H{"error": "local runtime process ownership cannot be verified"})
+			return
+		}
+		state, err := processidentity.Inspect(identity)
+		if err != nil || state != processidentity.StateAlive {
+			ctx.JSON(http.StatusConflict, gin.H{"error": "local runtime process is not confirmed alive"})
+			return
+		}
+		process, err := os.FindProcess(identity.PID)
+		if err != nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "local runtime process could not be reached"})
+			return
+		}
+		state, err = processidentity.Inspect(identity)
+		if err != nil || state != processidentity.StateAlive || lease.CheckCurrent() != nil {
+			ctx.JSON(http.StatusConflict, gin.H{"error": "local runtime process ownership changed before termination"})
+			return
+		}
+		if err := process.Kill(); err != nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "local runtime process could not be stopped"})
+			return
+		}
+		ctx.JSON(http.StatusAccepted, gin.H{"killed": true, "process_id": identity.PID, "runtime_epoch": lease.Epoch()})
+	}
 }
 
 type e2eAttachGitHubContributionRequest struct {
@@ -180,6 +256,7 @@ func handleE2EReset(
 	automationSvc *automation.Service,
 	githubSvc *github.Service,
 	gitlabSvc *gitlab.Service,
+	coordinatorSvc *coordinator.Service,
 	log *logger.Logger,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -228,6 +305,19 @@ func handleE2EReset(
 		}
 		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM runtime_flag_overrides`); err != nil {
 			log.Warn("e2e reset: runtime flag override cleanup failed", zap.Error(err))
+		}
+		// Coordinator state (coordinators, proposals, stalls) is keyed by
+		// workspace_id, not task_id, so it outlives a reset's task deletion
+		// the same way review watches and routing state do. Without this,
+		// every coordinator e2e spec sharing the worker-scoped
+		// seedData.workspaceId leaks its coordinators/stalls/proposals into
+		// the next spec. coordinatorSvc is nil when features.coordinator is
+		// disabled (prod/dev profiles never register this endpoint's mock
+		// mode with the feature off, but guard anyway).
+		if err := deleteCoordinatorStateForReset(ctx, coordinatorSvc, workspaceID); err != nil {
+			log.Error("e2e reset: coordinator state cleanup failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: "coordinator state cleanup failed"})
+			return
 		}
 		// Repository sets outlive the tasks a reset removes, so a set seeded by
 		// one spec would still be offered in the next spec's create dialog. The
@@ -367,6 +457,12 @@ func handleE2EReset(
 			})
 			return
 		}
+		tasks, err = orderE2ETasksForDeletion(tasks)
+		if err != nil {
+			log.Error("e2e reset: failed to order tasks for deletion", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
 		var deletedTasks int64
 		deletedTaskIDs := append([]string(nil), taskIDsForCleanup...)
 		deletedTaskIDSet := make(map[string]struct{}, len(deletedTaskIDs))
@@ -421,6 +517,58 @@ func handleE2EReset(
 
 type e2eResetTaskDeleter interface {
 	DeleteTaskWithOptions(context.Context, string, taskservice.DeleteTaskOptions) error
+}
+
+func orderE2ETasksForDeletion(tasks []*taskmodels.Task) ([]*taskmodels.Task, error) {
+	tasksByID := make(map[string]*taskmodels.Task, len(tasks))
+	remainingChildren := make(map[string]int, len(tasks))
+	parentByID := make(map[string]string, len(tasks))
+	for _, task := range tasks {
+		if task == nil || task.ID == "" {
+			return nil, fmt.Errorf("task deletion order requires nonempty task IDs")
+		}
+		if _, exists := tasksByID[task.ID]; exists {
+			return nil, fmt.Errorf("duplicate task ID %q in deletion order", task.ID)
+		}
+		tasksByID[task.ID] = task
+		remainingChildren[task.ID] = 0
+		parentByID[task.ID] = task.ParentID
+	}
+	for _, task := range tasks {
+		parentID := task.ParentID
+		if parentID == "" {
+			continue
+		}
+		if _, exists := tasksByID[parentID]; exists {
+			remainingChildren[parentID]++
+		}
+	}
+
+	ready := make([]*taskmodels.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if remainingChildren[task.ID] == 0 {
+			ready = append(ready, task)
+		}
+	}
+
+	ordered := make([]*taskmodels.Task, 0, len(tasks))
+	for next := 0; next < len(ready); next++ {
+		task := ready[next]
+		ordered = append(ordered, task)
+		parentID := parentByID[task.ID]
+		parent, exists := tasksByID[parentID]
+		if parentID == "" || !exists {
+			continue
+		}
+		remainingChildren[parentID]--
+		if remainingChildren[parentID] == 0 {
+			ready = append(ready, parent)
+		}
+	}
+	if len(ordered) != len(tasks) {
+		return nil, fmt.Errorf("task deletion order contains a parent cycle")
+	}
+	return ordered, nil
 }
 
 func deleteTaskForE2EReset(
@@ -629,6 +777,17 @@ func deleteAutomationsForReset(
 	return automationSvc.DeleteAutomationsByWorkspace(ctx, workspaceID)
 }
 
+func deleteCoordinatorStateForReset(
+	ctx context.Context,
+	coordinatorSvc *coordinator.Service,
+	workspaceID string,
+) error {
+	if coordinatorSvc == nil {
+		return nil
+	}
+	return coordinatorSvc.DeleteWorkspaceState(ctx, workspaceID)
+}
+
 type e2eHiddenWorkflowRequest struct {
 	WorkspaceID string `json:"workspace_id"`
 	Name        string `json:"name"`
@@ -661,14 +820,15 @@ func handleE2ECreateHiddenWorkflow(taskSvc *taskservice.Service, log *logger.Log
 }
 
 type e2eCreateAutomationRequest struct {
-	WorkspaceID    string                            `json:"workspace_id"`
-	Name           string                            `json:"name"`
-	WorkflowID     string                            `json:"workflow_id"`
-	WorkflowStepID string                            `json:"workflow_step_id"`
-	TaskMode       automation.TaskMode               `json:"task_mode"`
-	RepositoryMode automation.RepositoryMode         `json:"repository_mode"`
-	RepositoryIDs  []string                          `json:"repository_ids"`
-	Repositories   []automation.AutomationRepository `json:"repositories"`
+	WorkspaceID        string                                     `json:"workspace_id"`
+	Name               string                                     `json:"name"`
+	WorkflowID         string                                     `json:"workflow_id"`
+	WorkflowStepID     string                                     `json:"workflow_step_id"`
+	TaskMode           automation.TaskMode                        `json:"task_mode"`
+	ManagedDestination *automation.ManagedConversationDestination `json:"managed_destination,omitempty"`
+	RepositoryMode     automation.RepositoryMode                  `json:"repository_mode"`
+	RepositoryIDs      []string                                   `json:"repository_ids"`
+	Repositories       []automation.AutomationRepository          `json:"repositories"`
 	// Prompt is the automation's standing instruction. Optional, but the run
 	// view only renders the instruction card when there is one, so a spec
 	// asserting on where that card lives has to seed it.
@@ -707,18 +867,19 @@ func handleE2ECreateAutomation(
 			return
 		}
 		a, err := svc.CreateAutomation(c.Request.Context(), &automation.CreateAutomationRequest{
-			WorkspaceID:       body.WorkspaceID,
-			Name:              body.Name,
-			WorkflowID:        body.WorkflowID,
-			WorkflowStepID:    body.WorkflowStepID,
-			TaskMode:          body.TaskMode,
-			RepositoryMode:    body.RepositoryMode,
-			RepositoryIDs:     body.RepositoryIDs,
-			Repositories:      body.Repositories,
-			Prompt:            body.Prompt,
-			AgentProfileID:    body.AgentProfileID,
-			ExecutorProfileID: body.ExecutorProfileID,
-			MaxConcurrentRuns: 10,
+			WorkspaceID:        body.WorkspaceID,
+			Name:               body.Name,
+			WorkflowID:         body.WorkflowID,
+			WorkflowStepID:     body.WorkflowStepID,
+			TaskMode:           body.TaskMode,
+			ManagedDestination: body.ManagedDestination,
+			RepositoryMode:     body.RepositoryMode,
+			RepositoryIDs:      body.RepositoryIDs,
+			Repositories:       body.Repositories,
+			Prompt:             body.Prompt,
+			AgentProfileID:     body.AgentProfileID,
+			ExecutorProfileID:  body.ExecutorProfileID,
+			MaxConcurrentRuns:  10,
 		})
 		if err != nil {
 			log.Error("e2e: failed to create automation", zap.Error(err))
@@ -1026,6 +1187,17 @@ func handleE2EAutomationManualTrigger(svc *automation.Service, log *logger.Logge
 			c.JSON(http.StatusOK, gin.H{"skipped": true, "reason": result.Reason})
 			return
 		}
+		if a.TaskMode == automation.TaskModeManagedConversation {
+			run, pollErr := e2ePollNewManagedRun(ctx, svc, automationID, beforeID)
+			if pollErr != nil {
+				log.Warn("e2e: timed out waiting for managed automation run after manual trigger",
+					zap.String("automation_id", automationID))
+				c.JSON(http.StatusGatewayTimeout, gin.H{errKey: pollErr.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"run_id": run.ID, "delivery_status": run.DeliveryStatus})
+			return
+		}
 
 		taskID, err := e2ePollNewRun(ctx, svc, automationID, beforeID)
 		if err != nil {
@@ -1036,6 +1208,26 @@ func handleE2EAutomationManualTrigger(svc *automation.Service, log *logger.Logge
 		}
 		c.JSON(http.StatusOK, gin.H{"run_task_id": taskID})
 	}
+}
+
+func e2ePollNewManagedRun(ctx context.Context, svc *automation.Service, automationID, beforeID string) (*automation.AutomationRun, error) {
+	deadline := time.Now().Add(15 * time.Second)
+	var candidate *automation.AutomationRun
+	for time.Now().Before(deadline) {
+		time.Sleep(100 * time.Millisecond)
+		runs, err := svc.ListRuns(ctx, automationID, 1)
+		if err == nil && len(runs) > 0 && runs[0].ID != beforeID {
+			candidate = runs[0]
+			if candidate.DeliveryStatus != "" {
+				return candidate, nil
+			}
+		}
+	}
+	if candidate == nil {
+		return nil, fmt.Errorf("timeout waiting for a new managed automation run")
+	}
+	return nil, fmt.Errorf("timeout waiting for managed delivery receipt (run_id=%s status=%s delivery_status=%s task_id=%s error=%s)",
+		candidate.ID, candidate.Status, candidate.DeliveryStatus, candidate.TaskID, candidate.ErrorMessage)
 }
 
 // e2ePollNewRun blocks until a new run (with a different id than beforeID) has

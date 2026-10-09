@@ -3,6 +3,10 @@ version: "2"
 run:
   build-tags:
     - fts5
+    # The adapter e2e harness is gated behind this tag. Without it here,
+    # linting any package that carries the tag fails with "build constraints
+    # exclude all Go files", so a change to a tagged file cannot be committed.
+    - e2e
 
 linters:
   enable:

@@ -31,6 +31,8 @@ export type TaskSwitcherItem = {
   priority?: TaskPriority;
   state?: TaskState;
   sessionState?: TaskSessionState;
+  /** Task-wide RUNNING aggregate; undefined preserves the legacy primary fallback. */
+  hasRunningSession?: boolean;
   /** Task-level most-active-wins busy aggregate (ADR-0049) from the task record. */
   foregroundActivity?: ForegroundActivity | null;
   /** True when the task's session was mid-turn when the backend died. */
@@ -51,6 +53,8 @@ export type TaskSwitcherItem = {
   repositoryRuleIdentities?: readonly TaskRepositoryRuleIdentity[];
   automaticColor?: TaskMarkerPresentation;
   automaticColorSource?: AutomaticTaskColorSource;
+  /** Visible named marker after automatic color overrides the manual fallback. */
+  effectiveColorToken?: string | null;
   /** Persisted task-to-repository links used by host-owned plugin task actions. */
   repositoryLinks?: Array<{ repository_id: string; position?: number }>;
   diffStats?: { additions: number; deletions: number };
@@ -63,14 +67,17 @@ export type TaskSwitcherItem = {
   lastActivityAt?: string;
   createdAt?: string;
   isArchived?: boolean;
-  /** True while an accepted archive request is still in flight. */
-  isPendingArchive?: boolean;
+  /** True while an accepted archive or delete request is still in flight. */
+  isPendingRemoval?: boolean;
   isFromOffice?: boolean;
   primarySessionId?: string | null;
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
   parentTaskTitle?: string;
   parentTaskId?: string;
+  continuationParentTitle?: string;
+  /** Number of filtered descendants reported by the paged sidebar query. */
+  subtaskCount?: number;
   workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
   prInfo?: { number: number; state: string; aggregateState?: string };
   /** Number of prompts currently en-queued for this task (mail badge). */
@@ -128,6 +135,8 @@ export type TaskSwitcherProps = {
   retryLabel?: string;
   totalTaskCount?: number;
   showActivityTime?: boolean;
+  /** Defaults on for callers which predate the saved-view preference. */
+  groupIndent?: boolean;
   taskRowPresentation?: SidebarTaskRowPresentation;
   // Multi-select (cmd/shift click). When the selection is non-empty, plain
   // clicks toggle instead of navigating; the context menu acts on the selection.

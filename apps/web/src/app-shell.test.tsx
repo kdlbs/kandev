@@ -7,6 +7,7 @@ import { AppShell } from "./app-shell";
 const mocks = vi.hoisted(() => ({
   passthrough: ({ children }: { children: React.ReactNode }) => children,
 }));
+const originalUserAgent = navigator.userAgent;
 
 vi.mock("@/components/navigation/mobile-task-navigation-provider", () => ({
   MobileTaskNavigationProvider: mocks.passthrough,
@@ -46,6 +47,9 @@ vi.mock("@/components/theme-provider", () => ({ ThemeProvider: mocks.passthrough
 vi.mock("@/components/workspace-scope-provider", () => ({
   WorkspaceScopeProvider: mocks.passthrough,
 }));
+vi.mock("@/app/coordinator/copilot/workspace-copilot-host", () => ({
+  WorkspaceCopilotHost: mocks.passthrough,
+}));
 vi.mock("@/components/ws-connector", () => ({ WebSocketConnector: () => null }));
 vi.mock("@/hooks/use-task-color-migration", () => ({
   useTaskColorMigration: () => undefined,
@@ -61,6 +65,11 @@ describe("AppShell plugin modal topology", () => {
     cleanup();
     pluginModalManager.closeAllForPlugin("bitbucket");
     Reflect.deleteProperty(navigator, "windowControlsOverlay");
+    Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+    Object.defineProperty(navigator, "userAgent", {
+      configurable: true,
+      value: originalUserAgent,
+    });
   });
 
   it("renders host task-link forms inside the shared toast provider", () => {
@@ -103,5 +112,19 @@ describe("AppShell plugin modal topology", () => {
     expect(shell.style.getPropertyValue("--titlebar-area-x")).toBe("72px");
     expect(shell.style.getPropertyValue("--titlebar-area-width")).toBe("1448px");
     expect(shell.style.getPropertyValue("--titlebar-area-height")).toBe("40px");
+  });
+
+  it("publishes a separate macOS Tauri overlay hint without changing the PWA flag", () => {
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+    Object.defineProperty(navigator, "userAgent", {
+      configurable: true,
+      value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)",
+    });
+
+    render(<AppShell>App content</AppShell>);
+
+    const shell = screen.getByTestId("app-shell");
+    expect(shell.getAttribute("data-macos-tauri-overlay")).toBe("true");
+    expect(shell.getAttribute("data-window-controls-overlay")).toBe("hidden");
   });
 });

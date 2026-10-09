@@ -24,11 +24,21 @@ Domain systems retain ownership of source records and workspace context identity
 ## Ownership
 
 This system owns startup and shutdown contracts, process and port-independent
-runtime safety, configuration precedence, diagnostics, notifications,
+runtime safety, foreground delivery semantics (including explicit same-turn
+steering), configuration precedence, diagnostics, notifications,
 localization, feature toggles, health, and shared session recovery services.
 
 Settings discovery and interface parity belong to Platform. Each settings domain
 retains ownership of its values, validation, authority, and persistence.
+
+Shared Git diff file metadata belongs to Platform, including commit and
+cumulative comparisons. UI retains historical-file navigation and merge-detail
+presentation; Tasks retains environment and repository bindings.
+
+Shared local Git commit evidence also belongs to Platform, including pushed
+reachability against the repository's tracked upstream. Tasks retains provider
+contribution provenance and mutation policy; Workspaces retains comparison-base
+and repository-context identity.
 
 ## Exclusions
 
@@ -63,6 +73,7 @@ retains ownership of its values, validation, authority, and persistence.
 - [Browser console retention](requirements/browser-console-retention.md)
 - [Diagnostic logging](requirements/diagnostic-logging.md)
 - [Runtime failure attribution](requirements/runtime-failure-attribution.md)
+- [Durable agent delivery](requirements/durable-agent-delivery.md) (draft)
 - [Duration-aware E2E sharding and CI reliability](requirements/e2e-duration-aware-sharding.md)
 - [External CI runner capacity](requirements/external-e2e-runner-capacity.md)
 - [Expected runtime log severity](requirements/expected-runtime-log-severity.md)
@@ -75,11 +86,13 @@ retains ownership of its values, validation, authority, and persistence.
 - [Additional I18n Audit Gaps](requirements/i18n-second-audit-gaps.md)
 - [Internationalization (i18n)](requirements/i18n.md)
 - [LSP File Intelligence](requirements/lsp-file-intelligence.md)
+- [LSP continuity graduation](requirements/lsp-continuity-graduation.md)
 - [Session MCP Attachment Observability](requirements/mcp-session-observability.md)
 - [Mid-Turn Steering](requirements/mid-turn-steering.md)
 - [Semantic Notifications](requirements/notifications.md)
 - [Apprise rescan](requirements/apprise-rescan.md)
 - [Required Persisted Store Parity](requirements/postgres-domain-store-parity.md)
+- [Prompt completion ownership](requirements/prompt-completion-ownership.md)
 - [Provider Error Recovery](requirements/provider-error-recovery.md)
 - [Session Config Reconciliation Across Agent Types](requirements/session-config-cross-agent-reconcile.md)
 - [Session subscription recovery](requirements/session-subscription-recovery.md)
@@ -117,13 +130,18 @@ retains ownership of its values, validation, authority, and persistence.
 - [Diagnostic logging System Design Part 2](system-design/diagnostic-logging-02.md)
 - [Runtime failure attribution](system-design/runtime-failure-attribution.md)
 - [Expected runtime log severity](system-design/expected-runtime-log-severity.md)
+- [Frontend feature state](system-design/features-slice-state.md)
+- [Durable agent delivery](system-design/durable-agent-delivery.md) (draft)
+- [Durable agent stream processing](system-design/durable-agent-stream-processing.md) (draft)
 - [Duration-aware E2E sharding and CI reliability](system-design/e2e-duration-aware-sharding.md)
 - [External CI runner capacity](system-design/external-e2e-runner-capacity.md)
 - [Health Endpoint — Surface the Running Version](system-design/health-endpoint-version.md)
 - [Internationalization (i18n)](system-design/i18n.md)
 - [LSP File Intelligence System Design Part 1](system-design/lsp-file-intelligence-01.md)
 - [LSP File Intelligence System Design Part 2](system-design/lsp-file-intelligence-02.md)
+- [LSP continuity graduation](system-design/lsp-continuity-graduation.md)
 - [Session MCP Attachment Observability](system-design/mcp-session-observability.md)
+- [Prompt completion ownership](system-design/prompt-completion-ownership.md)
 - [Required Persisted Store Parity](system-design/postgres-domain-store-parity.md)
 - [Provider Error Recovery](system-design/provider-error-recovery.md)
 - [Provider Response-Attempt Recovery](system-design/provider-response-attempt-recovery.md)

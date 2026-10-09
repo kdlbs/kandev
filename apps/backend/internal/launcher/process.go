@@ -38,6 +38,7 @@ type processSupervisor struct {
 	mu           sync.Mutex
 	children     []*managedProcess
 	shutdownOnce sync.Once
+	shutdownCode int
 }
 
 type managedProcess struct {
@@ -51,12 +52,14 @@ type managedProcess struct {
 }
 
 type managedProcessShutdownResult struct {
-	label       string
-	pid         int
-	duration    time.Duration
-	graceful    bool
-	forceKilled bool
-	err         error
+	label           string
+	pid             int
+	duration        time.Duration
+	graceful        bool
+	forceKilled     bool
+	exitStatusKnown bool
+	exitCode        int
+	err             error
 }
 
 type shutdownSummary struct {
@@ -91,13 +94,14 @@ func (s *processSupervisor) add(proc *managedProcess) {
 	shutdownDebugf("supervisor add child pid=%d total_children=%d", proc.cmd.Process.Pid, len(s.children))
 }
 
-func (s *processSupervisor) shutdown(reason string) {
+func (s *processSupervisor) shutdown(reason string) int {
 	s.shutdownOnce.Do(func() {
-		s.runShutdown(reason)
+		s.shutdownCode = s.runShutdown(reason)
 	})
+	return s.shutdownCode
 }
 
-func (s *processSupervisor) runShutdown(reason string) {
+func (s *processSupervisor) runShutdown(reason string) int {
 	s.mu.Lock()
 	children := append([]*managedProcess(nil), s.children...)
 	s.mu.Unlock()
@@ -117,6 +121,7 @@ func (s *processSupervisor) runShutdown(reason string) {
 	wg.Wait()
 	logShutdownComplete(time.Since(start), results)
 	shutdownDebugf("launcher shutdown complete reason=%q", reason)
+	return shutdownExitCode(results)
 }
 
 func (s *processSupervisor) forceKillAll(reason string) []managedProcessShutdownResult {
@@ -145,10 +150,9 @@ func (s *processSupervisor) attachSignals() {
 	go func() {
 		sig := <-ch
 		shutdownDebugf("launcher received signal=%s launcher_pid=%d", sig.String(), os.Getpid())
-		shutdownDone := make(chan struct{})
+		shutdownDone := make(chan int, 1)
 		go func() {
-			s.shutdown("signal " + sig.String())
-			close(shutdownDone)
+			shutdownDone <- s.shutdown("signal " + sig.String())
 		}()
 		select {
 		case nextSig := <-ch:
@@ -159,9 +163,9 @@ func (s *processSupervisor) attachSignals() {
 			logForcedShutdownComplete(time.Since(forceStart), results)
 			signal.Stop(ch)
 			launcherExit(1)
-		case <-shutdownDone:
+		case exitCode := <-shutdownDone:
 			signal.Stop(ch)
-			launcherExit(0)
+			launcherExit(exitCode)
 		}
 	}()
 }
@@ -411,6 +415,7 @@ func (p *managedProcess) gracefulTargetPID(rootPID int) (int, bool) {
 
 func (p *managedProcess) finishGracefulShutdown(start time.Time, pid int, result managedProcessShutdownResult) managedProcessShutdownResult {
 	result.duration = time.Since(start)
+	result = p.recordExitStatus(result)
 	result.graceful = true
 	if !managedProcessGroupCleanupSupported() {
 		return result
@@ -428,6 +433,11 @@ func (p *managedProcess) finishGracefulShutdown(start time.Time, pid int, result
 	result.forceKilled = true
 	shutdownDebugf("managed process root exited; descendant process group force cleanup sent label=%q pgid=%d",
 		p.label, pid)
+	return result
+}
+
+func (p *managedProcess) recordExitStatus(result managedProcessShutdownResult) managedProcessShutdownResult {
+	result.exitStatusKnown, result.exitCode = p.Exited()
 	return result
 }
 
@@ -483,24 +493,30 @@ func waitForManagedProcessKillDone(done <-chan struct{}, timeout time.Duration) 
 }
 
 // waitForAppExit blocks until the backend (or, in dev, any extra supervised
-// child such as the Vite dev server) exits, then shuts the whole tree down
-// and returns that child's exit code — a dead frontend must take the launcher
-// down with it, matching the spec's "if either child exits" contract. Codes
-// below zero mean the child was killed by a signal; treat those as 0 like the
-// TypeScript launcher's `signal ? 0 : code`.
+// child such as the Vite dev server) exits, then shuts the whole tree down.
+// A failed tree shutdown overrides a successful app exit so callers cannot
+// mistake forced or uncertain cleanup for a clean stop. Codes below zero mean
+// the child was killed by a signal; for the extra-child path, treat those as 0
+// like the TypeScript launcher's `signal ? 0 : code`.
 func waitForAppExit(supervisor *processSupervisor, backend *restartableBackend, extra ...*managedProcess) int {
 	if len(extra) == 0 {
 		code := <-backend.exitCh
-		supervisor.shutdown("backend exit")
+		if shutdownCode := supervisor.shutdown("backend exit"); shutdownCode != 0 {
+			return shutdownCode
+		}
 		return code
 	}
 	select {
 	case code := <-backend.exitCh:
-		supervisor.shutdown("backend exit")
+		if shutdownCode := supervisor.shutdown("backend exit"); shutdownCode != 0 {
+			return shutdownCode
+		}
 		return code
 	case <-extra[0].done:
 		_, code := extra[0].Exited()
-		supervisor.shutdown(extra[0].label + " exit")
+		if shutdownCode := supervisor.shutdown(extra[0].label + " exit"); shutdownCode != 0 {
+			return shutdownCode
+		}
 		if code < 0 {
 			return 0
 		}
@@ -519,18 +535,25 @@ func logShutdownComplete(duration time.Duration, results []managedProcessShutdow
 	launcherInfof("graceful shutdown complete (duration=%s, graceful=%d, force_killed=%d, failed=%d)",
 		duration.Round(time.Millisecond), summary.graceful, summary.forceKilled, summary.failed)
 	for _, result := range results {
-		if result.forceKilled || result.err != nil {
-			label := result.label
-			if label == "" {
-				label = "process"
-			}
-			if result.err != nil {
-				launcherInfof("shutdown detail: %s pid=%d required force cleanup after %s: %v",
-					label, result.pid, result.duration.Round(time.Millisecond), result.err)
-				continue
-			}
+		if !result.forceKilled && result.err == nil && result.exitStatusKnown && result.exitCode == 0 {
+			continue
+		}
+		label := result.label
+		if label == "" {
+			label = "process"
+		}
+		if result.err != nil {
+			launcherInfof("shutdown detail: %s pid=%d stop failed after %s: %v",
+				label, result.pid, result.duration.Round(time.Millisecond), result.err)
+		}
+		if result.forceKilled {
 			launcherInfof("shutdown detail: %s pid=%d required SIGKILL after %s",
 				label, result.pid, result.duration.Round(time.Millisecond))
+		}
+		if result.exitStatusKnown && result.exitCode != 0 {
+			launcherInfof("shutdown detail: %s pid=%d exited with code %d", label, result.pid, result.exitCode)
+		} else if !result.exitStatusKnown {
+			launcherInfof("shutdown detail: %s pid=%d exit status was not confirmed", label, result.pid)
 		}
 	}
 }
@@ -541,7 +564,7 @@ func summarizeShutdown(results []managedProcessShutdownResult) shutdownSummary {
 		if result.forceKilled {
 			summary.forceKilled++
 		}
-		if result.err != nil {
+		if result.err != nil || result.exitStatusKnown && result.exitCode != 0 || result.graceful && !result.exitStatusKnown {
 			summary.failed++
 		}
 		if result.graceful {
@@ -549,4 +572,13 @@ func summarizeShutdown(results []managedProcessShutdownResult) shutdownSummary {
 		}
 	}
 	return summary
+}
+
+func shutdownExitCode(results []managedProcessShutdownResult) int {
+	for _, result := range results {
+		if !result.graceful || result.forceKilled || !result.exitStatusKnown || result.exitCode != 0 || result.err != nil {
+			return 1
+		}
+	}
+	return 0
 }

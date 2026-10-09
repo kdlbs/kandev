@@ -88,6 +88,8 @@ func (t *taskWorktreeTargets) mergeLegacyEnvRepo(row legacyEnvRepo) error {
 	target.worktreeBranchOwner = row.worktreeBranchOwner
 	target.worktreeIntegrationRef = row.worktreeIntegrationRef
 	target.worktreeRecoveryHeadSHA = row.worktreeRecoveryHeadSHA
+	target.worktreeSourceClonePath = row.worktreeSourceClonePath
+	target.worktreeSourceCommonDir = row.worktreeSourceCommonDir
 	target.worktreeBranchCompactedAt = row.worktreeBranchCompactedAt
 	return target.mergeCreation(row.createdAt, row.updatedAt)
 }
@@ -301,12 +303,14 @@ func (c *worktreeCutover) insertRepoRow(tx *sqlx.Tx, taskID, envID string, targe
 		INSERT INTO task_environment_repos_shadow (
 			id, task_environment_id, repository_id, branch_slug,
 			worktree_id, worktree_path, worktree_branch, worktree_branch_owner,
-			worktree_integration_ref, worktree_recovery_head_sha, worktree_branch_compacted_at, position,
+			worktree_integration_ref, worktree_recovery_head_sha, worktree_source_clone_path,
+			worktree_source_common_dir, worktree_branch_compacted_at, position,
 			error_message, status, created_at, updated_at, merged_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		uuid.New().String(), envID, target.repositoryID, target.branchSlug,
 		target.worktreeID, target.worktreePath, target.worktreeBranch, target.worktreeBranchOwner,
-		target.worktreeIntegrationRef, target.worktreeRecoveryHeadSHA, target.worktreeBranchCompactedAt, target.position,
+		target.worktreeIntegrationRef, target.worktreeRecoveryHeadSHA,
+		target.worktreeSourceClonePath, target.worktreeSourceCommonDir, target.worktreeBranchCompactedAt, target.position,
 		target.errorMessage, target.status, target.createdAt, target.updatedAt,
 		mergedAt, deletedAt); err != nil {
 		return fmt.Errorf("cutover: insert shadow repo row for task %s: %w", taskID, err)
@@ -455,6 +459,7 @@ func (r *Repository) checkShadowFinalSchema(tx *sqlx.Tx) error {
 	for _, required := range []string{"id", "task_environment_id", columnRepositoryID, "branch_slug",
 		columnWorktreeID, columnWorktreePath, columnWorktreeBranch,
 		"worktree_branch_owner", "worktree_integration_ref", "worktree_recovery_head_sha",
+		"worktree_source_clone_path", "worktree_source_common_dir",
 		"worktree_branch_compacted_at", "position", "error_message",
 		columnStatus, columnCreatedAt, columnUpdatedAt, "merged_at", "deleted_at"} {
 		if !repoColumns[required] {

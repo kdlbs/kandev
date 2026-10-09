@@ -20,6 +20,8 @@ This document is the migrated task-system source for the capability. The source 
 #### Acceptance criteria
 
 - **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001.2:** The `step_complete_kandev` response additively carries `advances` (bool), reporting whether the recorded signal can move the task from the calling turn's current step, without changing `accepted:true`. When `advances` is `false`, the response also carries a `note` explaining the signal was recorded but will not move the task. When the current step cannot be resolved, both fields are omitted rather than defaulted, so a caller never receives a guessed value.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001.3:** `advances` is `true` only when the current step is `auto_advance_requires_signal` and its `on_turn_complete` declares a move the workflow engine runs on turn completion: `move_to_next`, `move_to_previous`, or `move_to_step` with a non-empty `step_id` that differs from the current step, without `requires_approval: true`. An unguarded self-target is selected before later actions and blocks them, but it does not advance the task. A guarded self-target can fall through to later actions when its guard is not satisfied. A signal-gated step without a move the engine can run returns `accepted:true`, `advances:false`, and a `note` stating that the step has no `on_turn_complete` move that runs automatically, so the signal will not move the task. The signal is recorded and published exactly as for any other accepted call.
 
 ### REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-002: Signal-Gated Manual Move Visibility
 
@@ -54,6 +56,12 @@ when the agent did not emit its completion signal.
   hide the next-step action even when the session is waiting for input. After
   the clarification barrier clears, the surfaces shall reevaluate visibility
   and show the action when the signal-gated idle conditions are satisfied.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-002.6:** When a task qualifies
+  for the adjacent-next-step action, its standard and passthrough composers
+  shall name and move to the next step in that task's own workflow, regardless
+  of which workflow is selected on the board. If the task's workflow or current
+  step is not yet available, the composers shall omit the action until that
+  task's data is available; they shall never offer a step from another workflow.
 
 ### REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003: Recovery after a step change
 
@@ -158,6 +166,10 @@ The pending completion signal continues to use `TaskSession.Metadata` as specifi
 - **GIVEN** a signal-gated Office workflow step, **WHEN** its first-turn context is generated, **THEN** the context instructs the agent to call `step_complete_kandev` as the final action.
 - **GIVEN** a task-mode client has connected to Kandev MCP, **WHEN** its MCP connection drops and reconnects, **THEN** the client can list and call `step_complete_kandev` without another user message.
 - **GIVEN** a signal-gated workflow step, **WHEN** the agent finishes without calling the tool, **THEN** the task remains on the current step and no automatic transition runs.
+- **GIVEN** a step with `auto_advance_requires_signal=true` whose `on_turn_complete` declares a move action the engine runs automatically, **WHEN** an agent calls `step_complete_kandev`, **THEN** the response carries `accepted:true` and `advances:true` with no `note`.
+- **GIVEN** a step with `auto_advance_requires_signal=true` whose `on_turn_complete` declares no move action the engine runs (no actions, only `disable_plan_mode`, a `move_to_step` without `step_id`, or only moves marked `requires_approval`), **WHEN** an agent calls `step_complete_kandev`, **THEN** the signal is recorded and the response carries `accepted:true` and `advances:false` plus a `note` stating that the step has no `on_turn_complete` move that runs automatically.
+- **GIVEN** a step with `auto_advance_requires_signal=false`, **WHEN** an agent calls `step_complete_kandev`, **THEN** the response carries `accepted:true` and `advances:false` plus a `note` explaining the signal was recorded but will not move the task.
+- **GIVEN** the calling turn's step cannot be resolved (workflow controller unset, or the step ID does not exist), **WHEN** an agent calls `step_complete_kandev`, **THEN** the response omits both `advances` and `note` rather than defaulting either.
 - **GIVEN** a signal-gated workflow step with a configured `move_to_next` move,
   **WHEN** its agent becomes idle without calling the completion tool, **THEN**
   the normal next-step action is visible in task composer surfaces that provide

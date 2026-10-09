@@ -57,6 +57,11 @@ func (p *fakeAuthorPlugin) InvokeAgentTool(_ context.Context, req *AgentToolRequ
 		Text: "called:" + req.Context.TaskID,
 		StructuredContent: map[string]any{
 			"name": req.Name, "value": req.Arguments["value"],
+			"execution_id": req.Context.ExecutionID, "installation_id": req.Context.InstallationID,
+			"conversation_revision": req.Context.ConversationRevision,
+			"approval_revision":     req.Context.ApprovalRevision,
+			"manifest_digest":       req.Context.ManifestDigest,
+			"agent_tool_names":      []any{"read_task"},
 		},
 	}, nil
 }
@@ -162,11 +167,21 @@ func TestServe_EndToEnd(t *testing.T) {
 	t.Run("InvokeAgentTool", func(t *testing.T) {
 		resp, err := remote.InvokeAgentTool(context.Background(), &AgentToolRequest{
 			InvocationID: "inv-1", Name: "echo", Arguments: map[string]any{"value": "ok"},
-			Context: AgentToolContext{TaskID: "task-1", SessionID: "session-1", WorkspaceID: "workspace-1", Surface: "kanban-task"},
+			Context: AgentToolContext{
+				TaskID: "task-1", SessionID: "session-1", WorkspaceID: "workspace-1", Surface: "managed-conversation",
+				ExecutionID: "execution-1", InstallationID: "installation-1", ConversationRevision: 4,
+				ApprovalRevision: 7, ManifestDigest: "manifest-digest", AgentToolNames: []string{"read_task"},
+			},
 		})
 		require.NoError(t, err)
 		require.Equal(t, "called:task-1", resp.Text)
 		require.Equal(t, "echo", resp.StructuredContent["name"])
+		require.Equal(t, "execution-1", resp.StructuredContent["execution_id"])
+		require.Equal(t, "installation-1", resp.StructuredContent["installation_id"])
+		require.Equal(t, float64(4), resp.StructuredContent["conversation_revision"])
+		require.Equal(t, float64(7), resp.StructuredContent["approval_revision"])
+		require.Equal(t, "manifest-digest", resp.StructuredContent["manifest_digest"])
+		require.Equal(t, []any{"read_task"}, resp.StructuredContent["agent_tool_names"])
 	})
 
 	t.Run("HostBrokerRoundTrip", func(t *testing.T) {
@@ -221,4 +236,102 @@ func TestServe_LegacyPluginGetsClearUnsupportedExtensionErrors(t *testing.T) {
 	_, err = remote.GetGitCredentialBinding(context.Background(), &GitCredentialBindingRequest{})
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 	require.Contains(t, err.Error(), "plugin does not implement git credential binder")
+}
+
+func TestServe_ManagedAgentInputHostMethodsRoundTrip(t *testing.T) {
+	author := &fakeAuthorPlugin{}
+	hostImpl := &exactHostFixture{}
+	gp := &GRPCPlugin{Impl: author, Host: hostImpl, HostDialTimeout: 5 * time.Second}
+	client, server := hcplugin.TestPluginGRPCConn(t, false, map[string]hcplugin.Plugin{PluginMapKey: gp})
+	defer func() { _ = client.Close() }()
+	defer server.Stop()
+
+	raw, err := client.Dispense(PluginMapKey)
+	require.NoError(t, err)
+	_, ok := raw.(*RemotePlugin)
+	require.True(t, ok)
+	require.Eventually(t, func() bool { return author.Host() != nil }, 5*time.Second, 10*time.Millisecond)
+
+	exact, ok := HostV2(author.Host())
+	require.True(t, ok)
+	manager := exact.ManagedAgentConversations()
+
+	enqueue := ManagedAgentInputEnqueue{
+		RequestID: "request-enqueue", IdempotencyKey: "idempotency-enqueue", WorkspaceID: "workspace-1",
+		InstanceKey: "lead", ExpectedConversationRevision: 4, ApprovalRevision: 7, ManifestDigest: "digest-7",
+		OccurrenceKey: "occurrence-human-1", Origin: ManagedAgentInputHuman, Payload: "Please review task 42",
+	}
+	result, receipt, err := manager.EnqueueInput(context.Background(), enqueue)
+	require.NoError(t, err)
+	require.Equal(t, CommandApplied, result.Status)
+	require.Equal(t, ManagedAgentInputReceipt{
+		HostInputID: "input-1", OccurrenceKey: enqueue.OccurrenceKey, Sequence: 11,
+		Origin: ManagedAgentInputHuman, Payload: enqueue.Payload, ConversationRevision: 4,
+		State: ManagedAgentInputAccepted, CreatedAt: "2026-09-25T12:00:00Z",
+		UpdatedAt: "2026-09-25T12:00:00Z", QueueEntryID: "queue-1",
+	}, receipt)
+	require.Equal(t, enqueue, hostImpl.managed.lastEnqueue)
+
+	getQuery := ManagedAgentInputQuery{
+		WorkspaceID: "workspace-1", InstanceKey: "lead", HostInputID: "input-1",
+		ApprovalRevision: 7, ManifestDigest: "digest-7",
+	}
+	got, err := manager.GetInput(context.Background(), getQuery)
+	require.NoError(t, err)
+	require.Equal(t, getQuery, hostImpl.managed.lastGet)
+	require.Equal(t, ManagedAgentInputReceipt{
+		HostInputID: "input-1", OccurrenceKey: "occurrence-1", Sequence: 11,
+		Origin: ManagedAgentInputHuman, Payload: "queued text", ConversationRevision: 4,
+		State: ManagedAgentInputRunning, CreatedAt: "2026-09-25T12:00:00Z",
+		UpdatedAt: "2026-09-25T12:01:00Z", QueueEntryID: "queue-1",
+		ExecutionID: "execution-1", TurnID: "turn-1",
+	}, got)
+
+	listQuery := ManagedAgentInputListQuery{
+		WorkspaceID: "workspace-1", InstanceKey: "lead", SequenceCursor: 9, Limit: 17,
+		ApprovalRevision: 7, ManifestDigest: "digest-7",
+	}
+	page, err := manager.ListInputs(context.Background(), listQuery)
+	require.NoError(t, err)
+	require.Equal(t, listQuery, hostImpl.managed.lastList)
+	require.Equal(t, ManagedAgentInputPage{
+		Inputs: []ManagedAgentInputReceipt{{
+			HostInputID: "input-2", OccurrenceKey: "occurrence-2", Sequence: 10,
+			Origin: ManagedAgentInputPeriodic, Payload: "tick", CoalesceKey: "schedule-1",
+			ConversationRevision: 6, State: ManagedAgentInputCompleted,
+			CreatedAt: "2026-09-25T12:02:00Z", UpdatedAt: "2026-09-25T12:03:00Z",
+			QueueEntryID: "queue-2", ExecutionID: "execution-2", TurnID: "turn-2", SupersededBy: "input-3",
+		}},
+		NextSequenceCursor: 10, HasMore: true,
+	}, page)
+
+	cancel := ManagedAgentInputCancel{
+		RequestID: "request-cancel", IdempotencyKey: "idempotency-cancel", WorkspaceID: "workspace-1",
+		InstanceKey: "lead", HostInputID: "input-1", ExpectedConversationRevision: 4,
+		ExpectedExecutionID: "execution-1", ApprovalRevision: 7, ManifestDigest: "digest-7",
+	}
+	result, cancelled, err := manager.CancelInput(context.Background(), cancel)
+	require.NoError(t, err)
+	require.Equal(t, CommandApplied, result.Status)
+	require.Equal(t, cancel, hostImpl.managed.lastCancel)
+	require.Equal(t, ManagedAgentInputReceipt{
+		HostInputID: cancel.HostInputID, OccurrenceKey: "occurrence-1", Sequence: 11,
+		Origin: ManagedAgentInputHuman, Payload: "queued text", ConversationRevision: 4,
+		State: ManagedAgentInputCancelled, CreatedAt: "2026-09-25T12:00:00Z",
+		UpdatedAt: "2026-09-25T12:04:00Z", QueueEntryID: "queue-1",
+		ExecutionID: "execution-1", TurnID: "turn-1",
+	}, cancelled)
+
+	dispatch := ManagedAgentConversationDispatch{
+		RequestID: "request-dispatch", IdempotencyKey: "idempotency-dispatch", WorkspaceID: "workspace-1",
+		InstanceKey: "lead", ExpectedConversationRevision: 4, ApprovalRevision: 7, ManifestDigest: "digest-7",
+		OccurrenceKey: "occurrence-automation-1", Origin: ManagedAgentInputAutomation, Payload: "Inspect assigned work",
+	}
+	result, dispatchStatus, conversation, err := manager.Dispatch(context.Background(), dispatch)
+	require.NoError(t, err)
+	require.Equal(t, dispatch, hostImpl.managed.lastDispatch)
+	require.Equal(t, CommandConflict, result.Status)
+	require.Equal(t, ManagedAgentDispatchBusy, dispatchStatus)
+	require.Equal(t, "task-managed-1", conversation.TaskID)
+	require.Equal(t, "workspace-1", conversation.WorkspaceID)
 }

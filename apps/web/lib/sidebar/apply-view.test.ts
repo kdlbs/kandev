@@ -34,6 +34,26 @@ describe("applyFilters — basics", () => {
   });
 });
 
+describe("applySort — effective color", () => {
+  it("uses the row's effective token and lets later rules break ties", () => {
+    const sorted = applySort(
+      [
+        task({ id: "red-old", effectiveColorToken: "red", updatedAt: "2026-01-01" }),
+        task({ id: "blue-new", effectiveColorToken: "blue", updatedAt: "2026-02-01" }),
+        task({ id: "red-new", effectiveColorToken: "red", updatedAt: "2026-03-01" }),
+      ],
+      {
+        key: "color",
+        color: "red",
+        direction: "desc",
+        thenBy: [{ key: "updatedAt", direction: "desc" }],
+      },
+    );
+
+    expect(sorted.map((entry) => entry.id)).toEqual(["red-new", "red-old", "blue-new"]);
+  });
+});
+
 describe("applyFilters — hasPR", () => {
   it("filters by hasPR is true (task with linked PR)", () => {
     const tasks = [task({ id: "a", prInfo: { number: 1, state: "Open" } }), task({ id: "b" })];
@@ -606,6 +626,7 @@ describe("applyView (integration)", () => {
       filters: [{ id: "f1", dimension: "isPRReview", op: "is", value: false }],
       sort: { key: "updatedAt", direction: "desc" },
       group: "none",
+      groupIndent: true,
       collapsedGroups: [],
     };
     const tasks = [
@@ -626,6 +647,7 @@ describe("applyView — pinned tasks", () => {
     filters: [],
     sort: { key: "title", direction: "asc" },
     group: "none",
+    groupIndent: true,
     collapsedGroups: [],
   };
 
@@ -691,6 +713,7 @@ describe("applyView — custom sort", () => {
     filters: [],
     sort: { key: "custom", direction: "asc" },
     group: "none",
+    groupIndent: true,
     collapsedGroups: [],
   };
 
@@ -793,6 +816,7 @@ describe("applyView — subtaskOrderByParentId", () => {
     filters: [],
     sort: { key: "title", direction: "asc" },
     group: "none",
+    groupIndent: true,
     collapsedGroups: [],
   };
   const parentId = "p1";
@@ -859,6 +883,7 @@ describe("applyView — Last activity tree overrides", () => {
       filters: [],
       sort: { key: LAST_ACTIVITY_SORT_KEY, direction: "desc" },
       group: "none",
+      groupIndent: true,
       collapsedGroups: [],
     };
     const tasks = [

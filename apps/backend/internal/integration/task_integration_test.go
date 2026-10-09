@@ -2,11 +2,14 @@
 package integration
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/auth/httpmw"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -131,8 +134,14 @@ func TestTaskCRUD(t *testing.T) {
 
 	// Delete task
 	t.Run("DeleteTask", func(t *testing.T) {
+		preview, err := ts.TaskSvc.TaskDeletePreflight(
+			authn.WithIdentity(context.Background(), httpmw.SyntheticIdentity()),
+			[]string{taskID}, false, false,
+		)
+		require.NoError(t, err)
 		resp, err := client.SendRequest("task-delete-1", ws.ActionTaskDelete, map[string]interface{}{
-			"id": taskID,
+			"id":              taskID,
+			"confirmation_id": preview.ConfirmationID,
 		})
 		require.NoError(t, err)
 

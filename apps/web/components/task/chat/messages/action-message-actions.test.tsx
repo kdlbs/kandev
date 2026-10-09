@@ -20,7 +20,10 @@ vi.mock("@/components/toast-provider", () => ({
 describe("ActionButton task deletion", () => {
   it("opens the shared discard-consent dialog", async () => {
     getSubtaskCountMock.mockResolvedValue({ count: 0 });
-    getTaskDeletePreflightMock.mockResolvedValue({ requires_discard_consent: false });
+    getTaskDeletePreflightMock.mockResolvedValue({
+      requires_discard_consent: false,
+      confirmation_id: "delete-confirmation-1",
+    });
     const action: MessageAction = {
       type: "delete_task",
       label: "Delete task",
@@ -36,7 +39,9 @@ describe("ActionButton task deletion", () => {
 
     fireEvent.click(screen.getByTestId("message-delete-task-button"));
     expect(await screen.findByRole("alertdialog")).toBeTruthy();
-    await waitFor(() => expect(getTaskDeletePreflightMock).toHaveBeenCalledWith(["task-1"], false));
+    await waitFor(() =>
+      expect(getTaskDeletePreflightMock).toHaveBeenCalledWith(["task-1"], false, false),
+    );
     await waitFor(() =>
       expect((screen.getByRole("button", { name: "Delete" }) as HTMLButtonElement).disabled).toBe(
         false,

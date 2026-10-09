@@ -34,6 +34,11 @@ const SORT_OPTIONS: Array<{ key: SortKey; labelKey: string; descriptionKey: stri
     descriptionKey: "task:sortTitleDescription",
   },
   {
+    key: "running",
+    labelKey: "task:sortRunning",
+    descriptionKey: "task:sortRunningDescription",
+  },
+  {
     key: "custom",
     labelKey: "task:sortCustom",
     descriptionKey: "task:sortCustomDescription",
@@ -41,7 +46,12 @@ const SORT_OPTIONS: Array<{ key: SortKey; labelKey: string; descriptionKey: stri
 ];
 
 export function sortKeyLabelKey(key: SortKey): string {
+  if (key === "color") return "task:color";
   return SORT_OPTIONS.find((option) => option.key === key)?.labelKey ?? "task:sortStatus";
+}
+
+export function sortKeyDescriptionKey(key: SortKey): string | undefined {
+  return SORT_OPTIONS.find((option) => option.key === key)?.descriptionKey;
 }
 
 type Props = {

@@ -4,7 +4,7 @@ import {
   type WorkflowStep,
 } from "@/lib/types/http";
 
-function stepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
+function baseStepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
   return {
     name: step.name,
     position: step.position,
@@ -16,6 +16,11 @@ function stepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
     is_start_step: step.is_start_step ?? false,
     show_in_command_panel: step.show_in_command_panel ?? false,
     auto_archive_after_hours: step.auto_archive_after_hours ?? 0,
+  };
+}
+
+function profileStepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
+  return {
     agent_profile_id: step.agent_profile_id ?? "",
     profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
       step.profile_session_start_policy,
@@ -23,12 +28,32 @@ function stepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
     profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
       step.profile_session_end_policy,
     ),
+  };
+}
+
+function recoveryStepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
+  return {
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
+  };
+}
+
+function behaviorStepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
+  return {
     session_target: step.session_target ?? null,
     complete_task_on_enter: step.complete_task_on_enter ?? false,
     auto_advance_requires_signal: step.auto_advance_requires_signal ?? false,
     cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
     wip_limit: step.wip_limit ?? 0,
     pull_from_step_id: step.pull_from_step_id ?? "",
+  };
+}
+
+function stepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
+  return {
+    ...baseStepUpdatePayload(step),
+    ...profileStepUpdatePayload(step),
+    ...recoveryStepUpdatePayload(step),
+    ...behaviorStepUpdatePayload(step),
   };
 }
 

@@ -89,6 +89,7 @@ import {
   getEffectiveActiveTurnId,
   getItemKey,
   getStreamingAgentMessageId,
+  hasTranscriptContentBelowViewport,
   canReassertDividerScroll,
   getLastUserMessageId,
   getFirstUserMessageId,
@@ -99,6 +100,25 @@ import {
   resolveLastPromptEdge,
   shouldAutoScrollToBottom,
 } from "./message-list-shared";
+
+describe("hasTranscriptContentBelowViewport", () => {
+  it("hides latest navigation when history is empty", () => {
+    expect(
+      hasTranscriptContentBelowViewport({
+        hasContent: false,
+        scrollTop: 0,
+        scrollHeight: 1200,
+        clientHeight: 400,
+      }),
+    ).toBe(false);
+  });
+
+  it("shows latest navigation when grouped or streaming content grows below the reader", () => {
+    const viewport = { hasContent: true, scrollTop: 300, clientHeight: 400 };
+    expect(hasTranscriptContentBelowViewport({ ...viewport, scrollHeight: 700 })).toBe(false);
+    expect(hasTranscriptContentBelowViewport({ ...viewport, scrollHeight: 900 })).toBe(true);
+  });
+});
 
 describe("anchoredBarScrollOffsetPx", () => {
   it("passes through a measured height unchanged", () => {

@@ -20,23 +20,31 @@ type fieldDisposition struct {
 }
 
 var automationFieldDispositions = map[string]fieldDisposition{
-	"Name":               {exported: true, yamlKey: "name"},
-	"Description":        {exported: true, yamlKey: "description"},
-	"Prompt":             {exported: true, yamlKey: "prompt"},
-	"TaskTitleTemplate":  {exported: true, yamlKey: "task_title_template"},
-	"Enabled":            {exported: true, yamlKey: "enabled"},
-	"MaxConcurrentRuns":  {exported: true, yamlKey: "max_concurrent_runs"},
-	"ContinuationPolicy": {exported: true, yamlKey: "continuation_policy"},
-	"TaskMode":           {exported: true, yamlKey: "task_mode"},
-	"RepositoryMode":     {exported: true, yamlKey: "repository_mode"},
-	"Triggers":           {exported: true, yamlKey: "triggers"},
-	"WorkflowID":         {exported: true, yamlKey: "workflow.name"},
-	"WorkflowStepID":     {exported: true, yamlKey: "workflow.step"},
-	"AgentProfileID":     {exported: true, yamlKey: "agent_profile"},
-	"ExecutorProfileID":  {exported: true, yamlKey: "executor_profile"},
-	"RepositoryIDs":      {exported: true, yamlKey: "repositories"},
-	"Repositories":       {exported: false},
-	"ContinuationTaskID": {exported: false}, // runtime pointer to the reused task
+	"Name":                             {exported: true, yamlKey: "name"},
+	"Description":                      {exported: true, yamlKey: "description"},
+	"Prompt":                           {exported: true, yamlKey: "prompt"},
+	"TaskTitleTemplate":                {exported: true, yamlKey: "task_title_template"},
+	"Enabled":                          {exported: true, yamlKey: "enabled"},
+	"MaxConcurrentRuns":                {exported: true, yamlKey: "max_concurrent_runs"},
+	"ContinuationPolicy":               {exported: true, yamlKey: "continuation_policy"},
+	"TaskMode":                         {exported: true, yamlKey: "task_mode"},
+	"ManagedDestination":               {exported: true, yamlKey: "managed_destination"},
+	"ManagedOwnerInstallationID":       {exported: false}, // installation identity is rebound in the destination workspace
+	"ManagedDestinationInstallationID": {exported: false}, // workspace-local installation identity, resolved from the portable destination
+	"ManagedDestinationConversationID": {exported: false}, // workspace-local conversation identity, resolved from the portable destination
+	"ManagedDestinationPluginID":       {exported: false}, // storage projection of ManagedDestination
+	"ManagedDestinationInstanceKey":    {exported: false}, // storage projection of ManagedDestination
+	"ManagedDestinationRevision":       {exported: false}, // refreshed during explicit destination binding
+	"ResourceRevision":                 {exported: false}, // destination schedule concurrency token
+	"RepositoryMode":                   {exported: true, yamlKey: "repository_mode"},
+	"Triggers":                         {exported: true, yamlKey: "triggers"},
+	"WorkflowID":                       {exported: true, yamlKey: "workflow.name"},
+	"WorkflowStepID":                   {exported: true, yamlKey: "workflow.step"},
+	"AgentProfileID":                   {exported: true, yamlKey: "agent_profile"},
+	"ExecutorProfileID":                {exported: true, yamlKey: "executor_profile"},
+	"RepositoryIDs":                    {exported: true, yamlKey: "repositories"},
+	"Repositories":                     {exported: false},
+	"ContinuationTaskID":               {exported: false}, // runtime pointer to the reused task
 
 	"WebhookSecret":   {exported: false}, // secret
 	"ID":              {exported: false}, // instance identity

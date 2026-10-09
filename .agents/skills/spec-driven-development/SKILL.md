@@ -139,12 +139,14 @@ For each work order, in dependency order:
 5. After implementation and targeted checks pass, change only the current work
    order to `done`.
 6. After every linked work order passes, verify the implementation still matches
-   each paired draft system design. If it does, promote that design from `draft`
-   to `current`, synchronize affected spec frontmatter and matching
-   `docs/specs/INDEX.md` entries from `building` to `shipped`, then change the
-   plan to `implemented`. If implementation diverged or an open design issue
-   remains, leave the design draft and report the mismatch instead of completing
-   the package.
+   each paired requirement and system design. If it does, promote each paired
+   draft requirement to `active` and each paired draft system design to `current`,
+   then change the plan to `implemented`. Record spec lifecycle in spec
+   frontmatter and delivery status in plans and work orders;
+   `docs/specs/INDEX.md` is a static entry page, not a per-spec delivery catalog.
+   Update a system README only when its boundary or migration record changed. If
+   implementation diverged or an open design issue remains, do not promote
+   unresolved draft specs or mark the plan implemented; report the mismatch.
 
 If the user authorizes subagents, launch only parallel-safe work orders in the
 requested wave. Use native delegation with no full-history fork. Give each

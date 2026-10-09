@@ -5,6 +5,7 @@ import { SessionPage } from "../../pages/session-page";
 const OWNER = "northstar-labs";
 const REPO = "relay-console";
 const PR_NUMBER = 842;
+const PR_HEAD_SHA = "eligible-merge-queue-head";
 
 test("adds an eligible GitHub PR to its merge queue", async ({ testPage, apiClient, seedData }) => {
   test.setTimeout(120_000);
@@ -28,7 +29,6 @@ test("adds an eligible GitHub PR to its merge queue", async ({ testPage, apiClie
   await session.waitForLoad();
   await testPage.reload();
   await session.waitForLoad();
-  await seedEligiblePR(apiClient, task.id);
 
   await session.hoverPRTopbar();
   const popover = session.prTopbarPopover();
@@ -43,7 +43,6 @@ test("adds an eligible GitHub PR to its merge queue", async ({ testPage, apiClie
   } else {
     await session.prTopbarButton().click();
   }
-  await seedEligiblePR(apiClient, task.id);
 
   const detail = testPage.getByTestId("change-request-detail");
   const merge = detail.getByRole("button", { name: "Merge PR" });
@@ -110,11 +109,15 @@ test("surfaces queued PR metadata across desktop status surfaces", async ({
   await expect(popover.getByTestId("pr-merge-queue-status")).toContainText("Position 2");
   await expect(popover.getByTestId("pr-merge-queue-status")).toContainText("2 minutes");
 
+  await session.prTopbarButton().blur();
   await session.hoverPRChip();
   const compactPopover = session.prChipPopover();
   await expect(compactPopover.getByTestId("pr-merge-queue-status")).toContainText("Queued");
   await expect(compactPopover.getByTestId("pr-merge-queue-status")).toContainText("Position 2");
   await expect(compactPopover.getByTestId("pr-merge-queue-status")).toContainText("2 minutes");
+  await testPage.mouse.move(0, 0);
+  await expect(compactPopover).toBeHidden();
+  await expect(session.prTopbarPopover()).toBeHidden();
 
   // The default layout can reopen PR details as a dock tab or through the
   // existing topbar affordance. Keep the display scenario independent from
@@ -161,12 +164,36 @@ async function seedQueuedPR(apiClient: ApiClient, taskId: string) {
     checks_total: 3,
     checks_passing: 3,
   });
+  await seedMergeReadyPRFeedback(apiClient);
   await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "queued");
 }
 
 async function seedEligiblePR(apiClient: ApiClient, taskId: string) {
   await apiClient.mockGitHubAddRepos(OWNER, [
     { full_name: `${OWNER}/${REPO}`, owner: OWNER, name: REPO },
+  ]);
+  await apiClient.mockGitHubAddPRs([
+    {
+      number: PR_NUMBER,
+      title: "Make deployment rollbacks deterministic",
+      state: "open",
+      head_branch: "feat/resilient-rollbacks",
+      head_sha: PR_HEAD_SHA,
+      base_branch: "main",
+      author_login: "maya-chen",
+      repo_owner: OWNER,
+      repo_name: REPO,
+      mergeable_state: "blocked",
+    },
+  ]);
+  await apiClient.mockGitHubAddReviews(OWNER, REPO, PR_NUMBER, [
+    { id: 1, author: "reviewer-one", state: "APPROVED" },
+    { id: 2, author: "reviewer-two", state: "APPROVED" },
+  ]);
+  await apiClient.mockGitHubAddCheckRuns(OWNER, REPO, PR_HEAD_SHA, [
+    { name: "unit", status: "completed", conclusion: "success" },
+    { name: "lint", status: "completed", conclusion: "success" },
+    { name: "build", status: "completed", conclusion: "success" },
   ]);
   await apiClient.mockGitHubAssociateTaskPR({
     task_id: taskId,
@@ -177,6 +204,7 @@ async function seedEligiblePR(apiClient: ApiClient, taskId: string) {
     pr_title: "Make deployment rollbacks deterministic",
     head_branch: "feat/resilient-rollbacks",
     base_branch: "main",
+    head_sha: PR_HEAD_SHA,
     author_login: "maya-chen",
     state: "open",
     review_state: "approved",
@@ -188,6 +216,7 @@ async function seedEligiblePR(apiClient: ApiClient, taskId: string) {
     checks_total: 3,
     checks_passing: 3,
   });
+  await seedMergeReadyPRFeedback(apiClient);
   await apiClient.mockGitHubSetMergeOutcome(OWNER, REPO, PR_NUMBER, "queued");
   await apiClient.mockGitHubSeedPRFeedback({
     owner: OWNER,
@@ -201,6 +230,23 @@ async function seedEligiblePR(apiClient: ApiClient, taskId: string) {
     reviews: [
       { id: 1, author: "reviewer-one", state: "APPROVED", created_at: "2026-09-24T10:00:00Z" },
       { id: 2, author: "reviewer-two", state: "APPROVED", created_at: "2026-09-24T11:00:00Z" },
+    ],
+  });
+}
+
+async function seedMergeReadyPRFeedback(apiClient: ApiClient) {
+  await apiClient.mockGitHubSeedPRFeedback({
+    owner: OWNER,
+    repo: REPO,
+    pr_number: PR_NUMBER,
+    checks: [
+      { name: "Build", status: "completed", conclusion: "success" },
+      { name: "Unit tests", status: "completed", conclusion: "success" },
+      { name: "E2E tests", status: "completed", conclusion: "success" },
+    ],
+    reviews: [
+      { id: 1, author: "reviewer-one", state: "APPROVED" },
+      { id: 2, author: "reviewer-two", state: "APPROVED" },
     ],
   });
 }

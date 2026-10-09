@@ -690,6 +690,7 @@ func TestRecreate_ManagedRefreshUsesRemotePRHeadWhenLocalCheckoutBranchIsBehind(
 // Leaving deleted_at set would hide the restored worktree from every lookup
 // that filters on `deleted_at IS NULL`, so the session would silently get a
 // brand-new worktree instead of its own work back.
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.5
 func TestCreate_RestoresReleasedWorktreeAfterArchive(t *testing.T) {
 	mgr, store := newReferenceCleanupTestManager(t)
 	ctx := context.Background()
@@ -727,6 +728,11 @@ func TestCreate_RestoresReleasedWorktreeAfterArchive(t *testing.T) {
 	// Unarchive + resume: the launch carries the stored worktree ID.
 	resumeReq := req
 	resumeReq.WorktreeID = wt.ID
+	resumeReq.PullBeforeWorktree = true
+	resumeReq.RefreshRepository = func(context.Context) error {
+		runGit(t, repoPath, "fetch", "origin")
+		return nil
+	}
 	restored, err := mgr.Create(ctx, resumeReq)
 	if err != nil {
 		t.Fatalf("resume after unarchive must recreate the worktree: %v", err)

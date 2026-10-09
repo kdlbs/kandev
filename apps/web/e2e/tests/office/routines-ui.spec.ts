@@ -1,6 +1,7 @@
 import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/office-fixture";
 import { waitForHttp } from "../../helpers/causal-waits";
+import type { OfficeApiClient } from "../../helpers/office-api-client";
 
 /**
  * Wire contract round trips (docs/specs/office/requirements/routine-wire-contract.md).
@@ -22,6 +23,15 @@ function comboboxNear(page: Page, label: string) {
 
 function textboxNear(page: Page, label: string) {
   return page.getByText(label, { exact: true }).locator("..").getByRole("textbox");
+}
+
+async function seededAgentName(officeApi: OfficeApiClient, agentId: string): Promise<string> {
+  const agent = await officeApi.getAgent(agentId);
+  const name = agent.name;
+  if (typeof name !== "string" || name.length === 0) {
+    throw new Error(`office seed agent ${agentId} has no name`);
+  }
+  return name;
 }
 
 test.describe("Routines UI", () => {
@@ -95,6 +105,7 @@ test.describe("Routines UI", () => {
     prCapture,
   }) => {
     const name = "E2E Wire Contract Create";
+    const agentName = await seededAgentName(officeApi, officeSeed.agentId);
     await testPage.goto("/office/routines");
     await testPage.getByRole("button", { name: "New Routine" }).click();
 
@@ -104,7 +115,7 @@ test.describe("Routines UI", () => {
       .locator("..")
       .getByRole("combobox")
       .click();
-    await testPage.getByRole("option", { name: "CEO", exact: true }).click();
+    await testPage.getByRole("option", { name: agentName, exact: true }).click();
     await testPage.getByRole("button", { name: "Next" }).click();
 
     await testPage.getByLabel("Task Title Template").fill("{{name}} wire check");
@@ -123,15 +134,11 @@ test.describe("Routines UI", () => {
         "Create Routine dialog with assignee, concurrency/catch-up policy, task template and cron schedule filled in",
     });
 
-    // AC-OFFICE-ROUTINE-WIRE-002.1/.2: before this capability, the trigger
-    // create call this arms was rejected outright (`cronExpression` bound to
-    // "" -> `ErrInvalidTrigger` -> 400), so a cron schedule could not be
-    // armed from the UI at all.
+    // AC-OFFICE-ROUTINE-WIRE-002.2/.10: the routine and its cron trigger are
+    // created in one request, so a rejected trigger writes no routine.
     const routineCreated = waitForHttp(testPage, "POST", /\/workspaces\/[^/]+\/routines$/);
-    const triggerCreated = waitForHttp(testPage, "POST", /\/routines\/[^/]+\/triggers$/);
     await testPage.getByRole("button", { name: "Create" }).click();
     await routineCreated;
-    await triggerCreated;
     await expect(testPage.getByText(name)).toBeVisible({ timeout: 10_000 });
 
     const listed = (await officeApi.listRoutines(officeSeed.workspaceId)) as {
@@ -164,6 +171,7 @@ test.describe("Routines UI", () => {
     prCapture,
   }) => {
     const name = "E2E Wire Contract Detail Save";
+    const agentName = await seededAgentName(officeApi, officeSeed.agentId);
     const routine = (await officeApi.createRoutine(officeSeed.workspaceId, { name })) as {
       id: string;
     };
@@ -173,7 +181,7 @@ test.describe("Routines UI", () => {
     await expect(testPage.getByText(name)).toBeVisible({ timeout: 10_000 });
 
     await comboboxNear(testPage, "Assignee").click();
-    await testPage.getByRole("option", { name: "CEO", exact: true }).click();
+    await testPage.getByRole("option", { name: agentName, exact: true }).click();
     await comboboxNear(testPage, "Concurrency policy").click();
     await testPage.getByRole("option", { name: "Always create" }).click();
     await comboboxNear(testPage, "Catch-up policy").click();
@@ -195,7 +203,7 @@ test.describe("Routines UI", () => {
     // values this same save just wrote.
     await testPage.waitForLoadState("load");
     await expect(testPage.getByText(name)).toBeVisible({ timeout: 10_000 });
-    await expect(comboboxNear(testPage, "Assignee")).toHaveText("CEO");
+    await expect(comboboxNear(testPage, "Assignee")).toHaveText(agentName);
     await expect(comboboxNear(testPage, "Concurrency policy")).toHaveText("Always create");
     await expect(comboboxNear(testPage, "Catch-up policy")).toHaveText("Skip missed");
     await expect(textboxNear(testPage, "Cron expression")).toHaveValue("15 3 * * *");
@@ -231,6 +239,7 @@ test.describe("Routines UI", () => {
     prCapture,
   }) => {
     const name = "E2E Wire Contract Read";
+    const agentName = await seededAgentName(officeApi, officeSeed.agentId);
     const routine = (await officeApi.createRoutine(officeSeed.workspaceId, {
       name,
       assignee_agent_profile_id: officeSeed.agentId,
@@ -248,7 +257,7 @@ test.describe("Routines UI", () => {
     await expect(row).toBeVisible({ timeout: 10_000 });
     // AC-OFFICE-ROUTINE-WIRE-003.1/.6: routine-row.tsx's own snake_case
     // fallbacks are gone; these now render through the normalized model.
-    await expect(row.getByText("CEO", { exact: true })).toBeVisible();
+    await expect(row.getByText(agentName, { exact: true })).toBeVisible();
     await expect(row.getByText("Always create", { exact: true })).toBeVisible();
 
     // AC-OFFICE-ROUTINE-WIRE-003.11: one entry per declared variable name,
@@ -266,7 +275,7 @@ test.describe("Routines UI", () => {
 
     await testPage.goto(`/office/routines/${routine.id}`);
     await expect(testPage.getByText(name)).toBeVisible({ timeout: 10_000 });
-    await expect(comboboxNear(testPage, "Assignee")).toHaveText("CEO");
+    await expect(comboboxNear(testPage, "Assignee")).toHaveText(agentName);
     await expect(comboboxNear(testPage, "Concurrency policy")).toHaveText("Always create");
     await expect(comboboxNear(testPage, "Catch-up policy")).toHaveText("Skip missed");
   });
@@ -278,8 +287,11 @@ test.describe("Routines UI", () => {
   // fix end to end against the real component, not just the unit mock.
   test("a post-create refetch failure reports its own toast and still closes the dialog", async ({
     testPage,
+    officeApi,
+    officeSeed,
   }) => {
     const name = "E2E Refetch Failure Routine";
+    const agentName = await seededAgentName(officeApi, officeSeed.agentId);
     // React StrictMode double-invokes the page-mount effect in dev, so the
     // list endpoint sees two GET calls before any user interaction. Rather
     // than count calls, arm the failure right before the action whose
@@ -305,7 +317,7 @@ test.describe("Routines UI", () => {
       .locator("..")
       .getByRole("combobox")
       .click();
-    await testPage.getByRole("option", { name: "CEO", exact: true }).click();
+    await testPage.getByRole("option", { name: agentName, exact: true }).click();
     await testPage.getByRole("button", { name: "Next" }).click();
     await testPage.getByRole("button", { name: "Next" }).click();
 
@@ -341,18 +353,23 @@ test.describe("Routines UI", () => {
 
     const fireResponse = await officeApi.runRoutine(routine.id);
     expect(fireResponse.ok).toBe(true);
-    const fired = (await fireResponse.json()) as { run: { id: string; created_at: string } };
+    const fired = (await fireResponse.json()) as {
+      run: { id: string; source: string; created_at: string };
+    };
     expect(fired.run.created_at).toBeTruthy();
+    expect(fired.run.source).toBe("manual");
 
     await testPage.goto("/office/routines");
     await testPage.getByRole("tab", { name: "Runs" }).click();
-    // officeSeed's workspace is reset per test, so exactly one run exists.
     const runsList = testPage.locator(".rounded-lg.divide-y > div");
-    await expect(runsList).toHaveCount(1, { timeout: 10_000 });
+    const manualRun = runsList.filter({
+      has: testPage.getByText(fired.run.source, { exact: true }),
+    });
+    await expect(manualRun).toHaveCount(1, { timeout: 10_000 });
     // AC-OFFICE-ROUTINE-WIRE-004.1/.3: `created_at` now reaches the model,
     // so run-row.tsx's `formatTime` renders the real timestamp instead of
     // the "--" placeholder it showed for every run before this capability.
-    await expect(runsList).toContainText(new Date(fired.run.created_at).toLocaleString());
+    await expect(manualRun).toContainText(new Date(fired.run.created_at).toLocaleString());
   });
 
   // Review round 3 (Codex-1): before Build round 4's fix,

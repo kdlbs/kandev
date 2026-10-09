@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/authn"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
@@ -94,7 +95,7 @@ func bootInitialState(
 		activeID := ""
 		if ok {
 			activeID = builder.settingsWorkspaceID(ctx, req, workspaces)
-			builder.addWorkspaceStateFrom(workspaces, state, &activeID)
+			builder.addWorkspaceStateFrom(ctx, workspaces, state, &activeID)
 		}
 		builder.addUserSettingsState(ctx, state, activeID)
 		builder.addSettingsRouteState(ctx, state, route.Path)
@@ -161,6 +162,12 @@ func isLocalContextRoute(route webapp.RouteName) bool {
 	}
 }
 
+// bootItemsKey and bootActiveIDKey name the fields of a boot slice block.
+const (
+	bootItemsKey    = "items"
+	bootActiveIDKey = "activeId"
+)
+
 type bootStateBuilder struct {
 	p routeParams
 }
@@ -170,7 +177,7 @@ func (b bootStateBuilder) addWorkspaceState(ctx context.Context, state map[strin
 	if !ok {
 		return
 	}
-	b.addWorkspaceStateFrom(workspaces, state, activeID)
+	b.addWorkspaceStateFrom(ctx, workspaces, state, activeID)
 }
 
 // listBootWorkspaces returns the workspace snapshot a boot payload is built
@@ -188,24 +195,18 @@ func (b bootStateBuilder) listBootWorkspaces(ctx context.Context) ([]*taskmodels
 }
 
 func (b bootStateBuilder) addWorkspaceStateFrom(
+	ctx context.Context,
 	workspaces []*taskmodels.Workspace,
 	state map[string]any,
 	activeID *string,
 ) {
-	items := make([]taskdto.WorkspaceDTO, 0, len(workspaces))
-	for _, workspace := range workspaces {
-		if workspace == nil {
-			continue
-		}
-		items = append(items, taskdto.FromWorkspace(workspace))
-	}
 	var active any
 	if activeID != nil {
 		active = *activeID
 	}
 	state["workspaces"] = map[string]any{
-		"items":    items,
-		"activeId": active,
+		bootItemsKey:    b.workspaceItemStates(ctx, workspaces),
+		bootActiveIDKey: active,
 	}
 }
 
@@ -287,15 +288,8 @@ func (b bootStateBuilder) addHomeKanbanRouteState(ctx context.Context, req *http
 		b.logBootError("list home workspaces", err)
 		return
 	}
-	workspaceItems := make([]map[string]any, 0, len(workspaces))
-	workspaceIDs := make(map[string]bool, len(workspaces))
-	for _, workspace := range workspaces {
-		if workspace == nil {
-			continue
-		}
-		workspaceIDs[workspace.ID] = true
-		workspaceItems = append(workspaceItems, mapWorkspaceItemState(taskdto.FromWorkspace(workspace)))
-	}
+	workspaceItems := b.workspaceItemStates(ctx, workspaces)
+	workspaceIDs := workspaceIDSet(workspaces)
 
 	settings, hasSettings := b.userSettings(ctx)
 	settingsWorkspaceID := ""
@@ -336,8 +330,9 @@ func (b bootStateBuilder) addHomeKanbanRouteState(ctx context.Context, req *http
 	}
 	activeWorkflowID := resolveHomeWorkflowID(workflows, queryValue(req, "workflowId"), settingsWorkflowID, hasSettings)
 	state["workflows"] = map[string]any{
-		"items":    workflowItems,
-		"activeId": nullString(activeWorkflowID),
+		"items":                workflowItems,
+		"activeId":             nullString(activeWorkflowID),
+		"taskWorkflowCoverage": b.taskWorkflowCoverage(ctx, activeWorkspaceID),
 	}
 	if hasSettings {
 		state["userSettings"] = mapUserSettingsStateWithWorkflow(settings, activeWorkspaceID, activeWorkflowID)
@@ -534,6 +529,14 @@ func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID str
 	for _, item := range items {
 		sessions = append(sessions, mapQuickChatSessionState(item))
 		sessionDTO := taskdto.FromTaskSession(item.Session)
+		if item.Session != nil && item.Session.TaskEnvironmentID != "" {
+			operation, runnerLive, recoveryErr := b.p.taskSvc.WorkspaceRecoveryProjection(ctx, item.Session.TaskEnvironmentID)
+			if recoveryErr != nil {
+				b.logBootError("get quick chat workspace recovery projection", recoveryErr)
+			} else {
+				taskdto.EnrichWorkspaceRecovery(&sessionDTO, operation, runnerLive)
+			}
+		}
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichCancellationPending(&sessionDTO, b.p.orchestratorSvc)
 			taskdto.EnrichParkedProjection(&sessionDTO, b.p.orchestratorSvc)
@@ -650,6 +653,7 @@ func (b bootStateBuilder) workflowSnapshotState(ctx context.Context, workflow *t
 	return map[string]any{
 		"workflowId":   workflow.ID,
 		"workflowName": workflow.Name,
+		"taskCoverage": b.p.taskSvc.WorkflowTaskCoverage(workflow, len(tasks), len(taskStates)),
 		"steps":        steps,
 		"tasks":        taskStates,
 	}, true
@@ -1008,8 +1012,9 @@ func (b bootStateBuilder) addTaskDetailResourceState(ctx context.Context, state 
 		b.logBootError("list task detail workflows", err)
 	} else {
 		state["workflows"] = map[string]any{
-			"items":    workflowItemStates(workflows),
-			"activeId": nil,
+			"items":                workflowItemStates(workflows),
+			"activeId":             nil,
+			"taskWorkflowCoverage": b.taskWorkflowCoverage(ctx, task.WorkspaceID),
 		}
 	}
 	b.addRepositoriesState(ctx, state, task.WorkspaceID)
@@ -1123,6 +1128,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 	worktrees := make(map[string]any)
 	worktreesBySession := make(map[string]any)
 	sessionModelsByID := make(map[string]any)
+	sessionModeByID := make(map[string]any)
 	sessionMCPStatusByID := make(map[string]any)
 	pendingActionsBySession, err := b.bootPendingActionsForInputCapableSessions(
 		ctx,
@@ -1137,6 +1143,14 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 			continue
 		}
 		dto := taskdto.FromTaskSession(session)
+		if session.TaskEnvironmentID != "" {
+			operation, runnerLive, recoveryErr := b.p.taskSvc.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
+			if recoveryErr != nil {
+				b.logBootError("get task detail workspace recovery projection", recoveryErr)
+			} else {
+				taskdto.EnrichWorkspaceRecovery(&dto, operation, runnerLive)
+			}
+		}
 		// Mirror the in-memory fine-grained busy substate onto a RUNNING session
 		// so a fresh page-load / second tab sees the accept-input +
 		// working-in-background affordance without waiting for a WS flip
@@ -1168,6 +1182,9 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 			sessionModelsByID[session.ID] = taskSessionModelsBootState(
 				snapshot, sessionACPConfigBaseline(session),
 			)
+			if snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored {
+				sessionModeByID[session.ID] = taskSessionModeBootState(snapshot)
+			}
 		}
 		if history, ok := lifecycle.LoadMCPAttachmentHistory(
 			session.Metadata[taskmodels.SessionMetaKeyMCPAttachmentState],
@@ -1187,6 +1204,9 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 	state["sessionWorktreesBySessionId"] = map[string]any{"itemsBySessionId": worktreesBySession}
 	if len(sessionModelsByID) > 0 {
 		state["sessionModels"] = map[string]any{"bySessionId": sessionModelsByID}
+	}
+	if len(sessionModeByID) > 0 {
+		state["sessionMode"] = map[string]any{"bySessionId": sessionModeByID}
 	}
 	if len(sessionMCPStatusByID) > 0 {
 		state["sessionMcpStatus"] = map[string]any{"bySessionId": sessionMCPStatusByID}
@@ -1251,10 +1271,21 @@ func taskSessionModelsBootState(
 	if snapshot.ConfigOptionsSettled {
 		state["configOptionsSettled"] = true
 	}
+	if snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored {
+		state["settingsPolicy"] = string(snapshot.SettingsPolicy)
+	}
 	if len(baseline) > 0 {
 		state["configBaseline"] = baseline
 	}
 	return state
+}
+
+func taskSessionModeBootState(snapshot lifecycle.SessionModelsSnapshot) map[string]any {
+	return map[string]any{
+		"currentModeId":  snapshot.CurrentModeID,
+		"availableModes": []any{},
+		"settingsPolicy": string(snapshot.SettingsPolicy),
+	}
 }
 
 func activeTurnBySessionState(sessionID string) map[string]any {

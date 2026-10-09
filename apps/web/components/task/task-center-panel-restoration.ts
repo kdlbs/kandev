@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useLayoutEffect, useState, useCallback } from "react";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import {
@@ -13,7 +13,11 @@ import { calculateHash, generateUnifiedDiff } from "@/lib/utils/file-diff";
 import { requestFileContent, updateFileContent, deleteFile } from "@/lib/ws/workspace-files";
 import { useToast } from "@/components/toast-provider";
 import { t } from "@/lib/i18n";
-import { getFileTabKey } from "./task-center-panel-file-tabs";
+import {
+  getFileTabKey,
+  installFileEditorTab,
+  type FileEditorTab,
+} from "./task-center-panel-file-tabs";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
 import { getFilePreviewKind } from "@/lib/utils/file-types";
 
@@ -26,10 +30,9 @@ export type FileTabRestorationOptions = {
 
 export type FileSaveDeleteOptions = {
   activeSessionId: string | null;
-  openFileTabs: OpenFileTab[];
+  openFileTabs: FileEditorTab[];
   setOpenFileTabs: React.Dispatch<React.SetStateAction<OpenFileTab[]>>;
-  setSavingFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
-  handleCloseFileTab: (fileKey: string) => void;
+  handleCloseFileTab: (fileKey: string, instanceId?: symbol) => void;
 };
 
 export function toPrimaryTab(savedTab: string) {
@@ -44,21 +47,23 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
     try {
       const response = await requestFileContent(client, sessionId, savedTab.path, savedTab.repo);
       const hash = await calculateHash(response.content);
-      loadedTabs.push({
-        path: savedTab.path,
-        name: savedTab.name,
-        content: response.content,
-        originalContent: response.content,
-        originalHash: hash,
-        isDirty: false,
-        isBinary: response.is_binary,
-        resolvedPath: response.resolved_path,
-        repo: savedTab.repo,
-        renderedPreview:
-          getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
-            ? savedTab.renderedPreview
-            : undefined,
-      });
+      loadedTabs.push(
+        installFileEditorTab({
+          path: savedTab.path,
+          name: savedTab.name,
+          content: response.content,
+          originalContent: response.content,
+          originalHash: hash,
+          isDirty: false,
+          isBinary: response.is_binary,
+          resolvedPath: response.resolved_path,
+          repo: savedTab.repo,
+          renderedPreview:
+            getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
+              ? savedTab.renderedPreview
+              : undefined,
+        }),
+      );
     } catch {
       /* skip failed tabs */
     }
@@ -182,7 +187,7 @@ export function useFileTabRestoration({
 }
 
 function updateTabsAfterSave(
-  tabs: OpenFileTab[],
+  tabs: FileEditorTab[],
   fileKey: string,
   persistedContent: string,
   originalHash: string,
@@ -199,45 +204,83 @@ function updateTabsAfterSave(
   );
 }
 
+type MutationOwner = { session: string; visit: symbol; fileKey: string; instanceId: symbol };
+
+function useFileMutationOwner(activeSessionId: string | null, tabs: FileEditorTab[]) {
+  const visitRef = useRef<{ session: string; id: symbol } | null>(null);
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  const [pendingSaves, setPendingSaves] = useState(new Map<string, MutationOwner>());
+  useLayoutEffect(() => {
+    visitRef.current = activeSessionId ? { session: activeSessionId, id: Symbol() } : null;
+    setPendingSaves(new Map());
+    return () => {
+      visitRef.current = null;
+    };
+  }, [activeSessionId]);
+  const capture = (fileKey: string): MutationOwner | null => {
+    const visit = visitRef.current;
+    const tab = tabsRef.current.find((item) => getFileTabKey(item) === fileKey);
+    if (!visit || !tab?.instanceId) return null;
+    return { session: visit.session, visit: visit.id, fileKey, instanceId: tab.instanceId };
+  };
+  const isCurrent = (owner: MutationOwner, currentTabs = tabsRef.current) =>
+    visitRef.current?.id === owner.visit &&
+    visitRef.current.session === owner.session &&
+    currentTabs.some(
+      (tab) => getFileTabKey(tab) === owner.fileKey && tab.instanceId === owner.instanceId,
+    );
+  const savingFiles = new Set(
+    [...pendingSaves]
+      .filter(([, owner]) => owner.session === activeSessionId && isCurrent(owner))
+      .map(([key]) => key),
+  );
+  return { capture, isCurrent, tabsRef, savingFiles, setPendingSaves };
+}
+
 export function useFileSaveDelete({
   activeSessionId,
   openFileTabs,
   setOpenFileTabs,
-  setSavingFiles,
   handleCloseFileTab,
 }: FileSaveDeleteOptions) {
   const { toast } = useToast();
-  const openFileTabsRef = useRef(openFileTabs);
-  openFileTabsRef.current = openFileTabs;
+  const ownership = useFileMutationOwner(activeSessionId, openFileTabs);
+  const closeRef = useRef(handleCloseFileTab);
+  closeRef.current = handleCloseFileTab;
 
   const handleFileSave = useCallback(
     async (path: string, repo?: string) => {
       const fileKey = getFileTabKey({ path, repo });
-      const tab = openFileTabsRef.current.find((item) => getFileTabKey(item) === fileKey);
+      const tab = ownership.tabsRef.current.find((item) => getFileTabKey(item) === fileKey);
       if (!tab || !tab.isDirty) return;
       const client = getWebSocketClient();
-      if (!client || !activeSessionId) return;
-      setSavingFiles((prev) => new Set(prev).add(fileKey));
+      const owner = ownership.capture(fileKey);
+      if (!client || !owner) return;
+      ownership.setPendingSaves((prev) => new Map(prev).set(fileKey, owner));
       try {
         const diff = generateUnifiedDiff(tab.originalContent, tab.content, tab.path);
-        const response = await updateFileContent(client, activeSessionId, {
+        const response = await updateFileContent(client, owner.session, {
           path,
           diff,
           originalHash: tab.originalHash,
           desiredContent: tab.content,
           repo: tab.repo,
         });
+        if (!ownership.isCurrent(owner)) return;
         if (response.success && response.new_hash) {
-          const current = openFileTabsRef.current.find((item) => getFileTabKey(item) === fileKey);
+          const current = ownership.tabsRef.current.find((item) => getFileTabKey(item) === fileKey);
           lspClientManager.saveDocument(
-            activeSessionId,
+            owner.session,
             path,
             tab.repo,
             tab.content,
             current?.content ?? tab.content,
           );
           setOpenFileTabs((prev) =>
-            updateTabsAfterSave(prev, fileKey, tab.content, response.new_hash!),
+            ownership.isCurrent(owner, prev)
+              ? updateTabsAfterSave(prev, fileKey, tab.content, response.new_hash!)
+              : prev,
           );
         } else {
           toast({
@@ -247,30 +290,34 @@ export function useFileSaveDelete({
           });
         }
       } catch (error) {
+        if (!ownership.isCurrent(owner)) return;
         toast({
           title: t("editors:saveFailed"),
           description: error instanceof Error ? error.message : t("editors:errorWhileSavingFile"),
           variant: "error",
         });
       } finally {
-        setSavingFiles((prev) => {
-          const next = new Set(prev);
+        ownership.setPendingSaves((prev) => {
+          if (prev.get(fileKey) !== owner) return prev;
+          const next = new Map(prev);
           next.delete(fileKey);
           return next;
         });
       }
     },
-    [activeSessionId, toast, setOpenFileTabs, setSavingFiles],
+    [ownership, toast, setOpenFileTabs],
   );
 
   const handleFileDelete = useCallback(
     async (path: string, repo?: string) => {
       const client = getWebSocketClient();
-      if (!client || !activeSessionId) return;
+      const owner = ownership.capture(getFileTabKey({ path, repo }));
+      if (!client || !owner) return;
       try {
-        const response = await deleteFile(client, activeSessionId, path, repo);
+        const response = await deleteFile(client, owner.session, path, repo);
+        if (!ownership.isCurrent(owner)) return;
         if (response.success) {
-          handleCloseFileTab(getFileTabKey({ path, repo }));
+          closeRef.current(owner.fileKey, owner.instanceId);
         } else {
           toast({
             title: t("editors:deleteFailed"),
@@ -279,6 +326,7 @@ export function useFileSaveDelete({
           });
         }
       } catch (error) {
+        if (!ownership.isCurrent(owner)) return;
         toast({
           title: t("editors:deleteFailed"),
           description: error instanceof Error ? error.message : t("editors:errorWhileDeletingFile"),
@@ -286,8 +334,8 @@ export function useFileSaveDelete({
         });
       }
     },
-    [activeSessionId, handleCloseFileTab, toast],
+    [ownership, toast],
   );
 
-  return { handleFileSave, handleFileDelete };
+  return { handleFileSave, handleFileDelete, savingFiles: ownership.savingFiles };
 }

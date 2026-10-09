@@ -1,5 +1,8 @@
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
+import { watchWs } from "../../helpers/causal-waits";
+import { createEmptyRemoteRepository } from "../../helpers/empty-remote-repository";
+import { GitHelper } from "../../helpers/git-helper";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -80,6 +83,9 @@ test.describe("PR auto-detection", () => {
       ],
     });
 
+    // Attach before navigation so this can observe the workspace event stream.
+    const gateway = watchWs(testPage);
+
     // Navigate to kanban BEFORE moving tasks so the WebSocket is subscribed
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -93,6 +99,10 @@ test.describe("PR auto-detection", () => {
     });
 
     // --- Add PR to mock GitHub AFTER task completion ---
+    const prUpdated = gateway.waitForEvent("github.task_pr.updated", {
+      timeout: 120_000,
+      where: (payload) => payload.task_id === task.id && payload.pr_number === 99,
+    });
     await apiClient.mockGitHubAddPRs([
       {
         number: 99,
@@ -108,17 +118,22 @@ test.describe("PR auto-detection", () => {
       },
     ]);
 
-    // --- Open the task to trigger on-demand sync (github.task_pr.sync) ---
+    // The backend poller discovers the PR and publishes the persisted task-PR update.
+    await prUpdated;
+    await expect
+      .poll(async () => (await apiClient.listTaskPRs(task.id)).some((pr) => pr.pr_number === 99), {
+        timeout: 10_000,
+        message: "Waiting for the detected PR association to be readable",
+      })
+      .toBe(true);
+
+    // --- Open the task after detection and verify the session surface ---
     await kanban.taskCardInColumn("Auto-Detect PR Task", doneStep.id).click();
     await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-
-    // The useTaskPR hook triggers github.task_pr.sync which calls TriggerPRSync.
-    // Since a PR watch was created during task start (ensureSessionPRWatch),
-    // TriggerPRSync finds the PR via FindPRByBranch and associates it.
-    await expect(session.prTopbarButton()).toBeVisible({ timeout: 60_000 });
+    await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
     await expect(session.prTopbarButton()).toContainText("#99");
   });
 
@@ -331,8 +346,20 @@ test.describe("PR external detection", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(120_000);
+
+    const repository = createEmptyRemoteRepository(backend.tmpDir, "external-pr");
+    const git = new GitHelper(repository.localPath, repository.gitEnv);
+    git.exec('git commit --allow-empty -m "init"');
+    git.pushMainWithRetry();
+    const githubRepo = await apiClient.createRepository(
+      seedData.workspaceId,
+      repository.localPath,
+      "main",
+      { name: "External PR repository" },
+    );
 
     // --- Seed workflow ---
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "PR Detection Workflow");
@@ -364,13 +391,13 @@ test.describe("PR external detection", () => {
       workflow_id: workflow.id,
       workflow_step_id: inboxStep.id,
       agent_profile_id: seedData.agentProfileId,
-      repositories: [{ repository_id: seedData.repositoryId, checkout_branch: "main" }],
+      repositories: [{ repository_id: githubRepo.id, checkout_branch: "main" }],
     });
     const helperTask = await apiClient.createTask(seedData.workspaceId, "Helper Task", {
       workflow_id: workflow.id,
       workflow_step_id: inboxStep.id,
       agent_profile_id: seedData.agentProfileId,
-      repositories: [{ repository_id: seedData.repositoryId, checkout_branch: "main" }],
+      repositories: [{ repository_id: githubRepo.id, checkout_branch: "main" }],
     });
 
     const kanban = new KanbanPage(testPage);

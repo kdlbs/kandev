@@ -85,6 +85,7 @@ describe("useTaskSubtasks", () => {
               makeTask({ id: "child-1", title: "Child 1", parentTaskId: "parent-1", position: 1 }),
               makeTask({
                 id: "child-3",
+                workflowId: "wf-2",
                 title: "Cross-workflow child",
                 parentTaskId: "parent-1",
                 position: 2,

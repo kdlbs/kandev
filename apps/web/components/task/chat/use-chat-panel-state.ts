@@ -249,6 +249,7 @@ export function useContextFiles(resolvedSessionId: string | null) {
   const removeContextFile = useContextFilesStore((s) => s.removeFile);
   const unpinFile = useContextFilesStore((s) => s.unpinFile);
   const clearEphemeral = useContextFilesStore((s) => s.clearEphemeral);
+  const consumeSubmittedEphemeral = useContextFilesStore((s) => s.consumeSubmittedEphemeral);
 
   useEffect(() => {
     if (resolvedSessionId) hydrateContextFiles(resolvedSessionId);
@@ -274,6 +275,7 @@ export function useContextFiles(resolvedSessionId: string | null) {
     removeContextFile,
     unpinFile,
     clearEphemeral,
+    consumeSubmittedEphemeral,
     handleToggleContextFile,
     handleAddContextFile,
   };
@@ -369,6 +371,9 @@ function useSessionData(
   const turns = useAppStore((state) =>
     resolvedSessionId ? state.turns.bySession[resolvedSessionId] : undefined,
   );
+  const activeTurnId = useAppStore((state) =>
+    resolvedSessionId ? (state.turns.activeBySession[resolvedSessionId] ?? null) : null,
+  );
   const currentTurnId = useMemo(
     () => clarificationTurnIdForSession(session?.state, turns),
     [session?.state, turns],
@@ -404,6 +409,8 @@ function useSessionData(
   } = useQueue(resolvedSessionId);
   return {
     messages,
+    lastAgentError,
+    activeTurnId,
     messagesLoading,
     isInitialMessagesLoading,
     historyRefreshPending,

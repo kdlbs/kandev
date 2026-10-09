@@ -15,6 +15,9 @@ func snapshotCheckout(source, destination string) error {
 	if err := os.MkdirAll(destination, 0700); err != nil {
 		return fmt.Errorf("create recovery snapshot: %w", err)
 	}
+	if err := os.Chmod(destination, 0700); err != nil {
+		return fmt.Errorf("secure recovery snapshot root: %w", err)
+	}
 	var directoryModes []recoveryDirectoryMode
 	err := filepath.WalkDir(source, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -55,12 +58,15 @@ func snapshotCheckoutEntry(source, destination, path string, entry os.DirEntry) 
 		if err := os.MkdirAll(target, 0700); err != nil {
 			return nil, err
 		}
-		return &recoveryDirectoryMode{path: target, mode: info.Mode().Perm()}, nil
+		if err := os.Chmod(target, 0700); err != nil {
+			return nil, err
+		}
+		return &recoveryDirectoryMode{path: target, sourcePath: path, sourceInfo: info}, nil
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		return nil, snapshotSymlink(path, target)
 	}
-	return nil, snapshotRegularFile(path, target, info.Mode().Perm())
+	return nil, snapshotRegularFile(path, target, info)
 }
 
 func snapshotSymlink(source, target string) error {
@@ -74,29 +80,86 @@ func snapshotSymlink(source, target string) error {
 	return os.Symlink(link, target)
 }
 
-func snapshotRegularFile(source, target string, mode os.FileMode) error {
+func snapshotRegularFile(source, target string, sourceInfo os.FileInfo) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return err
 	}
-	in, err := os.Open(source)
+	return copyRecoveryRegularFile(source, target, sourceInfo, false)
+}
+
+func copyRecoveryRegularFile(source, target string, sourceInfo os.FileInfo, replace bool) error {
+	in, err := openRecoverySourceFile(source)
 	if err != nil {
 		return err
 	}
-	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	openedSourceInfo, err := in.Stat()
 	if err != nil {
 		_ = in.Close()
 		return err
 	}
-	_, copyErr := io.Copy(out, in)
-	closeInputErr := in.Close()
-	syncErr := out.Sync()
-	closeOutputErr := out.Close()
-	for _, result := range []error{copyErr, closeInputErr, syncErr, closeOutputErr} {
-		if result != nil {
-			return result
+	if err := verifyRecoverySourceInfo(sourceInfo, openedSourceInfo); err != nil {
+		_ = in.Close()
+		return err
+	}
+	if replace {
+		if err := prepareRecoveryFileReplacement(target); err != nil {
+			_ = in.Close()
+			return err
 		}
 	}
-	return nil
+	out, err := createRecoveryFile(target)
+	if err != nil {
+		_ = in.Close()
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = in.Close()
+		_ = out.Close()
+		return err
+	}
+	currentSourceInfo, err := in.Stat()
+	if err != nil {
+		_ = in.Close()
+		_ = out.Close()
+		return err
+	}
+	if err := verifyRecoverySourceInfo(sourceInfo, currentSourceInfo); err != nil {
+		_ = in.Close()
+		_ = out.Close()
+		return err
+	}
+	if err := in.Close(); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := syncRecoveryContentBeforeAttributes(out.Sync, func() error {
+		return applyRecoveryFileAttributes(out, currentSourceInfo)
+	}); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+func syncRecoveryContentBeforeAttributes(syncContent, applyAttributes func() error) error {
+	if err := syncContent(); err != nil {
+		return err
+	}
+	return applyAttributes()
+}
+
+func prepareRecoveryFileReplacement(target string) error {
+	existing, err := os.Lstat(target)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !existing.Mode().IsRegular() {
+		return fmt.Errorf("recovery destination type changed before file restore: %q", target)
+	}
+	return os.Remove(target)
 }
 
 //nolint:cyclop // The manifest must record every supported filesystem entry explicitly.
@@ -156,18 +219,25 @@ func checkoutManifest(root string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sort.Strings(entries)
-	hash := sha256.Sum256([]byte(strings.Join(entries, "\n")))
-	return hex.EncodeToString(hash[:]), nil
+	return recoveryEntriesManifest(entries), nil
 }
 
-func restoreSnapshot(source, destination, expectedManifest string) error {
+func recoveryEntriesManifest(entries []string) string {
+	sort.Strings(entries)
+	hash := sha256.Sum256([]byte(strings.Join(entries, "\n")))
+	return hex.EncodeToString(hash[:])
+}
+
+func restoreSnapshot(original, source, destination, expectedManifest string) error {
 	current, err := checkoutManifest(source)
 	if err != nil {
 		return fmt.Errorf("manifest recovery snapshot before rematerialization: %w", err)
 	}
 	if current != expectedManifest {
 		return fmt.Errorf("recovery snapshot changed during rematerialization")
+	}
+	if err := verifyRecoveryRequiredIdentityTrees(original, source, ""); err != nil {
+		return err
 	}
 	if err := copySnapshotEntries(source, destination); err != nil {
 		return err
@@ -178,6 +248,9 @@ func restoreSnapshot(source, destination, expectedManifest string) error {
 	}
 	if current != expectedManifest {
 		return fmt.Errorf("recovery replacement does not match verified snapshot")
+	}
+	if err := verifyRecoveryRequiredIdentityTrees(original, source, destination); err != nil {
+		return err
 	}
 	current, err = checkoutManifest(source)
 	if err != nil {
@@ -230,7 +303,7 @@ func copySnapshotEntries(source, destination string) error {
 				return relErr
 			}
 			directoryModes = append(directoryModes, recoveryDirectoryMode{
-				path: filepath.Join(destination, rel), mode: info.Mode().Perm(),
+				path: filepath.Join(destination, rel), sourcePath: path, sourceInfo: info,
 			})
 		}
 		return copySnapshotEntry(source, destination, path, entry)
@@ -242,13 +315,30 @@ func copySnapshotEntries(source, destination string) error {
 }
 
 type recoveryDirectoryMode struct {
-	path string
-	mode os.FileMode
+	path       string
+	sourcePath string
+	sourceInfo os.FileInfo
 }
 
 func applyRecoveryDirectoryModes(directories []recoveryDirectoryMode) error {
 	for i := len(directories) - 1; i >= 0; i-- {
-		if err := os.Chmod(directories[i].path, directories[i].mode); err != nil {
+		directory := directories[i]
+		currentSource, err := os.Lstat(directory.sourcePath)
+		if err != nil {
+			return err
+		}
+		if err := verifyRecoverySourceInfo(directory.sourceInfo, currentSource); err != nil {
+			return err
+		}
+		target, err := openRecoveryDirectory(directory.path)
+		if err != nil {
+			return err
+		}
+		if err := applyRecoveryFileAttributes(target, currentSource); err != nil {
+			_ = target.Close()
+			return err
+		}
+		if err := target.Close(); err != nil {
 			return err
 		}
 	}
@@ -445,41 +535,5 @@ func copySnapshotFile(source, target string, entry os.DirEntry) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return err
 	}
-	if existing, err := os.Lstat(target); err == nil {
-		if !existing.Mode().IsRegular() {
-			return fmt.Errorf("recovery destination type changed before file restore: %q", target)
-		}
-		if err := os.Remove(target); err != nil {
-			return err
-		}
-	} else if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
-	if err != nil {
-		return err
-	}
-	in, err := os.Open(source)
-	if err != nil {
-		_ = file.Close()
-		return err
-	}
-	_, copyErr := io.Copy(file, in)
-	closeInputErr := in.Close()
-	if copyErr != nil {
-		_ = file.Close()
-		return copyErr
-	}
-	if closeInputErr != nil {
-		_ = file.Close()
-		return closeInputErr
-	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	return os.Chmod(target, info.Mode().Perm())
+	return copyRecoveryRegularFile(source, target, info, true)
 }

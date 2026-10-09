@@ -5,6 +5,7 @@ created: 2026-05-14
 owners:
   - tbd
 ---
+
 # Homebrew Core Submission Requirements
 
 ## Overview
@@ -26,9 +27,13 @@ Kandev is currently installable via `brew install kdlbs/kandev/kandev` from the 
 - **AC-RELEASE-HOMEBREW-CORE-001.5:** Install the bundle under `libexec/bin` and expose one `bin/kandev` wrapper produced by `write_env_script`. The wrapper sets `KANDEV_BUNDLE_DIR=<libexec>` and `KANDEV_VERSION=<version>`.
 - **AC-RELEASE-HOMEBREW-CORE-001.6:** Use stable numeric tags for `livecheck`; prerelease and Nightly npm versions are not Homebrew channels.
 - **AC-RELEASE-HOMEBREW-CORE-001.7:** Keep `kdlbs/homebrew-kandev` as the upstream binary fast path alongside Homebrew Core's source-built bottles. The generated tap formula must set the Stable SemVer explicitly because platform archive names end in architecture tokens such as `x64`, and it must smoke-test its version, readiness endpoint, and embedded SPA. The shared release-bundle validator runs before those binary archives are published.
-- **AC-RELEASE-HOMEBREW-CORE-001.8:** Preserve all four remote `agentctl` helpers in custom-tap installations. The tap must use an exact-path Homebrew mismatched-binary audit allowlist rather than pruning helpers, so Docker and SSH targets can differ from the Homebrew host. Decision: [ADR-2026-08-05-homebrew-remote-helper-audit](../../../decisions/2026-08-05-homebrew-remote-helper-audit.md).
+- **AC-RELEASE-HOMEBREW-CORE-001.8 (historical):** Before the compact runtime distribution cutover, preserve all four remote `agentctl` helpers in custom-tap installations and use an exact-path Homebrew mismatched-binary audit allowlist. This behavior is superseded by [REQ-RELEASE-COMPACT-RUNTIME-003](compact-runtime-distribution.md) and [ADR-2026-09-23-compact-runtime-and-remote-helper-assets](../../../decisions/2026-09-23-compact-runtime-and-remote-helper-assets.md).
 
 ## Migrated source detail
+
+The custom-tap full-bundle statements below describe behavior before the
+compact runtime distribution cutover. Homebrew Core source builds remain
+governed by the other criteria in this file.
 
 ## Why
 
@@ -47,7 +52,7 @@ Kandev is currently installable via `brew install kdlbs/kandev/kandev` from the 
 - Install the bundle under `libexec/bin` and expose one `bin/kandev` wrapper produced by `write_env_script`. The wrapper sets `KANDEV_BUNDLE_DIR=<libexec>` and `KANDEV_VERSION=<version>`.
 - Use stable numeric tags for `livecheck`; prerelease and Nightly npm versions are not Homebrew channels.
 - Keep `kdlbs/homebrew-kandev` as the upstream binary fast path alongside Homebrew Core's source-built bottles. The generated tap formula must set the Stable SemVer explicitly because platform archive names end in architecture tokens such as `x64`, and it must smoke-test its version, readiness endpoint, and embedded SPA. The shared release-bundle validator runs before those binary archives are published.
-- Preserve all four remote `agentctl` helpers in custom-tap installations. The tap must use an exact-path Homebrew mismatched-binary audit allowlist rather than pruning helpers, so Docker and SSH targets can differ from the Homebrew host. Decision: [ADR-2026-08-05-homebrew-remote-helper-audit](../../../decisions/2026-08-05-homebrew-remote-helper-audit.md).
+- The custom tap consumes the Stable standard runtime archive and checks its release-bound remote-helper manifest. First use downloads only the selected verified helper; the `-full` command-line archive remains available for offline use.
 
 The runtime bundle contains exactly:
 
@@ -67,9 +72,9 @@ The Darwin arm64 helper must carry a Mach-O code signature so Apple Silicon can 
 - **GIVEN** the installed formula starts with an isolated home directory and loopback port, **WHEN** `brew test kandev` polls `GET /health`, **THEN** readiness returns `{"status":"ok"}` and `/` serves the embedded page containing `<title>Kandev</title>`.
 - **GIVEN** a new kandev release `vX.Y.Z` is tagged, **WHEN** Homebrew's auto-bump worker runs, **THEN** `livecheck` resolves the new tag from GitHub Releases and a bump PR is opened against the formula.
 - **GIVEN** a maintainer reviews the PR, **WHEN** they run `brew install --build-from-source kandev` locally, **THEN** the build completes without network or sandbox failures and `brew test kandev` passes.
-- **GIVEN** a Stable release updates `kdlbs/homebrew-kandev`, **WHEN** its platform archive is built and the tap formula is tested, **THEN** the archive contains the complete executable runtime and the installed launcher serves both `/health` and the embedded Kandev page.
+- **GIVEN** a Stable release updates `kdlbs/homebrew-kandev`, **WHEN** its standard platform archive is built and the tap formula is tested, **THEN** the archive contains the host executables and a standard remote-helper manifest, and the installed launcher serves both `/health` and the embedded Kandev page.
 - **GIVEN** a Stable release updates `kdlbs/homebrew-kandev`, **WHEN** Homebrew evaluates a platform archive URL ending in `x64` or `arm64`, **THEN** the generated formula's explicit version keeps the Cellar path and `version` value at `X.Y.Z` rather than the architecture suffix.
-- **GIVEN** a tap archive contains remote helpers for CPU architectures other than the Homebrew host, **WHEN** Homebrew audits the installed formula on macOS or Linux, **THEN** only the four declared remote-helper paths are exempted and the complete runtime remains installed.
+- **Historical before compact cutover:** a tap archive containing foreign remote helpers used an exact-path audit exception so Homebrew could install the complete runtime.
 
 ## Out of scope
 

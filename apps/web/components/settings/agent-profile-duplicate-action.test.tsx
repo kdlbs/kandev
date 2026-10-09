@@ -1,7 +1,10 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Agent, AgentProfile } from "@/lib/types/http";
-import { useProfileDuplicateAction } from "./agent-profile-duplicate-action";
+import {
+  resolveProfileEditorInvalidReason,
+  useProfileDuplicateAction,
+} from "./agent-profile-duplicate-action";
 
 type ToastArgs = {
   title?: string;
@@ -15,6 +18,8 @@ const cancelPendingNavigation = vi.fn<() => void>();
 const routerPush = vi.fn<(href: string) => void>();
 const toast = vi.fn<(args: ToastArgs) => void>();
 const setState = vi.fn<() => void>();
+const MISSING_NAME_REASON = "missing name";
+const BAD_PROVIDER_REASON = "bad provider";
 
 const hoisted = vi.hoisted(() => ({
   coordinatorInvalidReason: undefined as string | undefined,
@@ -39,6 +44,58 @@ vi.mock("@/lib/routing/navigation-guard", () => ({
 vi.mock("@/components/settings/agent-profile-page-state", () => ({
   errorMessage: (error: unknown) => (error instanceof Error ? error.message : String(error)),
 }));
+
+describe("resolveProfileEditorInvalidReason", () => {
+  const translate = (key: string) => key;
+
+  it("prioritizes unavailable native profiles and external conflicts", () => {
+    expect(
+      resolveProfileEditorInvalidReason(
+        {
+          nativeCodexUnavailable: true,
+          hasExternalConflict: true,
+          profileInvalidReason: MISSING_NAME_REASON,
+          providerInvalidReason: BAD_PROVIDER_REASON,
+        },
+        translate,
+      ),
+    ).toBe("agents:nativeCodexUnavailable");
+    expect(
+      resolveProfileEditorInvalidReason(
+        {
+          nativeCodexUnavailable: false,
+          hasExternalConflict: true,
+          profileInvalidReason: MISSING_NAME_REASON,
+        },
+        translate,
+      ),
+    ).toBe("agents:profileExternalChangeInvalidReason");
+  });
+
+  it("uses the first profile or provider validation reason", () => {
+    expect(
+      resolveProfileEditorInvalidReason(
+        {
+          nativeCodexUnavailable: false,
+          hasExternalConflict: false,
+          profileInvalidReason: MISSING_NAME_REASON,
+          providerInvalidReason: BAD_PROVIDER_REASON,
+        },
+        translate,
+      ),
+    ).toBe(MISSING_NAME_REASON);
+    expect(
+      resolveProfileEditorInvalidReason(
+        {
+          nativeCodexUnavailable: false,
+          hasExternalConflict: false,
+          providerInvalidReason: BAD_PROVIDER_REASON,
+        },
+        translate,
+      ),
+    ).toBe(BAD_PROVIDER_REASON);
+  });
+});
 
 /** Builds an Agent fixture for the duplicate-action harness. */
 function agent(): Agent {

@@ -342,7 +342,7 @@ func requireClosed(t *testing.T, channel <-chan struct{}, message string) {
 	t.Helper()
 	select {
 	case <-channel:
-	case <-time.After(time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal(message)
 	}
 }

@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/hostutility"
@@ -29,6 +31,7 @@ import (
 	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -94,6 +97,7 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 	agentSettingsController.SetDynamicAgentRoutingEnabled(cfg.Features.DynamicAgentRouting)
 	agentSettingsController.SetSecretStore(userSecretStore)
 	agentSettingsController.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
+	agentSettingsController.SetRuntimeAutoUpdateStore(managedruntime.NewAutoUpdateStore(repos.SystemSettings))
 
 	core, err := initCoreTaskServices(ctx, cfg, repos, dbPool, eventBus, agentRegistry, storeTracker, log)
 	if err != nil {
@@ -116,6 +120,11 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 	pluginsSvc := integrations.pluginsSvc
 
 	services := assembleServices(managedRuntimeSelections, core, providers, integrations)
+	if services.Plugins != nil {
+		services.Plugins.SetSourceIssueController(pluginSourceIssueController{
+			tasks: services.Task, jira: services.Jira, linear: services.Linear,
+		})
+	}
 	mentionProviders := builtinMentionProviders(services, repos.Task)
 	reserveBuiltinMentionIdentities(pluginsSvc, mentionProviders)
 	mentionComponents, err := newMentionComponents(
@@ -167,6 +176,7 @@ func assembleServices(
 		Canvas:                   integrations.canvasSvc,
 		CanvasDistribution:       integrations.canvasDistributionSvc,
 		GitCredentials:           integrations.gitCredentialBroker,
+		Coordinator:              integrations.coordinatorSvc,
 		// Office is constructed later in initOfficeServices once all
 		// of its dependencies (config loader, task integrations, etc.) are available.
 		Office: nil,
@@ -205,6 +215,7 @@ func initCoreTaskServices(
 	userSvc := userservice.NewService(repos.User, eventBus, log)
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)
 	promptSvc := promptservice.NewService(repos.Prompts)
+	promptSvc.SetEventBus(eventBus, log)
 	utilitySvc := utilityservice.NewService(repos.Utility)
 	utilitySvc.SetProfileResolver(profilebinding.New(repos.AgentSettings, func(agentID string) bool {
 		if agentID == agents.DynamicAgentID {
@@ -225,31 +236,33 @@ func initCoreTaskServices(
 	}
 	taskSvc := taskservice.NewService(
 		taskservice.Repos{
-			Workspaces:        repos.Task,
-			Tasks:             repos.Task,
-			TaskRepos:         repos.Task,
-			WorkspaceFolders:  repos.Task,
-			Workflows:         repos.Task,
-			Messages:          repos.Task,
-			Attachments:       repos.Task,
-			Turns:             repos.Task,
-			Sessions:          repos.Task,
-			GitSnapshots:      repos.Task,
-			RepoEntities:      repos.Task,
-			DiscoveryRoots:    repos.Task,
-			RepositorySets:    repos.Task,
-			BranchPolicies:    repos.Task,
-			RepositoryCleanup: repos.Task,
-			Executors:         repos.Task,
-			Environments:      repos.Task,
-			TaskEnvironments:  repos.Task,
-			Reviews:           repos.Task,
-			ResourceCleanups:  repos.Task,
-			StatusSummaries:   repos.Task,
-			TaskActivity:      repos.Task,
-			SubagentContexts:  repos.Task,
-			Usage:             repos.Task,
-			AgentProfiles:     repos.AgentSettings,
+			Workspaces:         repos.Task,
+			Tasks:              repos.Task,
+			TaskRepos:          repos.Task,
+			WorkspaceFolders:   repos.Task,
+			Workflows:          repos.Task,
+			Messages:           repos.Task,
+			Attachments:        repos.Task,
+			Turns:              repos.Task,
+			Sessions:           repos.Task,
+			GitSnapshots:       repos.Task,
+			RepoEntities:       repos.Task,
+			DiscoveryRoots:     repos.Task,
+			RepositorySets:     repos.Task,
+			BranchPolicies:     repos.Task,
+			RepositoryCleanup:  repos.Task,
+			Executors:          repos.Task,
+			Environments:       repos.Task,
+			TaskEnvironments:   repos.Task,
+			Reviews:            repos.Task,
+			ResourceCleanups:   repos.Task,
+			StatusSummaries:    repos.Task,
+			TaskActivity:       repos.Task,
+			SubagentContexts:   repos.Task,
+			Usage:              repos.Task,
+			BackgroundWork:     repos.Task,
+			RecoveryOperations: repos.Task,
+			AgentProfiles:      repos.AgentSettings,
 			AgentProfileExecutorValidator: taskAgentExecutorCompatibilityValidator{
 				profiles:        repos.AgentSettings,
 				agentRegistry:   agentRegistry,
@@ -265,6 +278,9 @@ func initCoreTaskServices(
 			DesktopRuntime:    strings.EqualFold(strings.TrimSpace(os.Getenv("KANDEV_DESKTOP_RUNTIME")), "true"),
 		},
 	)
+	if err := taskSvc.ReconcileWorkspaceRecoveryOperations(ctx); err != nil {
+		return nil, fmt.Errorf("reconcile managed workspace recovery operations: %w", err)
+	}
 	wireSidebarWorkspaceAccess(userSvc, taskSvc)
 	taskSvc.SetPendingActionProjectionEpoch(pendingActionProjectionEpoch)
 	// Workspace membership needs to resolve colleague names and reject
@@ -309,6 +325,10 @@ func initManagedRuntimeAndDiscovery(
 		return nil, nil, fmt.Errorf("initialize managed runtime settings: required store is unavailable")
 	}
 	managedRuntimeSelections := managedruntime.NewStore(managedRuntimeSettings)
+	if err := bootstrapOpenCodeSelection(ctx, managedRuntimeSelections, repos, agentRegistry, log); err != nil {
+		return nil, nil, fmt.Errorf("OpenCode runtime selection bootstrap: %w", err)
+	}
+	agentRegistry.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
 	if err := reconcileManagedRuntimeDefaults(ctx, managedRuntimeSelections, agentRegistry, log); err != nil {
 		return nil, nil, fmt.Errorf("reconcile managed runtime defaults: %w", err)
 	}
@@ -403,6 +423,7 @@ type integrationWiring struct {
 	gitCredentialBroker   *gitcredentials.Broker
 	shareHTTP             *share.HTTPHandlers
 	automationComponents  *automation.Components
+	coordinatorSvc        *coordinator.Service
 }
 
 func initIntegrationWiring(
@@ -445,11 +466,21 @@ func initIntegrationWiring(
 	if err != nil {
 		return nil, err
 	}
+	if pluginsSvc != nil && automationComponents != nil {
+		automationComponents.Service.SetManagedConversationDestinationResolver(pluginsSvc)
+		automationComponents.Service.SetManagedConversationAutomationDelivery(managedConversationAutomationDeliveryAdapter{plugins: pluginsSvc})
+		pluginsSvc.SetManagedConversationSchedules(managedConversationScheduleAdapter{service: automationComponents.Service})
+	}
+	coordinatorSvc, err := initCoordinatorWiring(ctx, dbPool, storeTracker, taskSvc, workflowSvc, repos.AgentSettings, cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, log)
+	if err != nil {
+		return nil, err
+	}
 	wiring := &integrationWiring{
 		pluginsSvc: pluginsSvc, pluginsCleanup: pluginsCleanup, agentConversationsSvc: agentConversationsSvc,
 		canvasSvc: canvasSvc, canvasDistributionSvc: canvasDistributionSvc,
 		gitCredentialBroker: gitCredentialBroker, shareHTTP: shareHTTP,
 		automationComponents: automationComponents,
+		coordinatorSvc:       coordinatorSvc,
 	}
 	cleanupTransferred = true
 	return wiring, nil
@@ -621,7 +652,9 @@ func initPluginsWiring(
 		// caller; without it the check stays a no-op. An un-stamped local
 		// build passes "dev", which the service treats as "don't enforce".
 		pluginsSvc.SetKandevVersion(version)
+		taskSvc.SetExecutorProviderCatalog(pluginsSvc)
 		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
+		pluginsSvc.SetWorkspaceAdminWriter(pluginsWorkspaceAdminAdapter{tasks: taskSvc, workflows: workflowSvc, agents: agentSettingsController})
 		// Wire the managed agent conversation service for the agent_conversation
 		// Host capability. Wired here (not at boot time in main.go) because the
 		// task service, shared repository, agent settings repository, and
@@ -631,6 +664,7 @@ func initPluginsWiring(
 		agentConversationsSvc = NewAgentConversationService(repos.Task, repos.AgentSettings, pluginsSvc.StateStore(), eventBus)
 		agentConversationsSvc.SetTaskDeleter(taskSvc)
 		pluginsSvc.SetAgentConversations(agentConversationsSvc)
+		pluginsSvc.SetManagedAgentConversations(agentConversationsSvc)
 		// Separate from SetDataSources: githubSvc is optional (nil when github
 		// is unconfigured), and a nil source leaves tasks with no PullRequests
 		// rather than failing every task read.
@@ -1819,6 +1853,7 @@ type pluginTaskWriteService interface {
 	UpdateTask(ctx context.Context, id string, req *taskservice.UpdateTaskRequest) (*taskmodels.Task, error)
 	DeleteTask(ctx context.Context, id string) error
 	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
+	UpdateTaskExact(ctx context.Context, id string, req taskservice.ExactTaskUpdateRequest) (*taskservice.ExactTaskUpdateResult, error)
 	MoveTaskWithOptions(ctx context.Context, id, workflowID, workflowStepID string, position int, opts taskservice.MoveTaskOptions) (*taskservice.MoveTaskResult, error)
 }
 
@@ -1827,13 +1862,43 @@ type pluginsTaskWriterAdapter struct {
 }
 
 func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.TaskCreateInput) (*taskmodels.Task, error) {
+	created, _, err := a.createTask(ctx, in, "")
+	return created, err
+}
+
+func (a pluginsTaskWriterAdapter) CreateTaskExact(ctx context.Context, in plugins.ExactTaskCreateInput) (*taskmodels.Task, bool, error) {
+	externalID, err := taskservice.NormalizeExternalID(in.ExternalID)
+	if err != nil || externalID == "" {
+		return nil, false, status.Error(codes.InvalidArgument, "external_id is required and must be valid")
+	}
+	created, alreadyApplied, err := a.createTask(ctx, in.Task, externalID)
+	if err != nil || alreadyApplied {
+		return created, alreadyApplied, err
+	}
+	settler, ok := a.svc.(interface {
+		SettleExternalID(context.Context, string, string) (bool, *taskmodels.Task, error)
+	})
+	if !ok {
+		return nil, false, errors.New("task source identity settlement is unavailable")
+	}
+	settled, _, err := settler.SettleExternalID(ctx, created.ID, externalID)
+	if err != nil {
+		return nil, false, fmt.Errorf("settle task source identity: %w", err)
+	}
+	if !settled {
+		return nil, false, errors.New("task source identity was lost before settlement")
+	}
+	return created, false, nil
+}
+
+func (a pluginsTaskWriterAdapter) createTask(ctx context.Context, in plugins.TaskCreateInput, externalID string) (*taskmodels.Task, bool, error) {
 	metadata, err := pluginTaskMetadata(in)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	repositories, err := pluginTaskRepositoryInputs(in.Repositories)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    in.WorkspaceID,
@@ -1847,11 +1912,12 @@ func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.Tas
 		PlanMode:       in.PlanMode,
 		Priority:       in.Priority,
 		StartAgent:     in.StartAgent,
+		ExternalID:     externalID,
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return result.Task, nil
+	return result.Task, result.Outcome != taskservice.CreateTaskOutcomeCreated, nil
 }
 
 func (a pluginsTaskWriterAdapter) DeleteTask(ctx context.Context, id string) error {
@@ -1986,7 +2052,71 @@ func (a pluginsTaskWriterAdapter) UpdateTask(ctx context.Context, in plugins.Tas
 		}
 		req.State = &state
 	}
-	return a.svc.UpdateTask(ctx, in.ID, req)
+	task, err := a.svc.GetTask(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	claimFence, err := a.legacyTaskManagementFence(ctx, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	operationID, payloadDigest, err := pluginLegacyCommandIdentity("task-update", in)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid task update")
+	}
+	updated, err := a.svc.UpdateTaskExact(ctx, in.ID, taskservice.ExactTaskUpdateRequest{
+		WorkspaceID: task.WorkspaceID, ExpectedResourceVersion: task.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		OperationID: operationID, PayloadDigest: payloadDigest,
+		ClaimFence: claimFence,
+		Title:      req.Title, Description: req.Description, State: req.State, Priority: req.Priority,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return updated.Task, nil
+}
+
+func (a pluginsTaskWriterAdapter) UpdateTaskExact(ctx context.Context, in plugins.ExactTaskUpdateInput) (*taskmodels.Task, bool, error) {
+	if in.Title != nil {
+		if err := taskservice.ValidateTaskTitle(*in.Title); err != nil {
+			return nil, false, status.Error(codes.InvalidArgument, "invalid task title")
+		}
+	}
+	if in.Priority != nil {
+		if err := taskservice.ValidateTaskPriority(*in.Priority); err != nil {
+			return nil, false, status.Error(codes.InvalidArgument, "invalid task priority")
+		}
+	}
+	exactService, ok := a.svc.(interface {
+		UpdateTaskExact(context.Context, string, taskservice.ExactTaskUpdateRequest) (*taskservice.ExactTaskUpdateResult, error)
+	})
+	if !ok {
+		return nil, false, errors.New("exact task update service is unavailable")
+	}
+	request := taskservice.ExactTaskUpdateRequest{
+		WorkspaceID:             in.WorkspaceID,
+		ExpectedResourceVersion: in.ExpectedResourceVersion,
+		OperationID:             in.OperationID,
+		PayloadDigest:           in.PayloadDigest,
+		Title:                   in.Title,
+		Description:             in.Description,
+		Priority:                in.Priority,
+		Labels:                  in.Labels,
+		AssigneeUserID:          in.AssigneeUserID,
+		ClaimFence:              in.ClaimFence,
+	}
+	if in.State != nil {
+		state := v1.TaskState(*in.State)
+		if !validPluginTaskState(state) {
+			return nil, false, status.Errorf(codes.InvalidArgument, "invalid task state %q", *in.State)
+		}
+		request.State = &state
+	}
+	result, err := exactService.UpdateTaskExact(ctx, in.TaskID, request)
+	if err != nil {
+		return nil, false, err
+	}
+	return result.Task, result.AlreadyApplied, nil
 }
 
 func (a pluginsTaskWriterAdapter) MoveTask(ctx context.Context, in plugins.TaskMoveInput) (*plugins.TaskMoveResult, error) {
@@ -1994,10 +2124,26 @@ func (a pluginsTaskWriterAdapter) MoveTask(ctx context.Context, in plugins.TaskM
 	if err != nil {
 		return nil, err
 	}
+	task, err := a.svc.GetTask(ctx, in.TaskID)
+	if err != nil {
+		return nil, classifyPluginMoveError(err)
+	}
+	claimFence, err := a.legacyTaskManagementFence(ctx, in.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	operationID, payloadDigest, err := pluginLegacyCommandIdentity("task-move", in)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid move_task request")
+	}
 
 	opts := taskservice.MoveTaskOptions{
 		StepHistoryTrigger: wfmodels.StepTransitionTriggerPluginMove,
 		StepHistoryActor:   wfmodels.StepTransitionActorSystem,
+		ExactOperation: &taskservice.ExactTaskMoveOperation{
+			WorkspaceID: task.WorkspaceID, ExpectedResourceVersion: task.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			OperationID: operationID, PayloadDigest: payloadDigest, ClaimFence: claimFence,
+		},
 	}
 	if in.WorkflowID == nil {
 		// workflowID above was inherited from a separate GetTask pre-read
@@ -2028,6 +2174,162 @@ func (a pluginsTaskWriterAdapter) MoveTask(ctx context.Context, in plugins.TaskM
 		Transitioned: result.Transitioned,
 		FromStepID:   result.FromStepID,
 	}, nil
+}
+
+func (a pluginsTaskWriterAdapter) legacyTaskManagementFence(ctx context.Context, taskID string) (taskmodels.TaskManagementClaimFence, error) {
+	reader, ok := a.svc.(interface {
+		GetTaskManagementClaim(context.Context, string) (*taskmodels.TaskManagementClaim, error)
+	})
+	if !ok {
+		return taskmodels.TaskManagementClaimFence{}, status.Error(codes.Unavailable, "task management claim state is unavailable")
+	}
+	claim, err := reader.GetTaskManagementClaim(ctx, taskID)
+	if err != nil {
+		return taskmodels.TaskManagementClaimFence{}, status.Error(codes.Unavailable, "task management claim state is unavailable")
+	}
+	if claim == nil {
+		return taskmodels.TaskManagementClaimFence{}, nil
+	}
+	if claim.OwnerKind != "" {
+		return taskmodels.TaskManagementClaimFence{}, status.Error(codes.Aborted, "task is managed by another owner")
+	}
+	return taskmodels.TaskManagementClaimFence{Generation: claim.Generation}, nil
+}
+
+func pluginLegacyCommandIdentity(method string, input any) (string, string, error) {
+	payload, err := json.Marshal(input)
+	if err != nil {
+		return "", "", err
+	}
+	return uuid.NewString(), plugins.CanonicalApprovalDigest("legacy-plugin-command", method, string(payload)), nil
+}
+
+func (a pluginsTaskWriterAdapter) MoveTaskExact(ctx context.Context, in plugins.ExactTaskMoveInput) (*taskmodels.Task, bool, error) {
+	workflowID, err := a.resolvePluginMoveWorkflowID(ctx, in.Move)
+	if err != nil {
+		return nil, false, err
+	}
+	opts := taskservice.MoveTaskOptions{
+		StepHistoryTrigger: wfmodels.StepTransitionTriggerPluginMove,
+		StepHistoryActor:   wfmodels.StepTransitionActorSystem,
+		ExactOperation: &taskservice.ExactTaskMoveOperation{
+			WorkspaceID: in.WorkspaceID, ExpectedResourceVersion: in.ExpectedResourceVersion,
+			OperationID: in.OperationID, PayloadDigest: in.PayloadDigest, ClaimFence: in.ClaimFence,
+		},
+	}
+	if in.Move.WorkflowID == nil {
+		opts.ExpectedWorkflowID = &workflowID
+	}
+	alreadyApplied := false
+	opts.AlreadyApplied = &alreadyApplied
+	ctx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
+		Trigger: steptelemetry.TriggerPluginMove, ActorKind: steptelemetry.ActorIntegration,
+		ActorID: in.Move.Source,
+	})
+	result, err := a.svc.MoveTaskWithOptions(ctx, in.Move.TaskID, workflowID, in.Move.WorkflowStepID, int(in.Move.Position), opts)
+	if err != nil {
+		return nil, false, classifyPluginMoveError(err)
+	}
+	return result.Task, result.AlreadyApplied, nil
+}
+
+func (a pluginsTaskWriterAdapter) ArchiveTaskExact(ctx context.Context, in plugins.ExactTaskArchiveInput) (*taskmodels.Task, bool, error) {
+	exactService, ok := a.svc.(interface {
+		ArchiveTaskExact(context.Context, string, taskservice.ExactTaskArchiveRequest) (*taskservice.ExactTaskArchiveResult, error)
+	})
+	if !ok {
+		return nil, false, errors.New("exact task archive service is unavailable")
+	}
+	result, err := exactService.ArchiveTaskExact(ctx, in.TaskID, taskservice.ExactTaskArchiveRequest{
+		WorkspaceID: in.WorkspaceID, ExpectedResourceVersion: in.ExpectedResourceVersion,
+		OperationID: in.OperationID, PayloadDigest: in.PayloadDigest,
+		ClaimFence: in.ClaimFence,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return result.Task, result.AlreadyApplied, nil
+}
+
+func (a pluginsTaskWriterAdapter) ChangeTaskManagementClaim(
+	ctx context.Context,
+	taskID string,
+	change taskmodels.TaskManagementClaimChange,
+) (*taskmodels.TaskManagementClaim, error) {
+	claimService, ok := a.svc.(interface {
+		ChangeTaskManagementClaim(context.Context, string, taskmodels.TaskManagementClaimChange) (*taskmodels.TaskManagementClaim, error)
+	})
+	if !ok {
+		return nil, errors.New("task management claim service is unavailable")
+	}
+	return claimService.ChangeTaskManagementClaim(ctx, taskID, change)
+}
+
+func (a pluginsTaskWriterAdapter) SetTaskCompletionCriteriaExact(ctx context.Context, in plugins.ExactTaskCompletionCriteriaInput) (*taskmodels.TaskCompletionGateSnapshot, bool, error) {
+	exactService, ok := a.svc.(interface {
+		SetTaskCompletionCriteriaExact(context.Context, string, taskservice.ExactTaskCompletionCriteriaRequest) (*taskservice.ExactTaskCompletionGateResult, error)
+	})
+	if !ok {
+		return nil, false, errors.New("exact task completion criteria service is unavailable")
+	}
+	result, err := exactService.SetTaskCompletionCriteriaExact(ctx, in.TaskID, taskservice.ExactTaskCompletionCriteriaRequest{
+		WorkspaceID: in.WorkspaceID, ExpectedTaskResourceVersion: in.ExpectedTaskResourceVersion,
+		ExpectedRevision: in.ExpectedRevision, OperationID: in.OperationID, PayloadDigest: in.PayloadDigest,
+		ClaimFence: in.ClaimFence, ActorID: "plugin:" + in.ClaimFence.InstallationID, Criteria: in.Criteria,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return result.Snapshot, result.AlreadyApplied, nil
+}
+
+func (a pluginsTaskWriterAdapter) VerifyTaskCompletionCriterionExact(ctx context.Context, in plugins.ExactTaskCompletionEvidenceInput) (*taskmodels.TaskCompletionGateSnapshot, bool, error) {
+	exactService, ok := a.svc.(interface {
+		VerifyTaskCompletionCriterionExact(context.Context, string, taskservice.ExactTaskCompletionEvidenceRequest) (*taskservice.ExactTaskCompletionGateResult, error)
+	})
+	if !ok {
+		return nil, false, errors.New("exact task completion evidence service is unavailable")
+	}
+	result, err := exactService.VerifyTaskCompletionCriterionExact(ctx, in.TaskID, taskservice.ExactTaskCompletionEvidenceRequest{
+		WorkspaceID: in.WorkspaceID, ExpectedTaskResourceVersion: in.ExpectedTaskResourceVersion,
+		ExpectedRevision: in.ExpectedRevision, OperationID: in.OperationID, PayloadDigest: in.PayloadDigest,
+		ClaimFence: in.ClaimFence, ActorID: "plugin:" + in.ClaimFence.InstallationID,
+		CriterionID: in.CriterionID, Evidence: in.Evidence,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return result.Snapshot, result.AlreadyApplied, nil
+}
+
+func (a pluginsTaskWriterAdapter) AddTaskRelationExact(ctx context.Context, in plugins.ExactTaskRelationInput) (bool, error) {
+	exactService, ok := a.svc.(interface {
+		AddTaskRelationExact(context.Context, taskservice.ExactTaskRelationRequest) (bool, error)
+	})
+	if !ok {
+		return false, errors.New("exact task relation service is unavailable")
+	}
+	return exactService.AddTaskRelationExact(ctx, taskservice.ExactTaskRelationRequest{
+		WorkspaceID: in.WorkspaceID, TaskID: in.TaskID, RelatedTaskID: in.RelatedTaskID,
+		ExpectedTaskResourceVersion:    in.ExpectedTaskResourceVersion,
+		ExpectedRelatedResourceVersion: in.ExpectedRelatedResourceVersion,
+		ClaimFence:                     in.ClaimFence,
+	})
+}
+
+func (a pluginsTaskWriterAdapter) RemoveTaskRelationExact(ctx context.Context, in plugins.ExactTaskRelationInput) (bool, error) {
+	exactService, ok := a.svc.(interface {
+		RemoveTaskRelationExact(context.Context, taskservice.ExactTaskRelationRequest) (bool, error)
+	})
+	if !ok {
+		return false, errors.New("exact task relation service is unavailable")
+	}
+	return exactService.RemoveTaskRelationExact(ctx, taskservice.ExactTaskRelationRequest{
+		WorkspaceID: in.WorkspaceID, TaskID: in.TaskID, RelatedTaskID: in.RelatedTaskID,
+		ExpectedTaskResourceVersion:    in.ExpectedTaskResourceVersion,
+		ExpectedRelatedResourceVersion: in.ExpectedRelatedResourceVersion,
+		ClaimFence:                     in.ClaimFence,
+	})
 }
 
 // resolvePluginMoveWorkflowID resolves the effective workflow id for a plugin

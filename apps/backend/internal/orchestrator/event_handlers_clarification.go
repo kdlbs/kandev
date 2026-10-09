@@ -485,10 +485,16 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		data.SessionID,
 		&expectedTurnID,
 		guard.unlock,
-		guard.relock,
+		guard.relockWithContext,
 	)
 	if watchdogEntry != nil {
 		watchdogEntry.endRecoveryCancellation()
+	}
+	if !guard.locked {
+		s.logger.Warn("clarification recovery lost the cancellation guard; skipping recovery",
+			zap.String("session_id", data.SessionID),
+			zap.Error(cancelErr))
+		return false
 	}
 	if cancelErr != nil {
 		s.logger.Warn("cancel failed (agent likely dead), force-transitioning session state",
@@ -687,7 +693,7 @@ func (s *Service) PauseForClarificationInputWithOptions(
 		sessionID,
 		expectedTurn,
 		guard.unlock,
-		guard.relock,
+		guard.relockWithContext,
 	); errors.Is(err, ErrSendNowTurnChanged) {
 		s.logger.Debug("skipping stale clarification pause after successor turn",
 			zap.String("task_id", session.TaskID),
@@ -867,7 +873,10 @@ func (s *Service) runSilentCancellation(requestCtx context.Context, taskID, sess
 }
 
 func (s *Service) runSilentCancellationOwned(ctx context.Context, taskID, sessionID string, operation *cancelOperation) error {
-	guard := s.lockCancelInFlightGuard(sessionID)
+	guard, err := s.lockCancelInFlightGuardWithContext(ctx, sessionID)
+	if err != nil {
+		return err
+	}
 	defer guard.release()
 
 	// Capture only the execution/turn identity before yielding the guard. The
@@ -885,7 +894,7 @@ func (s *Service) runSilentCancellationOwned(ctx context.Context, taskID, sessio
 		return ErrSendNowTurnChanged
 	}
 	s.setCancellationIdentity(sessionID, operation, identity)
-	if err := s.cancelAgentWhileUnlocked(ctx, sessionID, operation, guard.unlock, guard.relock); err != nil {
+	if err := s.cancelAgentWhileUnlocked(ctx, sessionID, operation, guard.unlock, guard.relockWithContext); err != nil {
 		return err
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -935,7 +944,7 @@ func (s *Service) cancelAgentSilentWithGuard(
 	taskID string,
 	sessionID string,
 	unlockGuard func(),
-	relockGuard func(),
+	relockGuard func(context.Context) error,
 ) error {
 	return s.cancelAgentSilentExpectedWithGuard(
 		ctx, taskID, sessionID, nil, unlockGuard, relockGuard,
@@ -954,7 +963,8 @@ func (s *Service) cancelAgentSilentExpectedWithGuard(
 	ctx context.Context,
 	taskID, sessionID string,
 	expectedTurnID *string,
-	unlockGuard, relockGuard func(),
+	unlockGuard func(),
+	relockGuard func(context.Context) error,
 ) error {
 	if s.repo == nil {
 		return errors.New("cancel agent silently: repository is not configured")
@@ -971,8 +981,11 @@ func (s *Service) cancelAgentSilentExpectedWithGuard(
 		go s.runSilentCancellation(ctx, taskID, sessionID, operation)
 	}
 	unlockGuard()
-	defer relockGuard()
-	return operation.wait(ctx)
+	waitErr := operation.wait(ctx)
+	if relockErr := relockGuard(ctx); relockErr != nil {
+		return errors.Join(waitErr, fmt.Errorf("reacquire cancellation guard: %w", relockErr))
+	}
+	return waitErr
 }
 
 func (s *Service) cancelAgentSilentWithGuardAction(
@@ -980,7 +993,7 @@ func (s *Service) cancelAgentSilentWithGuardAction(
 	taskID string,
 	sessionID string,
 	unlockGuard func(),
-	relockGuard func(),
+	relockGuard func(context.Context) error,
 	action func(context.Context) (bool, error),
 ) (bool, error) {
 	return s.cancelAgentSilentWithGuardActionKind(
@@ -993,13 +1006,17 @@ func (s *Service) cancelAgentSilentWithGuardActionKind(
 	taskID string,
 	sessionID string,
 	unlockGuard func(),
-	relockGuard func(),
+	relockGuard func(context.Context) error,
 	action func(context.Context) (bool, error),
 	kind cancellationKind,
 ) (bool, error) {
 	if unlockGuard != nil {
 		unlockGuard()
-		defer relockGuard()
+		dispatched, actionErr := s.cancelAgentSilentActionWithKind(ctx, taskID, sessionID, action, kind)
+		if err := relockGuard(ctx); err != nil {
+			return dispatched, errors.Join(actionErr, fmt.Errorf("reacquire cancellation guard: %w", err))
+		}
+		return dispatched, actionErr
 	}
 	return s.cancelAgentSilentActionWithKind(ctx, taskID, sessionID, action, kind)
 }
@@ -1007,14 +1024,19 @@ func (s *Service) cancelAgentSilentWithGuardActionKind(
 func (s *Service) cancelAgentSilentWithGuardActionKindExclusive(
 	ctx context.Context,
 	taskID, sessionID string,
-	unlockGuard, relockGuard func(),
+	unlockGuard func(),
+	relockGuard func(context.Context) error,
 	action func(context.Context) (bool, error),
 	kind cancellationKind,
 	expectedTurnID string,
 ) (bool, error) {
 	if unlockGuard != nil {
 		unlockGuard()
-		defer relockGuard()
+		dispatched, actionErr := s.cancelAgentSilentActionWithKindExclusive(ctx, taskID, sessionID, action, kind, expectedTurnID)
+		if err := relockGuard(ctx); err != nil {
+			return dispatched, errors.Join(actionErr, fmt.Errorf("reacquire cancellation guard: %w", err))
+		}
+		return dispatched, actionErr
 	}
 	return s.cancelAgentSilentActionWithKindExclusive(ctx, taskID, sessionID, action, kind, expectedTurnID)
 }
@@ -1028,7 +1050,8 @@ func (s *Service) cancelAgentSilentWithGuardActionKindExclusive(
 func (s *Service) cancelAgentSilentWithGuardActionKindExclusiveConflict(
 	ctx context.Context,
 	taskID, sessionID string,
-	unlockGuard, relockGuard func(),
+	unlockGuard func(),
+	relockGuard func(context.Context) error,
 	action func(context.Context) (bool, error),
 	kind cancellationKind,
 	expectedTurnID string,
@@ -1042,16 +1065,18 @@ func (s *Service) cancelAgentSilentWithGuardActionKindExclusiveConflict(
 	}
 	if unlockGuard != nil {
 		unlockGuard()
-		defer relockGuard()
 	}
-	if err := operation.wait(ctx); err != nil {
-		return operation, false, err
+	waitErr := operation.wait(ctx)
+	var dispatched bool
+	if waitErr == nil && registered != nil {
+		dispatched, waitErr = registered.wait(ctx)
 	}
-	if registered == nil {
-		return operation, false, nil
+	if unlockGuard != nil {
+		if relockErr := relockGuard(ctx); relockErr != nil {
+			waitErr = errors.Join(waitErr, fmt.Errorf("reacquire cancellation guard: %w", relockErr))
+		}
 	}
-	dispatched, err := registered.wait(ctx)
-	return operation, dispatched, err
+	return operation, dispatched, waitErr
 }
 
 func (s *Service) logSilentCancelReconciled(taskID, sessionID string, err error) {

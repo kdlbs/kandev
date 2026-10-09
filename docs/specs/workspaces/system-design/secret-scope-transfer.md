@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: workspaces
 requirements:
   - REQ-WORKSPACES-SECRET-SCOPE-TRANSFER-001
@@ -17,7 +17,21 @@ This design preserves the technical source detail for `REQ-WORKSPACES-SECRET-SCO
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-WORKSPACES-SECRET-SCOPE-TRANSFER-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-WORKSPACES-SECRET-SCOPE-TRANSFER-001` | [Migrated source detail](#migrated-source-detail), [Destination-name lookup lifecycle](#destination-name-lookup-lifecycle) (AC 001.9-001.11) |
+
+## Destination-name lookup lifecycle
+
+`useSecretDestinationNames` in `apps/web/hooks/domains/settings/use-secret-destination-names.ts` owns a single hook-local reusable workspace result, not a collection-wide or cross-instance cache. Global names derive from `useAppStore(state => state.secrets.items)` and exclude workspace entries. Workspace reads use the actual `listSecrets` API with `scope: "workspace"`, `workspaceId`, and `cache: "no-store"`; `fetchJson` serializes `scope` and `workspace_id` on `GET /api/v1/secrets`. The public return shape remains `{ names, loaded, conflict(name) }`, with exact trimmed matching through `secretNameConflict`.
+
+A reusable cache marker represents a settled current read, not request admission. On admitting a different or explicitly refreshed workspace read, invalidate the previous marker and mark `workspaceLoaded` false. Publish returned names, or the existing empty-name failure fallback, only while that effect is current. Mark the key reusable and loaded only at accepted settlement. Cleanup fences the abandoned read's success, failure, and finalization; an abandoned read cannot recreate a reusable marker. Returning after cancellation must therefore admit a replacement read, including React StrictMode effect cleanup/setup. Completed success and completed failure fallback retain the existing same-session reuse behavior. This can use the existing ref and effect-local cancellation flag; no abort framework, extra global cache, or request manager is required.
+
+`refreshKey` invalidation remains the dialog's explicit new-session mechanism. Changing workspaces invalidates reuse of the former workspace; a later abandoned response cannot replace current names or mark the current read loaded. This preserves the existing one-entry behavior rather than adding a multi-workspace cache. No automatic retries run while a destination remains unchanged.
+
+`CopyMoveSecretDialog` is the immediate consumer. It starts with `destination=null`, auto-selects through `useDestinationOptions`, and feeds the selected scope/workspace and `destinationNamesKey` into this hook. For a workspace source the current picker allows workspace B, General, then B again without unmounting. The standalone initial-workspace StrictMode case does not imply every initial dialog mount fails. `CopyMoveDialogBody` already projects a loaded duplicate through `TargetNameField` (`aria-invalid`, associated localized conflict text) and disables the existing primary action via the dialog's conflict predicate. The names hook's `loaded` flag is not a separate submit requirement; a pending or failed best-effort lookup does not itself disable Copy/Move. Existing `useTransferSubmit` still handles `ApiError` 409 on the name field and other failures through the generic alert. Backend transactions remain authoritative.
+
+Verification uses the real hook, `StateProvider`/`createAppStore`, `listSecrets`/`fetchJson`, and rendered `CopyMoveSecretDialog`/`CopyMoveDialogBody`/Radix controls. Only fetch transport is deferred; API helpers, predicates, stores, hooks, and dialog markup are not substituted. Cover canceled roundtrip and stale settlement, current success/failure, completed reuse, session refresh, workspace isolation, and standalone StrictMode. The rendered principal regression resolves the replacement read with a duplicate and observes the existing invalid field, message, disabled action, then successful correction of the name. Detailed fixture ordering and delivery evidence live in the [retry plan](../../../plans/retry-cancelled-secret-destination-lookups/plan.md).
+
+The correction is pure shared state/data behavior within the existing dialog. Desktop and phone consume the same hook and conflict projection. Layout, navigation, touch targets, scrolling, and breakpoint policy are unchanged; focused production component tests satisfy the mobile-parity state/data exception. The existing mobile contract below remains owned by the original feature, outside this repair's scope.
 
 ## Migrated source detail
 

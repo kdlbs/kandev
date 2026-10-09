@@ -58,3 +58,25 @@ func TestApplyTaskEnvironmentToWorkspaceInfoProjectsEnvironmentAttachmentHandles
 		})
 	}
 }
+
+func TestApplyTaskEnvironmentToWorkspaceInfoReplacesRelativeSessionPath(t *testing.T) {
+	canonicalWorkspacePath := t.TempDir()
+	info := &lifecycle.WorkspaceInfo{WorkspacePath: "."}
+	applyTaskEnvironmentToWorkspaceInfo(info, &models.TaskEnvironment{
+		ID:            "environment-1",
+		WorkspacePath: canonicalWorkspacePath,
+	})
+	if info.WorkspacePath != canonicalWorkspacePath {
+		t.Fatalf("WorkspacePath = %q, want canonical environment path %q", info.WorkspacePath, canonicalWorkspacePath)
+	}
+
+	worktreePath := t.TempDir()
+	info.WorkspacePath = worktreePath
+	applyTaskEnvironmentToWorkspaceInfo(info, &models.TaskEnvironment{
+		ID:            "environment-1",
+		WorkspacePath: canonicalWorkspacePath,
+	})
+	if info.WorkspacePath != worktreePath {
+		t.Fatalf("WorkspacePath = %q, want selected absolute worktree path %q", info.WorkspacePath, worktreePath)
+	}
+}

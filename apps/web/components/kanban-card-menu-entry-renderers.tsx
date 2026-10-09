@@ -22,7 +22,11 @@ function ContextEntry({ entry }: { entry: KanbanCardMenuEntry }) {
   if (entry.kind === "submenu") {
     return (
       <ContextMenuSub>
-        <ContextMenuSubTrigger data-testid={entry.testId} disabled={entry.disabled}>
+        <ContextMenuSubTrigger
+          data-testid={entry.testId}
+          disabled={entry.disabled}
+          className="[@media(pointer:coarse)]:min-h-12"
+        >
           {entry.icon}
           {entry.label}
         </ContextMenuSubTrigger>
@@ -39,7 +43,12 @@ function ContextEntry({ entry }: { entry: KanbanCardMenuEntry }) {
     <ContextMenuItem
       data-testid={entry.testId}
       disabled={entry.disabled}
-      className={entry.destructive ? "text-destructive focus:text-destructive" : undefined}
+      className={[
+        "[@media(pointer:coarse)]:min-h-12",
+        entry.destructive ? "text-destructive focus:text-destructive" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       // Portal events bubble through the React tree, so stop them before the card's click handler.
       onClick={(event) => event.stopPropagation()}
       onSelect={() => {
@@ -62,6 +71,7 @@ function DropdownEntry({ entry }: { entry: KanbanCardMenuEntry }) {
         <DropdownMenuSubTrigger
           data-testid={entry.testId}
           disabled={entry.disabled}
+          className="[@media(pointer:coarse)]:min-h-12"
           onClick={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
         >
@@ -83,7 +93,12 @@ function DropdownEntry({ entry }: { entry: KanbanCardMenuEntry }) {
     <DropdownMenuItem
       data-testid={entry.testId}
       disabled={entry.disabled}
-      className={entry.destructive ? "text-destructive focus:text-destructive" : undefined}
+      className={[
+        "[@media(pointer:coarse)]:min-h-12",
+        entry.destructive ? "text-destructive focus:text-destructive" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       // Portal events bubble through the React tree, including to dnd-kit listeners.
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => event.stopPropagation()}

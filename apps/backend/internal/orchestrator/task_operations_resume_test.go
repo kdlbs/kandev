@@ -111,6 +111,39 @@ func TestGetTaskSessionStatus_AutoResumesNormalWaitingSession(t *testing.T) {
 	}
 }
 
+func TestGetTaskSessionStatus_ReportsIdleSuspensionWithoutResuming(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-idle-suspended", "session-idle-suspended", models.TaskSessionStateWaitingForInput)
+	now := time.Now().UTC()
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "session-idle-suspended", SessionID: "session-idle-suspended", TaskID: "task-idle-suspended",
+		AgentExecutionID: "execution-idle-suspended", Status: models.ExecutorRunningStatusStopped,
+		IdleSuspensionState: models.ExecutorIdleSuspensionSuspended,
+		Resumable:           true, ResumeToken: "same-conversation-token", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert suspended runtime: %v", err)
+	}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	resp, err := svc.GetTaskSessionStatus(ctx, "task-idle-suspended", "session-idle-suspended")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus: %v", err)
+	}
+	if !resp.IsIdleSuspended || !resp.NeedsResume || !resp.IsResumable || resp.ResumeReason != "idle_suspension" {
+		t.Fatalf("idle suspension status = %+v", resp)
+	}
+	running, err := repo.GetExecutorRunningBySessionID(ctx, "session-idle-suspended")
+	if err != nil {
+		t.Fatalf("load suspended runtime: %v", err)
+	}
+	if running.IdleSuspensionState != models.ExecutorIdleSuspensionSuspended || running.ResumeToken != "same-conversation-token" {
+		t.Fatalf("status inspection changed recovery ownership: state=%q token=%q", running.IdleSuspensionState, running.ResumeToken)
+	}
+}
+
 func TestGetTaskSessionStatus_RecoversSweptSessionWithoutExecutorRow(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -158,6 +191,7 @@ func TestAutoResumeEligibilityPreservesDeferredLaunchOwnership(t *testing.T) {
 
 	tests := []struct {
 		name          string
+		taskOrigin    string
 		taskMetadata  map[string]interface{}
 		sessionID     string
 		sessionMeta   map[string]interface{}
@@ -169,6 +203,12 @@ func TestAutoResumeEligibilityPreservesDeferredLaunchOwnership(t *testing.T) {
 			name:        "ordinary session is eligible",
 			sessionID:   "ordinary-session",
 			wantAllowed: true,
+		},
+		{
+			name:          "coordinator conversation task is message-only",
+			taskOrigin:    models.TaskOriginCoordinator,
+			sessionID:     "ordinary-session",
+			wantBlockCode: autoResumeBlockedCoordinatorMessageOnly,
 		},
 		{
 			name:      "durable parking does not block source session",
@@ -252,7 +292,7 @@ func TestAutoResumeEligibilityPreservesDeferredLaunchOwnership(t *testing.T) {
 	service := &Service{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			task := &models.Task{Metadata: tt.taskMetadata}
+			task := &models.Task{Origin: tt.taskOrigin, Metadata: tt.taskMetadata}
 			session := &models.TaskSession{
 				ID:        tt.sessionID,
 				Metadata:  tt.sessionMeta,

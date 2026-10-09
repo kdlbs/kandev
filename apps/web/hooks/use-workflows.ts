@@ -1,7 +1,7 @@
+import { reconcileTaskWorkflowCoverage } from "@/lib/state/slices/task-workflow-coverage";
 import { useCallback, useEffect, useRef } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { listWorkflows } from "@/lib/api";
-import type { WorkflowsState } from "@/lib/state/slices";
 import {
   classifyWorkspaceContextReadError,
   isCurrentWorkspaceContext,
@@ -16,8 +16,7 @@ import type { WorkspaceContextReadState } from "@/lib/state/slices/kanban/types"
 const WORKSPACE_CONTEXT_RETRY_DELAYS_MS = [2_000, 5_000] as const;
 const NOOP_REFRESH = () => {};
 
-type StoreWorkflow = WorkflowsState["items"][number];
-type SetWorkflows = (workflows: StoreWorkflow[]) => void;
+type SetWorkflows = AppState["setWorkflows"];
 
 function canRetryWorkspaceContext(
   readState: WorkspaceContextReadState | undefined,
@@ -80,11 +79,13 @@ function useWorkflowsFetchEffect(
   trackRecovery: boolean,
   retryVersion: number,
 ) {
+  const connectionStatus = useAppStore((state) => state.connection.status);
   useEffect(() => {
     if (!enabled || !workspaceId) return;
     let cancelled = false;
     const requestId = trackRecovery ? generateUUID() : undefined;
     const generation = store.getState().workspaceContextGeneration;
+    const overviewRead = store.getState().beginTaskOverviewRead?.();
     if (trackRecovery && typeof store.getState().setWorkspaceContextRead === "function") {
       store
         .getState()
@@ -117,7 +118,10 @@ function useWorkflowsFetchEffect(
           hidden: workflow.hidden,
           style: workflow.style,
         }));
-        setWorkflows(mapped);
+        setWorkflows(
+          mapped,
+          reconcileTaskWorkflowCoverage(state, response.task_workflow_coverage, overviewRead),
+        );
         if (trackRecovery && typeof state.setWorkspaceContextRead === "function") {
           state.setWorkspaceContextRead(
             "workflows",
@@ -153,9 +157,13 @@ function useWorkflowsFetchEffect(
           retryAfterMilliseconds(error),
           requestId,
         );
+      })
+      .finally(() => {
+        if (overviewRead) store.getState().finishTaskOverviewRead(overviewRead);
       });
     return () => {
       cancelled = true;
+      if (overviewRead) store.getState().finishTaskOverviewRead(overviewRead);
       if (
         trackRecovery &&
         requestId &&
@@ -181,6 +189,7 @@ function useWorkflowsFetchEffect(
     store,
     trackRecovery,
     workspaceId,
+    connectionStatus,
   ]);
 }
 

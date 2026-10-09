@@ -1,6 +1,7 @@
 "use client";
 
 import type { AgentProfileOption } from "@/lib/state/slices";
+import type { ComboboxOption } from "@/components/combobox";
 import type { AgentCompatState, DialogFormState } from "@/components/task-create-dialog-types";
 import { CreateEditSelectors } from "@/components/task-create-dialog-form-body";
 import { AgentSelector, ExecutorProfileSelector } from "@/components/task-create-dialog-selectors";
@@ -9,11 +10,7 @@ import { useAgentProfileOptions } from "@/components/task-create-dialog-options"
 type CreateModeSelectorsProps = {
   isTaskStarted: boolean;
   agentProfileOptions: ReturnType<typeof useAgentProfileOptions>;
-  executorProfileOptions: Array<{
-    value: string;
-    label: string;
-    renderLabel?: () => React.ReactNode;
-  }>;
+  executorProfileOptions: ComboboxOption[];
   agentProfiles: AgentProfileOption[];
   agentProfilesLoading: boolean;
   executorsLoading: boolean;

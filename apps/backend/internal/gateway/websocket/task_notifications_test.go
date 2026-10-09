@@ -226,7 +226,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	//
 	// Update this number when adding or removing event subscriptions in
 	// RegisterTaskNotifications — it is intentionally exact.
-	const wantSubscriptions = 77
+	const wantSubscriptions = 78
 	if got := len(b.subscriptions); got != wantSubscriptions {
 		t.Errorf("RegisterTaskNotifications created %d subscriptions, want %d — "+
 			"did an event get subscribed twice?", got, wantSubscriptions)
@@ -739,5 +739,25 @@ func TestTaskEventBroadcaster_ScopesSessionPendingActionToOwningWorkspace(t *tes
 	}
 	if clientReceived(foreign) {
 		t.Fatal("session pending-action event crossed the workspace boundary")
+	}
+}
+
+func TestTaskEventBroadcaster_PromptChangesInvalidateWithoutContent(t *testing.T) {
+	log := testLogger()
+	eventBus := bus.NewMemoryEventBus(log)
+	t.Cleanup(eventBus.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hub := NewHub(nil, log)
+	RegisterTaskNotifications(ctx, eventBus, hub, log)
+	require.NoError(t, eventBus.Publish(ctx, events.PromptsChanged, bus.NewEvent(events.PromptsChanged, "test", map[string]any{})))
+	select {
+	case message := <-hub.broadcast:
+		require.Equal(t, ws.ActionPromptsChanged, message.Action)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(message.Payload, &payload))
+		require.Empty(t, payload)
+	default:
+		t.Fatal("prompt change was not broadcast")
 	}
 }

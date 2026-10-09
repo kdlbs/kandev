@@ -177,3 +177,10 @@ ownership model.
 - [Sidebar Task Row Presentation](sidebar-task-row-presentation.md)
 - [PR Task Status Summary](pr-task-status-summary.md)
 - [Mobile Task Chrome](mobile-task-chrome.md)
+
+## Changes timeline extension
+
+The [bounded Changes design](bounded-changes-rendering.md) extends the same
+viewport and positive-measurement principles to Changes collections. Its
+[package](../../../plans/bounded-changes-rendering/plan.md) owns that delivery.
+The Files, sidebar, and plugin work in this document retains its existing scope.

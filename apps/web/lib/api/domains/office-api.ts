@@ -158,6 +158,11 @@ function normalizeAgent(raw: unknown): AgentProfile {
     icon: agent.icon as string | undefined,
     status: agent.status as AgentStatus,
     reportsTo: stringField(agent, "reportsTo", "reports_to"),
+    executionAgentProfileId: stringField(
+      agent,
+      "executionAgentProfileId",
+      "execution_agent_profile_id",
+    ),
     permissions: parseJSONField(agent.permissions, {}),
     budgetMonthlyCents: numberField(agent, "budgetMonthlyCents", "budget_monthly_cents", 0),
     maxConcurrentSessions: numberField(
@@ -201,7 +206,7 @@ function stringifyJSONField(value: unknown): string | undefined {
 function agentPayload(data: Partial<AgentProfile>): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     name: data.name,
-    agent_profile_id: data.agentProfileId,
+    agent_profile_id: data.executionAgentProfileId ?? data.agentProfileId,
     role: data.role,
     icon: data.icon,
     reports_to: data.reportsTo,

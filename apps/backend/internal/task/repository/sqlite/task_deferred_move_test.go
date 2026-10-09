@@ -100,6 +100,83 @@ func TestUpdateTaskWithWorkflowStepAdmissionForDeferredMovePersistsQueuedEntryOp
 	}
 }
 
+func TestExactWIPMoveDoesNotPromoteAfterManagementTransfer(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "workspace-claim-promotion")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "workflow-claim-promotion", WorkspaceID: "workspace-claim-promotion", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	seedCASWorkflowStep(t, repo, "workflow-claim-promotion", "step-claim-source", 0)
+	seedCASWorkflowStep(t, repo, "workflow-claim-promotion", "step-claim-target", 1)
+	occupant := &models.Task{
+		ID: "task-claim-promotion-occupant", WorkspaceID: "workspace-claim-promotion", WorkflowID: "workflow-claim-promotion",
+		WorkflowStepID: "step-claim-target", Title: "Occupant", WIPAdmitted: true,
+	}
+	if err := repo.CreateTask(ctx, occupant); err != nil {
+		t.Fatal(err)
+	}
+	candidate := &models.Task{
+		ID: "task-claim-promotion", WorkspaceID: "workspace-claim-promotion", WorkflowID: "workflow-claim-promotion",
+		WorkflowStepID: "step-claim-source", Title: "Candidate", WIPAdmitted: true,
+	}
+	if err := repo.CreateTask(ctx, candidate); err != nil {
+		t.Fatal(err)
+	}
+	version := candidate.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	claim, err := repo.ChangeTaskManagementClaim(ctx, models.TaskManagementClaimChange{
+		Action: models.TaskManagementClaimAcquire, TaskID: candidate.ID, WorkspaceID: candidate.WorkspaceID,
+		ExpectedTaskResourceVersion: version, InstallationID: "old-manager", InstanceKey: "instance-1", ActorID: "plugin:old-manager",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, replayed, err := repo.UpdateTaskWithWorkflowStepAdmissionExact(
+		ctx, candidate, "step-claim-source", "step-claim-target", 1, nil, false,
+		candidate.WorkflowID, candidate.WorkspaceID, version, "move-claim-1", "digest-claim-1",
+		models.TaskManagementClaimFence{InstallationID: "old-manager", InstanceKey: "instance-1", Generation: claim.Generation},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admitted || replayed {
+		t.Fatalf("move admitted=%t replayed=%t, want deferred first application", admitted, replayed)
+	}
+	queued, err := repo.GetTask(ctx, candidate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := queued.Metadata[models.MetaKeyTaskManagementDeferredFence]; !ok {
+		t.Fatalf("deferred task lacks manager fence: %+v", queued.Metadata)
+	}
+	if _, leaked := models.PublicTaskMetadata(queued.Metadata)[models.MetaKeyTaskManagementDeferredFence]; leaked {
+		t.Fatal("internal manager fence leaked in public task metadata")
+	}
+	_, err = repo.ChangeTaskManagementClaim(ctx, models.TaskManagementClaimChange{
+		Action: models.TaskManagementClaimTransfer, TaskID: queued.ID, WorkspaceID: queued.WorkspaceID,
+		ExpectedTaskResourceVersion:  queued.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		ExpectedClaimResourceVersion: claim.ResourceVersion,
+		OwnerKind:                    "human", OwnerActorID: "user-1", ActorID: "user-1", Reason: "take over queued move",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	promoted, err := repo.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, queued, "step-claim-target", "step-claim-target", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if promoted {
+		t.Fatal("old manager's queued move promoted after ownership transfer")
+	}
+	stillQueued, err := repo.GetTask(ctx, candidate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stillQueued.WIPAdmitted || stillQueued.QueuedForStepID != "step-claim-target" {
+		t.Fatalf("stale deferred move changed task placement: %+v", stillQueued)
+	}
+}
+
 func TestUpdateTaskWithWorkflowStepAdmissionForDeferredMoveRejectsReplacementSession(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

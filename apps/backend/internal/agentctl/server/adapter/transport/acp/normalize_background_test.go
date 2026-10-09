@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 // TestNormalizeExecute_BackgroundFlag covers the two ways an execute/bash tool
@@ -77,4 +79,42 @@ func TestUpdateShellExecInput_ForegroundUpdateDoesNotClearBackground(t *testing.
 	// A later update with no background signal must leave Background:true.
 	n.UpdatePayloadInput(payload, map[string]any{"cwd": "/repo"}, nil)
 	require.True(t, payload.ShellExec().Background, "a later foreground update must not clear an established background flag")
+}
+
+// TestACPBackgroundWorkObservationOnly verifies that ACP background work recognition
+// produces normalized observation payloads with proper kind, work ID, and detached state.
+func TestACPBackgroundWorkObservationOnly(t *testing.T) {
+	n := NewNormalizer("claude-acp")
+
+	// Background shell
+	shellPayload := n.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": "make test", "run_in_background": true},
+	})
+	require.NotNil(t, shellPayload.ShellExec())
+	require.True(t, shellPayload.ShellExec().Background)
+	shellPayload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "", true, false)
+	bw := shellPayload.BackgroundWork()
+	require.NotNil(t, bw)
+	require.Equal(t, streams.BackgroundWorkKindShell, bw.Kind)
+	require.True(t, bw.Detached)
+	require.False(t, bw.Ended)
+
+	// Subagent task
+	subagentPayload := n.NormalizeToolCall("task", map[string]any{
+		"meta": map[string]any{
+			"claudeCode": map[string]any{
+				"toolName": "Agent",
+			},
+		},
+		"raw_input": map[string]any{"description": "run analysis", "prompt": "analyze code", "subagent_type": "explore"},
+	})
+	require.NotNil(t, subagentPayload.SubagentTask())
+	subagentPayload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindSubagent, "agent-123", true, false)
+	bwSub := subagentPayload.BackgroundWork()
+	require.NotNil(t, bwSub)
+	require.Equal(t, streams.BackgroundWorkKindSubagent, bwSub.Kind)
+	require.Equal(t, "agent-123", bwSub.WorkID)
+	require.True(t, bwSub.Detached)
+	require.False(t, bwSub.Ended)
 }

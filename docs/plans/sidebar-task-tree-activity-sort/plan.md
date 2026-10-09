@@ -79,3 +79,9 @@ Task 01 is complete. The focused unit suite passed (3 files, 83 tests), frontend
 - A child excluded by filtering must not influence its former parent's key. The resolver must consume the filtered parent-child map, not the original task list.
 - The parent row's own time may appear older than its position. Keep that established row meaning and prove the child's activity explains the tree's placement.
 - The phone task drawer must use each task's activity time for both Last activity sorting and row display, with task-local fallbacks when the summary field is absent.
+
+## Subsequent archive browsing package
+
+[Archived sidebar loading](../archived-sidebar-loading/plan.md) proposes bounded archive pages
+and preserves the view semantics established here. This completed package remains historical
+evidence. Its recorded results do not validate the subsequent repair.

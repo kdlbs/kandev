@@ -21,7 +21,7 @@ and task-owned deferred record. It does not replace either queue or change WIP a
 
 | Requirement | Sections |
 | --- | --- |
-| REQ-TASKS-QUEUED-SESSION-OWNERSHIP-001 | Inspection intent; Conversation recovery and workflow stop history |
+| REQ-TASKS-QUEUED-SESSION-OWNERSHIP-001 | Inspection intent; Conversation recovery and workflow stop history; Recovery metadata and prompt turns |
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-002 | Deferred entry ownership; Task reconciliation |
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-003 | Queue projection; Desktop and mobile surfaces; Failure and observability |
 | REQ-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001 | Replay and reconciliation locking |
@@ -130,6 +130,95 @@ Desktop keeps its session tabs above chat. Phone keeps its existing session
 picker and one conversation scroll area. Both show ordinary recovery after open.
 Test provider readiness independently of workspace-only readiness. Recovery must
 preserve context without resending an interrupted or settled workflow prompt.
+
+## Superseded failed conversation recovery
+
+Criteria 001.13 through 001.15 add a narrow exception to conversation recovery.
+[The decision](../../../decisions/2026-10-02-superseded-failed-session-recovery.md)
+retains explicit concurrent execution and remembered conversation selection.
+
+Extend `autoResumeEligibility` through a small helper in
+`internal/orchestrator/session_open_failed_recovery.go`.
+Keep queue and dynamic-route restrictions authoritative. For a FAILED candidate,
+read `ListTaskSessions` and evaluate the candidate from that current inventory.
+A different primary marks the candidate as superseded. At least one other row
+must satisfy `sessionstate.IsWorking`: STARTING or RUNNING. Ignore nil rows and
+the candidate itself. A failed or idle sibling cannot cancel a working match.
+WAITING_FOR_INPUT alone does not meet this predicate.
+
+If the candidate is primary, ordinary recovery remains eligible. No primary is
+not proof of supersession. Multiple primary rows or a missing candidate are
+ambiguous ownership and suppress passive recovery. Inventory read failure
+suppresses every FAILED candidate because current ownership and sibling state
+are unavailable, using `ownership_unavailable`.
+Use `failed_session_sibling_working` for the confirmed suppression.
+Do not make historical parking metadata part of this decision.
+
+`GetTaskSessionStatus` keeps explicit resumability and workspace information.
+It sets `auto_resume_allowed=false` and the reason for passive suppression.
+`passiveLaunchResponse` returns the existing successful suppressed disposition.
+Recheck through `sessionOpenRecoveryBlockReason` inside the existing task admission
+guard. Reload the candidate there; do not trust its earlier state or primary flag.
+No runtime start, prompt creation, fresh fallback, or queue replacement follows
+suppression. Check deferred `session_open` replay through the same admission path.
+
+This is an admission-time observation, not a task-wide writer lock. It does not
+prevent a later authorized sibling start. Retain existing lock order and keep
+runtime calls outside the task admission guard. Add deterministic race tests
+for a sibling starting or primary ownership changing after status was read.
+
+The web hook already sends `activation_source=session_open` and respects
+`auto_resume_allowed=false`. Preserve explicit `user_action` requests. Verify
+that suppression keeps the historical failure and existing recovery controls.
+Workspace access remains independent. Do not route every status denial through
+a no-workspace path. Browser focus cannot bypass this rule by claiming idle
+suspension without valid provenance.
+
+Desktop tabs and the phone session picker retain their current composition.
+No new banner, confirmation, copy, state enum, configuration, schema, or metric
+is needed. Integration tests assert no runtime launch or prompt mutation.
+Desktop and phone E2E tests assert passive inspection and explicit recovery.
+
+Delivery: [Issue 4152 fix package](../../../plans/superseded-failed-session-recovery/plan.md).
+
+## Recovery metadata and prompt turns
+
+This section implements criteria 001.10 through 001.12. The
+[resume todo fix package](../../../plans/resume-todo-turn-boundary/plan.md)
+records its delivery work.
+
+ACP `Adapter.LoadSession` suppresses historical output but re-emits a captured
+plan through `emitReplayPlan`. The fallback from `session/resume` to
+`session/load` retains this behavior. The restored plan updates the live todo
+indicator without representing new conversational work.
+
+`handleSessionTodosEvent` must retain its event-bus publication.
+`persistTodoMessage` must resolve an existing turn without calling
+`getActiveTurnID`, `StartTurn`, or another creating fallback. Resolve an
+in-flight reserved prompt turn first, then use the authoritative active-turn
+lookup. Preserve the reserved-turn ownership contract during dispatch.
+
+With an existing active or reserved prompt turn, persist the update against its
+explicit ID, including an empty list that clears the todos. Keep that resolved
+ID if the turn completes while persistence is in flight; a successor must not
+capture the snapshot. After a successful lookup confirms there is no active
+turn, persist the snapshot in a completed lifecycle-only turn through the
+`CompletedTurn` message path. This keeps changed and empty lists available to
+reload without leaving an open turn for the next prompt to adopt. Historical
+todo messages remain intact and the latest persisted snapshot wins on reload.
+A lookup error must omit persistence and produce a bounded diagnostic. It must
+never be treated as proof that no turn exists. An empty ID must not reach
+`CreateSessionMessage`, whose task-service fallback creates an open turn.
+
+Keep `handleSessionStatusEvent` non-creating. Preserve provider resume-token
+updates independently of message persistence. Use explicit turn IDs across
+persistence so concurrent completion cannot redirect a todo into a successor.
+Never close or re-stamp a genuine turn to make a completion signal eligible.
+
+The next workflow prompt uses ordinary turn creation and atomic step stamping.
+Completion checks continue to reject genuine turns that started on another step.
+This correction does not change automatic recovery admission, recipient selection,
+provider capabilities, storage schema, or prompt retry behavior.
 
 ## Deferred entry ownership
 

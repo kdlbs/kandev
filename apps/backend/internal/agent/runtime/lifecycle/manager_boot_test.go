@@ -2,11 +2,14 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap/zapcore"
 )
 
 // MockBootMessageService implements BootMessageService for testing
@@ -128,6 +131,63 @@ func TestFinalizeBootMessage_Failed(t *testing.T) {
 	}
 }
 
+func TestFinalizeBootMessageLogsPersistenceFailureAtWarn(t *testing.T) {
+	mgr := newTestManager(t)
+	log, logs := observedLogger(t)
+	mgr.logger = log
+	mgr.bootMessageService = &MockBootMessageService{updateErr: errors.New("database unavailable")}
+
+	mgr.finalizeBootMessage(nil, &models.Message{
+		ID:       "boot-msg-failed-update",
+		Metadata: map[string]interface{}{"status": "running"},
+	}, nil, "failed")
+
+	entries := logs.FilterMessage("failed to update agent boot message").All()
+	if len(entries) != 1 || entries[0].Level != zapcore.WarnLevel {
+		t.Fatalf("boot-status persistence logs = %#v, want one warning", entries)
+	}
+}
+
+func TestFinalizeBootMessageClearsStderrFromEarlierStartupAttempt(t *testing.T) {
+	mgr := newTestManager(t)
+	bootSvc := &MockBootMessageService{}
+	mgr.bootMessageService = bootSvc
+	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.mu.Lock()
+	mock.stderrConfigured = true
+	mock.stderrLines = nil
+	mock.mu.Unlock()
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	streamCtx, stopStream := context.WithCancel(context.Background())
+	t.Cleanup(stopStream)
+	if err := client.StreamUpdates(streamCtx, func(agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("connect agent event stream: %v", err)
+	}
+
+	message := &models.Message{
+		ID:       "boot-msg-retried",
+		Content:  "npm error code ECONNRESET",
+		Metadata: map[string]interface{}{"status": "running", "startup_retrying": true},
+	}
+	execution := &AgentExecution{agentctl: client}
+	mgr.finalizeBootMessage(execution, message, nil, containerStateExited)
+
+	lastMessage := bootSvc.getLastUpdatedMessage()
+	if lastMessage == nil {
+		t.Fatal("expected boot message finalization")
+	}
+	if lastMessage.Content != "" {
+		t.Fatalf("final boot message content = %q, want cleared stderr from the successful silent retry", lastMessage.Content)
+	}
+	mgr.updateBootMessage(execution, message, false, func(message *models.Message) {
+		message.Content = "late first-attempt stderr"
+	})
+	if lastMessage = bootSvc.getLastUpdatedMessage(); lastMessage.Content != "" {
+		t.Fatalf("late stderr poll overwrote the final message content with %q", lastMessage.Content)
+	}
+}
+
 func TestFinalizeBootMessage_NilMessage(t *testing.T) {
 	mgr := newTestManager(t)
 	bootSvc := &MockBootMessageService{}
@@ -184,6 +244,25 @@ func TestCreateBootMessage_MarksResumedSession(t *testing.T) {
 	}
 	if got := message.Metadata["is_resuming"]; got != true {
 		t.Fatalf("is_resuming = %#v, want true", got)
+	}
+}
+
+func TestManagedStartupProgress(t *testing.T) {
+	mgr := newTestManager(t)
+	bootSvc := &MockBootMessageService{}
+	mgr.bootMessageService = bootSvc
+	execution := &AgentExecution{ID: "execution-1"}
+	message := &models.Message{Metadata: map[string]interface{}{"status": "running"}}
+
+	mgr.updateBootMessageStartupRetryProgress(execution, message)
+
+	updated := bootSvc.getLastUpdatedMessage()
+	if updated == nil {
+		t.Fatal("boot message was not updated with retry progress")
+	}
+	if updated.Metadata["startup_retrying"] != true || updated.Metadata["startup_retry_attempt"] != 2 ||
+		updated.Metadata["startup_retry_max_attempts"] != 2 {
+		t.Fatalf("retry progress metadata = %#v", updated.Metadata)
 	}
 }
 

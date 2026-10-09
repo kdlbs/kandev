@@ -108,6 +108,7 @@ function useChangesView(
     prDiffError,
     refreshPRDiff,
     gitStatus,
+    statusByRepo,
     rawPRFiles,
     truncatedFilesCount,
     selectedPR: pr,
@@ -174,6 +175,7 @@ function useChangesView(
     prDiffError,
     refreshPRDiff,
     gitStatus,
+    statusByRepo,
     truncatedFilesCount,
     prs: reviewSources.prs,
     selectedPR: reviewSources.selectedPR,
@@ -300,7 +302,9 @@ function useChangesActions(
   const handleToggleReviewed = useCallback(
     (key: string, reviewed: boolean) => {
       if (reviewed) {
-        markReviewed(key, reviewDiffHashForKey(allFiles, key));
+        const diffHash = reviewDiffHashForKey(allFiles, key);
+        if (diffHash === null) return;
+        markReviewed(key, diffHash);
       } else {
         markUnreviewed(key);
       }
@@ -473,6 +477,9 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     filePath,
     sourceFilter,
     gitStatus: view.gitStatus,
+    statusByRepo: view.statusByRepo,
+    repositoryName: fileRepositoryName,
+    changeLayer,
     visibleCount: visible.visibleFiles.length,
     prDiffLoading: relevantPRLoading,
     onBecameEmpty,

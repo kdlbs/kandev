@@ -266,6 +266,14 @@ export async function readSessionModelSnapshots(
   }, fileName);
 }
 
+async function openDesktopFileSearch(session: SessionPage): Promise<"search" | false> {
+  const searchInput = session.fileSearchInput();
+  if (await searchInput.isVisible()) return "search";
+  if (!(await session.fileSearchButton().isVisible())) return false;
+  await session.fileSearchButton().click({ timeout: 2_000 });
+  return (await searchInput.isVisible()) ? "search" : false;
+}
+
 export async function openDesktopFile(
   page: Page,
   session: SessionPage,
@@ -278,8 +286,19 @@ export async function openDesktopFile(
   // visible so a late panel switch cannot turn a successful visibility check
   // into a 180-second click timeout. Virtualized trees can also omit a valid
   // file row from the DOM, so use the exact file search in that case.
-  await session.clickTab("Files", { force: true });
-  await expect(session.files).toBeVisible({ timeout: 30_000 });
+  await expect
+    .poll(
+      async () => {
+        try {
+          await session.clickTab("Files", { force: true });
+          return await session.files.isVisible();
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 30_000, message: "waiting for the Files panel to stay in the foreground" },
+    )
+    .toBe(true);
   const existingSearch = session.fileSearchInput();
   if (await existingSearch.isVisible()) {
     await existingSearch.press("Escape");
@@ -293,13 +312,13 @@ export async function openDesktopFile(
           await session.clickTab("Files", { force: true });
           if (!(await session.files.isVisible())) return false;
           if (await session.fileSearchInput().isVisible()) {
-            await session.fileSearchInput().press("Escape");
-            return false;
+            openMode = "search";
+            return openMode;
           }
           for (let index = 1; index < pathSegments.length; index++) {
             const ancestor = session.fileTreeNode(pathSegments.slice(0, index).join("/"));
             if (!(await ancestor.isVisible())) {
-              openMode = (await session.fileSearchButton().isVisible()) ? "search" : false;
+              openMode = await openDesktopFileSearch(session);
               return openMode;
             }
             if ((await ancestor.locator(".tabler-icon-chevron-right").count()) > 0) {
@@ -311,7 +330,7 @@ export async function openDesktopFile(
             openMode = "tree";
             return openMode;
           }
-          openMode = (await session.fileSearchButton().isVisible()) ? "search" : false;
+          openMode = await openDesktopFileSearch(session);
           return openMode;
         } catch {
           openMode = false;
@@ -323,7 +342,6 @@ export async function openDesktopFile(
     .toBeTruthy();
 
   if (openMode === "search") {
-    await session.fileSearchButton().click();
     const searchInput = session.fileSearchInput();
     await expect(searchInput).toBeVisible({ timeout: 5_000 });
     // Search matches the repository-relative path, while the task tree path

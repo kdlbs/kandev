@@ -1,7 +1,9 @@
+import type { WorkloadRunObservation, WorkloadOutputChunk } from "@/lib/types/background-work";
 import type {
   WorkspaceRestorationAttempt,
   WorkspaceRestorationState,
 } from "./workspace-restoration";
+import type { NativeMCPDiagnostic } from "@/lib/prepare/native-mcp-diagnostic";
 
 export type TerminalState = {
   terminals: Array<{ id: string; output: string[] }>;
@@ -55,6 +57,9 @@ export type FileChangeFacet = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  diff_state?: "pending" | "ready" | "unavailable";
+  /** True only on display projections that borrow details from a prior snapshot. */
+  display_stale?: boolean;
 };
 
 export type FileInfo = {
@@ -67,6 +72,9 @@ export type FileInfo = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  diff_state?: "pending" | "ready" | "unavailable";
+  /** True only on display projections that borrow details from a prior snapshot. */
+  display_stale?: boolean;
   staged_change?: FileChangeFacet;
   unstaged_change?: FileChangeFacet;
   /** Frontend-only projection used when one raw path appears in both change sections. */
@@ -85,6 +93,13 @@ export type FileInfo = {
 };
 
 export type GitStatusEntry = {
+  status_state?: "ready" | "loading" | "unavailable";
+  files_complete?: boolean;
+  detail_state?: "pending" | "ready" | "unavailable";
+  error_code?: string;
+  tracker_id?: string;
+  tracker_epoch?: number;
+  snapshot_revision?: number;
   branch: string | null;
   remote_branch: string | null;
   modified: string[];
@@ -127,6 +142,45 @@ export type GitStatusState = {
    * environment ID then repository name. Empty for single-repo workspaces.
    */
   byEnvironmentRepo: Record<string, Record<string, GitStatusEntry>>;
+  /** Foreground status recovery keyed by environment when repository inventory is unknown. */
+  refreshByEnvironmentId?: Record<string, GitStatusRefreshState>;
+  /** Foreground status recovery keyed by environment and repository scope. */
+  refreshByEnvironmentRepo?: Record<string, Record<string, GitStatusRefreshState>>;
+};
+
+export type GitStatusDisplayRepresentation = Pick<
+  FileInfo,
+  "is_symlink" | "additions" | "deletions" | "old_path" | "diff" | "diff_skip_reason"
+>;
+
+export type GitStatusDisplayFile = {
+  flat?: GitStatusDisplayRepresentation;
+  flatLayer?: "faceted" | "staged" | "unstaged";
+  staged?: GitStatusDisplayRepresentation;
+  unstaged?: GitStatusDisplayRepresentation;
+};
+
+export type GitStatusDisplayEntry = {
+  checkoutGeneration: number;
+  branch: string | null;
+  headCommit: string | null;
+  baseCommit: string | null;
+  comparisonTarget: string | null;
+  files: Record<string, GitStatusDisplayFile>;
+};
+
+export type GitStatusDisplayState = {
+  byEnvironmentRepo: Record<string, Record<string, GitStatusDisplayEntry>>;
+};
+
+export type GitStatusRefreshState = {
+  state: "pending" | "unavailable";
+  error_code?: string;
+  request_id?: string;
+  tracker_id?: string;
+  tracker_epoch?: number;
+  snapshot_revision?: number;
+  timestamp?: string;
 };
 
 // Git Snapshot types for historical tracking
@@ -212,6 +266,13 @@ export type AvailableCommand = {
   name: string;
   description?: string;
   input_hint?: string;
+  kind?: string;
+  action?: {
+    kind: string;
+    config_id: string;
+    value: string;
+    reset_value: string;
+  };
 };
 
 export type AvailableCommandsState = {
@@ -230,6 +291,13 @@ export type SessionModeState = {
     {
       currentModeId: string;
       availableModes: SessionModeEntry[];
+      /** Marks the effective selector snapshot restored after explicit recovery. */
+      settingsPolicy?: "provider_restored";
+      /**
+       * The mode Kandev asked for when the session did not end up in it. Set
+       * so a clamped mode is distinguishable from an applied one.
+       */
+      requestedModeId?: string;
     }
   >;
 };
@@ -287,7 +355,16 @@ export type SessionModelsState = {
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
       configOptionsSettled?: boolean;
+      /** Provider-reported config values from the last settled snapshot. */
+      confirmedConfigOptions?: Record<string, string>;
+      confirmedConfigOptionsExecutionId?: string;
+      pendingConfirmedConfigOptions?: {
+        executionId: string;
+        values: Record<string, string>;
+      };
       configBaseline?: Record<string, string>;
+      /** Marks the effective selector snapshot restored after explicit recovery. */
+      settingsPolicy?: "provider_restored";
       /** Set when the session started on the profile's fallback model. */
       fallbackModel?: string;
     }
@@ -397,12 +474,18 @@ export type UserShellsState = {
 
 export type PrepareStepInfo = {
   name: string;
+  kind?: string;
+  remotePlatform?: string;
+  mcpServerId?: string;
+  mcpProvider?: string;
+  failureCode?: string;
   command?: string;
   status: string;
   output?: string;
   error?: string;
   warning?: string;
   warningDetail?: string;
+  mcpDiagnostic?: NativeMCPDiagnostic;
   startedAt?: string;
   endedAt?: string;
 };
@@ -410,6 +493,8 @@ export type PrepareStepInfo = {
 export type SessionPrepareState = {
   sessionId: string;
   status: string;
+  preparationId?: string;
+  preparationStartedAt?: string;
   steps: PrepareStepInfo[];
   errorMessage?: string;
   durationMs?: number;
@@ -461,11 +546,19 @@ export type LaunchWarningState = {
   bySessionId: Record<string, LaunchWarningEntry>;
 };
 
+export type BackgroundWorkState = {
+  workloadsBySessionId: Record<string, WorkloadRunObservation[]>;
+  activeWorkIdBySessionId: Record<string, string>;
+  loadingBySessionId: Record<string, boolean>;
+};
+
 export type SessionRuntimeSliceState = {
   terminal: TerminalState;
   shell: ShellState;
   processes: ProcessState;
   gitStatus: GitStatusState;
+  /** One runtime-only ready display companion per live environment/repository. */
+  gitStatusDisplay: GitStatusDisplayState;
   /** Maps sessionId → environmentId for workspace state sharing. */
   environmentIdBySessionId: Record<string, string>;
   sessionCommits: SessionCommitsState;
@@ -478,6 +571,7 @@ export type SessionRuntimeSliceState = {
   sessionModels: SessionModelsState;
   sessionMcpStatus: SessionMCPStatusState;
   promptUsage: PromptUsageState;
+  usageInvalidation: { bySessionId: Record<string, number> };
   sessionTodos: SessionTodosState;
   userShells: UserShellsState;
   prepareProgress: PrepareProgressState;
@@ -486,6 +580,7 @@ export type SessionRuntimeSliceState = {
   embeddedVscodeSupport: EmbeddedVscodeSupportState;
   workspaceFilesRefresh: { bySessionId: Record<string, number> };
   workspaceRestoration: WorkspaceRestorationState;
+  backgroundWork: BackgroundWorkState;
 };
 
 export type SessionRuntimeSliceActions = {
@@ -503,6 +598,11 @@ export type SessionRuntimeSliceActions = {
   /** Returns true when the update meaningfully changed git state (so callers
    *  can invalidate derived caches without repeating the deep comparison). */
   setGitStatus: (taskEnvironmentId: string, gitStatus: GitStatusEntry) => boolean;
+  setGitStatusRefresh: (
+    taskEnvironmentId: string,
+    repositoryName: string | undefined,
+    refresh: GitStatusRefreshState | null,
+  ) => void;
   clearGitStatus: (sessionId: string) => void;
   bumpWorkspaceFilesRefresh: (sessionId: string) => void;
   /** Drops the pre-multi-repo (empty-repo-name) git-status entries so a
@@ -530,7 +630,13 @@ export type SessionRuntimeSliceActions = {
   setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;
   // Session mode actions
-  setSessionMode: (sessionId: string, modeId: string, availableModes?: SessionModeEntry[]) => void;
+  setSessionMode: (
+    sessionId: string,
+    modeId: string,
+    availableModes?: SessionModeEntry[],
+    requestedModeId?: string,
+    settingsPolicy?: "provider_restored" | "strict",
+  ) => void;
   clearSessionMode: (sessionId: string) => void;
   // Agent capabilities actions
   setAgentCapabilities: (sessionId: string, caps: AgentCapabilitiesEntry) => void;
@@ -541,15 +647,27 @@ export type SessionRuntimeSliceActions = {
       currentModelId: string;
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
+      configOptionsSettled?: boolean;
+      /** Provider-reported config values from the last settled snapshot. */
+      confirmedConfigOptions?: Record<string, string>;
+      confirmedConfigOptionsExecutionId?: string;
+      pendingConfirmedConfigOptions?: {
+        executionId: string;
+        values: Record<string, string>;
+      };
       configBaseline?: Record<string, string>;
+      settingsPolicy?: "provider_restored";
       /** Set when the session started on the profile's fallback model
        *  because the configured start model was unavailable. */
       fallbackModel?: string;
     },
   ) => void;
+  /** Hide a previous execution's provider configuration while startup identity settles. */
+  invalidateConfirmedConfigOptions: (sessionId: string, executionId?: string) => void;
   setSessionMCPStatus: (sessionId: string, history: MCPAttachmentHistory) => void;
   // Prompt usage actions
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
+  bumpSessionUsageInvalidation: (sessionId: string) => void;
   // Session todos actions
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions — env-scoped (sessions in the same task share one shell list)
@@ -577,6 +695,12 @@ export type SessionRuntimeSliceActions = {
   clearWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
   setLaunchWarning: (sessionId: string, entry: LaunchWarningEntry) => void;
   clearLaunchWarning: (sessionId: string) => void;
+  setBackgroundWorkloads: (sessionId: string, workloads: WorkloadRunObservation[]) => void;
+  updateBackgroundWorkload: (sessionId: string, workload: WorkloadRunObservation) => void;
+  appendBackgroundWorkloadOutput: (sessionId: string, chunk: WorkloadOutputChunk) => void;
+  setActiveBackgroundWorkload: (sessionId: string, workId: string) => void;
+  clearBackgroundWork: (sessionId: string) => void;
+  setBackgroundWorkLoading: (sessionId: string, loading: boolean) => void;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;

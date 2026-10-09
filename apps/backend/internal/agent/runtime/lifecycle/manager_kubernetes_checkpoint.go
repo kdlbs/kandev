@@ -75,7 +75,8 @@ func (m *Manager) checkpointKubernetesRuntimeInventory(
 	execution := &AgentExecution{
 		ID: req.InstanceID, TaskID: req.TaskID, SessionID: req.SessionID,
 		TaskEnvironmentID: req.TaskEnvironmentID, AgentProfileID: req.AgentProfileID,
-		RuntimeName: agentruntime.RuntimeKubernetes, Status: v1.AgentStatusStarting,
+		OriginalWorkspacePath: req.OriginalWorkspacePath,
+		RuntimeName:           agentruntime.RuntimeKubernetes, Status: v1.AgentStatusStarting,
 		metadata: metadata,
 	}
 	running := buildRunningFromExecution(execution, prior)
@@ -135,6 +136,9 @@ func stopRuntimeInstanceAndRelease(
 ) error {
 	if runtime == nil || instance == nil {
 		return nil
+	}
+	if instance.StopReason == "" {
+		instance.StopReason = StopReasonLaunchRollback
 	}
 	if err := runtime.StopInstance(ctx, instance, force); err != nil {
 		return err

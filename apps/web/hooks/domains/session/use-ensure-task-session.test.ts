@@ -54,7 +54,7 @@ vi.mock("@/components/state-provider", () => ({
 
 import { useEnsureTaskSession, isFinalWorkflowStep } from "./use-ensure-task-session";
 
-const TASK = { id: "task-1" };
+const TASK = { id: "task-1", isArchived: false };
 const OTHER_DONE_STEP = "other-done";
 const OTHER_STEP = "other-step";
 const OTHER_WORKFLOW = "wf-other";
@@ -127,6 +127,20 @@ describe("useEnsureTaskSession", () => {
     expect(mockEnsureTaskSession).not.toHaveBeenCalled();
   });
 
+  it("does not ensure a session for an archived task", () => {
+    renderHook(() => useEnsureTaskSession({ id: "task-1", isArchived: true }));
+
+    expect(mockEnsureTaskSession).not.toHaveBeenCalled();
+  });
+
+  it("waits when the task's archive state is not known", () => {
+    renderHook(() =>
+      useEnsureTaskSession({ id: "task-1", isArchived: false, archiveStateKnown: false }),
+    );
+
+    expect(mockEnsureTaskSession).not.toHaveBeenCalled();
+  });
+
   it("does not dispatch ensure while the task is pending removal", () => {
     mockStoreState.taskRemoval = beginTaskRemoval(createTaskRemovalState(), {
       token: "removal-1",
@@ -141,6 +155,10 @@ describe("useEnsureTaskSession", () => {
 
     expect(mockEnsureTaskSession).not.toHaveBeenCalled();
   });
+});
+
+describe("useEnsureTaskSession repeat and retry behavior", () => {
+  beforeEach(resetEnsureTaskSessionMocks);
 
   it("no-ops when task id is missing", () => {
     renderHook(() => useEnsureTaskSession(null));
@@ -240,7 +258,7 @@ describe("useEnsureTaskSession — task changes", () => {
   it("clears a stale error when switching to a task that already has a session", async () => {
     mockEnsureTaskSession.mockRejectedValueOnce(new Error("task one failed"));
     const { result, rerender } = renderHook(
-      ({ task }: { task: { id: string } }) => useEnsureTaskSession(task),
+      ({ task }: { task: { id: string; isArchived: boolean } }) => useEnsureTaskSession(task),
       { initialProps: { task: TASK } },
     );
 
@@ -253,7 +271,7 @@ describe("useEnsureTaskSession — task changes", () => {
       isLoaded: true,
       loadSessions: mockLoadSessions,
     };
-    rerender({ task: { id: "task-2" } });
+    rerender({ task: { id: "task-2", isArchived: false } });
 
     expect(result.current.status).toBe("idle");
     expect(result.current.error).toBeNull();
@@ -262,11 +280,11 @@ describe("useEnsureTaskSession — task changes", () => {
 
   it("calls ensure again when the task id changes", () => {
     const { rerender } = renderHook(
-      ({ task }: { task: { id: string } }) => useEnsureTaskSession(task),
+      ({ task }: { task: { id: string; isArchived: boolean } }) => useEnsureTaskSession(task),
       { initialProps: { task: TASK } },
     );
     expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
-    rerender({ task: { id: "task-2" } });
+    rerender({ task: { id: "task-2", isArchived: false } });
     expect(mockEnsureTaskSession).toHaveBeenCalledTimes(2);
     expect(mockEnsureTaskSession).toHaveBeenLastCalledWith("task-2", {
       activationSource: "session_open",

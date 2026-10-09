@@ -3,8 +3,12 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -126,6 +130,173 @@ func TestList_BlendsDBAndPTYStatus(t *testing.T) {
 	}
 	if items[1].ID != t2.ID || items[1].PTYStatus != PTYStatusStopped {
 		t.Errorf("item 1 = %+v, want stopped %s", items[1], t2.ID)
+	}
+}
+
+func TestShellLaunchInfoReadsPersistedCommandAndChecksEnvironment(t *testing.T) {
+	svc, _ := setupService(t)
+	ctx := context.Background()
+	command := "cursor-agent mcp login 'server id'"
+	term, err := svc.Create(ctx, "task-1", "env-1", command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	label := "Sign in to Issue Tracker"
+	if err := svc.Rename(ctx, "task-1", term.ID, &label); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := svc.ShellLaunchInfo(ctx, "task-1", "env-1", term.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Label != label || info.InitialCommand != command {
+		t.Fatalf("launch info = %+v", info)
+	}
+	if _, err := svc.ShellLaunchInfo(ctx, "task-1", "env-other", term.ID); !errors.Is(err, ErrTaskMismatch) {
+		t.Fatalf("wrong environment error = %v, want ErrTaskMismatch", err)
+	}
+	if _, err := svc.ShellLaunchInfo(ctx, "task-other", "env-1", term.ID); !errors.Is(err, ErrTaskMismatch) {
+		t.Fatalf("wrong task error = %v, want ErrTaskMismatch", err)
+	}
+}
+
+func TestOneShotShellLaunchCommandIsClaimedOnlyOnceAndPersists(t *testing.T) {
+	svc, _ := setupService(t)
+	ctx := context.Background()
+	command := "exec 'cursor-agent' mcp login 'server exact'"
+	term, err := svc.CreateWithOneShotInitialCommand(ctx, "task-1", "env-1", command)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := svc.ClaimShellLaunchInfo(ctx, "task-1", "env-1", term.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.InitialCommand != command || !first.InitialCommandOnce {
+		t.Fatalf("first launch info = %+v", first)
+	}
+	second, err := svc.ClaimShellLaunchInfo(ctx, "task-1", "env-1", term.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.InitialCommand != "" || !second.InitialCommandOnce {
+		t.Fatalf("second launch info = %+v, want consumed command", second)
+	}
+
+	// A new service models backend restart: the persisted consumed bit still
+	// prevents an automatic terminal reconnect from replaying native login.
+	restarted := New(svc.repo, nil, nil)
+	third, err := restarted.ClaimShellLaunchInfo(ctx, "task-1", "env-1", term.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.InitialCommand != "" || !third.InitialCommandOnce {
+		t.Fatalf("post-restart launch info = %+v, want consumed command", third)
+	}
+	if _, err := svc.ClaimShellLaunchInfo(ctx, "task-1", "wrong-env", term.ID); !errors.Is(err, ErrTaskMismatch) {
+		t.Fatalf("wrong environment error = %v, want ErrTaskMismatch", err)
+	}
+}
+
+func TestConcurrentOneShotShellLaunchClaimsReturnCommandOnce(t *testing.T) {
+	svc, _ := setupService(t)
+	ctx := context.Background()
+	command := "exec cursor-agent mcp login server-exact"
+	term, err := svc.CreateWithOneShotInitialCommand(ctx, "task-1", "env-1", command)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const callers = 12
+	var wg sync.WaitGroup
+	commands := make(chan string, callers)
+	errs := make(chan error, callers)
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			info, err := svc.ClaimShellLaunchInfo(ctx, "task-1", "env-1", term.ID)
+			if err != nil {
+				errs <- err
+				return
+			}
+			commands <- info.InitialCommand
+		}()
+	}
+	wg.Wait()
+	close(commands)
+	close(errs)
+	for err := range errs {
+		t.Errorf("claim one-shot command: %v", err)
+	}
+	claimed := 0
+	for got := range commands {
+		if got == command {
+			claimed++
+		} else if got != "" {
+			t.Errorf("unexpected command from concurrent claim: %q", got)
+		}
+	}
+	if claimed != 1 {
+		t.Fatalf("one-shot command was returned %d times, want exactly once", claimed)
+	}
+}
+
+func TestTerminalListDoesNotSerializeOrdinaryInitialCommand(t *testing.T) {
+	svc, _ := setupService(t)
+	ctx := context.Background()
+	command := "cursor-agent mcp login server-exact"
+	term, err := svc.Create(ctx, "task-1", "env-1", command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := svc.List(ctx, "task-1", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].InitialCommand != command || items[0].EnvironmentID != "env-1" {
+		t.Fatalf("internal list metadata = %+v", items)
+	}
+	encoded, err := json.Marshal(items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), command) || strings.Contains(string(encoded), "initial_command") {
+		t.Fatalf("terminal list exposed server-side command: %s", encoded)
+	}
+	if got := TerminalListInitialCommand(term.ID, command); got != "" {
+		t.Fatalf("ordinary terminal wire command = %q, want empty", got)
+	}
+	if got := TerminalListInitialCommand("script-1", "npm run start"); got != "npm run start" {
+		t.Fatalf("script terminal command = %q, want preserved", got)
+	}
+}
+
+func TestCursorMCPAuthenticationAttemptPendingExpiresOrTransitionsToStarted(t *testing.T) {
+	svc, _ := setupService(t)
+	svc.MarkCursorMCPAuthenticationAttemptPending("shell-pending")
+	if !svc.CursorMCPAuthenticationAttemptPending("shell-pending") {
+		t.Fatal("new authentication attempt should be pending")
+	}
+	svc.MarkCursorMCPAuthenticationAttemptStarted("shell-pending")
+	if svc.CursorMCPAuthenticationAttemptPending("shell-pending") {
+		t.Fatal("started authentication attempt must rely on PTY liveness")
+	}
+	svc.MarkCursorMCPAuthenticationAttemptPending("shell-expired")
+	svc.authMu.Lock()
+	attempt := svc.authPending["shell-expired"]
+	attempt.createdAt = time.Now().Add(-cursorMCPAuthenticationPendingTTL)
+	svc.authPending["shell-expired"] = attempt
+	svc.authMu.Unlock()
+	if svc.CursorMCPAuthenticationAttemptPending("shell-expired") {
+		t.Fatal("expired unopened authentication attempt remained pending")
+	}
+	svc.MarkCursorMCPAuthenticationAttemptPending("shell-failed")
+	svc.MarkCursorMCPAuthenticationAttemptFailed("shell-failed")
+	if svc.CursorMCPAuthenticationAttemptPending("shell-failed") {
+		t.Fatal("failed shell start left an authentication attempt pending")
 	}
 }
 

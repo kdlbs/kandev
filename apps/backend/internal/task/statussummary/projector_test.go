@@ -762,6 +762,7 @@ func TestProjectorRetainsStoredDomainsUntilTheirFirstObservation(t *testing.T) {
 			Revision:            8,
 			UpdatedAt:           storedAt,
 			PrimarySession:      &PrimarySessionSummary{ID: "primary-restart", State: "RUNNING"},
+			HasRunningSession:   boolPtr(true),
 			ForegroundActivity:  "generating",
 			ActiveSubagentCount: 3,
 			PendingAction:       "permission",

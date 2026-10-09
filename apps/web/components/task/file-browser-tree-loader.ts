@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type React from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { FileTreeNode } from "@/lib/types/backend";
@@ -7,7 +7,11 @@ import {
   completeRestoredTree,
   fetchRestoredTree,
   removeFailedExpansions,
+  mergeLoadedFolder,
 } from "./file-browser-restore";
+import { mergeTreeNodes } from "./file-tree-utils";
+import { readOwnedTree } from "./file-browser-tree-reader";
+import type { FileTreeCacheBinding } from "./file-browser-tree-cache";
 import type { LoadState } from "./file-browser-hooks";
 import { t } from "@/lib/i18n";
 
@@ -15,7 +19,12 @@ const debugLoad = createDebugLogger("file-browser:load");
 const MAX_RETRY_ATTEMPTS = 4;
 const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000];
 
-export type TreeLoadOwner = { sessionId: string; resetKey: string; generation: number };
+export type TreeLoadOwner = {
+  sessionId: string;
+  resetKey: string;
+  generation: number;
+  context?: object;
+};
 export type TreeLoaderContext = {
   sessionId: string;
   effectiveResetKey: string;
@@ -29,17 +38,33 @@ export type TreeLoaderContext = {
   setIsLoadingTree: React.Dispatch<React.SetStateAction<boolean>>;
   setLoadState: React.Dispatch<React.SetStateAction<LoadState>>;
   setLoadError: React.Dispatch<React.SetStateAction<string | null>>;
+  cacheBinding?: FileTreeCacheBinding;
 };
 
 function logLoad(event: string, data: Record<string, unknown>) {
   if (isDebug()) debugLoad(event, data);
 }
 
-function useTreeLoadOwner(sessionId: string, resetKey: string) {
-  const ownerRef = useRef<TreeLoadOwner>({ sessionId, resetKey, generation: 0 });
-  if (ownerRef.current.sessionId !== sessionId || ownerRef.current.resetKey !== resetKey) {
-    ownerRef.current = { sessionId, resetKey, generation: ownerRef.current.generation + 1 };
+function useTreeLoadOwner(sessionId: string, resetKey: string, context?: object) {
+  const ownerRef = useRef<TreeLoadOwner>({ sessionId, resetKey, context, generation: 0 });
+  if (
+    ownerRef.current.sessionId !== sessionId ||
+    ownerRef.current.resetKey !== resetKey ||
+    ownerRef.current.context !== context
+  ) {
+    ownerRef.current = {
+      sessionId,
+      resetKey,
+      context,
+      generation: ownerRef.current.generation + 1,
+    };
   }
+  useEffect(
+    () => () => {
+      ownerRef.current = { ...ownerRef.current, generation: ownerRef.current.generation + 1 };
+    },
+    [],
+  );
   return ownerRef;
 }
 
@@ -171,7 +196,7 @@ function applyCompletedTree({
   }
 
   hasInitializedExpandedRef.current = owner.resetKey;
-  setTree(completed.tree);
+  if (!completed.root?.children?.length) setTree(completed.tree);
   setLoadState("loaded");
   retryAttemptRef.current = 0;
   clearRetryTimer();
@@ -188,17 +213,30 @@ async function restoreTree({
   paths,
   isCurrentLoad,
   setExpandedPaths,
+  setTree,
 }: {
   owner: TreeLoadOwner;
   paths: string[];
   isCurrentLoad: () => boolean;
   setExpandedPaths: React.Dispatch<React.SetStateAction<Set<string>>>;
+  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
 }) {
+  const client = requireWebSocketClient();
   const hydrated = await fetchRestoredTree({
-    client: requireWebSocketClient(),
+    client,
     owner,
     paths,
     isCurrentLoad,
+    readPath: (path) => readOwnedTree(client, owner, path, isCurrentLoad),
+    onTree: (incoming, root) => {
+      if (!isCurrentLoad()) return;
+      setTree((current) => {
+        if (!isCurrentLoad()) return current;
+        if (!incoming) return null;
+        if (root) return current ? mergeTreeNodes(current, incoming) : incoming;
+        return current ? mergeLoadedFolder(current, incoming) : current;
+      });
+    },
   });
   return completeRestoredTree(hydrated, isCurrentLoad, (failedPaths) =>
     setExpandedPaths((previous) => removeFailedExpansions(Array.from(previous), failedPaths)),
@@ -219,6 +257,7 @@ type TreeLoaderRuntime = {
   ownerRef: React.MutableRefObject<TreeLoadOwner>;
   loadInFlightGenerationRef: React.MutableRefObject<number | null>;
   loadRequestRef: React.MutableRefObject<number>;
+  cacheBinding?: FileTreeCacheBinding;
 };
 
 async function loadTreeRequest(runtime: TreeLoaderRuntime, options?: LoadTreeOptions) {
@@ -238,13 +277,19 @@ async function loadTreeRequest(runtime: TreeLoaderRuntime, options?: LoadTreeOpt
     loadRequestRef,
   } = runtime;
   const owner = ownerRef.current;
+  if (runtime.cacheBinding && !runtime.cacheBinding.isCurrent()) {
+    setIsLoadingTree(false);
+    return;
+  }
   if (loadInFlightGenerationRef.current === owner.generation) {
     logLoad("skip-in-flight", { sessionId: owner.sessionId, resetKey: owner.resetKey });
     return;
   }
   const requestId = ++loadRequestRef.current;
   const isCurrentLoad = () =>
-    loadRequestRef.current === requestId && ownerRef.current.generation === owner.generation;
+    loadRequestRef.current === requestId &&
+    ownerRef.current.generation === owner.generation &&
+    (!runtime.cacheBinding || runtime.cacheBinding.isCurrent());
   const restorePaths = options?.restoreExpandedPaths ?? restoreExpandedPathsRef.current;
   loadInFlightGenerationRef.current = owner.generation;
   setIsLoadingTree(true);
@@ -266,7 +311,9 @@ async function loadTreeRequest(runtime: TreeLoaderRuntime, options?: LoadTreeOpt
       paths: restorePaths,
       isCurrentLoad,
       setExpandedPaths,
+      setTree,
     });
+    if (completed?.errors?.length) throw completed.errors[0];
     applyCompletedTree({
       completed,
       isCurrentLoad,
@@ -320,7 +367,20 @@ export function useTreeLoader(ctx: TreeLoaderContext) {
     setLoadState,
     setLoadError,
   } = ctx;
-  const ownerRef = useTreeLoadOwner(ctx.sessionId, ctx.effectiveResetKey);
+  const ownerRef = useTreeLoadOwner(ctx.sessionId, ctx.effectiveResetKey, ctx.cacheBinding);
+  const cacheBinding = ctx.cacheBinding;
+  const readTree = useCallback(
+    (path: string) => {
+      const owner = ownerRef.current;
+      return readOwnedTree(
+        requireWebSocketClient(),
+        owner,
+        path,
+        () => ownerRef.current === owner && (!cacheBinding || cacheBinding.isCurrent()),
+      );
+    },
+    [ownerRef, cacheBinding],
+  );
   const loadInFlightGenerationRef = useRef<number | null>(null);
   const loadRequestRef = useRef(0);
   const loadTree = useCallback(
@@ -340,6 +400,7 @@ export function useTreeLoader(ctx: TreeLoaderContext) {
           ownerRef,
           loadInFlightGenerationRef,
           loadRequestRef,
+          cacheBinding,
         },
         options,
       ),
@@ -354,7 +415,8 @@ export function useTreeLoader(ctx: TreeLoaderContext) {
       setIsLoadingTree,
       setLoadError,
       setLoadState,
+      cacheBinding,
     ],
   );
-  return loadTree;
+  return { loadTree, readTree };
 }

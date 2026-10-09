@@ -472,9 +472,9 @@ func TestDocumentServiceUploadAndDownloadAttachment(t *testing.T) {
 	if doc.SizeBytes != int64(len("bytes")) {
 		t.Fatalf("size = %d, want %d", doc.SizeBytes, len("bytes"))
 	}
-	wantPath := filepath.Join(base, "attachments", "task-doc", "shot.png")
-	if doc.DiskPath != wantPath {
-		t.Fatalf("disk path = %q, want %q", doc.DiskPath, wantPath)
+	wantDir := filepath.Join(base, "attachments", "task-doc")
+	if filepath.Dir(doc.DiskPath) != wantDir {
+		t.Fatalf("disk path = %q, want directory %q", doc.DiskPath, wantDir)
 	}
 	written, err := os.ReadFile(doc.DiskPath)
 	if err != nil {
@@ -488,11 +488,11 @@ func TestDocumentServiceUploadAndDownloadAttachment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DownloadAttachment: %v", err)
 	}
-	if path != wantPath || downloaded.Key != "shot" {
+	if path != doc.DiskPath || downloaded.Key != "shot" {
 		t.Fatalf("download = %q/%+v", path, downloaded)
 	}
 
-	// Re-upload replaces in place: same row, preserved id and created_at.
+	// Re-upload preserves the same row identity and creation time.
 	second, err := svc.UploadAttachment(ctx, "task-doc", "shot", "screen2.png", "image/png", []byte("more"), base)
 	if err != nil {
 		t.Fatalf("second UploadAttachment: %v", err)

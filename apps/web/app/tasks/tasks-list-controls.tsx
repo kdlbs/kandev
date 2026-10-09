@@ -93,7 +93,7 @@ function ListOptionSelect<T extends string>({
       <Select value={value} onValueChange={(next) => onChange(next as T)}>
         <SelectTrigger
           data-testid={testId}
-          className={controlSizingClassName("standard", "w-[150px] cursor-pointer")}
+          className={controlSizingClassName("standard", "w-auto min-w-[150px] cursor-pointer")}
         >
           <SelectValue />
         </SelectTrigger>

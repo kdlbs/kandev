@@ -13,6 +13,7 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/repository"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 type workflowChangeExecutorValidator struct {
@@ -63,6 +64,44 @@ type workflowChangeFixture struct {
 	task      *models.Task
 	request   *models.WorkflowChangeRequest
 	validator *workflowChangeExecutorValidator
+}
+
+type workflowChangeCleanupRaceRepository struct {
+	*sqliterepo.Repository
+	t      *testing.T
+	update workflowChangeAdmissionWriter
+}
+
+type workflowChangeAdmissionWriter func(
+	context.Context,
+	*models.Task,
+	string,
+	string,
+	int,
+	*v1.TaskState,
+	bool,
+	*models.WorkflowChangeSource,
+) (bool, error)
+
+func (r *workflowChangeCleanupRaceRepository) UpdateTaskWithWorkflowChangeAdmissionAndState(
+	ctx context.Context,
+	task *models.Task,
+	sourceStepID string,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	source *models.WorkflowChangeSource,
+) (bool, error) {
+	r.t.Helper()
+	cleared, err := r.ClearManualMoveLifecycleMarkersIfCompleted(ctx, task.ID, source.UpdatedAt)
+	if err != nil {
+		r.t.Fatalf("clear old lifecycle markers before workflow-change write: %v", err)
+	}
+	if !cleared {
+		r.t.Fatal("expected concurrent recovery cleanup to clear the old markers")
+	}
+	return r.update(ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, source)
 }
 
 func newWorkflowChangeFixture(t *testing.T) workflowChangeFixture {
@@ -177,6 +216,13 @@ func TestMoveTaskWithWorkflowChangeReplacesOverridesAndPreservesTaskContext(t *t
 	if result.Task.Title != "Preserved title" || result.Task.Description != "Preserved description" || result.Task.Metadata["sentinel"] != "keep" {
 		t.Fatalf("task context changed: %+v", result.Task)
 	}
+	pending, ok := result.Task.Metadata[models.MetaKeyManualMoveLifecyclePending].(map[string]interface{})
+	if !ok || pending["from_step_id"] != "source-step" {
+		t.Fatalf("new manual-move pending marker = %#v, want source-step", result.Task.Metadata[models.MetaKeyManualMoveLifecyclePending])
+	}
+	if _, completed := result.Task.Metadata[models.MetaKeyManualMoveLifecycleCompleted]; completed {
+		t.Fatal("completed marker from the source move remained after the new workflow change")
+	}
 	if result.Task.WorkflowAgentOverrides == nil || result.Task.WorkflowAgentOverrides.WorkflowID != "workflow-target" {
 		t.Fatalf("destination overrides = %+v", result.Task.WorkflowAgentOverrides)
 	}
@@ -214,6 +260,49 @@ func TestMoveTaskWithWorkflowChangeAcceptsEquivalentOffsetTimestamp(t *testing.T
 	}
 	if result.Task.WorkflowID != "workflow-target" || result.Task.WorkflowStepID != "target-analysis" {
 		t.Fatalf("moved assignment = %s/%s, want workflow-target/target-analysis", result.Task.WorkflowID, result.Task.WorkflowStepID)
+	}
+}
+
+func TestMoveTaskWithWorkflowChangeDoesNotRestoreClearedManualMoveMarkers(t *testing.T) {
+	fixture := newWorkflowChangeFixture(t)
+	ctx := context.Background()
+	if err := fixture.repo.SetTaskMetadataKey(ctx, fixture.task.ID, models.MetaKeyManualMoveLifecyclePending,
+		map[string]interface{}{"from_step_id": "old-source-step"}); err != nil {
+		t.Fatalf("seed stale manual-move pending marker: %v", err)
+	}
+	if err := fixture.repo.SetTaskMetadataKey(ctx, fixture.task.ID, models.MetaKeyManualMoveLifecycleCompleted, true); err != nil {
+		t.Fatalf("seed completed manual-move marker: %v", err)
+	}
+	if err := fixture.repo.UpdateTaskSessionState(ctx, "session-workflow-change", models.TaskSessionStateCompleted, ""); err != nil {
+		t.Fatalf("end task session: %v", err)
+	}
+	snapshot, err := fixture.repo.GetTask(ctx, fixture.task.ID)
+	if err != nil {
+		t.Fatalf("reload task with lifecycle markers: %v", err)
+	}
+	fixture.request.ExpectedUpdatedAt = snapshot.UpdatedAt
+
+	fixture.svc.tasks = &workflowChangeCleanupRaceRepository{
+		Repository: fixture.repo,
+		t:          t,
+		update:     fixture.repo.UpdateTaskWithWorkflowChangeAdmissionAndState,
+	}
+	if _, err := fixture.svc.MoveTaskWithOptions(
+		ctx, fixture.task.ID, "workflow-target", "target-analysis", 0,
+		MoveTaskOptions{AllowActivePrimarySession: true, WorkflowChange: fixture.request},
+	); err != nil {
+		t.Fatalf("MoveTaskWithOptions during marker cleanup: %v", err)
+	}
+
+	stored, err := fixture.repo.GetTask(ctx, fixture.task.ID)
+	if err != nil {
+		t.Fatalf("reload task after workflow change: %v", err)
+	}
+	if _, present := stored.Metadata[models.MetaKeyManualMoveLifecyclePending]; present {
+		t.Fatal("workflow change restored the stale manual-move pending marker after recovery cleared it")
+	}
+	if _, present := stored.Metadata[models.MetaKeyManualMoveLifecycleCompleted]; present {
+		t.Fatal("workflow change restored the completed manual-move marker after recovery cleared it")
 	}
 }
 

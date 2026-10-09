@@ -3,11 +3,12 @@ import type { Page } from "@playwright/test";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { waitForHttp } from "../../helpers/causal-waits";
-import { switchToTerminalPanel, waitForShellReady } from "../terminal/mobile-terminal-helpers";
+import { makeGitEnv } from "../../helpers/git-helper";
+import { taskWorktreeGit, waitForTaskWorktree } from "../../helpers/empty-remote-repository";
 import {
   cleanupPRLinkForkLaunchFixture,
   createPRLinkForkLaunchFixture,
-  expectForkPRLaunchState,
+  expectForkPRLaunchMetadata,
 } from "./pr-link-fork-launch-helpers";
 
 function expectedRemoteTitle(title: string): string {
@@ -170,9 +171,24 @@ test.describe("Create task Remote repo picker on mobile", () => {
       await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible();
       await expect(session.idleInput()).toBeVisible();
 
-      await switchToTerminalPanel(testPage);
-      await waitForShellReady(testPage);
-      await expectForkPRLaunchState(testPage, session, apiClient, fixture, taskId);
+      await expect
+        .poll(async () => (await apiClient.getTaskEnvironment(created.id))?.status ?? null, {
+          timeout: 60_000,
+          message: "the mobile fork PR task worktree did not become ready",
+        })
+        .toBe("ready");
+      if (!fixture.repositoryId) throw new Error("fork launch fixture has no repository");
+      const worktreePath = await waitForTaskWorktree(apiClient, taskId, fixture.repositoryId);
+      const worktreeGit = taskWorktreeGit(worktreePath, makeGitEnv(backend.tmpDir));
+      expect(worktreeGit.exec("git branch --show-current").trim()).toBe(fixture.headBranch);
+      expect(worktreeGit.exec("git rev-parse HEAD").trim()).toBe(fixture.headOID);
+      expect(worktreeGit.exec("git rev-parse refs/remotes/origin/main").trim()).toBe(
+        fixture.targetOID,
+      );
+
+      await testPage.reload();
+      await session.waitForLoad();
+      await expectForkPRLaunchMetadata(apiClient, fixture, taskId);
     } finally {
       await cleanupPRLinkForkLaunchFixture(apiClient, fixture, taskId);
     }

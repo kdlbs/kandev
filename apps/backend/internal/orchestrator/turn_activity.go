@@ -17,10 +17,10 @@ import (
 // independently. Foreground activity always has precedence; background work is
 // visible only after an explicit foreground-idle boundary.
 //
-// It is a best-effort accounting signal only. The default admission and public
-// activity contracts never trust it. A high-risk, default-off experiment may
-// use it for persisted Claude Code sessions, whose adapter supplies the
-// recognized lifecycle attestations below.
+// It is a best-effort accounting signal, not proof of provider quiescence. A
+// positive background-work registration can protect a session from destructive
+// idle suspension; its absence does not prove provider-internal work is absent.
+// The default admission and public activity contracts never trust it.
 //
 // The absent/zero internal state means "foreground generating". A recognized
 // registration plus an explicit idle boundary can move only this private

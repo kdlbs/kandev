@@ -140,6 +140,13 @@ remains a how-to guide and documents only the implemented automatic safeguards.
 - Existing public docs must not promise these safeguards until implementation
   and its targeted evidence are complete.
 
+## Follow-up package
+
+[Missing-checkout recovery](../missing-worktree-checkout-recovery/plan.md) extends
+selected-environment admission for issue #4052. Its work orders own the new
+regressions and real-manager integration evidence. The outstanding checks above
+remain outstanding. Their results are not inferred from the follow-up package.
+
 ## Delivery
 
 After the implementation request, execute each work order with TDD. Refresh the

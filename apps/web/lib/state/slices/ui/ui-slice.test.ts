@@ -6,7 +6,7 @@ import { waitFor } from "@testing-library/react";
 import { immer } from "zustand/middleware/immer";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import { createUISlice, migrateView } from "./ui-slice";
-import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
+import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/lib/layout/app-sidebar-geometry";
 import type { SidebarView, SidebarViewDraft } from "./sidebar-view-types";
 import type { UISlice } from "./types";
 import {
@@ -18,11 +18,19 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
   updateUserSettings: vi.fn(() => Promise.resolve({ settings: {} })),
 }));
 
-function makeStore() {
+function makeStore(createSlice: typeof createUISlice = createUISlice) {
   return create<UISlice>()(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    immer((...a) => ({ ...(createUISlice as any)(...a), workspaces: { activeId: "ws" } })),
+    immer((...a) => ({ ...(createSlice as any)(...a), workspaces: { activeId: "ws" } })),
   );
+}
+
+/** Re-evaluates the slice module and returns a store built from it, which is
+ * what a page load does to the stored UI preferences. */
+async function importAfterReload() {
+  vi.resetModules();
+  const fresh = await import("./ui-slice");
+  return makeStore(fresh.createUISlice);
 }
 
 type UIStore = UseBoundStore<StoreApi<UISlice>>;
@@ -42,6 +50,7 @@ function makeSidebarView(id: string, name: string): SidebarView {
     filters: [],
     sort: { key: "state" as const, direction: "asc" as const },
     group: "none" as const,
+    groupIndent: true,
     collapsedGroups: [],
   };
 }
@@ -52,6 +61,40 @@ function setSidebarViews(store: UIStore, patch: Partial<UISlice["sidebarViews"]>
     sidebarViewsByWorkspace: { ws: { ...state.sidebarViews, ...patch } },
   }));
 }
+
+describe("directory browser hidden-entry preference", () => {
+  const SHOW_HIDDEN_KEY = "kandev.directoryBrowser.showHidden";
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  // @covers AC-WORKSPACES-HIDDEN-FOLDERS-001.1
+  it("defaults the directory browser to the current hidden-entry behavior", () => {
+    expect(makeStore().getState().directoryBrowserShowHidden).toBe(false);
+  });
+
+  // @covers AC-WORKSPACES-HIDDEN-FOLDERS-001.5
+  it("restores a stored preference on the next page load", async () => {
+    makeStore().getState().setDirectoryBrowserShowHidden(true);
+    expect(window.localStorage.getItem(SHOW_HIDDEN_KEY)).toBe("true");
+
+    // The slice reads stored UI preferences while the module is evaluated, so a
+    // page load is simulated by re-importing the module rather than by building
+    // a second store from the already-evaluated state.
+    const afterReload = await importAfterReload();
+    expect(afterReload.getState().directoryBrowserShowHidden).toBe(true);
+  });
+
+  it("stays inactive for the next page load after being switched back off", async () => {
+    const store = makeStore();
+    store.getState().setDirectoryBrowserShowHidden(true);
+    store.getState().setDirectoryBrowserShowHidden(false);
+
+    const afterReload = await importAfterReload();
+    expect(afterReload.getState().directoryBrowserShowHidden).toBe(false);
+  });
+});
 
 describe("cancel-turn progress", () => {
   it("tracks pending cancellation independently per session and clears one entry", () => {
@@ -592,6 +635,7 @@ describe("reorderSidebarViews", () => {
       filters: [{ id: "c1", dimension: "titleMatch", op: "matches", value: "bug" }],
       sort: { key: "title", direction: "asc" },
       group: "workflow",
+      groupIndent: true,
     };
     const store = makeStore();
     setSidebarViews(store, {
@@ -654,6 +698,7 @@ describe("sidebar view backend state", () => {
         filters: [],
         sort: { key: "state", direction: "asc" },
         group: "state",
+        groupIndent: true,
       },
     });
 
@@ -691,6 +736,7 @@ describe("sidebar view backend state", () => {
           filters: [],
           sort: { key: "updatedAt", direction: "desc" },
           group: "workflow",
+          group_indent: true,
           task_row: expect.any(Object),
         },
       },
@@ -703,6 +749,7 @@ describe("sidebar view backend state", () => {
       filters: [],
       sort: { key: "updatedAt", direction: "desc" },
       group: "state",
+      groupIndent: true,
     };
     const store = makeStore();
     setSidebarViews(store, {
@@ -723,9 +770,68 @@ describe("sidebar view backend state", () => {
           filters: [],
           sort: { key: "updatedAt", direction: "desc" },
           group: "state",
+          group_indent: true,
           task_row: expect.any(Object),
         },
       },
     });
   });
+});
+
+// @covers AC-AGENTS-RUNTIME-NOTIFY-001.3
+it("queues runtime notices arriving in one render and preserves their occurrence identities", () => {
+  const store = makeStore();
+  const gemini = {
+    version: "2.0.0",
+    agent_name: "gemini",
+    title: "Gemini",
+    body: "runtime update",
+    occurrence_id: "gemini-2",
+  };
+  const codex = { ...gemini, agent_name: "codex-app-server", occurrence_id: "codex-2" };
+  store.getState().setUpdateAvailableNotification(gemini);
+  store.getState().setUpdateAvailableNotification(codex);
+  expect(store.getState().updateAvailableNotification).toEqual(gemini);
+  store.getState().setUpdateAvailableNotification(null);
+  expect(store.getState().updateAvailableNotification).toEqual(codex);
+  store.getState().setUpdateAvailableNotification(null);
+  expect(store.getState().updateAvailableNotification).toBeNull();
+});
+
+// @covers AC-AGENTS-RUNTIME-NOTIFY-003.3, AC-AGENTS-RUNTIME-NOTIFY-003.5
+it("queues a grouped runtime notification as one occurrence with its typed members", () => {
+  const store = makeStore();
+  const summary = {
+    notification_kind: "agent_runtime_summary" as const,
+    runtime_updates: [
+      {
+        occurrence_id: "gemini-2",
+        agent_name: "gemini",
+        runtime_id: "npm:@google/gemini-cli",
+        display_name: "Gemini",
+        previous_version: "1.0.0",
+        version: "2.0.0",
+      },
+      {
+        occurrence_id: "codex-3",
+        agent_name: "codex-app-server",
+        runtime_id: "npm:@openai/codex",
+        display_name: "Codex",
+        previous_version: "1.0.0",
+        version: "3.0.0",
+      },
+    ],
+    title: "2 agent runtime updates available",
+    body: "Review the new versions in Settings > Agents.",
+    url: "/settings/agents#runtime-updates",
+    occurrence_id: "summary-codex-gemini",
+  };
+
+  store.getState().setUpdateAvailableNotification(summary);
+  store.getState().setUpdateAvailableNotification({ ...summary });
+
+  expect(store.getState().updateAvailableNotification).toEqual(summary);
+  expect(store.getState().updateAvailableNotificationQueue).toEqual([]);
+  store.getState().setUpdateAvailableNotification(null);
+  expect(store.getState().updateAvailableNotification).toBeNull();
 });

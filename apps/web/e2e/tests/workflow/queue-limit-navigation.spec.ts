@@ -8,6 +8,14 @@ import {
 } from "./queued-session-ownership-helpers";
 
 test.describe("Queue limit navigation", () => {
+  test.afterEach(async ({ backend }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    await testInfo.attach("queue-limit-navigation-backend.log", {
+      path: backend.logPath,
+      contentType: "text/plain",
+    });
+  });
+
   test("labels the global capacity queue and returns without changing the task", async ({
     testPage,
     apiClient,

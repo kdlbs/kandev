@@ -18,6 +18,7 @@ import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginTaskMenuContext } from "@/lib/plugins/types";
 import type { TaskPriority, TaskState } from "@/lib/types/http";
 import { buildTaskActionsMenuEntries } from "@/lib/kanban/task-actions-menu-entries";
+import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
 
 export type TaskActionsMenuBoardRow = {
   id: string;
@@ -205,7 +206,7 @@ type UseTaskActionsMenuArgs = {
   isArchiving?: boolean;
   isDeleting?: boolean;
   onArchive: (opts: { cascade: boolean }) => void | Promise<void>;
-  onDelete: (opts: { cascade: boolean }) => void | Promise<void>;
+  onDelete: (opts: DeleteTaskParams & { cascade: boolean }) => void | Promise<void>;
   /** The subject's own workflow step, independent of `boardRow` (AC-002.4b's
    * plugin task-menu context must not go stale just because the board
    * excludes the subject, e.g. an archived task). Falls back to

@@ -1,3 +1,4 @@
+import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import fs from "node:fs";
 import path from "node:path";
@@ -33,6 +34,95 @@ const RESERVED_SOURCE_PATH = "Main # query? 100%.kt";
 const DEFINITION_PARENT_PATH = "nested/references";
 const DEFINITION_TARGET_PATH = `${DEFINITION_PARENT_PATH}/Definition Target # query? 100%.kt`;
 
+async function readMonacoModelText(page: Page, uri: string): Promise<string | null> {
+  return page.evaluate((modelUri) => {
+    const monaco = (
+      window as typeof window & {
+        monaco?: {
+          editor: {
+            getModels: () => Array<{
+              uri: { toString: () => string };
+              getValue: () => string;
+            }>;
+          };
+        };
+      }
+    ).monaco;
+    return (
+      monaco?.editor
+        .getModels()
+        .find((model) => model.uri.toString() === modelUri)
+        ?.getValue() ?? null
+    );
+  }, uri);
+}
+
+async function monacoTextPosition(page: Page, uri: string, text: string) {
+  return page.evaluate(
+    ({ modelUri, targetText }) => {
+      const monaco = (
+        window as typeof window & {
+          monaco?: {
+            editor: {
+              getEditors: () => Array<{
+                getModel: () => {
+                  uri: { toString: () => string };
+                  getValue: () => string;
+                } | null;
+                hasTextFocus: () => boolean;
+                getScrolledVisiblePosition: (position: {
+                  lineNumber: number;
+                  column: number;
+                }) => { left: number; top: number; height: number } | null;
+                getTargetAtClientPoint: (
+                  x: number,
+                  y: number,
+                ) => { position?: { lineNumber: number; column: number } } | null;
+                getDomNode: () => HTMLElement | null;
+              }>;
+            };
+          };
+        }
+      ).monaco;
+      const editor = monaco?.editor
+        .getEditors()
+        .find(
+          (candidate) =>
+            candidate.getModel()?.uri.toString() === modelUri && candidate.hasTextFocus(),
+        );
+      const model = editor?.getModel();
+      const domNode = editor?.getDomNode();
+      if (!editor || !model || !domNode) return null;
+
+      const lines = model.getValue().split("\n");
+      const lineIndex = lines.findIndex((line) => line.includes(targetText));
+      if (lineIndex === -1) return null;
+      const column = lines[lineIndex]!.indexOf(targetText) + 2;
+      const visiblePosition = editor.getScrolledVisiblePosition({
+        lineNumber: lineIndex + 1,
+        column,
+      });
+      if (!visiblePosition) return null;
+      const bounds = domNode.getBoundingClientRect();
+      const point = {
+        x: bounds.left + visiblePosition.left + 2,
+        y: bounds.top + visiblePosition.top + visiblePosition.height / 2,
+      };
+      const target = editor.getTargetAtClientPoint(point.x, point.y);
+      if (
+        !target?.position ||
+        target.position.lineNumber !== lineIndex + 1 ||
+        target.position.column < column ||
+        target.position.column > column + 2
+      ) {
+        return null;
+      }
+      return point;
+    },
+    { modelUri: uri, targetText: text },
+  );
+}
+
 function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -42,6 +132,12 @@ function isProcessAlive(pid: number): boolean {
     throw error;
   }
 }
+
+test("enables browser continuity in the normal E2E profile", async ({ apiClient }) => {
+  const response = await apiClient.rawRequest("GET", "/api/v1/features");
+  expect(response.ok).toBeTruthy();
+  expect(await response.json()).toMatchObject({ lspBrowserContinuity: true });
+});
 
 test.describe("LSP file intelligence", () => {
   test.describe.configure({ timeout: 90_000 });
@@ -416,7 +512,11 @@ test.describe("LSP file intelligence", () => {
     });
     expect(lspSockets).toHaveLength(1);
     await expectFakeLspMarkerCount(testPage, 1);
+    const sourceModelUri = expectedMonacoModelUri(sourceUri, task.sessionId);
+    const originalSource = await readMonacoModelText(testPage, sourceModelUri);
+    expect(originalSource).toContain("fun greeting0(name: String): String");
 
+    await testPage.keyboard.press("Escape");
     const editor = testPage.locator(".monaco-editor:visible");
     await editor.click();
     await testPage.keyboard.press("Control+Space");
@@ -443,13 +543,13 @@ test.describe("LSP file intelligence", () => {
     );
     await testPage.keyboard.press("Control+Z");
     await testPage.keyboard.press("Control+Z");
+    await expect.poll(() => readMonacoModelText(testPage, sourceModelUri)).toBe(originalSource);
 
-    await testPage
-      .locator(".monaco-editor:visible .view-line")
-      .nth(2)
-      .hover({
-        position: { x: 80, y: 8 },
-      });
+    const hoverPoint = () => monacoTextPosition(testPage, sourceModelUri, "greeting0");
+    await expect.poll(hoverPoint).not.toBeNull();
+    const point = await hoverPoint();
+    if (!point) throw new Error("Kotlin greeting is not visible in the focused Monaco editor");
+    await testPage.mouse.move(point.x, point.y);
     await expectFakeLspEvent(
       backend,
       (event) => event.event === "message" && event.method === "textDocument/hover",
@@ -959,31 +1059,38 @@ test.describe("LSP file intelligence", () => {
     seedData,
     backend,
   }) => {
-    const featureResponse = await apiClient.rawRequest("GET", "/api/v1/features");
-    expect(featureResponse.ok).toBeTruthy();
-    expect(await featureResponse.json()).toMatchObject({ lspBrowserContinuity: false });
-    installFakeKotlinLsp(backend);
-    const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
-      title: "Kotlin LSP Manual Persistence",
+    const releaseFeature = await backend.useEnv({
+      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "false",
     });
-    await openDesktopFile(testPage, task.session, task.filePaths[0]);
-    let statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await performLspAction(testPage, "start");
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
-    const storageKey = `kandev-lsp:${task.sessionId}:kotlin`;
-    expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBe("1");
+    try {
+      const featureResponse = await apiClient.rawRequest("GET", "/api/v1/features");
+      expect(featureResponse.ok).toBeTruthy();
+      expect(await featureResponse.json()).toMatchObject({ lspBrowserContinuity: false });
+      installFakeKotlinLsp(backend);
+      const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+        title: "Kotlin LSP Manual Persistence",
+      });
+      await openDesktopFile(testPage, task.session, task.filePaths[0]);
+      let statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
+      await performLspAction(testPage, "start");
+      await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      const storageKey = `kandev-lsp:${task.sessionId}:kotlin`;
+      expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBe("1");
 
-    await testPage.reload();
-    await openDesktopFile(testPage, task.session, task.filePaths[0]);
-    statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
-    await expect
-      .poll(() => readFakeLspEvents(backend).filter((event) => event.event === "started").length)
-      .toBeGreaterThanOrEqual(2);
+      await testPage.reload();
+      await openDesktopFile(testPage, task.session, task.filePaths[0]);
+      statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
+      await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      await expect
+        .poll(() => readFakeLspEvents(backend).filter((event) => event.event === "started").length)
+        .toBeGreaterThanOrEqual(2);
 
-    await performLspAction(testPage, "stop");
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
-    expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBeNull();
+      await performLspAction(testPage, "stop");
+      await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
+      expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBeNull();
+    } finally {
+      await releaseFeature();
+    }
   });
 
   test("cleans up a crashed server and reconnects", async ({
@@ -1140,9 +1247,6 @@ test.describe("LSP file intelligence", () => {
     const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
       ? (initial.settings.lsp_auto_start_languages as string[])
       : [];
-    const releaseFeature = await backend.useEnv({
-      KANDEV_FEATURES_LSP_BROWSER_CONTINUITY: "true",
-    });
     const context = testPage.context();
 
     try {
@@ -1210,6 +1314,23 @@ test.describe("LSP file intelligence", () => {
       await openDesktopFile(reopenedPage, reopenedSession, task.filePaths[0]);
       const reopenedStatus = reopenedPage.locator('[data-testid="lsp-status-button"]:visible');
       await expect(reopenedStatus).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      const continuityDidOpenCount = () =>
+        readFakeLspEvents(backend).filter(
+          (event) => event.event === "message" && event.method === "textDocument/didOpen",
+        ).length;
+      await expect.poll(continuityDidOpenCount, { timeout: 15_000 }).toBe(2);
+
+      // During a resumed lease, the server can publish diagnostics before the
+      // browser sends attachmentReady. Reopen the file after the barrier so the
+      // marker assertion observes a post-ready didOpen instead of packet timing.
+      const reopenedTab = reopenedPage.locator(".dv-default-tab", {
+        hasText: path.basename(task.filePaths[0]),
+      });
+      await reopenedTab.hover();
+      await reopenedTab.locator(".dv-default-tab-action").click();
+      await expect(reopenedTab).toHaveCount(0);
+      await openDesktopFile(reopenedPage, reopenedSession, task.filePaths[0]);
+      await expect.poll(continuityDidOpenCount, { timeout: 15_000 }).toBe(3);
       await expectFakeLspMarkerMessages(reopenedPage, modelUri, ["Fake Kotlin diagnostic"]);
       const progress = (await openLspStatus(reopenedPage)).getByTestId("lsp-project-progress");
       await expect(progress).toHaveAttribute("data-lsp-progress-kind", "active");
@@ -1225,7 +1346,7 @@ test.describe("LSP file intelligence", () => {
         events.filter(
           (event) => event.event === "message" && event.method === "textDocument/didOpen",
         ),
-      ).toHaveLength(2);
+      ).toHaveLength(3);
       await performLspAction(reopenedPage, "stop");
       await expect(reopenedStatus).toHaveAttribute("data-lsp-state", "disabled");
       await expect.poll(() => isProcessAlive(started.pid)).toBe(false);
@@ -1233,7 +1354,6 @@ test.describe("LSP file intelligence", () => {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         lsp_auto_start_languages: initialAutoStart,
       });
-      await releaseFeature();
     }
   });
 

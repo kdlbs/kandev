@@ -5,6 +5,7 @@ import {
   removeTestRepository,
 } from "../../helpers/empty-remote-repository";
 import { GitHelper } from "../../helpers/git-helper";
+import { configureGitHubOrigin } from "../../helpers/github-origin";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SessionPage } from "../../pages/session-page";
 
@@ -64,6 +65,14 @@ export async function expectForkPRLaunchState(
 
   await page.reload();
   await session.waitForLoad();
+  await expectForkPRLaunchMetadata(apiClient, fixture, taskId);
+}
+
+export async function expectForkPRLaunchMetadata(
+  apiClient: ApiClient,
+  fixture: PRLinkForkLaunchFixture,
+  taskId: string,
+): Promise<void> {
   const task = await apiClient.getTask(taskId);
   expect(task.repositories?.[0]?.checkout_branch).toBe(fixture.headBranch);
   expect(task.repositories?.[0]?.base_branch).toBe("main");
@@ -124,6 +133,12 @@ export async function createPRLinkForkLaunchFixture(
     const headOID = forkGit.commit("fork pull request head");
     forkGit.exec(`git push origin ${HEAD_BRANCH}`);
     forkGit.exec(`git push "${upstream.remoteURL}" HEAD:refs/pull/${PR_NUMBER}/head`);
+
+    configureGitHubOrigin(
+      upstream.localPath,
+      `https://github.com/${upstreamOwner}/${upstreamRepository}.git`,
+      upstream.gitEnv,
+    );
 
     repositoryId = (
       await apiClient.createRepository(workspaceId, upstream.localPath, "main", {

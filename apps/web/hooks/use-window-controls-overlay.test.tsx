@@ -55,7 +55,14 @@ describe("useWindowControlsOverlay", () => {
     expect(result.current.visible).toBe(false);
 
     act(() => overlay.publish(new DOMRect(72, 0, 1448, 40)));
-    expect(result.current).toEqual({ visible: true, x: 72, y: 0, width: 1448, height: 40 });
+    expect(result.current).toEqual({
+      visible: true,
+      x: 72,
+      y: 0,
+      width: 1448,
+      height: 40,
+      macTauriOverlay: false,
+    });
 
     act(() => overlay.publish(new DOMRect(0, 0, 0, 0), false));
     expect(result.current.visible).toBe(false);
@@ -79,6 +86,13 @@ describe("useWindowControlsOverlay", () => {
 
     const { result } = renderHook(() => useWindowControlsOverlay());
 
-    expect(result.current).toEqual({ visible: true, x: 72, y: 0, width: 1448, height: 40 });
+    expect(result.current).toEqual({
+      visible: true,
+      x: 72,
+      y: 0,
+      width: 1448,
+      height: 40,
+      macTauriOverlay: false,
+    });
   });
 });

@@ -107,3 +107,15 @@ Tasks 01 and 02 must complete so the E2E scenarios exercise the final protocol a
 Added managed desktop E2E coverage for retained process identity and fresh diagnostics/progress after reattachment, independent windows and duplicate-tab isolation, Stop and idle release, detached eviction and all-attached capacity, disabled-flag compatibility, and fresh startup after task-host restart. Tablet drawer reattachment and the phone no-socket boundary passed on the managed mobile project. Updated public developer, configuration, feature-status, and WebSocket guidance; both public-doc validators passed. Spec catalog validation, spec lint, and `git diff --check` passed.
 
 Code-review remediation extends the close/reopen scenario to send and observe a second completed agent turn after LSP admission. It then waits 95 seconds to pass the 60-second idle age threshold and the 30-second reaper tick, and verifies the same fake LSP process and initialize count after reattachment. The focused managed desktop E2E passed (1 test, 1.7 minutes); the frontend production build and backend build both completed as part of the managed runner.
+
+
+PR #3598 CI follow-up, 2026-10-06: run `37450559149`, shard 1 job
+`112233810062`, exposed a search fallback outside the helper's existing
+foreground-tab readiness poll. A late Git-status update selected Changes
+after the helper returned, so clicking Search no longer exposed its input.
+`openDesktopFile` now opens Search and verifies its input inside the same
+30-second poll used for tree selection. The final five-second input check
+and production tab-selection behavior remain unchanged.
+
+The backend-restart case passed three consecutive runs without retries.
+`cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project chromium tests/task/sidebar-scroll-preservation.spec.ts tests/lsp/lsp-file-intelligence.spec.ts -- --retries 0 --trace=retain-on-failure`: all 27 tests passed in 9.8 minutes (19 LSP cases and eight sidebar-scroll cases). This includes retained browser reattachment, the two-minute editor-idle release, backend restart, and capacity recovery. Full web lint and typecheck, focused Prettier/ESLint, and whitespace checks passed. Exact pushed-head CI remains pending.

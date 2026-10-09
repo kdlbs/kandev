@@ -30,6 +30,7 @@ A parent and its nested children appear as one sidebar tree. Last activity sorti
 - **AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-001.6:** The built-in view and new-view defaults do not change.
 - **AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-001.7:** When a view sorts by **Last activity**, each row displays that activity time. Other sort modes retain the existing row time behavior.
 - **AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-001.8:** **GIVEN** several idle tasks receive pull-request status refreshes, **WHEN** a view sorts by **Last activity**, **THEN** their order and displayed activity times do not change.
+- **AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-001.9:** **GIVEN** a task whose manual workflow move has already completed, **WHEN** Kandev restarts and clears its remaining recovery markers, **THEN** that cleanup alone does not change the task's last activity time or its position relative to tasks with unchanged activity. A later user task edit or workflow move still advances activity.
 
 ### REQ-UI-SIDEBAR-LAST-ACTIVITY-SORT-002: Task tree activity order
 
@@ -203,3 +204,4 @@ vertical scroll body.
 
 - [Sidebar Last Activity Sort](../../../plans/sidebar-last-activity-sort/plan.md)
 - [Sidebar task tree activity order](../../../plans/sidebar-task-tree-activity-sort/plan.md)
+- [Preserve activity during recovery cleanup](../../../plans/sidebar-activity-recovery-cleanup/plan.md)
