@@ -1,7 +1,8 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { IconLayoutGrid } from "@tabler/icons-react";
+import { useRef } from "react";
+import { IconLayoutGrid, IconNetwork, IconChevronRight } from "@tabler/icons-react";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import { pluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
@@ -10,6 +11,10 @@ import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import { registrationIsVisible } from "../plugin-task-panel";
 import { resolveTaskPanelTitle } from "@/lib/state/layout-manager/plugin-panels";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
+import {
+  type PortForwardingVisibility,
+  useOptionalPortForwardingVisibility,
+} from "../port-forwarding-visibility-provider";
 
 type PluginPanelPickerProps = {
   open: boolean;
@@ -34,6 +39,8 @@ export function PluginPanelPicker({
   sessionKind = null,
 }: PluginPanelPickerProps) {
   const { t } = useTranslation();
+  const portForwarding = useOptionalPortForwardingVisibility();
+  const openingPorts = useRef(false);
   usePluginRegistry();
   const registrations = taskId
     ? pluginRegistry
@@ -52,8 +59,26 @@ export function PluginPanelPicker({
   if (!open) return null;
 
   return (
-    <MobilePickerSheet open={open} onOpenChange={onOpenChange} title={t("common:panels")}>
+    <MobilePickerSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title={t("common:panels")}
+      onCloseAutoFocus={(event) => {
+        if (openingPorts.current) event.preventDefault();
+        openingPorts.current = false;
+      }}
+    >
       <div className="space-y-1" data-testid="mobile-plugin-panel-options">
+        {taskId && portForwarding && (
+          <PortForwardingPickerAction
+            visibility={portForwarding}
+            onSelect={() => {
+              openingPorts.current = true;
+              onOpenChange(false);
+              portForwarding.setDialogOpen(true);
+            }}
+          />
+        )}
         {taskCanvases.map((canvas) => (
           <button
             key={canvas.id}
@@ -91,5 +116,42 @@ export function PluginPanelPicker({
         })}
       </div>
     </MobilePickerSheet>
+  );
+}
+
+function PortForwardingPickerAction({
+  visibility,
+  onSelect,
+}: {
+  visibility: PortForwardingVisibility;
+  onSelect: () => void;
+}) {
+  const { t } = useTranslation();
+  const disabled = !visibility.canToggle || visibility.isUpdating;
+  return (
+    <>
+      <h3 className="px-3 py-2 text-xs font-medium text-muted-foreground">{t("task:taskTools")}</h3>
+      <button
+        type="button"
+        data-testid="mobile-port-forwarding-open"
+        className="flex min-h-11 w-full min-w-0 cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50"
+        aria-label={t("task:portForwarding")}
+        aria-describedby={disabled ? "mobile-port-forwarding-unavailable" : undefined}
+        disabled={disabled}
+        onClick={onSelect}
+      >
+        <IconNetwork className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="min-w-0 flex-1">{t("task:portForwarding")}</span>
+        <IconChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+      </button>
+      {disabled && (
+        <p
+          id="mobile-port-forwarding-unavailable"
+          className="px-3 pb-2 text-xs text-muted-foreground"
+        >
+          {visibility.isUpdating ? t("task:saving") : t("task:portForwardingUnavailable")}
+        </p>
+      )}
+    </>
   );
 }

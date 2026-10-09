@@ -2714,5 +2714,8 @@
   "sortOldestFirst": "Oldest first",
   "sortAscending": "Ascending",
   "sortMatchingFirst": "Matching first",
-  "sortRuleColor": "Color for sort field {{position}}"
+  "sortRuleColor": "Color for sort field {{position}}",
+  "portForwardingShowInHeader": "Show in task header",
+  "portForwardingHeaderShortcutDescription": "Shows a shortcut for everyone viewing this task. Does not change tunnels.",
+  "portForwardingUnavailable": "Port forwarding requires an active, unarchived task session with a ready runtime."
 }

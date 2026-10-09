@@ -52,6 +52,15 @@ export class SessionPage {
   get mobileSessionMenu() {
     return this.page.getByTestId("mobile-task-picker-trigger");
   }
+  get mobilePanels() {
+    return this.page.getByTestId("mobile-session-nav-panels");
+  }
+  get mobilePortForwardingOpen() {
+    return this.page.getByTestId("mobile-port-forwarding-open");
+  }
+  get portForwardHeaderShortcut() {
+    return this.page.getByTestId("port-forward-header-shortcut");
+  }
   get mobilePortForwardingToggle() {
     return this.page.getByTestId("mobile-port-forwarding-toggle");
   }

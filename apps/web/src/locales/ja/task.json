@@ -2714,5 +2714,8 @@
   "sortOldestFirst": "古い順",
   "sortAscending": "昇順",
   "sortMatchingFirst": "一致する項目を優先",
-  "sortRuleColor": "並べ替え項目 {{position}} の色"
+  "sortRuleColor": "並べ替え項目 {{position}} の色",
+  "portForwardingShowInHeader": "タスクのヘッダーに表示",
+  "portForwardingHeaderShortcutDescription": "このタスクを表示する全員にショートカットを表示します。トンネルは変更しません。",
+  "portForwardingUnavailable": "ポート転送には、実行環境が準備できている、アーカイブされていないアクティブなタスクセッションが必要です。"
 }

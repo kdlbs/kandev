@@ -2714,5 +2714,8 @@
   "sortOldestFirst": "Mais antigas primeiro",
   "sortAscending": "Ascendente",
   "sortMatchingFirst": "Correspondentes primeiro",
-  "sortRuleColor": "Cor do campo de ordenação {{position}}"
+  "sortRuleColor": "Cor do campo de ordenação {{position}}",
+  "portForwardingShowInHeader": "Mostrar no cabeçalho da tarefa",
+  "portForwardingHeaderShortcutDescription": "Mostra um atalho para todas as pessoas que veem esta tarefa. Não altera os túneis.",
+  "portForwardingUnavailable": "O encaminhamento de portas requer uma sessão de tarefa ativa e não arquivada, com o ambiente de execução pronto."
 }

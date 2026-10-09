@@ -2714,5 +2714,8 @@
   "sortOldestFirst": "Ōĺďēśţ ƒĩŕśţ",
   "sortAscending": "Àśćēńďĩńĝ",
   "sortMatchingFirst": "Ḿàţćĥĩńĝ ƒĩŕśţ",
-  "sortRuleColor": "Ćōĺōŕ ƒōŕ śōŕţ ƒĩēĺď {{position}}"
+  "sortRuleColor": "Ćōĺōŕ ƒōŕ śōŕţ ƒĩēĺď {{position}}",
+  "portForwardingShowInHeader": "Śĥōŵ ĩń ţàśķ ĥēàďēŕ",
+  "portForwardingHeaderShortcutDescription": "Śĥōŵś à śĥōŕţćũţ ƒōŕ ēvēŕŷōńē vĩēŵĩńĝ ţĥĩś ţàśķ. Ďōēś ńōţ ćĥàńĝē ţũńńēĺś.",
+  "portForwardingUnavailable": "Ƥōŕţ ƒōŕŵàŕďĩńĝ ŕēqũĩŕēś àń àćţĩvē, ũńàŕćĥĩvēď ţàśķ śēśśĩōń ŵĩţĥ à ŕēàďŷ ŕũńţĩḿē."
 }

@@ -85,8 +85,7 @@ test.describe("Mobile plugin task panel", () => {
       )
       .toBe("hello from mobile e2e");
 
-    // Definitive disable while focused selects Chat and removes the grouped
-    // plugin action rather than leaving a dead panel selection behind.
+    // Disabling the plugin selects Chat; task tools retain their Panels entry.
     await testPage.goto("/settings/plugins");
     const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
     await pluginRow.getByRole("button", { name: "Disable" }).click();
@@ -94,15 +93,14 @@ test.describe("Mobile plugin task panel", () => {
     await testPage.goto(`/t/${seedTask.id}`);
     await session.waitForLoad();
     await expect(notesEditor).toHaveCount(0);
-    // With its only plugin panel disabled and no task canvases, the grouped
-    // Panels action has nothing to populate its sheet, so it is no longer
-    // offered; the disabled plugin's option is gone and Chat must stay the
-    // active panel (no dead panel selection behind).
-    await expect(panelsNavButton).toHaveCount(0);
+    await expect(panelsNavButton).toBeVisible();
+    await panelsNavButton.tap();
+    await expect(session.mobilePortForwardingOpen).toBeVisible();
     await expect(
       testPage.getByTestId("mobile-plugin-panel-option-kandev-plugin-e2e-notes"),
     ).toHaveCount(0);
     await expect(testPage.getByTestId("mobile-prompt-history-option")).toHaveCount(0);
+    await testPage.getByRole("dialog", { name: "Panels", exact: true }).press("Escape");
     await expect(testPage.getByRole("button", { name: "Chat", exact: true })).toHaveClass(
       /text-primary/,
     );

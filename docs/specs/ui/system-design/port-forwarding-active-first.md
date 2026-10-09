@@ -25,11 +25,12 @@ and [Browser access](../requirements/port-proxy-browser-panel.md).
 
 ## Components and responsibilities
 
-- `apps/web/components/task/port-forward-dialog.tsx`: `PortForwardButton` gates a
-  session-keyed `SessionPortForwardControl` that owns `activeTunnels` hydration;
-  `PortForwardDialogContent` retains
-  detected/manual state, refresh, and existing action wiring. `PortListSection`
-  consumes the derived rows rather than separately mapping detected and manual lists.
+- `apps/web/components/task/port-forward-dialog.tsx`: `PortForwardingManager`
+  hosts the session-scoped `usePortForwardManagement` controller above responsive
+  headers; `PortForwardButton` is the optional header trigger. Shared
+  `PortForwardContent` retains detected/manual state and action wiring under
+  phone Drawer and wider Dialog wrappers. `PortListSection` consumes the derived
+  rows rather than separately mapping detected and manual lists.
 - `apps/web/components/task/port-forward-rows.ts`: a pure, dependency-neutral
   projection using `ListeningPort`, manual target numbers, and the active tunnel map.
   Keep formatting and translation out of it. `port-forward-list.tsx` owns
@@ -53,8 +54,8 @@ optional tunnel port. Count forwarded rows from this same projection. The
 refresh callback must not be the gate that makes tunnel-only targets appear;
 late `listTunnels` hydration must update the union immediately.
 
-Retain successfully stopped tunnel-only targets in dialog-local manual state
-for the rest of that visit. Reuse the existing manual-state retention pattern,
+Retain successfully stopped tunnel-only targets in session-owned manual state
+for the rest of that session visit. Reuse the existing manual-state retention pattern,
 reconciling it when active tunnel keys arrive, rather than persisting runtime history.
 Do not mutate source arrays or Maps while sorting.
 
@@ -75,15 +76,13 @@ rows remain compact and ordinary controls are 28px. On phones, put each URL on
 its own line and actions beneath it, with at least 44px targets. Use the canonical
 phone/coarse-pointer conditions rather than `sm:` alone for touch sizing.
 
-The nearest shipped surface is the existing port dialog, exercised by
-`e2e/tests/session/mobile-port-forwarding.spec.ts`. Retain its Dialog because this
-is temporary configuration plus multi-action management, rather than a short
-picker. Reuse fixed-header, `min-h-0` scroll-body, dynamic viewport, and safe-area
-geometry from `components/task/mobile/mobile-picker-sheet.tsx` without changing
-overlay type or introducing another state owner. One content scroller contains
-both groups and manual addition. Long values wrap or truncate within their own
-line; controls never shrink out of reach. Browser-panel availability stays
-capability-based, including its current phone behavior.
+The [discovery design](port-forwarding-discovery.md) supplies phone Panels
+access and a tall native bottom Drawer. Wider layouts retain Dialog. Both reuse
+one session controller, fixed header, `min-h-0` scroll body, dynamic viewport,
+and safe-area geometry. One content scroller contains both groups and manual
+addition; phones also expose the optional header-shortcut preference. Long values
+wrap or truncate within their own line; controls never shrink out of reach.
+Browser-panel availability remains capability-based; phones retain Open/Copy.
 
 Keep each `PortRow` under the same React parent with `key={port}` across both
 logical groups; insert keyed headings in that list rather than migrating rows
@@ -100,8 +99,9 @@ forwarded; successful Stop removes the entry and demotes it. Errors leave the ma
 and grouping intact while `pendingTunnels` prevents repeated actions. The main toggle uses
 `aria-disabled` with an action guard so pending operations retain focus.
 
-Keep the cancelled-response guard in `SessionPortForwardControl`. Key
-the control by session identity so detected/manual state cannot leak
+Keep hydration cancellation and session-scope guards in
+`usePortForwardManagement`. Reset the controller by session identity so
+detected/manual state cannot leak
 when a session changes while the dialog is open. Ensure async refresh/mutation
 results cannot write into a replacement session: use the existing effect
 cancellation pattern and scope the active-map setter to its initiating session.
