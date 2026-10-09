@@ -234,3 +234,19 @@ assets; the sequential mobile run reused those unchanged assets with
 `--no-build`. Existing rotation, touch sizing, Save clearance and responsive
 boundary assertions remain covered. Exact-head remote CI/review and current-base
 merge-result verification are externally pending until the remediation push.
+
+
+### Merge verification follow-up (2026-10-07)
+
+The mobile browser test initially failed to navigate after pressing the saved
+shortcut immediately after a document navigation to Home. It now waits for
+the real Open navigation menu control and focuses that non-editable control
+before pressing the shortcut. This establishes page readiness and preserves
+the global shortcut's editable-target suppression. All saved-setting, reset,
+touch-target and viewport-containment assertions remain unchanged.
+
+Three first attempts passed with
+`E2E_PORT_OFFSET=0 pnpm --dir apps/web e2e:run --host --no-build --shards 1
+--project mobile-chrome tests/settings/mobile-integration-shortcuts.spec.ts --
+--retries=0 --repeat-each=3` from the root. Fresh hosted verification remains
+pending.

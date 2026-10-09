@@ -535,7 +535,8 @@ describe("current mutation outcomes", () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
-  it("current same-workspace save keeps existing reset and GitLab payload semantics", async () => {
+  // @covers AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.1, AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-003.2
+  it("current GitLab save retains in-flight edits and submitted payload semantics", async () => {
     const hook = await mount();
     act(() => {
       hook.result.current.setProvider("gitlab");
@@ -565,7 +566,8 @@ describe("current mutation outcomes", () => {
       branch: "main",
     });
     expect(payload).not.toHaveProperty("repo_owner");
-    expect(hook.result.current.form.branch).toBe("main");
+    expect(hook.result.current.form.branch).toBe("in-flight-edit");
+    expect(hook.result.current.config?.branch).toBe("main");
     expect(hook.result.current.saving).toBe(false);
   });
 });

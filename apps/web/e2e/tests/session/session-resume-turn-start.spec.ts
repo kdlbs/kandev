@@ -41,12 +41,6 @@ test.describe("Desktop message during resumed workflow turn start", () => {
         `e2e:message("${marker}")`,
       );
 
-      await waitForNewSessionMessage(
-        apiClient,
-        fixture.identity.sessionId,
-        previousMessageIds,
-        marker,
-      );
       await waitForSessionStarting(
         testPage,
         apiClient,
@@ -68,6 +62,12 @@ test.describe("Desktop message during resumed workflow turn start", () => {
         apiClient,
         fixture.task.id,
         fixture.identity.sessionId,
+      );
+      await waitForNewSessionMessage(
+        apiClient,
+        fixture.identity.sessionId,
+        previousMessageIds,
+        marker,
       );
       const response = fixture.session
         .activeChat()

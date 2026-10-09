@@ -53,6 +53,7 @@ vi.mock("@/lib/services/session-recovery-service", () => ({
   recoveryInspectionBusyMessage: () => "",
   sessionRecoveryGuardDetails: () => null,
   sessionRecoveryGuardMessage: () => "",
+  contextContinuationDetails: () => null,
   requestSessionRecover: mocks.requestSessionRecover,
   restoreSessionWorkspace: mocks.restoreSessionWorkspace,
   getWorkspaceRecoveryStatus: mocks.getWorkspaceRecoveryStatus,

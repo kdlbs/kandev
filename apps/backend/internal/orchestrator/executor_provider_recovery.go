@@ -33,3 +33,16 @@ func (s *Service) recordProviderRecovery(ctx context.Context, data watcher.ACPSe
 		}
 	}
 }
+
+// A continuation reports replacement only after its native generation and
+// context submission are committed. Persistence fences the execution and token.
+func (s *Service) recordContinuationRecovery(ctx context.Context, taskID string, checkpoint *continuationCheckpoint) {
+	if checkpoint == nil || checkpoint.nativeID == "" || checkpoint.candidateExecutionID == "" {
+		return
+	}
+	s.recordProviderRecovery(ctx, watcher.ACPSessionEventData{
+		TaskID: taskID, SessionID: checkpoint.sessionID,
+		AgentExecutionID: checkpoint.candidateExecutionID,
+		ACPSessionID:     checkpoint.nativeID, ConversationOutcome: models.ProviderConversationFresh,
+	})
+}

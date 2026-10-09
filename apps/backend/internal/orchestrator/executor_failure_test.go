@@ -34,3 +34,30 @@ func TestExecutorFailureProviderOutcomeReachesTranscriptThroughEvent(t *testing.
 	require.NoError(t, err)
 	require.Len(t, messages, 1, "a delayed old event cannot add a false restoration notice")
 }
+
+func TestExecutorFailureContinuationReportsOnlyCommittedCurrentConversation(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	require.NoError(t, repo.UpsertExecutorRunning(t.Context(), &models.ExecutorRunning{
+		ID: "current", TaskID: "task1", SessionID: "session1", AgentExecutionID: "current",
+		Status: "ready", ResumeToken: "new-native",
+	}))
+	checkpoint := &continuationCheckpoint{sessionID: "session1", candidateExecutionID: "current"}
+	svc.recordContinuationRecovery(t.Context(), "task1", checkpoint)
+	messages, err := repo.ListMessages(t.Context(), "session1")
+	require.NoError(t, err)
+	require.Empty(t, messages, "an uncommitted candidate cannot report recovery")
+	checkpoint.nativeID = "new-native"
+	svc.recordContinuationRecovery(t.Context(), "task1", checkpoint)
+	messages, err = repo.ListMessages(t.Context(), "session1")
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	require.Equal(t, "fresh", messages[0].Metadata["provider_conversation"])
+	checkpoint.candidateExecutionID = "replaced"
+	checkpoint.nativeID = "old-native"
+	svc.recordContinuationRecovery(t.Context(), "task1", checkpoint)
+	messages, err = repo.ListMessages(t.Context(), "session1")
+	require.NoError(t, err)
+	require.Len(t, messages, 1, "a stale continuation cannot report another recovery")
+}

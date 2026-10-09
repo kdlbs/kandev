@@ -4,7 +4,7 @@
 
 ## Spec authority
 
-`docs/specs/office/` (16 files, plus later requirements/system-design additions below) is the authority for what Office is and why — it outranks any card, register, or comment. **Where code and spec disagree, that is a defect in one of them; do not silently follow the code.** A seventeenth office-tagged spec, [per-agent + per-role tier selection](../../../../docs/specs/office-agent-tier-routing/spec.md), lives in a sibling directory, not under `docs/specs/office/`.
+`docs/specs/office/` (16 files, plus later requirements/system-design additions below) is the authority for what Office is and why — it outranks any card, register, or comment. **Where code and spec disagree, that is a defect in one of them; do not silently follow the code.** A seventeenth office-tagged spec, [per-agent + per-role tier selection](../../../../docs/specs/office/requirements/office-agent-tier-routing.md), lives under `docs/specs/office/requirements/` (migrated from a sibling `docs/specs/office-agent-tier-routing/spec.md`), split further into [system-design part 1](../../../../docs/specs/office/system-design/office-agent-tier-routing-01.md), [part 2](../../../../docs/specs/office/system-design/office-agent-tier-routing-02.md), [part 3](../../../../docs/specs/office/system-design/office-agent-tier-routing-03.md).
 
 | Spec | Status | Covers |
 |---|---|---|
@@ -14,7 +14,7 @@
 | `scheduler.md` | draft | Autonomous wakeup pipeline: assignments/comments/approvals, routines, idle skip, retry/backoff |
 | `routine-catch-up.md` | shipped | Resuming after downtime produces exactly one run per due trigger, never one per missed tick; `catch_up_max` bounds only how many ticks are counted/reported, never how many runs fire; policy `enqueue_missed_with_cap` renamed to `summarize_missed` (deprecated alias accepted forever) |
 | `runtime.md` | draft | Error-handling contract for the agent runtime; **2026-08-17 amendment**: provider classification/recovery is superseded by `../platform/provider-error-recovery.md` and `../agents/dynamic-agent-routing.md` — read the amendment banner before the body |
-| `routing.md` | **archived** | Provider routing; superseded by `../agents/dynamic-agent-routing.md` — do not treat as current |
+| `routing.md` | **deprecated** | Historical Office provider routing; migration target: `docs/specs/agents/system-design/dynamic-agent-routing-01.md` — do not treat as current |
 | `costs.md` | in-progress | Cost tracking and budget management |
 | `dashboard.md` | draft | Workspace-health landing page: agents, run trends, recent activity, spend |
 | `live-updates.md` | draft | Real-time refresh so concurrent agent fan-out is visible without a manual reload |
@@ -27,10 +27,11 @@
 | `requirements/task-session-termination.md` + `system-design/task-session-termination-01.md` | shipped | Retained-capacity precondition on the three session-termination call sites (role removal, seat-claim displacement, reassignment): don't end a shared (task, agent) session while the agent still holds another capacity |
 | `requirements/seat-claim-decision-guard.md` + `system-design/seat-claim-decision-guard-01.md` | shipped | `claimAutoSeat`'s `NOT EXISTS` guard against a roleless decision race; latent on every shipped decision path but the only defense on that path |
 | `requirements/assignment-wake-rate-limit.md` + `system-design/assignment-wake-rate-limit-01.md` | shipped | Per-task rolling-window admission gate (5 admitted agent-initiated `task_assigned` wakes per 10-minute window) bounding self-reassignment run spam from an agent holding `can_assign_tasks` |
+| `requirements/gate-comment-wake.md` + `system-design/gate-comment-wake-01.md` | shipped | A comment at a gated (`review`/`approval`) step wakes only its seat's undecided reviewers/approvers with a verdict-framing prompt, never the comment's own author; `office-default.yml`'s `on_comment` fan-out and the `healBuiltinWorkflowStepOnCommentFanOut` startup reconciler backfill it onto already-materialized system workflows |
 
 The two rows above are the only entries reflecting the newer `requirements/` + `system-design/` split; the other 15 predate that migration and this table has not been reconciled with the full current Office spec set. `docs/specs/office/README.md` no longer carries a tracked specification map (see ADR `2026-09-07-on-demand-document-catalogs`) — run `python3 scripts/list-docs.py specs --system office --format paths` for the authoritative, current list of anything not covered here.
 
-`office-agent-tier-routing/spec.md`'s own front matter still calls `routing.md` "authoritative" for tiers, provider order, execution profiles, provider health, and wake-reason policy — that predates `routing.md`'s archival in `docs/specs/INDEX.md` and is now stale; trust the INDEX status over the sibling spec's own text.
+The active Office tier-selection contract is in `docs/specs/office/requirements/office-agent-tier-routing.md`. The deprecated `routing.md` specification is historical and does not override that contract.
 
 ## Traps
 
@@ -57,7 +58,7 @@ The two rows above are the only entries reflecting the newer `requirements/` + `
 - `routines/` — routine (cron) definitions and dispatch, including the default coordinator routine
 - `wakeup/` — wake payload/source/reason types and the dispatcher that turns them into runs
 - `repository/sqlite/` — Office's SQLite tables (`runs`, route-attempt ledger, etc.)
-- `routing/` — provider routing types; **spec archived**, package still live — exactly the kind of code/spec mismatch the precedence rule above exists for; readers wanting current routing behavior should start from `../agents/dynamic-agent-routing.md`
+- `routing/` — provider routing types; **spec deprecated**, package still live — tier precedence is in `docs/specs/office/requirements/office-agent-tier-routing.md`; the provider-routing migration target is `docs/specs/agents/system-design/dynamic-agent-routing-01.md`
 - `engine_dispatcher/` — office's bridge into `internal/workflow/engine` (participant roles, transitions)
 - `engine_adapters/` — concrete adapters office supplies to the workflow engine (CEO, child-task creation, workflow switching); consumed from `internal/backendapp`
 - `runtime/` — Office agent runtime wiring

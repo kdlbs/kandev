@@ -109,6 +109,52 @@ test.describe("Mobile menu backdrops", () => {
     await expect(mobile.menuCard).toBeVisible();
   });
 
+  // @covers AC-UI-MOBILE-TASK-NAVIGATION-001.9, AC-UI-MOBILE-TASK-NAVIGATION-001.11
+  test("Kanban confirmation releases a stalled closing menu lock", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Mobile confirmation task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+    await testPage.addStyleTag({
+      content:
+        '[data-slot="dropdown-menu-content"][data-state="closed"] { animation-duration: 60s !important; }',
+    });
+    const trigger = mobile.taskCard(task.id).getByRole("button", { name: "More options" });
+    await trigger.tap();
+    const menu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]');
+    await menu.getByRole("menuitem", { name: "Delete", exact: true }).tap();
+    const dialog = testPage.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    await prCapture.screenshot("kanban-confirmation-handoff", {
+      caption: "The task menu yields to the native confirmation without trapping the page.",
+    });
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).tap();
+    await expect(dialog).toBeHidden();
+    await expect
+      .poll(() => testPage.evaluate(() => document.body.style.pointerEvents))
+      .not.toBe("none");
+    await mobile.mobileMenuButton.tap();
+    await expect(mobile.menuCard).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await expect(mobile.menuCard).toBeHidden();
+    await trigger.tap();
+    await menu.getByRole("menuitem", { name: "Delete", exact: true }).press("Enter");
+    await expect(dialog).toBeVisible();
+    await expect(testPage.locator("body")).toHaveCSS("pointer-events", "none");
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).tap();
+    await expect(dialog).toBeHidden();
+    await expect
+      .poll(() => testPage.evaluate(() => document.body.style.pointerEvents))
+      .not.toBe("none");
+  });
+
   // @covers AC-UI-MOBILE-TASK-NAVIGATION-001.3, AC-UI-MOBILE-TASK-NAVIGATION-001.10, AC-UI-MOBILE-TASK-NAVIGATION-001.11
   test("task submenus share one backdrop and preserve the task drawer", async ({
     testPage,

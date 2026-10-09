@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -32,6 +33,20 @@ func (si *SchedulerIntegration) evaluateRunStaleness(
 	expectedStepID := payload["workflow_step_id"]
 	taskID := payload["task_id"]
 	if expectedStepID == "" || taskID == "" {
+		return false, "", nil
+	}
+	if expectedTransitionID, hasEntryIdentity := payload["workflow_step_transition_id"]; hasEntryIdentity {
+		entryID, err := strconv.ParseInt(expectedTransitionID, 10, 64)
+		if err != nil || entryID < 0 {
+			return true, "invalid_workflow_step_entry", nil
+		}
+		currentStepID, currentEntryID, err := si.svc.repo.GetTaskWorkflowStepEntry(ctx, taskID)
+		if err != nil {
+			return false, "", fmt.Errorf("resolve current workflow step entry for task %s: %w", taskID, err)
+		}
+		if currentStepID != expectedStepID || currentEntryID != entryID {
+			return true, "workflow_step_entry_changed", nil
+		}
 		return false, "", nil
 	}
 	currentStepID, err := si.svc.repo.GetTaskWorkflowStepID(ctx, taskID)

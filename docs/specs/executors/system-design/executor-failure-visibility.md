@@ -69,11 +69,11 @@ successful recovery RPC do not establish continuity. This task does not repair
 credentials, change Git configuration, change legacy cleanup policy, or repeat
 production repairs.
 
-The source's `session.go:isSessionLoadFallbackErr` and
-`isMissingProviderSessionErr` corroborate that explicit missing-rollout evidence
-for the requested provider identity permits an existing fresh-session fallback.
-Keep that policy intact; carry its actual outcome rather than inferring continuity
-from the recovery RPC result or coarse session state.
+The current restore coordinator preserves a missing native conversation and
+blocks automatic replacement. An explicitly authorized continuation from Kandev
+history may create a new conversation through its existing checkpoint contract.
+Keep that policy intact; carry actual recovery outcomes rather than inferring
+continuity from the recovery RPC result or coarse session state.
 
 ## Observations and classification
 

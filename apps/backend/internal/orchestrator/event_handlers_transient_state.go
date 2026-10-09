@@ -218,12 +218,16 @@ func (s *Service) cancelRetainedRuntimeRetry(
 	entry *transientRetryEntry,
 ) bool {
 	entry.mu.Lock()
-	started, acceptedExecution := entry.started, entry.acceptedExecution
-	entry.mu.Unlock()
-	if started == 0 && acceptedExecution == "" {
+	waiting := entry.acceptedExecution == "" && (!entry.claimed || entry.started == 0)
+	if waiting {
+		// Attempt counts span the episode; only this entry owns the next dispatch.
+		entry.claimed = true
 		if entry.cancel != nil {
 			entry.cancel()
 		}
+	}
+	entry.mu.Unlock()
+	if waiting {
 		s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, "cancelled")
 		return true
 	}

@@ -2,6 +2,7 @@ import path from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionDone } from "../../helpers/session";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
@@ -104,6 +105,12 @@ test.describe("Bitbucket plugin contract", () => {
       },
     );
     if (!task.session_id) throw new Error("fixture contract task has no session");
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "initial Bitbucket contract conversation",
+    );
 
     // Native Link submenu action invokes the declared task-scoped action.
     await kanban.goto();

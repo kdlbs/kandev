@@ -63,7 +63,13 @@ function ContextEntry({ entry }: { entry: KanbanCardMenuEntry }) {
   );
 }
 
-function DropdownEntry({ entry }: { entry: KanbanCardMenuEntry }) {
+function DropdownEntry({
+  entry,
+  onItemSelect,
+}: {
+  entry: KanbanCardMenuEntry;
+  onItemSelect?: () => void;
+}) {
   if (entry.kind === "separator") return <DropdownMenuSeparator />;
   if (entry.kind === "submenu") {
     return (
@@ -81,7 +87,7 @@ function DropdownEntry({ entry }: { entry: KanbanCardMenuEntry }) {
         <DropdownMenuPortal>
           <DropdownMenuSubContent className={entry.className}>
             {entry.children.map((child) => (
-              <DropdownEntry key={child.key} entry={child} />
+              <DropdownEntry key={child.key} entry={child} onItemSelect={onItemSelect} />
             ))}
           </DropdownMenuSubContent>
         </DropdownMenuPortal>
@@ -104,7 +110,10 @@ function DropdownEntry({ entry }: { entry: KanbanCardMenuEntry }) {
       onPointerDown={(event) => event.stopPropagation()}
       onSelect={(event) => {
         event.stopPropagation();
-        if (!entry.disabled) entry.onSelect?.();
+        if (!entry.disabled) {
+          onItemSelect?.();
+          entry.onSelect?.();
+        }
       }}
     >
       {entry.icon}
@@ -125,11 +134,17 @@ export function KanbanCardContextMenuItems({ entries }: { entries: KanbanCardMen
   );
 }
 
-export function KanbanCardDropdownMenuItems({ entries }: { entries: KanbanCardMenuEntry[] }) {
+export function KanbanCardDropdownMenuItems({
+  entries,
+  onItemSelect,
+}: {
+  entries: KanbanCardMenuEntry[];
+  onItemSelect?: () => void;
+}) {
   return (
     <>
       {entries.map((entry) => (
-        <DropdownEntry key={entry.key} entry={entry} />
+        <DropdownEntry key={entry.key} entry={entry} onItemSelect={onItemSelect} />
       ))}
     </>
   );

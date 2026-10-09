@@ -790,6 +790,12 @@ func (s *Service) dispatchAutomationRun(
 			zap.String("task_id", taskID), zap.String("run_id", runID))
 		return true
 	} else {
+		if isSessionRecoveryRequiredError(err) {
+			s.logger.Info("parked automation run for explicit session recovery",
+				zap.String("operation", operation), zap.String("automation_id", automationID),
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+			return true
+		}
 		if onFailure != nil {
 			onFailure()
 		}
@@ -869,6 +875,12 @@ func (s *Service) dispatchAutomationContinuation(ctx context.Context, a *automat
 
 	dispatchResult, err := dispatch()
 	if err != nil {
+		if isSessionRecoveryRequiredError(err) {
+			s.logger.Info("parked automation continuation for explicit session recovery",
+				zap.String("automation_id", a.ID), zap.String("task_id", task.ID),
+				zap.String("session_id", session.ID), zap.Error(err))
+			return
+		}
 		s.logger.Error("failed to dispatch automation continuation",
 			zap.String("automation_id", a.ID), zap.String("task_id", task.ID), zap.String("session_id", session.ID), zap.Error(err))
 		if !s.markExactAutomationRunTerminal(ctx, runID, "", "", false, err.Error()) {
@@ -946,6 +958,11 @@ func (s *Service) autoStartAutomationTaskForRun(ctx context.Context, a *automati
 
 	dispatch, err := s.startAutomationTask(ctx, a, task, workflowStepID, run)
 	if err != nil {
+		if isSessionRecoveryRequiredError(err) {
+			s.logger.Info("parked automation task for explicit session recovery",
+				zap.String("automation_id", a.ID), zap.String("task_id", task.ID), zap.Error(err))
+			return
+		}
 		s.logger.Error("failed to auto-start automation task",
 			zap.String("task_id", task.ID), zap.Error(err))
 		// The run row was written before the launch, so a start that never

@@ -166,3 +166,20 @@ compressed assets are listed in the ignored PR asset manifest. The user-requeste
 isolated manual-test instance was stopped through its ownership-checked script;
 ports 48429 and 49429 were verified closed. Main :9998 was untouched.
 No delegation or persistent Kandev task/session creation was performed.
+
+
+### PR #3598 CI remediation, 2026-10-07
+
+Shard 12 exposed a fixture assumption that provider-backed repositories display
+only their local name. The shared fixture now seeds a provider repository and
+uses its persisted owner/name identity in both selection values and expected
+labels. The controlled provider case failed before the expectation repair with
+`pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project chromium
+tests/task/sidebar-filter-selected-first.spec.ts -- --retries=0`. The same command
+with `--repeat-each=3` passed all three runs. The fresh-build desktop recovery
+batch also passed this case without retries. Phone verification follows below.
+
+Phone verification passed with the provider repository seeded: the shared
+mobile recovery batch ran seven cases with `--retries=0`, including
+`tests/task/mobile-sidebar-filter-selected-first.spec.ts`. Ordering, selection,
+search, reopen, touch-target size, and viewport assertions passed.

@@ -105,3 +105,33 @@ pnpm e2e:raw --project=mobile-chrome e2e/tests/settings/mobile-workspace-reposit
   task repository.
 - Verification: `make build-web`, desktop E2E (8 tests), and mobile E2E (4
   tests) pass.
+
+
+### Hosted phone picker handoff follow-up
+
+At PR head `11b985f7df`, E2E run `37540216925`, shard 1 job `112541511492`
+failed the strict flake gate: 227 tests passed, two skipped, and this drawer
+case passed on retry after its initial branch search input disappeared.
+The original failed snapshot retains the editor but no branch dropdown.
+The picker interaction that failed at the preceding head passed in this run.
+
+Cold reproduction passed three times; keeping another repository available
+also passed three times. A controlled slower repository-menu exit passed once.
+These checks did not reproduce the exact dismissal, so the original cause is
+unconfirmed. The fixture previously observed removal of the repository option,
+which does not establish that its popover and focus cleanup have finished.
+It now keeps an unused repository available, waits for the add-repository
+popover to unmount and its enabled opener to regain native focus, then opens
+the branch picker. The unused repository is removed during owned cleanup.
+No production UI, timeout, retry or animation override changed; temporary
+animation diagnostics were removed. All original search, refresh, badge,
+touch-target, hit-target, viewport and overflow assertions remain.
+
+`KANDEV_RUN_QUIET_DIR=/root/.cache/kandev-pr3598-quiet-owned E2E_PORT_OFFSET=0 GOMAXPROCS=4 scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome -- tests/settings/mobile-workspace-repository-sets.spec.ts --repeat-each=3 --retries=0 --trace=retain-on-failure`
+passed all nine cases in 32.3 seconds. Pushed-head hosted CI remains the
+independent confirmation; no source startup or focus bug is claimed fixed.
+
+Desktop parity:
+`KANDEV_RUN_QUIET_DIR=/root/.cache/kandev-pr3598-quiet-owned E2E_PORT_OFFSET=0 GOMAXPROCS=4 scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --project chromium -- tests/settings/workspace-repository-sets.spec.ts --retries=0 --trace=retain-on-failure`
+passed both cases in 8.6 seconds. Web typecheck, scoped ESLint, catalog/full spec
+lint, whitespace, and the 58-work-order coverage preflight passed.

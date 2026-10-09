@@ -110,16 +110,20 @@ function BulkDeleteHarness({ onDeleteFile }: { onDeleteFile: (path: string) => P
   );
 }
 
-function RenameHarness() {
+function RenameHarness({
+  onRenameFile = vi.fn().mockResolvedValue(true),
+}: {
+  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
+}) {
   const [tree, setTree] = React.useState<FileTreeNode | null>(FILE_NODE);
-  const rename = useFileRename(FILE_NODE, tree, setTree, vi.fn().mockResolvedValue(true));
+  const rename = useFileRename(FILE_NODE, tree, setTree, onRenameFile);
 
   return (
     <FileContextMenu
       node={FILE_NODE}
       tree={tree}
       setTree={setTree}
-      onRenameFile={vi.fn().mockResolvedValue(true)}
+      onRenameFile={onRenameFile}
       onStartRename={rename.handleStartRename}
     >
       <div data-testid={RENAME_ROW}>
@@ -239,6 +243,24 @@ describe("FileContextMenu rename", () => {
     expect(document.activeElement).toBe(input);
     expect((input as HTMLInputElement).selectionStart).toBe(0);
     expect((input as HTMLInputElement).selectionEnd).toBe(FILE_NODE.name.length);
+  });
+
+  it("commits a changed name when the input blurs before the focus handoff delay", async () => {
+    vi.useFakeTimers();
+    const onRenameFile = vi.fn().mockResolvedValue(true);
+    render(<RenameHarness onRenameFile={onRenameFile} />);
+
+    openMenu(RENAME_ROW);
+    fireEvent.click(screen.getByText("Rename"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "renamed.md" } });
+    fireEvent.blur(input);
+
+    expect(onRenameFile).toHaveBeenCalledExactlyOnceWith(FILE_NODE.path, "renamed.md");
   });
 });
 

@@ -93,7 +93,11 @@ func newEndpointControlClient(
 	}
 	transport := newLeasedRoundTripper(manager, initial, client.authToken, "", dependencies)
 	client.applyToken = transport.setAuthToken
-	client.httpClient = &http.Client{Timeout: 30 * time.Second, Transport: transport, CheckRedirect: endpointRedirectPolicy}
+	var guardedTransport http.RoundTripper = transport
+	if client.runtimeGuard != nil {
+		guardedTransport = &runtimeBindingTransport{guard: client.runtimeGuard, base: transport}
+	}
+	client.httpClient = &http.Client{Timeout: 30 * time.Second, Transport: guardedTransport, CheckRedirect: endpointRedirectPolicy}
 	return client, nil
 }
 
@@ -778,8 +782,16 @@ func appendUnique(existing []string, add ...string) []string {
 }
 
 func (c *Client) dialWebSocket(ctx context.Context, route string, callerHeaders http.Header, callerProtocols ...string) (*websocket.Conn, *http.Response, error) {
+	boundCtx, cancel, err := c.RuntimeBoundContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer cancel()
+
+	var conn *websocket.Conn
+	var response *http.Response
 	if c.endpointTransport != nil {
-		lease, err := c.endpointTransport.manager.resolve(ctx)
+		lease, err := c.endpointTransport.manager.resolve(boundCtx)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -787,30 +799,55 @@ func (c *Client) dialWebSocket(ctx context.Context, route string, callerHeaders 
 		if err != nil {
 			return nil, nil, errors.New("remote executor lease endpoint is invalid")
 		}
-		return c.endpointTransport.dialWebSocket(ctx, endpoint, lease, route, callerHeaders, callerProtocols, c.executionID)
-	}
-	endpoint, err := url.Parse(c.baseURL)
-	if err != nil {
-		return nil, nil, err
-	}
-	endpoint, err = joinEndpointPath(endpoint, route)
-	if err != nil {
-		return nil, nil, err
-	}
-	dialer := *websocket.DefaultDialer
-	dialer.Subprotocols = append([]string(nil), callerProtocols...)
-	if callerHeaders == nil {
-		callerHeaders = make(http.Header)
+		var dialErr error
+		conn, response, dialErr = c.endpointTransport.dialWebSocket(boundCtx, endpoint, lease, route, callerHeaders, callerProtocols, c.executionID)
+		if dialErr != nil {
+			return nil, response, dialErr
+		}
 	} else {
-		callerHeaders = callerHeaders.Clone()
+		endpoint, parseErr := url.Parse(c.baseURL)
+		if parseErr != nil {
+			return nil, nil, parseErr
+		}
+		endpoint, parseErr = joinEndpointPath(endpoint, route)
+		if parseErr != nil {
+			return nil, nil, parseErr
+		}
+		dialer := *websocket.DefaultDialer
+		dialer.Subprotocols = append([]string(nil), callerProtocols...)
+		if callerHeaders == nil {
+			callerHeaders = make(http.Header)
+		} else {
+			callerHeaders = callerHeaders.Clone()
+		}
+		if c.authToken != "" {
+			callerHeaders.Set("Authorization", "Bearer "+c.authToken)
+		}
+		if c.executionID != "" {
+			callerHeaders.Set("X-Instance-ID", c.executionID)
+		}
+		conn, response, err = dialer.DialContext(boundCtx, endpoint.String(), callerHeaders)
 	}
-	if c.authToken != "" {
-		callerHeaders.Set("Authorization", "Bearer "+c.authToken)
+	if err != nil {
+		return nil, response, err
 	}
-	if c.executionID != "" {
-		callerHeaders.Set("X-Instance-ID", c.executionID)
+	if c.runtimeGuard == nil {
+		return conn, response, nil
 	}
-	return dialer.DialContext(ctx, endpoint.String(), callerHeaders)
+	stop := context.AfterFunc(c.runtimeGuard.binding.ctx, func() { _ = conn.Close() })
+	c.mu.Lock()
+	if c.closed || !c.runtimeGuard.current() {
+		c.mu.Unlock()
+		stop()
+		_ = conn.Close()
+		return nil, response, ErrRuntimeLeaseRetired
+	}
+	if c.runtimeConns == nil {
+		c.runtimeConns = make(map[*websocket.Conn]func() bool)
+	}
+	c.runtimeConns[conn] = stop
+	c.mu.Unlock()
+	return conn, response, nil
 }
 
 // ConnectionGeneration resolves and returns the current provider connection

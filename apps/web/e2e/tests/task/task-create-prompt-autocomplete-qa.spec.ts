@@ -3,12 +3,18 @@
  * Complements task-create-prompt-autocomplete.spec.ts with edge-case coverage.
  */
 import { test, expect } from "../../fixtures/test-base";
-import type { Locator } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { KanbanPage } from "../../pages/kanban-page";
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { expectTaskDescription } from "../../pages/task-description-editor";
 
 const MENU_TITLE = /Mention tasks, files, prompts/i;
 const LONG_PROMPT_NAME = "qa-long-prompt-reference-name-that-definitely-overflows-editor-width";
+
+async function openTaskCreation(page: Page) {
+  await new AppSidebarPage(page).expandNavigationIfCollapsed();
+  await new KanbanPage(page).createTaskButton.first().click();
+}
 
 async function cleanupPrompts(
   apiClient: {
@@ -125,7 +131,11 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await kanban.createTaskButton.first().click();
+    const navigationDivider = testPage.getByTestId("sidebar-navigation-divider");
+    await navigationDivider.focus();
+    await navigationDivider.press("Home");
+    await expect(navigationDivider).toHaveAttribute("aria-valuenow", "0");
+    await openTaskCreation(testPage);
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
     const editor = testPage.getByTestId("task-description-input");
@@ -142,7 +152,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await kanban.createTaskButton.first().click();
+    await openTaskCreation(testPage);
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
     const editor = testPage.getByTestId("task-description-input");
@@ -173,7 +183,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await kanban.createTaskButton.first().click();
+    await openTaskCreation(testPage);
 
     const dialog = testPage.getByTestId("create-task-dialog");
     const editor = testPage.getByTestId("task-description-input");
@@ -198,7 +208,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await kanban.createTaskButton.first().click();
+    await openTaskCreation(testPage);
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
     const editor = testPage.getByTestId("task-description-input");
@@ -232,7 +242,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await kanban.createTaskButton.first().click();
+    await openTaskCreation(testPage);
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
     const editor = testPage.getByTestId("task-description-input");
@@ -258,7 +268,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     try {
       const kanban = new KanbanPage(testPage);
       await kanban.goto();
-      await kanban.createTaskButton.first().click();
+      await openTaskCreation(testPage);
       await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
       const editor = testPage.getByTestId("task-description-input");
@@ -283,7 +293,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await kanban.createTaskButton.first().click();
+    await openTaskCreation(testPage);
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
     const editor = testPage.getByTestId("task-description-input");
@@ -301,7 +311,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await kanban.createTaskButton.first().click();
+    await openTaskCreation(testPage);
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
     const editor = testPage.getByTestId("task-description-input");
@@ -323,7 +333,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await kanban.createTaskButton.first().click();
+    await openTaskCreation(testPage);
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
     const editor = testPage.getByTestId("task-description-input");
@@ -350,7 +360,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await kanban.createTaskButton.first().click();
+    await openTaskCreation(testPage);
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
     // Use scratch mode so submit does not depend on a pre-selected repository.
@@ -383,7 +393,7 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await testPage.setViewportSize({ width: 1280, height: 900 });
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await kanban.createTaskButton.first().click();
+    await openTaskCreation(testPage);
 
     const dialog = testPage.getByTestId("create-task-dialog");
     const editor = dialog.getByTestId("task-description-input");

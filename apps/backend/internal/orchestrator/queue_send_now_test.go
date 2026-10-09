@@ -986,6 +986,59 @@ func TestSendQueuedNowCancelsLiveFIFOTurn(t *testing.T) {
 	}
 }
 
+func TestSendQueuedNowCancelsActiveTurnWhenSessionProjectionIsPromptable(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
+	turns := &repoTurnService{repo: repo}
+	if _, err := turns.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+
+	// The turn store can observe a live turn before the session projection moves
+	// out of WAITING_FOR_INPUT. Send Now must use the authoritative active turn
+	// identity instead of admitting a concurrent prompt from the stale projection.
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("persist stale promptable projection: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.turnService = turns
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.messageCreator = &mockMessageCreator{}
+	svc.messageQueue.SetAutoMergeEnabled(false)
+	t.Cleanup(func() { svc.stopSendNowWorkers() })
+
+	for _, content := range []string{"queued A", "urgent B", "queued C"} {
+		if _, err := svc.messageQueue.QueueMessageWithMetadata(
+			ctx, "session-1", "task-1", content, "", messagequeue.QueuedByUser, false, nil, nil,
+		); err != nil {
+			t.Fatalf("queue %q: %v", content, err)
+		}
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if len(status.Entries) != 3 {
+		t.Fatalf("queued entries = %#v, want A, B, C", status.Entries)
+	}
+
+	if _, err := svc.SendQueuedNow(ctx, "session-1", QueueSendNowScopeEntry, status.Entries[1].ID); err != nil {
+		t.Fatalf("Send Now error = %v", err)
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
+		t.Fatalf("cancel calls = %d, want one for the active turn despite the promptable session projection", got)
+	}
+}
+
 func TestSendQueuedNowConflictsAfterFIFOHandoffAccepted(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

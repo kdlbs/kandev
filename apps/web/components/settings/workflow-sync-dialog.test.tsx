@@ -74,7 +74,10 @@ function controller(overrides: Partial<WorkflowSyncController> = {}): WorkflowSy
     update: vi.fn(),
     setUrlInput: vi.fn(),
     setProvider: vi.fn(),
-    handleSave: vi.fn().mockResolvedValue(true),
+    handleSave: vi.fn(async (onDraftAccepted?: () => void) => {
+      onDraftAccepted?.();
+      return true;
+    }),
     handleDelete: vi.fn().mockResolvedValue(true),
     handleSyncNow: vi.fn().mockResolvedValue(undefined),
     ...overrides,

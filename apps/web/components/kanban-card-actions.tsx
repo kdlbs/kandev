@@ -12,6 +12,7 @@ import {
 } from "@/components/kanban-card-status-icon";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { shouldShowTaskRunningSpinner } from "@/lib/ui/state-icons";
 import type { Task } from "@/components/kanban-card";
@@ -51,6 +52,7 @@ type KanbanCardMenuProps = KanbanCardActionProps & {
 
 function KanbanCardMenu(props: KanbanCardMenuProps) {
   const { t } = useTranslation();
+  const { isDesktop } = useResponsiveBreakpoint();
   const {
     effectiveMenuOpen,
     setMenuOpen,
@@ -61,13 +63,15 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
   } = props;
   const { menuEntries } = props;
   const isProcessing = isDeleting || isArchiving;
+  const [selectionInProgress, setSelectionInProgress] = useState(false);
 
   return (
     <DropdownMenu
-      modal={false}
+      modal={!isDesktop && !selectionInProgress}
       open={effectiveMenuOpen}
       onOpenChange={(open) => {
         if (!open && isProcessing) return;
+        if (open) setSelectionInProgress(false);
         setMenuOpen(open);
         onPRMenuOpenChange?.(open);
       }}
@@ -85,7 +89,10 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <KanbanCardDropdownMenuItems entries={menuEntries} />
+        <KanbanCardDropdownMenuItems
+          entries={menuEntries}
+          onItemSelect={() => setSelectionInProgress(true)}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   );

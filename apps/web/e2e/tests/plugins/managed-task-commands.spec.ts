@@ -31,6 +31,7 @@ test.describe("managed task commands", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(90_000);
     await installAndGrantTaskWrite(testPage, apiClient, seedData.workspaceId);
@@ -80,6 +81,9 @@ test.describe("managed task commands", () => {
     await expect(staleDialog).toBeVisible();
     const deleteAction = staleDialog.getByRole("button", { name: "Delete", exact: true });
     await expect(deleteAction).toBeEnabled();
+    await prCapture.screenshot("kanban-native-confirmation-handoff", {
+      caption: "Task deletion stays in its native confirmation after the task menu closes.",
+    });
 
     await apiClient.updateTaskTitle(child.id, "Child changed after deletion preview");
     await deleteAction.click();

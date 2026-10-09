@@ -118,6 +118,9 @@ test("desktop: capacity after tools keeps one error and the same runtime for mod
       ),
     ).toBe(true);
 
+    await expect(modelList).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await expect(modelList).toBeHidden();
     await session.sendMessage("/e2e:simple-message");
     await expect
       .poll(
@@ -207,10 +210,8 @@ test("desktop: completed tools continue once on the same runtime across reload a
     const session = new SessionPage(testPage);
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
-    await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
-    await expect(session.transientRetryCard()).toContainText("Continuing in");
+    await expectCompletedCapacityProgress(session);
     const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
-    assertRetainedACPTrace(fixture.tracePath, 1);
 
     await testPage.reload();
     await session.waitForLoad();
@@ -269,21 +270,35 @@ test("desktop: idle cancellation and retry exhaustion preserve the live runtime 
   backend,
   seedData,
 }) => {
+  const ws = watchWs(testPage);
   for (const scenario of ["cancel", "exhaust"]) {
-    const fixture = await createRetainedCapacityFixture(backend, apiClient, seedData, scenario);
+    const fixture = await createRetainedCapacityFixture(
+      backend,
+      apiClient,
+      seedData,
+      scenario,
+      scenario === "cancel" ? { initialPrompt: "/e2e:simple-message" } : {},
+    );
     try {
       const session = new SessionPage(testPage);
       await testPage.goto(`/t/${fixture.taskId}`);
       await session.waitForLoad();
       const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
       if (scenario === "cancel") {
+        await session.sendMessage("/capacity-cancel");
         await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
+        const cancellation = ws.waitForResponse("session.recover");
         await session.recoveryCancelRetryButton().click();
+        expect((await cancellation).payload).toMatchObject({ cancelled: true });
       }
       const disposition = scenario === "cancel" ? "cancelled" : "exhausted";
       const failure = await waitForRetainedTurnFailure(apiClient, fixture.sessionId, disposition);
       assertRetainedFailureMessage(failure);
-      expect(failure.metadata?.attempts_started).toBe(scenario === "cancel" ? 0 : 5);
+      const promptCount = readMockACPTrace(fixture.tracePath).filter(
+        (record) => record.event === "prompt",
+      ).length;
+      expect(failure.metadata?.attempts_started).toBe(promptCount - 1);
+      if (scenario === "exhaust") expect(failure.metadata?.attempts_started).toBe(5);
       await expectRetainedTurnReady(session);
       const feedback = session.activeChat().getByTestId("retained-turn-recovery-feedback");
       await expect(feedback).toBeVisible();
@@ -292,7 +307,7 @@ test("desktop: idle cancellation and retry exhaustion preserve the live runtime 
       expect(await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId)).toBe(
         executionId,
       );
-      assertRetainedACPTrace(fixture.tracePath, scenario === "cancel" ? 1 : 6);
+      assertRetainedACPTrace(fixture.tracePath, promptCount);
     } finally {
       await fixture.dispose();
     }

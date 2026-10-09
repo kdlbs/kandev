@@ -119,7 +119,9 @@ test.describe("Mobile plugin navigation", () => {
     await expect(navItem).toHaveText(/Hello E2E/);
     // Measure the touch target after the sheet entrance transform has settled.
     await waitForFiniteAnimations(testPage.locator("body"));
-    expect((await navItem.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    const navItemBox = await navItem.boundingBox();
+    expect(navItemBox).not.toBeNull();
+    expect(navItemBox!.height).toBeCloseTo(44, 1);
 
     // Saved layouts own plugin destinations, so scroll the projected row into
     // view instead of the legacy plugin section that no longer renders it.

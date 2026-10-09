@@ -163,6 +163,28 @@ test("phone drawer edits and saves a touch-reachable sort chain and group inset"
     await scrollSidebarFilterListTopIntoView(ruleList);
     await waitForFiniteAnimations(savedPopover);
 
+    const keyboardHandle = savedPopover.getByTestId("sort-rule-handle-0");
+    await keyboardHandle.focus();
+    await testPage.keyboard.press("Space");
+    await expect(keyboardHandle).toHaveAttribute("aria-pressed", "true");
+    await testPage.evaluate(
+      () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())),
+    );
+    await testPage.keyboard.press("ArrowDown");
+    await expect(
+      testPage.getByText("Running moved to position 2 of 3 items.", { exact: true }),
+    ).toBeAttached();
+    await testPage.keyboard.press("Escape");
+    await expect(drawer).toBeVisible();
+    await expect(keyboardHandle).toBeFocused();
+    await expect.poll(readSortKeys).toEqual(["Running", "Color", "Last activity"]);
+    await waitForSidebarSortSync(
+      testPage,
+      seedData.workspaceId,
+      ["running", "color", "lastActivityAt"],
+      "red",
+    );
+
     const lastHandle = savedPopover.getByTestId("sort-rule-handle-2");
     const scrollTop = await savedPopover.evaluate((element) => element.scrollTop);
     await savedPopover.evaluate((element) => {

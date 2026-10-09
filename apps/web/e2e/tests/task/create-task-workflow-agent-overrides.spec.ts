@@ -4,6 +4,7 @@ import { waitForSessionDone } from "../../helpers/session";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { waitForSessionDone } from "../../helpers/session";
 import {
   createOverrideTask,
   deleteFixtureTasks,
@@ -207,7 +208,7 @@ test.describe("task-specific workflow agent overrides", () => {
         apiClient,
         runtimeTask.id,
         initialSessionId,
-        "Review session becomes idle before its proceed control is available",
+        "Reused workflow session settled before proceeding",
       );
       await testPage.reload();
       await sessionPage.waitForLoad();

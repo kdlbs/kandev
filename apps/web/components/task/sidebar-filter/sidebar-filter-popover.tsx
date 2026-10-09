@@ -203,6 +203,7 @@ function DesktopSidebarFilterSurface({
           style={{ maxHeight: "var(--radix-popper-available-height, calc(100dvh - 1rem))" }}
           align="end"
           data-testid="sidebar-filter-popover"
+          onEscapeKeyDown={(event) => preventReorderEscape(event, contentRef.current)}
           onFocusOutside={(event) => {
             if (deletion.target && isActionConfirmationTarget(event.target)) event.preventDefault();
           }}
@@ -238,6 +239,7 @@ function MobileSidebarFilterSurface({
   deletion,
   title,
 }: SidebarFilterSurfaceProps & { title: string }) {
+  const contentRef = useRef<HTMLDivElement>(null);
   return (
     <MobileConfirmationHost open={open} surface="drawer">
       {({ contentProps }) => (
@@ -250,8 +252,13 @@ function MobileSidebarFilterSurface({
         >
           <DrawerTrigger asChild>{trigger}</DrawerTrigger>
           <DrawerContent
+            ref={contentRef}
             aria-describedby={undefined}
             {...contentProps}
+            onEscapeKeyDown={(event) => {
+              contentProps.onEscapeKeyDown?.(event);
+              preventReorderEscape(event, contentRef.current);
+            }}
             data-testid="sidebar-filter-drawer"
             className="h-[min(90dvh,48rem)] max-h-[calc(100dvh-1rem)] overflow-hidden rounded-t-xl"
           >
@@ -271,4 +278,9 @@ function MobileSidebarFilterSurface({
       )}
     </MobileConfirmationHost>
   );
+}
+
+// The active reorder consumes Escape before its enclosing editor may close.
+function preventReorderEscape(event: KeyboardEvent, content: HTMLElement | null) {
+  if (content?.querySelector('[data-dragging="true"]')) event.preventDefault();
 }

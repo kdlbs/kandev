@@ -86,6 +86,11 @@ test("coarse pointer grows the reveal control and keeps the reveal usable by tou
   await drawer.getByRole("button", { name: "Add folder" }).tap();
   await expect(drawer.getByTestId("workspace-source-row")).toBeVisible();
 
+  // Exercise sizing while the real opening animation is still active.
+  await testPage.addStyleTag({
+    content:
+      '[data-testid="folder-picker-popover"][data-state="open"] { animation-duration: 1s !important; }',
+  });
   await drawer.getByTestId("folder-picker-trigger").last().tap();
   const picker = testPage
     .locator('[data-testid="folder-picker-popover"][data-state="open"]')
@@ -97,6 +102,7 @@ test("coarse pointer grows the reveal control and keeps the reveal usable by tou
 
   // The label wraps the switch, so the whole band is the tap target; it must meet
   // the coarse-pointer minimum and must not push the entry list out of reach.
+  await waitForFiniteAnimations(picker);
   await expectControlHeight(control, TOUCH_TARGET_PX, 1);
   await expect(picker.getByTestId("folder-picker-entry").first()).toBeVisible();
 

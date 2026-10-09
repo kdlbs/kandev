@@ -185,7 +185,13 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
     await firstHandle.focus();
     await testPage.keyboard.press("Space");
     await expect(firstHandle).toHaveAttribute("aria-pressed", "true");
+    await testPage.evaluate(
+      () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())),
+    );
     await testPage.keyboard.press("ArrowDown");
+    await expect(
+      testPage.getByText("Running moved to position 2 of 3 items.", { exact: true }),
+    ).toBeAttached();
     await testPage.keyboard.press("Escape");
     await expect(firstHandle).toBeFocused();
     await expect
@@ -234,11 +240,17 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
     await testPage.mouse.down();
     await testPage.mouse.move(dragStartX, dragStartY + 16, { steps: 4 });
     await expect(testPage.locator('[data-dragging="true"]')).toHaveCount(1);
+    await waitForFiniteAnimations(reloadPopover);
+    const activeTargetBox = await firstCard.boundingBox();
+    expect(activeTargetBox).not.toBeNull();
     await testPage.mouse.move(
-      firstCardBox!.x + firstCardBox!.width / 2,
-      firstCardBox!.y + firstCardBox!.height / 2,
+      activeTargetBox!.x + activeTargetBox!.width / 2,
+      activeTargetBox!.y + activeTargetBox!.height / 2,
       { steps: 16 },
     );
+    await expect(
+      testPage.getByText("Last activity moved to position 1 of 3 items.", { exact: true }),
+    ).toBeAttached();
     await testPage.mouse.up();
     await expect(reloadPopover.getByTestId("sort-key-select")).toContainText("Last activity");
     await expect(reloadPopover.getByTestId("sort-rule-key-1")).toContainText("Running");

@@ -9,6 +9,7 @@ import {
   restoreStorageMaintenanceSettings,
   seedManagedGoCache,
 } from "../../helpers/storage-maintenance";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { setStoreRole } from "../../helpers/session-store";
 
 function seedOrphanWorkspace(tmpDir: string): { root: string; artifact: string } {
@@ -164,8 +165,10 @@ test.describe("System storage maintenance", () => {
     const initialSchedulingState = await scheduling.getAttribute("data-state");
     try {
       await scheduling.click();
+      const saved = waitForHttp(testPage, "PATCH", /\/system\/storage\/settings$/);
       await testPage.getByRole("button", { name: "Save changes" }).click();
-      await expect(testPage.getByText("Storage policy saved")).toBeVisible();
+      expect((await saved).ok()).toBe(true);
+      await expect(testPage.getByText("Storage policy saved").last()).toBeVisible();
       await expect(analyzedTime).toHaveAttribute("datetime", initialAnalyzedAt!);
 
       await testPage.getByTestId("storage-analyze").click();
@@ -177,8 +180,10 @@ test.describe("System storage maintenance", () => {
     } finally {
       if ((await scheduling.getAttribute("data-state")) !== initialSchedulingState) {
         await scheduling.click();
+        const saved = waitForHttp(testPage, "PATCH", /\/system\/storage\/settings$/);
         await testPage.getByRole("button", { name: "Save changes" }).click();
-        await expect(testPage.getByText("Storage policy saved")).toBeVisible();
+        expect((await saved).ok()).toBe(true);
+        await expect(testPage.getByText("Storage policy saved").last()).toBeVisible();
       }
     }
   });

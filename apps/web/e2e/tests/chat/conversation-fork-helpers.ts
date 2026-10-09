@@ -1,6 +1,7 @@
 import { type Page } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 type GatewayFrame = {
@@ -79,12 +80,34 @@ export async function openCompletedNativeForkTask(
   );
   const sessionId = task.session_id ?? task.primary_session_id;
   if (!sessionId) throw new Error("The conversation fork task has no session");
+  await waitForSessionDone(apiClient, task.id, sessionId, "Conversation fork fixture settled");
 
   await routeConversationForkResponse(page);
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  // Idle controls can appear before the completed transcript has hydrated.
+  await page.waitForFunction(
+    (sessionId) => {
+      const store = (
+        window as Window & {
+          __KANDEV_E2E_STORE__?: {
+            getState: () => {
+              messages: { bySession: Record<string, Array<Record<string, unknown>>> };
+            };
+          };
+        }
+      ).__KANDEV_E2E_STORE__;
+      return store
+        ?.getState()
+        .messages.bySession[
+          sessionId
+        ]?.some((message) => message.author_type === "agent" && typeof message.turn_id === "string");
+    },
+    sessionId,
+    { timeout: 30_000 },
+  );
   await markLatestTurnAsNative(page, task.id, sessionId);
   return { taskId: task.id, sessionId, session };
 }

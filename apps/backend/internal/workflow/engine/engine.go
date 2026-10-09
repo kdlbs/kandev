@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 
@@ -10,14 +11,18 @@ import (
 
 // MachineState captures runtime workflow state for a task session.
 type MachineState struct {
-	TaskID          string
-	SessionID       string
-	WorkflowID      string
-	CurrentStepID   string
-	SessionState    string
-	TaskDescription string
-	IsPassthrough   bool
-	Data            map[string]any
+	TaskID        string
+	SessionID     string
+	WorkflowID    string
+	CurrentStepID string
+	// WorkflowStepTransitionID is the immutable ledger identity for the
+	// current visit to CurrentStepID. It distinguishes a later return to the
+	// same step from the earlier visit that produced a retryable event.
+	WorkflowStepTransitionID int64
+	SessionState             string
+	TaskDescription          string
+	IsPassthrough            bool
+	Data                     map[string]any
 	// AgentProfileID is the session's agent profile, when a session
 	// exists. Actions that create a child task or queue a run
 	// (create_child_task, queue_run) forward it as the causing agent so
@@ -285,7 +290,17 @@ func (e *Engine) handleTrigger(ctx context.Context, in HandleInput, filter func(
 		return HandleResult{Idempotent: true}, nil
 	}
 
-	state, step, err := e.loadExecutionContext(ctx, in)
+	state, err := e.loadExecutionState(ctx, in)
+	if err != nil {
+		return HandleResult{}, err
+	}
+	if commentRetryIsStale(in, state) {
+		if err := e.markOperationAppliedForInput(ctx, in); err != nil {
+			return HandleResult{}, err
+		}
+		return HandleResult{}, nil
+	}
+	step, err := e.store.LoadStep(ctx, state.WorkflowID, state.CurrentStepID)
 	if err != nil {
 		return HandleResult{}, err
 	}
@@ -302,6 +317,13 @@ func (e *Engine) handleTrigger(ctx context.Context, in HandleInput, filter func(
 
 	result, err := e.processActions(ctx, in, state, step, actions, filter)
 	if err != nil {
+		if in.Trigger == TriggerOnComment && errors.Is(err, ErrCommentFanOutIncomplete) {
+			err = &CommentFanOutIncompleteError{
+				WorkflowStepID:           state.CurrentStepID,
+				WorkflowStepTransitionID: state.WorkflowStepTransitionID,
+				Err:                      err,
+			}
+		}
 		return HandleResult{}, err
 	}
 
@@ -392,7 +414,7 @@ func (e *Engine) markOperationAppliedForInput(ctx context.Context, in HandleInpu
 	return e.markOperationApplied(ctx, in.OperationID)
 }
 
-func (e *Engine) loadExecutionContext(ctx context.Context, in HandleInput) (MachineState, StepSpec, error) {
+func (e *Engine) loadExecutionState(ctx context.Context, in HandleInput) (MachineState, error) {
 	var state MachineState
 	if in.PreloadedState != nil {
 		state = *in.PreloadedState
@@ -400,14 +422,22 @@ func (e *Engine) loadExecutionContext(ctx context.Context, in HandleInput) (Mach
 		var err error
 		state, err = e.store.LoadState(ctx, in.TaskID, in.SessionID)
 		if err != nil {
-			return MachineState{}, StepSpec{}, err
+			return MachineState{}, err
 		}
 	}
-	step, err := e.store.LoadStep(ctx, state.WorkflowID, state.CurrentStepID)
-	if err != nil {
-		return MachineState{}, StepSpec{}, err
+	return state, nil
+}
+
+func commentRetryIsStale(in HandleInput, state MachineState) bool {
+	if in.Trigger != TriggerOnComment {
+		return false
 	}
-	return state, step, nil
+	comment, ok := commentPayload(in.Payload)
+	if !ok || comment.RetryWorkflowStepID == "" {
+		return false
+	}
+	return state.CurrentStepID != comment.RetryWorkflowStepID ||
+		state.WorkflowStepTransitionID != comment.RetryWorkflowStepTransitionID
 }
 
 func (e *Engine) evaluateActions(

@@ -13,6 +13,7 @@ import {
   SLEEP_EXEMPT_FILES,
 } from "./eslint-rules/no-unsanctioned-sleep.mjs";
 import { taskLinksPlugin } from "./eslint-rules/no-task-link-bypass.mjs";
+import { systemQueryOwnerPlugin } from "./eslint-rules/no-migrated-system-query-owner.mjs";
 
 const eslintConfig = defineConfig([
   {
@@ -116,6 +117,16 @@ const eslintConfig = defineConfig([
     ],
     plugins: { "task-links": taskLinksPlugin },
     rules: { "task-links/no-task-link-bypass": "error" },
+  },
+  {
+    files: [
+      "lib/state/slices/system/types.ts",
+      "lib/state/slices/system/system-slice.ts",
+      "lib/state/slices/system/index.ts",
+      "lib/state/hydration/hydrator.ts",
+    ],
+    plugins: { "system-query-owner": systemQueryOwnerPlugin },
+    rules: { "system-query-owner/no-migrated-system-zustand-owner": "error" },
   },
   // E2E tests (Playwright): disable React hooks rules since Playwright's `use()` and
   // `test.extend()` patterns are falsely flagged, and relax test-specific limits.

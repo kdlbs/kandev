@@ -295,3 +295,29 @@ describe("SidebarFilterPopover option details", () => {
     }
   });
 });
+
+it.each(["desktop", "phone"])(
+  "keeps the %s editor open when Escape cancels a reorder",
+  async (surface) => {
+    responsive.isMobile = surface === "phone";
+    responsive.usesDesktopWorkbench = surface === "desktop";
+    const onOpenChange = vi.fn();
+    render(
+      <SidebarFilterPopover
+        trigger={<button type="button">Open</button>}
+        open
+        onOpenChange={onOpenChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("sidebar-sort-settings-toggle"));
+    const card = screen.getByTestId("sort-rule-card-0");
+    card.setAttribute("data-dragging", "true");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId("sidebar-filter-popover")).toBeTruthy();
+
+    card.removeAttribute("data-dragging");
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  },
+);

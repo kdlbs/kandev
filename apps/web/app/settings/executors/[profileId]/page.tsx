@@ -6,7 +6,7 @@ import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
   updateExecutorProfile,
@@ -168,7 +168,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
   const { t } = useTranslation();
   const router = useRouter();
   const { toast } = useToast();
-  const executors = useAppStore((state) => state.executors.items);
+  const appStore = useAppStoreApi();
   const setExecutors = useAppStore((state) => state.setExecutors);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -183,7 +183,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
         const updated = await updateExecutorProfile(executor.id, profile.id, data);
         setSaveStatus("success");
         toast({ title: t("executors:profileSaved"), variant: "success" });
-        setExecutors(upsertExecutorProfile(executors, executor, updated));
+        setExecutors(upsertExecutorProfile(appStore.getState().executors.items, executor, updated));
         window.setTimeout(() => setSaveStatus("idle"), 1500);
       } catch (err) {
         const message = err instanceof Error ? err.message : t("executors:failedToSaveProfile");
@@ -197,7 +197,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
         throw err;
       }
     },
-    [executor, profile.id, executors, setExecutors, toast, t],
+    [executor, profile.id, appStore, setExecutors, toast, t],
   );
 
   const remove = useCallback(
@@ -207,11 +207,13 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
         await beforeDelete?.();
         await deleteExecutorProfile(executor.id, profile.id);
         setExecutors(
-          executors.map((e: Executor) =>
-            e.id === executor.id
-              ? { ...e, profiles: e.profiles?.filter((p) => p.id !== profile.id) }
-              : e,
-          ),
+          appStore
+            .getState()
+            .executors.items.map((e: Executor) =>
+              e.id === executor.id
+                ? { ...e, profiles: e.profiles?.filter((p) => p.id !== profile.id) }
+                : e,
+            ),
         );
         runWithNavigationBlockerBypassed(() => router.push(EXECUTORS_ROUTE));
       } catch {
@@ -219,7 +221,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
         setDeleteDialogOpen(false);
       }
     },
-    [executor.id, profile.id, executors, setExecutors, router],
+    [executor.id, profile.id, appStore, setExecutors, router],
   );
 
   return { saveStatus, error, deleting, deleteDialogOpen, setDeleteDialogOpen, save, remove };

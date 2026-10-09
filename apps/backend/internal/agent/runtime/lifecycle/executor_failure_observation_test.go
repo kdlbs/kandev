@@ -367,11 +367,11 @@ func TestExecutorFailureRestartRequiresRecordedBaseline(t *testing.T) {
 	require.Equal(t, "healthy", status.Observation.Outcome, "absence of baseline must not invent restart history")
 }
 
-func TestExecutorFailureFreshConversationOutcome(t *testing.T) {
+func TestExecutorFailureConversationOutcome(t *testing.T) {
 	for _, tc := range []struct {
 		name, outcome string
 		missing       bool
-	}{{"restored", "restored", false}, {"missing rollout creates fresh conversation", "fresh", true}} {
+	}{{"restored", "restored", false}, {"missing rollout preserves conversation and blocks recovery", "unknown", true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			mock := newMockAgentServer(t)
 			t.Cleanup(mock.Close)
@@ -388,7 +388,14 @@ func TestExecutorFailureFreshConversationOutcome(t *testing.T) {
 			require.NoError(t, client.StreamUpdates(t.Context(), func(agentctl.AgentEvent) {}, nil, nil))
 			waitForWSConnected(t, mock)
 			config := &testAgent{id: "test-agent", enabled: true, runtimeConfig: &agents.RuntimeConfig{Cmd: agents.NewCommand("test-agent"), Protocol: agent.ProtocolACP, SessionConfig: agents.SessionConfig{NativeSessionResume: true}}}
-			result, err := sm.InitializeSession(t.Context(), client, config, "saved-session", "/workspace", nil)
+			result, err := sm.InitializeSession(t.Context(), nil, client, config, "saved-session", "/workspace", nil)
+			if tc.missing {
+				require.Error(t, err)
+				require.Nil(t, result)
+				var required *RestoreRequiredError
+				require.ErrorAs(t, err, &required)
+				return
+			}
 			require.NoError(t, err)
 			require.Equal(t, tc.outcome, result.ConversationOutcome, "successful initialization must report the actual load/create result")
 		})

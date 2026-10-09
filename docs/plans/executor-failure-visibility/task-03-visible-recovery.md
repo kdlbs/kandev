@@ -543,3 +543,100 @@ of the six CI failure scenarios, 3.7 minutes) with retries disabled. Final
 frontend typecheck, localization ratchet, changed-file lint, trusted-base
 coverage validation, catalog validation and specification lint passed. The final
 controller ownership matrix passed under the race detector (1.526 seconds).
+
+### Mobile menu and fixture readiness CI remediation
+
+The next published-head CI run passed all six container shards (145 passed,
+seven skipped, no retries), but one normal shard failed the phone Kanban outside
+tap regression and another exhausted its existing job limit. The partial
+reports also identified a retry-resolved task-creation setup failure. Remote
+browser aggregate gates remained red.
+
+Phone Kanban menus retain their modal backdrop while open and during ordinary
+dismissal. Selecting an enabled action releases the menu's modal ownership
+before invoking the action, allowing the native confirmation to take ownership.
+Desktop menus retain their existing non-modal policy. Mouse and keyboard
+selection handoff regressions failed before the fix and passed afterwards;
+disabled actions do not transfer ownership. A 60-second closing-menu animation
+exposes stuck locks without inflating the test timeout. All five phone scenarios
+passed twice with retries disabled (ten cases, 1.1 minutes), covering ordinary
+fade, outside-tap focus return, confirmation handoff, nested task sheets and
+workspace selection. The 58 focused frontend tests passed across six files;
+changed-file lint, typecheck and localization ratchet passed.
+
+Task-creation QA expands a collapsed sidebar through its existing UI helper
+before clicking New Task. The regression explicitly collapses navigation first;
+the original click timed out and the corrected setup passed. The final
+desktop verification after the selection-handoff change passed all 13 affected
+cases with retries disabled (4.2 minutes).
+
+The timed-out shard was reproduced using its original assignment and exact CI
+checkout/runtime artifacts. Its first reproduced failure was a Bitbucket
+fixture whose initial agent turn moved the task to another workflow step while
+its context menu was open. Waiting for that turn's successful idle state before
+opening the menu made the complete plugin flow pass with retries disabled
+(32.4 seconds). The remaining original assignment is being checked with only
+that fixture readiness correction. Missing CI artifacts are not evidence that
+the unreported tests passed.
+
+These changes restore documented interaction behavior and settle test fixtures;
+no public command, configuration, terminology or localization contract changes.
+Existing task and mobile documentation remains accurate. Complete shard
+investigation, final-commit captures and fresh remote CI/review evidence remain
+delivery gates.
+
+The continued original-shard run reproduced a retained retry cancellation
+failure. The request reached the backend but returned `cancelled: false` after
+one automatic attempt: the next waiting reservation retained the episode's
+cumulative count and was mistaken for a currently dispatched attempt. Cancelling
+a waiting reservation now fences its dispatch claim and retires automatic work
+without cancelling the idle agent runtime, preserving the actual count in its
+durable error. The regression failed before the correction and passed afterwards;
+the cancellation/status matrix passed under the race detector (2.851 seconds).
+This restores the existing waiting-cancellation contract in
+[transient runtime continuity](../../specs/platform/requirements/transient-turn-runtime-continuity.md).
+The browser regression observes the cancellation response and compares reported
+attempts to the ACP trace instead of assuming startup finishes before the first
+retry. All four continuity scenarios passed against the recorded diagnostic runtime,
+including cancellation and all five retries ending in exhaustion. An earlier
+local build refused retry admission; no fail-closed policy was weakened to make
+the reproduction pass. Final merged-head browser evidence remains pending.
+
+
+Current-base integration preserves the newer native restore coordinator and
+durable stream identities alongside executor observation. Missing native state
+blocks automatic replacement; successful explicit continuation records a fresh
+conversation only after generation commit, context submission, and recovery
+settlement. Historical fresh-conversation notices remain durable. Schema startup
+initializes executor episodes, session continuity, and delivery journals together.
+The focused regression rejects uncommitted or replaced continuation candidates.
+
+The continued original-shard diagnostic run passed 42 cases, skipped one gated
+fixture, and stopped at a storage policy notification locator. Consecutive saves
+left two legitimate success notifications visible. The test now waits on the
+save response and checks the latest notification; the focused case passed with
+retries disabled. The remaining 139 original cases are being checked explicitly.
+The next diagnostic segment passed 21 cases and exposed a sidebar reorder
+regression; 117 cases were not reached. Escape during an active reorder also
+closed its enclosing editor. Desktop and phone surfaces now consume that Escape
+while allowing ordinary dismissal after the reorder ends, including the existing
+inner confirmation handler. Two new surface regressions failed before the fix;
+the focused sidebar unit matrix passed all 21 cases afterwards. Browser tests
+cover cancel, retained focus and unchanged order on both surfaces. Pointer tests
+observe the move announcement and current target bounds before release. The
+complete desktop and phone sort scenarios passed with retries disabled against
+the recorded diagnostic runtime (52.7 and 49.9 seconds). Two prior runs failed
+at backend readiness during measured disk pressure before entering the test;
+neither timeout nor retry policy changed. Fresh merged-tree scenarios follow.
+
+Merged-tree executor failure, cancellation, and explicit continuation package
+tests passed across the lifecycle, orchestrator, SQLite, task service, handlers,
+and summary packages. The missing native rollout test verifies restore admission
+fails without silently starting a fresh provider conversation. Frontend unit
+verification passed 86 cases across ten files; the native backend and plugin
+package builds passed. Strict merged-tree browser verification passed six cases
+with retries disabled: executor failure and worker outage on both viewports,
+plus desktop and phone sort editing (2.2 and 1.6 minutes). Typecheck, full
+localization checks, changed-file lint and trusted documentation coverage passed.
+Final captures and new remote checks remain delivery gates; old-head success is
+not final delivery proof.
