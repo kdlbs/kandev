@@ -1,4 +1,23 @@
 import { expect, test } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
+import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
+
+let baseline: Awaited<ReturnType<ApiClient["getUserSettings"]>>["settings"];
+test.beforeEach(async ({ testPage, apiClient }) => {
+  void testPage;
+  baseline = (await apiClient.getUserSettings()).settings;
+});
+test.afterEach(async ({ apiClient, seedData }) => {
+  await restoreSidebarLayout(
+    apiClient,
+    seedData.workspaceId,
+    baseline.sidebar_layouts_by_workspace?.[seedData.workspaceId],
+  );
+  await apiClient.saveUserSettings({
+    sidebar_fast_actions_enabled: baseline.sidebar_fast_actions_enabled,
+    sidebar_new_task_style: baseline.sidebar_new_task_style,
+  });
+});
 
 // @covers AC-UI-SIDEBAR-CUSTOMIZATION-006.6 AC-UI-SIDEBAR-CUSTOMIZATION-006.7 AC-UI-SIDEBAR-CUSTOMIZATION-007.5
 test("customizes the saved sidebar from an inset phone drawer", async ({
