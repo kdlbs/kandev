@@ -1,33 +1,46 @@
 import type { Page } from "@playwright/test";
 
-/** Preserve the pending notification until its UI assertions finish. */
+/** Isolate the real pending notification until its UI assertions finish. */
 export async function holdCancellationSettlement(page: Page) {
   let sessionId: string | null = null;
   const releases = new Set<() => void>();
-  await page.routeWebSocket("**/ws", (client) => {
+  await page.routeWebSocket(/\/ws(?:\?.*)?$/, (client) => {
     const server = client.connectToServer();
-    let held = false;
     const frames: Array<string | Buffer> = [];
     releases.add(() => {
-      held = false;
       for (const frame of frames.splice(0)) client.send(frame);
     });
     server.onMessage((message) => {
-      if (held) {
+      if (sessionId === null) {
+        client.send(message);
+        return;
+      }
+      // Settlement can overtake pending delivery. Buffer from arm, including
+      // other replies, so a newer revision cannot erase the observed state.
+      if (typeof message !== "string") {
         frames.push(message);
         return;
       }
-      const frame = JSON.parse(message.toString()) as {
-        action?: string;
-        payload?: { session_id?: string; cancellation_pending?: boolean };
-      };
-      client.send(message);
-      if (
-        frame.action === "session.cancellation_changed" &&
-        frame.payload?.session_id === sessionId &&
-        frame.payload.cancellation_pending === true
-      ) {
-        held = true;
+      for (const part of message.split("\n")) {
+        let frame: {
+          action?: string;
+          payload?: { session_id?: string; cancellation_pending?: boolean };
+        };
+        try {
+          frame = JSON.parse(part);
+        } catch {
+          frames.push(part);
+          continue;
+        }
+        if (
+          frame?.action === "session.cancellation_changed" &&
+          frame.payload?.session_id === sessionId &&
+          frame.payload.cancellation_pending === true
+        ) {
+          client.send(part);
+        } else {
+          frames.push(part);
+        }
       }
     });
   });

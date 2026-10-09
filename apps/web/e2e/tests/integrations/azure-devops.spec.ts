@@ -346,7 +346,16 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
   await workItemWatch.getByRole("button", { name: "Reset" }).click();
   const resetDialog = testPage.getByTestId("reset-watch-dialog");
   await expect(resetDialog).toBeVisible();
+  // Reset deletes imported tasks before acknowledging success. Observe the
+  // completed operation before asserting its feedback, rather than racing it.
+  const resetResponse = testPage.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      /\/watches\/work-items\/[^/]+\/reset$/.test(new URL(response.url()).pathname),
+  );
   await resetDialog.getByTestId("reset-watch-dialog-confirm").click();
+  expect((await resetResponse).ok()).toBe(true);
+  await expect(resetDialog).not.toBeVisible();
   await expect(testPage.getByText("Watch reset.")).toBeVisible();
   await workItemWatch.getByRole("button", { name: "Delete this watch?" }).click();
   await testPage

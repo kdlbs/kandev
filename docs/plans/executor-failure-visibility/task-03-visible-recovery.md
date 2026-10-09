@@ -678,3 +678,28 @@ contract and its shipped Drawer/Sheet composition. It changes no labels, sizes,
 scroll ownership, data semantics, or recovery policy. Current-head lint,
 typecheck, full discovery, documentation validation and fresh remote CI remain
 delivery checks; successful local reproduction is not a remote CI verdict.
+
+The eleventh-head CI passed the earlier retained-runtime, phone workspace, and
+packaged-provider regressions. Two different first-attempt failures surfaced:
+Quick Chat cancellation pending observation and Azure DevOps watch reset feedback.
+Both passed on retry, so the flake gate correctly kept their shard checks red.
+The first nineteen reports contain two failed results and four retry attempts
+(including serial-suite repetitions); the last report and aggregate remain pending.
+
+The Azure failure snapshot shows the reset confirmation still processing task
+deletion when the feedback assertion timed out. The existing test now awaits
+the actual successful reset response and confirmation dismissal before checking
+the same success message, without increasing any timeout. The cancellation
+observation helper now buffers from arm, forwards the real pending notification,
+and releases all remaining frames after the pending UI assertion. It handles
+batched gateway frames and preserves unarmed/binary traffic. Three focused
+regressions failed on the original helper and passed after the correction. The
+full Quick Chat cancellation browser suite passed all three cases with retries
+disabled. Original first-attempt CI traces were unavailable; isolated baselines
+passed, so local helper regressions establish the fixture boundary without
+claiming an exact transport ordering was captured in the incident. Phone
+cancellation and the complete Azure integration flow then passed with retries
+disabled (one case each). Changed-file ESLint, typecheck, all twenty shard
+manifests and documentation validators passed. The final full-report audit and
+fresh remote CI remain delivery gates. Product cancellation and integration
+reset policy are unchanged.
