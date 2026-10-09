@@ -417,3 +417,28 @@ active-hook fixup publication finish the local handoff. Actual publication and
 hook receipts are preserved in the own task plan. Hosted new-head CI and semantic
 review require a later ROOT release after explicit local-heavy return and END.
 No hosted retry, review request, observer or merge is authorized in this turn.
+
+### Shared continuity cleanup correction
+
+ROOT qualified a shared review finding: restoring private committed history
+does not remove the three untracked files created by the desktop continuity
+case. Apply the exact reviewed spec-only correction from the source owner:
+delete only the prefix, target and unrelated paths in a nested `finally`,
+including when history restoration fails. Assert restored HEAD and clean Git
+status for those owned paths. Existing geometry, product assertions, timeouts
+and strict flaky policy remain unchanged. The source owner's causal RED and
+delivery are accepted without replay or duplicate authoring.
+
+Validation in this work order is limited to one fresh managed Chromium/Pierre
+desktop run, one worker, no retries and one repetition, followed by affected
+spec lint/format, document/reference/coverage checks and normal active hooks.
+No backend, expanded typecheck, Monaco or mobile passing replay applies.
+The exact reviewed correction is implemented. One fresh managed Pierre desktop
+run passes in 16.3 seconds with the restored-HEAD and three-owned-path Git
+postconditions, one worker and no retries. Affected spec ESLint reports zero
+issues, formatting passes, the catalog validates 365 decisions and 1480 specs,
+all specification lint passes, and whitespace is clean. Source-owner causal
+RED remains accepted without replay; no unrelated passing checks were repeated.
+Normal active-hook publication evidence belongs in the own task plan.
+New-head hosted delivery remains pending a later ROOT release after explicit
+local-heavy return and END/WFI; prior-head CI/review evidence is historical.
