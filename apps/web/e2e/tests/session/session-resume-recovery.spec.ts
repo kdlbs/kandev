@@ -16,6 +16,7 @@ import {
   readManagedCloneRecoveryConsumers,
   readPrivateManagedCloneRecoveryArtifacts,
   removeRecoveryBranch,
+  waitForStoppedRecoveryRuntime,
   seedManagedCloneRelocationFixture,
   seedWorktreeRecoveryFixture,
   taskEnvironmentRepository,
@@ -65,6 +66,8 @@ test.describe("worktree branch resume recovery", () => {
       timeout: 30_000,
     });
     await expect(fixture.session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
+
+    await waitForStoppedRecoveryRuntime(apiClient, backend.tmpDir, fixture);
 
     removeRecoveryBranch(seedData.repositoryPath, backend.tmpDir, fixture.repository);
 

@@ -24,6 +24,7 @@ import {
   readPrivateManagedCloneRecoveryArtifacts,
   readManagedCloneRecoveryConsumers,
   removeRecoveryBranch,
+  waitForStoppedRecoveryRuntime,
   seedManagedCloneRelocationFixture,
   seedWorktreeRecoveryFixture,
 } from "../../helpers/session-resume-recovery";
@@ -279,8 +280,6 @@ test.describe("mobile: failed resume recovery", () => {
 });
 
 test.describe("mobile: worktree branch resume recovery", () => {
-  test.describe.configure({ retries: 1 });
-
   test("keeps branch recovery touch-safe and reload-stable", async ({
     testPage,
     apiClient,
@@ -318,6 +317,8 @@ test.describe("mobile: worktree branch resume recovery", () => {
       timeout: 30_000,
     });
     await expect(fixture.session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
+
+    await waitForStoppedRecoveryRuntime(apiClient, backend.tmpDir, fixture);
 
     removeRecoveryBranch(seedData.repositoryPath, backend.tmpDir, fixture.repository);
 

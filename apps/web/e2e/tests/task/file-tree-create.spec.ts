@@ -1,5 +1,6 @@
 import { type Page } from "@playwright/test";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -20,9 +21,19 @@ import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-
 async function setupTask(
   testPage: Page,
   apiClient: ApiClient,
-  seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string },
+  seedData: {
+    workspaceId: string;
+    workflowId: string;
+    startStepId: string;
+    repositoryId: string;
+    repositoryPath: string;
+  },
   options: { profileName: string; taskTitle: string },
 ) {
+  const seededBranch = execFileSync("git", ["symbolic-ref", "--short", "HEAD"], {
+    cwd: seedData.repositoryPath,
+    encoding: "utf8",
+  }).trim();
   const profile = await createStandardProfile(apiClient, options.profileName);
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -32,7 +43,7 @@ async function setupTask(
       description: "/e2e:simple-message",
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
+      repositories: [{ repository_id: seedData.repositoryId, base_branch: seededBranch }],
     },
   );
 
@@ -82,6 +93,8 @@ test.describe("File tree create file", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    // Task startup must retain the non-default branch containing the seed.
+    git.exec(`git checkout -b file-create-fixture-${Date.now()}`);
     // Seed at least one file so the tree loads. Without any files the tree
     // shows "No files found" instead of the toolbar.
     git.createFile("seed.ts", "seed");
