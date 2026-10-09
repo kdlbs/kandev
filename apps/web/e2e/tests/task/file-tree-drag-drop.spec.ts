@@ -1,5 +1,6 @@
 import { type Page } from "@playwright/test";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
@@ -28,17 +29,27 @@ async function setupTask({
 }: {
   testPage: Page;
   apiClient: ApiClient;
-  seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string };
+  seedData: {
+    workspaceId: string;
+    workflowId: string;
+    startStepId: string;
+    repositoryId: string;
+    repositoryPath: string;
+  };
   profileName: string;
   taskTitle: string;
   requiredPath: string;
 }) {
+  const seededBranch = execFileSync("git", ["symbolic-ref", "--short", "HEAD"], {
+    cwd: seedData.repositoryPath,
+    encoding: "utf8",
+  }).trim();
   const profile = await createStandardProfile(apiClient, profileName);
   const task = await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
     description: "/e2e:simple-message",
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
-    repository_ids: [seedData.repositoryId],
+    repositories: [{ repository_id: seedData.repositoryId, base_branch: seededBranch }],
   });
 
   // The task API returns before local workspace preparation finishes. Wait
@@ -172,6 +183,8 @@ test.describe("File tree drag and drop", () => {
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    // Task startup must retain the non-default branch containing the drag source.
+    git.exec(`git checkout -b file-dnd-fixture-${Date.now()}`);
     git.createFile("movable.ts", "m");
     git.createFile("target-dir/keep.ts", "k");
     git.stageAll();
