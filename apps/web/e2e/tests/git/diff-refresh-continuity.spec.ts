@@ -150,6 +150,9 @@ test.describe("desktop Git diff refresh continuity", () => {
           `[data-review-file-key="${encodeURIComponent(TARGET_PATH)}"]`,
         );
         await expect(targetSection).toBeVisible({ timeout: 30_000 });
+        // This scenario owns two files; commits from an earlier preview test
+        // must not enter the all-changes viewer or shift the reading baseline.
+        await expect(diffRoot.locator("[data-review-file-key]")).toHaveCount(2);
         await scrollDiffIntoReadingPosition(testPage, renderer, TARGET_PATH);
         const anchorBefore = await visibleDiffAnchor(testPage, renderer, TARGET_PATH);
         expect(anchorBefore?.line).toBeGreaterThan(30);

@@ -97,3 +97,22 @@ New incident-response tasks retain their own workflow steps during completion.
 Focused tests passed 66 tests across 12 files. Typecheck, focused lint, and the translation ratchet passed.
 Headless Chrome verified direct and queued replies, Jira ticket filtering, and both discovered repositories in the new-task picker.
 The production demo build passed. No local server or real agent ran for these checks.
+
+The October 9 PR fixup rebased onto current main without conflicts or a changed head.
+CI artifacts showed an unbound terminal descriptor interrupting a local start.
+Terminal mutations now invalidate older workspace snapshots, and reconnect reads preserve pending starts.
+HTML preview tests now reset committed assets before and after each test.
+The diff continuity test checks that only its two fixture files enter the viewer.
+Focused unit checks passed 148 tests across 17 files, including demo and reconnect regressions.
+The ordered browser checks passed five mobile tests and seven desktop tests without retries.
+After the final frontend rebuild, both terminal browser tests also passed without retries.
+Current-head CI and automated review remain pending until the remediation push is verified.
+
+Fixup verification commands, run from the repository root:
+
+```bash
+pnpm --dir apps/web exec vitest run lib/browser-demo lib/state/slices/ui/quick-chat-sync.test.ts lib/state/slices/ui/quick-chat-actions.test.ts hooks/use-quick-chat-resync.test.ts
+E2E_PORT_OFFSET=29 pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/workflow/mobile-queued-session-ownership.spec.ts e2e/tests/workflow/mobile-workflow-peer-resume.spec.ts e2e/tests/chat/mobile-inbox-failed-tab.spec.ts e2e/tests/chat/mobile-last-prompt-scroll.spec.ts --retries=0
+E2E_PORT_OFFSET=29 pnpm --dir apps/web e2e:run --host --no-build --project chromium e2e/tests/chat/html-preview.spec.ts e2e/tests/git/diff-refresh-continuity.spec.ts e2e/tests/terminal/quick-terminal.spec.ts --retries=0
+E2E_PORT_OFFSET=29 MAKEFLAGS=GOFLAGS=-buildvcs=false pnpm --dir apps/web e2e:run --host --project chromium e2e/tests/terminal/quick-terminal.spec.ts --retries=0
+```
