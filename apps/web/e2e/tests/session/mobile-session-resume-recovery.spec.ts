@@ -29,6 +29,14 @@ import {
   seedWorktreeRecoveryFixture,
 } from "../../helpers/session-resume-recovery";
 
+test.afterEach(async ({ backend }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus) return;
+  await testInfo.attach("session-recovery-backend.log", {
+    path: backend.logPath,
+    contentType: "text/plain",
+  });
+});
+
 async function seedSessionWithProfile(
   testPage: Parameters<typeof seedDelayedResumeFixture>[0],
   apiClient: Parameters<typeof seedDelayedResumeFixture>[1],

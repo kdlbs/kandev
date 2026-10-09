@@ -23,6 +23,14 @@ import {
   taskEnvironmentRepositoryWorktreePath,
 } from "../../helpers/session-resume-recovery";
 
+test.afterEach(async ({ backend }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus) return;
+  await testInfo.attach("session-recovery-backend.log", {
+    path: backend.logPath,
+    contentType: "text/plain",
+  });
+});
+
 test.describe("worktree branch resume recovery", () => {
   test.describe.configure({ retries: 0 });
 
