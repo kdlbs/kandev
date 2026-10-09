@@ -868,6 +868,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		DeliveryStreamID:          req.DeliveryStreamID,
 		DeliveryIncarnationID:     req.DeliveryIncarnationID,
 		DeliveryHarnessGeneration: req.DeliveryHarnessGeneration,
+		ForceContextContinuation:  req.ForceContextContinuation,
 		RuntimeName:               ri.RuntimeName,
 		Status:                    v1.AgentStatusRunning,
 		StartedAt:                 time.Now(),
