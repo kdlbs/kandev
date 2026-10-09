@@ -9,7 +9,7 @@ import {
 } from "./review-fix-comments-popover-flow";
 
 test.describe("Review dialog Fix Comments popover", () => {
-  test.describe.configure({ retries: 2, timeout: 120_000 });
+  test.describe.configure({ retries: 0, timeout: 120_000 });
 
   test("hovering Fix Comments shows a scrollable per-file overview", async ({
     testPage,
@@ -58,8 +58,23 @@ test.describe("Review dialog Fix Comments popover", () => {
       .poll(async () => scroller.evaluate((el) => el.scrollTop), { timeout: 5_000 })
       .toBeGreaterThan(0);
 
-    // The bridge keeps the popover open while the cursor is over the content.
-    await scroller.hover();
+    // Move to visible portal coordinates without locator.hover's implicit page scroll.
+    await expect(scroller).toBeInViewport();
+    const visibleBounds = await scroller.evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      return {
+        left: Math.max(0, rect.left),
+        right: Math.min(window.innerWidth, rect.right),
+        top: Math.max(0, rect.top),
+        bottom: Math.min(window.innerHeight, rect.bottom),
+      };
+    });
+    expect(visibleBounds.right).toBeGreaterThan(visibleBounds.left);
+    expect(visibleBounds.bottom).toBeGreaterThan(visibleBounds.top);
+    await testPage.mouse.move(
+      (visibleBounds.left + visibleBounds.right) / 2,
+      (visibleBounds.top + visibleBounds.bottom) / 2,
+    );
     await expect(overview).toBeVisible();
   });
 

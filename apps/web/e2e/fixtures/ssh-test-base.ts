@@ -169,12 +169,12 @@ async function withBackendRecovery<T>(
     }
   }
 }
-
 async function resetSSHRuntime(
   apiClient: ApiClient,
   backend: BackendContext,
   seedData: SSHSeedData,
 ) {
+  await backend.ensureReady();
   await withBackendRecovery(backend, () =>
     apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]),
   );

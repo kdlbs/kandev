@@ -187,6 +187,7 @@ export async function exerciseSharedFirstResponse(
   await page.goto(`/t/${anchor.id}`);
   const { rows } = await surface(page, mobile);
   await waitForCoverage(page, seed.workspaceId);
+  await expect(rows.getByRole("status").filter({ hasText: "Updating tasks" })).toHaveCount(0);
   const captured = gate(),
     first = gate(),
     trailing = gate();
@@ -204,6 +205,7 @@ export async function exerciseSharedFirstResponse(
     }
   });
   try {
+    expect(requests).toBe(0);
     await selectView(page, rows, mobile, ARCHIVES);
     await captured.promise;
     await api.updateTaskTitle(tasks[0].id, "Shared fixture kept live");

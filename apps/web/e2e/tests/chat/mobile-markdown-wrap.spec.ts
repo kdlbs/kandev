@@ -3,6 +3,8 @@ import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("mobile: Markdown table wrapping", () => {
+  test.describe.configure({ retries: 0 });
+
   test("ordinary two-column pnpm tables wrap without overflowing the chat or document", async ({
     testPage,
     apiClient,
@@ -44,14 +46,18 @@ test.describe("mobile: Markdown table wrapping", () => {
     const firstColumnCode = table.locator("tbody tr").nth(1).locator("td").first().locator("code");
 
     await expect(table).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle();
+    await expect(firstColumnCode).toHaveText("strictDepBuilds: true");
     await expect(markdown.getByTestId(/^markdown-table-resizer-/)).toHaveCount(0);
-    expect(
-      await firstColumnCode.evaluate((code) => {
-        const range = document.createRange();
-        range.selectNodeContents(code);
-        return range.getClientRects().length;
-      }),
-    ).toBeGreaterThan(1);
+    await expect
+      .poll(() =>
+        firstColumnCode.evaluate((code) => {
+          const range = document.createRange();
+          range.selectNodeContents(code);
+          return range.getClientRects().length;
+        }),
+      )
+      .toBeGreaterThan(1);
     expect(
       await tableWrapper.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
     ).toBe(true);

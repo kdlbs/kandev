@@ -1,6 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow, requireBox } from "../../helpers/layout-assertions";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { createStandardProfile, openTaskSession } from "../../helpers/git-helper";
 import { waitForLatestSessionDone } from "../../helpers/session";
 
@@ -105,6 +106,7 @@ test.describe("Shared phone listing topbar", () => {
     await assertNoDocumentHorizontalOverflow(testPage, "saved-view sync failure");
 
     await trigger.tap();
+    await waitForFiniteAnimations(testPage.locator("body"));
     for (const id of ["threads-view-sync-retry", "threads-view-sync-dismiss"]) {
       const height = (await requireBox(recovery.getByTestId(id), "recovery action")).height;
       expect(Math.round(height * 100) / 100).toBeGreaterThanOrEqual(44);

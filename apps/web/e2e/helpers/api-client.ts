@@ -1657,19 +1657,26 @@ export class ApiClient {
         (body.includes("inspect worktrees before delete") ||
           body.includes("capture worktree cleanup identities") ||
           body.includes("capture cleanup identity"));
+      const transientTaskHierarchyConflict =
+        response.status === 500 &&
+        body.includes("task has children at final deletion; retry the task deletion");
       const sessionTransferInProgress =
         response.status === 500 && body.trim() === '{"error":"session transfer in progress"}';
-      if ((!transientWorktreeInspection && !sessionTransferInProgress) || attempt === 3) {
+      if (
+        (!transientWorktreeInspection &&
+          !transientTaskHierarchyConflict &&
+          !sessionTransferInProgress) ||
+        attempt === 3
+      ) {
         throw new Error(`API DELETE ${path} failed (${response.status}): ${body}`);
       }
 
-      // A task cleanup worker can remove a checkout between the reset's
-      // inventory read and its dirty-worktree inspection. Retry the complete
-      // reset after cleanup or a workflow session transfer releases its ownership.
+      // Rebuild the reset inventory after cleanup, child-task mutations, or
+      // session transfer ownership settles.
       await dwell(
         250 * (attempt + 1),
         "poll-interval",
-        "poll interval for E2E reset after transient cleanup or session transfer ownership",
+        "retry interval for E2E reset after transient cleanup or session transfer ownership",
       );
     }
   }

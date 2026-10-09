@@ -7,10 +7,11 @@ import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-
 import { SessionPage } from "../../pages/session-page";
 import { watchWs } from "../../helpers/causal-waits";
 
-// Inline rename lives in file-context-menu.tsx (useFileRename + TreeNodeName).
+// Inline rename lives in file-context-menu.tsx and file-tree-node-name.tsx.
 // Entry points (today, in product code):
 //   - Right-click -> "Rename" menu item
-//   - The input is focused after rename mode mounts, and losing focus commits.
+//   - The input is focused after rename mode mounts. A blur handoff gate keeps
+//     the context menu's initial focus restoration from committing the rename.
 // Commit on Enter, cancel on Escape, commit on blur.
 // We test the user-visible flow only (no direct DOM hacks).
 
@@ -189,6 +190,7 @@ test.describe("File tree inline rename", () => {
     const input = await startRenameViaContextMenu(testPage, node);
     await input.press("ControlOrMeta+A");
     await input.fill("blur-final.ts");
+    await expect(input).toHaveAttribute("data-blur-commit-ready", "true");
     // Click another file to blur the input. The other node also belongs to
     // the tree, so we don't lose tree-container focus state.
     await expect(input).toBeFocused();

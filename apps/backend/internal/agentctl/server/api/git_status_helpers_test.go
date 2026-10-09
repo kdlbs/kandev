@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,7 +33,13 @@ func newMultiRepoStatusServerWithAgentEnv(t *testing.T, agentEnv []string) (*Ser
 		WorkDir:  taskRoot,
 		AgentEnv: append([]string(nil), agentEnv...),
 	}
-	return NewServer(cfg, process.NewManager(cfg, log), nil, nil, log), repoNames
+	manager := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		if err := manager.Stop(context.Background()); err != nil {
+			t.Errorf("stop process manager: %v", err)
+		}
+	})
+	return NewServer(cfg, manager, nil, nil, log), repoNames
 }
 
 func newStatusTestRepo(t *testing.T, taskRoot, name string) string {

@@ -417,6 +417,19 @@ func (s *Service) finishContinuationManual(ctx context.Context, taskID, sessionI
 	guard.Lock()
 	defer guard.Unlock()
 	defer release()
+	s.finishContinuationManualLocked(ctx, taskID, sessionID, executionID, entry, cancelConfirmed, disposition...)
+}
+
+func (s *Service) finishContinuationManualLocked(
+	ctx context.Context,
+	taskID, sessionID, executionID string,
+	entry *transientRetryEntry,
+	cancelConfirmed bool,
+	disposition ...string,
+) {
+	if ctx.Err() != nil {
+		return
+	}
 	current, ok := s.transientRetries.Load(sessionID)
 	if !ok || current != entry {
 		return

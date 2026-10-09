@@ -135,7 +135,10 @@ export async function runtimeAwareness(page: Page, mobile = false, capture?: PrA
   await page.goto("/settings/agents#runtime-updates");
   await expect(page).toHaveURL(/settings\/agents#runtime-updates$/);
   await expect(page.locator("#runtime-updates > details")).toHaveAttribute("open");
+  const previousConnection = runtime.connectionGeneration();
+  const statusReadAfterRemount = waitForHttp(page, "GET", /\/agent-update\/status$/);
   await page.goto("/");
+  await Promise.all([runtime.waitForConnectionAfter(previousConnection), statusReadAfterRemount]);
   await runtime.emit("system.update_available", {
     agent_name: "kimi-acp",
     runtime_id: "kimi-acp",

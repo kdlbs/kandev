@@ -1654,7 +1654,11 @@ func TestService_DeleteWorkflow_SkipsConcurrentlyArchivedTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTask raced: %v", err)
 	}
+	svc.StopTaskResourceCleanupWorker()
 	svc.tasks = leakyListTaskRepo{TaskRepository: repo, extra: []*models.Task{raced}}
+	if err := svc.StartTaskResourceCleanupWorker(ctx); err != nil {
+		t.Fatalf("restart cleanup worker: %v", err)
+	}
 
 	if err := svc.DeleteWorkflow(ctx, "wf-doomed"); err != nil {
 		t.Fatalf("DeleteWorkflow should swallow ErrTaskAlreadyArchived: %v", err)
@@ -1693,7 +1697,11 @@ func TestService_DeleteWorkflow_PartialArchiveErrorPreservesWorkflow(t *testing.
 	// "task-ghost" never actually exists in the DB — the leaky list returns
 	// it so the cascade's ArchiveTask call hits a real GetTask error.
 	ghost := &models.Task{ID: "task-ghost", WorkspaceID: "ws-1", WorkflowID: "wf-doomed", WorkflowStepID: "step-1", Title: "Ghost"}
+	svc.StopTaskResourceCleanupWorker()
 	svc.tasks = leakyListTaskRepo{TaskRepository: repo, extra: []*models.Task{ghost}}
+	if err := svc.StartTaskResourceCleanupWorker(ctx); err != nil {
+		t.Fatalf("restart cleanup worker: %v", err)
+	}
 
 	err := svc.DeleteWorkflow(ctx, "wf-doomed")
 	if err == nil {

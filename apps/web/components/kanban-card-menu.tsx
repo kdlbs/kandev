@@ -178,6 +178,10 @@ function useTaskMenuConfirmations(
   detachTask: (taskId: string) => Promise<unknown>,
   dialogs: ReturnType<typeof useTaskMenuDialogState>,
 ) {
+  const requestDeleteConfirmation = () => {
+    // Let Radix finish releasing the dropdown's modal pointer lock first.
+    window.setTimeout(() => dialogs.setShowDeleteConfirm(true), 300);
+  };
   const handleDetachConfirm = async () => {
     try {
       await detachTask(taskId);
@@ -194,7 +198,12 @@ function useTaskMenuConfirmations(
     // Radix must finish the menu pointer sequence before the confirmation opens.
     window.setTimeout(() => dialogs.setShowArchiveConfirm(true), 300);
   };
-  return { handleDetachConfirm, requestDetachConfirmation, requestArchiveConfirmation };
+  return {
+    handleDetachConfirm,
+    requestDeleteConfirmation,
+    requestDetachConfirmation,
+    requestArchiveConfirmation,
+  };
 }
 
 export function useKanbanCardMenus({
@@ -224,8 +233,7 @@ export function useKanbanCardMenus({
   const { detachTask, detachingTaskId } = useDetachTask();
   const updateTaskPriority = useUpdateTaskPriority();
   const prUnlinkMenu = useCardPRUnlinkEntries(task);
-  const { handleDetachConfirm, requestDetachConfirmation, requestArchiveConfirmation } =
-    useTaskMenuConfirmations(task.id, detachTask, dialogs);
+  const confirmations = useTaskMenuConfirmations(task.id, detachTask, dialogs);
   const detachAnchorRef = useRef<HTMLDivElement>(null);
   const detachFocusReturnRef = useRef<HTMLButtonElement>(null);
   const isDetaching = detachingTaskId === task.id;
@@ -247,9 +255,12 @@ export function useKanbanCardMenus({
     currentPriority: task.priority,
     onSelectPriority: (priority: TaskPriority) => void updateTaskPriority(task.id, priority),
     onEdit: onEdit ? () => onEdit(task) : undefined,
-    onArchive: onArchive ? requestArchiveConfirmation : undefined,
-    onDelete: onDelete ? () => dialogs.setShowDeleteConfirm(true) : undefined,
-    onDetach: task.parentTaskId && !actingOnMultiSelection ? requestDetachConfirmation : undefined,
+    onArchive: onArchive ? confirmations.requestArchiveConfirmation : undefined,
+    onDelete: onDelete ? confirmations.requestDeleteConfirmation : undefined,
+    onDetach:
+      task.parentTaskId && !actingOnMultiSelection
+        ? confirmations.requestDetachConfirmation
+        : undefined,
     ...buildLinkDialogHandlers(externalLinkAvailability, dialogs),
     onChangeWorkflow: () => {
       window.setTimeout(() => dialogs.setShowChangeWorkflow(true), 300);
@@ -302,7 +313,7 @@ export function useKanbanCardMenus({
     detachFocusReturnRef,
     archiveAnchorRef: detachFocusReturnRef,
     archiveFocusReturnRef: detachFocusReturnRef,
-    handleDetachConfirm,
+    handleDetachConfirm: confirmations.handleDetachConfirm,
   };
 }
 

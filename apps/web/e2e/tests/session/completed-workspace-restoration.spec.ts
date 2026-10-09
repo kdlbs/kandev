@@ -10,7 +10,7 @@ import {
 } from "./completed-workspace-restoration-helpers";
 
 test.describe("Completed workspace restoration", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test("restores a cold workspace and recovers a bounded failure", async ({
     testPage,
@@ -61,12 +61,19 @@ test.describe("Completed workspace restoration", () => {
     );
 
     const retry = workspaceUnavailable.getByTestId("workspace-retry");
+    await expect(retry).toBeVisible({ timeout: 30_000 });
     const retryBox = await retry.boundingBox();
     expect(retryBox, "workspace retry has no rendered hitbox").not.toBeNull();
     expect(retryBox?.height ?? 0).toBeGreaterThanOrEqual(28);
     failure.allowNextRestores();
     await retry.click();
+    await expect(workspaceUnavailable).toHaveCount(0);
 
+    // Workspace recovery can refresh the right-pane layout. Foreground Files
+    // again before querying its virtualized tree so the wait never targets a
+    // hidden dockview panel.
+    await session.clickTab("Files");
+    await expect(session.files).toBeVisible();
     const fileNode = await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 60_000);
     await fileNode.click();
     const viewer = testPage.locator(".monaco-editor:visible").first();

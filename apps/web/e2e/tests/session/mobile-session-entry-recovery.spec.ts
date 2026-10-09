@@ -73,7 +73,8 @@ test.describe("mobile session entry recovery", () => {
     await expect.poll(() => proxy.pendingRequestCount("message.list")).toBe(0);
     proxy.allowResponses("message.list");
     const requestsBeforeRetry = proxy.requestCount("message.list");
-    await retry.click();
+    await expect(retry).toBeVisible();
+    await retry.tap();
     await expect
       .poll(() => proxy.requestCount("message.list"))
       .toBeGreaterThan(requestsBeforeRetry);

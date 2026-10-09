@@ -5,10 +5,32 @@ import path from "node:path";
 import type { BackendContext } from "../fixtures/backend";
 import type { ApiClient } from "./api-client";
 import type { AgentProfile } from "../../lib/types/http-agents";
+import { DatabaseSync } from "./node-sqlite";
 
 export const MANAGED_RUNTIME_CACHE_ROOT = "/tmp/kandev-managed-npm-cache";
 const MANAGED_RUNTIME_AGENT_NAME = "opencode-acp";
 const MANAGED_RUNTIME_TEST_MODEL = "opencode/big-pickle";
+const runtimeSelectionBaselines = new WeakMap<BackendContext, string>();
+
+function selectManagedFixtureRuntime(backend: BackendContext): void {
+  const database = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
+  try {
+    database.exec("PRAGMA busy_timeout = 10000");
+    const row = database
+      .prepare("SELECT value FROM settings WHERE key = ?")
+      .get("managed_runtime.opencode.selection") as { value: string } | undefined;
+    if (!row) throw new Error("OpenCode runtime selection has not been initialized");
+    runtimeSelectionBaselines.set(backend, row.value);
+    database
+      .prepare("UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?")
+      .run(
+        JSON.stringify({ ...JSON.parse(row.value), source: "managed" }),
+        "managed_runtime.opencode.selection",
+      );
+  } finally {
+    database.close();
+  }
+}
 
 export function managedRuntimeExecutionCacheKey(packageSpec: string): string {
   return createSha512(packageSpec).slice(0, 16);
@@ -52,9 +74,8 @@ export type ManagedRuntimePreparationOptions = {
 };
 
 /**
- * The real managed OpenCode agent is enabled only for this container-backed
- * test. Its command runs through the image's npx wrapper, while the wrapper
- * starts the Linux mock ACP binary on the online retry.
+ * Managed startup runs through a deterministic npx wrapper on hosts and in
+ * runtime containers. Successful launches use the mock ACP binary.
  */
 export async function prepareManagedRuntimeProfile(
   apiClient: ApiClient,
@@ -69,6 +90,7 @@ export async function prepareManagedRuntimeProfile(
     fs.mkdirSync(fixtureBin, { recursive: true });
     fs.copyFileSync(path.resolve(__dirname, "../fixtures/managed-runtime-npx.sh"), hostFixturePath);
     fs.chmodSync(hostFixturePath, 0o755);
+    selectManagedFixtureRuntime(backend);
   }
   const inheritedPath = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
   const pathWithoutNativeOpenCode = inheritedPath.filter(
@@ -156,6 +178,19 @@ export async function prepareManagedRuntimeProfile(
 
 /** Restore the normal e2e-only mock registry after a managed-runtime test. */
 export async function restoreE2EAgentRegistry(backend: BackendContext): Promise<void> {
+  const baseline = runtimeSelectionBaselines.get(backend);
+  if (baseline !== undefined) {
+    const database = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
+    try {
+      database.exec("PRAGMA busy_timeout = 10000");
+      database
+        .prepare("UPDATE settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?")
+        .run(baseline, "managed_runtime.opencode.selection");
+      runtimeSelectionBaselines.delete(backend);
+    } finally {
+      database.close();
+    }
+  }
   await backend.restart();
 }
 

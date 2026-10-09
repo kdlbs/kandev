@@ -214,11 +214,34 @@ export async function seedIdleSession(
       repository_ids: [seedData.repositoryId],
     },
   );
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+  const sessionId = task.session_id;
+  if (!sessionId) throw new Error("createTaskWithAgent did not return a session_id");
+  await pollUntil(
+    () => apiClient.listSessionTurns(sessionId),
+    ({ turns }) => turns.length > 0 && turns.every((turn) => Boolean(turn.completed_at)),
+    30_000,
+    "Waiting for the initial session turn to complete",
+  );
   const session = await openTaskSession(testPage, task.id);
   await session.waitForChatIdle({ timeout: 30_000 });
   await session.composerReady();
   return session;
+}
+
+/** Waits until a session's advertised slash-command list is available in the composer. */
+export async function waitForSlashCommandAvailable(
+  page: Page,
+  session: SessionPage,
+  command: string,
+): Promise<void> {
+  const editor = await session.composerReady();
+  await editor.fill("/");
+  await expect(page.getByText(`/${command}`, { exact: true })).toBeVisible({ timeout: 10_000 });
+  const modifier = process.platform === "darwin" ? "Meta" : "Control";
+  await editor.press(`${modifier}+A`);
+  await editor.press("Backspace");
+  await expect(editor).toBeEmpty();
+  await session.waitForDirectInput();
 }
 
 export async function waitForSessionGitHydration(page: Page, sessionId: string) {

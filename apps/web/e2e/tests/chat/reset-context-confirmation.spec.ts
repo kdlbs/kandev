@@ -18,7 +18,9 @@ test("desktop reset context confirms at its toolbar action and preserves cancell
     seedData,
     "Desktop Reset Context Confirmation",
   );
-  await seedStaleContextWindow(testPage);
+  const sessionId = await session.activeChat().getAttribute("data-session-id");
+  if (!sessionId) throw new Error("active chat did not expose a session id");
+  await seedStaleContextWindow(testPage, sessionId);
 
   const contextRing = testPage.getByRole("button", { name: "Context window: 95% used" });
   await expect(contextRing).toBeVisible();

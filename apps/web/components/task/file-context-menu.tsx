@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useRef, useEffect } from "react";
-import { Input } from "@kandev/ui/input";
+import React, { useState, useCallback, useRef } from "react";
 import { IconMessageDots } from "@tabler/icons-react";
 import { AlertDialog } from "@kandev/ui/alert-dialog";
 import {
@@ -11,7 +10,6 @@ import {
   ContextMenuTrigger,
   ContextMenuSeparator,
 } from "@kandev/ui/context-menu";
-import { cn } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
@@ -19,7 +17,6 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTranslation } from "react-i18next";
 import type { FileTreeNode } from "@/lib/types/backend";
 import { FileContextMenuItems } from "./file-context-menu-items";
-import type { FileInfo } from "@/lib/state/store";
 import { removeNodeFromTree, renameNodeInTree, treeContainsPath } from "./file-tree-utils";
 import { createFileDeleteAction, type FileDeleteAction } from "./file-delete-action";
 import {
@@ -28,8 +25,6 @@ import {
   useFileTreeEditorActions,
 } from "./file-tree-editor-menu";
 import { DeleteConfirmDialog } from "./file-delete-confirmation";
-
-type GitFileStatus = FileInfo["status"] | undefined;
 
 const FileDeleteActionContext = React.createContext<FileDeleteAction | null>(null);
 
@@ -440,11 +435,13 @@ export function useFileRename(
   const { toast } = useToast();
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(node.name);
+  const [renameSequence, setRenameSequence] = useState(0);
   const fallbackTreeRef = useRef<FileTreeNode | null>(tree);
   fallbackTreeRef.current = tree;
   const currentTreeRef = treeRef ?? fallbackTreeRef;
 
   const handleStartRename = useCallback(() => {
+    setRenameSequence((sequence) => sequence + 1);
     setRenameValue(node.name);
     setIsRenaming(true);
   }, [node.name]);
@@ -519,6 +516,7 @@ export function useFileRename(
   return {
     isRenaming,
     renameValue,
+    renameSequence,
     setRenameValue,
     handleStartRename,
     handleConfirmRename,
@@ -526,68 +524,4 @@ export function useFileRename(
   };
 }
 
-/** Inline rename input or static file name */
-export function TreeNodeName({
-  node,
-  displayName,
-  isActive,
-  gitStatus,
-  rename,
-}: {
-  node: FileTreeNode;
-  displayName?: string;
-  isActive: boolean;
-  gitStatus: GitFileStatus;
-  rename: ReturnType<typeof useFileRename>;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (rename.isRenaming) {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    }
-  }, [rename.isRenaming]);
-
-  const handleBlur = useCallback(() => {
-    rename.handleConfirmRename();
-  }, [rename]);
-
-  if (rename.isRenaming) {
-    return (
-      <Input
-        ref={inputRef}
-        controlSize="none"
-        value={rename.renameValue}
-        onChange={(e) => rename.setRenameValue(e.target.value)}
-        onKeyDown={rename.handleRenameKeyDown}
-        onBlur={handleBlur}
-        onClick={(e) => e.stopPropagation()}
-        className="h-5 text-xs px-1 py-0 flex-1 min-w-0"
-      />
-    );
-  }
-  return (
-    <span
-      className={cn(
-        "min-w-0 flex-1 truncate group-hover:text-foreground",
-        isActive ? "text-foreground" : "text-muted-foreground",
-        node.is_dir ? "font-medium" : getGitStatusTextClass(gitStatus),
-      )}
-    >
-      {displayName ?? node.name}
-    </span>
-  );
-}
-
-export function getGitStatusTextClass(status: GitFileStatus): string {
-  switch (status) {
-    case "added":
-    case "untracked":
-      return "text-green-700 dark:text-green-600";
-    case "modified":
-      return "text-yellow-600";
-    default:
-      return "";
-  }
-}
+export { TreeNodeName, getGitStatusTextClass } from "./file-tree-node-name";

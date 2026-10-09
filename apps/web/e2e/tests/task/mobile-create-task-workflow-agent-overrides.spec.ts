@@ -33,6 +33,7 @@ async function longPress(page: Page, target: Locator): Promise<void> {
 }
 
 test.describe("mobile: task-specific workflow agent overrides", () => {
+  test.describe.configure({ retries: 0 });
   test("keeps touch controls usable and routes the selected profile", async ({
     testPage,
     tabletTestPage,

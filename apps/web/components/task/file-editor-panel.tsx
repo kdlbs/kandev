@@ -8,8 +8,10 @@ import { FileBinaryViewer } from "./file-binary-viewer";
 import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
 import { useFileEditors } from "@/hooks/use-file-editors";
+import { useFileEditorBuffer } from "@/hooks/use-file-editor-buffer";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { getFileCategory, getFilePreviewKind } from "@/lib/utils/file-types";
+import { isMarkdownFile } from "@/lib/utils/file-types";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent } from "@/lib/ws/workspace-files";
 import { calculateHash } from "@/lib/utils/file-diff";
@@ -20,6 +22,10 @@ import { FileViewerDownloadButton, FileViewerExternalLink } from "./file-viewer-
 import { triggerFileDownload } from "@/lib/utils/file-download";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { useTranslation } from "react-i18next";
+import { MarkdownFileEditor } from "./markdown-file-editor";
+import type { MarkdownFileMode } from "./markdown-file-mode";
+import { defaultMarkdownFileMode } from "./markdown-file-mode";
+import { useMarkdownFileLinkHandler } from "./markdown-file-link-handler";
 
 type FileCategory = "image" | "binary" | "text";
 
@@ -244,6 +250,7 @@ function useFileLoader({
           isDirty: false,
           isBinary: response.is_binary,
           resolvedPath: response.resolved_path,
+          markdownMode: defaultMarkdownFileMode(path),
         };
         setFileState(fileKey, state);
       })
@@ -348,33 +355,6 @@ type FileEditorPanelProps = {
   params: Record<string, unknown>;
 };
 
-function useFileEditorBuffer(fileKey: string) {
-  const hasFile = useDockviewStore((s) => s.openFiles.has(fileKey));
-  const isSymlink = useDockviewStore((s) => !!s.openFiles.get(fileKey)?.resolvedPath);
-  const content = useDockviewStore((s) => s.openFiles.get(fileKey)?.content ?? "");
-  const isDirty = useDockviewStore((s) => s.openFiles.get(fileKey)?.isDirty ?? false);
-  const hasRemoteUpdate = useDockviewStore(
-    (s) => s.openFiles.get(fileKey)?.hasRemoteUpdate ?? false,
-  );
-  const isBinary = useDockviewStore((s) => s.openFiles.get(fileKey)?.isBinary ?? false);
-  const originalContent = useDockviewStore((s) => s.openFiles.get(fileKey)?.originalContent ?? "");
-  const originalHash = useDockviewStore((s) => s.openFiles.get(fileKey)?.originalHash ?? "");
-  const renderedPreview = useDockviewStore(
-    (s) => s.openFiles.get(fileKey)?.renderedPreview ?? false,
-  );
-  return {
-    hasFile,
-    isSymlink,
-    content,
-    isDirty,
-    hasRemoteUpdate,
-    isBinary,
-    originalContent,
-    originalHash,
-    renderedPreview,
-  };
-}
-
 function LoadingFilePanel() {
   const { t } = useTranslation();
   return (
@@ -400,6 +380,10 @@ type LoadedFilePanelProps = {
   repositoryId: string | undefined;
   repositoryName: string | undefined;
   editorProps: FileEditorContentProps;
+  markdownMode?: MarkdownFileMode;
+  onMarkdownModeChange: (mode: MarkdownFileMode) => void;
+  onOpenFile?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
 };
 
 function LoadedFilePanel({
@@ -412,6 +396,10 @@ function LoadedFilePanel({
   repositoryId,
   repositoryName,
   editorProps,
+  markdownMode,
+  onMarkdownModeChange,
+  onOpenFile,
+  onOpenLink,
 }: LoadedFilePanelProps) {
   if (category !== "text") {
     return (
@@ -430,7 +418,34 @@ function LoadedFilePanel({
   return (
     <PanelRoot>
       <PanelBody padding={false} scroll={false}>
-        <FileEditorContent {...editorProps} />
+        {isMarkdownFile(editorProps.path) ? (
+          <MarkdownFileEditor
+            path={editorProps.path}
+            content={editorProps.content}
+            originalContent={editorProps.originalContent}
+            isDirty={editorProps.isDirty}
+            hasRemoteUpdate={editorProps.hasRemoteUpdate}
+            vcsDiff={editorProps.vcsDiff}
+            isSaving={editorProps.isSaving}
+            sessionId={editorProps.sessionId}
+            taskId={editorProps.taskId}
+            repositoryId={editorProps.repositoryId}
+            worktreePath={editorProps.worktreePath}
+            repo={editorProps.repo}
+            enableComments={editorProps.enableComments}
+            mode={markdownMode ?? defaultMarkdownFileMode(editorProps.path) ?? "source"}
+            onModeChange={onMarkdownModeChange}
+            onChange={editorProps.onChange}
+            onSave={editorProps.onSave}
+            onReloadFromAgent={editorProps.onReloadFromAgent}
+            onDelete={editorProps.onDelete}
+            onOpenFile={onOpenFile}
+            onOpenLink={onOpenLink}
+            onSourceFallback={() => onMarkdownModeChange("source")}
+          />
+        ) : (
+          <FileEditorContent {...editorProps} />
+        )}
       </PanelBody>
     </PanelRoot>
   );
@@ -496,6 +511,10 @@ type LoadedFileEditorPanelProps = {
     FileEditorContentProps,
     "onChange" | "onSave" | "onReloadFromAgent" | "onDelete" | "onDownload"
   >;
+  markdownMode?: MarkdownFileMode;
+  onMarkdownModeChange: (mode: MarkdownFileMode) => void;
+  onOpenFile?: (path: string) => void;
+  onOpenLink?: (url: string) => void;
 };
 
 function LoadedFileEditorPanel({
@@ -505,6 +524,10 @@ function LoadedFileEditorPanel({
   buffer,
   options,
   actions,
+  markdownMode,
+  onMarkdownModeChange,
+  onOpenFile,
+  onOpenLink,
 }: LoadedFileEditorPanelProps) {
   return (
     <LoadedFilePanel
@@ -513,10 +536,15 @@ function LoadedFileEditorPanel({
       path={buffer.path}
       {...panelProps}
       editorProps={{ ...buffer, ...options, ...actions }}
+      markdownMode={markdownMode}
+      onMarkdownModeChange={onMarkdownModeChange}
+      onOpenFile={onOpenFile}
+      onOpenLink={onOpenLink}
     />
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- coordinates the loaded file panel lifecycle.
 export const FileEditorPanel = memo(function FileEditorPanel({
   panelId,
   params,
@@ -536,8 +564,9 @@ export const FileEditorPanel = memo(function FileEditorPanel({
   );
   const gitStatus = useSessionGitStatus(activeSessionId);
   const vcsDiff = gitStatus?.files?.[path]?.diff;
-  const { savingFiles, handleFileChange, saveFile, deleteFile, applyRemoteUpdate } =
+  const { savingFiles, openFile, handleFileChange, saveFile, deleteFile, applyRemoteUpdate } =
     useFileEditors();
+  const worktreePath = getSessionWorkspacePath(activeSession);
   useFileLoader({ hasFile: file.hasFile, activeSessionId, fileKey, path, setFileState, repo });
   useResyncOnTabActivate({
     panelId,
@@ -564,6 +593,17 @@ export const FileEditorPanel = memo(function FileEditorPanel({
       },
     });
   const onDownload = useLoadedFileDownloadForBuffer(file, path);
+  const onOpenFile = useCallback(
+    (targetPath: string) => {
+      void openFile(targetPath, repo);
+    },
+    [openFile, repo],
+  );
+  const onOpenLink = useMarkdownFileLinkHandler({ path, worktreePath, onOpenFile });
+  const onMarkdownModeChange = useCallback(
+    (nextMode: MarkdownFileMode) => updateFileState(fileKey, { markdownMode: nextMode }),
+    [updateFileState, fileKey],
+  );
 
   if (!file.hasFile || !file.originalHash) {
     return <LoadingFilePanel />;
@@ -611,6 +651,10 @@ export const FileEditorPanel = memo(function FileEditorPanel({
         onDelete,
         onDownload,
       }}
+      markdownMode={file.markdownMode}
+      onMarkdownModeChange={onMarkdownModeChange}
+      onOpenFile={onOpenFile}
+      onOpenLink={onOpenLink}
     />
   );
 });

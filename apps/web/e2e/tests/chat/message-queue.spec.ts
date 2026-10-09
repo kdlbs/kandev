@@ -418,6 +418,7 @@ test.describe("Task session queue", () => {
     const task = await apiClient.getTask(taskID);
     const sessionID = task.primary_session_id;
     if (!sessionID) throw new Error("task did not have a primary session");
+    const queueIdentity = await apiClient.getQueueSessionIdentity(taskID, sessionID);
     await queueMessages(apiClient, taskID, sessionID, [
       scriptedQueueMessage(markerA),
       scriptedQueueMessage(markerB, 5_000),
@@ -442,6 +443,12 @@ test.describe("Task session queue", () => {
     await sendNow.click();
     await sendNowResponse;
 
+    await expect
+      .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count), {
+        timeout: 30_000,
+        message: "Send Now did not remove the selected queue entry",
+      })
+      .toBe(2);
     await expect(panel.getByTestId("queue-entry-text")).toHaveCount(2, { timeout: 10_000 });
     await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText(markerA);
     await expect(panel.getByTestId("queue-entry-text").nth(1)).toContainText(markerC);

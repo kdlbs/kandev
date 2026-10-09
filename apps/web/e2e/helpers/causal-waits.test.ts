@@ -266,6 +266,43 @@ describe("watchWs().waitForResponse", () => {
     await expect(pending).resolves.toMatchObject({ id: "req-1", payload: { content: "# Plan" } });
   });
 
+  it("filters correlated requests by their payload", async () => {
+    const { page, fake } = fakePage();
+    const ws = watchWs(page);
+    const socket = fake.openSocket(GATEWAY);
+    const pending = ws.waitForResponse("github.pr_commits.get", {
+      where: (payload) => payload.number === 202,
+    });
+    socket.emit("framesent", {
+      id: "pr-101",
+      type: "request",
+      action: "github.pr_commits.get",
+      payload: { owner: "testorg", repo: "testrepo", number: 101 },
+    });
+    socket.emit("framereceived", {
+      id: "pr-101",
+      type: "response",
+      action: "github.pr_commits.get",
+      payload: { commits: [{ message: "wrong PR" }] },
+    });
+    socket.emit("framesent", {
+      id: "pr-202",
+      type: "request",
+      action: "github.pr_commits.get",
+      payload: { owner: "testorg", repo: "testrepo", number: 202 },
+    });
+    socket.emit("framereceived", {
+      id: "pr-202",
+      type: "response",
+      action: "github.pr_commits.get",
+      payload: { commits: [{ message: "matching PR" }] },
+    });
+    await expect(pending).resolves.toMatchObject({
+      id: "pr-202",
+      payload: { commits: [{ message: "matching PR" }] },
+    });
+  });
+
   it("ignores a reply to a different in-flight request", async () => {
     const { page, fake } = fakePage();
     const ws = watchWs(page);

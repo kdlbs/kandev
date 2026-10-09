@@ -134,8 +134,7 @@ export type WaitForWsOptions = {
   where?: (payload: Record<string, unknown>) => boolean;
 };
 
-export type WaitForWsResponseOptions = {
-  timeout?: number;
+export type WaitForWsResponseOptions = WaitForWsOptions & {
   /** Start the response timeout after this operation completes. */
   timeoutAfter?: Promise<unknown>;
 };
@@ -256,7 +255,7 @@ function waitForResponse(
   action: string,
   options: WaitForWsResponseOptions,
 ): Promise<WsFrame> {
-  const { timeout = DEFAULT_TIMEOUT, timeoutAfter } = options;
+  const { timeout = DEFAULT_TIMEOUT, timeoutAfter, where } = options;
   return new Promise<WsFrame>((resolve, reject) => {
     const requestIds = new Set<string>();
     const wait = armWsWait(
@@ -266,7 +265,9 @@ function waitForResponse(
       timeoutAfter,
     );
     wait.listen(channels.sent, (frame) => {
-      if (frame.action === action && frame.id) requestIds.add(frame.id);
+      if (frame.action === action && frame.id && (!where || where(frame.payload))) {
+        requestIds.add(frame.id);
+      }
     });
     wait.listen(channels.received, (frame) => {
       if (!frame.id || !requestIds.has(frame.id)) return;

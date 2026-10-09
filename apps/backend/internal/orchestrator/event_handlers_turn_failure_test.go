@@ -460,6 +460,7 @@ func TestAgentTurnFailedRoutesOfficeTasksToTerminalFailureOwner(t *testing.T) {
 	_, retryOwned := svc.transientRetries.Load("s-office")
 	require.False(t, retryOwned, "Office failures must not enter interactive retained retry ownership")
 	waitForDynamicSuccessorWorkers(t, svc)
+	waitForStopCall(t, agentManager)
 	agentManager.mu.Lock()
 	require.Len(t, agentManager.stopAgentWithReasonArgs, 1,
 		"the terminal failure owner must clean up the Office execution once")

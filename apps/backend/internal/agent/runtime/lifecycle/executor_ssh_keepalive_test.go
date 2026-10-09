@@ -1000,7 +1000,9 @@ func TestSSHExecutorStopInstanceAbandonsARemoteCommandThatWedgesAfterTheReading(
 
 	state := &sshSessionState{client: client, remoteDir: "/remote/session", remoteTaskDir: "/remote/task", pid: 4242}
 	exec.sessions["instance-1"] = state
+	var cleanupCalls int
 	exec.cleanupScript = func(ctx context.Context, client *ssh.Client, _ string, _ map[string]interface{}, _ map[string]string, _ SSHRemotePlatform, _ string, _ string) error {
+		cleanupCalls++
 		_, _, err := runSSHCommand(ctx, client, "true")
 		return err
 	}
@@ -1042,8 +1044,8 @@ func TestSSHExecutorStopInstanceAbandonsARemoteCommandThatWedgesAfterTheReading(
 	if !exec.isTransportLost(state) {
 		t.Fatal("a command abandoned by its own timeout must mark the client transport-lost")
 	}
-	if stopCalls != 0 {
-		t.Fatalf("stop calls = %d, want 0 after the cleanup command loses transport", stopCalls)
+	if cleanupCalls != 1 || stopCalls != 0 {
+		t.Fatalf("remote cleanup calls = %d, remote stop calls = %d, want 1 and 0 after transport loss", cleanupCalls, stopCalls)
 	}
 }
 

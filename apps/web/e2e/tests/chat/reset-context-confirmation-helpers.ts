@@ -65,15 +65,30 @@ export async function seedResetContextSession(
   return session;
 }
 
-export async function seedStaleContextWindow(testPage: Page): Promise<void> {
-  await testPage.evaluate(() => {
+export async function seedStaleContextWindow(testPage: Page, sessionId: string): Promise<void> {
+  const getActiveSessionId = () =>
+    testPage.evaluate(() => {
+      const store = (window as ContextWindowStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) throw new Error("E2E store bridge is unavailable");
+      return store.getState().tasks.activeSessionId;
+    });
+  await expect
+    .poll(getActiveSessionId, {
+      timeout: 30_000,
+      message: "the intended session must be active before seeding its context window",
+    })
+    .toBe(sessionId);
+
+  await testPage.evaluate((expectedSessionId) => {
     const store = (window as ContextWindowStoreWindow).__KANDEV_E2E_STORE__;
     if (!store) throw new Error("E2E store bridge is unavailable");
 
-    const sessionId = store.getState().tasks.activeSessionId;
-    if (!sessionId) throw new Error("No active session is available");
+    const activeSessionId = store.getState().tasks.activeSessionId;
+    if (activeSessionId !== expectedSessionId) {
+      throw new Error(`Expected active session ${expectedSessionId}, found ${activeSessionId}`);
+    }
 
-    store.getState().setContextWindow(sessionId, {
+    store.getState().setContextWindow(expectedSessionId, {
       size: 200_000,
       used: 190_000,
       remaining: 10_000,
@@ -81,5 +96,5 @@ export async function seedStaleContextWindow(testPage: Page): Promise<void> {
       compactionCount: 0,
       source: "acp",
     });
-  });
+  }, sessionId);
 }

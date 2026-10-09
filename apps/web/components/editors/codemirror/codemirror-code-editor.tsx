@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import type { EditorView } from "@codemirror/view";
 import { Button } from "@kandev/ui/button";
@@ -40,6 +40,7 @@ type FileEditorContentProps = {
   onTogglePreview?: () => void;
   onPreviewHtml?: () => void;
   isPublishingHtmlPreview?: boolean;
+  toolbarModeControl?: ReactNode;
   onChange: (newContent: string) => void;
   onSave: () => void;
   onReloadFromAgent?: () => void;
@@ -154,6 +155,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
     onTogglePreview,
     onPreviewHtml,
     isPublishingHtmlPreview,
+    toolbarModeControl,
     onSave,
     onReloadFromAgent,
     onDelete,
@@ -188,6 +190,7 @@ export function CodeMirrorCodeEditor(props: FileEditorContentProps) {
         onTogglePreview={onTogglePreview}
         onPreviewHtml={onPreviewHtml}
         isPublishingHtmlPreview={isPublishingHtmlPreview}
+        toolbarModeControl={toolbarModeControl}
       />
       <div ref={editorAreaRef} className="flex-1 overflow-hidden relative">
         <CodeMirror

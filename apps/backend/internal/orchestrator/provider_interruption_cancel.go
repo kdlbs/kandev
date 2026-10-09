@@ -92,14 +92,18 @@ func (s *Service) retainedContinuationCancellationOwnsTurn(
 
 func (s *Service) cancelContinuationRetry(ctx context.Context, taskID, sessionID string, entry *transientRetryEntry) bool {
 	ctx = context.WithValue(ctx, continuationCancelContextKey{}, entry)
-	if err := s.CancelAgent(ctx, sessionID); err != nil {
-		return false
-	}
 	if entry.retainedRuntime != nil {
+		if err := s.CancelAgent(ctx, sessionID); err != nil {
+			return false
+		}
 		s.finishRetainedRetryWithoutDispatch(context.WithoutCancel(ctx), taskID, sessionID, entry, "cancelled")
 		return true
 	}
-	s.finishContinuationManual(context.WithoutCancel(ctx), taskID, sessionID, "", entry, "cancelled")
+	ctx = context.WithValue(ctx, continuationCancelDispositionContextKey{}, "cancelled")
+	ctx = context.WithValue(ctx, continuationCancelTaskContextKey{}, taskID)
+	if err := s.CancelAgent(ctx, sessionID); err != nil {
+		return false
+	}
 	return true
 }
 

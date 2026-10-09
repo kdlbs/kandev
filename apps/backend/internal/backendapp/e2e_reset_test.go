@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -107,6 +108,28 @@ func TestOrderE2ETasksForDeletionRejectsParentCycles(t *testing.T) {
 
 	if _, err := orderE2ETasksForDeletion(tasks); err == nil {
 		t.Fatal("orderE2ETasksForDeletion() error = nil, want a hierarchy cycle error")
+	}
+}
+
+func TestOrderE2ETasksForDeletionPreservesChildFirstOrder(t *testing.T) {
+	tasks := []*taskmodels.Task{
+		{ID: "parent"},
+		{ID: "child", ParentID: "parent"},
+		{ID: "grandchild", ParentID: "child"},
+		{ID: "independent"},
+	}
+
+	ordered, err := orderE2ETasksForDeletion(tasks)
+	if err != nil {
+		t.Fatalf("orderE2ETasksForDeletion(): %v", err)
+	}
+	got := make([]string, 0, len(ordered))
+	for _, task := range ordered {
+		got = append(got, task.ID)
+	}
+	want := []string{"grandchild", "independent", "child", "parent"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("deletion order = %v, want %v", got, want)
 	}
 }
 

@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import type { ApiClient } from "../../helpers/api-client";
 import { seedTaskWithLinkedGitLabMRs, GITLAB_HOST, GITLAB_PROJECT } from "../../helpers/gitlab";
 import { SessionPage } from "../../pages/session-page";
 
@@ -107,6 +108,14 @@ async function expectCenterIsReachable(locator: ReturnType<Page["locator"]>, lab
 }
 
 test.describe("Mobile task topbar remote repository", () => {
+  let restoreRepositoryProvider: (() => Promise<void>) | undefined;
+
+  test.afterEach(async () => {
+    const restore = restoreRepositoryProvider;
+    restoreRepositoryProvider = undefined;
+    await restore?.();
+  });
+
   // @covers AC-UI-REMOTE-REPO-TOPBAR-001.1, AC-UI-REMOTE-REPO-TOPBAR-001.2,
   // AC-UI-REMOTE-REPO-TOPBAR-001.5
   test("keeps the repository link and task picker usable on a phone", async ({
@@ -182,6 +191,37 @@ test.describe("Mobile task topbar remote repository", () => {
     test.setTimeout(180_000);
     await testPage.setViewportSize({ width: 320, height: 800 });
     await addRemoteExecutorStatus(testPage);
+    const originalRepository = await apiClient.getRepository(seedData.repositoryId);
+    restoreRepositoryProvider = () =>
+      restoreRepositoryProviderMetadata(apiClient, seedData.repositoryId, originalRepository);
+    let repositoryResponsePatched = false;
+    await testPage.route(
+      `**/api/v1/workspaces/${seedData.workspaceId}/repositories*`,
+      async (route) => {
+        const response = await route.fetch();
+        const body = (await response.json()) as {
+          repositories: Array<Record<string, unknown>>;
+          [key: string]: unknown;
+        };
+        const repositories = body.repositories.map((repository) => {
+          if (repository.id !== seedData.repositoryId) return repository;
+          repositoryResponsePatched = true;
+          return {
+            ...repository,
+            source_type: "provider",
+            remote_url: `${GITLAB_HOST}/${GITLAB_PROJECT}.git`,
+            provider: "gitlab",
+            provider_host: GITLAB_HOST,
+            provider_owner: "platform",
+            provider_name: "kandev",
+          };
+        });
+        if (!repositoryResponsePatched) {
+          throw new Error("The workspace repository response omitted the task repository");
+        }
+        await route.fulfill({ response, json: { ...body, repositories } });
+      },
+    );
     const taskId = await seedTaskWithLinkedGitLabMRs(
       apiClient,
       {
@@ -199,55 +239,7 @@ test.describe("Mobile task topbar remote repository", () => {
     await testPage.goto(`/t/${taskId}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.evaluate(
-      ({ workspaceId, repositoryId, remoteUrl, providerHost }) => {
-        const store = (
-          window as unknown as {
-            __KANDEV_E2E_STORE__?: {
-              getState(): {
-                repositories: {
-                  itemsByWorkspaceId: Record<string, Array<Record<string, unknown>>>;
-                };
-              };
-              setState(value: unknown): void;
-            };
-          }
-        ).__KANDEV_E2E_STORE__;
-        if (!store) throw new Error("The E2E app store is unavailable");
-        const state = store.getState();
-        const repositories = state.repositories.itemsByWorkspaceId[workspaceId] ?? [];
-        let found = false;
-        const updatedRepositories = repositories.map((repository) => {
-          if (repository.id !== repositoryId) return repository;
-          found = true;
-          return {
-            ...repository,
-            source_type: "provider",
-            remote_url: remoteUrl,
-            provider: "gitlab",
-            provider_host: providerHost,
-            provider_owner: "platform",
-            provider_name: "kandev",
-          };
-        });
-        if (!found) throw new Error("The task repository is absent from the E2E app store");
-        store.setState({
-          repositories: {
-            ...state.repositories,
-            itemsByWorkspaceId: {
-              ...state.repositories.itemsByWorkspaceId,
-              [workspaceId]: updatedRepositories,
-            },
-          },
-        });
-      },
-      {
-        workspaceId: seedData.workspaceId,
-        repositoryId: seedData.repositoryId,
-        remoteUrl: `${GITLAB_HOST}/${GITLAB_PROJECT}.git`,
-        providerHost: GITLAB_HOST,
-      },
-    );
+    expect(repositoryResponsePatched).toBe(true);
     const repositoryLink = testPage.getByTestId("mobile-task-repository-link");
     const taskPicker = testPage.getByTestId("mobile-task-picker-trigger");
     await expect(testPage.getByTestId("mr-topbar-button")).toBeVisible();
@@ -290,3 +282,16 @@ test.describe("Mobile task topbar remote repository", () => {
     await expect(testPage.getByRole("dialog", { name: "Tasks" })).toBeVisible();
   });
 });
+
+async function restoreRepositoryProviderMetadata(
+  apiClient: ApiClient,
+  repositoryId: string,
+  original: Awaited<ReturnType<ApiClient["getRepository"]>>,
+) {
+  await apiClient.updateRepository(repositoryId, {
+    provider: original.provider,
+    provider_host: original.provider_host ?? "",
+    provider_owner: original.provider_owner,
+    provider_name: original.provider_name,
+  });
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import Editor from "@monaco-editor/react";
 import { useTheme } from "@/components/theme/app-theme";
 import { Button } from "@kandev/ui/button";
@@ -39,6 +39,7 @@ type MonacoCodeEditorProps = {
   onTogglePreview?: () => void;
   onPreviewHtml?: () => void;
   isPublishingHtmlPreview?: boolean;
+  toolbarModeControl?: ReactNode;
   onChange: (newContent: string) => void;
   onSave: () => void;
   onReloadFromAgent?: () => void;
@@ -286,6 +287,7 @@ function MonacoEditorView({
         onTogglePreview={props.onTogglePreview}
         onPreviewHtml={props.onPreviewHtml}
         isPublishingHtmlPreview={props.isPublishingHtmlPreview}
+        toolbarModeControl={props.toolbarModeControl}
       />
       <div className="flex-1 overflow-hidden relative" ref={editorAreaRef}>
         <Editor

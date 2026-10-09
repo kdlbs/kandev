@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { expectTouchControl, expectTouchSquareControl } from "../../helpers/control-sizing";
 import { SessionPage } from "../../pages/session-page";
 import {
   SIDEBAR_PR_UNLINK_LABEL,
@@ -9,6 +10,7 @@ import {
 } from "./task-pr-unlink-sidebar-fixtures";
 
 test.describe("Mobile sidebar task PR unlink menu", () => {
+  test.describe.configure({ retries: 0 });
   test("unlinks the selected association from the task row actions", async ({
     testPage,
     apiClient,
@@ -33,11 +35,9 @@ test.describe("Mobile sidebar task PR unlink menu", () => {
 
     await testPage.getByTestId("mobile-task-picker-trigger").tap();
     await expect(row).toBeVisible({ timeout: 15_000 });
+    await waitForFiniteAnimations(picker);
     const taskActions = row.locator("button.mobile-task-actions-button");
-    const taskActionsBounds = await taskActions.boundingBox();
-    expect(taskActionsBounds).not.toBeNull();
-    expect(taskActionsBounds!.width).toBeGreaterThanOrEqual(44);
-    expect(taskActionsBounds!.height).toBeGreaterThanOrEqual(44);
+    await expectTouchSquareControl(taskActions);
     await taskActions.tap();
     await testPage.getByRole("menuitem", { name: "Edit", exact: true }).tap();
     const edit = testPage.getByTestId("task-row-edit-submenu");
@@ -52,7 +52,7 @@ test.describe("Mobile sidebar task PR unlink menu", () => {
     });
     const choiceBounds = await unlinkChoice.boundingBox();
     expect(choiceBounds).not.toBeNull();
-    expect(choiceBounds!.height).toBeGreaterThanOrEqual(44);
+    await expectTouchControl(unlinkChoice);
     const viewport = testPage.viewportSize();
     expect(viewport).not.toBeNull();
     expect(choiceBounds!.x).toBeGreaterThanOrEqual(0);

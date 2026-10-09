@@ -3,6 +3,8 @@ import type { ApiClient } from "../../helpers/api-client";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { waitForSessionDone } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
+import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
 import {
   expectEmptyList,
   expectThreadsHome,
@@ -13,6 +15,7 @@ import {
 const APPEARANCE_PATH = "/settings/preferences/appearance";
 
 test.describe("Threads Home default", () => {
+  test.describe.configure({ retries: 0 });
   let baseline: Awaited<ReturnType<ApiClient["getUserSettings"]>>["settings"];
   let createdWorkspace: { id: string; name: string } | undefined;
   test.beforeEach(async ({ testPage, apiClient }) => {
@@ -20,7 +23,12 @@ test.describe("Threads Home default", () => {
     baseline = (await apiClient.getUserSettings()).settings;
     createdWorkspace = undefined;
   });
-  test.afterEach(async ({ apiClient }) => {
+  test.afterEach(async ({ apiClient, seedData }) => {
+    await restoreSidebarLayout(
+      apiClient,
+      seedData.workspaceId,
+      baseline.sidebar_layouts_by_workspace?.[seedData.workspaceId],
+    );
     if (baseline)
       await apiClient.saveUserSettings({
         startup_page: baseline.startup_page ?? "task_overview",
@@ -62,6 +70,7 @@ test.describe("Threads Home default", () => {
     await testPage.reload();
     await expectEmptyList(testPage);
     expect((await apiClient.getUserSettings()).settings.startup_page).toBe("threads");
+    await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
     await testPage.getByRole("link", { name: "Home", exact: true }).click();
     await expectThreadsHome(testPage, seedData.workspaceId);
     await testPage.evaluate((key) => localStorage.removeItem(key), VIEW_STORAGE_KEY);

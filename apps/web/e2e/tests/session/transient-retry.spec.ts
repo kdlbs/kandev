@@ -1,7 +1,9 @@
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { pollUntil } from "../../helpers/poll-until";
-import { seedIdleSession } from "../../helpers/session";
+import { seedIdleSession, waitForSlashCommandAvailable } from "../../helpers/session";
 import { listTransientRetryNotices } from "../../helpers/transient-retry";
 import { SessionPage } from "../../pages/session-page";
 
@@ -31,12 +33,24 @@ async function waitForRetryNotice(
 }
 
 test.describe("transient provider error (529 Overloaded) retry", () => {
+  test.describe.configure({ retries: 0 });
+
+  test.afterEach(async ({ backend }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    for (const logPath of [backend.logPath, path.join(backend.tmpDir, "backend-process.log")]) {
+      if (fs.existsSync(logPath)) {
+        await testInfo.attach(path.basename(logPath), { path: logPath, contentType: "text/plain" });
+      }
+    }
+  });
+
   test("shows the yellow retrying card, not the red error banner", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     const session = await seedIdleSession(testPage, apiClient, seedData, "Overloaded Retry Test");
+    await waitForSlashCommandAvailable(testPage, session, "overloaded");
     const sessionId = await session.activeChat().getAttribute("data-session-id");
     if (!sessionId) throw new Error("active chat did not expose a session id");
     const firstRetryNotice = waitForRetryNotice(apiClient, sessionId, 1);
@@ -63,6 +77,7 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     seedData,
   }) => {
     const session = await seedIdleSession(testPage, apiClient, seedData, "Overloaded Cancel Test");
+    await waitForSlashCommandAvailable(testPage, session, "overloaded");
 
     await session.sendMessage("/overloaded:9");
     const sessionId = await session.activeChat().getAttribute("data-session-id");
@@ -99,15 +114,15 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     const session = await seedIdleSession(testPage, apiClient, seedData, "Overloaded Backoff Test");
     const sessionId = await session.activeChat().getAttribute("data-session-id");
     if (!sessionId) throw new Error("active chat did not expose a session id");
+    await waitForSlashCommandAvailable(testPage, session, "overloaded");
 
     // /overloaded:9 keeps failing, so each backoff retry re-drives the prompt
     // and the orchestrator advances the attempt counter. Read the persisted
     // status row instead of depending on a websocket notification. The row is
     // the durable contract and remains observable when a busy gateway drops a
     // short-lived notification.
-    const firstNoticePromise = waitForRetryNotice(apiClient, sessionId, 1);
     await session.sendMessage("/overloaded:9");
-    const firstNotice = await firstNoticePromise;
+    const firstNotice = await waitForRetryNotice(apiClient, sessionId, 1);
     const firstMetadata = firstNotice.metadata as Record<string, unknown>;
     expect(firstMetadata).toMatchObject({ attempt: 1, retry_in_seconds: 5 });
     const createdAt = Date.parse(String(firstNotice.created_at));

@@ -7,6 +7,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+import { waitForSessionAgentctlReady } from "../../helpers/session-store";
+
+test.describe.configure({ retries: 0 });
 
 async function chooseDirectory(
   page: Page,
@@ -86,12 +89,20 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
       timeout: 30_000,
     })
     .toBeTruthy();
+  await expect
+    .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status, {
+      timeout: 60_000,
+      message: "the mobile sources workspace did not become ready",
+    })
+    .toBe("ready");
 
   await mockFolderAvailability(testPage, true);
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  if (!task.session_id) throw new Error("task creation did not return a session id");
+  await waitForSessionAgentctlReady(testPage, task.session_id);
   await testPage.getByRole("button", { name: "Files", exact: true }).tap();
   const entryPoint = testPage.getByTestId("files-workspace-actions");
   await expect(entryPoint).toBeVisible();
@@ -319,7 +330,7 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   await expect(
     viewer.locator(".cm-line").filter({ hasText: "active mobile worktree source" }),
   ).toBeVisible();
-  await expect(viewer.getByRole("button", { name: "Close" })).toBeVisible();
+  await expect(viewer.getByRole("button", { name: "Back" })).toBeVisible();
   await expect(
     viewer.getByText("mobile-local-repository-main/mobile-repository.txt"),
   ).toBeVisible();

@@ -234,15 +234,28 @@ function mergeParkedProjection(
   };
 }
 
+function hasStaleRouteProjection(existing: TaskSession, incoming: TaskSession): boolean {
+  const existingGeneration = existing.route_generation;
+  if (existingGeneration === undefined) return false;
+
+  const incomingGeneration = incoming.route_generation;
+  if (incomingGeneration === undefined || incomingGeneration < existingGeneration) return true;
+  if (incomingGeneration > existingGeneration) return false;
+
+  const incomingUpdatedAt = parseTurnTimestamp(incoming.updated_at);
+  const existingUpdatedAt = parseTurnTimestamp(existing.updated_at);
+  return (
+    incomingUpdatedAt !== null &&
+    existingUpdatedAt !== null &&
+    incomingUpdatedAt < existingUpdatedAt
+  );
+}
+
 /** Merge an incoming session update with an existing session, preserving nullable fields. */
 export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSession {
   const cancellation = mergeCancellationProjection(existing, incoming);
   const parked = mergeParkedProjection(existing, incoming);
-  const incomingRouteGeneration = incoming.route_generation;
-  const existingRouteGeneration = existing.route_generation;
-  const routeIsStale =
-    existingRouteGeneration !== undefined &&
-    (incomingRouteGeneration === undefined || incomingRouteGeneration < existingRouteGeneration);
+  const routeIsStale = hasStaleRouteProjection(existing, incoming);
   const pendingAction = mergePendingActionProjection(existing, incoming);
   const attachmentChanged = hasACPAttachmentChanged(existing, incoming);
   const merged = { ...existing, ...incoming };
@@ -279,6 +292,7 @@ export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): 
           route_deadline: existing.route_deadline,
           route_pending_outcome: existing.route_pending_outcome,
           downstream_acp_session_id: existing.downstream_acp_session_id,
+          updated_at: existing.updated_at,
         }
       : {}),
     ...pendingAction,

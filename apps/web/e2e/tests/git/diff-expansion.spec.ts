@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
+import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
@@ -40,6 +41,8 @@ async function seedExpansionTask(
   await expect(
     session.chat.getByText("diff-expansion-setup complete", { exact: false }),
   ).toBeVisible({ timeout: 45_000 });
+  await waitForSessionDone(apiClient, task.id, task.session_id, "Diff setup did not settle");
+  await session.waitForChatIdle();
 
   return session;
 }
@@ -139,7 +142,7 @@ async function hoverUntilGutterSlotAppears(testPage: Page) {
 }
 
 test.describe("Diff expansion — Pierre Diffs provider", () => {
-  test.describe.configure({ retries: 2, timeout: 120_000 });
+  test.describe.configure({ retries: 0, timeout: 120_000 });
 
   test("diff viewer background matches app --background (regression for pierre 1.1.22 selector rename)", async ({
     testPage,

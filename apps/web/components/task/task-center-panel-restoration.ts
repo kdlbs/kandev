@@ -19,7 +19,8 @@ import {
   type FileEditorTab,
 } from "./task-center-panel-file-tabs";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
-import { getFilePreviewKind } from "@/lib/utils/file-types";
+import { getFilePreviewKind, isMarkdownFile } from "@/lib/utils/file-types";
+import { resolveStoredMarkdownFileMode } from "./markdown-file-mode";
 
 export type FileTabRestorationOptions = {
   activeSessionId: string | null;
@@ -62,6 +63,9 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
             getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
               ? savedTab.renderedPreview
               : undefined,
+          ...(isMarkdownFile(savedTab.path)
+            ? { markdownMode: resolveStoredMarkdownFileMode(savedTab) }
+            : {}),
         }),
       );
     } catch {
