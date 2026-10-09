@@ -319,3 +319,14 @@ and the session-ownership case pass without retries after a fresh managed build.
 The main merge was conflict-free; 48 workflow/gate tests, Actionlint, harness
 validation, documentation coverage, and Go lint passed. Hosted verification remains
 pending the next remediation push.
+
+The next backend run passed the Git-status concurrency assertions but failed
+while deleting a temporary repository: an asynchronous observation was still
+writing inside `.git`. The multi-repository fixture had no process-manager
+teardown. A new lifetime regression failed deterministically because cleanup
+left admission open and both repository trackers live. The original cleanup
+timing did not recur in 100 local repetitions. The shared fixture and its
+invalid-repository sibling now stop their manager before temporary-directory
+cleanup. All 300 focused executions pass under the race detector. The complete
+API package also passes with race detection and atomic coverage, and Go lint is
+clean. This remediation changes tests only; hosted CI awaits the next push.
