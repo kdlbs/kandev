@@ -6,10 +6,7 @@ import type { JiraSlice } from "./types";
 import type { JiraIssueWatch } from "@/lib/types/jira";
 
 function makeStore() {
-  return create<JiraSlice>()(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    immer((...a) => ({ ...(createJiraSlice as any)(...a) })),
-  );
+  return create<JiraSlice>()(immer((set) => createJiraSlice(set)));
 }
 
 function watch(id: string, overrides: Partial<JiraIssueWatch> = {}): JiraIssueWatch {
@@ -41,12 +38,36 @@ describe("jira issue-watches slice", () => {
     expect(s.jiraIssueWatches.loading).toBe(false);
   });
 
+  it("keeps mutations isolated between stores", () => {
+    const firstStore = makeStore();
+    const secondStore = makeStore();
+
+    firstStore.getState().addJiraIssueWatch(watch("first-store"));
+
+    expect(firstStore.getState().jiraIssueWatches.items.map((item) => item.id)).toEqual([
+      "first-store",
+    ]);
+    expect(secondStore.getState().jiraIssueWatches).toEqual({
+      items: [],
+      loaded: false,
+      loading: false,
+    });
+  });
+
   it("setJiraIssueWatches replaces items and flips loaded=true", () => {
     const store = makeStore();
     store.getState().setJiraIssueWatches([watch("a"), watch("b")]);
     const s = store.getState();
     expect(s.jiraIssueWatches.items.map((w) => w.id)).toEqual(["a", "b"]);
     expect(s.jiraIssueWatches.loaded).toBe(true);
+  });
+
+  it("setJiraIssueWatchesLoading toggles loading independently", () => {
+    const store = makeStore();
+    store.getState().setJiraIssueWatchesLoading(true);
+    expect(store.getState().jiraIssueWatches.loading).toBe(true);
+    store.getState().setJiraIssueWatchesLoading(false);
+    expect(store.getState().jiraIssueWatches.loading).toBe(false);
   });
 
   it("addJiraIssueWatch appends a new entry", () => {
@@ -79,10 +100,12 @@ describe("jira issue-watches slice", () => {
     // re-running on workspace switch.
     const store = makeStore();
     store.getState().setJiraIssueWatches([watch("a")]);
+    store.getState().setJiraIssueWatchesLoading(true);
     expect(store.getState().jiraIssueWatches.loaded).toBe(true);
 
     store.getState().resetJiraIssueWatches();
     expect(store.getState().jiraIssueWatches.items).toEqual([]);
     expect(store.getState().jiraIssueWatches.loaded).toBe(false);
+    expect(store.getState().jiraIssueWatches.loading).toBe(true);
   });
 });

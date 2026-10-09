@@ -6,10 +6,7 @@ import type { LinearSlice } from "./types";
 import type { LinearIssueWatch } from "@/lib/types/linear";
 
 function makeStore() {
-  return create<LinearSlice>()(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    immer((...a) => ({ ...(createLinearSlice as any)(...a) })),
-  );
+  return create<LinearSlice>()(immer((set) => createLinearSlice(set)));
 }
 
 function watch(id: string, overrides: Partial<LinearIssueWatch> = {}): LinearIssueWatch {
@@ -39,6 +36,22 @@ describe("linear issue-watches slice", () => {
     expect(s.linearIssueWatches.items).toEqual([]);
     expect(s.linearIssueWatches.loaded).toBe(false);
     expect(s.linearIssueWatches.loading).toBe(false);
+  });
+
+  it("keeps mutations isolated between stores", () => {
+    const firstStore = makeStore();
+    const secondStore = makeStore();
+
+    firstStore.getState().addLinearIssueWatch(watch("first-store"));
+
+    expect(firstStore.getState().linearIssueWatches.items.map((item) => item.id)).toEqual([
+      "first-store",
+    ]);
+    expect(secondStore.getState().linearIssueWatches).toEqual({
+      items: [],
+      loaded: false,
+      loading: false,
+    });
   });
 
   it("setLinearIssueWatches replaces items and flips loaded=true", () => {
@@ -89,10 +102,12 @@ describe("linear issue-watches slice", () => {
     // re-running on workspace switch.
     const store = makeStore();
     store.getState().setLinearIssueWatches([watch("a")]);
+    store.getState().setLinearIssueWatchesLoading(true);
     expect(store.getState().linearIssueWatches.loaded).toBe(true);
 
     store.getState().resetLinearIssueWatches();
     expect(store.getState().linearIssueWatches.items).toEqual([]);
     expect(store.getState().linearIssueWatches.loaded).toBe(false);
+    expect(store.getState().linearIssueWatches.loading).toBe(true);
   });
 });

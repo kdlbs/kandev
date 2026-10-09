@@ -1,6 +1,6 @@
 # Historical audit disposition
 
-[Roadmap](README.md) · Assessment date: 2026-09-27.
+[Roadmap](README.md) · Original assessment date: 2026-09-27; disposition refreshed 2026-10-09.
 
 The original workspace contains 15 untracked Markdown files under `docs/architecture-review/2026-07-30/`.
 They total 2,622 lines. This PR leaves them unchanged and excludes them from its published files.
@@ -22,27 +22,24 @@ This assessment compares its proposals with current source and merged delivery r
 | `04-unify-task-read-model.md`                | Needs fresh domain design                           | Preserve intentional Task/Office differences until their semantics are agreed                          |
 | `05-collapse-run-scheduling.md`              | Partly superseded                                   | Scheduler ownership and shared models now have explicit boundaries. Office policy remains Office-owned |
 | `06-typed-domain-events.md`                  | Reassess                                            | Select one event family, including auth routing and gateway projection                                 |
-| `07-frontend-reconciliation.md`              | Partly explored                                     | SystemInfo is finite read-only data. Disk usage is the proposed first Query/WS increment               |
-| `08-typed-domain-store-composition.md`       | In progress through smaller increments              | Features is typed. Continue one slice at a time                                                        |
+| `07-frontend-reconciliation.md`              | Partly explored                                     | SystemInfo, database statistics, backups, and the disk-usage snapshot now have separate Query owners; the System job stream remains in Zustand. Other resources need individual inventory. |
+| `08-typed-domain-store-composition.md`       | In progress through smaller increments              | Features and Azure DevOps are typed. Jira and Linear remain bounded follow-up slices in the reviewed delivery plan. |
 | `09-modular-backend-composition.md`          | Reassess                                            | Find a current construction-order problem before introducing module bundles                            |
 | `10-code-host-capability-seam.md`            | Reassess                                            | Inventory current plugin/integration contracts and real provider differences                           |
 | `11-frontend-feature-locality.md`            | Reassess                                            | State-to-UI imports are resolved. Broad folder moves remain unapproved                                 |
-| `12-architecture-fitness-and-deprecation.md` | Foundation implemented, old absence claims obsolete | Eight rules and the compatibility ledger now exist. Use the linter guide                               |
+| `12-architecture-fitness-and-deprecation.md` | Foundation implemented, old absence claims obsolete | Architecture rules and the compatibility ledger now exist. TanStack Query rules and the four-owner guard are tracked in the linter roadmap. |
 | `13-tanstack-query-pr-1512-assessment.md`    | Historical PR assessment, pilot proposal superseded | Use the merged SystemInfo design and the resource migration tracker                                    |
 
 The earlier proposal to move all run processing into Runs is not the current migration instruction.
 The shared-contract extraction deliberately retained Office launch, continuation, refusal, and gate policy.
 The earlier Query mega-PR is not the vehicle for future migrations.
 
-## Other outdated documentation found
+## Architecture overview refresh
 
-`docs/ARCHITECTURE.md` still presents WebSocket-first operation as replacing REST and SQLite as replacing PostgreSQL.
-It also mixes planned microservice material with current implementation descriptions.
-The current System hooks use HTTP, and backend validation includes PostgreSQL parity cases.
-
-A bounded architecture-overview refresh is a separate candidate.
-It needs current backend, transport, persistence, and executor evidence before replacement prose is authoritative.
-This PR does not silently rewrite that broader document.
+The outdated overview identified in the original audit was refreshed in
+[PR #4011](https://github.com/kdlbs/kandev/pull/4011), merge commit
+`d2b66efd7e48fc518a9d62131d6d1392397b43db`. This closes that candidate; it
+does not authorize another broad overview rewrite without new source evidence.
 
 ## Retention decision
 

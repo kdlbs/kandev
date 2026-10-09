@@ -1,6 +1,7 @@
 # Server-state migrations
 
-[Roadmap](README.md) · Inventory at main `359b5ffdbb6`, 2026-09-27.
+[Roadmap](README.md) · Historical inventory at main `359b5ffdbb6`, 2026-09-27.
+Current owners were rechecked at main `3fed5570cec533f468c25ed03c84967bdc972588`, 2026-10-09. The intervening main commits did not change these ownership paths.
 
 The target is one owner for each server resource, not a complete replacement of Zustand.
 TanStack Query owns finite snapshots after migration. Zustand retains UI state and unmigrated resources.
@@ -11,9 +12,9 @@ WebSocket remains the transport for live events and streams.
 | ID       | Resource               | Current owner and evidence                                                                                                                                                                                                                                                                    | Status                                                          | Completion boundary                                                                                                                                    |
 | -------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | QUERY-01 | About SystemInfo       | Query through [use-system-info.ts](../../apps/web/hooks/domains/system/use-system-info.ts)                                                                                                                                                                                                    | Done, [#3977](https://github.com/kdlbs/kandev/pull/3977)        | Snapshot and request lifecycle removed from Zustand. Separate process-control probes remain                                                            |
-| QUERY-02 | Database statistics    | TanStack Query via [useDatabaseStats](../../apps/web/hooks/domains/system/use-database-stats.ts); used by DatabaseStatsCard and Backups description in [data-logs-settings.tsx](../../apps/web/components/settings/system/data-logs-settings.tsx); Zustand database state and setter removed. | In progress                                                     | Both consumers share one Query observer; preserve the resolved backup-directory description and wait for PR #4225 to merge before starting QUERY-03.   |
-| QUERY-03 | Backup list            | TanStack Query via [use-backups.ts](../../apps/web/hooks/domains/system/use-backups.ts); backup-only Zustand state and actions removed.                                                                                                                                                       | In progress, [#4271](https://github.com/kdlbs/kandev/pull/4271) | One authoritative list with targeted create, delete, reset, and retention invalidation; preserve reload return/error behavior and existing permissions |
-| QUERY-04 | Disk usage             | Zustand snapshot, job observation, and polling in [use-disk-usage.ts](../../apps/web/hooks/domains/system/use-disk-usage.ts)                                                                                                                                                                  | In progress, [#4291](https://github.com/kdlbs/kandev/pull/4291) | Query owns the snapshot. Refresh, terminal job events, and missed-event recovery remain correct                                                        |
+| QUERY-02 | Database statistics    | TanStack Query via [useDatabaseStats](../../apps/web/hooks/domains/system/use-database-stats.ts); used by DatabaseStatsCard and Backups description in [data-logs-settings.tsx](../../apps/web/components/settings/system/data-logs-settings.tsx); old Zustand database snapshot and setter removed. | Done, [#4225](https://github.com/kdlbs/kandev/pull/4225) | Both consumers share one Query observer; the resolved backup-directory description remains available. |
+| QUERY-03 | Backup list            | TanStack Query via [use-backups.ts](../../apps/web/hooks/domains/system/use-backups.ts); backup-only Zustand state and actions removed.                                                                                                                                                       | Done, [#4271](https://github.com/kdlbs/kandev/pull/4271) | One authoritative list with targeted create, delete, reset, and retention invalidation; reload return/error behavior and permissions remain stable. |
+| QUERY-04 | Disk usage             | Query owns the disk-usage snapshot and GET state via [use-disk-usage.ts](../../apps/web/hooks/domains/system/use-disk-usage.ts); Zustand retains the System job stream and a narrow bridge invalidates the exact Query key on terminal disk-walk updates. | Done, [#4291](https://github.com/kdlbs/kandev/pull/4291) | The snapshot remains Query-owned; Zustand retains the job stream and the 1.5-second recovery poll runs only while the snapshot reports computing. |
 | QUERY-05 | Other System resources | Outside this bounded inventory                                                                                                                                                                                                                                                                | Deferred                                                        | Inventory jobs, retention, and maintenance independently before selecting another resource                                                             |
 
 ### QUERY-02: database statistics
@@ -27,6 +28,7 @@ Backend URL, process generation, and auth boundaries are explicit. The installat
 
 Completion evidence includes both consumer paths, explicit reload, failure recovery, and identity transitions.
 Tests must preserve unrelated form state. The implementation must remove the old state owner in the same PR.
+Delivery completed in [#4225](https://github.com/kdlbs/kandev/pull/4225).
 
 ### QUERY-03: backups
 
@@ -37,14 +39,17 @@ The current `reload()` returns `Promise<SnapshotInfo[]>` and rethrows the origin
 The existing Query identity and targeted cleanup cover the full backend URL, boot ID, and auth identity without remounting the shell or clearing unrelated resources. Successful create/delete/reset and observed retention attempts refresh only the captured matching identity. Failed deletes preserve the list; reset reconciles terminal outcomes; restore retains its quit/relaunch process identity behavior. GET member access and admin-only mutations/downloads remain unchanged.
 
 Completion evidence includes concurrent consumers, empty/loading/error/reload and last-good-data behavior, permissions, external-maintenance freshness, mutation and retention races, cancellation, backend/auth/process identity transitions, and preservation of unrelated shell/form state. The list remains separate from retention status and database-statistics snapshots.
+Delivery completed in [#4271](https://github.com/kdlbs/kandev/pull/4271).
 
 ### QUERY-04: disk usage
 
 Assignee: [Carlos Florêncio](https://github.com/carlosflorencio). Design: [disk usage Query cache](../specs/system-page/system-design/disk-usage-query-cache.md). Work order: [Task 01](../plans/disk-usage-query-migration/task-01-disk-usage-query.md). PR: [#4291](https://github.com/kdlbs/kandev/pull/4291). Kandev task ID: `f6d34be3-bf57-4ca5-9596-dabd4e6372cc`.
 
-The current hook observes terminal `disk-walk` jobs and reloads the snapshot.
-It also polls every 1500 milliseconds while the snapshot reports `computing`.
-This fallback covers a completion event missed before the WebSocket connection opens.
+Query owns the snapshot and GET state. The System slice, WebSocket handler, and
+`useSystemJobs` keep the job stream in Zustand. A narrow bridge invalidates the
+snapshot's exact Query key after a terminal `disk-walk` update. A 1500
+millisecond recovery poll runs only while the latest snapshot reports
+`computing`, covering a completion event missed before the WebSocket connection opens.
 
 The design must identify one owner for event-to-cache invalidation.
 Completion includes success, failure, duplicate events, missed events, reconnect, and leaving the page during a request.
@@ -64,7 +69,7 @@ Each selected resource gets its own row and owning system-design reference.
 
 ## Pilot constraints to preserve
 
-The [SystemInfo design](../specs/platform/system-design/system-info-query-cache.md) owns the current technical contract.
+The [SystemInfo design](../specs/platform/system-design/system-info-query-cache.md) owns the SystemInfo-specific technical contract.
 The [restart design](../specs/platform/system-design/backend-restart-page-recovery.md) owns process-generation recovery.
 
 - The authenticated app branch has a stable QueryClient. Identity changes must not remount forms or the shell.
@@ -76,7 +81,10 @@ The [restart design](../specs/platform/system-design/backend-restart-page-recove
 - Restart, self-update, and generation probes remain independent no-store reads.
 - SystemInfo uses `networkMode: "always"`. Its process-immutable freshness policy does not define mutable-resource policy.
 
-The current cleanup targets SystemInfo only. The second resource needs deliberate identity cleanup coverage without erasing unrelated caches.
+SystemInfo's identity and cleanup constraints apply to that owner only.
+Database statistics, backups, and disk usage have their own identity, freshness,
+and mutation contracts. Query owns those four snapshots; the System job stream
+and other unmigrated System resources remain in Zustand.
 
 ## Entry checklist
 
