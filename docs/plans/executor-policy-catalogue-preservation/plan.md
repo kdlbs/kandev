@@ -10,6 +10,26 @@ legacy_specs: []
 
 # Implementation Plan: Preserve executor choices during policy saves
 
+Current work-order continuation: ROOT admitted the scoped shared-fixture cleanup
+finding from review5469963689 on frozen98f2e6ea. The same order is implemented
+for its owning spec only: restore baseline and remove exactly its three untracked
+paths in nested cleanup, with real-repository post-cleanup assertions. Original
+observer39101 was explicitly stopped and actually joined exit143, with its last
+25passed/0failed/24pending snapshot retained without a CI verdict. ONE fresh
+managed Pierre case, changed-spec lint/format and docs/coverage precede normal
+corrective publication. Evidence lives in
+`/tmp/kandev-child98-review-cleanup-20261009/`; earlier product results/history
+remain unchanged. No new public contract or docs impact. Return heavy and END
+before separately released hosted collection; merge remains unauthorized.
+
+The own fresh cleanup GREEN passed exactly one test in 16.3s with strict guards,
+fresh backend/Vite/plugin artifacts and all 63 observed own descendants absent
+at actual native/subprocess join0. Changed-spec lint and formatting passed.
+The [same work-order continuation](task-01-preserve-policy-catalogue.md#later-scoped-review-correction-2026-10-09)
+records scoped ownership, real post-cleanup assertions and raw receipt references.
+Later doc/coverage gates and normal publication are retained separately; no
+earlier product result or interrupted hosted verdict is promoted.
+
 ## Overview
 
 Correct the executor MCP-policy form's successful acknowledgement publication

@@ -31,6 +31,48 @@ to CHILD98. GREEN runs only the new page suite: it exercises the real
 coordinator/options directly, so unchanged suites are not replayed.
 Hosted collection and merge still require their later separate grants.
 
+### Later scoped review correction (2026-10-09)
+
+ROOT granted this same work order an exclusive local-heavy lease for the valid
+grouped CodeRabbit finding `cr-comment:v1:a12fabbaa6e2d7a7269a47de` in current
+review `5469963689` on `98f2e6ea2bdbb97a0cf4a7a412c54b0b719b0b46`.
+The preview-history reset restores committed history but leaves this spec's
+untracked prefix, target and unrelated fixture files. The owning spec now
+restores history inside a nested `try/finally` and calls existing idempotent
+`GitHelper.deleteFile` for exactly those three paths, even if reset throws.
+Existing gate disposal stays first. Normal success checks restored HEAD and
+the absence of changes at those owned paths in the real repository.
+
+Before any correction, ROOT directed stopping only the original hosted observer.
+Original native `39101 -> 3718d8` actually joined exit143 after its own GNU
+process-group TERM; all 926 known original identities and both original groups
+were absent. Final old-head poll34 had 25 passed, zero failed and 24 pending;
+this cancelled observation is not a CI verdict. Hosted jobs were not cancelled.
+Receipts remain in `/tmp/kandev-child98-hosted-fixup-20261009/`.
+
+Run only ONE fresh guarded desktop Pierre case using the preceding managed
+command and caps, with output under
+`/tmp/kandev-child98-review-cleanup-20261009/`. Verify changed-spec lint/format,
+docs and actual changed-path coverage, then normal hooks/new commit/push.
+No broad cleanup, helper API, geometry, timeout, assertion relaxation or product
+change; no product25/type/i18n/backend/Monaco/mobile replay. No public docs
+impact: this is private fixture cleanup. New-head hosted collection/review and
+merge remain deferred until separate ROOT grants after heavy return and END.
+
+The ONE own fresh managed cleanup GREEN passed one test in 16.3s, with zero
+failures, flaky results, skips or retries. Original native
+`57776/93c5ba -> 2651dd` actually joined exit0, with all 63 observed own
+descendant identities absent. Normal host/shard1/chromium/strict1/workers1
+guards and fresh backend/Vite/plugin artifacts are qualified in
+`green-qualified.json`; managed raw log SHA256 is
+`4f205d3f00f959a618740577ab8949871001a4b958cc014bc40dae248547b02d`.
+The normal-success cleanup assertions ran against the real worker repository;
+reset-error cleanup is enforced by the nested `finally`, without claiming a
+separate injected-failure run. Changed-spec Prettier and ESLint passed
+(`7f1d86`; `53725/942088 -> ef28b6`). All further doc/coverage/hook/publication
+receipts remain alongside this result. The page fix, permanent page tests,
+owning specs, preview helper and scroll-readiness helper remain unchanged.
+
 ### Historical design barrier
 
 DESIGN ONLY now. No production/permanent tests, dependency install, product
