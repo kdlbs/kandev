@@ -45,6 +45,34 @@ type SidebarFilterSurfaceProps = Pick<Props, "trigger" | "open" | "onOpenChange"
   };
 };
 
+function inlineViewDeleteConfirmation({
+  shouldRender,
+  target,
+  anchorRef,
+  close,
+  onConfirm,
+}: {
+  shouldRender: boolean;
+  target: SavedTaskViewDeleteTarget | null;
+  anchorRef: RefObject<HTMLButtonElement | null>;
+  close: () => void;
+  onConfirm: (viewId: string) => void;
+}) {
+  if (!shouldRender || !target) return undefined;
+  return (
+    <SavedTaskViewDeleteConfirmation
+      target={target}
+      presentation="inline"
+      open
+      anchorRef={anchorRef}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) close();
+      }}
+      onConfirm={onConfirm}
+    />
+  );
+}
+
 export function SidebarFilterPopover({
   trigger,
   open,
@@ -56,6 +84,7 @@ export function SidebarFilterPopover({
   const { t } = useTranslation();
   const views = useAppStore((s) => selectSidebarViews(s).views);
   const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const storedDraft = useAppStore((s) => selectSidebarViews(s).draft);
   const updateDraft = guard(useAppStore((s) => s.updateSidebarDraft));
   const saveAs = guard(useAppStore((s) => s.saveSidebarDraftAs));
@@ -71,19 +100,13 @@ export function SidebarFilterPopover({
   const hasDraft = !!storedDraft && activeView?.id === storedDraft.baseViewId;
   const usesInlineDeleteConfirmation = !usesDesktopWorkbench || !isFinePointer;
 
-  const inlineDeleteConfirmation =
-    usesInlineDeleteConfirmation && deletion.target ? (
-      <SavedTaskViewDeleteConfirmation
-        target={deletion.target}
-        presentation="inline"
-        open
-        anchorRef={deletion.anchorRef}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) deletion.close();
-        }}
-        onConfirm={deleteView}
-      />
-    ) : undefined;
+  const inlineDeleteConfirmation = inlineViewDeleteConfirmation({
+    shouldRender: usesInlineDeleteConfirmation,
+    target: deletion.target,
+    anchorRef: deletion.anchorRef,
+    close: deletion.close,
+    onConfirm: deleteView,
+  });
   const headerProps: ComponentProps<typeof ViewHeaderRow> = {
     activeView,
     hasDraft,
@@ -106,6 +129,7 @@ export function SidebarFilterPopover({
     <SidebarViewEditor
       current={current}
       isDrawerLayout={!usesDesktopWorkbench}
+      reorderScopeKey={`${workspaceId ?? ""}:${activeViewId ?? ""}`}
       headerProps={headerProps}
       onUpdate={updateDraft}
       onAddFilter={() =>

@@ -22,7 +22,7 @@ import { seedDefaultCLIFlags } from "@/lib/cli-flags";
 import { generateUUID } from "@/lib/utils";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import type { AgentProfileKind } from "@/lib/types/agent-profile";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
@@ -167,7 +167,7 @@ function useAgentFormState(
 }
 
 function useAgentStoreSync() {
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const storeApi = useAppStoreApi();
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
 
@@ -181,6 +181,7 @@ function useAgentStoreSync() {
   };
 
   const upsertAgent = (agent: Agent) => {
+    const settingsAgents = storeApi.getState().settingsAgents.items;
     const exists = settingsAgents.some((item: Agent) => item.id === agent.id);
     syncAgentsToStore(
       exists

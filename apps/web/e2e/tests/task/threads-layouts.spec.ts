@@ -21,8 +21,11 @@ test("bounds both grid rows to visible streams and opens a lower-row deep link",
   testPage,
   apiClient,
   seedData,
+  backend,
 }) => {
   test.setTimeout(300_000);
+  await backend.restart();
+  await testPage.reload();
   const tasks = [];
   for (const title of ["A", "B", "C", "D", "E", "F", "G", "H"]) {
     tasks.push(

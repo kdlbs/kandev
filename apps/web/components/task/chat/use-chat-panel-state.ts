@@ -409,6 +409,7 @@ function useSessionData(
   } = useQueue(resolvedSessionId);
   return {
     messages,
+    lastAgentError,
     activeTurnId,
     messagesLoading,
     isInitialMessagesLoading,

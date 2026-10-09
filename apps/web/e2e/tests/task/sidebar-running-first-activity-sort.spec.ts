@@ -1,4 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
+import { watchWs } from "../../helpers/causal-waits";
+import { waitForSessionState } from "../../helpers/session";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
 import {
@@ -6,10 +8,18 @@ import {
   cleanupSidebarSortColors,
   expectSidebarRootOrder,
   openSidebarSortEditor,
+  moveSortRuleWithMenu,
+  readPreviousSidebarColorPatch,
   readPreviousSidebarViewState,
+  readTaskRunningSummary,
+  restoreSidebarSortColors,
   restoreSidebarViewState,
+  saveSidebarRunningRankView,
   saveSidebarSortView,
   sidebarRootOrder,
+  seedSidebarRunningRankScenario,
+  waitForSidebarSortSync,
+  waitForTaskRunningSummary,
 } from "./sidebar-running-first-activity-sort-helpers";
 
 // @covers AC-UI-SIDEBAR-RUNNING-ACTIVITY-001.1, .2, .3, .5, .6, .7, .10, .11, .13 AC-UI-SIDEBAR-GROUP-INDENT-001.1, .2, .3, .4, .6
@@ -156,12 +166,88 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
       testPage,
       false,
     );
+    await waitForFiniteAnimations(reloadPopover);
     await reloadFilters.openSortSettings();
     await expect(reloadPopover.getByTestId("sort-key-select")).toContainText("Running");
     await expect(reloadPopover.getByTestId("sort-rule-key-1")).toContainText("Color");
     await expect(reloadPopover.getByTestId("sort-rule-color-1")).toContainText("Red");
     await expect(reloadPopover.getByTestId("sort-rule-key-2")).toContainText("Last activity");
+
+    for (const control of ["sort-rule-handle-0", "sort-rule-more-0", "sort-rule-remove-0"]) {
+      const box = await reloadPopover.getByTestId(control).boundingBox();
+      expect(box?.height).toBeCloseTo(28, 0);
+      expect(box?.width).toBeCloseTo(28, 0);
+    }
+    const originalOrder = await reloadPopover
+      .locator("[data-testid^='sort-rule-description-']")
+      .allTextContents();
+    const firstHandle = reloadPopover.getByTestId("sort-rule-handle-0");
+    await firstHandle.focus();
+    await testPage.keyboard.press("Space");
+    await expect(firstHandle).toHaveAttribute("aria-pressed", "true");
+    await testPage.keyboard.press("ArrowDown");
+    await testPage.keyboard.press("Escape");
+    await expect(firstHandle).toBeFocused();
+    await expect
+      .poll(() =>
+        reloadPopover.locator("[data-testid^='sort-rule-description-']").allTextContents(),
+      )
+      .toEqual(originalOrder);
+
     await reloadFilters.close();
+    await reloadFilters.open();
+    await reloadFilters.openSortSettings();
+    const keyboardMoveHandle = reloadPopover.getByTestId("sort-rule-handle-0");
+    await keyboardMoveHandle.focus();
+    await testPage.keyboard.press("Space");
+    await expect(keyboardMoveHandle).toHaveAttribute("aria-pressed", "true");
+    await testPage.evaluate(
+      () => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())),
+    );
+    await testPage.keyboard.press("ArrowDown");
+    await expect(
+      testPage.getByText("Running moved to position 2 of 3 items.", { exact: true }),
+    ).toBeAttached();
+    await testPage.keyboard.press("Space");
+    await expect(reloadPopover.getByTestId("sort-key-select")).toContainText("Color");
+    await moveSortRuleWithMenu(testPage, reloadPopover, 1, "down");
+    await expect(reloadPopover.getByTestId("sort-key-select")).toContainText("Running");
+    await waitForFiniteAnimations(reloadPopover);
+    await waitForSidebarSortSync(
+      testPage,
+      seedData.workspaceId,
+      ["running", "color", "lastActivityAt"],
+      "red",
+    );
+
+    const dragHandle = reloadPopover.getByTestId("sort-rule-handle-2");
+    const firstCard = reloadPopover.getByTestId("sort-rule-card-0");
+    await firstCard.scrollIntoViewIfNeeded();
+    await dragHandle.scrollIntoViewIfNeeded();
+    const dragHandleBox = await dragHandle.boundingBox();
+    const firstCardBox = await firstCard.boundingBox();
+    expect(dragHandleBox).not.toBeNull();
+    expect(firstCardBox).not.toBeNull();
+    const dragStartX = dragHandleBox!.x + dragHandleBox!.width / 2;
+    const dragStartY = dragHandleBox!.y + dragHandleBox!.height / 2;
+    await testPage.mouse.move(dragStartX, dragStartY);
+    await testPage.mouse.down();
+    await testPage.mouse.move(dragStartX, dragStartY + 16, { steps: 4 });
+    await expect(testPage.locator('[data-dragging="true"]')).toHaveCount(1);
+    await testPage.mouse.move(
+      firstCardBox!.x + firstCardBox!.width / 2,
+      firstCardBox!.y + firstCardBox!.height / 2,
+      { steps: 16 },
+    );
+    await testPage.mouse.up();
+    await expect(reloadPopover.getByTestId("sort-key-select")).toContainText("Last activity");
+    await expect(reloadPopover.getByTestId("sort-rule-key-1")).toContainText("Running");
+    await expect(reloadPopover.getByTestId("sort-rule-key-2")).toContainText("Color");
+    await moveSortRuleWithMenu(testPage, reloadPopover, 1, "down");
+    await moveSortRuleWithMenu(testPage, reloadPopover, 2, "down");
+    await expect(reloadPopover.getByTestId("sort-key-select")).toContainText("Running");
+    await reloadFilters.gear.click();
+    await expect(reloadPopover).toBeHidden();
 
     await expect(controls.getByText("Page 1 of 2")).toBeVisible();
     await expectSidebarRootOrder(
@@ -194,7 +280,7 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
       false,
     );
     await precedenceFilters.openSortSettings();
-    await precedencePopover.getByTestId("sort-rule-up-1").click();
+    await moveSortRuleWithMenu(testPage, precedencePopover, 2, "up");
     await expectSidebarRootOrder(session.sidebar, [parent.id, red.id], [red.id, parent.id]);
     await precedencePopover.getByTestId("sort-rule-remove-0").click();
     await expectSidebarRootOrder(session.sidebar, [parent.id, red.id], [parent.id]);
@@ -208,7 +294,8 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
       await openSidebarSortEditor(testPage, false);
     await restoreChainFilters.openSortSettings();
     await addColorAfterActivity(testPage, restoreChainPopover);
-    await restoreChainFilters.close();
+    await restoreChainFilters.gear.click();
+    await expect(restoreChainPopover).toBeHidden();
     await expectSidebarRootOrder(session.sidebar, [parent.id, red.id], [parent.id, red.id]);
     await controls.getByRole("button").last().click();
     await expect(controls.getByText("Page 2 of 2")).toBeVisible();
@@ -254,5 +341,214 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
   } finally {
     await cleanupSidebarSortColors(apiClient, colorIds);
     await restoreSidebarViewState(apiClient, seedData.workspaceId, previousViews);
+  }
+});
+
+// @covers AC-UI-SIDEBAR-RUNNING-ACTIVITY-001.2, .6, .7, .14, .15, .16
+test("desktop keeps task-wide running rank through secondary session changes", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  test.setTimeout(120_000);
+  const token = prCapture.capturing ? "RankQ" : `desktop-run-${Date.now()}`;
+  const previousViews = await readPreviousSidebarViewState(apiClient, seedData.workspaceId);
+  const previousColors = await readPreviousSidebarColorPatch(apiClient);
+  const scenario = await seedSidebarRunningRankScenario(apiClient, seedData, token);
+  const navigation = await apiClient.createTask(
+    seedData.workspaceId,
+    `Desktop rank conversation ${Date.now()}`,
+    {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    },
+  );
+  const { session_id: conversationId } = await apiClient.seedTaskSession(navigation.id, {
+    state: "COMPLETED",
+    agentProfileId: seedData.agentProfileId,
+    completedAt: new Date().toISOString(),
+  });
+  await apiClient.setPrimarySession(conversationId);
+  const conversationText = "Desktop task-wide sort keeps this conversation open";
+  await apiClient.seedSessionMessage(conversationId, {
+    type: "message",
+    content: conversationText,
+  });
+  await apiClient.updateTaskState(navigation.id, "COMPLETED");
+  const viewId = `desktop-running-rank-${Date.now()}`;
+  const watcher = watchWs(testPage);
+
+  try {
+    await apiClient.saveUserSettings({
+      sidebar_task_color_patch: {
+        colors: {
+          [scenario.runningNoPrimary.id]: "blue",
+          [scenario.secondaryTask.id]: "blue",
+          [scenario.idleRed.id]: "red",
+          [scenario.idleOrange.id]: "orange",
+        },
+        if_missing: false,
+      },
+    });
+    await saveSidebarRunningRankView(apiClient, seedData, viewId, token);
+
+    const noPrimarySessions = await apiClient.listTaskSessions(scenario.runningNoPrimary.id);
+    expect(noPrimarySessions.sessions).toHaveLength(1);
+    expect(noPrimarySessions.sessions[0]).toMatchObject({
+      id: scenario.runningNoPrimarySessionId,
+      state: "RUNNING",
+      is_primary: false,
+    });
+    expect((await apiClient.getTask(scenario.runningNoPrimary.id)).primary_session_id ?? null).toBe(
+      null,
+    );
+    const secondarySessions = await apiClient.listTaskSessions(scenario.secondaryTask.id);
+    expect(secondarySessions.sessions).toHaveLength(2);
+    expect(
+      secondarySessions.sessions.find((session) => session.id === scenario.primarySessionId),
+    ).toMatchObject({ state: "WAITING_FOR_INPUT", is_primary: true });
+    expect(
+      secondarySessions.sessions.find((session) => session.id === scenario.secondarySessionId),
+    ).toMatchObject({ state: "WAITING_FOR_INPUT", is_primary: false });
+    const savedView = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+      seedData.workspaceId
+    ].views.find((view) => view.id === viewId);
+    expect(savedView?.sort).toEqual({
+      key: "running",
+      direction: "desc",
+      then_by: [
+        { key: "color", color: "red", direction: "desc" },
+        { key: "color", color: "orange", direction: "desc" },
+        { key: "lastActivityAt", direction: "desc" },
+      ],
+    });
+
+    await testPage.goto(`/t/${navigation.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const expectConversationStable = async () => {
+      await expect(testPage).toHaveURL(new RegExp(`/t/${navigation.id}$`));
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", conversationId);
+      await expect(session.activeChat().getByText(conversationText).last()).toBeVisible();
+    };
+    const initialOrder = [
+      scenario.runningNoPrimary.id,
+      scenario.idleRed.id,
+      scenario.idleOrange.id,
+      scenario.secondaryTask.id,
+    ];
+    await expectConversationStable();
+    await expectSidebarRootOrder(session.sidebar, scenario.rootIds, initialOrder);
+    await expect
+      .poll(
+        async () =>
+          (
+            await readTaskRunningSummary(
+              apiClient,
+              seedData.workspaceId,
+              scenario.runningNoPrimary.id,
+            )
+          )?.has_running_session,
+      )
+      .toBe(true);
+    await expect
+      .poll(
+        async () =>
+          (await readTaskRunningSummary(apiClient, seedData.workspaceId, scenario.secondaryTask.id))
+            ?.has_running_session,
+      )
+      .toBe(false);
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await expectConversationStable();
+    await expectSidebarRootOrder(session.sidebar, scenario.rootIds, initialOrder);
+
+    const waitingSummary = await readTaskRunningSummary(
+      apiClient,
+      seedData.workspaceId,
+      scenario.secondaryTask.id,
+    );
+    expect(waitingSummary?.has_running_session).toBe(false);
+    if (!waitingSummary) throw new Error("Expected a task status summary before secondary start");
+    const startedSummary = waitForTaskRunningSummary(
+      watcher,
+      scenario.secondaryTask.id,
+      true,
+      waitingSummary.revision,
+    );
+    await apiClient.seedTaskSession(scenario.secondaryTask.id, {
+      state: "RUNNING",
+      sessionId: scenario.secondarySessionId,
+    });
+    await waitForSessionState(apiClient, {
+      taskId: scenario.secondaryTask.id,
+      sessionId: scenario.secondarySessionId,
+      expectedState: "RUNNING",
+      message: "Waiting for the secondary session to start",
+    });
+    const startedEvent = await startedSummary;
+    expect(startedEvent.payload.status_summary).toMatchObject({ has_running_session: true });
+    await expect
+      .poll(
+        async () =>
+          (await readTaskRunningSummary(apiClient, seedData.workspaceId, scenario.secondaryTask.id))
+            ?.has_running_session,
+      )
+      .toBe(true);
+    await expectSidebarRootOrder(session.sidebar, scenario.rootIds, [
+      scenario.secondaryTask.id,
+      scenario.runningNoPrimary.id,
+      scenario.idleRed.id,
+      scenario.idleOrange.id,
+    ]);
+    await expectConversationStable();
+    if (prCapture.capturing) {
+      await waitForFiniteAnimations(session.sidebar);
+      await prCapture.screenshot("sidebar-running-first-rank-desktop", {
+        caption: "Desktop sidebar with the running secondary session ranked first",
+      });
+    }
+
+    const runningSummary = await readTaskRunningSummary(
+      apiClient,
+      seedData.workspaceId,
+      scenario.secondaryTask.id,
+    );
+    if (!runningSummary) throw new Error("Expected a task status summary before secondary stop");
+    const stoppedSummary = waitForTaskRunningSummary(
+      watcher,
+      scenario.secondaryTask.id,
+      false,
+      runningSummary.revision,
+    );
+    await apiClient.seedTaskSession(scenario.secondaryTask.id, {
+      state: "WAITING_FOR_INPUT",
+      sessionId: scenario.secondarySessionId,
+    });
+    await waitForSessionState(apiClient, {
+      taskId: scenario.secondaryTask.id,
+      sessionId: scenario.secondarySessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Waiting for the final running session to stop",
+    });
+    const stoppedEvent = await stoppedSummary;
+    expect(stoppedEvent.payload.status_summary).toMatchObject({ has_running_session: false });
+    await expect
+      .poll(
+        async () =>
+          (await readTaskRunningSummary(apiClient, seedData.workspaceId, scenario.secondaryTask.id))
+            ?.has_running_session,
+      )
+      .toBe(false);
+    await expectSidebarRootOrder(session.sidebar, scenario.rootIds, initialOrder);
+    await expectConversationStable();
+  } finally {
+    try {
+      await restoreSidebarSortColors(apiClient, scenario.colorIds, previousColors);
+    } finally {
+      await restoreSidebarViewState(apiClient, seedData.workspaceId, previousViews);
+    }
   }
 });

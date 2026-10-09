@@ -56,6 +56,27 @@ type SendNowClaim struct {
 	// Ordinary sources are absent from storage while claimed, so task
 	// generations alone cannot prevent them from being resurrected.
 	SessionGeneration int64 `json:"session_generation"`
+	// Delivery identity is persisted with the replacement claim so a restart
+	// can reconcile the original submission rather than constructing a new one.
+	DeliveryProtocol     string `json:"delivery_protocol,omitempty"`
+	DeliverySubmissionID string `json:"delivery_submission_id,omitempty"`
+	DeliveryPayloadHash  string `json:"delivery_payload_hash,omitempty"`
+}
+
+func (c *SendNowClaim) DeliverySubmission() (protocol, submissionID, payloadHash string) {
+	if c == nil {
+		return "", "", ""
+	}
+	return c.DeliveryProtocol, c.DeliverySubmissionID, c.DeliveryPayloadHash
+}
+
+func (c *SendNowClaim) setDeliverySubmission(protocol, submissionID, payloadHash string) {
+	if c == nil {
+		return
+	}
+	c.DeliveryProtocol = protocol
+	c.DeliverySubmissionID = submissionID
+	c.DeliveryPayloadHash = payloadHash
 }
 
 // PendingSendNowClaim carries the durable acceptance decision used to choose

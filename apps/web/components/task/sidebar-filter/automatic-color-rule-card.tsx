@@ -1,6 +1,6 @@
 "use client";
 
-import { IconArrowDown, IconArrowUp, IconGripVertical, IconTrash } from "@tabler/icons-react";
+import { IconGripVertical, IconTrash } from "@tabler/icons-react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@kandev/ui/button";
@@ -19,6 +19,7 @@ import {
   optionWithCurrentValue,
 } from "./automatic-color-rule-fields";
 import type { Translate } from "./automatic-color-repository-picker";
+import { SidebarReorderMenu } from "./sidebar-reorder-menu";
 
 export function AutomaticColorRuleCard({
   rule,
@@ -55,7 +56,7 @@ export function AutomaticColorRuleCard({
   onMove: (direction: -1 | 1) => void;
   t: Translate;
 }) {
-  const sortable = useSortable({ id: rule.id });
+  const sortable = useSortable({ id: rule.id, disabled: total <= 1 });
   const rawOptions = getRuleOptions(rule, scalarOptions, repositoryOptions);
   const options = optionWithCurrentValue(rawOptions, rule, t);
   const selectedOption = options.find(
@@ -80,6 +81,7 @@ export function AutomaticColorRuleCard({
         total={total}
         dimension={rule.condition.dimension}
         sortable={sortable}
+        isDrawerLayout={isDrawerLayout}
         onRemove={onRemove}
         onMove={onMove}
         t={t}
@@ -169,6 +171,7 @@ function AutomaticColorRuleHeader({
   total,
   dimension,
   sortable,
+  isDrawerLayout,
   onRemove,
   onMove,
   t,
@@ -178,17 +181,25 @@ function AutomaticColorRuleHeader({
   total: number;
   dimension: SidebarTaskColorDimension;
   sortable: ReturnType<typeof useSortable>;
+  isDrawerLayout: boolean;
   onRemove: () => void;
   onMove: (direction: -1 | 1) => void;
   t: Translate;
 }) {
+  const touchClass = isDrawerLayout
+    ? "size-11"
+    : "size-7 max-md:size-11 [@media(pointer:coarse)]:size-11";
+  const label = `${t("task:automaticColorsRule", { number: index + 1 })} ${t(taskColorDimensionLabelKey(dimension))}`;
   return (
     <div className="flex min-h-11 items-center gap-1">
       <button
+        ref={sortable.setActivatorNodeRef}
         type="button"
-        className="flex min-h-11 min-w-11 shrink-0 cursor-grab touch-none items-center justify-center text-muted-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={`flex shrink-0 cursor-grab touch-none items-center justify-center text-muted-foreground/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed ${touchClass}`}
         aria-label={t("task:automaticColorsReorderHandle", { number: index + 1 })}
+        disabled={total <= 1}
         data-testid={`automatic-color-rule-handle-${ruleId}`}
+        data-vaul-no-drag={isDrawerLayout ? "" : undefined}
         {...sortable.attributes}
         {...sortable.listeners}
         aria-roledescription={t("task:automaticColorsReorderable")}
@@ -199,35 +210,21 @@ function AutomaticColorRuleHeader({
         {t("task:automaticColorsRule", { number: index + 1 })}{" "}
         {t(taskColorDimensionLabelKey(dimension))}
       </span>
+      <SidebarReorderMenu
+        label={label}
+        position={index + 1}
+        count={total}
+        onMove={onMove}
+        isDrawerLayout={isDrawerLayout}
+        testId={`automatic-color-rule-more-${ruleId}`}
+        moveUpLabelKey="task:automaticColorsMoveUp"
+        moveDownLabelKey="task:automaticColorsMoveDown"
+      />
       <Button
         type="button"
         variant="ghost"
         size="icon"
-        className="size-11 cursor-pointer md:size-7"
-        onClick={() => onMove(-1)}
-        disabled={index === 0}
-        aria-label={t("task:automaticColorsMoveUp")}
-        data-testid={`automatic-color-rule-up-${ruleId}`}
-      >
-        <IconArrowUp className="size-3.5" aria-hidden="true" />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="size-11 cursor-pointer md:size-7"
-        onClick={() => onMove(1)}
-        disabled={index === total - 1}
-        aria-label={t("task:automaticColorsMoveDown")}
-        data-testid={`automatic-color-rule-down-${ruleId}`}
-      >
-        <IconArrowDown className="size-3.5" aria-hidden="true" />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="size-11 cursor-pointer text-muted-foreground hover:text-destructive md:size-7"
+        className={`${touchClass} cursor-pointer text-muted-foreground hover:text-destructive`}
         onClick={onRemove}
         aria-label={t("task:automaticColorsRemoveRule")}
         data-testid={`automatic-color-rule-remove-${ruleId}`}

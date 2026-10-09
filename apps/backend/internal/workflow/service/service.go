@@ -543,10 +543,15 @@ func (s *Service) UpdateStep(ctx context.Context, step *models.WorkflowStep) err
 // UpdateStepWithStartStepUpdates updates a workflow step and returns any other
 // workflow steps whose start-step flag was cleared.
 func (s *Service) UpdateStepWithStartStepUpdates(ctx context.Context, step *models.WorkflowStep) ([]*models.WorkflowStep, error) {
+	return s.UpdateStepWithStartStepIntent(ctx, step, &step.IsStartStep)
+}
+
+// UpdateStepWithStartStepIntent preserves the saved start flag when intent is omitted.
+func (s *Service) UpdateStepWithStartStepIntent(ctx context.Context, step *models.WorkflowStep, isStartStep *bool) ([]*models.WorkflowStep, error) {
 	if err := models.ValidateWorkflowStep(step); err != nil {
 		return nil, err
 	}
-	demoted, err := s.repo.UpdateStepWithDemotedStartSteps(ctx, step)
+	demoted, err := s.repo.UpdateStepWithDemotedStartStepsIntent(ctx, step, isStartStep)
 	if err != nil {
 		s.logger.Error("failed to update step", zap.String("step_id", step.ID), zap.Error(err))
 		return nil, err

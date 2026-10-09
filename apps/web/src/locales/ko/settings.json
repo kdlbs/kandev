@@ -768,6 +768,8 @@
   "vsCodeRemoteSsh": "VS Code Remote SSH",
   "whenEnabledInstallYourProjectS": "활성화하면 프로젝트 종속성(예: 리포지토리 설정 스크립트를 통한 <2>{{command}}</2>)을 설치하여 누락된 타입 오류를 방지합니다.",
   "externalMcpToolListTaskSessions": "작업의 모든 에이전트 세션을 최신순으로 나열하여 다른 도구가 ID로 하나를 지정할 수 있게 합니다.",
+  "integrationShortcuts": "연동",
+  "shortcutOpenIntegration": "{{integration}} 열기",
   "shortcutBottomTerminal": "하단 터미널 전환",
   "shortcutCommandPanel": "명령 패널",
   "shortcutCommandPanelAlt": "명령 패널 (Alt)",

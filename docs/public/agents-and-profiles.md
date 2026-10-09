@@ -712,7 +712,13 @@ environment values, headers, raw MCP arguments, or option metadata. See
 
 Auto approval can authorize shell commands, file changes, network calls, or any other capability exposed by that agent. Agent-specific flags that suppress permission prompts can be broader still. Use either only with a constrained executor, repository, environment, and credential set.
 
-Workspace automation selectors do not offer passthrough agent profiles. Local executor profiles are available for the repository-free target; Worktree requires a repository. Hidden automation sessions receive a fixed workspace-scoped coordinator MCP surface. Visible normal-task automations use the ordinary task profile and MCP surface. The trusted automation principal is resolved before hidden-run dispatch, and a hidden automation task and its sessions cannot be used as mutation, messaging, stopping, spawning, or blocker targets. Cross-task spawning uses the target task's normal profile. Native provider continuation and compaction remain authoritative for a healthy reusable session; Kandev's fallback resume prompt uses only the newest 50 non-empty user or assistant messages and excludes tool events. See [Automation and MCP](automation-and-mcp.md).
+Workspace automation selectors do not offer passthrough agent profiles. Local executor profiles are available for the repository-free target; Worktree requires a repository. Hidden automation sessions receive a fixed workspace-scoped coordinator MCP surface. Visible normal-task automations use the ordinary task profile and MCP surface. The trusted automation principal is resolved before hidden-run dispatch, and a hidden automation task and its sessions cannot be used as mutation, messaging, stopping, spawning, or blocker targets. Cross-task spawning uses the target task's normal profile. Native provider continuation and compaction remain authoritative for a healthy reusable session. When native continuation is unavailable, Kandev uses an explicit recovery action and bounded saved history. It does not restore private harness state or repeat an uncertain prompt. See [Automation and MCP](automation-and-mcp.md).
+
+When native continuation is unavailable, Kandev parks unattended work and
+shows a recovery action. A provider retry, status update, or dismissed notice
+does not clear this block. An operator must choose the recovery action before
+the original work can run again. A context continuation creates a new native
+conversation from saved history. It does not restore private harness state.
 
 ## Structured ACP and terminal passthrough
 
@@ -747,6 +753,15 @@ its native chat ID; Kandev never resumes an arbitrary latest chat. Preparation c
 turns, and automatic server approval does not bypass tool-call permissions.
 The login-terminal action currently requires a POSIX host shell; native Windows
 login recovery is unavailable.
+
+If native approval or verification fails, expand the preparation details to
+review the operation, failure stage, optional exit status and sanitized cause.
+These details do not include raw command output or credential values. If retry
+reports that the agent is using the session, wait for its current turn to finish
+before trying again. An early busy check runs no native command. A prompt can
+also start after retry begins, after approval or verification commands have run.
+In that case Kandev keeps the existing preparation details and rejects the
+session reload without stopping, reloading or replaying the active prompt.
 
 ### Share local Cursor MCP credentials
 

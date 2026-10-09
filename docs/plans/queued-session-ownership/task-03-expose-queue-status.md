@@ -208,3 +208,21 @@ The required PostgreSQL projection/rebuild coverage remains outstanding because
 the isolated PostgreSQL verification runs. The repository-wide backend test
 target also reports unrelated existing environment-sensitive failures; the
 task-related backend packages pass.
+
+### CI follow-up: establish accepted capacity ownership
+
+The phone queue check failed to find its queue status on the initial CI attempt.
+Setup previously accepted a SQL RUNNING row as proof of capacity ownership.
+The capacity-holder fixture now uses the existing cancellation-gated
+mock command and waits for its exact persisted agent acknowledgment before
+moving the target task. A SQL RUNNING row alone does not establish accepted
+provider work. If setup fails, the fixture stops its own holder; normal caller
+release and cleanup remain unchanged. No admission rule or retry was relaxed.
+
+An exact acknowledgment assertion against the old timed slow command failed,
+establishing the missing fixture contract. With the cancellation-gated command,
+`TMPDIR=/root/.cache/kandev-pr3598-e2e-tmp GOMAXPROCS=4 scripts/run-quiet e2e --summary -- pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/workflow/mobile-queued-session-ownership.spec.ts -- --repeat-each=3 --retries=0 --trace=retain-on-failure`
+passed all three runs. The desktop ownership case also passed all three independent runs using
+`--project chromium e2e/tests/workflow/queued-session-ownership.spec.ts` with
+`--repeat-each=3 --retries=0 --trace=retain-on-failure`. Fresh pushed-head CI
+remains pending. Existing feature-specific release gates remain open.

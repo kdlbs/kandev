@@ -22,6 +22,8 @@ import { isValidCoordinatorName } from "@/lib/coordinators/validate-form";
 import { coordinatorFieldError, type CoordinatorFieldError } from "@/lib/coordinators/field-error";
 import { CoordinatorFormFields } from "./coordinator-form-fields";
 import { CoordinatorDeleteConfirmDialog } from "./coordinator-delete-confirm-dialog";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { CoordinatorSections } from "./sections/coordinator-sections";
 import type { WorkspaceState } from "@/lib/state/slices";
 
 type Workspace = WorkspaceState["items"][number];
@@ -205,6 +207,7 @@ function useCoordinatorEditorForm(workspaceId: string, coordinatorId: string) {
 export function CoordinatorEditorPage({ workspaceId, coordinatorId }: CoordinatorEditorPageProps) {
   const { t } = useTranslation();
   useSettingsData(true);
+  const phase2 = useFeature("coordinatorPhase2");
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const executors = useAppStore((state) => state.executors.items);
   const {
@@ -226,15 +229,8 @@ export function CoordinatorEditorPage({ workspaceId, coordinatorId }: Coordinato
     return <CoordinatorStatusView status={status} workspaceId={workspaceId} refresh={refresh} />;
   }
 
-  return (
-    <div className="max-w-2xl space-y-6" data-testid="coordinator-editor-page">
-      <Link
-        href={coordinatorsListHref(workspaceId)}
-        data-testid="all-coordinators-link"
-        className="text-sm text-primary hover:underline"
-      >
-        {t("coordinator:allCoordinators")}
-      </Link>
+  const identity = (
+    <div className="space-y-6">
       <CoordinatorFormFields
         form={form}
         onChange={(key, value) => setForm((prev) => ({ ...prev, [key]: value }))}
@@ -270,6 +266,28 @@ export function CoordinatorEditorPage({ workspaceId, coordinatorId }: Coordinato
             onConfirm={handleDelete}
           />
         </>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="max-w-2xl space-y-6" data-testid="coordinator-editor-page">
+      <Link
+        href={coordinatorsListHref(workspaceId)}
+        data-testid="all-coordinators-link"
+        className="text-sm text-primary hover:underline"
+      >
+        {t("coordinator:allCoordinators")}
+      </Link>
+      {phase2 ? (
+        <CoordinatorSections
+          workspaceId={workspaceId}
+          coordinatorId={coordinatorId}
+          canManage={canManage}
+          identity={identity}
+        />
+      ) : (
+        identity
       )}
     </div>
   );

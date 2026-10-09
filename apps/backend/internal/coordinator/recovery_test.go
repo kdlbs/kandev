@@ -18,7 +18,7 @@ func TestStartupRecoveryPass_RecoversStaleRowAndCreatesTask(t *testing.T) {
 
 	svc.StartupRecoveryPass(context.Background(), time.Now())
 
-	got, err := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestStartupRecoveryPass_LeavesRowsClaimedAtOrAfterCutoffAlone(t *testing.T)
 
 	svc.StartupRecoveryPass(context.Background(), cutoff)
 
-	got, err := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestStartupRecoveryPass_RecoversMultipleRowsInOrder(t *testing.T) {
 	svc.StartupRecoveryPass(context.Background(), time.Now())
 
 	for _, id := range []string{p1.ID, p2.ID} {
-		got, err := store.GetProposal(context.Background(), "ws-1", c.ID, id)
+		got, err := store.GetProposal(context.Background(), "ws-1", c.ID, id, false)
 		if err != nil {
 			t.Fatalf("GetProposal(%s): %v", id, err)
 		}
@@ -89,7 +89,7 @@ func TestStartupRecoveryPass_StepIneligibleFailsRowAndContinues(t *testing.T) {
 
 	svc.StartupRecoveryPass(context.Background(), time.Now())
 
-	got, err := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestStartupRecoveryPass_FoundTaskCompletesWithoutCreate(t *testing.T) {
 
 	svc.StartupRecoveryPass(context.Background(), time.Now())
 
-	got, err := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestStartupRecoveryPass_DiscoveryErrorReturnsWithoutPanicking(t *testing.T)
 
 	svc.StartupRecoveryPass(ctx, time.Now())
 
-	got, err := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID)
+	got, err := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
 	if err != nil {
 		t.Fatalf("GetProposal: %v", err)
 	}

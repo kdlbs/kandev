@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -139,6 +140,102 @@ func TestRegisterRoutesSleepInhibitionPermissions(t *testing.T) {
 	if adminResponse.Code != http.StatusOK || !bytes.Contains(adminResponse.Body.Bytes(), []byte(`"enabled":true`)) {
 		t.Fatalf("admin PATCH status=%d body=%s", adminResponse.Code, adminResponse.Body.String())
 	}
+}
+
+func TestRuntimeRecoverAuthorization(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := &agentRuntimeRecoveryTargetFake{snapshot: agentctlclient.AvailabilitySnapshot{
+		Status: "recovering", BootID: "boot-1", RuntimeEpoch: 7, Revision: 12, RecoveryID: "recovery-1",
+	}}
+	memberRouter := systemRouterForRole(authn.RoleMember)
+	(&Service{AgentRuntimeRecovery: target}).RegisterRoutes(memberRouter, log)
+	memberResponse := httptest.NewRecorder()
+	memberRouter.ServeHTTP(memberResponse, validAgentRuntimeRetryRequest())
+	if memberResponse.Code != http.StatusForbidden || target.calls != 0 {
+		t.Fatalf("member retry status=%d calls=%d body=%s", memberResponse.Code, target.calls, memberResponse.Body.String())
+	}
+
+	adminRouter := systemRouterForRole(authn.RoleAdmin)
+	(&Service{AgentRuntimeRecovery: target}).RegisterRoutes(adminRouter, log)
+	adminResponse := httptest.NewRecorder()
+	adminRouter.ServeHTTP(adminResponse, validAgentRuntimeRetryRequest())
+	if adminResponse.Code != http.StatusAccepted || target.calls != 1 {
+		t.Fatalf("admin retry status=%d calls=%d body=%s", adminResponse.Code, target.calls, adminResponse.Body.String())
+	}
+	if target.bootID != "boot-1" || target.epoch != 7 || target.revision != 12 || target.requestID != "request-1" {
+		t.Fatalf("retry fences = (%q, %d, %d, %q)", target.bootID, target.epoch, target.revision, target.requestID)
+	}
+	if !bytes.Contains(adminResponse.Body.Bytes(), []byte(`"recovery_id":"recovery-1"`)) {
+		t.Fatalf("accepted snapshot missing recovery id: %s", adminResponse.Body.String())
+	}
+
+	target.err = agentctlclient.ErrRecoveryConflict
+	staleResponse := httptest.NewRecorder()
+	adminRouter.ServeHTTP(staleResponse, validAgentRuntimeRetryRequest())
+	if staleResponse.Code != http.StatusConflict || !bytes.Contains(staleResponse.Body.Bytes(), []byte(`"error_code":"stale_runtime_snapshot"`)) {
+		t.Fatalf("stale retry status=%d body=%s", staleResponse.Code, staleResponse.Body.String())
+	}
+}
+
+func TestAgentRuntimeRecoveryRetryRejectsInvalidSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := &agentRuntimeRecoveryTargetFake{}
+	router := systemRouterForRole(authn.RoleAdmin)
+	(&Service{AgentRuntimeRecovery: target}).RegisterRoutes(router, log)
+	for _, body := range []string{
+		`{"boot_id":"boot-1","runtime_epoch":7,"request_id":"request-1"}`,
+		`{"boot_id":"boot-1","runtime_epoch":7,"revision":12,"request_id":"request-1","extra":true}`,
+		`{"boot_id":"boot-1","runtime_epoch":7,"revision":12,"request_id":"request-1"} {}`,
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/system/agent-runtime/retry", bytes.NewBufferString(body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("body %q status=%d body=%s, want 400", body, response.Code, response.Body.String())
+		}
+	}
+	if target.calls != 0 {
+		t.Fatalf("invalid requests reached recovery target %d times", target.calls)
+	}
+}
+
+func validAgentRuntimeRetryRequest() *http.Request {
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/system/agent-runtime/retry", bytes.NewBufferString(
+		`{"boot_id":"boot-1","runtime_epoch":7,"revision":12,"request_id":"request-1"}`,
+	))
+	request.Header.Set("Content-Type", "application/json")
+	return request
+}
+
+type agentRuntimeRecoveryTargetFake struct {
+	snapshot  agentctlclient.AvailabilitySnapshot
+	err       error
+	calls     int
+	bootID    string
+	epoch     uint64
+	revision  uint64
+	requestID string
+}
+
+func (target *agentRuntimeRecoveryTargetFake) RetryAtRevision(
+	_ context.Context,
+	bootID string,
+	epoch uint64,
+	revision uint64,
+	requestID string,
+) (agentctlclient.AvailabilitySnapshot, error) {
+	target.calls++
+	target.bootID, target.epoch, target.revision, target.requestID = bootID, epoch, revision, requestID
+	return target.snapshot, target.err
 }
 
 func systemRouterForRole(role authn.Role) *gin.Engine {

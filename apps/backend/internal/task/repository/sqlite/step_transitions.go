@@ -242,6 +242,33 @@ func (r *Repository) GetLatestTaskStepTransitionID(ctx context.Context, taskID s
 	return id, nil
 }
 
+// GetTaskWorkflowStepEntry returns the task's current workflow and step with
+// the latest transition identity from one database statement. The step and
+// identity must share a snapshot so a retry cannot pair an earlier step read
+// with a later return to the same step.
+func (r *Repository) GetTaskWorkflowStepEntry(
+	ctx context.Context,
+	taskID string,
+) (workflowID, stepID string, transitionID int64, err error) {
+	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT COALESCE(t.workflow_id, ''),
+		       COALESCE(t.workflow_step_id, ''),
+		       COALESCE((
+		           SELECT id
+		           FROM task_step_transitions
+		           WHERE task_id = t.id
+		           ORDER BY id DESC
+		           LIMIT 1
+		       ), 0)
+		FROM tasks t
+		WHERE t.id = ?
+	`), taskID).Scan(&workflowID, &stepID, &transitionID)
+	if err != nil {
+		return "", "", 0, err
+	}
+	return workflowID, stepID, transitionID, nil
+}
+
 // EnsureCurrentTaskStepTransition returns the latest workflow-entry identity,
 // creating a durable current-entry row when an older database predates the
 // transition ledger. The task-row write guard serializes this backfill with

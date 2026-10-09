@@ -121,6 +121,7 @@ After startup settlement, `provider_update` and `provider_response` events refre
 Updates from a starting or different execution do not establish confirmation. While startup identity is unresolved, a delayed prior-execution snapshot cannot restore the hidden confirmation; matching execution identity can restore it, while a new execution requires a fresh settled snapshot.
 When `session.state_changed` enters `STARTING` or `session.agentctl_starting` arrives, clear the visible confirmed projection immediately while preserving model-selector fallback data.
 If startup identity arrives after the state transition, hold the prior values outside the visible projection until the execution ID is known; restore them only when it identifies the same execution, and discard them for a different execution.
+If a live session makes an incoming agentctl startup appear ready, retain that startup execution ID for the matching state transition. Consume it at STARTING or a subsequent live transition so a later startup cannot reuse it.
 The session runtime reset/cleanup path must clear the projection with the existing session state.
 Reconnect restores it only from a settled backend snapshot, without treating saved preferences as confirmation.
 

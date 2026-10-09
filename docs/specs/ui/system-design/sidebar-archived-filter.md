@@ -196,6 +196,7 @@ Do not borrow the writer connection or weaken its read-only main-database contra
    Apply collapse, cycle handling, tree aggregation, ranking, counts, and page selection as before.
 5. Use the same relation for empty-page counts and collapsed-group headers.
    Hydrate only the selected task IDs, within the same transaction.
+   Hydrate queue positions in a separate statement bound to those selected IDs on the same transaction. Rank against the complete destination queue, including tasks hidden by view filters. Keeping queue evaluation outside the recursive page graph bounds repeated SQLite preparation without changing queue totals or snapshot consistency.
 6. Drop both owned scratch tables before a successful commit, then return the connection.
 
 Split `sidebarTaskBaseSQL` into candidate/filter construction and visibility construction.

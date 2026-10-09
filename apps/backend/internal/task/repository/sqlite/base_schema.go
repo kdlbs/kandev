@@ -31,6 +31,8 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
+		r.initSessionContinuitySchema,
+		r.initAgentDeliverySchema,
 		r.initDynamicRoutingSchema,
 		r.initStepTransitionsSchema,
 		r.initStepEntriesSchema,
@@ -53,6 +55,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.healBuiltinWorkflowStepFlags,
 		r.healBuiltinWorkflowStepParticipantSeats,
 		r.healBuiltinWorkflowStepOnAgentError,
+		r.healBuiltinWorkflowStepOnCommentFanOut,
 		r.normalizeTaskWorktreeOwnership,
 		r.ensureTaskEnvironmentRecoveryClaimsSchema,
 		r.ensureTaskEnvironmentRecoveryArtifactsSchema,
@@ -338,6 +341,10 @@ const controlServerRecordSchemaDDL = `
 		credential_secret_id TEXT NOT NULL,
 		capabilities TEXT NOT NULL DEFAULT '[]',
 		diagnostic_log_path TEXT NOT NULL,
+		process_id INTEGER NOT NULL DEFAULT 0,
+		process_group_id INTEGER NOT NULL DEFAULT 0,
+		process_session_id INTEGER NOT NULL DEFAULT 0,
+		process_birth_token TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
@@ -396,6 +403,16 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 		"task_session_messages",
 	)
 	if _, err := r.db.ExecContext(r.migrationContext(), lookupIndex); err != nil {
+		return err
+	}
+	// Keep inbox scans proportional to clarification history, not every message.
+	clarificationBundlesIndex := fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS idx_messages_clarification_bundle
+		ON task_session_messages((%s), task_session_id)
+		WHERE type = 'clarification_request'`,
+		dialect.JSONExtract(driver, "metadata", "pending_id"),
+	)
+	if _, err := r.db.ExecContext(r.migrationContext(), clarificationBundlesIndex); err != nil {
 		return err
 	}
 	return nil
@@ -969,7 +986,7 @@ func (r *Repository) backfillInitialPlanRevisions() error {
 	for _, x := range pending {
 		authorKind := x.createdBy
 		// Match CreateTaskPlan (plan.go) and the task_plan_revisions column DEFAULT 'agent'.
-		if authorKind != "user" && authorKind != authorKindAgent {
+		if authorKind != authorKindUser && authorKind != authorKindAgent {
 			authorKind = authorKindAgent
 		}
 		_, err := r.db.ExecContext(r.migrationContext(), r.db.Rebind(`

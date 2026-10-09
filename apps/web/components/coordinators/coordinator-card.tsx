@@ -4,7 +4,22 @@ import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { Button } from "@kandev/ui/button";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
-import type { Coordinator } from "@/lib/api/domains/coordinator-api";
+import type { Coordinator, CoordinatorSummary } from "@/lib/api/domains/coordinator-api";
+
+function summaryLine(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  summary: CoordinatorSummary,
+): string {
+  let watches: string;
+  if (summary.watch_scope === "all") watches = t("coordinator:cardWatchesEvery");
+  else if (summary.watched_count === 0) watches = t("coordinator:cardWatchesNone");
+  else watches = t("coordinator:cardWatchesBoards", { count: summary.watched_count });
+  return [
+    watches,
+    t("coordinator:cardNeedsApproval", { count: summary.approval_actions }),
+    t("coordinator:cardStandingOrders", { count: summary.active_orders }),
+  ].join(" \u00b7 ");
+}
 
 type CoordinatorCardProps = {
   coordinator: Coordinator;
@@ -43,6 +58,14 @@ export function CoordinatorCard({
           executor: executorProfileLabel,
         })}
       </p>
+      {coordinator.summary && (
+        <p
+          className="text-sm text-muted-foreground"
+          data-testid={`coordinator-summary-${coordinator.id}`}
+        >
+          {summaryLine(t, coordinator.summary)}
+        </p>
+      )}
       {coordinator.context && (
         <p className="line-clamp-2 text-sm text-muted-foreground">{coordinator.context}</p>
       )}

@@ -315,6 +315,9 @@ func TestReconcileRepositories_PrunesRemovedTrackerAndPreservesSubscription(t *t
 	}
 	sub := m.SubscribeWorkspaceStream()
 	defer m.UnsubscribeWorkspaceStream(sub)
+	// Stop the stale tracker before simulating rollback so Windows can remove
+	// its working tree while reconciliation still owns pruning and detachment.
+	rolledBackTracker.Stop()
 	if err := os.RemoveAll(rolledBack); err != nil {
 		t.Fatal(err)
 	}

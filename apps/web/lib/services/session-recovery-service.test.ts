@@ -3,7 +3,11 @@ import {
   branchRecoveryDetails,
   getWorkspaceRecoveryStatus,
   managedCloneRelocationRecoveryDetails,
+  contextContinuationDetails,
   requestSessionRecover,
+  recoveryInspectionBusyDetails,
+  recoveryInspectionBusyMessage,
+  resolveRequestErrorMessage,
   sessionRecoveryGuardDetails,
 } from "./session-recovery-service";
 import { WebSocketRequestError } from "@/lib/ws/client";
@@ -15,7 +19,39 @@ vi.mock("@/lib/ws/connection", () => ({
 
 beforeEach(() => vi.clearAllMocks());
 
-describe("sessionRecoveryGuardDetails", () => {
+describe("recoveryInspectionBusyDetails", () => {
+  it("recognizes only the structured inspection-contention conflict", () => {
+    const error = new WebSocketRequestError("busy", "CONFLICT", {
+      kind: "recovery_inspection_busy",
+    });
+
+    expect(recoveryInspectionBusyDetails(error)).toEqual({ kind: "recovery_inspection_busy" });
+    expect(recoveryInspectionBusyDetails(new Error("workspace recovery inspection is busy"))).toBe(
+      null,
+    );
+    expect(
+      recoveryInspectionBusyDetails(
+        new WebSocketRequestError("other conflict", "CONFLICT", { kind: "unrelated" }),
+      ),
+    ).toBeNull();
+  });
+
+  it("uses localized copy for typed contention and leaves unrelated transport errors unchanged", () => {
+    const t = (key: string) =>
+      key === "task:workspaceRecoveryInspectionBusy" ? "localized busy" : key;
+    const busy = new WebSocketRequestError("raw conflict", "CONFLICT", {
+      kind: "recovery_inspection_busy",
+    });
+
+    expect(recoveryInspectionBusyMessage(t)).toBe("localized busy");
+    expect(resolveRequestErrorMessage(busy, t)).toBe("localized busy");
+    expect(resolveRequestErrorMessage(new Error("raw transport failure"), t)).toBe(
+      "raw transport failure",
+    );
+  });
+});
+
+describe("session recovery service", () => {
   it("returns the details for a retryable in-progress recovery refusal", () => {
     const error = new WebSocketRequestError("blocked", "CONFLICT", {
       kind: "session_recovery_in_progress",
@@ -66,6 +102,44 @@ describe("sessionRecoveryGuardDetails", () => {
 
     expect(branchRecoveryDetails(error)).not.toBeNull();
     expect(sessionRecoveryGuardDetails(error)).toBeNull();
+  });
+
+  it("recognizes typed native-state loss without authorizing generic failures", () => {
+    const error = new WebSocketRequestError(
+      "native state is unavailable",
+      "SESSION_RESTORE_REQUIRED",
+      {
+        kind: "session_restore_required",
+        recovery_action: "continue_from_history",
+        reason: "native_state_missing",
+        generation: 3,
+      },
+    );
+    expect(contextContinuationDetails(error)).toMatchObject({
+      kind: "session_restore_required",
+      recovery_action: "continue_from_history",
+      reason: "native_state_missing",
+    });
+    expect(
+      contextContinuationDetails(new WebSocketRequestError("unknown", "INTERNAL_ERROR")),
+    ).toBeNull();
+  });
+
+  it("accepts the explicit continuation action as a distinct protocol action", async () => {
+    mocks.request.mockResolvedValue({ success: true });
+    await expect(
+      requestSessionRecover({
+        taskId: "task-1",
+        sessionId: "session-1",
+        action: "continue_from_history",
+        failureMessage: "failed",
+      }),
+    ).resolves.toBeUndefined();
+    expect(mocks.request).toHaveBeenCalledWith(
+      "session.recover",
+      { task_id: "task-1", session_id: "session-1", action: "continue_from_history" },
+      30_000,
+    );
   });
 });
 

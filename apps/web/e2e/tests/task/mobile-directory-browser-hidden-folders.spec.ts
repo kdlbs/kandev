@@ -1,7 +1,9 @@
 import { expect, test } from "../../fixtures/test-base";
 import { expectControlHeight } from "../../helpers/control-sizing";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { waitForSessionDone } from "../../helpers/session";
 import type { Locator } from "@playwright/test";
+import { SessionPage } from "../../pages/session-page";
 import fs from "node:fs";
 import path from "node:path";
 import type { BackendContext } from "../../fixtures/backend";
@@ -62,12 +64,16 @@ test("coarse pointer grows the reveal control and keeps the reveal usable by tou
     },
   );
   await expect
-    .poll(async () => (await apiClient.getTask(task.id)).primary_executor_type, {
+    .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
       timeout: 30_000,
     })
-    .toBeTruthy();
+    .toBe("ready");
+  if (!task.session_id) throw new Error("Directory browser task has no session identity");
+  await waitForSessionDone(apiClient, task.id, task.session_id, "Waiting for workspace setup");
 
   await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
   // On a phone the Files surface is a drawer opened from its own button, and the
   // add-sources surface is a drawer rather than a dialog.
   await testPage.getByRole("button", { name: "Files", exact: true }).tap();
@@ -80,16 +86,23 @@ test("coarse pointer grows the reveal control and keeps the reveal usable by tou
   await drawer.getByRole("button", { name: "Add folder" }).tap();
   await expect(drawer.getByTestId("workspace-source-row")).toBeVisible();
 
+  // Exercise sizing while the real opening animation is still active.
+  await testPage.addStyleTag({
+    content:
+      '[data-testid="folder-picker-popover"][data-state="open"] { animation-duration: 1s !important; }',
+  });
   await drawer.getByTestId("folder-picker-trigger").last().tap();
   const picker = testPage
     .locator('[data-testid="folder-picker-popover"][data-state="open"]')
     .last();
   await expect(picker).toBeVisible();
+  await waitForFiniteAnimations(picker);
   const control = picker.getByTestId("directory-browser-show-hidden");
   const toggle = picker.getByRole("switch", { name: "Hidden folders" });
 
   // The label wraps the switch, so the whole band is the tap target; it must meet
   // the coarse-pointer minimum and must not push the entry list out of reach.
+  await waitForFiniteAnimations(picker);
   await expectControlHeight(control, TOUCH_TARGET_PX, 1);
   await expect(picker.getByTestId("folder-picker-entry").first()).toBeVisible();
 
@@ -137,8 +150,12 @@ test("a breadcrumb too long to fit keeps the reveal control inside the popover",
       timeout: 30_000,
     })
     .toBeTruthy();
+  if (!task.session_id) throw new Error("Long-path directory task has no session identity");
+  await waitForSessionDone(apiClient, task.id, task.session_id, "Waiting for workspace setup");
 
   await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
   await testPage.getByRole("button", { name: "Files", exact: true }).tap();
   const entryPoint = testPage.getByTestId("files-workspace-actions");
   await entryPoint.tap();
@@ -151,6 +168,7 @@ test("a breadcrumb too long to fit keeps the reveal control inside the popover",
     .locator('[data-testid="folder-picker-popover"][data-state="open"]')
     .last();
   await expect(picker).toBeVisible();
+  await waitForFiniteAnimations(picker);
 
   const control = picker.getByTestId("directory-browser-show-hidden");
   const measure = async () => {

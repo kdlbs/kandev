@@ -14,6 +14,21 @@ import (
 // already distinguishes that from a failure, and this method preserves the
 // distinction rather than treating it as an error to retry.
 func (r *StandaloneExecutor) fetchTurnOutcomeWithRetry(ctx context.Context, instanceID string) (*agentctl.TurnOutcome, error) {
+	return r.fetchTurnOutcomeForEpoch(ctx, instanceID, 0)
+}
+
+func (r *StandaloneExecutor) fetchTurnOutcomeForEpoch(ctx context.Context, instanceID string, runtimeEpoch uint64) (*agentctl.TurnOutcome, error) {
+	control, controlCtx, release, lease, err := r.acquireControl(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	if runtimeEpoch != 0 && lease != nil && lease.Epoch() != runtimeEpoch {
+		return nil, agentctl.ErrRuntimeLeaseRetired
+	}
+	if runtimeEpoch != 0 && lease == nil && r.runtimeOwner != nil {
+		return nil, agentctl.ErrRuntimeLeaseRetired
+	}
 	timeout := r.recoveryReadTimeout
 	if timeout <= 0 {
 		timeout = defaultRecoveryReadTimeout
@@ -25,8 +40,8 @@ func (r *StandaloneExecutor) fetchTurnOutcomeWithRetry(ctx context.Context, inst
 
 	var lastErr error
 	for attempt := 0; attempt <= retries; attempt++ {
-		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
-		outcome, err := r.ctl.GetTurnOutcome(attemptCtx, instanceID)
+		attemptCtx, cancel := context.WithTimeout(controlCtx, timeout)
+		outcome, err := control.GetTurnOutcome(attemptCtx, instanceID)
 		cancel()
 		if err == nil {
 			return outcome, nil
@@ -44,11 +59,26 @@ func (r *StandaloneExecutor) fetchTurnOutcomeWithRetry(ctx context.Context, inst
 // left for the next backend's re-application of the same outcome rather than
 // retried in a loop that would delay this recovery pass.
 func (r *StandaloneExecutor) ackTurnOutcome(ctx context.Context, instanceID string, turnID int64) error {
+	return r.ackTurnOutcomeForEpoch(ctx, instanceID, turnID, 0)
+}
+
+func (r *StandaloneExecutor) ackTurnOutcomeForEpoch(ctx context.Context, instanceID string, turnID int64, runtimeEpoch uint64) error {
+	control, controlCtx, release, lease, err := r.acquireControl(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if runtimeEpoch != 0 && lease != nil && lease.Epoch() != runtimeEpoch {
+		return agentctl.ErrRuntimeLeaseRetired
+	}
+	if runtimeEpoch != 0 && lease == nil && r.runtimeOwner != nil {
+		return agentctl.ErrRuntimeLeaseRetired
+	}
 	timeout := r.recoveryReadTimeout
 	if timeout <= 0 {
 		timeout = defaultRecoveryReadTimeout
 	}
-	attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+	attemptCtx, cancel := context.WithTimeout(controlCtx, timeout)
 	defer cancel()
-	return r.ctl.AckTurnOutcome(attemptCtx, instanceID, turnID)
+	return control.AckTurnOutcome(attemptCtx, instanceID, turnID)
 }

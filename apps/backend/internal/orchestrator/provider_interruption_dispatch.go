@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
+
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -87,6 +89,7 @@ func (s *Service) retryInterruptedContinuation(ctx context.Context, taskID, sess
 			entry.mu.Unlock()
 			_, err := s.promptTask(promptCtx, taskID, sessionID, continuationInstruction, "", false, nil, true, launchOriginAutomatic, promptTaskOptions{
 				resumeAttempt: attempt, internalContinuation: true, preservePromptContext: true, disableDispatchRetry: true, requireNonterminalSession: true, reserveTurnUntilDispatch: true,
+				deliverySubmissionID: "continuation:" + uuid.NewString(),
 				beforeDispatch: func() error {
 					if err := s.validateContinuationOwner(promptCtx, taskID, sessionID, entry); err != nil {
 						return err
@@ -198,6 +201,7 @@ func (s *Service) retryRetainedRuntimeContinuation(
 			disableDispatchRetry:      true,
 			requireNonterminalSession: true,
 			reserveTurnUntilDispatch:  true,
+			deliverySubmissionID:      "continuation:" + uuid.NewString(),
 			liveExecutionFence:        liveExecutionFence,
 			beforeDispatch:            beforeDispatch,
 			beforeProviderAdmission:   beforeProviderAdmission,
@@ -342,9 +346,6 @@ func (s *Service) validateContinuationOwner(ctx context.Context, taskID, session
 	}
 	switch entry.continuationPolicy {
 	case continuationPolicySavedHistoryRestore:
-		if !s.config.ProviderInterruptionContinuation {
-			return ErrResumeAttemptCancelled
-		}
 	case continuationPolicyCapacityLive:
 	default:
 		return ErrResumeAttemptCancelled

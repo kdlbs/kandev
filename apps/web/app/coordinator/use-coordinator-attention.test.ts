@@ -25,6 +25,14 @@ vi.mock("./use-now-tick", () => ({
   useNowTick: () => mockUseNowTick(),
 }));
 
+vi.mock("@/hooks/domains/features/use-feature", () => ({ useFeature: () => false }));
+vi.mock("./use-coordinator-watch-set", () => ({
+  useCoordinatorWatchSet: () => ({
+    input: { value: undefined, error: false, loadedAt: undefined },
+    retry: vi.fn(),
+  }),
+}));
+
 import { useCoordinatorAttention } from "./use-coordinator-attention";
 
 const WORKSPACE_ID = "workspace-1";
@@ -242,5 +250,23 @@ describe("useCoordinatorAttention - computeNeedsYouCount", () => {
     const { result } = renderHook(() => useCoordinatorAttention(WORKSPACE_ID, null));
 
     expect(result.current.computeNeedsYouCount()).toBe(0);
+  });
+});
+
+describe("useCoordinatorAttention - task snapshots", () => {
+  it("exposes the tasks input's tasks, loadedAt and error", () => {
+    mockUseCoordinatorTasks.mockReturnValue({
+      tasks: [task("t-1"), task("t-2")],
+      stepNameByTaskId: new Map(),
+      workflowNameById: new Map(),
+      stepNameByWorkflowStep: new Map(),
+      error: true,
+      loadedAt: 700,
+      retry: retryTasksMock,
+    });
+    const { result } = renderHook(() => useCoordinatorAttention(WORKSPACE_ID, COORDINATOR_ID));
+    expect(result.current.tasks.map((t) => t.id)).toEqual(["t-1", "t-2"]);
+    expect(result.current.loadedAt).toBe(700);
+    expect(result.current.error).toBe(true);
   });
 });

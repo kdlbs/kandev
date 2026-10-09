@@ -10,8 +10,16 @@ import {
   NAVIGATION_PR_REPO,
 } from "../../helpers/task-navigation-efficiency";
 import { SessionPage } from "../../pages/session-page";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 test.describe("mobile progressive task navigation", () => {
+  test.afterEach(async ({ backend }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    await testInfo.attach("mobile-task-switch-backend.log", {
+      path: backend.logPath,
+      contentType: "text/plain",
+    });
+  });
   test("reveals the selected task while optional session enrichment is held", async ({
     testPage,
     apiClient,
@@ -133,6 +141,7 @@ test.describe("mobile progressive task navigation", () => {
         .locator("[data-testid='pr-check-group'][data-kind='failed']");
       await expect(failed.getByTestId("pr-check-group-count")).toHaveText("1");
 
+      await waitForFiniteAnimations(session.prStatusChipDrawer());
       await session.prStatusChipDrawerClose().tap();
       await expect(session.prStatusChipDrawer()).toHaveCount(0);
       await apiClient.mockGitHubSeedPRFeedback({

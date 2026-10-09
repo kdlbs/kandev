@@ -27,6 +27,7 @@ import type {
   RetentionSettings,
   RetentionStatus,
 } from "@/lib/types/system";
+import type { AgentRuntimeAvailability, AgentRuntimeRetryRequest } from "@/lib/types/agent-runtime";
 
 const SYSTEM_BASE = "/api/v1/system";
 
@@ -271,6 +272,20 @@ export function requestRestart(options?: ApiRequestOptions): Promise<RestartResp
   return fetchJson<RestartResponse>(`${SYSTEM_BASE}/restart`, {
     ...options,
     init: { ...(options?.init ?? {}), method: "POST" },
+  });
+}
+
+export function retryAgentRuntime(
+  request: AgentRuntimeRetryRequest,
+  options?: ApiRequestOptions,
+): Promise<AgentRuntimeAvailability> {
+  return fetchJson<AgentRuntimeAvailability>(`${SYSTEM_BASE}/agent-runtime/retry`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      body: JSON.stringify(request),
+    },
   });
 }
 

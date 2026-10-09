@@ -13,9 +13,11 @@ import {
   HEALTH_REQUESTED_TIMEOUT_MS,
   ROOT_REQUESTED_TIMEOUT_MS,
   parseProcessStatuses,
+  stopProcess,
   waitForHttp,
   writeJsonAtomically,
   createAtomicRecordWriter,
+  readInstances,
   waitForFile,
   writeInstanceRecord,
   writeFakeRuntime,
@@ -139,6 +141,21 @@ test("instance records remain valid during concurrent updates", async () => {
       assert.equal(record.payload.length, 100_000);
     });
     await Promise.all([...writes, ...reads]);
+  });
+});
+
+test("readInstances skips a record while the fake runtime is writing it", async () => {
+  await withTempDir(async (dir) => {
+    const instancesDir = join(dir, "instances");
+    const instanceDir = join(instancesDir, "123");
+    const instancePath = join(instanceDir, "instance.json");
+    await mkdir(instanceDir, { recursive: true });
+    await writeFile(instancePath, '{"pid":123,"home":');
+
+    assert.deepEqual(await readInstances(instancesDir), []);
+
+    await writeFile(instancePath, JSON.stringify({ pid: 123, home: "/tmp/kandev" }));
+    assert.deepEqual(await readInstances(instancesDir), [{ pid: 123, home: "/tmp/kandev" }]);
   });
 });
 
@@ -692,3 +709,105 @@ async function waitForPreviewHttp(url, timeoutMs, tick, pause = delay) {
   }
   throw new Error(`Timed out waiting for ${url}`);
 }
+
+for (const parentAlreadyExited of [false, true]) {
+  test(
+    `smoke shutdown waits for a backend writer (parent exited: ${parentAlreadyExited})`,
+    {
+      skip: process.platform === "win32",
+    },
+    async () => {
+      await withTempDir(async (dir) => {
+        const marker = join(dir, "terminated");
+        const worker = `
+        const fs = require("node:fs");
+        process.on("SIGTERM", () => setTimeout(() => {
+          fs.writeFileSync(process.argv[1], "settled");
+          process.exit(0);
+        }, 200));
+        process.send("ready");
+        setInterval(() => {}, 1000);
+      `;
+        const launcher = spawn(
+          process.execPath,
+          [
+            "-e",
+            `
+        const { spawn } = require("node:child_process");
+        const child = spawn(process.execPath, ["-e", process.argv[1], process.argv[2]], {
+          stdio: ["ignore", "ignore", "ignore", "ipc"],
+        });
+        process.on("SIGTERM", () => process.exit(0));
+        child.on("message", () => {
+          process.stdout.write("ready\\n");
+          if (process.argv[3] === "true") process.exit(0);
+        });
+      `,
+            worker,
+            marker,
+            String(parentAlreadyExited),
+          ],
+          {
+            detached: true,
+            stdio: ["ignore", "pipe", "inherit"],
+          },
+        );
+        const exited = new Promise((resolveExit) => launcher.once("exit", resolveExit));
+        try {
+          await new Promise((resolveReady, reject) => {
+            launcher.once("error", reject);
+            launcher.stdout.once("data", resolveReady);
+          });
+          if (parentAlreadyExited) await exited;
+          await stopProcess(launcher);
+          assert.equal(await readFile(marker, "utf8"), "settled");
+        } finally {
+          try {
+            process.kill(-launcher.pid, "SIGKILL");
+          } catch (error) {
+            if (error.code !== "ESRCH") throw error;
+          }
+          await exited;
+        }
+      });
+    },
+  );
+}
+
+test(
+  "smoke shutdown escalates an owned process that ignores SIGTERM",
+  {
+    skip: process.platform === "win32",
+  },
+  async () => {
+    const child = spawn(
+      process.execPath,
+      [
+        "-e",
+        `
+    process.on("SIGTERM", () => {});
+    process.stdout.write("ready\\n");
+    setInterval(() => {}, 1000);
+  `,
+      ],
+      { detached: true, stdio: ["ignore", "pipe", "inherit"] },
+    );
+    const exited = new Promise((resolveExit) => child.once("exit", resolveExit));
+    try {
+      await new Promise((resolveReady, reject) => {
+        child.once("error", reject);
+        child.stdout.once("data", resolveReady);
+      });
+      await stopProcess(child);
+      await exited;
+      assert.equal(child.signalCode, "SIGKILL");
+    } finally {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
+      }
+      await exited;
+    }
+  },
+);

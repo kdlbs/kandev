@@ -390,6 +390,9 @@ func (e *Engine) ApplyFailureContext(
 	if failure == nil {
 		return RouteDecision{}, ErrNoEligibleCandidate
 	}
+	if err := e.requireCurrentFailureRoute(ctx, sessionID, expectedGeneration, currentCandidateID); err != nil {
+		return RouteDecision{}, err
+	}
 	e.openCircuitForFailure(profile, currentCandidateID, failure)
 	e.releaseProbeForFailure(sessionID, expectedGeneration, currentCandidateID)
 	if candidate, ok := candidateByID(profile, currentCandidateID); ok && candidate.Policies.Version != 0 {

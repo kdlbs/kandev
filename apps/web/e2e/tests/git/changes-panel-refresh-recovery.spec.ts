@@ -25,13 +25,19 @@ test.describe("Changes panel Git refresh recovery", () => {
     git.exec("git clean -fd");
 
     const profile = await createStandardProfile(apiClient, "Initial Git Loading Profile");
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "Initial Git Loading", profile.id, {
-      description: "e2e:delay(120000)",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
-    const bridge = await routeGitStatusRefresh(testPage);
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Initial Git Loading",
+      profile.id,
+      {
+        description: "e2e:delay(120000)",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("The Git loading task should have a session identity");
+    const bridge = await routeGitStatusRefresh(testPage, { holdReadyNotifications: true });
     bridge.holdFreshGitRefreshRequests();
 
     try {
@@ -39,11 +45,22 @@ test.describe("Changes panel Git refresh recovery", () => {
       await expect(session.agentStatus()).toBeVisible({ timeout: 30_000 });
       await session.clickTab("Changes");
       await expect(session.changes).toBeVisible();
-      await bridge.waitForHeldFreshGitRefreshRequests(1);
+      await bridge.waitForHeldFreshGitRefreshRequests(1, task.session_id);
 
       const status = session.changes.getByTestId("changes-refresh-status");
       await expect(status).toContainText("Loading changes...");
-      await expect(session.changes.getByText("Your changed files will appear here")).toHaveCount(0);
+      const emptyState = session.changes.getByText("Your changed files will appear here");
+      // A ready snapshot for this session can arrive before the held refresh;
+      // its empty state is valid while the next refresh is pending.
+      await expect
+        .poll(
+          async () =>
+            bridge.readyNotificationCount(task.session_id) > 0 || (await emptyState.count()) === 0,
+          {
+            message: "Hide the empty state until a ready Git membership snapshot is available",
+          },
+        )
+        .toBe(true);
       const toolbar = session.changes.locator(":scope > div").first();
       const pendingToolbarBox = await toolbar.boundingBox();
       const panelBox = await session.changes.boundingBox();
@@ -59,6 +76,7 @@ test.describe("Changes panel Git refresh recovery", () => {
       });
 
       const priorFreshResponses = bridge.responseCount("fresh");
+      bridge.releaseReadyGitStatusNotifications();
       bridge.releaseFreshGitRefreshRequests();
       const response = await bridge.waitForResponse("fresh", priorFreshResponses);
       expect(response.success).toBe(true);
@@ -69,6 +87,7 @@ test.describe("Changes panel Git refresh recovery", () => {
         caption: "The loading feedback clears without changing the narrow toolbar height",
       });
     } finally {
+      bridge.releaseReadyGitStatusNotifications();
       bridge.releaseFreshGitRefreshRequests();
     }
   });

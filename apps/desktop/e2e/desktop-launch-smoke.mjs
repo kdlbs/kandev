@@ -577,7 +577,7 @@ async function waitForReadyInstances(instancesDir, count, tick) {
     .slice(0, count);
 }
 
-async function readInstances(instancesDir) {
+export async function readInstances(instancesDir) {
   const entries = await readdir(instancesDir, { withFileTypes: true });
   const instances = [];
   for (const entry of entries) {
@@ -587,7 +587,7 @@ async function readInstances(instancesDir) {
         JSON.parse(await readFile(join(instancesDir, entry.name, "instance.json"), "utf8")),
       );
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
     }
   }
   return instances;
@@ -647,11 +647,10 @@ async function waitForProcessExit(pid, timeoutMs) {
 function readChildProcessStatuses(parentPid) {
   let output;
   try {
-    output = execFileSync(
-      "ps",
-      ["-o", "pid=,ppid=,stat=", "--ppid", String(parentPid)],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-    );
+    output = execFileSync("ps", ["-o", "pid=,ppid=,stat=", "--ppid", String(parentPid)], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
   } catch (error) {
     return parseProcessStatuses(error);
   }
@@ -661,7 +660,9 @@ function readChildProcessStatuses(parentPid) {
 function assertLiveDesktopChild(parentPid, childPid, label) {
   const child = readChildProcessStatuses(parentPid).find((process) => process.pid === childPid);
   if (!child || child.parentPid !== parentPid || child.state.startsWith("Z")) {
-    throw new Error(`${label} PID ${childPid} is not a live child of conflict launcher ${parentPid}`);
+    throw new Error(
+      `${label} PID ${childPid} is not a live child of conflict launcher ${parentPid}`,
+    );
   }
 }
 
@@ -964,26 +965,46 @@ async function findAvailablePort() {
   return address.port;
 }
 
-async function stopProcess(child) {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-  if (process.platform === "win32") {
-    child.kill();
-  } else {
-    process.kill(-child.pid, "SIGTERM");
-  }
-  await Promise.race([
-    new Promise((resolveExit) => child.once("exit", resolveExit)),
-    new Promise((resolveTimeout) => setTimeout(resolveTimeout, 5_000)),
-  ]);
-  if (child.exitCode === null && child.signalCode === null) {
-    if (process.platform === "win32") {
-      child.kill("SIGKILL");
-    } else {
-      process.kill(-child.pid, "SIGKILL");
+export async function stopProcess(child) {
+  if (!child.pid) return;
+  const isRunning =
+    process.platform === "win32"
+      ? () => child.exitCode === null && child.signalCode === null
+      : () => processGroupIsRunning(child.pid);
+  const signal = (name) => {
+    try {
+      if (process.platform === "win32") child.kill(name);
+      else process.kill(-child.pid, name);
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
     }
+  };
+
+  signal("SIGTERM");
+  const deadline = Date.now() + 5_000;
+  while (isRunning() && Date.now() < deadline) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
+  if (isRunning()) {
+    signal("SIGKILL");
+    await waitForCondition(() => !isRunning(), 5_000, "owned desktop process group to stop");
+  }
+}
+
+function processGroupIsRunning(groupId) {
+  const output = execFileSync("ps", ["-axo", "pgid=,stat="], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  return output
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .some((row) => {
+      const match = /^\s*(\d+)\s+(\S+)\s*$/.exec(row);
+      if (!match) throw new Error("ps returned an invalid process group row");
+      return Number(match[1]) === groupId && !match[2].startsWith("Z");
+    });
 }
 
 function commandExists(command) {

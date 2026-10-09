@@ -19,6 +19,9 @@ extension through the generic plugin Host contracts.
 
 Phase 1 is attended: every coordinator turn starts from a message a workspace
 manager sends. The coordinator's Kandev tool surface can only read and propose.
+Phase 2 (Control) keeps both rules and gives managers the controls: per-action
+settings, Watches, standing orders, a goal, a log of what the coordinator did
+with Undo, and the copilot on every workspace page.
 
 ## Terms
 
@@ -27,8 +30,18 @@ manager sends. The coordinator's Kandev tool surface can only read and propose.
   proposals and its own attention count. In the UI it is called
   "Coordinator". It is not Office's coordinator role, which is an Office agent
   role defined by the [Office system](../office/README.md).
-- **Proposal:** a stored request by a coordinator to create one task. Only a
-  person with `workspace.manage` can approve or reject it.
+- **Proposal:** a stored request by a coordinator to create one task, or, in
+  phase 2, to resume, message or move one. Only a person with
+  `workspace.manage` can approve or reject it.
+- **Policy (May do):** a coordinator's setting per action (`denied`,
+  `requires_approval` or `automatic`); its tool profile is derived from it.
+- **Watches:** the workflows a coordinator reads and proposes about.
+- **Standing order:** a dated rule a manager gives a coordinator; guidance
+  only, never a permission.
+- **Goal:** a coordinator's current milestone with exit criteria and a
+  frozen baseline.
+- **Activity log (What it did):** the per-coordinator record of every
+  proposal, decision, refusal and undo.
 - **Needs you:** the coordinator's list of items that need a person, derived
   from task facts, stall records and pending proposals.
 - **Queue:** the coordinator's read-only list of the other open tasks, grouped
@@ -49,7 +62,9 @@ This system owns:
 - stall records and their retention;
 - the Needs you and Queue projections, the count strip, the sidebar entries and
   the `coordinator.updated` event;
-- the `features.coordinator` release toggle.
+- coordinator policy, Watches, standing orders, goals and the activity log;
+- the workspace-wide copilot launcher and its page context chip;
+- the `features.coordinator` and `features.coordinatorPhase2` release toggles.
 
 ## Exclusions
 
@@ -94,3 +109,5 @@ The system is new and has no legacy sources.
 
 - [Workspace coordinator in core](../../decisions/2026-09-26-workspace-coordinator.md)
 - [Workspace coordinator implementation plan](../../plans/workspace-coordinator/plan.md)
+- [Coordinator phase 2, a person approves everything](../../decisions/2026-09-29-coordinator-phase-2-control.md)
+- [Coordinator phase 2 implementation plan](../../plans/workspace-coordinator-p2/plan.md)

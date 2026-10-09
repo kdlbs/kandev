@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-INITIAL-TASK-BRIEF-001
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-10-07
 owners:
   - kandev
 ---
@@ -23,10 +23,18 @@ the committed result. This extends the existing first-prompt boundary.
 
 ## Admission
 
-`MessageHandlers.wsAddMessage` already resolves session changes after
+`MessageHandlers.wsAddMessage` resolves session changes after
 `ProcessOnTurnStart`. Eligibility belongs to that resolved session, including
-a CREATED source redirected to a fresh workflow session. The service verifies
-task/session ownership and excludes Office, ephemeral, and configuration contexts.
+a CREATED source redirected to a fresh workflow session and a never-prompted
+WAITING_FOR_INPUT recipient. The service verifies task/session ownership and
+excludes Office, ephemeral, and configuration contexts.
+
+Brief candidacy and process startup are separate decisions. Keep
+`startCreatedSession` responsible for choosing `StartCreatedSession` versus
+ordinary `PromptTask`; a ready agent must not be relaunched to add its brief.
+Provider conversation IDs, agent boot records, and lifecycle-only turns do not
+prove user input has been accepted. Existing state, archive, authorization,
+workflow, and capacity gates remain responsible for whether a message can run.
 
 Use a server-only admission option on `CreateMessageRequest`. It carries a
 prepared initial-content candidate and its corresponding trusted prompt context.
@@ -45,6 +53,13 @@ queued plan-comment message writes. Keep candidate selection, message insertion,
 ordinal allocation, comment consumption, and queue insertion atomic where those
 operations are already atomic. Preserve SQLite writer serialization and the
 PostgreSQL session advisory lock. A new counter table or migration is unnecessary.
+
+For ready sessions, use the repository's bounded `HasUserPromptHistory` lookup
+through the task service before preparing a candidate. An existing marker skips
+candidate preparation and retains ordinary follow-up dispatch. A read error
+fails admission before persistence or dispatch. This read is only a preparation
+filter: an absent marker is rechecked inside final admission, so two contenders
+or an automatic fallback cannot both add the brief. No transcript scan is needed.
 
 The candidate uses a task-description snapshot read from authorized task data.
 Validate that snapshot against the task row during final admission. A concurrent
@@ -80,6 +95,16 @@ use the existing composed-prompt launch option to prevent a second replacement.
 Keep automatic workflow-entry composition unchanged. Test empty step prompts,
 `{{task_prompt}}`, and nonempty templates without that placeholder.
 
+For a recovered ready recipient, dispatch the selected stored content through
+ordinary prompt delivery, including its existing missing-runtime resume path.
+Do not use the created-session starter or introduce a second workflow-entry
+transform. Retain the acceptance-time saved expansion and attachment identities.
+The existing admission-order handling still defers a contender that loses the
+initial boundary while the winner is dispatching. An already-prompted ready
+session must bypass initial candidacy; a non-selected candidate is not a general
+instruction to queue every follow-up. Atomic feedback queues must preserve the
+same selected content and drain on the ready recipient without a fresh launch.
+
 The saved user row and final dispatch must contain the same visible brief and
 instruction. Existing canonical system-context additions retain their authority.
 Passthrough delivery retains visible text without hidden saved-prompt expansion.
@@ -100,6 +125,15 @@ Composer position, safe-area handling, touch targets, and navigation remain unch
 Long first prompts remain reachable through the transcript's own rendering and, above the bounded-preview limit, its full-text download.
 
 ## Failure and compatibility
+
+Passive recovery remains prompt-free under the
+[session-open recovery decision](../../../decisions/2026-09-18-session-open-resumes-conversation.md).
+Recovery can create a provider conversation and publish WAITING_FOR_INPUT while
+the durable prompt marker remains absent. The next direct message, rather than
+recovery itself, owns brief composition. This does not replay a failed accepted
+submission, consume `initial_prompt_preview`, or authorize terminal-session
+recovery. Previously accepted prompts remain consumed even after deletion or
+restart. Existing affected conversations are not backfilled.
 
 A history, snapshot, or persistence error stops admission before dispatch.
 Existing launch-error behavior handles failures after message acceptance. This
@@ -124,3 +158,5 @@ This design records a local extension of existing ownership, so no separate ADR 
 ## Implementation plans
 
 [Initial task brief fix package](../../../plans/initial-task-brief/plan.md)
+
+[Initial task brief after recovery](../../../plans/initial-task-brief-after-recovery/plan.md)

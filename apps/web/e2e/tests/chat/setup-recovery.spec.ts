@@ -232,12 +232,24 @@ test.describe("Setup recovery UX (desktop)", () => {
     await testPage.reload();
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await testPage.keyboard.press(`${modifier}+Shift+q`);
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.listTaskSessions(created.task_id)).sessions.find(
+            (row) => row.id === created.session_id,
+          )?.state,
+        {
+          timeout: 30_000,
+          message: "the persisted setup failure should remain failed after reload",
+        },
+      )
+      .toBe("FAILED");
     await expect(
       dialog.getByTestId("session-recovery-action-message").getByText(failure, { exact: true }),
     ).toBeVisible();
     await expect(
       dialog.getByTestId("session-recovery-action-message").getByTestId("recovery-resume-button"),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 15_000 });
     const sessions = (await apiClient.listTaskSessions(created.task_id)).sessions;
     expect(sessions).toHaveLength(1);
     expect(sessions[0].id).toBe(created.session_id);

@@ -5,6 +5,7 @@ import {
   assertRetainedACPTrace,
   assertRetainedFailureMessage,
   createRetainedCapacityFixture,
+  expectCompletedCapacityProgress,
   readMockACPTrace,
   waitForRetainedTurnFailure,
 } from "../../helpers/transient-turn-runtime-continuity";
@@ -140,12 +141,7 @@ test("phone: completed tools continue on the same runtime across reload and a se
     const session = new SessionPage(testPage);
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
-    await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
-    await expect(session.transientRetryCard()).toContainText("Continuing in");
-    await expect(session.recoveryCancelRetryButton()).toHaveCount(1);
-    const cancelBounds = await session.recoveryCancelRetryButton().boundingBox();
-    expect(cancelBounds?.height).toBeGreaterThanOrEqual(44);
-    expect(cancelBounds?.width).toBeGreaterThanOrEqual(44);
+    await expectCompletedCapacityProgress(session);
     await assertNoDocumentHorizontalOverflow(testPage);
 
     const executionId = await pollUntil(
@@ -161,7 +157,7 @@ test("phone: completed tools continue on the same runtime across reload and a se
     );
     await testPage.reload();
     await session.waitForLoad();
-    await expect(session.transientRetryCard()).toBeVisible();
+    await expectCompletedCapacityProgress(session);
     await assertNoDocumentHorizontalOverflow(testPage);
 
     const viewer = await testPage.context().newPage();
@@ -169,8 +165,7 @@ test("phone: completed tools continue on the same runtime across reload and a se
       await viewer.goto(`/t/${fixture.taskId}`);
       const otherViewer = new SessionPage(viewer);
       await otherViewer.waitForLoad();
-      await expect(otherViewer.transientRetryCard()).toBeVisible();
-      await expect(otherViewer.transientRetryCard()).toContainText("Continuing");
+      await expectCompletedCapacityProgress(otherViewer);
     } finally {
       await viewer.close();
     }
@@ -219,11 +214,14 @@ test("phone: capacity retry can be cancelled during backoff", async ({
   backend,
   seedData,
 }) => {
-  const fixture = await createRetainedCapacityFixture(backend, apiClient, seedData, "cancel");
+  const fixture = await createRetainedCapacityFixture(backend, apiClient, seedData, "cancel", {
+    initialPrompt: "/e2e:simple-message",
+  });
   try {
     const session = new SessionPage(testPage);
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
+    await session.sendMessageViaButton("/capacity-cancel");
     await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
     await expect(session.transientRetryCard()).toContainText(/attempt 1 of 5/i);
     await expect(session.recoveryCancelRetryButton()).toBeVisible();
@@ -238,7 +236,7 @@ test("phone: capacity retry can be cancelled during backoff", async ({
     expect(failure.metadata?.attempts_started).toBe(0);
     await expect(session.transientRetryCard()).toBeHidden();
     await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
-    assertRetainedACPTrace(fixture.tracePath, 1);
+    assertRetainedACPTrace(fixture.tracePath, 2);
     await assertNoDocumentHorizontalOverflow(testPage);
   } finally {
     await fixture.dispose();

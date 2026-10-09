@@ -1,3 +1,4 @@
+import { errors } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
 import {
@@ -336,7 +337,7 @@ test.describe("User-save then diff view (colleague repro)", () => {
   // pre-save content (agent's edit only, not the user's save). Workaround
   // reported: leave the task and re-enter. We try to repro by driving the
   // exact UI sequence and asserting the diff contains the user's marker.
-  test.describe.configure({ retries: 2, timeout: 120_000 });
+  test.describe.configure({ timeout: 120_000 });
 
   test("diff shows user's edit after open-edit-save sequence", async ({
     testPage,
@@ -354,22 +355,27 @@ test.describe("User-save then diff view (colleague repro)", () => {
     await expect(testPage.locator(".dv-default-tab", { hasText: /^Changes \(\d+\)/ })).toBeVisible({
       timeout: 30_000,
     });
-    // Click Files and verify the file row becomes visible. If a late
-    // auto-activate stole focus back to Changes, click Files again.
+    // A late Changes activation can hide Files during the click. Retry the
+    // activation and click together until the editor has opened.
     const fileRow = session.fileTreeNode("diff_update_test.txt");
+    const editorTab = testPage.locator(".dv-default-tab[type='file-editor']", {
+      hasText: "diff_update_test.txt",
+    });
     await expect
       .poll(
         async () => {
+          if (await editorTab.isVisible()) return true;
           await session.clickTab("Files");
-          return await fileRow.isVisible();
+          try {
+            await fileRow.click({ timeout: 1000 });
+          } catch (error) {
+            if (!(error instanceof errors.TimeoutError)) throw error;
+          }
+          return editorTab.isVisible();
         },
         { timeout: 20_000, intervals: [500, 1000, 2000] },
       )
       .toBe(true);
-    await fileRow.click();
-    const editorTab = testPage.locator(".dv-default-tab[type='file-editor']", {
-      hasText: "diff_update_test.txt",
-    });
     await expect(editorTab).toBeVisible({ timeout: 10_000 });
     const editorContent = testPage.locator(".view-lines").first();
     await expect(editorContent).toContainText("FIRST_MODIFICATION", { timeout: 30_000 });

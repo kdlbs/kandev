@@ -284,6 +284,13 @@ test.describe("worktree branch resume recovery", () => {
       await expectMinimumElementHeight(cancel, 26);
       await expectMinimumElementHeight(confirm, 26);
       await testPage.getByTestId("managed-clone-relocation-confirm").click();
+      await waitForSessionState(apiClient, {
+        taskId: fixture.task.id,
+        sessionId,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for managed clone relocation to resume the session",
+        timeout: 120_000,
+      });
       await expect
         .poll(
           () =>
@@ -292,9 +299,12 @@ test.describe("worktree branch resume recovery", () => {
               recoveryResponses,
               "relocate_and_resume",
             ),
-          { timeout: 30_000, message: "Waiting for managed clone relocation response" },
+          {
+            timeout: 30_000,
+            message: "Waiting for managed clone relocation response after the session resumed",
+          },
         )
-        .toBeTruthy();
+        .toBe("response");
       const relocationResponse = capturedSessionRecoveryResponse(
         recoveryRequestIds,
         recoveryResponses,

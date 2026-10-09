@@ -69,6 +69,12 @@ type ciAutomationDispatchParams struct {
 func (s *Service) dispatchCIAutomationPrompt(
 	ctx context.Context, session *models.TaskSession, params ciAutomationDispatchParams,
 ) (ciAutomationDispatchResult, error) {
+	if session == nil {
+		return ciAutomationDispatchResult{}, errors.New("CI automation session is nil")
+	}
+	if err := s.checkSessionRecoveryBlock(ctx, session.ID); err != nil {
+		return ciAutomationDispatchResult{}, err
+	}
 	switch session.State {
 	case models.TaskSessionStateCreated, models.TaskSessionStateRunning, models.TaskSessionStateStarting:
 		return s.queueOrReplaceCIAutomationPrompt(ctx, session, params, params.AllowNewRound)

@@ -2,7 +2,11 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
-import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
+import {
+  type ChatInputContainerHandle,
+  type ChatSubmitPayload,
+  type ChatSubmitResult,
+} from "@/components/task/chat/chat-input-container";
 import { MessageList } from "@/components/task/chat/message-list";
 import { useVisibleItems } from "./startup-rows";
 import { useCopilotActivity } from "@/app/coordinator/copilot/use-copilot-activity";
@@ -45,6 +49,47 @@ type QuickChatContentProps = {
   activityDisplay?: boolean;
 };
 
+/** Bundles the composer-priming hooks: a rejected launch prompt is restored
+ *  as a manual draft, and a caller-supplied draft is inserted once the
+ *  prompt (if any) clears. */
+function useQuickChatComposerPriming({
+  sessionId,
+  taskId,
+  initialPrompt,
+  initialDraft,
+  blocked,
+  handleSubmit,
+  onInitialPromptAttempted,
+  chatInputRef,
+}: {
+  sessionId: string;
+  taskId: string | null;
+  initialPrompt?: QuickChatInitialPrompt;
+  initialDraft?: string;
+  blocked: boolean;
+  handleSubmit: (payload: ChatSubmitPayload) => ChatSubmitResult;
+  onInitialPromptAttempted?: () => void;
+  chatInputRef: React.RefObject<ChatInputContainerHandle | null>;
+}) {
+  const { restoreRejectedPrompt, clearAcceptedPrompt } = useQuickChatInitialPromptRecovery(
+    sessionId,
+    chatInputRef,
+  );
+
+  useQuickChatInitialPrompt({
+    sessionId,
+    taskId,
+    prompt: initialPrompt,
+    blocked,
+    submit: handleSubmit,
+    onAttempted: onInitialPromptAttempted,
+    onAccepted: clearAcceptedPrompt,
+    onRejected: restoreRejectedPrompt,
+  });
+
+  useQuickChatInitialDraft({ draft: initialDraft, initialPrompt, chatInputRef });
+}
+
 function useQuickChatState(sessionId: string, transformOutgoing?: (message: string) => string) {
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
 
@@ -68,46 +113,11 @@ function useQuickChatState(sessionId: string, transformOutgoing?: (message: stri
   };
 }
 
-function useQuickChatComposerPriming({
-  sessionId,
-  initialPrompt,
-  initialDraft,
-  onInitialPromptAttempted,
-  state,
-}: Pick<
-  QuickChatContentProps,
-  "sessionId" | "initialPrompt" | "initialDraft" | "onInitialPromptAttempted"
-> & {
-  state: ReturnType<typeof useQuickChatState>;
-}) {
-  const { chatInputRef, panelState, handleSubmit } = state;
-  const { taskId } = panelState;
-  const { restoreRejectedPrompt, clearAcceptedPrompt } = useQuickChatInitialPromptRecovery(
-    sessionId,
-    chatInputRef,
-  );
-
+function useFocusComposerOnMount(chatInputRef: React.RefObject<ChatInputContainerHandle | null>) {
   useEffect(() => {
     const timer = setTimeout(() => chatInputRef.current?.focusInput(), 50);
     return () => clearTimeout(timer);
   }, [chatInputRef]);
-
-  useQuickChatInitialPrompt({
-    sessionId,
-    taskId,
-    prompt: initialPrompt,
-    blocked:
-      !panelState.session ||
-      panelState.inputMode === "unavailable" ||
-      (panelState.inputMode === "queue" && (!panelState.isQueueReady || panelState.isLoading)) ||
-      (panelState.planCommentMigration?.isBlocking ?? false),
-    submit: handleSubmit,
-    onAttempted: onInitialPromptAttempted,
-    onAccepted: clearAcceptedPrompt,
-    onRejected: restoreRejectedPrompt,
-  });
-
-  useQuickChatInitialDraft({ draft: initialDraft, initialPrompt, chatInputRef });
 }
 
 export const QuickChatContent = memo(function QuickChatContent({
@@ -129,12 +139,22 @@ export const QuickChatContent = memo(function QuickChatContent({
   const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
   const activity = useCopilotActivity(activityDisplay, panelState);
   const items = useVisibleItems(activity.items, hideStartupRows);
+
+  useFocusComposerOnMount(chatInputRef);
+
   useQuickChatComposerPriming({
     sessionId,
+    taskId,
     initialPrompt,
     initialDraft,
+    blocked:
+      !panelState.session ||
+      panelState.inputMode === "unavailable" ||
+      (panelState.inputMode === "queue" && (!panelState.isQueueReady || panelState.isLoading)) ||
+      (panelState.planCommentMigration?.isBlocking ?? false),
+    handleSubmit,
     onInitialPromptAttempted,
-    state,
+    chatInputRef,
   });
 
   const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);

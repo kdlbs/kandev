@@ -606,6 +606,7 @@ export function useFileEditors() {
     updateFileState,
     activeSessionIdRef,
     gitFileSignaturesRef,
+    activeEditorVisitRef,
   });
   const {
     openFile,

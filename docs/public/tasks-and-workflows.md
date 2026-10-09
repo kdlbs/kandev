@@ -512,7 +512,7 @@ A task created with **Create without starting agent** opens in a prepared workbe
 
 If the selected profile is unhealthy or incompatible with the executor, fix that configuration before launch. Starting an agent is separate from moving the task through its workflow; entry actions and turn-complete transitions can move or restart work afterward.
 
-When you send a message from Chat before selecting **Start agent**, Kandev keeps the task description in the first user prompt and places your instruction after it. The combined prompt is stored and remains after reload. Later messages contain only their own text.
+When you send the first message from Chat on a prepared task, Kandev keeps the task description in the first user prompt and places your instruction after it. This also applies if the backend restarts after workspace preparation but before the first user prompt is accepted. The combined prompt is stored and remains after reload. Later messages contain only their own text.
 
 By default, a running session keeps the coarse **Generating** state and queues
 another message even if Kandev detects background work. Operators can opt into
@@ -699,13 +699,13 @@ The **TASKS** list in the left sidebar can combine up to ten sort rules. Each la
 
 | Sort rule         | Meaning                                                                                                                                                                                                                  |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Running**       | Tasks with a running primary session rank first or last. A running included subtask also promotes its parent. Workflow placement alone does not mean that an agent is running.                                           |
+| **Running**       | Tasks with a running session, primary or secondary, rank first or last. A running included subtask also promotes its parent. Workflow placement alone does not mean that an agent is running. |
 | **Color**         | A chosen named color ranks first or last by the marker shown on each task. An automatic color rule takes precedence over a manual color. The marker is personal and does not change shared task priority.                  |
 | **Updated**       | The last task summary refresh. Background events, such as pull-request status changes, can change this time.                                                                                                              |
 | **Last activity** | The last real user or agent action. Opening or focusing a task and background provider polling do not change this time. When a view includes this rule, each row shows its own activity time, while included subtasks help order parents. |
 | **Created, Title, Status** | These fields can also order tasks in either direction. Manual order remains available as a standalone choice.                                                                                                    |
 
-On desktop, open **Sort** from the sidebar filter button. On a phone, open **Tasks**, tap **Sidebar filters**, then expand **Sort**. Each field can be set to its first or last order. The saved view keeps the rule sequence. With no later rule, the sidebar's usual tie order applies.
+On desktop, open **Sort** from the sidebar filter button. On a phone, open **Tasks**, tap **Sidebar filters**, then expand **Sort**. Each field can be set to its first or last order. Drag a rule by its grip to change its priority, or open **More** and choose **Move up** or **Move down**. The saved view keeps the rule sequence. With no later rule, the sidebar's usual tie order applies. Automatic color rules and task-row details use the same grip and **More** menu. Color-rule changes apply immediately; sort and task-row changes follow the view's save or discard controls.
 
 When tasks are grouped, expand **Group by** and use **Indent grouped tasks** to align the rows with the normal sidebar inset. It is enabled by default. Turning it off removes only the group inset; headings, counts, collapse controls, and subtask nesting remain.
 
@@ -827,6 +827,11 @@ Regular tasks have one shared Markdown plan, not a collection of named documents
    - **Run** sends only that comment in plan mode to the task's primary session.
    - After Kandev accepts either action, it removes the delivered comments from the plan and every composer.
 6. Choose **Implement** for the current session or **Implement in fresh agent**. Kandev saves the draft and marks it as sent for implementation. The action stays disabled while a composer attachment is uploading or failed. After implementation starts, the button is disabled for that plan.
+
+If you add a composer instruction when starting implementation, Kandev clears
+that draft only after acceptance and while its text and attachments still match.
+Edits made while implementation starts remain available when you return to that
+session. Starting from the Plan panel leaves an unsent composer draft intact.
 
 Each plan comment supports up to 64 KiB of feedback and 256 KiB of selected
 text. A plan supports up to 100 pending comments and 1 MiB of combined feedback
@@ -989,6 +994,7 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 
 ## Troubleshooting
 
+- **A task edit fails to save:** the editor stays open so you can correct the error and retry with your current title and editable instructions. A successful save closes the editor. **Cancel** discards the current draft. If the error reports a saved task or runner change followed by another failure, that completed change remains; retry only the remaining operation.
 - **No workflow is available:** open the workspace's **Workflows** page. Newly added workspaces have none by default.
 - **No agent starts:** the empty-description **Start Plan Mode** path does not use the normal start-agent submission. To begin an agent immediately, enter a description and use **Start task** or **Start task in plan mode**; also confirm the selected profiles are healthy and compatible.
 - **Task starts in the wrong step:** the destination depends on whether an agent starts immediately. **Create without starting agent** uses **Start step** with first-step fallback. **Start task** and **Start task in plan mode** use the first **Auto-start agent** step, then fall back to **Start step**. An explicit `workflow_step_id` from the creator outranks these defaults.

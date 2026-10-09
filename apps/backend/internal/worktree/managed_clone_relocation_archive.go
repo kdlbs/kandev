@@ -468,9 +468,6 @@ func (m *Manager) reconcilePublishedManagedCloneRelocation(
 	if !ok {
 		return false, recoveryAdmissionError(*req, "durable recovery claim state is unavailable")
 	}
-	if err := verifyPublishedManagedCloneRelocation(ctx, m, wt, record); err != nil {
-		return false, err
-	}
 	claim, err := reader.GetTaskEnvironmentRecoveryClaim(ctx, req.TaskEnvironmentID)
 	if err != nil {
 		return false, recoveryAdmissionError(*req, "durable recovery claim could not be inspected")
@@ -478,20 +475,102 @@ func (m *Manager) reconcilePublishedManagedCloneRelocation(
 	if claim != nil && !publishedRelocationClaimMatches(claim, req, record) {
 		return false, recoveryAdmissionError(*req, "published relocation is held by another recovery operation")
 	}
-	if err := finishPublishedManagedCloneRelocation(ctx, m, req, recordPath, &record); err != nil {
+	if record.State != string(RecoveryStateComplete) {
+		return m.reconcileUnfinishedPublishedManagedCloneRelocation(ctx, req, wt, recordPath, &record, claim, found)
+	}
+	return m.reconcileCompletedPublishedManagedCloneRelocation(ctx, req, wt, slot, recordPath, record, claim, found)
+}
+
+func (m *Manager) reconcileUnfinishedPublishedManagedCloneRelocation(
+	ctx context.Context,
+	req *RecoveryAdmissionRequest,
+	wt *Worktree,
+	recordPath string,
+	record *managedCloneRelocationRecord,
+	claim *models.TaskEnvironmentRecoveryClaim,
+	found bool,
+) (bool, error) {
+	if err := verifyPublishedManagedCloneRelocation(ctx, m, wt, *record); err != nil {
 		return false, err
 	}
-	if !found && claim != nil && record.LayoutVersion == 1 {
-		if err := m.registerVerifiedLegacyRelocation(ctx, req, wt, claim, record); err != nil {
-			return false, recoveryAdmissionError(*req, "legacy relocation artifact ownership could not be registered")
-		}
+	if err := finishPublishedManagedCloneRelocation(ctx, m, req, recordPath, record); err != nil {
+		return false, err
 	}
-	if claim != nil {
-		if err := m.releaseRecoveryClaim(ctx, claim); err != nil {
-			return false, recoveryAdmissionError(*req, "published relocation claim could not be released")
-		}
+	if _, err := m.registerVerifiedLegacyRelocationIfNeeded(ctx, req, wt, claim, *record, found); err != nil {
+		return false, recoveryAdmissionError(*req, "legacy relocation artifact ownership could not be registered")
+	}
+	if err := releasePublishedRelocationClaim(ctx, m, req, claim); err != nil {
+		return false, err
 	}
 	return true, nil
+}
+
+func (m *Manager) reconcileCompletedPublishedManagedCloneRelocation(
+	ctx context.Context,
+	req *RecoveryAdmissionRequest,
+	wt *Worktree,
+	slot *RecoverySlot,
+	recordPath string,
+	record managedCloneRelocationRecord,
+	claim *models.TaskEnvironmentRecoveryClaim,
+	found bool,
+) (bool, error) {
+	// A completed record without Original cannot result from successful
+	// retention, so treat it as persisted journal corruption.
+	if !managedCloneRelocationProofComplete(wt, slot.CloneRelocation) || strings.TrimSpace(record.OperationID) == "" || record.Original == "" {
+		return false, recoveryAdmissionError(*req, "completed relocation identity is incomplete")
+	}
+	if err := verifyCompletedManagedCloneRelocation(ctx, m, wt, slot.CloneRelocation, record); err != nil {
+		return false, err
+	}
+	recoveryPath := publishedRelocationRecoveryRecordPath(recordPath, record)
+	reconciled, err := reconcilePublishedDirtyRecovery(recoveryPath, record)
+	if err != nil {
+		return false, recoveryAdmissionError(*req, "published relocation recovery journal could not be reconciled")
+	}
+	registered, err := m.registerVerifiedLegacyRelocationIfNeeded(ctx, req, wt, claim, record, found)
+	if err != nil {
+		return false, recoveryAdmissionError(*req, "legacy relocation artifact ownership could not be registered")
+	}
+	reconciled = reconciled || registered
+	hadClaim := claim != nil
+	if err := releasePublishedRelocationClaim(ctx, m, req, claim); err != nil {
+		return false, err
+	}
+	reconciled = reconciled || hadClaim
+	return reconciled, nil
+}
+
+func (m *Manager) registerVerifiedLegacyRelocationIfNeeded(
+	ctx context.Context,
+	req *RecoveryAdmissionRequest,
+	wt *Worktree,
+	claim *models.TaskEnvironmentRecoveryClaim,
+	record managedCloneRelocationRecord,
+	found bool,
+) (bool, error) {
+	if found || claim == nil || record.LayoutVersion != 1 {
+		return false, nil
+	}
+	if err := m.registerVerifiedLegacyRelocation(ctx, req, wt, claim, record); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func releasePublishedRelocationClaim(
+	ctx context.Context,
+	m *Manager,
+	req *RecoveryAdmissionRequest,
+	claim *models.TaskEnvironmentRecoveryClaim,
+) error {
+	if claim == nil {
+		return nil
+	}
+	if err := m.releaseRecoveryClaim(ctx, claim); err != nil {
+		return recoveryAdmissionError(*req, "published relocation claim could not be released")
+	}
+	return nil
 }
 
 func (m *Manager) readRegisteredPublishedRelocation(
@@ -813,14 +892,18 @@ func finishPublishedManagedCloneRelocation(
 	if err := markManagedCloneRelocationComplete(recordPath, record, req.TaskID); err != nil {
 		return err
 	}
-	recoveryPath := record.OriginalWorkspacePath + ".kandev-recovery.json"
-	if record.LayoutVersion == 2 {
-		recoveryPath = filepath.Join(filepath.Dir(recordPath), "recovery.json")
-	}
-	if err := reconcilePublishedDirtyRecovery(recoveryPath, *record); err != nil {
+	recoveryPath := publishedRelocationRecoveryRecordPath(recordPath, *record)
+	if _, err := reconcilePublishedDirtyRecovery(recoveryPath, *record); err != nil {
 		return recoveryAdmissionError(*req, "published relocation recovery journal could not be reconciled")
 	}
 	return nil
+}
+
+func publishedRelocationRecoveryRecordPath(recordPath string, record managedCloneRelocationRecord) string {
+	if record.LayoutVersion == 2 {
+		return filepath.Join(filepath.Dir(recordPath), managedCloneRecoveryRecordFilename)
+	}
+	return record.OriginalWorkspacePath + ".kandev-recovery.json"
 }
 
 func verifyPublishedManagedCloneRelocation(
@@ -843,6 +926,90 @@ func verifyPublishedManagedCloneRelocation(
 	return nil
 }
 
+func verifyCompletedManagedCloneRelocation(
+	ctx context.Context,
+	m *Manager,
+	wt *Worktree,
+	proof *ManagedCloneRelocationProof,
+	record managedCloneRelocationRecord,
+) error {
+	if !m.IsValid(wt.Path) {
+		return managedCloneRelocationError(wt.TaskID, "published replacement worktree is unavailable")
+	}
+	destination, err := verifyCompletedManagedCloneDestination(ctx, m, wt, proof, record)
+	if err != nil {
+		return err
+	}
+	return verifyCompletedManagedCloneBranch(ctx, m, wt, destination)
+}
+
+func verifyCompletedManagedCloneDestination(
+	ctx context.Context,
+	m *Manager,
+	wt *Worktree,
+	proof *ManagedCloneRelocationProof,
+	record managedCloneRelocationRecord,
+) (string, error) {
+	_, destination, err := canonicalManagedCloneDestination(wt.TaskID, wt, proof)
+	if err != nil || filepath.Clean(record.DestPath) != filepath.Clean(destination) {
+		return "", managedCloneRelocationError(wt.TaskID, "completed replacement does not match the selected managed clone")
+	}
+	common, err := gitCommonDir(ctx, m, wt.Path)
+	if err != nil {
+		return "", completedRelocationInspectionFailure(ctx, wt.TaskID, "published replacement clone could not be verified", err)
+	}
+	if !sameDirectoryIdentity(common, filepath.Join(destination, ".git")) ||
+		filepath.Clean(record.DestCommon) != filepath.Clean(filepath.Join(destination, ".git")) {
+		return "", managedCloneRelocationError(wt.TaskID, "published replacement clone could not be verified")
+	}
+	if err := verifyManagedCloneOrigin(ctx, m, destination, proof.Identity); err != nil {
+		if operationalErr := checkoutInspectionOperationalError(ctx, err); operationalErr != nil {
+			return "", operationalErr
+		}
+		return "", managedCloneRelocationError(wt.TaskID, "published replacement provider identity could not be verified")
+	}
+	return destination, nil
+}
+
+func verifyCompletedManagedCloneBranch(ctx context.Context, m *Manager, wt *Worktree, destination string) error {
+	branch := strings.TrimSpace(wt.Branch)
+	if branch == "" || strings.HasPrefix(branch, "refs/") {
+		return managedCloneRelocationError(wt.TaskID, "published replacement branch identity is incomplete")
+	}
+	if _, err := m.runBoundedGitInspect(ctx, destination, "check-ref-format", "--branch", branch); err != nil {
+		return completedRelocationInspectionFailure(ctx, wt.TaskID, "published replacement branch name is invalid", err)
+	}
+	head, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return completedRelocationInspectionFailure(ctx, wt.TaskID, "published replacement commit could not be verified", err)
+	}
+	if !relocationCommitPattern.MatchString(strings.TrimSpace(head)) {
+		return managedCloneRelocationError(wt.TaskID, "published replacement commit could not be verified")
+	}
+	registeredHead, registered, err := registeredWorktreeHead(ctx, m, destination, wt.Path, branch)
+	if err != nil {
+		return completedRelocationInspectionFailure(ctx, wt.TaskID, "published replacement worktree registration could not be verified", err)
+	}
+	if !registered || strings.TrimSpace(registeredHead) != strings.TrimSpace(head) {
+		return managedCloneRelocationError(wt.TaskID, "published replacement worktree registration could not be verified")
+	}
+	branchHead, err := m.runBoundedGitInspect(ctx, destination, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}")
+	if err != nil {
+		return completedRelocationInspectionFailure(ctx, wt.TaskID, "published replacement branch no longer identifies its checkout", err)
+	}
+	if strings.TrimSpace(branchHead) != strings.TrimSpace(head) {
+		return managedCloneRelocationError(wt.TaskID, "published replacement branch no longer identifies its checkout")
+	}
+	return nil
+}
+
+func completedRelocationInspectionFailure(ctx context.Context, taskID, reason string, err error) error {
+	if operationalErr := checkoutInspectionOperationalError(ctx, err); operationalErr != nil {
+		return operationalErr
+	}
+	return managedCloneRelocationError(taskID, reason)
+}
+
 func publishedRelocationClaimMatches(
 	claim *models.TaskEnvironmentRecoveryClaim,
 	req *RecoveryAdmissionRequest,
@@ -853,25 +1020,65 @@ func publishedRelocationClaimMatches(
 		claim.SessionID == req.SessionID && claim.ExecutorType == req.ExecutorType
 }
 
-func reconcilePublishedDirtyRecovery(path string, record managedCloneRelocationRecord) error {
+func reconcilePublishedDirtyRecovery(path string, record managedCloneRelocationRecord) (bool, error) {
 	originalPath := record.OriginalWorkspacePath
 	if originalPath == "" {
-		return nil
+		return false, nil
 	}
 	recovery, err := readRecoveryRecord(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return false, nil
 	}
 	if err != nil || recovery.OperationID != record.OperationID ||
 		(recovery.State != RecoveryStateRematerializing && recovery.State != RecoveryStateComplete) {
-		return fmt.Errorf("dirty recovery record is not reconciliable")
+		return false, fmt.Errorf("dirty recovery record is not reconciliable")
+	}
+	paths := []string{path, record.Original + ".kandev-recovery.json"}
+	needsWrite, uniquePaths, err := inspectPublishedDirtyRecoveryRecords(paths, record)
+	if err != nil {
+		return false, err
+	}
+	if !needsWrite {
+		return false, nil
 	}
 	recovery.Original = record.Original
 	recovery.Replacement = record.Replacement
 	recovery.State = RecoveryStateComplete
 	recovery.UpdatedAt = time.Now().UTC()
-	if err := writeRecoveryRecord(path, recovery); err != nil {
-		return err
+	for _, path := range uniquePaths {
+		if err := writeRecoveryRecord(path, recovery); err != nil {
+			return false, err
+		}
 	}
-	return writeRecoveryRecord(record.Original+".kandev-recovery.json", recovery)
+	return true, nil
+}
+
+func inspectPublishedDirtyRecoveryRecords(
+	paths []string,
+	record managedCloneRelocationRecord,
+) (bool, []string, error) {
+	needsWrite := false
+	seen := make(map[string]struct{}, len(paths))
+	uniquePaths := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		uniquePaths = append(uniquePaths, path)
+		companion, readErr := readRecoveryRecord(path)
+		if errors.Is(readErr, os.ErrNotExist) {
+			needsWrite = true
+			continue
+		}
+		if readErr != nil || companion.OperationID != record.OperationID ||
+			(companion.State != RecoveryStateRematerializing && companion.State != RecoveryStateComplete) {
+			return false, nil, fmt.Errorf("dirty recovery record is not reconciliable")
+		}
+		if companion.State != RecoveryStateComplete || companion.Original != record.Original ||
+			companion.Replacement != record.Replacement {
+			needsWrite = true
+		}
+	}
+	return needsWrite, uniquePaths, nil
 }

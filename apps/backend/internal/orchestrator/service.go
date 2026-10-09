@@ -60,10 +60,9 @@ const maxStartupTransferReconcileAttempts = 30
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
-	ProviderInterruptionContinuation bool
-	Scheduler                        scheduler.SchedulerConfig
-	QueueSize                        int
-	QueueGroup                       string
+	Scheduler  scheduler.SchedulerConfig
+	QueueSize  int
+	QueueGroup string
 	// CodexAppServerEnabled controls native-only lifecycle actions such as
 	// conversation forks. It is restart-required, matching agentctl transport
 	// composition and the feature's runtime flag.
@@ -308,13 +307,21 @@ type AgentFamilyResolver interface {
 
 // PromptReferenceExpander resolves "@name" saved-prompt references embedded in
 // an effective prompt and returns both the expanded prompt and the exact
-// server-generated block content. Implemented by promptservice.Service.
+// server-generated block content. It can also extend an accepted context with
+// references from newly composed text without re-resolving accepted content.
+// Implemented by promptservice.Service.
 type PromptReferenceExpander interface {
 	AppendReferenceExpansionsWithContext(
 		ctx context.Context,
 		prompt string,
 		log *zap.Logger,
 	) (expandedPrompt, trustedContext string)
+	AppendReferenceExpansionsToTrustedContext(
+		ctx context.Context,
+		prompt string,
+		trustedContext string,
+		log *zap.Logger,
+	) string
 }
 
 // DirectPromptPreparer canonicalizes a user-submitted structured prompt before
@@ -323,6 +330,20 @@ type PromptReferenceExpander interface {
 // canonicalization.
 type DirectPromptPreparer interface {
 	PrepareDirectPrompt(ctx context.Context, prompt string, isPassthrough bool) (string, string)
+}
+
+// DeliverySubmissionPromptStarter binds a saved direct-message prompt to its
+// durable delivery record before the agent runtime receives it.
+type DeliverySubmissionPromptStarter interface {
+	PromptTaskWithDeliverySubmissionID(
+		context.Context,
+		string, string, string, string,
+		bool,
+		[]v1.MessageAttachment,
+		bool,
+		string,
+		...DirectPromptStartOptions,
+	) (*PromptResult, error)
 }
 
 // DirectPromptStarter starts a prepared direct-message session while retaining
@@ -370,6 +391,33 @@ type DirectPromptStarterWithCanvasGuidanceAndPreservedPrompt interface {
 		promptReferenceContext string,
 		promptReferencesPrepared bool,
 		canvasGuidanceResolved, includeCanvasGuidance bool,
+	) (*executor.TaskExecution, error)
+}
+
+// DirectPromptStartOptions carries accepted direct-message identity and
+// server-owned composition through session start or prompt dispatch.
+type DirectPromptStartOptions struct {
+	SkipMessageRecord             bool
+	PlanMode                      bool
+	AutoStart                     bool
+	Attachments                   []v1.MessageAttachment
+	References                    []v1.EntityReference
+	PromptReferenceContext        string
+	PromptReferencesPrepared      bool
+	CanvasGuidanceResolved        bool
+	IncludeCanvasGuidance         bool
+	PreserveDirectPrompt          bool
+	DeliverySubmissionID          string
+	InitialTaskBriefDispatchOwner bool
+}
+
+// DirectPromptStarterWithDeliverySubmission preserves the accepted message
+// identity when a direct first message starts a prepared session.
+type DirectPromptStarterWithDeliverySubmission interface {
+	StartCreatedSessionWithDeliverySubmission(
+		context.Context,
+		string, string, string, string,
+		DirectPromptStartOptions,
 	) (*executor.TaskExecution, error)
 }
 
@@ -1352,6 +1400,9 @@ type Service struct {
 	// turn completing in the same window — must not let an ordinary drain
 	// dispatch it ahead of the steer that was admitted first.
 	steerInFlight sync.Map
+	// initialTaskBriefDispatches tracks selected first prompts while their
+	// direct dispatch owns the first-turn boundary.
+	initialTaskBriefDispatches sync.Map
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
 	resetInProgressSessions sync.Map
@@ -1903,6 +1954,7 @@ func NewService(
 		OnAgentTurnFailed:      s.handleAgentTurnFailed,
 		OnAgentStalled:         s.handleAgentStalled,
 		OnAgentStopped:         s.handleAgentStopped,
+		OnAgentctlError:        s.handleAgentctlDeliveryRecovery,
 		OnAgentStreamEvent:     s.handleAgentStreamEvent,
 		OnACPSessionCreated:    s.handleACPSessionCreated,
 		OnPermissionRequest:    s.handlePermissionRequest,
@@ -3194,6 +3246,9 @@ func (s *Service) reconcileDurableQueueStateOnStartup(ctx context.Context) error
 		case <-timer.C:
 		}
 	}
+	if err := s.reconcileAgentDeliverySettlements(ctx, ""); err != nil {
+		return fmt.Errorf("reconcile durable delivery terminal settlements: %w", err)
+	}
 	if err := s.reconcilePendingQueueDispatchesOnStartup(ctx); err != nil {
 		return fmt.Errorf("reconcile pending queue dispatches: %w", err)
 	}
@@ -4151,6 +4206,63 @@ func (s *Service) withSessionPromptAdmission(
 	})
 }
 
+// WithInitialTaskBriefAdmission serializes the first-candidate commit with a
+// losing contender's queue admission. The callback must commit synchronously;
+// its caller marks the selected first prompt before this admission lock is
+// released.
+func (s *Service) WithInitialTaskBriefAdmission(
+	ctx context.Context,
+	sessionID string,
+	fn func(context.Context) error,
+) error {
+	return s.withSessionPromptAdmission(ctx, sessionID, fn)
+}
+
+// MarkInitialTaskBriefDispatchPending records the selected first prompt while
+// its dispatch is in flight. Call it inside WithInitialTaskBriefAdmission so a
+// queued contender cannot observe a committed winner without its owner marker.
+func (s *Service) MarkInitialTaskBriefDispatchPending(sessionID string) {
+	if sessionID != "" {
+		s.initialTaskBriefDispatches.Store(sessionID, struct{}{})
+	}
+}
+
+// CompleteInitialTaskBriefDispatch releases first-boundary ownership and
+// retries the queue drain. Queue admission shares the lock so either a
+// contender observes this owner or this completion sees its queued entry.
+func (s *Service) CompleteInitialTaskBriefDispatch(ctx context.Context, taskID, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	completionCtx := context.WithoutCancel(ctx)
+	if err := s.withSessionPromptAdmission(completionCtx, sessionID, func(context.Context) error {
+		s.initialTaskBriefDispatches.Delete(sessionID)
+		return nil
+	}); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to release initial task brief dispatch ownership",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		}
+		return
+	}
+	s.tryFastPathDrainAfterEnqueue(completionCtx, taskID, sessionID)
+}
+
+func (s *Service) isInitialTaskBriefDispatchPending(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	_, pending := s.initialTaskBriefDispatches.Load(sessionID)
+	return pending
+}
+
+// InitialTaskBriefDispatchPending reports whether the accepted first prompt
+// still owns the session's first dispatch boundary. Queued dispatch ownership
+// is tracked separately so it does not block prompts after that first boundary.
+func (s *Service) InitialTaskBriefDispatchPending(sessionID string) bool {
+	return s.isInitialTaskBriefDispatchPending(sessionID)
+}
+
 // QueueUserPrompt persists a prompt that must wait for workflow WIP admission.
 // The user message row is already written by the WebSocket handler, so the
 // queue marker prevents the drain path from creating a duplicate row.
@@ -4172,6 +4284,7 @@ func (s *Service) QueueUserPrompt(
 	if userMessageRecorded {
 		queueMetadata[metaKeyUserMessageRecorded] = true
 	}
+	deferInitialBriefDrain := false
 	if err := s.withSessionPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		session, err := s.repo.GetTaskSession(admittedCtx, sessionID)
 		if err != nil {
@@ -4193,15 +4306,16 @@ func (s *Service) QueueUserPrompt(
 		); err != nil {
 			return fmt.Errorf("queue user prompt: %w", err)
 		}
+		deferInitialBriefDrain = s.isInitialTaskBriefDispatchPending(sessionID)
 		return nil
 	}); err != nil {
 		return err
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
-	if deferFastPath, _ := queueMetadata[MetaKeyInitialTaskBriefDispatchPending].(bool); deferFastPath {
+	if deferInitialBriefDrain {
 		// A later first-message contender is already durably queued. Let the
-		// admitted candidate launch first; the normal agent-ready/boot-ready
-		// drains will deliver this entry in FIFO order.
+		// admitted candidate finish its first dispatch. Its turn-tail drain or
+		// CompleteInitialTaskBriefDispatch will deliver this entry in FIFO order.
 		return nil
 	}
 
@@ -4235,12 +4349,15 @@ func (s *Service) MaxQueuedPromptsPerSession() int {
 // that another repository committed atomically with its user-message record.
 func (s *Service) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID string) {
 	s.publishQueueStatusEvent(ctx, sessionID)
+	if s.isInitialTaskBriefDispatchPending(sessionID) || s.isQueuedDispatchInFlight(sessionID) {
+		return
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err == nil && session != nil && session.State == models.TaskSessionStateCreated {
 		go func(profileID string) {
 			_, launchErr := s.startCreatedSessionWithComposedPrompt(
 				context.WithoutCancel(ctx), taskID, sessionID, profileID,
-				"", "", "", true, false, false, false, nil, nil,
+				"", "", "", true, false, false, false, nil, nil, false,
 			)
 			if launchErr != nil && !errors.Is(launchErr, ErrAgentPromptInProgress) {
 				s.logger.Warn("failed to start session for durable queued prompt",
@@ -4303,6 +4420,9 @@ func (s *Service) tryQueueAdmissionReadiness(
 	identity *messagequeue.QueueSessionIdentity,
 ) {
 	if s.messageQueue == nil {
+		return
+	}
+	if s.isInitialTaskBriefDispatchPending(sessionID) {
 		return
 	}
 	if s.isCancelInFlight(sessionID) || s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {

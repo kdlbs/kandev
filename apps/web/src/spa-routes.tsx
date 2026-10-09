@@ -337,20 +337,29 @@ function resolveKanbanRoute(searchParams: URLSearchParams): SpaRoute {
   };
 }
 
-export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
-  // Subscribe so a plugin route registered after first paint (async bundle
-  // load) re-resolves without requiring a navigation.
-  usePluginRegistry();
+/** The location resolved with the feature options the router itself uses, so
+ *  every reader of "what page is this" agrees with `SpaRoutes`. */
+export function useResolvedSpaRoute(): SpaRoute {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const canvasesEnabled = useFeature("canvases");
   const needsYouInboxEnabled = useFeature("needsYouInbox");
   const coordinatorEnabled = useFeature("coordinator");
-  const route = resolveSpaRoute(pathname, searchParams, {
+  return resolveSpaRoute(pathname, searchParams, {
     canvasesEnabled,
     needsYouInboxEnabled,
     coordinatorEnabled,
   });
+}
+
+export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
+  // Subscribe so a plugin route registered after first paint (async bundle
+  // load) re-resolves without requiring a navigation.
+  usePluginRegistry();
+  const canvasesEnabled = useFeature("canvases");
+  const needsYouInboxEnabled = useFeature("needsYouInbox");
+  const coordinatorEnabled = useFeature("coordinator");
+  const route = useResolvedSpaRoute();
 
   // Reaching /login, /setup, or /invite here means the pre-auth gate in
   // main.tsx already decided the app shell should render (authenticated, or

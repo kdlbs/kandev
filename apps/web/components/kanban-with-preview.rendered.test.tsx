@@ -10,6 +10,7 @@ const previewState = vi.hoisted(() => ({
   open: vi.fn(),
   close: vi.fn(),
   updatePreviewWidth: vi.fn(),
+  displace: vi.fn(),
 }));
 const responsiveState = vi.hoisted(() => ({ isMobile: false, isFinePointer: true }));
 const TEST_IDS = vi.hoisted(() => ({
@@ -111,6 +112,7 @@ afterEach(() => {
   previewState.open.mockReset();
   previewState.close.mockReset();
   previewState.updatePreviewWidth.mockReset();
+  previewState.displace.mockReset();
   previewState.previewWidthPx = 360;
   responsiveState.isFinePointer = true;
   window.history.replaceState({}, "", "/");

@@ -60,6 +60,16 @@ retained; native Windows login terminals are outside this implementation.
 
 - **AC-AGENTS-MCP-PREP-003.5:** Authentication warnings shall retain Authenticate and Retry connection actions on desktop and phone. Successful verification shall clear the current warning without erasing other servers' failures or warnings.
 
+### REQ-AGENTS-MCP-PREP-004: Retained failure diagnostics
+
+Users and operators can identify why a native MCP preparation command failed
+without repeating the failure solely to recover its cause.
+
+- **AC-AGENTS-MCP-PREP-004.1:** When native approval or verification fails, preparation shall retain its command operation, failure stage, sanitized underlying runner error and observed exit status when available. A runner failure before verification shall not be presented as evidence that the provider rejected a connection.
+- **AC-AGENTS-MCP-PREP-004.2:** Retained diagnostics shall survive task reload and appear consistently in live preparation updates, saved results and backend diagnostic logs. A primary failure shall remain identifiable if process cleanup also fails. Successful recovery shall replace the current failed step without changing another server's diagnostics or accepting an older preparation attempt.
+- **AC-AGENTS-MCP-PREP-004.3:** Diagnostics shall exclude native stdout/stderr, credentials, runtime environment values, authentication URLs and private endpoint details. Error text shall be sanitized before logging, publication or persistence, bounded to 1024 UTF-8 bytes per message and at most two messages per failed command. Missing historical diagnostics shall not invent a cause.
+- **AC-AGENTS-MCP-PREP-004.4:** Desktop and phone users shall see the retained safe cause in the failed preparation step with localized explanatory labels, selectable plain text and reachable existing recovery controls. Phone text shall wrap without document horizontal overflow. Busy recovery shall explain that the current turn must finish before retry; it shall not imply a second connection attempt failed.
+
 ## Out of scope
 
 Implementing adapters for other agents, remote credential transfer, plugin
@@ -69,5 +79,6 @@ business operations during readiness checks are excluded.
 
 ## Implementation plans
 
+- [Native MCP failure diagnostics](../../../plans/native-mcp-failure-diagnostics/plan.md)
 - [Setup recovery UX](../../../plans/setup-recovery-ux/plan.md)
 - [Agent MCP preparation](../../../plans/agent-mcp-preparation/plan.md)

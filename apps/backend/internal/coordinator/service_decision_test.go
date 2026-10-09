@@ -13,7 +13,7 @@ func TestPublishCoordinatorUpdated_PublishesOpenProposalsCount(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	c := newTestCoordinator(t, store, "ws-1")
-	if err := store.InsertProposal(ctx, &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}); err != nil {
+	if err := store.InsertProposal(ctx, &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}, false); err != nil {
 		t.Fatalf("InsertProposal: %v", err)
 	}
 

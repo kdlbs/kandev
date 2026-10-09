@@ -20,7 +20,7 @@ system_design:
 ROOT's later explicit release authorized the completed regression tests and
 local list read publication correction in `useCoordinators`.
 Use the [plan's scenario matrix](plan.md#tests) and
-[owning design](../../specs/coordinator/system-design/coordinators.md#settings-list-read-publication).
+[owning design](../../specs/coordinator/system-design/list-publication.md#settings-list-read-publication).
 Design creation does not authorize execution.
 
 ## In scope

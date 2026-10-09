@@ -6,6 +6,7 @@
 package winproc
 
 import (
+	"context"
 	"os/exec"
 
 	commonwinproc "github.com/kandev/kandev/internal/common/winproc"
@@ -19,6 +20,10 @@ func InstallKillOnCloseJobForSuspendedCommand(cmd *exec.Cmd) (KillOnCloseJob, er
 
 func InstallKillOnCloseJobForCommand(cmd *exec.Cmd) (KillOnCloseJob, error) {
 	return commonwinproc.InstallKillOnCloseJobForCommand(cmd)
+}
+
+func TerminateJobAndWaitHandle(ctx context.Context, handle uintptr) error {
+	return commonwinproc.TerminateJobAndWaitHandle(ctx, handle)
 }
 
 func InstallKillOnCloseJobForProcess(pid int) (KillOnCloseJob, error) {

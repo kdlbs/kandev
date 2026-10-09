@@ -27,6 +27,7 @@ import {
   shouldReplaceMcpAttachmentHistory,
 } from "@/lib/state/slices/session-runtime/mcp-attachment-reconciliation";
 import { getPlanLastSeen, setPlanLastSeen } from "@/lib/local-storage";
+import { sessionStateConfirmsAgentctlExecutionReady } from "@/lib/session-state";
 import {
   getWalkthroughLastSeen,
   setWalkthroughLastSeen,
@@ -74,6 +75,26 @@ function applyMessageMeta(
  * Merge message fields: only overwrite existing fields with non-undefined incoming values.
  * This handles duplicate events from multiple sources.
  */
+/** Keep an already acknowledged Git push dismissal across a delayed update without the marker. */
+function retainDismissedMetadata(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): boolean {
+  if (source.metadata === undefined) return false;
+  const targetMetadata = target.metadata as Record<string, unknown> | undefined;
+  const dismissedAt = targetMetadata?.git_operation_error_dismissed_at;
+  if (typeof dismissedAt !== "string" || dismissedAt === "") return false;
+  const sourceMetadata =
+    source.metadata !== null && typeof source.metadata === "object"
+      ? (source.metadata as Record<string, unknown>)
+      : {};
+  target.metadata = {
+    ...sourceMetadata,
+    git_operation_error_dismissed_at: dismissedAt,
+  };
+  return true;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mergeMessageFields(target: Record<string, unknown>, source: Record<string, any>) {
   const noticeResolved = (target.metadata as Message["metadata"])?.running_notice_resolved === true;
@@ -84,6 +105,7 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
       !payloadRetentionMarker(source.metadata)
     )
       continue;
+    if (key === "metadata" && retainDismissedMetadata(target, source)) continue;
     if (source[key] !== undefined) {
       target[key] = source[key];
     }
@@ -829,6 +851,33 @@ function resetQueueStateForReincarnation(
   delete draft.queue.activeOperationBySessionId[incoming.id];
 }
 
+function promoteAgentctlReadyFromSessionSnapshot(
+  draft: Pick<SessionSliceState, "sessionAgentctl">,
+  session: Pick<TaskSession, "id" | "state" | "updated_at" | "agent_execution_id">,
+): void {
+  const current = draft.sessionAgentctl.itemsBySessionId[session.id];
+  if (
+    !sessionStateConfirmsAgentctlExecutionReady(
+      session.state,
+      session.agent_execution_id,
+      current?.agentExecutionId,
+    )
+  ) {
+    return;
+  }
+  if (
+    current?.status === "ready" &&
+    (!session.agent_execution_id || current.agentExecutionId === session.agent_execution_id)
+  ) {
+    return;
+  }
+  draft.sessionAgentctl.itemsBySessionId[session.id] = {
+    status: "ready",
+    agentExecutionId: session.agent_execution_id ?? current?.agentExecutionId,
+    updatedAt: session.updated_at,
+  };
+}
+
 /** Build actions that reconcile complete session snapshots with partial live events. */
 function buildTaskSessionReconciliationActions(set: ImmerSet) {
   return {
@@ -867,6 +916,7 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
         (draft.taskSessionsByTask.errorByTaskId ??= {})[taskId] = null;
         for (const session of merged) {
           draft.taskSessions.items[session.id] = session;
+          promoteAgentctlReadyFromSessionSnapshot(draft, session);
           syncEnvironmentMapping(draft, session.id, session.task_environment_id);
           syncPrepareProgress(draft, session);
           reconcileMcpAttachmentHistory(
@@ -906,6 +956,7 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
           epochs[session.id] = (epochs[session.id] ?? 0) + 1;
         }
         draft.taskSessions.items[session.id] = merged;
+        promoteAgentctlReadyFromSessionSnapshot(draft, merged);
         const list = draft.taskSessionsByTask.itemsByTaskId[taskId];
         if (list) {
           const idx = list.findIndex((s) => s.id === session.id);
@@ -951,6 +1002,7 @@ function buildTaskSessionActions(set: ImmerSet) {
           epochs[session.id] = (epochs[session.id] ?? 0) + 1;
         }
         draft.taskSessions.items[session.id] = mergedSession;
+        promoteAgentctlReadyFromSessionSnapshot(draft, mergedSession);
         const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
         if (sessionsByTask) {
           const sessionIndex = sessionsByTask.findIndex((s) => s.id === session.id);
@@ -1154,7 +1206,17 @@ export const createSessionSlice: StateCreator<
   ...buildTaskSessionProjectionActions(set),
   setSessionAgentctlStatus: (sessionId, status) =>
     set((draft) => {
-      draft.sessionAgentctl.itemsBySessionId[sessionId] = status;
+      const session = draft.taskSessions.items[sessionId];
+      const sameLiveExecution =
+        status.status === "starting" &&
+        sessionStateConfirmsAgentctlExecutionReady(
+          session?.state,
+          session?.agent_execution_id,
+          status.agentExecutionId,
+        );
+      draft.sessionAgentctl.itemsBySessionId[sessionId] = sameLiveExecution
+        ? { ...status, status: "ready", startingExecutionId: status.agentExecutionId }
+        : status;
     }),
   setWorktree: (worktree) =>
     set((draft) => {

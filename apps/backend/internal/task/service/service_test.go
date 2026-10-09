@@ -248,6 +248,9 @@ func createTestServiceWithTaskAndSessionRepos(
 		Usage:             repo,
 		BackgroundWork:    repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
+	svc.SetProjectRepositorySourceReader(projectRepositorySourceReaderFunc(func(context.Context, string) (ProjectRepositorySources, error) {
+		return ProjectRepositorySources{WorkspaceID: "ws-1"}, nil
+	}))
 	svc.SetWorkspaceBootstrapper(repo)
 	// Reach comes from the unit tree, so the service tests wire the real one
 	// rather than a stub: a resolver the wiring never calls protects nothing.

@@ -746,6 +746,8 @@
   "visualEditorUnavailable": "Editor visual indisponível",
   "vsCodeRemoteSsh": "VS Code Remote SSH",
   "whenEnabledInstallYourProjectS": "Quando está ativado, instale as dependências do seu projeto (por exemplo, <2>{{command}}</2> através dos scripts de configuração do repositório) para evitar erros de tipos por falta de dependências.",
+  "integrationShortcuts": "Integrações",
+  "shortcutOpenIntegration": "Abrir {{integration}}",
   "shortcutBottomTerminal": "Alternar terminal inferior",
   "shortcutCommandPanel": "Painel de comandos",
   "shortcutCommandPanelAlt": "Painel de comandos (alternativo)",

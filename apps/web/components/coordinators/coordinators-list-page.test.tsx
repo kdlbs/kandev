@@ -19,6 +19,7 @@ vi.mock("@/lib/routing/client-router", () => ({
 }));
 
 type StoreState = {
+  features: { coordinatorPhase2: boolean };
   agentProfiles: { items: AgentProfileOption[] };
   executors: { items: Executor[] };
   workspaces: { items: Array<{ id: string; scopes?: string[] }> };
@@ -53,9 +54,11 @@ function setup(
   overrides: {
     coordinators?: Partial<ReturnType<typeof mockUseCoordinators>>;
     scopes?: string[];
+    phase2?: boolean;
   } = {},
 ) {
   storeState = {
+    features: { coordinatorPhase2: overrides.phase2 ?? false },
     agentProfiles: {
       items: [
         {
@@ -171,5 +174,70 @@ describe("CoordinatorsListPage", () => {
   it("shows the later-phase note", () => {
     setup();
     expect(screen.getByTestId("coordinators-later-phase-note")).toBeTruthy();
+  });
+});
+
+describe("CoordinatorsListPage summary line", () => {
+  afterEach(cleanup);
+
+  it("renders the summary line and hides the later-phase note while phase 2 is on", () => {
+    setup({
+      phase2: true,
+      coordinators: {
+        items: [
+          coordinator({
+            summary: {
+              watch_scope: "selected",
+              watched_count: 1,
+              approval_actions: 2,
+              active_orders: 1,
+            },
+          }),
+        ],
+      },
+    });
+    expect(screen.getByTestId("coordinator-summary-c1").textContent).toBe(
+      "1 board \u00b7 2 actions need approval \u00b7 1 standing order",
+    );
+    expect(screen.queryByTestId("coordinators-later-phase-note")).toBeNull();
+  });
+
+  it("names every board and a watch of no board", () => {
+    setup({
+      phase2: true,
+      coordinators: {
+        items: [
+          coordinator({
+            id: "a",
+            summary: {
+              watch_scope: "all",
+              watched_count: 0,
+              approval_actions: 1,
+              active_orders: 0,
+            },
+          }),
+          coordinator({
+            id: "b",
+            summary: {
+              watch_scope: "selected",
+              watched_count: 0,
+              approval_actions: 0,
+              active_orders: 2,
+            },
+          }),
+        ],
+      },
+    });
+    expect(screen.getByTestId("coordinator-summary-a").textContent).toBe(
+      "Every board \u00b7 1 action needs approval \u00b7 0 standing orders",
+    );
+    expect(screen.getByTestId("coordinator-summary-b").textContent).toBe(
+      "Watches no board \u00b7 0 actions need approval \u00b7 2 standing orders",
+    );
+  });
+
+  it("renders no summary line when the list carries none", () => {
+    setup({ phase2: true, coordinators: { items: [coordinator()] } });
+    expect(screen.queryByTestId("coordinator-summary-c1")).toBeNull();
   });
 });

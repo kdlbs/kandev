@@ -91,6 +91,20 @@ describe("authoritative overview coverage", () => {
       }),
     ).toBeNull();
   });
+  it("requires the task-wide running field before locally evaluating Running sort", () => {
+    const store = fixture();
+    const view = { ...DEFAULT_VIEW, sort: { key: "running", direction: "desc" } as const };
+    expect(coveredTaskOverviews(store.getState(), "workspace", view)).toBeNull();
+
+    store.setState((state) => {
+      state.kanbanMulti.snapshots.workflow.tasks[0].statusSummary = {
+        revision: 1,
+        updated_at: "2026-09-29T00:00:00Z",
+        has_running_session: false,
+      };
+    });
+    expect(coveredTaskOverviews(store.getState(), "workspace", view)).toHaveLength(1);
+  });
   it("requires hidden active workflows but allows an explicit covered workflow restriction", () => {
     const store = fixture();
     store.setState((state) => {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"go.uber.org/zap"
@@ -29,8 +28,11 @@ func (s *Service) RejectProposal(ctx context.Context, workspaceID, coordinatorID
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage); err != nil {
 		return nil, err
 	}
-	proposal, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID)
+	proposal, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.checkRejectable(proposal); err != nil {
 		return nil, err
 	}
 	if proposal.Status != ProposalStatusPending && proposal.Status != ProposalStatusFailed {
@@ -50,7 +52,7 @@ func (s *Service) RejectProposal(ctx context.Context, workspaceID, coordinatorID
 	}
 
 	decidedBy := decidingUserID(ctx)
-	matched, err := s.store.RejectProposal(ctx, proposalID, trimmed, decidedBy, time.Now())
+	matched, err := s.rejectProposalStore(ctx, proposal, trimmed, decidedBy)
 	if err != nil {
 		return nil, err
 	}
@@ -60,5 +62,5 @@ func (s *Service) RejectProposal(ctx context.Context, workspaceID, coordinatorID
 	s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
 	s.logger.Info("proposal rejected",
 		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID), zap.String("workspace_id", workspaceID))
-	return s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID)
+	return s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
 }

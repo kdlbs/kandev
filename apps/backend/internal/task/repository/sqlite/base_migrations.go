@@ -79,6 +79,27 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 //
 //nolint:cyclop,funlen,maintidx // Legacy flat list of ~60 independent idempotent migration steps predating startup-step instrumentation; splitting it is out of scope here.
 func (r *Repository) runMigrations(ctx context.Context) error {
+	for _, migration := range []struct{ name, query string }{
+		{"control_server_records.process_id", `ALTER TABLE control_server_records ADD COLUMN process_id INTEGER NOT NULL DEFAULT 0`},
+		{"control_server_records.process_group_id", `ALTER TABLE control_server_records ADD COLUMN process_group_id INTEGER NOT NULL DEFAULT 0`},
+		{"control_server_records.process_session_id", `ALTER TABLE control_server_records ADD COLUMN process_session_id INTEGER NOT NULL DEFAULT 0`},
+		{"control_server_records.process_birth_token", `ALTER TABLE control_server_records ADD COLUMN process_birth_token TEXT NOT NULL DEFAULT ''`},
+		{"session_recovery_blocks.delivery_submission_id", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_submission_id TEXT NOT NULL DEFAULT ''`},
+		{"session_recovery_blocks.delivery_stream_id", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_stream_id TEXT NOT NULL DEFAULT ''`},
+		{"session_recovery_blocks.delivery_sequence", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_sequence BIGINT NOT NULL DEFAULT 0`},
+		{"session_recovery_blocks.delivery_turn_id", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_turn_id TEXT NOT NULL DEFAULT ''`},
+		{"session_recovery_blocks.delivery_outcome", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_outcome TEXT NOT NULL DEFAULT ''`},
+		{"agent_delivery_effects.session_id", `ALTER TABLE agent_delivery_effects ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`},
+		{"agent_delivery_effects.incarnation_id", `ALTER TABLE agent_delivery_effects ADD COLUMN incarnation_id TEXT NOT NULL DEFAULT ''`},
+		{"agent_delivery_effects.harness_generation", `ALTER TABLE agent_delivery_effects ADD COLUMN harness_generation BIGINT NOT NULL DEFAULT 0`},
+		{"agent_delivery_effects.submission_id", `ALTER TABLE agent_delivery_effects ADD COLUMN submission_id TEXT NOT NULL DEFAULT ''`},
+		{"agent_delivery_effects.turn_id", `ALTER TABLE agent_delivery_effects ADD COLUMN turn_id TEXT NOT NULL DEFAULT ''`},
+		{"agent_delivery_effects.outcome", `ALTER TABLE agent_delivery_effects ADD COLUMN outcome TEXT NOT NULL DEFAULT ''`},
+	} {
+		if err := r.migrate.Apply(migration.name, migration.query); err != nil {
+			return fmt.Errorf("apply migration %q: %w", migration.name, err)
+		}
+	}
 	if err := r.migrateTaskPriorityToTextPostgres(); err != nil {
 		return err
 	}
@@ -100,6 +121,12 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	r.migrate.Apply("task_sessions.route_state", `ALTER TABLE task_sessions ADD COLUMN route_state TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_sessions.route_reason", `ALTER TABLE task_sessions ADD COLUMN route_reason TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("task_sessions.downstream_acp_session_id", `ALTER TABLE task_sessions ADD COLUMN downstream_acp_session_id TEXT NOT NULL DEFAULT ''`)
+	if err := r.migrate.Apply("session_continuation_snapshots.target_generation", `ALTER TABLE session_continuation_snapshots ADD COLUMN target_generation BIGINT NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("session_continuation_snapshots.submission_id", `ALTER TABLE session_continuation_snapshots ADD COLUMN submission_id TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	r.migrate.Apply("dynamic_route_states.continuation_json", `ALTER TABLE dynamic_route_states ADD COLUMN continuation_json TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("dynamic_route_states.policy_state_json", `ALTER TABLE dynamic_route_states ADD COLUMN policy_state_json TEXT NOT NULL DEFAULT ''`)
 	if err := r.backfillLegacyActiveDynamicRoutes(); err != nil {

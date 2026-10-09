@@ -4,11 +4,11 @@ import "github.com/kandev/kandev/internal/agentctl/types/streams"
 
 func (a *Adapter) beginContinuationPermission(sessionID, toolCallID string, options []PermissionOption) func(*PermissionResponse, error) {
 	a.mu.RLock()
-	enabled := a.cfg.ProviderInterruptionContinuation && sessionID == a.sessionID && !a.isLoadingSession
+	eligible := sessionID == a.sessionID && !a.isLoadingSession
 	support := a.dialect.continuationSupport
 	a.mu.RUnlock()
 	turn := a.currentPromptTurn()
-	if !enabled || turn == nil || turn.promptGeneration == 0 {
+	if !eligible || turn == nil || turn.promptGeneration == 0 {
 		return nil
 	}
 	turn.evidenceMu.Lock()

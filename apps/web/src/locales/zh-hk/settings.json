@@ -768,6 +768,8 @@
   "visualEditorUnavailable": "可視化編輯器不可用",
   "vsCodeRemoteSsh": "VS Code Remote SSH",
   "whenEnabledInstallYourProjectS": "啓用後，會通過儲存庫設定腳本安裝項目依賴（例如執行 <2>{{command}}</2>），以避免缺少類型錯誤。",
+  "integrationShortcuts": "集成",
+  "shortcutOpenIntegration": "開啟 {{integration}}",
   "shortcutBottomTerminal": "切換底部終端",
   "shortcutCommandPanel": "命令面板",
   "shortcutCommandPanelAlt": "命令面板（備用）",

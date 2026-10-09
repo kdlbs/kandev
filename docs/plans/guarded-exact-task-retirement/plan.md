@@ -23,7 +23,7 @@ and add the operation ledger and physical executor.
 
 - [x] [Task 01: Record exact-retirement contract](task-01-record-contract.md)
 - [x] [Task 02: Add read-only exact-pair preview](task-02-read-only-preview.md)
-- [ ] Task 03: Integrate preservation, FIFO handoff, and pending-move evidence.
+- [ ] [Task 03: Design preservation and handoff evidence](task-03-preservation-handoff.md)
 - [ ] Task 04: Add the fenced operation ledger and admission claim.
 - [ ] Task 05: Add exact physical cleanup under worktree guards.
 - [ ] Task 06: Finalize old-only deletion, tombstone, and recovery.
