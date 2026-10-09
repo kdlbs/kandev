@@ -207,3 +207,15 @@ After the final main merge, a fresh build passed those five desktop scenarios ag
 Affected upstream background-probe, agent API, and credential tests passed under the race detector. Runtime-proxy race regressions passed three repetitions on the final merged code; document catalog and specification validation also passed. The full runtime-client suite, gateway proxy races, VS Code process races, and changed-package lint passed before the final merge, which did not change those implementations.
 
 Evidence logs: `/tmp/pr4332-final-desktop-complete.log`, `/tmp/kandev-run.e2e.y9uGK71c.log`, `/tmp/pr4332-merged-desktop.log`, `/tmp/pr4332-final-feature.log`, and `/tmp/pr4332-latest-main-{probe,api,credentials}.log`. Remote CI is still pending. Work order 09 retains its disclosed executor, storage, and performance qualification gaps.
+
+
+### Ambient environment CI follow-up
+
+- [x] Reproduce `TestAmbientEnvCoverageIncludesEveryPackageEnvRead` on the pushed commit.
+- [x] Register `XDG_RUNTIME_DIR` in the process test environment inventory.
+- [x] Verify both poisoned-environment CI commands.
+- [ ] Push and confirm fresh-head CI.
+
+CI caught the environment inventory omitted from the Linux editor IPC fix. The host runtime directory must remain available to code-server; socket tests explicitly select isolated directories. The inventory now records that exemption. The existing guard failed before the correction. This changes test metadata only; editor behavior and the earlier browser evidence remain unchanged.
+
+Both exact CI commands passed locally under their poisoned environment values: `go test -race ./internal/gitlab/... ./internal/agentctl/server/process/...` (process package: 263.5 seconds) and `go test -race ./internal/github/...` (69.3 seconds). Logs: `/tmp/pr4332-ambient-env-{red,green}.log` and `/tmp/pr4332-ambient-github-green.log`.
