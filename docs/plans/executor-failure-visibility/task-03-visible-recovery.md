@@ -738,3 +738,16 @@ bridge in its pre-navigation init script. This fixes the observation setup,
 without changing store data, production behavior or assertion timeouts. Local
 container execution remains unavailable because of the host Docker bridge;
 fresh remote execution is still required.
+
+
+The following CI run failed in multiple Docker and SSH image-build worker
+fixtures before application assertions. Both helpers discarded build stderr
+in their default mode, hiding the primary cause. They now capture it in the
+native thrown error while preserving explicit debug streaming and temporary
+context cleanup. Real subprocess regressions failed with discarded stderr and
+passed after the correction for both image builders. Changed-file ESLint and
+web typecheck passed. A local container attempt now exposes its missing Docker
+bridge in the default error output; it remains an unavailable integration
+check. That local cause does not establish the remote hosted runner cause.
+Fresh remote logs and container assertions remain delivery gates. This internal
+test diagnostic change has no user-facing copy or public documentation impact.

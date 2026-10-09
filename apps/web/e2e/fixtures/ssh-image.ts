@@ -195,7 +195,7 @@ export function buildE2ESSHImage(): void {
       path.join(ctxDir, "managed-runtime-npx.sh"),
     );
     execFileSync("docker", ["build", "-t", SSH_E2E_IMAGE_TAG, ctxDir], {
-      stdio: process.env.E2E_DEBUG ? "inherit" : "ignore",
+      stdio: process.env.E2E_DEBUG ? "inherit" : "pipe",
       // 15-minute ceiling — even cold-cache builds (apk add openssh-server
       // + a few hundred KB of mock-agent + sshd config) finish well under
       // a minute. A stuck registry pull or BuildKit hang should fail fast.

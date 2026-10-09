@@ -71,7 +71,7 @@ function buildImage(tag: string, dockerfile: string): void {
     fs.copyFileSync(FAKE_LSP_SERVER, path.join(tmpDir, "fake-lsp-server.mjs"));
     fs.copyFileSync(MANAGED_RUNTIME_NPX_WRAPPER, path.join(tmpDir, "managed-runtime-npx.sh"));
     execFileSync("docker", ["build", "-t", tag, tmpDir], {
-      stdio: process.env.E2E_DEBUG ? "inherit" : "ignore",
+      stdio: process.env.E2E_DEBUG ? "inherit" : "pipe",
     });
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
