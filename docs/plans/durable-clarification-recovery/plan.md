@@ -14,10 +14,11 @@ system_design:
 
 ## Outcome
 
-Prevent detached clarification answers from becoming journal-only prompt
-submissions, and make the existing explicit recovery available for interrupted
-durable work. This implements the diagnosed integration gap in PR #3598 using
-the existing delivery and harness-continuity contracts.
+Prevent detached clarification answers and watchdog replacements from becoming
+journal-only prompt submissions. Make the existing explicit history continuation
+available in the main composer recovery card for interrupted durable work. This
+implements the diagnosed integration gap in PR #3598 using the existing delivery
+and harness-continuity contracts.
 
 ## Contracts
 
@@ -32,8 +33,9 @@ Execute [task 01](task-01-clarification-admission-and-recovery.md) in this sessi
 The user requested implementation and a PR following the completed investigation.
 
 1. Reproduce missing backend registration and missing bounded recovery response.
-2. Register each detached-answer dispatch attempt before provider admission.
-3. Expose explicit history continuation for unresolved durable work.
+2. Register each detached-answer and watchdog dispatch before provider admission.
+3. Expose explicit history continuation for unresolved durable work and wire it
+   into the primary composer recovery card after the bounded Resume response.
 4. Run the targeted race tests and lint, then publish the PR.
 
 ## Deployment and existing sessions
@@ -50,13 +52,20 @@ Kandev history. The existing generation transition retires the old submissions.
 Run from `apps/backend`:
 
 ```bash
-go test -trimpath -race ./internal/orchestrator ./internal/orchestrator/handlers -run 'TestDetachedClarification|TestResumeDetachedClarification|TestRestoreRequiredRecoveryResponse|TestWSLaunchSession_DurableRecovery' -count=1
+go test -trimpath -race ./internal/orchestrator ./internal/orchestrator/handlers -run 'TestDetachedClarification|TestResumeDetachedClarification|TestClarificationWatchdog|TestRestoreRequiredRecoveryResponse|TestWSLaunchSession_DurableRecovery' -count=1
 golangci-lint run ./internal/orchestrator/... --new-from-rev=770ba303fd07f26edab2f7edb84ad62684111813 --timeout=5m
 ```
 
 Also run `python3 scripts/list-docs.py validate` and `git diff --check` from the
-repository root. Backend-only changes reuse the existing recovery controls;
-no frontend layout or component changes are included.
+repository root. From `apps/web`, run the focused card tests and managed browser
+regressions:
+
+```bash
+pnpm exec vitest run components/task/chat/session-recovery-card-history.test.tsx components/task/chat/session-recovery-card.test.tsx components/task/chat/messages/action-message-recovery.test.tsx --maxWorkers=1
+pnpm exec tsc --noEmit
+pnpm e2e:run --host --project chromium -- tests/session/history-continuation-recovery.spec.ts --retries=0
+pnpm e2e:run --host --project mobile-chrome -- tests/session/mobile-history-continuation-recovery.spec.ts --retries=0
+```
 
 ## Risks
 
@@ -71,3 +80,13 @@ missing behavior before the production change. The targeted tests passed with
 the race detector, changed-code lint reported zero issues, and documentation
 coverage, catalog validation and whitespace checks passed. The implementation
 keeps existing prompt claims, generation transitions and explicit recovery.
+
+Review follow-up: the watchdog's direct prompt call also omitted the identity,
+and the primary card omitted an option already supported by the older banner.
+Both defects were reproduced before their fixes, including the browser's missing
+button after a bounded Resume response. Follow-up race tests passed, 46 focused
+component tests passed, and one desktop plus one 320px mobile E2E passed with
+retries disabled. TypeScript and changed-file ESLint passed. The browser checks
+require the visible button, an unobstructed hit target, explicit user activation
+and the original task/session identity; managed-clone recovery keeps precedence.
+Remote CI and review disposition remain tracked in PR #4383.

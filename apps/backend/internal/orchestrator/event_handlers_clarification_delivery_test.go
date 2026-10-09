@@ -123,3 +123,48 @@ func TestDetachedClarificationBlocksUnresolvedDelivery(t *testing.T) {
 	require.NotNil(t, block)
 	require.Equal(t, durableDeliveryUnresolvedReason, block.Reason)
 }
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-003.1
+func TestClarificationWatchdogPersistsDeliveryBeforeDispatch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-watchdog", "session-watchdog", "step-1")
+	seedExecutorRunning(t, repo, "session-watchdog", "task-watchdog", "execution-watchdog")
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "session-watchdog", models.TaskSessionStateWaitingForInput, ""))
+	base := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	var admitted *models.AgentDeliverySubmission
+	manager := &clarificationDeliveryTestManager{
+		durableDeliveryTestAgentManager: &durableDeliveryTestAgentManager{
+			mockAgentManager: base, advertised: true,
+			capability: agentruntime.DurableDeliveryCapability{Version: journal.CurrentVersion, Durable: true},
+		},
+		onSubmission: func(ctx context.Context, id string) {
+			var err error
+			admitted, err = repo.GetAgentDeliverySubmission(ctx, id)
+			require.NoError(t, err, "watchdog answers must be registered before provider dispatch")
+			require.Equal(t, models.DeliverySubmissionDispatching, admitted.State)
+		},
+	}
+	service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	service.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	service.turnService = &repoTurnService{repo: repo}
+	turn, err := service.turnService.StartTurn(ctx, "session-watchdog")
+	require.NoError(t, err)
+	data := clarificationAnsweredData{
+		TaskID: "task-watchdog", SessionID: "session-watchdog", PendingID: "pending-watchdog",
+		ClarificationTurnID: turn.ID, Question: "Continue?", AnswerText: "Continue",
+	}
+	key := service.clarificationWatchdogKey(data.SessionID, data.PendingID)
+	entry := &clarificationWatchdogEntry{}
+	service.clarificationWatchdogs.Store(key, entry)
+	service.runClarificationWatchdog(ctx, key, entry, data, 0)
+
+	require.Zero(t, countClarificationWatchdogs(service))
+	require.NotEmpty(t, manager.submissionID, "the watchdog must retain the backend delivery identity")
+	require.NotNil(t, admitted)
+	require.Equal(t, data.SessionID, admitted.SessionID)
+	require.Equal(t, journal.SubmissionHash(admitted.Payload), admitted.PayloadHash)
+	var payload agentDeliveryPromptPayload
+	require.NoError(t, json.Unmarshal(admitted.Payload, &payload))
+	require.Equal(t, []string{payload.Text}, base.capturedPrompts)
+}

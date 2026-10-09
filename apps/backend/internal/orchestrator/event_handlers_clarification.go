@@ -410,7 +410,10 @@ func (s *Service) resumeClarificationViaFallback(ctx context.Context, data clari
 		nil,
 		false,
 		launchOriginAutomatic,
-		promptTaskOptions{expectedCurrentTurnID: data.ClarificationTurnID},
+		promptTaskOptions{
+			expectedCurrentTurnID: data.ClarificationTurnID,
+			deliverySubmissionID:  "clarification:" + uuid.NewString(),
+		},
 	); err != nil {
 		if !s.retryClarificationAfterCancel(ctx, data, prompt, err) {
 			s.logger.Error("failed to resume agent via clarification watchdog fallback",
