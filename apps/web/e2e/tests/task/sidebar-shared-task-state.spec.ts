@@ -5,6 +5,8 @@ import {
   exerciseSharedFirstResponse,
 } from "./sidebar-shared-task-state-fixtures";
 
+test.describe.configure({ retries: 0 });
+
 test("desktop pages complete shared state without queries and bounds archived ownership", async ({
   testPage,
   apiClient,

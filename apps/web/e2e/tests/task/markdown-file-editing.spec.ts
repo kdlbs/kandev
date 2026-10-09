@@ -83,8 +83,7 @@ async function seedMarkdownSession({
 async function openFile(session: SessionPage, testPage: Page, fileName: string): Promise<void> {
   await session.clickTab("Files");
   await expect(session.files).toBeVisible({ timeout: 10_000 });
-  const fileNode = session.fileTreeNode(fileName);
-  await expect(fileNode).toBeVisible({ timeout: 15_000 });
+  const fileNode = await session.fileTree.waitForFileTreeNode(fileName);
   await fileNode.click();
   await expect(testPage.getByTestId("markdown-file-editor")).toBeVisible({ timeout: 15_000 });
 }

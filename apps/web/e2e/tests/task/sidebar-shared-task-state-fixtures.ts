@@ -170,7 +170,7 @@ export async function exerciseSharedFirstResponse(
   seed: SeedData,
   mobile: boolean,
 ) {
-  await saveViews(api, seed, true);
+  await saveViews(api, seed, false);
   const tasks = [];
   for (const name of ["kept", "deleted", "unarchived"])
     tasks.push(
@@ -184,6 +184,10 @@ export async function exerciseSharedFirstResponse(
     tasks.map((task) => task.id),
   );
   const anchor = await anchorTask(api, seed);
+  await page.goto(`/t/${anchor.id}`);
+  const { rows } = await surface(page, mobile);
+  await waitForCoverage(page, seed.workspaceId);
+  await expect(rows.getByRole("status").filter({ hasText: "Updating tasks" })).toHaveCount(0);
   const captured = gate(),
     first = gate(),
     trailing = gate();
@@ -201,8 +205,8 @@ export async function exerciseSharedFirstResponse(
     }
   });
   try {
-    await page.goto(`/t/${anchor.id}`);
-    const { rows } = await surface(page, mobile);
+    expect(requests).toBe(0);
+    await selectView(page, rows, mobile, ARCHIVES);
     await captured.promise;
     await api.updateTaskTitle(tasks[0].id, "Shared fixture kept live");
     await api.deleteTask(tasks[1].id);

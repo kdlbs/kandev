@@ -135,8 +135,7 @@ test.describe("Mobile Markdown file editing", () => {
       .getByTestId("session-mobile-bottom-nav")
       .getByRole("button", { name: "Files", exact: true })
       .tap();
-    const fileNode = session.fileTreeNode(fileName);
-    await expect(fileNode).toBeVisible({ timeout: 15_000 });
+    const fileNode = await session.fileTree.waitForFileTreeNode(fileName);
     await fileNode.tap();
 
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
