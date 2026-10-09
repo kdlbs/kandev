@@ -138,3 +138,20 @@ Command: `KANDEV_E2E_CONTAINERS=1 pnpm --dir apps/web e2e:run --host --no-build 
 The full post-push hold ran from 20:53:37 UTC to 21:08:37 UTC before PR fixup started. The initial fixup snapshot found no failed checks or unresolved inline threads, but CI remained queued. A sampled job had `runner_id=0` and no steps. GitHub API rate limiting temporarily blocked complete policy/review evidence; the standard waiter restarted after the quota reset. Terminal current-head CI and review completion remain pending until verified.
 
 A disposable synthetic merge checked the QA code against base `5aa06bcefe02b6ce7b7c321f7092efe89f0c8992`. It merged without conflicts. Focused checkpoint/lifecycle/boot-state tests, the coordinator package, six frontend files (36 tests), localization, and public-doc validation passed. This is compatibility evidence for those exact inputs, not a completed CI verdict.
+
+## Conflict and CI follow-up (2026-10-09)
+
+- [x] Inspect current-head CI and review evidence. The earlier head had one failing leaf job: Windows process tests.
+- [x] Reconcile upstream prompt delivery, retained runtime failure, canonical transcript, schema, and Git security changes.
+- [x] Replace Windows-invalid quoted-filename coverage with a portable Unicode filename; retain the control-character case on Unix.
+- [x] Add failing regressions for canonical reply anchors and capture finalization on retained failed turns, then implement the fixes.
+- [x] Verify the merged code locally.
+- [ ] Push and confirm terminal current-head CI/reviews.
+
+The Windows failure occurred when the fixture tried to create a filename containing a tab and double quote. The portable Unicode case still requires Git path quoting. No product behavior was relaxed to pass the test.
+
+Conflict resolution preserves both turn-change tables and upstream delivery/continuity tables. Stream disconnects retain the upstream uncertain-delivery and cancellation guards, while definitive failure captures the end interval before publishing the error. Prompt dispatch retains its delivery submission identity and capture-failure callback.
+
+Post-merge validation passed: focused race tests for lifecycle, checkpoint processing, change coordination, Git security, and the required-store catalog; the full lifecycle, change-coordinator, backendapp, and requiredstores packages; focused SQLite turn-change tests; six frontend files (36 tests); typecheck; localization; specification/catalog/public-doc checks; four desktop and three mobile E2Es on rebuilt assets. Windows execution remains a required remote CI check.
+
+The first post-merge CI run exposed a fixture inventory mismatch: upstream now lists missing tables individually, and the v0.93.0 manifest omitted the six turn-history tables. The exact SQLite upgrade assertion failed locally before the manifest correction. Afterwards the full SQLite conformance suite passed under `-race`, and upgrade/manifest tests passed with a disposable PostgreSQL 16 DSN. The archived SQL fixtures were not changed; their missing-table metadata now matches the combined required-store catalog.

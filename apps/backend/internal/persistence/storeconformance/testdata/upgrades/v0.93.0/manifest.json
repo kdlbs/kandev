@@ -508,7 +508,13 @@
       "session_recovery_blocks",
       "session_restore_attempts",
       "task_environment_kubernetes",
-      "task_workflow_session_bindings"
+      "task_workflow_session_bindings",
+      "turn_change_content_leases",
+      "turn_change_content_links",
+      "turn_change_contents",
+      "turn_change_sets",
+      "turn_file_changes",
+      "turn_repository_changes"
     ]
   }
 }
