@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { GitHelper } from "../../helpers/git-helper";
 
 const SAVED_HTML = "<!doctype html><html><body><p>Saved source</p></body></html>";
@@ -18,14 +20,19 @@ function previewPaths(suffix: string): string[] {
   ];
 }
 
-function rollbackPreviewHistory(git: GitHelper, initialHead: string, setupError: unknown): never {
+function rollbackPreviewHistory(
+  git: GitHelper,
+  initialHead: string,
+  attemptedPaths: string[],
+  setupError: unknown,
+): never {
   const errors = [setupError];
   try {
     git.exec(`git reset --hard ${initialHead}`);
   } catch (error) {
     errors.push(error);
   }
-  for (const name of HISTORY_SUFFIXES.flatMap(previewPaths)) {
+  for (const name of attemptedPaths) {
     try {
       git.deleteFile(name);
     } catch (error) {
@@ -63,14 +70,25 @@ function nativePreviewScript(entryName: string): string {
 
 export function seedContinuityPreviewHistory(git: GitHelper) {
   const initialHead = git.getCurrentSha();
+  const directory = git.exec("git rev-parse --show-toplevel").trim();
+  for (const name of HISTORY_SUFFIXES.flatMap(previewPaths)) {
+    if (fs.lstatSync(path.join(directory, name), { throwIfNoEntry: false })) {
+      throw new Error(`Preview history fixture path already exists: ${name}`);
+    }
+  }
+  const attemptedPaths: string[] = [];
+  const createPreviewFile = (name: string, content: string) => {
+    attemptedPaths.push(name);
+    git.createFile(name, content);
+  };
   try {
     for (const suffix of HISTORY_SUFFIXES) {
       const fileName = `preview-${suffix}.html`;
       const assetDirectory = `preview-assets-${suffix}`;
-      git.createFile(fileName, SAVED_HTML);
-      git.createFile(`${assetDirectory}/preview.css`, "#css-status { font-weight: 700; }");
-      git.createFile(`${assetDirectory}/preview.js`, nativePreviewScript(fileName));
-      git.createFile(`${assetDirectory}/logo.svg`, SVG_ASSET);
+      createPreviewFile(fileName, SAVED_HTML);
+      createPreviewFile(`${assetDirectory}/preview.css`, "#css-status { font-weight: 700; }");
+      createPreviewFile(`${assetDirectory}/preview.js`, nativePreviewScript(fileName));
+      createPreviewFile(`${assetDirectory}/logo.svg`, SVG_ASSET);
       git.exec(
         `git add -- ${previewPaths(suffix)
           .map((name) => `"${name}"`)
@@ -79,7 +97,7 @@ export function seedContinuityPreviewHistory(git: GitHelper) {
       git.commit(`add ${fileName}`);
     }
   } catch (error) {
-    rollbackPreviewHistory(git, initialHead, error);
+    rollbackPreviewHistory(git, initialHead, attemptedPaths, error);
   }
   return () => git.exec(`git reset --hard ${initialHead}`);
 }

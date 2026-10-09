@@ -480,3 +480,31 @@ One fresh managed Pierre desktop success case passes in 15.2 seconds, with one
 worker, no retries and one repetition. Scoped checks and active-hook publication
 receipts are recorded in the own task plan. New-head hosted review and CI remain
 pending a later ROOT release after explicit local-heavy return and END/WFI.
+
+### Shared preview-path collision correction
+
+The prior setup rollback is the baseline for a qualified shared review finding:
+fixed preview paths could overwrite pre-existing files, and rollback deleted
+unattempted paths. The exact source-owner helper/test correction is implemented.
+It checks all twelve fixed leaf paths before the first write, records each
+attempted path before creation, and deletes only attempted paths on setup failure.
+It preserves the
+original setup error and cleanup errors, successful history and restore callback,
+preview contents, geometry, assertions, timeouts and strict flaky policy.
+
+The source owner's four real-Git collision RED cases and five prior controls
+are authoritative and accepted without duplicate authoring or replay. Local
+validation is limited to the exact nine helper GREEN cases, one fresh managed
+Chromium/Pierre desktop success case with one worker, no retries and one
+repetition, affected helper/test lint and formatting, document/reference/actual
+13-path scope checks, and normal active-hook corrective publication. No shared
+GitHelper, product, backend, mobile or runner configuration change applies.
+All nine actual-Git helper controls pass in 544 milliseconds. The fresh managed
+Pierre desktop success control passes in 15.3 seconds with one worker, no retries
+and one repetition. The initial lightweight discovery invocation failed on a
+known variadic project-selector syntax mistake before any test ran; the corrected
+same-case discovery finds exactly one Chromium case without errors. That failed
+receipt remains failed and does not count as a product failure or causal RED.
+Scoped-check and normal publication receipts are retained in the own task plan.
+Hosted new-head evidence remains pending a later ROOT release after explicit
+local-heavy return and actual END/WFI; prior-head CI/review evidence is historical.

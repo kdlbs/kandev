@@ -76,6 +76,63 @@ function expectRestored(git: GitHelper, directory: string, initialHead: string) 
 
 describe("seedContinuityPreviewHistory real Git rollback", () => {
   it.each([
+    { position: "early", state: "tracked", collisionPath: OWNED_PATHS[0] },
+    { position: "later", state: "untracked", collisionPath: OWNED_PATHS[11] },
+    { position: "later", state: "ignored", collisionPath: OWNED_PATHS[9] },
+    {
+      position: "before an earlier write failure",
+      state: "untracked",
+      collisionPath: OWNED_PATHS[7],
+    },
+  ])(
+    "preserves a $state $position collision before writing history",
+    ({ position, state, collisionPath }) => {
+      withRepository((git, directory) => {
+        git.createFile(collisionPath, "existing preview fixture\n");
+        if (state === "tracked") {
+          git.stageFile(collisionPath);
+          git.commit("seed existing preview fixture");
+        } else if (state === "ignored") {
+          fs.writeFileSync(path.join(directory, ".git/info/exclude"), `${collisionPath}\n`);
+        }
+        git.createFile("staged-sentinel.txt", "staged sentinel\n");
+        git.stageFile("staged-sentinel.txt");
+        const snapshot = () => ({
+          head: git.getCurrentSha(),
+          index: git.exec("git write-tree").trim(),
+          status: git.exec("git status --porcelain --untracked-files=all --ignored"),
+          files: [
+            ...OWNED_PATHS,
+            "tracked-sentinel.txt",
+            "staged-sentinel.txt",
+            UNTRACKED_PATH,
+          ].map((name) => {
+            const file = path.join(directory, name);
+            return [name, fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null];
+          }),
+        });
+        const before = snapshot();
+        const setupError = new Error("earlier preview write failed");
+        const createFile = git.createFile.bind(git);
+        const writes = vi.spyOn(git, "createFile").mockImplementation((name, content) => {
+          createFile(name, content);
+          if (position === "before an earlier write failure") throw setupError;
+        });
+        let caught: unknown;
+        try {
+          seedContinuityPreviewHistory(git);
+        } catch (error) {
+          caught = error;
+        }
+        expect.soft(caught).toBeInstanceOf(Error);
+        expect.soft((caught as Error | undefined)?.message).toContain(collisionPath);
+        expect.soft(writes).not.toHaveBeenCalled();
+        expect(snapshot()).toEqual(before);
+      });
+    },
+  );
+
+  it.each([
     { phase: "early", failurePath: "preview-01-continuity-history.html" },
     {
       phase: "after an earlier commit",
