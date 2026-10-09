@@ -232,43 +232,6 @@ describe("PRTaskIcon tooltip accessibility", () => {
   });
 });
 
-describe("PRTaskIcon hover delay", () => {
-  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.26
-  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.28
-  it("does not hydrate during a brief hover and hydrates once after deliberate disclosure", async () => {
-    vi.useFakeTimers();
-    const response = new Promise<{ task_prs: Record<string, TaskPR[]> }>(() => {});
-    listTaskPRsMock.mockReturnValue(response);
-    renderWithStore(
-      { workspaces: { items: [], activeId: WORKSPACE_ID } },
-      <TaskContributionIcons
-        taskId={TASK_ID}
-        prInfo={{ number: 7, state: "open", aggregateState: "pending" }}
-      />,
-    );
-
-    const icon = screen.getByTestId(`pr-task-icon-${TASK_ID}`);
-    act(() => fireEvent.pointerEnter(icon, { pointerType: "mouse" }));
-    expect(listTaskPRsMock).not.toHaveBeenCalled();
-
-    await act(async () => {
-      vi.advanceTimersByTime(499);
-    });
-    expect(listTaskPRsMock).not.toHaveBeenCalled();
-    expect(screen.queryByTestId(TOOLTIP_LOADING_TEST_ID)).toBeNull();
-
-    await act(async () => {
-      vi.advanceTimersByTime(1);
-      await Promise.resolve();
-    });
-    expect(listTaskPRsMock).toHaveBeenCalledTimes(1);
-    expect(screen.getAllByTestId(TOOLTIP_LOADING_TEST_ID)).not.toHaveLength(0);
-
-    act(() => fireEvent.pointerEnter(icon, { pointerType: "mouse" }));
-    expect(listTaskPRsMock).toHaveBeenCalledTimes(1);
-  });
-});
-
 describe("PRTaskIcon disclosure hydration", () => {
   it("keeps keyboard focus and the open tooltip when hydration completes", async () => {
     let resolveResponse!: (value: { task_prs: Record<string, TaskPR[]> }) => void;

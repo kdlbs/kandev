@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { TaskContributionIcons } from "@/components/task/task-contribution-icons";
@@ -92,6 +92,35 @@ function makeAutomationOptions(): TaskCIAutomationOptions {
 afterEach(() => cleanup());
 
 describe("PRTaskIcon automation disclosure", () => {
+  it("shows pending automation settings before hiding a disabled section", async () => {
+    let resolveOptions!: (value: TaskCIAutomationOptions) => void;
+    const response = new Promise<TaskCIAutomationOptions>((resolve) => {
+      resolveOptions = resolve;
+    });
+    apiMocks.getTaskCIAutomationOptions.mockReset().mockReturnValue(response);
+    renderWithStore(
+      {
+        workspaces: { items: [], activeId: WORKSPACE_ID },
+        taskPRs: { byTaskId: { [TASK_ID]: [makePR()] } },
+      },
+      <TaskContributionIcons taskId={TASK_ID} prInfo={{ number: 1, state: "open" }} />,
+    );
+
+    fireEvent.pointerEnter(screen.getByTestId(`pr-task-icon-${TASK_ID}`), {
+      pointerType: "mouse",
+    });
+    await waitFor(() => expect(apiMocks.getTaskCIAutomationOptions).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("pr-task-automation-details").textContent).toContain(
+      "Loading pull request details",
+    );
+
+    await act(async () => {
+      resolveOptions({ ...makeAutomationOptions(), pr_options: [] });
+      await response;
+    });
+    await waitFor(() => expect(screen.queryByTestId("pr-task-automation-details")).toBeNull());
+  });
+
   // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.29
   it("loads per-PR automation settings when full PR records are already cached", async () => {
     apiMocks.listTaskPRs.mockReset();

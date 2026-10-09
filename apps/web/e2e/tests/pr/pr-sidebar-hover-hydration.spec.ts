@@ -7,6 +7,64 @@ import { installNewerNegativePRProjectionFixture } from "../../helpers/pr-negati
 const NAVIGATION_TITLE = "PR summary navigation";
 const TARGET_TITLE = "Inactive PR summary target";
 
+test("shows pending automation settings before omitting disabled actions", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  const stepOptions = {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+  };
+  const navigation = await apiClient.seedTask(seedData.workspaceId, NAVIGATION_TITLE, stepOptions);
+  const target = await apiClient.seedTask(seedData.workspaceId, TARGET_TITLE, stepOptions);
+  await apiClient.mockGitHubAssociateTaskPR({
+    workspace_id: seedData.workspaceId,
+    repository_id: seedData.repositoryId,
+    task_id: target.task_id,
+    owner: "kandev-e2e",
+    repo: "sidebar-loading",
+    pr_number: 66,
+    pr_url: "https://github.test/kandev-e2e/sidebar-loading/pull/66",
+    pr_title: "PR with disabled automation",
+    head_branch: "feature/sidebar-loading",
+    base_branch: "main",
+    author_login: "test-user",
+    state: "open",
+  });
+  await testPage.goto(`/t/${navigation.task_id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+  let releaseOptions!: () => void;
+  const pendingOptions = new Promise<void>((resolve) => {
+    releaseOptions = resolve;
+  });
+  await testPage.route(`**/api/v1/github/tasks/${target.task_id}/ci-options`, async (route) => {
+    const response = await route.fetch();
+    await pendingOptions;
+    await route.fulfill({ response });
+  });
+  try {
+    await session
+      .sidebarTaskItem(TARGET_TITLE)
+      .getByTestId(`pr-task-icon-${target.task_id}`)
+      .hover();
+    const automation = testPage.getByTestId("pr-task-automation-details");
+    await expect(automation).toContainText("Loading pull request details");
+    await prCapture.screenshot("desktop-pr-automation-loading", {
+      caption:
+        "Desktop PR summary shows pending automation settings before hiding disabled actions.",
+    });
+    releaseOptions();
+    await expect(testPage.getByTestId("pr-task-status-number")).toHaveText("PR #66");
+    await expect(automation).toHaveCount(0);
+  } finally {
+    releaseOptions();
+    await testPage.unrouteAll({ behavior: "wait" });
+  }
+});
+
 type AutomationE2EStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
     getState: () => {
@@ -185,38 +243,40 @@ async function expectTaskAutomationHydrated({
     repositoryId,
   );
 
-  const evidence = await page.evaluate((id) => {
-    const store = (window as AutomationE2EStoreWindow).__KANDEV_E2E_STORE__;
-    const state = store?.getState();
-    if (!state) return null;
-
-    const pr = state.taskPRs.byTaskId[id]?.find((candidate) => candidate.pr_number === 51);
-    const automation = state.taskCIAutomation?.byTaskId?.[id];
-    const matchingAutomation = automation?.pr_options?.find(
-      (option) => option.pr_number === pr?.pr_number && option.repository_id === pr?.repository_id,
-    );
-    return {
-      workspaceId: state.workspaces.activeId,
-      workspaceContextGeneration: state.workspaceContextGeneration,
-      taskPRWorkspaceId: state.taskPRs.workspaceId,
-      taskPRWorkspaceContextGeneration: state.taskPRs.workspaceContextGeneration,
-      pr,
-      automation,
-      matchingAutomation,
-    };
-  }, taskId);
-  expect(evidence?.workspaceId).toBe(workspaceId);
-  expect(evidence?.taskPRWorkspaceId).toBe(workspaceId);
-  expect(evidence?.taskPRWorkspaceContextGeneration).toBe(evidence?.workspaceContextGeneration);
-  expect(evidence?.automation?.workspace_id).toBe(workspaceId);
-  expect(evidence?.pr?.repository_id).toBe(repositoryId);
-  expect(evidence?.matchingAutomation).toEqual(
-    expect.objectContaining({
-      repository_id: repositoryId,
-      auto_fix_enabled: true,
-      auto_merge_enabled: false,
-    }),
-  );
+  await expect
+    .poll(() =>
+      page.evaluate((id) => {
+        const state = (window as AutomationE2EStoreWindow).__KANDEV_E2E_STORE__?.getState();
+        if (!state) return null;
+        const pr = state.taskPRs.byTaskId[id]?.find((candidate) => candidate.pr_number === 51);
+        const automation = state.taskCIAutomation?.byTaskId?.[id];
+        const matchingAutomation = automation?.pr_options?.find(
+          (option) =>
+            option.pr_number === pr?.pr_number && option.repository_id === pr?.repository_id,
+        );
+        return {
+          workspaceId: state.workspaces.activeId,
+          taskPRWorkspaceId: state.taskPRs.workspaceId,
+          currentGeneration:
+            state.taskPRs.workspaceContextGeneration === state.workspaceContextGeneration,
+          automationWorkspaceId: automation?.workspace_id,
+          repositoryId: pr?.repository_id,
+          matchingAutomation,
+        };
+      }, taskId),
+    )
+    .toMatchObject({
+      workspaceId,
+      taskPRWorkspaceId: workspaceId,
+      currentGeneration: true,
+      automationWorkspaceId: workspaceId,
+      repositoryId,
+      matchingAutomation: {
+        repository_id: repositoryId,
+        auto_fix_enabled: true,
+        auto_merge_enabled: false,
+      },
+    });
 }
 
 test.describe("inactive task PR summary hydration", () => {

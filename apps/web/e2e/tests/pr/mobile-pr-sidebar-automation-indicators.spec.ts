@@ -93,6 +93,54 @@ async function seedSidebarAutomation(
 }
 
 test.describe("Mobile sidebar PR automation indicators", () => {
+  test("shows pending settings then omits disabled automation in the drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const { navigationTaskId, targetTaskId } = await seedSidebarAutomation(apiClient, seedData);
+    await apiClient.updateTaskCIAutomationOptions(targetTaskId, {
+      repository_id: seedData.repositoryId,
+      pr_number: PR_NUMBER,
+      auto_fix_enabled: false,
+      auto_merge_enabled: false,
+    });
+    await testPage.goto(`/t/${navigationTaskId}`);
+    await new SessionPage(testPage).waitForLoad();
+
+    let releaseOptions!: () => void;
+    const pendingOptions = new Promise<void>((resolve) => {
+      releaseOptions = resolve;
+    });
+    await testPage.route(`**/api/v1/github/tasks/${targetTaskId}/ci-options`, async (route) => {
+      const response = await route.fetch();
+      await pendingOptions;
+      await route.fulfill({ response });
+    });
+    try {
+      await testPage.getByTestId("mobile-task-picker-trigger").tap();
+      const picker = testPage.getByRole("dialog", { name: "Tasks" });
+      const row = picker.locator(`[data-task-row-id="${targetTaskId}"]`);
+      await row.getByTestId(`pr-task-icon-${targetTaskId}`).tap();
+      const drawer = testPage.getByTestId(`pr-task-automation-drawer-${targetTaskId}`);
+      await expect(drawer).toBeVisible();
+      const automation = drawer.getByTestId("pr-task-automation-details");
+      await expect(automation).toContainText("Loading pull request details");
+      await waitForFiniteAnimations(drawer);
+      await prCapture.screenshot("sidebar-pr-automation-loading-mobile", {
+        caption:
+          "Phone PR drawer shows pending automation settings before hiding disabled actions.",
+      });
+      releaseOptions();
+      await expect(drawer.getByTestId("pr-task-status-number")).toHaveText(`PR #${PR_NUMBER}`);
+      await expect(automation).toHaveCount(0);
+    } finally {
+      releaseOptions();
+      await testPage.unrouteAll({ behavior: "wait" });
+    }
+  });
+
   // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.2/.3/.17/.24
   // @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.4/.8
   test("shows merged PR details in the drawer after a newer negative approval projection", async ({

@@ -433,7 +433,8 @@ export function TaskPRAutomationDetails({
 }) {
   const { t } = useTranslation();
   const hasAutomation = summary.autoFixEnabled || summary.autoMergeEnabled;
-  if (!hasAutomation && summary.details.length === 0) return null;
+  const loading = status === "loading";
+  if (!loading && !hasAutomation && summary.details.length === 0) return null;
   const detailContent =
     summary.details.length > 0 ? (
       <div className="mt-1 space-y-1">
@@ -461,7 +462,7 @@ export function TaskPRAutomationDetails({
       </div>
     ) : null;
   const loadingContent =
-    status === "loading" || status === "idle" ? (
+    loading || status === "idle" ? (
       <p className="mt-1 text-muted-foreground">{t("github:taskPrDetailsLoading")}</p>
     ) : null;
   return (

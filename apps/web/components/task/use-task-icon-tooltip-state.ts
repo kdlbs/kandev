@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, type FocusEvent, type PointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type PointerEvent,
+  type RefObject,
+} from "react";
 import { useHoverPopover } from "@/components/integrations/use-hover-popover";
 
 type TaskIconTooltipStateOptions = {
@@ -40,6 +48,42 @@ function useOnOpenTransition(open: boolean, onOpen?: () => void) {
   }, [open]);
 }
 
+function useTooltipEscape({
+  hoverable,
+  pendingHover,
+  triggerFocused,
+  suppressFocusOpen,
+  setDismissed,
+  onOpenChange,
+}: {
+  hoverable: boolean;
+  pendingHover: boolean;
+  triggerFocused: RefObject<boolean>;
+  suppressFocusOpen: RefObject<boolean>;
+  setDismissed: (dismissed: boolean) => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const onEscapeKeyDown = useCallback(
+    (event: Event) => {
+      if (isEditableTarget(event.target)) return false;
+      suppressFocusOpen.current = hoverable && !pendingHover && !triggerFocused.current;
+      setDismissed(true);
+      if (hoverable) onOpenChange(false);
+      return true;
+    },
+    [hoverable, pendingHover, onOpenChange, setDismissed, suppressFocusOpen, triggerFocused],
+  );
+  useEffect(() => {
+    if (!pendingHover) return;
+    const onPendingKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onEscapeKeyDown(event);
+    };
+    document.addEventListener("keydown", onPendingKeyDown, true);
+    return () => document.removeEventListener("keydown", onPendingKeyDown, true);
+  }, [pendingHover, onEscapeKeyDown]);
+  return onEscapeKeyDown;
+}
+
 /** Shared fine-pointer and keyboard disclosure behavior for compact task indicators. */
 export function useTaskIconTooltipState(
   onOpen?: () => void,
@@ -62,30 +106,32 @@ export function useTaskIconTooltipState(
   const open = !dismissed && (hoverable ? hoverPopover.open : hovered || focused);
   useOnOpenTransition(open, onOpen);
 
-  const openImmediately = (event: { type?: string }) => {
-    suppressFocusOpen.current = false;
-    setDismissed(false);
-    hoverPopover.onTriggerEnter(event);
-    hoverPopover.onOpenChange(true);
-  };
+  const onEscapeKeyDown = useTooltipEscape({
+    hoverable,
+    pendingHover: hoverable && hovered && !open && !dismissed && openDelayMs > 0,
+    triggerFocused,
+    suppressFocusOpen,
+    setDismissed,
+    onOpenChange: hoverPopover.onOpenChange,
+  });
 
   return {
     open,
     onPointerEnter(event: PointerEvent<HTMLSpanElement>) {
       if (event.pointerType !== "mouse") return;
+      setHovered(true);
       if (hoverable) {
         suppressFocusOpen.current = false;
         setDismissed(false);
         hoverPopover.onTriggerEnter(event);
         return;
       }
-      setHovered(true);
       setDismissed(false);
     },
     onPointerLeave(event: PointerEvent<HTMLSpanElement>) {
       if (event.pointerType !== "mouse") return;
-      if (hoverable) return hoverPopover.onTriggerLeave(event);
       setHovered(false);
+      if (hoverable) return hoverPopover.onTriggerLeave(event);
       if (!focused) setDismissed(false);
     },
     onFocus(event: FocusEvent<HTMLSpanElement>) {
@@ -97,7 +143,10 @@ export function useTaskIconTooltipState(
           suppressFocusOpen.current = false;
           return;
         }
-        openImmediately(event);
+        suppressFocusOpen.current = false;
+        setDismissed(false);
+        hoverPopover.onTriggerEnter(event);
+        hoverPopover.onOpenChange(true);
         return;
       }
       setFocused(true);
@@ -134,12 +183,6 @@ export function useTaskIconTooltipState(
       contentFocusVisible.current = false;
       hoverPopover.onContentLeave(event);
     },
-    onEscapeKeyDown(event: Event) {
-      if (isEditableTarget(event.target)) return false;
-      suppressFocusOpen.current = hoverable && !triggerFocused.current;
-      setDismissed(true);
-      if (hoverable) hoverPopover.onOpenChange(false);
-      return true;
-    },
+    onEscapeKeyDown,
   };
 }

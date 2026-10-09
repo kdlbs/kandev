@@ -183,6 +183,17 @@ Implementation and verification passed on 2026-10-09:
 - Desktop PR E2E: 14 tests passed. Mobile PR E2E: 12 tests passed. The long-summary hydration case passed again after its evidence assertions were extracted.
 - Catalog validation, full specification lint, and `git diff --check` passed. Desktop and phone captures were produced by the focused browser checks.
 
+PR fixup verification on 2026-10-09:
+
+- Restored the Automation loading message for missing settings, including cached PR records; hide the section after disabled settings resolve.
+- Escape cancels a pending mouse opening without fetching details. Later keyboard focus still opens immediately. Pending listeners are removed on exit and unmount.
+- Browser hydration evidence polls the store after responses instead of reading it once.
+- Focused Vitest: 10 files, 140 tests passed. Typecheck, targeted ESLint with zero warnings, and i18n ratchet passed.
+- Fresh managed Chromium sidebar checks: 5 passed. Mobile drawer checks: 4 passed, including deferred settings loading and disabled-section omission.
+- Catalog validation, full specification lint, and `git diff --check` passed.
+- These fixes enforce the existing disclosure contract; no new requirement or public-documentation change is needed. Phone composition remains the shipped drawer with shared status data.
+- Remote CI and review verification remain pending until the remediation is pushed and the latest head reaches terminal checks. The walkthrough generator currently fails because its trusted base workflow names a model unavailable to OpenCode.
+
 Implementation details and per-work-order results are recorded in the task files.
 
 ## Risks

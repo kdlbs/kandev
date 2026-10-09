@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, fireEvent, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useTaskIconTooltipState } from "./use-task-icon-tooltip-state";
 
@@ -13,6 +13,62 @@ function mouseEvent() {
 afterEach(() => vi.useRealTimers());
 
 describe("delayed useTaskIconTooltipState disclosure", () => {
+  it("allows keyboard focus after Escape cancels a pending mouse opening", () => {
+    vi.useFakeTimers();
+    const onOpen = vi.fn();
+    const { result } = renderHook(() => useHoverableTooltipState(onOpen, 500));
+    const trigger = document.createElement("span");
+    vi.spyOn(trigger, "matches").mockReturnValue(true);
+    act(() => result.current.onPointerEnter(mouseEvent()));
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    act(() => result.current.onFocus({ type: "focus", currentTarget: trigger } as never));
+    expect(result.current.open).toBe(true);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves pending hover intact for non-Escape keys and editable targets", () => {
+    vi.useFakeTimers();
+    const onOpen = vi.fn();
+    const { result } = renderHook(() => useHoverableTooltipState(onOpen, 500));
+    const input = document.createElement("input");
+    document.body.append(input);
+    try {
+      act(() => result.current.onPointerEnter(mouseEvent()));
+      fireEvent.keyDown(document.body, { key: "Enter" });
+      fireEvent.keyDown(input, { key: "Escape" });
+      act(() => vi.advanceTimersByTime(500));
+      expect(result.current.open).toBe(true);
+      expect(onOpen).toHaveBeenCalledTimes(1);
+    } finally {
+      input.remove();
+    }
+  });
+
+  it("removes pending Escape listeners on pointer exit and unmount", () => {
+    vi.useFakeTimers();
+    const add = vi.spyOn(document, "addEventListener");
+    const remove = vi.spyOn(document, "removeEventListener");
+    try {
+      const { result, unmount } = renderHook(() => useHoverableTooltipState(undefined, 500));
+      act(() => result.current.onPointerEnter(mouseEvent()));
+      const listener = add.mock.calls.find(([type]) => type === "keydown")?.[1];
+      expect(listener).toBeTypeOf("function");
+      act(() => result.current.onPointerLeave(mouseEvent()));
+      expect(remove).toHaveBeenCalledWith("keydown", listener, true);
+
+      act(() => result.current.onPointerEnter(mouseEvent()));
+      const latestListener = add.mock.calls.filter(([type]) => type === "keydown").at(-1)?.[1];
+      unmount();
+      expect(remove).toHaveBeenCalledWith("keydown", latestListener, true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      add.mockRestore();
+      remove.mockRestore();
+    }
+  });
+});
+
+describe("delayed useTaskIconTooltipState timing", () => {
   it("waits for the full configured delay before opening on pointer entry", () => {
     vi.useFakeTimers();
     const onOpen = vi.fn();

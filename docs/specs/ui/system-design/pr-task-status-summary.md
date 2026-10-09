@@ -134,12 +134,16 @@ Pointer entry into content does not start hydration again.
 Pointer leave cancels pending opening through the existing helper.
 Each icon owns its timer, with no shared fast-reopen window.
 Unmount and Escape clear pending timers.
+While a delayed mouse opening is pending, the shared hook registers a document
+Escape listener because tooltip content is not mounted yet. It removes that
+listener on pointer exit, opening, dismissal, and unmount. Editable targets
+retain their Escape handling.
 The existing 150 ms close delay permits pointer transfer into open content.
 Keyboard focus in either region continues to hold the summary open.
 
 The delay measures continuous presence inside the icon, not literal pointer immobility.
 Small movements inside the icon do not restart it.
-This keeps the interaction predictable without movement thresholds or extra listeners.
+This keeps the interaction predictable without pointer-movement thresholds or listeners.
 The coarse-pointer drawer retains its explicit tap and direct hydration callback.
 This change adds no setting, persistent state, provider refresh, or global Tooltip delay.
 
@@ -147,6 +151,8 @@ The Automation section includes only open PRs with auto-fix or auto-merge enable
 When no open PR has either option enabled, omit the section. Keep the loading
 message while automation settings load. On disclosure, fetch settings when they
 are not cached even if the full PR records are already available.
+Only the active `loading` status keeps an otherwise empty Automation section
+visible. The terminal `idle` status omits it when both actions are disabled.
 
 Fake-timer tests cover the 499/500 ms boundary, cancelled and repeated entries,
 independent icons, focus during a pending delay, Escape, and unmount.

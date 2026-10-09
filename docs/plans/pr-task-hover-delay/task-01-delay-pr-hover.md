@@ -74,7 +74,7 @@ Run these commands from the repository root. Managed E2E commands rebuild their 
 
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/web && pnpm exec vitest run components/task/use-task-icon-tooltip-state.test.ts hooks/domains/github/use-hover-popover.test.ts components/github/pr-task-icon.automation.test.ts components/github/pr-task-icon.automation-render.test.tsx components/github/pr-task-icon.render.test.tsx hooks/domains/github/use-task-pr-tooltip-hydration.test.tsx)
+(cd apps/web && pnpm exec vitest run components/task/use-task-icon-tooltip-state.test.ts hooks/domains/github/use-hover-popover.test.ts components/github/pr-task-icon.automation.test.ts components/github/pr-task-icon.automation-render.test.tsx components/github/pr-task-icon.render.test.tsx components/github/pr-task-icon.hover-render.test.tsx hooks/domains/github/use-task-pr-tooltip-hydration.test.tsx)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm exec eslint components/task/use-task-icon-tooltip-state.ts components/task/use-task-icon-tooltip-state.test.ts components/github/pr-task-icon.tsx components/github/pr-task-icon.render.test.tsx e2e/tests/pr/pr-sidebar-hover-hydration.spec.ts)
 (cd apps/web && pnpm run i18n:ratchet)
@@ -130,3 +130,14 @@ Completed on 2026-10-09.
 - Focused Vitest suite passed: 9 files, 135 tests. Typecheck, targeted ESLint, i18n ratchet, and the production web build passed.
 - Desktop PR E2E passed: 14 tests across the sidebar hydration and multi-PR popover specs. Mobile PR E2E passed: 12 tests across automation indicators and the CI drawer.
 - Catalog validation, full specification lint, and `git diff --check` passed.
+
+### PR fixup results
+
+- Reproduced hidden pending Automation details and uncancelled hover opening with failing rendered tests before fixing them.
+- Added pending Escape listener cleanup, editable-target, and subsequent keyboard-focus coverage. Moved rendered hover cases into `pr-task-icon.hover-render.test.tsx` to retain lint limits.
+- The settings-loading regression holds its response pending, then verifies disabled automation is omitted. Mobile and desktop browser scenarios exercise the same outcome.
+- Replaced the hydration helper's one-time store read with `expect.poll` over current workspace, PR, and matching automation evidence.
+- Final focused Vitest command above, plus `components/github/pr-ci-popover.automation.test.tsx`, `components/github/pr-status-refresh-routes.test.tsx`, and `components/github/pr-status-chip.test.tsx`: 10 files, 140 tests passed.
+- Typecheck, targeted ESLint (`--max-warnings 0`) across all modified TS/TSX files, and i18n ratchet passed.
+- Managed Chromium sidebar command above: 5 passed. Managed Mobile Chrome automation-indicator command above: 4 passed. Captures cover the loading state in both viewports.
+- Catalog validation, full specification lint, and `git diff --check` passed. Remote checks remain pending at the remediation head.
