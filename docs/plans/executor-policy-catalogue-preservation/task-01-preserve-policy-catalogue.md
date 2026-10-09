@@ -31,6 +31,60 @@ to CHILD98. GREEN runs only the new page suite: it exercises the real
 coordinator/options directly, so unchanged suites are not replayed.
 Hosted collection and merge still require their later separate grants.
 
+### Later fixture leaf-ownership correction (2026-10-09)
+
+ROOT admitted grouped CodeRabbit finding
+`cr-comment:v1:9e667bcd90a10bf7a5efe583` from review5472025858 on
+`76f3205343e7138613fa94512729059a18517631`. This same work order owns only
+`apps/web/e2e/tests/git/git-continuity-preview-history.ts` and its existing
+`apps/web/e2e/helpers/git-continuity-preview-history.test.ts` plus these two
+package documents. The valid defect is overwriting an existing fixed fixture
+leaf, then removing untouched existing leaves during setup-failure rollback.
+Use helper-local filesystem preflight for all twelve exact leaf paths before
+any write, including tracked, untracked and ignored files. Reject collisions
+without mutation. Register each attempted write before `createFile`, and
+rollback captured HEAD plus only those registered paths. Preserve partial-write
+cleanup, original error identity and visible aggregate cleanup failures. The
+GitHelper API, geometry, assertions and timeout policy stay unchanged; no
+arbitrary dirty-index or concurrent external-writer guarantee is introduced.
+
+Four real-repository RED cases cover early tracked, later untracked, later
+ignored, and an earlier injected write failure with an existing later leaf.
+They compare HEAD, index tree, full status and all selected/unselected sentinel
+bytes and require zero writes when rejected. Original84200/91255a ->2322e1
+actually joined exit1: exactly four new failures and five original controls
+passed, with no unhandled or unexpected setup errors. The original helper
+remained blob1bfb020 at RED. Original18824/596b78 ->47011e then actually joined
+exit0: all nine helper cases passed in 765ms. Receipt paths:
+`/tmp/kandev-child98-preview-collision-fixup-20261009/{red-qualified.json,helper-green-qualified.json}`.
+
+The ONE fresh own managed Pierre GREEN passed exactly one test in 16.8s,
+zero failures/flaky/skips/retries, with normal strict guards and all five build
+artifacts fresh after original start. Original22054/409908 ->7e355e actually
+joined exit0; all60 observed own descendants were absent. Affected helper/test
+formatting and ESLint passed. Actual pinned Node24.21.0/pnpm9.15.9 app runtime
+was qualified with existing dependencies and no install. Raw joins/hashes:
+`green-qualified.json`, `runtime-qualified.json`, `scoped-codechecks.json`
+in the collision evidence directory. No earlier passing product suite or
+unrelated check was replayed.
+
+Before local work original observer49605 was identity-guard stopped by its own
+GNU group2566279 only, then actually joined native3d0905/subprocess143. All574
+recorded child identities plus its wrapper were freshly absent. Its last
+8passed/0failed/7pending snapshot has no terminal CI verdict; hosted jobs were
+not cancelled. The three older cde CI causes remain unknown.
+
+Run one fresh guarded exact desktop Pierre case, workers1/retries0/repeat1,
+strict, 900s/kill10, Node4GiB and Go2/-p2/512MiB; retain fresh backend/Vite/plugin
+build evidence and actual native/subprocess joins. Then affected helper/test
+lint/format, docs/catalog/spec and actual eleven-path coverage, normal active
+hooks/new commit/push. Prepare an exact two-code-file patch and before/after
+blob manifest for ROOT's later sibling mirror. No product25/backend/type/i18n,
+Monaco/mobile/full-shard replay, installs, observer, review request, CI retry,
+body/settings/relink changes or merge. Mobile observation stays unapplied and
+unrun. No public docs impact. Return heavy and actually END/WFI after publication;
+new-head hosted collection and merge need distinct later ROOT releases.
+
 ### Later scoped review correction (2026-10-09)
 
 ROOT granted this same work order an exclusive local-heavy lease for the valid

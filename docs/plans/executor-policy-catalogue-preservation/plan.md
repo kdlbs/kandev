@@ -30,7 +30,7 @@ records scoped ownership, real post-cleanup assertions and raw receipt reference
 Later doc/coverage gates and normal publication are retained separately; no
 earlier product result or interrupted hosted verdict is promoted.
 
-Current continuation: ROOT released the reviewed preview-history setup-failure
+Previous continuation: ROOT released the reviewed preview-history setup-failure
 rollback correction to this same primary. The same order is implemented for
 exactly the existing seed helper and one real-Git regression file. The source
 causal RED is already ROOT-qualified and is accepted without replay. This
@@ -42,6 +42,24 @@ its last39passed/3failed/7pending snapshot is retained with no CI terminal
 verdict. The three unrelated CI causes remain unknown. Evidence lives in
 `/tmp/kandev-child98-seed-failure-fixup-20261009/`. Later hosted and merge gates
 remain separate after explicit heavy return and actual END/WFI.
+
+Current continuation: ROOT admitted the valid leaf-ownership finding from
+review5472025858 on frozen76f32053. This same order is implemented for the
+existing seed helper and its existing real-Git tests only. Before any write,
+preflight all twelve fixed leaf paths regardless of Git tracking or ignore
+state; a collision rejects setup without changing HEAD, index or file bytes.
+Rollback targets only this attempt's registered writes, including partial
+writes that throw, and preserves the existing original/aggregate error rules.
+Four new real-Git collision cases produced causal RED while all five earlier
+controls passed; all nine cases then passed. One fresh guarded Pierre control passed in 16.8s with fresh backend/Vite/plugin
+builds and all60 observed descendants absent at actual join0. Affected
+lint/format passed; docs and actual eleven-path coverage precede normal
+publication. Evidence: `/tmp/kandev-child98-preview-collision-fixup-20261009/`.
+Original49605 was explicitly stopped and actually joined exit143; its last
+8passed/0failed/7pending snapshot is not a terminal CI verdict. No hosted job
+was cancelled. Public docs and executor-policy requirements/design are
+unchanged. No dirty-index rollback or concurrent-writer contract is added.
+Return the exclusive heavy lease and END before later hosted/merge grants.
 
 ## Overview
 
