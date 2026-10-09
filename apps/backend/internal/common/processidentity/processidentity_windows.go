@@ -77,3 +77,6 @@ func parseWindowsBirthToken(token string) (uint64, error) {
 	}
 	return created, nil
 }
+
+// OwnedSessionTerminated fails closed when descendant ownership cannot be inspected.
+func OwnedSessionTerminated(Identity) (bool, error) { return false, ErrUnverifiableIdentity }

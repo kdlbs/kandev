@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"io"
 	"net/http"
 	"net/url"
@@ -180,6 +181,11 @@ func (c *Client) getTraceCtx() context.Context {
 
 // StatusResponse from agentctl
 type StatusResponse struct {
+	DeliveryHealth struct {
+		State               string `json:"state"`
+		CancellationPending bool   `json:"cancellation_pending"`
+		ProducerPaused      bool   `json:"producer_paused"`
+	} `json:"delivery_health"`
 	AgentStatus string                 `json:"agent_status"`
 	ProcessInfo map[string]interface{} `json:"process_info"`
 }
@@ -249,6 +255,14 @@ func (c *Client) RuntimeProcessID() int {
 		return 0
 	}
 	return c.runtimeGuard.binding.processID
+}
+
+// RuntimeProcessIdentity retains the authenticated local runtime's birth identity.
+func (c *Client) RuntimeProcessIdentity() processidentity.Identity {
+	if c == nil || c.runtimeGuard == nil || c.runtimeGuard.binding == nil {
+		return processidentity.Identity{}
+	}
+	return c.runtimeGuard.binding.processIdentity
 }
 
 // RuntimeCurrent reports whether this client still targets the published

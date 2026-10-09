@@ -191,6 +191,17 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 		_ = conn.Close()
 		return
 	}
+	if s.procMgr == nil {
+		_ = conn.Close()
+		return
+	}
+	ownedCtx, release, err := s.procMgr.BeginOwnedOperation(c.Request.Context())
+	if err != nil {
+		s.logger.Debug("agent stream rejected during instance teardown", zap.Error(err))
+		_ = conn.Close()
+		return
+	}
+	defer release()
 
 	// This is the agentctl-local "instance is attached" signal
 	// (AC-EXECUTORS-SURVIVAL-001.5/.6): the permission-request notification
@@ -199,8 +210,16 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	s.procMgr.MarkAttached()
 	defer s.procMgr.MarkDetached()
 
-	ctx, cancel := context.WithCancel(c.Request.Context())
+	ctx, cancel := context.WithCancel(ownedCtx)
 	defer cancel()
+	stopOwnerCancel := context.AfterFunc(ownedCtx, cancel)
+	defer stopOwnerCancel()
+	stopConnClose := context.AfterFunc(ctx, func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			s.logger.Debug("failed to close agent stream during shutdown", zap.Error(closeErr))
+		}
+	})
+	defer stopConnClose()
 	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.2: terminate this stream if the
 	// control server's credential rotates while it is open, so a prior
 	// holder cannot keep consuming an instance's events past the moment its
@@ -248,8 +267,12 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 
 // runAgentStreamReader reads MCP responses and agent operation requests from the backend connection.
 func (s *Server) runAgentStreamReader(ctx context.Context, conn *websocket.Conn, writeMessage func([]byte) error, cancel context.CancelFunc, wg *sync.WaitGroup) {
-	defer wg.Done()
-	defer cancel()
+	var requestWG sync.WaitGroup
+	defer func() {
+		cancel()
+		requestWG.Wait()
+		wg.Done()
+	}()
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
@@ -266,7 +289,9 @@ func (s *Server) runAgentStreamReader(ctx context.Context, conn *websocket.Conn,
 			continue
 		}
 		if msg.Type == ws.MessageTypeRequest {
+			requestWG.Add(1)
 			go func(reqMsg ws.Message) {
+				defer requestWG.Done()
 				resp := s.handleAgentStreamRequest(ctx, &reqMsg)
 				if resp == nil {
 					return

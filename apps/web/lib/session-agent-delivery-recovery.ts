@@ -1,4 +1,9 @@
-export type AgentDeliveryRecoveryPhase = "reconnecting" | "uncertain" | "recovered" | "settled";
+export type AgentDeliveryRecoveryPhase =
+  | "reconnecting"
+  | "uncertain"
+  | "recovered"
+  | "settled"
+  | "continued";
 
 export type AgentDeliveryRecovery = {
   phase: AgentDeliveryRecoveryPhase;
@@ -55,7 +60,8 @@ function isAgentDeliveryRecoveryPhase(value: unknown): value is AgentDeliveryRec
     value === "reconnecting" ||
     value === "uncertain" ||
     value === "recovered" ||
-    value === "settled"
+    value === "settled" ||
+    value === "continued"
   );
 }
 

@@ -3,6 +3,8 @@ import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
+import { routeSessionEntryRecovery } from "../../helpers/session-entry-recovery";
+import { assertDeliveryRecoveryGeometry } from "../../helpers/delivery-recovery-controls";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 
@@ -46,6 +48,9 @@ test("keeps uncertain delivery recovery usable on a phone", async ({
 }) => {
   const capture = attachGatewayTrafficCapture(testPage);
   const { task, sessionId } = await seedUncertainDeliverySession(apiClient, seedData);
+  const proxy = await routeSessionEntryRecovery(testPage);
+  proxy.holdResponses("session.recover", { sessionId });
+  proxy.rejectResponsesUntilReleased("session.stop", "Stop was refused", { sessionId });
 
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
@@ -61,8 +66,25 @@ test("keeps uncertain delivery recovery usable on a phone", async ({
   await expect(banner.getByTestId("recovery-resume-button")).toHaveCount(0);
 
   await banner.getByTestId("recovery-retry-connection-button").tap();
-  await expect(session.recoveryError()).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => proxy.heldResponseCount("session.recover")).toBe(1);
+  await assertDeliveryRecoveryGeometry(testPage);
   await banner.getByTestId("recovery-stop-button").tap();
+  await expect(banner.getByTestId("delivery-stop-failed")).toBeVisible();
+  await assertDeliveryRecoveryGeometry(testPage);
+  proxy.releaseHeldResponses("session.recover");
+  await expect(banner.getByTestId("delivery-recovery-result")).toBeVisible({ timeout: 30_000 });
+  for (const id of ["recovery-retry-connection-button", "recovery-stop-button"]) {
+    const box = await banner.getByTestId(id).boundingBox();
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+  }
+  await testPage.evaluate(() => {
+    document.cookie = "kandev_locale=pseudo; path=/; SameSite=Lax";
+  });
+  await testPage.reload();
+  await assertDeliveryRecoveryGeometry(testPage);
+  await testPage.setViewportSize({ width: 1024, height: 900 });
+  expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+  await assertDeliveryRecoveryGeometry(testPage);
   await expect
     .poll(
       () =>

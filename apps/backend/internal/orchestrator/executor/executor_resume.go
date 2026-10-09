@@ -1029,7 +1029,11 @@ const (
 )
 
 type ResumeOptions struct {
-	RequiredNativeConversationID     string
+	RequiredNativeConversationID string
+	InterruptedSubmissionID      string
+	InterruptedStreamID          string
+	InterruptedHarnessGeneration uint64
+
 	SettingsPolicy                   ResumeSettingsPolicy
 	AllowBranchReplacement           bool
 	RepairWorkspaceInventory         bool
@@ -2092,6 +2096,10 @@ func newResumeLaunchRequest(
 		TaskID:                       task.ID,
 		SessionSettingsPolicy:        options.SettingsPolicy,
 		RequiredNativeConversationID: options.RequiredNativeConversationID,
+		ACPSessionID:                 options.RequiredNativeConversationID,
+		InterruptedSubmissionID:      options.InterruptedSubmissionID,
+		InterruptedStreamID:          options.InterruptedStreamID,
+		InterruptedHarnessGeneration: options.InterruptedHarnessGeneration,
 		WorkspaceID:                  task.WorkspaceID,
 		SessionID:                    session.ID,
 		TaskTitle:                    task.Title,

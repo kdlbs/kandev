@@ -45,6 +45,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionSessionFork, h.wsForkConversation)
 	d.RegisterFunc(ws.ActionSessionEnsure, h.wsEnsureSession)
 	d.RegisterFunc(ws.ActionSessionRecover, h.wsRecoverSession)
+	d.RegisterFunc(ws.ActionSessionRecoverBatch, h.wsResumeInterruptedBatch)
 	d.RegisterFunc(ws.ActionSessionWorkspaceRecoveryGet, h.wsGetWorkspaceRecoveryStatus)
 	d.RegisterFunc(ws.ActionTaskLaunchRecover, h.wsRecoverTaskLaunch)
 	d.RegisterFunc(ws.ActionSessionResetContext, h.wsResetContext)
@@ -309,12 +310,13 @@ func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Mess
 }
 
 type wsRecoverSessionRequest struct {
-	TaskID         string                        `json:"task_id"`
-	SessionID      string                        `json:"session_id"`
-	Action         string                        `json:"action"`
-	IdempotencyKey string                        `json:"idempotency_key,omitempty"`
-	ErrorStamp     string                        `json:"error_stamp,omitempty"`
-	SettingsPolicy executor.ResumeSettingsPolicy `json:"settings_policy,omitempty"`
+	InterruptedResume *orchestrator.InterruptedSessionResumeRequest `json:"interrupted_resume,omitempty"`
+	TaskID            string                                        `json:"task_id"`
+	SessionID         string                                        `json:"session_id"`
+	Action            string                                        `json:"action"`
+	IdempotencyKey    string                                        `json:"idempotency_key,omitempty"`
+	ErrorStamp        string                                        `json:"error_stamp,omitempty"`
+	SettingsPolicy    executor.ResumeSettingsPolicy                 `json:"settings_policy,omitempty"`
 }
 
 type wsGetWorkspaceRecoveryStatusRequest struct {
@@ -461,6 +463,9 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"cancelled": cancelled})
 	}
 
+	if req.Action == "resume_interrupted" || req.InterruptedResume != nil {
+		return h.wsResumeInterrupted(ctx, msg, req)
+	}
 	if req.Action == "retry_connection" {
 		resp, err := h.service.RetrySessionDelivery(ctx, req.TaskID, req.SessionID)
 		if err != nil {

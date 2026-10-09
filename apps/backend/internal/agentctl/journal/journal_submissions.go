@@ -70,9 +70,9 @@ func (j *Journal) ListSubmissions(ctx context.Context, sessionID string) ([]Subm
 	return submissions, err
 }
 
-// RetireSubmission seals an explicitly recovered submission. Native resume
-// may acknowledge an interrupted unknown outcome in the same generation;
-// retiring other work requires a newer generation.
+// RetireSubmission seals explicitly recovered work. Native resume may
+// acknowledge an interrupted unknown outcome in the same generation; other
+// work requires a newer generation.
 func (j *Journal) RetireSubmission(ctx context.Context, id string, recoveryGeneration uint64) (Submission, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
@@ -94,9 +94,8 @@ func (j *Journal) RetireSubmission(ctx context.Context, id string, recoveryGener
 			return ErrSubmissionGeneration
 		}
 		retired.Retired = true
-		if retired.State != SubmissionInterruptedUnknown {
-			retired.State = SubmissionCancelled
-			retired.Payload = nil
+		if retired.State == SubmissionPrepared || retired.State == SubmissionAccepted || retired.State == SubmissionDispatching {
+			retired.State = SubmissionInterruptedUnknown
 		}
 		retired.UpdatedAt = time.Now().UTC()
 		encoded, err := json.Marshal(retired)

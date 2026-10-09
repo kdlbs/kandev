@@ -49,6 +49,16 @@ It flushes pending progress after 20 ms or 256 projected events, whichever occur
 A terminal boundary requests an immediate ACK without blocking committed output notification.
 Failed requests retain the highest pending cursor for bounded retry under the existing recovery window.
 Owner replacement cancels the scheduler. Reconnection reconstructs progress from SQL.
+The scheduler's stream key identifies durable ordering, not a permanent HTTP client.
+Bind each worker to the current authenticated execution and runtime epoch. Replace its client binding when that owner changes.
+Cancel the previous worker before granting replacement send authority. Late responses and teardown must not mutate or cancel the replacement worker.
+Initialize pending progress from the committed projected cursor, including when no new event arrives.
+Compare it with the authenticated journal's acknowledged cursor during attachment and later reconciliation.
+Retain projection-before-ACK in this repair; changing to inbox-only acknowledgment requires a separate projector recovery proof.
+Retry transient ACK failures with jittered exponential delay from 100 ms to 5 seconds and a 3-second request timeout.
+Keep at most one request in flight per stream. Record bounded error categories and surface persistent lag instead of silently retrying every 20 ms.
+Owner mismatch stops that worker and returns through authenticated attachment. It never retries indefinitely with an obsolete credential or lease.
+ACK recovery is independent of prompt admission, event arrival, terminal arrival, and browser focus.
 Projection failure enters typed recovery and stops cursor advancement.
 It cannot leave an apparently healthy stream consuming later events behind a permanent gap.
 
@@ -61,6 +71,39 @@ Only bounded terminal and health metadata can consume reserved space.
 If ordinary capacity is exhausted, admission stops and cancellation targets the exact current owner.
 Status and Stop remain available even if the event writer cannot commit.
 Failure to persist a terminal outcome preserves uncertainty.
+
+### Pressure recovery before exhaustion
+
+The 256 MiB stream limit bounds a temporary retained backlog, not the total transcript or task lifetime.
+Keep existing finite defaults while fixing retention. Size future changes from measured serialized event rate and the supported disconnected interval.
+Per-stream limits, per-journal limits, physical file size, and host free space remain separate budgets.
+A larger per-stream limit increases the worst-case footprint across concurrent sessions; it cannot correct stalled acknowledgments.
+
+Introduce pressure at 75 percent of ordinary retained capacity and an admission/producer guard at 90 percent.
+Clear pressure below 60 percent after verified ACK pruning. Apply these bounds to both stream and journal budgets.
+Reserve enough capacity for all bounded pending writes, one maximum event, and terminal/health records before admitting additional output.
+The guard must engage earlier when those bounds exceed the remaining headroom. Percentages alone are insufficient admission checks.
+Existing disk-space checks can engage the same state before the logical limit.
+
+On pressure, immediately reconcile the backend's projected cursor and the journal's acknowledged cursor.
+Advance only to a verified contiguous committed cursor with matching owner identity, then prune through the existing journal transaction.
+Do not fabricate acknowledgment, clear submissions, or require a new prompt to drain the backlog.
+Do not increase limits automatically or roll over an unacknowledged stream to evade its budget.
+
+Use producer backpressure only when the adapter can preserve control responsiveness and bounded pending data.
+If it cannot, request cancellation of the exact owned turn before exhausting the reserved capacity.
+There is no assumption that arbitrary providers support pause-and-resume of an in-flight RPC.
+A failed commit enters a typed delivery-unavailable state and reports out of band if the journal cannot store the notice.
+Keep process liveness separate from delivery health. Session focus and stale-execution cleanup must not kill a live harness because its delivery status is unhealthy.
+After space returns, resume the existing delivery pump when its state is recoverable. Otherwise preserve uncertainty and use explicit same-conversation continuation.
+
+Report retained/unacknowledged bytes, ACK pending age, last successful ACK, retry/error categories, pressure transitions, and projection lag.
+Keep metric labels bounded; session/stream identifiers belong in structured diagnostics only.
+Use the existing recovery card for a localized delivery-storage explanation and Retry connection/Stop, with desktop and phone parity.
+Raw SQL cursors and internal storage paths are diagnostic details, not required user decisions.
+
+Oversized text must use the existing bounded chunk representation. Add coverage for cumulative tool-output snapshots that can multiply retained bytes.
+Do not silently truncate authoritative output. Any representation change requires the existing version and rollback compatibility checks.
 
 Idle rollover changes transport stream identity without creating a new harness conversation.
 It requires settled submissions and completed projection/acknowledgment evidence for the old stream.
@@ -79,3 +122,5 @@ Neither mode silently drops output or automatically resends a prompt.
 The existing chat recovery surface shows reconnecting or uncertain state on desktop and phone.
 Stop remains reachable. Retry connection only queries and reconnects the original work.
 Storage failure alone does not authorize context continuation.
+
+The [journal shutdown and recovery package](../../../plans/agentctl-journal-shutdown-recovery/plan.md) owns the October ACK replacement and capacity recurrence repairs.

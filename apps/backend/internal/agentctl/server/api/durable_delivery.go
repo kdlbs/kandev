@@ -166,6 +166,9 @@ func (s *Server) handleDeliverySubmissionRetire(c *gin.Context) {
 		writeDeliveryError(c, journal.ErrOwnerMismatch)
 		return
 	}
+	if c.Request.ContentLength != 0 && !s.validateInterruptedRetirement(c) {
+		return
+	}
 	if err := s.procMgr.RetireDeliverySubmission(
 		c.Request.Context(), c.Param("id"), s.procMgr.DeliveryHarnessGeneration(),
 	); err != nil {
