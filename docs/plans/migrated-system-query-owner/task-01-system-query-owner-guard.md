@@ -344,12 +344,15 @@ trusted-base coverage preflight used merge base
 4569a63bf3da88bc31b1d6b34d7f03bf20269e93 (matching `origin/main`); the actual
 14-file scoped diff was covered by the requirement/design with one accepted
 reference and no errors. This was the pure `validateCoverage` check only; the
-required PR coverage gate remains pending. The rule has zero owner findings or
-exemptions.
+PR documentation-coverage status later passed for commit `c04ed073`. The
+follow-up work-order correction must be included in the next exact-head gate.
+The rule has zero owner findings or exemptions.
 
 No application runtime, cache, hydration, API, UI, or backend source change is
 retained. The guard does not resolve aliases or arbitrary data flow, dynamic or
 template keys, object spreads, indirect helper payloads, renamed owners, or
-mirrors outside the four configured source files. All actionable review
-findings have implementation and regression coverage locally; exact-head PR
-replies and inline-thread resolutions remain pending.
+mirrors outside the four configured source files. The five unique actionable
+review findings were fixed in `c04ed073`; replies were posted and all three
+inline threads were resolved. The automated review findings were written
+against `56db63c2`; no exact-head AI approval is claimed. A documentation-only
+follow-up still requires its own terminal PR checks.
