@@ -729,3 +729,12 @@ The existing assertion now includes bounded session states and error summaries
 when that marker remains, without extending its timeout or accepting a busy
 move. No workflow production behavior changed. Fresh CI must validate this
 flow; local passes do not establish the original failure's cause.
+
+Fresh container CI exposed a setup omission in the Git-status precondition:
+the Docker page fixture does not enable the read-only store bridge that the
+normal page fixture enables. The added poll therefore returned false in every
+attempt before repository attachment. This test now enables that existing
+bridge in its pre-navigation init script. This fixes the observation setup,
+without changing store data, production behavior or assertion timeouts. Local
+container execution remains unavailable because of the host Docker bridge;
+fresh remote execution is still required.

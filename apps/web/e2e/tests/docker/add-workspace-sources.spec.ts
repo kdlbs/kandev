@@ -93,6 +93,9 @@ test.describe("Docker executor — attach workspace sources", () => {
       const before = await apiClient.getTaskEnvironment(task.id);
       expect(before?.container_id).toBeTruthy();
 
+      await testPage.addInitScript(() => {
+        window.__KANDEV_E2E_EXPOSE_STORE__ = true;
+      });
       await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);
       await session.waitForLoad();
