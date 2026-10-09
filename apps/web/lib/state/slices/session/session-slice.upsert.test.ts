@@ -277,6 +277,25 @@ describe("agentctl readiness from session snapshots", () => {
   });
 });
 
+describe("stale agentctl readiness snapshots", () => {
+  it("does not promote a restarted execution from an older live session snapshot", () => {
+    const store = makeStore();
+    store.getState().setSessionAgentctlStatus(SESSION_ID, {
+      status: "starting",
+      agentExecutionId: SECOND_AGENT_EXECUTION_ID,
+      updatedAt: LATER_TS,
+    });
+
+    store.getState().setTaskSession(makeSession({ state: "WAITING_FOR_INPUT", updated_at: TS }));
+
+    expect(store.getState().sessionAgentctl.itemsBySessionId[SESSION_ID]).toEqual({
+      status: "starting",
+      agentExecutionId: SECOND_AGENT_EXECUTION_ID,
+      updatedAt: LATER_TS,
+    });
+  });
+});
+
 describe("resume projection ownership", () => {
   it("revokes an optimistic resume projection when an authoritative event arrives", () => {
     const store = makeStore();

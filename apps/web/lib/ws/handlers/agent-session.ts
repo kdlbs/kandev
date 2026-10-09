@@ -24,7 +24,10 @@ import { ROUTE_SESSION_FIELDS } from "@/lib/ws/handlers/agent-session-route-fiel
 import { t } from "@/lib/i18n";
 import { maybeMarkQuickChatUnseenIdle } from "@/lib/ws/handlers/quick-chat-unseen";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
-import { sessionStateConfirmsAgentctlExecutionReady } from "@/lib/session-state";
+import {
+  sessionStateConfirmsAgentctlExecutionReady,
+  sessionStateImpliesAgentctlReady,
+} from "@/lib/session-state";
 import {
   sanitizeWorkspaceRestorationDetails,
   type WorkspaceRestorationAttempt,
@@ -143,7 +146,7 @@ function maybePromoteAgentctlReady(
   newState: TaskSessionState | undefined,
   timestamp: string | undefined,
 ): void {
-  if (!newState || !AGENT_LIVE_STATES.has(newState)) return;
+  if (!newState || !sessionStateImpliesAgentctlReady(newState)) return;
   if (isStaleAgentctlObservation(store, sessionId, timestamp)) return;
   const state = store.getState();
   const current = state.sessionAgentctl?.itemsBySessionId?.[sessionId];
