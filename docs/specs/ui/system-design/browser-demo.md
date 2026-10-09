@@ -18,7 +18,8 @@ The backend and real agent adapters remain unchanged.
 
 `install.ts` replaces browser fetch and WebSocket transport for demo requests.
 The worker owns seeded data, request dispatch, and simulated session events.
-Browser storage retains demo changes. Reset restores the seed without changing real application storage.
+Session storage retains demo changes within each tab. Reload preserves that tab’s snapshot; a new tab starts an independent demo.
+Reset clears only the current tab’s demo snapshot.
 Unsupported routes remain explicit errors rather than false success responses.
 
 ## Application capabilities
@@ -34,7 +35,10 @@ The discovery runtime handles repository discovery and refresh through the curre
 The Jira runtime supplies local projects, statuses, tickets, dashboard filters, and transitions.
 Follow-up sends preserve history and emit ordered thinking, tool, and answer events through the conversation transport.
 Replies vary between turns. Queued sends drain locally, and retries retain their original message identity.
-Each session serializes its simulated turns and returns to idle review. Reset cancels pending callbacks.
+Each session serializes its simulated turns and returns to idle review.
+Stop, task deletion, and reset cancel the session’s delayed messages and queued turns.
+Reload settles saved running or starting sessions to idle without replaying an incomplete turn.
+Workflow and step deletion remove matching tasks, sessions, and messages from the worker’s canonical state.
 These responses remain simulations and do not use a model or integration credentials. Criterion .9 covers follow-up behavior.
 
 ## Release distribution
@@ -42,6 +46,8 @@ These responses remain simulations and do not use a model or integration credent
 `scripts/browser-demo/build-web-demo.sh` builds the SPA under `/browser-demo/app/`.
 Relative output paths resolve from the repository root. Absolute paths remain unchanged.
 The release workflow packages the bundle, enforces the 25 MiB compressed limit, and publishes its SHA-256 checksum.
+After successful Stable publication, the release workflow sends `kandev_release` to the landing repository with the exact release tag.
+The dispatch job requires `LANDING_REPOSITORY_DISPATCH_TOKEN` in the `release` environment, with Contents write access to `kdlbs/landing`.
 The landing repository consumes this archive separately. Criteria .1 and .8 cover installation and distribution.
 
 ## Verification

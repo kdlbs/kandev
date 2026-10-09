@@ -2,6 +2,8 @@
 """Contract tests for the maintainer release workflow."""
 
 import fnmatch
+import json
+import os
 import re
 import subprocess
 import tempfile
@@ -95,6 +97,46 @@ def step_run_script(block: str) -> str:
 
 
 class ReleaseWorkflowContractTest(unittest.TestCase):
+    def test_browser_demo_dispatch_follows_successful_stable_publication(self):
+        condition = job_condition("notify-browser-demo")
+        for guard in ("!cancelled()", "inputs.channel == 'stable'", "!inputs.dry_run",
+                      "!inputs.desktop_validation_only", "needs.publish-release.result == 'success'"):
+            self.assertIn(guard, condition)
+        job = job_block("notify-browser-demo")
+        self.assertIn("needs: [prepare, publish-release]", job)
+        self.assertIn("environment: release", job)
+        step = job_step_block("notify-browser-demo", "Dispatch landing browser demo")
+        self.assertIn("secrets.LANDING_REPOSITORY_DISPATCH_TOKEN", step)
+        self.assertIn("needs.prepare.outputs.tag", step)
+        script = step_run_script(step)
+        self.assertIn("repos/kdlbs/landing/dispatches", script)
+        self.assertIn("kandev_release", script)
+        self.assertIn("client_payload", script)
+        self.assertIn('"$KANDEV_DEMO_TAG"', script)
+
+    def test_browser_demo_dispatch_payload_and_missing_credentials(self):
+        script = step_run_script(job_step_block("notify-browser-demo", "Dispatch landing browser demo"))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            payload = root / "payload.json"
+            gh = root / "gh"
+            gh.write_text('#!/bin/sh\ncat > "$DISPATCH_PAYLOAD"\n')
+            gh.chmod(0o755)
+            env = {**os.environ, "PATH": f"{root}:{os.environ['PATH']}",
+                   "GH_TOKEN": "test-token", "KANDEV_DEMO_TAG": "v1.2.3",
+                   "DISPATCH_PAYLOAD": str(payload)}
+            result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(payload.read_text()), {
+                "event_type": "kandev_release", "client_payload": {"tag": "v1.2.3"},
+            })
+            payload.unlink()
+            env["GH_TOKEN"] = ""
+            result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("LANDING_REPOSITORY_DISPATCH_TOKEN", result.stderr)
+            self.assertFalse(payload.exists())
+
     def create_downloaded_helper_artifact(self, root: Path, stable: bool) -> tuple[Path, str]:
         source_dir = root / "source-bin"
         source_dir.mkdir(parents=True)

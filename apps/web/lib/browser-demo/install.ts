@@ -23,7 +23,7 @@ export async function installBrowserDemo(): Promise<void> {
   worker.addEventListener("message", (event: MessageEvent<DemoWorkerResponse>) => {
     const message = event.data;
     if (message.kind === "persist") {
-      localStorage.setItem(DEMO_STORAGE_KEY, message.state);
+      sessionStorage.setItem(DEMO_STORAGE_KEY, message.state);
       return;
     }
     if (message.kind === "ws-event") {
@@ -147,7 +147,7 @@ export async function installBrowserDemo(): Promise<void> {
   const payload = applyBrowserDemoDefaults(
     (await call({
       kind: "init",
-      persistedState: localStorage.getItem(DEMO_STORAGE_KEY) ?? undefined,
+      persistedState: sessionStorage.getItem(DEMO_STORAGE_KEY) ?? undefined,
     })) as BootPayload,
   );
   history.replaceState({}, "", browserDemoStartPath(payload));

@@ -2796,6 +2796,37 @@ jobs:
             dist/release-assets/latest.json
           preserve_order: true
 
+  notify-browser-demo:
+    name: Notify landing of browser demo release
+    needs: [prepare, publish-release]
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.publish-release.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - name: Dispatch landing browser demo
+        env:
+          GH_TOKEN: ${{ secrets.LANDING_REPOSITORY_DISPATCH_TOKEN }}
+          KANDEV_DEMO_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Set LANDING_REPOSITORY_DISPATCH_TOKEN in the release environment." >&2
+            exit 1
+          fi
+          jq -n --arg tag "$KANDEV_DEMO_TAG" \
+            '{event_type: "kandev_release", client_payload: {tag: $tag}}' | \
+            gh api --method POST repos/kdlbs/landing/dispatches --input -
+
   publish-npm:
     name: Publish npm packages
     needs: [prepare, publish-release]

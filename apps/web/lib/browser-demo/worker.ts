@@ -60,6 +60,8 @@ import type { QueuedMessage, QueueStatus } from "@/lib/state/slices/session/type
 import { routeDemoDiscovery } from "./discovery-runtime";
 import { createDemoJiraRuntime } from "./jira-runtime";
 import { makeDemoReplyMessages } from "./reply-messages";
+import { createDemoRunTimers } from "./run-timers";
+import { routeDemoTaskRead } from "./task-read-runtime";
 
 const scope: DedicatedWorkerGlobalScope = self as never;
 let state = createDemoState();
@@ -70,6 +72,7 @@ let systemRuntime = createDemoSystemRuntime();
 let workflowRuntime = makeWorkflowRuntime();
 let jiraRuntime = createDemoJiraRuntime();
 const activeRuns = new Set<string>();
+const runTimers = createDemoRunTimers();
 const pendingReplies = new Map<string, Message[]>();
 const queuedMessages = new Map<string, QueuedMessage>();
 const acceptedQueueMessages = new Map<string, QueuedMessage>();
@@ -191,6 +194,7 @@ const DEMO_REPOSITORY_SCRIPTS = [
 scope.onmessage = (event: MessageEvent<DemoWorkerRequest>) => {
   const message = event.data;
   if (message.kind === "init") {
+    runTimers.clear();
     state = restoreState(message.persistedState);
     files = createDemoFiles();
     multiRepoFiles = createDemoMultiRepoFiles();
@@ -241,7 +245,18 @@ function restoreState(persisted?: string): DemoState {
   if (!persisted) return createDemoState();
   try {
     const parsed = JSON.parse(persisted) as DemoState;
-    return parsed.version === DEMO_SCENARIO_VERSION ? parsed : createDemoState();
+    if (parsed.version !== DEMO_SCENARIO_VERSION) return createDemoState();
+    for (const session of parsed.sessions) {
+      if (session.state !== "RUNNING" && session.state !== "STARTING") continue;
+      session.state = "IDLE";
+      session.updated_at = new Date().toISOString();
+      const task = parsed.tasks.find((item) => item.primary_session_id === session.id);
+      if (task) {
+        task.primary_session_state = "IDLE";
+        task.updated_at = session.updated_at;
+      }
+    }
+    return parsed;
   } catch {
     return createDemoState();
   }
@@ -477,6 +492,12 @@ function updateTask(task: Task, input: Record<string, unknown>): DemoHttpRespons
 }
 
 function removeTask(task: Task): DemoHttpResponse {
+  for (const session of state.sessions.filter((item) => item.task_id === task.id)) {
+    cancelSessionRun(session.id);
+    delete state.messagesBySession[session.id];
+    fileReviewsBySession.delete(session.id);
+  }
+  delete plansByTask[task.id];
   state.tasks = state.tasks.filter((item) => item.id !== task.id);
   state.sessions = state.sessions.filter((session) => session.task_id !== task.id);
   delete state.taskPRs[task.id];
@@ -497,6 +518,62 @@ export function handleSocketRequest(socketId: string, raw: string) {
   const action = request.action ?? "";
   const payload = request.payload ?? {};
   if (!id) return;
+
+  if (
+    [
+      "task.subscribe",
+      "task.unsubscribe",
+      "user.subscribe",
+      "user.unsubscribe",
+      "session.unsubscribe",
+      "run.subscribe",
+      "run.unsubscribe",
+      "system.metrics.subscribe",
+      "system.metrics.unsubscribe",
+    ].includes(action)
+  ) {
+    respond(socketId, id, { success: true });
+    return;
+  }
+  if (action === "session.stop") {
+    const session = state.sessions.find((item) => item.id === payload.session_id);
+    if (!session) {
+      respond(socketId, id, { message: "Session not found" }, true);
+      return;
+    }
+    cancelSessionRun(session.id);
+    const oldState = session.state;
+    session.state = "IDLE";
+    session.updated_at = new Date().toISOString();
+    const task = findTask(session.task_id);
+    if (task?.primary_session_id === session.id) {
+      task.primary_session_state = "IDLE";
+      task.updated_at = session.updated_at;
+      notify(TASK_UPDATED_EVENT, taskEvent(task));
+    }
+    notify("session.state_changed", {
+      task_id: session.task_id,
+      session_id: session.id,
+      old_state: oldState,
+      new_state: session.state,
+      updated_at: session.updated_at,
+    });
+    notify("message.queue.status_changed", demoQueueStatus(session));
+    persist();
+    respond(socketId, id, { success: true });
+    return;
+  }
+
+  const taskRead = routeDemoTaskRead(
+    state,
+    action,
+    payload,
+    (sessionId) => demoGitData(sessionId).status.files,
+  );
+  if (taskRead) {
+    respond(socketId, id, taskRead.payload, taskRead.error);
+    return;
+  }
 
   const conversationResponse = conversationRuntime.route(socketId, action, payload);
   if (conversationResponse) {
@@ -798,7 +875,7 @@ export function handleSocketRequest(socketId: string, raw: string) {
     if (!existing) persist();
     return;
   }
-  respond(socketId, id, { success: true, demo_mode: true });
+  respond(socketId, id, { message: `Unsupported demo action: ${action}`, demo_mode: true }, true);
 }
 
 function createDemoPlans(): Record<string, TaskPlan> {
@@ -1147,7 +1224,8 @@ function startAgent(task: Task, prompt: string) {
 function scheduleAgentRun(task: Task, session: TaskSession) {
   const messages = makeAgentRunMessages(task, session.id);
   messages.forEach((message, index) => {
-    setTimeout(
+    runTimers.schedule(
+      session.id,
       () => {
         if (!state.tasks.includes(task) || !state.sessions.includes(session)) return;
         appendMessage(message);
@@ -1290,17 +1368,21 @@ function queueFollowUp(
   queuedMessages.set(queueId, entry);
   respond(socketId, id, entry);
   notify("message.queue.status_changed", demoQueueStatus(session));
-  setTimeout(() => {
-    if (!state.tasks.includes(task) || !state.sessions.includes(session)) return;
-    queuedMessages.delete(queueId);
-    const user = makeMessage(`${queueId}-user`, session.id, task.id, "user", content, {
-      metadata: { client_queue_id: queueId },
-    });
-    appendMessage(user);
-    notify("message.queue.status_changed", demoQueueStatus(session));
-    enqueueReply(task, session, user);
-    persist();
-  }, 100);
+  runTimers.schedule(
+    session.id,
+    () => {
+      if (!state.tasks.includes(task) || !state.sessions.includes(session)) return;
+      queuedMessages.delete(queueId);
+      const user = makeMessage(`${queueId}-user`, session.id, task.id, "user", content, {
+        metadata: { client_queue_id: queueId },
+      });
+      appendMessage(user);
+      notify("message.queue.status_changed", demoQueueStatus(session));
+      enqueueReply(task, session, user);
+      persist();
+    },
+    100,
+  );
 }
 
 function demoQueueStatus(session: TaskSession): QueueStatus {
@@ -1315,6 +1397,17 @@ function demoQueueStatus(session: TaskSession): QueueStatus {
     merge_enabled: false,
     auto_run: true,
   };
+}
+
+function cancelSessionRun(sessionId: string) {
+  runTimers.cancel(sessionId);
+  activeRuns.delete(sessionId);
+  pendingReplies.delete(sessionId);
+  for (const [id, entry] of acceptedQueueMessages) {
+    if (entry.session_id !== sessionId) continue;
+    queuedMessages.delete(id);
+    acceptedQueueMessages.delete(id);
+  }
 }
 
 function enqueueReply(task: Task, session: TaskSession, user: Message) {
@@ -1352,12 +1445,16 @@ function scheduleReply(task: Task, session: TaskSession, user: Message) {
     previous?.metadata?.demo_reply_variant as number | undefined,
   );
   messages.forEach((message, index) => {
-    setTimeout(() => {
-      if (!state.tasks.includes(task) || !state.sessions.includes(session)) return;
-      appendMessage(message);
-      if (index === messages.length - 1) finishAgentRun(task, session);
-      persist();
-    }, [300, 900, 1800][index]);
+    runTimers.schedule(
+      session.id,
+      () => {
+        if (!state.tasks.includes(task) || !state.sessions.includes(session)) return;
+        appendMessage(message);
+        if (index === messages.length - 1) finishAgentRun(task, session);
+        persist();
+      },
+      [300, 900, 1800][index],
+    );
   });
 }
 
@@ -1744,6 +1841,9 @@ function makeWorkflowRuntime() {
   return createDemoWorkflowRuntime({
     snapshot: state.workflowRuntime,
     getTasks: activeTasks,
+    deleteTasks(matches) {
+      for (const task of state.tasks.filter(matches)) removeTask(task);
+    },
     onChange(snapshot) {
       state.workflowRuntime = snapshot;
       persist();

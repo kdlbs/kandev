@@ -29,6 +29,7 @@ export type DemoWorkflowRuntimeSnapshot = {
 type RuntimeOptions = {
   snapshot?: DemoWorkflowRuntimeSnapshot;
   getTasks: () => Task[];
+  deleteTasks: (matches: (task: Task) => boolean) => void;
   onChange: (snapshot: DemoWorkflowRuntimeSnapshot) => void;
   notify: (action: string, payload: unknown) => void;
 };
@@ -54,9 +55,15 @@ export function createDemoWorkflowRuntime(options: RuntimeOptions) {
     route(context: DemoWorkflowRouteContext): DemoHttpResponse | null {
       const common = routeWorkflowReads(context, state, options.getTasks);
       if (common) return common;
-      const mutation = routeWorkflowMutations(context, state, options.getTasks, changed);
+      const mutation = routeWorkflowMutations(context, state, options.deleteTasks, changed);
       if (mutation) return mutation;
-      const step = routeStepRequests(context, state, options.getTasks, changed);
+      const step = routeStepRequests(
+        context,
+        state,
+        options.getTasks,
+        options.deleteTasks,
+        changed,
+      );
       if (step) return step;
       const transfer = routeWorkflowTransfer(context, state, changed);
       if (transfer) return transfer;
@@ -109,7 +116,7 @@ function routeWorkflowReads(
 function routeWorkflowMutations(
   { path, method, input }: DemoWorkflowRouteContext,
   state: DemoWorkflowRuntimeSnapshot,
-  getTasks: () => Task[],
+  deleteTasks: RuntimeOptions["deleteTasks"],
   changed: (action?: string, payload?: unknown) => void,
 ) {
   if (path === "/api/v1/workflows" && method === "POST") {
@@ -128,7 +135,7 @@ function routeWorkflowMutations(
     if (method === "DELETE") {
       state.workflows = state.workflows.filter((item) => item.id !== workflow.id);
       state.steps = state.steps.filter((step) => step.workflow_id !== workflow.id);
-      removeTasks(getTasks(), (task) => task.workflow_id === workflow.id);
+      deleteTasks((task) => task.workflow_id === workflow.id);
       changed("workflow.deleted", { id: workflow.id, workspace_id: workflow.workspace_id });
       return ok({ success: true });
     }
@@ -151,12 +158,13 @@ function routeStepRequests(
   context: DemoWorkflowRouteContext,
   state: DemoWorkflowRuntimeSnapshot,
   getTasks: () => Task[],
+  deleteTasks: RuntimeOptions["deleteTasks"],
   changed: (action?: string, payload?: unknown) => void,
 ) {
   return (
     routeStepCollections(context, state, changed) ??
     routeTaskCountsAndMoves(context, getTasks, changed) ??
-    routeIndividualStep(context, state, getTasks, changed)
+    routeIndividualStep(context, state, deleteTasks, changed)
   );
 }
 
@@ -217,7 +225,7 @@ function routeTaskCountsAndMoves(
 function routeIndividualStep(
   { path, method, input }: DemoWorkflowRouteContext,
   state: DemoWorkflowRuntimeSnapshot,
-  getTasks: () => Task[],
+  deleteTasks: RuntimeOptions["deleteTasks"],
   changed: (action?: string, payload?: unknown) => void,
 ) {
   const stepMatch = path.match(/^\/api\/v1\/workflow\/steps\/([^/]+)$/);
@@ -230,7 +238,7 @@ function routeIndividualStep(
   if (method === "DELETE") {
     state.steps = state.steps.filter((item) => item.id !== step.id);
     normalizeStepPositions(state, step.workflow_id);
-    removeTasks(getTasks(), (task) => task.workflow_step_id === step.id);
+    deleteTasks((task) => task.workflow_step_id === step.id);
     changed("workflow.step.deleted", { step });
     return ok({ success: true });
   }
@@ -509,12 +517,6 @@ function importPortableWorkflow(state: DemoWorkflowRuntimeSnapshot, portable: Po
   })) as WorkflowStep[];
   state.steps.push(...steps);
   return workflow;
-}
-
-function removeTasks(tasks: Task[], shouldRemove: (task: Task) => boolean) {
-  for (let index = tasks.length - 1; index >= 0; index--) {
-    if (shouldRemove(tasks[index])) tasks.splice(index, 1);
-  }
 }
 
 function restoreEventStepIds<T>(value: T, stepIds: string[]): T {
