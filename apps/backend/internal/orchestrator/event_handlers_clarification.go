@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -227,6 +228,9 @@ func (s *Service) resumeDetachedClarificationWithPrompt(
 	}
 	if err := s.authorizeTaskSessionPair(ctx, data.TaskID, data.SessionID); err != nil {
 		return err
+	}
+	if options.deliverySubmissionID == "" {
+		options.deliverySubmissionID = "clarification:" + uuid.NewString()
 	}
 	prompt := buildClarificationPrompt(data)
 
