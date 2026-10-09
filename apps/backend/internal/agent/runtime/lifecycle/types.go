@@ -400,6 +400,8 @@ type AgentExecution struct {
 	// promptLifecycleMu is held by workspace rebind waiting for readiness.
 	startupAttemptGeneration uint64
 	startupRecoveryStarted   bool
+	startupRecoveryCancelled bool // A stopped execution cannot start another replacement.
+	startupRecoveryCancel    context.CancelCauseFunc
 	// startupAttemptIDs preserves the recovery identity for each startup
 	// generation. The execution ID can be reused by managed-runtime repair, so
 	// callbacks must use their captured generation identity instead of the
@@ -825,18 +827,37 @@ func (e *AgentExecution) recordExpectedWorkspaceRebindDisconnect(generation uint
 // beginStartupRecovery advances the startup generation exactly once. The
 // caller uses the returned generation when wiring the replacement streams.
 func (e *AgentExecution) beginStartupRecovery() (uint64, bool) {
+	return e.beginStartupRecoveryWithCancel(nil)
+}
+
+// beginStartupRecoveryWithCancel registers recovery cancellation with its execution owner.
+func (e *AgentExecution) beginStartupRecoveryWithCancel(cancel context.CancelCauseFunc) (uint64, bool) {
 	e.startupCallbackMu.Lock()
 	defer e.startupCallbackMu.Unlock()
 	e.startupLifecycleMu.Lock()
 	defer e.startupLifecycleMu.Unlock()
-	if e.startupRecoveryStarted {
+	if e.startupRecoveryStarted || e.startupRecoveryCancelled {
 		return e.startupAttemptGeneration, false
 	}
 	e.startupRecoveryStarted = true
+	e.startupRecoveryCancel = cancel
 	e.startupAttemptGeneration++
 	currentAttemptID := e.startupAttemptIDs[e.startupAttemptGeneration-1]
 	e.recordStartupAttemptIDLocked(e.startupAttemptGeneration, currentAttemptID)
 	return e.startupAttemptGeneration, true
+}
+
+func (e *AgentExecution) cancelStartupRecovery() {
+	if e == nil {
+		return
+	}
+	e.startupLifecycleMu.Lock()
+	e.startupRecoveryCancelled = true
+	cancel := e.startupRecoveryCancel
+	e.startupLifecycleMu.Unlock()
+	if cancel != nil {
+		cancel(context.Canceled)
+	}
 }
 
 func (e *AgentExecution) recordStartupAttemptIDLocked(generation uint64, attemptID string) {
@@ -883,6 +904,7 @@ func (e *AgentExecution) currentStartupAttemptID() string {
 func (e *AgentExecution) finishStartupRecovery() {
 	e.startupLifecycleMu.Lock()
 	e.startupRecoveryStarted = false
+	e.startupRecoveryCancel = nil
 	e.startupLifecycleMu.Unlock()
 }
 
