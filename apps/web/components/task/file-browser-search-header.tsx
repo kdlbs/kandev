@@ -41,7 +41,7 @@ export function FileBrowserSearchHeader({
         className="flex-1 min-w-0 h-5 text-xs border-none bg-transparent shadow-none focus-visible:ring-0 px-2"
       />
       <button
-        className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+        className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
         onClick={onCloseSearch}
       >
         <IconX className="h-3.5 w-3.5" />

@@ -1,5 +1,8 @@
 use url::{Host, Url};
 
+#[cfg(any(target_os = "macos", test))]
+use std::process::{Command, Stdio};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExternalLinkError {
     Empty,
@@ -70,13 +73,36 @@ fn validate_web_url(parsed: Url) -> Result<Url, ExternalLinkError> {
 }
 
 #[cfg(feature = "desktop-runtime")]
-pub fn open_validated_external_url(app: &tauri::AppHandle, input: &str) -> Result<(), String> {
-    use tauri_plugin_opener::OpenerExt;
-
+pub fn open_validated_external_url(_app: &tauri::AppHandle, input: &str) -> Result<(), String> {
     let url = validate_external_url(input).map_err(|error| error.to_string())?;
-    app.opener()
-        .open_url(url.as_str(), None::<&str>)
-        .map_err(|error| format!("failed to open external URL: {error}"))
+
+    #[cfg(target_os = "macos")]
+    {
+        crate::child_process::spawn_managed(build_macos_open_command(&url), "external link helper")
+            .map(|_| ())
+            .map_err(|error| format!("failed to open external URL: {error}"))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        use tauri_plugin_opener::OpenerExt;
+
+        _app.opener()
+            .open_url(url.as_str(), None::<&str>)
+            .map_err(|error| format!("failed to open external URL: {error}"))
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn build_macos_open_command(url: &Url) -> Command {
+    let mut command = Command::new("/usr/bin/open");
+    command
+        .arg("--")
+        .arg(url.as_str())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -142,5 +168,21 @@ mod tests {
                 "{input}"
             );
         }
+    }
+
+    #[test]
+    fn macos_open_command_preserves_url_as_one_argument() {
+        let url = validate_external_url(
+            "https://example.com/a%2Fb?q=desktop&next=https%3A%2F%2Fkandev.dev%2Fsettings#origin",
+        )
+        .expect("valid external URL");
+        let command = build_macos_open_command(&url);
+        let args = command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(command.get_program(), "/usr/bin/open");
+        assert_eq!(args, ["--", url.as_str()]);
     }
 }

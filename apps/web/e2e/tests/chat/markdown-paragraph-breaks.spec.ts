@@ -1,6 +1,12 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import {
+  assertMarkdownSeparatorRendering,
+  MARKDOWN_SEPARATOR_FIXTURE,
+  openMarkdownSeparatorTask,
+  seedMarkdownSeparatorTask,
+} from "./markdown-separators-helpers";
 
 test.describe("Markdown paragraph breaks", () => {
   test("consecutive paragraphs have visible spacing between them", async ({
@@ -67,5 +73,30 @@ test.describe("Markdown paragraph breaks", () => {
     });
 
     expect(hasSpacing).toBe(true);
+  });
+
+  test("glued prose separators render as paragraph and rule after reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const { task, sessionId, storedMessage } = await seedMarkdownSeparatorTask(
+      apiClient,
+      seedData,
+      "Markdown separator desktop regression",
+    );
+    expect(storedMessage.content).toBe(MARKDOWN_SEPARATOR_FIXTURE);
+
+    const session = await openMarkdownSeparatorTask(testPage, task.id);
+    await assertMarkdownSeparatorRendering(session);
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await assertMarkdownSeparatorRendering(session);
+
+    const { messages } = await apiClient.listSessionMessages(sessionId);
+    expect(messages.some((message) => message.content === MARKDOWN_SEPARATOR_FIXTURE)).toBe(true);
   });
 });

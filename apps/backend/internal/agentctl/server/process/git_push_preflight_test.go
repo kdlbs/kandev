@@ -88,17 +88,17 @@ func TestPushPreflightUsesStableGitEnvironment(t *testing.T) {
 	}
 	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("KANDEV_TEST_PUSH_ENV", envPath)
-	t.Setenv("LANG", "pt_PT.UTF-8")
-	t.Setenv("LC_ALL", "pt_PT.UTF-8")
+	t.Setenv("LANG", "POSIX")
+	t.Setenv("LC_ALL", "POSIX")
 	t.Setenv("GIT_TERMINAL_PROMPT", "1")
 
-	_, err = operator.PushPreflight(context.Background(), PushOptions{})
+	result, err := operator.PushPreflight(context.Background(), PushOptions{})
 	if err != nil {
 		t.Fatalf("PushPreflight returned error: %v", err)
 	}
 	env, err := os.ReadFile(envPath)
 	if err != nil {
-		t.Fatalf("read recorded Git environment: %v", err)
+		t.Fatalf("read recorded Git environment: %v; result=%+v", err, result)
 	}
 	want := "LANG=C\nLC_ALL=C\nGIT_TERMINAL_PROMPT=0\n"
 	if got := string(env); got != want {

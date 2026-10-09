@@ -2,6 +2,20 @@ import { describe, expect, it } from "vitest";
 import { shouldActivateSessionPanel } from "./dockview-session-tab-activation";
 
 describe("shouldActivateSessionPanel", () => {
+  it("activates a committed manual workflow recipient even when another panel is selected", () => {
+    expect(
+      shouldActivateSessionPanel({
+        sessionPanelExistedBefore: true,
+        prevTaskId: "task-1",
+        prevSessionId: "session-astra",
+        currentTaskId: "task-1",
+        currentSessionId: "session-luna",
+        currentActivePanelId: "plan",
+        workflowFocusRequested: true,
+      }),
+    ).toBe(true);
+  });
+
   const sessionId = "s-current";
   const baseArgs = {
     prevTaskId: null,

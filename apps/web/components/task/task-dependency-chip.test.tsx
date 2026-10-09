@@ -1,22 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getTaskDependenciesMock = vi.hoisted(() => vi.fn());
+const touchDrawerMock = vi.hoisted(() => ({ value: false }));
 vi.mock("@/lib/api/domains/task-dependencies-api", () => ({
   getTaskDependencies: getTaskDependenciesMock,
 }));
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+vi.mock("@/hooks/use-compact-task-chrome", () => ({
+  useTouchDrawer: () => touchDrawerMock.value,
+}));
+import { cleanup, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
+import {
+  clearNavigationBlockerForTests,
+  setNavigationBlocker,
+} from "@/lib/routing/navigation-guard";
 import { TaskDependencyChip } from "./task-dependency-chip";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 
 beforeEach(() => {
   getTaskDependenciesMock.mockReset();
+  touchDrawerMock.value = false;
   // Default: the server also reports no edges, so the fetch fallback cannot be
   // what makes a "renders nothing" assertion pass.
   getTaskDependenciesMock.mockResolvedValue({ id: "unknown", depends_on: [], blocks: [] });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  clearNavigationBlockerForTests();
+});
 
 type KanbanTask = KanbanState["tasks"][number];
 
@@ -38,6 +50,7 @@ function renderChip(tasks: KanbanTask[], taskId: string) {
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- the suite covers both disclosure surfaces.
 describe("TaskDependencyChip", () => {
   it("renders nothing when the task has no edges in either direction", () => {
     renderChip([task({ id: "a" })], "a");
@@ -71,6 +84,52 @@ describe("TaskDependencyChip", () => {
     );
     const chip = screen.getByTestId(CHIP_TESTID);
     expect(chip.textContent).toMatch(/1/);
+  });
+
+  it("uses canonical guarded links for both dependency directions", () => {
+    renderChip(
+      [
+        task({
+          id: "b",
+          dependsOn: [{ id: "a", title: "A", status: "pending" }],
+          blocks: [{ id: "c", title: "C" }],
+        }),
+      ],
+      "b",
+    );
+    const chip = screen.getByTestId(CHIP_TESTID);
+    fireEvent.click(chip);
+    const entries = screen.getAllByTestId("task-dependency-entry");
+
+    expect(entries.map((entry) => entry.getAttribute("href"))).toEqual(["/t/a", "/t/c"]);
+
+    const click = createEvent.click(entries[0]);
+    fireEvent(entries[0], click);
+    expect(click.defaultPrevented).toBe(true);
+  });
+
+  it("keeps the disclosure open until guarded navigation commits", async () => {
+    let proceed: () => void = () => undefined;
+    setNavigationBlocker((intent) => {
+      proceed = intent.proceed;
+    });
+    renderChip([task({ id: "b", dependsOn: [{ id: "a", title: "A", status: "pending" }] })], "b");
+    fireEvent.click(screen.getByTestId(CHIP_TESTID));
+    fireEvent.click(screen.getByTestId("task-dependency-entry"));
+
+    expect(screen.getByTestId("task-dependency-chip-popover")).toBeTruthy();
+    proceed();
+    await waitFor(() => expect(screen.queryByTestId("task-dependency-chip-popover")).toBeNull());
+  });
+
+  it("keeps dependency rows touch-sized in the drawer", () => {
+    touchDrawerMock.value = true;
+    renderChip([task({ id: "b", dependsOn: [{ id: "a", title: "A", status: "pending" }] })], "b");
+    fireEvent.click(screen.getByTestId(CHIP_TESTID));
+
+    expect(screen.getByTestId("task-dependency-entry").className).toContain(
+      "[@media(pointer:coarse)]:min-h-11",
+    );
   });
 
   it("renders for a resolved dependency so the chain is still visible after it unblocks", () => {

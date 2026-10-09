@@ -1,7 +1,7 @@
 ---
 id: "02-restore-core-snapshots"
 title: "Restore core snapshots during recovery"
-status: complete
+status: done
 wave: 2
 depends_on:
   - "01-correct-replay-grants"
@@ -13,13 +13,20 @@ acceptance_criteria:
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.5
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.6
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.9
-  - AC-PLUGINS-PROMPT-HISTORY-HOST-002.15
   - AC-PLUGINS-PROMPT-HISTORY-HOST-005.3
 system_design:
   - "../../specs/plugins/system-design/conversation-recovery.md"
 ---
 
 # Task 02: Restore core snapshots during recovery
+
+
+## Replacement scope, 2026-09-16
+
+The [conversation storage replacement](../conversation-storage-replacement/plan.md) owns the next implementation.
+This file preserves historical scope and results. Do not execute its durable replay mechanics as new work.
+The replacement work orders preserve public behavior and provide new source-reconciliation, upgrade, and E2E evidence.
+
 
 ## Summary
 

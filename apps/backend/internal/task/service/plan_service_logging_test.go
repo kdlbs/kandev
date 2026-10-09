@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -130,6 +131,50 @@ func TestPlanServiceRevertOtherWriteErrorLogSeverity(t *testing.T) {
 	}
 }
 
+func TestPlanServiceHistoryReadErrorIsLogged(t *testing.T) {
+	svc, _, repo := createTestPlanService(t)
+	ctx := context.Background()
+	const taskID = "task-plan-history-read-log"
+	seedTask(t, ctx, repo, taskID)
+	created, err := svc.CreatePlan(ctx, CreatePlanRequest{
+		TaskID: taskID, Content: strings.Repeat("x", planTruncationMinPriorChars+100),
+	})
+	if err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+	injected := errors.New("revision history unavailable")
+	svc.repo = &planLatestRevisionReadErrorRepo{planRepo: repo, err: injected}
+	log, logs := newObservedServiceLogger(t)
+	svc.logger = log
+
+	_, err = svc.UpdatePlan(ctx, UpdatePlanRequest{
+		TaskID: taskID, Content: "short", CreatedBy: createdByAgent,
+		AgentWrite: true, ExpectedVersion: created.Plan.WriteVersion,
+		AllowTruncation: true, EvaluateTruncation: true, Mode: PlanWriteModeReplace,
+	})
+	if err == nil {
+		t.Fatal("acknowledged replacement succeeded despite unavailable revision history")
+	}
+	var safety *PlanSafetyError
+	if !errors.As(err, &safety) || safety.Code != PlanErrorHistoryUnavailable {
+		t.Fatalf("error = %T %v, want history-unavailable PlanSafetyError", err, err)
+	}
+	entries := logs.FilterMessage("agent plan history read failed").All()
+	if len(entries) != 1 {
+		t.Fatalf("history-read log count = %d, want 1", len(entries))
+	}
+	if entries[0].Level != zapcore.WarnLevel {
+		t.Fatalf("history-read log level = %s, want warn", entries[0].Level)
+	}
+	fields := entries[0].ContextMap()
+	if fields["task_id"] != taskID {
+		t.Fatalf("history-read task_id = %v, want %q", fields["task_id"], taskID)
+	}
+	if !strings.Contains(fields["error"].(string), injected.Error()) {
+		t.Fatalf("history-read error = %v, want %q", fields["error"], injected)
+	}
+}
+
 type planWriteErrorRepo struct {
 	planRepo
 	err error
@@ -144,4 +189,13 @@ func (r *planWriteErrorRepo) WritePlanRevision(
 	bool,
 ) error {
 	return r.err
+}
+
+type planLatestRevisionReadErrorRepo struct {
+	planRepo
+	err error
+}
+
+func (r *planLatestRevisionReadErrorRepo) GetLatestTaskPlanRevision(context.Context, string) (*models.TaskPlanRevision, error) {
+	return nil, r.err
 }

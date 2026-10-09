@@ -1,8 +1,21 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ isMobile: false }));
+const clipboardMocks = vi.hoisted(() => ({ copyToClipboard: vi.fn() }));
+const toastMocks = vi.hoisted(() => ({ toast: vi.fn() }));
+const unsafePathCases = [
+  { name: "newline", path: "src/line\nbreak.ts" },
+  { name: "escape", path: "src/escape\u001b.ts" },
+  { name: "delete", path: "src/delete\u007f.ts" },
+];
+
+vi.mock("@/lib/utils/copy-to-clipboard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/utils/copy-to-clipboard")>();
+  return { ...actual, copyToClipboard: clipboardMocks.copyToClipboard };
+});
+vi.mock("@/components/toast-provider", () => ({ useToast: () => toastMocks }));
 
 vi.mock("@/components/editors/external-vcs-file-link", () => ({
   ExternalVcsFileLink: (props: Record<string, unknown>) => (
@@ -14,8 +27,18 @@ vi.mock("@/components/editors/external-vcs-file-link", () => ({
 }));
 
 vi.mock("@/components/editors/file-actions-dropdown", () => ({
-  FileActionsDropdown: () => <span data-testid="file-actions-dropdown" />,
-  FileActionsMenuItems: () => <span data-testid="file-actions-menu-items" />,
+  FileActionsDropdown: (props: { includeCopyPath?: boolean }) => (
+    <span
+      data-testid="file-actions-dropdown"
+      data-include-copy-path={String(props.includeCopyPath)}
+    />
+  ),
+  FileActionsMenuItems: (props: { includeCopyPath?: boolean }) => (
+    <span
+      data-testid="file-actions-menu-items"
+      data-include-copy-path={String(props.includeCopyPath)}
+    />
+  ),
 }));
 
 vi.mock("@/hooks/use-global-view-mode", () => ({
@@ -30,6 +53,8 @@ import { FileDiffToolbar, type FileDiffToolbarProps } from "./review-diff-toolba
 
 afterEach(() => {
   cleanup();
+  clipboardMocks.copyToClipboard.mockReset();
+  toastMocks.toast.mockReset();
   mocks.isMobile = false;
 });
 
@@ -43,7 +68,6 @@ describe("Markdown preview actions", () => {
     render(
       <TooltipProvider>
         <FileDiffToolbar
-          diff="# README"
           filePath="README.md"
           sessionId="session-1"
           source="pr"
@@ -69,7 +93,6 @@ describe("Markdown preview actions", () => {
     render(
       <TooltipProvider>
         <FileDiffToolbar
-          diff="# README"
           filePath="README.md"
           sessionId="session-1"
           source="pr"
@@ -95,7 +118,6 @@ describe("Markdown preview actions", () => {
   it("offers Show diff while a Markdown row is in preview mode", () => {
     const onToggleMarkdownPreview = vi.fn();
     const props: FileDiffToolbarProps & { markdownPreview: boolean } = {
-      diff: "# README",
       filePath: "README.md",
       sessionId: "session-1",
       source: "pr",
@@ -124,7 +146,6 @@ describe("FileDiffToolbar", () => {
     render(
       <TooltipProvider>
         <FileDiffToolbar
-          diff="@@ -1 +1 @@"
           filePath="src/new-name.ts"
           previousPath="src/old-name.ts"
           status="renamed"
@@ -157,7 +178,10 @@ describe("FileDiffToolbar", () => {
       size: "xs",
     });
     expect(screen.getByTestId("file-actions-dropdown")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Copy diff" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Copy diff" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Copy path" }));
+    expect(clipboardMocks.copyToClipboard).toHaveBeenCalledWith("src/new-name.ts");
+    expect(screen.getByTestId("file-actions-dropdown").dataset.includeCopyPath).toBe("false");
     expect(screen.queryByRole("button", { name: /More actions for/ })).toBeNull();
   });
 
@@ -168,7 +192,6 @@ describe("FileDiffToolbar", () => {
     render(
       <TooltipProvider>
         <FileDiffToolbar
-          diff="@@ -1 +1 @@"
           filePath="src/app.ts"
           sessionId="session-1"
           source="uncommitted"
@@ -191,7 +214,10 @@ describe("FileDiffToolbar", () => {
 
     const menu = screen.getByTestId("review-file-actions-menu");
     expect(menu).toBeTruthy();
-    expect(screen.getByRole("menuitem", { name: "Copy diff" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Copy diff" })).toBeNull();
+    const copyPath = screen.getByRole("menuitem", { name: "Copy path" });
+    expect(copyPath.className).toContain("min-h-11");
+    expect(screen.getByTestId("file-actions-menu-items").dataset.includeCopyPath).toBe("false");
     const expand = screen.getByRole("menuitemcheckbox", { name: "Expand unchanged lines" });
     const wrap = screen.getByRole("menuitemcheckbox", { name: "Wrap long lines" });
     expect(expand.getAttribute("aria-checked")).toBe("false");
@@ -208,5 +234,103 @@ describe("FileDiffToolbar", () => {
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Expand unchanged lines" }));
     expect(onToggleExpandUnchanged).toHaveBeenCalledOnce();
+
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy path" }));
+    expect(clipboardMocks.copyToClipboard).toHaveBeenCalledWith("src/app.ts");
   });
+});
+
+describe("Mobile file actions", () => {
+  it("opens file comments after selecting the mobile menu action", async () => {
+    mocks.isMobile = true;
+    const onCommentFile = vi.fn();
+    render(
+      <TooltipProvider>
+        <FileDiffToolbar
+          filePath="src/app.ts"
+          sessionId="session-1"
+          source="pr"
+          wordWrap={false}
+          expandUnchanged={false}
+          onDiscard={vi.fn()}
+          onCommentFile={onCommentFile}
+          onToggleExpandUnchanged={vi.fn()}
+          onToggleWordWrap={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "More actions for src/app.ts" });
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Comment on file" }));
+
+    await waitFor(() => expect(onCommentFile).toHaveBeenCalledOnce());
+  });
+});
+
+describe("FileDiffToolbar path safety", () => {
+  it.each(unsafePathCases)(
+    "refuses to copy a $name control-character path from the desktop toolbar",
+    async ({ path: filePath }) => {
+      render(
+        <TooltipProvider>
+          <FileDiffToolbar
+            filePath={filePath}
+            sessionId="session-1"
+            source="pr"
+            wordWrap={false}
+            expandUnchanged={false}
+            onDiscard={vi.fn()}
+            onToggleExpandUnchanged={vi.fn()}
+            onToggleWordWrap={vi.fn()}
+          />
+        </TooltipProvider>,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Copy path" }));
+
+      expect(clipboardMocks.copyToClipboard).not.toHaveBeenCalled();
+      await waitFor(() =>
+        expect(toastMocks.toast).toHaveBeenCalledWith({
+          description: "This path contains control characters and cannot be copied.",
+        }),
+      );
+    },
+  );
+
+  it.each(unsafePathCases)(
+    "refuses to copy a $name control-character path from the phone toolbar menu",
+    async ({ path: filePath }) => {
+      mocks.isMobile = true;
+      render(
+        <TooltipProvider>
+          <FileDiffToolbar
+            filePath={filePath}
+            sessionId="session-1"
+            source="pr"
+            wordWrap={false}
+            expandUnchanged={false}
+            onDiscard={vi.fn()}
+            onToggleExpandUnchanged={vi.fn()}
+            onToggleWordWrap={vi.fn()}
+          />
+        </TooltipProvider>,
+      );
+
+      const trigger = screen.getByRole("button", { name: /More actions for/ });
+      fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+      fireEvent.click(trigger);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Copy path" }));
+
+      expect(clipboardMocks.copyToClipboard).not.toHaveBeenCalled();
+      await waitFor(() =>
+        expect(toastMocks.toast).toHaveBeenCalledWith({
+          description: "This path contains control characters and cannot be copied.",
+        }),
+      );
+    },
+  );
 });

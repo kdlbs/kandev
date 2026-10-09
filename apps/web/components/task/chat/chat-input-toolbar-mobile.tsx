@@ -44,6 +44,7 @@ type MobileToolbarProps = {
   canCancelAgent?: boolean;
   hasContent: boolean;
   onImplementPlan?: (fresh: boolean) => void;
+  planActionDisabledReason?: string;
   onEnhancePrompt?: () => void;
   isEnhancingPrompt: boolean;
   isUtilityConfigured: boolean;
@@ -108,6 +109,7 @@ function MobileDefaultLeftActions(props: MobileToolbarProps) {
           </div>
           <div data-testid="toolbar-item-model">
             <ModelSelector
+              showAgentIcon
               sessionId={props.sessionId}
               triggerClassName="max-w-[56vw] min-w-0 overflow-hidden"
             />
@@ -218,7 +220,12 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
         <div className="flex shrink-0 items-center gap-1">
           <TokenUsageDisplay sessionId={props.sessionId} />
           {props.planModeEnabled && !props.isAgentBusy && props.onImplementPlan && (
-            <ImplementPlanButton onClick={props.onImplementPlan} presentation={presentation} />
+            <ImplementPlanButton
+              onClick={props.onImplementPlan}
+              presentation={presentation}
+              disabled={Boolean(props.planActionDisabledReason)}
+              disabledReason={props.planActionDisabledReason}
+            />
           )}
           {!props.hideAgentControls && (
             <ChatInputPluginActions

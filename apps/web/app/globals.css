@@ -246,6 +246,10 @@
     border-color: transparent !important;
   }
 
+  [data-quick-chat-silent-focus="true"][data-variant="outline"]:focus-visible {
+    border-color: var(--border) !important;
+  }
+
   [data-workflow-replay-cycle="true"] {
     @apply ring-1 ring-warning/20;
     border-color: color-mix(in oklab, var(--warning) 65%, var(--border)) !important;
@@ -379,10 +383,8 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   }
 }
 
-/* Radix menus are poppers: their inline transform lives on a generated wrapper,
-   not the menu surface. On mobile viewports, pin that wrapper to the
-   viewport and let the menu scroll internally like a compact bottom sheet. */
-@media (max-width: 639px) {
+/* Task actions remain visible throughout the phone layout and on touch devices. */
+@media (max-width: 767px), (pointer: coarse) {
   .mobile-task-actions {
     display: flex !important;
     opacity: 1 !important;
@@ -400,12 +402,20 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
 
   .mobile-task-actions-slot {
     position: static;
+    width: auto;
+    min-width: 44px;
+    overflow: visible;
   }
 
   .mobile-task-diff-stats {
     opacity: 1 !important;
   }
+}
 
+/* Radix menus are poppers: their inline transform lives on a generated wrapper,
+   not the menu surface. On mobile viewports, pin that wrapper to the
+   viewport and let the menu scroll internally like a compact bottom sheet. */
+@media (max-width: 639px) {
   [data-radix-popper-content-wrapper]:has(
     > :is(
       [data-slot="context-menu-content"],
@@ -420,6 +430,17 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
     min-width: 0 !important;
     transform: none !important;
     will-change: auto !important;
+  }
+
+  [data-radix-popper-content-wrapper]:has(> [data-mobile-review-selector-menu]) {
+    bottom: calc(4rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* The review file actions sheet needs its positioner pinned to the viewport;
+     other mobile menus keep the shared 8px inset and trigger placement. */
+  [data-radix-popper-content-wrapper]:has(> .mobile-menu-root.mobile-review-file-actions-menu) {
+    inset: 0 !important;
+    transform: none !important;
   }
 
   /* The root positioner owns one backdrop outside the scrolling menu.
@@ -498,6 +519,128 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   background-clip: padding-box;
 }
 
+.kanban-scroll-region {
+  scrollbar-gutter: stable;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 120ms ease;
+}
+
+.kanban-scroll-region[data-kanban-scroll-axis="horizontal"] {
+  scrollbar-gutter: auto;
+}
+
+.kanban-scroll-region::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.kanban-scroll-region::-webkit-scrollbar-thumb {
+  background: transparent;
+  background-clip: padding-box;
+}
+
+.kanban-scroll-region:is(:hover, :focus-within),
+.kanban-scroll-region[data-kanban-scroll-active="true"] {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.kanban-scroll-region:is(:hover, :focus-within)::-webkit-scrollbar-thumb,
+.kanban-scroll-region[data-kanban-scroll-active="true"]::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.kanban-overflow-fade {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease;
+}
+
+.kanban-overflow-fade-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.kanban-overflow-fade-top,
+.kanban-overflow-fade-bottom {
+  right: 10px;
+  left: 0;
+  height: 48px;
+  display: flex;
+  justify-content: center;
+  padding-block: 4px;
+}
+
+.kanban-overflow-chevron {
+  color: var(--foreground);
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
+.kanban-overflow-fade-top {
+  top: 0;
+  align-items: flex-start;
+  background: linear-gradient(to bottom, var(--background) 25%, transparent);
+}
+
+.kanban-overflow-fade-bottom {
+  bottom: 0;
+  align-items: flex-end;
+  background: linear-gradient(to top, var(--background) 25%, transparent);
+}
+
+.kanban-overflow-fade-left,
+.kanban-overflow-fade-right {
+  top: 0;
+  bottom: 10px;
+  width: 16px;
+}
+
+.kanban-overflow-fade-left {
+  left: 0;
+  background: linear-gradient(to right, var(--background), transparent);
+}
+
+.kanban-overflow-fade-right {
+  right: 0;
+  background: linear-gradient(to left, var(--background), transparent);
+}
+
+@media (any-pointer: coarse) {
+  .kanban-scroll-region {
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+
+  .kanban-scroll-region::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    background-clip: padding-box;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kanban-scroll-region,
+  .kanban-overflow-fade {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .kanban-scroll-region {
+    scrollbar-color: auto;
+    transition: none;
+  }
+
+  .kanban-scroll-region::-webkit-scrollbar-thumb {
+    background: ButtonText;
+  }
+
+  .kanban-overflow-fade {
+    display: none;
+  }
+}
+
 .task-sidebar-scroll[data-can-scroll-down="true"] {
   mask-image: linear-gradient(to bottom, black 0, black calc(100% - 3.5rem), transparent 100%);
   -webkit-mask-image: linear-gradient(
@@ -521,6 +664,18 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   background: var(--scrollbar-thumb-hover);
 }
 
+.sidebar-task-title[data-truncated="true"] {
+  mask-image: linear-gradient(to right, #000 calc(100% - min(16px, 33%)), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - min(16px, 33%)), transparent 100%);
+}
+
+@media (any-hover: hover) and (any-pointer: fine) {
+  .sidebar-task-title[data-truncated="true"]:hover {
+    mask-image: none;
+    -webkit-mask-image: none;
+  }
+}
+
 @media (hover: hover) and (pointer: fine) {
   .task-sidebar-scroll-root [data-slot="scroll-area-scrollbar"] {
     opacity: 0;
@@ -536,6 +691,14 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   .task-sidebar-scroll-root:is(:hover, :focus-within) [data-slot="scroll-area-scrollbar"] {
     opacity: 1;
     pointer-events: auto;
+  }
+}
+
+@media (forced-colors: active) {
+  .sidebar-task-title[data-truncated="true"],
+  .sidebar-task-title[data-truncated="true"]:hover {
+    mask-image: none;
+    -webkit-mask-image: none;
   }
 }
 
@@ -996,6 +1159,20 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
 
 .markdown-body p + p {
   margin-top: 0.5em;
+}
+
+.katex-display {
+  max-width: 100%;
+  margin: 1em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.125rem 0.25rem;
+  text-align: left;
+}
+
+.katex-display > .katex {
+  display: inline-block;
+  min-width: max-content;
 }
 
 .tiptap-plan-wrapper .ProseMirror::after {
@@ -2091,10 +2268,46 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   );
 }
 
+/* Native macOS Tauri title-bar geometry is separate from the browser PWA API. */
+[data-macos-tauri-overlay="true"] [data-window-controls-overlay-region="sidebar"] {
+  -webkit-app-region: drag;
+  padding-left: calc(72px + 0.75rem);
+}
+
+[data-macos-tauri-overlay="true"] [data-window-controls-overlay-region="content"] {
+  -webkit-app-region: drag;
+}
+
+[data-macos-tauri-overlay="true"]
+  [data-window-controls-overlay-region]
+  :is(a, button, input, select, textarea, [role="button"], [tabindex]) {
+  -webkit-app-region: no-drag;
+}
+
+[data-macos-tauri-overlay="true"] [data-sidebar-header-collapsed="true"] {
+  height: auto;
+  min-height: 112px;
+  padding-left: 0.25rem;
+  padding-top: calc(40px + 0.375rem);
+}
+
+[data-macos-tauri-overlay="true"]:has([data-testid="app-sidebar"][data-collapsed="true"])
+  [data-window-controls-overlay-region="content"] {
+  padding-left: calc(72px + 0.5rem);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sidebar-fade-in,
   .sidebar-section-content[data-state="open"],
   .sidebar-section-content[data-state="closed"] {
     animation: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-chat-text-motion],
+  [data-chat-motion-item] {
+    opacity: 1 !important;
+    transform: none !important;
   }
 }

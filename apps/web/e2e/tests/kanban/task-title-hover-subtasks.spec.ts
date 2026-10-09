@@ -141,4 +141,61 @@ test.describe("Task title hover card on the Kanban card", () => {
     await title.click();
     await expect(testPage).toHaveURL(new RegExp(`/t/${parent.id}`));
   });
+
+  // @covers AC-TASKS-RICH-TASK-TITLE-PREVIEWS-001.2, AC-TASKS-RICH-TASK-TITLE-PREVIEWS-001.3, AC-TASKS-RICH-TASK-TITLE-PREVIEWS-001.4
+  test("multi-select closes and suppresses title previews, then restores them when it ends", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const { parent } = await seedParentWithSubtasks(
+      apiClient,
+      seedData,
+      "Preview selection parent",
+    );
+    const sibling = await apiClient.createTask(seedData.workspaceId, "Preview selection sibling", {
+      description: "Second preview eligible task",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    const parentCard = kanban.taskCard(parent.id);
+    const siblingCard = kanban.taskCard(sibling.id);
+    await expect(parentCard).toBeVisible({ timeout: 45_000 });
+    await expect(siblingCard).toBeVisible({ timeout: 45_000 });
+
+    const parentTitle = parentCard.getByTestId("task-card-title");
+    await parentTitle.hover();
+    const hoverCard = testPage.getByTestId("task-title-hover-card");
+    await expect(hoverCard).toBeVisible();
+
+    // Modifier-click enters selection mode while the pointer remains on the
+    // open title preview, so this proves the mode transition itself closes it.
+    await parentTitle.click({ modifiers: ["ControlOrMeta"] });
+    await expect(kanban.multiSelectToolbar).toContainText("1 selected");
+    await expect(hoverCard).toHaveCount(0);
+
+    const siblingTitle = siblingCard.getByTestId("task-card-title");
+    await siblingTitle.hover();
+    await dwell(
+      testPage,
+      300,
+      "negative-assertion",
+      "multi-select must suppress a preview on an unselected title",
+    );
+    await expect(hoverCard).toHaveCount(0);
+    await siblingTitle.click();
+    await expect(kanban.multiSelectToolbar).toContainText("2 selected");
+    await expect(kanban.board).toBeVisible();
+    await expect(testPage).not.toHaveURL(new RegExp(`/t/${sibling.id}`));
+
+    await kanban.multiSelectToggle.first().click();
+    await expect(kanban.multiSelectToolbar).not.toBeVisible();
+    await parentTitle.hover();
+    await expect(hoverCard).toBeVisible();
+  });
 });

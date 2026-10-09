@@ -79,6 +79,29 @@ workflow run.
 - The existing OpenCode and preview event sets remain unchanged except for the
   approval label expression.
 
+### Eligibility-aware concurrency
+
+GitHub applies workflow-level concurrency before it evaluates a job-level
+`if`. The walkthrough workflow therefore mirrors the full generation gate when
+it selects the per-pull-request concurrency group. The shared
+`pr-walkthrough-<number>` group is used only when walkthrough generation is
+enabled, the event is non-draft and `pull_request_target`, and the source,
+action, label, and contributor allowlist conditions authorize generation.
+Events that fail any of those conditions use an `-ineligible` suffix.
+
+This includes unauthorized fork opened, ready-for-review, reopened, and
+synchronize events, as well as ineligible label events, draft events, and
+events received while generation is disabled. Same-repository
+`generate-pr-walkthrough` events and contributor `safe-to-review` events remain
+in the shared group. The existing job-level authorization gate remains the
+source of permission; group selection does not authorize a job.
+
+The eligible group keeps `cancel-in-progress: true`, so a newer eligible
+walkthrough trigger still replaces an older run for the same pull request.
+An ineligible event can be skipped independently and cannot cancel an eligible
+generation, publication, or linking pipeline. This preserves the
+`safe-to-review` authorization boundary.
+
 ### Walkthrough artifact contract
 
 The walkthrough keeps the existing provider-neutral contract:
@@ -159,6 +182,9 @@ The public object key remains
 - Missing, malformed, or non-matching allowlists fail closed.
 - A missing `safe-to-review` label skips contributor jobs. A stale
   `safe-to-test` label has no authorization effect after migration.
+- An event that fails the walkthrough generation gate cannot cancel an eligible
+  walkthrough pipeline; it is skipped independently after its separate
+  concurrency group is selected.
 - A failed label write does not grant access and does not block direct
   allowlist paths.
 - A missing or mismatched pull request ref fails walkthrough context
@@ -235,3 +261,4 @@ trigger.
 - [Use a Filesystem Contract for PR Walkthrough Runners](../../../decisions/2026-08-22-pr-walkthrough-filesystem-runner.md)
 - [Use the workflow SHA for trusted PR walkthrough inputs](../../../decisions/2026-08-23-pr-walkthrough-workflow-provenance.md)
 - [Host PR walkthrough HTML in Cloudflare R2](../../../decisions/2026-08-22-pr-walkthrough-r2-hosting.md)
+- [Isolate ineligible PR walkthrough triggers](../../../decisions/2026-09-22-pr-walkthrough-eligibility-concurrency.md)

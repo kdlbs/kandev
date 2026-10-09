@@ -1,5 +1,8 @@
 "use client";
 
+import { useSidebarWorkspaceGuard } from "@/hooks/domains/sidebar/use-sidebar-workspace-guard";
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
+
 import { useRef, type ComponentProps, type RefObject } from "react";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from "@kandev/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
@@ -42,6 +45,34 @@ type SidebarFilterSurfaceProps = Pick<Props, "trigger" | "open" | "onOpenChange"
   };
 };
 
+function inlineViewDeleteConfirmation({
+  shouldRender,
+  target,
+  anchorRef,
+  close,
+  onConfirm,
+}: {
+  shouldRender: boolean;
+  target: SavedTaskViewDeleteTarget | null;
+  anchorRef: RefObject<HTMLButtonElement | null>;
+  close: () => void;
+  onConfirm: (viewId: string) => void;
+}) {
+  if (!shouldRender || !target) return undefined;
+  return (
+    <SavedTaskViewDeleteConfirmation
+      target={target}
+      presentation="inline"
+      open
+      anchorRef={anchorRef}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) close();
+      }}
+      onConfirm={onConfirm}
+    />
+  );
+}
+
 export function SidebarFilterPopover({
   trigger,
   open,
@@ -49,16 +80,18 @@ export function SidebarFilterPopover({
   renameRequestedViewId,
   onRenameRequestHandled,
 }: Props) {
+  const guard = useSidebarWorkspaceGuard();
   const { t } = useTranslation();
-  const views = useAppStore((s) => s.sidebarViews.views);
-  const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
-  const storedDraft = useAppStore((s) => s.sidebarViews.draft);
-  const updateDraft = useAppStore((s) => s.updateSidebarDraft);
-  const saveAs = useAppStore((s) => s.saveSidebarDraftAs);
-  const saveOverwrite = useAppStore((s) => s.saveSidebarDraftOverwrite);
-  const discard = useAppStore((s) => s.discardSidebarDraft);
-  const deleteView = useAppStore((s) => s.deleteSidebarView);
-  const renameView = useAppStore((s) => s.renameSidebarView);
+  const views = useAppStore((s) => selectSidebarViews(s).views);
+  const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const storedDraft = useAppStore((s) => selectSidebarViews(s).draft);
+  const updateDraft = guard(useAppStore((s) => s.updateSidebarDraft));
+  const saveAs = guard(useAppStore((s) => s.saveSidebarDraftAs));
+  const saveOverwrite = guard(useAppStore((s) => s.saveSidebarDraftOverwrite));
+  const discard = guard(useAppStore((s) => s.discardSidebarDraft));
+  const deleteView = guard(useAppStore((s) => s.deleteSidebarView));
+  const renameView = guard(useAppStore((s) => s.renameSidebarView));
   const { usesDesktopWorkbench, isFinePointer } = useResponsiveBreakpoint();
   const deletion = useSavedTaskViewDeleteConfirmation<HTMLButtonElement>(views);
   const popoverContentRef = useRef<HTMLDivElement>(null);
@@ -67,19 +100,13 @@ export function SidebarFilterPopover({
   const hasDraft = !!storedDraft && activeView?.id === storedDraft.baseViewId;
   const usesInlineDeleteConfirmation = !usesDesktopWorkbench || !isFinePointer;
 
-  const inlineDeleteConfirmation =
-    usesInlineDeleteConfirmation && deletion.target ? (
-      <SavedTaskViewDeleteConfirmation
-        target={deletion.target}
-        presentation="inline"
-        open
-        anchorRef={deletion.anchorRef}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) deletion.close();
-        }}
-        onConfirm={deleteView}
-      />
-    ) : undefined;
+  const inlineDeleteConfirmation = inlineViewDeleteConfirmation({
+    shouldRender: usesInlineDeleteConfirmation,
+    target: deletion.target,
+    anchorRef: deletion.anchorRef,
+    close: deletion.close,
+    onConfirm: deleteView,
+  });
   const headerProps: ComponentProps<typeof ViewHeaderRow> = {
     activeView,
     hasDraft,
@@ -102,6 +129,7 @@ export function SidebarFilterPopover({
     <SidebarViewEditor
       current={current}
       isDrawerLayout={!usesDesktopWorkbench}
+      reorderScopeKey={`${workspaceId ?? ""}:${activeViewId ?? ""}`}
       headerProps={headerProps}
       onUpdate={updateDraft}
       onAddFilter={() =>

@@ -212,6 +212,54 @@ func TestCloudClient_DoTransition_PostsBody(t *testing.T) {
 	}
 }
 
+func TestCloudClient_AddCommentUsesCloudDocumentFormat(t *testing.T) {
+	var gotPath, gotBody string
+	ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"comment-7"}`))
+	})
+	c := clientTo(ts, AuthMethodAPIToken, "token")
+	id, err := c.AddComment(context.Background(), "ENG-7", "Ready for review")
+	if err != nil {
+		t.Fatalf("AddComment: %v", err)
+	}
+	if id != "comment-7" || gotPath != "/rest/api/3/issue/ENG-7/comment" {
+		t.Fatalf("comment response/path = %q %q", id, gotPath)
+	}
+	if !strings.Contains(gotBody, `"type":"doc"`) || !strings.Contains(gotBody, `"text":"Ready for review"`) {
+		t.Fatalf("comment body is not Atlassian Document Format: %s", gotBody)
+	}
+}
+
+func TestCloudClient_AddCommentUsesServerPlainTextBody(t *testing.T) {
+	var gotPath, gotBody string
+	ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"comment-8"}`))
+	})
+	c := NewCloudClient(&JiraConfig{
+		SiteURL: ts.URL, AuthMethod: AuthMethodPAT, InstanceType: InstanceTypeServer,
+	}, "token")
+	id, err := c.AddComment(context.Background(), "ENG-8", "Ready for review")
+	if err != nil {
+		t.Fatalf("AddComment: %v", err)
+	}
+	if id != "comment-8" || gotPath != "/rest/api/2/issue/ENG-8/comment" {
+		t.Fatalf("comment response/path = %q %q", id, gotPath)
+	}
+	if !strings.Contains(gotBody, `"body":"Ready for review"`) {
+		t.Fatalf("server comment body is not plain text: %s", gotBody)
+	}
+}
+
 func TestCloudClient_ListProjects(t *testing.T) {
 	ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/rest/api/3/project/search") {

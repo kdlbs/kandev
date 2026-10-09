@@ -1,6 +1,7 @@
 // Executor and environment payload types for WS events
 
-import type { ExecutorType } from "./executor";
+import type { ExecutorProvider, ExecutorType } from "./executor";
+import type { NativeMCPDiagnosticPayload } from "@/lib/prepare/native-mcp-diagnostic";
 
 export type ExecutorPayload = {
   id: string;
@@ -9,6 +10,7 @@ export type ExecutorPayload = {
   status: string;
   is_system: boolean;
   config?: Record<string, string>;
+  provider?: ExecutorProvider;
   created_at?: string;
   updated_at?: string;
 };
@@ -19,6 +21,8 @@ export type ExecutorProfilePayload = {
   name: string;
   mcp_policy?: string;
   config?: Record<string, string>;
+  secret_fields?: Record<string, boolean>;
+  provider?: ExecutorProvider;
   prepare_script: string;
   cleanup_script: string;
   created_at?: string;
@@ -30,6 +34,11 @@ export type PrepareProgressPayload = {
   session_id: string;
   execution_id: string;
   step_name: string;
+  step_kind?: string;
+  remote_platform?: string;
+  mcp_server_id?: string;
+  mcp_provider?: string;
+  failure_code?: string;
   step_command?: string;
   step_index: number;
   total_steps: number;
@@ -38,8 +47,11 @@ export type PrepareProgressPayload = {
   error?: string;
   warning?: string;
   warning_detail?: string;
+  mcp_diagnostic?: NativeMCPDiagnosticPayload;
   started_at?: string;
   ended_at?: string;
+  preparation_id?: string;
+  preparation_started_at?: string;
   timestamp: string;
 };
 
@@ -50,18 +62,37 @@ export type PrepareCompletedPayload = {
   success: boolean;
   error_message?: string;
   duration_ms: number;
+  preparation_id?: string;
+  preparation_started_at?: string;
   workspace_path?: string;
   steps?: Array<{
     name: string;
+    kind?: string;
+    remote_platform?: string;
+    mcp_server_id?: string;
+    mcp_provider?: string;
+    failure_code?: string;
     command?: string;
     status: string;
     output?: string;
     error?: string;
     warning?: string;
     warning_detail?: string;
+    mcp_diagnostic?: NativeMCPDiagnosticPayload;
     started_at?: string;
     ended_at?: string;
   }>;
+  timestamp: string;
+};
+
+export type LaunchWarningPayload = {
+  task_id: string;
+  session_id: string;
+  executor_id: string;
+  host: string;
+  state: string;
+  reason: string;
+  last_success_at?: string;
   timestamp: string;
 };
 

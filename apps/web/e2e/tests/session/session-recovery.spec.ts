@@ -6,8 +6,12 @@ import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import {
   cleanupDelayedResumeFixture,
+  countResumeBootMessages,
   createFailOnResumeProfile,
+  readSessionMessageIdsContaining,
+  readSessionRuntimeIdentity,
   seedDelayedResumeFixture,
+  waitForNewSessionMessage,
   waitForSessionReady,
   waitForQueuedCount,
 } from "../../helpers/session-resume-prompt-queue";
@@ -96,60 +100,182 @@ async function seedStaleContextWindow(testPage: Page): Promise<void> {
 const CRASH_RECOVERY_TIMEOUT = 170_000;
 
 test.describe("Session recovery", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
-  test("cancelling delayed resume fences the old work before a retry", async ({
+  test.describe("unaccepted startup cancellation", () => {
+    test.describe.configure({ retries: 0 });
+
+    test("cancelling delayed resume fences the old work before a retry", async ({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+    }) => {
+      test.setTimeout(150_000);
+
+      // The cancelled startup and the retry both load this session. Keep each
+      // injected delay short enough for the response assertion after cleanup.
+      const fixture = await seedDelayedResumeFixture(testPage, apiClient, seedData, backend, {
+        title: "Session cancel and retry recovery",
+        resumeDelay: "15s",
+      });
+
+      try {
+        // Cancel the actual STARTING session while the provider load is held by
+        // the delayed mock agent. This is the browser path that used to leave a
+        // resume continuation alive after cancellation.
+        await expect(fixture.session.cancelAgentButton()).toBeVisible({ timeout: 15_000 });
+        await fixture.session.cancelAgentButton().click();
+        await waitForSessionState(apiClient, {
+          taskId: fixture.task.id,
+          sessionId: fixture.identity.sessionId,
+          expectedState: "WAITING_FOR_INPUT",
+          message: "Waiting for delayed resume cancellation",
+          timeout: 30_000,
+        });
+        // Retry the same saved conversation through the normal composer. The
+        // old delayed callback must not publish a second response or consume
+        // this new attempt.
+        await waitForSessionReady(
+          testPage,
+          apiClient,
+          fixture.task.id,
+          fixture.identity.sessionId,
+          90_000,
+        );
+        // Delay only the cancelled process; the new process uses the normal resume path.
+        await apiClient.updateAgentProfile(fixture.delayedProfileId, { env_vars: [] });
+        await fixture.session.composerReady();
+        await fixture.session.sendMessage("/e2e:simple-message");
+        await fixture.session.expectChatResponseVisible("simple mock response", 1, {
+          timeout: 60_000,
+        });
+        await expect(fixture.session.activeChat().getByText("simple mock response")).toHaveCount(2);
+      } finally {
+        await cleanupDelayedResumeFixture(apiClient, fixture);
+      }
+    });
+  });
+
+  test("pausing an accepted lazy resume preserves the runtime for later turns", async ({
     testPage,
     apiClient,
     seedData,
     backend,
   }) => {
     test.setTimeout(150_000);
-
-    const fixture = await seedDelayedResumeFixture(
-      testPage,
-      apiClient,
-      seedData,
-      backend,
-      "Session cancel and retry recovery",
-    );
+    await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
 
     try {
-      // Cancel the actual STARTING session while the provider load is held by
-      // the delayed mock agent. This is the browser path that used to leave a
-      // resume continuation alive after cancellation.
-      await expect(fixture.session.cancelAgentButton()).toBeVisible({ timeout: 15_000 });
-      await fixture.session.cancelAgentButton().click();
-      await waitForSessionState(apiClient, {
-        taskId: fixture.task.id,
-        sessionId: fixture.identity.sessionId,
-        expectedState: "WAITING_FOR_INPUT",
-        message: "Waiting for delayed resume cancellation",
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Accepted lazy resume pause recovery",
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      if (!task.session_id) throw new Error("accepted lazy resume task has no session_id");
+
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
         timeout: 30_000,
       });
-      // Retry the same saved conversation through the normal composer. The
-      // old delayed callback must not publish a second response or consume
-      // this new attempt.
-      await waitForSessionReady(
-        testPage,
-        apiClient,
-        fixture.task.id,
-        fixture.identity.sessionId,
-        90_000,
-      );
-      await expect(fixture.session.activeChat().getByTestId("chat-input-editor")).toHaveAttribute(
-        "contenteditable",
-        "true",
-        { timeout: 30_000 },
-      );
+      await session.waitForChatIdle({ timeout: 30_000 });
 
-      await fixture.session.sendMessage("/e2e:simple-message");
-      await fixture.session.expectChatResponseVisible("simple mock response", 1, {
+      await backend.restart();
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(testPage.getByTestId("composer-agent-start-hint")).toBeVisible({
         timeout: 60_000,
       });
-      await expect(fixture.session.activeChat().getByText("simple mock response")).toHaveCount(2);
+
+      const resumeBootsBeforeMessage = await countResumeBootMessages(apiClient, task.session_id);
+
+      // The slow response is the acceptance witness: provider output can only
+      // arrive after the resumed prompt crossed the dispatch callback.
+      await session.sendMessage(
+        'e2e:message("Running slow response (8s total)...")\ne2e:delay(8000)',
+      );
+      await expect(
+        session.chat.getByText("Running slow response (8s total)...", { exact: true }),
+      ).toBeVisible({
+        timeout: 30_000,
+      });
+      await expect
+        .poll(() => countResumeBootMessages(apiClient, task.session_id!), {
+          message: "Waiting for the resumed runtime boot receipt before cancellation",
+          timeout: 30_000,
+        })
+        .toBe(resumeBootsBeforeMessage + 1);
+      const initialRuntimeIdentity = await readSessionRuntimeIdentity(
+        apiClient,
+        task.id,
+        task.session_id,
+      );
+      await session.cancelAgentButton().click();
+      await waitForSessionState(apiClient, {
+        taskId: task.id,
+        sessionId: task.session_id,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for accepted lazy resume cancellation",
+        timeout: 30_000,
+      });
+      await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      const resumeBootsAfterFirstPause = await countResumeBootMessages(apiClient, task.session_id);
+      expect(resumeBootsAfterFirstPause).toBe(resumeBootsBeforeMessage + 1);
+
+      // A second accepted pause must use the same process and conversation.
+      const slowResponseMessageIdsBeforeSecond = await readSessionMessageIdsContaining(
+        apiClient,
+        task.session_id,
+        "Running slow response",
+      );
+      expect(slowResponseMessageIdsBeforeSecond.size).toBeGreaterThan(0);
+      await session.sendMessage(
+        'e2e:message("Running slow response (8s total)...")\ne2e:delay(8000)',
+      );
+      await waitForNewSessionMessage(
+        apiClient,
+        task.session_id,
+        slowResponseMessageIdsBeforeSecond,
+        "Running slow response",
+      );
+      await session.cancelAgentButton().click();
+      await waitForSessionState(apiClient, {
+        taskId: task.id,
+        sessionId: task.session_id,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for the later accepted pause",
+        timeout: 30_000,
+      });
+
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      expect(await countResumeBootMessages(apiClient, task.session_id)).toBe(
+        resumeBootsAfterFirstPause,
+      );
+
+      await session.sendMessage("/e2e:simple-message");
+      await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
+      expect(await readSessionRuntimeIdentity(apiClient, task.id, task.session_id)).toEqual(
+        initialRuntimeIdentity,
+      );
+      expect(await countResumeBootMessages(apiClient, task.session_id)).toBe(
+        resumeBootsAfterFirstPause,
+      );
     } finally {
-      await cleanupDelayedResumeFixture(apiClient, fixture);
+      await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false });
     }
   });
 
@@ -161,13 +287,9 @@ test.describe("Session recovery", () => {
   }) => {
     test.setTimeout(120_000);
 
-    const fixture = await seedDelayedResumeFixture(
-      testPage,
-      apiClient,
-      seedData,
-      backend,
-      "Session startup composer readiness test",
-    );
+    const fixture = await seedDelayedResumeFixture(testPage, apiClient, seedData, backend, {
+      title: "Session startup composer readiness test",
+    });
 
     try {
       const editor = fixture.session.activeChat().getByTestId("chat-input-editor");

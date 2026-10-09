@@ -11,6 +11,8 @@ import type { AppState } from "@/lib/state/store";
 import type { TaskMentionData } from "./use-inline-mention";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
+/* eslint-disable max-lines -- message admission wire and routing cases share one fixture. */
+
 const getWebSocketClientMock = vi.hoisted(() => vi.fn());
 const listTaskSessionsMock = vi.hoisted(() => vi.fn());
 const queueMock = vi.hoisted(() => vi.fn());
@@ -169,6 +171,24 @@ describe("buildTaskMentionsContext", () => {
 });
 
 describe("buildDocumentContext", () => {
+  it("guides local plan revisions through bounded reads and fragment writes", () => {
+    const out = buildDocumentContext({ type: "plan", taskId: TASK_ID }, true);
+    for (const instruction of [
+      "offset",
+      "limit",
+      "expected_version",
+      "first page's version as expected_version",
+      "edit_task_plan_kandev",
+      'mode="append"',
+    ]) {
+      expect(out).toContain(instruction);
+    }
+    expect(out).toContain("Never submit a fragment as a replacement");
+    expect(out.match(/<kandev-system>/g)).toHaveLength(1);
+    expect(out.match(/<\/kandev-system>/g)).toHaveLength(1);
+    expect(buildDocumentContext({ type: "plan", taskId: TASK_ID }, false)).toBe("");
+  });
+
   it("uses the canonical plan tools in active-plan context", () => {
     const out = buildDocumentContext({ type: "plan", taskId: TASK_ID }, true);
 
@@ -454,6 +474,37 @@ describe("useMessageHandler", () => {
       expect.objectContaining({ content: "Queue this after I answer", taskId: TASK_ID }),
     );
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("returns sent or queued admission outcomes for late-message adapters", async () => {
+    const request = vi.fn().mockResolvedValue(undefined);
+    getWebSocketClientMock.mockReturnValue({ request });
+    selectedSession("IDLE");
+    const { result, rerender } = renderHook(
+      ({ hasPending }) =>
+        useMessageHandler({
+          resolvedSessionId: SESSION_ID,
+          taskId: TASK_ID,
+          sessionModel: null,
+          activeModel: null,
+          getHasPendingClarification: () => hasPending,
+        }),
+      { initialProps: { hasPending: false } },
+    );
+
+    await expect(
+      result.current.handleSendMessageWithOutcome({ message: "late answer" }),
+    ).resolves.toBe("sent");
+    expect(request).toHaveBeenCalled();
+
+    selectedSession("RUNNING", "generating");
+    rerender({ hasPending: true });
+    await expect(
+      result.current.handleSendMessageWithOutcome({ message: "another question is current" }),
+    ).resolves.toBe("queued");
+    expect(queueMock).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "another question is current" }),
+    );
   });
 });
 

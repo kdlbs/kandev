@@ -104,12 +104,12 @@ type taskSessionCheckerAdapter struct {
 func (a *taskSessionCheckerAdapter) HasUserAuthoredMessage(ctx context.Context, taskID string) (bool, error) {
 	sessions, err := a.repo.ListTaskSessions(ctx, taskID)
 	if err != nil {
-		return false, err
+		return false, wrapGitHubTaskSessionCheckerError(err)
 	}
 	for _, sess := range sessions {
 		messages, err := a.repo.ListMessages(ctx, sess.ID)
 		if err != nil {
-			return false, err
+			return false, wrapGitHubTaskSessionCheckerError(err)
 		}
 		for _, m := range messages {
 			if m.AuthorType != models.MessageAuthorUser {
@@ -127,6 +127,13 @@ func (a *taskSessionCheckerAdapter) HasUserAuthoredMessage(ctx context.Context, 
 		}
 	}
 	return false, nil
+}
+
+func wrapGitHubTaskSessionCheckerError(err error) error {
+	if errors.Is(err, taskrepo.ErrTaskNotFound) {
+		return fmt.Errorf("%w: %w", github.ErrTaskNotFound, err)
+	}
+	return err
 }
 
 // metaFlag returns true when meta[key] is a bool with value true. Returns

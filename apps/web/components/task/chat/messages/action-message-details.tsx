@@ -1,10 +1,12 @@
 import { useCallback, useState } from "react";
-import { IconChevronDown } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { SessionErrorDetails } from "@/components/task/session-error-details";
 import { AuthMethodsPanel, GenericAuthPanel } from "./auth-methods-panel";
 import { RemediationLink } from "@/components/task/remediation-link";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import type { MessageAction, RecoveryAuthMethod } from "@/components/task/chat/types";
+import type { AgentErrorCause } from "@/lib/types/task-status-summary";
+import type { SessionErrorDetailsField } from "@/lib/session-error-details";
 
 export type ActionMeta = {
   actions?: MessageAction[];
@@ -24,27 +26,44 @@ export type ActionMeta = {
   reset_at?: string;
   remediation_url?: string;
   retrying?: boolean;
+  recovery_mode?: string;
+  recovery_phase?: string;
+  recovery_disposition?: string;
+  recovery_reason?: string;
+  attempts_started?: number;
+  runtime_retained?: boolean;
+  failure_scope?: "turn" | "execution";
+  provider_error?: {
+    source?: string;
+    provider_id?: string;
+    error_kind?: string;
+    rpc_code?: number;
+  };
   attempt?: number;
   max_attempts?: number;
   retry_in_seconds?: number;
   retry_at?: string;
   failure_code?: string;
+  code?: string;
+  causes?: AgentErrorCause[];
+  occurred_at?: string;
+  execution_id?: string;
   failure_details?: string;
+  startup_reason?: string;
+  startup_attempts?: number;
+  startup_npm_code?: string;
+  attempt_id?: string;
+  phase?: string;
 };
 
-export function TechnicalDetails({ children }: { children: string }) {
-  const { t } = useTranslation();
-  return (
-    <details className="mt-2 min-w-0 text-xs text-muted-foreground">
-      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 sm:min-h-8">
-        <IconChevronDown className="h-3.5 w-3.5" />
-        {t("chat:technicalDetails")}
-      </summary>
-      <pre className="max-h-[300px] max-w-full overflow-y-auto whitespace-pre-wrap break-words rounded bg-muted/50 p-2 font-mono text-[11px]">
-        {children}
-      </pre>
-    </details>
-  );
+export function TechnicalDetails({
+  children,
+  structuredFields,
+}: {
+  children: string;
+  structuredFields?: readonly SessionErrorDetailsField[];
+}) {
+  return <SessionErrorDetails structuredFields={structuredFields}>{children}</SessionErrorDetails>;
 }
 
 export function ActionMessageDetails({
@@ -56,6 +75,7 @@ export function ActionMessageDetails({
 }) {
   const [hostShellOpen, setHostShellOpen] = useState(false);
   const [hostShellCommand, setHostShellCommand] = useState<string | undefined>(undefined);
+  const { t } = useTranslation();
 
   const openHostShellWithCommand = useCallback((command: string) => {
     setHostShellCommand(command + "\n");
@@ -68,10 +88,13 @@ export function ActionMessageDetails({
 
   if (!metadata) return null;
   const errorOutput = metadata.error_output || technicalDetails;
+  const structuredFields = providerErrorDetails(metadata.provider_error, t);
   return (
     <>
       {metadata.remediation_url && <RemediationLink url={metadata.remediation_url} />}
-      {errorOutput && <TechnicalDetails>{errorOutput}</TechnicalDetails>}
+      {(errorOutput || structuredFields.length > 0) && (
+        <TechnicalDetails structuredFields={structuredFields}>{errorOutput ?? ""}</TechnicalDetails>
+      )}
       {metadata.is_auth_error && metadata.auth_methods && metadata.auth_methods.length > 0 && (
         <AuthMethodsPanel
           methods={metadata.auth_methods}
@@ -88,4 +111,31 @@ export function ActionMessageDetails({
       />
     </>
   );
+}
+
+function providerErrorDetails(
+  providerError: ActionMeta["provider_error"],
+  translate: ReturnType<typeof useTranslation>["t"],
+): SessionErrorDetailsField[] {
+  if (!providerError) return [];
+  const fields: SessionErrorDetailsField[] = [];
+  if (providerError.source) {
+    fields.push({ label: translate("chat:providerErrorSource"), value: providerError.source });
+  }
+  if (providerError.provider_id) {
+    fields.push({
+      label: translate("chat:providerErrorProvider"),
+      value: providerError.provider_id,
+    });
+  }
+  if (providerError.error_kind) {
+    fields.push({ label: translate("chat:providerErrorKind"), value: providerError.error_kind });
+  }
+  if (Number.isInteger(providerError.rpc_code) && providerError.rpc_code !== 0) {
+    fields.push({
+      label: translate("chat:providerErrorRpcCode"),
+      value: String(providerError.rpc_code),
+    });
+  }
+  return fields;
 }

@@ -1,6 +1,6 @@
 ---
 id: "04-delivery-pending-retry"
-title: "Return delivery-pending retry outcomes"
+title: "Confirm delivery-pending retry outcomes"
 status: done
 wave: 4
 depends_on:
@@ -15,22 +15,24 @@ system_design:
   - "../../specs/tasks/system-design/clarification-response-reliability.md"
 ---
 
-# Task 04: Return delivery-pending retry outcomes
+# Task 04: Confirm delivery-pending retry outcomes
 
 ## Outcome
 
-An exact retry whose durable clarification outcome is already terminal but whose
-response delivery is still marked pending returns that recorded answer or
-rejection immediately. It does not create a duplicate response or leave a new
-retry waiter behind.
+An exact retry joins the live delivery of an already-claimed clarification
+instead of returning its provisional answer. It returns only after durable
+confirmation and the synchronous local watchdog notifier complete. A finalized
+outcome with no live confirmation can be replayed; detached answer ownership
+continues to prevent a duplicate tool response.
 
 ## In scope
 
 - Reconcile an already-recorded answered or rejected outcome when the durable
   message still carries `response_delivery_pending`.
 - Preserve the existing idempotent retry and rejection response contract.
-- Cover both answered and rejected delivery-pending outcomes with a focused
-  handler regression test.
+- Cover answered, rejected and failed confirmation through the real resolver.
+- Cover a finalized live response while its synchronous notifier is blocked,
+  including session cancellation.
 
 ## Exclusions
 
@@ -47,17 +49,33 @@ retry waiter behind.
 
 ## Implementation acceptance
 
-- A retry of a durable answered outcome marked delivery-pending returns the
-  recorded answer without waiting for a new response.
-- A retry of a durable rejected outcome marked delivery-pending returns the
-  recorded rejection without waiting for a new response.
-- Neither retry creates a pending waiter or duplicates the durable outcome.
+- A retry of an answered or rejected claim marked delivery-pending waits for
+  the existing resolver to confirm delivery, without asking the person again.
+- A retry of a finalized live response joins any remaining confirmation callback
+  and cannot return before the synchronous notifier.
+- Session cancellation does not erase an in-flight confirmation before retries
+  can join it. Registered waiters retain their original entry through removal.
+- A failed confirmation returns an error and restores the current bundle when
+  recovery is safe. No answer takes both live and detached paths.
 
 ## Verification
 
-- `cd apps/backend && go test ./internal/mcp/handlers -run 'TestHandleAskUserQuestion_RetryReturnsDeliveryPendingRecordedOutcome' -count=1`
+- `cd apps/backend && go test -trimpath -race -p 1 ./internal/mcp/handlers -run 'TestHandleAskUserQuestion_RetryDuring' -count=10`
+- `cd apps/backend && go test -trimpath -race -p 1 ./internal/clarification ./internal/mcp/handlers ./internal/mcp/server ./internal/task/repository/sqlite -count=1`
 
 ## Results
 
-Implemented the handler reconciliation and regression coverage for answered and
-rejected delivery-pending clarification outcomes.
+Deterministic real-resolver regressions reproduce the provisional tool response
+plus detached resume, false success on confirmation failure, and replay before
+the synchronous watchdog notifier completes. The corrected delivery, lost
+adoption, cancellation, and pinned-waiter cases pass with `-count=10`.
+
+The four affected backend packages passed ordinary tests, and the PostgreSQL
+reattachment lifecycle case passed against an isolated PostgreSQL 17.11 server.
+Catalog, specification, public-documentation, SQL portability, formatting, and
+current-main delta whitespace checks passed. Broad local lint attempts timed
+out or encountered a compiler OOM within the four-GiB limit; the broad race run
+was stopped without a full passing result. Under the coordinator's updated
+validation direction, broad tests, race coverage, and the expensive Go lint
+hook are transferred to hosted CI. The default CI checks must pass on the exact
+pushed head before merge; no local broad-validation success is claimed.

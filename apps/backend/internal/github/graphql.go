@@ -209,6 +209,7 @@ type batchedPRResult struct {
 	HeadRefName     string                  `json:"headRefName"`
 	BaseRefName     string                  `json:"baseRefName"`
 	HeadRefOid      string                  `json:"headRefOid"`
+	BaseRefOid      string                  `json:"baseRefOid"`
 	HeadRepository  ghRepository            `json:"headRepository"`
 	HeadRepoOwner   ghRepositoryOwner       `json:"headRepositoryOwner"`
 	Additions       int                     `json:"additions"`
@@ -461,7 +462,7 @@ func buildBatchedPRQuery(refs []graphQLPRRef) (string, map[string]any) {
 // the batched and single-PR paths returning the same data.
 func prFieldsBlock() string {
 	return `state title url isDraft mergeable mergeStateStatus ` +
-		`headRefName baseRefName headRefOid headRepository { id name nameWithOwner url } headRepositoryOwner { login } additions deletions changedFiles ` +
+		`headRefName baseRefName headRefOid baseRefOid headRepository { id name nameWithOwner url } headRepositoryOwner { login } additions deletions changedFiles ` +
 		`author { login } mergedBy { login } autoMergeRequest { enabledAt } ` +
 		`mergeQueueEntry { id state position estimatedTimeToMerge headCommit { oid } } ` +
 		`createdAt updatedAt mergedAt closedAt ` +
@@ -511,9 +512,12 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		HeadBranch:           raw.HeadRefName,
 		HeadSHA:              raw.HeadRefOid,
 		BaseBranch:           raw.BaseRefName,
+		BaseSHA:              raw.BaseRefOid,
 		AuthorLogin:          raw.Author.Login,
 		RepoOwner:            owner,
 		RepoName:             repo,
+		BaseRepoOwner:        owner,
+		BaseRepoName:         repo,
 		HeadRepoNodeID:       raw.HeadRepository.ID,
 		HeadRepoOwner:        raw.HeadRepoOwner.Login,
 		HeadRepoName:         raw.HeadRepository.Name,

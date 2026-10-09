@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,16 +54,56 @@ func (*inactiveTurnService) AbandonOpenTurns(context.Context, string) error {
 	return nil
 }
 
+type activeLSPLeaseForTest struct {
+	mu               sync.Mutex
+	sessionID        string
+	executionID      string
+	checks           int
+	executionChecks  int
+	executionCheck   chan struct{}
+	stoppedExecution []string
+}
+
+func (lease *activeLSPLeaseForTest) HasActiveLSPLease(sessionID string) bool {
+	lease.mu.Lock()
+	lease.checks++
+	lease.mu.Unlock()
+	return sessionID == lease.sessionID
+}
+func (lease *activeLSPLeaseForTest) HasActiveLSPLeaseForExecution(executionID string) bool {
+	lease.mu.Lock()
+	lease.executionChecks++
+	lease.mu.Unlock()
+	if lease.executionCheck != nil {
+		select {
+		case lease.executionCheck <- struct{}{}:
+		default:
+		}
+	}
+	return executionID == lease.executionID
+}
+func (*activeLSPLeaseForTest) StopLSPLeasesForSession(string) {}
+func (*activeLSPLeaseForTest) StopLSPLeasesForTask(string)    {}
+func (lease *activeLSPLeaseForTest) StopLSPLeasesForExecution(executionID string) {
+	lease.mu.Lock()
+	lease.stoppedExecution = append(lease.stoppedExecution, executionID)
+	lease.mu.Unlock()
+}
+
 // TestClassifyIdleReclaimDisposition is the single decision-matrix test for
 // the idle-reclaim predicate. Each case names the (state, runtime-live,
-// active-turn) tuple the primitive sees and the disposition it must return;
-// fail-closed means every uncertain input is a Skipped* disposition.
+// active-turn, resume-token, row-status) tuple the primitive sees and the
+// disposition it must return; a case holds a resume token unless
+// noResumeToken is set. Fail-closed means every uncertain input is a
+// Skipped* disposition.
 func TestClassifyIdleReclaimDisposition(t *testing.T) {
 	tests := []struct {
 		name          string
 		state         models.TaskSessionState
 		agentRunning  bool
 		hasActiveTurn bool
+		noResumeToken bool
+		rowStatus     string
 		want          idleReclaimDisposition
 	}{
 		{
@@ -121,10 +162,53 @@ func TestClassifyIdleReclaimDisposition(t *testing.T) {
 			hasActiveTurn: true,
 			want:          idleReclaimDispositionSkippedTurn,
 		},
+		{
+			name:          "prepared waiting_for_input row without resume token is never reclaimed",
+			state:         models.TaskSessionStateWaitingForInput,
+			noResumeToken: true,
+			rowStatus:     models.ExecutorRunningStatusPrepared,
+			want:          idleReclaimDispositionSkippedNoToken,
+		},
+		{
+			name:          "ready idle office row without resume token is never reclaimed",
+			state:         models.TaskSessionStateIdle,
+			noResumeToken: true,
+			rowStatus:     models.ExecutorRunningStatusReady,
+			want:          idleReclaimDispositionSkippedNoToken,
+		},
+		{
+			name:          "running waiting_for_input row without resume token reclaims",
+			state:         models.TaskSessionStateWaitingForInput,
+			noResumeToken: true,
+			rowStatus:     models.ExecutorRunningStatusRunning,
+			want:          idleReclaimDispositionReclaimed,
+		},
+		{
+			name:          "completed session without resume token reclaims",
+			state:         models.TaskSessionStateCompleted,
+			noResumeToken: true,
+			rowStatus:     models.ExecutorRunningStatusReady,
+			want:          idleReclaimDispositionReclaimed,
+		},
+		{
+			name:          "live runtime is reported before a missing resume token",
+			state:         models.TaskSessionStateWaitingForInput,
+			agentRunning:  true,
+			noResumeToken: true,
+			rowStatus:     models.ExecutorRunningStatusPrepared,
+			want:          idleReclaimDispositionSkippedLive,
+		},
+		{
+			name:          "running session without resume token is skipped by state",
+			state:         models.TaskSessionStateRunning,
+			noResumeToken: true,
+			rowStatus:     models.ExecutorRunningStatusRunning,
+			want:          idleReclaimDispositionSkippedState,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := classifyIdleReclaim(tt.state, tt.agentRunning, tt.hasActiveTurn)
+			got := classifyIdleReclaim(tt.state, tt.agentRunning, tt.hasActiveTurn, !tt.noResumeToken, tt.rowStatus)
 			if got != tt.want {
 				t.Fatalf("disposition = %q, want %q", got, tt.want)
 			}
@@ -187,6 +271,48 @@ func TestReclaimIdleSessionReleasesRuntimeAndPreservesRow(t *testing.T) {
 	}
 	if row.WorktreePath != worktree {
 		t.Fatalf("WorktreePath lost during reclaim: got %q, want %q", row.WorktreePath, worktree)
+	}
+}
+
+func TestReclaimIdleSessionKeepsExecutionWithActiveLSPLease(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	seedTaskAndSession(t, repo, "taskLSP", "sessionLSP", models.TaskSessionStateWaitingForInput)
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "sessionLSP", SessionID: "sessionLSP", TaskID: "taskLSP",
+		AgentExecutionID: "exec-lsp", ResumeToken: "resume-keep",
+		Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusRunning,
+		LocalPID: 4242, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert LSP-pinned row: %v", err)
+	}
+	manager := newReclaimTrackingAgentManager(&mockAgentManager{
+		isAgentRunning: false,
+		rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
+			return models.ProcessLivenessDead
+		},
+	})
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.turnService = &inactiveTurnService{}
+	pin := &activeLSPLeaseForTest{sessionID: "sessionLSP"}
+	svc.SetLSPLeaseLifecycle(pin)
+
+	if err := svc.reclaimIdleSession(ctx, "sessionLSP"); err != nil {
+		t.Fatalf("reclaimIdleSession: %v", err)
+	}
+	if pin.checks != 1 {
+		t.Fatalf("lease liveness checks = %d, want early skip after one check", pin.checks)
+	}
+	if manager.callCount() != 0 {
+		t.Fatalf("stale execution cleanup calls = %v, want none while lease is active", manager.callsSnapshot())
+	}
+	row, err := repo.GetExecutorRunningBySessionID(ctx, "sessionLSP")
+	if err != nil {
+		t.Fatalf("load execution row: %v", err)
+	}
+	if row.Status != models.ExecutorRunningStatusRunning || row.LocalPID != 4242 {
+		t.Fatalf("active LSP lease changed execution row: status=%q pid=%d", row.Status, row.LocalPID)
 	}
 }
 

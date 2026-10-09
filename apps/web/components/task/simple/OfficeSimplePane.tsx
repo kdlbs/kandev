@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
+import TaskLink from "@/components/routing/task-link";
 import {
   IconCopy,
   IconPlayerPause,
@@ -141,13 +142,13 @@ function useSimplePaneTopbar(task: Task, onToggleAdvanced?: () => void) {
             />
           </div>
         )}
-        <Link
-          href={`/t/${task.id}`}
+        <TaskLink
+          taskId={task.id}
           className="text-xs text-muted-foreground underline-offset-2 hover:underline cursor-pointer whitespace-nowrap"
           data-testid="task-cross-link"
         >
           {t("task:openInAdvancedView")}
-        </Link>
+        </TaskLink>
       </>
     ),
   });

@@ -1,14 +1,15 @@
-// Regression guard: hovering a chat message's relative timestamp ("5m ago")
-// must reveal the full absolute time via the native browser tooltip, backed
-// by an HTML <time title="..."> element (see message-actions.tsx).
+// Hovering a transcript timestamp exposes its absolute-short counterpart.
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { dwell } from "../../helpers/causal-waits";
+const CREATED_AT = "2026-06-20T10:15:00Z";
+
+test.use({ locale: "en-US", timezoneId: "UTC" });
 
 const SEEDED_MESSAGE = "Tooltip regression fixture message";
 
 test.describe("Chat message timestamp tooltip", () => {
-  test("shows the full absolute time as the title of the relative timestamp", async ({
+  test("shows the absolute short time as the relative timestamp title", async ({
     testPage,
     apiClient,
     seedData,
@@ -25,6 +26,7 @@ test.describe("Chat message timestamp tooltip", () => {
     await apiClient.seedSessionMessage(sessionId, {
       type: "message",
       content: SEEDED_MESSAGE,
+      createdAt: CREATED_AT,
     });
 
     await testPage.goto(`/t/${task.id}`);
@@ -59,14 +61,24 @@ test.describe("Chat message timestamp tooltip", () => {
     const titleAttr = await timestamp.getAttribute("title");
     expect(dateTimeAttr).toBeTruthy();
 
-    // Compute the expected absolute time in the browser's own context so the
-    // comparison isn't sensitive to the test runner's locale/timezone.
     const expectedTitle = await testPage.evaluate(
-      (iso) => new Date(iso as string).toLocaleString(),
+      (iso) =>
+        new Intl.DateTimeFormat("en-US", { dateStyle: "short", timeStyle: "short" }).format(
+          new Date(iso as string),
+        ),
+      dateTimeAttr,
+    );
+    const expectedLabel = await testPage.evaluate(
+      (iso) =>
+        new Intl.DateTimeFormat("en-US", {
+          year: "numeric",
+          month: "numeric",
+          day: "numeric",
+        }).format(new Date(iso as string)),
       dateTimeAttr,
     );
     expect(titleAttr).toBe(expectedTitle);
-    // The tooltip must be the full timestamp, not a repeat of the relative label.
-    expect(titleAttr).not.toMatch(/ago$/);
+    await expect(timestamp).toHaveText(expectedLabel);
+    expect(titleAttr).not.toBe(expectedLabel);
   });
 });

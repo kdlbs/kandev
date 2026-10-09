@@ -127,6 +127,29 @@ describe("useQueue task plan comment admission", () => {
     );
   });
 
+  it("forwards task preview feedback admission fields", async () => {
+    queueApiMock.queueMessage.mockResolvedValue(entry());
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.queueMessage.mockClear();
+
+    await act(async () => {
+      await result.current.queue({
+        taskId: TASK_ID,
+        content: "",
+        clientQueueId: "client-preview-1",
+        previewFeedbackRefs: [{ id: "preview-1", version: 4 }],
+      });
+    });
+
+    expect(queueApiMock.queueMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client_queue_id: "client-preview-1",
+        preview_feedback_refs: [{ id: "preview-1", version: 4 }],
+      }),
+    );
+  });
+
   it("keeps an accepted queue admission successful when reconciliation fails", async () => {
     queueApiMock.queueMessage.mockResolvedValue(entry({ id: "accepted" }));
     const { result } = renderHook(() => useQueue(SESSION_ID));

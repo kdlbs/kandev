@@ -49,7 +49,7 @@ func TestDynamicAttemptEvidenceTreatsMatchingACPProviderDiagnosticAsPreResult(t 
 	var service Service
 	const message = "API Error: Repeated 529 Overloaded errors. The API is at capacity."
 	service.beginPromptAttempt("session-1", "execution-1", 1, true)
-	service.observeProviderDiagnostic("session-1", "execution-1", 1, message)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, "", message)
 
 	got := service.withDynamicAttemptEvidence(watcher.AgentEventData{
 		SessionID:        "session-1",
@@ -66,7 +66,7 @@ func TestDynamicAttemptEvidenceTreatsMatchingACPProviderDiagnosticAsPreResult(t 
 
 	// A different failure must not erase the output fence.
 	service.beginPromptAttempt("session-2", "execution-2", 1, true)
-	service.observeProviderDiagnostic("session-2", "execution-2", 1, message)
+	service.observeProviderDiagnostic("session-2", "execution-2", 1, "", message)
 	other := service.withDynamicAttemptEvidence(watcher.AgentEventData{
 		SessionID:        "session-2",
 		AgentExecutionID: "execution-2",

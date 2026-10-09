@@ -146,6 +146,17 @@ func TestDeleteTaskWithDiscardConsentPersistsAndCleansDirtyWorktree(t *testing.T
 	}); err != nil {
 		t.Fatalf("delete task with discard consent: %v", err)
 	}
+	var jobID string
+	if err := repo.DB().QueryRowContext(ctx, `
+		SELECT id FROM task_resource_cleanup_jobs
+		WHERE task_id = ? AND trigger = 'delete'
+		ORDER BY created_at DESC LIMIT 1
+	`, taskID).Scan(&jobID); err != nil {
+		t.Fatalf("load delete cleanup job: %v", err)
+	}
+	if err := svc.processTaskResourceCleanupJob(ctx, jobID); err != nil {
+		t.Fatalf("process delete cleanup job: %v", err)
+	}
 	var encodedSnapshot string
 	if err := repo.DB().QueryRowContext(ctx, `
 		SELECT resource_snapshot FROM task_resource_cleanup_jobs
@@ -161,16 +172,15 @@ func TestDeleteTaskWithDiscardConsentPersistsAndCleansDirtyWorktree(t *testing.T
 	if !snapshot.DiscardWorktreeChanges {
 		t.Fatal("cleanup snapshot omitted discard consent")
 	}
-	var jobID string
-	if err := repo.DB().QueryRowContext(ctx, `
-		SELECT id FROM task_resource_cleanup_jobs
-		WHERE task_id = ? AND trigger = 'delete'
-		ORDER BY created_at DESC LIMIT 1
-	`, taskID).Scan(&jobID); err != nil {
-		t.Fatalf("load delete cleanup job: %v", err)
+	if len(snapshot.ArchiveSourceManifest) != 1 || snapshot.ArchiveSourceManifest[0].WorktreeID != wt.ID {
+		t.Fatalf("delete cleanup snapshot omitted task worktree source evidence: %+v", snapshot.ArchiveSourceManifest)
 	}
-	if err := svc.processTaskResourceCleanupJob(ctx, jobID); err != nil {
-		t.Fatalf("process delete cleanup job: %v", err)
+	retrieved, err := svc.GetTaskSourceManifest(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetTaskSourceManifest after delete: %v", err)
+	}
+	if len(retrieved) != 1 || retrieved[0].CleanupJobID == "" || retrieved[0].WorktreeID != wt.ID {
+		t.Fatalf("retrieved delete source manifest = %+v, want durable task evidence", retrieved)
 	}
 	if _, statErr := os.Stat(wt.Path); !os.IsNotExist(statErr) {
 		t.Fatalf("consented cleanup left worktree on disk: %s (stat err = %v)", wt.Path, statErr)
@@ -183,6 +193,12 @@ func (dirtyWorktreeCleanupFailure) OnTaskDeleted(context.Context, string) error 
 
 func (dirtyWorktreeCleanupFailure) GetAllByTaskID(context.Context, string) ([]*worktree.Worktree, error) {
 	return nil, nil
+}
+
+func (dirtyWorktreeCleanupFailure) CaptureArchiveSourceManifests(
+	ctx context.Context, worktrees []*worktree.Worktree,
+) (map[string]worktree.ArchiveSourceManifest, error) {
+	return (&recordingWorktreeCleanup{}).CaptureArchiveSourceManifests(ctx, worktrees)
 }
 
 func (dirtyWorktreeCleanupFailure) CleanupWorktrees(context.Context, []*worktree.Worktree) error {

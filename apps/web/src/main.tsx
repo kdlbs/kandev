@@ -1,10 +1,12 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
+import "katex/dist/katex.min.css";
 import "@/app/globals.css";
 import { setOnUnauthorized } from "@/lib/api/client";
 import { scheduleFrontendErrorReport } from "@/lib/api/domains/frontend-error-log-api";
 import { setBackendReloadDiagnosticReporter } from "@/lib/platform/backend-reload-coordinator";
 import { useAppStoreApi, StateProvider } from "@/components/state-provider";
+import { SystemInfoQueryProvider } from "@/components/system-info-query-provider";
 import { PluginBootBridge } from "@/lib/plugins/plugin-boot-bridge";
 import { preloadLocale } from "@/lib/i18n";
 import { resolveInitialLocale } from "@/lib/i18n/boot";
@@ -50,14 +52,16 @@ function AppBody({ payload }: { payload: BootPayload }) {
     return <AuthGatedScreen decision={decision} />;
   }
   return (
-    <>
-      <PluginBootBridge plugins={payload.plugins} />
-      <AppShell>
-        <RouteErrorBoundary>
-          <SpaRoutes routeData={payload.routeData} />
-        </RouteErrorBoundary>
-      </AppShell>
-    </>
+    <SystemInfoQueryProvider bootId={payload.runtime?.bootId}>
+      <>
+        <PluginBootBridge plugins={payload.plugins} />
+        <AppShell>
+          <RouteErrorBoundary>
+            <SpaRoutes routeData={payload.routeData} />
+          </RouteErrorBoundary>
+        </AppShell>
+      </>
+    </SystemInfoQueryProvider>
   );
 }
 

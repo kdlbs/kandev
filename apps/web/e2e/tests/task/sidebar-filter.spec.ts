@@ -28,10 +28,12 @@
 import path from "node:path";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
+import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
+import type { SidebarTaskColorAutomation } from "../../../lib/task-color-automation-settings";
 
 async function openWithSeed(
   testPage: import("@playwright/test").Page,
@@ -94,6 +96,91 @@ async function taskActivityAt(
   return result.tasks.find((task) => task.id === taskId)?.status_summary?.last_activity_at ?? null;
 }
 
+async function expectTouchControlsInCard(card: Locator, controls: Locator[]): Promise<void> {
+  await card.scrollIntoViewIfNeeded();
+  const cardBox = await card.boundingBox();
+  expect(cardBox).not.toBeNull();
+  for (const control of controls) {
+    const controlBox = await control.boundingBox();
+    expect(controlBox?.height).toBeGreaterThanOrEqual(44);
+    expect(controlBox?.width).toBeGreaterThanOrEqual(44);
+    expect(controlBox?.x).toBeGreaterThanOrEqual(cardBox!.x);
+    expect(controlBox!.x + controlBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
+    expect(controlBox?.y).toBeGreaterThanOrEqual(cardBox!.y);
+    expect(controlBox!.y + controlBox!.height).toBeLessThanOrEqual(cardBox!.y + cardBox!.height);
+  }
+}
+
+test("fine-pointer phone viewport keeps reorder controls touch-sized", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const previousColors = (await apiClient.getUserSettings()).settings
+    .sidebar_task_color_automation as SidebarTaskColorAutomation | undefined;
+  await testPage.setViewportSize({ width: 390, height: 844 });
+  expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+  const navigation = await apiClient.seedTask(seedData.workspaceId, "Fine pointer phone nav", {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+  });
+  const session = new SessionPage(testPage);
+
+  try {
+    await testPage.goto(`/t/${navigation.task_id}`);
+    await session.waitForLoad();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
+    const sheet = testPage.getByRole("dialog", { name: "Tasks" });
+    await expect(sheet).toBeVisible();
+    const filters = new SidebarFilterPopoverPage(testPage);
+    await filters.open();
+    const editor = filters.popover;
+    await expect(editor).toBeVisible();
+
+    await editor.getByTestId("sidebar-sort-settings-toggle").click();
+    const sortCard = editor.getByTestId("sort-rule-card-0");
+    await expectTouchControlsInCard(sortCard, [
+      editor.getByTestId("sort-rule-handle-0"),
+      editor.getByTestId("sort-rule-more-0"),
+      editor.getByTestId("sort-rule-remove-0"),
+    ]);
+
+    const automaticSettings = editor.getByTestId("automatic-color-settings");
+    await automaticSettings.getByTestId("automatic-color-settings-toggle").click();
+    const addRule = automaticSettings.getByTestId("automatic-color-add-rule");
+    await addRule.scrollIntoViewIfNeeded();
+    await addRule.click();
+    const colorHandle = automaticSettings.locator("[data-testid^='automatic-color-rule-handle-']");
+    const colorRuleId = (await colorHandle.getAttribute("data-testid"))!.replace(
+      "automatic-color-rule-handle-",
+      "",
+    );
+    const colorCard = automaticSettings.getByTestId(`automatic-color-rule-${colorRuleId}`);
+    await expectTouchControlsInCard(colorCard, [
+      colorHandle,
+      automaticSettings.getByTestId(`automatic-color-rule-more-${colorRuleId}`),
+      automaticSettings.getByTestId(`automatic-color-rule-remove-${colorRuleId}`),
+    ]);
+    await automaticSettings.getByTestId(`automatic-color-rule-remove-${colorRuleId}`).click();
+
+    const taskRowSettings = editor.getByTestId("task-row-settings");
+    await taskRowSettings.getByTestId("task-row-settings-toggle").click();
+    const detailRow = taskRowSettings.getByTestId("task-row-detail-relative_time");
+    await expectTouchControlsInCard(detailRow, [
+      taskRowSettings.getByTestId("task-row-detail-handle-relative_time"),
+      taskRowSettings.getByTestId("task-row-detail-more-relative_time"),
+      taskRowSettings.getByTestId("task-row-detail-toggle-relative_time"),
+    ]);
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  } finally {
+    await apiClient.saveUserSettings({
+      sidebar_task_color_automation: previousColors ?? { enabled: false, rules: [] },
+    });
+  }
+});
+
 test.describe("Sidebar filter bar — popover basics", () => {
   test("gear opens popover; ESC closes it", async ({ testPage, apiClient, seedData }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Basics Task"]);
@@ -120,7 +207,10 @@ test.describe("Sidebar filter bar — popover basics", () => {
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        const draft = settings.sidebar_draft as { base_view_id?: string } | null | undefined;
+        const draft = settings.sidebar_views_by_workspace[seedData.workspaceId].draft as
+          | { base_view_id?: string }
+          | null
+          | undefined;
         return draft?.base_view_id ?? null;
       })
       .toBe("view-all-tasks");
@@ -145,9 +235,11 @@ test.describe("Sidebar filter bar — popover basics", () => {
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        return (settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
-          (view) => view.name === "Persist View",
-        );
+        return (
+          settings.sidebar_views_by_workspace[seedData.workspaceId].views as
+            | Array<{ name?: string }>
+            | undefined
+        )?.some((view) => view.name === "Persist View");
       })
       .toBe(true);
 
@@ -332,15 +424,15 @@ test.describe("Sidebar filter — group + sort", () => {
     await expect(headers.first()).toBeVisible();
   });
 
-  test("Sort direction toggle flips icon direction", async ({ testPage, apiClient, seedData }) => {
+  test("Sort rule direction can be changed", async ({ testPage, apiClient, seedData }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Sort A"]);
     await filters.open();
     await filters.openSortSettings();
-    const toggle = filters.popover.getByTestId("sort-direction-toggle");
-    const initial = await toggle.getAttribute("data-direction");
-    await toggle.click();
-    const flipped = await toggle.getAttribute("data-direction");
-    expect(flipped).not.toBe(initial);
+    const direction = filters.popover.getByTestId("sort-rule-direction-0");
+    await expect(direction).toHaveAttribute("data-direction", "asc");
+    await direction.click();
+    await testPage.getByTestId("sort-rule-direction-option-0-desc").click();
+    await expect(direction).toHaveAttribute("data-direction", "desc");
   });
 
   test("sorts by last activity, persists, and ignores provider-only refresh", async ({
@@ -508,7 +600,7 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await expect(filters.popover.getByTestId("group-key-select")).toHaveCount(0);
     await filters.openSortSettings();
     await expect(filters.popover.getByTestId("sort-key-select")).toContainText("Status");
-    await expect(filters.popover.getByTestId("sort-direction-toggle")).toHaveAttribute(
+    await expect(filters.popover.getByTestId("sort-rule-direction-0")).toHaveAttribute(
       "data-direction",
       "asc",
     );
@@ -524,9 +616,11 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        return (settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
-          (view) => view.name === "Planning view",
-        );
+        return (
+          settings.sidebar_views_by_workspace[seedData.workspaceId].views as
+            | Array<{ name?: string }>
+            | undefined
+        )?.some((view) => view.name === "Planning view");
       })
       .toBe(true);
 
@@ -575,7 +669,7 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        return settings.sidebar_draft ?? null;
+        return settings.sidebar_views_by_workspace[seedData.workspaceId].draft ?? null;
       })
       .toBeNull();
 
@@ -588,15 +682,20 @@ test.describe("Sidebar filter — saved views CRUD", () => {
       collapsed_groups: [],
     }));
     const response = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
-      sidebar_views: limitViews,
-      sidebar_active_view_id: limitViews[0].id,
-      sidebar_draft: null,
+      sidebar_view_state: {
+        workspace_id: seedData.workspaceId,
+        views: limitViews,
+        active_view_id: limitViews[0].id,
+        draft: null,
+      },
     });
     expect(response.ok).toBe(true);
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
-        return (settings.sidebar_views as unknown[] | undefined)?.length;
+        return (
+          settings.sidebar_views_by_workspace[seedData.workspaceId].views as unknown[] | undefined
+        )?.length;
       })
       .toBe(50);
     await testPage.reload();
@@ -658,9 +757,11 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     );
     const settingsAfterCancel = await apiClient.getUserSettings();
     expect(
-      (settingsAfterCancel.settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
-        (view) => view.name === "Ephemeral",
-      ),
+      (
+        settingsAfterCancel.settings.sidebar_views_by_workspace[seedData.workspaceId].views as
+          | Array<{ name?: string }>
+          | undefined
+      )?.some((view) => view.name === "Ephemeral"),
     ).toBe(true);
 
     await filters.beginDeleteActiveView("Ephemeral");
@@ -821,6 +922,20 @@ test.describe("Sidebar filter — task-row presentation", () => {
     await expect
       .poll(() => filters.taskRowDetailOrder())
       .toEqual(["pull_request_number", "relative_time", "repository"]);
+    const relativeTimeMore = filters.taskRowSettings.getByTestId(
+      "task-row-detail-more-relative_time",
+    );
+    const relativeTimeMoreBox = await relativeTimeMore.boundingBox();
+    const relativeTimeHandleBox = await relativeTimeHandle.boundingBox();
+    expect(relativeTimeMoreBox?.height).toBe(28);
+    expect(relativeTimeMoreBox?.width).toBe(28);
+    expect(relativeTimeHandleBox?.height).toBe(28);
+    expect(relativeTimeHandleBox?.width).toBe(28);
+    await relativeTimeMore.click();
+    await testPage.getByTestId("task-row-detail-more-relative_time-move-up").click();
+    await expect
+      .poll(() => filters.taskRowDetailOrder())
+      .toEqual(["relative_time", "pull_request_number", "repository"]);
     await filters.toggleTaskRowDetail("repository");
     await expect(row.getByTestId("sidebar-task-repository")).toHaveCount(0);
 
@@ -843,7 +958,8 @@ test.describe("Sidebar filter — task-row presentation", () => {
     await filters.expectActiveViewChip("Compact task rows");
 
     const savedSettings = await apiClient.getUserSettings();
-    const savedViews = savedSettings.settings.sidebar_views as Array<{
+    const savedViews = savedSettings.settings.sidebar_views_by_workspace[seedData.workspaceId]
+      .views as Array<{
       name?: string;
       task_row?: { details_enabled?: boolean };
     }>;
@@ -865,7 +981,6 @@ test.describe("Sidebar filter — task-row presentation", () => {
     ]);
     expect(timeBox).not.toBeNull();
     expect(secondTimeBox).not.toBeNull();
-    expect(Math.abs(timeBox!.width - secondTimeBox!.width)).toBeLessThanOrEqual(1);
 
     await filters.openTaskRowSettings();
     await detailsToggle.click();

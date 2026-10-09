@@ -1,8 +1,15 @@
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { watchWs } from "../../helpers/causal-waits";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import path from "node:path";
+
+async function scrollChangesPanel(session: SessionPage, position: "top" | "bottom"): Promise<void> {
+  // PR files precede commits in the virtualized timeline.
+  await session.changes.getByTestId("changes-panel-scroll-owner").evaluate((element, edge) => {
+    element.scrollTop = edge === "top" ? 0 : element.scrollHeight;
+  }, position);
+}
 
 test.describe("PR switcher changes panel", () => {
   /**
@@ -48,10 +55,13 @@ test.describe("PR switcher changes panel", () => {
     // --- Seed mock GitHub data ---
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");
-    const git = new GitHelper(
-      path.join(backend.tmpDir, "repos", "e2e-repo"),
-      makeGitEnv(backend.tmpDir),
-    );
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+    const git = new GitHelper(seedData.repositoryPath, makeGitEnv(backend.tmpDir));
+    for (let index = 0; index < 20; index += 1) {
+      git.createFile("pr-switcher-prefix.txt", `prefix ${index}\n`);
+      git.stageFile("pr-switcher-prefix.txt");
+      git.commit(`PR switcher preceding commit ${index}`);
+    }
     git.createFile("auth-fix-task.txt", "auth fix task commit");
     git.stageFile("auth-fix-task.txt");
     const authCommitSHA = git.commit("fix auth token expiry");
@@ -143,6 +153,7 @@ test.describe("PR switcher changes panel", () => {
     // <100ms; if we navigate after moveTask the events are emitted before
     // the browser subscribes and the kanban never receives them.
     const kanban = new KanbanPage(testPage);
+    const gateway = watchWs(testPage);
     await kanban.goto();
 
     // Move tasks to Working one at a time so their shared E2E checkout stays
@@ -192,6 +203,7 @@ test.describe("PR switcher changes panel", () => {
     });
 
     // --- Click Task A to enter session view ---
+    const taskACommitsLoaded = gateway.waitForResponse("github.pr_commits.get");
     await kanban.taskCardInColumn("Auth Fix Task", doneStep.id).click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
@@ -200,14 +212,17 @@ test.describe("PR switcher changes panel", () => {
 
     // --- Switch to the Changes tab (Files tab is active by default) ---
     await session.clickTab("Changes");
+    await taskACommitsLoaded;
 
     // --- Verify Task A PR data ---
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
     await session.expandPRChangesSection();
     await session.expandCommitsSection();
+    await scrollChangesPanel(session, "top");
     await expect(session.prFilesSection().getByText("auth.go")).toBeVisible();
     await expect(session.prFilesSection().getByText("auth_test.go")).toBeVisible();
 
+    await scrollChangesPanel(session, "bottom");
     await expect(session.commitsSection()).toBeVisible();
     await expect(session.commitsSection().getByText("fix auth token expiry")).toBeVisible();
     const authCommitRow = session
@@ -219,16 +234,19 @@ test.describe("PR switcher changes panel", () => {
     );
 
     // --- Switch to Task B ---
+    const taskBCommitsLoaded = gateway.waitForResponse("github.pr_commits.get");
     await session.taskInSidebar("Dashboard Task").click();
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskB.id), {
       timeout: 15_000,
     });
     await session.clickTab("Changes");
+    await taskBCommitsLoaded;
 
     // Wait for PR data to load for Task B
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
     await session.expandPRChangesSection();
     await session.expandCommitsSection();
+    await scrollChangesPanel(session, "top");
     await expect(session.prFilesSection().getByText("dashboard.tsx")).toBeVisible();
     await expect(session.prFilesSection().getByText("api.ts")).toBeVisible();
     await expect(session.prFilesSection().getByText("styles.css")).toBeVisible();
@@ -236,6 +254,7 @@ test.describe("PR switcher changes panel", () => {
     // Verify Task A files are NOT visible
     await expect(session.prFilesSection().getByText("auth.go")).not.toBeVisible();
 
+    await scrollChangesPanel(session, "bottom");
     await expect(session.commitsSection()).toBeVisible();
     await expect(session.commitsSection().getByText("add dashboard component")).toBeVisible();
     await expect(session.commitsSection().getByText("add api client")).toBeVisible();
@@ -281,8 +300,10 @@ test.describe("PR switcher changes panel", () => {
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
     await session.expandPRChangesSection();
     await session.expandCommitsSection();
+    await scrollChangesPanel(session, "top");
     await expect(session.prFilesSection().getByText("auth.go")).toBeVisible();
     await expect(session.prFilesSection().getByText("auth_test.go")).toBeVisible();
+    await scrollChangesPanel(session, "bottom");
     await expect(session.commitsSection().getByText("fix auth token expiry")).toBeVisible();
     await expect(authCommitRow.getByTestId("commit-provenance")).toHaveAttribute(
       "data-commit-provenance",

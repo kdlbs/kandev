@@ -3,6 +3,7 @@ package statussummary
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -22,6 +23,8 @@ func (p *Projector) applySourceEventLocked(state *projectionState, eventType str
 		sourceChanged = p.applyTaskUpdatedEventLocked(state, data)
 	case events.TaskSessionStateChanged:
 		sourceChanged = p.applySessionEventLocked(state, data)
+	case events.SessionRemoved:
+		sourceChanged = p.removeSessionEventLocked(state, data)
 	case events.TaskSessionActivityChanged:
 		sourceChanged = p.applyActivityEventLocked(state, data)
 	case events.TaskSessionErrorChanged:
@@ -316,11 +319,21 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreLaunchQueue(ctx, taskID, state); err != nil {
+		return err
+	}
+	if err := p.restoreCompletionGate(ctx, taskID, state); err != nil {
+		return err
+	}
 	return nil
 }
 
 func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.queuedCount = summary.QueuedPromptCount
+	state.launchQueue = cloneLaunchQueue(summary.LaunchQueue)
+	state.launchQueueObserved = summary.LaunchQueue != nil
+	state.completionGate = cloneCompletionGate(summary.CompletionGate)
+	state.completionGateObserved = summary.CompletionGate != nil
 	state.taskPending = summary.PendingAction
 	state.lastActivityAt = maxTimePtr(state.lastActivityAt, summary.LastActivityAt)
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
@@ -381,6 +394,7 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	current := state.current
 	previousLastActivityAt := cloneTimePtr(state.lastActivityAt)
 	state.sessions = make(map[string]sessionObservation)
+	state.sessionsObserved = false
 	state.activityObserved = false
 	state.lastActivityAt = previousLastActivityAt
 	state.pending = make(map[string]string)
@@ -412,6 +426,47 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	if err := p.restorePullRequestObservations(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreLaunchQueue(ctx, taskID, state); err != nil {
+		return err
+	}
+	if err := p.restoreCompletionGate(ctx, taskID, state); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *Projector) restoreCompletionGate(ctx context.Context, taskID string, state *projectionState) error {
+	if p.loadCompletionGate == nil {
+		return nil
+	}
+	gate, err := p.loadCompletionGate(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load completion gate for task status summary %q: %w", taskID, err)
+	}
+	state.completionGate = cloneCompletionGate(gate)
+	state.completionGateObserved = true
+	return nil
+}
+
+func isCompletionGateRefreshEvent(eventType string) bool {
+	switch eventType {
+	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged, events.GitHubTaskPRUpdated:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *Projector) restoreLaunchQueue(ctx context.Context, taskID string, state *projectionState) error {
+	if p.loadLaunchQueue == nil {
+		return nil
+	}
+	queue, err := p.loadLaunchQueue(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load launch queue for task status summary %q: %w", taskID, err)
+	}
+	state.launchQueue = cloneLaunchQueue(queue)
+	state.launchQueueObserved = true
 	return nil
 }
 
@@ -449,12 +504,25 @@ func (p *Projector) restoreSessionObservations(
 		errorsBySession[sessionID] = activeError
 	}
 	state.sessions = sessions
+	state.sessionsObserved = true
 	state.activityObserved = snapshot.ActivityObserved
 	if snapshot.ErrorsObserved {
 		state.errors = errorsBySession
 		state.errorsObserved = true
 	}
 	return nil
+}
+
+func (p *Projector) removeSessionEventLocked(state *projectionState, data map[string]interface{}) bool {
+	sessionID := strings.TrimSpace(firstString(data, "session_id", "id"))
+	if sessionID == "" {
+		return false
+	}
+	delete(state.sessions, sessionID)
+	delete(state.errors, sessionID)
+	delete(state.clearedErrorStamps, sessionID)
+	p.clearPendingLocked(state, sessionID)
+	return true
 }
 
 func (p *Projector) restoreTaskLaunchError(
@@ -782,18 +850,27 @@ func (p *Projector) applyPREventLocked(state *projectionState, data map[string]i
 		state.prBaseline = nil
 		state.prObserved = true
 	}
+	attention, _ := data["workflow_attention"].(map[string]interface{})
+	attentionStale, _ := attention["stale"].(bool)
 	observation := pullRequestObservation{
-		state:                 stringField(data, "state"),
-		number:                intValueOrZero(data["pr_number"]),
-		url:                   stringField(data, "pr_url"),
-		reviewState:           stringField(data, "review_state"),
-		checksState:           stringField(data, "checks_state"),
-		mergeableState:        stringField(data, "mergeable_state"),
-		mergeQueueState:       stringField(data, "merge_queue_state"),
-		unresolvedReviewCount: intValueOrZero(data["unresolved_review_threads"]),
-		pendingReviewCount:    intValueOrZero(data["pending_review_count"]),
-		checksTotal:           intValueOrZero(data["checks_total"]),
-		checksPassing:         intValueOrZero(data["checks_passing"]),
+		state:                    stringField(data, "state"),
+		owner:                    stringField(data, "owner"),
+		repo:                     stringField(data, "repo"),
+		number:                   intValueOrZero(data["pr_number"]),
+		url:                      stringField(data, "pr_url"),
+		reviewState:              stringField(data, "review_state"),
+		checksState:              stringField(data, "checks_state"),
+		mergeableState:           stringField(data, "mergeable_state"),
+		hasMergeConflicts:        boolPointerField(data, "has_merge_conflicts"),
+		mergeQueueState:          stringField(data, "merge_queue_state"),
+		unresolvedReviewCount:    intValueOrZero(data["unresolved_review_threads"]),
+		pendingReviewCount:       intValueOrZero(data["pending_review_count"]),
+		checksTotal:              intValueOrZero(data["checks_total"]),
+		checksPassing:            intValueOrZero(data["checks_passing"]),
+		headSHA:                  boundedWorkflowValue(stringField(data, "head_sha")),
+		workflowAttentionState:   boundedWorkflowValue(stringField(attention, "state")),
+		workflowAttentionHeadSHA: boundedWorkflowValue(stringField(attention, "head_sha")),
+		workflowAttentionStale:   attentionStale,
 	}
 	// PR refresh events do not carry the per-PR automation switches. Preserve
 	// the last authoritative values from the CI-options projection instead of
@@ -813,11 +890,23 @@ func (p *Projector) applyPREventLocked(state *projectionState, data map[string]i
 	if value, ok := intValue(data["required_reviews"]); ok {
 		observation.requiredReviews = maxInt(value, 0)
 	}
-	if existing, ok := state.prs[key]; ok && existing == observation {
+	if existing, ok := state.prs[key]; ok && pullRequestObservationsEqual(existing, observation) {
 		return false
 	}
 	state.prs[key] = observation
 	return true
+}
+
+func pullRequestObservationsEqual(left, right pullRequestObservation) bool {
+	return reflect.DeepEqual(left, right)
+}
+
+func boolPointerField(data map[string]interface{}, key string) *bool {
+	value, ok := data[key].(bool)
+	if !ok {
+		return nil
+	}
+	return &value
 }
 
 func pullRequestObservationKey(data map[string]interface{}) string {

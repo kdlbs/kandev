@@ -70,10 +70,10 @@ func TestExecutionProfileColumnsReplayOnLegacySchema(t *testing.T) {
 			t.Fatalf("drop legacy %s.execution_profile_id: %v", table, err)
 		}
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations on legacy schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay runMigrations: %v", err)
 	}
 

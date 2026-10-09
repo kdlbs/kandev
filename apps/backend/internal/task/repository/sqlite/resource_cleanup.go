@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/db/dialect"
+	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
@@ -18,8 +20,38 @@ const taskResourceCleanupColumns = `
 	next_attempt_at, last_error, created_at, updated_at, completed_at`
 
 func (r *Repository) CreateTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob) error {
+	_, err := r.createTaskResourceCleanupJob(ctx, job, nil)
+	return err
+}
+
+// CreateArchiveReclaimTaskResourceCleanupJob inserts a reclaim candidate only
+// while the task still has the archive generation that produced it. The task
+// row lock is shared with unarchive, which also checks for active archive jobs
+// before clearing archived_at.
+func (r *Repository) CreateArchiveReclaimTaskResourceCleanupJob(
+	ctx context.Context,
+	job *models.TaskResourceCleanupJob,
+	archivedAt time.Time,
+) (bool, error) {
+	if job == nil || job.Trigger != models.TaskResourceCleanupTriggerArchiveReclaim {
+		return false, errors.New("archive reclaim cleanup job is required")
+	}
+	if archivedAt.IsZero() {
+		return false, errors.New("archive reclaim generation is required")
+	}
+	return r.createTaskResourceCleanupJob(ctx, job, &archivedAt)
+}
+
+func (r *Repository) createTaskResourceCleanupJob(
+	ctx context.Context,
+	job *models.TaskResourceCleanupJob,
+	expectedArchivedAt *time.Time,
+) (bool, error) {
 	if job == nil {
-		return errors.New("task resource cleanup job is nil")
+		return false, errors.New("task resource cleanup job is nil")
+	}
+	if claim, err := managed.DeletionEnvelope(job.ResourceSnapshot); err != nil || claim != nil {
+		return false, managed.ErrUnavailable
 	}
 	if job.ID == "" {
 		job.ID = uuid.NewString()
@@ -32,11 +64,30 @@ func (r *Repository) CreateTaskResourceCleanupJob(ctx context.Context, job *mode
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := recoveryclaim.EnsureTaskAvailableTx(ctx, r.db, tx, job.TaskID); err != nil {
-		return err
+		return false, err
+	}
+	if err := r.managedDeletionBarrierTx(ctx, tx, job.TaskID); err != nil {
+		return false, err
+	}
+	if expectedArchivedAt != nil {
+		var archivedAt sql.NullTime
+		err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT archived_at FROM tasks WHERE id = ?
+		`), job.TaskID).Scan(&archivedAt)
+		matchesGeneration := err == nil && archivedAt.Valid && archivedAt.Time.Equal(*expectedArchivedAt)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return false, err
+		}
+		if !matchesGeneration {
+			if commitErr := tx.Commit(); commitErr != nil {
+				return false, commitErr
+			}
+			return false, nil
+		}
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_resource_cleanup_jobs (`+taskResourceCleanupColumns+`)
@@ -46,9 +97,12 @@ func (r *Repository) CreateTaskResourceCleanupJob(ctx context.Context, job *mode
 		job.ResourceSnapshot, job.Attempts, job.NextAttemptAt, job.LastError,
 		job.CreatedAt, job.UpdatedAt, job.CompletedAt)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // UpdateTaskResourceCleanupSnapshot writes the resource inventory captured
@@ -56,10 +110,13 @@ func (r *Repository) CreateTaskResourceCleanupJob(ctx context.Context, job *mode
 // inventory query so concurrent session/worktree creation is rejected while
 // the snapshot is being assembled.
 func (r *Repository) UpdateTaskResourceCleanupSnapshot(ctx context.Context, operationID, snapshot string) error {
+	if claim, err := managed.DeletionEnvelope(snapshot); err != nil || claim != nil {
+		return managed.ErrUnavailable
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_resource_cleanup_jobs
 		SET resource_snapshot = ?, updated_at = ?
-		WHERE operation_id = ? AND state = ?
+		WHERE operation_id = ? AND state = ? AND `+r.unmarkedManagedDeletionSQL()+`
 	`), snapshot, time.Now().UTC(), operationID, models.TaskResourceCleanupStatePrepared)
 	if err != nil {
 		return err
@@ -78,8 +135,8 @@ func (r *Repository) UpdateClaimedTaskResourceCleanupSnapshot(ctx context.Contex
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_resource_cleanup_jobs
 		SET resource_snapshot = ?, updated_at = ?
-		WHERE id = ? AND state = ? AND attempts = ?
-	`), snapshot, time.Now().UTC(), id, models.TaskResourceCleanupStateRunning, attempt)
+		WHERE id = ? AND state = ? AND attempts = ? AND COALESCE(`+dialect.JSONExtract(r.db.DriverName(), "COALESCE(NULLIF(resource_snapshot, ''), '{}')", "managed_delete")+`, '') = COALESCE(`+dialect.JSONExtract(r.db.DriverName(), "COALESCE(NULLIF(?, ''), '{}')", "managed_delete")+`, '')
+	`), snapshot, time.Now().UTC(), id, models.TaskResourceCleanupStateRunning, attempt, snapshot)
 	if err != nil {
 		return false, err
 	}
@@ -95,13 +152,14 @@ func (r *Repository) HasActiveTaskResourceCleanupJob(ctx context.Context, taskID
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT EXISTS (
 			SELECT 1 FROM task_resource_cleanup_jobs
-			WHERE task_id = ? AND state IN (?, ?, ?, ?)
+			WHERE task_id = ? AND state IN (?, ?, ?, ?, ?)
 		)
 	`), taskID,
 		models.TaskResourceCleanupStatePrepared,
 		models.TaskResourceCleanupStatePending,
 		models.TaskResourceCleanupStateRunning,
 		models.TaskResourceCleanupStateRetryWait,
+		models.TaskResourceCleanupStateWaitingForClean,
 	).Scan(&active)
 	return active, err
 }
@@ -128,10 +186,37 @@ func (r *Repository) ListArchiveTaskResourceCleanupJobs(
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskResourceCleanupColumns+`
 		FROM task_resource_cleanup_jobs
-		WHERE task_id = ? AND trigger IN (?, ?)
+		WHERE task_id = ? AND trigger IN (?, ?, ?)
 		ORDER BY created_at ASC
 	`), taskID, models.TaskResourceCleanupTriggerArchive,
-		models.TaskResourceCleanupTriggerCascadeArchive)
+		models.TaskResourceCleanupTriggerCascadeArchive,
+		models.TaskResourceCleanupTriggerArchiveReclaim)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	jobs := make([]*models.TaskResourceCleanupJob, 0)
+	for rows.Next() {
+		job, scanErr := scanTaskResourceCleanupJob(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
+}
+
+// ListTaskResourceCleanupJobs returns every durable cleanup generation for one
+// task, including delete generations that outlive the task row itself.
+func (r *Repository) ListTaskResourceCleanupJobs(
+	ctx context.Context, taskID string,
+) ([]*models.TaskResourceCleanupJob, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskResourceCleanupColumns+`
+		FROM task_resource_cleanup_jobs
+		WHERE task_id = ?
+		ORDER BY created_at ASC
+	`), taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -186,9 +271,11 @@ func (r *Repository) ListDueTaskResourceCleanupJobs(ctx context.Context, now tim
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskResourceCleanupColumns+`
 		FROM task_resource_cleanup_jobs
-		WHERE state = ? OR (state = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
+		WHERE state = ? OR ((state = ? OR state = ?) AND (next_attempt_at IS NULL OR next_attempt_at <= ?))
 		ORDER BY created_at ASC LIMIT ?
-	`), models.TaskResourceCleanupStatePending, models.TaskResourceCleanupStateRetryWait, now.UTC(), limit)
+	`), models.TaskResourceCleanupStatePending,
+		models.TaskResourceCleanupStateRetryWait, models.TaskResourceCleanupStateWaitingForClean,
+		now.UTC(), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -204,14 +291,62 @@ func (r *Repository) ListDueTaskResourceCleanupJobs(ctx context.Context, now tim
 	return jobs, rows.Err()
 }
 
+func (r *Repository) ListArchivedActiveWorktreeReclaimCandidates(
+	ctx context.Context,
+	taskID string,
+	afterWorktreeID string,
+	limit int,
+) ([]*models.TaskArchiveReclaimCandidate, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	query := `
+		SELECT t.id, t.archived_at, ter.worktree_id, ter.worktree_path, COALESCE(r.local_path, '')
+		FROM tasks t
+		INNER JOIN task_environments te ON te.task_id = t.id
+		INNER JOIN task_environment_repos ter ON ter.task_environment_id = te.id
+		LEFT JOIN repositories r ON r.id = ter.repository_id
+		WHERE t.archived_at IS NOT NULL
+			AND ter.status = 'active' AND ter.deleted_at IS NULL
+			AND COALESCE(ter.worktree_id, '') <> ''
+			AND COALESCE(ter.worktree_path, '') <> ''
+			AND COALESCE(r.local_path, '') <> ''
+			AND ter.worktree_id > ?`
+	args := []any{afterWorktreeID}
+	if taskID != "" {
+		query += ` AND t.id = ?`
+		args = append(args, taskID)
+	}
+	query += ` ORDER BY ter.worktree_id ASC LIMIT ?`
+	args = append(args, limit)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	candidates := make([]*models.TaskArchiveReclaimCandidate, 0, limit)
+	for rows.Next() {
+		candidate := &models.TaskArchiveReclaimCandidate{}
+		if err := rows.Scan(
+			&candidate.TaskID, &candidate.ArchivedAt, &candidate.WorktreeID,
+			&candidate.WorktreePath, &candidate.RepositoryPath,
+		); err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, candidate)
+	}
+	return candidates, rows.Err()
+}
+
 func (r *Repository) MarkTaskResourceCleanupJobRunning(ctx context.Context, id string) (bool, error) {
 	now := time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_resource_cleanup_jobs
 		SET state = ?, attempts = attempts + 1, next_attempt_at = NULL, updated_at = ?
-		WHERE id = ? AND state IN (?, ?)
+		WHERE id = ? AND state IN (?, ?, ?)
 	`), models.TaskResourceCleanupStateRunning, now, id,
-		models.TaskResourceCleanupStatePending, models.TaskResourceCleanupStateRetryWait)
+		models.TaskResourceCleanupStatePending, models.TaskResourceCleanupStateRetryWait,
+		models.TaskResourceCleanupStateWaitingForClean)
 	if err != nil {
 		return false, err
 	}
@@ -220,12 +355,15 @@ func (r *Repository) MarkTaskResourceCleanupJobRunning(ctx context.Context, id s
 }
 
 func (r *Repository) StartPreparedTaskResourceCleanupJob(ctx context.Context, id string) (bool, error) {
+	if err := r.validateManagedCleanupActivation(ctx, id); err != nil {
+		return false, err
+	}
 	now := time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_resource_cleanup_jobs
 		SET state = ?, next_attempt_at = NULL, updated_at = ?
-		WHERE id = ? AND state = ?
-	`), models.TaskResourceCleanupStatePending, now, id, models.TaskResourceCleanupStatePrepared)
+		WHERE id = ? AND state = ? AND (`+r.unmarkedManagedDeletionSQL()+` OR `+dialect.JSONExtractPath(r.db.DriverName(), "resource_snapshot", "managed_delete", "phase")+` = ?)
+	`), models.TaskResourceCleanupStatePending, now, id, models.TaskResourceCleanupStatePrepared, managed.DeleteCommitted)
 	if err != nil {
 		return false, err
 	}
@@ -240,6 +378,9 @@ func (r *Repository) CompleteTaskResourceCleanupJob(
 	lastError string,
 	nextAttemptAt *time.Time,
 ) error {
+	if err := r.rejectManagedCleanupMutation(ctx, id); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	var completedAt *time.Time
 	if state == models.TaskResourceCleanupStateSucceeded ||
@@ -250,7 +391,7 @@ func (r *Repository) CompleteTaskResourceCleanupJob(
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_resource_cleanup_jobs
 		SET state = ?, last_error = ?, next_attempt_at = ?, completed_at = ?, updated_at = ?
-		WHERE id = ?
+		WHERE id = ? AND `+r.unmarkedManagedDeletionSQL()+`
 	`), state, lastError, nextAttemptAt, completedAt, now, id)
 	return err
 }
@@ -269,7 +410,7 @@ func (r *Repository) RestoreCancelledTaskResourceCleanupJobIfUnchanged(
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_resource_cleanup_jobs
 		SET state = ?, last_error = ?, next_attempt_at = NULL, completed_at = NULL, updated_at = ?
-		WHERE id = ? AND state = ? AND attempts = ?
+		WHERE id = ? AND state = ? AND attempts = ? AND `+r.unmarkedManagedDeletionSQL()+`
 	`), models.TaskResourceCleanupStatePrepared, lastError, now,
 		id, models.TaskResourceCleanupStateCancelled, attempts)
 	if err != nil {
@@ -286,12 +427,13 @@ func (r *Repository) CancelTaskResourceCleanupJobIfPending(ctx context.Context, 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_resource_cleanup_jobs
 		SET state = ?, next_attempt_at = NULL, completed_at = ?, updated_at = ?
-		WHERE id = ? AND state IN (?, ?, ?)
+		WHERE id = ? AND state IN (?, ?, ?, ?) AND `+r.unmarkedManagedDeletionSQL()+`
 	`),
 		models.TaskResourceCleanupStateCancelled, now, now, id,
 		models.TaskResourceCleanupStatePrepared,
 		models.TaskResourceCleanupStatePending,
 		models.TaskResourceCleanupStateRetryWait,
+		models.TaskResourceCleanupStateWaitingForClean,
 	)
 	if err != nil {
 		return false, err
@@ -336,11 +478,12 @@ func (r *Repository) CancelArchiveTaskResourceCleanupJobs(ctx context.Context, t
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_resource_cleanup_jobs
 		SET state = ?, completed_at = ?, updated_at = ?
-		WHERE task_id = ? AND trigger IN (?, ?) AND state IN (?, ?, ?)
+		WHERE task_id = ? AND trigger IN (?, ?, ?) AND state IN (?, ?, ?, ?)
 	`), models.TaskResourceCleanupStateCancelled, now, now, taskID,
 		models.TaskResourceCleanupTriggerArchive, models.TaskResourceCleanupTriggerCascadeArchive,
+		models.TaskResourceCleanupTriggerArchiveReclaim,
 		models.TaskResourceCleanupStatePrepared, models.TaskResourceCleanupStatePending,
-		models.TaskResourceCleanupStateRetryWait)
+		models.TaskResourceCleanupStateRetryWait, models.TaskResourceCleanupStateWaitingForClean)
 	return err
 }
 
@@ -351,4 +494,8 @@ func (r *Repository) ResetRunningTaskResourceCleanupJobs(ctx context.Context) er
 		SET state = ?, next_attempt_at = ?, updated_at = ? WHERE state = ?
 	`), models.TaskResourceCleanupStateRetryWait, now, now, models.TaskResourceCleanupStateRunning)
 	return err
+}
+
+func (r *Repository) unmarkedManagedDeletionSQL() string {
+	return dialect.JSONExtract(r.db.DriverName(), "COALESCE(NULLIF(resource_snapshot, ''), '{}')", "managed_delete") + " IS NULL"
 }

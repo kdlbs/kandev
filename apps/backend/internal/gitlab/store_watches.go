@@ -518,8 +518,13 @@ func (s *Store) reviewWatchGeneration(ctx context.Context, watchID string) (int6
 func (s *Store) ListReviewMRTasksByWatch(ctx context.Context, watchID string) ([]*ReviewMRTask, error) {
 	var rows []ReviewMRTask
 	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
-		`SELECT `+reviewMRTaskSelectCols+` FROM gitlab_review_mr_tasks
-		 WHERE review_watch_id = ? ORDER BY created_at ASC`), watchID); err != nil {
+		`SELECT `+reviewMRTaskSelectCols+` FROM gitlab_review_mr_tasks t
+		 WHERE t.review_watch_id = ?
+		   AND (t.task_id = '' OR EXISTS (
+			SELECT 1 FROM tasks task_row
+			 WHERE task_row.id = t.task_id AND task_row.archived_at IS NULL
+		   ))
+		 ORDER BY t.created_at ASC`), watchID); err != nil {
 		return nil, err
 	}
 	out := make([]*ReviewMRTask, 0, len(rows))
@@ -533,7 +538,12 @@ func (s *Store) ListReviewMRTasksByWatch(ctx context.Context, watchID string) ([
 func (s *Store) ListAllReviewMRTasks(ctx context.Context) ([]*ReviewMRTask, error) {
 	var rows []ReviewMRTask
 	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
-		`SELECT `+reviewMRTaskSelectCols+` FROM gitlab_review_mr_tasks ORDER BY created_at ASC`)); err != nil {
+		`SELECT `+reviewMRTaskSelectCols+` FROM gitlab_review_mr_tasks t
+		 WHERE t.task_id = '' OR EXISTS (
+			SELECT 1 FROM tasks task_row
+			 WHERE task_row.id = t.task_id AND task_row.archived_at IS NULL
+		 )
+		 ORDER BY t.created_at ASC`)); err != nil {
 		return nil, err
 	}
 	out := make([]*ReviewMRTask, 0, len(rows))
@@ -550,7 +560,12 @@ func (s *Store) ListReviewMRTasksForWorkspace(ctx context.Context, workspaceID s
 			t.mr_url, t.task_id, t.generation, t.created_at
 		 FROM gitlab_review_mr_tasks t
 		 JOIN gitlab_review_watches w ON w.id = t.review_watch_id
-			 WHERE w.workspace_id = ? ORDER BY t.created_at ASC`), workspaceID); err != nil {
+			 WHERE w.workspace_id = ?
+			   AND (t.task_id = '' OR EXISTS (
+				SELECT 1 FROM tasks task_row
+				 WHERE task_row.id = t.task_id AND task_row.archived_at IS NULL
+			   ))
+			 ORDER BY t.created_at ASC`), workspaceID); err != nil {
 		return nil, err
 	}
 	out := make([]*ReviewMRTask, 0, len(rows))
@@ -882,8 +897,13 @@ func (s *Store) issueWatchGeneration(ctx context.Context, watchID string) (int64
 func (s *Store) ListIssueWatchTasksByWatch(ctx context.Context, watchID string) ([]*IssueWatchTask, error) {
 	var rows []IssueWatchTask
 	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
-		`SELECT `+issueWatchTaskSelectCols+` FROM gitlab_issue_watch_tasks
-		 WHERE issue_watch_id = ? ORDER BY created_at ASC`), watchID); err != nil {
+		`SELECT `+issueWatchTaskSelectCols+` FROM gitlab_issue_watch_tasks t
+		 WHERE t.issue_watch_id = ?
+		   AND (t.task_id = '' OR EXISTS (
+			SELECT 1 FROM tasks task_row
+			 WHERE task_row.id = t.task_id AND task_row.archived_at IS NULL
+		   ))
+		 ORDER BY t.created_at ASC`), watchID); err != nil {
 		return nil, err
 	}
 	out := make([]*IssueWatchTask, 0, len(rows))
@@ -897,7 +917,12 @@ func (s *Store) ListIssueWatchTasksByWatch(ctx context.Context, watchID string) 
 func (s *Store) ListAllIssueWatchTasks(ctx context.Context) ([]*IssueWatchTask, error) {
 	var rows []IssueWatchTask
 	if err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
-		`SELECT `+issueWatchTaskSelectCols+` FROM gitlab_issue_watch_tasks ORDER BY created_at ASC`)); err != nil {
+		`SELECT `+issueWatchTaskSelectCols+` FROM gitlab_issue_watch_tasks t
+		 WHERE t.task_id = '' OR EXISTS (
+			SELECT 1 FROM tasks task_row
+			 WHERE task_row.id = t.task_id AND task_row.archived_at IS NULL
+		 )
+		 ORDER BY t.created_at ASC`)); err != nil {
 		return nil, err
 	}
 	out := make([]*IssueWatchTask, 0, len(rows))
@@ -914,7 +939,12 @@ func (s *Store) ListIssueWatchTasksForWorkspace(ctx context.Context, workspaceID
 			t.issue_url, t.task_id, t.generation, t.created_at
 		 FROM gitlab_issue_watch_tasks t
 		 JOIN gitlab_issue_watches w ON w.id = t.issue_watch_id
-			 WHERE w.workspace_id = ? ORDER BY t.created_at ASC`), workspaceID); err != nil {
+			 WHERE w.workspace_id = ?
+			   AND (t.task_id = '' OR EXISTS (
+				SELECT 1 FROM tasks task_row
+				 WHERE task_row.id = t.task_id AND task_row.archived_at IS NULL
+			   ))
+			 ORDER BY t.created_at ASC`), workspaceID); err != nil {
 		return nil, err
 	}
 	out := make([]*IssueWatchTask, 0, len(rows))

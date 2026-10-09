@@ -4,9 +4,6 @@ import type {
   AgentProfile,
   Project,
   CostSummary,
-  Routine,
-  RoutineTrigger,
-  RoutineRun,
   Approval,
   InboxItem,
   OfficeMeta,
@@ -23,6 +20,8 @@ export {
   setupChannel,
   deleteChannel,
   exportConfig,
+  exportConfigManifest,
+  exportSelectedConfigZip,
   exportConfigZipUrl,
   previewImport,
   applyImport,
@@ -64,6 +63,19 @@ export {
   gitPush,
 } from "./office-extended-api";
 export { listBudgets, createBudget, updateBudget, deleteBudget } from "./office-budget-api";
+export {
+  listRoutines,
+  createRoutine,
+  getRoutine,
+  updateRoutine,
+  deleteRoutine,
+  runRoutine,
+  listRoutineTriggers,
+  createRoutineTrigger,
+  deleteRoutineTrigger,
+  listRoutineRuns,
+  listAllRoutineRuns,
+} from "./office-routine-api";
 export type {
   ImportDiff,
   ImportPreview,
@@ -146,6 +158,11 @@ function normalizeAgent(raw: unknown): AgentProfile {
     icon: agent.icon as string | undefined,
     status: agent.status as AgentStatus,
     reportsTo: stringField(agent, "reportsTo", "reports_to"),
+    executionAgentProfileId: stringField(
+      agent,
+      "executionAgentProfileId",
+      "execution_agent_profile_id",
+    ),
     permissions: parseJSONField(agent.permissions, {}),
     budgetMonthlyCents: numberField(agent, "budgetMonthlyCents", "budget_monthly_cents", 0),
     maxConcurrentSessions: numberField(
@@ -189,7 +206,7 @@ function stringifyJSONField(value: unknown): string | undefined {
 function agentPayload(data: Partial<AgentProfile>): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     name: data.name,
-    agent_profile_id: data.agentProfileId,
+    agent_profile_id: data.executionAgentProfileId ?? data.agentProfileId,
     role: data.role,
     icon: data.icon,
     reports_to: data.reportsTo,
@@ -450,92 +467,6 @@ export function setDefaultCeiling(
       ...options?.init,
     },
   });
-}
-
-// --- Routines ---
-
-export function listRoutines(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ routines: Routine[] }>(`${BASE}/workspaces/${workspaceId}/routines`, options);
-}
-
-export function createRoutine(
-  workspaceId: string,
-  data: Partial<Routine>,
-  options?: ApiRequestOptions,
-) {
-  return fetchJson<Routine>(`${BASE}/workspaces/${workspaceId}/routines`, {
-    ...options,
-    init: { method: "POST", body: JSON.stringify(data), ...options?.init },
-  });
-}
-
-export function getRoutine(id: string, options?: ApiRequestOptions) {
-  return fetchJson<Routine>(`${BASE}/routines/${id}`, options);
-}
-
-export function updateRoutine(id: string, data: Partial<Routine>, options?: ApiRequestOptions) {
-  return fetchJson<Routine>(`${BASE}/routines/${id}`, {
-    ...options,
-    init: { method: "PATCH", body: JSON.stringify(data), ...options?.init },
-  });
-}
-
-export function deleteRoutine(id: string, options?: ApiRequestOptions) {
-  return fetchJson<void>(`${BASE}/routines/${id}`, {
-    ...options,
-    init: { method: "DELETE", ...options?.init },
-  });
-}
-
-export function runRoutine(
-  id: string,
-  variables?: Record<string, string>,
-  options?: ApiRequestOptions,
-) {
-  return fetchJson<{ run: RoutineRun }>(`${BASE}/routines/${id}/run`, {
-    ...options,
-    init: {
-      method: "POST",
-      body: variables ? JSON.stringify({ variables }) : undefined,
-      ...options?.init,
-    },
-  });
-}
-
-export function listRoutineTriggers(routineId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ triggers: RoutineTrigger[] }>(
-    `${BASE}/routines/${routineId}/triggers`,
-    options,
-  );
-}
-
-export function createRoutineTrigger(
-  routineId: string,
-  data: Partial<RoutineTrigger>,
-  options?: ApiRequestOptions,
-) {
-  return fetchJson<{ trigger: RoutineTrigger }>(`${BASE}/routines/${routineId}/triggers`, {
-    ...options,
-    init: { method: "POST", body: JSON.stringify(data), ...options?.init },
-  });
-}
-
-export function deleteRoutineTrigger(triggerId: string, options?: ApiRequestOptions) {
-  return fetchJson<void>(`${BASE}/routine-triggers/${triggerId}`, {
-    ...options,
-    init: { method: "DELETE", ...options?.init },
-  });
-}
-
-export function listRoutineRuns(routineId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ runs: RoutineRun[] }>(`${BASE}/routines/${routineId}/runs`, options);
-}
-
-export function listAllRoutineRuns(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ runs: RoutineRun[] }>(
-    `${BASE}/workspaces/${workspaceId}/routine-runs`,
-    options,
-  );
 }
 
 // --- Approvals ---

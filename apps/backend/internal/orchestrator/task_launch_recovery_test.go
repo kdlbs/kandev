@@ -20,15 +20,16 @@ import (
 )
 
 type taskLaunchRecoveryServiceFake struct {
-	branches    []taskservice.Branch
-	branchErr   error
-	updated     []taskservice.UpdateRepositoryBaseBranchRequest
-	moved       []taskservice.MoveTaskOptions
-	moveErr     error
-	moveTaskIDs []string
-	environment *models.TaskEnvironment
-	resetErr    error
-	resetCalls  int
+	branches      []taskservice.Branch
+	branchErr     error
+	updated       []taskservice.UpdateRepositoryBaseBranchRequest
+	systemUpdated []taskservice.UpdateRepositoryBaseBranchRequest
+	moved         []taskservice.MoveTaskOptions
+	moveErr       error
+	moveTaskIDs   []string
+	environment   *models.TaskEnvironment
+	resetErr      error
+	resetCalls    int
 }
 
 type failingTaskSessionErrorBus struct {
@@ -45,6 +46,11 @@ func (b failingTaskSessionErrorBus) Publish(ctx context.Context, subject string,
 
 func (f *taskLaunchRecoveryServiceFake) UpdateRepositoryBaseBranch(_ context.Context, req taskservice.UpdateRepositoryBaseBranchRequest) (*models.TaskRepository, error) {
 	f.updated = append(f.updated, req)
+	return &models.TaskRepository{ID: req.TaskRepositoryID, TaskID: req.TaskID, BaseBranch: req.BaseBranch}, nil
+}
+
+func (f *taskLaunchRecoveryServiceFake) UpdateRepositoryBaseBranchFromSystem(_ context.Context, req taskservice.UpdateRepositoryBaseBranchRequest) (*models.TaskRepository, error) {
+	f.systemUpdated = append(f.systemUpdated, req)
 	return &models.TaskRepository{ID: req.TaskRepositoryID, TaskID: req.TaskID, BaseBranch: req.BaseBranch}, nil
 }
 

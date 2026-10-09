@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/task/statussummary"
 )
 
 func newStatusSummaryTestStore(t *testing.T) *github.Store {
@@ -112,6 +114,60 @@ func TestGitHubTaskStatusSummaryPRReaderPreservesMergeQueueState(t *testing.T) {
 	}
 	if inputs[0].MergeQueueState != queuePR.MergeQueueState {
 		t.Fatalf("MergeQueueState = %q, want %q", inputs[0].MergeQueueState, queuePR.MergeQueueState)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.7
+func TestGitHubTaskStatusSummaryPRReaderIncludesWorkflowApprovalIdentity(t *testing.T) {
+	ctx := context.Background()
+	store := newStatusSummaryTestStore(t)
+	approvalPR := &github.TaskPR{
+		TaskID: "task-workflow-approval-summary", RepositoryID: "repo-workflow-approval-summary", PRNumber: 42,
+		Owner: "contributor", Repo: "fork", PRURL: "https://example.test/42", State: "open", HeadSHA: "head-a", CreatedAt: time.Now().UTC(),
+		WorkflowAttention: &github.WorkflowAttention{
+			State:      github.WorkflowAttentionApprovalRequired,
+			HeadSHA:    "head-a",
+			ObservedAt: time.Now().UTC(),
+			Stale:      true,
+		},
+	}
+	if err := store.CreateTaskPR(ctx, approvalPR); err != nil {
+		t.Fatalf("CreateTaskPR: %v", err)
+	}
+
+	reader := &githubTaskStatusSummaryPRReader{
+		gh: github.NewService(nil, "", nil, store, nil, nil),
+	}
+	result, err := reader.ListTaskStatusSummaryPullRequests(ctx, []string{approvalPR.TaskID})
+	if err != nil {
+		t.Fatalf("ListTaskStatusSummaryPullRequests: %v", err)
+	}
+	inputs := result[approvalPR.TaskID]
+	if len(inputs) != 1 {
+		t.Fatalf("summary inputs = %+v, want one input", inputs)
+	}
+	if inputs[0].HeadSHA != "head-a" || inputs[0].WorkflowAttentionState != "approval_required" ||
+		inputs[0].WorkflowAttentionHeadSHA != "head-a" || !inputs[0].WorkflowAttentionStale ||
+		inputs[0].Owner != "contributor" || inputs[0].Repo != "fork" {
+		t.Fatalf("workflow approval input = %+v", inputs[0])
+	}
+	summary := statussummary.BuildFromAuthoritative(statussummary.RebuildInput{
+		PRObserved:   true,
+		PullRequests: inputs,
+		Now:          time.Now().UTC(),
+	})
+	encoded, err := json.Marshal(summary.PullRequest)
+	if err != nil {
+		t.Fatalf("marshal task pull request summary: %v", err)
+	}
+	var fields map[string]interface{}
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatalf("unmarshal task pull request summary: %v", err)
+	}
+	if fields["workflow_approval_required"] != true || fields["workflow_approval_stale"] != true ||
+		fields["workflow_approval_pr_number"] != float64(42) ||
+		fields["workflow_approval_repository"] != "contributor/fork" {
+		t.Fatalf("serialized workflow approval projection = %s", encoded)
 	}
 }
 

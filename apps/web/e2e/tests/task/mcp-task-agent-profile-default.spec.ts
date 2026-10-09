@@ -2,6 +2,41 @@ import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("MCP-created task agent profile default", () => {
+  let cleanupBaseline:
+    | {
+        defaultAgentProfileId: string;
+        mcpTaskAgentProfileDefault: "current_task" | "workspace_default";
+      }
+    | undefined;
+  let createdProfileIds: string[] = [];
+
+  test.afterEach(async ({ apiClient, seedData }) => {
+    const baseline = cleanupBaseline;
+    cleanupBaseline = undefined;
+    const profileIds = createdProfileIds;
+    createdProfileIds = [];
+
+    const restoreResults = baseline
+      ? await Promise.allSettled([
+          apiClient.updateWorkspace(seedData.workspaceId, {
+            default_agent_profile_id: baseline.defaultAgentProfileId,
+          }),
+          apiClient.saveUserSettings({
+            mcp_task_agent_profile_default: baseline.mcpTaskAgentProfileDefault,
+          }),
+        ])
+      : [];
+    const deleteResults = await Promise.allSettled(
+      profileIds.map((profileId) => apiClient.deleteAgentProfile(profileId, true)),
+    );
+    const failures = [...restoreResults, ...deleteResults]
+      .filter((result) => result.status === "rejected")
+      .map((result) => (result.status === "rejected" ? result.reason : undefined));
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "Failed to restore MCP agent-profile E2E state");
+    }
+  });
+
   test("workspace-default mode routes an omitted-profile subtask to the workspace profile", async ({
     testPage,
     apiClient,
@@ -12,31 +47,55 @@ test.describe("MCP-created task agent profile default", () => {
     const workflow = (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
       (candidate) => candidate.id === seedData.workflowId,
     );
+    const [{ settings }, { workspaces }] = await Promise.all([
+      apiClient.getUserSettings(),
+      apiClient.listWorkspaces(),
+    ]);
+    const workspace = workspaces.find((candidate) => candidate.id === seedData.workspaceId);
+    if (!workspace) {
+      throw new Error("E2E workspace is not registered");
+    }
+    cleanupBaseline = {
+      defaultAgentProfileId: workspace.default_agent_profile_id ?? "",
+      mcpTaskAgentProfileDefault: settings.mcp_task_agent_profile_default ?? "current_task",
+    };
+
     const startStep = seedData.steps.find((step) => step.id === seedData.startStepId);
     expect(workflow?.agent_profile_id).toBeFalsy();
     expect(startStep?.agent_profile_id).toBeFalsy();
 
     const { agents } = await apiClient.listAgents();
+    const mockAgent = agents.find((agent) => agent.name === "mock-agent");
+    if (!mockAgent) {
+      throw new Error("E2E mock agent is not registered");
+    }
+    const profileNameSuffix = `${test.info().parallelIndex}-${Date.now()}`;
+    const parentProfile = await apiClient.createAgentProfile(
+      mockAgent.id,
+      `MCP Parent E2E ${profileNameSuffix}`,
+      {
+        model: "mock-fast",
+      },
+    );
+    createdProfileIds.push(parentProfile.id);
     const workspaceProfile = await apiClient.createAgentProfile(
-      agents[0].id,
-      "MCP Workspace Default E2E",
+      mockAgent.id,
+      `MCP Workspace Default E2E ${profileNameSuffix}`,
       { model: "mock-slow" },
     );
+    createdProfileIds.push(workspaceProfile.id);
     expect(workspaceProfile.id).not.toBe(seedData.agentProfileId);
     await apiClient.updateWorkspace(seedData.workspaceId, {
       default_agent_profile_id: workspaceProfile.id,
     });
 
     await testPage.goto("/settings/preferences/task-behavior");
-    await expect(testPage.getByText("create_task_kandev", { exact: true })).toBeVisible();
-    await expect(testPage.getByText("spawn_session_kandev", { exact: true })).toBeVisible();
-    const mcpToolHelp = testPage.getByRole("button", {
-      name: "About affected Kandev MCP tools",
-    });
-    await mcpToolHelp.hover();
-    await expect(testPage.getByRole("tooltip")).toContainText(
-      "spawn_session_kandev adds a session to the current task",
-    );
+    await expect(testPage.getByText("create_task_kandev", { exact: true })).not.toBeVisible();
+    await testPage
+      .getByRole("button", { name: "About Profile for Tasks Created by Agents" })
+      .hover();
+    await expect(testPage.getByRole("tooltip")).toContainText("spawn_session_kandev");
+    await testPage.mouse.move(0, 0);
     const workspaceDefault = testPage.getByRole("radio", {
       name: "Workspace default profile",
     });
@@ -69,7 +128,7 @@ test.describe("MCP-created task agent profile default", () => {
     const parent = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Workspace Default MCP Parent E2E",
-      seedData.agentProfileId,
+      parentProfile.id,
       {
         description: script,
         workflow_id: seedData.workflowId,
@@ -87,7 +146,7 @@ test.describe("MCP-created task agent profile default", () => {
     await parentSession.waitForChatIdle({ timeout: 120_000 });
 
     const parentSessions = await apiClient.listTaskSessions(parent.id);
-    expect(parentSessions.sessions[0]?.agent_profile_id).toBe(seedData.agentProfileId);
+    expect(parentSessions.sessions[0]?.agent_profile_id).toBe(parentProfile.id);
 
     let subtaskId: string | undefined;
     await expect

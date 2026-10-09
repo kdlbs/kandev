@@ -21,7 +21,7 @@ type managerEnvironmentDestroyer struct {
 	mgr *worktree.Manager
 }
 
-func (d *managerEnvironmentDestroyer) DestroyContainer(context.Context, string) error {
+func (d *managerEnvironmentDestroyer) DestroyContainer(context.Context, *models.TaskEnvironment) error {
 	return nil
 }
 
@@ -37,7 +37,7 @@ func (d *managerEnvironmentDestroyer) PushEnvironmentBranch(context.Context, *mo
 	return nil
 }
 
-func (d *managerEnvironmentDestroyer) GetContainerLiveStatus(context.Context, string) (*ContainerLiveStatus, error) {
+func (d *managerEnvironmentDestroyer) GetContainerLiveStatus(context.Context, *models.TaskEnvironment) (*ContainerLiveStatus, error) {
 	return nil, nil
 }
 

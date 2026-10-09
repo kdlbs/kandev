@@ -34,3 +34,4 @@ find them.
 
 - [Agents](../agents/README.md): supplies model and profile identity.
 - [Office](../office/README.md): consumes cost-aware routing.
+- [Tasks](../tasks/README.md): supplies task/session ownership and the durable usage ledger repository.

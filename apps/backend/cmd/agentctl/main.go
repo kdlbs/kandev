@@ -134,9 +134,11 @@ func runMain() int {
 
 func runGitHubUtilityCommand() (int, bool) {
 	if isGitHubCLIShimInvocation(os.Args[0]) {
+		self, _ := os.Executable()
+		lookPath := lookPathSkippingShims(self)
 		err := runGitHubCLIShim(
 			context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr,
-			os.Getenv, os.Environ, nil, os.Getenv(envGitHubCLIShimDir), lookPathIn, executeGitHubCLI,
+			os.Getenv, os.Environ, nil, os.Getenv(envGitHubCLIShimDir), lookPath, executeGitHubCLI,
 		)
 		return githubUtilityExitCode(err), true
 	}
@@ -220,11 +222,12 @@ func run(cfg *config.Config, log *logger.Logger) {
 		// Create MCP server using the channel-based backend client
 		var mcpSrv *mcpserver.Server
 		mcpNamePresentationOption := mcpserver.WithMCPToolNamespacingByServer(instCfg.NamespacesMCPToolsByServer)
+		mcpSSEBaseURLOption := mcpserver.WithSSEBaseURL(config.MCPServerURL(instCfg.MCPHost, instCfg.Port, ""))
 		if instCfg.McpProfile != nil {
-			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, *instCfg.McpProfile, mcpNamePresentationOption)
+			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, *instCfg.McpProfile, mcpNamePresentationOption, mcpSSEBaseURLOption)
 		} else {
 			legacyProfile := mcpprofile.Legacy(instCfg.McpMode, instCfg.DisableAskQuestion, instCfg.McpProviders)
-			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, legacyProfile, mcpNamePresentationOption)
+			mcpSrv = mcpserver.NewWithProfile(mcpBackendClient, instCfg.SessionID, instCfg.TaskID, instCfg.Port, instLog, cfg.McpLogFile, instCfg.DisableAskQuestion, legacyProfile, mcpNamePresentationOption, mcpSSEBaseURLOption)
 		}
 		mcpSrv.SetAttachmentReporter(procMgr.PublishMCPAttachment)
 		instLog.Info("MCP server enabled (channel-based)",

@@ -30,21 +30,28 @@ type RebuildGit struct {
 // It deliberately does not expose the full provider record to the summary
 // package or to the WebSocket payload.
 type PullRequestInput struct {
-	Key                   string
-	State                 string
-	Number                int
-	URL                   string
-	ReviewState           string
-	ChecksState           string
-	MergeableState        string
-	MergeQueueState       string
-	UnresolvedReviewCount int
-	PendingReviewCount    int
-	RequiredReviews       int
-	ChecksTotal           int
-	ChecksPassing         int
-	AutoFixEnabled        bool
-	AutoMergeEnabled      bool
+	Key                      string
+	Owner                    string
+	Repo                     string
+	State                    string
+	Number                   int
+	URL                      string
+	ReviewState              string
+	ChecksState              string
+	MergeableState           string
+	HasMergeConflicts        *bool
+	MergeQueueState          string
+	UnresolvedReviewCount    int
+	PendingReviewCount       int
+	RequiredReviews          int
+	ChecksTotal              int
+	ChecksPassing            int
+	AutoFixEnabled           bool
+	AutoMergeEnabled         bool
+	HeadSHA                  string
+	WorkflowAttentionState   string
+	WorkflowAttentionHeadSHA string
+	WorkflowAttentionStale   bool
 }
 
 // RebuildInput contains the authoritative bounded facts available from
@@ -52,7 +59,10 @@ type PullRequestInput struct {
 // observed by its corresponding boolean so an unavailable optional provider
 // does not masquerade as an authoritative empty value.
 type RebuildInput struct {
-	Sessions         []RebuildSession
+	Sessions []RebuildSession
+	// SessionsObserved distinguishes a complete empty snapshot from an
+	// unavailable or partial session source.
+	SessionsObserved bool
 	TaskError        *ActiveErrorSummary
 	PendingActions   map[string]string
 	ActivityObserved bool
@@ -63,8 +73,11 @@ type RebuildInput struct {
 	PRObserved       bool
 	// QueuedPromptCount is the authoritative pending prompt count for the task
 	// (all sessions). Supplied by the caller; 0 means nothing is queued.
-	QueuedPromptCount int
-	Now               time.Time
+	QueuedPromptCount      int
+	LaunchQueue            *LaunchQueueSummary
+	CompletionGate         *CompletionGateSummary
+	CompletionGateObserved bool
+	Now                    time.Time
 }
 
 // BuildFromAuthoritative derives the same summary semantics used by the live
@@ -73,18 +86,23 @@ type RebuildInput struct {
 // replaying any session stream.
 func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 	state := &projectionState{
-		sessions:           make(map[string]sessionObservation, len(input.Sessions)),
-		pending:            make(map[string]string, len(input.PendingActions)),
-		pendingRequests:    make(map[string]pendingRequestIdentity),
-		errors:             make(map[string]*ActiveErrorSummary),
-		clearedErrorStamps: make(map[string]string),
-		git:                make(map[string]GitSummary, len(input.Git)),
-		prs:                make(map[string]pullRequestObservation, len(input.PullRequests)),
-		pendingObserved:    true,
-		activityObserved:   input.ActivityObserved,
-		errorsObserved:     true,
-		gitObserved:        input.GitObserved,
-		prObserved:         input.PRObserved,
+		sessions:               make(map[string]sessionObservation, len(input.Sessions)),
+		sessionsObserved:       input.SessionsObserved,
+		pending:                make(map[string]string, len(input.PendingActions)),
+		pendingRequests:        make(map[string]pendingRequestIdentity),
+		errors:                 make(map[string]*ActiveErrorSummary),
+		clearedErrorStamps:     make(map[string]string),
+		git:                    make(map[string]GitSummary, len(input.Git)),
+		prs:                    make(map[string]pullRequestObservation, len(input.PullRequests)),
+		pendingObserved:        true,
+		activityObserved:       input.ActivityObserved,
+		errorsObserved:         true,
+		gitObserved:            input.GitObserved,
+		prObserved:             input.PRObserved,
+		launchQueueObserved:    true,
+		launchQueue:            cloneLaunchQueue(input.LaunchQueue),
+		completionGateObserved: input.CompletionGateObserved,
+		completionGate:         cloneCompletionGate(input.CompletionGate),
 	}
 	for _, inputSession := range input.Sessions {
 		if strings.TrimSpace(inputSession.ID) == "" {

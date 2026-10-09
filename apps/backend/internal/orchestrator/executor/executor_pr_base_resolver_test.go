@@ -10,9 +10,11 @@ import (
 )
 
 type recordingPRBaseResolver struct {
-	base  string
-	err   error
-	calls []prBaseResolveCall
+	base       string
+	headBranch string
+	result     *models.PRBase
+	err        error
+	calls      []prBaseResolveCall
 }
 
 // @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.11
@@ -44,6 +46,58 @@ func TestResolveTaskRepoInfo_PRBaseLookupFailureKeepsStoredBase(t *testing.T) {
 	}
 	if info.BaseBranch != "feature/stored-base" {
 		t.Fatalf("BaseBranch = %q, want stored base", info.BaseBranch)
+	}
+}
+
+func TestResolveTaskRepoInfo_PRBaseLookupCancellationAbortsLaunchResolution(t *testing.T) {
+	target := forkPRComparisonTarget()
+	metadata := map[string]interface{}{"pr_number": 42}
+	if err := models.PutComparisonTarget(metadata, target); err != nil {
+		t.Fatalf("PutComparisonTarget() error: %v", err)
+	}
+	repo := newMockRepository()
+	repo.repositories["repo-1"] = &models.Repository{
+		ID: "repo-1", WorkspaceID: "workspace-1", SourceType: sourceTypeLocal,
+		LocalPath: t.TempDir(), Provider: "github", ProviderOwner: "fork-owner",
+		ProviderName: "widgets", DefaultBranch: "main",
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	exec.SetPRBaseResolver(&recordingPRBaseResolver{err: context.Canceled})
+
+	info, err := exec.resolveTaskRepoInfo(context.Background(), &models.TaskRepository{
+		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1",
+		BaseBranch: "main", CheckoutBranch: "feature", Metadata: metadata,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("resolveTaskRepoInfo() error = %v, want context.Canceled", err)
+	}
+	if info != nil {
+		t.Fatalf("resolveTaskRepoInfo() returned launch info after cancellation: %#v", info)
+	}
+}
+
+func TestResolveTaskRepoInfo_FallsBackToTaskRepositoryBaseForIntegrationRef(t *testing.T) {
+	repo := newMockRepository()
+	repo.repositories["repo-1"] = &models.Repository{
+		ID:            "repo-1",
+		WorkspaceID:   "workspace-1",
+		SourceType:    sourceTypeLocal,
+		LocalPath:     t.TempDir(),
+		DefaultBranch: "main",
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	info, err := exec.resolveTaskRepoInfo(context.Background(), &models.TaskRepository{
+		ID:           "task-repo-1",
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		BaseBranch:   "main",
+	})
+	if err != nil {
+		t.Fatalf("resolveTaskRepoInfo() error: %v", err)
+	}
+	if info.IntegrationRef != "main" {
+		t.Fatalf("IntegrationRef = %q, want task repository base", info.IntegrationRef)
 	}
 }
 
@@ -99,11 +153,46 @@ type prBaseResolveCall struct {
 	number                   int
 }
 
-func (r *recordingPRBaseResolver) ResolvePRBaseBranch(
-	_ context.Context, workspaceID, owner, repo string, number int,
-) (string, error) {
-	r.calls = append(r.calls, prBaseResolveCall{workspaceID: workspaceID, owner: owner, repo: repo, number: number})
-	return r.base, r.err
+func (r *recordingPRBaseResolver) ResolvePRBase(
+	_ context.Context, workspaceID string, lookup PRBaseLookup,
+) (models.PRBase, error) {
+	owner, repo := lookup.AttachedOwner, lookup.AttachedRepository
+	if lookup.Target != nil {
+		owner, repo, _ = strings.Cut(lookup.Target.TargetRepository.Path, "/")
+	}
+	r.calls = append(r.calls, prBaseResolveCall{workspaceID: workspaceID, owner: owner, repo: repo, number: lookup.Number})
+	if r.err != nil {
+		return models.PRBase{}, r.err
+	}
+	if r.result != nil {
+		return *r.result, nil
+	}
+	headBranch := r.headBranch
+	if headBranch == "" {
+		headBranch = lookup.CheckoutBranch
+	}
+	if headBranch == "" {
+		headBranch = "feature"
+	}
+	target, err := (models.ComparisonTargetCandidate{
+		Provider:     models.ComparisonTargetProviderGitHub,
+		Kind:         models.ComparisonTargetKindPullRequest,
+		Number:       lookup.Number,
+		HeadBranch:   headBranch,
+		TargetBranch: r.base,
+		HeadRepository: models.ComparisonTargetRepository{
+			Host: "github.com", Path: owner + "/" + repo,
+			RemoteURL: "https://github.com/" + owner + "/" + repo + ".git",
+		},
+		TargetRepository: models.ComparisonTargetRepository{
+			Host: "github.com", Path: owner + "/" + repo,
+			RemoteURL: "https://github.com/" + owner + "/" + repo + ".git",
+		},
+	}).Build()
+	if err != nil {
+		return models.PRBase{}, err
+	}
+	return models.PRBase{Target: target}, nil
 }
 
 // @covers AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.11
@@ -119,7 +208,7 @@ func TestResolveTaskRepoInfo_UsesLivePRBase(t *testing.T) {
 		ProviderName:  "widgets",
 		DefaultBranch: "main",
 	}
-	resolver := &recordingPRBaseResolver{base: "main"}
+	resolver := &recordingPRBaseResolver{base: "main", headBranch: "feature/stacked-child"}
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
 	exec.SetPRBaseResolver(resolver)
 

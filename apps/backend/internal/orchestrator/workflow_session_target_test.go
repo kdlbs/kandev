@@ -5,11 +5,19 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/stretchr/testify/require"
 )
+
+type workflowTargetTestCredentialIssuer struct{}
+
+func (workflowTargetTestCredentialIssuer) Issue(context.Context, gitcredentials.Scope) (gitcredentials.Lease, error) {
+	return gitcredentials.Lease{Token: "opaque-test-lease"}, nil
+}
 
 type failWorkflowRouteMetadataRepo struct {
 	repoStore
@@ -123,6 +131,66 @@ func TestSelectExplicitWorkflowStartSessionFallsBackFromTerminalTarget(t *testin
 	require.Equal(t, "profile-a", profileID)
 }
 
+func TestCandidatePreflightIgnoresTerminalStepBinding(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	task, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	overrides, err := models.NewWorkflowAgentOverrides("wf1", []models.WorkflowAgentOverrideBinding{{
+		StepID: "implement", SourceProfileID: "profile-a", ReplacementProfileID: "profile-b",
+	}})
+	require.NoError(t, err)
+	source := &wfmodels.WorkflowStep{ID: "implement", WorkflowID: "wf1", Position: 0, AgentProfileID: "profile-a"}
+	target := &wfmodels.WorkflowStep{
+		ID: "pr", WorkflowID: "wf1", Position: 1,
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyReuse,
+		SessionTarget:             &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetStep, StepID: source.ID},
+	}
+	fixture.stepGetter.steps[source.ID] = source
+	fixture.stepGetter.steps[target.ID] = target
+
+	require.NoError(t, fixture.repo.CreateExecutor(ctx, &models.Executor{
+		ID: "exec-ssh", Name: "SSH", Type: models.ExecutorTypeSSH,
+	}))
+	require.NoError(t, fixture.repo.CreateExecutorProfile(ctx, &models.ExecutorProfile{
+		ID: "executor-profile-a", ExecutorID: "exec-ssh", Name: "A with GitHub token",
+		Config: map[string]string{"remote_auth_secrets": `{"gh_cli_env":"test-token"}`},
+	}))
+	require.NoError(t, fixture.repo.CreateExecutorProfile(ctx, &models.ExecutorProfile{
+		ID: "executor-profile-b", ExecutorID: "exec-ssh", Name: "B without GitHub token",
+	}))
+	fixture.current.ExecutorID = "exec-ssh"
+	fixture.current.ExecutorProfileID = "executor-profile-a"
+	require.NoError(t, fixture.repo.UpdateTaskSession(ctx, fixture.current))
+	terminal := &models.TaskSession{
+		ID: "terminal-profile-b", TaskID: task.ID, AgentProfileID: "profile-b",
+		ExecutorID: "exec-ssh", ExecutorProfileID: "executor-profile-b",
+		State: models.TaskSessionStateCompleted,
+	}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, terminal))
+	_, err = fixture.repo.UpsertWorkflowSessionBinding(ctx, &models.WorkflowSessionBinding{
+		TaskID: task.ID, TargetKey: workflowSessionBindingTargetKey(source.ID),
+		WorkflowID: "wf1", AgentProfileID: "profile-b", SessionID: terminal.ID,
+		OperationID: "candidate-terminal-binding", UpdatedAt: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-invalid-github", WorkspaceID: "ws1", Name: "Invalid GitHub remote",
+		SourceType: "local", Provider: "github", RemoteURL: "https://forge.example/acme/repo.git",
+	}))
+	require.NoError(t, fixture.repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-invalid-github", TaskID: task.ID, RepositoryID: "repo-invalid-github",
+	}))
+	fixture.svc.executor.SetGitHubCredentialBroker(
+		workflowTargetTestCredentialIssuer{}, "https://kandev.example/api/v1/github/credentials/resolve",
+	)
+	candidate := *task
+	candidate.WorkflowAgentOverrides = overrides
+
+	require.NoError(t, fixture.svc.PreflightWorkflowStepChange(ctx, &candidate, fixture.current, target),
+		"the terminal binding is not reused; preflight must use the current session's executor profile")
+}
+
 func TestRecordWorkflowSourceBindingIgnoresDelayedEntryAfterTaskMoves(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
@@ -142,6 +210,101 @@ func TestRecordWorkflowSourceBindingIgnoresDelayedEntryAfterTaskMoves(t *testing
 	binding, err := fixture.repo.GetWorkflowSessionBinding(ctx, "t1", workflowSessionBindingTargetKey(source.ID))
 	require.NoError(t, err)
 	require.Equal(t, fixture.current.ID, binding.SessionID)
+}
+
+func TestWorkflowSessionTargetUsesTaskEffectiveSourceProfile(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	overrides, err := models.NewWorkflowAgentOverrides("wf1", []models.WorkflowAgentOverrideBinding{
+		{StepID: "step-a", SourceProfileID: "profile-a", ReplacementProfileID: "profile-b"},
+	})
+	require.NoError(t, err)
+	task, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	task.WorkflowAgentOverrides = overrides
+	require.NoError(t, fixture.repo.UpdateTask(ctx, task))
+
+	source := &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", Position: 0, AgentProfileID: "profile-a"}
+	target := &wfmodels.WorkflowStep{
+		ID: "step-review", WorkflowID: "wf1", Position: 1,
+		SessionTarget: &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetStep, StepID: source.ID},
+	}
+	fixture.stepGetter.steps[source.ID] = source
+	session := &models.TaskSession{ID: "session-b", TaskID: "t1", AgentProfileID: "profile-b"}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, session))
+	require.NoError(t, fixture.svc.recordWorkflowSourceBinding(ctx, "t1", source, session))
+
+	resolution, err := fixture.svc.resolveWorkflowSessionTarget(ctx, "t1", target)
+	require.NoError(t, err)
+	require.Equal(t, session.ID, resolution.session.ID)
+	require.Equal(t, "profile-b", resolution.profileID)
+}
+
+func TestWorkflowChangeCredentialPreflightUsesCandidateBoundSession(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	now := time.Now().UTC()
+	require.NoError(t, fixture.repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf-destination", WorkspaceID: "ws1", Name: "Destination", CreatedAt: now, UpdatedAt: now,
+	}))
+	task, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	candidateOverrides, err := models.NewWorkflowAgentOverrides("wf-destination", []models.WorkflowAgentOverrideBinding{{
+		StepID: "implement", SourceProfileID: "profile-a", ReplacementProfileID: "profile-b",
+	}})
+	require.NoError(t, err)
+	source := &wfmodels.WorkflowStep{
+		ID: "implement", WorkflowID: "wf-destination", Position: 0, AgentProfileID: "profile-a",
+	}
+	target := &wfmodels.WorkflowStep{
+		ID: "pr", WorkflowID: "wf-destination", Position: 1,
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyReuse,
+		SessionTarget:             &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetStep, StepID: source.ID},
+	}
+	fixture.stepGetter.steps[source.ID] = source
+	fixture.stepGetter.steps[target.ID] = target
+
+	require.NoError(t, fixture.repo.CreateExecutor(ctx, &models.Executor{
+		ID: "exec-ssh", Name: "SSH", Type: models.ExecutorTypeSSH,
+	}))
+	require.NoError(t, fixture.repo.CreateExecutorProfile(ctx, &models.ExecutorProfile{
+		ID: "executor-profile-a", ExecutorID: "exec-ssh", Name: "A without GitHub token",
+	}))
+	require.NoError(t, fixture.repo.CreateExecutorProfile(ctx, &models.ExecutorProfile{
+		ID: "executor-profile-b", ExecutorID: "exec-ssh", Name: "B with GitHub token",
+		Config: map[string]string{"remote_auth_secrets": `{"gh_cli_env":"test-token"}`},
+	}))
+	fixture.current.ExecutorID = "exec-ssh"
+	fixture.current.ExecutorProfileID = "executor-profile-a"
+	require.NoError(t, fixture.repo.UpdateTaskSession(ctx, fixture.current))
+	bound := &models.TaskSession{
+		ID: "session-profile-b", TaskID: task.ID, AgentProfileID: "profile-b",
+		ExecutorID: "exec-ssh", ExecutorProfileID: "executor-profile-b",
+		State: models.TaskSessionStateWaitingForInput,
+	}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, bound))
+	_, err = fixture.repo.UpsertWorkflowSessionBinding(ctx, &models.WorkflowSessionBinding{
+		TaskID: task.ID, TargetKey: workflowSessionBindingTargetKey(source.ID),
+		WorkflowID: "wf-destination", AgentProfileID: "profile-b", SessionID: bound.ID,
+		OperationID: "preflight-candidate-binding", UpdatedAt: now,
+	})
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-invalid-github", WorkspaceID: "ws1", Name: "Invalid GitHub remote",
+		SourceType: "local", Provider: "github", RemoteURL: "https://forge.example/acme/repo.git",
+	}))
+	require.NoError(t, fixture.repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-invalid-github", TaskID: task.ID, RepositoryID: "repo-invalid-github",
+	}))
+	fixture.svc.executor.SetGitHubCredentialBroker(
+		workflowTargetTestCredentialIssuer{}, "https://kandev.example/api/v1/github/credentials/resolve",
+	)
+	candidate := *task
+	candidate.WorkflowID = "wf-destination"
+	candidate.WorkflowAgentOverrides = candidateOverrides
+
+	err = fixture.svc.PreflightWorkflowStepChange(ctx, &candidate, fixture.current, target)
+	require.NoError(t, err, "candidate binding B supplies its own remote Git credential profile")
 }
 
 func TestRecordWorkflowSourceBindingDoesNotOverwriteRevisitedSourceEntry(t *testing.T) {
@@ -324,6 +487,58 @@ func TestReusePreparedWorkflowRouteCommitsWhenDestinationIsAlreadyPrimary(t *tes
 	require.Equal(t, workflowSessionRouteCommitted, committed.Phase)
 }
 
+func TestReuseCommittedWorkflowRouteClearsDestinationParkingOnly(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	destination := &models.TaskSession{
+		ID:             "workflow-committed-destination",
+		TaskID:         "t1",
+		AgentProfileID: "profile-a",
+		State:          models.TaskSessionStateWaitingForInput,
+	}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, destination))
+	parking := models.WorkflowParking{
+		Stamp:           "committed-destination-parking",
+		ParkedAt:        time.Now().UTC(),
+		SourceSessionID: fixture.current.ID,
+	}
+	require.NoError(t, fixture.repo.SetSessionMetadataKey(
+		ctx, destination.ID, models.SessionMetaKeyWorkflowParking, parking,
+	))
+	stopIntent := models.WorkflowProfileSwitchStopIntent{
+		ExecutionID: "committed-destination-execution",
+		Stamp:       parking.Stamp,
+	}
+	require.NoError(t, fixture.repo.SetSessionMetadataKey(
+		ctx, destination.ID, models.SessionMetaKeyWorkflowProfileSwitchStopIntent, stopIntent,
+	))
+
+	route := &models.WorkflowSessionRoute{
+		OperationID:       "workflow-route-committed",
+		DestinationStepID: "step-review",
+		EntryIdentity:     "entry:00000000000000000031",
+		TargetKind:        string(wfmodels.WorkflowSessionTargetInitial),
+		AgentProfileID:    "profile-a",
+		DestinationID:     destination.ID,
+		Phase:             workflowSessionRouteCommitted,
+	}
+	reused, switched, err := fixture.svc.reuseRecordedWorkflowSession(
+		ctx, "t1", fixture.current, route, destination, models.WorkflowProfileSessionEndPolicyPark,
+	)
+	require.NoError(t, err)
+	require.True(t, switched)
+	require.Equal(t, destination.ID, reused.ID)
+
+	updated, err := fixture.repo.GetTaskSession(ctx, destination.ID)
+	require.NoError(t, err)
+	_, stillParked := models.LoadWorkflowParking(updated.Metadata)
+	require.False(t, stillParked, "reusing a committed destination must clear its current parking marker")
+	gotIntent, intentPresent := workflowProfileSwitchStopIntentFromMetadata(updated.Metadata)
+	require.True(t, intentPresent, "reusing a parked destination must retain the stop-intent tombstone")
+	require.Equal(t, stopIntent.ExecutionID, gotIntent.ExecutionID)
+	require.Equal(t, stopIntent.Stamp, gotIntent.Stamp)
+}
+
 func TestWorkflowRouteRetryRecoversAfterLegacyCommitMetadataFailure(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
@@ -377,6 +592,133 @@ func TestWorkflowRouteRetryRecoversAfterLegacyCommitMetadataFailure(t *testing.T
 	committed, ok := models.LoadWorkflowSessionRoute(reloadedTask.Metadata)
 	require.True(t, ok)
 	require.Equal(t, workflowSessionRouteCommitted, committed.Phase)
+}
+
+func TestPromoteWorkflowSessionRouteUsesNonterminalGuardOnLegacyRepositories(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	destination := &models.TaskSession{
+		ID:             "workflow-terminal-destination",
+		TaskID:         "t1",
+		AgentProfileID: "profile-a",
+		State:          models.TaskSessionStateCompleted,
+	}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, destination))
+	route := models.WorkflowSessionRoute{
+		OperationID:       "workflow-route-terminal-destination",
+		DestinationStepID: "step-review",
+		EntryIdentity:     "entry:00000000000000000031",
+		TargetKind:        string(wfmodels.WorkflowSessionTargetInitial),
+		AgentProfileID:    "profile-a",
+		DestinationID:     destination.ID,
+		Phase:             workflowSessionRoutePrepared,
+	}
+	require.NoError(t, fixture.repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyWorkflowSessionRoute, route))
+
+	fixture.svc.repo = &failWorkflowRouteMetadataRepo{repoStore: fixture.repo}
+	promoted, err := fixture.svc.promoteWorkflowSessionRoute(ctx, "t1", destination, &route)
+	require.NoError(t, err)
+	require.False(t, promoted)
+
+	updatedDestination, err := fixture.repo.GetTaskSession(ctx, destination.ID)
+	require.NoError(t, err)
+	require.False(t, updatedDestination.IsPrimary)
+	updatedTask, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	updatedRoute, ok := models.LoadWorkflowSessionRoute(updatedTask.Metadata)
+	require.True(t, ok)
+	require.Equal(t, workflowSessionRoutePrepared, updatedRoute.Phase)
+}
+
+func TestPromoteWorkflowSessionRouteClearsSelectedDestinationParkingOnly(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	destination := &models.TaskSession{
+		ID:             "workflow-selected-destination",
+		TaskID:         "t1",
+		AgentProfileID: "profile-a",
+		State:          models.TaskSessionStateCreated,
+	}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, destination))
+
+	destinationParking := models.WorkflowParking{
+		Stamp:           "destination-parking",
+		ParkedAt:        time.Now().UTC(),
+		SourceSessionID: destination.ID,
+	}
+	require.NoError(t, fixture.repo.SetSessionMetadataKey(
+		ctx, destination.ID, models.SessionMetaKeyWorkflowParking, destinationParking,
+	))
+	require.NoError(t, fixture.repo.SetSessionMetadataKey(
+		ctx, destination.ID, models.SessionMetaKeyWorkflowProfileSwitchStopIntent,
+		models.WorkflowProfileSwitchStopIntent{ExecutionID: "destination-execution", Stamp: destinationParking.Stamp},
+	))
+	sourceParking := models.WorkflowParking{
+		Stamp:           "source-parking",
+		ParkedAt:        time.Now().UTC(),
+		SourceSessionID: fixture.current.ID,
+	}
+	require.NoError(t, fixture.repo.SetSessionMetadataKey(
+		ctx, fixture.current.ID, models.SessionMetaKeyWorkflowParking, sourceParking,
+	))
+
+	route := models.WorkflowSessionRoute{
+		OperationID:       "workflow-route-selected",
+		DestinationStepID: "step-review",
+		EntryIdentity:     "entry:00000000000000000021",
+		TargetKind:        string(wfmodels.WorkflowSessionTargetInitial),
+		AgentProfileID:    "profile-a",
+		DestinationID:     destination.ID,
+		Phase:             workflowSessionRoutePrepared,
+	}
+	require.NoError(t, fixture.repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyWorkflowSessionRoute, route))
+	promoted, err := fixture.svc.promoteWorkflowSessionRoute(ctx, "t1", destination, &route)
+	require.NoError(t, err)
+	require.True(t, promoted)
+
+	selected, err := fixture.repo.GetTaskSession(ctx, destination.ID)
+	require.NoError(t, err)
+	_, selectedStillParked := models.LoadWorkflowParking(selected.Metadata)
+	require.False(t, selectedStillParked, "selected destination parking marker was not cleared")
+	_, stopIntentStillPresent := workflowProfileSwitchStopIntentFromMetadata(selected.Metadata)
+	require.True(t, stopIntentStillPresent, "selected destination stop tombstone was cleared with parking")
+
+	source, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
+	require.NoError(t, err)
+	parking, sourceStillParked := models.LoadWorkflowParking(source.Metadata)
+	require.True(t, sourceStillParked)
+	require.Equal(t, sourceParking.Stamp, parking.Stamp, "promotion cleared the source marker instead of destination")
+}
+
+func TestReuseResolvedWorkflowSessionCommitsRouteForCurrentSession(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	route := &models.WorkflowSessionRoute{
+		OperationID:       "workflow-route-current-session",
+		DestinationStepID: "step-review",
+		EntryIdentity:     "entry:00000000000000000022",
+		TargetKind:        string(wfmodels.WorkflowSessionTargetInitial),
+		AgentProfileID:    fixture.current.AgentProfileID,
+	}
+
+	reused, switched, err := fixture.svc.reuseResolvedWorkflowSession(
+		ctx,
+		"t1",
+		fixture.current,
+		fixture.current,
+		route,
+		models.WorkflowProfileSessionEndPolicyPark,
+	)
+	require.NoError(t, err)
+	require.False(t, switched)
+	require.Equal(t, fixture.current.ID, reused.ID)
+
+	task, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	committed, ok := models.LoadWorkflowSessionRoute(task.Metadata)
+	require.True(t, ok)
+	require.Equal(t, workflowSessionRouteCommitted, committed.Phase)
+	require.Equal(t, fixture.current.ID, committed.DestinationID)
 }
 
 func fixtureSessionState(t *testing.T, repo interface {

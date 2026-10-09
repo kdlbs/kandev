@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/office/onboarding"
 	"github.com/kandev/kandev/internal/office/projects"
 	"github.com/kandev/kandev/internal/office/routines"
+	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/skills"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -37,7 +38,7 @@ func registeredOfficeRoutes(t *testing.T) gin.RoutesInfo {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
-	office.RegisterAllRoutes(engine.Group(officeRoutePrefix), officeTestServices(), nil, testLogger(t))
+	office.RegisterAllRoutes(engine.Group(officeRoutePrefix), officeTestServices(), nil, officeruntime.HandoffDependencies{}, testLogger(t))
 
 	routes := engine.Routes()
 	if len(routes) < 100 {

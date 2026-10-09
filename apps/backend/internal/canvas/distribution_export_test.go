@@ -54,6 +54,50 @@ func TestPrepareExportBuildsOneReleaseBoundBundleAndSource(t *testing.T) {
 	}
 }
 
+func TestPrepareExportRejectsStaticModeWhenEntryFileIsMissing(t *testing.T) {
+	service, _, _ := newDistributionExportTestService(t)
+	delete(service.artifacts.(*fakeDistributionArtifactReader).files, "ui/index.html")
+	defaults, err := service.GetExportDefaults(context.Background(), "user-1", "workspace-1", "canvas-1")
+	if err != nil || defaults.Metadata.SourceMode != "" || !containsString(defaults.MissingRequired, "source_mode") {
+		t.Fatalf("missing static entry defaults = %+v, error = %v", defaults, err)
+	}
+	_, err = service.PrepareExport(context.Background(), ExportRequest{
+		UserID: "user-1", WorkspaceID: "workspace-1", CanvasID: "canvas-1", ExpectedReleaseID: "release-1",
+		Metadata: ExportMetadata{PackageID: "canvas-board", Version: "1.2.3", DisplayName: "Board", Description: "A board", Author: "Kandev", License: "MIT", SourceMode: manifest.SourceModeStatic, MinKandevVersion: "1.0.0"},
+	})
+	if !errors.Is(err, ErrExportInvalid) || service.preparationsCount() != 0 {
+		t.Fatalf("missing static entry prepared: error = %v, preparations = %d", err, service.preparationsCount())
+	}
+}
+
+func TestExportDefaultsUseReleaseAndRequireAuthorLicense(t *testing.T) {
+	service, releases, canvases := newDistributionExportTestService(t)
+	var value manifest.Manifest
+	if err := json.Unmarshal(releases.release.ManifestJSON, &value); err != nil {
+		t.Fatal(err)
+	}
+	value.MinKandevVersion = ""
+	value.Distribution = nil
+	releases.release.ManifestJSON, _ = json.Marshal(value)
+	canvases.canvas.Title = "Mutable canvas name"
+	defaults, err := service.GetExportDefaults(context.Background(), "user-1", "workspace-1", "canvas-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.ExpectedReleaseID != "release-1" || defaults.Metadata.PackageID != value.ID || defaults.Metadata.Version != value.Version || defaults.Metadata.DisplayName != value.DisplayName || defaults.Metadata.Author != value.Author || defaults.Metadata.MinKandevVersion != MinimumCanvasDistributionVersion {
+		t.Fatalf("unexpected defaults: %+v", defaults)
+	}
+	if len(defaults.MissingRequired) != 1 || defaults.MissingRequired[0] != "license" {
+		t.Fatalf("missing fields = %v", defaults.MissingRequired)
+	}
+	value.MinKandevVersion = "1.5.0"
+	releases.release.ManifestJSON, _ = json.Marshal(value)
+	newDefaults, err := service.GetExportDefaults(context.Background(), "user-1", "workspace-1", "canvas-1")
+	if err != nil || newDefaults.Metadata.MinKandevVersion != "1.5.0" {
+		t.Fatalf("higher minimum = %+v, %v", newDefaults, err)
+	}
+}
+
 func TestPrepareExportAllowsTaskCanvasWithPortableWorkspacePlacement(t *testing.T) {
 	service, releases, canvases := newDistributionExportTestService(t)
 	var sourceManifest manifest.Manifest

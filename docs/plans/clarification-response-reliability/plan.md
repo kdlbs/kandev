@@ -94,7 +94,10 @@ to multiple backend replicas.
 ### Wave 3: Client recovery and viewport coverage
 
 - [x] [Task 03: Bound and recover clarification submission](task-03-bound-and-recover-clarification-submission.md) - depends on Task 02.
-- [x] [Task 04: Return delivery-pending retry outcomes](task-04-delivery-pending-retry.md) - depends on Task 03.
+
+### Wave 4: Retry delivery confirmation
+
+- [x] [Task 04: Confirm delivery-pending retry outcomes](task-04-delivery-pending-retry.md) - depends on Task 03.
 
 Implementation remains sequential in the primary conversation unless the user
 explicitly authorizes implementation sessions.
@@ -150,3 +153,12 @@ includes focused and race-enabled backend tests, frontend unit/type/lint/
 localization checks, and the managed Chromium (2 passed) and Pixel 5 (8
 passed) E2E scenarios. The PostgreSQL planner test is environment-gated and
 was skipped because no `KANDEV_TEST_POSTGRES_DSN` was available.
+
+
+Task 04 now preserves confirmation ordering for exact MCP retries, including
+claims during durable reads and session cancellation. Its deterministic
+regressions pass ten repetitions. The replacement review verified actual
+PostgreSQL reattachment authority. Broad default compiler, lint, and race
+validation is delegated to hosted CI under the updated validation direction;
+local broad attempts were incomplete, timed out, or OOM-killed. Exact-head CI
+success remains a merge gate. See Task 04 for the focused proof and disposition.

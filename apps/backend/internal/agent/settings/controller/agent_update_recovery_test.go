@@ -88,6 +88,7 @@ type recoveryRuntimeUpdater struct {
 	probeCaps     hostutility.AgentCapabilities
 	probeErr      error
 	runErrs       []error
+	updateOutput  string
 	runCalls      int
 	prepare       []string
 	probe         []string
@@ -125,8 +126,12 @@ func (u *recoveryRuntimeUpdater) RunUpdate(
 	if index < len(u.runErrs) {
 		err = u.runErrs[index]
 	}
+	output := u.updateOutput
 	u.mu.Unlock()
-	onChunk("prepared\n")
+	if output == "" {
+		output = "prepared\n"
+	}
+	onChunk(output)
 	return err
 }
 
@@ -311,6 +316,52 @@ func TestAgentUpdateExactTargetSkipsMetadataRefetch(t *testing.T) {
 	updater.mu.Unlock()
 	if metadataCalls != 0 {
 		t.Fatalf("metadata calls = %d, want no refetch for a validated target", metadataCalls)
+	}
+}
+
+func TestAgentUpdateExactCandidateNpmReleaseAgePolicySkipsCacheRepair(t *testing.T) {
+	const packageName = "@agentclientprotocol/claude-agent-acp"
+	selectionStore := newRecoverySelectionStore()
+	selectionStore.values["claude-acp\x00"+packageName] = managedruntime.Selection{
+		Package: packageName,
+		Version: "0.80.0",
+	}
+	updater := &recoveryRuntimeUpdater{
+		metadata: RuntimeVersionMetadata{
+			Versions: []string{"0.80.0", "0.81.0"},
+			Latest:   "0.81.0",
+		},
+		current: hostutility.AgentCapabilities{
+			Status:       hostutility.StatusOK,
+			AgentVersion: "0.80.0",
+		},
+		currentFound: true,
+		runErrs:      []error{errors.New("exit status 1")},
+		updateOutput: "npm error code ETARGET\nnpm error notarget No matching version found for @agentclientprotocol/claude-agent-acp@0.81.0 with a date before 9/22/2026, 12:28:47 PM.\n",
+	}
+	store, completed := newRecoveryStore(updater, selectionStore)
+	spec := agents.ManagedNPMRuntimeSpec{
+		Package:        packageName,
+		DefaultVersion: "0.80.0",
+		ACPArgs:        []string{"acp"},
+	}
+	job, err := store.Enqueue("claude-acp", spec, "0.81.0")
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusFailed)
+	if !strings.Contains(final.Error, "release-age policy") {
+		t.Fatalf("Error = %q, want the npm release-age policy failure", final.Error)
+	}
+	if strings.Contains(final.Error, "12:28:47 PM") {
+		t.Fatalf("Error leaked the raw npm date: %q", final.Error)
+	}
+	if updater.runCalls != 1 || len(updater.invalidate) != 0 || len(updater.probe) != 0 {
+		t.Fatalf("policy failure calls: update=%d invalidation=%#v probe=%#v, want 1, none, none", updater.runCalls, updater.invalidate, updater.probe)
+	}
+	selection, found, err := selectionStore.Get(context.Background(), "claude-acp", packageName)
+	if err != nil || !found || selection.Version != "0.80.0" {
+		t.Fatalf("selection after policy failure = %#v, found=%v, err=%v", selection, found, err)
 	}
 }
 

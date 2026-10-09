@@ -304,7 +304,7 @@ WHERE a.canvas_id = ?`,
 // while rechecking its owner, session, task, policy, task scope, and current
 // workspace ownership.
 func (r *Repository) ConsumeCreationAuthorityTx(ctx context.Context, tx *sqlx.Tx, authority CreationAuthority, ownerUserID, sessionID, taskID string, allowUnownedWorkspace bool) error {
-	if authority.CanvasID == "" || ownerUserID == "" || sessionID == "" || taskID == "" {
+	if authority.CanvasID == "" || !creationAuthorityPolicyVersionSupported(authority.PolicyVersion) || ownerUserID == "" || sessionID == "" || taskID == "" {
 		return ErrStaleCanvasPublish
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -321,7 +321,7 @@ WHERE canvas_creation_authority.canvas_id = ? AND owner_user_id = ? AND creating
 		  AND m.task_id = ?
 		  AND (w.owner_id = ? OR (? AND COALESCE(w.owner_id, '') = ''))
 	)`,
-	), now, authority.CanvasID, ownerUserID, sessionID, CreationAuthorityPolicyVersion, taskID, ownerUserID, allowUnownedWorkspace)
+	), now, authority.CanvasID, ownerUserID, sessionID, authority.PolicyVersion, taskID, ownerUserID, allowUnownedWorkspace)
 	if err != nil {
 		return err
 	}
@@ -442,6 +442,22 @@ func (r *Repository) DeleteTx(ctx context.Context, tx *sqlx.Tx, id string) error
 	}
 	result, err := tx.ExecContext(ctx, tx.Rebind(
 		`DELETE FROM canvas_lifecycle_metadata WHERE id = ?`), id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrCanvasNotFound
+	}
+	return nil
+}
+
+// Rename changes only the mutable canvas title. A removed row cannot be recreated.
+func (r *Repository) Rename(ctx context.Context, id, title string, updatedAt time.Time) error {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE canvas_lifecycle_metadata SET title = ?, updated_at = ? WHERE id = ?`), title, updatedAt.UTC().Format(time.RFC3339Nano), id)
 	if err != nil {
 		return err
 	}

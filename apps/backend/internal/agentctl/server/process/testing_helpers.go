@@ -14,6 +14,11 @@ func (m *Manager) SetAdapterForTest(a adapter.AgentAdapter) {
 	m.adapter = a
 }
 
+// SetStatusForTest injects the process status for API and lifecycle tests.
+func (m *Manager) SetStatusForTest(status Status) {
+	m.status.Store(status)
+}
+
 // SetVscodeForTest injects a VscodeManager with the given status and port.
 // Intended for use in tests where starting a real code-server is not feasible.
 func (m *Manager) SetVscodeForTest(status VscodeStatus, port int) {

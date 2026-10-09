@@ -1,23 +1,25 @@
 import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
 /* eslint-disable max-lines -- session state intentionally keeps its coordinated actions together. */
 import type { StateCreator } from "zustand";
+import type { Draft } from "immer";
 import { original } from "immer";
-import type { Message, TaskSession } from "@/lib/types/http";
-import type { QueueMeta, QueueOperationToken, SessionSlice, SessionSliceState } from "./types";
+import type { Message, TaskSession, WorkspaceRecoveryProjection } from "@/lib/types/http";
+import type {
+  QueueMeta,
+  QueueOperationToken,
+  SessionSlice,
+  SessionSliceState,
+  TaskSessionHydrationEpoch,
+} from "./types";
 import { buildTurnActions, isSettledSessionState, parseTurnTimestamp } from "./turn-actions";
 import {
   buildTaskSessionProjectionActions,
   mergeOrphanPendingActionProjection,
 } from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
-import {
-  buildPromptMessageActions,
-  fanOutTranscriptPrompts,
-  removePromptMessage,
-  updatePromptMessage,
-} from "./prompt-message-actions";
+import { resolveRunningNotices } from "./running-notice-activity";
 import { purgeSessionRuntimeState } from "@/lib/state/slices/session-runtime/session-runtime-slice";
-import { mergeTaskSession } from "./session-merge";
+import { mergeTaskSession, mergeWorkspaceRecoveryProjection } from "./session-merge";
 import { syncEnvironmentMapping, syncPrepareProgress } from "./session-environment-sync";
 import type { SessionRuntimeSliceState } from "@/lib/state/slices/session-runtime/types";
 import {
@@ -25,6 +27,7 @@ import {
   shouldReplaceMcpAttachmentHistory,
 } from "@/lib/state/slices/session-runtime/mcp-attachment-reconciliation";
 import { getPlanLastSeen, setPlanLastSeen } from "@/lib/local-storage";
+import { sessionStateConfirmsAgentctlExecutionReady } from "@/lib/session-state";
 import {
   getWalkthroughLastSeen,
   setWalkthroughLastSeen,
@@ -72,8 +75,29 @@ function applyMessageMeta(
  * Merge message fields: only overwrite existing fields with non-undefined incoming values.
  * This handles duplicate events from multiple sources.
  */
+/** Keep an already acknowledged Git push dismissal across a delayed update without the marker. */
+function retainDismissedMetadata(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): boolean {
+  if (source.metadata === undefined) return false;
+  const targetMetadata = target.metadata as Record<string, unknown> | undefined;
+  const dismissedAt = targetMetadata?.git_operation_error_dismissed_at;
+  if (typeof dismissedAt !== "string" || dismissedAt === "") return false;
+  const sourceMetadata =
+    source.metadata !== null && typeof source.metadata === "object"
+      ? (source.metadata as Record<string, unknown>)
+      : {};
+  target.metadata = {
+    ...sourceMetadata,
+    git_operation_error_dismissed_at: dismissedAt,
+  };
+  return true;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mergeMessageFields(target: Record<string, unknown>, source: Record<string, any>) {
+  const noticeResolved = (target.metadata as Message["metadata"])?.running_notice_resolved === true;
   for (const key of Object.keys(source)) {
     if (
       key === "metadata" &&
@@ -81,9 +105,16 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
       !payloadRetentionMarker(source.metadata)
     )
       continue;
+    if (key === "metadata" && retainDismissedMetadata(target, source)) continue;
     if (source[key] !== undefined) {
       target[key] = source[key];
     }
+  }
+  if (noticeResolved && target.metadata) {
+    target.metadata = {
+      ...(target.metadata as Message["metadata"]),
+      running_notice_resolved: true,
+    };
   }
 }
 
@@ -98,39 +129,100 @@ function mergeMessageAtIndex(messages: Message[], message: Message): void {
   messages[index] = merged;
 }
 
+function isTransientRetryNotice(message: Message): boolean {
+  return message.type === "status" && message.metadata?.retrying === true;
+}
+
 /** Return a new messages array with the message matching `messageId` removed. */
 function removeMessageByID(messages: Message[], messageId: string) {
   return messages.filter((message) => message.id !== messageId);
 }
 
+function hydrationEpochChanged(current: number, request: number | undefined): boolean {
+  if (request === undefined) return current > 0;
+  return current > request;
+}
+
+type SessionSnapshotEpochs = {
+  current: { activity: number; readCursor: number; workspaceRecovery?: number };
+  request?: { activity: number; readCursor: number; workspaceRecovery?: number };
+};
+
 /** Normalize and merge a complete session record without erasing a newer live activity event. */
 function mergeTaskSessionSnapshot(
   existing: TaskSession | undefined,
   incoming: TaskSession,
-  currentActivityEpoch: number,
-  requestActivityEpoch: number | undefined,
+  epochs: SessionSnapshotEpochs,
 ): TaskSession {
-  const snapshot = {
+  const snapshot = normalizeTaskSessionSnapshot(incoming);
+  if (!existing) return snapshot;
+  return mergeSessionSnapshotWithLiveEpochs(existing, snapshot, epochs);
+}
+
+function normalizeTaskSessionSnapshot(incoming: TaskSession): TaskSession {
+  return {
     ...incoming,
     foreground_activity: incoming.foreground_activity ?? null,
     active_subagent_count: incoming.active_subagent_count ?? 0,
     supports_steering: incoming.supports_steering ?? false,
   };
-  if (!existing) return snapshot;
+}
 
+function mergeSessionSnapshotWithLiveEpochs(
+  existing: TaskSession,
+  snapshot: TaskSession,
+  epochs: SessionSnapshotEpochs,
+): TaskSession {
   const merged = mergeTaskSession(existing, snapshot);
-  const activityChangedDuringRequest =
-    requestActivityEpoch === undefined
-      ? currentActivityEpoch > 0
-      : currentActivityEpoch > requestActivityEpoch;
-  if (!activityChangedDuringRequest) return merged;
+  const activityChangedDuringRequest = hydrationEpochChanged(
+    epochs.current.activity,
+    epochs.request?.activity,
+  );
+  const readCursorChangedDuringRequest = hydrationEpochChanged(
+    epochs.current.readCursor,
+    epochs.request?.readCursor,
+  );
+  const workspaceRecoveryChangedDuringRequest = hydrationEpochChanged(
+    epochs.current.workspaceRecovery ?? 0,
+    epochs.request?.workspaceRecovery ?? (epochs.request ? 0 : undefined),
+  );
+  if (
+    !activityChangedDuringRequest &&
+    !readCursorChangedDuringRequest &&
+    !workspaceRecoveryChangedDuringRequest
+  )
+    return merged;
 
   return {
     ...merged,
-    foreground_activity: existing.foreground_activity,
-    active_subagent_count: existing.active_subagent_count,
-    supports_steering: existing.supports_steering,
+    ...(activityChangedDuringRequest
+      ? {
+          foreground_activity: existing.foreground_activity,
+          active_subagent_count: existing.active_subagent_count,
+          supports_steering: existing.supports_steering,
+        }
+      : {}),
+    ...(readCursorChangedDuringRequest
+      ? { last_read_message_id: existing.last_read_message_id }
+      : {}),
+    ...(workspaceRecoveryChangedDuringRequest
+      ? { workspace_recovery: existing.workspace_recovery }
+      : {}),
   };
+}
+
+function mergeTaskSessionActionSnapshot(
+  existing: TaskSession | undefined,
+  incoming: TaskSession,
+  currentEpoch: TaskSessionHydrationEpoch,
+  requestEpoch?: TaskSessionHydrationEpoch,
+): TaskSession {
+  if (!existing) return incoming;
+  if (!requestEpoch) return mergeTaskSession(existing, incoming);
+  return mergeTaskSessionSnapshot(existing, incoming, {
+    current: currentEpoch,
+    request: requestEpoch,
+  });
 }
 
 function reconcileMcpAttachmentHistory(
@@ -142,6 +234,24 @@ function reconcileMcpAttachmentHistory(
   const existing = draft.sessionMcpStatus.bySessionId[session.id];
   if (!shouldReplaceMcpAttachmentHistory(existing, incoming)) return;
   draft.sessionMcpStatus.bySessionId[session.id] = incoming;
+}
+
+function applyCachedWorkspaceRecoveryProjection(
+  draft: Pick<SessionSliceState, "taskSessions">,
+  session: TaskSession,
+): TaskSession {
+  const environmentID = session.task_environment_id;
+  if (!environmentID) return session;
+  const cached = draft.taskSessions.workspaceRecoveryByEnvironment?.[environmentID];
+  if (!cached) return session;
+  const projection = mergeWorkspaceRecoveryProjection(
+    session.workspace_recovery,
+    cached,
+    environmentID,
+  );
+  return projection === session.workspace_recovery
+    ? session
+    : { ...session, workspace_recovery: projection };
 }
 
 // Settled states are defined once in turn-actions (SETTLED_SESSION_STATES /
@@ -192,12 +302,6 @@ function reconcileActiveTurnForIdleSession(draft: SessionSliceState, session: Ta
 
 export const defaultSessionState: SessionSliceState = {
   messages: { bySession: {}, metaBySession: {} },
-  messagePrompts: {
-    bySession: {},
-    metaBySession: {},
-    generationBySession: {},
-    refreshGenerationBySession: {},
-  },
   turns: {
     bySession: {},
     activeBySession: {},
@@ -205,7 +309,13 @@ export const defaultSessionState: SessionSliceState = {
     reconcileEpochBySession: {},
     settledBoundaryBySession: {},
   },
-  taskSessions: { items: {}, activityEpochBySession: {} },
+  taskSessions: {
+    items: {},
+    activityEpochBySession: {},
+    readCursorEpochBySession: {},
+    workspaceRecoveryEpochBySession: {},
+    workspaceRecoveryByEnvironment: {},
+  },
   taskSessionsByTask: {
     itemsByTaskId: {},
     loadingByTaskId: {},
@@ -252,6 +362,70 @@ export const defaultSessionState: SessionSliceState = {
 type ImmerSet = Parameters<typeof createSessionSlice>[0];
 type ImmerGet = () => SessionSlice;
 
+function applyWorkspaceRecoveryProjection(
+  draft: Draft<SessionSlice>,
+  sessionIds: string[],
+  projection: WorkspaceRecoveryProjection,
+) {
+  const environmentID = projection.environment_id;
+  if (!environmentID) return;
+  const cache = (draft.taskSessions.workspaceRecoveryByEnvironment ??= {});
+  const nextProjection = mergeWorkspaceRecoveryProjection(
+    cache[environmentID],
+    projection,
+    environmentID,
+  );
+  if (!nextProjection) return;
+  cache[environmentID] = nextProjection;
+
+  const targetIDs = new Set(sessionIds);
+  for (const [sessionID, existing] of Object.entries(draft.taskSessions.items)) {
+    if (existing.task_environment_id && existing.task_environment_id !== environmentID) continue;
+    if (!targetIDs.has(sessionID) && existing.task_environment_id !== environmentID) continue;
+    applyRecoveryProjectionToSession(draft, sessionID, existing, nextProjection, environmentID);
+  }
+}
+
+function applyRecoveryProjectionToSession(
+  draft: Draft<SessionSlice>,
+  sessionID: string,
+  existing: TaskSession,
+  projection: WorkspaceRecoveryProjection,
+  environmentID: string,
+) {
+  const recovery = mergeWorkspaceRecoveryProjection(
+    existing.workspace_recovery,
+    projection,
+    environmentID,
+  );
+  const nextSession = {
+    ...existing,
+    task_environment_id: existing.task_environment_id ?? environmentID,
+    workspace_recovery: recovery,
+  };
+  if (
+    recovery !== existing.workspace_recovery ||
+    nextSession.task_environment_id !== existing.task_environment_id
+  ) {
+    const epochs = (draft.taskSessions.workspaceRecoveryEpochBySession ??= {});
+    epochs[sessionID] = (epochs[sessionID] ?? 0) + 1;
+  }
+  draft.taskSessions.items[sessionID] = nextSession;
+  const sessionsForTask = draft.taskSessionsByTask.itemsByTaskId[existing.task_id];
+  if (sessionsForTask) {
+    const index = sessionsForTask.findIndex((session) => session.id === sessionID);
+    if (index >= 0) sessionsForTask[index] = nextSession;
+  }
+  syncEnvironmentMapping(draft, sessionID, nextSession.task_environment_id);
+}
+
+function buildSetWorkspaceRecoveryProjection(set: ImmerSet) {
+  return (sessionIds: string[], projection: WorkspaceRecoveryProjection) =>
+    set((draft) => {
+      applyWorkspaceRecoveryProjection(draft, sessionIds, projection);
+    });
+}
+
 function buildSetMessagesLoading(set: ImmerSet) {
   return (sessionId: string, loading: boolean) =>
     set((draft) => {
@@ -265,12 +439,13 @@ function buildSetMessagesMetadata(set: ImmerSet) {
     });
 }
 
-/** Builds the transcript update action and keeps the prompt cache in sync. */
+/** Builds the transcript update action. */
 function buildUpdateMessage(set: ImmerSet) {
   return (message: Parameters<SessionSlice["updateMessage"]>[0]) =>
     set((draft) => {
       const messages = draft.messages.bySession[message.session_id];
       if (messages) {
+        resolveRunningNotices(messages, message);
         const index = messages.findIndex((entry) => entry.id === message.id);
         if (index !== -1) {
           const merged = { ...messages[index] };
@@ -281,7 +456,6 @@ function buildUpdateMessage(set: ImmerSet) {
           messages[index] = merged;
         }
       }
-      updatePromptMessage(draft, message);
     });
 }
 
@@ -304,6 +478,7 @@ function buildMessageActions(set: ImmerSet) {
       set((draft) => {
         const sessionId = message.session_id;
         if (!draft.messages.bySession[sessionId]) draft.messages.bySession[sessionId] = [];
+        resolveRunningNotices(draft.messages.bySession[sessionId], message);
         const existingIndex = draft.messages.bySession[sessionId].findIndex(
           (entry) => entry.id === message.id,
         );
@@ -318,15 +493,21 @@ function buildMessageActions(set: ImmerSet) {
             message as unknown as Record<string, unknown>,
           );
         }
-        fanOutTranscriptPrompts(draft, [message]);
       }),
     updateMessage: buildUpdateMessage(set),
     updateMessages: (messages: Parameters<SessionSlice["updateMessages"]>[0]) =>
       set((draft) => {
         for (const message of messages) {
-          const sessionMessages = draft.messages.bySession[message.session_id];
-          if (sessionMessages) mergeMessageAtIndex(sessionMessages, message);
-          updatePromptMessage(draft, message);
+          let sessionMessages = draft.messages.bySession[message.session_id];
+          if (!sessionMessages && isTransientRetryNotice(message)) {
+            sessionMessages = draft.messages.bySession[message.session_id] = [];
+          }
+          if (sessionMessages) {
+            resolveRunningNotices(sessionMessages, message);
+            const hasMessage = sessionMessages.some((entry) => entry.id === message.id);
+            if (hasMessage) mergeMessageAtIndex(sessionMessages, message);
+            else if (isTransientRetryNotice(message)) sessionMessages.push(message);
+          }
         }
       }),
     removeMessage: (
@@ -336,7 +517,6 @@ function buildMessageActions(set: ImmerSet) {
       set((draft) => {
         const messages = draft.messages.bySession[sessionId];
         if (messages) draft.messages.bySession[sessionId] = removeMessageByID(messages, messageId);
-        removePromptMessage(draft, sessionId, messageId);
       }),
     mergeMessages: (
       sessionId: string,
@@ -356,7 +536,6 @@ function buildMessageActions(set: ImmerSet) {
         }
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
-        fanOutTranscriptPrompts(draft, messages);
       }),
     prependMessages: (
       sessionId: string,
@@ -372,7 +551,6 @@ function buildMessageActions(set: ImmerSet) {
         ];
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
-        fanOutTranscriptPrompts(draft, messages);
       }),
     setMessagesMetadata: buildSetMessagesMetadata(set),
     setMessagesLoading: buildSetMessagesLoading(set),
@@ -626,6 +804,12 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       if (draft.taskSessions.activityEpochBySession) {
         delete draft.taskSessions.activityEpochBySession[sessionId];
       }
+      if (draft.taskSessions.readCursorEpochBySession) {
+        delete draft.taskSessions.readCursorEpochBySession[sessionId];
+      }
+      if (draft.taskSessions.workspaceRecoveryEpochBySession) {
+        delete draft.taskSessions.workspaceRecoveryEpochBySession[sessionId];
+      }
       const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
       if (sessionsByTask) {
         draft.taskSessionsByTask.itemsByTaskId[taskId] = sessionsByTask.filter(
@@ -639,10 +823,6 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       // Drop the conversation history owned by this session.
       delete draft.messages.bySession[sessionId];
       delete draft.messages.metaBySession[sessionId];
-      delete draft.messagePrompts.bySession[sessionId];
-      delete draft.messagePrompts.metaBySession[sessionId];
-      const generations = (draft.messagePrompts.generationBySession ??= {});
-      generations[sessionId] = (generations[sessionId] ?? 0) + 1;
       delete draft.turns.bySession[sessionId];
       delete draft.turns.activeBySession[sessionId];
       delete draft.turns.loadedBySession[sessionId];
@@ -671,27 +851,63 @@ function resetQueueStateForReincarnation(
   delete draft.queue.activeOperationBySessionId[incoming.id];
 }
 
+function promoteAgentctlReadyFromSessionSnapshot(
+  draft: Pick<SessionSliceState, "sessionAgentctl">,
+  session: Pick<TaskSession, "id" | "state" | "updated_at" | "agent_execution_id">,
+): void {
+  const current = draft.sessionAgentctl.itemsBySessionId[session.id];
+  if (
+    !sessionStateConfirmsAgentctlExecutionReady(
+      session.state,
+      session.agent_execution_id,
+      current?.agentExecutionId,
+    )
+  ) {
+    return;
+  }
+  if (
+    current?.status === "ready" &&
+    (!session.agent_execution_id || current.agentExecutionId === session.agent_execution_id)
+  ) {
+    return;
+  }
+  draft.sessionAgentctl.itemsBySessionId[session.id] = {
+    status: "ready",
+    agentExecutionId: session.agent_execution_id ?? current?.agentExecutionId,
+    updatedAt: session.updated_at,
+  };
+}
+
 /** Build actions that reconcile complete session snapshots with partial live events. */
 function buildTaskSessionReconciliationActions(set: ImmerSet) {
   return {
     setTaskSessionsForTask: (
       taskId: string,
       sessions: Parameters<SessionSlice["setTaskSessionsForTask"]>[1],
-      activityEpochsAtRequestStart: Parameters<SessionSlice["setTaskSessionsForTask"]>[2],
+      hydrationEpochsAtRequestStart: Parameters<SessionSlice["setTaskSessionsForTask"]>[2],
     ) =>
       set((draft) => {
         const merged = sessions.map((session) => {
           const existing = draft.taskSessions.items[session.id];
+          const requestEpoch = hydrationEpochsAtRequestStart[session.id];
           resetQueueStateForReincarnation(draft, existing, session);
-          const snapshot = mergeTaskSessionSnapshot(
-            existing,
-            session,
-            draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
-            activityEpochsAtRequestStart[session.id],
-          );
+          const snapshot = mergeTaskSessionSnapshot(existing, session, {
+            current: {
+              activity: draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
+              readCursor: draft.taskSessions.readCursorEpochBySession?.[session.id] ?? 0,
+              workspaceRecovery:
+                draft.taskSessions.workspaceRecoveryEpochBySession?.[session.id] ?? 0,
+            },
+            request: requestEpoch,
+          });
+          if (snapshot.last_read_message_id !== existing?.last_read_message_id) {
+            const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+            epochs[session.id] = (epochs[session.id] ?? 0) + 1;
+          }
+          const withRecovery = applyCachedWorkspaceRecoveryProjection(draft, snapshot);
           return mergeOrphanPendingActionProjection(
             draft.pendingActionProjectionsBySessionId,
-            snapshot,
+            withRecovery,
           );
         });
         draft.taskSessionsByTask.itemsByTaskId[taskId] = merged;
@@ -700,6 +916,7 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
         (draft.taskSessionsByTask.errorByTaskId ??= {})[taskId] = null;
         for (const session of merged) {
           draft.taskSessions.items[session.id] = session;
+          promoteAgentctlReadyFromSessionSnapshot(draft, session);
           syncEnvironmentMapping(draft, session.id, session.task_environment_id);
           syncPrepareProgress(draft, session);
           reconcileMcpAttachmentHistory(
@@ -726,11 +943,20 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
           // as repository_id instead of treating the old list as authoritative.
           draft.taskSessionsByTask.loadedByTaskId[taskId] = false;
         }
-        const merged = mergeOrphanPendingActionProjection(
-          draft.pendingActionProjectionsBySessionId,
+        const mergedWithCache = applyCachedWorkspaceRecoveryProjection(
+          draft,
           existing ? mergeTaskSession(existing, session) : session,
         );
+        const merged = mergeOrphanPendingActionProjection(
+          draft.pendingActionProjectionsBySessionId,
+          mergedWithCache,
+        );
+        if (merged.last_read_message_id !== existing?.last_read_message_id) {
+          const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+          epochs[session.id] = (epochs[session.id] ?? 0) + 1;
+        }
         draft.taskSessions.items[session.id] = merged;
+        promoteAgentctlReadyFromSessionSnapshot(draft, merged);
         const list = draft.taskSessionsByTask.itemsByTaskId[taskId];
         if (list) {
           const idx = list.findIndex((s) => s.id === session.id);
@@ -742,21 +968,41 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
         syncEnvironmentMapping(draft, session.id, merged.task_environment_id);
         reconcileActiveTurnForIdleSession(draft, merged);
       }),
+    setWorkspaceRecoveryProjection: buildSetWorkspaceRecoveryProjection(set),
   };
 }
 
 /** Create the basic task-session set, read-cursor, removal, and loading actions. */
 function buildTaskSessionActions(set: ImmerSet) {
   return {
-    setTaskSession: (session: Parameters<SessionSlice["setTaskSession"]>[0]) =>
+    setTaskSession: (
+      session: Parameters<SessionSlice["setTaskSession"]>[0],
+      hydrationEpochAtRequestStart?: TaskSessionHydrationEpoch,
+    ) =>
       set((draft) => {
         const existingSession = draft.taskSessions.items[session.id];
         resetQueueStateForReincarnation(draft, existingSession, session);
+        const mergedSnapshot = mergeTaskSessionActionSnapshot(
+          existingSession,
+          session,
+          {
+            activity: draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
+            readCursor: draft.taskSessions.readCursorEpochBySession?.[session.id] ?? 0,
+            workspaceRecovery:
+              draft.taskSessions.workspaceRecoveryEpochBySession?.[session.id] ?? 0,
+          },
+          hydrationEpochAtRequestStart,
+        );
         const mergedSession = mergeOrphanPendingActionProjection(
           draft.pendingActionProjectionsBySessionId,
-          existingSession ? mergeTaskSession(existingSession, session) : session,
+          applyCachedWorkspaceRecoveryProjection(draft, mergedSnapshot),
         );
+        if (mergedSession.last_read_message_id !== existingSession?.last_read_message_id) {
+          const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+          epochs[session.id] = (epochs[session.id] ?? 0) + 1;
+        }
         draft.taskSessions.items[session.id] = mergedSession;
+        promoteAgentctlReadyFromSessionSnapshot(draft, mergedSession);
         const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
         if (sessionsByTask) {
           const sessionIndex = sessionsByTask.findIndex((s) => s.id === session.id);
@@ -770,6 +1016,10 @@ function buildTaskSessionActions(set: ImmerSet) {
       set((draft) => {
         const session = draft.taskSessions.items[sessionId];
         if (!session) return;
+        if (session.last_read_message_id !== lastReadMessageId) {
+          const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+          epochs[sessionId] = (epochs[sessionId] ?? 0) + 1;
+        }
         session.last_read_message_id = lastReadMessageId;
         const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
         if (sessionsByTask) {
@@ -950,14 +1200,23 @@ export const createSessionSlice: StateCreator<
 > = (set, get) => ({
   ...defaultSessionState,
   ...buildMessageActions(set),
-  ...buildPromptMessageActions(set),
   ...buildTurnActions(set),
   ...buildTaskSessionActions(set),
   ...buildTaskSessionReconciliationActions(set),
   ...buildTaskSessionProjectionActions(set),
   setSessionAgentctlStatus: (sessionId, status) =>
     set((draft) => {
-      draft.sessionAgentctl.itemsBySessionId[sessionId] = status;
+      const session = draft.taskSessions.items[sessionId];
+      const sameLiveExecution =
+        status.status === "starting" &&
+        sessionStateConfirmsAgentctlExecutionReady(
+          session?.state,
+          session?.agent_execution_id,
+          status.agentExecutionId,
+        );
+      draft.sessionAgentctl.itemsBySessionId[sessionId] = sameLiveExecution
+        ? { ...status, status: "ready", startingExecutionId: status.agentExecutionId }
+        : status;
     }),
   setWorktree: (worktree) =>
     set((draft) => {
@@ -978,6 +1237,10 @@ export const createSessionSlice: StateCreator<
   setActiveModel: (sessionId, modelId) =>
     set((draft) => {
       draft.activeModel.bySessionId[sessionId] = modelId;
+    }),
+  clearActiveModel: (sessionId) =>
+    set((draft) => {
+      delete draft.activeModel.bySessionId[sessionId];
     }),
   ...buildTaskPlanActions(set, get),
   ...buildWalkthroughActions(set, get),

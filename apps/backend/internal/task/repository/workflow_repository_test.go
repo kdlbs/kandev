@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // Workflow CRUD tests
@@ -142,6 +144,8 @@ func TestSQLiteRepository_WorkflowNotFound(t *testing.T) {
 	_, err := repo.GetWorkflow(ctx, "nonexistent")
 	if err == nil {
 		t.Error("expected error for nonexistent workflow")
+	} else if !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
+		t.Errorf("GetWorkflow error = %v, want ErrWorkflowNotFound", err)
 	}
 
 	err = repo.UpdateWorkflow(ctx, &models.Workflow{ID: "nonexistent", Name: "Test"})

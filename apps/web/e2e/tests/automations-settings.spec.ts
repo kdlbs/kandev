@@ -1,4 +1,6 @@
 import { test, expect } from "../fixtures/test-base";
+import { waitForFiniteAnimations } from "../helpers/animations";
+import { expectControlHeight } from "../helpers/control-sizing";
 import { AutomationsPage } from "../pages/automations-page";
 
 test.describe("Automations settings page", () => {
@@ -173,13 +175,21 @@ test.describe("Automations settings page", () => {
     await automations.nameInput.fill("Unsaved Draft Name");
     await automations.deleteButton.click();
     await expect(automations.deleteConfirmation).toBeVisible();
+    await waitForFiniteAnimations(automations.deleteConfirmation);
+    const cancel = automations.deleteConfirmation.getByRole("button", {
+      name: "Cancel",
+      exact: true,
+    });
+    // @covers AC-UI-CONTROL-SIZING-001.1, AC-UI-CONTROL-SIZING-001.3, AC-UI-CONTROL-SIZING-001.6
+    await expectControlHeight(cancel, 28);
+    await expectControlHeight(automations.deleteConfirmButton, 28);
     await expect(automations.deleteConfirmation).toContainText(
       "This will permanently delete To Be Deleted. This action cannot be undone.",
     );
     await expect(automations.deleteConfirmation).not.toContainText("Unsaved Draft Name");
 
     // Cancelling must leave the editor and the automation untouched.
-    await automations.deleteConfirmation.getByRole("button", { name: "Cancel" }).click();
+    await cancel.click();
     await expect(automations.deleteConfirmation).not.toBeVisible();
     await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 5_000 });
     await expect(automations.deleteButton).toBeVisible();
@@ -337,13 +347,21 @@ test.describe("Automations settings page", () => {
     await automations.workflowSelector.click();
     await expect(testPage.getByText(seedData.steps[0].name, { exact: true })).toBeVisible();
     await testPage.keyboard.press("Escape");
+    await expect(automations.workflowSelector).toBeFocused();
 
     const { repositories } = await apiClient.listRepositories(seedData.workspaceId);
     const repository = repositories[0];
     expect(repository).toBeTruthy();
     await testPage.getByRole("button", { name: "Add repository" }).click();
     await testPage.getByTestId("repo-chip-trigger").click();
-    await testPage.getByText(repository!.name, { exact: true }).last().click();
+    const repositoryOption = testPage.getByRole("option").filter({
+      has: testPage.getByText(repository!.name, { exact: true }),
+    });
+    await expect(repositoryOption).toBeVisible();
+    await waitForFiniteAnimations(
+      testPage.locator('[data-slot="popover-content"][data-state="open"]'),
+    );
+    await repositoryOption.click();
 
     await expect(testPage.getByTestId("repo-chip")).toHaveAttribute(
       "data-repository-id",

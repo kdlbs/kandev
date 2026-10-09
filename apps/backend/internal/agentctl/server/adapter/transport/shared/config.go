@@ -1,6 +1,10 @@
 package shared
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/common/acpprovider"
+)
 
 // DefaultPermissionTimeout is the default timeout for permission requests (5 minutes).
 const DefaultPermissionTimeout = 5 * time.Minute
@@ -56,6 +60,13 @@ type Config struct {
 	// NotificationQueueCapacity is the resolved ACP inbound notification queue
 	// capacity. Zero keeps compatibility for directly constructed test configs.
 	NotificationQueueCapacity int
+
+	// PromptCancelJoinTimeout is an optional per-adapter ACP cancellation join bound.
+	PromptCancelJoinTimeout time.Duration
+
+	// ProviderGatewayAuth, when set, makes the ACP adapter authenticate the
+	// agent against an OpenAI-compatible gateway right after initialize.
+	ProviderGatewayAuth *acpprovider.GatewayAuth
 }
 
 // GetPermissionTimeout returns the configured permission timeout or the default.

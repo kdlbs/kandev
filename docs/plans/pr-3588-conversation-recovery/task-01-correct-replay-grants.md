@@ -1,7 +1,7 @@
 ---
 id: "01-correct-replay-grants"
 title: "Correct replay grants"
-status: complete
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -11,14 +11,20 @@ requirements:
 acceptance_criteria:
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.5
   - AC-PLUGINS-PROMPT-HISTORY-HOST-002.7
-  - AC-PLUGINS-PROMPT-HISTORY-HOST-002.13
-  - AC-PLUGINS-PROMPT-HISTORY-HOST-002.15
   - AC-PLUGINS-PROMPT-HISTORY-HOST-005.3
 system_design:
   - "../../specs/plugins/system-design/conversation-recovery.md"
 ---
 
 # Task 01: Correct replay grants
+
+
+## Replacement scope, 2026-09-16
+
+The [conversation storage replacement](../conversation-storage-replacement/plan.md) owns the next implementation.
+This file preserves historical scope and results. Do not execute its durable replay mechanics as new work.
+The replacement work orders preserve public behavior and provide new source-reconciliation, upgrade, and E2E evidence.
+
 
 ## Summary
 

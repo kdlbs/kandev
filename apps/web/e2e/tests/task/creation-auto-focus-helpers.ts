@@ -3,12 +3,12 @@ import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import { waitForHttp } from "../../helpers/causal-waits";
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
+import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
 
 async function saveFocusPreference(page: Page, enabled: boolean, mobile: boolean) {
   await page.goto("/settings/preferences/task-behavior");
-  const card = page.getByTestId("creation-auto-focus-card");
-  const toggle = card.getByRole("switch", { name: "Auto-focus new tasks" });
+  const toggle = page.getByTestId("creation-auto-focus-row").getByRole("switch");
   await expect(toggle).toBeChecked({ checked: !enabled });
   await toggle.scrollIntoViewIfNeeded();
   if (mobile) {
@@ -63,18 +63,15 @@ async function submitTask(page: Page, title: string, withAgent: boolean, mobile:
   await expect(dialog).toBeHidden();
 }
 
-async function openCreationDialog(page: Page, open: () => Promise<void>) {
-  // Local repository status supplies the default branch used by submit eligibility.
-  const repositoryReady = waitForHttp(page, "GET", /\/repositories\/local-status$/);
+async function openCreationDialog(page: Page, mobile: boolean, open: () => Promise<void>) {
+  if (!mobile) await new AppSidebarPage(page).expandNavigationIfCollapsed();
   await open();
-  const response = await repositoryReady;
-  expect(response.ok()).toBe(true);
-  await response.finished();
+  await expect(page.getByTestId("create-task-dialog")).toBeVisible();
 }
 
 async function openFromTask(page: Page, mobile: boolean) {
   if (mobile) {
-    await page.getByTestId("mobile-session-menu").click();
+    await page.getByTestId("mobile-task-picker-trigger").click();
     await page
       .getByRole("dialog", { name: "Tasks", exact: true })
       .getByRole("button", { name: "New", exact: true })
@@ -113,7 +110,7 @@ export async function verifyCreationAutoFocus(
     const opener = mobile
       ? (board as MobileKanbanPage).mobileFab
       : page.getByTestId("create-task-button");
-    await openCreationDialog(page, () => opener.click());
+    await openCreationDialog(page, mobile, () => opener.click());
     await submitTask(page, "Background task one", false, mobile);
     await expect(page).toHaveURL(listingURL);
     await expect(opener).toBeFocused();
@@ -127,10 +124,10 @@ export async function verifyCreationAutoFocus(
     await expect(page).toHaveURL(new RegExp(`/t/${firstID}`));
     await new SessionPage(page).waitForLoad();
     const activeURL = page.url();
-    await openCreationDialog(page, () => openFromTask(page, mobile));
+    await openCreationDialog(page, mobile, () => openFromTask(page, mobile));
     await submitTask(page, "Background task with agent", true, mobile);
     await expect(page).toHaveURL(activeURL);
-    if (mobile) await expect(page.getByTestId("mobile-session-menu")).toBeFocused();
+    if (mobile) await expect(page.getByTestId("mobile-task-picker-trigger")).toBeFocused();
     const secondID = await taskID(api, workspaceID, "Background task with agent");
     await expect
       .poll(
@@ -144,7 +141,7 @@ export async function verifyCreationAutoFocus(
     await saveFocusPreference(page, true, mobile);
     await page.goto(activeURL);
     await new SessionPage(page).waitForLoad();
-    await openCreationDialog(page, () => openFromTask(page, mobile));
+    await openCreationDialog(page, mobile, () => openFromTask(page, mobile));
     await submitTask(page, "Focused task again", false, mobile);
     const focusedID = await taskID(api, workspaceID, "Focused task again");
     await expect(page).toHaveURL(new RegExp(`/t/${focusedID}`));
@@ -153,5 +150,10 @@ export async function verifyCreationAutoFocus(
       auto_focus_new_tasks: baseline.auto_focus_new_tasks as boolean,
       agent_generated_task_titles: baseline.agent_generated_task_titles ?? true,
     });
+    await restoreSidebarLayout(
+      api,
+      workspaceID,
+      baseline.sidebar_layouts_by_workspace?.[workspaceID],
+    );
   }
 }

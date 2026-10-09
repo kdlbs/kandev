@@ -128,7 +128,7 @@ The tool does not return a workflow from another user's workspace. Authenticatio
 - A workspace-level `export_workflows_kandev` batch tool.
 - Changes to the portable workflow format or the 1 MiB import limit.
 - Changes to the existing HTTP export endpoints or workflow export UI.
-- Saved prompt create, update, or delete tools over MCP.
+- Saved prompt deletion over MCP. Create/update are specified in [shared prompt writes](shared-prompt-writes.md).
 - Automatic expansion of saved prompt references in workflow-step list results.
 - Changes to saved prompt persistence, reference matching, or expansion depth.
 

@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { selectSidebarViews } from "@/lib/state/slices/ui/sidebar-workspace-state";
+
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { IconChevronDown, IconAdjustments, IconCheck, IconPlus } from "@tabler/icons-react";
+import { IconChevronDown, IconFilter, IconCheck, IconPlus } from "@tabler/icons-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,21 +14,23 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
 import { MAX_SIDEBAR_VIEWS } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { SidebarFilterIndicators } from "@/components/task/sidebar-filter/sidebar-filter-indicators";
 import { SidebarFilterPopover } from "@/components/task/sidebar-filter/sidebar-filter-popover";
 import { useSidebarViewPopover } from "@/components/task/sidebar-filter/use-sidebar-view-popover";
 import { cn } from "@/lib/utils";
 import { sidebarViewName } from "@/lib/state/slices/ui/sidebar-view-builtins";
 
 const TRIGGER_BUTTON_CLASS = cn(
-  "flex h-5 items-center justify-center rounded-sm px-1.5 cursor-pointer",
+  "flex h-7 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 items-center justify-center rounded-md border border-border/60 px-1.5 cursor-pointer",
   "text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors",
 );
 
 export function TasksViewPicker() {
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const { t } = useTranslation();
-  const views = useAppStore((s) => s.sidebarViews.views);
-  const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
-  const draft = useAppStore((s) => s.sidebarViews.draft);
+  const views = useAppStore((s) => selectSidebarViews(s).views);
+  const activeViewId = useAppStore((s) => selectSidebarViews(s).activeViewId);
+  const draft = useAppStore((s) => selectSidebarViews(s).draft);
   const setActiveView = useAppStore((s) => s.setSidebarActiveView);
   const openPopoverAfterPickerCloseRef = useRef(false);
   const {
@@ -38,12 +42,10 @@ export function TasksViewPicker() {
     newViewDisabledReason,
   } = useSidebarViewPopover();
 
-  const activeView = useMemo(
-    () => views.find((v) => v.id === activeViewId) ?? views[0],
-    [views, activeViewId],
-  );
-  const hasDraft = !!draft && draft.baseViewId === activeViewId;
+  const activeView = views.find((view) => view.id === activeViewId) ?? views[0];
   const activeLabel = activeView ? sidebarViewName(activeView, t) : t("sidebar:viewAll");
+
+  if (!workspaceId) return null;
 
   return (
     <div className="flex items-center gap-0.5">
@@ -97,6 +99,7 @@ export function TasksViewPicker() {
         </DropdownMenuContent>
       </DropdownMenu>
       <SidebarFilterPopover
+        key={workspaceId}
         open={open}
         onOpenChange={onOpenChange}
         renameRequestedViewId={renameRequestedViewId}
@@ -106,16 +109,10 @@ export function TasksViewPicker() {
             type="button"
             data-testid="sidebar-filter-gear"
             aria-label={t("sidebar:filtersAndSort")}
-            className={cn(TRIGGER_BUTTON_CLASS, "relative h-5 w-5 px-0")}
+            className={cn(TRIGGER_BUTTON_CLASS, "relative w-7 px-0")}
           >
-            <IconAdjustments className="h-3.5 w-3.5" />
-            {hasDraft && (
-              <span
-                data-testid="sidebar-filter-gear-indicator"
-                aria-label={t("sidebar:unsavedFilterChanges")}
-                className="absolute right-0.5 top-0.5 h-1 w-1 rounded-full bg-amber-500"
-              />
-            )}
+            <IconFilter className="h-3.5 w-3.5" />
+            <SidebarFilterIndicators />
           </button>
         }
       />

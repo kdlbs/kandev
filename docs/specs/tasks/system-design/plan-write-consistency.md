@@ -14,6 +14,12 @@ owners:
 
 # Task plan write consistency System Design
 
+## Implemented agent safety successor
+
+The implemented [safe agent edits design](plan-safe-edits.md) adds durable edit versions
+and preventive agent admission. Its contract transition names the changes to
+this design. Existing serialization and browser behavior remain dependencies.
+
 ## Purpose and boundaries
 
 This design closes the window between a plan read and its commit. It does not
@@ -528,12 +534,8 @@ one whose HEAD read is unknown proceeds; and a revert to the latest
 revision forced to interleave with a same-author
 coalescing write commits the target content, not the content that write merged in.
 
-## Implementation note: starting state
+## Implementation state
 
-The parent card calls a related change "already implemented and merged". It is not
-merged: the work sits only on `feature/plan-truncation-guar-qd5`, which has been
-rebuilt and extended since, so identify it by subject rather than by commit id. On
-`origin/main` `evaluatePlanWriteGuard` still calls `PlanService.ListRevisions`, there
-is no `GetLatestRevision`, and the false `ListRevisions` doc comment remains. It touches `task_plan_guard.go` and
-`plan_service.go`, which this work also touches: confirm its merge state and rebase
-rather than reimplement.
+As of 2026-09-16, the service owns truncation detection and the per-task lock.
+`GetLatestRevision` exists. Historical starting-state descriptions in this design
+explain the original change, not the current checkout.

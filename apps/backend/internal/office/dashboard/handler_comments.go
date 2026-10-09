@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -62,9 +63,18 @@ func (h *Handler) listCommentsForAgent(c *gin.Context, taskID string, claims *ag
 		return
 	}
 	limit, _ := strconv.Atoi(c.Query("limit"))
-	window, err := h.handoff.ListCommentsForCaller(c.Request.Context(), claims.TaskID, taskID, limit)
+	ctx := c.Request.Context()
+
+	var window *taskservice.CommentWindow
+	var err error
+	if strings.TrimSpace(claims.TaskID) == "" && claims.RunID != "" && strings.TrimSpace(claims.WorkspaceID) != "" {
+		window, err = h.handoff.ListCommentsForTasklessRun(ctx, claims.WorkspaceID, taskID, limit)
+	} else {
+		window, err = h.handoff.ListCommentsForCaller(ctx, claims.TaskID, taskID, limit)
+	}
 	if err != nil {
 		if errors.Is(err, taskservice.ErrAccessDenied) {
+			h.svc.appendDeniedCommentReadEvent(ctx, claims.RunID, taskID, claims.AgentProfileID, claims.SessionID, err)
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
 		}

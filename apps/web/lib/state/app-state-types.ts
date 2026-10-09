@@ -11,6 +11,7 @@ import type {
   TaskPendingActionRevision,
   Turn,
   TaskSession,
+  WorkspaceRecoveryProjection,
   TaskPlan,
   TaskPlanCommentSnapshot,
   TaskPlanRevision,
@@ -19,13 +20,12 @@ import type {
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
+import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
 import type { UISliceActions as UIA } from "./slices/ui/types";
+import type * as SettingsSliceTypes from "./slices/settings/types";
 import type * as UISliceTypes from "./slices/ui/types";
-import type {
-  AgentUpdateJob,
-  InstallJob,
-  NotificationProvidersUpdate,
-} from "./slices/settings/types";
+import type { AgentUpdateJob } from "@/lib/api";
+import type { InstallJob, NotificationProvidersUpdate } from "./slices/settings/types";
 import {
   defaultWorkspaceState,
   defaultSettingsState,
@@ -41,11 +41,14 @@ import {
   defaultFeaturesState,
   defaultAuthState,
   defaultAutomationsState,
+  defaultCoordinatorsState,
   defaultSystemState,
   defaultPluginsState,
   defaultReviewState,
   defaultNeedsYouInboxState,
   defaultFailedInboxState,
+  defaultPreviewFeedbackState,
+  defaultInboxHistoryState,
 } from "./slices";
 import type {
   WorkspaceState,
@@ -75,7 +78,9 @@ import type {
   KanbanSlice,
   NeedsYouInboxBootSeed,
 } from "./slices";
+import type { TaskOverviewSlice } from "./slices/task-overview-types";
 import type { AppStateExtraActions } from "./app-state-extra-actions";
+import type { GitStatusRefreshState } from "./slices/session-runtime/types";
 import type {
   AvailableCommand,
   SessionModeEntry,
@@ -92,6 +97,7 @@ import type {
   QueueMetaUpdateOptions,
   QueueOperationToken,
   QueuedMessage,
+  TaskSessionHydrationEpoch,
 } from "./slices/session/types";
 // Combined AppState type
 export type AppState = KanbanSlice & {
@@ -111,6 +117,7 @@ export type AppState = KanbanSlice & {
   agentProfiles: (typeof defaultSettingsState)["agentProfiles"];
   installJobs: (typeof defaultSettingsState)["installJobs"];
   updateJobs: (typeof defaultSettingsState)["updateJobs"];
+  agentRuntimeUpdates: (typeof defaultSettingsState)["agentRuntimeUpdates"];
   editors: (typeof defaultSettingsState)["editors"];
   prompts: (typeof defaultSettingsState)["prompts"];
   secrets: (typeof defaultSettingsState)["secrets"];
@@ -120,10 +127,10 @@ export type AppState = KanbanSlice & {
   sleepInhibition: (typeof defaultSettingsState)["sleepInhibition"];
   userSettings: (typeof defaultSettingsState)["userSettings"];
   agentProfileRecentUse: (typeof defaultSettingsState)["agentProfileRecentUse"];
+  sshReachability: (typeof defaultSettingsState)["sshReachability"];
 
   // Session slice
   messages: (typeof defaultSessionState)["messages"];
-  messagePrompts: (typeof defaultSessionState)["messagePrompts"];
   turns: (typeof defaultSessionState)["turns"];
   taskSessions: (typeof defaultSessionState)["taskSessions"];
   taskSessionsByTask: (typeof defaultSessionState)["taskSessionsByTask"];
@@ -142,6 +149,7 @@ export type AppState = KanbanSlice & {
   shell: (typeof defaultSessionRuntimeState)["shell"];
   processes: (typeof defaultSessionRuntimeState)["processes"];
   gitStatus: (typeof defaultSessionRuntimeState)["gitStatus"];
+  gitStatusDisplay: (typeof defaultSessionRuntimeState)["gitStatusDisplay"];
   environmentIdBySessionId: (typeof defaultSessionRuntimeState)["environmentIdBySessionId"];
   sessionCommits: (typeof defaultSessionRuntimeState)["sessionCommits"];
   gitCheckoutGeneration: (typeof defaultSessionRuntimeState)["gitCheckoutGeneration"];
@@ -151,13 +159,16 @@ export type AppState = KanbanSlice & {
   sessionMode: (typeof defaultSessionRuntimeState)["sessionMode"];
   userShells: (typeof defaultSessionRuntimeState)["userShells"];
   prepareProgress: (typeof defaultSessionRuntimeState)["prepareProgress"];
+  launchWarning: (typeof defaultSessionRuntimeState)["launchWarning"];
   sessionTodos: (typeof defaultSessionRuntimeState)["sessionTodos"];
   agentCapabilities: (typeof defaultSessionRuntimeState)["agentCapabilities"];
   sessionModels: (typeof defaultSessionRuntimeState)["sessionModels"];
   sessionMcpStatus: (typeof defaultSessionRuntimeState)["sessionMcpStatus"];
   promptUsage: (typeof defaultSessionRuntimeState)["promptUsage"];
+  usageInvalidation: (typeof defaultSessionRuntimeState)["usageInvalidation"];
   sessionPollMode: (typeof defaultSessionRuntimeState)["sessionPollMode"];
   embeddedVscodeSupport: (typeof defaultSessionRuntimeState)["embeddedVscodeSupport"];
+  backgroundWork: (typeof defaultSessionRuntimeState)["backgroundWork"];
 
   // GitHub slice
   githubStatus: (typeof defaultGitHubState)["githubStatus"];
@@ -207,6 +218,9 @@ export type AppState = KanbanSlice & {
   automations: (typeof defaultAutomationsState)["automations"];
   automationRuns: (typeof defaultAutomationsState)["automationRuns"];
 
+  // Coordinators slice
+  coordinators: (typeof defaultCoordinatorsState)["coordinators"];
+
   // System slice (actions merged via SystemSliceActions intersection on AppState)
   system: (typeof defaultSystemState)["system"];
   agentRuntime: AgentRuntimeAvailability | null;
@@ -225,6 +239,13 @@ export type AppState = KanbanSlice & {
   // intersection on AppState)
   failedInbox: (typeof defaultFailedInboxState)["failedInbox"];
 
+  // Task-owned pending feedback captured from rendered previews.
+  previewFeedback: (typeof defaultPreviewFeedbackState)["previewFeedback"];
+
+  // Inbox History slice (actions merged via InboxHistorySliceActions
+  // intersection on AppState)
+  inboxHistory: (typeof defaultInboxHistoryState)["inboxHistory"];
+
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
   rightPanel: (typeof defaultUIState)["rightPanel"];
@@ -241,8 +262,11 @@ export type AppState = KanbanSlice & {
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
   taskDeletedNotification: (typeof defaultUIState)["taskDeletedNotification"];
   updateAvailableNotification: (typeof defaultUIState)["updateAvailableNotification"];
+  updateAvailableNotificationQueue: (typeof defaultUIState)["updateAvailableNotificationQueue"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
+  directoryBrowserShowHidden: (typeof defaultUIState)["directoryBrowserShowHidden"];
   sidebarViews: (typeof defaultUIState)["sidebarViews"];
+  sidebarViewsByWorkspace: (typeof defaultUIState)["sidebarViewsByWorkspace"];
   threadViews: (typeof defaultUIState)["threadViews"];
   collapsedSubtaskParents: (typeof defaultUIState)["collapsedSubtaskParents"];
   kanbanPreviewedTaskId: (typeof defaultUIState)["kanbanPreviewedTaskId"];
@@ -250,6 +274,7 @@ export type AppState = KanbanSlice & {
   appSidebar: (typeof defaultUIState)["appSidebar"];
   settingsMenu: (typeof defaultUIState)["settingsMenu"];
   richOutputMotion: (typeof defaultUIState)["richOutputMotion"];
+  chatMotion: (typeof defaultUIState)["chatMotion"];
   acknowledgedAgentErrors: (typeof defaultUIState)["acknowledgedAgentErrors"];
   dismissedAgentErrors: (typeof defaultUIState)["dismissedAgentErrors"];
 
@@ -272,9 +297,12 @@ export type AppState = KanbanSlice & {
   appendInstallOutput: (agentName: string, chunk: string) => void;
   clearInstallJob: (agentName: string) => void;
   setAgentUpdateJobs: (jobs: AgentUpdateJob[]) => void;
+  setAgentRuntimeUpdateStatuses: SettingsSliceTypes.SettingsSliceActions["setAgentRuntimeUpdateStatuses"];
+  setAgentRuntimeUpdateLoading: SettingsSliceTypes.SettingsSliceActions["setAgentRuntimeUpdateLoading"];
   upsertAgentUpdateJob: (job: AgentUpdateJob) => void;
   appendAgentUpdateOutput: (agentName: string, jobId: string, chunk: string) => void;
   clearAgentUpdateJob: (agentName: string) => void;
+  setSSHReachability: (record: SSHReachabilityRecord) => void;
   setRepositories: (workspaceId: string, repositories: Repository[]) => void;
   upsertRepository: (workspaceId: string, repository: Repository) => void;
   setRepositoriesLoading: (workspaceId: string, loading: boolean) => void;
@@ -307,7 +335,7 @@ export type AppState = KanbanSlice & {
   upsertRepositoryBranchPolicy: (policy: RepositoryBranchPolicy) => void;
   removeRepositoryBranchPolicy: (repositoryId: string, policyId: string) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
-  setEditors: (editors: EditorsState["items"]) => void;
+  setEditors: (editors: EditorsState["items"], folderOpeningAvailable?: boolean) => void;
   setEditorsLoading: (loading: boolean) => void;
   setPrompts: (prompts: PromptsState["items"]) => void;
   setPromptsLoading: (loading: boolean) => void;
@@ -369,6 +397,7 @@ export type AppState = KanbanSlice & {
   setPlanMode: (sessionId: string, enabled: boolean) => void;
   setCancelTurnPending: UIA["setCancelTurnPending"];
   setTranscriptAutoScrollEnabled: UIA["setTranscriptAutoScrollEnabled"];
+  setDirectoryBrowserShowHidden: UIA["setDirectoryBrowserShowHidden"];
   setTranscriptScrollTop: UIA["setTranscriptScrollTop"];
   setReviewPRSelection: UIA["setReviewPRSelection"];
   setActiveDocument: (sessionId: string, doc: UISliceTypes.ActiveDocument | null) => void;
@@ -464,19 +493,10 @@ export type AppState = KanbanSlice & {
     },
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
-  replacePromptMessages: (
-    sessionId: string,
-    messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null },
+  setTaskSession: (
+    session: TaskSession,
+    hydrationEpochAtRequestStart?: TaskSessionHydrationEpoch,
   ) => void;
-  prependPromptMessages: (
-    sessionId: string,
-    messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null },
-  ) => void;
-  setPromptMessagesLoading: (sessionId: string, loading: boolean) => void;
-  setPromptMessagesLoadingMore: (sessionId: string, loading: boolean) => void;
-  setTaskSession: (session: TaskSession) => void;
   updateSessionReadCursor: (sessionId: string, lastReadMessageId: string) => void;
   setTaskSessionPendingAction: (
     sessionId: string,
@@ -484,11 +504,15 @@ export type AppState = KanbanSlice & {
     revision?: TaskPendingActionRevision,
     taskId?: string,
   ) => void;
+  setWorkspaceRecoveryProjection: (
+    sessionIds: string[],
+    projection: WorkspaceRecoveryProjection,
+  ) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (
     taskId: string,
     sessions: TaskSession[],
-    activityEpochsAtRequestStart: Readonly<Record<string, number>>,
+    hydrationEpochsAtRequestStart: Readonly<Record<string, TaskSessionHydrationEpoch>>,
   ) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
   setTaskSessionsLoading: (taskId: string, loading: boolean) => void;
@@ -497,6 +521,11 @@ export type AppState = KanbanSlice & {
   setWorktree: (worktree: Worktree) => void;
   setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;
   setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => boolean;
+  setGitStatusRefresh: (
+    taskEnvironmentId: string,
+    repositoryName: string | undefined,
+    refresh: GitStatusRefreshState | null,
+  ) => void;
   clearGitStatus: (sessionId: string) => void;
   clearLegacyGitStatusEntry: (sessionId: string) => void;
   registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
@@ -516,6 +545,7 @@ export type AppState = KanbanSlice & {
   setPendingModel: (sessionId: string, modelId: string) => void;
   clearPendingModel: (sessionId: string) => void;
   setActiveModel: (sessionId: string, modelId: string) => void;
+  clearActiveModel: (sessionId: string) => void;
   // Task plan actions
   setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
@@ -560,7 +590,13 @@ export type AppState = KanbanSlice & {
   setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;
   // Session mode actions
-  setSessionMode: (sessionId: string, modeId: string, availableModes?: SessionModeEntry[]) => void;
+  setSessionMode: (
+    sessionId: string,
+    modeId: string,
+    availableModes?: SessionModeEntry[],
+    requestedModeId?: string,
+    settingsPolicy?: "provider_restored" | "strict",
+  ) => void;
   clearSessionMode: (sessionId: string) => void;
   // Agent capabilities actions
   setAgentCapabilities: (sessionId: string, caps: AgentCapabilitiesEntry) => void;
@@ -571,13 +607,24 @@ export type AppState = KanbanSlice & {
       currentModelId: string;
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
+      configOptionsSettled?: boolean;
+      /** Provider-reported config values from the last settled snapshot. */
+      confirmedConfigOptions?: Record<string, string>;
+      confirmedConfigOptionsExecutionId?: string;
+      pendingConfirmedConfigOptions?: {
+        executionId: string;
+        values: Record<string, string>;
+      };
       configBaseline?: Record<string, string>;
+      settingsPolicy?: "provider_restored";
       /** Set when the session started on the profile's fallback model. */
       fallbackModel?: string;
     },
   ) => void;
+  invalidateConfirmedConfigOptions: (sessionId: string, executionId?: string) => void;
   // Prompt usage actions
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
+  bumpSessionUsageInvalidation: (sessionId: string) => void;
   // Session todos actions
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions
@@ -592,6 +639,26 @@ export type AppState = KanbanSlice & {
   ) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
   setEmbeddedVscodeSupport: (sessionId: string, supported: boolean) => void;
+  setLaunchWarning: (
+    sessionId: string,
+    entry: import("./slices/session-runtime/types").LaunchWarningEntry,
+  ) => void;
+  clearLaunchWarning: (sessionId: string) => void;
+  setBackgroundWorkloads: (
+    sessionId: string,
+    workloads: import("@/lib/types/background-work").WorkloadRunObservation[],
+  ) => void;
+  updateBackgroundWorkload: (
+    sessionId: string,
+    workload: import("@/lib/types/background-work").WorkloadRunObservation,
+  ) => void;
+  appendBackgroundWorkloadOutput: (
+    sessionId: string,
+    chunk: import("@/lib/types/background-work").WorkloadOutputChunk,
+  ) => void;
+  setActiveBackgroundWorkload: (sessionId: string, workId: string) => void;
+  clearBackgroundWork: (sessionId: string) => void;
+  setBackgroundWorkLoading: (sessionId: string, loading: boolean) => void;
   /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"];
   createSidebarView: UIA["createSidebarView"];
   updateSidebarDraft: UIA["updateSidebarDraft"];
@@ -638,18 +705,33 @@ export type AppState = KanbanSlice & {
   previewRichOutputAnimations: UIA["previewRichOutputAnimations"];
   commitRichOutputAnimations: UIA["commitRichOutputAnimations"];
   restoreRichOutputAnimations: UIA["restoreRichOutputAnimations"];
+  previewChatAnimations: UIA["previewChatAnimations"];
+  commitChatAnimations: UIA["commitChatAnimations"];
+  restoreChatAnimations: UIA["restoreChatAnimations"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
-} & AppStateExtraActions &
-  Pick<UIA, "setQuickChatInitialPrompt" | "requestQuickChatOpen" | "setQuickChatSelectionIdentity">;
+} & TaskOverviewSlice &
+  AppStateExtraActions &
+  Pick<
+    UIA,
+    | "setQuickChatInitialPrompt"
+    | "requestQuickChatOpen"
+    | "setQuickChatSelectionIdentity"
+    | "setConfigChatRestart"
+    | "syncConfigChatRestart"
+    | "replaceConfigChatSession"
+  >;
 
 // Most callers hydrate a fully-shaped slice per top-level key (see
 // mergeInitialState / hydrateState), but `system` is a grab-bag of many
-// independently-fetched fields (info, diskUsage, updates, ...). Callers that
+// independently-fetched fields (info, updates, ...). Callers that
 // only have one piece of it (e.g. update notification settings from the
 // settings boot payload) must be able to pass a partial `system` object
 // without fabricating placeholder values for the rest.
-export type HydrationState = Omit<Partial<AppState>, "system" | "quickChat"> & {
+export type HydrationState = Omit<
+  Partial<AppState>,
+  "system" | "quickChat" | "gitStatusDisplay"
+> & {
   quickChat?: Partial<AppState["quickChat"]>;
   system?: Partial<AppState["system"]>;
   // The Needs-you Inbox boot-hydration producer's raw wire shape, carried

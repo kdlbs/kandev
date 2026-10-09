@@ -27,7 +27,7 @@ func TestRecordSuccessRun_GitHubPRMerged_ConsumesDedupKey(t *testing.T) {
 		TriggerType:  automation.TriggerTypeGitHubPRMerged,
 		DedupKey:     "pr_merged:task-1:acme/api#42",
 	}
-	err := svc.recordSuccessRun(context.Background(), evt, "task-created-1")
+	err := svc.recordSuccessRun(context.Background(), evt, "task-created-1", "")
 	require.NoError(t, err)
 
 	require.Len(t, autoSvc.runs, 1)

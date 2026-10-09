@@ -3,6 +3,7 @@
   "archive": "归档",
   "archived": "已归档",
   "archiveTask": "归档任务",
+  "archivingInProgress": "正在归档",
   "changesRequested": "已请求更改",
   "columnStep": "步骤",
   "columnTask": "任务",
@@ -21,7 +22,6 @@
   "group": "分组",
   "groupByNone": "无",
   "groupByRepository": "仓库",
-  "groupByState": "状态",
   "groupByWorkflow": "工作流",
   "ungrouped": "未分组",
   "loading": "加载中…",
@@ -55,5 +55,10 @@
   "unarchivedBranchesMissing_one": "分支 {{branches}} 在本地和远程都已不存在。下一个会话将从基础分支重新开始。",
   "unarchivedBranchesMissing_other": "分支 {{branches}} 在本地和远程都已不存在。下一个会话将从基础分支重新开始。",
   "unarchivedTaskRestored": "任务已恢复。",
-  "unarchiveTask": "取消归档任务"
+  "unarchiveTask": "取消归档任务",
+  "groupByWorkflowStep": "工作流步骤",
+  "noWorkflowStep": "无工作流步骤",
+  "loadingWorkflowStep": "正在加载工作流步骤...",
+  "unknownWorkflowStep": "未知工作流步骤",
+  "workflowStepSection": "{{workflow}} / {{step}}"
 }

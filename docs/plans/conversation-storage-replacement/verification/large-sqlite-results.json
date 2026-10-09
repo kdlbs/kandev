@@ -1,0 +1,125 @@
+{
+  "date": "2026-09-16",
+  "scope": "Uncommitted replacement on 88c6c0fe0a6ae5d25332070d603b99f7d9241645",
+  "sqlite_version": "3.51.1",
+  "platform": "Linux-7.0.14-4-pve-x86_64-with-glibc2.41",
+  "fixture": {
+    "messages": 50000,
+    "message_content_bytes_before_final_suffix": 8190,
+    "versions": 100000,
+    "events": 100000,
+    "turn_versions": 0,
+    "legacy_bytes": 2953932800,
+    "backup_bytes": 2949378048
+  },
+  "phase_timings_ms": {
+    "backup": 10811.325203,
+    "open_and_backup": 10814.908,
+    "cleanup": 625.067,
+    "task_repository_reopen": 32.546,
+    "post_cleanup_process_to_ready": 2227.281,
+    "snapshot_inside_process_start": 1402.432516,
+    "remaining_process_start": 824.8484839999999
+  },
+  "repository_streaming": {
+    "duration_seconds": 60,
+    "workers": 8,
+    "updates": 44204,
+    "write_failures": 0,
+    "probes": 599,
+    "probe_failures": 0,
+    "worst_probe_ms": 115.891
+  },
+  "runtime_streaming": {
+    "process_to_http_ready_ms": 2227.281,
+    "ready": {
+      "service": "kandev",
+      "status": "ok",
+      "version": "large-upgrade-verification"
+    },
+    "workers": 8,
+    "duration_seconds": 60,
+    "streams": [
+      {
+        "writes": 5643,
+        "failures": 0,
+        "errors": [],
+        "max_write_ms": 82.34840724617243
+      },
+      {
+        "writes": 5636,
+        "failures": 0,
+        "errors": [],
+        "max_write_ms": 86.38314716517925
+      },
+      {
+        "writes": 5640,
+        "failures": 0,
+        "errors": [],
+        "max_write_ms": 96.79982252418995
+      },
+      {
+        "writes": 5634,
+        "failures": 0,
+        "errors": [],
+        "max_write_ms": 90.04011563956738
+      },
+      {
+        "writes": 5630,
+        "failures": 0,
+        "errors": [],
+        "max_write_ms": 92.23995544016361
+      },
+      {
+        "writes": 5642,
+        "failures": 0,
+        "errors": [],
+        "max_write_ms": 99.56210665404797
+      },
+      {
+        "writes": 5636,
+        "failures": 0,
+        "errors": [],
+        "max_write_ms": 86.35333180427551
+      },
+      {
+        "writes": 5654,
+        "failures": 0,
+        "errors": [],
+        "max_write_ms": 86.70796174556017
+      }
+    ],
+    "remaining_legacy_host_files": [],
+    "ready_samples": 596,
+    "ready_failures": [],
+    "max_ready_ms": 14.306996949017048
+  },
+  "full_catalog_periodic_probes": {
+    "observed_after_readiness": 4,
+    "unhealthy": 0
+  },
+  "manual_compaction": {
+    "before_bytes": 2953932800,
+    "free_pages_before": 604101,
+    "manual_vacuum_ms": 2960.6228582561016,
+    "integrity_check": "ok",
+    "messages": 50000,
+    "free_pages_after": 0,
+    "after_bytes": 477069312
+  },
+  "post_compaction_ready_ms": 412.714,
+  "audit": {
+    "legacy_primary_tables_remaining": 0,
+    "legacy_copy_triggers_remaining": 0,
+    "legacy_host_files_remaining": 0,
+    "old_worker_frames": 0,
+    "new_revision_worker_frames": 1
+  },
+  "limits": [
+    "Synthetic fixture, not a production database clone.",
+    "Legacy turn-version table is empty; all seven legacy trigger definitions are installed.",
+    "Two independent 60-second streaming runs; no long-duration soak or huge single-payload coverage.",
+    "PostgreSQL runtime migration not exercised.",
+    "Startup timings are staged measurements, not additive end-to-end upgrade latency."
+  ]
+}

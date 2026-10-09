@@ -1,0 +1,149 @@
+// host_data_dependencies.go attaches the dependency projection (blocked,
+// blocked_reason, depends_on, blocks, depends_on_truncated,
+// blocks_truncated, start_when_unblocked) onto Task DTOs, for both the gRPC
+// and canvas surfaces. It reuses internal/task/service's already fail-closed
+// derivation (BuildDependencyViews/BuildDependencyViewsBounded) rather than
+// reimplementing any of its withheld-verdict or fan-out-bound logic.
+package plugins
+
+import (
+	"context"
+
+	"go.uber.org/zap"
+
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/pkg/pluginsdk"
+)
+
+// attachDependencies fills the seven dependency-projection fields on tasks in
+// place. models[i] must be the raw model backing tasks[i] (same order, same
+// length) — StartWhenUnblocked reads the stored auto-start intent directly
+// off models[i]. operation identifies the calling Host RPC or canvas route
+// (e.g. "ListTasks", "GetWebAppTask") for the derivation-failure diagnostic
+// logDependencyDerivationFailure emits; it never carries a task id or title.
+//
+// A caller without api_read:tasks never reaches real dependency data through
+// this path, even when it holds some other capability (e.g. api_write:tasks)
+// that let it reach a Task DTO in the first place: every task is stamped with
+// the withheld verdict instead of deriving anything. That is not a failed
+// derivation attempt, so it is not logged.
+//
+// Unlike attachPullRequests, a derivation failure is not left at zero value:
+// BuildDependencyViews/Bounded already substitute the withheld verdict
+// (blocked: true, blocked_reason: "unknown") for every requested id on any
+// read failure, so this only copies whatever the derivation returned. The
+// one failure this function itself can return is the bounded fan-out
+// refusal, translated to a single gRPC ResourceExhausted error so a caller
+// never partially serializes a bounded batch around it — that refusal is a
+// distinct sentinel, never a withheld verdict, so it is not logged here
+// either.
+func (h *pluginHost) attachDependencies(
+	ctx context.Context, tasks []pluginsdk.Task, models []*taskmodels.Task, bounded bool, operation string,
+) error {
+	if len(tasks) == 0 {
+		return nil
+	}
+	if !h.capabilities.CanRead(resourceTasks) {
+		withholdDependencies(tasks)
+		return nil
+	}
+	if h.taskData == nil {
+		h.logDependencyDerivationFailure(operation, "source_unavailable")
+		withholdDependencies(tasks)
+		return nil
+	}
+	var views map[string]taskservice.DependencyView
+	if bounded {
+		v, err := h.taskData.BuildDependencyViewsBounded(ctx, models)
+		if err != nil {
+			return resourceExhausted(err.Error())
+		}
+		views = v
+	} else {
+		views = h.taskData.BuildDependencyViews(ctx, models)
+	}
+	derivationWithheld := false
+	for i := range tasks {
+		view := views[tasks[i].ID]
+		tasks[i].Blocked = view.Blocked
+		tasks[i].BlockedReason = view.BlockedReason
+		tasks[i].DependsOn = dependencyRefsToDTOs(view.DependsOn, true)
+		tasks[i].Blocks = dependencyRefsToDTOs(view.Blocks, false)
+		tasks[i].DependsOnTruncated = view.DependsOnTruncated
+		tasks[i].BlocksTruncated = view.BlocksTruncated
+		withheld := view.BlockedReason == taskservice.BlockedReasonUnknown
+		tasks[i].StartWhenUnblocked = !withheld && taskmodels.HasStartWhenUnblockedIntent(models[i])
+		if withheld {
+			derivationWithheld = true
+		}
+	}
+	if derivationWithheld {
+		// One record for the whole attempt, however many tasks it withheld
+		// for: BuildDependencyViews/Bounded only ever substitute this
+		// verdict batch-wide, on one of the read or edge-end-resolution
+		// failures it already logs internally without plugin/instance/
+		// operation identity.
+		h.logDependencyDerivationFailure(operation, "derivation_withheld")
+	}
+	return nil
+}
+
+// logDependencyDerivationFailure emits one structured record per derivation
+// attempt: plugin, instance, resource type, operation, and result code,
+// never a task title, task id, or edge content. No counter or metric is
+// added; this log record is the whole observability contract.
+func (h *pluginHost) logDependencyDerivationFailure(operation, resultCode string) {
+	if h.log == nil {
+		return
+	}
+	instanceID := h.instanceID
+	if instanceID == "" {
+		instanceID = h.pluginID
+	}
+	h.log.Warn("plugin dependency derivation withheld",
+		zap.String("plugin_id", h.pluginID),
+		zap.String("instance_id", instanceID),
+		zap.String("resource_type", "task"),
+		zap.String("operation", operation),
+		zap.String("result_code", resultCode),
+	)
+}
+
+// withholdDependencies stamps every task with the fail-closed withheld
+// verdict in place, for a caller that lacks api_read:tasks. It is the same
+// verdict a derivation failure produces, so a write-only caller cannot
+// distinguish "withheld for lack of capability" from "withheld because
+// derivation failed."
+func withholdDependencies(tasks []pluginsdk.Task) {
+	for i := range tasks {
+		tasks[i].Blocked = true
+		tasks[i].BlockedReason = taskservice.BlockedReasonUnknown
+		tasks[i].DependsOn = []pluginsdk.TaskDependencyRef{}
+		tasks[i].Blocks = []pluginsdk.TaskDependencyRef{}
+		tasks[i].DependsOnTruncated = false
+		tasks[i].BlocksTruncated = false
+		tasks[i].StartWhenUnblocked = false
+	}
+}
+
+// dependencyRefsToDTOs converts a derived edge list to its DTO form,
+// preserving order. Status carries DependencyStatusForTask's verdict for a
+// predecessor (includeStatus true); a dependent's own status describes its
+// own progress, not readiness to unblock this task, so it is dropped
+// (includeStatus false). Never nil: depends_on/blocks always serialize as
+// [], never as an absent or null field.
+func dependencyRefsToDTOs(refs []taskservice.DependencyRef, includeStatus bool) []pluginsdk.TaskDependencyRef {
+	out := make([]pluginsdk.TaskDependencyRef, len(refs))
+	for i, ref := range refs {
+		status := ref.Status
+		if !includeStatus {
+			status = ""
+		}
+		out[i] = pluginsdk.TaskDependencyRef{
+			ID: ref.ID, Title: ref.Title, State: string(ref.State), Status: status,
+			WorkspaceID: ref.WorkspaceID,
+		}
+	}
+	return out
+}

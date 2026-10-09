@@ -122,3 +122,39 @@ func TestNormalizationAppliesToBothSides(t *testing.T) {
 		deferralWith(CeilingLaunchStart, fresh),
 		true, "an older record normalizes the same way")
 }
+
+func TestAdmissionEquivalenceAllowsLegacyBindingEnrichmentButProtectsSuccessors(t *testing.T) {
+	legacy := deferralWith(CeilingLaunchStartCreated, map[string]interface{}{
+		"session_id": "session-1", "prompt": "workflow",
+	})
+	bound := deferralWith(CeilingLaunchStartCreated, map[string]interface{}{
+		"session_id": "session-1", "prompt": "workflow",
+		CeilingLaunchEntryBindingKey: map[string]interface{}{
+			"workflow_id": "workflow-1", "destination_step_id": "step-1",
+			"route_operation_id": "route-1", "entry_identity": "entry-1",
+		},
+	})
+	got, err := CeilingDeferralsEquivalentForAdmission(legacy, bound)
+	if err != nil {
+		t.Fatalf("CeilingDeferralsEquivalentForAdmission: %v", err)
+	}
+	if !got {
+		t.Fatal("binding enrichment must not make the same launch appear to be a successor")
+	}
+
+	successor := bound
+	successor.Payload = map[string]interface{}{
+		"session_id": "session-1", "prompt": "workflow",
+		CeilingLaunchEntryBindingKey: map[string]interface{}{
+			"workflow_id": "workflow-1", "destination_step_id": "step-2",
+			"route_operation_id": "route-2", "entry_identity": "entry-2",
+		},
+	}
+	got, err = CeilingDeferralsEquivalentForAdmission(bound, successor)
+	if err != nil {
+		t.Fatalf("CeilingDeferralsEquivalentForAdmission successor: %v", err)
+	}
+	if got {
+		t.Fatal("two bound workflow entries must not compare equal")
+	}
+}

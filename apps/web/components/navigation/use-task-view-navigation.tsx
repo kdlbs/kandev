@@ -40,7 +40,7 @@ function TaskViewSurface({
   );
 }
 
-export function useTaskViewNavigation(closeMenu: () => void) {
+export function useTaskViewNavigation(closeMenu: () => void, onOpenTaskViews?: () => void) {
   const workspace = useAppStore(selectActiveWorkspace);
   const { isMobile } = useResponsiveBreakpoint();
   const kanbanWorkspace = workspace && !isOfficeWorkspace(workspace);
@@ -65,8 +65,12 @@ export function useTaskViewNavigation(closeMenu: () => void) {
     frame.current = requestAnimationFrame(() => {
       opener.current =
         document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      setMounted(true);
-      setOpen(true);
+      if (onOpenTaskViews) {
+        onOpenTaskViews();
+      } else {
+        setMounted(true);
+        setOpen(true);
+      }
     });
   };
   const restoreFocus = (event: Event) => {

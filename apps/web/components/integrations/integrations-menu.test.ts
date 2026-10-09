@@ -9,17 +9,26 @@ import {
 import { pluginRegistry } from "@/lib/plugins/registry";
 import type { NavItem } from "@/lib/plugins/types";
 import type { GitHubStatus } from "@/lib/types/github";
-import { defaultState } from "@/lib/state/default-state";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
 const useGitHubStatusMock = vi.hoisted(() => vi.fn());
 const useGitLabAvailableMock = vi.hoisted(() => vi.fn());
 const useJiraAuthedMock = vi.hoisted(() => vi.fn());
 const useLinearAuthedMock = vi.hoisted(() => vi.fn());
-const activeWorkspaceRef = vi.hoisted(() => ({
-  id: null as string | null,
-  items: [] as Array<{ id: string }>,
-}));
+const integrationStore = vi.hoisted(() => {
+  const state = {
+    auth: { mode: "local", authenticated: false, user: null },
+    workspaceContextGeneration: 0,
+    workspaces: { activeId: null as string | null, items: [] as Array<{ id: string }> },
+    userSettings: {},
+    features: { office: false },
+  };
+  return {
+    state,
+    getState: () => state,
+    subscribe: () => () => {},
+  };
+});
 
 vi.mock("@/hooks/domains/github/use-github-status", () => ({
   useGitHubStatus: useGitHubStatusMock,
@@ -66,20 +75,9 @@ vi.mock("@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav", ()
 }));
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (
-    selector: (state: {
-      workspaces: { activeId: string | null; items: Array<{ id: string }> };
-      userSettings: typeof defaultState.userSettings;
-      // The navigation manifest resolves hrefs against the active mode, so
-      // `useInOffice` (and through it `useFeature`) now runs in this tree.
-      features: Record<string, boolean>;
-    }) => unknown,
-  ) =>
-    selector({
-      workspaces: { activeId: activeWorkspaceRef.id, items: activeWorkspaceRef.items },
-      userSettings: { ...defaultState.userSettings },
-      features: { office: false },
-    }),
+  useAppStore: (selector: (state: typeof integrationStore.state) => unknown) =>
+    selector(integrationStore.state),
+  useAppStoreApi: () => integrationStore,
 }));
 
 function status(overrides: Partial<GitHubStatus>): GitHubStatus {
@@ -116,8 +114,9 @@ function mockAvailability({
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
-  activeWorkspaceRef.id = null;
-  activeWorkspaceRef.items = [];
+  integrationStore.state.workspaces.activeId = null;
+  integrationStore.state.workspaces.items = [];
+  integrationStore.state.workspaceContextGeneration += 1;
 });
 
 // `getGitHubIntegrationStatus` now lives in `hooks/use-nav-availability` with the
@@ -150,8 +149,8 @@ describe("IntegrationsMenu", () => {
   });
 
   it("passes the active workspace id to the per-workspace availability hooks", () => {
-    activeWorkspaceRef.id = "ws-active";
-    activeWorkspaceRef.items = [{ id: "ws-active" }];
+    integrationStore.state.workspaces.activeId = "ws-active";
+    integrationStore.state.workspaces.items = [{ id: "ws-active" }];
     mockAvailability({ githubReady: true, jiraConfigured: true, linearConfigured: true });
 
     render(createElement(IntegrationsMenu, {}));
@@ -166,8 +165,8 @@ describe("IntegrationsMenu", () => {
     // The active workspace was removed but activeId was not reconciled. Scoping
     // to the deleted id would hide the links; fall back to null instead so the
     // backend's default-workspace resolution applies.
-    activeWorkspaceRef.id = "ws-deleted";
-    activeWorkspaceRef.items = [{ id: "ws-remaining" }];
+    integrationStore.state.workspaces.activeId = "ws-deleted";
+    integrationStore.state.workspaces.items = [{ id: "ws-remaining" }];
     mockAvailability({ githubReady: false, jiraConfigured: true, linearConfigured: true });
 
     render(createElement(IntegrationsMenu, {}));
@@ -279,6 +278,23 @@ describe("MobileIntegrationsSection", () => {
 
     expect(screen.getByText("Integrations")).toBeTruthy();
     expect(screen.getByTestId("plugin-nav-item-hello")).toBeTruthy();
+  });
+
+  it("excludes separately customized plugins and omitted destinations from the built-in section", () => {
+    mockAvailability({ githubReady: true, jiraConfigured: false, linearConfigured: true });
+    registerHelloIntegrationItem();
+    render(
+      createElement(MobileIntegrationsSection, {
+        onNavigate: vi.fn(),
+        includePlugins: false,
+        omitDestinations: ["linear"],
+        showSetup: true,
+      }),
+    );
+    expect(screen.getByRole("link", { name: "GitHub" }).getAttribute("href")).toBe("/github");
+    expect(screen.queryByRole("link", { name: HELLO_LABEL })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Linear" })).toBeNull();
+    expect(screen.getByTestId("mobile-integration-settings")).toBeTruthy();
   });
 
   it("renders nothing when there are no links and no plugin items", () => {

@@ -876,6 +876,9 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	if info.SessionID != "session-1" {
 		t.Errorf("expected SessionID 'session-1', got %q", info.SessionID)
 	}
+	if info.DeliveryIncarnationID != session.QueueIncarnationID || info.DeliveryHarnessGeneration != 1 || info.DeliveryStreamID != session.QueueIncarnationID+":g1" {
+		t.Fatalf("workspace restore lost persisted delivery identity: incarnation=%q generation=%d stream=%q", info.DeliveryIncarnationID, info.DeliveryHarnessGeneration, info.DeliveryStreamID)
+	}
 	if info.TaskEnvironmentID != "env-123" {
 		t.Errorf("expected TaskEnvironmentID 'env-123', got %q", info.TaskEnvironmentID)
 	}
@@ -1524,6 +1527,9 @@ func TestGetWorkspaceInfoForSession_KubernetesRunningRecordOwnsExecutorAndCurren
 	}
 	if info.ExecutorType != string(models.ExecutorTypeKubernetes) || info.RuntimeName != agentruntime.RuntimeKubernetes {
 		t.Fatalf("executor projection = type %q runtime %q", info.ExecutorType, info.RuntimeName)
+	}
+	if got := info.Metadata["executor_id"]; got != "recorded-kubernetes" {
+		t.Fatalf("executor ID metadata = %v, want the recorded Kubernetes executor", got)
 	}
 	if got := info.Metadata[lifecycle.MetadataKeyKubernetesPodUID]; got != "recorded-pod-uid" {
 		t.Fatalf("recorded Pod UID = %v", got)

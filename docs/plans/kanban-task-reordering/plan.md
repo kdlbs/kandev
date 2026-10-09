@@ -23,3 +23,9 @@ server result.
 The implementation uses the existing task service, repository, WebSocket, and
 Kanban state paths. It adds the step revision needed to reject stale client
 orders without changing workflow-step ownership or task-move behavior.
+
+## Mobile follow-up
+
+[Remove mobile Kanban dragging](../remove-mobile-kanban-drag/plan.md) replaces
+the phone drag interaction and positive mobile reorder test. This completed
+package retains its historical results; desktop/tablet and backend scope remain.

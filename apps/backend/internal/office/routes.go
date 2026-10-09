@@ -26,7 +26,16 @@ import (
 // handoff wires the guarded agent-caller comment-read branch of
 // dashboard.listComments; it may be nil where no HandoffService is
 // available, in which case an agent request to that route responds 503.
-func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, handoff *taskservice.HandoffService, log *logger.Logger) {
+// handoffDeps backs the cross-workspace handoff runtime action
+// (POST /runtime/handoffs); its zero value disables the action with a
+// runtime-dependency-missing error rather than a nil-pointer panic.
+func RegisterAllRoutes(
+	router *gin.RouterGroup,
+	svcs *Services,
+	handoff *taskservice.HandoffService,
+	handoffDeps officeruntime.HandoffDependencies,
+	log *logger.Logger,
+) {
 	agents.RegisterRoutes(router, svcs.Agents, log)
 	officeruntime.RegisterRoutes(router, officeruntime.NewHandler(
 		svcs.Agents,
@@ -40,11 +49,13 @@ func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, handoff *taskser
 			Runs:          svcs.Workspaces,
 			AgentModifier: svcs.Agents,
 			Skills:        svcs.Skills,
+			Handoff:       handoffDeps,
 		}),
 		svcs.Skills,
 		svcs.Workspaces,
 		newRuntimeDecisionRecorder(svcs.Dashboard),
 		log,
+		svcs.Dashboard,
 	))
 
 	skillsHandler := skills.NewHandler(svcs.Skills)

@@ -1,8 +1,42 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Page, Route } from "@playwright/test";
+import type { StorageMaintenanceSettings, StorageSettingsResponse } from "../../lib/types/system";
+import type { ApiClient } from "./api-client";
 
 const ABOVE_DEFAULT_LIMIT_BYTES = 16 * 1024 * 1024 * 1024;
+const STORAGE_SETTINGS_PATH = "/api/v1/system/storage/settings";
+
+export async function requestStorageMaintenanceSettings(
+  apiClient: ApiClient,
+  method: "GET" | "PATCH",
+  settings?: StorageMaintenanceSettings,
+): Promise<StorageSettingsResponse> {
+  const response = await apiClient.rawRequest(
+    method,
+    STORAGE_SETTINGS_PATH,
+    settings ? { settings } : undefined,
+  );
+  if (!response.ok) {
+    throw new Error(
+      `${method} ${STORAGE_SETTINGS_PATH} failed (${response.status}): ${await response.text()}`,
+    );
+  }
+  return response.json() as Promise<StorageSettingsResponse>;
+}
+
+export async function restoreStorageMaintenanceSettings(
+  apiClient: ApiClient,
+  settings: StorageMaintenanceSettings,
+): Promise<void> {
+  const current = await requestStorageMaintenanceSettings(apiClient, "GET");
+  // Adoption has a dedicated endpoint and no undo operation. Keep the current
+  // path while restoring ordinary policy fields in this disposable E2E backend.
+  await requestStorageMaintenanceSettings(apiClient, "PATCH", {
+    ...settings,
+    go_cache: { ...settings.go_cache, adopted_path: current.settings.go_cache.adopted_path },
+  });
+}
 
 export function seedManagedGoCache(tmpDir: string): { artifact: string } {
   const cacheRoot = path.join(tmpDir, ".kandev", "cache");
@@ -29,6 +63,46 @@ export function seedSystemTemporaryFile(
   return { root, file };
 }
 
+export async function mockStorageDiskCapacity(
+  page: Page,
+  options: { temporaryUsedPercent?: number; temporaryAvailableBytes?: number } = {},
+): Promise<void> {
+  const temporaryUsedPercent = options.temporaryUsedPercent ?? 95;
+  const temporaryTotalBytes = 100 * 1024 ** 3;
+  const temporaryAvailableBytes =
+    options.temporaryAvailableBytes ??
+    Math.round((temporaryTotalBytes * (100 - temporaryUsedPercent)) / 100);
+  await page.route("**/api/v1/system/storage/disk", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        path: "/isolated/home",
+        total_bytes: temporaryTotalBytes,
+        used_bytes: temporaryTotalBytes * 0.6,
+        available_bytes: temporaryTotalBytes * 0.4,
+        used_percent: 60,
+        available: true,
+        observed_at: "2026-09-28T10:00:00.000Z",
+        temporary_roots: [
+          {
+            requested_path: "/isolated/tmp",
+            path: "/isolated/tmp",
+            aliases: [],
+            total_bytes: temporaryTotalBytes,
+            used_bytes: temporaryTotalBytes - temporaryAvailableBytes,
+            available_bytes: temporaryAvailableBytes,
+            used_percent: temporaryUsedPercent,
+            available: true,
+            observed_at: "2026-09-28T10:00:00.000Z",
+            shared_with_home: false,
+          },
+        ],
+      }),
+    });
+  });
+}
+
 export async function mockPartialSystemTemporaryOverview(page: Page, root: string): Promise<void> {
   await page.route("**/api/v1/system/storage", async (route) => {
     if (route.request().method() !== "GET") {
@@ -50,7 +124,7 @@ export async function mockPartialSystemTemporaryOverview(page: Page, root: strin
       status: "partial",
       size_bytes: 24,
       included_in_total: false,
-      reason: "informational_overlap",
+      reason: "deadline",
       roots: [
         {
           requested_path: root,
@@ -58,10 +132,18 @@ export async function mockPartialSystemTemporaryOverview(page: Page, root: strin
           status: "partial",
           size_bytes: 24,
           skipped_count: 1,
-          warnings: ["fixture entry could not be measured"],
+          warnings: [
+            "context deadline exceeded",
+            "context deadline exceeded\ncontext deadline exceeded",
+            "fixture entry could not be measured",
+          ],
         },
       ],
-      warnings: ["One fixture entry was skipped."],
+      warnings: [
+        "context deadline exceeded",
+        "One fixture entry was skipped.",
+        "One fixture entry was skipped.",
+      ],
     };
     await route.fulfill({
       status: response.status,
@@ -69,6 +151,178 @@ export async function mockPartialSystemTemporaryOverview(page: Page, root: strin
       body: JSON.stringify(body),
     });
   });
+}
+
+function resolveGoCacheCleanupEligibleSize(options: {
+  goCache?: number;
+  goCacheCleanupEligible?: number;
+}): number {
+  return options.goCacheCleanupEligible ?? options.goCache ?? 7 * 1024 ** 3;
+}
+
+export function storageBarsSnapshot(
+  options: {
+    workspaces?: number;
+    database?: number;
+    databaseBackups?: number;
+    quarantine?: number;
+    systemTemporary?: number;
+    goCache?: number;
+    goCacheCleanupEligible?: number;
+    goCacheWarning?: string;
+    unmanagedGoCache?: number;
+    temporaryArtifacts?: number;
+    managedContainers?: number;
+    imageLayers?: number;
+    buildCache?: number;
+    unusedImages?: number;
+  } = {},
+): Record<string, unknown> {
+  return {
+    workspaces: {
+      total_bytes: options.workspaces ?? 8 * 1024 ** 3,
+      active_bytes: 0,
+      candidate_bytes: 0,
+    },
+    go_cache: {
+      path: "/data/cache/go-build",
+      size_bytes: options.goCache ?? 7 * 1024 ** 3,
+      cleanup_eligible_size_bytes: resolveGoCacheCleanupEligibleSize(options),
+      owned: true,
+      unmanaged_path: "/data/home/.cache/go-build",
+      unmanaged_size_bytes: options.unmanagedGoCache ?? 6 * 1024 ** 3,
+      warning: options.goCacheWarning,
+    },
+    quarantine: { available: true, count: 1, size_bytes: options.quarantine ?? 5 * 1024 ** 3 },
+    temporary_artifacts: {
+      available: true,
+      total_count: 1,
+      total_bytes: options.temporaryArtifacts ?? 4 * 1024 ** 3,
+      active_count: 0,
+      active_bytes: 0,
+      protected_count: 0,
+      protected_bytes: 0,
+      stale_count: 1,
+      stale_bytes: options.temporaryArtifacts ?? 4 * 1024 ** 3,
+      skipped_count: 0,
+    },
+    system_temporary: {
+      status: "partial",
+      size_bytes: options.systemTemporary ?? 3 * 1024 ** 3,
+      included_in_total: false,
+      reason: "deadline",
+      roots: [],
+    },
+    docker: {
+      available: true,
+      managed_container_count: 1,
+      managed_container_bytes: options.managedContainers ?? 2 * 1024 ** 3,
+      image_layer_bytes: options.imageLayers ?? 1 * 1024 ** 3,
+      build_cache_bytes: options.buildCache ?? 512 * 1024 ** 2,
+      unused_image_bytes: options.unusedImages ?? 256 * 1024 ** 2,
+    },
+    database: {
+      status: "measured",
+      size_bytes: options.database ?? 10 * 1024 ** 3,
+      path: "/data/kandev.db",
+      included_in_total: true,
+    },
+    database_backups: {
+      status: "measured",
+      size_bytes: options.databaseBackups ?? 9 * 1024 ** 3,
+      path: "/data/backups",
+      included_in_total: true,
+    },
+  };
+}
+
+export async function mockStorageAnalysisBarsOverview(page: Page): Promise<{
+  setSnapshot: (snapshot: Record<string, unknown>) => void;
+  holdNextOverviewRefresh: () => {
+    started: Promise<void>;
+    release: () => void;
+  };
+}> {
+  let snapshot = storageBarsSnapshot();
+  let heldRefresh: {
+    resolveStarted: () => void;
+    released: Promise<void>;
+  } | null = null;
+  await page.route("**/api/v1/system/storage", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const requestHeaders = route.request().headers();
+    const response = await fetch(route.request().url(), {
+      headers: {
+        ...(requestHeaders.accept ? { accept: requestHeaders.accept } : {}),
+        ...(requestHeaders.cookie ? { cookie: requestHeaders.cookie } : {}),
+      },
+    });
+    const body = JSON.parse(await response.text()) as {
+      analyzed_at?: string | null;
+      analysis?: Record<string, unknown> | null;
+      summary?: Record<string, unknown> | null;
+    };
+    const analyzedAt = new Date().toISOString();
+    body.summary = snapshot;
+    body.analyzed_at = analyzedAt;
+    body.analysis = {
+      ...(body.analysis ?? {}),
+      state: "ready",
+      completed_at: analyzedAt,
+      duration_ms: 100,
+      stale: false,
+      error: null,
+      partial_summary: null,
+    };
+    if (heldRefresh) {
+      const refresh = heldRefresh;
+      heldRefresh = null;
+      refresh.resolveStarted();
+      await refresh.released;
+    }
+    await route.fulfill({
+      status: response.status,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
+  await page.route("**/api/v1/system/storage/analyze", async (route) => {
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({ job_id: "storage-bars-analysis" }),
+    });
+  });
+  await page.route("**/api/v1/system/jobs/storage-bars-analysis", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "storage-bars-analysis",
+        kind: "storage-analysis",
+        state: "succeeded",
+        started_at: new Date().toISOString(),
+      }),
+    });
+  });
+  return {
+    setSnapshot: (nextSnapshot) => (snapshot = nextSnapshot),
+    holdNextOverviewRefresh: () => {
+      let resolveStarted!: () => void;
+      let resolveRelease!: () => void;
+      const started = new Promise<void>((resolve) => {
+        resolveStarted = resolve;
+      });
+      const released = new Promise<void>((resolve) => {
+        resolveRelease = resolve;
+      });
+      heldRefresh = { resolveStarted, released };
+      return { started, release: resolveRelease };
+    },
+  };
 }
 
 export async function mockTemporaryArtifactOverview(page: Page): Promise<void> {
@@ -103,6 +357,78 @@ export async function mockTemporaryArtifactOverview(page: Page): Promise<void> {
       protected_bytes: 16 * 1024 * 1024,
       stale_count: 1,
       stale_bytes: 16 * 1024 * 1024,
+      skipped_count: 0,
+    };
+    await route.fulfill({
+      status: response.status,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
+}
+
+export async function mockTemporaryEntryBreakdown(page: Page): Promise<void> {
+  await page.route("**/api/v1/system/storage", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const requestHeaders = route.request().headers();
+    const response = await fetch(route.request().url(), {
+      headers: {
+        ...(requestHeaders.accept ? { accept: requestHeaders.accept } : {}),
+        ...(requestHeaders.cookie ? { cookie: requestHeaders.cookie } : {}),
+      },
+    });
+    const body = JSON.parse(await response.text()) as {
+      capabilities: Record<string, unknown>;
+      summary: Record<string, unknown> | null;
+    };
+    body.capabilities.temporary_artifacts_available = true;
+    body.summary ??= {};
+    body.summary.system_temporary = {
+      status: "partial",
+      size_bytes: 1_200_000_000,
+      included_in_total: false,
+      roots: [
+        {
+          requested_path: "/isolated/tmp",
+          path: "/isolated/tmp",
+          status: "partial",
+          size_bytes: 1_200_000_000,
+          breakdown: {
+            status: "partial",
+            entries: [
+              {
+                name: "build-output",
+                kind: "directory",
+                size_bytes: 900_000_000,
+                completeness: "measured",
+                ownership: "untracked",
+              },
+              {
+                name: "active-profile",
+                kind: "directory",
+                completeness: "partial",
+                ownership: "unknown",
+              },
+            ],
+            other_observed_bytes: 100_000,
+            other_observed_count: 5,
+          },
+        },
+      ],
+    };
+    body.summary.temporary_artifacts = {
+      available: true,
+      total_count: 3,
+      total_bytes: 128 * 1024 ** 2,
+      active_count: 1,
+      active_bytes: 32 * 1024 ** 2,
+      protected_count: 1,
+      protected_bytes: 32 * 1024 ** 2,
+      stale_count: 1,
+      stale_bytes: 64 * 1024 ** 2,
       skipped_count: 0,
     };
     await route.fulfill({

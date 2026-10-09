@@ -33,8 +33,12 @@ func TestCleanupWorktrees_PreservesSharedActiveReference(t *testing.T) {
 		t.Fatalf("active foreign worktree references = %d, want 1", count)
 	}
 
-	if err := mgr.CleanupWorktrees(ctx, []*Worktree{wt}); err != nil {
-		t.Fatalf("CleanupWorktrees: %v", err)
+	receipt, err := mgr.CleanupWorktreesWithReceipt(ctx, []*Worktree{wt})
+	if err != nil {
+		t.Fatalf("CleanupWorktreesWithReceipt: %v", err)
+	}
+	if receipt.Attempted != 1 || receipt.RetainedReasons[RetainedActiveReference] != 1 {
+		t.Fatalf("shared-reference receipt = %+v", receipt)
 	}
 
 	if _, err := os.Stat(wt.Path); err != nil {
@@ -149,6 +153,9 @@ func newReferenceCleanupTestManager(t *testing.T) (*Manager, *SQLiteStore) {
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
+	mgr.SetRepositoryProvider(&fakeRepoProvider{repo: &Repository{
+		ID: "repository", DefaultBranch: "main",
+	}})
 	return mgr, store
 }
 
@@ -199,6 +206,7 @@ func createReferenceCleanupWorktree(t *testing.T, mgr *Manager, taskID, sessionI
 		RepositoryID:   "repository",
 		RepositoryPath: initGitRepoWithRemote(t),
 		BaseBranch:     "main",
+		IntegrationRef: "main",
 		TaskDirName:    taskID,
 		RepoName:       "repository",
 	})

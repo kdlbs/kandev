@@ -93,5 +93,8 @@
   "severityBlocker": "阻断",
   "severityMajor": "严重",
   "severityMinor": "次要",
-  "severityNit": "细节"
+  "severityNit": "细节",
+  "commentOnFile": "评论文件",
+  "fileComment": "文件评论",
+  "fileComments": "文件评论"
 }

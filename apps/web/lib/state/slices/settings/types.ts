@@ -1,3 +1,4 @@
+import type { SidebarWorkspaceStateApi } from "@/lib/types/http-user-settings";
 import type {
   Agent,
   AgentProfile,
@@ -13,9 +14,11 @@ import type {
   ToolStatus,
   LspStatusLocation,
   LastSeenDisplay,
+  MessageTimeDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
+import type { SidebarLayoutApi } from "@/lib/types/http-user-settings";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import type { ThreadView, ThreadViewDraft } from "@/lib/state/slices/ui/thread-view-types";
 import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
@@ -32,6 +35,8 @@ import type {
 } from "@/lib/agent-profile-recent-use";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { TaskColor } from "@/lib/task-colors";
+import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
+import type { AgentUpdateJob } from "@/lib/api";
 
 export type {
   AgentProfileRecentUseRecord,
@@ -40,6 +45,15 @@ export type {
 
 export type ExecutorsState = {
   items: Executor[];
+};
+
+/**
+ * SSH reachability records keyed by executor id. Populated by a per-card
+ * fetch (task 06's SSHReachabilityCard) and kept live via the
+ * executor.reachability.changed WS event.
+ */
+export type SSHReachabilityStoreState = {
+  byExecutorId: Record<string, SSHReachabilityRecord>;
 };
 
 export type SettingsAgentsState = {
@@ -336,32 +350,12 @@ export type InstallJobsState = {
   byAgent: Record<string, InstallJob>;
 };
 
-export type AgentUpdateJobStatus =
-  | "queued"
-  | "resolving"
-  | "updating"
-  | "refreshing"
-  | "succeeded"
-  | "failed";
-
-export type AgentUpdateJob = {
-  job_id: string;
-  agent_name: string;
-  status: AgentUpdateJobStatus;
-  current_version?: string;
-  target_version?: string;
-  output?: string;
-  error?: string;
-  refresh_error?: string;
-  started_at: string;
-  finished_at?: string;
-};
-
 export type AgentUpdateJobsState = {
   byAgent: Record<string, AgentUpdateJob>;
 };
 
 export type EditorsState = {
+  folderOpeningAvailable?: boolean;
   items: EditorOption[];
   loaded: boolean;
   loading: boolean;
@@ -432,6 +426,7 @@ export type UserSettingsState = {
   unreadDivider: boolean;
   agentGeneratedTaskTitles: boolean;
   autoFocusNewTasks: boolean;
+  agentTabCloseBehavior: "delete_session" | "hide_panel";
   mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
   showAnchoredPromptBar: boolean;
   showScrollToLastPrompt: boolean;
@@ -447,6 +442,8 @@ export type UserSettingsState = {
   lspStatusLocation: LspStatusLocation;
   savedLayouts: SavedLayout[];
   sidebarViews: SidebarView[];
+  sidebarViewsByWorkspace: Record<string, SidebarWorkspaceStateApi>;
+  sidebarLayoutsByWorkspace: Record<string, SidebarLayoutApi>;
   sidebarActiveViewId: string | null;
   sidebarDraft: SidebarViewDraft | null;
   threadViews: ThreadView[];
@@ -470,8 +467,11 @@ export type UserSettingsState = {
   terminalFontSize: number | null;
   changesPanelLayout: "flat" | "tree";
   lastSeenDisplay: LastSeenDisplay;
+  messageTimeDisplay: MessageTimeDisplay;
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
+  sidebarFastActionsEnabled: boolean;
+  sidebarNewTaskStyle: "simple" | "compact";
   sidebarHoverEnabled: boolean;
   sidebarHoverDelayMs: number;
   resolveSessionHostnames: boolean;
@@ -499,6 +499,11 @@ export type TaskCreateLastUsedState = {
 };
 
 export type SettingsSliceState = {
+  agentRuntimeUpdates: {
+    byAgent: Record<string, import("@/lib/api/domains/agent-update-api").AgentUpdateStatus>;
+    checkedAt: number;
+    loading: boolean;
+  };
   executors: ExecutorsState;
   settingsAgents: SettingsAgentsState;
   agentDiscovery: AgentDiscoveryState;
@@ -515,9 +520,15 @@ export type SettingsSliceState = {
   sleepInhibition: SleepInhibitionStoreState;
   userSettings: UserSettingsState;
   agentProfileRecentUse: AgentProfileRecentUseState;
+  sshReachability: SSHReachabilityStoreState;
 };
 
 export type SettingsSliceActions = {
+  setAgentRuntimeUpdateStatuses: (
+    statuses: import("@/lib/api/domains/agent-update-api").AgentUpdateStatus[],
+    checkedAt: number,
+  ) => void;
+  setAgentRuntimeUpdateLoading: (loading: boolean) => void;
   setExecutors: (executors: ExecutorsState["items"]) => void;
   setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
@@ -536,7 +547,7 @@ export type SettingsSliceActions = {
   upsertAgentUpdateJob: (job: AgentUpdateJob) => void;
   appendAgentUpdateOutput: (agentName: string, jobId: string, chunk: string) => void;
   clearAgentUpdateJob: (agentName: string) => void;
-  setEditors: (editors: EditorsState["items"]) => void;
+  setEditors: (editors: EditorsState["items"], folderOpeningAvailable?: boolean) => void;
   setEditorsLoading: (loading: boolean) => void;
   setPrompts: (prompts: PromptsState["items"]) => void;
   setPromptsLoading: (loading: boolean) => void;
@@ -563,6 +574,16 @@ export type SettingsSliceActions = {
     record: AgentProfileRecentUseRecord,
   ) => void;
   bumpAgentProfilesVersion: () => void;
+  /**
+   * Applies a reachability record (a fetch response or a pushed
+   * executor.reachability.changed event). Reconciles on updated_at, never
+   * checked_at: a connection-configuration reset clears checked_at (null)
+   * while still advancing updated_at, so comparing on checked_at would make
+   * the reset compare as older than the record it just invalidated and get
+   * discarded. A null updated_at (the synthesized never-probed placeholder)
+   * always loses to a record that has one.
+   */
+  setSSHReachability: (record: SSHReachabilityRecord) => void;
 };
 
 export type SettingsSlice = SettingsSliceState & SettingsSliceActions;

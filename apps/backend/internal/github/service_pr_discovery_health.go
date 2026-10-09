@@ -676,6 +676,13 @@ func classifyPRDiscoveryError(err error) PRDiscoveryHealthCategory {
 	return PRDiscoveryHealthUnavailable
 }
 
+// ClassifyPRDiscoveryError returns the bounded category used for PR discovery
+// diagnostics. It deliberately exposes the category contract without exposing
+// provider error text or payloads to callers.
+func ClassifyPRDiscoveryError(err error) PRDiscoveryHealthCategory {
+	return classifyPRDiscoveryError(err)
+}
+
 func containsRateLimitMarker(value string) bool {
 	lower := strings.ToLower(value)
 	for _, marker := range []string{"rate limit", "too many requests", "429", "abuse detection", "secondary limit"} {

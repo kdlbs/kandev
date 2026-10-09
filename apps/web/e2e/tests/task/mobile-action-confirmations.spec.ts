@@ -142,7 +142,7 @@ for (const presentation of presentations) {
     await testPage.reload();
     await new SessionPage(testPage).waitForLoad();
     await expect(testPage.locator("html")).toHaveAttribute("lang", presentation.locale);
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const row = testPage
       .getByTestId("mobile-task-switcher-list")
       .getByTestId("sidebar-task-item")
@@ -221,7 +221,7 @@ test("archive is a step in the Tasks drawer and Cancel restores the scrolled lis
   }
   await testPage.goto(`/t/${active.id}`);
   await new SessionPage(testPage).waitForLoad();
-  await testPage.getByTestId("mobile-session-menu").tap();
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
   const sheet = testPage
     .locator('[data-slot="drawer-content"]')
     .filter({ has: testPage.getByRole("heading", { name: "Tasks", exact: true }) });

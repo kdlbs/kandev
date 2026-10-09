@@ -67,6 +67,23 @@ function wsPayload(overrides: Partial<TaskLike> = {}): TaskLike {
 }
 
 describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
+  // @covers AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.4
+  it("maps is_from_office to isFromOffice", () => {
+    const officeProjection: Partial<TaskLike> = { is_from_office: true };
+    const http = toKanbanTask(httpDTO(officeProjection));
+    const ws = toKanbanTask(wsPayload(officeProjection));
+
+    expect(http.isFromOffice).toBe(true);
+    expect(ws.isFromOffice).toBe(true);
+  });
+
+  it("carries the card identifier through both task shapes, defaulting to undefined", () => {
+    const withIdentifier = toKanbanTask(httpDTO({ identifier: "KAN-42" }));
+    expect(withIdentifier.identifier).toBe("KAN-42");
+    expect(toKanbanTask(wsPayload({ identifier: "KAN-42" })).identifier).toBe("KAN-42");
+    expect(toKanbanTask(httpDTO()).identifier).toBeUndefined();
+  });
+
   it("carries workspace identity and archived state through both task shapes", () => {
     const archivedAt = "2026-08-04T10:00:00Z";
     const http = toKanbanTask(httpDTO({ archived_at: archivedAt } as Partial<TaskLike>));

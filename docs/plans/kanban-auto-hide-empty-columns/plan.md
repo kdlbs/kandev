@@ -133,3 +133,10 @@ make lint
   drag-time destination recovery, cancellation cleanup, and document overflow.
 - The E2E backend required a dedicated `KANDEV_AGENT_STANDALONE_PORT` locally because the live Kandev
   runtime already owned the default port; both successful runs used isolated temporary databases.
+
+## Mobile interaction follow-up
+
+[Remove mobile Kanban dragging](../remove-mobile-kanban-drag/plan.md) replaces
+the historical phone drag-target path with the existing card Move to menu.
+The mobile auto-hide E2E now proves hidden-destination recovery through that
+menu; the original completed results above remain historical.

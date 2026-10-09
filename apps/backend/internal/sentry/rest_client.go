@@ -393,6 +393,7 @@ func (c *RESTClient) searchIssues(
 		return nil, &APIError{StatusCode: http.StatusBadRequest, Message: "searchIssues: at most one project slug per request"}
 	}
 	q := url.Values{}
+	projectSlug := projectSlugForRequest(filter)
 	if limit > 0 {
 		q.Set("per_page", strconv.Itoa(limit))
 	}
@@ -403,7 +404,13 @@ func (c *RESTClient) searchIssues(
 	if filter.Environment != "" {
 		q.Set("environment", filter.Environment)
 	}
-	if filter.StatsPeriod != "" {
+	// statsPeriod is endpoint-specific: the project-scoped endpoint accepts
+	// only ''/24h/14d there, while the organization-scoped endpoint accepts any
+	// relative duration and uses it as its request time range. Send it only to
+	// the latter, and never empty — the org-scoped endpoint rejects an empty
+	// value. The `age:` term built in buildIssueQueryString is the age
+	// constraint both endpoints honor.
+	if filter.StatsPeriod != "" && projectSlug == "" {
 		q.Set("statsPeriod", filter.StatsPeriod)
 	}
 	if cursor != "" {
@@ -413,7 +420,7 @@ func (c *RESTClient) searchIssues(
 		q.Set("query", built)
 	}
 	var nodes []issueNode
-	resp, err := c.do(ctx, issuesSearchPath(filter.OrgSlug, projectSlugForRequest(filter)), q, &nodes)
+	resp, err := c.do(ctx, issuesSearchPath(filter.OrgSlug, projectSlug), q, &nodes)
 	if err != nil {
 		return nil, err
 	}
@@ -463,9 +470,9 @@ func projectSlugForRequest(f SearchFilter) string {
 // watch filters are limited to a single status (enforced by
 // validateFilterStatuses) because two `is:` tokens would AND-combine and match
 // nothing. StatsPeriod is translated into an `age:` token — see
-// statsPeriodAgeToken's doc comment for why that translation, not the
-// `statsPeriod` query param set separately in searchIssues, is what actually
-// restricts which issues come back.
+// statsPeriodAgeToken's doc comment for why that term, rather than the
+// endpoint-specific `statsPeriod` query param set separately in searchIssues,
+// is the age constraint both issue endpoints honor.
 //
 // The free-text Query is parenthesized whenever it is combined with another
 // token below. Sentry's search grammar ANDs implicitly-adjacent terms tighter
@@ -515,9 +522,10 @@ func buildIssueQueryString(f SearchFilter) string {
 	return strings.Join(parts, " ")
 }
 
-// statsPeriodPattern matches Sentry's relative-duration syntax: an integer
-// followed by h(ours)/d(ays)/w(eeks) — the same units Sentry's `age:` search
-// token and this integration's StatsPeriod values (1h, 24h, 7d, 14d, 30d) use.
+// statsPeriodPattern matches the relative-duration syntax this integration
+// accepts: an integer followed by h(ours)/d(ays)/w(eeks). Deliberately narrower
+// than Sentry's own relative-duration grammar, which also accepts seconds and
+// minutes — see parseStatsPeriodUnits.
 var statsPeriodPattern = regexp.MustCompile(`^[1-9]\d*[hdw]$`)
 
 // maxStatsPeriodUnits bounds the numeric component parseStatsPeriodUnits
@@ -531,12 +539,18 @@ var statsPeriodPattern = regexp.MustCompile(`^[1-9]\d*[hdw]$`)
 // nonsensical in one path can't still pass as a valid filter in the other.
 const maxStatsPeriodUnits = 3650
 
-// parseStatsPeriodUnits validates period against Sentry's relative-duration
-// syntax and the shared accepted range, returning the numeric component and
-// unit byte ('h'/'d'/'w') on success. statsPeriodAgeToken below and
-// mock_client.go's parseStatsPeriod both build on this so the real REST
-// client and the mock that backs E2E tests accept or reject the exact same
-// input.
+// parseStatsPeriodUnits validates period against the shared accepted syntax
+// and range, returning the numeric component and unit byte ('h'/'d'/'w') on
+// success. It is the single accepted-value authority: the write sites reject a
+// stored lookback it cannot express, statsPeriodAgeToken below derives the
+// query term from it, and mock_client.go's parseStatsPeriod builds on it, so
+// the real REST client and the mock that backs E2E tests accept or reject the
+// exact same input.
+//
+// The syntax is narrower than Sentry's own relative-duration grammar, which
+// also accepts seconds and minutes, so a "30m" lookback is rejected here even
+// though an `age:-30m` term would be valid upstream: every Kandev surface
+// offers only whole hours, days, or weeks.
 func parseStatsPeriodUnits(period string) (n int, unit byte, ok bool) {
 	period = strings.TrimSpace(period)
 	if !statsPeriodPattern.MatchString(period) {
@@ -555,13 +569,14 @@ func parseStatsPeriodUnits(period string) (n int, unit byte, ok bool) {
 // input, leaving the query unfiltered by age exactly as before this
 // translation existed.
 //
-// This exists because Sentry's `statsPeriod` query param (set separately in
-// searchIssues) does NOT filter which issues an issue search returns — it
-// only sizes the per-issue event-count stats window returned alongside each
-// result (https://github.com/getsentry/sentry/issues/36375). Both the issue
-// browser and issue watches expose StatsPeriod as "how far back to look for
-// matching issues"; without this translation a watch configured for e.g. the
-// last 24h silently matches (and creates tasks for) issues of any age.
+// Both the issue browser and issue watches expose StatsPeriod as "how far back
+// to look for matching issues", and this token is the constraint that applies
+// on both issue endpoints. The `statsPeriod` query param (set separately in
+// searchIssues) cannot carry that meaning on its own: the project-scoped
+// endpoint accepts only 24h and 14d there and rejects every other offered
+// value with a 400, and only the organization-scoped endpoint turns it into a
+// request time range. Without this translation a watch configured for the last
+// 24h would silently match (and create tasks for) issues of any age.
 func statsPeriodAgeToken(period string) string {
 	period = strings.TrimSpace(period)
 	if _, _, ok := parseStatsPeriodUnits(period); !ok {

@@ -2,6 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskPlan } from "@/lib/types/http-agents";
 import type { TaskSession } from "@/lib/types/http";
+import type { MessageAttachment } from "@/components/task/chat/chat-input-container";
 
 const mockSetTaskPlan = vi.fn();
 const mockSetActiveSession = vi.fn();
@@ -86,8 +87,9 @@ function makeChatRef(value = "ship it") {
         getValue: () => value,
         getSelectionStart: () => 0,
         insertText: vi.fn(),
-        getAttachments: () => [],
-        clear,
+        getAttachments: (): MessageAttachment[] => [],
+        clear: vi.fn(),
+        clearAcceptedPayload: clear,
       },
     },
     clear,
@@ -143,7 +145,8 @@ describe("useImplementPlanRunner same-session path", () => {
     expect(mockSetTaskPlan).toHaveBeenCalledWith(TASK_ID, plan);
     expect(handlePlanModeChange).toHaveBeenCalledWith(false);
     expect(clear).toHaveBeenCalledTimes(1);
-    expect(mockSetChatDraftContent).toHaveBeenCalledWith(SESSION_ID, null);
+    expect(clear).toHaveBeenCalledWith({ message: "ship it", attachments: [] });
+    expect(mockSetChatDraftContent).not.toHaveBeenCalled();
     expect(mockWsRequest).toHaveBeenNthCalledWith(
       2,
       "session.set_plan_mode",
@@ -204,6 +207,34 @@ describe("useImplementPlanRunner same-session path", () => {
     expect(handlePlanModeChange).not.toHaveBeenCalled();
     expect(clear).not.toHaveBeenCalled();
     expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
+  });
+});
+
+describe("useImplementPlanRunner attachment guard", () => {
+  beforeEach(() => setup());
+
+  // @covers AC-TASKS-PROMPT-ATTACHMENTS-001.17
+  it("does not send an implementation message with an incomplete attachment", async () => {
+    const { ref } = makeChatRef();
+    ref.current!.getAttachments = () => [
+      { type: "resource", data: "cGVuZGluZw==", mime_type: "text/plain" },
+    ];
+    const { result } = renderHook(() =>
+      useImplementPlanRunner({
+        resolvedSessionId: SESSION_ID,
+        taskId: TASK_ID,
+        chatInputRef: ref,
+      }),
+    );
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current(false);
+    });
+
+    expect(ok).toBe(false);
+    expect(mockWsRequest).not.toHaveBeenCalled();
+    expect(mockMarkPlanImplementationStarted).not.toHaveBeenCalled();
   });
 });
 

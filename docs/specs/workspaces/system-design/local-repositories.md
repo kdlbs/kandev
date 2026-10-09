@@ -1,7 +1,8 @@
 ---
-status: draft
+status: current
 system: workspaces
 created: 2026-08-27
+updated: 2026-10-06
 owners:
   - kandev
 requirements:
@@ -26,7 +27,7 @@ discovered repository into a saved repository grant.
 
 | Requirement | Design sections |
 | --- | --- |
-| REQ-WORKSPACES-LOCAL-REPOSITORIES-001 | API Surface, Permissions, Failure Modes, Persistence Guarantees |
+| REQ-WORKSPACES-LOCAL-REPOSITORIES-001 | Explicit local repository validation, Settings manual validation ownership; existing API, permissions and persistence contract |
 | REQ-WORKSPACES-LOCAL-REPOSITORIES-002 | Runtime policy, Desktop folder selection, Home scan exclusions, Persistence and state, Upgrade behavior |
 | REQ-WORKSPACES-LOCAL-REPOSITORIES-003 | Discovery flow, User interface, Persistence and state |
 | REQ-WORKSPACES-LOCAL-REPOSITORIES-004 | Workspace polling, Diagnostics, Failure handling |
@@ -72,9 +73,19 @@ configuration key. If the marker is absent, the backend uses server policy.
 
 ## Desktop folder selection
 
-The desktop bridge adds one origin-checked command. The command opens a native
-directory panel at the current user's home and returns one selected canonical
-directory or a cancellation result.
+The desktop bridge keeps one origin-checked folder-selection command. The
+command opens a native directory panel and returns a selected path,
+cancellation, or a failure. It does not block the Tauri IPC worker while the
+panel is open. The frontend still waits for the result and disables the picker
+trigger to avoid opening a second panel.
+
+The shell checks `Projects`, `Developer`, `src`, `Code`, `workspace`,
+`Development`, and `repos` under the desktop user's Home, in that order. It
+uses the first existing directory that is not a symlink as the initial panel
+location. If none exists, it omits `set_directory` and lets the operating
+system choose its default location. The user can navigate to Home from the
+panel. This avoids forcing the panel to list Home at open on machines without
+a local workspace directory.
 
 The command does not list directories, read files, or accept a caller-provided
 path. The Tauri WebView sends the returned path to the desktop root API. The
@@ -133,8 +144,11 @@ does not copy these roots into SQLite.
 The workspace-scoped discovery endpoint returns repositories for one workspace.
 It does not give workspace scope to the desktop root records.
 
-The repository-discovery cache is keyed by the normalized root set and maximum
-depth. It stores the last successful repositories, scan time, and root state.
+The aggregate repository-discovery cache is keyed by the normalized root set
+and maximum depth. It stores the last successful repositories, scan time, and
+root state. A secondary snapshot cache is keyed by each exact normalized root
+and maximum depth. It survives aggregate invalidation so an unchanged root can
+retain its last successful repositories while a changed root set is scanned.
 One single-flight scan serves concurrent workspace requests for the same key.
 
 ## Upgrade behavior
@@ -149,9 +163,19 @@ The SQLite migration distinguishes an existing database from a new database.
 For an existing database, it records this state only when configured and saved
 roots are both empty. A new database starts in the normal unconfigured state.
 
-The UI then shows Continue Home Discovery. If the user selects this action, the
-native picker opens at Home. Saved repositories remain available during this
-migration.
+The UI then shows Continue Home Discovery. This button calls a dedicated
+backend confirmation action without opening a picker or sending a path from
+the client. The backend checks that desktop Home confirmation is still
+pending, resolves its own current user's Home, and adds that canonical path
+through the existing discovery-root service. The action returns the saved
+root after its first scan. If the pending state is gone and Home is not saved,
+the action rejects the stale request; it does not add Home. If Home is already
+saved, a repeated request returns that root without starting a second scan.
+Saved repositories remain available throughout migration.
+
+This backend action is separate from ordinary folder selection. Sending
+`"~"` to `AddDesktopDiscoveryRoot` is invalid: that service treats it as a
+literal relative directory name, not as the current user's Home.
 
 ## Discovery flow
 
@@ -160,8 +184,46 @@ migration.
 3. The frontend renders saved and cached repositories immediately.
 4. If the surface is active and the snapshot is 30 minutes old, it requests a refresh.
 5. The backend shares an existing scan or starts one scan for the root set.
-6. Success replaces the cache and broadcasts the new snapshot.
-7. Failure preserves the cache and marks only the failed root for recovery.
+6. Each successful root replaces its cached results, including an empty result.
+7. Each failed root retains only its previous results and reports recovery state.
+
+### Partial scan recovery
+
+This section defines AC-WORKSPACES-LOCAL-REPOSITORIES-003.9 through 003.12.
+`repoWalker.visit` distinguishes root errors from descendant errors.
+An inaccessible root fails its scan. An inaccessible descendant produces a
+structured warning and does not terminate traversal of accessible siblings.
+Cancellation and deadline expiry abort the operation without a cache write.
+The existing Home exclusions and explicit-path validation remain unchanged.
+
+`scanRootForRepos` retains repositories found before a descendant error.
+The scan carries the existing runtime and trigger context into descendant
+diagnostics. Warnings identify the denied descendant, not just its root.
+The walker emits at most one warning per denied path during one scan.
+It does not retry denied paths within that scan.
+
+The aggregate `discoveryCacheEntry` retains results by exact normalized scan
+root internally. A secondary per-root snapshot retains each root's last
+successful result independently of the aggregate root-set key. This preserves
+unchanged roots across Add or Reconnect invalidation without borrowing results
+from a different normalized path or maximum depth. `scanDiscoveryRoots`
+replaces successful root entries and retains failed root entries. A root
+without previous results contributes an empty list on failure.
+The response deduplicates the union by repository path. Root membership comes
+from scan provenance, not a path-prefix guess, because effective roots can overlap.
+Cache snapshots and responses copy their slices to prevent concurrent mutation.
+
+The public response keeps its existing fields. `failed_roots` lists current
+root failures. Descendant denials do not mark accessible roots as failed.
+An absent clone root remains a reported root failure, but never replaces fresh
+results from another root. Discovery does not create directories. Failed-root
+paths are diagnostic data and are not rendered by repository selectors.
+
+The aggregate `scan_time` advances only after all roots succeed. During partial
+failure, it retains the previous complete-scan time, or remains absent.
+The coordinator retains automatic-retry suppression for failed snapshots.
+Manual Refresh retries the effective roots through the existing single-flight
+operation. This repair does not introduce background retries.
 
 The shared discovery coordinator owns one activation count in each browser tab.
 An open consumer acquires one activation lease. It releases the lease when the
@@ -178,6 +240,100 @@ hidden. It starts no new scan until both conditions are true again.
 No interval runs when the activation count is zero. A manual Refresh action
 bypasses the freshness test but still shares an active scan.
 
+### Shared coordinator response ordering
+
+`RepositoryDiscoveryCoordinator` in
+`apps/web/hooks/domains/workspace/use-repository-discovery.ts` implements
+AC-WORKSPACES-LOCAL-REPOSITORIES-003.13 within each workspace entry. Cached
+snapshot reads and refresh scans retain separate single-flight pending handles,
+but share one publication owner. Starting a new transport operation takes
+ownership across both kinds. Joining an existing same-kind handle does not
+take ownership again for unchanged roots or start a replacement request. Request start
+order, rather than completion order or scan timestamps, determines eligibility.
+
+Register ownership and the pending handle before notifying subscribers. Only
+the current owner of a still-registered entry can publish a normalized response
+or error. A successful empty response is authoritative. A current failure keeps
+the last accepted response and publishes its error; an obsolete success cannot
+erase that error or supply an unaccepted fallback. Each operation clears only
+its own pending handle. Busy state is derived from actual pending work by kind;
+refresh state also preserves the accepted response's `refreshing` metadata.
+Obsolete cleanup cannot overwrite current data, metadata, or error, and cannot
+clear a newer operation's busy state. Settlement must publish coherent state
+before subscriber callbacks can start another operation.
+
+Snapshot follow-up freshness work belongs only to an accepted successful
+snapshot. Recheck ownership and entry identity after publication, because a
+subscriber can synchronously start a newer operation or dispose the coordinator.
+Follow-up also requires a visible document and an active lease. Preserve the
+existing stale/refreshing decision, failed-root freshness suppression, and
+explicit manual recovery. An obsolete snapshot cannot schedule a scan from
+shared state; a failed snapshot does not initiate new automatic work.
+
+Releasing the last lease retains the entry and permits an already active
+operation to populate its cache, but starts no automatic follow-up. `dispose()`
+removes entries and visibility listening. Late settlement from a removed entry
+cannot publish, notify, schedule work, or affect a replacement entry with the
+same workspace ID. Public `load()` and `refresh()` return the currently
+registered entry's accepted response after their joined operation settles, or
+`null` when that entry has been removed, without recreating it.
+
+Ordinary `load()` and `refresh()` keep their existing coalescing contract.
+Workspace Repositories, root controls, Office, Automations, Create Task, and
+Add Workspace Sources share this coordinator. Successful root changes use
+the separate synchronization boundary below. No timers, trailing retries,
+backend cache keys, cancellation protocol, or store shapes are added.
+Desktop and phone reuse their existing presentation and interaction patterns.
+
+### Successful root mutation synchronization
+
+This section implements AC-WORKSPACES-LOCAL-REPOSITORIES-003.14. Desktop root
+records and mutation endpoints are install-wide; browser coordinator entries
+remain keyed by workspace ID. The guarantee applies to every subscriber and
+hook consumer of the initiating workspace entry in this coordinator, not all
+entries, browser tabs, or connected clients. Other workspace entries retain
+their existing independent reads and normal activation/freshness behavior.
+There is no new cross-workspace or backend broadcast mechanism.
+
+Add a narrow `synchronizeAfterRootMutation(workspaceId, kind)` coordinator
+method, exposed as `synchronizeAfterRootMutation(kind)` by the discovery hook,
+where `kind` is `"load"` or `"refresh"`. Invoke it only after a root mutation's
+transport succeeds. In one synchronous boundary, revoke the entry's prior
+publication owner, detach both pending handles, and start the chosen new
+operation using the existing request machinery. Reserve its new handle and
+owner before the first notification; subscriber reentry can then join the
+new same-kind operation or start a newer distinct operation under AC-003.13.
+Do not notify between invalidation and reserving the fresh operation. Do not
+clear the last accepted response optimistically or infer results from paths.
+
+Detached transports still settle and their callers still await them. They
+cannot publish responses/errors, clear replacement handles, recreate busy
+state, notify consumers as accepted work, or initiate snapshot follow-up.
+Ignore settlement that owns neither a current handle nor publication. Current
+pending handles and accepted `refreshing` metadata determine busy state;
+detached work does not keep a successful new result busy until the old read
+returns. Entry identity still fences disposal and same-ID recreation. New
+load/refresh await returns retain the registered accepted-response convention.
+A later distinct read can take authority normally. A second successful
+mutation fences the preceding synchronization as well as ordinary reads.
+
+`useDiscoveryRootActions` requests `"load"` after Add, Home confirmation, and
+Reconnect; Remove requests `"refresh"`. Its manual Refresh continues through
+ordinary `refresh()` and does not invalidate. Preserve mutation serialization,
+Home admission refs, finally cleanup, and existing error reporting. Rejection
+or picker cancellation does not invoke this boundary; a current synchronization
+failure preserves the accepted response with the current discovery error.
+Visibility, leases, freshness, and failed-root policies still govern automatic
+follow-up of accepted snapshots.
+
+The settings root-action file is a reexport of this hook. Two direct successful
+Add Home call sites also replace their post-action `load()` with this boundary:
+`components/task-create-dialog-repo-chips.tsx` and
+`components/task/add-workspace-sources/saved-repository-source-row.tsx`.
+They keep their existing action and UI admission semantics. No root mutation
+client or backend signature changes are required. Backend mutations already
+invalidate their discovery cache; the fresh transport reads that authority.
+
 ## User interface
 
 Create Task, Add Workspace Sources, Automations, Office project setup, and
@@ -187,8 +343,11 @@ Desktop with no effective root shows saved repositories and one action named
 Choose folders to discover repositories. The action explains that the user can
 select Home or a narrower folder.
 
-If migration needs Home confirmation, the surface also shows Continue Home
-Discovery. Cancellation leaves the current choices unchanged.
+If migration needs Home confirmation, the surface also shows a direct
+Continue Home Discovery button. It has a disabled, busy state while the
+backend saves the root and scans. The separate Choose folders action still
+opens the picker. On a narrow viewport, both actions remain separate and
+reachable in the existing scroll region.
 
 An inaccessible saved root shows Reconnect and Remove actions. Reconnect opens
 the native picker again. It does not retry the denied path in the background.
@@ -201,6 +360,19 @@ browser on a desktop backend uses desktop policy and the HTTP folder browser.
 
 Temporary repository choices use the current phone-native picker or drawer
 composition. No native Tauri control appears in a browser or mobile viewport.
+
+`RepositoryDiscoveryControls` remains the desktop root-management surface. It
+does not render failed-root warnings or paths for server, browser, or phone
+selectors. Those selectors keep their available repository choices and their
+normal manual Refresh action. The backend and coordinator retain failed-root
+data for structured diagnostics and automatic-retry suppression, but that data
+is logs-only from the selector's perspective.
+
+Saved desktop roots retain their existing Reconnect and Remove actions. Those
+controls manage explicit saved roots and do not extend to operator-configured
+roots. Phone presentation reuses each existing selector and its scroll owner;
+no warning details or extra scroll owner is added. Desktop actions remain 28
+pixels high. Phone and coarse-pointer actions have at least 44-pixel hit targets.
 
 ## Workspace polling
 
@@ -268,7 +440,8 @@ Suggested event names are:
 
 - Picker cancellation changes no grant and starts no scan.
 - An invalid selected path is rejected without persistence.
-- A partial scan returns the last successful cache and identifies failed roots.
+- A partial scan combines fresh successful roots with cached failed roots.
+- An inaccessible descendant does not discard accessible sibling results.
 - A denied root moves to `reconnect_required` and receives no automatic retry.
 - An unsigned update can change macOS code identity. The UI offers Reconnect and
   does not claim that one consent will survive every update.
@@ -317,6 +490,71 @@ When neither validator succeeds, their errors are joined to retain diagnostics.
 The explicit repository validation contract is recorded in [Explicit submodule
 repository trust](../../../decisions/2026-08-28-explicit-submodule-repository-trust.md).
 
+### Settings manual validation ownership
+
+AC-WORKSPACES-LOCAL-REPOSITORIES-001.9 through 001.11 extend the local
+settings draft boundary. `WorkspaceRepositoriesRoute` loads the workspace and
+repositories, then renders `WorkspaceRepositoriesClient`. Its exported
+`useWorkspaceRepositoriesPage` owns drafts and the nested `useDiscoverDialog`.
+`AddLocalRepositoryDialog` forwards that state to the real `DiscoverRepoDialog`:
+editable manual input, Validate, discovered selection, Cancel/dismiss and Use
+Repository. Desktop root controls retain their existing discovery hooks.
+
+Keep authority local to `useDiscoverDialog`: one mounted lifetime, a dialog
+visit/context generation, current workspace ID and trimmed input, and a distinct
+attempt token for each admitted validation. Store the requested identity separately
+from the response's canonical `path`. A result is usable only for the current
+open context and newest attempt. String equality alone cannot recognize a visit
+or an A-to-B-to-A transition. Whitespace-only edits preserve the same trimmed
+identity; selecting a discovered repository retires manual work.
+
+Open/close, path/selection and confirmation handlers revoke authority synchronously
+before publishing React state. Workspace replacement and unmount retire the
+committed context before another callback can act; use lifecycle cleanup and
+committed latest-context references, with render projection also checking the
+current workspace/input/open identity. A passive reset effect alone is insufficient.
+An old render must never expose success, error or loading as current while a
+reset awaits an effect. StrictMode cleanup/setup must leave a usable new lifetime.
+
+Bind callbacks to their originating context and compare it with current authority
+at invocation. A retained validation callback cannot request an old path/workspace
+after its context retires. Repeated calls within one unchanged context are allowed:
+reserve a new attempt before invoking transport, so synchronous reentry admits
+the newest attempt. A retained confirmation must also match its accepted selection
+or successful attempt; it cannot admit a retired draft or borrow a newer result.
+
+Use the existing `validateRepositoryPathAction` and `isValidManualRepository`
+contract (`exists && is_git`). `useRequest` currently exposes completion-ordered
+loading and has no dialog identity. Remove only this hook's reliance on its
+unqualified state; call the same action locally and derive `isValidating` from
+the owned pending attempt. Do not change the generic hook. Guard success, invalid
+response, rejection and finalization with the same context/attempt authority.
+Retired transport still settles; preserve the async handler's caught-error/void
+settlement for callers. It cannot clear a replacement attempt, revive busy state,
+or publish feedback. No cancellation, cache, store or discovery-owner change is
+needed.
+
+Project `manualValidation`, `isValidating` and `canSave` from accepted current
+state. Confirmation in `useWorkspaceRepositoriesPage` must consult the same local
+authority at invocation, rather than trust a button's disabled flag or captured
+`manualValidation`. Build a draft only from an actual current discovered row or
+accepted canonical manual path in the current workspace. Keep `buildDraftRepo`
+defaults and selected repository name/branch behavior. Never substitute raw input
+for a stale or missing validated result. Close through the same retirement path.
+
+Confirmation prepends a `temp-repo-*` item only. `handleSaveRepository` later calls
+`saveNewRepository` and `createRepositoryAction`; server validation and persistence
+remain authoritative. This design changes neither save transport nor draft-store
+shape and makes no claim that the observed race already persisted a wrong path.
+
+The same form and state path serve phone and desktop. This is state/data handling
+only: no layout, touch, scrolling, navigation, copy or breakpoint changes. Targeted
+real form/hook tests satisfy the narrow mobile-parity exception; no new browser,
+build or E2E work is required. Verify with the actual exported page hook,
+`StateProvider`/`createAppStore`, router, actions, discovery and dialog/root controls,
+mocking only fetch transport. Cover identity transitions, retained callbacks,
+newest-attempt reentry and ordinary canonical/discovered selection controls.
+
 ## Verification strategy
 
 - Go tests cover runtime policy, canonical roots, cache freshness, single-flight
@@ -324,6 +562,15 @@ repository trust](../../../decisions/2026-08-28-explicit-submodule-repository-tr
 - Rust tests cover origin checks, cancellation, directory-only selection, and
   the absence of generic filesystem commands.
 - Frontend tests cover all repository-selection consumers through one shared hook.
+- Deterministic deferred coordinator tests cover both overlap directions,
+  failures, empty results, same-kind sharing, workspace isolation, reentrant
+  subscriptions, lease release, and disposal. Real shared-hook/Office-consumer
+  integration covers exposed choices and flags with only transport mocked.
+- Root-mutation regressions cover each successful action with pending same-kind
+  and opposite-kind reads, both settlement orders and failure directions,
+  authoritative empty state, fresh pending flags, ordinary sharing, sequential
+  mutations, reentry, workspace isolation, release, and disposal. Real discovery
+  and root-action hooks plus a real shared Office consumer mock only transport.
 - Web E2E uses a stubbed native-picker adapter for selection, cancellation,
   cache, denial, reconnect, removal, and migration states.
 - Browser E2E covers server Home discovery at desktop and phone widths. It also
@@ -332,6 +579,13 @@ repository trust](../../../decisions/2026-08-28-explicit-submodule-repository-tr
 - Manual macOS QA covers `NSOpenPanel` and real privacy dialogs.
 - Lifecycle tests cover final refresh, paused delivery, startup fallback, focus,
   and new operation activity.
+
+## Implementation plans
+
+- [Manual Repository Validation Ownership](../../../plans/manual-repository-validation-ownership/plan.md)
+- [Repository Discovery Root Mutations](../../../plans/repository-discovery-root-mutations/plan.md)
+- [Repository Discovery Ordering](../../../plans/repository-discovery-ordering/plan.md)
+- [Repository Discovery Failure Recovery](../../../plans/repository-discovery-failure-recovery/plan.md)
 
 ## Decisions
 

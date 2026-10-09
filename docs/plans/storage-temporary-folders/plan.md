@@ -13,6 +13,9 @@ legacy_specs: []
 
 ## Overview
 
+The completed [storage analysis presentation package](../storage-analysis-presentation/plan.md)
+extends row ordering, usage bars, and timeout feedback. This completed package retains its original evidence.
+
 Deliver temporary-folder visibility first, then optional cleanup of registered artifacts, then integrated browser evidence.
 Each slice preserves the distinction between measured storage and cleanup ownership.
 All work stays sequential in the primary session.

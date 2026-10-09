@@ -157,6 +157,14 @@ func prDiscoveryTargetForWatch(watch *PRWatch) prDiscoveryHealthTarget {
 func (s *Service) beginPRDiscoveryWatch(
 	workspaceID, cacheScope string, credentialGeneration int64, watch *PRWatch,
 ) (prDiscoveryWatchAttempt, bool) {
+	return s.beginPRDiscoveryWatchWithOptions(
+		workspaceID, cacheScope, credentialGeneration, watch, false,
+	)
+}
+
+func (s *Service) beginPRDiscoveryWatchWithOptions(
+	workspaceID, cacheScope string, credentialGeneration int64, watch *PRWatch, explicitRefresh bool,
+) (prDiscoveryWatchAttempt, bool) {
 	target := prDiscoveryTargetForWatch(watch)
 	attempt := prDiscoveryWatchAttempt{target: target}
 	health := s.ensurePRDiscoveryHealth()
@@ -164,8 +172,8 @@ func (s *Service) beginPRDiscoveryWatch(
 		return attempt, true
 	}
 	s.prDiscoveryAttemptsMu.Lock()
-	invalidatedTargets, number, admitted, joined, eventHealth := health.trackConsumerAndBegin(
-		workspaceID, cacheScope, credentialGeneration, prDiscoveryWatchID(watch), target,
+	invalidatedTargets, number, admitted, joined, eventHealth := health.trackConsumerAndBeginWithOptions(
+		workspaceID, cacheScope, credentialGeneration, prDiscoveryWatchID(watch), target, explicitRefresh,
 	)
 	s.invalidatePRDiscoveryAttemptsLocked(workspaceID, invalidatedTargets)
 	if s.prDiscoveryAttempts == nil {
@@ -178,6 +186,10 @@ func (s *Service) beginPRDiscoveryWatch(
 		if joined && result != nil {
 			attempt.joined = true
 		} else {
+			if explicitRefresh && result != nil {
+				result.complete(nil, false, true, nil, true)
+				delete(s.prDiscoveryAttempts, key)
+			}
 			result = newPRDiscoveryAttemptResult(workspaceID, target.key())
 			s.prDiscoveryAttempts[key] = result
 		}
@@ -201,11 +213,11 @@ func (h *prDiscoveryHealthStore) beginWithJoin(
 	scopeKey := prDiscoveryScopeKey(workspaceID, cacheScope)
 	delete(h.retired, scopeKey)
 	scope := h.scopeLocked(workspaceID, cacheScope, credentialGeneration)
-	return h.beginWithJoinScopeLocked(scope, target)
+	return h.beginWithJoinScopeLocked(scope, target, false)
 }
 
 func (h *prDiscoveryHealthStore) beginWithJoinScopeLocked(
-	scope *prDiscoveryHealthScope, target prDiscoveryHealthTarget,
+	scope *prDiscoveryHealthScope, target prDiscoveryHealthTarget, explicitRefresh bool,
 ) (uint64, bool, bool) {
 	if scope == nil {
 		return 0, false, false
@@ -214,10 +226,10 @@ func (h *prDiscoveryHealthStore) beginWithJoinScopeLocked(
 	state := scope.targets[key]
 	now := h.nowLocked()
 	if state != nil {
-		if state.active {
+		if state.active && !explicitRefresh {
 			return state.attempt, true, true
 		}
-		if state.retryAt != nil && now.Before(*state.retryAt) {
+		if !state.active && state.retryAt != nil && now.Before(*state.retryAt) {
 			return 0, false, false
 		}
 	}
@@ -236,6 +248,15 @@ func (h *prDiscoveryHealthStore) beginWithJoinScopeLocked(
 
 func (h *prDiscoveryHealthStore) trackConsumerAndBegin(
 	workspaceID, cacheScope string, credentialGeneration int64, watchID string, target prDiscoveryHealthTarget,
+) ([]string, uint64, bool, bool, *PRDiscoveryHealth) {
+	return h.trackConsumerAndBeginWithOptions(
+		workspaceID, cacheScope, credentialGeneration, watchID, target, false,
+	)
+}
+
+func (h *prDiscoveryHealthStore) trackConsumerAndBeginWithOptions(
+	workspaceID, cacheScope string, credentialGeneration int64, watchID string,
+	target prDiscoveryHealthTarget, explicitRefresh bool,
 ) ([]string, uint64, bool, bool, *PRDiscoveryHealth) {
 	if h == nil || workspaceID == "" || cacheScope == "" || watchID == "" {
 		return nil, 0, true, false, nil
@@ -276,7 +297,7 @@ func (h *prDiscoveryHealthStore) trackConsumerAndBegin(
 	if changed {
 		scope.revision++
 	}
-	number, admitted, joined := h.beginWithJoinScopeLocked(scope, target)
+	number, admitted, joined := h.beginWithJoinScopeLocked(scope, target, explicitRefresh)
 	var eventHealth *PRDiscoveryHealth
 	if changed {
 		snapshot := h.snapshotLocked(scope)

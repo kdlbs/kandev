@@ -33,8 +33,7 @@ test("mobile creates in the selected workspace after leaving an open task", asyn
     testPage.locator("header").getByText("Mobile Workspace A Task", { exact: true }),
   ).toBeVisible();
 
-  // The phone task workbench has no workspace picker. Its existing back action
-  // returns to the board, whose responsive Menu drawer owns workspace switching.
+  // Return to the board before checking its workspace-specific creation context.
   await testPage.getByRole("link", { name: "Task overview" }).tap();
   await expect(mobile.mobileKanbanLayout()).toBeVisible();
   await mobile.mobileMenuButton.tap();

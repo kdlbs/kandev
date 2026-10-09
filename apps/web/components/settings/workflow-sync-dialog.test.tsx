@@ -63,6 +63,7 @@ function formForConfig(currentConfig: WorkflowSyncConfig | null): WorkflowSyncFo
 function controller(overrides: Partial<WorkflowSyncController> = {}): WorkflowSyncController {
   const currentConfig = overrides.config === undefined ? config() : overrides.config;
   return {
+    lifetime: Symbol(),
     config: currentConfig,
     form: formForConfig(currentConfig),
     url: currentConfig ? "https://github.com/acme/flows" : "",
@@ -73,7 +74,10 @@ function controller(overrides: Partial<WorkflowSyncController> = {}): WorkflowSy
     update: vi.fn(),
     setUrlInput: vi.fn(),
     setProvider: vi.fn(),
-    handleSave: vi.fn().mockResolvedValue(true),
+    handleSave: vi.fn(async (onDraftAccepted?: () => void) => {
+      onDraftAccepted?.();
+      return true;
+    }),
     handleDelete: vi.fn().mockResolvedValue(true),
     handleSyncNow: vi.fn().mockResolvedValue(undefined),
     ...overrides,

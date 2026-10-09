@@ -573,6 +573,7 @@ func TestResolveRunProject(t *testing.T) {
 		{"empty payload", "", "", service.ProjectResolutionNoneForTest},
 		{"empty object payload", "{}", "", service.ProjectResolutionNoneForTest},
 		{"no task_id key", `{"other":"field"}`, "", service.ProjectResolutionNoneForTest},
+		{"whitespace-only task_id", `{"task_id":"   "}`, "", service.ProjectResolutionNoneForTest},
 		{"task resolves with no project", `{"task_id":"task-no-project"}`, "", service.ProjectResolutionNoneForTest},
 		{"task resolves with a project", `{"task_id":"task-with-project"}`, "project-1", service.ProjectResolutionFoundForTest},
 		{"unparseable payload", `{not-json`, "", service.ProjectResolutionUnparseableForTest},

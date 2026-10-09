@@ -178,3 +178,8 @@ requirement and adds its system design.
   layouts. Desktop and mobile tests must retain viewport containment.
 - A missing or mismatched workspace ID must never be replaced with the active
   workspace or reach a global notification broadcast.
+
+## Follow-up repair
+
+[Preserve PR details after approval clears](../pr-task-disclosure-negative-projection/plan.md) repairs the newer negative projection path.
+This completed package retains its original work-order statuses and verification results.

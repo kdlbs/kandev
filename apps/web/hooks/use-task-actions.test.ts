@@ -11,6 +11,9 @@ const replaceTaskUrlMock = vi.fn();
 const setActiveSessionMock = vi.fn();
 const setActiveTaskMock = vi.fn();
 const toastMock = vi.fn();
+const dismissToastMock = vi.fn();
+const archiveFailureMessage = "archive failed";
+const archiveProgressToastId = "archive-progress-toast";
 let storeState: {
   tasks: { activeTaskId: string | null; activeSessionId: string | null };
   setActiveSession: (...args: unknown[]) => void;
@@ -40,7 +43,7 @@ vi.mock("@/hooks/use-task-removal", () => ({
   }),
 }));
 vi.mock("@/components/toast-provider", () => ({
-  useToast: () => ({ toast: toastMock }),
+  useToast: () => ({ toast: toastMock, dismissToast: dismissToastMock }),
 }));
 
 import {
@@ -51,6 +54,7 @@ import {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  toastMock.mockReturnValue(archiveProgressToastId);
   storeState = {
     tasks: { activeTaskId: "task-A", activeSessionId: "sess-A" },
     setActiveSession: (...args: unknown[]) => setActiveSessionMock(...args),
@@ -112,11 +116,13 @@ describe("useArchiveAndSwitchTask", () => {
   });
 
   it("does not restore a task when the coordinator rejects before mutation", async () => {
-    const error = new Error("archive failed");
+    const error = new Error(archiveFailureMessage);
     runTaskRemovalMock.mockRejectedValueOnce(error);
     const { result } = renderHook(() => useArchiveAndSwitchTask());
 
-    await expect(result.current("task-A", { cascade: true })).rejects.toThrow("archive failed");
+    await expect(result.current("task-A", { cascade: true })).rejects.toThrow(
+      archiveFailureMessage,
+    );
 
     expect(setActiveSessionMock).not.toHaveBeenCalled();
     expect(setActiveTaskMock).not.toHaveBeenCalled();
@@ -153,6 +159,102 @@ describe("useDeleteAndSwitchTask", () => {
 });
 
 describe("useTaskActions", () => {
+  // @covers AC-TASKS-REMOVAL-NAVIGATION-004.1, AC-TASKS-REMOVAL-NAVIGATION-004.2
+  it("keeps a loading toast visible until an archive request resolves", async () => {
+    let resolveArchive!: () => void;
+    archiveTaskMock.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveArchive = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useTaskActions());
+
+    const request = result.current.archiveTaskById("task-1");
+
+    expect(toastMock).toHaveBeenCalledWith({
+      title: "Archiving in progress",
+      variant: "loading",
+    });
+    expect(dismissToastMock).not.toHaveBeenCalled();
+
+    resolveArchive();
+    await request;
+
+    expect(dismissToastMock).toHaveBeenCalledWith(archiveProgressToastId);
+  });
+
+  // @covers AC-TASKS-REMOVAL-NAVIGATION-004.2
+  it("dismisses the loading toast when an archive request rejects", async () => {
+    archiveTaskMock.mockRejectedValueOnce(new Error(archiveFailureMessage));
+    const { result } = renderHook(() => useTaskActions());
+
+    await expect(result.current.archiveTaskById("task-1")).rejects.toThrow(archiveFailureMessage);
+
+    expect(dismissToastMock).toHaveBeenCalledWith(archiveProgressToastId);
+  });
+
+  // @covers AC-TASKS-REMOVAL-NAVIGATION-004.3
+  it("coalesces concurrent archive requests into one loading toast", async () => {
+    let resolveFirst!: () => void;
+    let resolveSecond!: () => void;
+    archiveTaskMock
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveFirst = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveSecond = resolve;
+        }),
+      );
+    const { result } = renderHook(() => useTaskActions());
+
+    const firstRequest = result.current.archiveTaskById("task-1");
+    const secondRequest = result.current.archiveTaskById("task-2");
+
+    expect(toastMock).toHaveBeenCalledTimes(1);
+
+    resolveFirst();
+    await firstRequest;
+    expect(dismissToastMock).not.toHaveBeenCalled();
+
+    resolveSecond();
+    await secondRequest;
+    expect(dismissToastMock).toHaveBeenCalledTimes(1);
+    expect(dismissToastMock).toHaveBeenCalledWith(archiveProgressToastId);
+  });
+
+  // @covers AC-TASKS-REMOVAL-NAVIGATION-004.2, AC-TASKS-REMOVAL-NAVIGATION-004.3
+  it("keeps the shared toast until a concurrent request resolves after another rejects", async () => {
+    let rejectFirst!: (error: Error) => void;
+    let resolveSecond!: () => void;
+    archiveTaskMock
+      .mockReturnValueOnce(
+        new Promise<void>((_resolve, reject) => {
+          rejectFirst = reject;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveSecond = resolve;
+        }),
+      );
+    const { result } = renderHook(() => useTaskActions());
+
+    const firstRequest = result.current.archiveTaskById("task-1");
+    const secondRequest = result.current.archiveTaskById("task-2");
+
+    rejectFirst(new Error(archiveFailureMessage));
+    await expect(firstRequest).rejects.toThrow(archiveFailureMessage);
+    expect(dismissToastMock).not.toHaveBeenCalled();
+
+    resolveSecond();
+    await secondRequest;
+    expect(dismissToastMock).toHaveBeenCalledTimes(1);
+    expect(dismissToastMock).toHaveBeenCalledWith(archiveProgressToastId);
+  });
+
   it("shows localized retry guidance for a dirty-worktree delete conflict", async () => {
     const { ApiError } = await import("@/lib/api/client");
     deleteTaskMock.mockRejectedValueOnce(

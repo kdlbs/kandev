@@ -30,7 +30,63 @@ Task comments render as plain text with `whitespace-pre-wrap`. Agent responses r
 - **AC-UI-COMMENT-MARKDOWN-001.9:** When a task message links to an absolute file path beneath a repository checkout registered to that task, but the active session uses a different worktree path for the same repository, selecting the link opens the corresponding file from the active task workspace on desktop and phone. Kandev does not read or edit the registered source checkout.
 - **AC-UI-COMMENT-MARKDOWN-001.10:** When an absolute host file path cannot be mapped to the active task workspace or to a registered repository represented by that workspace, selecting it does not navigate the current Kandev tab or issue a workspace file request.
 
-## Migrated source detail
+### REQ-UI-COMMENT-MARKDOWN-002: Prose section separators
+
+**Intent:** Shared Markdown surfaces show prose followed by a section separator
+as body text and a horizontal rule. UI owns this reusable presentation contract.
+This is a bounded exception to the GFM behavior in requirement 001.
+
+**Delivery:** Implemented as a render-time extension of the existing Markdown
+normalizer. The [section separator plan](../../../plans/chat-markdown-separators/plan.md)
+records the implementation and verification.
+
+#### Eligibility
+
+A separator candidate contains at least three consecutive hyphens, zero to three
+leading spaces, and optional trailing spaces or tabs. Internal spaces are excluded.
+The immediately preceding source line must be nonblank, ordinary paragraph text.
+It must contain whitespace between words and satisfy either condition:
+
+- At least 70 Unicode code points after trimming surrounding whitespace.
+- At least 40 code points and a final sentence terminator (`.`, `!`, or `?`).
+  Closing backticks, emphasis markers, parentheses, brackets, or quotes after
+  the terminator do not prevent eligibility.
+
+These limits describe source text, including inline Markdown. They do not depend
+on viewport width or visual wrapping. A short final line does not become eligible
+because earlier paragraph lines are long.
+
+#### Acceptance criteria
+
+- **AC-UI-COMMENT-MARKDOWN-002.1:** When an eligible paragraph precedes a candidate,
+  the renderer shall show paragraph content followed by a semantic horizontal rule.
+  It shall not promote that paragraph to a level-two heading.
+- **AC-UI-COMMENT-MARKDOWN-002.2:** When the preceding line fails both length rules,
+  the renderer shall retain GFM interpretation. `Skills to change` followed by
+  `---` shall remain a level-two heading. Short punctuated titles also remain headings.
+- **AC-UI-COMMENT-MARKDOWN-002.3:** The repair shall leave candidates inside backtick
+  or tilde fences unchanged, including unclosed fences and longer enclosing fences.
+  An ATX heading, list item, table row, blockquote, rule, fence delimiter, or indented
+  code line immediately before a candidate shall not trigger repair.
+- **AC-UI-COMMENT-MARKDOWN-002.4:** The repair shall preserve already separated rules,
+  `===`, `***`, `___`, spaced hyphens, and leading YAML-style front matter boundaries.
+  It shall preserve existing rule-delimited bare-code fixtures byte for byte.
+- **AC-UI-COMMENT-MARKDOWN-002.5:** The repair shall change only the render input.
+  Stored message content shall remain unchanged. Repeated normalization shall produce
+  the same output, with original line endings and surrounding blank lines preserved.
+- **AC-UI-COMMENT-MARKDOWN-002.6:** Desktop and phone chat shall show the same
+  paragraph, heading, and separator semantics before and after message reload.
+  Existing heading sizes, transcript navigation, and scroll ownership shall remain unchanged.
+
+#### Compatibility and exclusions
+
+The threshold deliberately favors section separators for long prose. An intentional
+setext heading that meets eligibility also becomes a separator. Authors can use an
+ATX heading to express an unambiguous long title. Short prose can remain setext.
+General author-intent inference and repairs inside nested Markdown containers are
+excluded. This contract does not authorize bare-wrapper repair or raw HTML support.
+
+## Migrated source detail (requirement 001)
 
 ## Why
 

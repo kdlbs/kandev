@@ -331,13 +331,11 @@ describe("buildAgentsBranch", () => {
 });
 
 describe("buildExecutorsBranch", () => {
-  it("uses the executor-scoped profile route, the one with an executor crumb", () => {
+  it("uses the canonical profile route", () => {
     const [executor] = buildExecutorsBranch(EXECUTORS);
 
     expect(executor.href).toBe("/settings/executor/exec-1");
-    expect(hrefsOf(executor.children ?? [])).toEqual([
-      "/settings/executor/exec-1/profile/exec-profile-1",
-    ]);
+    expect(hrefsOf(executor.children ?? [])).toEqual(["/settings/executors/exec-profile-1"]);
   });
 
   it("makes a configured Kubernetes executor disclosure-only and links its profile root", () => {
@@ -446,12 +444,12 @@ describe("findActiveNodePath", () => {
   });
 
   it("stops at the row when the route has no node — the row stays active", () => {
-    // The install catalogue is not an agent, and the flat profile spelling has
-    // no executor to nest under. Both are the row's own pages.
+    // The install catalogue is not an agent, and an unknown profile has no
+    // executor to nest under. Both are the row's own pages.
     expect(findActiveNodePath(forest, "/settings/agents/browse")).toEqual([
       settingsMenuRowKey("/settings/agents"),
     ]);
-    expect(findActiveNodePath(forest, "/settings/executors/exec-profile-1")).toEqual([
+    expect(findActiveNodePath(forest, "/settings/executors/unknown-profile")).toEqual([
       settingsMenuRowKey(EXECUTORS_HREF),
     ]);
   });

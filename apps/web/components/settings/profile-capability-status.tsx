@@ -4,20 +4,31 @@ import { IconAlertCircle, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { ModelConfig } from "@/lib/types/http";
+import type { ProfileDiscoveryStatus } from "@/hooks/domains/settings/use-profile-model-capabilities";
 
 const CAPABILITY_STATUS_KEYS: Record<string, string> = {
   probing: "agents:capabilityProbing",
   auth_required: "agents:capabilityAuthRequired",
   not_installed: "agents:capabilityNotInstalled",
   failed: "agents:capabilityProbeFailed",
+  loading: "agents:capabilityProbing",
+  stale: "agents:profileCapabilitiesStale",
+  ready: "agents:profileCapabilitiesReady",
 };
 
-function capabilityStatusMessage(t: TFunction, status: ModelConfig["status"]): string | null {
+function capabilityStatusMessage(
+  t: TFunction,
+  status: ModelConfig["status"] | ProfileDiscoveryStatus,
+): string | null {
   const key = status ? CAPABILITY_STATUS_KEYS[status] : undefined;
   return key ? t(key) : null;
 }
 
-export function CapabilityStatusMessage({ status }: { status: ModelConfig["status"] }) {
+export function CapabilityStatusMessage({
+  status,
+}: {
+  status: ModelConfig["status"] | ProfileDiscoveryStatus;
+}) {
   const { t } = useTranslation();
   const msg = capabilityStatusMessage(t, status);
   if (!msg) return null;
@@ -43,19 +54,23 @@ export function RefreshCapabilitiesButton({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5 shrink-0">
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={onRefresh}
-            disabled={isLoading}
-            className="cursor-pointer"
-            data-testid="profile-refresh-capabilities"
-          >
-            <IconRefresh className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-          </Button>
+          <span tabIndex={isLoading ? 0 : -1} className="inline-flex">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={onRefresh}
+              disabled={isLoading}
+              aria-label={t("agents:refreshCapabilities")}
+              data-testid="profile-refresh-capabilities"
+              className="cursor-pointer shrink-0"
+            >
+              <IconRefresh className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+            </Button>
+          </span>
         </TooltipTrigger>
         <TooltipContent>
           <p>{t("agents:refreshCapabilitiesTooltip")}</p>

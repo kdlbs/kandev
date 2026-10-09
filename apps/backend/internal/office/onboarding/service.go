@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/agents"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/configloader"
@@ -37,6 +38,10 @@ type Repository interface {
 	// used by onboarding to write explicit routing.inherit markers on
 	// the freshly created CEO agent.
 	UpdateAgentSettings(ctx context.Context, agentID, settings string) error
+	// GetTaskWorkflowStepID resolves the workflow step currently bound to
+	// a task, used to gate the onboarding task's initial wake to steps
+	// that auto-start an agent.
+	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
 }
 
 // WorkspaceCreator creates a DB workspace row for kanban compatibility.
@@ -53,15 +58,24 @@ type WorkspaceCreator interface {
 // CreateOfficeTask routes the task through the workspace's office workflow
 // (workspaces.office_workflow_id). CreateOfficeTaskInWorkflow targets a
 // specific workflow id explicitly — used by the routines dispatcher to
-// pin tasks to the dedicated routine workflow.
+// pin tasks to the dedicated routine workflow; onboarding never calls it,
+// but must still declare the same signature as routines.RoutineTaskCreator
+// because both interfaces are satisfied by the same concrete adapter.
 type TaskCreator interface {
 	CreateOfficeTask(ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string) (taskID string, err error)
-	CreateOfficeTaskInWorkflow(ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description string) (taskID string, err error)
+	CreateOfficeTaskInWorkflow(ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description, routineID string) (taskID string, err error)
 }
 
 // AgentCreator creates a new agent instance with validation.
 type AgentCreator interface {
 	CreateAgentInstance(ctx context.Context, agent *models.AgentInstance) error
+}
+
+// AgentDefaultSkillBackfiller lets onboarding retry default-skill attachment
+// after the new workspace and agent rows are committed. The optional hook
+// covers workspaces created after the backend startup system-skill sync.
+type AgentDefaultSkillBackfiller interface {
+	BackfillDefaultSkillsForWorkspace(ctx context.Context, workspaceID string)
 }
 
 // CoordinatorRoutineInstaller installs the pre-baked coordinator-heartbeat
@@ -124,6 +138,17 @@ type OnboardingService struct {
 	runQueuer        shared.RunQueuer
 	configSyncer     ConfigSyncer
 	routineInstaller CoordinatorRoutineInstaller
+
+	// workflowStepGetter resolves a task's current workflow step so the
+	// onboarding task's initial wake can be gated to steps that auto-start
+	// an agent. Optional — nil fails open (see shared.IsAssignmentWakeEligible).
+	workflowStepGetter shared.AssignmentStepGetter
+}
+
+// SetWorkflowStepGetter wires the workflow step lookup used to gate the
+// onboarding task's initial wake. Left nil, the gate fails open.
+func (s *OnboardingService) SetWorkflowStepGetter(g shared.AssignmentStepGetter) {
+	s.workflowStepGetter = g
 }
 
 // SetCoordinatorRoutineInstaller wires the routines-service hook used
@@ -272,6 +297,9 @@ func (s *OnboardingService) CompleteOnboarding(ctx context.Context, req Complete
 	if err := taskservice.ValidateTaskTitle(req.TaskTitle); err != nil {
 		return nil, fmt.Errorf("invalid onboarding task title: %w", err)
 	}
+	if err := s.validateDynamicOnboardingSource(ctx, req.AgentProfileID); err != nil {
+		return nil, err
+	}
 
 	if err := s.createOnboardingWorkspace(ctx, req.WorkspaceName, req.TaskPrefix); err != nil {
 		return nil, fmt.Errorf("create workspace: %w", err)
@@ -349,7 +377,12 @@ func (s *OnboardingService) maybeCreateOnboardingTask(
 		s.logger.Warn("create onboarding task failed", zap.Error(err))
 		return ""
 	}
-	if s.runQueuer != nil {
+	// The landing step must accept an auto-started run before this wake is
+	// queued — onboarding never sets StartAgent/PlanMode, so a custom
+	// workflow's start step and auto-start step can genuinely differ. See
+	// shared.IsAssignmentWakeEligible for the fail-open rationale.
+	if s.runQueuer != nil &&
+		shared.IsAssignmentWakeEligible(ctx, s.logger, s.repo, s.workflowStepGetter, taskID, "onboarding.maybe_create_onboarding_task") {
 		// A third task_assigned producer alongside queueTaskAssignedRun; it is
 		// never handed the assigning transaction's generation, so it enqueues
 		// keyless rather than deriving a divergent key.
@@ -562,13 +595,60 @@ func (s *OnboardingService) createOnboardingAgent(ctx context.Context, wsID stri
 		if err != nil {
 			return "", fmt.Errorf("look up source profile %s: %w", req.AgentProfileID, err)
 		}
+		if src == nil {
+			return "", errors.New("selected source profile is unavailable")
+		}
+		if src.AgentID == agents.DynamicAgentID {
+			if err := validateDynamicOnboardingSource(src); err != nil {
+				return "", err
+			}
+		}
+		if src.WorkspaceID != "" && src.WorkspaceID != wsID {
+			return "", errors.New("source agent profile belongs to a different workspace")
+		}
 		agent.AgentID = src.AgentID
+		if src.AgentID == agents.DynamicAgentID {
+			// The chosen profile is a dynamic routing owner. Bind the Office
+			// identity to it so launches resolve a concrete candidate; the
+			// Office ID remains the session's logical profile.
+			agent.ExecutionAgentProfileID = src.ID
+		}
 	}
 	if err := s.agentCreator.CreateAgentInstance(ctx, agent); err != nil {
 		return "", err
 	}
+	if backfiller, ok := s.agentCreator.(AgentDefaultSkillBackfiller); ok {
+		backfiller.BackfillDefaultSkillsForWorkspace(ctx, wsID)
+	}
 	s.installCoordinatorRoutine(ctx, wsID, agent.ID, agent.Role)
 	return agent.ID, nil
+}
+
+func (s *OnboardingService) validateDynamicOnboardingSource(ctx context.Context, profileID string) error {
+	if profileID == "" || s.sourceProfile == nil {
+		return nil
+	}
+	source, err := s.sourceProfile.GetAgentProfile(ctx, profileID)
+	if err != nil {
+		return fmt.Errorf("look up source profile %s: %w", profileID, err)
+	}
+	if source == nil {
+		return errors.New("selected source profile is unavailable")
+	}
+	if source.AgentID != agents.DynamicAgentID {
+		return nil
+	}
+	return validateDynamicOnboardingSource(source)
+}
+
+func validateDynamicOnboardingSource(source *models.AgentInstance) error {
+	if source == nil || source.DeletedAt != nil || !source.Enabled {
+		return errors.New("selected dynamic agent profile is unavailable")
+	}
+	if source.WorkspaceID != "" {
+		return errors.New("onboarding requires a global dynamic agent profile")
+	}
+	return nil
 }
 
 // seedWorkspaceRouting writes authoritative execution-profile references plus
@@ -661,6 +741,13 @@ func (s *OnboardingService) applyOnboardingTierProfile(
 	src, err := s.sourceProfile.GetAgentProfile(ctx, profileID)
 	if err != nil {
 		return fmt.Errorf("look up tier profile %s: %w", profileID, err)
+	}
+	if src.AgentID == agents.DynamicAgentID {
+		// The legacy workspace routing shape (provider_profiles) only carries
+		// concrete provider families. A dynamic profile is executed through the
+		// dynamic resolver, so there is nothing to seed here; skip instead of
+		// emitting an "unsupported provider" warning.
+		return nil
 	}
 	if src.AgentID == "" {
 		return nil

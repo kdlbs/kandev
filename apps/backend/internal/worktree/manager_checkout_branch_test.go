@@ -490,6 +490,7 @@ func runGit(t *testing.T, repoPath string, args ...string) string {
 
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoPath
+	cmd.Env = mainCheckoutInspectionEnvironment(os.Environ())
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(output))

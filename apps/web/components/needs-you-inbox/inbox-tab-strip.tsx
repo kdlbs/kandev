@@ -21,6 +21,7 @@ export function InboxTabStrip({
   needsYouHasMore,
   failedCount,
   failedTruncated,
+  historyCount,
   children,
 }: {
   selectedTab: InboxTab;
@@ -29,11 +30,13 @@ export function InboxTabStrip({
   needsYouHasMore: boolean;
   failedCount: number | undefined;
   failedTruncated: boolean;
+  historyCount: number;
   children?: ReactNode;
 }) {
   const { t } = useTranslation();
   const needsYouBadge = badgeText(needsYouCount, needsYouHasMore);
   const failedBadge = badgeText(failedCount, failedTruncated);
+  const historyBadge = badgeText(historyCount, false);
 
   return (
     <Tabs value={selectedTab} onValueChange={(value) => onSelectTab(value as InboxTab)}>
@@ -54,6 +57,18 @@ export function InboxTabStrip({
           {failedBadge && (
             <Badge variant="secondary" data-testid="inbox-tab-failed-badge">
               {failedBadge}
+            </Badge>
+          )}
+        </TabsTrigger>
+        <TabsTrigger
+          value="history"
+          data-testid="inbox-tab-history"
+          className="max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+        >
+          {t("inboxHistory:tabLabel")}
+          {historyBadge && (
+            <Badge variant="secondary" data-testid="inbox-tab-history-badge">
+              {historyBadge}
             </Badge>
           )}
         </TabsTrigger>

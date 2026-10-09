@@ -66,7 +66,7 @@ func TestKubernetesSessionRetentionProjectionTable(t *testing.T) {
 			clientset := kubernetesfake.NewSimpleClientset(pod)
 			handler := retentionProjectionHandler(repo, clientset)
 
-			row, visible, err := handler.sessionRow(context.Background(), clientset, "executor-1", run)
+			row, visible, err := handler.sessionRow(context.Background(), newSessionStatusCache(clientset), "executor-1", run)
 
 			require.NoError(t, err)
 			require.True(t, visible)
@@ -120,7 +120,7 @@ func TestKubernetesRetentionProjectionOmitsUnverifiedRequests(t *testing.T) {
 			}
 			handler := retentionProjectionHandler(repo, clientset)
 
-			row, visible, err := handler.sessionRow(context.Background(), clientset, "executor-1", run)
+			row, visible, err := handler.sessionRow(context.Background(), newSessionStatusCache(clientset), "executor-1", run)
 
 			require.NoError(t, err)
 			require.True(t, visible)
@@ -153,7 +153,7 @@ func TestKubernetesMainContainerRequestsPreserveExplicitZero(t *testing.T) {
 	clientset := kubernetesfake.NewSimpleClientset(pod)
 	handler := retentionProjectionHandler(repo, clientset)
 
-	row, visible, err := handler.sessionRow(context.Background(), clientset, "executor-1", run)
+	row, visible, err := handler.sessionRow(context.Background(), newSessionStatusCache(clientset), "executor-1", run)
 
 	require.NoError(t, err)
 	require.True(t, visible)

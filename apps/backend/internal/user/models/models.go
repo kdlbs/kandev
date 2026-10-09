@@ -60,6 +60,39 @@ func NormalizeLastSeenDisplay(value string) string {
 }
 
 const (
+	// MessageTimeDisplayRelative selects the compact relative transcript label.
+	MessageTimeDisplayRelative = "relative"
+	// MessageTimeDisplayAbsoluteShort selects the regional short date and time.
+	MessageTimeDisplayAbsoluteShort = "absolute_short"
+	// MessageTimeDisplayAbsoluteLong selects the regional long date with seconds.
+	MessageTimeDisplayAbsoluteLong = "absolute_long"
+)
+
+// NormalizeMessageTimeDisplay returns a supported transcript timestamp mode.
+func NormalizeMessageTimeDisplay(value string) string {
+	switch value {
+	case MessageTimeDisplayAbsoluteShort, MessageTimeDisplayAbsoluteLong:
+		return value
+	default:
+		return MessageTimeDisplayRelative
+	}
+}
+
+const (
+	AgentTabCloseBehaviorDeleteSession = "delete_session"
+	AgentTabCloseBehaviorHidePanel     = "hide_panel"
+)
+
+// NormalizeAgentTabCloseBehavior preserves the opt-in panel-hide behavior;
+// omitted and unknown values retain the established delete-session behavior.
+func NormalizeAgentTabCloseBehavior(value string) string {
+	if value == AgentTabCloseBehaviorHidePanel {
+		return value
+	}
+	return AgentTabCloseBehaviorDeleteSession
+}
+
+const (
 	// RoleAdmin unlocks user management and system settings mutation when
 	// authentication is enabled. It does NOT grant visibility into other
 	// users' workspaces (hard privacy isolation).
@@ -143,6 +176,9 @@ type UserSettings struct {
 	LspServerConfigs                  map[string]map[string]interface{} `json:"lsp_server_configs"`
 	LspStatusLocation                 string                            `json:"lsp_status_location"`
 	SavedLayouts                      []SavedLayout                     `json:"saved_layouts"`
+	SidebarViewsByWorkspace           map[string]SidebarWorkspaceState  `json:"sidebar_views_by_workspace"`
+	SidebarLayoutsByWorkspace         map[string]SidebarLayout          `json:"sidebar_layouts_by_workspace"`
+	SidebarWorkspaceVersion           int                               `json:"sidebar_workspace_version"`
 	SidebarViews                      []SidebarView                     `json:"sidebar_views"`
 	SidebarActiveViewID               string                            `json:"sidebar_active_view_id"`
 	SidebarDraft                      *SidebarViewDraft                 `json:"sidebar_draft"`
@@ -154,6 +190,7 @@ type UserSettings struct {
 	SidebarTaskColors                 map[string]*string                `json:"sidebar_task_colors"`
 	TaskCreateLastUsed                TaskCreateLastUsed                `json:"task_create_last_used"`
 	JiraSavedViews                    json.RawMessage                   `json:"jira_saved_views"`
+	JiraDefaultViewID                 string                            `json:"jira_default_view_id"`
 	JiraTaskPresets                   json.RawMessage                   `json:"jira_task_presets"`
 	GitHubSavedPresets                json.RawMessage                   `json:"github_saved_presets"`
 	GitHubDefaultQueryPresets         json.RawMessage                   `json:"github_default_query_presets"`
@@ -168,8 +205,12 @@ type UserSettings struct {
 	TerminalFontSize                  int                               `json:"terminal_font_size"`
 	ChangesPanelLayout                string                            `json:"changes_panel_layout"` // "flat" | "tree"
 	LastSeenDisplay                   string                            `json:"last_seen_display"`    // "absolute" | "relative"
+	MessageTimeDisplay                string                            `json:"message_time_display"`
+	AgentTabCloseBehavior             string                            `json:"agent_tab_close_behavior"`
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
+	SidebarFastActionsEnabled         bool                              `json:"sidebar_fast_actions_enabled"`
+	SidebarNewTaskStyle               string                            `json:"sidebar_new_task_style"`
 	SidebarHoverEnabled               bool                              `json:"sidebar_hover_enabled"`
 	SidebarHoverDelayMs               int                               `json:"sidebar_hover_delay_ms"`
 	ResolveSessionHostnames           bool                              `json:"resolve_session_hostnames"`
@@ -212,6 +253,7 @@ type SidebarView struct {
 	Filters         []SidebarViewClause         `json:"filters"`
 	Sort            SidebarViewSort             `json:"sort"`
 	Group           string                      `json:"group"`
+	GroupIndent     *bool                       `json:"group_indent,omitempty"`
 	CollapsedGroups []string                    `json:"collapsed_groups"`
 	TaskRow         *SidebarTaskRowPresentation `json:"task_row,omitempty"`
 }
@@ -224,16 +266,25 @@ type SidebarViewClause struct {
 }
 
 type SidebarViewSort struct {
+	Key       string                     `json:"key"`
+	Direction string                     `json:"direction"`
+	Color     string                     `json:"color,omitempty"`
+	ThenBy    []SidebarViewSortCriterion `json:"then_by,omitempty"`
+}
+
+type SidebarViewSortCriterion struct {
 	Key       string `json:"key"`
 	Direction string `json:"direction"`
+	Color     string `json:"color,omitempty"`
 }
 
 type SidebarViewDraft struct {
-	BaseViewID string                      `json:"base_view_id"`
-	Filters    []SidebarViewClause         `json:"filters"`
-	Sort       SidebarViewSort             `json:"sort"`
-	Group      string                      `json:"group"`
-	TaskRow    *SidebarTaskRowPresentation `json:"task_row,omitempty"`
+	BaseViewID  string                      `json:"base_view_id"`
+	Filters     []SidebarViewClause         `json:"filters"`
+	Sort        SidebarViewSort             `json:"sort"`
+	Group       string                      `json:"group"`
+	GroupIndent *bool                       `json:"group_indent,omitempty"`
+	TaskRow     *SidebarTaskRowPresentation `json:"task_row,omitempty"`
 }
 
 // SidebarTaskRowPresentation controls the optional metadata and trailing

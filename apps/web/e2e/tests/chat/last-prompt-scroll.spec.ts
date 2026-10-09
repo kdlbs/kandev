@@ -268,6 +268,14 @@ test.describe("@chat last prompt scroll affordance", () => {
     await expect(bar.locator("code")).toHaveText("terraform apply");
     const chip = bar.getByTestId(PROMPT_MENTION_CHIP);
     await expect(chip).toHaveAttribute("data-prompt-name", ANCHORED_PROMPT_NAME);
+    // Smooth scrolling can reveal the bar while its entrance is still running.
+    await bar.evaluate(async (element) => {
+      await Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .map((animation) => animation.finished.catch(() => {})),
+      );
+    });
     await chip.hover();
     await expect(testPage.getByText(ANCHORED_PROMPT_CONTENT, { exact: false })).toBeVisible({
       timeout: 10_000,
@@ -476,6 +484,9 @@ test.describe("@chat last prompt scroll affordance", () => {
     test.setTimeout(90_000);
     await testPage.setViewportSize({ width: 1440, height: 1200 });
     await apiClient.saveUserSettings({ show_anchored_prompt_bar: true });
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.show_anchored_prompt_bar)
+      .toBe(true);
     const longPrompt = Array.from(
       { length: 20 },
       (_, i) => `${LAST_PROMPT_MARKER} Line ${i + 1} of a deliberately long prompt.`,

@@ -6,7 +6,7 @@ import { SessionPage } from "../../pages/session-page";
 
 function mcpWrite(content: string): string {
   const escaped = JSON.stringify(content).slice(1, -1);
-  return `e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}","content":"${escaped}"})`;
+  return `e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}","content":"${escaped}","expected_version":"{plan_version}"})`;
 }
 
 function planRevisionScript(): string {

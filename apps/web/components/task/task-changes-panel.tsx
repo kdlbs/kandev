@@ -8,7 +8,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useReviewSources, type ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { useGitOperations } from "@/hooks/use-git-operations";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
-import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
+import { useCommentsStore, isReviewComment } from "@/lib/state/slices/comments";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { generateUUID } from "@/lib/utils";
 import { updateUserSettings } from "@/lib/api";
@@ -108,6 +108,7 @@ function useChangesView(
     prDiffError,
     refreshPRDiff,
     gitStatus,
+    statusByRepo,
     rawPRFiles,
     truncatedFilesCount,
     selectedPR: pr,
@@ -135,7 +136,7 @@ function useChangesView(
     let count = 0;
     for (const id of commentSessionIds) {
       const comment = byId[id];
-      if (comment && isDiffComment(comment)) count++;
+      if (comment && isReviewComment(comment)) count++;
     }
     return count;
   }, [byId, commentSessionIds]);
@@ -174,6 +175,7 @@ function useChangesView(
     prDiffError,
     refreshPRDiff,
     gitStatus,
+    statusByRepo,
     truncatedFilesCount,
     prs: reviewSources.prs,
     selectedPR: reviewSources.selectedPR,
@@ -231,7 +233,7 @@ function useChangesPRPresentation(opts: {
   return { selectedFileKey, blockChangesForPR };
 }
 
-function useFixCommentsRequest(
+export function useFixCommentsRequest(
   activeSessionId: string | null | undefined,
   workspaceBlocked: boolean,
 ) {
@@ -243,7 +245,9 @@ function useFixCommentsRequest(
 
   return useCallback(() => {
     if (workspaceBlocked || !activeSessionId || !activeTaskId) return;
-    const comments = getPendingComments().filter(isDiffComment);
+    const comments = getPendingComments()
+      .filter(isReviewComment)
+      .filter((comment) => comment.sessionId === activeSessionId);
     if (comments.length === 0) return;
     const markdown = formatReviewCommentsAsMarkdown(comments);
     if (!markdown) return;
@@ -298,7 +302,9 @@ function useChangesActions(
   const handleToggleReviewed = useCallback(
     (key: string, reviewed: boolean) => {
       if (reviewed) {
-        markReviewed(key, reviewDiffHashForKey(allFiles, key));
+        const diffHash = reviewDiffHashForKey(allFiles, key);
+        if (diffHash === null) return;
+        markReviewed(key, diffHash);
       } else {
         markUnreviewed(key);
       }
@@ -471,6 +477,9 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     filePath,
     sourceFilter,
     gitStatus: view.gitStatus,
+    statusByRepo: view.statusByRepo,
+    repositoryName: fileRepositoryName,
+    changeLayer,
     visibleCount: visible.visibleFiles.length,
     prDiffLoading: relevantPRLoading,
     onBecameEmpty,

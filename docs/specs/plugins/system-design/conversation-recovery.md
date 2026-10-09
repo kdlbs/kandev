@@ -1,5 +1,5 @@
 ---
-status: draft
+status: superseded
 system: plugins
 requirements:
   - REQ-PLUGINS-PROMPT-HISTORY-HOST-002
@@ -10,6 +10,16 @@ owners:
 ---
 
 # Conversation recovery
+
+
+## Storage replacement, 2026-09-16
+
+The [source reconciliation design](conversation-source-reconciliation.md) now owns the intended conversation transport and storage replacement.
+The [replacement plan](../../../plans/conversation-storage-replacement/plan.md) owns its implementation.
+The durable journal, fixed-cutoff snapshots, ACKs, poison dispatch, and retention text here records the prior implementation.
+It does not require the replacement to preserve those mechanisms.
+Authorization, safe DTOs, lifecycle fencing, core compatibility, and visible recovery outcomes remain required.
+
 
 ## Boundary and references
 

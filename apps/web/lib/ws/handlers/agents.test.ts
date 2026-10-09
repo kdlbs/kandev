@@ -125,6 +125,7 @@ describe("agent update job websocket handlers", () => {
     const store = makeStore();
     const handlers = handlersFor(store);
     const snapshot = {
+      update_mode: "pinned",
       job_id: "update-1",
       agent_name: AGENT_NAME,
       status: "updating",

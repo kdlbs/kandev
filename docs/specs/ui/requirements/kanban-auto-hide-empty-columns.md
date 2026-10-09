@@ -103,8 +103,9 @@ different drag-and-drop contract.
 ### Mobile and responsive behavior
 
 - The phone Columns control SHALL expose the same preference for the focused workflow.
-- Existing phone focused-column navigation, mobile drop targets, safe-area behavior, and 44 CSS px
-  touch targets SHALL remain intact.
+- Existing phone focused-column navigation, visible menu move targets, safe-area behavior, and
+  44 CSS px touch targets SHALL remain intact. Phone card gestures follow
+  [mobile Kanban scrolling](../../tasks/requirements/mobile-kanban-scroll.md).
 - Tablet and compact desktop boards SHALL not gain document-level horizontal overflow.
 - The preference SHALL not persist responsive state, drag state, or a derived list of empty steps.
 
@@ -196,7 +197,7 @@ live steps - manually hidden steps
 - **GIVEN** the preference is enabled, **WHEN** the page reloads or another tab hydrates settings,
   **THEN** the same workflow resumes automatic empty-column hiding.
 - **GIVEN** a phone viewport, **WHEN** the user enables auto-hide for the focused workflow, **THEN**
-  focused-column navigation and drag targets remain usable without document overflow.
+  focused-column navigation, native card scrolling, and menu-based moves to auto-hidden steps remain usable without document overflow.
 
 ## Out of scope
 
@@ -216,7 +217,7 @@ live steps - manually hidden steps
 - `apps/web/components/kanban/swimlane-container.tsx`
 - `apps/web/components/kanban/swimlane-kanban-content.tsx`
 - `apps/web/components/kanban/swimlane-graph-content.tsx`
-- `apps/web/components/kanban/mobile-drop-targets.tsx`
+- `apps/web/components/kanban-card-menu.tsx`
 
 ## Implementation plan
 

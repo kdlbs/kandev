@@ -546,7 +546,7 @@ export function ShellTerminal({
     );
   }
   if (isSessionFailed && workspaceRestoration.status === null) {
-    return <WorkspaceUnavailable error={errorMessage} />;
+    return <WorkspaceUnavailable error={errorMessage} failedSessionId={sessionId} />;
   }
   return (
     <div

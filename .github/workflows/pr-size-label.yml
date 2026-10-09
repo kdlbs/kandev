@@ -174,6 +174,20 @@ jobs:
               );
             }
 
+            function isMissingLabelDefinitionError(error, targetLabel) {
+              const status = error?.status ?? error?.response?.status;
+              return (
+                status === 422 &&
+                Array.isArray(error?.response?.data?.errors) &&
+                error.response.data.errors.some(detail =>
+                  detail?.resource === 'Label' &&
+                  detail?.code === 'invalid' &&
+                  detail?.field === 'name' &&
+                  detail?.value === targetLabel,
+                )
+              );
+            }
+
             function summaryTableRow(countedFileCount, targetLabel) {
               return [String(countedFileCount), targetLabel];
             }
@@ -203,39 +217,6 @@ jobs:
             ).length;
             const targetLabel = classifySize(countedFileCount);
 
-            for (const [name, definition] of Object.entries(sizeLabelDefinitions)) {
-              try {
-                await github.rest.issues.getLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  name,
-                });
-              } catch (error) {
-                const status = error?.status ?? error?.response?.status;
-                if (status !== 404) {
-                  throw error;
-                }
-                try {
-                  await github.rest.issues.createLabel({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    name,
-                    color: definition.color,
-                    description: definition.description,
-                  });
-                } catch (createError) {
-                  if (!isAlreadyExistingLabelError(createError)) {
-                    throw createError;
-                  }
-                  await github.rest.issues.getLabel({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    name,
-                  });
-                }
-              }
-            }
-
             const currentLabels = await github.paginate(
               github.rest.issues.listLabelsOnIssue,
               {
@@ -250,12 +231,38 @@ jobs:
               .filter(name => typeof name === 'string');
 
             if (!currentLabelNames.includes(targetLabel)) {
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pullNumber,
-                labels: [targetLabel],
-              });
+              try {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pullNumber,
+                  labels: [targetLabel],
+                });
+              } catch (error) {
+                if (!isMissingLabelDefinitionError(error, targetLabel)) {
+                  throw error;
+                }
+                const definition = sizeLabelDefinitions[targetLabel];
+                try {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: targetLabel,
+                    color: definition.color,
+                    description: definition.description,
+                  });
+                } catch (createError) {
+                  if (!isAlreadyExistingLabelError(createError)) {
+                    throw createError;
+                  }
+                }
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pullNumber,
+                  labels: [targetLabel],
+                });
+              }
             }
 
             for (const label of staleSizeLabels(currentLabelNames, targetLabel)) {

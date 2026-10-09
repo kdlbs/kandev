@@ -76,6 +76,16 @@ Rows use measured sizes because editing controls and touch layouts can change ro
 virtualizer uses an estimated size before measurement. It updates positions after a measured size
 changes.
 
+Only positive row measurements can replace cached sizes. A hidden panel can
+produce zero-height observer entries even though its rows remain connected.
+Those entries represent unavailable geometry, not a row with no content.
+The measurement callback retains the last positive size for the row key, or
+uses the current estimate when no positive measurement exists.
+When the panel becomes visible, normal measurement accepts its actual row sizes.
+This applies to node rows and inline creation controls in both pointer modes.
+It implements `AC-UI-FILE-TREE-CHAT-CONTEXT-001.10` without another scroll owner
+or changes to Dockview panel lifetime.
+
 Active-file reveal and restored scroll operations resolve a row index from `visibleRows`. They use
 the virtualizer scroll API before they query a row element. This sequence makes an offscreen row
 available before focus or selection work uses its element.
@@ -148,6 +158,11 @@ task data as the current complete list.
 Unit tests record render counts for controlled updates. Browser E2E tests record the number of
 mounted rows for a large generated file tree.
 
+Measurement tests cover positive sizes, unavailable sizes with a cached value,
+and unavailable sizes before the first measurement. Browser regressions hide
+and restore the Files panel, then compare visible row bounds with the viewport.
+Coverage includes compact desktop rows, touch rows, and scrolled large trees.
+
 Final performance evaluation uses a warmed production build without React DevTools or CPU profiler
 startup in the measured window. The report includes main-thread work, long tasks, and mounted-row
 counts. Development traces remain diagnostic evidence only.
@@ -162,3 +177,10 @@ ownership model.
 - [Sidebar Task Row Presentation](sidebar-task-row-presentation.md)
 - [PR Task Status Summary](pr-task-status-summary.md)
 - [Mobile Task Chrome](mobile-task-chrome.md)
+
+## Changes timeline extension
+
+The [bounded Changes design](bounded-changes-rendering.md) extends the same
+viewport and positive-measurement principles to Changes collections. Its
+[package](../../../plans/bounded-changes-rendering/plan.md) owns that delivery.
+The Files, sidebar, and plugin work in this document retains its existing scope.

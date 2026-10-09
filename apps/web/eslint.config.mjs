@@ -1,4 +1,5 @@
 import { defineConfig, globalIgnores } from "eslint/config";
+import tanstackQuery from "@tanstack/eslint-plugin-query";
 import js from "@eslint/js";
 import reactHooks from "eslint-plugin-react-hooks";
 import sonarjs from "eslint-plugin-sonarjs";
@@ -11,6 +12,8 @@ import {
   e2eSleepPlugin,
   SLEEP_EXEMPT_FILES,
 } from "./eslint-rules/no-unsanctioned-sleep.mjs";
+import { taskLinksPlugin } from "./eslint-rules/no-task-link-bypass.mjs";
+import { systemQueryOwnerPlugin } from "./eslint-rules/no-migrated-system-query-owner.mjs";
 
 const eslintConfig = defineConfig([
   {
@@ -56,6 +59,17 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  {
+    files: ["**/*.ts", "**/*.tsx"],
+    plugins: { "@tanstack/query": tanstackQuery },
+    // no-void-query-fn needs TypeScript parser services, which this config does not enable.
+    rules: {
+      "@tanstack/query/exhaustive-deps": "error",
+      "@tanstack/query/no-rest-destructuring": "warn",
+      "@tanstack/query/no-unstable-deps": "error",
+      "@tanstack/query/stable-query-client": "error",
+    },
+  },
   // Hardcoded user-facing strings. An ERROR, REPO-WIDE.
   //
   // This was scoped to `i18nGuardFiles` while the migration was in flight: a
@@ -85,6 +99,34 @@ const eslintConfig = defineConfig([
     ],
     plugins: { i18next },
     rules: { "i18next/no-literal-string": ["error", noLiteralStringOptions] },
+  },
+  // First-party task workbench URLs and anchors have one URL authority and one
+  // click transport. Tests and the authority module itself are excluded so the
+  // rule checks callers rather than its own implementation and fixtures.
+  {
+    files: ["**/*.ts", "**/*.tsx"],
+    ignores: [
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "**/*.test-helpers.ts",
+      "**/*.test-helpers.tsx",
+      "**/*.test-utils.ts",
+      "**/*.test-utils.tsx",
+      "e2e/**",
+      "lib/links.ts",
+    ],
+    plugins: { "task-links": taskLinksPlugin },
+    rules: { "task-links/no-task-link-bypass": "error" },
+  },
+  {
+    files: [
+      "lib/state/slices/system/types.ts",
+      "lib/state/slices/system/system-slice.ts",
+      "lib/state/slices/system/index.ts",
+      "lib/state/hydration/hydrator.ts",
+    ],
+    plugins: { "system-query-owner": systemQueryOwnerPlugin },
+    rules: { "system-query-owner/no-migrated-system-zustand-owner": "error" },
   },
   // E2E tests (Playwright): disable React hooks rules since Playwright's `use()` and
   // `test.extend()` patterns are falsely flagged, and relax test-specific limits.

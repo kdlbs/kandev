@@ -2,6 +2,7 @@ package acp
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -45,6 +46,139 @@ func TestParseCursorTaskParams(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCursorMCPFrameNormalizesIdentityArgumentsAndResult(t *testing.T) {
+	a := newTestAdapter()
+	a.agentID = "cursor-acp"
+	a.normalizer = NewNormalizer(a.agentID)
+	a.dialect = newACPDialect(a.agentID)
+
+	arguments := map[string]any{
+		"version": float64(1),
+		"title":   "Build health",
+		"blocks": []any{map[string]any{
+			"type": "metrics",
+			"items": []any{map[string]any{
+				"label": "Passed",
+				"value": "38",
+			}},
+		}},
+	}
+	rawInput := map[string]any{
+		"providerIdentifier": "kandev",
+		"toolName":           "show_rich_output_kandev",
+		"args":               arguments,
+	}
+
+	initial := a.convertToolCallUpdate("session-1", &acpsdk.SessionUpdateToolCall{
+		ToolCallId: "cursor-mcp-1",
+		Kind:       "other",
+		Title:      "kandev: show_rich_output_kandev",
+		Status:     toolStatusInProgress,
+		RawInput:   rawInput,
+	})
+	if initial == nil {
+		t.Fatal("initial event is nil")
+	}
+	if got := initial.NormalizedPayload.Generic().Name; got != "kandev/show_rich_output_kandev" {
+		t.Fatalf("generic name = %q, want kandev/show_rich_output_kandev", got)
+	}
+	if !initial.NormalizedPayload.IsMCPTool() {
+		t.Fatal("normalized payload is not marked as an MCP tool")
+	}
+	if got := initial.NormalizedPayload.Generic().Input; !reflect.DeepEqual(got, arguments) {
+		t.Fatalf("generic input = %#v, want %#v", got, arguments)
+	}
+
+	completed := acpsdk.ToolCallStatus("completed")
+	terminal := a.convertToolCallResultUpdate("session-1", &acpsdk.SessionToolCallUpdate{
+		ToolCallId: "cursor-mcp-1",
+		Status:     &completed,
+		RawOutput:  map[string]any{"success": true},
+	})
+	if terminal == nil {
+		t.Fatal("terminal event is nil")
+	}
+	if got := terminal.NormalizedPayload.Generic().Output; !reflect.DeepEqual(got, map[string]any{"success": true}) {
+		t.Fatalf("generic output = %#v, want success result", got)
+	}
+}
+
+func TestCursorMCPFrameNormalizesForGrokDialect(t *testing.T) {
+	a := newTestAdapter()
+	a.agentID = grokAgentID
+	a.normalizer = NewNormalizer(a.agentID)
+	a.dialect = newACPDialect(a.agentID)
+
+	arguments := map[string]any{"version": float64(1), "title": "Build health", "blocks": []any{}}
+	event := a.convertToolCallUpdate("session-1", &acpsdk.SessionUpdateToolCall{
+		ToolCallId: "grok-mcp-1",
+		Kind:       "other",
+		Title:      "kandev: show_rich_output_kandev",
+		Status:     toolStatusInProgress,
+		RawInput: map[string]any{
+			"providerIdentifier": "kandev",
+			"toolName":           "show_rich_output_kandev",
+			"args":               arguments,
+		},
+	})
+	if event == nil {
+		t.Fatal("event is nil")
+	}
+	if got := event.NormalizedPayload.Generic().Name; got != "kandev/show_rich_output_kandev" {
+		t.Fatalf("generic name = %q, want kandev/show_rich_output_kandev", got)
+	}
+	if got := event.NormalizedPayload.Generic().Input; !reflect.DeepEqual(got, arguments) {
+		t.Fatalf("generic input = %#v, want %#v", got, arguments)
+	}
+}
+
+func TestCursorMCPRecognitionPreservesProviderAndRejectsIncompleteEnvelopes(t *testing.T) {
+	t.Run("foreign provider retains its identity", func(t *testing.T) {
+		a := newTestAdapter()
+		a.agentID = cursorAgentID
+		a.normalizer = NewNormalizer(a.agentID)
+		a.dialect = newACPDialect(a.agentID)
+
+		event := a.convertToolCallUpdate("session-1", &acpsdk.SessionUpdateToolCall{
+			ToolCallId: "foreign-mcp-1",
+			Kind:       "other",
+			Status:     toolStatusInProgress,
+			RawInput: map[string]any{
+				"providerIdentifier": "github",
+				"toolName":           "show_rich_output_kandev",
+				"args":               map[string]any{},
+			},
+		})
+		if got := event.NormalizedPayload.Generic().Name; got != "github/show_rich_output_kandev" {
+			t.Fatalf("generic name = %q, want foreign provider identity", got)
+		}
+	})
+
+	t.Run("missing object args remains ordinary generic activity", func(t *testing.T) {
+		a := newTestAdapter()
+		a.agentID = cursorAgentID
+		a.normalizer = NewNormalizer(a.agentID)
+		a.dialect = newACPDialect(a.agentID)
+
+		event := a.convertToolCallUpdate("session-1", &acpsdk.SessionUpdateToolCall{
+			ToolCallId: "generic-other-1",
+			Kind:       "other",
+			Status:     toolStatusInProgress,
+			RawInput: map[string]any{
+				"providerIdentifier": "kandev",
+				"toolName":           "show_rich_output_kandev",
+				"args":               "not-an-object",
+			},
+		})
+		if got := event.NormalizedPayload.Generic().Name; got != "other" {
+			t.Fatalf("generic name = %q, want other", got)
+		}
+		if event.NormalizedPayload.IsMCPTool() {
+			t.Fatal("incomplete envelope was marked as an MCP tool")
+		}
+	})
 }
 
 func TestCursorTaskRequestBeforeToolCallMergesOnCreate(t *testing.T) {

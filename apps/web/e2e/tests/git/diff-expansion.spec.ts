@@ -40,6 +40,7 @@ async function seedExpansionTask(
   await expect(
     session.chat.getByText("diff-expansion-setup complete", { exact: false }),
   ).toBeVisible({ timeout: 45_000 });
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   return session;
 }
@@ -139,7 +140,7 @@ async function hoverUntilGutterSlotAppears(testPage: Page) {
 }
 
 test.describe("Diff expansion — Pierre Diffs provider", () => {
-  test.describe.configure({ retries: 2, timeout: 120_000 });
+  test.describe.configure({ retries: 0, timeout: 120_000 });
 
   test("diff viewer background matches app --background (regression for pierre 1.1.22 selector rename)", async ({
     testPage,
@@ -400,6 +401,10 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     const expandAllBtn = testPage.getByRole("button", { name: "Expand all" });
     await expect(expandAllBtn).toBeVisible({ timeout: 10_000 });
     await expandAllBtn.click();
+    await expect(testPage.getByRole("button", { name: "Collapse unchanged" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
 
     // After expanding, all original lines should be visible — pick a line
     // from the middle of the previously collapsed region.

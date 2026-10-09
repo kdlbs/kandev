@@ -285,18 +285,19 @@ func (f *fakeWorkflowEnsurer) EnsureRoutineWorkflow(_ context.Context, ws string
 
 type fakeTaskCreator struct {
 	captured struct {
-		workspaceID, workflowID, assignee, title, description string
+		workspaceID, workflowID, assignee, title, description, routineID string
 	}
 }
 
 func (f *fakeTaskCreator) CreateOfficeTaskInWorkflow(
-	_ context.Context, workspaceID, _, assignee, workflowID, title, description string,
+	_ context.Context, workspaceID, _, assignee, workflowID, title, description, routineID string,
 ) (string, error) {
 	f.captured.workspaceID = workspaceID
 	f.captured.workflowID = workflowID
 	f.captured.assignee = assignee
 	f.captured.title = title
 	f.captured.description = description
+	f.captured.routineID = routineID
 	return "task-routine-1", nil
 }
 
@@ -451,6 +452,9 @@ func TestDispatch_HeavyRoutine_CreatesTaskInRoutineWorkflow(t *testing.T) {
 	}
 	if !strings.Contains(tc.captured.title, "Daily review") {
 		t.Errorf("task title %q missing template prefix", tc.captured.title)
+	}
+	if tc.captured.routineID != routine.ID {
+		t.Errorf("task routineID = %q, want firing routine's id %q", tc.captured.routineID, routine.ID)
 	}
 }
 

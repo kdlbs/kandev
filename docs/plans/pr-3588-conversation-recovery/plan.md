@@ -12,6 +12,14 @@ legacy_specs: []
 
 # Implementation Plan: PR 3588 Conversation Recovery
 
+
+## Replacement scope, 2026-09-16
+
+The [conversation storage replacement](../conversation-storage-replacement/plan.md) owns the next implementation.
+This file preserves historical scope and results. Do not execute its durable replay mechanics as new work.
+The replacement work orders preserve public behavior and provide new source-reconciliation, upgrade, and E2E evidence.
+
+
 ## Overview
 
 Repair the three recovery defects found in PR #3588 at commit
@@ -179,3 +187,9 @@ PR review. The broader durable transport scope decision remains separate.
   overwrite newer snapshot state, and deleted rows must not reappear.
 - Expiry, removal, access revocation, and panel replacement can race.
 - Real transport tests must use fresh binaries and bundles.
+
+## Replacement validation handoff
+
+The [remaining-gates package](../conversation-storage-follow-up/plan.md) owns the
+replacement PostgreSQL matrix, backend failure remediation, and final recovery E2E evidence.
+Historical counts in this package do not prove the replacement implementation.

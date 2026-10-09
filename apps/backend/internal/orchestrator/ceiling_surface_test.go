@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -70,6 +71,30 @@ func TestDeferCeilingRefusal_SameReasonDoesNotRewriteTheNote(t *testing.T) {
 	require.NoError(t, svc.deferCeilingRefusal(ctx, "surface-dup-task", "surface-dup-session", models.CeilingLaunchResume, payload, ceilingReasonRefused, 3, true, 3))
 
 	require.Len(t, messages.sessionMessages, 1, "an unchanged reason must not write a second note")
+}
+
+func TestWriteCeilingSurfaceNote_IsIdentityGuardedAndIdempotent(t *testing.T) {
+	svc, repo := newServiceWithRealRepo(t)
+	ctx := context.Background()
+	seedTaskAndSession(t, repo, "surface-identity-task", "surface-identity-session", models.TaskSessionStateRunning)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	old := models.CeilingDeferral{
+		Kind: models.CeilingLaunchResume, Origin: string(launchOriginAutomatic),
+		ReasonCode: ceilingReasonRefused, QueuedAt: time.Now().UTC().Truncate(time.Second), Ceiling: 3,
+		Payload: map[string]interface{}{metaKeySessionID: "surface-identity-session"},
+	}
+	newer := old
+	newer.ReasonCode = ceilingReasonUnknownPopulation
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, "surface-identity-task", models.MetaKeyDeferredLaunch, models.CeilingRecordKeys(newer)))
+	require.ErrorIs(t, svc.writeCeilingSurfaceNote(ctx, "surface-identity-task", "surface-identity-session", old), errCeilingSurfaceSuperseded)
+	require.Empty(t, messages.sessionMessages)
+
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, "surface-identity-task", models.MetaKeyDeferredLaunch, models.CeilingRecordKeys(old)))
+	require.NoError(t, svc.writeCeilingSurfaceNote(ctx, "surface-identity-task", "surface-identity-session", old))
+	require.NoError(t, svc.writeCeilingSurfaceNote(ctx, "surface-identity-task", "surface-identity-session", old))
+	require.Len(t, messages.sessionMessages, 1)
 }
 
 // TestDeferCeilingRefusal_ReasonChangeRewritesTheRecordAndTheNote pins AC-49f:

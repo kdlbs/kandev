@@ -25,7 +25,7 @@ import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { deleteTask } from "@/lib/api/domains/kanban-api";
+import { deleteTaskAfterUserAction } from "@/lib/api/domains/kanban-api";
 import { resolveSessionDeletionTarget } from "@/lib/session/session-deletion";
 import { useSessionPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import { buildAgentLabelsById, resolveAgentLabelFor, sortSessions } from "./session-sort";
@@ -182,7 +182,7 @@ export function useSessionLifecycleActions(
           appStore.getState().quickChat.sessions,
         );
         if (deletionTarget.kind === "quick-chat-task") {
-          await deleteTask(deletionTarget.taskId);
+          await deleteTaskAfterUserAction(deletionTarget.taskId);
         } else {
           const client = getWebSocketClient();
           if (!client) return;

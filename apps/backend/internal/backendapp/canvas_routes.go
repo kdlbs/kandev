@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/authz"
 	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -22,11 +23,12 @@ import (
 	"github.com/kandev/kandev/internal/plugins/webapp"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	userstore "github.com/kandev/kandev/internal/user/store"
 	"github.com/kandev/kandev/internal/worktree/copyfiles"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// canvasHTTPHandler is the owner-authorized browser API for canvas metadata
+// canvasHTTPHandler is the workspace-authorized browser API for canvas metadata
 // and host operations. Source transfer and publishing stay on the agent MCP
 // path; browsers receive only metadata and short-lived runtime capabilities.
 type canvasHTTPHandler struct {
@@ -35,6 +37,11 @@ type canvasHTTPHandler struct {
 	tasks        *taskservice.Service
 	editor       *canvasEditService
 	distribution *canvasservice.DistributionService
+}
+
+type canvasWorkspaceOwnerAccess interface {
+	AuthorizeWorkspaceAccess(context.Context, string) error
+	GetWorkspace(context.Context, string) (*models.Workspace, error)
 }
 
 type canvasEditTaskStore interface {
@@ -365,9 +372,12 @@ func registerCanvasRoutes(p routeParams) {
 	p.router.GET("/api/v1/canvases/workspaces/:workspaceID", h.listWorkspace)
 	registerCanvasDistributionRoutes(p.router, h)
 	p.router.GET("/api/v1/canvases/:canvasID", h.get)
+	p.router.PATCH("/api/v1/canvases/:canvasID", h.rename)
 	p.router.GET("/api/v1/canvases/:canvasID/releases", h.releases)
 	p.router.GET("/api/v1/canvases/:canvasID/promotion-preview", h.promotionPreview)
 	p.router.POST("/api/v1/canvases/:canvasID/promotion", h.promote)
+	p.router.GET("/api/v1/canvases/:canvasID/workspace-data-preview", h.workspaceDataPreview)
+	p.router.POST("/api/v1/canvases/:canvasID/workspace-data", h.enableWorkspaceData)
 	p.router.POST("/api/v1/canvases/:canvasID/releases/:releaseID/approve", h.approveRelease)
 	p.router.POST("/api/v1/canvases/:canvasID/releases/:releaseID/reject", h.rejectRelease)
 	p.router.POST("/api/v1/canvases/:canvasID/rollback", h.rollback)
@@ -388,6 +398,7 @@ type canvasHTTPResponse struct {
 	TaskID              string                          `json:"task_id,omitempty"`
 	OriginTaskID        string                          `json:"origin_task_id,omitempty"`
 	ScopeKind           string                          `json:"scope_kind"`
+	DataScopeKind       string                          `json:"data_scope_kind"`
 	Title               string                          `json:"title"`
 	CreatedBySessionID  string                          `json:"created_by_session_id,omitempty"`
 	PromotedByUserID    string                          `json:"promoted_by_user_id,omitempty"`
@@ -406,6 +417,15 @@ type canvasHTTPResponse struct {
 
 type canvasReleaseResponse struct {
 	ID                 string                           `json:"id"`
+	PackageID          string                           `json:"package_id,omitempty"`
+	Version            string                           `json:"version,omitempty"`
+	DisplayName        string                           `json:"display_name,omitempty"`
+	Description        string                           `json:"description,omitempty"`
+	Author             string                           `json:"author,omitempty"`
+	License            string                           `json:"license,omitempty"`
+	SourceMode         string                           `json:"source_mode,omitempty"`
+	MinKandevVersion   string                           `json:"min_kandev_version,omitempty"`
+	RepoURL            string                           `json:"repo_url,omitempty"`
 	PackageDigest      string                           `json:"package_digest,omitempty"`
 	ValidationStatus   string                           `json:"validation_status"`
 	ValidationError    string                           `json:"validation_error,omitempty"`
@@ -431,6 +451,7 @@ func canvasResponse(value canvasservice.Canvas) canvasHTTPResponse {
 		TaskID:              value.TaskID,
 		OriginTaskID:        value.OriginTaskID,
 		ScopeKind:           value.ScopeKind,
+		DataScopeKind:       value.DataScopeKind,
 		Title:               value.Title,
 		CreatedBySessionID:  value.CreatedBySessionID,
 		PromotedByUserID:    value.PromotedByUserID,
@@ -518,6 +539,30 @@ func (h *canvasHTTPHandler) get(c *gin.Context) {
 	writeCanvasJSON(c, http.StatusOK, response)
 }
 
+func (h *canvasHTTPHandler) rename(c *gin.Context) {
+	item, err := h.canvases.Get(c.Request.Context(), c.Param("canvasID"))
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	if !h.authorizeWorkspaceManage(c, item.WorkspaceID) {
+		return
+	}
+	var request struct {
+		Title string `json:"title"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeCanvasError(c, http.StatusBadRequest, "invalid_request", nil)
+		return
+	}
+	updated, err := h.canvases.Rename(c.Request.Context(), item.ID, request.Title)
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	writeCanvasJSON(c, http.StatusOK, canvasResponse(*updated))
+}
+
 func (h *canvasHTTPHandler) releases(c *gin.Context) {
 	canvas, err := h.canvases.Get(c.Request.Context(), c.Param("canvasID"))
 	if err != nil {
@@ -553,16 +598,7 @@ func (h *canvasHTTPHandler) releases(c *gin.Context) {
 }
 
 func releaseResponse(release instances.Release, scope string, grants []instances.Grant) canvasReleaseResponse {
-	permissions := canvasservice.ReleasePermissionSummary(release)
-	return canvasReleaseResponse{
-		ID: release.ID, PackageDigest: release.PackageDigest,
-		ValidationStatus: release.ValidationStatus, ValidationError: release.ValidationError,
-		Permissions: &permissions, MissingPermissions: canvasservice.MissingPermissionKeys(permissions, scope, grants),
-		PermissionDigest: canvasservice.PermissionDigest(release), SourceActorKind: release.SourceActorKind,
-		SourceUserID: release.SourceUserID, SourceTaskID: release.SourceTaskID,
-		SourceSessionID: release.SourceSessionID, ProtocolVersion: release.ProtocolVersion,
-		CreatedAt: release.CreatedAt,
-	}
+	return *releaseResponseFromMetadata(canvasservice.ReleaseMetadataForHTTP(release, scope, grants))
 }
 
 func releaseResponseFromMetadata(value *canvasservice.ReleaseMetadata) *canvasReleaseResponse {
@@ -571,6 +607,9 @@ func releaseResponseFromMetadata(value *canvasservice.ReleaseMetadata) *canvasRe
 	}
 	return &canvasReleaseResponse{
 		ID: value.ID, PackageDigest: value.PackageDigest, ValidationStatus: value.ValidationStatus,
+		PackageID: value.PackageID, Version: value.Version, DisplayName: value.DisplayName,
+		Description: value.Description, Author: value.Author, License: value.License,
+		SourceMode: value.SourceMode, MinKandevVersion: value.MinKandevVersion, RepoURL: value.RepoURL,
 		ValidationError: value.ValidationError, Permissions: value.Permissions,
 		MissingPermissions: value.MissingPermissions, PermissionDigest: value.PermissionDigest,
 		SourceActorKind: value.SourceActorKind, SourceUserID: value.SourceUserID,
@@ -604,23 +643,25 @@ func (h *canvasHTTPHandler) promotionPreview(c *gin.Context) {
 		preview.SourceSessionID,
 	)
 	writeCanvasJSON(c, http.StatusOK, map[string]interface{}{
-		"canvas_id":           preview.Canvas.ID,
-		"title":               preview.Canvas.Title,
-		"origin_task_id":      preview.Canvas.OriginTaskID,
-		"active_release":      releaseResponseFromCanvas(preview.Canvas),
-		"source_actor_kind":   preview.SourceActorKind,
-		"source_user_id":      preview.SourceUserID,
-		"source_task_id":      preview.SourceTaskID,
-		"source_task_title":   sourceLabels.TaskTitle,
-		"source_session_id":   preview.SourceSessionID,
-		"source_session_name": sourceLabels.SessionName,
-		"permissions":         preview.Permissions,
-		"active_release_id":   preview.ActiveReleaseID,
-		"permission_digest":   preview.PermissionDigest,
-		"grant_generation":    preview.GrantGeneration,
-		"current_scope":       preview.CurrentScope,
-		"target_scope":        preview.TargetScope,
-		"placement":           preview.Placement,
+		"canvas_id":               preview.Canvas.ID,
+		"title":                   preview.Canvas.Title,
+		"origin_task_id":          preview.Canvas.OriginTaskID,
+		"active_release":          releaseResponseFromCanvas(preview.Canvas),
+		"source_actor_kind":       preview.SourceActorKind,
+		"source_user_id":          preview.SourceUserID,
+		"source_task_id":          preview.SourceTaskID,
+		"source_task_title":       sourceLabels.TaskTitle,
+		"source_session_id":       preview.SourceSessionID,
+		"source_session_name":     sourceLabels.SessionName,
+		"permissions":             preview.Permissions,
+		"active_release_id":       preview.ActiveReleaseID,
+		"permission_digest":       preview.PermissionDigest,
+		"grant_generation":        preview.GrantGeneration,
+		"current_scope":           preview.CurrentScope,
+		"target_scope":            preview.TargetScope,
+		"current_data_scope_kind": preview.CurrentDataScope,
+		"target_data_scope_kind":  preview.TargetDataScope,
+		"placement":               preview.Placement,
 	})
 }
 
@@ -652,6 +693,56 @@ func (h *canvasHTTPHandler) promote(c *gin.Context) {
 		return
 	}
 	updated, err := h.canvases.PromoteCanvasReviewed(c.Request.Context(), canvas.ID, canvasRuntimeUser(c), request.ExpectedReleaseID, request.ExpectedPermissionDigest, *request.ExpectedGrantGeneration)
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	writeCanvasJSON(c, http.StatusOK, canvasResponse(*updated))
+}
+
+func (h *canvasHTTPHandler) workspaceDataPreview(c *gin.Context) {
+	item, err := h.canvases.Get(c.Request.Context(), c.Param("canvasID"))
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	if item == nil || !h.authorizeWorkspaceOwner(c, item.WorkspaceID) {
+		return
+	}
+	preview, err := h.canvases.WorkspaceDataPreview(c.Request.Context(), item.ID)
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	writeCanvasJSON(c, http.StatusOK, map[string]interface{}{
+		"canvas":                  canvasResponse(*preview.Canvas),
+		"active_release_id":       preview.ActiveReleaseID,
+		"permission_digest":       preview.PermissionDigest,
+		"grant_generation":        preview.GrantGeneration,
+		"current_data_scope_kind": preview.CurrentDataScopeKind,
+		"target_data_scope_kind":  preview.TargetDataScopeKind,
+		"permissions":             preview.Permissions,
+	})
+}
+
+func (h *canvasHTTPHandler) enableWorkspaceData(c *gin.Context) {
+	item, err := h.canvases.Get(c.Request.Context(), c.Param("canvasID"))
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	if item == nil || !h.authorizeWorkspaceOwner(c, item.WorkspaceID) {
+		return
+	}
+	var request canvasPromotionRequest
+	if c.Request.Body == nil || c.ShouldBindJSON(&request) != nil || strings.TrimSpace(request.ExpectedReleaseID) == "" || strings.TrimSpace(request.ExpectedPermissionDigest) == "" || request.ExpectedGrantGeneration == nil || *request.ExpectedGrantGeneration < 0 {
+		writeCanvasError(c, http.StatusBadRequest, "workspace_data_review_required", nil)
+		return
+	}
+	updated, err := h.canvases.EnableWorkspaceDataReviewed(
+		c.Request.Context(), item.ID, canvasRuntimeUser(c), request.ExpectedReleaseID,
+		request.ExpectedPermissionDigest, *request.ExpectedGrantGeneration,
+	)
 	if err != nil {
 		h.writeError(c, err)
 		return
@@ -844,6 +935,49 @@ func (h *canvasHTTPHandler) authorizeWorkspace(c *gin.Context, workspaceID strin
 		return false
 	}
 	return true
+}
+
+func (h *canvasHTTPHandler) authorizeWorkspaceManage(c *gin.Context, workspaceID string) bool {
+	if !h.authorizeWorkspace(c, workspaceID) {
+		return false
+	}
+	if err := h.tasks.AuthorizeWorkspaceScope(c.Request.Context(), workspaceID, authz.ScopeWorkspaceManage); err != nil {
+		writeCanvasError(c, http.StatusForbidden, "forbidden", nil)
+		return false
+	}
+	return true
+}
+
+func (h *canvasHTTPHandler) authorizeWorkspaceOwner(c *gin.Context, workspaceID string) bool {
+	owner, err := checkCanvasWorkspaceOwner(c.Request.Context(), h.tasks, workspaceID, canvasRuntimeUser(c))
+	if err != nil {
+		writeCanvasError(c, http.StatusNotFound, "canvas_not_found", nil)
+		return false
+	}
+	if !owner {
+		writeCanvasError(c, http.StatusForbidden, "workspace_owner_required", nil)
+		return false
+	}
+	return true
+}
+
+func checkCanvasWorkspaceOwner(ctx context.Context, access canvasWorkspaceOwnerAccess, workspaceID, userID string) (bool, error) {
+	if access == nil {
+		return false, errors.New("canvas workspace access is unavailable")
+	}
+	if err := access.AuthorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return false, err
+	}
+	workspace, err := access.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return false, err
+	}
+	if workspace == nil {
+		return false, errors.New("canvas workspace was not found")
+	}
+	actorID := strings.TrimSpace(userID)
+	ownerID := strings.TrimSpace(workspace.OwnerID)
+	return actorID != "" && (ownerID == actorID || (ownerID == "" && actorID == userstore.DefaultUserID)), nil
 }
 
 func canvasRouteParam(c *gin.Context, names ...string) string {

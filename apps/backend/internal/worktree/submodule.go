@@ -96,7 +96,14 @@ func getSubmodulePaths(ctx context.Context, dir string) ([]string, error) {
 // Failures are non-fatal: submodule URLs may be unreachable (private repos,
 // missing credentials), but the worktree is still usable for non-submodule files.
 func (m *Manager) initSubmodules(ctx context.Context, dir string) {
-	cmd := m.newSubmoduleUpdateCmd(ctx, dir)
+	cmd, err := m.scopedSubmoduleUpdateCmd(ctx, dir)
+	if err != nil {
+		m.logger.Warn("failed to discover sparse-checkout submodules", zap.String("dir", dir), zap.Error(err))
+		return
+	}
+	if cmd == nil {
+		return
+	}
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
 		m.logger.Warn("git submodule update --init failed (non-fatal)",
@@ -106,4 +113,30 @@ func (m *Manager) initSubmodules(ctx context.Context, dir string) {
 		return
 	}
 	m.logger.Debug("initialized submodules in worktree", zap.String("dir", dir))
+}
+
+func (m *Manager) scopedSubmoduleUpdateCmd(ctx context.Context, dir string) (*exec.Cmd, error) {
+	cmd := m.newSubmoduleUpdateCmd(ctx, dir)
+	if !hasSparseCheckout(ctx) {
+		return cmd, nil
+	}
+	paths, err := getSubmodulePaths(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	var selected []string
+	for _, path := range paths {
+		for _, scope := range scopedCheckout(ctx).options.SparseDirectories {
+			if path == scope || strings.HasPrefix(path, scope+"/") {
+				selected = append(selected, path)
+				break
+			}
+		}
+	}
+	if len(selected) == 0 {
+		return nil, nil
+	}
+	cmd.Args = append(cmd.Args, "--")
+	cmd.Args = append(cmd.Args, selected...)
+	return cmd, nil
 }

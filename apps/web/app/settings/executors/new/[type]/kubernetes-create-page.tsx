@@ -71,7 +71,7 @@ export function KubernetesCreatePage() {
     try {
       const created = await resource.create(payload);
       runWithNavigationBlockerBypassed(() =>
-        router.push(executorProfileSettingsPath(created.executor, created.profile.id)),
+        router.push(executorProfileSettingsPath(created.profile.id)),
       );
     } catch (cause) {
       setError(cause);

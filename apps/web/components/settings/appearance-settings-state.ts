@@ -7,6 +7,7 @@ export type AppearanceState = {
   theme: Theme;
   settingsMenuMode: SettingsMenuMode;
   richOutputAnimationsEnabled: boolean;
+  chatAnimationsEnabled: boolean;
   startupPage: UserSettingsState["startupPage"];
   changesPanelLayout: UserSettingsState["changesPanelLayout"];
   appStatusBarEnabled: boolean;
@@ -29,6 +30,7 @@ export function createAppearanceSavedState(
     | "sidebarHoverEnabled"
     | "sidebarHoverDelayMs"
   >,
+  chatAnimationsEnabled = true,
 ): AppearanceState {
   return {
     theme,
@@ -38,6 +40,7 @@ export function createAppearanceSavedState(
     // Per-device, but drafted and saved with account settings under one control.
     settingsMenuMode,
     richOutputAnimationsEnabled,
+    chatAnimationsEnabled,
     changesPanelLayout: userSettings.changesPanelLayout,
     startupPage: userSettings.startupPage,
     showMetrics: userSettings.systemMetricsDisplay.showInTopbar,
@@ -97,6 +100,7 @@ export function rebaseAppearanceDraft(
     sidebarHoverDelayMs: rebase("sidebarHoverDelayMs"),
     settingsMenuMode: rebase("settingsMenuMode"),
     richOutputAnimationsEnabled: rebase("richOutputAnimationsEnabled"),
+    chatAnimationsEnabled: rebase("chatAnimationsEnabled"),
     startupPage: rebase("startupPage"),
     changesPanelLayout: rebase("changesPanelLayout"),
     appStatusBarEnabled: rebase("appStatusBarEnabled"),
@@ -112,6 +116,7 @@ export function appearanceRevision(state: AppearanceState): string {
     state.sidebarHoverDelayMs,
     state.settingsMenuMode,
     state.richOutputAnimationsEnabled,
+    state.chatAnimationsEnabled,
     state.startupPage,
     state.changesPanelLayout,
     state.appStatusBarEnabled,

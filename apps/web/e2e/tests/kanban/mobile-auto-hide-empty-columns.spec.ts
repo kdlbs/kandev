@@ -1,21 +1,20 @@
-import { type CDPSession, type Locator, type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
-import { dwell } from "../../helpers/causal-waits";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
-const TASK_TITLE = "Mobile auto-hide drag source";
+const TASK_TITLE = "Mobile auto-hide move source";
 
 async function openMobileMenu(mobile: MobileKanbanPage) {
-  await mobile.mobileMenuButton.click();
-  await mobile.menuCard.waitFor({ state: "visible" });
+  await mobile.viewOptionsButton.click();
+  await mobile.optionsCard.waitFor({ state: "visible" });
 }
 
 async function closeMobileMenu(page: Page, mobile: MobileKanbanPage) {
   await expect(async () => {
-    if ((await mobile.menuCard.count()) > 0) {
+    if ((await mobile.optionsCard.count()) > 0) {
       await page.keyboard.press("Escape");
     }
-    await expect(mobile.menuCard).toHaveCount(0, { timeout: 1_000 });
+    await expect(mobile.optionsCard).toHaveCount(0, { timeout: 1_000 });
   }).toPass({ timeout: 15_000 });
 }
 
@@ -24,54 +23,12 @@ async function openColumnsMenu(
   mobile: MobileKanbanPage,
   workflowId: string,
 ): Promise<Locator> {
-  const trigger = mobile.menuCard.getByTestId(`columns-menu-${workflowId}`);
+  const trigger = mobile.optionsCard.getByTestId(`columns-menu-${workflowId}`);
   await trigger.click();
   await expect(trigger).toHaveAttribute("data-state", "open");
   const menu = page.locator('[role="menu"]:visible');
   await expect(menu).toBeVisible();
   return menu;
-}
-
-async function touchDragToTarget(page: Page, card: Locator, target: Locator) {
-  const box = await card.boundingBox();
-  if (!box) throw new Error("mobile drag source has no layout box");
-  const x = box.x + box.width / 2;
-  const y = box.y + box.height / 2;
-  const cdp: CDPSession = await page.context().newCDPSession(page);
-  await cdp.send("Input.dispatchTouchEvent", {
-    type: "touchStart",
-    touchPoints: [{ x, y, id: 1 }],
-  });
-  await dwell(
-    page,
-    350,
-    "library-timer",
-    "dnd-kit's TouchSensor needs its 250ms activation delay before the move target appears",
-  );
-  await cdp.send("Input.dispatchTouchEvent", {
-    type: "touchMove",
-    touchPoints: [{ x: x + 14, y, id: 1 }],
-  });
-  await expect(target).toBeVisible();
-  await expectMinTouchTarget(target);
-  const targetBox = await target.boundingBox();
-  if (!targetBox) throw new Error("mobile drop target has no layout box");
-  const targetX = targetBox.x + targetBox.width / 2;
-  const targetY = targetBox.y + targetBox.height / 2;
-  for (let step = 1; step <= 10; step += 1) {
-    await cdp.send("Input.dispatchTouchEvent", {
-      type: "touchMove",
-      touchPoints: [
-        {
-          x: x + ((targetX - x) * step) / 10,
-          y: y + ((targetY - y) * step) / 10,
-          id: 1,
-        },
-      ],
-    });
-  }
-  await expect(target).toHaveClass(/border-primary/);
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 }
 
 async function expectMinTouchTarget(locator: Locator) {
@@ -82,7 +39,7 @@ async function expectMinTouchTarget(locator: Locator) {
   }).toPass({ timeout: 5_000 });
 }
 
-test("keeps auto-hide scoped and restores mobile move targets during drag", async ({
+test("keeps auto-hide scoped and moves through the mobile card menu", async ({
   testPage,
   apiClient,
   seedData,
@@ -115,7 +72,7 @@ test("keeps auto-hide scoped and restores mobile move targets during drag", asyn
   const mobile = new MobileKanbanPage(testPage);
   await mobile.goto();
   await openMobileMenu(mobile);
-  await expect(mobile.menuCard.getByTestId(`columns-menu-${otherWorkflow.id}`)).toHaveCount(0);
+  await expect(mobile.optionsCard.getByTestId(`columns-menu-${otherWorkflow.id}`)).toHaveCount(0);
   const columnsMenu = await openColumnsMenu(testPage, mobile, workflow.id);
 
   const autoHideToggle = columnsMenu.getByTestId(`columns-menu-auto-hide-empty-${workflow.id}`);
@@ -126,14 +83,15 @@ test("keeps auto-hide scoped and restores mobile move targets during drag", asyn
   await closeMobileMenu(testPage, mobile);
 
   await expect(testPage.getByTestId(`kanban-column-${hiddenDestination.id}`)).toHaveCount(0);
-  const recoveredTarget = testPage.getByTestId(`mobile-drop-target-${hiddenDestination.id}`);
-  await touchDragToTarget(testPage, mobile.taskCard(task.id), recoveredTarget);
+  await mobile.taskCard(task.id).getByRole("button", { name: "More options" }).tap();
+  await testPage.getByTestId("task-context-move-to").tap();
+  await testPage.getByTestId(`task-context-step-${hiddenDestination.id}`).tap();
   const overflow = await testPage.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
     clientWidth: document.documentElement.clientWidth,
   }));
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
-  await expect(recoveredTarget).toHaveCount(0);
+  await expect(testPage.locator('[data-testid^="mobile-drop-target-"]')).toHaveCount(0);
   await expect
     .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
     .toBe(hiddenDestination.id);

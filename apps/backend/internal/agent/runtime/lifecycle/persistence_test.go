@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 type captureExecutorRunningWriter struct {
@@ -170,6 +171,22 @@ func TestPersistExecutorRunningRestoresRecoveredExecutionProfile(t *testing.T) {
 	if writer.running.ResumeToken != "claude-session" || writer.running.LastMessageUUID != "last-message" {
 		t.Fatalf("recovered resume state was cleared: %+v", writer.running)
 	}
+}
+
+func TestPersistExecutorRunningUsesTrackedExecutionStatus(t *testing.T) {
+	writer := &captureExecutorRunningWriter{}
+	mgr := newTestManager(t)
+	mgr.SetExecutorRunningWriter(writer)
+	execution := &AgentExecution{
+		ID: "exec-tracked-status", TaskID: "task-1", SessionID: "session-1",
+		Status: v1.AgentStatusRunning,
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+	mgr.executionStore.UpdateError(execution.ID, "agentctl not ready")
+
+	require.NoError(t, mgr.persistExecutorRunningResult(context.Background(), execution))
+	require.NotNil(t, writer.running)
+	require.Equal(t, models.ExecutorRunningStatusFailed, writer.running.Status)
 }
 
 func TestPersistExecutorRunningReturnsUpsertFailure(t *testing.T) {

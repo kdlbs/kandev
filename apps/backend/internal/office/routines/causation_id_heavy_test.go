@@ -63,7 +63,7 @@ type dbBackedTaskCreator struct {
 }
 
 func (f *dbBackedTaskCreator) CreateOfficeTaskInWorkflow(
-	_ context.Context, workspaceID, _, _, workflowID, title, _ string,
+	_ context.Context, workspaceID, _, _, workflowID, title, _, _ string,
 ) (string, error) {
 	f.nextSeq++
 	f.captured.workflowID = workflowID

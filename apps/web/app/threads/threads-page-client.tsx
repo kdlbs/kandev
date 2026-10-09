@@ -39,21 +39,21 @@ function ThreadsPageHeader({
     <KanbanHeader
       workspaceId={workspaceId ?? undefined}
       currentPage="threads"
+      mobileListingStatus={
+        <MobileThreadPagination
+          position={threads.findIndex((thread) => thread.taskId === activeMobileTaskId) + 1}
+          total={threads.length}
+        />
+      }
       taskListingControls={
-        <>
-          <ThreadsViewControls
-            candidates={query.candidates}
-            repositories={repositories}
-            admittedCount={query.admittedCandidates.length}
-            matchingCount={query.matchingCount + query.temporaryAdmissionCount}
-            hiddenCount={query.hiddenCount}
-            gridHeightFallback={gridHeightFallback}
-          />
-          <MobileThreadPagination
-            position={threads.findIndex((thread) => thread.taskId === activeMobileTaskId) + 1}
-            total={threads.length}
-          />
-        </>
+        <ThreadsViewControls
+          candidates={query.candidates}
+          repositories={repositories}
+          admittedCount={query.admittedCandidates.length}
+          matchingCount={query.matchingCount + query.temporaryAdmissionCount}
+          hiddenCount={query.hiddenCount}
+          gridHeightFallback={gridHeightFallback}
+        />
       }
     />
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { Trans } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { rememberSettingsPath } from "@/lib/settings/last-settings-page";
 
@@ -13,10 +14,22 @@ export function SettingsRedirect({ to }: { to: string }) {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace(to);
+    router.replace(resolveSettingsRedirect(to));
   }, [router, to]);
 
   return null;
+}
+
+export function resolveSettingsRedirect(to: string): string {
+  if (typeof window === "undefined") return to;
+  const destination = new URL(to, window.location.href);
+  const current = new URL(window.location.href);
+  const query = new URLSearchParams(current.search);
+  for (const key of new Set(destination.searchParams.keys())) query.delete(key);
+  for (const [key, value] of destination.searchParams) query.append(key, value);
+  const search = query.toString();
+  const hash = destination.hash || (destination.searchParams.has("tab") ? "" : current.hash);
+  return `${destination.pathname}${search ? `?${search}` : ""}${hash}`;
 }
 
 /**
@@ -31,4 +44,21 @@ export function useRememberSettingsPath(pathname: string, knownPaths: ReadonlySe
   useEffect(() => {
     rememberSettingsPath(pathname, knownPaths);
   }, [pathname, knownPaths]);
+}
+
+/**
+ * Shown for a settings path the route table recognizes the shape of (a
+ * workspace sub-page, a flag-gated feature not yet enabled) but has no
+ * dedicated client page for yet.
+ */
+export function SettingsRouteFallback({ pathname }: { pathname: string }) {
+  return (
+    <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
+      {/* `pathname` is a route string, never translated. */}
+      <Trans i18nKey="system:settingsRouteNotPorted" values={{ pathname }}>
+        This settings route is handled by the SPA shell, but its dedicated client page is still
+        being ported: <span className="font-mono">{pathname}</span>
+      </Trans>
+    </div>
+  );
 }

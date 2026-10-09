@@ -760,7 +760,7 @@ func TestCancelSession_ConcurrentWithRespond_DoesNotCloseCancelChOnceDelivered(t
 	go func() {
 		cancelDone <- s.CancelSession("s1")
 	}()
-	<-cancelParked // CancelSession removed the entry from s.pending; parked just before acquiring pending.mu.
+	<-cancelParked // CancelSession captured the entry; parked before deciding cancellation.
 
 	// Release Respond first and wait for it to fully finish -- pending.resolved
 	// is now true and done is closed -- before letting CancelSession proceed.
@@ -897,7 +897,7 @@ func TestCancelSession_ConcurrentWithCancelRequest_DoesNotDoubleCloseCancelCh(t 
 	go func() {
 		cancelSessResult <- s.CancelSession("s1")
 	}()
-	<-cancelSessParked // CancelSession removed the entry from s.pending; parked before pending.mu.
+	<-cancelSessParked // CancelSession captured the entry; parked before deciding cancellation.
 
 	close(cancelReqRelease)
 	close(cancelSessRelease)

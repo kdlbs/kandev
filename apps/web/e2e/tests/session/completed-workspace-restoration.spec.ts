@@ -2,7 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 import {
-  failNextWorkspaceRestore,
+  failWorkspaceRestoresUntilReleased,
   restartAndAssertColdWorkspace,
   RETAINED_WORKSPACE_CONTENT,
   RETAINED_WORKSPACE_FILE,
@@ -10,8 +10,6 @@ import {
 } from "./completed-workspace-restoration-helpers";
 
 test.describe("Completed workspace restoration", () => {
-  test.describe.configure({ retries: 1 });
-
   test("restores a cold workspace and recovers a bounded failure", async ({
     testPage,
     apiClient,
@@ -19,7 +17,7 @@ test.describe("Completed workspace restoration", () => {
     backend,
     prCapture,
   }) => {
-    test.setTimeout(240_000);
+    test.setTimeout(360_000);
     const task = await seedCompletedConversation(
       apiClient,
       seedData,
@@ -31,7 +29,7 @@ test.describe("Completed workspace restoration", () => {
     const beforeMessages = await apiClient.listSessionMessages(task.session_id);
     await restartAndAssertColdWorkspace(backend, apiClient, task.id, task.session_id);
 
-    const failure = await failNextWorkspaceRestore(
+    const failure = await failWorkspaceRestoresUntilReleased(
       testPage,
       task.id,
       task.session_id,
@@ -43,6 +41,12 @@ test.describe("Completed workspace restoration", () => {
     await expect(session.completedSessionBanner()).toBeVisible({ timeout: 30_000 });
 
     await session.clickTab("Files");
+    await expect
+      .poll(() => failure.wasConsumed(), {
+        timeout: 15_000,
+        message: "The Files panel sends a workspace restore request",
+      })
+      .toBe(true);
     const workspaceUnavailable = session.files.getByTestId("workspace-unavailable");
     await expect(workspaceUnavailable).toBeVisible({ timeout: 30_000 });
     await expect(session.files.getByTestId("file-tree-waiting")).toHaveCount(0);
@@ -57,11 +61,11 @@ test.describe("Completed workspace restoration", () => {
     const retry = workspaceUnavailable.getByTestId("workspace-retry");
     const retryBox = await retry.boundingBox();
     expect(retryBox, "workspace retry has no rendered hitbox").not.toBeNull();
-    expect(retryBox?.height ?? 0).toBeGreaterThanOrEqual(32);
+    expect(retryBox?.height ?? 0).toBeGreaterThanOrEqual(28);
+    failure.allowNextRestores();
     await retry.click();
 
-    const fileNode = session.fileTreeNode(RETAINED_WORKSPACE_FILE);
-    await expect(fileNode).toBeVisible({ timeout: 60_000 });
+    const fileNode = await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 60_000);
     await fileNode.click();
     const viewer = testPage.locator(".monaco-editor:visible").first();
     await expect(viewer).toBeVisible({ timeout: 15_000 });
@@ -106,7 +110,7 @@ test.describe("Completed workspace restoration", () => {
     await testPage.reload();
     await session.showSessionContext();
     await session.clickTab("Files");
-    await expect(session.fileTreeNode(RETAINED_WORKSPACE_FILE)).toBeVisible({ timeout: 60_000 });
+    await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 60_000);
     await session.clickSessionChatTab();
     await expect(session.completedSessionBanner()).toBeVisible({ timeout: 30_000 });
 

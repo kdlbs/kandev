@@ -26,6 +26,7 @@ func (r *Repository) UpdateTaskRepositoryComparisonTarget(
 	id string,
 	target *models.ComparisonTarget,
 	expected *models.ComparisonTarget,
+	clearManualOverride bool,
 ) (*models.TaskRepository, bool, error) {
 	if target != nil {
 		if err := target.Validate(); err != nil {
@@ -42,15 +43,18 @@ func (r *Repository) UpdateTaskRepositoryComparisonTarget(
 	if err != nil {
 		return nil, false, err
 	}
+	if taskRepo.Metadata == nil {
+		taskRepo.Metadata = make(map[string]interface{})
+	}
 	current, present, err := models.LoadComparisonTarget(taskRepo.Metadata)
 	if err != nil {
 		return nil, false, err
 	}
 	var changed bool
 	if target == nil {
-		changed = removeComparisonTarget(taskRepo.Metadata, current, present, expected)
+		changed = removeComparisonTarget(taskRepo.Metadata, current, present, expected, clearManualOverride)
 	} else {
-		changed, err = applyComparisonTarget(taskRepo.Metadata, current, present, target)
+		changed, err = applyComparisonTarget(taskRepo.Metadata, current, present, target, clearManualOverride)
 	}
 	if err != nil {
 		return nil, false, err
@@ -74,15 +78,20 @@ func removeComparisonTarget(
 	current models.ComparisonTarget,
 	present bool,
 	expected *models.ComparisonTarget,
+	clearManualOverride bool,
 ) bool {
-	if !present {
+	if expected != nil && (!present || !current.ChangeIdentityEqual(*expected)) {
 		return false
 	}
-	if expected != nil && !current.ChangeIdentityEqual(*expected) {
-		return false
+	changed := present
+	if present {
+		delete(metadata, models.ComparisonTargetMetadataKey)
 	}
-	delete(metadata, models.ComparisonTargetMetadataKey)
-	return true
+	if clearManualOverride && models.HasManualBaseBranchOverride(metadata) {
+		delete(metadata, models.ManualBaseBranchOverrideMetadataKey)
+		changed = true
+	}
+	return changed
 }
 
 func applyComparisonTarget(
@@ -90,26 +99,35 @@ func applyComparisonTarget(
 	current models.ComparisonTarget,
 	present bool,
 	target *models.ComparisonTarget,
+	clearManualOverride bool,
 ) (bool, error) {
 	if present && current.Equal(*target) {
+		if clearManualOverride && models.HasManualBaseBranchOverride(metadata) {
+			delete(metadata, models.ManualBaseBranchOverrideMetadataKey)
+			return true, nil
+		}
 		return false, nil
 	}
 	if err := models.PutComparisonTarget(metadata, target); err != nil {
 		return false, err
 	}
+	if clearManualOverride {
+		delete(metadata, models.ManualBaseBranchOverrideMetadataKey)
+	}
 	return true, nil
 }
 
-// UpdateTaskRepositoryBaseBranchAndClearComparisonTarget applies a user
-// selected comparison branch while removing provider-owned target state in
-// the same transaction. This also handles selecting the same visible
-// branch. It mutates the link in place and bumps
+// UpdateTaskRepositoryBaseBranchAndClearComparisonTarget updates a task base
+// branch while removing provider-owned target state in the same transaction.
+// Manual selections are marked so provider refresh cannot replace them. It
+// mutates the link in place and bumps
 // task_repositories.updated_at, so it takes the owning task's row lock,
 // same reason as UpdateTaskRepositoryComparisonTarget above.
 func (r *Repository) UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
 	ctx context.Context,
 	id string,
 	baseBranch string,
+	manualSelection bool,
 ) (*models.TaskRepository, bool, error) {
 	if !securityutil.IsValidBaseBranchRef(baseBranch) {
 		return nil, false, fmt.Errorf("invalid base branch: %q", baseBranch)
@@ -124,14 +142,24 @@ func (r *Repository) UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
 	if err != nil {
 		return nil, false, err
 	}
+	if taskRepo.Metadata == nil {
+		taskRepo.Metadata = make(map[string]interface{})
+	}
 	_, present, err := models.LoadComparisonTarget(taskRepo.Metadata)
 	if err != nil {
 		return nil, false, err
 	}
-	if taskRepo.BaseBranch == baseBranch && !present {
+	manualOverride := models.HasManualBaseBranchOverride(taskRepo.Metadata)
+	if manualOverride && !manualSelection {
+		return taskRepo, false, nil
+	}
+	if taskRepo.BaseBranch == baseBranch && !present && (!manualSelection || manualOverride) {
 		return taskRepo, false, nil
 	}
 	delete(taskRepo.Metadata, models.ComparisonTargetMetadataKey)
+	if manualSelection {
+		taskRepo.Metadata[models.ManualBaseBranchOverrideMetadataKey] = true
+	}
 	taskRepo.BaseBranch = baseBranch
 	taskRepo.UpdatedAt = r.nowUTC()
 	if err := updateTaskRepositoryMetadata(ctx, tx, taskRepo); err != nil {

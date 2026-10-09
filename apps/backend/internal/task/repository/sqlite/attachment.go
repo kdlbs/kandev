@@ -273,6 +273,10 @@ func addQueuedAttachmentToClaim(
 		(attachment.QueueID != "" && attachment.QueueID != queueID) {
 		return models.ErrAttachmentClaimConflict
 	}
+	if attachment.SizeBytes < 0 || attachment.SizeBytes > models.MaxMessageAttachmentBytes {
+		return models.ErrAttachmentTooLarge
+	}
+	selection.selectedSize += attachment.SizeBytes
 	return nil
 }
 
@@ -330,6 +334,39 @@ func (r *Repository) RestoreQueuedMessageAttachments(
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit queued attachment restore: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) RestoreLaunchMessageAttachments(
+	ctx context.Context,
+	ids []string,
+	ownerID, taskID, sessionID string,
+	expiresAt time.Time,
+) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin launch attachment restore: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC()
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE task_message_attachments
+			SET task_id = '', session_id = '', message_id = '', queue_id = '',
+				state = ?, expires_at = ?, updated_at = ?
+			WHERE id = ? AND owner_id = ? AND task_id = ? AND session_id = ?
+			  AND message_id = '' AND queue_id = '' AND state = ?
+		`), models.AttachmentStateStaged, expiresAt, now, id, ownerID, taskID,
+			sessionID, models.AttachmentStateClaimed); err != nil {
+			return fmt.Errorf("restore launch attachment: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit launch attachment restore: %w", err)
 	}
 	return nil
 }
@@ -407,6 +444,10 @@ func addDirectAttachmentToClaim(
 		(attachment.MessageID != "" && attachment.MessageID != messageID) {
 		return models.ErrAttachmentClaimConflict
 	}
+	if attachment.SizeBytes < 0 || attachment.SizeBytes > models.MaxMessageAttachmentBytes {
+		return models.ErrAttachmentTooLarge
+	}
+	selection.selectedSize += attachment.SizeBytes
 	return nil
 }
 

@@ -99,7 +99,7 @@ export function useRemoteReposState() {
   };
 }
 
-function applyRemoteRepoPatch(
+export function applyRemoteRepoPatch(
   row: TaskRemoteRepoRow,
   patch: Partial<TaskRemoteRepoRow>,
 ): TaskRemoteRepoRow {
@@ -109,6 +109,7 @@ function applyRemoteRepoPatch(
   return {
     ...row,
     remoteUrl: undefined,
+    checkoutOptions: undefined,
     provider: undefined,
     providerHost: undefined,
     providerScope: undefined,

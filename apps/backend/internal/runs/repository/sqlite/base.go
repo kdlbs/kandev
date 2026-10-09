@@ -7,6 +7,8 @@ package sqlite
 
 import (
 	"github.com/jmoiron/sqlx"
+
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // Repository provides SQLite-based runs queue storage. It holds
@@ -16,6 +18,29 @@ import (
 type Repository struct {
 	db *sqlx.DB // writer
 	ro *sqlx.DB // reader
+
+	// claimLimits backs REQ-OFFICE-LAUNCH-SAFETY-001/005's claim-time
+	// ceilings and budgets. See ClaimSafetyLimits and SetClaimSafetyLimits.
+	claimLimits ClaimSafetyLimits
+
+	// gateFailureThreshold backs REQ-OFFICE-BACKPRESSURE-003's durable
+	// escalation record. See RecordGateOutcome and SetGateFailureThreshold.
+	gateFailureThreshold int
+
+	// log is optional (nil in most tests, via SetLogger otherwise) so
+	// NewWithDB's signature stays unchanged for the many existing call
+	// sites; ClaimNextEligibleRun's deferral-attribution log
+	// (AC-OFFICE-BACKPRESSURE-003.7) is skipped when it is nil.
+	log *logger.Logger
+}
+
+// SetLogger wires a logger for this repository's structured log
+// emission (currently: ClaimNextEligibleRun's deferral-attribution
+// entry, AC-OFFICE-BACKPRESSURE-003.7). Optional — a nil or never-set
+// logger simply skips that log entry; the underlying counters and
+// durable records still update.
+func (r *Repository) SetLogger(log *logger.Logger) {
+	r.log = log
 }
 
 // NewWithDB creates a new runs repository with existing database

@@ -302,7 +302,7 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
   );
   await taskDialog.getByTestId("submit-start-agent-chevron").click();
   await testPage.getByTestId("submit-create-without-agent").click();
-  await expect(testPage).toHaveURL(/\/tasks\//);
+  await expect(testPage).toHaveURL(/\/(?:t|tasks)\//);
   await testPage.goto("/azure-devops");
   await testPage.getByTestId("azure-devops-work-items-mode").click();
   await testPage.getByTestId("azure-devops-search-button").click();

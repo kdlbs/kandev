@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // Per-user scoping for the workflow-step surface (opt-in authentication).
@@ -205,9 +206,11 @@ func isNotFoundError(err error) bool {
 		return false
 	}
 	if errors.Is(err, ErrNotVisible) ||
+		errors.Is(err, repoerrors.ErrWorkflowNotFound) ||
 		errors.Is(err, repoerrors.ErrWorkspaceNotFound) ||
 		errors.Is(err, repoerrors.ErrTaskNotFound) ||
-		errors.Is(err, taskmodels.ErrTaskSessionNotFound) {
+		errors.Is(err, taskmodels.ErrTaskSessionNotFound) ||
+		errors.Is(err, workflowmodels.ErrWorkflowStepNotFound) {
 		return true
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "not found")

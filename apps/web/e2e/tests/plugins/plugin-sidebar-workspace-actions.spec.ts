@@ -53,15 +53,15 @@ test.describe("Plugins — sidebar-workspace-actions slot", () => {
         const chatEl = byTestId(chatId);
         const slotEl = byTestId(slotId);
         if (!terminalEl || !chatEl || !slotEl) return null;
-        const position = terminalEl.compareDocumentPosition(chatEl);
-        const chatAfterTerminal = Boolean(position & Node.DOCUMENT_POSITION_FOLLOWING);
+        const terminalPosition = terminalEl.compareDocumentPosition(slotEl);
+        const slotAfterTerminal = Boolean(terminalPosition & Node.DOCUMENT_POSITION_FOLLOWING);
         const slotPosition = chatEl.compareDocumentPosition(slotEl);
         const slotAfterChat = Boolean(slotPosition & Node.DOCUMENT_POSITION_FOLLOWING);
-        return { chatAfterTerminal, slotAfterChat };
+        return { slotAfterTerminal, slotAfterChat };
       },
       [QUICK_TERMINAL_TEST_ID, QUICK_CHAT_TEST_ID, SLOT_TEST_ID] as const,
     );
-    expect(order).toEqual({ chatAfterTerminal: true, slotAfterChat: true });
+    expect(order).toEqual({ slotAfterTerminal: true, slotAfterChat: true });
   });
 
   test("no sidebar-workspace-actions markup renders when the plugin isn't installed (A1)", async ({

@@ -13,8 +13,9 @@ import (
 
 // stubWorktreeRecovery implements WorktreeProvider + BranchStatusProber.
 type stubWorktreeRecovery struct {
-	worktrees []*worktree.Worktree
-	statuses  map[string]string // branch → status
+	worktrees     []*worktree.Worktree
+	statuses      map[string]string // branch → status
+	exactStatuses map[string]string
 }
 
 func (s *stubWorktreeRecovery) OnTaskDeleted(context.Context, string) error { return nil }
@@ -23,6 +24,12 @@ func (s *stubWorktreeRecovery) GetAllByTaskID(context.Context, string) ([]*workt
 }
 func (s *stubWorktreeRecovery) BranchRecoveryStatus(_ context.Context, _, branch string) string {
 	return s.statuses[branch]
+}
+func (s *stubWorktreeRecovery) RecoverBranchStatus(_ context.Context, wt *worktree.Worktree) string {
+	if status := s.exactStatuses[wt.Branch]; status != "" {
+		return status
+	}
+	return s.statuses[wt.Branch]
 }
 
 // stubTaskRepoRepo overrides just the two methods RecoverTaskBranches uses.
@@ -112,6 +119,27 @@ func TestRecoverTaskBranches_MissingBranchReportsWithoutUpdate(t *testing.T) {
 	}
 	if len(repos.updated) != 0 {
 		t.Errorf("checkout_branch must not be written for a missing branch: %+v", repos.updated)
+	}
+}
+
+func TestRecoverTaskBranches_UsesExactCompactedHeadRecovery(t *testing.T) {
+	wt := &stubWorktreeRecovery{
+		worktrees: []*worktree.Worktree{{
+			RepositoryID: "repo-1", RepositoryPath: "/repos/one", Branch: "feature/compacted",
+			BranchOwner: worktree.BranchOwnerManaged, RecoveryHeadSHA: "accepted-head",
+		}},
+		statuses:      map[string]string{"feature/compacted": worktree.BranchStatusMissing},
+		exactStatuses: map[string]string{"feature/compacted": worktree.BranchStatusLocal},
+	}
+	repos := &stubTaskRepoRepo{repos: []*models.TaskRepository{{TaskID: "task-1", RepositoryID: "repo-1"}}}
+	svc, _ := recoveryTestService(t, wt, repos)
+
+	out := svc.RecoverTaskBranches(context.Background(), "task-1")
+	if len(out) != 1 || out[0].Status != worktree.BranchStatusLocal {
+		t.Fatalf("recovery = %+v, want exact local recovery", out)
+	}
+	if len(repos.updated) != 1 || repos.updated[0].CheckoutBranch != "feature/compacted" {
+		t.Fatalf("checkout branch was not restored after exact recovery: %+v", repos.updated)
 	}
 }
 

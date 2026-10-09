@@ -87,6 +87,9 @@ export function RemoteRepoChipsRow({
         return (
           <RemoteRepoChip
             key={row.key}
+            workspaceId={workspaceId}
+            executorProfileId={fs.executorProfileId}
+            onOptionsChange={(checkoutOptions) => onUpdateRow(row.key, { checkoutOptions })}
             row={row}
             branches={fs.branchesByUrl.branches(row.url)}
             branchesLoading={fs.branchesByUrl.loading(row.url)}

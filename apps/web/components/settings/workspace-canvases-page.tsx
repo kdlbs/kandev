@@ -25,6 +25,7 @@ import { Button } from "@kandev/ui/button";
 import Link from "@/components/routing/app-link";
 import { useAppStore } from "@/components/state-provider";
 import { useRouter } from "@/lib/routing/client-router";
+import { linkToTask } from "@/lib/links";
 import {
   archiveCanvas,
   canvasHref,
@@ -101,10 +102,7 @@ function useWorkspaceCanvasState(workspaceId: string) {
     try {
       const response = await startCanvasEdit(canvas.id);
       if (response.task_id) {
-        const query = response.session_id
-          ? `?sessionId=${encodeURIComponent(response.session_id)}`
-          : "";
-        router.push(`/t/${encodeURIComponent(response.task_id)}${query}`);
+        router.push(linkToTask(response.task_id, { sessionId: response.session_id ?? undefined }));
       }
     } catch (reason: unknown) {
       setError(canvasErrorMessage(reason, t, "canvases:actionFailed"));

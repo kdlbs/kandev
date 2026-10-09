@@ -8,7 +8,7 @@ import { waitForStableActiveSession } from "../../helpers/session-store";
 const MOBILE_END_TOLERANCE_PX = 10;
 
 async function switchMobileTask(testPage: Page, title: string): Promise<void> {
-  await testPage.getByTestId("mobile-session-menu").tap();
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
   const sheet = testPage.getByRole("dialog", { name: "Tasks" });
   const taskRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: title });
   await expect(taskRow).toBeVisible({ timeout: 15_000 });
@@ -151,6 +151,8 @@ test.describe("Mobile unread divider", () => {
       });
 
     await responseHold.releaseHeldResponse();
+    const serverSession = await apiClient.getTaskSession(taskA.sessionId);
+    expect(serverSession.session.last_read_message_id).toBe(taskA.newestMessageId);
     await switchMobileTask(testPage, "Completed read cursor mobile A");
     await waitForStableActiveSession(testPage, taskA.sessionId);
 

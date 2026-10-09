@@ -11,8 +11,8 @@ import (
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/office/dashboard"
-	officemodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // runDetailDeps wires a fresh in-memory repo for run-detail tests.
@@ -47,7 +47,7 @@ func seedRunDetailRun(
 ) string {
 	t.Helper()
 	ctx := context.Background()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: agentID,
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"` + taskID + `"}`,
@@ -130,6 +130,55 @@ func TestListAgentRunsPaged_FirstPageNoCursor(t *testing.T) {
 	}
 }
 
+func TestListAgentRunsPaged_IncludesPersistedRoutineID(t *testing.T) {
+	deps := newRunDetailDeps(t)
+	run := &runsmodels.Run{
+		AgentProfileID: "agent-1",
+		Reason:         "routine_dispatch_event",
+		Payload:        `{"agent_profile_id":"agent-1"}`,
+		Status:         "queued",
+		RoutineID:      "routine-1",
+	}
+	if err := deps.repo.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	response, err := dashboard.ListAgentRunsPaged(context.Background(), deps.repo, "agent-1", "", "", 10)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(response.Runs) != 1 {
+		t.Fatalf("want one run, got %d", len(response.Runs))
+	}
+	if got := response.Runs[0].RoutineID; got != "routine-1" {
+		t.Fatalf("routine_id = %q, want persisted routine ID", got)
+	}
+}
+
+func TestListAgentRunsPaged_FallsBackToRoutineIDInPayload(t *testing.T) {
+	deps := newRunDetailDeps(t)
+	run := &runsmodels.Run{
+		AgentProfileID: "agent-1",
+		Reason:         "routine_dispatch_event",
+		Payload:        `{"routine_id":"routine-legacy"}`,
+		Status:         "queued",
+	}
+	if err := deps.repo.CreateRun(context.Background(), run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	response, err := dashboard.ListAgentRunsPaged(context.Background(), deps.repo, "agent-1", "", "", 10)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(response.Runs) != 1 {
+		t.Fatalf("want one run, got %d", len(response.Runs))
+	}
+	if got := response.Runs[0].RoutineID; got != "routine-legacy" {
+		t.Fatalf("routine_id = %q, want legacy payload routine ID", got)
+	}
+}
+
 func TestListAgentRunsPaged_LastPageHasNoCursor(t *testing.T) {
 	deps := newRunDetailDeps(t)
 	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
@@ -164,7 +213,7 @@ func TestListAgentRunsPaged_EmptyAgent(t *testing.T) {
 func TestListAgentRunsPaged_UsesSourceTaskForCommentLinks(t *testing.T) {
 	deps := newRunDetailDeps(t)
 	ctx := context.Background()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-1",
 		Reason:         "task_comment",
 		Payload:        `{"task_id":"target-task","source_task_id":"source-task","comment_id":"cm-source"}`,
@@ -193,7 +242,7 @@ func TestListAgentRunsPaged_UsesSourceTaskForCommentLinks(t *testing.T) {
 func TestListAgentRunsPaged_UsesSourceTaskWithoutCommentID(t *testing.T) {
 	deps := newRunDetailDeps(t)
 	ctx := context.Background()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-1",
 		Reason:         "approval_resolved",
 		Payload:        `{"task_id":"target-task","source_task_id":"source-task"}`,
@@ -216,6 +265,49 @@ func TestListAgentRunsPaged_UsesSourceTaskWithoutCommentID(t *testing.T) {
 	}
 	if resp.Runs[0].CommentID != "" {
 		t.Fatalf("summary comment_id = %q, want empty", resp.Runs[0].CommentID)
+	}
+}
+
+func TestGetRunDetailUsesNewestRunSessionInvocation(t *testing.T) {
+	deps := newRunDetailDeps(t)
+	ctx := context.Background()
+	seedRunDetailAgent(t, deps, "agent-retry", "agent-retry")
+	runID := seedRunDetailRun(t, deps, "agent-retry", "finished", "task-retry", time.Now().UTC())
+	if _, err := deps.db.Exec(`
+		UPDATE runs
+		SET session_id = ?, resolved_provider_id = ?, resolved_model = ?
+		WHERE id = ?
+	`, "session-old", "run-provider", "run-model", runID); err != nil {
+		t.Fatalf("update run snapshot: %v", err)
+	}
+	for _, session := range []struct {
+		id      string
+		attempt int
+		adapter string
+		model   string
+	}{
+		{"session-old", 1, "old-provider", "old-model"},
+		{"session-new", 2, "new-provider", "new-model"},
+	} {
+		if _, err := deps.db.Exec(`
+			INSERT INTO office_run_sessions (
+				id, workspace_id, agent_profile_id, run_id, attempt, state,
+				adapter, model, created_at
+			) VALUES (?, 'ws-1', 'agent-retry', ?, ?, 'finished', ?, ?, ?)
+		`, session.id, runID, session.attempt, session.adapter, session.model, time.Now().UTC()); err != nil {
+			t.Fatalf("insert session %s: %v", session.id, err)
+		}
+	}
+
+	detail, err := dashboard.GetRunDetail(ctx, deps.repo, "agent-retry", runID)
+	if err != nil {
+		t.Fatalf("GetRunDetail: %v", err)
+	}
+	if detail.Session.SessionID != "session-new" {
+		t.Fatalf("session id = %q, want session-new", detail.Session.SessionID)
+	}
+	if detail.Invocation.Adapter != "new-provider" || detail.Invocation.Model != "new-model" {
+		t.Fatalf("invocation = %+v, want newest attempt", detail.Invocation)
 	}
 }
 
@@ -289,12 +381,29 @@ func TestGetRunDetail_HappyPathWithCosts(t *testing.T) {
 	if len(resp.TasksTouched) != 1 || resp.TasksTouched[0] != "task-1" {
 		t.Errorf("want primary task in tasks_touched, got %v", resp.TasksTouched)
 	}
-	// After ADR 0005 the agent profile id IS the agent instance id, so
-	// the adapter slug surfaced in the invocation panel matches the agent
-	// row id directly. The legacy "office instance → shallow profile"
-	// indirection is gone.
-	if resp.Invocation.Adapter != "agent-1" {
-		t.Errorf("adapter mismatch: %q", resp.Invocation.Adapter)
+	if resp.Invocation.Adapter != "" {
+		t.Errorf("unrecorded adapter should stay empty, got %q", resp.Invocation.Adapter)
+	}
+	if resp.AgentName != "Agent" {
+		t.Errorf("agent name = %q, want Agent", resp.AgentName)
+	}
+}
+
+func TestGetRunDetailActualInvocation(t *testing.T) {
+	deps := newRunDetailDeps(t)
+	seedRunDetailAgent(t, deps, "agent-1", "ignored")
+	ctx := context.Background()
+	runID := seedRunDetailRun(t, deps, "agent-1", "finished", "task-1", time.Now().UTC())
+	if err := deps.repo.SetRunResolvedRoute(ctx, runID, "profile-1", "codex", "gpt-5"); err != nil {
+		t.Fatalf("set resolved route: %v", err)
+	}
+
+	resp, err := dashboard.GetRunDetail(ctx, deps.repo, "agent-1", runID)
+	if err != nil {
+		t.Fatalf("detail: %v", err)
+	}
+	if resp.Invocation.Adapter != "codex" || resp.Invocation.Model != "gpt-5" {
+		t.Fatalf("invocation = %+v, want recorded provider/model", resp.Invocation)
 	}
 }
 

@@ -144,12 +144,18 @@ export function useHoverPopover({
   openDelayMs,
   closeDelayMs,
   disabled = false,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
 }: {
   openDelayMs: number;
   closeDelayMs: number;
   disabled?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = controlledOnOpenChange ?? setUncontrolledOpen;
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const overTrigger = useRef(false);
@@ -180,7 +186,7 @@ export function useHoverPopover({
         setOpen(false);
       }
     }, closeDelayMs);
-  }, [disabled, clearOpen, clearClose, closeDelayMs]);
+  }, [disabled, clearOpen, clearClose, closeDelayMs, setOpen]);
 
   const scheduleOpen = useCallback(() => {
     if (disabled || open || openTimer.current) return;
@@ -188,7 +194,7 @@ export function useHoverPopover({
       openTimer.current = null;
       setOpen(true);
     }, openDelayMs);
-  }, [disabled, open, openDelayMs]);
+  }, [disabled, open, openDelayMs, setOpen]);
 
   const { onTriggerEnter, onTriggerLeave, onContentEnter, onContentLeave } = useHoverRegionHandlers(
     {
@@ -214,8 +220,15 @@ export function useHoverPopover({
       clearClose();
       setOpen(false);
     },
-    [clearOpen, clearClose],
+    [clearOpen, clearClose, setOpen],
   );
+
+  useEffect(() => {
+    if (controlledOpen !== false) return;
+    clearRegionPresence(overTrigger, triggerFocused, overContent, contentFocused);
+    clearOpen();
+    clearClose();
+  }, [controlledOpen, clearOpen, clearClose]);
 
   useEffect(
     () => () => {

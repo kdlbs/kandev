@@ -1,15 +1,18 @@
 package statussummary
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 func deriveSummary(state *projectionState) TaskStatusSummary {
 	primary, foregroundActivity, activeSubagentCount := deriveSessionFields(state)
 	return TaskStatusSummary{
 		PrimarySession:      primary,
+		HasRunningSession:   deriveHasRunningSession(state),
 		ForegroundActivity:  foregroundActivity,
 		ActiveSubagentCount: activeSubagentCount,
 		PendingAction:       derivePendingAction(state),
@@ -19,7 +22,90 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		PullRequest:         derivePullRequestSummary(state),
 		QueuedPromptCount:   state.queuedCount,
 		LastActivityAt:      cloneTimePtr(state.lastActivityAt),
+		LaunchQueue:         cloneLaunchQueue(state.launchQueue),
+		CompletionGate:      cloneCompletionGate(state.completionGate),
 	}
+}
+
+func deriveHasRunningSession(state *projectionState) *bool {
+	if state.sessionsObserved {
+		running := false
+		for _, session := range state.sessions {
+			if session.state == sessionStateRunning {
+				running = true
+				break
+			}
+		}
+		return &running
+	}
+	for _, session := range state.sessions {
+		if session.state == sessionStateRunning {
+			return boolPtr(true)
+		}
+	}
+	if state.current != nil {
+		return cloneBoolPtr(state.current.HasRunningSession)
+	}
+	return nil
+}
+
+func boolPtr(value bool) *bool { return &value }
+
+func cloneBoolPtr(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
+}
+
+func cloneCompletionGate(gate *CompletionGateSummary) *CompletionGateSummary {
+	if gate == nil {
+		return nil
+	}
+	copy := *gate
+	return &copy
+}
+
+func equalCompletionGate(left, right *CompletionGateSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
+}
+
+func cloneLaunchQueue(queue *LaunchQueueSummary) *LaunchQueueSummary {
+	if queue == nil {
+		return nil
+	}
+	copy := *queue
+	if queue.Capacity != nil {
+		capacity := *queue.Capacity
+		copy.Capacity = &capacity
+	}
+	return &copy
+}
+
+func equalLaunchQueue(left, right *LaunchQueueSummary) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	if left.SessionID != right.SessionID ||
+		left.AgentProfileID != right.AgentProfileID ||
+		left.WorkflowStepID != right.WorkflowStepID ||
+		!left.QueuedAt.Equal(right.QueuedAt) ||
+		left.Reason != right.Reason ||
+		left.Retrying != right.Retrying {
+		return false
+	}
+	if left.Capacity == nil || right.Capacity == nil {
+		return left.Capacity == right.Capacity
+	}
+	// ObservedAt describes when the controller sampled capacity. It is a
+	// response freshness detail, not queue identity, and must not create a new
+	// persisted projection on every refresh.
+	return left.Capacity.InUse == right.Capacity.InUse &&
+		left.Capacity.Limit == right.Capacity.Limit
 }
 
 func cloneActiveError(value *ActiveErrorSummary) *ActiveErrorSummary {
@@ -28,7 +114,7 @@ func cloneActiveError(value *ActiveErrorSummary) *ActiveErrorSummary {
 	}
 	copy := *value
 	copy.RecoveryActions = append([]string(nil), value.RecoveryActions...)
-	copy.Causes = append([]models.AgentErrorCause(nil), value.Causes...)
+	copy.Causes = models.NormalizeAgentErrorCauses(value.Causes)
 	return &copy
 }
 
@@ -190,14 +276,8 @@ func isGoneTaskPersistErr(err error) bool {
 		strings.Contains(msg, "violates foreign key")
 }
 
-// isMissingTaskResolveErr reports whether workspace resolution failed because
-// the task no longer exists. Transient repository errors must not match.
-func isMissingTaskResolveErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "not found") ||
-		strings.Contains(msg, "no rows") ||
-		strings.Contains(msg, "sql: no rows in result set")
+// isMissingTaskLookupErr reports whether a task lookup returned the repository's
+// authoritative missing-task sentinel. Transient repository errors must not match.
+func isMissingTaskLookupErr(err error) bool {
+	return errors.Is(err, repoerrors.ErrTaskNotFound)
 }

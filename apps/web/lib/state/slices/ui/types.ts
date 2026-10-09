@@ -1,6 +1,7 @@
 import type { ConnectionIssueSeverity, ConnectionStatus } from "@/lib/types/connection";
 import type { HealthCheckSummary, HealthIssue, SystemHealthResponse } from "@/lib/types/health";
 import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import type {
   FilterClause,
   GroupKey,
@@ -16,6 +17,7 @@ import type {
   ThreadViewSliceState,
   ThreadView,
 } from "./thread-view-types";
+import type { RuntimeUpdateSummaryMember } from "@/lib/types/backend";
 
 export type PreviewStage = "closed" | "logs" | "preview";
 export type PreviewViewMode = "preview" | "output";
@@ -61,14 +63,7 @@ export type MobileKanbanState = {
 /** Core, host-defined mobile panels. Kept as a named union (rather than
  *  inlined into MobileSessionPanel) so existing `=== "chat"`-style narrowing
  *  still works unchanged after MobileSessionPanel grew a plugin variant. */
-export type MobileSessionCorePanel =
-  | "chat"
-  | "plan"
-  | "changes"
-  | "files"
-  | "terminal"
-  | "review"
-  | "prompt-history";
+export type MobileSessionCorePanel = "chat" | "plan" | "changes" | "files" | "terminal" | "review";
 
 /** A plugin task panel id on mobile, `plugin:<pluginId>:<panelKey>` — see
  *  lib/state/layout-manager/plugin-panels.ts's pluginPanelId. */
@@ -118,6 +113,14 @@ export type SystemHealthState = {
 
 export type QuickChatSessionKind = "chat" | "config";
 
+export type QuickChatOpeningPayload = {
+  message: string;
+  clientMessageId?: string;
+  attachments?: MessageAttachment[];
+};
+
+export type QuickChatInitialPrompt = string | QuickChatOpeningPayload;
+
 export type QuickChatSelection = Partial<Record<QuickChatSessionKind, string>>;
 
 export type QuickChatSelectionByWorkspace = Record<string, QuickChatSelection>;
@@ -160,7 +163,7 @@ export type QuickChatSession = {
   taskId?: string;
   name?: string;
   agentProfileId?: string;
-  initialPrompt?: string;
+  initialPrompt?: QuickChatInitialPrompt;
 };
 
 export type QuickChatActiveKind = "conversation" | "terminal";
@@ -175,6 +178,13 @@ export type QuickChatSessionTombstone = {
   tombstonedAt: string;
 };
 
+export type ConfigChatRestartState = {
+  sessionId: string;
+  status: "restarting" | "uncertain";
+  source: "local" | "server";
+  error?: string;
+};
+
 export type QuickChatState = {
   isOpen: boolean;
   sessions: QuickChatSession[];
@@ -187,6 +197,7 @@ export type QuickChatState = {
   lastSettledAtBySession: Record<string, string>;
   sessionOwnership: Record<string, QuickChatSessionOwnership>;
   syncRevisionByWorkspace: Record<string, number>;
+  configChatRestarts: Record<string, ConfigChatRestartState>;
   tombstonedSessions: Record<string, QuickChatSessionTombstone>;
   /** Optimistic mixed-tab order keyed by workspace until the save settles. */
   tabOrderByWorkspace: Record<string, string[]>;
@@ -223,7 +234,14 @@ export type TaskDeletedNotification = {
 };
 
 export type UpdateAvailableNotification = {
-  version: string;
+  notification_kind?: "agent_runtime_summary";
+  runtime_updates?: RuntimeUpdateSummaryMember[];
+  agent_name?: string;
+  runtime_id?: string;
+  display_name?: string;
+  previous_version?: string;
+  runtime_update_status?: "available" | "succeeded" | "failed" | "interrupted";
+  version?: string;
   url?: string;
   title: string;
   body: string;
@@ -274,6 +292,9 @@ export type RichOutputMotionState = {
   savedEnabled: boolean;
 };
 
+/** Chat text and scroll motion, independently saved per device. */
+export type ChatMotionState = { enabled: boolean; savedEnabled: boolean };
+
 /** Unified AppSidebar collapse + per-section expand state (localStorage). */
 export type AppSidebarState = {
   collapsed: boolean;
@@ -320,8 +341,13 @@ export type UISliceState = {
   taskDeletedNotification: TaskDeletedNotification | null;
   /** Set when the background updates poller reports a newly detected release. */
   updateAvailableNotification: UpdateAvailableNotification | null;
+  updateAvailableNotificationQueue: UpdateAvailableNotification[];
   bottomTerminal: BottomTerminalState;
+  /** Whether every directory browser reveals entries whose name begins with a
+   * dot. A stored user preference, off by default. */
+  directoryBrowserShowHidden: boolean;
   sidebarViews: SidebarSliceState;
+  sidebarViewsByWorkspace: Record<string, SidebarSliceState>;
   threadViews: ThreadViewSliceState;
   /** Parent task IDs whose subtasks are collapsed in the sidebar. Tab-scoped (sessionStorage). */
   collapsedSubtaskParents: string[];
@@ -335,6 +361,7 @@ export type UISliceState = {
   settingsMenu: SettingsMenuState;
   /** Agent rich-output chart animation preference (localStorage). */
   richOutputMotion: RichOutputMotionState;
+  chatMotion: ChatMotionState;
   /**
    * Most recently dismissed `last_agent_error` stamp per sessionId. Shared by
    * the chat banner and the sidebar error icon so dismissing the banner also
@@ -370,6 +397,7 @@ export type UISliceActions = {
   setPlanMode: (sessionId: string, enabled: boolean) => void;
   setCancelTurnPending: (sessionId: string, pending: boolean) => void;
   setTranscriptAutoScrollEnabled: (sessionId: string, enabled: boolean) => void;
+  setDirectoryBrowserShowHidden: (showHidden: boolean) => void;
   setTranscriptScrollTop: (sessionId: string, scrollTop: number) => void;
   setReviewPRSelection: (taskId: string, selectedKey: string) => void;
   setActiveDocument: (sessionId: string, doc: ActiveDocument | null) => void;
@@ -422,7 +450,14 @@ export type UISliceActions = {
     workspaceId: string,
     state: { pending: boolean; error: string | null },
   ) => void;
-  setQuickChatInitialPrompt: (sessionId: string, prompt?: string) => void;
+  setQuickChatInitialPrompt: (sessionId: string, prompt?: QuickChatInitialPrompt) => void;
+  setConfigChatRestart: (workspaceId: string, restart: ConfigChatRestartState | null) => void;
+  syncConfigChatRestart: (workspaceId: string, pending: boolean, sessionId?: string) => void;
+  replaceConfigChatSession: (
+    workspaceId: string,
+    oldSessionId: string,
+    replacement: QuickChatSession,
+  ) => void;
   /** Opens Quick Chat after the requested workspace list becomes authoritative. */
   requestQuickChatOpen: (
     workspaceId: string,
@@ -444,6 +479,7 @@ export type UISliceActions = {
       filters: FilterClause[];
       sort: SortSpec;
       group: GroupKey;
+      groupIndent: boolean;
       taskRow: SidebarTaskRowPresentation;
     }>,
   ) => void;
@@ -456,7 +492,7 @@ export type UISliceActions = {
   reorderSidebarViews: (activeViewId: string, overViewId: string) => void;
   toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) => void;
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
-  clearSidebarSyncError: () => void;
+  clearSidebarSyncError: (workspaceId?: string) => void;
   setThreadActiveView: (viewId: string) => void;
   createThreadView: () => string | null;
   updateThreadViewDraft: (
@@ -521,6 +557,9 @@ export type UISliceActions = {
   commitRichOutputAnimations: (enabled: boolean) => void;
   /** Restore the persisted rich-output chart motion preference. */
   restoreRichOutputAnimations: () => void;
+  previewChatAnimations: (enabled: boolean) => void;
+  commitChatAnimations: (enabled: boolean) => void;
+  restoreChatAnimations: () => void;
   /** Record multiple sidebar badge acknowledgements with one localStorage merge. */
   acknowledgeAgentErrors: (stamps: Record<string, string>) => void;
   /** Record that `stamp` has been dismissed for `sessionId`. */

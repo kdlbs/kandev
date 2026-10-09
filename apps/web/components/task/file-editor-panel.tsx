@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { FileEditorContent, type FileEditorContentProps } from "./file-editor-content";
 import { FileImageViewer } from "./file-image-viewer";
@@ -295,8 +295,17 @@ function useResyncOnTabActivate({
   repo,
   updateFileState,
 }: ResyncOnTabActivateArgs) {
+  const visitRef = useRef<symbol | null>(null);
+  useLayoutEffect(() => {
+    visitRef.current = Symbol();
+    return () => {
+      visitRef.current = null;
+    };
+  }, [panelId, hasFile, activeSessionId, fileKey, path, repo]);
   useEffect(() => {
     if (!hasFile || !activeSessionId) return;
+    const visit = visitRef.current;
+    if (!visit) return;
     // panelPortalManager.acquire() runs in usePortalSlot's mount effect (the
     // dockview-side slot), which fires before child portals' effects, so the
     // entry is virtually always present here. There is one acceptable miss:
@@ -307,6 +316,7 @@ function useResyncOnTabActivate({
     // accept that edge case rather than wiring a manager-level subscription.
     const entry = panelPortalManager.get(panelId);
     if (!entry?.api) return;
+    const panelApi = entry.api;
     const syncNow = () => {
       const client = getWebSocketClient();
       if (!client) return;
@@ -317,14 +327,16 @@ function useResyncOnTabActivate({
         path,
         repo,
         updateFileState,
+        isCurrent: () =>
+          visitRef.current === visit && panelPortalManager.get(panelId)?.api === panelApi,
       });
     };
     // If the panel is already the active tab when this effect first runs,
     // onDidActiveChange won't fire (no transition), but the user is already
     // looking at the editor — sync immediately so the initial open path
     // benefits from the same WS-event-miss recovery as later activations.
-    if (entry.api.isActive) syncNow();
-    const disposable = entry.api.onDidActiveChange((event) => {
+    if (panelApi.isActive) syncNow();
+    const disposable = panelApi.onDidActiveChange((event) => {
       if (event.isActive) syncNow();
     });
     return () => disposable.dispose();

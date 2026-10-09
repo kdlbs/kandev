@@ -135,13 +135,13 @@ function renderKanbanCard() {
   );
 }
 
-function renderPipelineRow() {
+function renderPipelineRow(task: Task = TASK, isMultiSelectMode = false) {
   return render(
     <ToastProvider>
       <StateProvider initialState={SHARED_INITIAL_STATE}>
         <TooltipProvider delayDuration={0}>
           <Graph2TaskPipeline
-            task={TASK}
+            task={task}
             steps={STEPS}
             moveTargetSteps={STEPS}
             workspaceId={WORKSPACE_ID}
@@ -151,12 +151,29 @@ function renderPipelineRow() {
             onPreviewTask={() => undefined}
             onOpenTask={() => undefined}
             onDeleteTask={() => undefined}
+            isMultiSelectMode={isMultiSelectMode}
           />
         </TooltipProvider>
       </StateProvider>
     </ToastProvider>,
   );
 }
+
+describe("Pipeline title preview in multi-select mode", () => {
+  // @covers AC-TASKS-RICH-TASK-TITLE-PREVIEWS-001.2
+  it.each([
+    ["outside", false, true],
+    ["inside", true, false],
+  ] as const)("is %s multi-select mode", (_mode, isMultiSelectMode, previewEnabled) => {
+    renderPipelineRow({ ...TASK, parentTaskId: "parent-1" }, isMultiSelectMode);
+
+    if (previewEnabled) {
+      expect(screen.getByTestId("task-title-preview-trigger")).not.toBeNull();
+    } else {
+      expect(screen.queryByTestId("task-title-preview-trigger")).toBeNull();
+    }
+  });
+});
 
 async function openMenuAndSnapshot() {
   const trigger = screen.getByRole("button", { name: t("kanban:moreOptions") });

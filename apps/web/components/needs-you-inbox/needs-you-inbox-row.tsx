@@ -41,7 +41,13 @@ import {
   rowSecondaryText,
 } from "@/lib/needs-you-inbox/row-presentation";
 import { resolveThreadSessionStatus } from "@/lib/threads/thread-session-status";
+import { linkToTask } from "@/lib/links";
 import type { TaskSessionState } from "@/lib/types/http";
+import type {
+  LateClarificationSnapshot,
+  LateClarificationState,
+} from "@/hooks/use-late-clarification-message";
+import type { MessageAdmissionOutcome } from "@/hooks/use-message-handler";
 
 const SNOOZE_DURATIONS: ClarificationInboxSnoozeDuration[] = ["1h", "4h", "24h"];
 
@@ -93,6 +99,9 @@ function useRowOutcomeNotice(primaryText: string, bumpRefreshTick: () => void) {
       }
       if (outcome.kind === "no_longer_active") {
         toast(t("needsYouInbox:bundleNoLongerActive", { question: primaryText }));
+        bumpRefreshTick();
+      }
+      if (outcome.kind === "late_message_admitted") {
         bumpRefreshTick();
       }
       // submission_failed: the shared overlay's own inline banner already
@@ -159,11 +168,19 @@ function RowActionsMenu({
 }
 
 function taskHrefForBundle(bundle: ClarificationInboxBundle): string {
-  if (!bundle.session_id) return `/t/${bundle.task_id}`;
-  return `/t/${bundle.task_id}?sessionId=${encodeURIComponent(bundle.session_id)}`;
+  return linkToTask(bundle.task_id, { sessionId: bundle.session_id ?? undefined });
 }
 
-export function NeedsYouInboxRow({ bundle }: { bundle: ClarificationInboxBundle }) {
+// eslint-disable-next-line max-lines-per-function -- the row keeps its responsive actions and inline panel together.
+export function NeedsYouInboxRow({
+  bundle,
+  onLateAnswer,
+  lateAnswerState,
+}: {
+  bundle: ClarificationInboxBundle;
+  onLateAnswer?: (snapshot: LateClarificationSnapshot) => Promise<MessageAdmissionOutcome>;
+  lateAnswerState?: LateClarificationState;
+}) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -260,6 +277,8 @@ export function NeedsYouInboxRow({ bundle }: { bundle: ClarificationInboxBundle 
           messages={bundle.messages}
           onResolved={() => {}}
           onOutcome={handleOutcome}
+          onLateAnswer={onLateAnswer}
+          lateAnswerState={lateAnswerState}
           shortcutScopeRef={rowRef}
           maxHeightVh={50}
         />

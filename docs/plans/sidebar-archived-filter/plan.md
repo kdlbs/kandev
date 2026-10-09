@@ -222,3 +222,9 @@ projection; Task 05 verifies the completed vertical slice.
 - Changing active Kanban snapshot/query semantics.
 - Adding new archive/unarchive mutations or sidebar-specific persistence.
 - Redesigning the desktop sidebar or mobile task-switcher drawer.
+
+## Subsequent archive browsing package
+
+[Archived sidebar loading](../archived-sidebar-loading/plan.md) proposes bounded archive pages
+and preserves the view semantics established here. This completed package remains historical
+evidence. Its recorded results do not validate the subsequent repair.

@@ -3,6 +3,7 @@ package plugins
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -119,7 +120,25 @@ func ManifestCapabilityDigest(m manifest.Manifest) string {
 	if err != nil {
 		return ""
 	}
-	return CanonicalApprovalDigest(canonical...)
+	managedTools := make([]manifest.AgentTool, 0, len(m.AgentTools))
+	for _, tool := range m.AgentTools {
+		if !containsString(tool.Surfaces, manifest.AgentToolSurfaceManaged) {
+			continue
+		}
+		tool.Surfaces = append([]string(nil), tool.Surfaces...)
+		sort.Strings(tool.Surfaces)
+		managedTools = append(managedTools, tool)
+	}
+	if len(managedTools) == 0 {
+		return CanonicalApprovalDigest(canonical...)
+	}
+	sort.Slice(managedTools, func(i, j int) bool { return managedTools[i].Name < managedTools[j].Name })
+	encoded, err := json.Marshal(managedTools)
+	if err != nil {
+		return ""
+	}
+	parts := append([]string{strings.Join(canonical, "\x00")}, string(encoded))
+	return CanonicalApprovalDigest(parts...)
 }
 
 // ManifestCapabilityIDs returns the exact capability IDs declared by an

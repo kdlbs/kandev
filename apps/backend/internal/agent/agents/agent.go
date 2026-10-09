@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -70,6 +71,12 @@ type VirtualAgent interface {
 	IsVirtual() bool
 }
 
+// StoredProfilePreserver marks a disabled optional agent whose saved profiles
+// remain valid historical configuration and must not be orphan-cleaned.
+type StoredProfilePreserver interface {
+	PreserveStoredProfilesWhenDisabled() bool
+}
+
 // IsVirtualAgent reports whether an agent is a non-launchable virtual family.
 // Keeping this as an optional capability lets existing concrete agents remain
 // unchanged while callers can fail closed at launch and discovery boundaries.
@@ -87,11 +94,26 @@ type InferenceAgent interface {
 	InferenceConfig() *InferenceConfig
 }
 
+// HostUtilityInferenceAgent is an optional capability for agents whose host
+// utility command differs from the command used by a task executor. The
+// default InferenceConfig remains executor-safe; host utility callers can use
+// this capability when they run on the backend host.
+type HostUtilityInferenceAgent interface {
+	HostUtilityInferenceConfig() *InferenceConfig
+}
+
 // ManagedNPMRuntimeAgent is an optional capability for built-in agents whose
 // ACP runtime is resolved through npm. Package names and ACP arguments are
 // defined by the agent implementation rather than caller-provided input.
 type ManagedNPMRuntimeAgent interface {
 	ManagedNPMRuntime() ManagedNPMRuntimeSpec
+}
+
+// SelectedRuntimeInstallCommandProvider builds the Settings install command
+// for an install-wide runtime selection. Managed installs should prepare the
+// selected cache entry; native installs may update their standalone package.
+type SelectedRuntimeInstallCommandProvider interface {
+	SettingsInstallCommand(managedruntime.OpenCodeSelection) (Command, error)
 }
 
 // PassthroughAgent is an optional capability for agents that support CLI passthrough mode.
@@ -118,6 +140,8 @@ type NativeBinaryAgent interface {
 type LoginCommand struct {
 	// Cmd is the command + args to spawn, e.g. []string{"claude", "auth", "login"}.
 	Cmd []string
+	// Variants are server-owned command choices selected by opaque identifiers.
+	Variants map[string][]string
 	// Description renders above the terminal as a one-line hint, e.g.
 	// "Authenticate with your Anthropic account."
 	Description string
@@ -217,6 +241,12 @@ type CommandOptions struct {
 	// ManagedRuntimeVersion is an internal exact version override for trusted
 	// managed npm ACP runtimes. Empty uses the built-in exact version pin.
 	ManagedRuntimeVersion string
+	// ManagedRuntimeFamily and ManagedRuntimeSource carry the validated
+	// install-wide OpenCode choice into command construction.
+	ManagedRuntimeFamily managedruntime.OpenCodeFamily
+	ManagedRuntimeSource managedruntime.OpenCodeSource
+	// NativeRuntimeVersion is the observed version of a native OpenCode binary.
+	NativeRuntimeVersion string
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.
@@ -236,27 +266,37 @@ type PassthroughOptions struct {
 	// commands, which lifecycle.CommandBuilder appends centrally, passthrough
 	// agents opt in by appending these tokens in BuildPassthroughCommand.
 	CLIFlagTokens []string
+	// BaseCommand overrides the agent's default interactive CLI when the
+	// install-wide runtime selection resolves to a managed distribution.
+	BaseCommand Command
 }
 
 // RuntimeConfig holds Docker / standalone runtime settings.
 type RuntimeConfig struct {
-	Image           string
-	Tag             string
-	Cmd             Command
-	Entrypoint      Command
-	WorkingDir      string
-	Env             map[string]string
-	RequiredEnv     []string
-	Mounts          []MountTemplate
-	ResourceLimits  ResourceLimits
-	SessionConfig   SessionConfig
-	Protocol        agent.Protocol
-	ModelFlag       Param  // e.g. NewParam("--model", "{model}")
-	WorkspaceFlag   string // e.g. "--workspace-root"
-	AssumeMcpSse    bool   // Override: assume agent supports SSE MCP servers even if not advertised
-	AssumeMcpHttp   bool   // Override: assume agent supports HTTP MCP servers even if not advertised
-	ProjectSkillDir string // CWD-relative path for project-level skills (e.g. ".claude/skills")
-	UserSkillDir    string // home-relative path for user-level skills (e.g. ".claude/skills")
+	// ContainerEnv provides agent-specific environment required only when the
+	// process runs inside a container runtime. These values are independent of
+	// session mode and never reach host or SSH processes.
+	Image          string
+	Tag            string
+	Cmd            Command
+	Entrypoint     Command
+	WorkingDir     string
+	Env            map[string]string
+	ContainerEnv   map[string]string
+	RequiredEnv    []string
+	Mounts         []MountTemplate
+	ResourceLimits ResourceLimits
+	SessionConfig  SessionConfig
+	Protocol       agent.Protocol
+	ModelFlag      Param  // e.g. NewParam("--model", "{model}")
+	WorkspaceFlag  string // e.g. "--workspace-root"
+	AssumeMcpSse   bool   // Override: assume agent supports SSE MCP servers even if not advertised
+	AssumeMcpHttp  bool   // Override: assume agent supports HTTP MCP servers even if not advertised
+	// SupportsManagedToolPolicy is true only when this adapter can disable all
+	// native and ambient tool paths for managed conversations.
+	SupportsManagedToolPolicy bool
+	ProjectSkillDir           string // CWD-relative path for project-level skills (e.g. ".claude/skills")
+	UserSkillDir              string // home-relative path for user-level skills (e.g. ".claude/skills")
 	// ProjectMCPStrategy materializes resolved MCP servers into a project-local
 	// config file before a protocol-mode agent subprocess starts. Use this for
 	// agents whose ACP adapter does not wire session/new mcpServers through to
@@ -359,6 +399,18 @@ type PermissionSetting struct {
 	ApplyMethod  string `json:"apply_method,omitempty"`
 	CLIFlag      string `json:"cli_flag,omitempty"`
 	CLIFlagValue string `json:"cli_flag_value,omitempty"`
+
+	// PassthroughOnly marks a CLI flag that only reaches the agent in CLI
+	// passthrough mode. Over ACP the launched process is the bridge, which
+	// forwards no unrecognized argument to the CLI it wraps, so the flag is
+	// appended to a process that ignores it while the UI reports it as
+	// enabled.
+	PassthroughOnly bool `json:"passthrough_only,omitempty"`
+
+	// ACPEquivalent names the control that achieves the same thing over ACP.
+	// It is the actionable half of refusing a passthrough-only flag: a message
+	// that only says "not available here" leaves the user with no next step.
+	ACPEquivalent string `json:"acp_equivalent,omitempty"`
 }
 
 // PassthroughConfig defines configuration for CLI passthrough mode.
@@ -391,17 +443,19 @@ type PassthroughConfig struct {
 	// and when routing chat-compose messages to the PTY. "\r" for most TUIs.
 	// Empty inherits DefaultPassthroughSubmitSequence at PTY write sites.
 	SubmitSequence string
-	// DisableBracketedPaste sends prompt bytes verbatim (plus SubmitSequence).
-	// Claude Code enables bracketed-paste *mode* (?2004h) in its Ink TUI; injecting
-	// ESC[200~…ESC[201~ delimiters breaks input (nothing appears in the prompt).
+	// DisableBracketedPaste sends the prompt body without ESC[200~…ESC[201~
+	// delimiters. The planner then paces the body in writes that each fit within
+	// one terminal read, because a TUI can drop whole reads of a larger unframed
+	// burst. Set it only for a TUI that does not accept bracketed-paste input;
+	// framed bodies arrive whole at any length.
 	DisableBracketedPaste bool
-	// SubmitDelay is the wait inserted before each non-first chunk when writing the
-	// prompt+submit sequence to PTY stdin. Ink-based TUIs (Claude Code) detect a
+	// SubmitDelay is the wait inserted before the separate submit chunk when
+	// writing a prompt to PTY stdin. Ink-based TUIs (Claude Code) detect a
 	// "paste burst" when many stdin bytes arrive in one read and absorb the
 	// trailing \r into the pasted content instead of dispatching it as Enter.
-	// Splitting the prompt body from the submit byte with a small delay forces the
-	// submit to arrive as a discrete keystroke. 0 disables (other TUIs handle one
-	// atomic write fine).
+	// Writing the submit byte on its own after a small delay makes it arrive as
+	// a discrete keystroke. 0 appends the submit sequence to the final body
+	// write (other TUIs handle prompt and submit in one read).
 	SubmitDelay time.Duration
 }
 
@@ -440,11 +494,19 @@ func UserSkillDirFromRuntime(a Agent) string {
 type InferenceConfig struct {
 	// Supported indicates the agent can do one-shot inference.
 	Supported bool
-	// Command is the ACP command for one-shot inference.
+	// Protocol selects the agentctl one-shot inference transport. Empty keeps
+	// the historical ACP transport.
+	Protocol agent.Protocol
+	// Command is the protocol command for one-shot inference.
 	// e.g., ["npx", "-y", "@agentclientprotocol/claude-agent-acp"]
 	Command Command
 	// ModelFlag is the flag template for specifying the model (e.g., ["--model", "{model}"]).
 	ModelFlag Param
+	// OperatorDefined marks a Command that the install operator registered in
+	// Settings rather than one compiled into this binary. The host utility's
+	// probe allow-list is built from literals, which a command that does not
+	// exist until it is typed can never join.
+	OperatorDefined bool
 }
 
 // InferenceModel describes a model available for inference.

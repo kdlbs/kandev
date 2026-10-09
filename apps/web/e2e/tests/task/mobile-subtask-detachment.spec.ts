@@ -26,7 +26,7 @@ test.describe("Mobile subtask detachment", () => {
     await testPage.goto(`/t/${parent.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
     const childRow = taskSheet
@@ -55,7 +55,7 @@ test.describe("Mobile subtask detachment", () => {
         workspaceMode: "shared_group",
       });
 
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const promotedBlock = taskSheet.locator(
       `[data-testid="sortable-task-block"][data-task-id="${child.id}"]`,
     );

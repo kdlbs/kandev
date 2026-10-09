@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -26,6 +27,14 @@ import (
 // newRepositorySetTestRouter builds a real gin router over an in-memory task
 // repository seeded with one workspace and three repositories.
 func newRepositorySetTestRouter(t *testing.T) (*gin.Engine, *ws.Dispatcher) {
+	t.Helper()
+	router, dispatcher, _, _ := newRepositorySetTestRouterWithStore(t)
+	return router, dispatcher
+}
+
+func newRepositorySetTestRouterWithStore(
+	t *testing.T,
+) (*gin.Engine, *ws.Dispatcher, *sqliterepo.Repository, *bus.MemoryEventBus) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "repository-sets.db"))
@@ -48,16 +57,18 @@ func newRepositorySetTestRouter(t *testing.T) (*gin.Engine, *ws.Dispatcher) {
 
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	require.NoError(t, err)
+	eventBus := bus.NewMemoryEventBus(log)
+	t.Cleanup(eventBus.Close)
 	svc := service.NewService(service.Repos{
 		Workspaces:     repo,
 		RepoEntities:   repo,
 		RepositorySets: repo,
-	}, bus.NewMemoryEventBus(log), log, service.RepositoryDiscoveryConfig{})
+	}, eventBus, log, service.RepositoryDiscoveryConfig{})
 
 	router := gin.New()
 	dispatcher := ws.NewDispatcher()
 	RegisterRepositorySetRoutes(router, dispatcher, svc, log)
-	return router, dispatcher
+	return router, dispatcher, repo, eventBus
 }
 
 func doJSON(t *testing.T, router *gin.Engine, method, path string, body any) *httptest.ResponseRecorder {

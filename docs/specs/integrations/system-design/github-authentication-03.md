@@ -160,10 +160,14 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITHUB-A
 - **GIVEN** a broker-enabled managed task whose login profile replaces its inherited `PATH`,
   **WHEN** Git requests GitHub HTTPS credentials, **THEN** the configured helper invokes the
   instance-owned `agentctl` directly and does not search or fall through to an ambient helper.
-- **GIVEN** a broker-enabled Local or Worktree task whose checkout or setup script invokes Git
-  before the task instance is created, **WHEN** Git requests GitHub HTTPS credentials, **THEN** the
+- **GIVEN** a broker-enabled Local or Worktree task whose Kandev-owned checkout invokes Git before
+  the task instance is created, **WHEN** Git requests GitHub HTTPS credentials, **THEN** the
   configured helper invokes the standalone launcher's absolute `agentctl` executable without
   consulting `PATH` or an ambient helper.
+- **GIVEN** a Local or Worktree per-repository setup script, **WHEN** Kandev builds its environment,
+  **THEN** the script receives resolved profile and repository values, user-owned indexed Git
+  configuration, and Kandev's managed build cache, but receives no managed broker capability,
+  Kandev-generated Git credential helper, or managed `gh` shim routing.
 - **GIVEN** a broker-enabled Docker or Sprites task whose prepare script clones before `agentctl`
   starts, **WHEN** Git requests GitHub HTTPS credentials during that clone, **THEN** the configured
   helper invokes the already-installed absolute executor binary and redeems the task lease without
@@ -172,6 +176,16 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITHUB-A
   non-interactive login shell replaces `PATH`, **THEN** the existing hook still runs and the
   Kandev-managed `agentctl` and `gh` shims are restored ahead of ambient tools before the requested
   command starts.
+- **GIVEN** a broker-enabled managed task whose `PATH` still carries a `kandev-github-cli-*`
+  directory from an earlier `agentctl`, linking to or copying an older binary, or whose
+  `KANDEV_GITHUB_CLI_SHIM_DIR` names a different directory, **WHEN** the `gh` shim resolves the
+  real CLI, **THEN** it skips every candidate in a shim directory and every candidate that is
+  the running `agentctl`, and launches the real CLI once.
+- **GIVEN** the real `gh` runs a Bash extension whose `BASH_ENV` restores the shim directory,
+  **WHEN** the extension calls `gh`, **THEN** the nested shim launches the real CLI again with
+  the shim depth incremented.
+- **GIVEN** a `gh` shim started at the shim depth bound, **WHEN** it runs, **THEN** it exits
+  non-zero with an error naming the nesting and launches no process.
 - **GIVEN** that existing Bash environment hook is expressed as `$HOME/hook.sh` or
   `${KANDEV_HOOK_ROOT}/hook.sh`, **WHEN** Kandev composes its managed startup fragment, **THEN** it
   resolves the reference from the effective child environment and sources the intended hook rather
@@ -216,6 +230,9 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITHUB-A
 - A real Git subprocess test proves that host/executor indexed hooks and notes config survive
   managed credential injection, and focused tests prove ordered composition and overlap handling
   across standalone, container, and remote launch shapes.
+- Shim lookup tests prove that a symlinked shim and a foreign-binary shim directory ahead of the
+  real `gh` on `PATH` are skipped, a nested invocation below the depth bound launches the real
+  CLI, and an invocation at the bound is refused before any launch.
 
 ## Out Of Scope
 

@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 import { KanbanPage } from "../../pages/kanban-page";
 
 test.describe("Cross-workflow task move from home", () => {
@@ -22,7 +23,7 @@ test.describe("Cross-workflow task move from home", () => {
 
     await kanban.openTaskContextMenu(task.id);
     await expect(kanban.contextMoveTo()).toBeVisible();
-    await expect(kanban.contextSendToWorkflow()).not.toBeVisible();
+    await expect(kanban.contextChangeWorkflow()).not.toBeVisible();
     await testPage.keyboard.press("Escape");
     await kanban.moveTaskWithinWorkflow(task.id, targetStep.id);
 
@@ -52,7 +53,7 @@ test.describe("Cross-workflow task move from home", () => {
     await kanban.sendTaskToWorkflow(task.id, targetWorkflow.id, targetStep.id);
 
     await expect(kanban.taskCard(task.id)).not.toBeVisible({ timeout: 10_000 });
-    await expect(testPage.getByText(/Moved task to/i)).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByText("Workflow changed.")).toBeVisible({ timeout: 10_000 });
     expect(testPage.url()).toBe(beforeUrl);
 
     await testPage.goto(`/?workflowId=${targetWorkflow.id}`);
@@ -90,7 +91,7 @@ test.describe("Cross-workflow task move from home", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    const expectedLabels = ["Edit", "Move to", "Send to workflow", "Archive", "Delete"];
+    const expectedLabels = ["Edit", "Move to", "Change workflow...", "Archive", "Delete"];
     await kanban.openTaskContextMenu(task.id);
     for (const label of expectedLabels) {
       await expect(testPage.getByRole("menuitem", { name: label })).toBeVisible();
@@ -105,7 +106,7 @@ test.describe("Cross-workflow task move from home", () => {
     await kanban.sendTaskToWorkflowFromActions(task.id, targetWorkflow.id, targetStep.id);
 
     await expect(kanban.taskCard(task.id)).not.toBeVisible({ timeout: 10_000 });
-    await expect(testPage.getByText(/Moved task to/i)).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByText("Workflow changed.")).toBeVisible({ timeout: 10_000 });
 
     await testPage.goto(`/?workflowId=${targetWorkflow.id}`);
     await expect(kanban.taskCardInColumn("Cross Workflow Actions Task", targetStep.id)).toBeVisible(
@@ -113,7 +114,7 @@ test.describe("Cross-workflow task move from home", () => {
     );
   });
 
-  test("shows no-step workflows as disabled send targets", async ({
+  test("shows an empty-state form for workflows without steps", async ({
     testPage,
     apiClient,
     seedData,
@@ -130,13 +131,14 @@ test.describe("Cross-workflow task move from home", () => {
     await kanban.goto();
 
     await kanban.openTaskContextMenu(task.id);
-    await kanban.openSendToWorkflowTargets(emptyWorkflow.id);
-
-    await expect(kanban.contextWorkflow(emptyWorkflow.id)).toBeVisible();
-    await expect(kanban.contextWorkflow(emptyWorkflow.id)).toBeDisabled();
-    await expect(
-      kanban.contextWorkflow(emptyWorkflow.id).getByTestId("task-context-disabled-reason"),
-    ).toContainText("No steps");
+    await kanban.openChangeWorkflowForm();
+    const changeWorkflow = new ChangeWorkflowPage(testPage);
+    await changeWorkflow.chooseWorkflow(emptyWorkflow.id);
+    await expect(testPage.getByTestId("change-workflow-no-steps")).toContainText(
+      "This workflow has no steps",
+    );
+    await expect(testPage.getByTestId("change-workflow-submit")).toBeDisabled();
+    await testPage.getByTestId("change-workflow-cancel").click();
   });
 
   test("marks auto-start target steps before moving", async ({ testPage, apiClient, seedData }) => {
@@ -159,7 +161,10 @@ test.describe("Cross-workflow task move from home", () => {
     await kanban.goto();
 
     await kanban.openTaskContextMenu(task.id);
-    await kanban.openSendToWorkflowStep(targetWorkflow.id, targetStep.id);
-    await expect(kanban.contextAutoStartStep(targetStep.id)).toBeVisible();
+    await kanban.openChangeWorkflowForm();
+    const changeWorkflow = new ChangeWorkflowPage(testPage);
+    await changeWorkflow.chooseWorkflow(targetWorkflow.id);
+    await changeWorkflow.chooseStep(targetStep.id);
+    await expect(testPage.getByTestId("workflow-move-preview")).toBeVisible();
   });
 });

@@ -18,6 +18,7 @@ func TestHandleTransientFailure_ReplayRequiresPromptAttemptEvidence(t *testing.T
 		TaskID:           "t1",
 		SessionID:        "s1",
 		AgentExecutionID: "execution-1",
+		AgentID:          "cursor-acp",
 		PromptGeneration: 7,
 		EvidenceKnown:    true,
 		ErrorMessage:     cursorTransportLostDiagnostic,
@@ -53,6 +54,7 @@ func TestHandleTransientFailure_ReplayRejectsOutputOrToolEvidence(t *testing.T) 
 			data.TaskID = "t1"
 			data.SessionID = "s1"
 			data.AgentExecutionID = "execution-1"
+			data.AgentID = "cursor-acp"
 			data.PromptGeneration = 7
 			data.EvidenceKnown = true
 			data.ErrorMessage = cursorTransportLostDiagnostic
@@ -73,6 +75,7 @@ func TestHandleTransientFailure_ReplayUsesCurrentPromptAttempt(t *testing.T) {
 		TaskID:           "t1",
 		SessionID:        "s1",
 		AgentExecutionID: "execution-1",
+		AgentID:          "cursor-acp",
 		PromptGeneration: 7,
 		ErrorMessage:     cursorTransportLostDiagnostic,
 	}
@@ -102,7 +105,7 @@ func TestPromptAttemptEvidence_ObservesThoughtAndToolActivity(t *testing.T) {
 		SessionID:   "s1",
 		ExecutionID: "execution-1",
 		Data: &lifecycle.AgentStreamEventData{
-			Type:             "thinking_streaming",
+			Type:             "reasoning",
 			Text:             "thinking about the request",
 			PromptGeneration: 7,
 		},
@@ -124,6 +127,7 @@ func TestPromptAttemptEvidence_ObservesThoughtAndToolActivity(t *testing.T) {
 		TaskID:           "t1",
 		SessionID:        "s1",
 		AgentExecutionID: "execution-1",
+		AgentID:          "cursor-acp",
 		PromptGeneration: 7,
 		ErrorMessage:     cursorTransportLostDiagnostic,
 	}
@@ -145,6 +149,7 @@ func TestPromptAttemptEvidence_RejectsReplacedAttempt(t *testing.T) {
 		TaskID:           "t1",
 		SessionID:        "s1",
 		AgentExecutionID: "execution-1",
+		AgentID:          "cursor-acp",
 		PromptGeneration: 7,
 		ErrorMessage:     cursorTransportLostDiagnostic,
 	}

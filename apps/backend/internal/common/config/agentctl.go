@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 )
@@ -35,6 +36,9 @@ type AgentctlStartupConfig struct {
 	// "disabled for this launch" answer agentctl must not second-guess with
 	// its own default.
 	AgentSurvivalEnabled bool `json:"agentSurvivalEnabled"`
+	// PromptCancelJoinTimeout is the managed ACP cancellation acknowledgement bound.
+	// Zero preserves agentctl's built-in default for non-E2E launches.
+	PromptCancelJoinTimeout time.Duration `json:"promptCancelJoinTimeout"`
 }
 
 // ManagedAgentctlStartupConfig returns the agentctl settings resolved by the
@@ -52,6 +56,29 @@ func (c *Config) ManagedAgentctlStartupConfig() AgentctlStartupConfig {
 		UnownedPeriod:             c.Agentctl.UnownedPeriod,
 		DetachedEventLimit:        c.Agentctl.DetachedEventLimit,
 		AgentSurvivalEnabled:      c.Features.AgentSurvival,
+		PromptCancelJoinTimeout:   e2ePromptCancelJoinTimeout(),
+	}
+}
+
+// e2ePromptCancelJoinTimeout resolves the profile-owned cancellation bound for
+// managed agentctl processes. Keep selector truthiness aligned with profiles.
+func e2ePromptCancelJoinTimeout() time.Duration {
+	if !isProfileTruthy(os.Getenv("KANDEV_E2E_MOCK")) {
+		return 0
+	}
+	value, err := time.ParseDuration(strings.TrimSpace(os.Getenv("KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT")))
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return value
+}
+
+func isProfileTruthy(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "true", "1", "yes", "on":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -74,6 +101,9 @@ func (c AgentctlStartupConfig) Validate() error {
 	// already be within the contract's accepted range.
 	if c.UnownedPeriod < 0 {
 		return fmt.Errorf("agentctl unowned period must be zero (unset) or positive")
+	}
+	if c.PromptCancelJoinTimeout < 0 {
+		return fmt.Errorf("agentctl prompt cancel join timeout must be zero or greater")
 	}
 	if c.DetachedEventLimit != 0 && (c.DetachedEventLimit < 1 || c.DetachedEventLimit > 10000) {
 		return fmt.Errorf("agentctl detached event limit must be zero (unset) or between 1 and 10000")

@@ -7,6 +7,7 @@ import { useAppStore } from "@/components/state-provider";
 import { cacheAzureDevOpsTaskPullRequest } from "@/hooks/domains/azure-devops/use-azure-devops-task-pull-requests";
 import { cacheAzureDevOpsTaskWorkItem } from "@/hooks/domains/azure-devops/use-azure-devops-task-work-items";
 import { useRouter } from "@/lib/routing/client-router";
+import { linkToTask } from "@/lib/links";
 import {
   associateAzureDevOpsPullRequest,
   associateAzureDevOpsWorkItem,
@@ -186,7 +187,7 @@ export function AzureDevOpsTaskLauncher({
   ) => {
     await linkCreatedTask(task);
     onClose();
-    if (meta?.autoFocus !== false) router.push(`/tasks/${task.id}`);
+    if (meta?.autoFocus !== false) router.push(linkToTask(task.id));
   };
 
   if (!workspaceId || !payload || !launch?.workflow || !launch.workflowSteps[0]) return null;

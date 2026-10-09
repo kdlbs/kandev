@@ -72,7 +72,7 @@ type settingsWorkflowController interface {
 
 type settingsPromptService interface {
 	ListPrompts(context.Context) ([]*promptmodels.Prompt, error)
-	UpdatePrompt(context.Context, string, *string, *string) (*promptmodels.Prompt, error)
+	UpdatePromptForAgent(context.Context, string, *string, *string) (*promptmodels.Prompt, error)
 }
 
 type settingsUtilityService interface {

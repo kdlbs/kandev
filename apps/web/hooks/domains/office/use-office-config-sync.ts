@@ -127,7 +127,16 @@ function useOfficeConfigSyncForm() {
     setForm(configToForm(cfg));
   }, []);
 
-  return { form, update, setProvider, reset };
+  const acknowledgeSave = useCallback(
+    (submitted: OfficeConfigSyncFormState, saved: OfficeConfigSyncConfig) => {
+      setForm((current) =>
+        formRevision(current) === formRevision(submitted) ? configToForm(saved) : current,
+      );
+    },
+    [],
+  );
+
+  return { form, update, setProvider, reset, acknowledgeSave };
 }
 
 function syncOutcomeToast(error: string | undefined, warnings: string[] | undefined): void {
@@ -236,7 +245,7 @@ function useOfficeConfigSyncDelete(
 export function useOfficeConfigSync(workspaceId: string) {
   const router = useRouter();
   const [config, setConfig] = useState<OfficeConfigSyncConfig | null>(null);
-  const { form, update, setProvider, reset } = useOfficeConfigSyncForm();
+  const { form, update, setProvider, reset, acknowledgeSave } = useOfficeConfigSyncForm();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -246,30 +255,31 @@ export function useOfficeConfigSync(workspaceId: string) {
 
   const handleSave = useCallback(
     async (throwOnError = false) => {
+      const submitted = form;
       setSaving(true);
       try {
         const payload: OfficeConfigSyncSetConfigRequest =
-          form.provider === "gitlab"
+          submitted.provider === "gitlab"
             ? {
                 provider: "gitlab",
-                project_path: form.project_path.trim(),
-                branch: form.branch.trim(),
-                path: form.path,
-                interval_seconds: form.interval_seconds,
-                poll_enabled: form.poll_enabled,
+                project_path: submitted.project_path.trim(),
+                branch: submitted.branch.trim(),
+                path: submitted.path,
+                interval_seconds: submitted.interval_seconds,
+                poll_enabled: submitted.poll_enabled,
               }
             : {
                 provider: "github",
-                repo_owner: form.repo_owner.trim(),
-                repo_name: form.repo_name.trim(),
-                branch: form.branch.trim(),
-                path: form.path,
-                interval_seconds: form.interval_seconds,
-                poll_enabled: form.poll_enabled,
+                repo_owner: submitted.repo_owner.trim(),
+                repo_name: submitted.repo_name.trim(),
+                branch: submitted.branch.trim(),
+                path: submitted.path,
+                interval_seconds: submitted.interval_seconds,
+                poll_enabled: submitted.poll_enabled,
               };
         const saved = await setOfficeConfigSyncConfig(workspaceId, payload);
         setConfig(saved);
-        reset(saved);
+        acknowledgeSave(submitted, saved);
         toast.success(t("office:configSyncConfigSaved"));
         return true;
       } catch (err) {
@@ -280,7 +290,7 @@ export function useOfficeConfigSync(workspaceId: string) {
         setSaving(false);
       }
     },
-    [workspaceId, form, reset],
+    [workspaceId, form, acknowledgeSave],
   );
 
   useOfficeConfigSyncSaveContributor({ workspaceId, form, config, handleSave, reset });

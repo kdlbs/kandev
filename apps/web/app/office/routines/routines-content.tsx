@@ -14,7 +14,6 @@ import {
   deleteRoutine,
   runRoutine,
   listAllRoutineRuns,
-  createRoutineTrigger,
   listRoutineTriggers,
 } from "@/lib/api/domains/office-api";
 import type {
@@ -22,12 +21,15 @@ import type {
   AgentProfile,
   RoutineRun,
   RoutineTrigger,
+  CreateRoutineInput,
 } from "@/lib/state/slices/office/types";
 import { RoutineRow } from "./routine-row";
 import { RunRow } from "./run-row";
 import { CreateRoutineDialog } from "./create-routine-dialog";
 import { EmptyState } from "../components/shared/empty-state";
+import { routineNotFiringMessage } from "../lib/routine-not-firing";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 type RoutineFormData = {
   name: string;
@@ -43,15 +45,38 @@ type RoutineFormData = {
   timezone: string;
 };
 
+// A refetch failure after a create/trigger call must not swallow the toast
+// reporting that call's own outcome, and must not become an unhandled
+// rejection; it is reported as its own toast instead.
+async function refreshRoutinesOrReportFailure(
+  fetchRoutines: () => Promise<void>,
+  t: TFunction,
+): Promise<void> {
+  try {
+    await fetchRoutines();
+  } catch {
+    toast.error(t("office:failedToLoad"));
+  }
+}
+
+function buildCreateRoutineInput(data: RoutineFormData): CreateRoutineInput {
+  return {
+    name: data.name,
+    description: data.description,
+    taskTemplate: { title: data.taskTitle, description: data.taskDescription },
+    assigneeAgentProfileId: data.assigneeAgentProfileId,
+    concurrencyPolicy: data.concurrencyPolicy,
+    catchUpPolicy: data.catchUpPolicy,
+    catchUpMax: data.catchUpMax,
+  };
+}
+
 function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Promise<void>) {
   const { t } = useTranslation();
   const handleToggle = useCallback(
     async (id: string, active: boolean) => {
       try {
-        await updateRoutine(id, { status: active ? "active" : "paused" } as Record<
-          string,
-          unknown
-        >);
+        await updateRoutine(id, { status: active ? "active" : "paused" });
         await fetchRoutines();
         toast.success(active ? t("office:routineActivated") : t("office:routinePaused"));
       } catch (err) {
@@ -74,40 +99,29 @@ function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Prom
     [fetchRoutines],
   );
 
+  // The routine and its optional cron trigger are created in one request, so
+  // a rejected trigger creates no routine. Returns whether the create
+  // succeeded, which is also whether the dialog should close and reset its
+  // form: false leaves the user's input in place for a retry.
   const handleCreate = useCallback(
-    async (data: RoutineFormData, onDone: () => void) => {
-      if (!workspaceId) return;
+    async (data: RoutineFormData): Promise<boolean> => {
+      if (!workspaceId) return false;
+      const input = buildCreateRoutineInput(data);
+      const cronExpression = data.cronExpression.trim();
+      if (data.triggerKind === "cron" && cronExpression) {
+        input.trigger = { kind: "cron", cronExpression, timezone: data.timezone };
+      }
+
       try {
-        const template = JSON.stringify({
-          title: data.taskTitle,
-          description: data.taskDescription,
-        });
-        const res = await createRoutine(workspaceId, {
-          name: data.name,
-          description: data.description,
-          taskTemplate: JSON.parse(template),
-          assigneeAgentProfileId: data.assigneeAgentProfileId,
-          concurrencyPolicy: data.concurrencyPolicy,
-          catchUpPolicy: data.catchUpPolicy,
-          catchUpMax: data.catchUpMax,
-        } as Record<string, unknown>);
-        if (data.triggerKind === "cron" && data.cronExpression && res) {
-          const routineObj = res as unknown as { routine?: { id: string } };
-          const routineId = routineObj.routine?.id ?? (res as unknown as { id: string }).id;
-          if (routineId) {
-            await createRoutineTrigger(routineId, {
-              kind: data.triggerKind as "cron",
-              cronExpression: data.cronExpression,
-              timezone: data.timezone,
-            });
-          }
-        }
-        onDone();
-        await fetchRoutines();
-        toast.success(t("office:routineCreated"));
+        await createRoutine(workspaceId, input);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("office:failedToCreateRoutine"));
+        return false;
       }
+
+      await refreshRoutinesOrReportFailure(fetchRoutines, t);
+      toast.success(t("office:routineCreated"));
+      return true;
     },
     [workspaceId, fetchRoutines],
   );
@@ -204,7 +218,7 @@ export function RoutinesContent() {
         setRuns(await fetchRuns());
         toast.success(t("office:routineStarted"));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : t("office:failedToRunRoutine"));
+        toast.error(routineNotFiringMessage(err, t, "office:failedToRunRoutine"));
       }
     },
     [fetchRuns, setRuns],
@@ -248,7 +262,7 @@ export function RoutinesContent() {
         open={showCreate}
         onOpenChange={setShowCreate}
         agents={agents}
-        onSubmit={(data) => handleCreate(data, () => setShowCreate(false))}
+        onSubmit={handleCreate}
       />
     </div>
   );

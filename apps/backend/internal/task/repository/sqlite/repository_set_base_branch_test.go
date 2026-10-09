@@ -101,10 +101,10 @@ func TestRepositorySetBaseBranchMigrationPreservesLegacyItems(t *testing.T) {
 		t.Fatalf("insert legacy repository-set item: %v", err)
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("run base-branch migration: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay base-branch migration: %v", err)
 	}
 

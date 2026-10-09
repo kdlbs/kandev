@@ -93,3 +93,23 @@ func TestUpdateTaskStatus_NoPublisherWiredIsSafe(t *testing.T) {
 		t.Fatalf("update task status: %v", err)
 	}
 }
+
+func TestUpdateTaskProjectIDPublishesCanonicalTaskUpdatedForAssignAndClear(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "project-transition", "ws-project", "Project transition", "todo", 0)
+	insertTestProject(t, deps, "project-1", "ws-project")
+	pub := &recordingTaskLifecyclePublisher{}
+	deps.svc.SetTaskLifecyclePublisher(pub)
+
+	if err := deps.svc.UpdateTaskProjectID(context.Background(), "project-transition", "project-1"); err != nil {
+		t.Fatalf("assign project: %v", err)
+	}
+	if err := deps.svc.UpdateTaskProjectID(context.Background(), "project-transition", ""); err != nil {
+		t.Fatalf("clear project: %v", err)
+	}
+
+	want := []string{"project-transition", "project-transition"}
+	if len(pub.published) != len(want) || pub.published[0] != want[0] || pub.published[1] != want[1] {
+		t.Fatalf("published = %v, want %v", pub.published, want)
+	}
+}

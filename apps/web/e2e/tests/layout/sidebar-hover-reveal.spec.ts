@@ -1,4 +1,10 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Locator } from "@playwright/test";
+
+async function waitForSidebarReveal(sidebar: Locator) {
+  await expect(sidebar).toHaveAttribute("data-hover-revealed", "true", { timeout: 15_000 });
+  await expect(sidebar).toHaveCSS("width", "320px", { timeout: 15_000 });
+}
 
 // @covers AC-UI-SIDEBAR-HOVER-001.1, AC-UI-SIDEBAR-HOVER-001.2
 test("collapsed sidebar reveals after dwell without moving page content", async ({
@@ -9,18 +15,12 @@ test("collapsed sidebar reveals after dwell without moving page content", async 
   await sidebar.getByRole("button", { name: "Collapse sidebar", exact: true }).click();
   await testPage.mouse.move(600, 400);
   await expect(sidebar).toHaveCSS("width", "56px");
-  const pageBefore = await testPage
-    .getByTestId("app-shell")
-    .locator(":scope > div > main")
-    .boundingBox();
+  const pageBefore = await testPage.getByTestId("app-shell").locator("main").boundingBox();
   await sidebar.hover({ position: { x: 20, y: 200 } });
-  await expect(sidebar).toHaveCSS("width", "320px");
+  await waitForSidebarReveal(sidebar);
   await expect(testPage.getByTestId("app-sidebar-layout")).toHaveCSS("width", "56px");
   await expect(sidebar).toHaveAttribute("data-collapsed", "true");
-  const pageAfter = await testPage
-    .getByTestId("app-shell")
-    .locator(":scope > div > main")
-    .boundingBox();
+  const pageAfter = await testPage.getByTestId("app-shell").locator("main").boundingBox();
   expect(pageAfter).toEqual(pageBefore);
   await testPage.screenshot({ path: testInfo.outputPath("sidebar-hover.png") });
   await testPage.mouse.move(600, 400);
@@ -37,6 +37,7 @@ test("reveal supports the workspace menu, Escape, and permanent expansion", asyn
   await testPage.mouse.move(600, 400);
   await expect(sidebar).toHaveCSS("width", "56px");
   await sidebar.hover({ position: { x: 20, y: 200 } });
+  await waitForSidebarReveal(sidebar);
   await expect(sidebar.getByTestId("sidebar-workspace-trigger")).toBeVisible();
   await sidebar.getByTestId("sidebar-workspace-trigger").click();
   const menu = testPage.getByRole("menu");
@@ -80,7 +81,7 @@ test("short hover cancels and crossing the phone breakpoint closes the reveal", 
   await testPage.clock.resume();
   await testPage.setViewportSize({ width: 768, height: 900 });
   await sidebar.hover({ position: { x: 20, y: 200 } });
-  await expect(sidebar).toHaveCSS("width", "320px");
+  await waitForSidebarReveal(sidebar);
   await testPage.setViewportSize({ width: 767, height: 900 });
   await expect(sidebar).toBeHidden();
   await testPage.mouse.move(600, 400);
@@ -105,6 +106,7 @@ test("revealed tasks support context menus and navigation", async ({
   await testPage.mouse.move(600, 400);
   await expect(sidebar).toHaveCSS("width", "56px");
   await sidebar.hover({ position: { x: 20, y: 200 } });
+  await waitForSidebarReveal(sidebar);
   const row = sidebar.getByText("Hover navigation task", { exact: true });
   await expect(row).toBeVisible();
   await row.click({ button: "right" });

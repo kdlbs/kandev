@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"time"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/office/models"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
@@ -69,6 +72,13 @@ func (s *Service) DeleteWorkspace(ctx context.Context, workspaceID string) error
 	s.cancelWorkspaceTasks(taskCancelCtx, tasks)
 	cancelTaskCancel()
 
+	runCleanupCtx, cancelRunCleanup := workspaceDeletionPhaseContext(cleanupBaseCtx)
+	if err := s.stopWorkspaceRunSessions(runCleanupCtx, workspaceID); err != nil {
+		cancelRunCleanup()
+		return err
+	}
+	cancelRunCleanup()
+
 	if s.configSyncCleaner != nil {
 		configSyncCleanupCtx, cancelConfigSyncCleanup := workspaceDeletionPhaseContext(cleanupBaseCtx)
 		unlock, err := s.configSyncCleaner.PurgeForWorkspaceDeletion(configSyncCleanupCtx, workspaceID)
@@ -111,6 +121,47 @@ func (s *Service) DeleteWorkspace(ctx context.Context, workspaceID string) error
 		zap.String("workspace_name", workspace.Name),
 		zap.Int("tasks", len(tasks)))
 	return nil
+}
+
+// stopWorkspaceRunSessions terminates every run-owned process while its
+// durable session identity is still available. Any stop or persistence error
+// aborts deletion so a live process cannot outlive the rows that identify it.
+func (s *Service) stopWorkspaceRunSessions(ctx context.Context, workspaceID string) error {
+	sessions, err := s.repo.ListLiveRunSessionsForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("list live run sessions for deletion: %w", err)
+	}
+	if len(sessions) == 0 {
+		return nil
+	}
+	if s.runStopper == nil {
+		return errors.New("stop run sessions for deletion: run execution stopper not configured")
+	}
+	var firstErr error
+	for _, session := range sessions {
+		if _, requestErr := s.repo.RequestRunSessionCancellation(ctx, session.ID); requestErr != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("request cancellation for run session %s: %w", session.ID, requestErr)
+			}
+			continue
+		}
+		stopErr := s.runStopper.Stop(ctx, session.ExecutionID, "workspace deleted")
+		switch {
+		case stopErr == nil:
+			if _, finishErr := s.repo.FinishRunSession(ctx, session.ID, models.RunSessionStateCancelled, "workspace deleted"); finishErr != nil && firstErr == nil {
+				firstErr = fmt.Errorf("finish cancelled run session %s: %w", session.ID, finishErr)
+			}
+		case errors.Is(stopErr, runtimeapi.ErrNotFound):
+			if _, finishErr := s.repo.FinishRunSession(ctx, session.ID, models.RunSessionStateInterrupted, "runtime execution not found"); finishErr != nil && firstErr == nil {
+				firstErr = fmt.Errorf("finish missing run session %s: %w", session.ID, finishErr)
+			}
+		default:
+			if firstErr == nil {
+				firstErr = fmt.Errorf("stop run session %s: %w", session.ID, stopErr)
+			}
+		}
+	}
+	return firstErr
 }
 
 func (s *Service) deleteWorkspaceTasks(ctx context.Context, tasks []*taskmodels.Task) error {

@@ -30,7 +30,7 @@ func TestListDirectory_ListsImmediateSubdirsOnly(t *testing.T) {
 	}
 
 	svc := &Service{}
-	got, err := svc.ListDirectory(context.Background(), root)
+	got, err := svc.ListDirectory(context.Background(), root, false)
 	if err != nil {
 		t.Fatalf("ListDirectory: %v", err)
 	}
@@ -47,6 +47,51 @@ func TestListDirectory_ListsImmediateSubdirsOnly(t *testing.T) {
 	// A t.TempDir is not the filesystem root, so the parent should be set.
 	if got.Parent == "" {
 		t.Errorf("expected parent to be set for nested path, got empty")
+	}
+}
+
+// @covers AC-WORKSPACES-HIDDEN-FOLDERS-001.1, AC-WORKSPACES-HIDDEN-FOLDERS-001.6
+func TestListDirectory_RevealKeepsDirectoriesOnlyAndLeadsWithDotEntries(t *testing.T) {
+	// The reveal widens which names are listed, never which entry kinds are.
+	// Ordinary entries must keep their existing relative order, so the service
+	// contract is pinned here without the HTTP layer.
+	root := t.TempDir()
+	for _, name := range []string{"alpha", "gamma"} {
+		if err := os.Mkdir(filepath.Join(root, name), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", name, err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(root, ".hidden-dir"), 0o755); err != nil {
+		t.Fatalf("mkdir hidden dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".hidden-file"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write hidden file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "visible-file"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write visible file: %v", err)
+	}
+
+	svc := &Service{}
+	got, err := svc.ListDirectory(context.Background(), root, true)
+	if err != nil {
+		t.Fatalf("ListDirectory: %v", err)
+	}
+
+	want := []string{".hidden-dir", "alpha", "gamma"}
+	names := make([]string, 0, len(got.Entries))
+	for _, e := range got.Entries {
+		names = append(names, e.Name)
+	}
+	if len(names) != len(want) {
+		t.Fatalf("entries = %v, want %v", names, want)
+	}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("entries = %v, want %v", names, want)
+		}
+	}
+	if got.Entries[0].Path != filepath.Join(root, ".hidden-dir") {
+		t.Errorf("revealed entry path = %q, want %q", got.Entries[0].Path, filepath.Join(root, ".hidden-dir"))
 	}
 }
 
@@ -68,7 +113,7 @@ func TestDriveRootsFromMask(t *testing.T) {
 
 func TestListDirectory_DefaultsToHome(t *testing.T) {
 	svc := &Service{}
-	got, err := svc.ListDirectory(context.Background(), "")
+	got, err := svc.ListDirectory(context.Background(), "", false)
 	if err != nil {
 		t.Fatalf("ListDirectory: %v", err)
 	}
@@ -85,7 +130,7 @@ func TestListDirectory_RejectsNonDirectory(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 	svc := &Service{}
-	_, err := svc.ListDirectory(context.Background(), file)
+	_, err := svc.ListDirectory(context.Background(), file, false)
 	if err == nil {
 		t.Fatalf("expected error for non-directory path, got nil")
 	}
@@ -103,7 +148,7 @@ func TestListDirectory_BrowsesOutsideHome(t *testing.T) {
 		}
 	}
 	svc := &Service{}
-	got, err := svc.ListDirectory(context.Background(), target)
+	got, err := svc.ListDirectory(context.Background(), target, false)
 	if err != nil {
 		t.Fatalf("ListDirectory(%q): %v", target, err)
 	}
@@ -158,7 +203,7 @@ func TestListDirectory_ParentEmptyAtFilesystemRoot(t *testing.T) {
 		}
 	}
 	svc := &Service{}
-	got, err := svc.ListDirectory(context.Background(), target)
+	got, err := svc.ListDirectory(context.Background(), target, false)
 	if err != nil {
 		t.Fatalf("ListDirectory(%q): %v", target, err)
 	}

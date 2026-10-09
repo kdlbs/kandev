@@ -17,7 +17,7 @@ including local, container, and SSH execution boundaries.
 ## Ownership
 
 This system owns executor profiles, environment construction, SSH lifecycle,
-runtime resource admission, process and port safety, agent process lifetime
+runtime resource admission, plugin-provided remote environments, process and port safety, agent process lifetime
 across a backend restart, and executor-specific failure and recovery contracts.
 
 ## Exclusions
@@ -33,6 +33,7 @@ across a backend restart, and executor-specific failure and recovery contracts.
 
 
 
+- [Remote executor plugins](requirements/remote-executor-plugins.md)
 - [Agent survival across a backend restart](requirements/agent-survival-across-restart.md)
 - [Survived session state and capability gating](requirements/agent-survival-session-state.md)
 - [Standalone control-server ownership](requirements/standalone-control-server-ownership.md)
@@ -45,11 +46,16 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Kubernetes startup timing](requirements/kubernetes-startup-timing.md)
 - [Kubernetes retained compute visibility](requirements/kubernetes-retained-compute.md)
 - [SSH Session Transport Liveness](requirements/ssh-transport-liveness.md)
+- [SSH Host Reachability](requirements/ssh-reachability.md)
+- [Remote Docker Executor](requirements/remote-docker-executor.md)
+- [Remote Docker container inputs](requirements/remote-docker-container-inputs.md)
+- [Docker container network selection](requirements/docker-container-networks.md)
 
 ### System design
 
 
 
+- [Remote executor plugins](system-design/remote-executor-plugins.md)
 - [Agent survival across a backend restart Part 1](system-design/agent-survival-across-restart-01.md)
 - [Agent survival across a backend restart Part 2](system-design/agent-survival-across-restart-02.md)
 - [Agent survival across a backend restart Part 3](system-design/agent-survival-across-restart-03.md)
@@ -64,6 +70,11 @@ across a backend restart, and executor-specific failure and recovery contracts.
 - [Kubernetes startup timing](system-design/kubernetes-startup-timing.md)
 - [Kubernetes retained compute visibility](system-design/kubernetes-retained-compute.md)
 - [SSH Session Transport Liveness](system-design/ssh-transport-liveness.md)
+- [SSH Host Reachability](system-design/ssh-reachability.md)
+- [SSH Host Reachability Surfaces](system-design/ssh-reachability-surfaces.md)
+- [Remote Docker Executor](system-design/remote-docker-executor.md)
+- [Remote Docker container inputs](system-design/remote-docker-container-inputs.md)
+- [Docker container network selection](system-design/docker-container-networks.md)
 
 ## Migration record
 
@@ -72,11 +83,20 @@ canonical requirement and system-design documents. Use the catalog command to
 find current sources.
 
 The [Kubernetes executor foundation](../kubernetes-executor/spec.md) remains
-the current lifecycle contract. The three Kubernetes pairs own additive
-presets, launch diagnostics, and retained-compute visibility. They do not
-replace the foundation's resource ownership, recovery, or cleanup rules.
+the shipped lifecycle contract. Kubernetes capability pairs extend it. The
+[task-pod requirements](requirements/kubernetes-task-pod.md) and
+[design](system-design/kubernetes-task-pod.md) define task-owned compute and
+replace session ownership. Other foundation
+security, admission, and recovery guarantees remain applicable.
 
 ## Related systems
 
 - [Agents](../agents/README.md): supplies the agent command and profile.
 - [Tasks](../tasks/README.md): owns task-scoped execution lifecycle.
+- [Plugins](../plugins/README.md): owns package activation and dispatch. Executor
+  providers follow the current [remote executor contract](system-design/remote-executor-plugins.md).
+
+The compact task indicator contract is extracted into
+[requirements](requirements/task-status-indicators.md) and
+[design](system-design/task-status-indicators.md), including automatic freshness
+and desktop/touch disclosure. The foundation retains task-page controls.

@@ -1,12 +1,11 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { IconAlertTriangle, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
+import { IconAlertTriangle } from "@tabler/icons-react";
 import { Checkbox } from "@kandev/ui/checkbox";
-import { FileStatusIcon } from "@/components/shared/file-status-icon";
+import { CollapsibleFileHeader } from "@/components/diff/collapsible-file-header";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";
-import type { ReviewFile } from "./types";
+import { isReviewFileDetailReady, type ReviewFile } from "./types";
 import { FileDiffToolbar } from "./review-diff-toolbar";
 import { useTranslation } from "react-i18next";
 
@@ -29,6 +28,7 @@ type ReviewDiffHeaderProps = ReviewExternalLinkContext & {
   hasStickyRepoHeader?: boolean;
   onCheckboxChange: (checked: boolean | "indeterminate") => void;
   onDiscard: () => void;
+  onCommentFile?: () => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
   markdownPreview?: boolean;
   onToggleMarkdownPreview?: () => void;
@@ -36,15 +36,6 @@ type ReviewDiffHeaderProps = ReviewExternalLinkContext & {
   onToggleExpandUnchanged: () => void;
   onToggleWordWrap: () => void;
 };
-
-function splitFilePath(filePath: string): { directory: string; name: string } {
-  const lastSlash = filePath.lastIndexOf("/");
-  if (lastSlash === -1) return { directory: "", name: filePath };
-  return {
-    directory: filePath.slice(0, lastSlash),
-    name: filePath.slice(lastSlash + 1),
-  };
-}
 
 function ReviewDiffStats({ file, compact = false }: { file: ReviewFile; compact?: boolean }) {
   return (
@@ -76,72 +67,15 @@ function StaleIndicator({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function ReviewFileDirectory({ directory, className }: { directory: string; className: string }) {
-  return (
-    <span aria-hidden="true" data-review-file-directory className={className}>
-      <bdi dir="ltr">{directory}</bdi>
-    </span>
-  );
-}
-
-function DesktopReviewFilePath({ path }: { path: string }) {
-  const { directory, name } = splitFilePath(path);
+function DisplayFreshnessIndicator({ state }: { state: ReviewFile["diff_state"] }) {
+  const { t } = useTranslation();
   return (
     <span
-      className="flex min-w-0 flex-1 items-baseline overflow-hidden text-[13px] font-medium"
-      title={path}
+      data-testid="review-header-refresh-status"
+      role="status"
+      className="shrink-0 text-[11px] text-muted-foreground"
     >
-      {directory && (
-        <>
-          <ReviewFileDirectory
-            directory={directory}
-            className="min-w-0 truncate text-muted-foreground [direction:rtl] [unicode-bidi:isolate]"
-          />
-          <span aria-hidden="true" className="shrink-0 text-muted-foreground">
-            /
-          </span>
-        </>
-      )}
-      <span data-review-file-name className="max-w-full shrink-0 truncate">
-        {name}
-      </span>
-    </span>
-  );
-}
-
-function MobileReviewFileDetails({ file, isStale }: { file: ReviewFile; isStale: boolean }) {
-  const { directory, name } = splitFilePath(file.path);
-  return (
-    <span
-      className="flex min-w-0 flex-1 flex-col justify-center overflow-hidden text-left leading-none"
-      title={file.repository_name ? `${file.repository_name}/${file.path}` : file.path}
-    >
-      {file.repository_name && (
-        <span
-          data-testid="review-file-repository"
-          className="truncate text-[10px] font-medium leading-3 text-primary"
-        >
-          {file.repository_name}
-        </span>
-      )}
-      <span data-review-file-name className="truncate text-[13px] font-medium leading-4">
-        {name}
-      </span>
-      <span className="flex min-w-0 items-center gap-1 leading-4">
-        {directory && (
-          <ReviewFileDirectory
-            directory={directory}
-            className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground [direction:rtl] [unicode-bidi:isolate]"
-          />
-        )}
-        <FileStatusIcon
-          status={file.status}
-          oldPath={file.old_path}
-          className="size-3.5 shrink-0"
-        />
-        {isStale && <StaleIndicator compact />}
-        <ReviewDiffStats file={file} compact />
-      </span>
+      {state === "unavailable" ? t("task:gitDiffUnavailable") : t("task:gitDiffLoading")}
     </span>
   );
 }
@@ -149,146 +83,51 @@ function MobileReviewFileDetails({ file, isStale }: { file: ReviewFile; isStale:
 function MobileReviewCheckbox({
   checked,
   onCheckedChange,
+  disabled,
 }: {
   checked: boolean;
   onCheckedChange: ReviewDiffHeaderProps["onCheckboxChange"];
+  disabled?: boolean;
 }) {
   return (
     <span className="flex size-10 shrink-0 items-center justify-center">
       <Checkbox
         checked={checked}
         onCheckedChange={onCheckedChange}
+        disabled={disabled}
         className="relative size-4 cursor-pointer after:absolute after:left-1/2 after:top-1/2 after:size-10 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']"
       />
     </span>
   );
 }
 
-type ResponsiveHeaderIdentityProps = Pick<
-  ReviewDiffHeaderProps,
-  "file" | "isReviewed" | "isStale" | "collapsed" | "onCheckboxChange" | "onToggleCollapse"
-> & {
-  toolbar: ReactNode;
-};
-
-function MobileHeaderIdentity({
-  file,
-  isReviewed,
-  isStale,
-  collapsed,
-  onCheckboxChange,
-  onToggleCollapse,
-  toolbar,
-}: ResponsiveHeaderIdentityProps) {
-  const { t } = useTranslation();
-  return (
-    <div
-      data-testid="review-file-identity"
-      className="flex min-h-14 w-full min-w-0 items-center gap-1 px-2"
-    >
-      <MobileReviewCheckbox checked={isReviewed} onCheckedChange={onCheckboxChange} />
-      <button
-        type="button"
-        aria-expanded={!collapsed}
-        aria-label={
-          collapsed
-            ? t("review:expandFile", { path: file.path })
-            : t("review:collapseFile", { path: file.path })
-        }
-        onClick={onToggleCollapse}
-        className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left transition-colors duration-150 ease-out hover:text-foreground"
-      >
-        {collapsed ? (
-          <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-        ) : (
-          <IconChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-        )}
-        <MobileReviewFileDetails file={file} isStale={isStale} />
-      </button>
-      {toolbar}
-    </div>
-  );
-}
-
-function DesktopHeaderIdentity({
-  file,
-  isReviewed,
-  isStale,
-  collapsed,
-  onCheckboxChange,
-  onToggleCollapse,
-  toolbar,
-}: ResponsiveHeaderIdentityProps) {
-  const { t } = useTranslation();
-  return (
-    <>
-      <div data-testid="review-file-identity" className="flex min-w-0 flex-1 items-center gap-2">
-        <Checkbox
-          checked={isReviewed}
-          onCheckedChange={onCheckboxChange}
-          className="size-4 cursor-pointer"
-        />
-        <button
-          type="button"
-          aria-expanded={!collapsed}
-          aria-label={
-            collapsed
-              ? t("review:expandFile", { path: file.path })
-              : t("review:collapseFile", { path: file.path })
-          }
-          onClick={onToggleCollapse}
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left hover:text-foreground"
-        >
-          {collapsed ? (
-            <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-          ) : (
-            <IconChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-          )}
-          <DesktopReviewFilePath path={file.path} />
-        </button>
-        {isStale && <StaleIndicator />}
-        <ReviewDiffStats file={file} />
-      </div>
-      <div data-testid="review-file-actions" className="flex items-center">
-        {toolbar}
-      </div>
-    </>
-  );
-}
-
-export function ReviewDiffHeader({
-  file,
-  isReviewed,
-  isStale,
-  collapsed,
-  wordWrap,
-  expandUnchanged,
-  hasStickyRepoHeader = false,
-  sessionId,
-  onCheckboxChange,
-  onDiscard,
-  onOpenFile,
-  markdownPreview,
-  onToggleMarkdownPreview,
-  onToggleCollapse,
-  onToggleExpandUnchanged,
-  onToggleWordWrap,
-  baseBranchByRepo,
-  fallbackBaseBranch,
-  taskId,
-  publishedPRBranch,
-  publishedPRRepositoryId,
-}: ReviewDiffHeaderProps) {
-  const { isMobile } = useResponsiveBreakpoint();
+function ReviewDiffToolbarActions(props: ReviewDiffHeaderProps) {
+  const {
+    file,
+    sessionId,
+    wordWrap,
+    expandUnchanged,
+    onDiscard,
+    onCommentFile,
+    onOpenFile,
+    markdownPreview,
+    onToggleMarkdownPreview,
+    onToggleExpandUnchanged,
+    onToggleWordWrap,
+    baseBranchByRepo,
+    fallbackBaseBranch,
+    taskId,
+    publishedPRBranch,
+    publishedPRRepositoryId,
+  } = props;
   const hasPublishedPR =
     file.source === "pr" && (!file.repository_id || file.repository_id === publishedPRRepositoryId);
   const publishedBranch = hasPublishedPR ? publishedPRBranch : undefined;
   const baseBranch =
     baseBranchByRepo[file.repository_name ?? ""] ??
     (file.repository_name ? undefined : fallbackBaseBranch);
-  const toolbar = (
+  return (
     <FileDiffToolbar
-      diff={file.diff}
       filePath={file.path}
       sessionId={sessionId}
       source={file.source}
@@ -301,6 +140,7 @@ export function ReviewDiffHeader({
       wordWrap={wordWrap}
       expandUnchanged={expandUnchanged}
       onDiscard={onDiscard}
+      onCommentFile={onCommentFile}
       onOpenFile={onOpenFile}
       markdownPreview={markdownPreview}
       onToggleMarkdownPreview={onToggleMarkdownPreview}
@@ -309,6 +149,38 @@ export function ReviewDiffHeader({
       repo={file.repository_name}
     />
   );
+}
+
+function ReviewDiffMetadata({
+  file,
+  isStale,
+  compact,
+}: {
+  file: ReviewFile;
+  isStale: boolean;
+  compact?: boolean;
+}) {
+  if (!file.display_stale && !isStale) return undefined;
+  return (
+    <div className="flex items-center gap-1.5">
+      {file.display_stale && <DisplayFreshnessIndicator state={file.diff_state} />}
+      {isStale && <StaleIndicator compact={compact} />}
+    </div>
+  );
+}
+
+export function ReviewDiffHeader(props: ReviewDiffHeaderProps) {
+  const {
+    file,
+    isReviewed,
+    isStale,
+    collapsed,
+    hasStickyRepoHeader = false,
+    onCheckboxChange,
+    onToggleCollapse,
+  } = props;
+  const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
 
   return (
     <div
@@ -320,27 +192,38 @@ export function ReviewDiffHeader({
         !isMobile && "flex items-center gap-2 px-4 py-2",
       )}
     >
-      {isMobile ? (
-        <MobileHeaderIdentity
-          file={file}
-          isReviewed={isReviewed}
-          isStale={isStale}
-          collapsed={collapsed}
-          onCheckboxChange={onCheckboxChange}
-          onToggleCollapse={onToggleCollapse}
-          toolbar={toolbar}
-        />
-      ) : (
-        <DesktopHeaderIdentity
-          file={file}
-          isReviewed={isReviewed}
-          isStale={isStale}
-          collapsed={collapsed}
-          onCheckboxChange={onCheckboxChange}
-          onToggleCollapse={onToggleCollapse}
-          toolbar={toolbar}
-        />
-      )}
+      <CollapsibleFileHeader
+        filePath={file.path}
+        repositoryName={file.repository_name}
+        status={file.status}
+        oldPath={file.old_path}
+        collapsed={collapsed}
+        expandLabel={t("review:expandFile", { path: file.path })}
+        collapseLabel={t("review:collapseFile", { path: file.path })}
+        onToggleCollapse={onToggleCollapse}
+        mobileLeading={
+          <MobileReviewCheckbox
+            checked={isReviewed}
+            onCheckedChange={onCheckboxChange}
+            disabled={!isReviewFileDetailReady(file)}
+          />
+        }
+        desktopLeading={
+          <Checkbox
+            checked={isReviewed}
+            onCheckedChange={onCheckboxChange}
+            disabled={!isReviewFileDetailReady(file)}
+            className="size-4 cursor-pointer"
+          />
+        }
+        mobileMetadata={<ReviewDiffMetadata file={file} isStale={isStale} compact />}
+        desktopMetadata={<ReviewDiffMetadata file={file} isStale={isStale} />}
+        mobileStats={<ReviewDiffStats file={file} compact />}
+        desktopStats={<ReviewDiffStats file={file} />}
+        actions={<ReviewDiffToolbarActions {...props} />}
+        actionsTestId="review-file-actions"
+        identityTestId="review-file-identity"
+      />
     </div>
   );
 }

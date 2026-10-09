@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WebSocketClient, WebSocketRequestError, WebSocketRequestTimeoutError } from "./client";
+import { sendQueuedNow } from "../api/domains/queue-api";
+import { setWebSocketClient } from "./connection";
 
 type SentRequest = {
   id: string;
@@ -58,6 +60,7 @@ class FakeWebSocket {
 function connectClient(options?: ConstructorParameters<typeof WebSocketClient>[2]) {
   const client = new WebSocketClient("ws://test", undefined, {
     enabled: false,
+    conversationProtocol: "v1",
     ...options,
   });
   client.connect();
@@ -271,6 +274,76 @@ describe("session subscription readiness", () => {
     await expect(reconnected.ready).resolves.toBeUndefined();
     initial.unsubscribe();
     reconnected.unsubscribe();
+  });
+});
+
+describe("session Git refresh response", () => {
+  it("cancels a foreground refresh waiter without accepting its late response", async () => {
+    const { client, socket } = connectClient();
+    const sessionId = "sess-git-refresh-cancel";
+    const unfocus = client.focusSession(sessionId);
+    const controller = new AbortController();
+    const refresh = client.refreshSessionData(sessionId, "recover", controller.signal);
+    if (!refresh) throw new Error("refresh request was not sent");
+    const request = socket.sent.find((message) => message.action === "session.git.refresh");
+    expect(request).toBeDefined();
+
+    controller.abort();
+    await expect(refresh).rejects.toBeInstanceOf(Error);
+    socket.receive({ id: request?.id, type: "response", payload: { success: true } });
+    unfocus();
+  });
+
+  it("returns the correlated scoped snapshot response and forwards the recovery mode", async () => {
+    const { client, socket } = connectClient();
+    const sessionId = "sess-git-refresh";
+    const unfocus = client.focusSession(sessionId);
+    const refresh = client.refreshSessionData(sessionId, "recover");
+    if (!refresh) throw new Error("refresh request was not sent");
+
+    const request = socket.sent.find((message) => message.action === "session.git.refresh");
+    expect(request?.payload).toEqual({ session_id: sessionId, mode: "recover" });
+    const response = {
+      success: true,
+      session_id: sessionId,
+      task_environment_id: "env-git-refresh",
+      mode: "recover",
+      status_state: "ready",
+      snapshots: [
+        {
+          type: "notification",
+          action: "session.git.event",
+          payload: {
+            type: "status_update",
+            session_id: sessionId,
+            task_environment_id: "env-git-refresh",
+            timestamp: "2026-09-30T12:00:00Z",
+            status: {
+              status_state: "ready",
+              files_complete: true,
+              detail_state: "ready",
+              branch: "main",
+              remote_branch: null,
+              modified: ["README.md"],
+              added: [],
+              deleted: [],
+              untracked: [],
+              renamed: [],
+              ahead: 0,
+              behind: 0,
+              remote_ahead: 0,
+              remote_behind: 0,
+              files: {},
+            },
+          },
+        },
+      ],
+    } as const;
+    socket.receive({ id: request?.id, type: "response", payload: response });
+
+    await expect(refresh).resolves.toEqual(response);
+    unfocus();
+    client.disconnect();
   });
 });
 
@@ -534,6 +607,39 @@ describe("connection generations", () => {
 });
 
 describe("request errors", () => {
+  it("starts response timeout after an initially queued request is sent", async () => {
+    vi.useFakeTimers();
+    const client = new WebSocketClient("ws://test", undefined, { enabled: false });
+    client.connect();
+    const socket = FakeWebSocket.latest();
+    let outcome: "pending" | "resolved" | "rejected" = "pending";
+    const request = client.request("workspace.tree.get", { session_id: "sess-1" }).then(
+      () => {
+        outcome = "resolved";
+      },
+      () => {
+        outcome = "rejected";
+      },
+    );
+
+    try {
+      await vi.advanceTimersByTimeAsync(5001);
+      expect(outcome).toBe("pending");
+
+      socket.open();
+      const sent = socket.sent.find((message) => message.action === "workspace.tree.get");
+      if (!sent) throw new Error("No queued workspace tree request was sent");
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(outcome).toBe("pending");
+
+      socket.receive({ id: sent.id, type: "response", payload: { root: null } });
+      await request;
+      expect(outcome).toBe("resolved");
+    } finally {
+      client.disconnect();
+    }
+  });
+
   it("retains the backend code and details when a request fails", async () => {
     const { client, socket } = connectClient();
     const request = client.request("session.recover", { action: "resume" });
@@ -899,5 +1005,269 @@ describe("ordered core session validation", () => {
     await vi.waitFor(() => expect(projected).toHaveBeenCalledTimes(1));
     unregister();
     subscription.unsubscribe();
+  });
+
+  it("projects source conversation batches and ignores legacy duplicates", async () => {
+    const { client, socket } = connectClient({ conversationProtocol: "v2" });
+    const projected = vi.fn();
+    const changed = vi.fn();
+    const completed = vi.fn();
+    client.on("session.message.added", projected);
+    client.on("session.conversation.changed", changed);
+    client.on("session.turn.completed", completed);
+    const subscription = client.subscribeSessionWithReady("sess-1");
+    const v2Request = socket.sent.find(
+      (message) => message.action === "session.conversation.subscribe",
+    );
+    if (!v2Request) throw new Error("No source conversation subscribe request was sent");
+    const scopeID = (v2Request.payload as { scope_id: string }).scope_id;
+    socket.receive({
+      id: v2Request.id,
+      type: "response",
+      payload: {
+        success: true,
+        protocol_version: 2,
+        scope_id: scopeID,
+        session_id: "sess-1",
+        epoch: "epoch-1",
+        revision: "0",
+      },
+    });
+    const legacyRequest = socket.sent.find((message) => message.action === "session.subscribe");
+    if (!legacyRequest) throw new Error("No session subscribe request was sent");
+    socket.receive({ id: legacyRequest.id, type: "response", payload: { success: true } });
+    await subscription.ready;
+
+    socket.receive({
+      type: "notification",
+      action: "session.conversation.changed",
+      payload: {
+        protocol_version: 2,
+        scope_id: scopeID,
+        session_id: "sess-1",
+        epoch: "epoch-1",
+        base_revision: "0",
+        revision: "1",
+        operations: [
+          {
+            kind: "upsert",
+            entity: "message",
+            id: "message-1",
+            message: {
+              task_id: "task-1",
+              author_type: "user",
+              content: "source",
+              type: "message",
+              created_at: "2026-09-16T12:00:00Z",
+              updated_at: "2026-09-16T12:00:00Z",
+            },
+          },
+          {
+            kind: "upsert",
+            entity: "turn",
+            id: "turn-1",
+            turn: {
+              task_id: "task-1",
+              started_at: "2026-09-16T11:59:00Z",
+              completed_at: "2026-09-16T12:00:01Z",
+              updated_at: "2026-09-16T12:00:01Z",
+              execution_profile_id: "profile-1",
+              route_generation: 3,
+              metadata: { runtime_config_snapshot: { model: "mock-fast" } },
+              had_output: false,
+            },
+          },
+        ],
+      },
+    });
+    socket.receive({
+      type: "notification",
+      action: "session.message.added",
+      payload: { session_id: "sess-1", message_id: "message-1" },
+    });
+    expect(projected).toHaveBeenCalledTimes(1);
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(completed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          id: "turn-1",
+          execution_profile_id: "profile-1",
+          route_generation: 3,
+          metadata: { runtime_config_snapshot: { model: "mock-fast" } },
+          had_output: false,
+        }),
+      }),
+    );
+    subscription.unsubscribe();
+  });
+
+  it("repairs malformed source operations before advancing the applied revision", async () => {
+    const { client, socket } = connectClient({ conversationProtocol: "v2" });
+    const projected = vi.fn();
+    const recover = vi.fn(async () => true);
+    client.on("session.message.added", projected);
+    const subscription = client.subscribeSessionWithReady("sess-1");
+    const v2Request = socket.sent.find(
+      (message) => message.action === "session.conversation.subscribe",
+    );
+    if (!v2Request) throw new Error("No source conversation subscribe request was sent");
+    const scopeID = (v2Request.payload as { scope_id: string }).scope_id;
+    socket.receive({
+      id: v2Request.id,
+      type: "response",
+      payload: {
+        success: true,
+        protocol_version: 2,
+        scope_id: scopeID,
+        session_id: "sess-1",
+        epoch: "epoch-1",
+        revision: "0",
+      },
+    });
+    const legacyRequest = socket.sent.find((message) => message.action === "session.subscribe");
+    if (!legacyRequest) throw new Error("No session subscribe request was sent");
+    socket.receive({ id: legacyRequest.id, type: "response", payload: { success: true } });
+    await subscription.ready;
+    client.registerCoreSessionRecovery("sess-1", recover);
+
+    socket.receive({
+      type: "notification",
+      action: "session.conversation.changed",
+      payload: {
+        protocol_version: 2,
+        scope_id: scopeID,
+        session_id: "sess-1",
+        epoch: "epoch-1",
+        base_revision: "0",
+        revision: "1",
+        operations: [{ kind: "upsert", entity: "message", id: "message-1" }],
+      },
+    });
+
+    await vi.waitFor(() => expect(recover).toHaveBeenCalledTimes(1));
+    expect(projected).not.toHaveBeenCalled();
+    subscription.unsubscribe();
+  });
+  it.each(["missed", "delivered", "closed"])(
+    "checks idle source revisions with %s updates",
+    async (outcome) => {
+      vi.useFakeTimers();
+      const { client, socket } = connectClient({ conversationProtocol: "v2" });
+      const projected = vi.fn();
+      const recover = vi.fn(async () => true);
+      client.on("session.message.added", projected);
+      const subscription = client.subscribeSessionWithReady("sess-1");
+      const v2Request = socket.sent.find(
+        (message) => message.action === "session.conversation.subscribe",
+      );
+      if (!v2Request) throw new Error("No source conversation subscribe request was sent");
+      const scopeID = (v2Request.payload as { scope_id: string }).scope_id;
+      socket.receive({
+        id: v2Request.id,
+        type: "response",
+        payload: {
+          success: true,
+          protocol_version: 2,
+          scope_id: scopeID,
+          session_id: "sess-1",
+          epoch: "epoch-1",
+          revision: "0",
+        },
+      });
+      const legacyRequest = socket.sent.find((message) => message.action === "session.subscribe");
+      if (!legacyRequest) throw new Error("No session subscribe request was sent");
+      socket.receive({ id: legacyRequest.id, type: "response", payload: { success: true } });
+      await subscription.ready;
+      client.registerCoreSessionRecovery("sess-1", recover);
+
+      const check = (revision: string) =>
+        socket.receive({
+          type: "notification",
+          action: "session.conversation.changed",
+          payload: {
+            protocol_version: 2,
+            scope_id: scopeID,
+            session_id: "sess-1",
+            epoch: "epoch-1",
+            base_revision: revision,
+            revision,
+            check: true,
+            operations: [],
+          },
+        });
+      check("0");
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(recover).not.toHaveBeenCalled();
+      check("1");
+      await vi.advanceTimersByTimeAsync(999);
+      expect(recover).not.toHaveBeenCalled();
+      if (outcome === "closed") subscription.unsubscribe();
+      if (outcome === "delivered")
+        socket.receive({
+          type: "notification",
+          action: "session.conversation.changed",
+          payload: {
+            protocol_version: 2,
+            scope_id: scopeID,
+            session_id: "sess-1",
+            epoch: "epoch-1",
+            base_revision: "0",
+            revision: "1",
+            operations: [],
+          },
+        });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(recover).toHaveBeenCalledTimes(outcome === "missed" ? 1 : 0);
+
+      subscription.unsubscribe();
+    },
+  );
+});
+
+describe("Send Now cancellation acknowledgement", () => {
+  it("keeps a real queue request pending beyond the ordinary five-second deadline", async () => {
+    vi.useFakeTimers();
+    const { client, socket } = connectClient();
+    setWebSocketClient(client);
+    try {
+      const result = sendQueuedNow({
+        task_id: "task-1",
+        session_id: "session-1",
+        session_incarnation_id: "incarnation-1",
+        scope: "entry",
+        entry_id: "q-2",
+      });
+      const settled = vi.fn();
+      void result.then(settled, settled);
+      await vi.advanceTimersByTimeAsync(8_000);
+      expect(settled).not.toHaveBeenCalled();
+      const request = socket.sent.find((frame) => frame.action === "message.queue.send_now");
+      expect(request).toBeDefined();
+      const payload = { session_id: "session-1", dispatched: true, sent_count: 1 };
+      socket.receive({ id: request!.id, type: "response", payload });
+      await expect(result).resolves.toEqual(payload);
+    } finally {
+      client.disconnect();
+      setWebSocketClient(null);
+    }
+  });
+
+  it("still rejects a Send Now request whose cancellation never acknowledges", async () => {
+    vi.useFakeTimers();
+    const { client } = connectClient();
+    setWebSocketClient(client);
+    try {
+      const result = sendQueuedNow({
+        task_id: "task-1",
+        session_id: "session-1",
+        session_incarnation_id: "incarnation-1",
+        scope: "all",
+      }).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(35_001);
+      expect(await result).toBeInstanceOf(WebSocketRequestTimeoutError);
+    } finally {
+      client.disconnect();
+      setWebSocketClient(null);
+    }
   });
 });

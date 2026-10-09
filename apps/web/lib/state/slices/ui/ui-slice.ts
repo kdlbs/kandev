@@ -1,5 +1,7 @@
+import { buildChatMotionActions, loadChatMotionState } from "./chat-motion-actions";
 import type { StateCreator } from "zustand";
 import {
+  getLocalStorage,
   getStoredCollapsedSubtaskParents,
   setLocalStorage,
   setStoredCollapsedSubtaskParents,
@@ -18,18 +20,24 @@ import {
   loadRichOutputMotionState,
 } from "./rich-output-motion-actions";
 import { DEFAULT_SETTINGS_MENU_MODE } from "@/lib/settings/settings-menu-mode";
-import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
+import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/lib/layout/app-sidebar-geometry";
 import { buildSidebarTaskPrefsActions } from "./sidebar-task-prefs-actions";
 import { buildSidebarViewActions } from "./sidebar-view-actions";
 import { buildThreadViewActions } from "./thread-view-actions";
 import { DEFAULT_VIEW } from "./sidebar-view-builtins";
 import { DEFAULT_THREAD_VIEW, DEFAULT_THREAD_VIEW_ID } from "./thread-view-builtins";
-import type { SidebarView, SidebarViewDraft, SortSpec } from "./sidebar-view-types";
+import type { SidebarView, SidebarViewDraft } from "./sidebar-view-types";
 import { cloneSidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
+import { normalizeSidebarSort } from "@/lib/sidebar/sidebar-sort-chain";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { ActiveDocument, UISlice, UISliceState } from "./types";
 import { buildQuickChatActions } from "./quick-chat-actions";
 import { buildQuickTerminalActions } from "./quick-terminal-actions";
+
+/** Key for the stored directory-browser hidden-entry preference. Namespaced
+ * like the other UI preferences so a reload restores the same reveal state.
+ * Declared before the initial state, which reads it at module load. */
+const DIRECTORY_BROWSER_SHOW_HIDDEN_KEY = "kandev.directoryBrowser.showHidden";
 
 /** Default sidebar view state: the single built-in "All tasks" view, active, no draft. */
 function createDefaultSidebarState(): UISliceState["sidebarViews"] {
@@ -69,6 +77,8 @@ export const KNOWN_SORT_KEYS = new Set<string>([
   "lastActivityAt",
   "createdAt",
   "title",
+  "running",
+  "color",
   "custom",
 ]);
 
@@ -78,26 +88,28 @@ export const KNOWN_SORT_KEYS = new Set<string>([
  * when rendering stored views.
  */
 export function migrateView(view: SidebarView): SidebarView {
-  const sort: SortSpec = KNOWN_SORT_KEYS.has(view.sort.key)
-    ? view.sort
-    : { key: "state", direction: view.sort.direction };
+  const normalized = normalizeSidebarSort(view.sort);
+  const sortWarningCount = Math.max(view.sortWarningCount ?? 0, normalized.droppedRuleCount);
   return {
     ...view,
     filters: view.filters.filter((c) => KNOWN_DIMENSIONS.has(c.dimension)),
-    sort,
+    sort: normalized.sort,
+    ...(sortWarningCount > 0 ? { sortWarningCount } : {}),
+    groupIndent: typeof view.groupIndent === "boolean" ? view.groupIndent : true,
     taskRow: cloneSidebarTaskRowPresentation(view.taskRow),
   };
 }
 
 /** Drops removed filter dimensions from an in-flight saved-view draft. */
 export function migrateSidebarViewDraft(draft: SidebarViewDraft): SidebarViewDraft {
-  const sort: SortSpec = KNOWN_SORT_KEYS.has(draft.sort.key)
-    ? draft.sort
-    : { key: "state", direction: draft.sort.direction };
+  const normalized = normalizeSidebarSort(draft.sort);
+  const sortWarningCount = Math.max(draft.sortWarningCount ?? 0, normalized.droppedRuleCount);
   return {
     ...draft,
     filters: draft.filters.filter((c) => KNOWN_DIMENSIONS.has(c.dimension)),
-    sort,
+    sort: normalized.sort,
+    ...(sortWarningCount > 0 ? { sortWarningCount } : {}),
+    groupIndent: typeof draft.groupIndent === "boolean" ? draft.groupIndent : true,
     taskRow: cloneSidebarTaskRowPresentation(draft.taskRow),
   };
 }
@@ -145,6 +157,7 @@ export const defaultUIState: UISliceState = {
     lastSettledAtBySession: {},
     sessionOwnership: {},
     syncRevisionByWorkspace: {},
+    configChatRestarts: {},
     tombstonedSessions: {},
     tabOrderByWorkspace: {},
     tabOrderSyncErrorByWorkspace: {},
@@ -159,8 +172,11 @@ export const defaultUIState: UISliceState = {
   sessionFailureNotification: null,
   taskDeletedNotification: null,
   updateAvailableNotification: null,
+  updateAvailableNotificationQueue: [],
   bottomTerminal: { isOpen: false, pendingCommand: null },
+  directoryBrowserShowHidden: loadDirectoryBrowserShowHidden(),
   sidebarViews: createDefaultSidebarState(),
+  sidebarViewsByWorkspace: {},
   threadViews: createDefaultThreadViewState(),
   collapsedSubtaskParents: [],
   kanbanPreviewedTaskId: null,
@@ -178,6 +194,7 @@ export const defaultUIState: UISliceState = {
     savedMode: DEFAULT_SETTINGS_MENU_MODE,
     expandedKeys: [],
   },
+  chatMotion: { enabled: true, savedEnabled: true },
   richOutputMotion: {
     enabled: true,
     savedEnabled: true,
@@ -281,6 +298,25 @@ function buildMobileActions(set: ImmerSet) {
   };
 }
 
+/** Reads the stored reveal preference. An unreadable or corrupt value falls
+ * back to the current default listing rather than blocking the browser. */
+function loadDirectoryBrowserShowHidden(): boolean {
+  return getLocalStorage<boolean>(DIRECTORY_BROWSER_SHOW_HIDDEN_KEY, false) === true;
+}
+
+/** Builds the reveal action for every directory browser. The preference is
+ * written so the choice survives a reload, and lives in one place so the three
+ * directory browsers cannot disagree. */
+function buildDirectoryBrowserActions(set: ImmerSet) {
+  return {
+    setDirectoryBrowserShowHidden: (showHidden: boolean) =>
+      set((draft) => {
+        draft.directoryBrowserShowHidden = showHidden;
+        setLocalStorage(DIRECTORY_BROWSER_SHOW_HIDDEN_KEY, showHidden);
+      }),
+  };
+}
+
 /** Builds the bottom terminal's open/toggle and pending-command actions, persisting open state to localStorage. */
 function buildBottomTerminalActions(set: ImmerSet) {
   return {
@@ -360,7 +396,20 @@ function buildNotificationActions(set: ImmerSet) {
       }),
     setUpdateAvailableNotification: (n: UISlice["updateAvailableNotification"]) =>
       set((draft) => {
-        draft.updateAvailableNotification = n;
+        if (!n) {
+          draft.updateAvailableNotification =
+            draft.updateAvailableNotificationQueue.shift() ?? null;
+          return;
+        }
+        if (
+          draft.updateAvailableNotification?.occurrence_id === n.occurrence_id ||
+          draft.updateAvailableNotificationQueue.some(
+            (queued) => queued.occurrence_id === n.occurrence_id,
+          )
+        )
+          return;
+        if (draft.updateAvailableNotification) draft.updateAvailableNotificationQueue.push(n);
+        else draft.updateAvailableNotification = n;
       }),
   };
 }
@@ -377,12 +426,15 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   appSidebar: loadAppSidebarState(),
   settingsMenu: loadSettingsMenuState(),
   richOutputMotion: loadRichOutputMotionState(),
+  chatMotion: loadChatMotionState(),
   ...buildAppSidebarActions(set),
   ...buildSettingsMenuActions(set),
   ...buildRichOutputMotionActions(set),
+  ...buildChatMotionActions(set),
   ...buildPreviewActions(set),
   ...buildMobileActions(set),
   ...buildBottomTerminalActions(set),
+  ...buildDirectoryBrowserActions(set),
   ...buildSidebarViewActions(set, get),
   ...buildThreadViewActions(set, get),
   ...buildSidebarTaskPrefsActions(set, get),

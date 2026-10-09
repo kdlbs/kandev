@@ -71,11 +71,16 @@ test.describe("Subagent card", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
+    const sessionId = task.session_id ?? task.primary_session_id;
+    expect(sessionId).toBeTruthy();
+    if (!sessionId) throw new Error("agent task did not return a session id");
+    await waitForPersistedSubagentMetrics(apiClient, sessionId);
+
     // The dedicated subagent card renders, not the generic tool_call row.
     // Assert exactly one so an accidental duplicate render fails the test
     // rather than being masked by .first().
     const cards = session.chat.locator('[data-testid="subagent-card"]');
-    await expect(cards).toHaveCount(1);
+    await expect(cards).toHaveCount(1, { timeout: 30_000 });
     const card = cards.first();
     await expect(card).toBeVisible();
 
@@ -86,15 +91,6 @@ test.describe("Subagent card", () => {
     await expect(card.locator('[data-testid="subagent-description"]')).toContainText(
       "Explore the codebase",
     );
-
-    // Chat idle means the outer turn is no longer streaming. The nested
-    // subagent completion event can still be hydrating into the card. Wait for
-    // the persisted message that causes the metadata row before checking the
-    // rendered consequence.
-    const sessionId = task.session_id ?? task.primary_session_id;
-    expect(sessionId).toBeTruthy();
-    if (!sessionId) throw new Error("agent task did not return a session id");
-    await waitForPersistedSubagentMetrics(apiClient, sessionId);
 
     const metadata = card.locator('[data-testid="subagent-meta"]');
     // A live update may have been missed while the page was hydrating. Once

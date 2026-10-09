@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/pause"
@@ -31,16 +32,21 @@ type fakeRepo struct {
 	activityEntries []*models.ActivityEntry
 	activityErr     error
 
-	inflightRuns      []models.InflightRun
-	inflightErr       error
-	inflightSequences [][]models.InflightRun
-	liveOfficeIDs     []string
-	liveOfficeErr     error
-	liveRoutineIDs    []string
-	liveRoutineErr    error
-	cancelRunsCount   int64
-	cancelRunsErr     error
-	releaseCkoutErr   error
+	inflightRuns        []models.InflightRun
+	inflightErr         error
+	inflightSequences   [][]models.InflightRun
+	liveOfficeIDs       []string
+	liveOfficeErr       error
+	liveRoutineIDs      []string
+	liveRoutineErr      error
+	liveRunSessions     []models.RunSession
+	liveRunSessionErr   error
+	runSessionCancelErr error
+	finishRunSessionErr error
+	finishedRunSessions map[string]models.RunSessionState
+	cancelRunsCount     int64
+	cancelRunsErr       error
+	releaseCkoutErr     error
 }
 
 // GetActiveWorkspacePause pops the next scripted (record, error) pair off
@@ -92,6 +98,22 @@ func (f *fakeRepo) ListLiveOfficeTaskIDsForWorkspace(context.Context, string) ([
 
 func (f *fakeRepo) ListLiveRoutineTaskIDsForWorkspace(context.Context, string) ([]string, error) {
 	return f.liveRoutineIDs, f.liveRoutineErr
+}
+
+func (f *fakeRepo) ListLiveRunSessionsForWorkspace(context.Context, string) ([]models.RunSession, error) {
+	return f.liveRunSessions, f.liveRunSessionErr
+}
+
+func (f *fakeRepo) RequestRunSessionCancellation(context.Context, string) (bool, error) {
+	return f.runSessionCancelErr == nil, f.runSessionCancelErr
+}
+
+func (f *fakeRepo) FinishRunSession(_ context.Context, id string, state models.RunSessionState, _ string) (bool, error) {
+	if f.finishedRunSessions == nil {
+		f.finishedRunSessions = make(map[string]models.RunSessionState)
+	}
+	f.finishedRunSessions[id] = state
+	return f.finishRunSessionErr == nil, f.finishRunSessionErr
 }
 
 func (f *fakeRepo) CancelRunsForWorkspace(context.Context, []string, string) (int64, error) {
@@ -164,6 +186,60 @@ type fakeCanceller struct {
 	results         map[string]error
 	resultSequences map[string][]error
 	calls           []string
+}
+
+type fakeRunStopper struct {
+	results map[string]error
+	calls   []string
+}
+
+func (f *fakeRunStopper) Stop(_ context.Context, executionID, _ string) error {
+	f.calls = append(f.calls, executionID)
+	return f.results[executionID]
+}
+
+func TestPauseStopsMixedRunSessionInventory(t *testing.T) {
+	repo := &fakeRepo{
+		liveRunSessions: []models.RunSession{
+			{ID: "run-session-live", ExecutionID: "execution-live", State: models.RunSessionStateRunning},
+			{ID: "run-session-failed", ExecutionID: "execution-failed", State: models.RunSessionStateRunning},
+		},
+	}
+	stopper := &fakeRunStopper{results: map[string]error{"execution-failed": errors.New("stop failed")}}
+	svc := pause.NewService(repo, &fakeCanceller{}, &fakeWorkspaces{known: map[string]bool{"ws-1": true}}, logger.Default())
+	svc.SetRunExecutionStopper(stopper)
+	result, err := svc.Pause(context.Background(), "ws-1", "incident", "user-1", "user")
+	if err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if result.Sweep.ExecutionsCancelled != 1 || result.Sweep.Failures != 1 {
+		t.Fatalf("sweep = %+v, want one stopped and one failure", result.Sweep)
+	}
+	if len(stopper.calls) != 2 {
+		t.Fatalf("stop calls = %v, want both run executions", stopper.calls)
+	}
+}
+
+func TestPauseMarksMissingRuntimeRunSessionInterrupted(t *testing.T) {
+	repo := &fakeRepo{
+		liveRunSessions: []models.RunSession{{
+			ID: "run-session-missing", ExecutionID: "execution-missing", State: models.RunSessionStateRunning,
+		}},
+	}
+	stopper := &fakeRunStopper{results: map[string]error{"execution-missing": runtimeapi.ErrNotFound}}
+	svc := pause.NewService(repo, &fakeCanceller{}, &fakeWorkspaces{known: map[string]bool{"ws-1": true}}, logger.Default())
+	svc.SetRunExecutionStopper(stopper)
+
+	result, err := svc.Pause(context.Background(), "ws-1", "incident", "user-1", "user")
+	if err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	if result.Sweep.ExecutionsNotRunning != 1 || result.Sweep.Failures != 0 {
+		t.Fatalf("sweep = %+v, want one missing runtime and no failure", result.Sweep)
+	}
+	if got := repo.finishedRunSessions["run-session-missing"]; got != models.RunSessionStateInterrupted {
+		t.Fatalf("run session state = %q, want interrupted", got)
+	}
 }
 
 func (f *fakeCanceller) CancelTaskExecution(_ context.Context, taskID string, _ string, _ bool) error {

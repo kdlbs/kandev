@@ -126,7 +126,7 @@ func TestReconcileComparisonTargetClearsSameRepositoryBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, rows[0].ID, &seedTarget, nil); err != nil {
+	if _, _, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, rows[0].ID, &seedTarget, nil, false); err != nil {
 		t.Fatalf("seed target: %v", err)
 	}
 
@@ -181,6 +181,49 @@ func TestReconcileComparisonTargetFromSyncDoesNotReplaceNewerChange(t *testing.T
 	}
 }
 
+func TestReconcileComparisonTargetFromSyncPreservesManualBaseOverride(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedComparisonServiceWorkspace(t, repo, "contributor/widget", "head-42")
+	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-comparison", WorkflowID: "wf-comparison", WorkflowStepID: "step-comparison", Title: "Manual comparison",
+		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-comparison", BaseBranch: "release/custom", CheckoutBranch: "feature/cursor-cost"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	rows, err := repo.ListTaskRepositories(ctx, taskResult.Task.ID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("ListTaskRepositories: %v rows=%d", err, len(rows))
+	}
+	if rows[0].Metadata == nil {
+		rows[0].Metadata = make(map[string]interface{})
+	}
+	rows[0].Metadata[models.ManualBaseBranchOverrideMetadataKey] = true
+	if err := repo.UpdateTaskRepository(ctx, rows[0]); err != nil {
+		t.Fatalf("persist manual base marker: %v", err)
+	}
+
+	result, err := svc.ReconcileComparisonTargetFromSync(ctx, taskResult.Task.ID,
+		comparisonCandidate("contributor/widget", "head-42", "upstream/widget", "base-99"))
+	if err != nil {
+		t.Fatalf("provider sync: %v", err)
+	}
+	if result.Status != models.ComparisonTargetNoMatch {
+		t.Fatalf("provider sync status = %q, want no_match for manual selection", result.Status)
+	}
+	rows, err = repo.ListTaskRepositories(ctx, taskResult.Task.ID)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("reload task repositories: %v rows=%d", err, len(rows))
+	}
+	if rows[0].BaseBranch != "release/custom" || !models.HasManualBaseBranchOverride(rows[0].Metadata) {
+		t.Fatalf("provider sync changed manual base: branch=%q metadata=%#v", rows[0].BaseBranch, rows[0].Metadata)
+	}
+	if _, ok, err := models.LoadComparisonTarget(rows[0].Metadata); err != nil || ok {
+		t.Fatalf("provider sync persisted comparison target: present=%v err=%v", ok, err)
+	}
+}
+
 func TestRemoveComparisonTargetForChangeResolvesRepositoryAttachment(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -200,7 +243,7 @@ func TestRemoveComparisonTargetForChangeResolvesRepositoryAttachment(t *testing.
 	if err != nil {
 		t.Fatalf("Build target: %v", err)
 	}
-	if _, _, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, rows[0].ID, &target, nil); err != nil {
+	if _, _, err := repo.UpdateTaskRepositoryComparisonTarget(ctx, rows[0].ID, &target, nil, false); err != nil {
 		t.Fatalf("seed target: %v", err)
 	}
 	if err := svc.RemoveComparisonTargetForChange(ctx, taskResult.Task.ID, "repo-comparison", models.ComparisonTargetProviderGitHub, models.ComparisonTargetKindPullRequest, target.Number); err != nil {

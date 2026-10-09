@@ -273,3 +273,23 @@ it("does not reopen an active branch after the user collapses it", () => {
   expect(expanded.current.size).toBe(0);
   expect(setExpandedPaths).not.toHaveBeenCalled();
 });
+
+it("ignores an absolute active file path", async () => {
+  const loadChildren = vi.fn<(node: FileTreeNode) => Promise<boolean>>();
+  const { expanded, setExpandedPaths } = expansionState();
+
+  renderHook(() =>
+    useFileTreeReveal({
+      activeFilePath: "/home/jcfs/project/src/main/Greeting.kt",
+      sessionId: "session-1",
+      tree: srcOnlyTree(),
+      setExpandedPaths,
+      isLoading: () => false,
+      loadChildren,
+    }),
+  );
+  await act(async () => Promise.resolve());
+
+  expect(expanded.current).toEqual(new Set());
+  expect(loadChildren).not.toHaveBeenCalled();
+});

@@ -11,6 +11,7 @@ import { FileAttachmentItem } from "./file-attachment-item";
 import { PRFeedbackItem } from "./pr-feedback-item";
 import { WalkthroughCommentItem } from "./walkthrough-comment-item";
 import { AgentMessageCommentItem } from "./agent-message-comment-item";
+import { PreviewFeedbackItem } from "./preview-feedback-item";
 
 export function ContextItemRenderer({
   item,
@@ -30,6 +31,8 @@ export function ContextItemRenderer({
       return <CommentItem item={item} />;
     case "plan-comment":
       return <PlanCommentItem item={item} />;
+    case "preview-feedback":
+      return <PreviewFeedbackItem item={item} />;
     case "image":
       return <ImageItem item={item} />;
     case "file-attachment":

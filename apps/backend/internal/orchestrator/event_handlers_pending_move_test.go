@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -351,6 +352,10 @@ type pendingMoveScenario struct {
 //   - Mock LaunchAgent that fires the boot signal asynchronously so the
 //     resume path can complete in tests without a real agent process.
 func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
+	return buildPendingMoveScenarioWithQueue(t, false)
+}
+
+func buildPendingMoveScenarioWithQueue(t *testing.T, useSQLiteQueue bool) *pendingMoveScenario {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -390,6 +395,10 @@ func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
 	log := testLogger()
 	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
+	messageQueueService := newAuthoritativeMemoryQueue(repo, log)
+	if useSQLiteQueue {
+		messageQueueService = newSQLiteQueueForTaskRepo(t, repo)
+	}
 
 	svc := &Service{
 		logger:             log,
@@ -397,7 +406,7 @@ func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
 		workflowStepGetter: stepGetter,
 		taskRepo:           taskRepo,
 		agentManager:       agentMgr,
-		messageQueue:       newAuthoritativeMemoryQueue(repo, log),
+		messageQueue:       messageQueueService,
 		executor:           exec,
 		scheduler:          sched,
 	}
@@ -413,10 +422,15 @@ func buildPendingMoveScenario(t *testing.T) *pendingMoveScenario {
 	); err != nil {
 		t.Fatalf("queue hand-off prompt: %v", err)
 	}
+	reviewSession, err := repo.GetTaskSession(ctx, reviewSessionID)
+	if err != nil {
+		t.Fatalf("load review session for pending move: %v", err)
+	}
 	if err := svc.messageQueue.SetPendingMove(ctx, reviewSessionID, &messagequeue.PendingMove{
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: stepInProgressID,
+		SessionIncarnationID: reviewSession.QueueIncarnationID,
+		TaskID:               "task-1",
+		WorkflowID:           "wf1",
+		WorkflowStepID:       stepInProgressID,
 	}); err != nil {
 		t.Fatalf("set pending move: %v", err)
 	}
@@ -530,6 +544,7 @@ func seedReviewSession(t *testing.T, repo *sqliterepo.Repository, now time.Time)
 // wrong session too early and leave the receiving queue without its real drain.
 func wireBootReadySimulator(svc *Service, agentMgr *mockAgentManager, newExecID string) {
 	promptReady := make(chan struct{})
+	var readyOnce sync.Once
 	var preparedSessionID string
 	agentMgr.isAgentReadyFn = func(_ context.Context, _ string) bool {
 		select {
@@ -567,7 +582,7 @@ func wireBootReadySimulator(svc *Service, agentMgr *mockAgentManager, newExecID 
 		agentMgr.mu.Lock()
 		sessionID := preparedSessionID
 		agentMgr.mu.Unlock()
-		close(promptReady)
+		readyOnce.Do(func() { close(promptReady) })
 		svc.handleAgentBootReady(context.Background(), watcher.AgentEventData{
 			TaskID:           "task-1",
 			SessionID:        sessionID,
@@ -887,6 +902,14 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 				executor:           exec,
 			}
 			svc.SetWorkflowStepGetter(stepGetter)
+			attempt, owner, err := svc.beginResumeAttempt(ctx, "task-1", sessionID)
+			if err != nil {
+				t.Fatalf("begin resume attempt: %v", err)
+			}
+			if !owner {
+				t.Fatal("resume attempt was not admitted")
+			}
+			defer attempt.finish(svc.resumeAttemptStore())
 
 			// Reset task to step-current in case a prior subtest moved it.
 			tk, _ := repo.GetTask(ctx, "task-1")
@@ -898,6 +921,7 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 				TaskID: "task-1", SessionID: sessionID,
 				AgentExecutionID: "ae-current",
 				AgentProfileID:   "profile-impl",
+				AttemptID:        attempt.identity(),
 			})
 
 			finalTask, err := repo.GetTask(ctx, "task-1")

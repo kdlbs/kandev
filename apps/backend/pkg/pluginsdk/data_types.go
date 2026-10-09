@@ -93,12 +93,13 @@ func taskRepositoryFromProto(p *pluginv1.TaskRepository) TaskRepository {
 
 // Task is the Go-native mirror of kandev.plugin.v1.Task.
 type Task struct {
-	ID          string
-	WorkspaceID string
-	WorkflowID  string
-	Title       string
-	Description string
-	State       string
+	ID              string
+	WorkspaceID     string
+	WorkflowID      string
+	ResourceVersion string
+	Title           string
+	Description     string
+	State           string
 	// Priority is one of critical, high, medium, or low.
 	Priority     string
 	CreatedBy    string
@@ -132,6 +133,36 @@ type Task struct {
 	QueuedAt        *string
 	ProjectID       string
 	ExternalID      string
+	// Dependency projection derived from task_blockers. Blocked and
+	// BlockedReason report the task's own gate; DependsOn is what it is
+	// waiting on and Blocks is what is waiting on it. A read that cannot
+	// resolve the dependency graph reports Blocked=true,
+	// BlockedReason="unknown" and empty lists rather than a false
+	// "unblocked".
+	Blocked            bool
+	BlockedReason      string // "pending" | "failed" | "unknown" | ""
+	DependsOn          []TaskDependencyRef
+	Blocks             []TaskDependencyRef
+	DependsOnTruncated bool
+	BlocksTruncated    bool
+	// StartWhenUnblocked is always false when BlockedReason is "unknown",
+	// regardless of the underlying stored configuration.
+	StartWhenUnblocked bool
+}
+
+// TaskDependencyRef is one edge end in a task's dependency projection: a
+// predecessor entry in DependsOn, or a dependent entry in Blocks.
+type TaskDependencyRef struct {
+	ID    string
+	Title string // redacted to "" on a canvas surface outside the caller's scope
+	State string // redacted to "" alongside Title
+	// Status is DependencyStatusForTask's verdict ("resolved" | "failed" |
+	// "pending"). Always "" on a Blocks entry.
+	Status string
+	// WorkspaceID is never sent over the wire (not mapped by toProto/proto
+	// decode). It exists only so a canvas surface can decide, without a
+	// further read, whether this ref falls outside the caller's scope.
+	WorkspaceID string
 }
 
 // TaskPullRequest is one change opened for a task. Provider-neutral by design:
@@ -187,6 +218,43 @@ func taskPullRequestFromProto(p *pluginv1.TaskPullRequest) TaskPullRequest {
 	}
 }
 
+func (r TaskDependencyRef) toProto() *pluginv1.TaskDependencyRef {
+	return &pluginv1.TaskDependencyRef{
+		Id: r.ID, Title: r.Title, State: r.State, Status: r.Status,
+	}
+}
+
+func taskDependencyRefFromProto(p *pluginv1.TaskDependencyRef) TaskDependencyRef {
+	if p == nil {
+		return TaskDependencyRef{}
+	}
+	return TaskDependencyRef{
+		ID: p.GetId(), Title: p.GetTitle(), State: p.GetState(), Status: p.GetStatus(),
+	}
+}
+
+func taskDependencyRefsToProto(in []TaskDependencyRef) []*pluginv1.TaskDependencyRef {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]*pluginv1.TaskDependencyRef, len(in))
+	for i := range in {
+		out[i] = in[i].toProto()
+	}
+	return out
+}
+
+func taskDependencyRefsFromProto(in []*pluginv1.TaskDependencyRef) []TaskDependencyRef {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]TaskDependencyRef, len(in))
+	for i, r := range in {
+		out[i] = taskDependencyRefFromProto(r)
+	}
+	return out
+}
+
 func (t Task) toProto() (*pluginv1.Task, error) {
 	metadata, err := mapToStruct(t.Metadata)
 	if err != nil {
@@ -200,23 +268,24 @@ func (t Task) toProto() (*pluginv1.Task, error) {
 		}
 	}
 	return &pluginv1.Task{
-		Id:           t.ID,
-		WorkspaceId:  t.WorkspaceID,
-		WorkflowId:   t.WorkflowID,
-		Title:        t.Title,
-		Description:  t.Description,
-		State:        t.State,
-		Priority:     t.Priority,
-		CreatedBy:    t.CreatedBy,
-		CreatedAt:    t.CreatedAt,
-		UpdatedAt:    t.UpdatedAt,
-		StartedAt:    t.StartedAt,
-		CompletedAt:  t.CompletedAt,
-		ParentId:     t.ParentID,
-		Identifier:   t.Identifier,
-		IsEphemeral:  t.IsEphemeral,
-		Repositories: repos,
-		Metadata:     metadata,
+		Id:              t.ID,
+		WorkspaceId:     t.WorkspaceID,
+		WorkflowId:      t.WorkflowID,
+		ResourceVersion: t.ResourceVersion,
+		Title:           t.Title,
+		Description:     t.Description,
+		State:           t.State,
+		Priority:        t.Priority,
+		CreatedBy:       t.CreatedBy,
+		CreatedAt:       t.CreatedAt,
+		UpdatedAt:       t.UpdatedAt,
+		StartedAt:       t.StartedAt,
+		CompletedAt:     t.CompletedAt,
+		ParentId:        t.ParentID,
+		Identifier:      t.Identifier,
+		IsEphemeral:     t.IsEphemeral,
+		Repositories:    repos,
+		Metadata:        metadata,
 
 		ArchivedAt:             t.ArchivedAt,
 		PullRequests:           taskPullRequestsToProto(t.PullRequests),
@@ -230,6 +299,14 @@ func (t Task) toProto() (*pluginv1.Task, error) {
 		QueuedAt:               t.QueuedAt,
 		ProjectId:              t.ProjectID,
 		ExternalId:             t.ExternalID,
+
+		Blocked:            t.Blocked,
+		BlockedReason:      t.BlockedReason,
+		DependsOn:          taskDependencyRefsToProto(t.DependsOn),
+		Blocks:             taskDependencyRefsToProto(t.Blocks),
+		DependsOnTruncated: t.DependsOnTruncated,
+		BlocksTruncated:    t.BlocksTruncated,
+		StartWhenUnblocked: t.StartWhenUnblocked,
 	}, nil
 }
 
@@ -271,23 +348,24 @@ func taskFromProto(p *pluginv1.Task) (Task, error) {
 		}
 	}
 	return Task{
-		ID:           p.GetId(),
-		WorkspaceID:  p.GetWorkspaceId(),
-		WorkflowID:   p.GetWorkflowId(),
-		Title:        p.GetTitle(),
-		Description:  p.GetDescription(),
-		State:        p.GetState(),
-		Priority:     p.GetPriority(),
-		CreatedBy:    p.GetCreatedBy(),
-		CreatedAt:    p.GetCreatedAt(),
-		UpdatedAt:    p.GetUpdatedAt(),
-		StartedAt:    p.StartedAt,
-		CompletedAt:  p.CompletedAt,
-		ParentID:     p.ParentId,
-		Identifier:   p.GetIdentifier(),
-		IsEphemeral:  p.GetIsEphemeral(),
-		Repositories: repos,
-		Metadata:     metadata,
+		ID:              p.GetId(),
+		WorkspaceID:     p.GetWorkspaceId(),
+		WorkflowID:      p.GetWorkflowId(),
+		ResourceVersion: p.GetResourceVersion(),
+		Title:           p.GetTitle(),
+		Description:     p.GetDescription(),
+		State:           p.GetState(),
+		Priority:        p.GetPriority(),
+		CreatedBy:       p.GetCreatedBy(),
+		CreatedAt:       p.GetCreatedAt(),
+		UpdatedAt:       p.GetUpdatedAt(),
+		StartedAt:       p.StartedAt,
+		CompletedAt:     p.CompletedAt,
+		ParentID:        p.ParentId,
+		Identifier:      p.GetIdentifier(),
+		IsEphemeral:     p.GetIsEphemeral(),
+		Repositories:    repos,
+		Metadata:        metadata,
 
 		ArchivedAt:             p.ArchivedAt,
 		PullRequests:           taskPullRequestsFromProto(p.GetPullRequests()),
@@ -301,6 +379,14 @@ func taskFromProto(p *pluginv1.Task) (Task, error) {
 		QueuedAt:               p.QueuedAt,
 		ProjectID:              p.GetProjectId(),
 		ExternalID:             p.GetExternalId(),
+
+		Blocked:            p.GetBlocked(),
+		BlockedReason:      p.GetBlockedReason(),
+		DependsOn:          taskDependencyRefsFromProto(p.GetDependsOn()),
+		Blocks:             taskDependencyRefsFromProto(p.GetBlocks()),
+		DependsOnTruncated: p.GetDependsOnTruncated(),
+		BlocksTruncated:    p.GetBlocksTruncated(),
+		StartWhenUnblocked: p.GetStartWhenUnblocked(),
 	}, nil
 }
 

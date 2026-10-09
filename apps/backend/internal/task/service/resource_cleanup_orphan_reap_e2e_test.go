@@ -64,7 +64,8 @@ func TestOrphanReapEndToEndKillsRealChildAfterQuickChatDirRemoval(t *testing.T) 
 		State:   models.TaskResourceCleanupStatePending,
 	}
 	snapshot := &taskResourceCleanupSnapshot{
-		Sessions: []*models.TaskSession{{ID: sessionID, TaskID: "task-reap-e2e"}},
+		ArchiveSourceManifestCaptured: true,
+		Sessions:                      []*models.TaskSession{{ID: sessionID, TaskID: "task-reap-e2e"}},
 	}
 
 	err := taskSvc.executeTaskResourceCleanupJob(ctx, job, snapshot)

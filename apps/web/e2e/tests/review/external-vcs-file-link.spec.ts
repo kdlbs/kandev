@@ -15,11 +15,20 @@ const PUBLISHED_FILE = "published-link.ts";
 const EXISTING_FILE = "base-link.ts";
 const UNTRACKED_FILE = "local-only-link.ts";
 
-function initializeRepository(backend: BackendContext, slug: string): string {
+function initializeRepository(
+  backend: BackendContext,
+  slug: string,
+  repositoryName = GITHUB_REPOSITORY,
+): string {
   const repositoryPath = path.join(backend.tmpDir, "repos", slug);
   fs.mkdirSync(repositoryPath, { recursive: true });
   const gitEnvironment = makeGitEnv(backend.tmpDir);
   execFileSync("git", ["init", "-b", "main"], { cwd: repositoryPath, env: gitEnvironment });
+  execFileSync(
+    "git",
+    ["remote", "add", "origin", `https://github.com/${GITHUB_OWNER}/${repositoryName}.git`],
+    { cwd: repositoryPath, env: gitEnvironment },
+  );
   fs.writeFileSync(path.join(repositoryPath, EXISTING_FILE), "export const base = true;\n");
   execFileSync("git", ["add", "-A"], { cwd: repositoryPath, env: gitEnvironment });
   execFileSync("git", ["commit", "-m", "seed provider repository"], {
@@ -153,7 +162,11 @@ test.describe("External VCS file links", () => {
     seedData,
     backend,
   }) => {
-    const repositoryPath = initializeRepository(backend, `external-link-base-${Date.now()}`);
+    const repositoryPath = initializeRepository(
+      backend,
+      `external-link-base-${Date.now()}`,
+      BASE_GITHUB_REPOSITORY,
+    );
     await createGitHubRepository(
       apiClient,
       seedData.workspaceId,

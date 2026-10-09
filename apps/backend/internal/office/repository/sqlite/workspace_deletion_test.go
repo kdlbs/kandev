@@ -35,6 +35,7 @@ func TestDeleteWorkspaceDataDeletesOwnedOfficeRows(t *testing.T) {
 		"run_events",
 		"office_run_route_attempts",
 		"office_run_skills",
+		"office_run_sessions",
 		"agent_wakeup_requests",
 		"agent_continuation_summaries",
 		"office_routine_triggers",
@@ -133,6 +134,7 @@ func seedWorkspaceDeletionRows(t *testing.T, repo *sqlite.Repository, workspaceI
 	execRaw(t, repo, `INSERT INTO run_events (run_id, seq, event_type, payload, created_at) VALUES (?, 1, 'queued', '{}', ?)`, runID, now)
 	execRaw(t, repo, `INSERT INTO office_run_route_attempts (run_id, seq, provider_id, model, tier, outcome, started_at) VALUES (?, 1, 'codex', 'gpt', 'balanced', 'failed', ?)`, runID, now)
 	execRaw(t, repo, `INSERT INTO office_run_skills (run_id, skill_id, version, content_hash, materialized_path) VALUES (?, ?, 'v1', 'hash', '/tmp/skill')`, runID, workspaceID+"-skill")
+	execRaw(t, repo, `INSERT INTO office_run_sessions (id, workspace_id, agent_profile_id, run_id, attempt, state, created_at) VALUES (?, ?, ?, ?, 1, 'finished', ?)`, workspaceID+"-run-session", workspaceID, agentID, runID, now)
 	execRaw(t, repo, `INSERT INTO agent_wakeup_requests (id, agent_profile_id, source, status, requested_at) VALUES (?, ?, 'test', 'queued', ?)`, workspaceID+"-wakeup", agentID, now)
 	execRaw(t, repo, `INSERT INTO agent_continuation_summaries (agent_profile_id, scope, content) VALUES (?, 'workspace', 'summary')`, agentID)
 	execRaw(t, repo, `INSERT INTO office_agent_pause_recoveries (agent_id, task_id, failed_run_id) VALUES (?, ?, ?)`, agentID, taskID, runID)
@@ -147,6 +149,7 @@ func seedWorkspaceDeletionRows(t *testing.T, repo *sqlite.Repository, workspaceI
 	execRaw(t, repo, `INSERT INTO office_approvals (id, workspace_id, type, created_at, updated_at) VALUES (?, ?, 'test', ?, ?)`, workspaceID+"-approval", workspaceID, now, now)
 	execRaw(t, repo, `INSERT INTO office_activity_log (id, workspace_id, actor_type, actor_id, action, created_at) VALUES (?, ?, 'agent', ?, 'created', ?)`, workspaceID+"-activity", workspaceID, agentID, now)
 	execRaw(t, repo, `INSERT INTO office_workspace_pauses (id, workspace_id, reason, created_by, created_by_kind, created_at) VALUES (?, ?, 'test', ?, 'user', ?)`, workspaceID+"-pause", workspaceID, agentID, now)
+	execRaw(t, repo, `INSERT INTO office_deferred_assignments (task_id, workspace_id, agent_profile_id, assignment_generation, pause_id, created_at) VALUES (?, ?, ?, 1, ?, ?)`, taskID, workspaceID, agentID, workspaceID+"-pause", now)
 	execRaw(t, repo, `INSERT INTO office_onboarding (workspace_id, completed, ceo_agent_id, created_at) VALUES (?, 1, ?, ?)`, workspaceID, agentID, now)
 	execRaw(t, repo, `INSERT INTO office_workspace_governance (workspace_id, key, value) VALUES (?, 'require_approval_for_new_agents', 1)`, workspaceID)
 	execRaw(t, repo, `INSERT INTO office_workspace_routing (workspace_id, enabled, default_tier, provider_order, provider_profiles, updated_at) VALUES (?, 1, 'balanced', '["codex"]', '{}', ?)`, workspaceID, now)
@@ -179,6 +182,7 @@ func assertWorkspaceOfficeRows(t *testing.T, db *sqlx.DB, workspaceID string, wa
 		"office_approvals",
 		"office_activity_log",
 		"office_workspace_pauses",
+		"office_deferred_assignments",
 		"office_onboarding",
 		"office_workspace_governance",
 	} {

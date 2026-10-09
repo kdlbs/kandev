@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { useRouter } from "@/lib/routing/client-router";
+import { linkToTask } from "@/lib/links";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import type { Task, Workflow, WorkflowStep } from "@/lib/types/http";
 import type { LinearIssue } from "@/lib/types/linear";
@@ -84,7 +85,7 @@ export function LinearQuickTaskLauncher({
   };
   const handleSuccess = (task: Task, _mode?: "create" | "edit", meta?: { autoFocus?: boolean }) => {
     onClose();
-    if (meta?.autoFocus !== false) router.push(`/tasks/${task.id}`);
+    if (meta?.autoFocus !== false) router.push(linkToTask(task.id));
   };
 
   if (!workspaceId || !defaultWorkflow || !defaultStep || !dialog) return null;

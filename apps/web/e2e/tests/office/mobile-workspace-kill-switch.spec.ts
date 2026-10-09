@@ -27,21 +27,25 @@ test.describe("mobile: Office workspace kill switch", () => {
     })) as { id: string };
 
     await testPage.goto(`/office?workspaceId=${officeSeed.workspaceId}`);
-    await expect(testPage.getByTestId("office-workspace-running-bar")).toBeVisible({
-      timeout: 10_000,
-    });
+    const actionsTrigger = testPage.getByTestId("office-workspace-actions-trigger");
+    await expect(actionsTrigger).toBeVisible({ timeout: 10_000 });
     await assertNoDocumentHorizontalOverflow(testPage);
 
-    // Pause control meets the 44px coarse-pointer touch-target minimum
-    // (apps/web/AGENTS.md's mobile-parity convention).
-    const pauseButtonBox = await testPage
-      .getByTestId("office-pause-workspace-button")
-      .boundingBox();
-    expect(pauseButtonBox?.height).toBeGreaterThanOrEqual(44);
+    // The actions trigger and drawer controls meet the 44px coarse-pointer
+    // touch-target minimum (apps/web/AGENTS.md's mobile-parity convention).
+    const actionsTriggerBox = await actionsTrigger.boundingBox();
+    expect(actionsTriggerBox?.height).toBeGreaterThanOrEqual(44);
 
     // Pause control is reachable and operable on a phone viewport (AC-006.12, -006.8).
-    await testPage.getByTestId("office-pause-workspace-button").tap();
+    await actionsTrigger.tap();
+    const actionsDrawer = testPage.getByTestId("office-workspace-actions-drawer");
+    await expect(actionsDrawer).toBeVisible();
+    const pauseButton = actionsDrawer.getByTestId("office-pause-workspace-button");
+    const pauseButtonBox = await pauseButton.boundingBox();
+    expect(pauseButtonBox?.height).toBeGreaterThanOrEqual(44);
+    await pauseButton.tap();
     const pauseDialog = testPage.getByTestId("office-pause-workspace-dialog");
+    await expect(actionsDrawer).toHaveCount(0);
     await expect(pauseDialog).toBeVisible();
     await pauseDialog.getByTestId("office-pause-reason-input").fill("Mobile E2E kill switch drill");
 
@@ -66,8 +70,12 @@ test.describe("mobile: Office workspace kill switch", () => {
     expect(blockedFire.status).toBe(409);
 
     // Resume requires explicit confirmation and is operable via touch (AC-006.5, -006.8).
-    await testPage.getByTestId("office-resume-workspace-button").tap();
+    await testPage.getByTestId("office-workspace-actions-trigger").tap();
+    const resumeDrawer = testPage.getByTestId("office-workspace-actions-drawer");
+    await expect(resumeDrawer).toBeVisible();
+    await resumeDrawer.getByTestId("office-resume-workspace-button").tap();
     const resumeDialog = testPage.getByTestId("office-resume-workspace-dialog");
+    await expect(resumeDrawer).toHaveCount(0);
     await expect(resumeDialog).toBeVisible();
 
     const resumePosted = waitForHttp(testPage, "POST", /\/office\/workspaces\/[^/]+\/resume$/);
@@ -75,7 +83,7 @@ test.describe("mobile: Office workspace kill switch", () => {
     await resumePosted;
 
     await expect(testPage.getByTestId("office-workspace-paused-banner")).toHaveCount(0);
-    await expect(testPage.getByTestId("office-workspace-running-bar")).toBeVisible();
+    await expect(testPage.getByTestId("office-workspace-actions-trigger")).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage);
 
     const resumedFire = await officeApi.runRoutine(routine.id);

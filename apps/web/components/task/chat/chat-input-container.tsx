@@ -2,13 +2,16 @@
 
 import { forwardRef, useCallback } from "react";
 import type { ContextFile } from "@/lib/state/context-files-store";
-import type { ClarificationRequestMetadata, Message } from "@/lib/types/http";
-import type { DiffComment } from "@/lib/diff/types";
+import type { Message } from "@/lib/types/http";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
-import type { TaskPlanCommentRef } from "@/lib/types/http";
+import type { TaskPlanCommentRef, TaskPreviewFeedbackRef } from "@/lib/types/http";
 import { useChatInputContainer } from "./use-chat-input-container";
+import { SessionRecoveryCard } from "./session-recovery-card";
+import { useSessionComposerRecovery } from "./session-recovery-context";
+import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { SessionStoppedBanner } from "./session-stopped-banner";
 import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import {
@@ -22,7 +25,11 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { t } from "@/lib/i18n";
-import { shouldHideChatInputForLaunchError, shouldRenderStoppedSessionBanner } from "./types";
+import {
+  shouldHideChatInputForLaunchError,
+  shouldRenderStoppedSessionBanner,
+  shouldShowCancelAgent,
+} from "./types";
 
 // Re-export ImageAttachment type for consumers
 export type { ImageAttachment } from "./image-attachment-preview";
@@ -44,6 +51,8 @@ export type ChatInputContainerHandle = {
   getValue: () => string;
   getSelectionStart: () => number;
   insertText: (text: string, from: number, to: number) => void;
+  clearAcceptedPayload?: (payload: Pick<ChatSubmitPayload, "message" | "attachments">) => boolean;
+  restoreStagedAttachments?: (attachments: MessageAttachment[]) => void;
   clear: () => void;
   getAttachments: () => MessageAttachment[];
 };
@@ -52,12 +61,15 @@ export type ChatSubmitResult = void | boolean | Promise<void | boolean>;
 
 export type ChatSubmitPayload = {
   message: string;
-  reviewComments?: DiffComment[];
+  /** Reused by recovery-aware adapters when an admission survives remounting. */
+  clientMessageId?: string;
+  reviewComments?: ReviewComment[];
   attachments?: MessageAttachment[];
   inlineMentions?: ContextFile[];
   inlineTaskMentions?: TaskMentionData[];
   entityReferences?: EntityReference[];
   planCommentRefs?: TaskPlanCommentRef[];
+  previewFeedbackRefs?: TaskPreviewFeedbackRef[];
 };
 
 type ChatInputContainerProps = {
@@ -65,6 +77,8 @@ type ChatInputContainerProps = {
   sessionId: string | null;
   taskId: string | null;
   workspaceId?: string | null;
+  workspaceResolutionFailed?: boolean;
+  onRetryWorkspaceResolution?: () => void;
   entityReferencesEnabled?: boolean;
   taskTitle?: string;
   taskDescription: string;
@@ -74,6 +88,9 @@ type ChatInputContainerProps = {
   mcpAttachmentHistory?: MCPAttachmentHistory;
   onPlanModeChange: (enabled: boolean) => void;
   isAgentBusy: boolean;
+  isWorking: boolean;
+  /** False for surfaces whose cancel callback only dismisses the composer. */
+  showCancelAgent?: boolean;
   /** True when a send would be delivered into the running turn (mid-turn
    * steering) rather than queued. Defaults to false. */
   supportsSteering?: boolean;
@@ -93,13 +110,15 @@ type ChatInputContainerProps = {
   onClarificationResolved?: () => void;
   showRequestChangesTooltip?: boolean;
   onRequestChangesTooltipDismiss?: () => void;
-  pendingCommentsByFile?: Record<string, DiffComment[]>;
+  pendingCommentsByFile?: Record<string, ReviewComment[]>;
   hasContextComments?: boolean;
   submitKey?: "enter" | "cmd_enter";
   hasAgentCommands?: boolean;
   isFailed?: boolean;
   isCompleted?: boolean;
   sessionErrorMessage?: string;
+  uncertainDelivery?: boolean;
+  deliveryRecoveryPhase?: "reconnecting" | "uncertain";
   needsRecovery?: boolean;
   /** The task-owned launch card renders the failed-start recovery. */
   launchErrorOwned?: boolean;
@@ -150,10 +169,17 @@ function buildContextAreaProps(
   s: ContainerState,
   p: ChatInputContainerProps,
 ): ChatInputContextAreaProps {
+  const hasPendingFileAttachment = s.allItems.some(
+    (item) =>
+      (item.kind === "image" || item.kind === "file-attachment") &&
+      Boolean(item.attachment.file && !item.attachment.attachmentId),
+  );
   return {
     hasContextZone: s.hasContextZone,
     allItems: s.allItems,
     sessionId: p.sessionId,
+    scopeError: Boolean(p.workspaceResolutionFailed) && hasPendingFileAttachment,
+    onRetryScope: p.onRetryWorkspaceResolution,
   };
 }
 
@@ -162,15 +188,6 @@ type EnhancePromptExtras = {
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
 };
-
-export function shouldShowCancelAgent(
-  isAgentBusy: boolean,
-  pendingClarification: Message | null | undefined,
-): boolean {
-  if (!pendingClarification) return isAgentBusy;
-  return !(pendingClarification.metadata as ClarificationRequestMetadata | undefined)
-    ?.agent_disconnected;
-}
 
 function buildEditorAreaProps(
   s: ContainerState,
@@ -204,7 +221,9 @@ function buildEditorAreaProps(
     fileInputRef: s.fileInputRef,
     showRequestChangesTooltip: p.showRequestChangesTooltip,
     isAgentBusy: p.isAgentBusy || !!(p.pendingClarification && p.onClarificationResolved),
-    canCancelAgent: shouldShowCancelAgent(p.isAgentBusy, p.pendingClarification),
+    canCancelAgent:
+      p.showCancelAgent !== false &&
+      shouldShowCancelAgent(p.isWorking, p.pendingClarification, p.sessionId),
     onPlanModeChange: p.onPlanModeChange,
     taskTitle: p.taskTitle,
     taskDescription: p.taskDescription,
@@ -294,10 +313,15 @@ function useChatPromptEnhancement({
   return { handleEnhancePrompt, isEnhancingPrompt, isUtilityConfigured, promptDelivery };
 }
 
-function useChatInputRecoveryActions(taskId: string | null, sessionId: string | null) {
+function useChatInputRecoveryActions(
+  taskId: string | null,
+  sessionId: string | null,
+  errorStamp?: string,
+) {
   return useSessionRecoveryActions({
     taskId: taskId ?? "",
     sessionId: sessionId ?? "",
+    errorStamp,
   });
 }
 
@@ -310,10 +334,12 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     const isMoving = props.isMoving ?? false;
     const executorUnavailable = props.executorUnavailable ?? false;
     const isBusyVisual = isStarting || isMoving;
+    const useUncertainDeliveryControls = props.uncertainDelivery && !p.isCompleted;
 
     const s = useChatInputContainer({
       ref,
       sessionId,
+      taskId,
       workspaceId: props.workspaceId,
       isSending,
       isStarting,
@@ -337,7 +363,12 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onSubmit: props.onSubmit,
     });
 
-    const recoveryActions = useChatInputRecoveryActions(taskId, sessionId);
+    const composerRecovery = useSessionComposerRecovery(sessionId);
+    const recoveryActions = useChatInputRecoveryActions(
+      taskId,
+      sessionId,
+      composerRecovery?.model?.stamp,
+    );
 
     const promptEnhancement = useChatPromptEnhancement({
       inputRef: s.inputRef,
@@ -351,9 +382,31 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       shouldHideChatInputForLaunchError({
         isFailed: p.isFailed,
         launchErrorOwned: p.launchErrorOwned,
+        uncertainDelivery: useUncertainDeliveryControls,
       })
     ) {
       return null;
+    }
+
+    if (composerRecovery?.model && taskId && !useUncertainDeliveryControls) {
+      return (
+        <>
+          <SessionRecoveryCard
+            model={composerRecovery.model}
+            actions={{
+              ...recoveryActions,
+              busyAction: recoveryActions.busyAction ?? composerRecovery.pending,
+            }}
+            onNewSession={() => s.setShowNewSessionDialog(true)}
+          />
+          <NewSessionDialog
+            open={s.showNewSessionDialog}
+            onOpenChange={s.setShowNewSessionDialog}
+            taskId={taskId}
+            workspaceId={props.workspaceId}
+          />
+        </>
+      );
     }
 
     if (
@@ -362,6 +415,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         isCompleted: p.isCompleted,
         executorUnavailable,
         launchErrorOwned: p.launchErrorOwned,
+        uncertainDelivery: useUncertainDeliveryControls,
       })
     ) {
       return (
@@ -372,6 +426,8 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
           taskId={taskId}
           sessionId={sessionId}
           workspaceId={props.workspaceId}
+          uncertainDelivery={props.uncertainDelivery}
+          deliveryRecoveryPhase={props.deliveryRecoveryPhase}
           recoveryActions={recoveryActions}
           {...buildStoppedBannerProps(props)}
         />

@@ -227,7 +227,9 @@ describe("PluginsSettingsPage", () => {
     render(<PluginsSettingsPage />);
 
     expect(screen.getByText(PLUGIN_DISPLAY_NAME)).toBeTruthy();
-    expect(screen.getByText(/acme-tools.*v1\.0\.0/)).toBeTruthy();
+    expect(screen.getByTestId(`plugin-row-${PLUGIN_ID}`).textContent).toMatch(
+      /acme-tools.*v1\.0\.0/,
+    );
     expect(screen.getAllByText(/active/i).length).toBeGreaterThan(0);
     expect(screen.getAllByTestId("plugin-unsigned-badge")).toHaveLength(1);
   });

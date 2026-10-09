@@ -601,6 +601,7 @@ func newPhase4Service(t *testing.T, fakeTasks *fakeTaskRepo, blockers BlockerRep
 // methods AttachWorkspacePolicy actually calls and panicking on the rest
 // (which would catch accidental new dependencies in tests).
 type phase4TaskRepo struct {
+	unsupportedTaskFieldUpdater
 	base *fakeTaskRepo
 }
 
@@ -746,6 +747,10 @@ func (r *phase4TaskRepo) ListArchivedTasksWithActiveSessions(context.Context) ([
 	r.panicNotUsed("ListArchivedTasksWithActiveSessions")
 	return nil, nil
 }
+func (r *phase4TaskRepo) ListUnarchivedTasksWithActiveSessions(context.Context) ([]*models.Task, error) {
+	r.panicNotUsed("ListUnarchivedTasksWithActiveSessions")
+	return nil, nil
+}
 func (r *phase4TaskRepo) ListExpiredQuickChatTasks(context.Context, time.Time) ([]*models.Task, error) {
 	r.panicNotUsed("ListExpiredQuickChatTasks")
 	return nil, nil
@@ -753,6 +758,10 @@ func (r *phase4TaskRepo) ListExpiredQuickChatTasks(context.Context, time.Time) (
 func (r *phase4TaskRepo) DeleteExpiredQuickChatTask(context.Context, string, time.Time) (bool, error) {
 	r.panicNotUsed("DeleteExpiredQuickChatTask")
 	return false, nil
+}
+func (r *phase4TaskRepo) ListCoordinatorOriginTasks(context.Context, string) ([]*models.Task, error) {
+	r.panicNotUsed("ListCoordinatorOriginTasks")
+	return nil, nil
 }
 func (r *phase4TaskRepo) CountOpenWatcherCreatedTasks(context.Context, string, string) (int, error) {
 	r.panicNotUsed("CountOpenWatcherCreatedTasks")

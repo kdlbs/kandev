@@ -71,11 +71,14 @@ func (ss *SchedulerService) DispatchWithRouting(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance,
 	launch LaunchContext,
 ) (bool, bool, error) {
-	if ss.resolver == nil || ss.taskStarter == nil {
+	if ss.resolver == nil || (ss.taskStarter == nil && ss.runSessionLauncher == nil) {
 		return false, false, nil
 	}
 	if agent == nil || run == nil {
 		return false, false, fmt.Errorf("dispatch: nil run or agent")
+	}
+	if extractRunTaskID(run.Payload) != "" && ss.taskStarter == nil {
+		return false, false, nil
 	}
 	prior, err := ss.repo.ListRouteAttempts(ctx, run.ID)
 	if err != nil {
@@ -262,7 +265,6 @@ func (ss *SchedulerService) tryCandidates(
 	agent *models.AgentInstance, res *routing.Resolution,
 	launch LaunchContext, prior []models.RouteAttempt,
 ) (bool, *routing.BlockReason, error) {
-	taskID := extractRunTaskID(run.Payload)
 	var prev *routing.Candidate
 	for i := range res.Candidates {
 		candidate := res.Candidates[i]
@@ -273,7 +275,7 @@ func (ss *SchedulerService) tryCandidates(
 		if err != nil {
 			return false, nil, err
 		}
-		sessionID, launchErr := ss.launchCandidate(ctx, taskID, agent.ID, candidate, candidateLaunch)
+		sessionID, launchErr := ss.launchCandidate(ctx, run, agent, candidate, candidateLaunch)
 		if errors.Is(launchErr, service.ErrLaunchDeferredByCapacity) {
 			return ss.handleLaunchDeferred(ctx, run, agent.WorkspaceID, seq)
 		}
@@ -419,11 +421,29 @@ func (ss *SchedulerService) recordAttemptStart(
 // everything except provider/model selection. Without this, the routed
 // path would fall back to task.Description and lose role framing.
 func (ss *SchedulerService) launchCandidate(
-	ctx context.Context, taskID, agentID string,
+	ctx context.Context, run *models.Run, agent *models.AgentInstance,
 	candidate routing.Candidate, launch LaunchContext,
 ) (string, error) {
+	taskID := extractRunTaskID(run.Payload)
+	agentID := agent.ID
 	if taskID == "" {
-		return "", fmt.Errorf("dispatch: empty task id in run payload")
+		if ss.runSessionLauncher == nil {
+			return "", fmt.Errorf("dispatch: taskless run-session launcher is not configured")
+		}
+		route := &RouteOverride{
+			ExecutionProfileID: candidate.ExecutionProfileID,
+			ProviderID:         string(candidate.ProviderID),
+			Model:              candidate.Model,
+			Tier:               string(candidate.Tier),
+			Mode:               candidate.Mode,
+			Flags:              candidate.Flags,
+			Env:                candidate.Env,
+		}
+		result, err := ss.runSessionLauncher.StartRunSession(ctx, run, agent, launch, route)
+		if err != nil {
+			return "", err
+		}
+		return result.SessionID, nil
 	}
 	if _, ok := routingerr.InjectedCode(string(candidate.ProviderID)); ok {
 		// Synthesize a launch failure via Classify so injection is
@@ -484,8 +504,12 @@ func (ss *SchedulerService) handleLaunchSuccess(
 // routing/park wake-up loop — a second automatic attempt here would race
 // the ceiling's own replay into a double launch. Parking under
 // blocked_provider_action_required (the same status parkRunMaxAttempts
-// uses) keeps LiftParkedRuns from ever picking the run back up on its own;
-// an operator notices via "Retry now" once capacity is known to be free.
+// uses) keeps LiftParkedRuns from ever picking the run back up on its own.
+// There is no reconciliation path back from the orchestrator's ceiling
+// state today (REQ-OFFICE-LAUNCH-SAFETY-003/REQ-OFFICE-BACKPRESSURE-003
+// require a durable operator-visible record here, not a lift mechanism),
+// so the run stays parked until an operator finds it and clears the
+// routing block by hand.
 func (ss *SchedulerService) handleLaunchDeferred(
 	ctx context.Context, run *models.Run, workspaceID string, seq int,
 ) (bool, *routing.BlockReason, error) {
@@ -499,6 +523,10 @@ func (ss *SchedulerService) handleLaunchDeferred(
 	if err := ss.repo.UpdateRouteAttemptOutcome(ctx, &attempt); err != nil {
 		return false, nil, err
 	}
+	ss.svc.AppendRunEvent(ctx, run.ID, "adapter.invoke", "info", map[string]interface{}{
+		"phase":  "deferred",
+		"reason": "session_ceiling",
+	})
 	hydrated := ss.hydrateAttempt(ctx, run.ID, seq, attempt)
 	ss.publishRouteAttemptAppended(ctx, run.ID, hydrated)
 	if err := ss.repo.ParkRunForProviderCapacity(ctx,

@@ -10,7 +10,7 @@ owners:
 
 ## Overview
 
-Every task action Kandev offers (edit, move to step, send to workflow, link an
+Every task action Kandev offers (edit, move to step, change workflow, link an
 external item, run a plugin task action, detach from parent, archive, delete) is
 reachable from a Kanban card, through its visible "more options" button or its
 context menu. Two other surfaces show a single task and offer none of them: the
@@ -48,7 +48,7 @@ the menu, dropdown, and popover primitives this composes.
   holding Maximize and Close; on the detail surface it is the top bar's
   right-hand group, whose last member today is the tools cluster.
 - **Board row:** The task's entry in the board's task collections. Entries such
-  as Edit, Detach, Move to, Send to workflow, and Link need fields that only
+  as Edit, Detach, Move to, Change workflow, and Link need fields that only
   the board row carries.
 
 ## Prior art
@@ -154,7 +154,10 @@ in the same order, with the same labels, wherever the menu is opened.
   same task at that same moment, except where
   AC-TASKS-TASK-ACTIONS-MENU-002.4 through
   AC-TASKS-TASK-ACTIONS-MENU-002.9 state otherwise, except for plugin
-  `edit`-group actions (AC-TASKS-TASK-ACTIONS-MENU-002.2a), and except for the
+  `edit`-group actions (AC-TASKS-TASK-ACTIONS-MENU-002.2a), and except that
+  single-task **Change workflow...** opens the shared change form directly while
+  a selected multi-task set retains the separate bulk workflow submenu, and
+  except for the
   in-flight disabled state, which is per surface under
   AC-TASKS-TASK-ACTIONS-MENU-004.1b and so may differ from the card's for the
   duration of a request.
@@ -162,7 +165,7 @@ in the same order, with the same labels, wherever the menu is opened.
   AC-TASKS-TASK-ACTIONS-MENU-002.1 follow
   [Task menu grouping](task-menu-grouping.md).
   The system shall omit Priority when the card actions menu
-  omits it. It shall omit any of Move to, Send to workflow, Link, and Detach
+  omits it. It shall omit any of Move to, Change workflow, Link, and Detach
   from parent whose availability condition in the card actions menu is unmet,
   and shall not reorder the entries that remain.
 - **AC-TASKS-TASK-ACTIONS-MENU-002.2a:** The Edit entry on these two surfaces
@@ -171,24 +174,22 @@ in the same order, with the same labels, wherever the menu is opened.
   either surface. Group `edit` is a card-only plugin contract and this
   requirement does not widen it; group `primary` is unaffected and appears per
   AC-TASKS-TASK-ACTIONS-MENU-002.2.
-- **AC-TASKS-TASK-ACTIONS-MENU-002.3:** Within the Move to and Send to workflow
-  submenus the system shall order steps by ascending `position`, breaking a tie
-  by ascending step `id`. The new surfaces shall use the same order as the card.
-- **AC-TASKS-TASK-ACTIONS-MENU-002.3a:** Within the Send to workflow submenu the
-  system shall order workflows in the order the workflow collection holds them,
-  which is the order the card actions menu uses, and shall omit workflows marked
-  hidden.
+- **AC-TASKS-TASK-ACTIONS-MENU-002.3:** Within the Move to submenu and the
+  destination-step selector of **Change workflow...**, the system shall order
+  steps by ascending `position`, breaking a tie by ascending step `id`.
+- **AC-TASKS-TASK-ACTIONS-MENU-002.3a:** The destination-workflow selector in
+  **Change workflow...** shall follow the workflow collection order and omit
+  workflows marked hidden.
 - **AC-TASKS-TASK-ACTIONS-MENU-002.3b:** The system shall exclude from a Move to
   target list every step the user has hidden for the subject task's current
   workflow, matching the card, whose current-workflow targets are already
-  hidden-filtered. Within Send to workflow the system shall not filter another
-  workflow's steps by hidden state, also matching the card. This asymmetry is
-  inherited deliberately; see `## Out of scope`.
+  hidden-filtered. The **Change workflow...** form shall include destination
+  steps without applying task-local hidden-step preferences.
 - **AC-TASKS-TASK-ACTIONS-MENU-002.3c:** The system shall never present the
   display-only orphan sentinel step (`__kandev_orphan__`, labelled "Needs
   Reassignment") as a move target on either surface.
 - **AC-TASKS-TASK-ACTIONS-MENU-002.4:** When the subject task is archived, the
-  system shall omit Edit, Move to, Send to workflow, Link, Detach from parent,
+  system shall omit Edit, Move to, Change workflow, Link, Detach from parent,
   and Archive from the actions menu, and shall present exactly, in this order:
   the admitted plugin primary actions, then a separator, then Delete. The card
   has no archived branch to inherit from, so the order is stated in full here;
@@ -209,7 +210,7 @@ in the same order, with the same labels, wherever the menu is opened.
   carries no archived signal, and a plugin that should hide itself for an
   archived task owns that.
 - **AC-TASKS-TASK-ACTIONS-MENU-002.5:** When the subject task's board row is
-  not resolvable, the system shall omit Edit, Move to, Send to workflow, Link,
+  not resolvable, the system shall omit Edit, Move to, Change workflow, Link,
   and Detach from parent, and shall present Archive and Delete, which need only
   the task identifier. This criterion yields to
   AC-TASKS-TASK-ACTIONS-MENU-002.4 when the subject is also archived.
@@ -243,17 +244,14 @@ in the same order, with the same labels, wherever the menu is opened.
 - **AC-TASKS-TASK-ACTIONS-MENU-002.9:** The system shall present no entry on
   these two surfaces that the card actions menu does not present for a single,
   unselected task, and shall present no bulk-selection variant of the menu.
-- **AC-TASKS-TASK-ACTIONS-MENU-002.10:** Except for the ordering and dividers
-  defined in [Task menu grouping](task-menu-grouping.md), the system shall leave the card actions
-  menu, the card context menu, and the task switcher sidebar menu unchanged in
-  entry membership, labels, top-level order, and behavior, with one named
-  exception. Adopting `sortWorkflowStepsByPosition` inside the shared
-  move-target derivation also applies its ascending-`id` tiebreak to the steps
-  the card lists under Send to workflow, which are today sorted by `position`
-  alone. That changes rendered order only where two steps of a non-current
-  workflow share a `position` value, a case whose order is arbitrary today. No
-  other card-facing change is permitted; the card's Move to submenu is
-  unaffected, already sorting through that helper.
+- **AC-TASKS-TASK-ACTIONS-MENU-002.10:** The single-task **Change workflow...**
+  entry shall open the shared form defined by
+  [Change workflow](change-workflow.md), including from the card, sidebar,
+  preview, detail, Threads, and command palette surfaces. A selected multi-task
+  set shall retain its separate bulk workflow submenu and shall not open the
+  single-task form. The form shall sort destination steps by ascending
+  `position`, breaking ties by ascending step `id`; the bulk submenu retains
+  the same ordering.
 
 ### Action outcomes and post-action navigation
 
@@ -289,7 +287,7 @@ actions. It lives in
 - **A right-click context menu on either surface.** This requirement adds the
   visible trigger only; the card keeps its context menu.
 - **Correcting the card's hidden-step asymmetry in move targets.** The card
-  filters user-hidden steps out of Move to but not out of Send to workflow.
+  filters user-hidden steps out of Move to but not out of the bulk workflow submenu.
   `AC-TASKS-TASK-ACTIONS-MENU-002.3b` reproduces that asymmetry rather than
   fixing it, because fixing it would change card behavior that
   `AC-TASKS-TASK-ACTIONS-MENU-002.10` freezes. A follow-up should change both

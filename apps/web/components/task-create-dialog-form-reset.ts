@@ -18,6 +18,7 @@ export type FormResetters = {
   setExecutorId: (value: string) => void;
   setExecutorProfileId: (value: string) => void;
   setSelectedWorkflowId: (value: string | null) => void;
+  setWorkflowAgentOverrides: (value: Record<string, string>) => void;
   setFetchedSteps: (value: StepType[] | null) => void;
   setDiscoveredRepositories: (value: LocalRepository[]) => void;
   setDiscoverReposLoaded: (value: boolean) => void;
@@ -69,6 +70,7 @@ export function resetTaskForm(
   resetters.setExecutorId("");
   resetters.setExecutorProfileId("");
   resetters.setSelectedWorkflowId(workflowId);
+  resetters.setWorkflowAgentOverrides({});
   resetters.setFetchedSteps(null);
   resetters.setNoRepository(initialValues?.noRepository ?? false);
   resetters.setPreferLocalExecutor(initialValues?.preferLocalExecutor ?? false);

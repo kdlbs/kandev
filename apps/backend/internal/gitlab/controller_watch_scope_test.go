@@ -160,6 +160,7 @@ func TestCleanupWatchRoutesOnlyDeleteRequestedWorkspaceTasks(t *testing.T) {
 		iid   int
 		task  string
 	}{{reviewA, "a/project", 1, "review-a"}, {reviewB, "b/project", 2, "review-b"}} {
+		seedTask(t, store, row.task, row.watch.WorkspaceID)
 		if _, err := store.ReserveReviewMRTask(t.Context(), row.watch.ID, row.path, row.iid, "url"); err != nil {
 			t.Fatal(err)
 		}
@@ -173,6 +174,7 @@ func TestCleanupWatchRoutesOnlyDeleteRequestedWorkspaceTasks(t *testing.T) {
 		iid   int
 		task  string
 	}{{issueA, "a/project", 3, "issue-a"}, {issueB, "b/project", 4, "issue-b"}} {
+		seedTask(t, store, row.task, row.watch.WorkspaceID)
 		if _, err := store.ReserveIssueWatchTask(t.Context(), row.watch.ID, row.path, row.iid, "url"); err != nil {
 			t.Fatal(err)
 		}

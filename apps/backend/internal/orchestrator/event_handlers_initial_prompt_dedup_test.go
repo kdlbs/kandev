@@ -487,7 +487,7 @@ func (r promptHistoryErrorRepo) HasUserPromptHistory(context.Context, string) (b
 	return false, r.err
 }
 
-func (r promptHistoryErrorRepo) ClaimInitialPromptFallback(context.Context, string) (bool, error) {
+func (r promptHistoryErrorRepo) ClaimInitialPromptFallback(context.Context, string, string) (bool, error) {
 	return false, r.err
 }
 

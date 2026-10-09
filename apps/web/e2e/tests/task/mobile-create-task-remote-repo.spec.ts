@@ -1,6 +1,15 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { SessionPage } from "../../pages/session-page";
+import { waitForHttp } from "../../helpers/causal-waits";
+import { makeGitEnv } from "../../helpers/git-helper";
+import { taskWorktreeGit, waitForTaskWorktree } from "../../helpers/empty-remote-repository";
+import {
+  cleanupPRLinkForkLaunchFixture,
+  createPRLinkForkLaunchFixture,
+  expectForkPRLaunchMetadata,
+} from "./pr-link-fork-launch-helpers";
 
 function expectedRemoteTitle(title: string): string {
   const characters = Array.from(title);
@@ -94,6 +103,95 @@ test.describe("Create task Remote repo picker on mobile", () => {
     await expect(testPage.getByTestId("remote-branch-chip-trigger")).toContainText("main");
     await expect.poll(() => branchRequests).toBe(1);
     await expectNoDocumentHorizontalOverflow(testPage);
+  });
+
+  test("starts a target-attached fork PR from its URL", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+    const fixture = await createPRLinkForkLaunchFixture(
+      apiClient,
+      seedData.workspaceId,
+      backend.tmpDir,
+    );
+    let taskId: string | undefined;
+
+    try {
+      const { executors } = await apiClient.listExecutors();
+      const worktreeExec = executors.find((executor) => executor.type === "worktree");
+      if (!worktreeExec?.profiles?.[0]) {
+        test.skip(true, "No worktree executor profile available");
+        return;
+      }
+
+      const taskTitle = `Phone fork PR ${fixture.repositoryName}`;
+      const mobile = new MobileKanbanPage(testPage);
+      await mobile.goto();
+      await mobile.mobileFab.tap();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await testPage.getByTestId("source-mode-remote").tap();
+      await testPage.getByTestId("remote-repo-chip-trigger").first().tap();
+      const urlInput = testPage.getByTestId("remote-repo-input");
+      await expect(urlInput).toBeVisible();
+      await urlInput.fill(fixture.prURL);
+      await urlInput.press("Enter");
+      await expect(testPage.getByTestId("remote-branch-chip-trigger").first()).toContainText(
+        fixture.headBranch,
+      );
+      await testPage.getByTestId("task-title-input").fill(taskTitle);
+      await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
+
+      const startButton = testPage.getByTestId("submit-start-agent");
+      await expect(startButton).toBeEnabled();
+      await testPage.getByTestId("executor-profile-selector").tap();
+      await testPage.getByRole("option", { name: /Worktree/i }).tap();
+      const createdTaskResponse = waitForHttp(testPage, "POST", /\/api\/v1\/tasks$/);
+      await startButton.tap();
+      const response = await createdTaskResponse;
+      const responseBody = await response.text();
+      expect(response.status(), responseBody).toBe(200);
+      const created = JSON.parse(responseBody) as { id: string };
+      taskId = created.id;
+      const requestBody = response.request().postDataJSON() as {
+        repositories?: Array<Record<string, unknown>>;
+      };
+      expect(requestBody.repositories?.[0]).not.toHaveProperty("remote_contribution");
+      expect(requestBody.repositories?.[0]).not.toHaveProperty("comparison_target");
+
+      await expect(dialog).not.toBeVisible();
+      await expect(mobile.taskCard(taskId)).toBeVisible({ timeout: 15_000 });
+      await mobile.taskCard(taskId).tap();
+      await expect(testPage).toHaveURL(new RegExp(`/t/${taskId}$`));
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible();
+      await expect(session.idleInput()).toBeVisible();
+
+      await expect
+        .poll(async () => (await apiClient.getTaskEnvironment(created.id))?.status ?? null, {
+          timeout: 60_000,
+          message: "the mobile fork PR task worktree did not become ready",
+        })
+        .toBe("ready");
+      if (!fixture.repositoryId) throw new Error("fork launch fixture has no repository");
+      const worktreePath = await waitForTaskWorktree(apiClient, taskId, fixture.repositoryId);
+      const worktreeGit = taskWorktreeGit(worktreePath, makeGitEnv(backend.tmpDir));
+      expect(worktreeGit.exec("git branch --show-current").trim()).toBe(fixture.headBranch);
+      expect(worktreeGit.exec("git rev-parse HEAD").trim()).toBe(fixture.headOID);
+      expect(worktreeGit.exec("git rev-parse refs/remotes/origin/main").trim()).toBe(
+        fixture.targetOID,
+      );
+
+      await testPage.reload();
+      await session.waitForLoad();
+      await expectForkPRLaunchMetadata(apiClient, fixture, taskId);
+    } finally {
+      await cleanupPRLinkForkLaunchFixture(apiClient, fixture, taskId);
+    }
   });
 
   test("keeps a failed URL row touch-usable and retries its branch resolution", async ({

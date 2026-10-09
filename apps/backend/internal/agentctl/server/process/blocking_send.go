@@ -18,7 +18,17 @@ import "github.com/kandev/kandev/internal/agentctl/server/adapter"
 // forever with no lifecycle that could ever release it.
 func (m *Manager) sendUpdateBlocking(event adapter.AgentEvent) bool {
 	m.recordTerminalOutcome(&event)
+	return m.sendUpdateBlockingRecorded(event)
+}
 
+// sendUpdateBlockingRecorded publishes an already-recorded event. Durable
+// events are read from the journal after a bounded wakeup; legacy events keep
+// their existing backpressure behavior.
+func (m *Manager) sendUpdateBlockingRecorded(event adapter.AgentEvent) bool {
+	if m.hasPersistedDeliveryEvent(event) {
+		m.signalDeliveryWakeup()
+		return true
+	}
 	select {
 	case m.updatesCh <- event:
 		return true
@@ -37,4 +47,21 @@ func (m *Manager) sendUpdateBlocking(event adapter.AgentEvent) bool {
 	case <-stopCh:
 		return false
 	}
+}
+
+func (m *Manager) sendUpdateNonBlockingRecorded(event adapter.AgentEvent) bool {
+	if m.hasPersistedDeliveryEvent(event) {
+		m.signalDeliveryWakeup()
+		return true
+	}
+	select {
+	case m.updatesCh <- event:
+		return true
+	default:
+		return false
+	}
+}
+
+func (m *Manager) hasPersistedDeliveryEvent(event adapter.AgentEvent) bool {
+	return event.DeliverySequence > 0 && m.deliveryJournalAvailable()
 }

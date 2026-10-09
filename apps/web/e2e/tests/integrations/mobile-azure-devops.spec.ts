@@ -271,7 +271,7 @@ test("mobile board opens a focused column editor without horizontal overflow", a
     "Implement: Handle token rotation",
   );
   await testPage.getByRole("button", { name: "Create only" }).click();
-  await expect(testPage).toHaveURL(/\/tasks\//);
+  await expect(testPage).toHaveURL(/\/(?:t|tasks)\//);
   await testPage.goto("/azure-devops");
   await testPage.getByTestId("azure-devops-work-items-mode").click();
   await testPage.getByTestId("azure-devops-mobile-filter-button").click();

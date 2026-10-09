@@ -300,7 +300,7 @@ describe("TaskArchiveConfirmation classification", () => {
     expect(screen.getByTestId("task-confirmation-outcome").textContent).toContain("Task One");
 
     const archive = screen.getByTestId(CONFIRM_TEST_ID);
-    expect(archive.className).toContain("min-h-11");
+    expect(archive.className).toContain("[@media(pointer:coarse)]:h-11");
     expect(archive.className).toContain("w-full");
     expect(archive.getAttribute("data-variant")).toBe("default");
 
@@ -388,7 +388,28 @@ describe("TaskArchiveConfirmation cleanup copy", () => {
     expect(
       screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).querySelectorAll('[role="listitem"]'),
     ).toHaveLength(2);
+    expect(screen.getByTestId(CLEANUP_EFFECTS_TEST_ID).textContent).toMatch(
+      /Git changes stays until it is clean/i,
+    );
+    expect(screen.getByTestId(CLEANUP_NOTES_TEST_ID).textContent).toMatch(
+      /Unpublished local branches remain available/i,
+    );
     expect(screen.getByTestId(CLEANUP_NOTES_TEST_ID).tagName).toBe("SPAN");
+  });
+
+  it("shows conditional worktree cleanup in the phone sheet", async () => {
+    pointerState.isMobile = true;
+    getSubtaskCountMock.mockResolvedValue({ count: 0 });
+
+    renderConfirmation();
+
+    const sheet = await screen.findByRole("dialog", { name: /Archive task/ });
+    expect(within(sheet).getByTestId(CLEANUP_EFFECTS_TEST_ID).textContent).toMatch(
+      /Git changes stays until it is clean/i,
+    );
+    expect(within(sheet).getByTestId(CLEANUP_NOTES_TEST_ID).textContent).toMatch(
+      /Unpublished local branches remain available/i,
+    );
   });
 });
 

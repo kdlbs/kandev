@@ -3,6 +3,7 @@ import type {
   CreateAutomationRequest,
   AutomationRepository,
   ContinuationPolicy,
+  ManagedConversationDestination,
   RepositoryMode,
   TaskMode,
   TriggerType,
@@ -26,6 +27,7 @@ export type FormState = {
   agentProfileId: string;
   executorProfileId: string;
   taskMode: TaskMode;
+  managedDestination?: ManagedConversationDestination;
   repositoryMode: RepositoryMode;
   // repositorySelections captures an ordered list of registered workspace
   // repos (id), discovered local repos (path — registered at save time to
@@ -169,6 +171,8 @@ export function buildCreatePayload(
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
     task_mode: form.taskMode,
+    managed_destination:
+      form.taskMode === "managed_conversation" ? form.managedDestination : undefined,
     repository_mode: repositories.length > 0 ? "selected" : "none",
     repository_ids: repositories.map((repository) => repository.repository_id),
     repositories,
@@ -192,6 +196,8 @@ export function buildUpdatePayload(
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
     task_mode: form.taskMode,
+    managed_destination:
+      form.taskMode === "managed_conversation" ? form.managedDestination : undefined,
     repository_mode: repositories.length > 0 ? "selected" : "none",
     repository_ids: repositories.map((repository) => repository.repository_id),
     repositories,

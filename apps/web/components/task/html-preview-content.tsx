@@ -2,7 +2,7 @@
 
 import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
 
-import { memo } from "react";
+import { memo, useRef } from "react";
 import { IconBrowser, IconCode, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -18,6 +18,9 @@ import {
 } from "@/hooks/use-html-preview-publisher";
 import { toRelativePath } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { usePreviewCapture } from "@/hooks/use-preview-capture";
+import { PreviewFeedbackControls } from "./inspector/preview-feedback-controls";
+import type { PreviewFeedbackController } from "./inspector/preview-feedback-controls";
 
 type HtmlPreviewContentProps = {
   path: string;
@@ -52,13 +55,17 @@ function HtmlPreviewContentToolbar({
   onRefresh,
   onOpenInBrowser,
   onTogglePreview,
-}: Omit<HtmlPreviewContentProps, "previewUrl" | "error" | "onRetry">) {
+  capture,
+}: Omit<HtmlPreviewContentProps, "previewUrl" | "error" | "onRetry"> & {
+  capture: PreviewFeedbackController;
+}) {
   const { t } = useTranslation();
   const fileStatus = useExternalVcsFileStatus(path, sessionId, repositoryName);
   const trustWarning = t("task:htmlPreviewTrustedCode");
 
   return (
     <PanelHeaderBarSplit
+      className="h-auto min-h-[52px] py-1 sm:h-[30px] sm:min-h-[30px] sm:py-0"
       left={
         <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
           <span className="truncate font-mono">{toRelativePath(path, worktreePath)}</span>
@@ -88,7 +95,7 @@ function HtmlPreviewContentToolbar({
               onClick={onRefresh}
               disabled={isLoading}
               aria-label={t("task:refreshHtmlPreview")}
-              className="h-11 w-11 cursor-pointer p-0 text-foreground sm:h-8 sm:w-8"
+              className="h-6 w-6 cursor-pointer p-0 text-foreground max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
             >
               <IconRefresh className="h-4 w-4" />
             </Button>
@@ -99,11 +106,12 @@ function HtmlPreviewContentToolbar({
               variant="ghost"
               onClick={onOpenInBrowser}
               aria-label={t("task:openInBrowserPanel")}
-              className="h-11 w-11 cursor-pointer p-0 text-foreground sm:h-8 sm:w-8"
+              className="h-6 w-6 cursor-pointer p-0 text-foreground max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
             >
               <IconBrowser className="h-4 w-4" />
             </Button>
           )}
+          <PreviewFeedbackControls capture={capture} enabled={!!taskId && !!sessionId} />
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -112,7 +120,7 @@ function HtmlPreviewContentToolbar({
                 onClick={onTogglePreview}
                 aria-label={t("task:showCode")}
                 title={trustWarning}
-                className="h-11 w-11 cursor-pointer p-0 text-foreground sm:h-8 sm:w-8"
+                className="h-6 w-6 cursor-pointer p-0 text-foreground max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
                 data-testid="html-preview-code-toggle"
               >
                 <IconCode className="h-4 w-4" />
@@ -125,6 +133,7 @@ function HtmlPreviewContentToolbar({
           </Tooltip>
         </div>
       }
+      rightClassName="overflow-visible"
     />
   );
 }
@@ -148,7 +157,20 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
   onTogglePreview,
 }: HtmlPreviewContentProps) {
   const { t } = useTranslation();
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const errorKey = error ? getHtmlPreviewPublishErrorKey(error) : null;
+  const sourcePath = toRelativePath(path, worktreePath);
+  const capture = usePreviewCapture({
+    taskId,
+    iframeRef,
+    enabled: !!previewUrl && !!taskId && !!sessionId,
+    source: {
+      kind: "html_file",
+      sessionId,
+      label: sourcePath,
+      path: sourcePath,
+    },
+  });
 
   return (
     <div className="relative flex h-full min-h-0 flex-col" data-testid="html-preview">
@@ -166,6 +188,7 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
         onRefresh={onRefresh}
         onOpenInBrowser={onOpenInBrowser}
         onTogglePreview={onTogglePreview}
+        capture={capture}
       />
       <p
         data-testid="html-preview-trust-warning"
@@ -198,12 +221,14 @@ export const HtmlPreviewContent = memo(function HtmlPreviewContent({
         )}
         {!isLoading && !errorKey && previewUrl && (
           <iframe
+            ref={iframeRef}
             data-testid="html-preview-frame"
             src={previewUrl}
             title={t("task:browserPreview")}
             className="h-full w-full border-0"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
             referrerPolicy="no-referrer"
+            onLoad={capture.handleIframeLoad}
           />
         )}
       </div>

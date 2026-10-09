@@ -1,16 +1,21 @@
 import { type Locator, type Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { routeSessionEntryRecovery } from "../../helpers/session-entry-recovery";
 import {
   startQuickChatFromSetup,
   sendQuickChatMessage,
   waitForQuickChatDirectInput,
+  waitForSessionSettledBaseline,
 } from "./quick-chat-helpers";
+
+test.use({ trace: "retain-on-failure" });
 
 async function openMobileQuickChat(page: Page): Promise<Locator> {
   await page.goto("/");
   await page.waitForLoadState("networkidle");
-  await page.getByTestId("mobile-topbar-menu").tap();
+  await page.getByTestId("app-nav-trigger").tap();
   await page.getByTestId("mobile-quick-chat-button").tap();
   const dialog = page.getByRole("dialog", { name: "Quick Chat" });
   await expect(dialog).toBeVisible({ timeout: 10_000 });
@@ -18,7 +23,52 @@ async function openMobileQuickChat(page: Page): Promise<Locator> {
 }
 
 test.describe("mobile agent goal visibility", () => {
-  test("opens the active goal in a touch drawer and clears it", async ({ testPage }) => {
+  test.describe.configure({ retries: 0 });
+
+  test.afterEach(async ({ backend }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    await testInfo.attach("mobile-agent-goal-backend.log", {
+      path: backend.logPath,
+      contentType: "text/plain",
+    });
+  });
+
+  test("submits once while the message acknowledgement is delayed", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const proxy = await routeSessionEntryRecovery(testPage);
+    const dialog = await openMobileQuickChat(testPage);
+    const started = await startQuickChatFromSetup(dialog, testPage);
+    await waitForSessionSettledBaseline(apiClient, started.task_id, started.session_id);
+    await expect(
+      dialog.getByText("I've completed the analysis of your request:", { exact: false }).last(),
+    ).toBeVisible({ timeout: 30_000 });
+    await waitForQuickChatDirectInput(dialog);
+    // The opening prompt can be carried by launch for passthrough profiles or
+    // by message.add for structured profiles. The persisted settled state above
+    // is the baseline; this test measures only the following user submission.
+    const openingMessageRequestCount = proxy.requestCount("message.add");
+    proxy.delayNextResponses("message.add", 1, 3_500, "exercise asynchronous composer clearing");
+
+    await sendQuickChatMessage(dialog, testPage, "/e2e:goal-active");
+
+    await expect.poll(() => proxy.delayedResponseCount("message.add"), { timeout: 15_000 }).toBe(1);
+    await expect
+      .poll(() => proxy.requestCount("message.add"), { timeout: 15_000 })
+      .toBe(openingMessageRequestCount + 1);
+    // Admission acknowledgement does not mean the provider has executed the message.
+    await expect(
+      dialog
+        .getByText("The provider goal remains active after the thread becomes idle.", {
+          exact: false,
+        })
+        .last(),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(dialog.getByTestId("agent-goal-chip")).toBeVisible();
+  });
+
+  test("opens the active goal in a touch drawer and clears it", async ({ testPage, prCapture }) => {
     const dialog = await openMobileQuickChat(testPage);
     await startQuickChatFromSetup(dialog, testPage);
     await sendQuickChatMessage(dialog, testPage, "/e2e:goal-active");
@@ -26,9 +76,11 @@ test.describe("mobile agent goal visibility", () => {
     const chip = dialog.getByTestId("agent-goal-chip");
     await expect(chip).toBeVisible({ timeout: 30_000 });
     await expect(
-      dialog.getByText("The provider goal remains active after the thread becomes idle.", {
-        exact: false,
-      }),
+      dialog
+        .getByText("The provider goal remains active after the thread becomes idle.", {
+          exact: false,
+        })
+        .last(),
     ).toBeVisible({ timeout: 30_000 });
     const bounds = await chip.boundingBox();
     expect(bounds).not.toBeNull();
@@ -62,18 +114,27 @@ test.describe("mobile agent goal visibility", () => {
 
     await waitForQuickChatDirectInput(dialog);
     await sendQuickChatMessage(dialog, testPage, "/e2e:goal-active");
-    await expect(dialog.getByTestId("agent-goal-chip")).toBeVisible({ timeout: 30_000 });
-    await expect(
-      dialog.getByText("The provider goal remains active after the thread becomes idle.", {
-        exact: false,
-      }),
-    ).toBeVisible({ timeout: 30_000 });
+    const activeGoalChip = dialog.getByTestId("agent-goal-chip");
+    await expect(activeGoalChip).toBeVisible({ timeout: 30_000 });
+    await activeGoalChip.tap();
+    const activeGoalDrawer = testPage.getByTestId("agent-goal-drawer-content");
+    await expect(activeGoalDrawer).toBeVisible();
+    await expect(activeGoalDrawer.getByTestId("agent-goal-objective")).toContainText(
+      "Coordinate contributor PR reviews",
+    );
+    await waitForFiniteAnimations(activeGoalDrawer);
+    await prCapture.screenshot("phone-agent-goal", {
+      caption: "Phone goal drawer with a touch close control",
+    });
+    await testPage.getByRole("button", { name: "Close goal details" }).tap();
+    await expect(activeGoalDrawer).toBeHidden();
 
     await waitForQuickChatDirectInput(dialog);
     await sendQuickChatMessage(dialog, testPage, "/e2e:goal-clear");
-    await expect(dialog.getByText("The provider goal was cleared.", { exact: false })).toBeVisible({
-      timeout: 30_000,
-    });
+    await expect(
+      dialog.getByText("The provider goal was cleared.", { exact: false }),
+    ).toBeVisible();
+    await waitForQuickChatDirectInput(dialog);
     await expect(dialog.getByTestId("agent-goal-chip")).toBeHidden({ timeout: 15_000 });
   });
 });

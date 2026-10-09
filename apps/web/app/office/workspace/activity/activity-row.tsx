@@ -23,10 +23,10 @@ const CANCEL_REASON_LABEL_KEYS: Record<string, string> = {
 
 const MAX_DESCRIPTION_LENGTH = 80;
 
-function actorInitial(actorType: string, actorId: string): string {
+function actorInitial(actorType: string, actorId: string, actorName?: string): string {
   if (actorType === "system") return "SY";
   if (actorType === "agent") {
-    const trimmed = actorId.trim();
+    const trimmed = (actorName || actorId).trim();
     return trimmed.slice(0, 2).toUpperCase() || "AG";
   }
   return "U";
@@ -34,8 +34,8 @@ function actorInitial(actorType: string, actorId: string): string {
 
 function actorLabel(entry: ActivityEntry): string {
   if (entry.actorType === "system") return t("office:system");
-  // An agent id or the raw actor type — identifiers, never copy.
-  return entry.actorId || entry.actorType;
+  // Historical rows may have no resolved label, so retain the identifier.
+  return entry.actorName || entry.actorId || entry.actorType;
 }
 
 function taskIdentifier(details: Record<string, unknown> | undefined): string | null {
@@ -44,11 +44,18 @@ function taskIdentifier(details: Record<string, unknown> | undefined): string | 
   return null;
 }
 
-function taskRefNode(details: Record<string, unknown> | undefined): React.ReactNode {
-  const id = details?.task_id;
-  const identifier = taskIdentifier(details);
+function taskRefNode(
+  entry: ActivityEntry,
+  details: Record<string, unknown> | undefined,
+): React.ReactNode {
+  const id = details?.task_id ?? entry.targetId;
+  const identifier = entry.targetIdentifier ?? taskIdentifier(details);
   if (!id && !identifier) return null;
-  const label = identifier ?? (typeof id === "string" ? id : "");
+  const fallback = identifier || (typeof id === "string" ? id : "");
+  let label = fallback;
+  if (entry.targetName) {
+    label = identifier ? `${identifier} ${entry.targetName}` : entry.targetName;
+  }
   return <span className="font-bold"> {label}</span>;
 }
 
@@ -71,70 +78,82 @@ function taskStatusLabel(raw: string): string {
   return key ? t(key) : raw.replace(/_/g, " ");
 }
 
-function renderAction(entry: ActivityEntry): React.ReactNode {
+function renderStaleCancellation(entry: ActivityEntry): React.ReactNode {
   const d = entry.details;
+  const label = cancelReasonLabel(typeof d?.reason === "string" ? d.reason : "");
+  return (
+    <>
+      <span className="text-muted-foreground"> {t("office:staleRunCancelled")}</span>
+      {taskRefNode(entry, d)}
+      {label && <span className="text-muted-foreground"> - {truncate(label)}</span>}
+    </>
+  );
+}
 
-  if (entry.action === "run_stale_cancelled") {
-    const label = cancelReasonLabel(typeof d?.reason === "string" ? d.reason : "");
-    return (
-      <>
-        <span className="text-muted-foreground"> {t("office:staleRunCancelled")}</span>
-        {taskRefNode(d)}
-        {label && <span className="text-muted-foreground"> - {truncate(label)}</span>}
-      </>
-    );
-  }
+function renderReassignmentCancellation(entry: ActivityEntry): React.ReactNode {
+  return (
+    <>
+      <span className="text-muted-foreground"> {t("office:retryCancelledReassigned")}</span>
+      {taskRefNode(entry, entry.details)}
+    </>
+  );
+}
 
-  if (entry.action === "run_retry_cancelled") {
-    return (
-      <>
-        <span className="text-muted-foreground"> {t("office:retryCancelledReassigned")}</span>
-        {taskRefNode(d)}
-      </>
-    );
-  }
+function renderRecoveryDispatch(entry: ActivityEntry): React.ReactNode {
+  return (
+    <>
+      <span className="text-muted-foreground"> {t("office:unstartedTaskRecovered")}</span>
+      {taskRefNode(entry, entry.details)}
+    </>
+  );
+}
 
-  if (entry.action === "recovery_dispatch") {
-    return (
-      <>
-        <span className="text-muted-foreground"> {t("office:unstartedTaskRecovered")}</span>
-        {taskRefNode(d)}
-      </>
-    );
-  }
+function renderTaskStatusChange(entry: ActivityEntry): React.ReactNode {
+  const d = entry.details;
+  // One key for the whole clause. The raw status resolves through the shared
+  // label map without freezing the English word order.
+  const status = taskStatusLabel(typeof d?.new_status === "string" ? d.new_status : "");
+  return (
+    <>
+      <span className="text-muted-foreground">
+        {" "}
+        {status ? t("office:activityStatusChangedTo", { status }) : t("office:statusChanged")}
+      </span>
+      {taskRefNode(entry, d)}
+    </>
+  );
+}
 
-  if (entry.action === "task_status_changed") {
-    // One key for the whole clause. "status changed" + " to {status}" as two
-    // fragments freezes the English order, and the status arrived as the raw
-    // wire value; it now resolves through the shared status label map.
-    const status = taskStatusLabel(typeof d?.new_status === "string" ? d.new_status : "");
-    return (
-      <>
-        <span className="text-muted-foreground">
-          {" "}
-          {status ? t("office:activityStatusChangedTo", { status }) : t("office:statusChanged")}
-        </span>
-        {taskRefNode(d)}
-      </>
-    );
-  }
+const SPECIAL_ACTION_RENDERERS: Record<string, (entry: ActivityEntry) => React.ReactNode> = {
+  run_stale_cancelled: renderStaleCancellation,
+  run_retry_cancelled: renderReassignmentCancellation,
+  recovery_dispatch: renderRecoveryDispatch,
+  task_status_changed: renderTaskStatusChange,
+};
 
-  // NOT localized, deliberately: `entry.action` is an open-ended backend
-  // activity identifier with no closed union on the wire, so a key map would
-  // silently fall through for any action the backend adds. `targetType` below is
-  // a wire value for the same reason.
+function renderFallbackAction(entry: ActivityEntry): React.ReactNode {
+  // NOT localized deliberately: these are open-ended backend identifiers.
   const formatted = truncate(entry.action.replace(/[._]/g, " "));
   return (
     <>
       <span className="text-muted-foreground"> {formatted} </span>
       {entry.targetType && (
         <span className="font-medium">
-          {entry.targetType}
-          {entry.targetId ? ` ${entry.targetId}` : ""}
+          {entry.targetName || entry.targetType}
+          {entry.targetIdentifier || entry.targetId
+            ? ` ${entry.targetIdentifier || entry.targetId}`
+            : ""}
         </span>
       )}
     </>
   );
+}
+
+function renderAction(entry: ActivityEntry): React.ReactNode {
+  const renderer = SPECIAL_ACTION_RENDERERS[entry.action];
+  if (renderer) return renderer(entry);
+
+  return renderFallbackAction(entry);
 }
 
 function runHref(entry: ActivityEntry): string | null {
@@ -160,7 +179,7 @@ export function ActivityRow({ entry }: Props) {
   return (
     <div className="flex items-start gap-3 px-4 py-2.5 text-sm hover:bg-accent/50 transition-colors">
       <div className="h-6 w-6 rounded-full bg-muted flex items-center justify-center shrink-0 text-[10px] font-medium uppercase text-muted-foreground">
-        {actorInitial(entry.actorType, entry.actorId)}
+        {actorInitial(entry.actorType, entry.actorId, entry.actorName)}
       </div>
       <div className="flex-1 min-w-0 truncate">
         <span className="font-medium">{actorLabel(entry)}</span>

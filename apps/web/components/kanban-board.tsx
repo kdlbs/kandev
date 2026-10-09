@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
+import { Button } from "@kandev/ui/button";
 import { Task } from "./kanban-card";
 import { TaskCreateDialog } from "./task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -451,6 +452,12 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         setMoveError={s.setMoveError}
         handleGoToTask={s.handleGoToTask}
       />
+      {s.isMobile && (
+        <MobileSelectionToggle
+          active={s.multiSelect.isMultiSelectMode}
+          onToggle={s.multiSelect.toggleMultiSelect}
+        />
+      )}
       <KanbanSwimlanes
         viewMode={s.kanbanViewMode || ""}
         workflowFilter={s.workflowsState.activeId}
@@ -611,5 +618,22 @@ function ApprovalWarningDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+function MobileSelectionToggle({ active, onToggle }: { active: boolean; onToggle: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="px-2 py-1">
+      <Button
+        variant="outline"
+        className="cursor-pointer"
+        aria-pressed={active}
+        onClick={onToggle}
+        data-testid="mobile-select-tasks"
+      >
+        {t(active ? "kanban:cancelTaskSelection" : "kanban:selectTasks")}
+      </Button>
+    </div>
   );
 }

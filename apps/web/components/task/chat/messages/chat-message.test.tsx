@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { ChatMessage } from "./chat-message";
+import { MessageTaskOriginProvider } from "./message-task-origin-context";
 import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import { activateLocale } from "@/lib/i18n";
@@ -28,10 +29,19 @@ const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
 const FULL_SIZE_ATTACHMENT_1_ALT = "Full size Attachment 1";
 const PROMPT_MENTION_TESTID = "custom-prompt-mention";
 const ENTITY_REFERENCE_TESTID = "entity-reference-chip";
+const { copyMessage } = vi.hoisted(() => ({
+  copyMessage: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/hooks/use-copy-to-clipboard", () => ({
+  useCopyToClipboard: () => ({ copied: false, copy: copyMessage }),
+}));
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  copyMessage.mockReset();
+  copyMessage.mockResolvedValue(undefined);
 });
 
 /** Builds a user Message with default test fields, merged with the given overrides. */
@@ -622,6 +632,88 @@ Visible agent response.`;
 
     expect(screen.getByText(/Hidden agent context/)).not.toBeNull();
     expect(screen.getByText(/Visible agent response/)).not.toBeNull();
+  });
+});
+
+describe("ChatMessage bounded user source", () => {
+  it("keeps complete copy and attachment values while shortening the rendered preview", () => {
+    const content = Array.from({ length: 240 }, (_, index) => `message-${index}`).join("\n");
+
+    render(
+      <StateProvider>
+        <ChatMessage
+          comment={userMessage({
+            content,
+            metadata: {
+              attachments: [{ type: "resource", mime_type: "text/plain", name: "full-log.txt" }],
+            },
+          })}
+          label="Message"
+          className=""
+        />
+      </StateProvider>,
+    );
+
+    expect(screen.getByTestId("message-file-attachment").textContent).toContain("full-log.txt");
+    expect(screen.getByTestId("user-message-bubble").textContent).not.toContain("message-239");
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy message to clipboard" }));
+
+    expect(copyMessage).toHaveBeenCalledWith(content);
+  });
+});
+
+const COORDINATOR_ABOUT_MESSAGE = "About KAN-418: why is this here?";
+
+describe("ChatMessage task origin", () => {
+  it("renders the coordinator About-prefix tag when wrapped in MessageTaskOriginProvider", () => {
+    render(
+      <StateProvider>
+        <MessageTaskOriginProvider value="coordinator">
+          <ChatMessage
+            comment={userMessage({ content: COORDINATOR_ABOUT_MESSAGE })}
+            label="Message"
+            className=""
+          />
+        </MessageTaskOriginProvider>
+      </StateProvider>,
+    );
+
+    expect(screen.getByTestId("coordinator-about-tag")).toBeTruthy();
+    expect(screen.getByText("why is this here?")).toBeTruthy();
+  });
+
+  it("renders the About-prefix verbatim without a provider", () => {
+    render(
+      <StateProvider>
+        <ChatMessage
+          comment={userMessage({ content: COORDINATOR_ABOUT_MESSAGE })}
+          label="Message"
+          className=""
+        />
+      </StateProvider>,
+    );
+
+    expect(screen.queryByTestId("coordinator-about-tag")).toBeNull();
+    expect(screen.getByText(/About KAN-418: why is this here\?/)).toBeTruthy();
+  });
+
+  it("copies the full stored text, prefix included, for a coordinator-origin message", () => {
+    render(
+      <StateProvider>
+        <MessageTaskOriginProvider value="coordinator">
+          <ChatMessage
+            comment={userMessage({ content: COORDINATOR_ABOUT_MESSAGE })}
+            label="Message"
+            className=""
+          />
+        </MessageTaskOriginProvider>
+      </StateProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy message to clipboard" }));
+
+    expect(copyMessage).toHaveBeenCalledWith(COORDINATOR_ABOUT_MESSAGE);
   });
 });
 

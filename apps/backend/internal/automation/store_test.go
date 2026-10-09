@@ -286,6 +286,54 @@ func TestInitSchema_BackfillsLegacyRepositoryID(t *testing.T) {
 	}
 }
 
+// TestInitSchema_ReleasesStaleFailedWebhookDedupKeys simulates a database
+// from before MarkRunTerminal released a failed webhook run's dedup key on
+// transition: a "failed" run with an empty task_id but a still-populated
+// dedup_key. NewStore's backfill must clear it before the unique index is
+// created, or HasRunWithDedupKey treats the stale key as permanently taken
+// and every future retry of that alert is silently skipped forever.
+func TestInitSchema_ReleasesStaleFailedWebhookDedupKeys(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "A", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true}
+	if err := store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	run := &AutomationRun{
+		AutomationID: a.ID,
+		TriggerID:    "trigger-1",
+		TriggerType:  TriggerTypeWebhook,
+		Status:       RunStatusFailed,
+		DedupKey:     "webhook:stale-issue",
+	}
+	if err := store.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the next backend boot picking up this pre-existing row —
+	// initSchema runs on every NewStore call, same as a real restart.
+	if _, err := NewStore(store.db, store.ro); err != nil {
+		t.Fatal(err)
+	}
+
+	var dedupKey string
+	if err := store.ro.Get(&dedupKey, `SELECT dedup_key FROM automation_runs WHERE id = ?`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if dedupKey != "" {
+		t.Fatalf("expected stale failed webhook run's dedup_key to be released, got %q", dedupKey)
+	}
+
+	has, err := store.HasRunWithDedupKey(ctx, a.ID, "webhook:stale-issue")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Fatal("expected a retried delivery with the same key to no longer be treated as a duplicate")
+	}
+}
+
 func TestCreateAndListTriggers(t *testing.T) {
 	store := setupTestStore(t)
 	ctx := context.Background()

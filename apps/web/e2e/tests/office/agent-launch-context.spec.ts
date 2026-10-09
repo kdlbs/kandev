@@ -33,7 +33,7 @@ test.describe("Office agent launch context", () => {
     officeApi,
     officeSeed,
   }) => {
-    test.setTimeout(60_000);
+    test.setTimeout(120_000);
 
     // 1. Prime the bundled system-skill sync for the Office workspace
     //    (the lazy sync runs on the first /skills list).
@@ -46,12 +46,17 @@ test.describe("Office agent launch context", () => {
     const slugs = (primed.skills ?? []).map((s) => s.slug);
     expect(slugs).toContain("kandev-protocol");
 
+    const agent = await officeApi.getAgent(officeSeed.agentId);
+    const originalDesiredSkills = JSON.parse(
+      (agent.desired_skills as string | undefined) ?? "[]",
+    ) as string[];
+
     // 2. Attach the bundled slug to the seed agent's desired_skills.
     //    The runtime materializer resolves slugs against the
     //    workspace skill registry at session start.
-    await apiClient.setProfileDesiredSkills(officeSeed.agentId, ["kandev-protocol"]);
-
     try {
+      await apiClient.setProfileDesiredSkills(officeSeed.agentId, ["kandev-protocol"]);
+
       // 3. Create and assign a real Office task. Office ownership determines
       // the MCP mode and causes the scheduler to inject the Office runtime
       // context used by the system-skill deployer.
@@ -74,7 +79,7 @@ test.describe("Office agent launch context", () => {
             worktreePath = env?.workspace_path ?? env?.repos?.[0]?.worktree_path ?? "";
             return worktreePath;
           },
-          { timeout: 30_000, message: "task environment workspace_path never appeared" },
+          { timeout: 60_000, message: "task environment workspace_path never appeared" },
         )
         .not.toBe("");
 
@@ -84,7 +89,7 @@ test.describe("Office agent launch context", () => {
       const skillFile = path.join(worktreePath, ".agents", "skills", "kandev-protocol", "SKILL.md");
       await expect
         .poll(() => fs.existsSync(skillFile), {
-          timeout: 15_000,
+          timeout: 30_000,
           message: skillFile,
         })
         .toBe(true);
@@ -94,8 +99,8 @@ test.describe("Office agent launch context", () => {
       const content = fs.readFileSync(skillFile, "utf8");
       expect(content).toMatch(/kandev/i);
     } finally {
-      // Tidy up so the worker's next test doesn't inherit the attach.
-      await apiClient.setProfileDesiredSkills(officeSeed.agentId, []);
+      // Restore the worker-shared agent state for the next test.
+      await apiClient.setProfileDesiredSkills(officeSeed.agentId, originalDesiredSkills);
     }
   });
 

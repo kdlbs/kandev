@@ -2,16 +2,25 @@ import { expect, type Page } from "@playwright/test";
 import { test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
-import { getDockviewGroupWidth } from "../../helpers/dockview-resize";
+import { getDockviewGroupWidth, resizeColumnViaSplitview } from "../../helpers/dockview-resize";
+import { snapshotPersistedLayouts } from "../../helpers/dockview-persistence";
+import { waitForLatestSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 async function createTask(apiClient: ApiClient, seedData: SeedData, title: string) {
-  return apiClient.createTaskWithAgent(seedData.workspaceId, title, seedData.agentProfileId, {
-    description: "/e2e:simple-message",
-    workflow_id: seedData.workflowId,
-    workflow_step_id: seedData.startStepId,
-    repository_ids: [seedData.repositoryId],
-  });
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    title,
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  await waitForLatestSessionDone(apiClient, task.id, 1, `quiet layout fixture ${title}`);
+  return task;
 }
 
 type DesktopTaskOptions = {
@@ -50,6 +59,7 @@ test.describe("right-panel visibility", () => {
       { viewport: { width: 1600, height: 900 } },
     );
     const toggle = testPage.getByTestId("task-right-panels-toggle");
+    await session.clickTab("Files");
     await expect(toggle).toBeVisible();
     await expect(toggle).toBeEnabled();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
@@ -93,6 +103,7 @@ test.describe("right-panel visibility", () => {
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await session.clickTab("Files");
     await expect(session.files).toBeVisible();
     await expect(session.terminal).toBeVisible();
 
@@ -100,6 +111,7 @@ test.describe("right-panel visibility", () => {
     await session.waitForLoad();
     await session.waitForDockviewReady();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await session.clickTab("Files");
     await expect(session.files).toBeVisible();
     await expect(session.terminal).toBeVisible();
     await session.expectLayoutHealthy();
@@ -220,6 +232,13 @@ test.describe("right-panel visibility", () => {
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
 
     await session.clickTab("Files");
+    // Reload must restore a selection that has reached the debounced layout save.
+    await expect
+      .poll(() => snapshotPersistedLayouts(testPage), {
+        timeout: 10_000,
+        message: "Files selection never reached the saved layout",
+      })
+      .toContain('"activeView":"files"');
     await session.clickMaximize();
     await session.expectMaximized();
 
@@ -236,6 +255,7 @@ test.describe("right-panel visibility", () => {
     await session.clickMaximize();
     await expect(toggle).toBeEnabled();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await session.clickTab("Files");
     await expect(session.files).toBeVisible();
 
     await testPage.reload();
@@ -243,6 +263,7 @@ test.describe("right-panel visibility", () => {
     await session.waitForDockviewReady();
     await expect(toggle).toBeEnabled();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await session.clickTab("Files");
     await expect(session.files).toBeVisible();
     await session.expectLayoutHealthy();
   });
@@ -349,19 +370,10 @@ for (const layout of ["default", "plan", "preview"] as const) {
     }
     const panelId = { default: "files", preview: "browser", plan: "plan" }[layout]!;
     const before = await getDockviewGroupWidth(testPage, panelId);
-    const sashBox = await testPage.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const api = (window as any).__dockviewApi__;
-      const sashes = api.component.gridview.root.splitview.sashes;
-      const rect = sashes.at(-1).container.getBoundingClientRect();
-      return { x: rect.x + rect.width / 2, y: rect.y + 100 };
-    });
-    await testPage.mouse.move(sashBox.x, sashBox.y);
-    await testPage.mouse.down();
-    await testPage.mouse.move(sashBox.x - 100, sashBox.y, { steps: 10 });
-    await testPage.mouse.up();
-    await expect.poll(() => getDockviewGroupWidth(testPage, panelId)).toBeGreaterThan(before + 50);
-    const resized = await getDockviewGroupWidth(testPage, panelId);
+    // Use the same dockview resize path as the other pane specs. A real mouse
+    // drag can miss the sash under CI load even when the layout is ready.
+    const resized = await resizeColumnViaSplitview(testPage, "right", before + 100);
+    expect(resized).toBeGreaterThan(before + 50);
     const toggle = testPage.getByTestId("task-right-panels-toggle");
     for (let cycle = 0; cycle < 3; cycle++) {
       await toggle.click();

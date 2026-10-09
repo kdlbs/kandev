@@ -539,6 +539,24 @@ func TestNextCronTime_InvalidTimezone(t *testing.T) {
 	}
 }
 
+func TestValidateCronSchedule_ValidExpression(t *testing.T) {
+	if err := ValidateCronSchedule("0 9 * * *", "America/New_York"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateCronSchedule_InvalidExpression(t *testing.T) {
+	if err := ValidateCronSchedule("invalid", ""); err == nil {
+		t.Fatal("expected error for invalid expression")
+	}
+}
+
+func TestValidateCronSchedule_InvalidTimezone(t *testing.T) {
+	if err := ValidateCronSchedule("0 9 * * *", "Not/A_Zone"); err == nil {
+		t.Fatal("expected error for invalid timezone")
+	}
+}
+
 // TestNextCronTime_RejectsCronTZPrefix verifies that a caller-supplied
 // TZ=/CRON_TZ= prefix is rejected rather than silently accepted. robfig/cron
 // strips the prefix in Parse() before any field-mask check, so without this
@@ -558,5 +576,18 @@ func TestNextCronTime_RejectsCronTZPrefix(t *testing.T) {
 				t.Fatalf("expected error for prefixed expression %q, got none", expr)
 			}
 		})
+	}
+}
+
+// TestValidateCronSchedule_RejectsUnsatisfiable verifies that validation uses
+// the scheduler's occurrence rules instead of accepting an impossible date.
+func TestValidateCronSchedule_RejectsUnsatisfiable(t *testing.T) {
+	start := time.Now()
+	err := ValidateCronSchedule("0 0 30 2 *", "UTC")
+	if !errors.Is(err, ErrUnsatisfiableCron) {
+		t.Fatalf("expected ErrUnsatisfiableCron, got %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		t.Errorf("ValidateCronSchedule took %v, want a bounded scheduler check", elapsed)
 	}
 }

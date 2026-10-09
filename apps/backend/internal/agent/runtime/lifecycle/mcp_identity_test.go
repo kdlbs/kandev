@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -160,6 +161,46 @@ func TestMCPHandlerForCarriesExecutionWithoutScoper(t *testing.T) {
 	execution, ok := streams.MCPExecutionContextFromContext(inner.gotCtx)
 	if !ok || execution.ExecutionID != "exec-1" {
 		t.Errorf("execution context = %#v, want exec-1", execution)
+	}
+}
+
+func TestMCPHandlerForRestoresManagedPolicyFromTrustedExecutionMetadata(t *testing.T) {
+	inner := &recordingMCPHandler{}
+	sm := newMCPStreamManager(t, inner, nil)
+	policy := mcpprofile.ManagedToolPolicy{
+		PluginID: "coordinator.v1", InstallationID: "installation-1", WorkspaceID: "workspace-1",
+		InstanceKey: "lead", ConversationRevision: 4, ApprovalRevision: 7,
+		ManifestDigest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		AgentToolNames: []string{"read_task"},
+	}
+	encoded, err := mcpprofile.MarshalManagedToolPolicy(policy)
+	if err != nil {
+		t.Fatalf("MarshalManagedToolPolicy: %v", err)
+	}
+	execution := &AgentExecution{ID: "exec-current", TaskID: "task-1", SessionID: "session-1"}
+	execution.setMetadataValue(mcpprofile.ManagedToolPolicyMetadataKey, encoded)
+	handler := sm.mcpHandlerFor(execution)
+	if _, err := handler.Dispatch(context.Background(), mcpRequest(t, map[string]interface{}{"execution_id": "forged"})); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	executionContext, ok := streams.MCPExecutionContextFromContext(inner.gotCtx)
+	if !ok || executionContext.ExecutionID != "exec-current" || !executionContext.ManagedToolPolicyRequired || executionContext.ManagedToolPolicy == nil {
+		t.Fatalf("managed execution context = %+v, present=%t", executionContext, ok)
+	}
+	if executionContext.ManagedToolPolicy.PluginID != policy.PluginID || executionContext.ManagedToolPolicy.ApprovalRevision != policy.ApprovalRevision ||
+		len(executionContext.ManagedToolPolicy.AgentToolNames) != 1 || executionContext.ManagedToolPolicy.AgentToolNames[0] != "read_task" {
+		t.Fatalf("managed tool policy = %+v", executionContext.ManagedToolPolicy)
+	}
+
+	invalid := &AgentExecution{ID: "exec-invalid", TaskID: "task-1", SessionID: "session-1"}
+	invalid.setMetadataValue(mcpprofile.ManagedToolPolicyMetadataKey, map[string]any{"forged": true})
+	invalidHandler := sm.mcpHandlerFor(invalid)
+	if _, err := invalidHandler.Dispatch(context.Background(), mcpRequest(t, nil)); err != nil {
+		t.Fatalf("invalid metadata Dispatch: %v", err)
+	}
+	invalidContext, ok := streams.MCPExecutionContextFromContext(inner.gotCtx)
+	if !ok || !invalidContext.ManagedToolPolicyRequired || invalidContext.ManagedToolPolicy != nil {
+		t.Fatalf("invalid managed execution context = %+v, present=%t", invalidContext, ok)
 	}
 }
 

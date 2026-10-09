@@ -279,6 +279,7 @@ type PR struct {
 	HeadBranch          string `json:"head_branch"`
 	HeadSHA             string `json:"head_sha"`
 	BaseBranch          string `json:"base_branch"`
+	BaseSHA             string `json:"base_sha,omitempty"`
 	AuthorLogin         string `json:"author_login"`
 	RepoOwner           string `json:"repo_owner"`
 	RepoName            string `json:"repo_name"`
@@ -296,6 +297,10 @@ type PR struct {
 	Draft               bool   `json:"draft"`
 	Mergeable           bool   `json:"mergeable"`
 	MergeableState      string `json:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
+	// HasMergeConflicts is the nullable raw value carried by a status snapshot.
+	HasMergeConflicts *bool `json:"-"`
+	// HasMergeConflictsObserved distinguishes an explicit nil observation from no snapshot override.
+	HasMergeConflictsObserved bool `json:"-"`
 	// The mock provider uses these optional fields to reproduce GraphQL merge
 	// queue observations through its REST-shaped status path. Production REST
 	// payloads leave them empty; GraphQL remains the authoritative queue source.
@@ -379,14 +384,26 @@ type PRComment struct {
 
 // CheckRun represents a CI check result.
 type CheckRun struct {
-	Name        string     `json:"name"`
-	Source      string     `json:"source"`     // check_run, status_context
-	Status      string     `json:"status"`     // queued, in_progress, completed
-	Conclusion  string     `json:"conclusion"` // success, failure, neutral, cancelled, timed_out, action_required, skipped
-	HTMLURL     string     `json:"html_url"`
-	Output      string     `json:"output"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	ID            int64      `json:"id,omitempty"`
+	AppID         int64      `json:"app_id,omitempty"`
+	AppSlug       string     `json:"app_slug,omitempty"`
+	CheckSuiteID  int64      `json:"check_suite_id,omitempty"`
+	WorkflowID    int64      `json:"workflow_id,omitempty"`
+	WorkflowName  string     `json:"workflow_name,omitempty"`
+	WorkflowRunID int64      `json:"workflow_run_id,omitempty"`
+	WorkflowEvent string     `json:"workflow_event,omitempty"`
+	HeadRepoID    int64      `json:"head_repo_id,omitempty"`
+	HeadRepoOwner string     `json:"head_repo_owner,omitempty"`
+	HeadRepoName  string     `json:"head_repo_name,omitempty"`
+	HeadBranch    string     `json:"head_branch,omitempty"`
+	Name          string     `json:"name"`
+	Source        string     `json:"source"`     // check_run, status_context
+	Status        string     `json:"status"`     // queued, in_progress, completed
+	Conclusion    string     `json:"conclusion"` // success, failure, neutral, cancelled, timed_out, action_required, skipped
+	HTMLURL       string     `json:"html_url"`
+	Output        string     `json:"output"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	CompletedAt   *time.Time `json:"completed_at,omitempty"`
 }
 
 // WorkflowAttentionState describes an Actions workflow observation that is
@@ -427,6 +444,7 @@ type WorkflowAttention struct {
 // to match a run to one pull-request head and classify action_required.
 type WorkflowRun struct {
 	ID            int64                    `json:"id"`
+	CheckSuiteID  int64                    `json:"check_suite_id,omitempty"`
 	RunAttempt    int                      `json:"run_attempt"`
 	WorkflowID    int64                    `json:"workflow_id"`
 	Name          string                   `json:"name"`
@@ -472,6 +490,7 @@ type PRFeedback struct {
 	Reviews           []PRReview         `json:"reviews"`
 	Comments          []PRComment        `json:"comments"`
 	Checks            []CheckRun         `json:"checks"`
+	ChecksState       *string            `json:"checks_state,omitempty"`
 	HasIssues         bool               `json:"has_issues"`
 	WorkflowAttention *WorkflowAttention `json:"workflow_attention,omitempty"`
 }
@@ -612,6 +631,7 @@ type TaskPR struct {
 	ReviewState                           string     `json:"review_state" db:"review_state"`       // approved, changes_requested, pending, ""
 	ChecksState                           string     `json:"checks_state" db:"checks_state"`       // success, failure, pending, ""
 	MergeableState                        string     `json:"mergeable_state" db:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
+	HasMergeConflicts                     *bool      `json:"has_merge_conflicts" db:"has_merge_conflicts"`
 	HeadSHA                               string     `json:"head_sha" db:"head_sha"`
 	MergeQueueState                       string     `json:"merge_queue_state" db:"merge_queue_state"`
 	MergeQueuePosition                    *int       `json:"merge_queue_position" db:"merge_queue_position"`

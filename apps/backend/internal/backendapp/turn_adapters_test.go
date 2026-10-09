@@ -2,20 +2,35 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	githubsvc "github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
 // fakeSessionMsgRepo is a minimal stub for taskSessionCheckerAdapter.repo
 // — returns canned sessions + per-session messages from in-memory maps.
 type fakeSessionMsgRepo struct {
-	sessions map[string][]*models.TaskSession
-	messages map[string][]*models.Message
+	sessions    map[string][]*models.TaskSession
+	messages    map[string][]*models.Message
+	sessionsErr error
 }
 
 func (r *fakeSessionMsgRepo) ListTaskSessions(_ context.Context, taskID string) ([]*models.TaskSession, error) {
-	return r.sessions[taskID], nil
+	return r.sessions[taskID], r.sessionsErr
+}
+
+func TestTaskSessionCheckerWrapsMissingTask(t *testing.T) {
+	adapter := &taskSessionCheckerAdapter{repo: &fakeSessionMsgRepo{sessionsErr: taskrepo.ErrTaskNotFound}}
+	_, err := adapter.HasUserAuthoredMessage(context.Background(), "deleted-task")
+	if !errors.Is(err, githubsvc.ErrTaskNotFound) {
+		t.Fatalf("HasUserAuthoredMessage error = %v, want github ErrTaskNotFound", err)
+	}
+	if !errors.Is(err, taskrepo.ErrTaskNotFound) {
+		t.Fatalf("wrapped error = %v, want to preserve task repository ErrTaskNotFound", err)
+	}
 }
 
 func (r *fakeSessionMsgRepo) ListMessages(_ context.Context, sessionID string) ([]*models.Message, error) {

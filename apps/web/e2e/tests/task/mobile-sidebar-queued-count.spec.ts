@@ -32,7 +32,7 @@ test.describe("Mobile sidebar — queued prompt count", () => {
     await session.waitForLoad();
 
     // Open the task switcher sheet from the mobile session top bar.
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const sheet = testPage.getByRole("dialog");
     await expect(sheet.getByText("Mobile Queued Badge Task")).toBeVisible({ timeout: 10_000 });
 

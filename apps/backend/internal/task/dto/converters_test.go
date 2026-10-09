@@ -62,6 +62,26 @@ func TestFromTaskSerializesWorkspaceFolders(t *testing.T) {
 	}
 }
 
+func TestFromTaskProjectsWorkflowAgentOverridesOnlyForStoredWorkflow(t *testing.T) {
+	overrides, err := models.NewWorkflowAgentOverrides("wf-1", []models.WorkflowAgentOverrideBinding{
+		{StepID: "implement", SourceProfileID: "profile-a", ReplacementProfileID: "profile-b"},
+	})
+	if err != nil {
+		t.Fatalf("create overrides: %v", err)
+	}
+	task := &models.Task{WorkflowID: "wf-1", WorkflowAgentOverrides: overrides}
+	dto := FromTask(task)
+	if dto.WorkflowAgentOverrides == nil {
+		t.Fatal("expected workflow agent overrides in DTO")
+	}
+
+	task.WorkflowID = "wf-2"
+	dto = FromTask(task)
+	if dto.WorkflowAgentOverrides != nil {
+		t.Fatal("foreign workflow override leaked into DTO")
+	}
+}
+
 func TestFromTaskSerializesAutopilot(t *testing.T) {
 	got := FromTask(&models.Task{ID: "task-autopilot", Autopilot: true})
 	if !got.Autopilot {
@@ -203,6 +223,44 @@ func TestTaskSessionDTOsProjectQueueIncarnation(t *testing.T) {
 	}
 	if got := FromTaskSessionSummary(session).QueueIncarnationID; got != session.QueueIncarnationID {
 		t.Fatalf("summary queue incarnation = %q, want %q", got, session.QueueIncarnationID)
+	}
+}
+
+func TestFromTaskSessionDTOPreservesSelectionCauseMetadata(t *testing.T) {
+	promptNotSent := true
+	session := &models.TaskSession{
+		ID:     "session-selection-cause",
+		TaskID: "task-selection-cause",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyLastAgentError: models.LastAgentError{
+				Message: "The agent could not start.",
+				Causes: []models.AgentErrorCause{{
+					Operation:      models.AgentErrorCauseOperationStart,
+					Code:           models.AgentErrorCauseCodeModelUnavailable,
+					Reason:         models.AgentErrorCauseReasonRequestedNotAdvertised,
+					RequestedModel: "anthropic/claude-opus-4-8",
+					PromptNotSent:  &promptNotSent,
+				}},
+			},
+		},
+	}
+
+	encoded, err := json.Marshal(FromTaskSession(session))
+	if err != nil {
+		t.Fatalf("marshal full session DTO: %v", err)
+	}
+	var payload struct {
+		Metadata map[string]struct {
+			Causes []models.AgentErrorCause `json:"causes"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("decode full session DTO: %v", err)
+	}
+	lastError := payload.Metadata[models.SessionMetaKeyLastAgentError]
+	if len(lastError.Causes) != 1 || lastError.Causes[0].RequestedModel != "anthropic/claude-opus-4-8" ||
+		lastError.Causes[0].PromptNotSent == nil || !*lastError.Causes[0].PromptNotSent {
+		t.Fatalf("session DTO did not preserve selection cause: %+v", lastError)
 	}
 }
 

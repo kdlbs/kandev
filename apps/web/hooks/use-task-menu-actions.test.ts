@@ -30,6 +30,9 @@ const tasks = ["A", "B"].map((id) => ({
   workflowStepId: "step",
   position: 0,
 }));
+const toastCallsWithVariant = (variant: string) =>
+  api.toast.mock.calls.filter(([input]) => input.variant === variant);
+
 beforeEach(() => {
   vi.clearAllMocks();
   store = createAppStore();
@@ -112,7 +115,7 @@ describe("concurrent shared task menu removal", () => {
         expect(await outcomeA).toBe(false);
       });
       expect(result.current.pendingTaskId).toBe("B");
-      expect(api.toast).toHaveBeenCalledTimes(1);
+      expect(toastCallsWithVariant("error")).toHaveLength(1);
       request.mockResolvedValueOnce(undefined);
       await act(async () => {
         expect(await result.current[method]("B")).toBe(false);
@@ -149,7 +152,7 @@ describe("shared task menu removal", () => {
         expect(operations).toHaveLength(1);
         expect(operations[0]).toMatchObject({ taskIds: ["A"], departure: null });
         expect(store.getState().kanban.tasks).toEqual(tasks);
-        expect(api.toast).not.toHaveBeenCalled();
+        expect(toastCallsWithVariant("loading")).toHaveLength(Number(method === "runArchive"));
       } finally {
         await act(async () => {
           release();
@@ -160,7 +163,6 @@ describe("shared task menu removal", () => {
       expect(store.getState().kanban.tasks.map(({ id }) => id)).toEqual(["B"]);
       expect(store.getState().taskRemoval.operationsByToken).toEqual({});
       expect(api.softNavigate).not.toHaveBeenCalled();
-      expect(api.toast).toHaveBeenCalledOnce();
       expect(api.toast).toHaveBeenCalledWith(expect.objectContaining({ variant: "success" }));
     },
   );
@@ -181,7 +183,7 @@ describe("shared task menu removal", () => {
       expect(store.getState().kanban.tasks).toEqual(tasks);
       expect(store.getState().taskRemoval.operationsByToken).toEqual({});
       expect(api.softNavigate).not.toHaveBeenCalled();
-      expect(api.toast).toHaveBeenCalledOnce();
+      expect(toastCallsWithVariant("error")).toHaveLength(1);
       expect(api.toast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
     },
   );
@@ -227,7 +229,7 @@ describe("shared task menu removal", () => {
         expect(await result.current[method]("A")).toBe(false);
       });
       expect(store.getState().kanban.tasks).toEqual(tasks);
-      expect(api.toast).toHaveBeenCalledTimes(1);
+      expect(toastCallsWithVariant("error")).toHaveLength(1);
       expect(result.current.pendingTaskId).toBeNull();
       request.mockResolvedValueOnce(undefined);
       await act(async () => {

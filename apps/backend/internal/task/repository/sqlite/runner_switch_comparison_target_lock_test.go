@@ -38,7 +38,7 @@ func TestSwitchTaskRunner_ConcurrentBaseBranchUpdateNeverBlendsWithSwitch(t *tes
 	}()
 	go func() {
 		defer wg.Done()
-		_, _, branchErr = repo.UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx, taskRepo.ID, "develop")
+		_, _, branchErr = repo.UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx, taskRepo.ID, "develop", true)
 	}()
 	wg.Wait()
 
@@ -146,7 +146,7 @@ func TestPostgresRepositoryWritersUseConsistentTaskThenLinkLockOrder(t *testing.
 	comparisonFinished := make(chan struct{})
 	go func() {
 		defer close(comparisonFinished)
-		_, _, err := comparisonRepo.UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx, link.ID, "release")
+		_, _, err := comparisonRepo.UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(ctx, link.ID, "release", true)
 		comparisonErr <- err
 	}()
 	if err := waitForPostgresLock(ctx, db, comparisonPID, comparisonFinished); err != nil {

@@ -664,7 +664,7 @@ func TestBuildInternalVscodeURL(t *testing.T) {
 			absPath:      "/workspace/src/main.go",
 			line:         0,
 			column:       0,
-			expected:     "internal://vscode?goto=src/main.go",
+			expected:     "internal://vscode?goto=src%2Fmain.go",
 		},
 		{
 			name:         "file path with line",
@@ -672,7 +672,7 @@ func TestBuildInternalVscodeURL(t *testing.T) {
 			absPath:      "/workspace/src/main.go",
 			line:         42,
 			column:       0,
-			expected:     "internal://vscode?goto=src/main.go:42",
+			expected:     "internal://vscode?goto=src%2Fmain.go&line=42",
 		},
 		{
 			name:         "file path with line and column",
@@ -680,7 +680,7 @@ func TestBuildInternalVscodeURL(t *testing.T) {
 			absPath:      "/workspace/src/main.go",
 			line:         42,
 			column:       10,
-			expected:     "internal://vscode?goto=src/main.go:42:10",
+			expected:     "internal://vscode?column=10&goto=src%2Fmain.go&line=42",
 		},
 		{
 			name:         "empty worktree uses absolute path",
@@ -688,7 +688,7 @@ func TestBuildInternalVscodeURL(t *testing.T) {
 			absPath:      "/some/file.go",
 			line:         5,
 			column:       0,
-			expected:     "internal://vscode?goto=/some/file.go:5",
+			expected:     "internal://vscode?goto=%2Fsome%2Ffile.go&line=5",
 		},
 	}
 

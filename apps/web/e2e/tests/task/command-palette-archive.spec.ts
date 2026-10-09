@@ -58,6 +58,7 @@ test.describe("Command palette archive", () => {
     await testPage.keyboard.press("Enter");
 
     // The shared confirmation dialog names the task being archived.
+    await expect(testPage.getByRole("combobox")).toHaveCount(0);
     const confirm = testPage.getByRole("alertdialog");
     await expect(confirm.getByText(/Palette Archive Target/)).toBeVisible({ timeout: 10_000 });
     await testPage.getByTestId("palette-archive-confirm").click();
@@ -104,6 +105,13 @@ test.describe("Command palette archive", () => {
         .getByRole("option")
         .filter({ has: testPage.getByText("Create Subtask", { exact: true }) }),
     ).toBeVisible();
+
+    for (const label of ["Rename", "Link", "Delete"]) {
+      await dialog.getByRole("combobox").fill(label);
+      await expect(
+        dialog.getByRole("option").filter({ has: testPage.getByText(label, { exact: true }) }),
+      ).toBeVisible();
+    }
 
     await dialog.getByRole("combobox").fill("archive");
     await expect(

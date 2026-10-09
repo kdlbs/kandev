@@ -22,42 +22,46 @@ const (
 
 // scenarioRegistry maps scenario names to their handler functions.
 var scenarioRegistry = map[string]func(e *emitter){
-	"simple-message":          scenarioSimpleMessage,
-	"read-and-edit":           scenarioReadAndEdit,
-	"permission-flow":         scenarioPermissionFlow,
-	toolKeyError:              scenarioError,
-	"subagent":                scenarioSubagent,
-	"all-tools":               scenarioAllTools,
-	"multi-turn":              scenarioMultiTurn,
-	"diff-expansion-setup":    scenarioDiffExpansionSetup,
-	"diff-update-setup":       scenarioDiffUpdateSetup,
-	"diff-update-modify":      scenarioDiffUpdateModify,
-	"diff-update-streaming":   scenarioDiffUpdateStreaming,
-	"multi-file-setup":        scenarioMultiFileSetup,
-	"multi-file-modify":       scenarioMultiFileModify,
-	"untracked-file-setup":    scenarioUntrackedFileSetup,
-	"untracked-file-modify":   scenarioUntrackedFileModify,
-	"clarification":           scenarioClarification,
-	"clarification-markdown":  scenarioClarificationMarkdown,
-	"clarification-multi":     scenarioClarificationMulti,
-	"clarification-timeout":   scenarioClarificationTimeout,
-	"multi-permission":        scenarioMultiPermission,
-	"kandev-mcp-permission":   scenarioKandevMCPPermission,
-	"review-cumulative-setup": scenarioReviewCumulativeSetup,
-	"walkthrough-setup":       scenarioWalkthroughSetup,
-	"walkthrough-basic":       scenarioWalkthroughBasic,
-	"walkthrough-reemit":      scenarioWalkthroughReemit,
-	"symlink-file-setup":      scenarioSymlinkFileSetup,
-	"markdown-table":          scenarioMarkdownTable,
-	"empty-turn":              scenarioEmptyTurn,
-	"push-current-branch":     scenarioPushCurrentBranch,
-	"steer-fold-setup":        scenarioSteerFoldSetup,
-	"steer-defer-setup":       scenarioSteerDeferSetup,
-	"saved-prompt-delivery":   scenarioSavedPromptDelivery,
-	"goal-active":             scenarioGoalActive,
-	"goal-complete":           scenarioGoalComplete,
-	"goal-clear":              scenarioGoalClear,
-	"goal-long":               scenarioGoalLong,
+	"simple-message":            scenarioSimpleMessage,
+	"read-and-edit":             scenarioReadAndEdit,
+	"permission-flow":           scenarioPermissionFlow,
+	toolKeyError:                scenarioError,
+	"subagent":                  scenarioSubagent,
+	"all-tools":                 scenarioAllTools,
+	"multi-turn":                scenarioMultiTurn,
+	"diff-expansion-setup":      scenarioDiffExpansionSetup,
+	"diff-update-setup":         scenarioDiffUpdateSetup,
+	"diff-update-modify":        scenarioDiffUpdateModify,
+	"diff-update-streaming":     scenarioDiffUpdateStreaming,
+	"multi-file-setup":          scenarioMultiFileSetup,
+	"multi-file-modify":         scenarioMultiFileModify,
+	"untracked-file-setup":      scenarioUntrackedFileSetup,
+	"untracked-file-modify":     scenarioUntrackedFileModify,
+	"clarification":             scenarioClarification,
+	"clarification-no-other":    scenarioClarificationNoOther,
+	"clarification-markdown":    scenarioClarificationMarkdown,
+	"clarification-multi":       scenarioClarificationMulti,
+	"clarification-timeout":     scenarioClarificationTimeout,
+	"multi-permission":          scenarioMultiPermission,
+	"kandev-mcp-permission":     scenarioKandevMCPPermission,
+	"review-cumulative-setup":   scenarioReviewCumulativeSetup,
+	"walkthrough-setup":         scenarioWalkthroughSetup,
+	"walkthrough-basic":         scenarioWalkthroughBasic,
+	"walkthrough-reemit":        scenarioWalkthroughReemit,
+	"walkthrough-reemit-second": scenarioWalkthroughReemitSecond,
+	"symlink-file-setup":        scenarioSymlinkFileSetup,
+	"markdown-table":            scenarioMarkdownTable,
+	"empty-turn":                scenarioEmptyTurn,
+	"push-current-branch":       scenarioPushCurrentBranch,
+	"steer-fold-setup":          scenarioSteerFoldSetup,
+	"steer-defer-setup":         scenarioSteerDeferSetup,
+	"saved-prompt-delivery":     scenarioSavedPromptDelivery,
+	"response-retry":            scenarioResponseRetry,
+	"goal-active":               scenarioGoalActive,
+	"goal-complete":             scenarioGoalComplete,
+	"goal-clear":                scenarioGoalClear,
+	"goal-long":                 scenarioGoalLong,
+	"git-commit-permission":     scenarioGitCommitPermission,
 }
 
 // steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup
@@ -136,6 +140,13 @@ func scenarioSimpleMessage(e *emitter) {
 
 	fixedDelay(100)
 	e.text("This is a simple mock response for e2e testing.")
+}
+
+func scenarioResponseRetry(e *emitter) {
+	e.thoughtWithID("Abandoned response attempt reasoning.")
+	e.textWithID("Abandoned response attempt answer.")
+	e.responseAttemptReset()
+	e.textWithID("Replacement response after provider retry.")
 }
 
 // scenarioReadAndEdit: read -> edit -> text with fixed delays, using real files.
@@ -719,6 +730,7 @@ const (
 	clarificationPromptKey  = "prompt"
 	clarificationIDKey      = "id"
 	clarificationTitleKey   = "title"
+	clarificationCustomText = "allow_custom_text"
 )
 
 func mockOption(label, description string) map[string]any {
@@ -738,6 +750,22 @@ func clarificationQuestionArgs() map[string]any {
 					mockOption("PostgreSQL", "Relational database with strong consistency"),
 					mockOption("MongoDB", "Document database for flexible schemas"),
 					mockOption("SQLite", "Embedded database for simplicity"),
+				},
+			},
+		},
+	}
+}
+
+func clarificationNoOtherQuestionArgs() map[string]any {
+	return map[string]any{
+		"questions": []map[string]any{
+			{
+				clarificationIDKey:      "mode",
+				clarificationPromptKey:  "Choose a mode",
+				clarificationCustomText: false,
+				clarificationOptionsKey: []map[string]any{
+					mockOption("Fast", "Prioritize quick completion"),
+					mockOption("Safe", "Prioritize additional checks"),
 				},
 			},
 		},
@@ -809,12 +837,24 @@ func scenarioClarification(e *emitter) {
 	fixedDelay(100)
 	e.text("Let me ask you a question about the project setup.")
 
-	result, err := callMCPTool("kandev", "ask_user_question_kandev", clarificationQuestionArgs())
+	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", clarificationQuestionArgs())
 	if err != nil {
 		e.text(fmt.Sprintf("Question failed: %s", err))
 		return
 	}
 
+	fixedDelay(50)
+	e.text(fmt.Sprintf("You answered: %s", result))
+}
+
+func scenarioClarificationNoOther(e *emitter) {
+	fixedDelay(100)
+	e.text("Please choose one of the offered modes.")
+	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", clarificationNoOtherQuestionArgs())
+	if err != nil {
+		e.text(fmt.Sprintf("Question failed: %s", err))
+		return
+	}
 	fixedDelay(50)
 	e.text(fmt.Sprintf("You answered: %s", result))
 }
@@ -825,7 +865,7 @@ func scenarioClarificationMarkdown(e *emitter) {
 	fixedDelay(100)
 	e.text("Let me ask you a formatted question about project storage.")
 
-	result, err := callMCPTool("kandev", "ask_user_question_kandev", clarificationMarkdownQuestionArgs())
+	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", clarificationMarkdownQuestionArgs())
 	if err != nil {
 		e.text(fmt.Sprintf("Question failed: %s", err))
 		return
@@ -841,7 +881,7 @@ func scenarioClarificationMulti(e *emitter) {
 	fixedDelay(100)
 	e.text("Let me ask you a few questions about the project setup.")
 
-	result, err := callMCPTool("kandev", "ask_user_question_kandev", clarificationMultiQuestionArgs())
+	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", clarificationMultiQuestionArgs())
 	if err != nil {
 		e.text(fmt.Sprintf("Questions failed: %s", err))
 		return
@@ -859,12 +899,19 @@ func scenarioClarificationTimeout(e *emitter) {
 	ctx, cancel := contextWithTimeout(5)
 	defer cancel()
 
-	result, err := callMCPToolCtx(ctx, "kandev", "ask_user_question_kandev", clarificationQuestionArgs())
+	result, err := e.callMCPToolCtx(ctx, "kandev", "ask_user_question_kandev", clarificationQuestionArgs())
 	if err != nil {
-		fixedDelay(50)
-		if ctx.Err() != nil {
-			e.text("Question timed out, continuing without answer.")
+		if ctx.Err() != nil || strings.Contains(strings.ToLower(err.Error()), "timeout") {
+			// The backend cancels the in-flight ACP prompt when the MCP client
+			// times out. Keep the mock's explicit continuation update on the
+			// live transport so this scenario exercises the late-event
+			// admission path rather than dropping it with the canceled prompt
+			// context.
+			continuation := *e
+			continuation.ctx = context.WithoutCancel(e.ctx)
+			continuation.text("Question timed out, continuing without answer.")
 		} else {
+			fixedDelay(50)
 			e.text(fmt.Sprintf("Question failed: %s", err))
 		}
 		return
@@ -963,9 +1010,7 @@ func wtArgs(title string, steps ...map[string]interface{}) map[string]interface{
 	return map[string]interface{}{wtKeyTitle: title, wtKeySteps: steps}
 }
 
-// scenarioWalkthroughReemit emits one walkthrough, waits, then emits a second
-// (different) one — exercising the live `task.walkthrough.updated` path so the
-// UI must reflect the re-emit without a page reload.
+// scenarioWalkthroughReemit emits the first tour so the E2E browser can open it.
 func scenarioWalkthroughReemit(e *emitter) {
 	fixedDelay(50)
 	wd, err := os.Getwd()
@@ -979,7 +1024,7 @@ func scenarioWalkthroughReemit(e *emitter) {
 	}
 
 	e.text("First tour incoming.")
-	if _, err := callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("First",
+	if _, err := e.callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("First",
 		wtStep("First step", "reemit.txt", "REEMIT_FIRST step one.", 1, 0),
 		wtStep("First step 2", "reemit.txt", "REEMIT_FIRST step two.", 2, 0),
 	)); err != nil {
@@ -987,10 +1032,11 @@ func scenarioWalkthroughReemit(e *emitter) {
 		return
 	}
 	e.text("reemit-first-done")
+}
 
-	fixedDelay(200)
-
-	if _, err := callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("Second",
+// scenarioWalkthroughReemitSecond emits a new tour on a later user prompt.
+func scenarioWalkthroughReemitSecond(e *emitter) {
+	if _, err := e.callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("Second",
 		wtStep("Second step", "reemit.txt", "REEMIT_SECOND step one.", 1, 0),
 		wtStep("Second step 2", "reemit.txt", "REEMIT_SECOND step two.", 2, 0),
 		wtStep("Second step 3", "reemit.txt", "REEMIT_SECOND step three.", 1, 0),
@@ -1093,7 +1139,7 @@ func emitWalkthroughTour(e *emitter, doneText string) {
 	toolName := "show_walkthrough_kandev"
 	args := walkthroughDemoArgs()
 	e.startTool(toolID, toolName, acp.ToolKindOther, args)
-	result, err := callMCPTool("kandev", toolName, args)
+	result, err := e.callMCPTool("kandev", toolName, args)
 	if err != nil {
 		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})
 		e.text(fmt.Sprintf("show_walkthrough failed: %s", err))

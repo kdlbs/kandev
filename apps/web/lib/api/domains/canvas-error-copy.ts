@@ -18,6 +18,8 @@ const CANVAS_API_ERROR_TRANSLATIONS: Record<string, string> = {
   artifact_unavailable: CANVAS_UNAVAILABLE_KEY,
   active_release_missing: CANVAS_UNAVAILABLE_KEY,
   promotion_review_stale: "canvases:actionFailed",
+  workspace_data_review_stale: "canvases:workspaceDataReviewStale",
+  workspace_owner_required: "canvases:workspaceOwnerRequired",
   canvas_edit_stale: "canvases:actionFailed",
 };
 

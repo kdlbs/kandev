@@ -67,8 +67,9 @@ without changing the action being confirmed.
   behavior; confirmation shall not create browser-history entries.
 - **AC-UI-MOBILE-CONFIRMATION-001.6:** At widths of 768 CSS pixels or greater,
   current desktop/tablet confirmation composition and pointer rules shall
-  remain unchanged. A viewport change across that boundary shall dismiss an
-  unsubmitted confirmation without dispatching its action.
+  remain unchanged. Coarse-pointer file actions shall retain a touch confirmation
+  at every width. A change between effective confirmation surfaces shall dismiss
+  an unsubmitted confirmation without dispatching its action.
 - **AC-UI-MOBILE-CONFIRMATION-001.7:** Existing full task-delete, discard-consent,
   type-to-confirm, and system maintenance dialogs shall retain their current
   presentation. An inline decision inside an existing centered form dialog

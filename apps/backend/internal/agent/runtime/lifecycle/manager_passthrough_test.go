@@ -24,11 +24,25 @@ type mockPassthroughProfileResolver struct {
 	envVars        []settingsmodels.ProfileEnvVar
 	err            error
 	agentName      string
+	profile        *AgentProfileInfo
+	profiles       map[string]*AgentProfileInfo
+	resolvedIDs    []string
 }
 
 func (m *mockPassthroughProfileResolver) ResolveProfile(ctx context.Context, profileID string) (*AgentProfileInfo, error) {
+	m.resolvedIDs = append(m.resolvedIDs, profileID)
 	if m.err != nil {
 		return nil, m.err
+	}
+	if profile := m.profiles[profileID]; profile != nil {
+		resolved := *profile
+		resolved.ProfileID = profileID
+		return &resolved, nil
+	}
+	if m.profile != nil {
+		resolved := *m.profile
+		resolved.ProfileID = profileID
+		return &resolved, nil
 	}
 	return &AgentProfileInfo{
 		ProfileID:      profileID,
@@ -92,6 +106,7 @@ func newPassthroughMCPTestManager(t *testing.T, agentName string) (*Manager, *Ag
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
 		WorkspacePath:  t.TempDir(),
+		ExecutorType:   "local",
 		metadata: map[string]interface{}{
 			"standalone_port": 45678,
 		},

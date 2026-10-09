@@ -29,8 +29,8 @@ System settings will expose two direct page destinations:
 The existing `Data & Logs` path remains stable. The legacy Database, Backups,
 and Logs paths will continue to redirect to that page.
 
-Desktop and phone navigation will show both destinations directly. The split
-will not add tabs, drawers, or another navigation level.
+Desktop and phone navigation will show both destinations directly. The split originally added no tabs, drawers, or another navigation level.
+The [header-tab decision](2026-09-15-settings-header-tabs.md) supersedes the no-tabs constraint.
 
 ## Consequences
 

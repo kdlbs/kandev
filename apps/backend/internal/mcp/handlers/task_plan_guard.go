@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // planTruncationWarning renders the agent-facing warning appended to a plan
@@ -29,15 +30,11 @@ import (
 // at 1 (NextTaskPlanRevisionNumber), so 0 is never a real revision. In that
 // case the warning does not make an unverified preservation claim.
 //
-// It deliberately does NOT tell the caller to "recover" the content by
-// calling an MCP tool: none of the four registered plan tools can read a
-// past revision (get_task_plan_kandev returns the current, now-truncated,
-// HEAD). Telling an agent to "recover it" here would send it to the only
-// tool it has, get back the truncated document, and fall back to
-// reconstructing the plan from memory — the exact WO-38 failure this guard
-// exists to stop. Instead it says where the content lives (revision
-// history, Kandev UI only) and that the caller cannot fetch it itself, so
-// the caller stops and surfaces the loss instead of guessing.
+// This helper remains for compatibility with older non-guarded callers. The
+// current agent handlers reject a suspicious reduction before this warning
+// can be produced and expose task-scoped revision recovery tools. If a legacy
+// caller does receive the warning, it points to those tools and never asks
+// the agent to reconstruct content from memory.
 func planTruncationWarning(replacedRunes, newRunes, priorRevisionNumber int) string {
 	// dropped is always >= 0: the only caller renders this after the plan
 	// service has already confirmed newRunes < replacedRunes.
@@ -50,10 +47,10 @@ func planTruncationWarning(replacedRunes, newRunes, priorRevisionNumber int) str
 				"This replace-mode write overwrote the entire document; use "+
 				"update_task_plan_kandev with mode=\"append\" to add a section without "+
 				"resubmitting the whole document next time. Kandev could not verify which "+
-				"prior revision contains the pre-write content. The MCP plan tools cannot "+
-				"fetch past revisions. If this drop was not intentional, stop and inspect "+
-				"the task's revision history in the Kandev UI rather than rewriting the "+
-				"plan from memory.",
+				"prior revision contains the pre-write content. Read the current plan and "+
+				"list_task_plan_revisions_kandev before retrying. If this drop was not "+
+				"intentional, fetch the identified revision when available rather than "+
+				"rewriting the plan from memory.",
 			replacedRunes, newRunes, dropped, droppedPct,
 		)
 	}
@@ -63,37 +60,45 @@ func planTruncationWarning(replacedRunes, newRunes, priorRevisionNumber int) str
 			"This replace-mode write overwrote the entire document; use "+
 			"update_task_plan_kandev with mode=\"append\" to add a section without "+
 			"resubmitting the whole document next time. The pre-write content is "+
-			"preserved in %s — recoverable from the Kandev UI, but NOT fetchable through "+
-			"the MCP plan tools (get_task_plan_kandev returns the current, now-truncated, "+
-			"content, not that revision). If this drop was not intentional, stop and "+
-			"surface the loss rather than rewriting the plan from memory.",
+			"preserved in %s. Use list_task_plan_revisions_kandev and "+
+			"get_task_plan_revision_kandev to inspect that snapshot. If this drop was "+
+			"not intentional, restore it only after checking the current plan and both "+
+			"snapshot versions; do not rewrite the plan from memory.",
 		replacedRunes, newRunes, dropped, droppedPct,
 		fmt.Sprintf("plan revision %d, in the task's plan revision history", priorRevisionNumber),
 	)
 }
 
-// planWriteResponse extends the standard plan DTO with a truncation warning
-// for the MCP write actions only. It deliberately does not touch
+// planReadResponse extends the standard plan DTO with the agent-only opaque
+// write version. It deliberately does not touch
 // dto.TaskPlanDTO itself — the browser plan editor (which has a visible diff
 // and revision history, and uses TaskPlanDTO as-is) is unaffected.
-// json.Marshal promotes an embedded pointer struct's exported fields to the
-// top level, so a non-truncating write still marshals to the identical shape
-// callers see today.
+type planReadResponse struct {
+	*dto.TaskPlanDTO
+	Version string `json:"version,omitempty"`
+}
+
+// planWriteResponse extends the standard plan DTO with the committed version
+// and, for compatibility with older callers, the existing truncation fields.
 type planWriteResponse struct {
 	*dto.TaskPlanDTO
+	Version             string `json:"version,omitempty"`
 	PlanWriteWarning    string `json:"plan_write_warning,omitempty"`
 	PriorRevisionNumber int    `json:"prior_revision_number,omitempty"`
 }
 
-// planWritePayload wraps plan in a planWriteResponse when warning is
-// non-empty, otherwise returns plan unwrapped so an unaffected write's
-// response shape is unchanged.
-func planWritePayload(plan *dto.TaskPlanDTO, warning string, priorRevision int) interface{} {
-	if warning == "" {
+func planReadPayload(plan *models.TaskPlan) interface{} {
+	return planReadResponse{TaskPlanDTO: dto.TaskPlanFromModel(plan), Version: plan.WriteVersion}
+}
+
+// planWritePayload always includes the committed version for agent writes.
+func planWritePayload(plan *dto.TaskPlanDTO, version, warning string, priorRevision int) interface{} {
+	if version == "" && warning == "" {
 		return plan
 	}
 	return planWriteResponse{
 		TaskPlanDTO:         plan,
+		Version:             version,
 		PlanWriteWarning:    warning,
 		PriorRevisionNumber: priorRevision,
 	}

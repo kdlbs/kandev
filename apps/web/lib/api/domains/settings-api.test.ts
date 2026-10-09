@@ -7,14 +7,18 @@ vi.mock("@/lib/config", () => ({
 import {
   deleteExecutor,
   fetchMessageQueueSettings,
+  fetchSessionCapacitySettings,
   fetchSleepInhibitionSettings,
+  probeAgentProfile,
   resolveAgentModelConfig,
   startHostShell,
   updateMessageQueueSettings,
+  updateSessionCapacitySettings,
   updateSleepInhibitionSettings,
 } from "./settings-api";
 
 const BASE = "http://api.test/api/v1/system/message-queue/settings";
+const SESSION_CAPACITY_BASE = "http://api.test/api/v1/system/session-capacity/settings";
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
 const fetchSpy = vi.fn<(...args: [FetchInput, FetchInit?]) => Promise<Response>>();
@@ -103,6 +107,41 @@ describe("message queue settings api", () => {
     await updateMessageQueueSettings({ auto_merge_enabled: false });
 
     expect(lastCall().init?.body).toBe(JSON.stringify({ auto_merge_enabled: false }));
+  });
+});
+
+describe("session capacity settings api", () => {
+  it("fetches the install-wide setting without cache", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        settings: { enabled: false, max_sessions: 5 },
+        effective: { enabled: false, max_sessions: 0, source: "default", locked: false },
+      }),
+    );
+
+    const response = await fetchSessionCapacitySettings({ cache: "force-cache" });
+
+    expect(lastCall().url).toBe(SESSION_CAPACITY_BASE);
+    expect(lastCall().init?.cache).toBe("no-store");
+    expect(response.settings.max_sessions).toBe(5);
+  });
+
+  it("PATCHes enabled state and maximum atomically", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        settings: { enabled: true, max_sessions: 8 },
+        effective: { enabled: true, max_sessions: 8, source: "setting", locked: false },
+      }),
+    );
+
+    await updateSessionCapacitySettings(
+      { enabled: true, max_sessions: 8 },
+      { init: { method: "GET", body: JSON.stringify({ enabled: false }) } },
+    );
+
+    expect(lastCall().url).toBe(SESSION_CAPACITY_BASE);
+    expect(lastCall().init?.method).toBe("PATCH");
+    expect(lastCall().init?.body).toBe(JSON.stringify({ enabled: true, max_sessions: 8 }));
   });
 });
 
@@ -211,6 +250,36 @@ describe("resolveAgentModelConfig", () => {
       model: "opencode/gpt-5.6",
       mode: "build",
       config_options: { reasoning_effort: "high" },
+    });
+  });
+});
+
+describe("probeAgentProfile", () => {
+  it("posts a complete launch snapshot to the profile probe route", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ agent_name: "codex-acp", status: "ok", models: [], error: null }),
+    );
+
+    await probeAgentProfile("codex-acp", {
+      profile_id: "profile-1",
+      launch_settings: {
+        env_vars: [{ key: "CODEX_PATH", value: "/opt/codex" }],
+        cli_flags: [{ flag: "--profile", description: "", enabled: true }],
+        command_prefix: "npx --",
+      },
+      refresh: true,
+    });
+
+    expect(lastCall().url).toBe("http://api.test/api/v1/agent-models/codex-acp/probe");
+    expect(lastCall().init?.method).toBe("POST");
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      profile_id: "profile-1",
+      launch_settings: {
+        env_vars: [{ key: "CODEX_PATH", value: "/opt/codex" }],
+        cli_flags: [{ flag: "--profile", description: "", enabled: true }],
+        command_prefix: "npx --",
+      },
+      refresh: true,
     });
   });
 });

@@ -22,7 +22,21 @@ func newTestDB(t *testing.T) *sqlx.DB {
 	raw.SetMaxIdleConns(1)
 	db := sqlx.NewDb(raw, "sqlite3")
 	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.Exec(`CREATE TABLE tasks (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL DEFAULT '',
+		archived_at DATETIME
+	)`); err != nil {
+		t.Fatalf("create tasks table: %v", err)
+	}
 	return db
+}
+
+func seedAzureTask(t *testing.T, store *Store, taskID, workspaceID string) {
+	t.Helper()
+	if _, err := store.db.Exec(`INSERT OR IGNORE INTO tasks (id, workspace_id) VALUES (?, ?)`, taskID, workspaceID); err != nil {
+		t.Fatalf("seed task %s: %v", taskID, err)
+	}
 }
 
 func TestStoreConfigRoundTripAndHealth(t *testing.T) {
@@ -356,7 +370,7 @@ func TestStoreTaskPRConcurrentUpsertPreservesStableIdentity(t *testing.T) {
 
 func TestStoreTaskPRListsByTaskAndWorkspace(t *testing.T) {
 	db := newTestDB(t)
-	if _, err := db.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL)`); err != nil {
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL)`); err != nil {
 		t.Fatalf("create tasks table: %v", err)
 	}
 	if _, err := db.Exec(`INSERT INTO tasks (id, workspace_id) VALUES ('task-a', 'ws-a'), ('task-b', 'ws-a'), ('task-c', 'ws-b')`); err != nil {

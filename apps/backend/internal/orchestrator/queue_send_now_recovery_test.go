@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync/atomic"
 
@@ -108,6 +109,196 @@ func TestSendNowAcceptedClaimIsAcknowledgedAfterProcessRestart(t *testing.T) {
 	}
 	if status := restartedQueue.GetStatus(ctx, "session-1"); status.Count != 0 {
 		t.Fatalf("accepted Send Now source was restored after restart: %#v", status.Entries)
+	}
+}
+
+func TestTransferredIdentityAwareSendNowClaimReconcilesAfterProcessRestart(t *testing.T) {
+	for _, accepted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("accepted=%t", accepted), func(t *testing.T) {
+			ctx := context.Background()
+			dbPath := filepath.Join(t.TempDir(), "queue.db")
+			queue, db, sourceIdentity, destinationIdentity := newIdentityWorkflowTransferQueue(t, dbPath, true)
+			source, err := queue.QueueMessageWithMetadataForSession(
+				ctx, sourceIdentity, "transferred prompt", "", "user", false, nil, nil,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			claim, err := queue.ClaimSendNowForSession(ctx, sourceIdentity, []messagequeue.QueuedMessage{*source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if accepted {
+				if err := queue.MarkPendingSendNowClaimAccepted(ctx, claim); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := queue.TransferSessionWithDurableAttachmentPreparation(
+				ctx, sourceIdentity.TaskID, sourceIdentity.SessionID, destinationIdentity.SessionID, nil, nil,
+			); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`DELETE FROM task_sessions WHERE id = ?`, sourceIdentity.SessionID); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			restartedQueue, restartedDB, _, _ := newIdentityWorkflowTransferQueue(t, dbPath, false)
+			t.Cleanup(func() { _ = restartedDB.Close() })
+			restarted := &Service{logger: testLogger(), messageQueue: restartedQueue}
+			if err := restarted.reconcilePendingSendNowClaimsOnStartup(ctx); err != nil {
+				t.Fatal(err)
+			}
+			status := restartedQueue.GetStatus(ctx, destinationIdentity.SessionID)
+			if accepted && status.Count != 0 {
+				t.Fatalf("accepted transferred claim restored after restart: %#v", status.Entries)
+			}
+			if !accepted && (len(status.Entries) != 1 || status.Entries[0].ID != source.ID) {
+				t.Fatalf("unaccepted transferred claim after restart = %#v, want source %s", status.Entries, source.ID)
+			}
+		})
+	}
+}
+
+func newIdentityWorkflowTransferQueue(
+	t *testing.T,
+	dbPath string,
+	seed bool,
+) (*messagequeue.Service, *sqlx.DB, messagequeue.QueueSessionIdentity, messagequeue.QueueSessionIdentity) {
+	t.Helper()
+	raw, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw.SetMaxOpenConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, archived_at TIMESTAMP, updated_at TIMESTAMP)`,
+		`CREATE TABLE IF NOT EXISTS task_sessions (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, queue_incarnation_id TEXT NOT NULL)`,
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			_ = db.Close()
+			t.Fatal(err)
+		}
+	}
+	source := messagequeue.QueueSessionIdentity{TaskID: "task-1", SessionID: "session-old", SessionIncarnationID: "incarnation-old"}
+	destination := messagequeue.QueueSessionIdentity{TaskID: source.TaskID, SessionID: "session-new", SessionIncarnationID: "incarnation-new"}
+	if seed {
+		if _, err := db.Exec(`INSERT OR IGNORE INTO tasks (id, updated_at) VALUES (?, CURRENT_TIMESTAMP)`, source.TaskID); err != nil {
+			_ = db.Close()
+			t.Fatal(err)
+		}
+		for _, identity := range []messagequeue.QueueSessionIdentity{source, destination} {
+			if _, err := db.Exec(`
+				INSERT INTO task_sessions (id, task_id, queue_incarnation_id) VALUES (?, ?, ?)
+				ON CONFLICT(id) DO UPDATE SET task_id = excluded.task_id, queue_incarnation_id = excluded.queue_incarnation_id
+			`, identity.SessionID, identity.TaskID, identity.SessionIncarnationID); err != nil {
+				_ = db.Close()
+				t.Fatal(err)
+			}
+		}
+	}
+	repo, err := messagequeue.NewSQLiteRepository(db, db)
+	if err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	return messagequeue.NewService(repo, messagequeue.DefaultMaxPerSession, testLogger()), db, source, destination
+}
+
+func TestUnknownSendNowOutcomeParksWithRecoveryBlock(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-unknown-send-now", "session-unknown-send-now", "step-1")
+	queue, db := newWorkflowTransferQueue(t, t.TempDir()+"/queue.db")
+	t.Cleanup(func() { _ = db.Close() })
+	source, err := queue.QueueMessage(
+		ctx, "session-unknown-send-now", "task-unknown-send-now", "unknown Send Now prompt", "", messagequeue.QueuedByUser, false, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queue.ClaimSendNow(ctx, source.SessionID, []messagequeue.QueuedMessage{*source}); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := &Service{logger: testLogger(), repo: repo, messageQueue: queue}
+	if err := svc.reconcilePendingSendNowClaimsOnStartup(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if status := queue.GetStatus(ctx, source.SessionID); status.Count != 0 {
+		t.Fatalf("unknown Send Now claim was restored at startup: %#v", status.Entries)
+	}
+	claims, err := queue.ListPendingSendNowClaims(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claims) != 1 || claims[0].Claim.Dispatch.ID == "" {
+		t.Fatalf("pending Send Now claims = %#v, want one parked claim", claims)
+	}
+	block, err := svc.GetOpenSessionRecoveryBlock(ctx, source.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if block == nil || block.Reason != "unknown_send_now_outcome" {
+		t.Fatalf("recovery block = %#v, want unknown_send_now_outcome", block)
+	}
+}
+
+func TestSessionRecoveryResolutionRestoresPendingSendNowClaim(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-send-now-recovery", "session-send-now-recovery", "step-1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	queue, db := newWorkflowTransferQueue(t, t.TempDir()+"/queue.db")
+	t.Cleanup(func() { _ = db.Close() })
+	svc.messageQueue = queue
+
+	session, err := repo.GetTaskSession(ctx, "session-send-now-recovery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	incarnationID := session.QueueIncarnationID
+	if incarnationID == "" {
+		incarnationID = session.ID
+	}
+	if err := repo.UpsertSessionRecoveryBlock(ctx, &models.SessionRecoveryBlock{
+		ID:                 "block-send-now-recovery",
+		SessionID:          session.ID,
+		IncarnationID:      incarnationID,
+		ExpectedGeneration: 0,
+		Reason:             "unknown_send_now_outcome",
+		State:              models.RecoveryBlockOpen,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	source, err := svc.messageQueue.QueueMessage(
+		ctx, session.ID, session.TaskID, "pending Send Now prompt", "", messagequeue.QueuedByUser, false, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.messageQueue.ClaimSendNow(ctx, session.ID, []messagequeue.QueuedMessage{*source}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.resolveSessionRecoveryBlock(ctx, session.ID, "continue_from_history"); err != nil {
+		t.Fatal(err)
+	}
+	status := svc.messageQueue.GetStatus(ctx, session.ID)
+	if len(status.Entries) != 1 || status.Entries[0].ID != source.ID {
+		t.Fatalf("queue after session recovery = %#v, want source %s", status.Entries, source.ID)
+	}
+	claims, err := svc.messageQueue.ListPendingSendNowClaims(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claims) != 0 {
+		t.Fatalf("pending Send Now claim was not settled after recovery: %#v", claims)
 	}
 }
 

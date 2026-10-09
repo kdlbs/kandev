@@ -2,14 +2,84 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Route } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import type { StorageMaintenanceSettings } from "../../../lib/types/system";
 import {
   mockProgressiveStorageOverview,
   mockTemporaryArtifactOverview,
+  requestStorageMaintenanceSettings,
+  restoreStorageMaintenanceSettings,
   seedManagedGoCache,
 } from "../../helpers/storage-maintenance";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
 test.describe("Mobile storage maintenance", () => {
+  let baselineSettings: StorageMaintenanceSettings | null = null;
+  const fixturePaths: string[] = [];
+
+  test.beforeEach(async ({ apiClient }) => {
+    baselineSettings = (await requestStorageMaintenanceSettings(apiClient, "GET")).settings;
+  });
+
+  test.afterEach(async ({ apiClient }) => {
+    if (baselineSettings) {
+      await restoreStorageMaintenanceSettings(apiClient, baselineSettings);
+      baselineSettings = null;
+    }
+    for (const fixturePath of fixturePaths.splice(0)) {
+      fs.rmSync(fixturePath, { recursive: true, force: true });
+    }
+  });
+
+  test("saves the Go busy-cleanup policy with a touch-sized switch", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const baseline = (await requestStorageMaintenanceSettings(apiClient, "GET")).settings;
+    const offSettings = {
+      ...baseline,
+      go_cache: { ...baseline.go_cache, allow_cleanup_while_busy: false },
+    };
+    try {
+      await requestStorageMaintenanceSettings(apiClient, "PATCH", offSettings);
+      await testPage.goto("/settings/system/storage");
+      const toggle = testPage.getByTestId("storage-go-cache-allow-busy");
+      await expect(toggle).toHaveAttribute("data-state", "unchecked");
+      await expect(testPage.getByTestId("storage-go-cache-busy-warning")).toContainText(
+        "Active builds may fail and need a retry.",
+      );
+      const box = await toggle.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+
+      await toggle.tap();
+      await testPage.getByRole("button", { name: "Save changes" }).click();
+      await expect(testPage.getByText("Storage policy saved")).toBeVisible();
+      await testPage.reload();
+      await expect(testPage.getByTestId("storage-go-cache-allow-busy")).toHaveAttribute(
+        "data-state",
+        "checked",
+      );
+      expect(
+        (await requestStorageMaintenanceSettings(apiClient, "GET")).settings.go_cache
+          .allow_cleanup_while_busy,
+      ).toBe(true);
+
+      await testPage.getByTestId("storage-go-cache-allow-busy").tap();
+      await testPage.getByRole("button", { name: "Save changes" }).click();
+      await expect(testPage.getByText("Storage policy saved")).toBeVisible();
+      await testPage.reload();
+      await expect(testPage.getByTestId("storage-go-cache-allow-busy")).toHaveAttribute(
+        "data-state",
+        "unchecked",
+      );
+      expect(
+        await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    } finally {
+      await restoreStorageMaintenanceSettings(apiClient, baseline);
+    }
+  });
+
   test("keeps temporary artifact cleanup reachable with a touch-sized action", async ({
     testPage,
     prCapture,
@@ -45,7 +115,7 @@ test.describe("Mobile storage maintenance", () => {
     expect(box).not.toBeNull();
     expect(box!.height).toBeGreaterThanOrEqual(44);
     await cleanButton.tap();
-    await expect(testPage.getByText("Clean stale Kandev artifacts?")).toBeVisible();
+    await expect(testPage.getByText("Clean inactive Kandev temporary files?")).toBeVisible();
     await prCapture.screenshot("temporary-artifacts-confirmation", {
       caption: "Mobile storage keeps stale artifact cleanup in a reachable confirmation",
     });
@@ -113,23 +183,26 @@ test.describe("Mobile storage maintenance", () => {
     backend,
   }) => {
     const cache = seedManagedGoCache(backend.tmpDir);
+    fixturePaths.push(cache.artifact);
     const externalGoCache = `${backend.tmpDir}/external-go-cache`;
     fs.mkdirSync(externalGoCache, { recursive: true });
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
     await mobile.mobileMenuButton.click();
-    await testPage.getByRole("link", { name: "Settings" }).click();
+    await testPage.getByRole("link", { name: "Settings", exact: true }).click();
     const index = testPage.getByTestId("settings-index");
     await index.locator('a[href="/settings/system/storage"]').click();
 
     await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
     await expect(testPage.getByTestId("storage-disk-capacity-card")).toBeVisible();
-    await expect(testPage.getByRole("progressbar")).toBeVisible();
+    await expect(
+      testPage.getByTestId("storage-disk-capacity-card").getByRole("progressbar"),
+    ).toBeVisible();
     await testPage
       .getByRole("button", { name: "More information about Scheduled maintenance" })
       .click();
-    await expect(testPage.getByRole("tooltip")).toContainText(
-      "Turning it off does not disable Analyze or Run now",
+    await expect(testPage.getByRole("dialog")).toContainText(
+      "Turning scheduling off does not disable Analyze or Run now",
     );
     await testPage.keyboard.press("Escape");
     await testPage.getByTestId("storage-scheduling-enabled").click();
@@ -176,11 +249,11 @@ test.describe("Mobile storage maintenance", () => {
     await testPage
       .getByRole("button", { name: "More information about Folders Kandev will check" })
       .tap();
-    await expect(testPage.getByRole("tooltip")).toContainText("recursively");
+    await expect(testPage.getByRole("dialog")).toContainText("recursively");
     await testPage.reload();
     await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
     await testPage.getByRole("button", { name: "More information about Quarantine" }).click();
-    await expect(testPage.getByRole("tooltip")).toContainText("recoverable holding area");
+    await expect(testPage.getByRole("dialog")).toContainText("recoverable holding area");
     await expect
       .poll(() =>
         testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -269,7 +342,7 @@ test.describe("Mobile storage maintenance", () => {
       );
     }
     await timingHelp.tap();
-    await expect(testPage.getByRole("tooltip")).toContainText("Scan duration");
+    await expect(testPage.getByRole("dialog")).toContainText("Scan duration");
     await prCapture.screenshot("progressive-analysis-timing", {
       caption: "Mobile storage opens progressive scan timing by touch",
     });

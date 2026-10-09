@@ -56,6 +56,12 @@ func (r *KubernetesExecutor) bootstrapPod(
 	}
 
 	authEnv := kubernetesAuthEnvironment(req.Env, nonce)
+	if getMetadataBool(req.Metadata, metadataKubernetesTaskOwned) {
+		authEnv["HOME"] = kubernetesSessionHome(req)
+		if err := r.writeKubernetesSessionAuth(ctx, runtime, req, pod, profile.MainContainer); err != nil {
+			return err
+		}
+	}
 	authData, err := kubernetesSerializeEnvironment(authEnv)
 	if err != nil {
 		return err
@@ -69,6 +75,15 @@ func (r *KubernetesExecutor) bootstrapPod(
 	}
 	if err := runKubernetesPrepareScript(ctx, runtime.streams, pod, profile.MainContainer); err != nil {
 		return err
+	}
+	if getMetadataBool(req.Metadata, metadataKubernetesTaskOwned) {
+		controlEnv, err := kubernetesSerializeEnvironment(kubernetesAuthEnvironment(nil, nonce))
+		if err != nil {
+			return err
+		}
+		if err := kubernetesWriteFile(ctx, runtime.streams, pod, profile.MainContainer, kubernetesAuthEnvPath, controlEnv, 0o600); err != nil {
+			return err
+		}
 	}
 	if err := kubernetesWriteFile(ctx, runtime.streams, pod, profile.MainContainer,
 		kubernetesStartPath, nil, 0o600); err != nil {
@@ -162,6 +177,12 @@ func kubernetesRuntimeEnvironment(req *ExecutorCreateRequest) map[string]string 
 		kubernetesEnvEnvironmentID:    req.TaskEnvironmentID,
 		kubernetesEnvAgentProfile:     req.OfficeAgentProfileID,
 		kubernetesEnvExecutionProfile: req.AgentProfileID,
+	}
+	if getMetadataBool(req.Metadata, metadataKubernetesTaskOwned) {
+		values[kubernetesEnvInstanceID] = req.TaskEnvironmentID
+		delete(values, kubernetesEnvSessionID)
+		delete(values, kubernetesEnvAgentProfile)
+		delete(values, kubernetesEnvExecutionProfile)
 	}
 	if selectedCheckoutIsPullRequest(req.Metadata) {
 		values[selectedCheckoutMarker] = "1"

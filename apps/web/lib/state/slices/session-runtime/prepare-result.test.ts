@@ -15,9 +15,16 @@ describe("prepareResultToSessionState", () => {
         status: "completed",
         error_message: "boom",
         duration_ms: 1234,
+        preparation_id: "attempt-1",
+        preparation_started_at: "2026-09-28T18:00:00.123456789Z",
         steps: [
           {
             name: "clone",
+            kind: "remote_helper_download",
+            remote_platform: "linux/amd64",
+            mcp_server_id: "server-a",
+            mcp_provider: "cursor",
+            failure_code: "timeout",
             command: "git clone",
             status: "ok",
             output: "done",
@@ -36,9 +43,16 @@ describe("prepareResultToSessionState", () => {
       status: "completed",
       errorMessage: "boom",
       durationMs: 1234,
+      preparationId: "attempt-1",
+      preparationStartedAt: "2026-09-28T18:00:00.123456789Z",
       steps: [
         {
           name: "clone",
+          kind: "remote_helper_download",
+          remotePlatform: "linux/amd64",
+          mcpServerId: "server-a",
+          mcpProvider: "cursor",
+          failureCode: "timeout",
           command: "git clone",
           status: "ok",
           output: "done",
@@ -61,5 +75,62 @@ describe("prepareResultToSessionState", () => {
       durationMs: undefined,
       steps: [],
     });
+  });
+});
+
+describe("prepareResultToSessionState MCP diagnostics", () => {
+  it("hydrates bounded MCP diagnostics and continues to suppress legacy raw MCP fields", () => {
+    const diagnostic = {
+      operation: "enable",
+      stage: "wait",
+      kind: "output_wait_timeout",
+      message: "exec: WaitDelay expired before I/O complete",
+      exit_code: 0,
+    };
+    const result = prepareResultToSessionState("s1", {
+      prepare_result: {
+        steps: [
+          {
+            name: "raw name",
+            kind: "agent_mcp_approval",
+            mcp_server_id: "server-a",
+            status: "failed",
+            command: "raw command",
+            output: "raw stdout",
+            error: "raw stderr",
+            mcp_diagnostic: diagnostic,
+          },
+          {
+            name: "raw name",
+            kind: "agent_mcp_verification",
+            mcp_server_id: "server-b",
+            status: "failed",
+            mcp_diagnostic: { ...diagnostic, stage: "unknown" },
+          },
+        ],
+      },
+    });
+
+    expect(result?.steps).toMatchObject([
+      {
+        name: "",
+        kind: "agent_mcp_approval",
+        mcpServerId: "server-a",
+        status: "failed",
+        mcpDiagnostic: {
+          operation: "enable",
+          stage: "wait",
+          kind: "output_wait_timeout",
+          message: "exec: WaitDelay expired before I/O complete",
+          exitCode: 0,
+        },
+      },
+      {
+        name: "",
+        kind: "agent_mcp_verification",
+        mcpServerId: "server-b",
+        status: "failed",
+      },
+    ]);
   });
 });

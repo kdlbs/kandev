@@ -16,6 +16,35 @@ func TestFromUserSettingsIncludesAtomicRevision(t *testing.T) {
 	}
 }
 
+func TestJiraDefaultViewSettingsContract(t *testing.T) {
+	t.Run("response returns saved ID", func(t *testing.T) {
+		got := FromUserSettings(&models.UserSettings{JiraDefaultViewID: "custom-view"})
+		if got.JiraDefaultViewID != "custom-view" {
+			t.Fatalf("JiraDefaultViewID = %q, want custom-view", got.JiraDefaultViewID)
+		}
+	})
+
+	t.Run("patch distinguishes omission from set and clear", func(t *testing.T) {
+		var omitted UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil {
+			t.Fatalf("decode omitted patch: %v", err)
+		}
+		if omitted.JiraDefaultViewID != nil {
+			t.Fatalf("omitted JiraDefaultViewID = %v, want nil", omitted.JiraDefaultViewID)
+		}
+
+		for _, raw := range []string{`{"jira_default_view_id":"custom-view"}`, `{"jira_default_view_id":""}`} {
+			var req UpdateUserSettingsRequest
+			if err := json.Unmarshal([]byte(raw), &req); err != nil {
+				t.Fatalf("decode %s: %v", raw, err)
+			}
+			if req.JiraDefaultViewID == nil {
+				t.Fatalf("%s did not set JiraDefaultViewID", raw)
+			}
+		}
+	})
+}
+
 func TestSidebarTaskColorAutomationDTOContract(t *testing.T) {
 	value := models.SidebarTaskColorAutomation{
 		Enabled: true,

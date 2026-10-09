@@ -5,23 +5,102 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/kandev/kandev/internal/auth"
 	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
 	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
+	"github.com/kandev/kandev/internal/startup"
+	"github.com/kandev/kandev/internal/system/maintenance"
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
+
+func TestPersistenceMiddlewareRemainsAvailableDuringManagedMaintenance(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		conn, err := sqlx.Open("sqlite3", ":memory:")
+		if err != nil {
+			t.Fatalf("open sqlite: %v", err)
+		}
+		t.Cleanup(func() { _ = conn.Close() })
+		conn.SetMaxOpenConns(1)
+		if _, err := conn.Exec("CREATE TABLE tasks (id TEXT PRIMARY KEY)"); err != nil {
+			t.Fatalf("create tasks table: %v", err)
+		}
+		pool := db.NewPool(conn, conn)
+		tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{
+			ID: "task", OwnerPackage: "internal/task", RequiredTables: []string{"tasks"},
+			Sweep: startup.StepStoresRepositories,
+		}})
+		if err != nil {
+			t.Fatalf("NewTracker: %v", err)
+		}
+		if err := tracker.RecordSuccess("task"); err != nil {
+			t.Fatalf("RecordSuccess: %v", err)
+		}
+		core, logs := observer.New(zap.DebugLevel)
+		log, err := logger.NewFromZap(zap.New(core))
+		if err != nil {
+			t.Fatalf("NewFromZap: %v", err)
+		}
+		health := requiredstores.NewHealth(tracker, pool, log)
+		if err := health.Check(context.Background()); err != nil {
+			t.Fatalf("initial Check: %v", err)
+		}
+
+		release, ok := maintenance.ForPool(pool).TryAcquire()
+		if !ok {
+			t.Fatal("maintenance lease unavailable")
+		}
+		t.Cleanup(release)
+		tx, err := conn.Beginx()
+		if err != nil {
+			t.Fatalf("begin writer transaction: %v", err)
+		}
+		t.Cleanup(func() { _ = tx.Rollback() })
+
+		health.SetInterval(time.Millisecond)
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		stop := health.Start(ctx)
+		t.Cleanup(func() { _ = stop() })
+		time.Sleep(time.Millisecond)
+		synctest.Wait()
+
+		if !health.Healthy() {
+			t.Fatal("required persistence became unhealthy during managed maintenance")
+		}
+		if count := logs.FilterMessage("required persistence probe deferred during database maintenance").Len(); count == 0 {
+			t.Fatal("periodic health probe did not report maintenance deferral")
+		}
+
+		router := gin.New()
+		router.Use(requiredPersistenceMiddleware(health))
+		router.GET("/api/v1/tasks", func(c *gin.Context) { c.Status(http.StatusOK) })
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("stateful request status = %d, want %d", rec.Code, http.StatusOK)
+		}
+	})
+}
 
 func TestRequiredPersistenceMiddlewareBlocksStatefulTrafficButAllowsDiagnostics(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{
 		ID: "task", OwnerPackage: "internal/task", RequiredTables: []string{"tasks"},
+		Sweep: startup.StepStoresRepositories,
 	}})
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)
@@ -74,6 +153,7 @@ func TestRequiredPersistenceMiddlewareRunsBeforeAuthentication(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{
 		ID: "task", OwnerPackage: "internal/task", RequiredTables: []string{"tasks"},
+		Sweep: startup.StepStoresRepositories,
 	}})
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)
@@ -141,6 +221,7 @@ func TestRequiredPersistenceMiddlewarePrecedesDatabaseBackedAuthentication(t *te
 
 	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{
 		ID: "task", OwnerPackage: "internal/task", RequiredTables: []string{"tasks"},
+		Sweep: startup.StepStoresRepositories,
 	}})
 	if err != nil {
 		t.Fatalf("NewTracker: %v", err)

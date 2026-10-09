@@ -1,11 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
-	"go.uber.org/zap"
+	"image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,10 +13,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/previewfeedback"
 	"github.com/kandev/kandev/internal/task/repository"
+	"go.uber.org/zap"
 )
 
 const (
@@ -27,6 +30,7 @@ const (
 	MaxAttachmentCount           = models.MaxMessageAttachmentCount
 	attachmentDeliveryModePrompt = "prompt"
 	attachmentDeliveryModePath   = "path"
+	previewScreenshotMimeType    = "image/png"
 )
 
 var (
@@ -265,6 +269,90 @@ func (s *AttachmentService) Open(ctx context.Context, ownerID, id string) (*mode
 	return attachment, file, nil
 }
 
+// ValidatePreviewScreenshot verifies task-feedback screenshot bytes before the
+// repository changes their staged claim. Already claimed task-feedback bytes
+// are accepted so a lost create response can be retried idempotently.
+func (s *AttachmentService) ValidatePreviewScreenshot(
+	ctx context.Context,
+	ownerID, workspaceID, taskID, id string,
+) error {
+	attachment, file, err := s.Open(ctx, ownerID, id)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+
+	if err := validatePreviewScreenshotMetadata(attachment, ownerID, workspaceID, taskID); err != nil {
+		return err
+	}
+	return validatePreviewScreenshotFile(file, attachment.SizeBytes)
+}
+
+func validatePreviewScreenshotMetadata(
+	attachment *models.TaskMessageAttachment,
+	ownerID, workspaceID, taskID string,
+) error {
+	if !validPreviewScreenshotClaim(attachment, ownerID, workspaceID, taskID) {
+		return ErrAttachmentClaimConflict
+	}
+	if attachment.MimeType != previewScreenshotMimeType || attachment.Kind != "image" ||
+		attachment.DeliveryMode != attachmentDeliveryModePrompt {
+		return fmt.Errorf("%w: screenshot attachment metadata", previewfeedback.ErrCaptureInvalid)
+	}
+	if attachment.SizeBytes <= 0 || attachment.SizeBytes > previewfeedback.MaxScreenshotBytes {
+		return previewfeedback.ErrCaptureTooLarge
+	}
+	return nil
+}
+
+func validatePreviewScreenshotFile(file *os.File, expectedSize int64) error {
+	stat, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect preview screenshot: %w", err)
+	}
+	if stat.Size() != expectedSize || stat.Size() > previewfeedback.MaxScreenshotBytes {
+		return fmt.Errorf("%w: screenshot byte count", previewfeedback.ErrCaptureInvalid)
+	}
+
+	var signature [8]byte
+	if _, err := io.ReadFull(file, signature[:]); err != nil ||
+		!bytes.Equal(signature[:], []byte("\x89PNG\r\n\x1a\n")) {
+		return fmt.Errorf("%w: invalid PNG signature", previewfeedback.ErrCaptureInvalid)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("seek preview screenshot: %w", err)
+	}
+	config, err := png.DecodeConfig(io.LimitReader(file, previewfeedback.MaxScreenshotBytes+1))
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		return fmt.Errorf("%w: invalid PNG metadata", previewfeedback.ErrCaptureInvalid)
+	}
+	if uint64(config.Width)*uint64(config.Height) > uint64(previewfeedback.MaxScreenshotPixels) {
+		return previewfeedback.ErrCaptureTooLarge
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("seek preview screenshot for decode: %w", err)
+	}
+	if _, err := png.Decode(io.LimitReader(file, previewfeedback.MaxScreenshotBytes+1)); err != nil {
+		return fmt.Errorf("%w: invalid PNG data", previewfeedback.ErrCaptureInvalid)
+	}
+	return nil
+}
+
+func validPreviewScreenshotClaim(
+	attachment *models.TaskMessageAttachment,
+	ownerID, workspaceID, taskID string,
+) bool {
+	if attachment == nil || attachment.OwnerID != ownerID || attachment.WorkspaceID != workspaceID {
+		return false
+	}
+	if attachment.State == models.AttachmentStateStaged {
+		return attachment.TaskID == "" && attachment.SessionID == "" &&
+			attachment.MessageID == "" && attachment.QueueID == ""
+	}
+	return attachment.State == models.AttachmentStateClaimed && attachment.TaskID == taskID &&
+		attachment.SessionID == "" && attachment.MessageID == "" && attachment.QueueID == ""
+}
+
 // OpenClaimed opens a descriptor for the internal lifecycle delivery path.
 // It deliberately authorizes by the claimed task/session binding rather than
 // accepting a caller-supplied owner, and never exposes the storage key.
@@ -288,6 +376,31 @@ func (s *AttachmentService) OpenClaimed(ctx context.Context, id, taskID, session
 		return nil, "", "", 0, fmt.Errorf("open claimed attachment: %w", err)
 	}
 	return file, attachment.Name, attachment.MimeType, attachment.SizeBytes, nil
+}
+
+// ResolveClaimed returns the canonical registry record for one task-owned
+// attachment. A session-scoped claim may be unbound until the task's first
+// session is created, but a claim for another task or session is rejected.
+func (s *AttachmentService) ResolveClaimed(
+	ctx context.Context,
+	id, taskID, sessionID string,
+) (*models.TaskMessageAttachment, error) {
+	attachment, err := s.repo.GetMessageAttachment(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if attachment == nil || attachment.State != models.AttachmentStateClaimed ||
+		attachment.TaskID != taskID || (attachment.SessionID != "" && attachment.SessionID != sessionID) {
+		return nil, ErrAttachmentForbidden
+	}
+	if strings.TrimSpace(attachment.WorkspaceID) == "" ||
+		ValidateAttachmentMetadata(attachment.Name, attachment.MimeType, attachment.Kind, attachment.DeliveryMode) != nil ||
+		attachment.SizeBytes < 0 || attachment.SizeBytes > MaxAttachmentBytes ||
+		attachment.StorageKey == "" || filepath.Base(attachment.StorageKey) != attachment.StorageKey {
+		return nil, ErrAttachmentInvalid
+	}
+	canonical := *attachment
+	return &canonical, nil
 }
 
 func (s *AttachmentService) Delete(ctx context.Context, ownerID, id string) error {
@@ -349,6 +462,27 @@ func (s *AttachmentService) RestoreQueued(
 		return errors.New("queued attachment admission is unavailable")
 	}
 	return repo.RestoreQueuedMessageAttachments(ctx, ids, ownerID, taskID, sessionID, queueID)
+}
+
+// RestoreLaunchClaim returns unreferenced launch attachments to staging after
+// synchronous launch admission fails, so an explicit retry can reuse the files.
+func (s *AttachmentService) RestoreLaunchClaim(
+	ctx context.Context,
+	ownerID, taskID, sessionID string,
+	ids []string,
+) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	repo, ok := s.repo.(repository.LaunchAttachmentRollbackRepository)
+	if !ok {
+		return errors.New("launch attachment rollback is unavailable")
+	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	return repo.RestoreLaunchMessageAttachments(
+		ctx, ids, ownerID, taskID, sessionID, time.Now().UTC().Add(AttachmentStagedTTL),
+	)
 }
 
 // Release removes claimed descriptors that are no longer referenced by a

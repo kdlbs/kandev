@@ -293,6 +293,7 @@ function BuiltInPresetItems({ onApply }: { onApply: (presetId: BuiltInLayoutProf
 
 function useApplySavedLayout() {
   const applyCustomLayout = useDockviewStore((s) => s.applyCustomLayout);
+  const currentLayoutEnvId = useDockviewStore((s) => s.currentLayoutEnvId);
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const appStore = useAppStoreApi();
@@ -316,10 +317,18 @@ function useApplySavedLayout() {
           layout: layout.layout,
           createdAt: layout.created_at,
         },
-        { activeSessionId, sessionIds },
+        { activeSessionId, sessionIds, envId: currentLayoutEnvId },
       );
     },
-    [activeSessionId, activeTaskId, appStore, applyCustomLayout, loadSessions, taskSessionsLoaded],
+    [
+      activeSessionId,
+      activeTaskId,
+      appStore,
+      applyCustomLayout,
+      currentLayoutEnvId,
+      loadSessions,
+      taskSessionsLoaded,
+    ],
   );
 }
 

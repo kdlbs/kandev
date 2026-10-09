@@ -717,6 +717,30 @@ func TestPublishTaskUpdated_EmitsAutopilot(t *testing.T) {
 	}
 }
 
+func TestPublishTaskUpdatedEmitsOfficeIdentityExplicitly(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		isFromOffice bool
+	}{
+		{name: "office", isFromOffice: true},
+		{name: "kanban", isFromOffice: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, eventBus, _ := createTestService(t)
+			svc.PublishTaskUpdated(context.Background(), &models.Task{
+				ID: "task-office-identity", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+				IsFromOffice: tc.isFromOffice,
+			})
+
+			data := singlePublishedEventData(t, eventBus)
+			got, ok := data["is_from_office"].(bool)
+			if !ok || got != tc.isFromOffice {
+				t.Fatalf("is_from_office payload = %#v, want %t", data["is_from_office"], tc.isFromOffice)
+			}
+		})
+	}
+}
+
 func TestPublishTaskUpdatedRedactsDeferredLaunchAttribution(t *testing.T) {
 	svc, eventBus, _ := createTestService(t)
 	task := &models.Task{

@@ -32,7 +32,7 @@ test.describe("Agent-generated task titles on mobile", () => {
       expect(
         await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);
-      await testPage.getByTestId("mobile-session-menu").click();
+      await testPage.getByTestId("mobile-task-picker-trigger").click();
       const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
       const taskRow = taskSheet
         .getByTestId("sidebar-task-item")

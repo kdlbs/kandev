@@ -20,6 +20,7 @@ type mockTaskCreator struct {
 
 func (m *mockTaskCreator) CreateOfficeTaskAsAgent(
 	_ context.Context, workspaceID, projectID, assigneeAgentID, title, description string,
+	metadata map[string]interface{},
 ) (string, error) {
 	m.agentCalls = append(m.agentCalls, createTaskCall{
 		WorkspaceID:     workspaceID,
@@ -27,6 +28,7 @@ func (m *mockTaskCreator) CreateOfficeTaskAsAgent(
 		AssigneeAgentID: assigneeAgentID,
 		Title:           title,
 		Description:     description,
+		Metadata:        metadata,
 	})
 	id := m.taskID
 	if id == "" {
@@ -41,6 +43,7 @@ type createTaskCall struct {
 	AssigneeAgentID string
 	Title           string
 	Description     string
+	Metadata        map[string]interface{}
 }
 
 func (m *mockTaskCreator) CreateOfficeTask(
@@ -76,7 +79,7 @@ func TestCreateOfficeTaskAsAgent_WorkerCanCreate(t *testing.T) {
 	}
 
 	taskID, err := svc.CreateOfficeTaskAsAgent(
-		ctx, caller.ID, "ws-1", "project-1", "agent-assignee", "Build widget", "A description",
+		ctx, caller.ID, "ws-1", "project-1", "agent-assignee", "Build widget", "A description", "",
 	)
 	if err != nil {
 		t.Fatalf("CreateOfficeTaskAsAgent failed for worker: %v", err)
@@ -104,7 +107,7 @@ func TestCreateOfficeTaskAsAgent_NilCreatorReturnsError(t *testing.T) {
 	ctx := context.Background()
 
 	// Empty callerAgentID bypasses permission check; the nil creator path is reached.
-	_, err := svc.CreateOfficeTaskAsAgent(ctx, "", "ws-1", "", "", "Task", "")
+	_, err := svc.CreateOfficeTaskAsAgent(ctx, "", "ws-1", "", "", "Task", "", "")
 	if err == nil {
 		t.Fatal("expected error when task creator is nil")
 	}
@@ -116,7 +119,7 @@ func TestCreateOfficeTaskAsAgent_EmptyCallerSkipsCheck(t *testing.T) {
 	ctx := context.Background()
 
 	// Empty callerAgentID = internal caller; no permission check performed.
-	_, err := svc.CreateOfficeTaskAsAgent(ctx, "", "ws-1", "", "", "Internal task", "")
+	_, err := svc.CreateOfficeTaskAsAgent(ctx, "", "ws-1", "", "", "Internal task", "", "")
 	if err != nil {
 		t.Fatalf("expected success with empty caller: %v", err)
 	}
@@ -141,7 +144,7 @@ func TestCreateOfficeTaskAsAgent_ForbiddenWhenPermissionMissing(t *testing.T) {
 		t.Fatalf("create caller: %v", err)
 	}
 
-	_, err := svc.CreateOfficeTaskAsAgent(ctx, caller.ID, "ws-1", "", "", "Blocked task", "")
+	_, err := svc.CreateOfficeTaskAsAgent(ctx, caller.ID, "ws-1", "", "", "Blocked task", "", "")
 	if err == nil {
 		t.Fatal("expected ErrForbidden, got nil")
 	}

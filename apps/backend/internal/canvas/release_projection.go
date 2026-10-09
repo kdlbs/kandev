@@ -37,6 +37,11 @@ func releaseMetadata(release plugininstances.Release, scope string, grants []plu
 	}
 }
 
+// ReleaseMetadataForHTTP returns safe manifest fields for host projections.
+func ReleaseMetadataForHTTP(release plugininstances.Release, scope string, grants []plugininstances.Grant) *ReleaseMetadata {
+	return releaseMetadata(release, scope, grants)
+}
+
 type manifestSeed struct {
 	PackageID        string
 	Version          string
@@ -77,7 +82,7 @@ func effectiveGrantProjection(instance plugininstances.Instance, summary Permiss
 	declared := permissionKeys(summary)
 	result := make([]GrantProjection, 0, len(grants))
 	for _, grant := range grants {
-		if !grantScopeCovers(grant.ScopeCeiling, instance.ScopeKind) {
+		if !grantScopeCovers(grant.ScopeCeiling, instance.EffectiveDataScopeKind()) {
 			continue
 		}
 		permission := grant.PermissionKind + ":" + grant.Resource

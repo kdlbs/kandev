@@ -117,6 +117,12 @@ func (m *workspaceSourceMaterializer) MaterializeWorkspaceSources(ctx context.Co
 	if state == nil || state.environment == nil {
 		return &taskservice.WorkspaceSourceMaterializationResult{}, nil
 	}
+	if state.environment.Status == models.TaskEnvironmentStatusCreating ||
+		(isHostWorkspaceExecutor(state.environment.ExecutorType) && state.environment.TaskDirName == "") {
+		m.logger.Info("deferring workspace source materialization until the task environment is provisioned",
+			zap.String("task_id", taskID), zap.String("task_environment_id", state.environment.ID))
+		return &taskservice.WorkspaceSourceMaterializationResult{}, nil
+	}
 	if !isHostWorkspaceExecutor(state.environment.ExecutorType) {
 		if !models.IsRemoteExecutorType(models.ExecutorType(state.environment.ExecutorType)) {
 			return nil, fmt.Errorf(
@@ -728,7 +734,7 @@ func (m *workspaceSourceMaterializer) materializeWorktreeSources(ctx context.Con
 			if m.branches == nil {
 				return nil, nil, fmt.Errorf("worktree repository materializer is unavailable")
 			}
-			materialization, err := m.branches.materializeUnfinalized(ctx, taskID, source.Repository.ID)
+			materialization, err := m.branches.materializeUnfinalized(ctx, taskID, source.Repository.ID, nil)
 			if err != nil {
 				return nil, nil, err
 			}

@@ -92,7 +92,9 @@ The workflow owns three repository label definitions:
 | `medium` | `FBCA04` | Pull request changes 11-50 application files |
 | `big` | `D93F0B` | Pull request changes 51 or more application files |
 
-The workflow creates a missing definition before it changes pull request labels. It does not replace the color or description of an existing label.
+The workflow creates the selected definition only when applying that label shows
+that its repository definition is missing. It does not preflight all three
+definitions and does not replace the color or description of an existing label.
 
 ## Control flow
 
@@ -100,8 +102,11 @@ The workflow creates a missing definition before it changes pull request labels.
 2. The workflow reads all available changed-file pages for the current pull request.
 3. The workflow stops before mutations if the changed-file result can be incomplete.
 4. The workflow filters the paths and calculates the target size label.
-5. The workflow reads the three repository label definitions and creates missing definitions. If another run created a label after the read, a 422 `already_exists` response is re-read as success; other errors fail the job.
-6. The workflow adds the target label if the pull request does not have it.
+5. The workflow reads the current pull request labels once.
+6. If the target label is absent, the workflow applies it directly. A narrowly
+   identified missing-definition response creates only the target definition and
+   retries the apply. A concurrent `already_exists` creation converges on the
+   same retry path.
 7. The workflow removes the other size labels if the pull request has them.
 8. The workflow writes the counted-file total and final label to the step summary.
 
@@ -113,7 +118,7 @@ The GitHub files endpoint returns at most 3,000 files. A result with 3,000 files
 
 A changed-file API error also fails before a label mutation. The current size labels remain unchanged in both cases.
 
-A label-definition or label-mutation error fails the job. A concurrent label-definition creation that returns 422 with `already_exists` is re-read and does not fail the run. A retry reads current GitHub state and converges on one target label.
+A label-definition or label-mutation error fails the job. A concurrent label-definition creation that returns 422 with `already_exists` is accepted before the target label apply is retried. A later workflow retry reads current GitHub state and converges on one target label.
 
 The workflow adds the target before it removes stale labels. A partial mutation can temporarily leave two size labels, but it does not leave the pull request unlabeled.
 
@@ -132,6 +137,8 @@ The workflow passes repository and pull request values as API parameters. It doe
 The step summary shows the pull request number, counted-file total, and selected label. API errors remain visible in the workflow result.
 
 The contract test covers the event list, permission block, pagination, file filter, limits, label definitions, mutation order, and trusted execution boundary.
+It also rejects unconditional repository label-definition reads and verifies the
+missing-target recovery path.
 
 ## Related decisions
 

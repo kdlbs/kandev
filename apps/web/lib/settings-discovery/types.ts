@@ -38,6 +38,8 @@ export type SettingsDiscoveryContext = {
   showAccount: boolean;
   showUsers: boolean;
   showOrganizations: boolean;
+  /** Gates the per-workspace Coordinators entry. Defaults to false (flag off). */
+  coordinatorEnabled?: boolean;
   workspaces: Array<{ id: string; name: string }>;
   agents: Array<{
     name: string;

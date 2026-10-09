@@ -26,6 +26,8 @@ class SpecLinterTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        self.test_hooks = self.root / ".empty-git-hooks"
+        self.test_hooks.mkdir()
         self.config = {
             "version": 1,
             "limits": {
@@ -46,8 +48,9 @@ class SpecLinterTest(unittest.TestCase):
         return path
 
     def git(self, *args: str) -> None:
+        # Synthetic history must not depend on machine-wide Git hooks.
         subprocess.run(
-            ["git", *args],
+            ["git", "-c", f"core.hooksPath={self.test_hooks}", *args],
             cwd=self.root,
             check=True,
             capture_output=True,

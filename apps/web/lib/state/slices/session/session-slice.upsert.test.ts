@@ -33,6 +33,8 @@ const SESSION_ID = toSessionId("session-1");
 const TS = "2026-04-20T00:00:00Z";
 const LATER_TS = "2026-04-20T00:01:00Z";
 const INCARNATION_ID = "incarnation-1";
+const FIRST_AGENT_EXECUTION_ID = "execution-1";
+const SECOND_AGENT_EXECUTION_ID = "execution-2";
 
 type SessionOverrides = Partial<Omit<TaskSession, "id" | "agent_profile_id" | "repository_id">> & {
   id?: string;
@@ -163,6 +165,115 @@ describe("upsertTaskSessionFromEvent", () => {
 
     expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK_ID]).toBe(true);
     expect(store.getState().taskSessions.items[SESSION_ID].repository_id).toBe("repo-1");
+  });
+});
+
+describe("agentctl readiness from session snapshots", () => {
+  it("promotes a hydrated live session when its ready event was missed", () => {
+    const store = makeStore();
+    store.getState().setSessionAgentctlStatus(SESSION_ID, {
+      status: "starting",
+      agentExecutionId: FIRST_AGENT_EXECUTION_ID,
+    });
+
+    store
+      .getState()
+      .setTaskSessionsForTask(TASK_ID, [makeSession({ state: "WAITING_FOR_INPUT" })], {});
+
+    expect(store.getState().sessionAgentctl.itemsBySessionId[SESSION_ID]).toEqual({
+      status: "ready",
+      agentExecutionId: FIRST_AGENT_EXECUTION_ID,
+      updatedAt: TS,
+    });
+  });
+
+  it("promotes a single hydrated live session when its ready event was missed", () => {
+    const store = makeStore();
+    store.getState().setSessionAgentctlStatus(SESSION_ID, { status: "starting" });
+
+    store.getState().setTaskSession(makeSession({ state: "RUNNING" }));
+
+    expect(store.getState().sessionAgentctl.itemsBySessionId[SESSION_ID]).toEqual({
+      status: "ready",
+      updatedAt: TS,
+    });
+  });
+
+  it("does not promote a parked session to agentctl ready", () => {
+    const store = makeStore();
+    store.getState().setSessionAgentctlStatus(SESSION_ID, { status: "starting" });
+
+    store.getState().setTaskSession(makeSession({ state: "IDLE" }));
+
+    expect(store.getState().sessionAgentctl.itemsBySessionId[SESSION_ID]).toEqual({
+      status: "starting",
+    });
+  });
+
+  it("does not let a late starting event downgrade a live session", () => {
+    const store = makeStore();
+    store.getState().setTaskSession(
+      makeSession({
+        state: "WAITING_FOR_INPUT",
+        agent_execution_id: SECOND_AGENT_EXECUTION_ID,
+      }),
+    );
+
+    store.getState().setSessionAgentctlStatus(SESSION_ID, {
+      status: "starting",
+      agentExecutionId: SECOND_AGENT_EXECUTION_ID,
+      updatedAt: LATER_TS,
+    });
+
+    expect(store.getState().sessionAgentctl.itemsBySessionId[SESSION_ID]).toEqual({
+      status: "ready",
+      agentExecutionId: SECOND_AGENT_EXECUTION_ID,
+      startingExecutionId: SECOND_AGENT_EXECUTION_ID,
+      updatedAt: LATER_TS,
+    });
+  });
+
+  it("keeps a new execution starting while the previous execution's session state is live", () => {
+    const store = makeStore();
+    store
+      .getState()
+      .setTaskSession(
+        makeSession({ state: "WAITING_FOR_INPUT", agent_execution_id: FIRST_AGENT_EXECUTION_ID }),
+      );
+
+    store.getState().setSessionAgentctlStatus(SESSION_ID, {
+      status: "starting",
+      agentExecutionId: SECOND_AGENT_EXECUTION_ID,
+      updatedAt: LATER_TS,
+    });
+
+    expect(store.getState().sessionAgentctl.itemsBySessionId[SESSION_ID]).toEqual({
+      status: "starting",
+      agentExecutionId: SECOND_AGENT_EXECUTION_ID,
+      updatedAt: LATER_TS,
+    });
+  });
+
+  it("promotes a live partial session event after its starting lifecycle event", () => {
+    const store = makeStore();
+    store.getState().setSessionAgentctlStatus(SESSION_ID, {
+      status: "starting",
+      agentExecutionId: FIRST_AGENT_EXECUTION_ID,
+    });
+
+    store.getState().upsertTaskSessionFromEvent(
+      TASK_ID,
+      makeSession({
+        state: "WAITING_FOR_INPUT",
+        agent_execution_id: FIRST_AGENT_EXECUTION_ID,
+      }),
+    );
+
+    expect(store.getState().sessionAgentctl.itemsBySessionId[SESSION_ID]).toEqual({
+      status: "ready",
+      agentExecutionId: FIRST_AGENT_EXECUTION_ID,
+      updatedAt: TS,
+    });
   });
 });
 
@@ -474,7 +585,7 @@ describe("session foreground activity reconciliation", () => {
       .setTaskSessionsForTask(
         TASK_ID,
         [makeSession({ state: "WAITING_FOR_INPUT", repository_id: "repo-1" })],
-        { [SESSION_ID]: 0 },
+        { [SESSION_ID]: { activity: 0, readCursor: 0 } },
       );
 
     const session = store.getState().taskSessions.items[SESSION_ID];
@@ -506,7 +617,7 @@ describe("session foreground activity reconciliation", () => {
         supports_steering: false,
       }),
     );
-    const activityEpochsAtRequestStart = { [SESSION_ID]: 1 };
+    const activityEpochsAtRequestStart = { [SESSION_ID]: { activity: 1, readCursor: 0 } };
     store.getState().upsertTaskSessionFromEvent(
       TASK_ID,
       makeSession({
@@ -534,6 +645,25 @@ describe("session foreground activity reconciliation", () => {
       active_subagent_count: 2,
       supports_steering: true,
       repository_id: "repo-1",
+    });
+  });
+
+  it("preserves a read cursor advanced after a full-session request started", () => {
+    const store = makeStore();
+    store.getState().setTaskSession(makeSession({ last_read_message_id: "message-1" }));
+    const hydrationEpochAtRequestStart = { activity: 0, readCursor: 1 };
+
+    store.getState().updateSessionReadCursor(SESSION_ID, "message-2");
+    store
+      .getState()
+      .setTaskSession(
+        makeSession({ last_read_message_id: "message-1", state: "WAITING_FOR_INPUT" }),
+        hydrationEpochAtRequestStart,
+      );
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      last_read_message_id: "message-2",
+      state: "WAITING_FOR_INPUT",
     });
   });
 

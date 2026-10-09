@@ -64,6 +64,7 @@ const agentInstanceColumns = `
 	COALESCE(skill_ids, '[]')               AS skill_ids,
 	COALESCE(desired_skills, '[]')          AS desired_skills,
 	COALESCE(executor_preference, '')       AS executor_preference,
+	COALESCE(execution_agent_profile_id, '') AS execution_agent_profile_id,
 	COALESCE(pause_reason, '')              AS pause_reason,
 	COALESCE(consecutive_failures, 0)       AS consecutive_failures,
 	NULLIF(failure_threshold, 0)            AS failure_threshold,
@@ -160,7 +161,7 @@ func (r *Repository) insertAgentInstance(
 			max_concurrent_sessions, cooldown_sec, skip_idle_runs,
 			consecutive_failures, failure_threshold,
 			executor_preference, budget_monthly_cents,
-			settings, permissions
+			settings, permissions, execution_agent_profile_id
 		) VALUES (
 			?, ?, ?, ?, ?, ?,
 			?, ?, ?,
@@ -172,7 +173,7 @@ func (r *Repository) insertAgentInstance(
 			?, ?, ?,
 			?, ?,
 			?, ?,
-			'{}', ?
+			'{}', ?, ?
 		)
 	`),
 		agent.ID, agent.AgentID, agent.Name, displayName, agent.Model, agent.Mode,
@@ -185,7 +186,7 @@ func (r *Repository) insertAgentInstance(
 		agent.MaxConcurrentSessions, agent.CooldownSec, boolToInt(agent.SkipIdleRuns),
 		agent.ConsecutiveFailures, threshold,
 		agent.ExecutorPreference, agent.BudgetMonthlyCents,
-		permissions,
+		permissions, agent.ExecutionAgentProfileID,
 	)
 	return err
 }
@@ -310,6 +311,7 @@ func (r *Repository) UpdateAgentInstance(ctx context.Context, agent *models.Agen
 			END,
 			failure_threshold = ?, settings = ?,
 			auto_approve = ?, allow_indexing = ?, cli_passthrough = ?,
+			execution_agent_profile_id = ?,
 			updated_at = ?
 		WHERE id = ? AND `+agentInstanceFilter+`
 	`), agent.Name, string(agent.Role), agent.Icon, status, status,
@@ -319,6 +321,7 @@ func (r *Repository) UpdateAgentInstance(ctx context.Context, agent *models.Agen
 		skillIDs, desiredSkills, agent.ExecutorPreference,
 		status, agent.PauseReason, threshold, settings,
 		boolToInt(agent.AutoApprove), boolToInt(agent.AllowIndexing), boolToInt(agent.CLIPassthrough),
+		agent.ExecutionAgentProfileID,
 		agent.UpdatedAt, agent.ID)
 	return err
 }
@@ -454,6 +457,32 @@ func (r *Repository) UpdateAgentStatusFieldsIfCurrent(
 			updated_at = ?
 		WHERE id = ? AND status = ? AND `+agentInstanceFilter+`
 	`), status, status, status, pauseReason, status, now, id, expectedStatus)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+// UnpauseAgentIfCurrent moves a paused agent to newStatus and clears
+// pause_reason, but only while the row still has status='paused' AND
+// pause_reason=expectedReason. Gating on the pause reason as well as the
+// status closes the window where a concurrent writer changes the reason
+// (a second auto-pause landing on an already-paused agent) while status
+// stays 'paused': a status-only guard would accept that write and
+// silently clobber the newer reason instead of refusing it.
+func (r *Repository) UnpauseAgentIfCurrent(
+	ctx context.Context, id, expectedReason, newStatus string,
+) (bool, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_profiles
+		SET status = ?, pause_reason = '', working_run_id = '', updated_at = ?
+		WHERE id = ? AND status = ? AND pause_reason = ? AND `+agentInstanceFilter+`
+	`), newStatus, now, id, string(models.AgentStatusPaused), expectedReason)
 	if err != nil {
 		return false, err
 	}

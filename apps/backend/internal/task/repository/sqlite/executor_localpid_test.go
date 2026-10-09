@@ -288,7 +288,7 @@ func TestExecutorRunningLocalPIDMigrationOnLegacyDB(t *testing.T) {
 
 	// Re-run migrations, exactly as a boot of the new binary would. The
 	// idempotent ADD COLUMN must re-add local_pid without erroring.
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations on legacy DB: %v", err)
 	}
 
@@ -319,5 +319,159 @@ func TestExecutorRunningLocalPIDMigrationOnLegacyDB(t *testing.T) {
 	}
 	if repaired.Status != models.ExecutorRunningStatusStopped || repaired.LocalPID != 0 {
 		t.Errorf("re-added local_pid column must be writable; got status=%q local_pid=%d", repaired.Status, repaired.LocalPID)
+	}
+}
+
+func TestExecutorRunningIdleSuspensionCASPreservesConversation(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedExecutorRunningCleanupTask(t, repo, "task-idle-suspension")
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-idle-suspension", TaskID: "task-idle-suspension", State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "session-idle-suspension", SessionID: "session-idle-suspension", TaskID: "task-idle-suspension",
+		ExecutorID: "profile", Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusReady,
+		Resumable: true, ResumeToken: "provider-conversation", LocalPID: 4242, AgentExecutionID: "execution-idle-suspension",
+	}); err != nil {
+		t.Fatalf("UpsertExecutorRunning: %v", err)
+	}
+	observed, err := repo.GetExecutorRunningBySessionID(ctx, "session-idle-suspension")
+	if err != nil {
+		t.Fatalf("GetExecutorRunningBySessionID: %v", err)
+	}
+	if err := repo.CompareAndSetExecutorRunningIdleSuspension(
+		ctx, observed.SessionID, observed.AgentExecutionID, observed.UpdatedAt,
+		models.ExecutorIdleSuspensionNone, models.ExecutorIdleSuspensionInProgress,
+	); err != nil {
+		t.Fatalf("claim idle suspension: %v", err)
+	}
+	if err := repo.CompareAndSetExecutorRunningIdleSuspension(
+		ctx, observed.SessionID, observed.AgentExecutionID, observed.UpdatedAt,
+		models.ExecutorIdleSuspensionNone, models.ExecutorIdleSuspensionInProgress,
+	); !errors.Is(err, models.ErrExecutionRotated) {
+		t.Fatalf("stale idle suspension claim = %v, want ErrExecutionRotated", err)
+	}
+	if err := repo.CompareAndSetExecutorRunningIdleSuspension(
+		ctx, observed.SessionID, observed.AgentExecutionID, time.Time{},
+		models.ExecutorIdleSuspensionInProgress, models.ExecutorIdleSuspensionSuspended,
+	); err != nil {
+		t.Fatalf("complete idle suspension: %v", err)
+	}
+	got, err := repo.GetExecutorRunningBySessionID(ctx, observed.SessionID)
+	if err != nil {
+		t.Fatalf("read suspended row: %v", err)
+	}
+	if got.IdleSuspensionState != models.ExecutorIdleSuspensionSuspended || got.Status != models.ExecutorRunningStatusStopped || got.LocalPID != 0 {
+		t.Fatalf("suspended row state = %q/%q local_pid=%d", got.IdleSuspensionState, got.Status, got.LocalPID)
+	}
+	if got.ResumeToken != "provider-conversation" || !got.Resumable {
+		t.Fatalf("suspension lost restore data: token=%q resumable=%v", got.ResumeToken, got.Resumable)
+	}
+}
+
+func TestExecutorRunningIdleSuspensionClaimRequiresCurrentWorkspacePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name                string
+		policyEnabled       bool
+		stalePolicyRevision bool
+		staleExecutionRow   bool
+		wantClaim           bool
+	}{
+		{name: "current enabled policy", policyEnabled: true, wantClaim: true},
+		{name: "disabled policy", wantClaim: false},
+		{name: "changed policy revision", policyEnabled: true, stalePolicyRevision: true, wantClaim: false},
+		{name: "changed execution row", policyEnabled: true, staleExecutionRow: true, wantClaim: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newRepoForSessionTests(t)
+			ctx := context.Background()
+			taskID, sessionID := "task-idle-claim", "session-idle-claim"
+			seedExecutorRunningCleanupTask(t, repo, taskID)
+			workspace, err := repo.GetWorkspace(ctx, "ws-"+taskID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			workspace.ACPIdleSuspensionEnabled = tc.policyEnabled
+			if err := repo.UpdateWorkspace(ctx, workspace); err != nil {
+				t.Fatal(err)
+			}
+			workspace, err = repo.GetWorkspace(ctx, workspace.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+				ID: sessionID, SessionID: sessionID, TaskID: taskID,
+				Status: models.ExecutorRunningStatusReady, AgentExecutionID: "execution-idle-claim",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			running, err := repo.GetExecutorRunningBySessionID(ctx, sessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			policyRevision := workspace.UpdatedAt
+			rowRevision := running.UpdatedAt
+			if tc.stalePolicyRevision {
+				policyRevision = policyRevision.Add(-time.Second)
+			}
+			if tc.staleExecutionRow {
+				rowRevision = rowRevision.Add(-time.Second)
+			}
+
+			claimed, err := repo.ClaimExecutorRunningIdleSuspension(
+				ctx, sessionID, running.AgentExecutionID, rowRevision, workspace.ID, policyRevision,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if claimed != tc.wantClaim {
+				t.Fatalf("claim = %v, want %v", claimed, tc.wantClaim)
+			}
+			got, err := repo.GetExecutorRunningBySessionID(ctx, sessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantState := models.ExecutorIdleSuspensionNone
+			if tc.wantClaim {
+				wantState = models.ExecutorIdleSuspensionInProgress
+			}
+			if got.IdleSuspensionState != wantState {
+				t.Fatalf("idle suspension state = %q, want %q", got.IdleSuspensionState, wantState)
+			}
+		})
+	}
+}
+
+func TestExecutorRunningIdleSuspensionMigrationOnLegacyDB(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedExecutorRunningCleanupTask(t, repo, "task-idle-legacy")
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-idle-legacy", TaskID: "task-idle-legacy", State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "session-idle-legacy", SessionID: "session-idle-legacy", TaskID: "task-idle-legacy",
+		ExecutorID: "profile", Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusStopped,
+		Resumable: true, ResumeToken: "legacy-conversation", AgentExecutionID: "execution-idle-legacy",
+	}); err != nil {
+		t.Fatalf("UpsertExecutorRunning: %v", err)
+	}
+	if _, err := repo.db.Exec(`ALTER TABLE executors_running DROP COLUMN idle_suspension_state`); err != nil {
+		t.Fatalf("simulate legacy schema: %v", err)
+	}
+	if err := repo.runMigrations(ctx); err != nil {
+		t.Fatalf("runMigrations: %v", err)
+	}
+	got, err := repo.GetExecutorRunningBySessionID(ctx, "session-idle-legacy")
+	if err != nil {
+		t.Fatalf("read legacy row: %v", err)
+	}
+	if got.IdleSuspensionState != models.ExecutorIdleSuspensionNone || got.ResumeToken != "legacy-conversation" {
+		t.Fatalf("legacy row migration state=%q token=%q", got.IdleSuspensionState, got.ResumeToken)
 	}
 }

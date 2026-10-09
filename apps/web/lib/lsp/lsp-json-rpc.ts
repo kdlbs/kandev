@@ -17,6 +17,7 @@ export type LspUnavailableCause =
 export type LspStatus =
   | { state: "disabled" }
   | { state: "connecting" }
+  | { state: "reconnecting" }
   | { state: "installing" }
   | { state: "starting" }
   | { state: "ready" }
@@ -29,6 +30,7 @@ export type OpenDocument = {
   languageId: string;
   refCount: number;
   text: string;
+  pendingClose?: boolean;
 };
 
 export type LSPConnection = {
@@ -229,6 +231,7 @@ export const CLOSE_CODE_STATUS: Record<number, (reason: string) => LspStatus> = 
     cause: "auto_install_unsupported",
   }),
   4008: () => ({ state: "error", reason: t("lsp:languageServerFailedToStart") }),
+  4010: () => ({ state: "disabled" }),
 };
 
 export function getLspUnavailableSetupHint(
@@ -260,7 +263,7 @@ export const LSP_CLIENT_CAPABILITIES = {
       willSaveWaitUntil: false,
     },
     completion: {
-      dynamicRegistration: false,
+      dynamicRegistration: true,
       completionItem: {
         snippetSupport: true,
         commitCharactersSupport: true,
@@ -270,11 +273,11 @@ export const LSP_CLIENT_CAPABILITIES = {
       },
       contextSupport: true,
     },
-    hover: { dynamicRegistration: false, contentFormat: ["markdown", "plaintext"] },
-    definition: { dynamicRegistration: false },
-    references: { dynamicRegistration: false },
+    hover: { dynamicRegistration: true, contentFormat: ["markdown", "plaintext"] },
+    definition: { dynamicRegistration: true },
+    references: { dynamicRegistration: true },
     signatureHelp: {
-      dynamicRegistration: false,
+      dynamicRegistration: true,
       signatureInformation: {
         documentationFormat: ["markdown", "plaintext"],
         parameterInformation: { labelOffsetSupport: true },
@@ -282,7 +285,7 @@ export const LSP_CLIENT_CAPABILITIES = {
     },
     publishDiagnostics: { relatedInformation: true },
     semanticTokens: {
-      dynamicRegistration: false,
+      dynamicRegistration: true,
       requests: { full: true },
       tokenTypes: [
         "namespace",

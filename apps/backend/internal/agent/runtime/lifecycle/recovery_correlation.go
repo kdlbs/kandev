@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -44,7 +45,7 @@ func CorrelateRecoveryInstances(
 ) *RecoveryCorrelationResult {
 	recordBySession := make(map[string]*models.ExecutorRunning, len(records))
 	for _, rec := range records {
-		if rec == nil || rec.SessionID == "" {
+		if rec == nil || rec.SessionID == "" || (rec.Runtime != "" && rec.Runtime != agentruntime.RuntimeStandalone) {
 			continue
 		}
 		recordBySession[rec.SessionID] = rec

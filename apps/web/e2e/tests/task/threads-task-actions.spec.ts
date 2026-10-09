@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 import {
   allTaskActionOutcomes,
   seedActionThreads,
@@ -36,33 +37,48 @@ for (const [name, outcome] of [
   });
 }
 
-test("contains long desktop workflow submenus and keeps final steps reachable", async ({
+test("searches long desktop workflow steps in the change form", async ({
   testPage,
   apiClient,
   seedData,
-}) => {
+}, testInfo) => {
   test.setTimeout(120_000);
   const { a, destination } = await seedActionThreads(apiClient, seedData);
-  for (let index = 0; index < 30; index++)
-    await apiClient.createWorkflowStep(
+  let finalStepId = "";
+  for (let index = 0; index < 30; index++) {
+    const step = await apiClient.createWorkflowStep(
       destination.id,
       `${index} ${"LongStep".repeat(20)}`,
       index + 1,
     );
+    if (index === 29) finalStepId = step.id;
+  }
   await testPage.setViewportSize({ width: 900, height: 500 });
   await testPage.goto(`/threads?workspace=${seedData.workspaceId}`);
   const ui = new ThreadActionsPage(testPage);
   await ui.open(a.id);
-  await ui.nested("Send to workflow");
-  await ui.nested(destination.name);
-  const submenu = testPage
-    .getByRole("menu")
-    .filter({ has: ui.choice(`29 ${"LongStep".repeat(20)}`) })
-    .last();
-  await ui.contained(submenu);
-  await ui.choice(`29 ${"LongStep".repeat(20)}`).scrollIntoViewIfNeeded();
-  await expect(ui.choice(`29 ${"LongStep".repeat(20)}`)).toBeInViewport();
+  await ui.pick("Change workflow...");
+  const form = new ChangeWorkflowPage(testPage);
+  await expect(form.desktopDialog).toBeVisible();
+  await form.chooseWorkflow(destination.id);
+  await form.form.getByTestId("change-workflow-step").click();
+  const finalStep = testPage.locator(`[role="option"][data-value="${finalStepId}"]`);
+  await finalStep.scrollIntoViewIfNeeded();
+  await expect(finalStep).toBeVisible();
+  await expect(finalStep.locator("xpath=ancestor::*[@data-slot='popover-content']")).toHaveCSS(
+    "opacity",
+    "1",
+  );
+  expect(
+    await finalStep.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const topmost = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      return topmost === element || element.contains(topmost);
+    }),
+  ).toBe(true);
+  await testPage.screenshot({ path: testInfo.outputPath("desktop-change-workflow-long-step.png") });
   await testPage.keyboard.press("Escape");
+  await form.form.getByTestId("change-workflow-cancel").click();
   await expect(ui.trigger(a.id)).toBeFocused();
 });
 

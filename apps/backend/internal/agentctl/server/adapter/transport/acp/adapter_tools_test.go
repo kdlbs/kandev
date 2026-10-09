@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 func TestLocationsArgsFromACP(t *testing.T) {
@@ -50,6 +51,25 @@ func TestToolCallUpdateSupplemental(t *testing.T) {
 	n.UpdatePayloadInput(searchPayload, nil, supplemental)
 	if got := searchPayload.CodeSearch().Path; got != "/workspace/src/index.ts" {
 		t.Fatalf("CodeSearch.Path = %q, want /workspace/src/index.ts", got)
+	}
+}
+
+// @covers AC-AGENTS-AGENT-PLAN-STREAM-COALESCING-001.1
+func TestConvertToolCallResultUpdateAgentPlanCarriesToolCallID(t *testing.T) {
+	adapter := newTestAdapter()
+	t.Cleanup(func() { _ = adapter.Close() })
+
+	adapter.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+		ToolCallId: "plan-call-1",
+		RawInput:   map[string]any{"plan": "# Plan\n\n1. Read"},
+	})
+
+	event := <-adapter.updatesCh
+	if event.Type != streams.EventTypeAgentPlan {
+		t.Fatalf("event type = %q, want %q", event.Type, streams.EventTypeAgentPlan)
+	}
+	if event.ToolCallID != "plan-call-1" {
+		t.Fatalf("tool call id = %q, want plan-call-1", event.ToolCallID)
 	}
 }
 

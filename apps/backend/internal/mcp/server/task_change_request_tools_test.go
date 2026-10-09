@@ -34,6 +34,9 @@ func TestManageTaskChangeRequestSchemaAndDispatch(t *testing.T) {
 	} {
 		assert.Contains(t, properties, field)
 	}
+	for _, combinator := range []string{"oneOf", "allOf", "anyOf"} {
+		assert.NotContains(t, schema, combinator, "root schema must not declare %q", combinator)
+	}
 
 	result := callTool(t, s, "manage_task_change_request_kandev", map[string]interface{}{
 		"operation": "link", "task_id": "task-target", "provider": "gitlab",
@@ -170,6 +173,16 @@ func TestChangeRequestAutomationToolSchemaAndDispatch(t *testing.T) {
 	assert.Equal(t, "object", schema["type"])
 	assert.Equal(t, false, schema["additionalProperties"])
 	assert.Equal(t, []interface{}{"target", "patch"}, schema["required"])
+	for _, combinator := range []string{"oneOf", "allOf", "anyOf"} {
+		assert.NotContains(t, schema, combinator, "root schema must not declare %q", combinator)
+	}
+	properties, ok := schema["properties"].(map[string]interface{})
+	require.True(t, ok)
+	targetSchema, ok := properties["target"].(map[string]interface{})
+	require.True(t, ok)
+	for _, combinator := range []string{"oneOf", "allOf", "anyOf"} {
+		assert.NotContains(t, targetSchema, combinator, "target schema must not declare %q", combinator)
+	}
 
 	result := callTool(t, s, "update_task_change_request_automation_kandev", map[string]interface{}{
 		"target": map[string]interface{}{"scope": "association", "provider": "github", "repository_id": "repo-gh", "number": 8},
@@ -181,6 +194,56 @@ func TestChangeRequestAutomationToolSchemaAndDispatch(t *testing.T) {
 	require.True(t, ok)
 	assert.NotContains(t, payload, "task_id")
 	assert.Equal(t, false, payload["patch"].(map[string]interface{})["auto_fix_enabled"])
+}
+
+func TestChangeRequestAutomationToolRejectsInvalidTargets(t *testing.T) {
+	tests := []struct {
+		name string
+		args map[string]interface{}
+	}{
+		{
+			name: "association target carrying providers",
+			args: map[string]interface{}{
+				"target": map[string]interface{}{
+					"scope": "association", "provider": "github", "repository_id": "repo-gh",
+					"number": 8, "providers": []interface{}{"github"},
+				},
+				"patch": map[string]interface{}{"auto_fix_enabled": false},
+			},
+		},
+		{
+			name: "association target missing identity",
+			args: map[string]interface{}{
+				"target": map[string]interface{}{"scope": "association", "provider": "github"},
+				"patch":  map[string]interface{}{"auto_fix_enabled": false},
+			},
+		},
+		{
+			name: "task target carrying association identity",
+			args: map[string]interface{}{
+				"target": map[string]interface{}{
+					"scope": "task", "providers": []interface{}{"github"}, "provider": "github",
+				},
+				"patch": map[string]interface{}{"auto_fix_enabled": false},
+			},
+		},
+		{
+			name: "task target missing providers",
+			args: map[string]interface{}{
+				"target": map[string]interface{}{"scope": "task"},
+				"patch":  map[string]interface{}{"auto_fix_enabled": false},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			backend := &testBackend{}
+			s := newTaskModeServer(t, backend, "task-current")
+			result := callTool(t, s, "update_task_change_request_automation_kandev", tt.args)
+			assert.True(t, result.IsError)
+			assert.Empty(t, backend.lastAction, "invalid input must not reach the backend")
+		})
+	}
 }
 
 func TestChangeRequestAutomationToolSchemaRejectsAssociationPrompt(t *testing.T) {

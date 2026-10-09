@@ -201,6 +201,14 @@ export function CommandPreviewCard({
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-xs text-muted-foreground">{t("agents:commandPreviewHelp")}</p>
+        {preview?.flag_destination === "acp_bridge" && (
+          <p
+            data-testid="command-preview-flag-destination"
+            className="text-xs text-muted-foreground"
+          >
+            {t("agents:cliFlagsGoToBridge")}
+          </p>
+        )}
 
         {loading && <CommandPreviewLoading />}
         {error && <CommandPreviewError error={error} />}

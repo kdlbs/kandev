@@ -18,19 +18,15 @@ import {
 } from "@/components/settings/settings-breadcrumbs";
 import { TaskBehaviorSettings } from "@/components/settings/task-behavior-settings";
 import { LegacyExecutorSettingsRoute } from "@/components/settings/legacy-executor-settings-route";
-import { StorageMaintenanceSettings } from "@/components/settings/system/storage/storage-maintenance-settings";
-import { SystemRouteShell } from "@/components/settings/system/system-route-shell";
+import { DataLogsSettings } from "@/components/settings/system/data-logs-settings";
 import { WorkspaceSettingsShell } from "@/components/settings/workspaces/workspace-settings-shell";
 import { SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS } from "@/lib/settings-discovery/catalog";
 import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import { DEFAULT_SETTINGS_PATH } from "@/lib/settings/last-settings-page";
 import { scopedCookieName } from "@/lib/routing/route-bootstrap";
-import {
-  buildSettingsInitialStateForRoute,
-  renderSettingsRoute,
-  SETTINGS_ROUTE_PATHS,
-} from "./settings-routes";
+import { buildSettingsInitialStateForRoute } from "./settings-routes.initial-state";
+import { renderSettingsRoute, SETTINGS_ROUTE_PATHS } from "./settings-routes";
 
 vi.mock("@/components/settings/system/updates-card", () => ({ UpdatesCard: () => null }));
 
@@ -158,6 +154,24 @@ describe("buildSettingsInitialStateForRoute", () => {
   });
 });
 
+describe("current tab workspace settings hydration", () => {
+  beforeEach(() => {
+    document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=; path=/; max-age=0`;
+    document.cookie = `${scopedCookieName(ACTIVE_WORKSPACE_COOKIE)}=; path=/; max-age=0`;
+  });
+
+  it("keeps the current tab workspace ahead of the shared cookie and saved setting", () => {
+    document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=ws-2; path=/`;
+    const state = buildState({
+      workspaces: workspaceRows(["ws-1", "ws-2"]),
+      userSettingsResponse: userSettings({ workspace_id: workspaceId("ws-2") }),
+      currentWorkspaceId: "ws-1",
+    });
+    expect(state.workspaces?.activeId).toBe("ws-1");
+    expect(state.userSettings?.workspaceId).toBe("ws-1");
+  });
+});
+
 describe("message queue settings route", () => {
   it("renders the Message Queue inside the merged Task behavior page", () => {
     const route = renderSettingsRoute(TASK_BEHAVIOR_PATH);
@@ -210,6 +224,14 @@ describe("renderSettingsRoute", () => {
     const route = renderSettingsRoute("/settings/preferences/layouts");
     expect(isValidElement(route)).toBe(true);
     expect(((route as ReactElement).type as { name?: string }).name).toBe("LayoutSettings");
+  });
+
+  it("redirects the legacy sidebar page into the Layouts sidebar tab", () => {
+    const route = renderSettingsRoute("/settings/sidebar") as ReactElement<{ to: string }>;
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
+    expect(route.props.to).toBe("/settings/preferences/layouts?tab=sidebar");
   });
 
   it("redirects the legacy task actions page into Task behavior", () => {
@@ -276,18 +298,23 @@ describe("renderSettingsRoute", () => {
 });
 
 describe("system data and storage routes", () => {
-  it("renders Storage maintenance on its direct route", () => {
-    const route = renderSettingsRoute("/settings/system/storage") as ReactElement<{
-      titleKey: string;
-      descriptionKey: string;
-      children: ReactElement;
+  it("renders the Data & Logs page composition directly", () => {
+    const route = renderSettingsRoute("/settings/system/data-storage");
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route as ReactElement).type).toBe(DataLogsSettings);
+  });
+
+  it("redirects legacy backups into the Database tab and target", () => {
+    const route = renderSettingsRoute("/settings/system/backups") as ReactElement<{
+      to: string;
     }>;
 
     expect(isValidElement(route)).toBe(true);
-    expect(route.type).toBe(SystemRouteShell);
-    expect(route.props.titleKey).toBe("system:storageTitle");
-    expect(route.props.descriptionKey).toBe("system:storageDescription");
-    expect(route.props.children.type).toBe(StorageMaintenanceSettings);
+    expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
+    expect(route.props.to).toBe(
+      "/settings/system/data-storage?tab=database#setting-system-backups",
+    );
   });
 });
 

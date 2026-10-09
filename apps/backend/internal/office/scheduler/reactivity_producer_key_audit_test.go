@@ -102,7 +102,7 @@ func TestReactivityProducerKeyAudit(t *testing.T) {
 		task := &TaskSnapshot{ID: "task-audit-assigned", WorkspaceID: "ws-1"}
 		gen := int64(3)
 		res := &ApplyTaskMutationResult{}
-		ss.reactToAssigneeChange(task, "agent-assigned", TaskMutation{
+		ss.reactToAssigneeChange(context.Background(), task, "agent-assigned", TaskMutation{
 			AssignmentGeneration: &gen, ActorID: "user-1", ActorType: "user",
 		}, queue, res)
 

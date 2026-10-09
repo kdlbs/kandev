@@ -59,8 +59,8 @@ func (m *multiTaskIssueStore) GetRepository(_ context.Context, _ string) (*taskm
 	return nil, errors.New("not implemented")
 }
 
-func (m *multiTaskIssueStore) UpdateTaskMetadata(
-	_ context.Context, _ string, _ map[string]interface{},
+func (m *multiTaskIssueStore) UpdateTaskGitHubIssue(
+	_ context.Context, _ string, _ *taskmodels.TaskGitHubIssueLink,
 ) (*taskmodels.Task, error) {
 	return nil, errors.New("not implemented")
 }
@@ -309,6 +309,37 @@ func TestAssociatePRByURL_WatchAndAssociationAgreeOnRedirectedOwner(t *testing.T
 	}
 	if len(memberWatches) != 0 {
 		t.Fatalf("got %d PR watches for member1, want 0 (watch must not be stranded under the observing member task): %+v", len(memberWatches), memberWatches)
+	}
+}
+
+func TestCreatePRWatch_RedirectedMemberReusesOwnerCanonicalWatch(t *testing.T) {
+	_, svc, _, store := setupPollerTest(t)
+
+	issueStore := newMultiTaskIssueStore()
+	issueStore.addTask(&taskmodels.Task{ID: "member1"}, "repo-canonical")
+	issueStore.addTask(&taskmodels.Task{ID: "owner1"}, "repo-canonical")
+	svc.SetTaskIssueStore(issueStore)
+	svc.SetWorkspaceGroupOwnerResolver(&fakeWorkspaceGroupOwnerResolver{ownerTaskID: "owner1"})
+
+	ctx := context.Background()
+	existing, err := svc.CreatePRWatch(ctx, "owner-session", "owner1", "repo-canonical", "org", "repo", 0, "feature-x")
+	if err != nil {
+		t.Fatalf("create owner watch: %v", err)
+	}
+
+	got, err := svc.CreatePRWatch(ctx, "member-session", "member1", "repo-canonical", "org", "repo", 0, "feature-x")
+	if err != nil {
+		t.Fatalf("create redirected member watch: %v", err)
+	}
+	if got.ID != existing.ID {
+		t.Fatalf("watch ID = %q, want existing owner watch %q", got.ID, existing.ID)
+	}
+	watches, err := store.ListPRWatchesByTask(ctx, "owner1")
+	if err != nil {
+		t.Fatalf("list owner watches: %v", err)
+	}
+	if len(watches) != 1 {
+		t.Fatalf("owner watches = %+v, want exactly one canonical watch", watches)
 	}
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { KanbanColumn } from "@/components/kanban-column";
 import { type Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
@@ -9,7 +9,6 @@ import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { MobileColumnTabs } from "./mobile-column-tabs";
 import { SwipeableColumns } from "./swipeable-columns";
-import { MobileDropTargets } from "./mobile-drop-targets";
 import { KanbanDragSurface } from "./kanban-drag-surface";
 import { getDesktopEmptyState } from "./desktop-auto-hidden-empty-state";
 import { useOrphanDisplay } from "./swimlane-orphan-display";
@@ -35,6 +34,8 @@ import { cn } from "@kandev/ui/lib/utils";
 import { useKanbanExternalLinkAvailability } from "@/components/kanban-external-link-availability";
 import { useTranslation } from "react-i18next";
 import { useCompactSwimlaneHeight } from "@/hooks/domains/kanban/use-compact-swimlane-height";
+import { useKanbanOverflow } from "@/hooks/domains/kanban/use-kanban-overflow";
+import { KanbanOverflowFades } from "./kanban-overflow-fades";
 
 export type SwimlaneKanbanContentProps = {
   compactHeight?: boolean;
@@ -122,7 +123,6 @@ function MobileKanbanLayout({
   onDeleteTask,
   onArchiveTask,
   moveTaskToStep,
-  activeTask,
   showMaximizeButton,
   deletingTaskId,
   archivingTaskId,
@@ -131,14 +131,10 @@ function MobileKanbanLayout({
   onSelectRange,
   isMultiSelectMode,
   externalLinkAvailability,
-  activeTaskId,
-  keyboardDraft,
-  onCardKeyDown,
   mobileWorkflowNavigation,
 }: SharedKanbanLayoutProps & {
   activeIndex: number;
   onIndexChange: (index: number) => void;
-  activeTask: Task | null;
   mobileWorkflowNavigation?: MobileWorkflowNavigation;
 }) {
   const taskCounts = useMemo(() => {
@@ -149,7 +145,6 @@ function MobileKanbanLayout({
     return counts;
   }, [steps, tasks]);
 
-  const currentStepId = steps[activeIndex]?.id ?? null;
   const allStepsAutoHidden = areAllEmptyStepsAutoHidden(steps, moveTargetSteps);
 
   return (
@@ -191,16 +186,8 @@ function MobileKanbanLayout({
           onSelectRange={onSelectRange}
           isMultiSelectMode={isMultiSelectMode}
           externalLinkAvailability={externalLinkAvailability}
-          activeTaskId={activeTaskId}
-          keyboardDraft={keyboardDraft}
-          onCardKeyDown={onCardKeyDown}
         />
       )}
-      <MobileDropTargets
-        steps={moveTargetSteps}
-        currentStepId={currentStepId}
-        isDragging={!!activeTask}
-      />
     </div>
   );
 }
@@ -231,48 +218,68 @@ function TabletKanbanLayout({
   onCardKeyDown,
 }: SharedKanbanLayoutProps) {
   const getTasksForStep = useTasksByStep(tasks);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const { t } = useTranslation();
+  const overflow = useKanbanOverflow(scrollRef, {
+    axis: "horizontal",
+    contentRef: scrollRef,
+    revision: steps.length,
+  });
 
   return (
     <div
-      className="flex h-full min-h-0 gap-2 overflow-x-auto snap-x snap-mandatory scrollbar-hide"
+      className="relative h-full min-h-0"
       data-testid="tablet-kanban-layout"
       style={{ height: columnHeight }}
     >
-      {steps.map((step) => (
-        <div
-          key={step.id}
-          data-kanban-step-id={step.id}
-          className={cn(
-            "h-full min-h-0 w-[calc(50%-4px)] flex-shrink-0 snap-start",
-            temporaryStepIds.has(step.id) && "opacity-70",
-          )}
-        >
-          <KanbanColumn
-            onNaturalHeightChange={onNaturalHeightChange}
-            step={step}
-            tasks={getTasksForStep(step.id)}
-            presentation="desktop"
-            onPreviewTask={onPreviewTask}
-            onOpenTask={onOpenTask}
-            onEditTask={onEditTask}
-            onDeleteTask={onDeleteTask}
-            onArchiveTask={onArchiveTask}
-            onMoveTask={moveTaskToStep}
-            steps={moveTargetSteps}
-            showMaximizeButton={showMaximizeButton}
-            deletingTaskId={deletingTaskId}
-            archivingTaskId={archivingTaskId}
-            selectedIds={selectedIds}
-            onToggleSelect={onToggleSelect}
-            onSelectRange={onSelectRange}
-            isMultiSelectMode={isMultiSelectMode}
-            externalLinkAvailability={externalLinkAvailability}
-            activeTaskId={activeTaskId}
-            keyboardDraft={keyboardDraft}
-            onCardKeyDown={onCardKeyDown}
-          />
-        </div>
-      ))}
+      <div
+        ref={scrollRef}
+        aria-label={t("kanban:columns")}
+        className="kanban-scroll-region flex h-full min-h-0 gap-2 overflow-x-auto overscroll-y-auto snap-x snap-mandatory"
+        data-kanban-scroll-axis="horizontal"
+        data-kanban-scroll-active={overflow.isScrolling}
+        data-kanban-scroll-left={overflow.canScrollLeft}
+        data-kanban-scroll-right={overflow.canScrollRight}
+        data-testid="tablet-kanban-scroll-window"
+        tabIndex={0}
+      >
+        {steps.map((step) => (
+          <div
+            key={step.id}
+            data-kanban-step-id={step.id}
+            className={cn(
+              "h-full min-h-0 w-[calc(50%-4px)] flex-shrink-0 snap-start",
+              temporaryStepIds.has(step.id) && "opacity-70",
+            )}
+          >
+            <KanbanColumn
+              onNaturalHeightChange={onNaturalHeightChange}
+              step={step}
+              tasks={getTasksForStep(step.id)}
+              presentation="desktop"
+              onPreviewTask={onPreviewTask}
+              onOpenTask={onOpenTask}
+              onEditTask={onEditTask}
+              onDeleteTask={onDeleteTask}
+              onArchiveTask={onArchiveTask}
+              onMoveTask={moveTaskToStep}
+              steps={moveTargetSteps}
+              showMaximizeButton={showMaximizeButton}
+              deletingTaskId={deletingTaskId}
+              archivingTaskId={archivingTaskId}
+              selectedIds={selectedIds}
+              onToggleSelect={onToggleSelect}
+              onSelectRange={onSelectRange}
+              isMultiSelectMode={isMultiSelectMode}
+              externalLinkAvailability={externalLinkAvailability}
+              activeTaskId={activeTaskId}
+              keyboardDraft={keyboardDraft}
+              onCardKeyDown={onCardKeyDown}
+            />
+          </div>
+        ))}
+      </div>
+      <KanbanOverflowFades axis="horizontal" state={overflow} />
     </div>
   );
 }
@@ -352,7 +359,6 @@ function renderKanbanLayout({
   sharedProps,
   activeIndex,
   setActiveIndex,
-  activeTask,
   mobileWorkflowNavigation,
 }: {
   isMobile: boolean;
@@ -360,7 +366,6 @@ function renderKanbanLayout({
   sharedProps: SharedKanbanLayoutProps;
   activeIndex: number;
   setActiveIndex: (index: number) => void;
-  activeTask: Task | null;
   mobileWorkflowNavigation?: MobileWorkflowNavigation;
 }): React.ReactNode {
   if (isMobile) {
@@ -369,7 +374,6 @@ function renderKanbanLayout({
         {...sharedProps}
         activeIndex={activeIndex}
         onIndexChange={setActiveIndex}
-        activeTask={activeTask}
         mobileWorkflowNavigation={mobileWorkflowNavigation}
       />
     );
@@ -466,7 +470,6 @@ export function SwimlaneKanbanContent({
     sharedProps,
     activeIndex,
     setActiveIndex,
-    activeTask: drag.activeTask,
     mobileWorkflowNavigation,
   });
 

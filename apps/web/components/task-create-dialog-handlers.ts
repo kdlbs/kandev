@@ -345,7 +345,10 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
     [fs],
   );
   const handleWorkflowChange = useCallback(
-    (value: string) => fs.setSelectedWorkflowId(value),
+    (value: string) => {
+      fs.setSelectedWorkflowId(value);
+      fs.setWorkflowAgentOverrides({});
+    },
     [fs],
   );
   return {

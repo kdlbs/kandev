@@ -37,7 +37,7 @@ func (r *sqliteRepository) LookupQueueAdmission(
 	if err := validateQueueAdmissionInput(identity, clientQueueID, candidate); err != nil {
 		return nil, false, err
 	}
-	fingerprint, err := queueAdmissionFingerprint(identity, candidate)
+	fingerprint, err := queueAdmissionFingerprint(identity, candidate, nil)
 	if err != nil {
 		return nil, false, err
 	}
@@ -81,11 +81,12 @@ func (r *sqliteRepository) AdmitQueueMessage(
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
 	policy *AutoMergePolicy,
+	workflowEntry *WorkflowEntryIdentity,
 ) (*QueuedMessage, bool, error) {
 	if err := validateQueueAdmissionInput(identity, clientQueueID, candidate); err != nil {
 		return nil, false, err
 	}
-	fingerprint, err := queueAdmissionFingerprint(identity, candidate)
+	fingerprint, err := queueAdmissionFingerprint(identity, candidate, workflowEntry)
 	if err != nil {
 		return nil, false, err
 	}
@@ -114,12 +115,25 @@ func (r *sqliteRepository) AdmitQueueMessage(
 		}
 		return receipt.Message, true, nil
 	}
+	if err := r.validateWorkflowEntryTx(ctx, tx, candidate.TaskID, candidate.SessionID, workflowEntry); err != nil {
+		return nil, false, err
+	}
+	if workflowEntry != nil && workflowEntry.EnforceTaskManagementClaim {
+		if err := r.ensureQueueCapacityTx(ctx, tx, candidate.SessionID, maxPerSession); err != nil {
+			return nil, false, err
+		}
+	}
 	if err := r.rejectExistingQueueAdmissionIDTx(ctx, tx, admitted); err != nil {
 		return nil, false, err
 	}
 	accepted, err := r.admitQueueCandidateTx(ctx, tx, admitted, claim, maxPerSession, policy)
 	if err != nil {
 		return nil, false, err
+	}
+	if workflowEntry != nil {
+		if err := persistTaskManagementFenceTx(ctx, tx, r.db, accepted.ID, accepted.TaskID, *workflowEntry); err != nil {
+			return nil, false, err
+		}
 	}
 	if err := r.insertQueueAdmissionReceiptTx(ctx, tx, identity, clientQueueID, fingerprint, accepted); err != nil {
 		return nil, false, err

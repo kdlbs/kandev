@@ -30,6 +30,12 @@ export type ExportReview = {
   source_download: string;
 };
 
+export type ExportDefaults = {
+  expected_release_id: string;
+  metadata: Omit<DistributionMetadata, "source_mode"> & { source_mode?: "" | "static" | "project" };
+  missing_required: string[];
+};
+
 export type InstallReview = {
   preparation_id: string;
   workspace_id: string;
@@ -70,6 +76,16 @@ export type InstallResult = { canvas: Canvas; receipt: Record<string, unknown> }
 
 const EXPORTS = "/api/v1/canvases";
 const INSTALLS = "/api/v1/canvases/install-preparations";
+
+export function getCanvasExportDefaults(
+  canvasId: string,
+  options?: ApiRequestOptions,
+): Promise<ExportDefaults> {
+  return fetchJson<ExportDefaults>(
+    `${EXPORTS}/${encodeURIComponent(canvasId)}/export-defaults`,
+    options,
+  );
+}
 
 export function prepareCanvasExport(
   canvasId: string,

@@ -12,9 +12,16 @@ const state = {
   workspaces: { activeId: "ws-1" as string | null },
   kanban: { workflowId: "wf-1" as string | null },
   sidebarViews: {
-    views: [{ id: "all", name: "All tasks" }],
+    views: [{ id: "all", name: "All tasks", filters: [] }],
     activeViewId: "all",
     draft: null,
+  },
+  sidebarViewsByWorkspace: {
+    "ws-1": {
+      views: [{ id: "all", name: "All tasks", filters: [] }],
+      activeViewId: "all",
+      draft: null,
+    },
   },
   toggleAppSidebarSection: vi.fn(),
   setAppSidebarCollapsed: vi.fn(),
@@ -23,6 +30,7 @@ const state = {
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
+  useAppStoreApi: () => ({ getState: () => state }),
 }));
 
 vi.mock("@/components/task/task-session-sidebar", () => ({
@@ -48,9 +56,10 @@ describe("TasksSection", () => {
     state.appSidebar.sectionExpanded.tasks = true;
     state.workspaces.activeId = "ws-1";
     state.kanban.workflowId = "wf-1";
-    state.sidebarViews.views = [{ id: "all", name: "All tasks" }];
+    state.sidebarViews.views = [{ id: "all", name: "All tasks", filters: [] }];
     state.sidebarViews.activeViewId = "all";
     state.sidebarViews.draft = null;
+    state.sidebarViewsByWorkspace["ws-1"] = state.sidebarViews;
     state.toggleAppSidebarSection.mockClear();
     state.setAppSidebarCollapsed.mockClear();
     state.setSidebarActiveView.mockClear();

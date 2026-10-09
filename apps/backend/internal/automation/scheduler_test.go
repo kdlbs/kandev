@@ -54,7 +54,7 @@ func TestFireTrigger_SkippedForConcurrencyCap_UpdatesLastEvaluatedAt(t *testing.
 		t.Fatal(err)
 	}
 
-	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), "scheduled:trig:1")
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), DedupKey("scheduled:trig:1"))
 	if err != nil {
 		t.Fatalf("FireTrigger returned error for a skip: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestFireTriggerAdmitsRunBeforePublishing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), "scheduled:1")
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), DedupKey("scheduled:1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestFireTrigger_MergedPRConcurrencySkipLeavesDedupKeyEmpty(t *testing.T) {
 	}
 
 	const dedupKey = "pr_merged:task-1:acme/api#7"
-	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeGitHubPRMerged, json.RawMessage(`{}`), dedupKey)
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeGitHubPRMerged, json.RawMessage(`{}`), DedupKey(dedupKey))
 	if err != nil {
 		t.Fatalf("FireTrigger returned error: %v", err)
 	}
@@ -259,10 +259,24 @@ func TestCronScheduler_DailyTrigger_DoesNotRefireNextTick(t *testing.T) {
 	}
 	updated := triggers[0]
 
-	// One minute later — well within the @daily interval — the scheduler
-	// must not treat the trigger as due again.
-	if cs.shouldFire(&updated, now.Add(time.Minute)) {
-		t.Fatal("expected shouldFire to be false one minute after a skipped evaluation of a daily trigger")
+	if updated.LastEvaluatedAt == nil {
+		t.Fatal("expected the skipped evaluation to be persisted")
+	}
+	evaluatedAt := updated.LastEvaluatedAt.UTC()
+	nextMidnight := time.Date(evaluatedAt.Year(), evaluatedAt.Month(), evaluatedAt.Day()+1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		at   time.Time
+		due  bool
+	}{
+		{"before next daily occurrence", nextMidnight.Add(-time.Nanosecond), false},
+		{"at next daily occurrence", nextMidnight, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cs.shouldFire(&updated, tc.at); got != tc.due {
+				t.Fatalf("shouldFire at %s = %v, want %v", tc.at, got, tc.due)
+			}
+		})
 	}
 }
 
@@ -305,7 +319,7 @@ func TestFireTrigger_ConcurrencyCapCheckError_DoesNotAdvanceLastEvaluatedAt(t *t
 		t.Fatal(err)
 	}
 
-	if _, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), ""); err == nil {
+	if _, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), DedupNotConfigured()); err == nil {
 		t.Fatal("expected FireTrigger to return the concurrency-cap check error")
 	}
 
@@ -363,7 +377,7 @@ func TestFireTrigger_ArchivedTaskRun_DoesNotBlockConcurrencyCap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), "new-run")
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), DedupKey("new-run"))
 	if err != nil {
 		t.Fatalf("FireTrigger returned error: %v", err)
 	}

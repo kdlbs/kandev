@@ -14,6 +14,10 @@ import (
 var ErrProviderNotFound = errors.New("notification provider not found")
 
 type Repository interface {
+	// CreateProviderWithSubscriptions saves the complete new configuration atomically.
+	CreateProviderWithSubscriptions(ctx context.Context, provider *models.Provider, events []string) error
+	// UpdateProviderWithSubscriptions is owner-scoped; nil events preserve subscriptions.
+	UpdateProviderWithSubscriptions(ctx context.Context, provider *models.Provider, events *[]string) error
 	CreateProvider(ctx context.Context, provider *models.Provider) error
 	// UpdateProvider is scoped to provider.UserID.
 	UpdateProvider(ctx context.Context, provider *models.Provider) error

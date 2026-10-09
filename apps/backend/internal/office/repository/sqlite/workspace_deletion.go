@@ -60,6 +60,7 @@ func (r *Repository) deleteWorkspaceDataTx(ctx context.Context, tx *sqlx.Tx, wor
 		`DELETE FROM office_run_skills WHERE run_id IN (
 			SELECT id FROM runs WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)
 		)`,
+		`DELETE FROM office_run_sessions WHERE workspace_id = ?`,
 		`DELETE FROM runs WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 		`DELETE FROM agent_wakeup_requests WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 		`DELETE FROM agent_continuation_summaries WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
@@ -90,6 +91,7 @@ func (r *Repository) deleteWorkspaceDataTx(ctx context.Context, tx *sqlx.Tx, wor
 		`DELETE FROM office_approvals WHERE workspace_id = ?`,
 		`DELETE FROM office_activity_log WHERE workspace_id = ?`,
 		`DELETE FROM office_workspace_pauses WHERE workspace_id = ?`,
+		`DELETE FROM office_deferred_assignments WHERE workspace_id = ?`,
 		`DELETE FROM office_routines WHERE workspace_id = ?`,
 		`DELETE FROM office_skills WHERE workspace_id = ?`,
 		`DELETE FROM office_projects WHERE workspace_id = ?`,

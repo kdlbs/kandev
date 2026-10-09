@@ -8,6 +8,7 @@ const renderCounts = vi.hoisted(() => ({
   groups: new Map<string, number>(),
   nodes: new Map<string, number>(),
   rows: new Map<string, number>(),
+  nestCandidateGetters: new Map<string, (() => TaskSwitcherItem[]) | undefined>(),
 }));
 
 function increment(counts: Map<string, number>, key: string) {
@@ -15,14 +16,37 @@ function increment(counts: Map<string, number>, key: string) {
 }
 
 vi.mock("./task-item", () => ({
-  TaskItem: ({ title, onClick }: { title: string; onClick?: () => void }) => {
+  TaskItem: ({
+    title,
+    onClick,
+    isSelected,
+  }: {
+    title: string;
+    onClick?: () => void;
+    isSelected?: boolean;
+  }) => {
     increment(renderCounts.rows, title);
-    return <button onClick={onClick}>{title}</button>;
+    return (
+      <button onClick={onClick} aria-pressed={isSelected}>
+        {title}
+      </button>
+    );
   },
 }));
 
 vi.mock("./task-switcher-context-menu", () => ({
-  TaskItemWithContextMenu: ({ children }: { children: ReactElement }) => children,
+  TaskItemWithContextMenu: ({
+    task,
+    children,
+    getNestCandidateTasks,
+  }: {
+    task: TaskSwitcherItem;
+    children: ReactElement;
+    getNestCandidateTasks?: () => TaskSwitcherItem[];
+  }) => {
+    renderCounts.nestCandidateGetters.set(task.id, getNestCandidateTasks);
+    return children;
+  },
 }));
 
 vi.mock("./task-switcher-subtask-dnd", () => ({
@@ -131,11 +155,27 @@ beforeEach(() => {
   renderCounts.groups.clear();
   renderCounts.nodes.clear();
   renderCounts.rows.clear();
+  renderCounts.nestCandidateGetters.clear();
 });
 
 afterEach(() => cleanup());
 
 describe("TaskSwitcher render stability", () => {
+  it("updates the selected rows without rerendering unrelated task controls", () => {
+    const grouped = groupedTogether([
+      task(TASK_A, WORKFLOW_A),
+      task(TASK_B, WORKFLOW_A),
+      task("Task C", WORKFLOW_A),
+    ]);
+    const props = { grouped, onSelectTask, onToggleSubtasks, selectedTaskId: null };
+    const view = render(<TaskSwitcher {...props} activeTaskId={TASK_A} />);
+    view.rerender(<TaskSwitcher {...props} activeTaskId={TASK_B} />);
+
+    expect(screen.getByRole("button", { name: TASK_A }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: TASK_B }).getAttribute("aria-pressed")).toBe("true");
+    expect(renderCounts.rows.get("Task C")).toBe(1);
+  });
+
   it("does not rerender an unaffected expanded group when another group task updates", () => {
     const taskA = task(TASK_A, WORKFLOW_A);
     const taskB = task(TASK_B, WORKFLOW_B);
@@ -188,6 +228,20 @@ describe("TaskSwitcher render stability", () => {
     fireEvent.click(screen.getByRole("button", { name: TASK_B }));
 
     expect(latestHandler).toHaveBeenCalledWith(TASK_B);
+  });
+
+  it("gives a skipped row the latest nest candidates", () => {
+    const taskA = task(TASK_A, WORKFLOW_A);
+    const taskB = task(TASK_B, WORKFLOW_A);
+    const view = render(switcher(groupedTogether([taskA, taskB])));
+
+    view.rerender(switcher(groupedTogether([{ ...taskA, title: TASK_A_UPDATED }, { ...taskB }])));
+
+    expect(
+      renderCounts.nestCandidateGetters
+        .get(TASK_B)?.()
+        .map((item) => item.title),
+    ).toEqual([TASK_A_UPDATED, TASK_B]);
   });
 });
 

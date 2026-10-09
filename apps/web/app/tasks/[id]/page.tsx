@@ -1,4 +1,5 @@
 import { redirect } from "@/lib/routing/server-navigation";
+import { linkToTask } from "@/lib/links";
 
 /**
  * Compatibility alias for `/tasks/:id`.
@@ -25,6 +26,5 @@ export default async function TasksDetailAliasPage({
       query.set(key, value);
     }
   }
-  const queryString = query.toString();
-  redirect(queryString ? `/t/${id}?${queryString}` : `/t/${id}`);
+  redirect(linkToTask(id, { searchParams: query }));
 }

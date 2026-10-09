@@ -33,6 +33,7 @@ describe("focused shared task actions", () => {
                 ],
               }}
               onMove={vi.fn()}
+              onChangeWorkflow={vi.fn()}
               onPriority={onPriority}
               onArchive={vi.fn()}
               onDelete={vi.fn()}
@@ -44,7 +45,7 @@ describe("focused shared task actions", () => {
       </StateProvider>,
     );
     fireEvent.contextMenu(screen.getByText("Open"));
-    expect(screen.queryByText("Send to workflow")).toBeNull();
+    expect(screen.queryByText("Change workflow...")).toBeNull();
     fireEvent.pointerMove(screen.getByTestId("task-context-move-to"), { pointerType: "mouse" });
     const current = await screen.findByTestId("task-context-step-s1");
     expect(current.getAttribute("aria-disabled")).toBe("true");

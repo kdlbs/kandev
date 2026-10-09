@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DropdownMenu, DropdownMenuContent } from "@kandev/ui/dropdown-menu";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import { registerCanvasesHandlers } from "@/lib/ws/handlers/canvases";
 
@@ -11,6 +12,7 @@ const {
   mockListWorkspaceCanvases,
   mockPush,
   mockIsMobile,
+  mockRenderPageShellOverflow,
 } = vi.hoisted(() => ({
   mockGetCanvas: vi.fn(),
   mockGetCanvasRuntime: vi.fn(),
@@ -18,6 +20,7 @@ const {
   mockListWorkspaceCanvases: vi.fn(),
   mockPush: vi.fn(),
   mockIsMobile: { value: false },
+  mockRenderPageShellOverflow: { value: false },
 }));
 
 const FRAME_TEST_ID = "canvas-frame";
@@ -25,6 +28,12 @@ const RUNTIME_URL_ATTRIBUTE = "data-runtime-url";
 
 vi.mock("@/lib/api/domains/canvas-api", () => ({
   canvasHref: (canvasId: string) => `/canvases/${canvasId}`,
+  canvasDataScope: (value: Canvas) => value.data_scope_kind ?? value.scope_kind,
+  canvasCanEnableWorkspaceData: (value: Canvas) =>
+    value.scope_kind === "task" &&
+    (value.data_scope_kind ?? value.scope_kind) === "task" &&
+    value.status === "active" &&
+    value.active_release_status === "valid",
   getCanvas: mockGetCanvas,
   getCanvasRuntime: mockGetCanvasRuntime,
   listTaskCanvases: mockListTaskCanvases,
@@ -33,16 +42,52 @@ vi.mock("@/lib/api/domains/canvas-api", () => ({
 }));
 
 vi.mock("@/components/page-shell", () => ({
-  PageShell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  PageShell: ({
+    actions,
+    children,
+    overflowMenuItems,
+    subtitle,
+    titleSlot,
+    topbarTestId,
+  }: {
+    actions?: ReactNode;
+    children: ReactNode;
+    overflowMenuItems?: ReactNode;
+    subtitle?: string;
+    titleSlot?: ReactNode;
+    topbarTestId?: string;
+  }) => (
+    <div>
+      <div data-testid={topbarTestId}>
+        {titleSlot}
+        {subtitle}
+        {mockIsMobile.value ? actions : null}
+      </div>
+      {overflowMenuItems && mockRenderPageShellOverflow.value ? (
+        <DropdownMenu open>
+          <DropdownMenuContent data-testid="page-shell-overflow">
+            {overflowMenuItems}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+      {children}
+    </div>
+  ),
 }));
 
 vi.mock("@/components/plugins/canvas-page", () => ({
-  CanvasPage: ({ runtimeUrl, onError }: { runtimeUrl?: string; onError?: () => void }) => (
+  CanvasPage: ({
+    runtimeUrl,
+    onError,
+  }: {
+    runtimeUrl?: string;
+    onError?: (reason: string) => void;
+  }) => (
     <button
       type="button"
       data-testid={FRAME_TEST_ID}
       data-runtime-url={runtimeUrl ?? ""}
-      onClick={onError}
+      onClick={() => onError?.("context_unavailable")}
     >
       frame
     </button>
@@ -52,6 +97,7 @@ vi.mock("@/components/plugins/canvas-page", () => ({
 vi.mock("@/components/settings/canvas-lifecycle-dialogs", () => ({
   CanvasPromotionDialog: () => null,
   CanvasReleaseDialog: () => null,
+  CanvasWorkspaceDataDialog: () => null,
 }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
@@ -72,6 +118,11 @@ vi.mock("@/components/task/mobile/mobile-picker-sheet", () => ({
 
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mockPush }),
+}));
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({ auth: { mode: "disabled", user: null } }),
 }));
 
 import { CanvasHostRoute } from "./canvas-host-route";
@@ -106,6 +157,7 @@ beforeEach(() => {
   mockListTaskCanvases.mockReset().mockResolvedValue({ canvases: [canvas] });
   mockListWorkspaceCanvases.mockReset().mockResolvedValue({ canvases: [] });
   mockIsMobile.value = false;
+  mockRenderPageShellOverflow.value = false;
   mockPush.mockReset();
 });
 
@@ -126,8 +178,11 @@ describe("CanvasHostRoute runtime recovery", () => {
     fireEvent.click(screen.getByTestId(FRAME_TEST_ID));
 
     await waitFor(() =>
-      expect(screen.getByTestId("canvas-host-state").textContent).toContain("unavailable"),
+      expect(screen.getByTestId("canvas-host-state").textContent).toContain(
+        "Canvas runtime failed to start",
+      ),
     );
+    expect(screen.getByTestId("canvas-host-state").textContent).not.toContain("Canvas unavailable");
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
 
     await waitFor(() => {
@@ -166,6 +221,18 @@ describe("CanvasHostRoute runtime recovery", () => {
       );
     });
   });
+});
+
+describe("CanvasHostRoute chrome and lifecycle", () => {
+  it("passes raw desktop overflow items to the standalone page shell", async () => {
+    mockRenderPageShellOverflow.value = true;
+    render(<CanvasHostRoute canvasId="canvas-1" />);
+
+    await waitFor(() => expect(screen.getByTestId(FRAME_TEST_ID)).toBeTruthy());
+
+    expect(screen.getByRole("menuitem", { name: "Releases and permissions" })).toBeTruthy();
+    expect(screen.queryByTestId("panel-header-overflow")).toBeNull();
+  });
 
   it("refreshes the visible host when a canvas lifecycle event arrives", async () => {
     const updated = { ...canvas, active_release_id: "release-2" };
@@ -199,7 +266,9 @@ describe("CanvasHostRoute runtime recovery", () => {
       );
     });
   });
+});
 
+describe("CanvasHostRoute mobile data scope", () => {
   it("lets a mobile focused host switch to another applicable canvas", async () => {
     mockIsMobile.value = true;
     const otherCanvas = {
@@ -219,5 +288,14 @@ describe("CanvasHostRoute runtime recovery", () => {
     fireEvent.click(other);
 
     expect(mockPush).toHaveBeenCalledWith("/canvases/canvas-2");
+  });
+
+  it("shows the data scope beside the title on mobile", async () => {
+    mockIsMobile.value = true;
+    mockGetCanvas.mockReset().mockResolvedValue({ ...canvas, data_scope_kind: "workspace" });
+
+    render(<CanvasHostRoute canvasId="canvas-1" />);
+
+    expect((await screen.findByTestId("canvas-data-scope")).textContent).toBe("Workspace data");
   });
 });

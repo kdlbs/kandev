@@ -23,12 +23,12 @@ test.describe("Notifications settings type scale", () => {
       caption: "Settings → General → Notifications at 1280px",
     });
 
-    // The page body inherits the Card base (text-xs/relaxed = 12px); group
-    // headings sit one step up at text-sm (14px). Assert the computed sizes so
-    // the capture is backed by a real measurement, not just an eyeball.
+    // Group descriptions use the readable section role (14px), while the
+    // table body remains compact (12px). Assert the computed sizes so the
+    // capture is backed by a real measurement, not just an eyeball.
     expect(
       await description.evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
-    ).toBeCloseTo(12, 1);
+    ).toBeCloseTo(14, 1);
     expect(await table.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeCloseTo(
       12,
       1,

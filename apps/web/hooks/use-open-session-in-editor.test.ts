@@ -71,7 +71,7 @@ describe("useOpenSessionInEditor", () => {
 
   it("gotos the file in the embedded editor when a file path is returned", async () => {
     mockOpenSessionInEditor.mockResolvedValueOnce({
-      url: "internal://vscode?goto=apps/web/app.ts",
+      url: "internal://vscode?goto=apps%2Fweb%2Fapp.ts",
     });
     const { result } = renderHook(() => useOpenSessionInEditor("session-1"));
 
@@ -82,7 +82,7 @@ describe("useOpenSessionInEditor", () => {
   });
 
   it("skips the embedded-editor goto for a folder, which has nothing to open", async () => {
-    mockOpenSessionInEditor.mockResolvedValueOnce({ url: "internal://vscode?goto=apps/web" });
+    mockOpenSessionInEditor.mockResolvedValueOnce({ url: "internal://vscode?goto=apps%2Fweb" });
     const { result } = renderHook(() => useOpenSessionInEditor("session-1"));
 
     await result.current.open({ editorId: "editor-1", filePath: "apps/web", isDirectory: true });

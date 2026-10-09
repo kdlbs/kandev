@@ -293,6 +293,7 @@ func seedWorkItemReservation(t *testing.T, store *Store, watch *WorkItemWatch, w
 	if taskID == "" {
 		return
 	}
+	seedAzureTask(t, store, taskID, watch.WorkspaceID)
 	if err := store.AssignWorkItemWatchTaskID(
 		t.Context(), watch.ID, watch.Generation, watch.ProjectID, workItemID, taskID,
 	); err != nil {

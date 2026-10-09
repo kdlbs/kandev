@@ -112,3 +112,9 @@ keys and saved view settings remain unchanged.
 
 The resolver uses only task and session state already available to the current sidebar. It adds no
 data source, permission, or trust boundary.
+
+## Planned sidebar query
+
+[Sidebar task browsing](sidebar-archived-filter.md) proposes server evaluation of these
+semantics for bounded pages in every sidebar view. Non-sidebar consumers keep their existing path.
+A sidebar consumer must not derive complete-tree values from a partial page.

@@ -15,19 +15,23 @@ export function buildMobileTaskSwitcherProps(
     onReorderSubtasks: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
     pinnedTaskIds: string[];
     showActivityTime: boolean;
+    groupIndent: boolean;
     taskRowPresentation: TaskSwitcherProps["taskRowPresentation"];
   },
 ): TaskSwitcherProps {
   return {
     grouped: helpers.grouped,
+    nestHierarchyTasks: props.tasks,
     workflows: props.workflows,
     stepsByWorkflowId: props.stepsByWorkflowId,
     activeTaskId: props.activeTaskId,
     selectedTaskId: props.selectedTaskId,
+    onMoveToStep: props.onMoveToStep,
     onRequestMoveOptions: props.onRequestMoveOptions,
     onBeforeMoveOptionsOpen: props.onBeforeMoveOptionsOpen,
     collapsedGroupKeys: helpers.collapsedGroupKeys,
     showActivityTime: helpers.showActivityTime,
+    groupIndent: helpers.groupIndent,
     taskRowPresentation: helpers.taskRowPresentation,
     onToggleGroup: helpers.onToggleGroup,
     collapsedSubtaskParentIds: helpers.collapsedSubtaskParentIds,
@@ -57,6 +61,6 @@ export function buildMobileTaskSwitcherProps(
     loadError: props.loadError,
     onRetryLoad: props.onRetryLoad,
     retryLabel: props.retryLabel,
-    totalTaskCount: props.tasks.length,
+    totalTaskCount: props.page?.total_tasks ?? props.tasks.length,
   };
 }

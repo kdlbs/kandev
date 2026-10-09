@@ -143,7 +143,7 @@ func projectWebAppEvent(source *bus.Event) (webapp.EventInput, bool) {
 func isProjectableWebAppEvent(eventType string) bool {
 	switch eventType {
 	case events.CanvasCreated, events.CanvasReleaseActivated, events.CanvasReleasePermissionRequired,
-		events.CanvasPromoted, events.CanvasArchived, events.CanvasRestored, events.CanvasRemoved,
+		events.CanvasPromoted, events.CanvasWorkspaceDataEnabled, events.CanvasArchived, events.CanvasRestored, events.CanvasRemoved,
 		events.TaskCreated, events.TaskUpdated, events.TaskStateChanged, events.TaskDeleted, events.TaskMoved,
 		events.TaskQueuePromoted, events.TaskDependenciesResolved, events.TaskDependencyFailed,
 		events.WorkspaceCreated, events.WorkspaceUpdated, events.WorkspaceDeleted,
@@ -160,7 +160,7 @@ func isProjectableWebAppEvent(eventType string) bool {
 
 func publicEventFields(eventType string) []string {
 	canvasFields := []string{
-		"canvas_id", "workspace_id", "task_id", "scope_kind", "status", "title", "plugin_id", "plugin_instance_id",
+		"canvas_id", "workspace_id", "task_id", "scope_kind", "data_scope_kind", "status", "title", "plugin_id", "plugin_instance_id",
 		"release_id", "active_release_id", "validation_status", "validation_error", "source_actor_kind", "source_user_id",
 		"source_task_id", "source_session_id", "placement", "protocol_version",
 	}
@@ -234,7 +234,7 @@ func webAppBusEventMatchesInstance(item instances.Instance, scope webapp.EventSc
 	if scope.WorkspaceID != "" && item.WorkspaceID != scope.WorkspaceID {
 		return false
 	}
-	switch item.ScopeKind {
+	switch item.EffectiveDataScopeKind() {
 	case instances.ScopeInstance:
 		return true
 	case instances.ScopeWorkspace:
@@ -290,7 +290,7 @@ func webAppEventMatchesBinding(scope webapp.EventScope, binding webapp.Capabilit
 	if scope.InstanceID != "" && scope.InstanceID != binding.InstanceID {
 		return false
 	}
-	switch binding.ScopeKind {
+	switch instances.EffectiveDataScopeKind(binding.ScopeKind, binding.DataScopeKind) {
 	case instances.ScopeInstance:
 		return true
 	case instances.ScopeWorkspace:

@@ -4,6 +4,8 @@ import type { useSidebarActions } from "./task-session-sidebar";
 import type { useSidebarTaskLinking } from "./task-session-sidebar-task-linking";
 import type { useSidebarSelection } from "./task-session-sidebar-selection";
 import type { WorkspaceContextReadError } from "@/lib/state/slices/kanban/types";
+import { sidebarSortHasKey } from "@/lib/sidebar/sidebar-sort-chain";
+import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 
 type TaskSwitcherComponentProps = ComponentProps<typeof TaskSwitcher>;
 
@@ -14,13 +16,15 @@ type TaskSwitcherComponentProps = ComponentProps<typeof TaskSwitcher>;
  */
 export function buildTaskSwitcherProps(args: {
   grouped: TaskSwitcherComponentProps["grouped"];
+  nestHierarchyTasks: TaskSwitcherComponentProps["nestHierarchyTasks"];
   workflows: TaskSwitcherComponentProps["workflows"];
   stepsByWorkflowId: TaskSwitcherComponentProps["stepsByWorkflowId"];
   highlightedTaskId: string | null;
   highlightedSelectedTaskId: string | null;
   effectiveView: {
     collapsedGroups: TaskSwitcherComponentProps["collapsedGroupKeys"];
-    sort: { key: string };
+    sort: SidebarView["sort"];
+    groupIndent: boolean;
     taskRow?: TaskSwitcherComponentProps["taskRowPresentation"];
   };
   handleToggleGroup: TaskSwitcherComponentProps["onToggleGroup"];
@@ -43,18 +47,20 @@ export function buildTaskSwitcherProps(args: {
   workspaceContextAccessDenied: boolean;
   workspaceContextLoadErrorLabel: string;
   workspaceContextAccessDeniedLabel: string;
-  retryWorkspaceContext: () => void;
+  retryWorkspaceContext: (() => void) | undefined;
   totalTaskCount: number;
   selection: ReturnType<typeof useSidebarSelection>;
 }): TaskSwitcherComponentProps {
   return {
     grouped: args.grouped,
+    nestHierarchyTasks: args.nestHierarchyTasks,
     workflows: args.workflows,
     stepsByWorkflowId: args.stepsByWorkflowId,
     activeTaskId: args.highlightedTaskId,
     selectedTaskId: args.highlightedSelectedTaskId,
     collapsedGroupKeys: args.effectiveView.collapsedGroups,
-    showActivityTime: args.effectiveView.sort.key === "lastActivityAt",
+    showActivityTime: sidebarSortHasKey(args.effectiveView.sort, "lastActivityAt"),
+    groupIndent: args.effectiveView.groupIndent,
     taskRowPresentation: args.effectiveView.taskRow,
     onToggleGroup: args.handleToggleGroup,
     collapsedSubtaskParentIds: args.collapsedSubtaskParents,
@@ -106,8 +112,8 @@ function resolveSidebarRetry(args: {
   archivedError: string | null;
   retryArchivedTasks: () => void;
   workspaceContextError: WorkspaceContextReadError | null;
-  retryWorkspaceContext: () => void;
-}): () => void {
+  retryWorkspaceContext: (() => void) | undefined;
+}): (() => void) | undefined {
   if (args.workspaceContextError) return args.retryWorkspaceContext;
   return args.retryArchivedTasks;
 }

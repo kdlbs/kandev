@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Trans, useTranslation } from "react-i18next";
 
 import AgentsSettingsPage from "@/app/settings/agents/page";
@@ -21,7 +21,7 @@ import NewAutomationPage from "@/app/settings/workspace/[id]/automations/new/pag
 import WorkspaceEditPage from "@/app/settings/workspace/[id]/page";
 import WorkspacesPage from "@/app/settings/workspace/page";
 import Link from "@/components/routing/app-link";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
 import {
   AppearanceSettings,
   KeyboardShortcutsSettings,
@@ -29,7 +29,12 @@ import {
 import { SettingsIndex } from "@/components/settings/settings-index";
 import { LegacyExecutorSettingsRoute } from "@/components/settings/legacy-executor-settings-route";
 import { readLastSettingsPath } from "@/lib/settings/last-settings-page";
-import { SettingsRedirect, useRememberSettingsPath } from "./settings-route-helpers";
+import {
+  SettingsRedirect,
+  SettingsRouteFallback,
+  useRememberSettingsPath,
+} from "./settings-route-helpers";
+import { renderWorkspaceCoordinatorRoute } from "./settings-routes.coordinators";
 import { NotificationsSettings } from "@/components/settings/notifications-settings";
 import { LayoutSettings } from "@/components/settings/layouts/layout-settings";
 import { PromptsSettings } from "@/components/settings/prompts-settings";
@@ -50,7 +55,7 @@ import { UnitsPage } from "@/components/settings/units/units-page";
 import { HealthIssuesCard } from "@/components/settings/system/health-issues-card";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { SystemRouteShell } from "@/components/settings/system/system-route-shell";
-import { StorageMaintenanceSettings } from "@/components/settings/system/storage/storage-maintenance-settings";
+import { StorageSettings } from "@/components/settings/system/storage-settings";
 import { UIStateCard } from "@/components/settings/system/ui-state-card";
 import { UpdatesCard } from "@/components/settings/system/updates-card";
 import { VersionSummaryCard } from "@/components/settings/system/version-summary-card";
@@ -64,6 +69,7 @@ import {
   KEYBOARD_SHORTCUTS_SETTINGS_HREF,
   LAYOUTS_SETTINGS_HREF,
   NOTIFICATIONS_SETTINGS_HREF,
+  SIDEBAR_LAYOUT_TAB_HREF,
   TASK_BEHAVIOR_SETTINGS_HREF,
   TERMINAL_EDITORS_SETTINGS_HREF,
 } from "@/lib/settings-discovery/catalog/preferences";
@@ -81,47 +87,20 @@ import {
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import {
-  fetchUserSettings,
-  listAgentDiscovery,
-  listAgents,
-  listAvailableAgents,
-  listExecutors,
-} from "@/lib/api/domains/settings-api";
-import { listWorkspaces } from "@/lib/api/domains/workspace-api";
-import {
   matchSingle,
   matchDouble,
   normalizeSettingsPath,
   safeDecodePathSegment,
 } from "@/lib/routing/path";
-import {
-  mapWorkspaceItem,
-  promoteLegacyWorkspaceSelection,
-  readActiveWorkspaceCookie,
-  resolveSettingsActiveWorkspaceId,
-} from "@/lib/routing/route-bootstrap";
-import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
-import type { HydrationState } from "@/lib/state/store";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
-import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import type { LicenseEntry } from "@/lib/types/system";
 import { renderIntegrationSettingsRoute } from "./integration-settings-route";
 import {
   WorkspaceRepositoriesRoute,
   WorkspaceWorkflowsRoute,
 } from "./settings-routes.workspace-data";
+import { SettingsRouteBootstrap } from "./settings-routes.bootstrap";
 
 type RouteRenderer = () => ReactNode;
-type SettingsInitialStateData = {
-  workspaces: ListWorkspacesResponse["workspaces"];
-  executors: Awaited<ReturnType<typeof listExecutors>>["executors"];
-  agents: Awaited<ReturnType<typeof listAgents>>["agents"];
-  discoveryAgents: Awaited<ReturnType<typeof listAgentDiscovery>>["agents"];
-  availableAgents: Awaited<ReturnType<typeof listAvailableAgents>>["agents"];
-  availableTools: NonNullable<Awaited<ReturnType<typeof listAvailableAgents>>["tools"]>;
-  userSettingsResponse: UserSettingsResponse | null;
-  agentProfilesVersion?: number;
-};
 
 const licenseEntries = licenses as LicenseEntry[];
 
@@ -137,6 +116,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/preferences/notifications": () => <NotificationsSettings />,
   "/settings/preferences/task-behavior": () => <TaskBehaviorSettings />,
   "/settings/preferences/terminal-editors": () => <TerminalEditorsSettings />,
+  "/settings/sidebar": () => <SettingsRedirect to={SIDEBAR_LAYOUT_TAB_HREF} />,
   // Legacy /settings/general paths, one redirect per page that lived there.
   "/settings/general": () => <SettingsRedirect to={APPEARANCE_SETTINGS_HREF} />,
   "/settings/general/appearance": () => <SettingsRedirect to={APPEARANCE_SETTINGS_HREF} />,
@@ -201,16 +181,17 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <AboutSettings licenses={licenseEntries} />
     </SystemRouteShell>
   ),
-  "/settings/system/data-storage": () => (
-    <SystemRouteShell
-      titleKey="system:navDataStorage"
-      descriptionKey="system:dataStoragePageDescription"
-    >
-      <DataLogsSettings />
-    </SystemRouteShell>
+  "/settings/system/data-storage": () => <DataLogsSettings />,
+  "/settings/system/backups": () => (
+    <SettingsRedirect
+      to={`${SYSTEM_DATA_STORAGE_SETTINGS_HREF}?tab=database#setting-system-backups`}
+    />
   ),
-  "/settings/system/backups": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
-  "/settings/system/database": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
+  "/settings/system/database": () => (
+    <SettingsRedirect
+      to={`${SYSTEM_DATA_STORAGE_SETTINGS_HREF}?tab=database#setting-system-database`}
+    />
+  ),
   "/settings/units": () => (
     <SystemRouteShell titleKey="settings:unitsTitle" descriptionKey="settings:unitsDescription">
       <UnitsPage />
@@ -230,7 +211,9 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
     </SystemRouteShell>
   ),
   "/settings/system/licenses": () => <SettingsRedirect to={SYSTEM_ABOUT_SETTINGS_HREF} />,
-  "/settings/system/logs": () => <SettingsRedirect to={SYSTEM_DATA_STORAGE_SETTINGS_HREF} />,
+  "/settings/system/logs": () => (
+    <SettingsRedirect to={`${SYSTEM_DATA_STORAGE_SETTINGS_HREF}?tab=logs#setting-system-logs`} />
+  ),
   "/settings/system/message-queue": () => <SettingsRedirect to={TASK_BEHAVIOR_SETTINGS_HREF} />,
   "/settings/system/status": () => (
     <SystemRouteShell titleKey="common:status" descriptionKey="system:statusPageDescription">
@@ -242,11 +225,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <UIStateCard />
     </SystemRouteShell>
   ),
-  "/settings/system/storage": () => (
-    <SystemRouteShell titleKey="system:storageTitle" descriptionKey="system:storageDescription">
-      <StorageMaintenanceSettings />
-    </SystemRouteShell>
-  ),
+  "/settings/system/storage": () => <StorageSettings />,
   "/settings/system/updates": renderUpdatesRoute,
   "/settings/changelog": () => <SettingsRedirect to="/settings/system/updates" />,
 };
@@ -455,6 +434,22 @@ function renderWorkspaceSettingsRoute(pathname: string): ReactNode {
     return renderWorkspaceAutomationRoute(workspaceAutomation[0], workspaceAutomation[1]);
   }
 
+  const workspaceCoordinator = matchDouble(
+    pathname,
+    /^\/settings\/workspaces\/([^/]+)\/coordinators\/([^/]+)$/,
+  );
+  if (workspaceCoordinator) {
+    return renderWorkspaceCoordinatorRoute(workspaceCoordinator[0], workspaceCoordinator[1]);
+  }
+
+  const workspaceCoordinatorsList = matchSingle(
+    pathname,
+    /^\/settings\/workspaces\/([^/]+)\/coordinators$/,
+  );
+  if (workspaceCoordinatorsList) {
+    return renderWorkspaceCoordinatorRoute(workspaceCoordinatorsList, null);
+  }
+
   const workspaceSubpage = matchDouble(
     pathname,
     /^\/settings\/workspaces\/([^/]+)\/(repositories|workflows|automations|secrets)$/,
@@ -552,140 +547,5 @@ function UpdatesRoute() {
       </p>
       <UpdatesCard />
     </SystemRouteShell>
-  );
-}
-
-export function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
-  const store = useAppStoreApi();
-  const bootstrappedRef = useRef(false);
-
-  useEffect(() => {
-    if (bootstrappedRef.current) return;
-    bootstrappedRef.current = true;
-    let cancelled = false;
-
-    async function bootstrap() {
-      const initialState = await loadSettingsInitialState(
-        () => store.getState().agentProfiles.version,
-      );
-      if (cancelled || Object.keys(initialState).length === 0) return;
-      const desiredWorkspaceId = initialState.workspaces?.activeId ?? null;
-      const workspaceBeforeHydration = store.getState().workspaces.activeId;
-      // Routing the actual switch through `setActiveWorkspace` (rather than
-      // letting `hydrate` overwrite `activeId` directly) keeps
-      // `activeIdRevision` accurate for consumers that key staleness off it,
-      // such as the Failed-inbox cache.
-      store.getState().hydrate(
-        initialState.workspaces
-          ? {
-              ...initialState,
-              workspaces: { ...initialState.workspaces, activeId: workspaceBeforeHydration },
-            }
-          : initialState,
-      );
-      if (initialState.workspaces && desiredWorkspaceId !== workspaceBeforeHydration) {
-        store.getState().setActiveWorkspace(desiredWorkspaceId);
-      }
-    }
-
-    void bootstrap();
-    return () => {
-      cancelled = true;
-      bootstrappedRef.current = false;
-    };
-  }, [pathname, store]);
-
-  return null;
-}
-
-export async function loadSettingsInitialState(
-  getAgentProfilesVersion: () => number,
-): Promise<HydrationState> {
-  // A profile event can arrive while any of these requests are in flight. Do
-  // not publish a partial snapshot as loaded; repeat the complete read until
-  // it was captured at one stable local generation.
-  for (;;) {
-    const agentProfilesVersion = getAgentProfilesVersion();
-    const [workspaces, executors, agents, discovery, available, userSettingsResponse] =
-      await Promise.all([
-        listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
-        listExecutors({ cache: "no-store" }).catch(() => ({ executors: [] })),
-        listAgents({ cache: "no-store" }).catch(() => ({ agents: [] })),
-        listAgentDiscovery({ cache: "no-store" }).catch(() => ({ agents: [] })),
-        listAvailableAgents({ cache: "no-store" }).catch(() => ({ agents: [], tools: [] })),
-        fetchUserSettings({ cache: "no-store" }).catch(() => null),
-      ]);
-
-    const initialState = buildSettingsInitialStateForRoute({
-      workspaces: workspaces.workspaces,
-      executors: executors.executors,
-      agents: agents.agents,
-      discoveryAgents: discovery.agents,
-      availableAgents: available.agents,
-      availableTools: available.tools ?? [],
-      userSettingsResponse,
-      agentProfilesVersion,
-    });
-    if (getAgentProfilesVersion() === agentProfilesVersion) return initialState;
-  }
-}
-
-export function buildSettingsInitialStateForRoute({
-  workspaces,
-  executors,
-  agents,
-  discoveryAgents,
-  availableAgents,
-  availableTools,
-  userSettingsResponse,
-  agentProfilesVersion = 0,
-}: SettingsInitialStateData): HydrationState {
-  const workspaceItems = workspaces.map(mapWorkspaceItem);
-  promoteLegacyWorkspaceSelection(workspaceItems);
-  const activeWorkspaceId = resolveSettingsActiveWorkspaceId(
-    workspaceItems,
-    readActiveWorkspaceCookie(),
-    userSettingsResponse?.settings?.workspace_id ?? null,
-  );
-  const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
-
-  return {
-    workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
-    executors: { items: executors },
-    agentProfiles: {
-      items: agents.flatMap((agent) =>
-        agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-      ),
-      version: agentProfilesVersion,
-    },
-    settingsAgents: { items: agents },
-    agentDiscovery: { items: discoveryAgents, loading: false, loaded: true },
-    availableAgents: {
-      items: availableAgents,
-      tools: availableTools,
-      loading: false,
-      loaded: true,
-    },
-    settingsData: { executorsLoaded: true, agentsLoaded: true },
-    ...(mappedUserSettings.loaded
-      ? {
-          userSettings: {
-            ...mappedUserSettings,
-            workspaceId: activeWorkspaceId,
-          },
-        }
-      : {}),
-  };
-}
-
-function SettingsRouteFallback({ pathname }: { pathname: string }) {
-  return (
-    <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
-      {/* `pathname` is a route string, never translated. */}
-      <Trans i18nKey="system:settingsRouteNotPorted" values={{ pathname }}>
-        This settings route is handled by the SPA shell, but its dedicated client page is still
-        being ported: <span className="font-mono">{pathname}</span>
-      </Trans>
-    </div>
   );
 }

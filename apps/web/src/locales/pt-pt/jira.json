@@ -223,5 +223,9 @@
   "oauthPopupBlocked": "O navegador bloqueou a janela de autorização. Permita pop-ups e tente novamente.",
   "oauthComplete": "Concluir",
   "oauthCancel": "Cancelar",
-  "oauthPasteInvalid": "URL inválido. Certifique-se de que copiou o URL de redirecionamento completo, incluindo os parâmetros code e state."
+  "oauthPasteInvalid": "URL inválido. Certifique-se de que copiou o URL de redirecionamento completo, incluindo os parâmetros code e state.",
+  "clearViewAsDefault": "Limpar {{name}} como vista predefinida",
+  "defaultViewDeleteFailed": "Não foi possível eliminar a vista Jira guardada. Tente novamente.",
+  "defaultViewSaveFailed": "Não foi possível guardar a vista Jira predefinida. Tente novamente.",
+  "setViewAsDefault": "Definir {{name}} como vista predefinida"
 }

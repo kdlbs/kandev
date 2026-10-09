@@ -72,6 +72,15 @@ func TestTaskProtoRoundTrip(t *testing.T) {
 		Autopilot: true, WIPAdmitted: true,
 		QueuedForStepID: "step-build", QueuedAt: strPtr("2026-07-16T10:00:00Z"),
 		ProjectID: "project-1", ExternalID: "external-1",
+
+		Blocked: true, BlockedReason: "pending",
+		DependsOn: []TaskDependencyRef{
+			{ID: "task-0", Title: "Blocking task", State: "in_progress", Status: "pending"},
+		},
+		Blocks: []TaskDependencyRef{
+			{ID: "task-9", Title: "Dependent task", State: "not_started", Status: ""},
+		},
+		DependsOnTruncated: true, BlocksTruncated: false, StartWhenUnblocked: false,
 	}
 
 	proto, err := task.toProto()
@@ -86,10 +95,42 @@ func TestTaskProtoRoundTrip(t *testing.T) {
 	require.True(t, proto.GetAutopilot())
 	require.Len(t, proto.GetPullRequests(), 1)
 	require.Equal(t, int64(42), proto.GetPullRequests()[0].GetNumber())
+	require.True(t, proto.GetBlocked())
+	require.Equal(t, "pending", proto.GetBlockedReason())
+	require.Len(t, proto.GetDependsOn(), 1)
+	require.Equal(t, "task-0", proto.GetDependsOn()[0].GetId())
+	require.Equal(t, "pending", proto.GetDependsOn()[0].GetStatus())
+	require.Len(t, proto.GetBlocks(), 1)
+	require.Empty(t, proto.GetBlocks()[0].GetStatus(), "blocks entries never carry a status")
+	require.True(t, proto.GetDependsOnTruncated())
+	require.False(t, proto.GetBlocksTruncated())
 
 	back, err := taskFromProto(proto)
 	require.NoError(t, err)
 	require.Equal(t, task, back)
+}
+
+func TestTaskDependencyRefProtoRoundTrip(t *testing.T) {
+	ref := TaskDependencyRef{ID: "task-5", Title: "Dependency", State: "in_progress", Status: "resolved"}
+
+	proto := ref.toProto()
+	require.Equal(t, ref, taskDependencyRefFromProto(proto))
+}
+
+func TestTaskDependencyRefWorkspaceIDNeverReachesTheWire(t *testing.T) {
+	ref := TaskDependencyRef{ID: "task-5", Title: "Dependency", WorkspaceID: "ws-secret"}
+
+	proto := ref.toProto()
+	require.NotContains(t, proto.String(), "ws-secret", "WorkspaceID must never be serialized onto the wire")
+
+	back := taskDependencyRefFromProto(proto)
+	require.Empty(t, back.WorkspaceID, "a decoded ref never recovers a WorkspaceID; the proto has no field for it")
+}
+
+func TestTaskDependencyRefsSliceProtoRoundTrip_EmptyIsNil(t *testing.T) {
+	require.Nil(t, taskDependencyRefsToProto(nil))
+	require.Nil(t, taskDependencyRefsToProto([]TaskDependencyRef{}))
+	require.Nil(t, taskDependencyRefsFromProto(nil))
 }
 
 func TestTaskProtoRoundTrip_NilOptionalsAndEmptyMetadata(t *testing.T) {

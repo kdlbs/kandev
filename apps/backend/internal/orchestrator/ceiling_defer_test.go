@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // TestDeferCeilingRefusalCreatesRecordFromAbsent covers the first refusal for a
@@ -38,6 +40,41 @@ func TestDeferCeilingRefusalCreatesRecordFromAbsent(t *testing.T) {
 	}
 	if record[models.CeilingQueuedAtKey] == nil || record[models.CeilingQueuedAtKey] == "" {
 		t.Fatalf("ceiling_queued_at was not stamped: %+v", record)
+	}
+}
+
+func TestReconcileQueuedTaskStateRepairsLegacyInProgressRow(t *testing.T) {
+	svc, repo := newServiceWithRealRepo(t)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "defer-state-repair", v1.TaskStateInProgress)
+	svc.taskRepo = taskRepo
+	ctx := context.Background()
+	queuedAt := time.Now().UTC()
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "defer-state-repair", Title: "T", State: v1.TaskStateInProgress,
+		CreatedAt: queuedAt, UpdatedAt: queuedAt,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "defer-state-repair-session", TaskID: "defer-state-repair",
+		State: models.TaskSessionStateCreated, StartedAt: queuedAt, UpdatedAt: queuedAt,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.SetTaskMetadataKey(ctx, "defer-state-repair", models.MetaKeyDeferredLaunch,
+		models.CeilingRecordKeys(models.CeilingDeferral{
+			Kind:    models.CeilingLaunchStartCreated,
+			Payload: map[string]interface{}{metaKeySessionID: "defer-state-repair-session"},
+			Origin:  string(launchOriginAutomatic), ReasonCode: ceilingReasonRefused,
+			QueuedAt: queuedAt, Ceiling: 5, Population: 6, PopulationKnown: true,
+		})); err != nil {
+		t.Fatalf("SetTaskMetadataKey: %v", err)
+	}
+
+	svc.reconcileQueuedTaskState(ctx, "defer-state-repair")
+	if taskRepo.updatedStates["defer-state-repair"] != v1.TaskStateScheduling {
+		t.Fatalf("state repair write = %q, want %q", taskRepo.updatedStates["defer-state-repair"], v1.TaskStateScheduling)
 	}
 }
 

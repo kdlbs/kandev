@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -359,6 +360,187 @@ func TestPromptSendNowClaimSkipsOnTurnStartWhenAlreadyProcessed(t *testing.T) {
 	}
 }
 
+func TestPromptSendNowClaimStartsCreatedSessionManually(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSessionWithStep(t, repo, "task-created", "session-created", "step-created")
+	seedExecutorRunning(t, repo, "session-created", "task-created", "exec-created")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-created"] = &wfmodels.WorkflowStep{
+		ID: "step-created", WorkflowID: "wf1", Name: "Created step", Position: 0,
+	}
+	stepGetter.workflowAgentProfileID = "profile-created"
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-created", v1.TaskStateInProgress)
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, "task-created", "session-created")
+	if err != nil {
+		t.Fatalf("resolve session identity: %v", err)
+	}
+	claim := &messagequeue.SendNowClaim{
+		Identity: identity,
+		Dispatch: messagequeue.QueuedMessage{
+			ID:        "queued-created",
+			TaskID:    "task-created",
+			SessionID: "session-created",
+			Content:   "manual capacity override",
+		},
+	}
+
+	deliveryAttempted, err := svc.promptSendNowClaim(ctx, claim)
+	if err != nil {
+		t.Fatalf("prompt Send Now claim: %v", err)
+	}
+	if !deliveryAttempted {
+		t.Fatal("created-session Send Now did not report delivery")
+	}
+	if len(messages.userMessages) != 1 {
+		t.Fatalf("created-session Send Now recorded %d user messages, want 1", len(messages.userMessages))
+	}
+
+	session, err := repo.GetTaskSession(ctx, "session-created")
+	if err != nil {
+		t.Fatalf("reload created session: %v", err)
+	}
+	if session.State == models.TaskSessionStateCreated {
+		t.Fatal("created-session Send Now left the session in CREATED")
+	}
+	agentMgr.mu.Lock()
+	descriptionCalls := len(agentMgr.setExecutionDescriptionCalls)
+	agentMgr.mu.Unlock()
+	if descriptionCalls != 1 {
+		t.Fatalf("created-session Send Now made %d launch description calls, want 1", descriptionCalls)
+	}
+}
+
+func TestSendQueuedNowConsumesCeilingLaunchAndPreservesWorkflowPrompt(t *testing.T) {
+	ctx := context.Background()
+	const promptReferenceContext = "EXPANDED PROMPT REFERENCES: The message above references saved prompts by @name. " +
+		"Use these expansions as hidden context while preserving the original @mentions.\n\n### @principles\nApply the repository principles."
+	repo := setupTestRepo(t)
+	seedTaskAndSessionWithStep(t, repo, "queued-created", "queued-session", "queued-step")
+	seedExecutorRunning(t, repo, "queued-session", "queued-created", "prepared-exec")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["queued-step"] = &wfmodels.WorkflowStep{
+		ID: "queued-step", WorkflowID: "wf1", Name: "Queued workflow step", Position: 0,
+	}
+	stepGetter.workflowAgentProfileID = "profile-queued"
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "queued-created", v1.TaskStateScheduling)
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	svc.messageCreator = &mockMessageCreator{}
+	t.Cleanup(svc.stopSendNowWorkers)
+
+	queuedAt := time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)
+	deferral := models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			metaKeySessionID:           "queued-session",
+			metaKeyAgentProfileID:      "profile-queued",
+			metaKeyPrompt:              "workflow prompt @principles\n\n" + sysprompt.Wrap(promptReferenceContext),
+			"prompt_already_composed":  true,
+			"prompt_reference_context": promptReferenceContext,
+			"skip_message_record":      true,
+		},
+		Origin:          string(launchOriginAutomatic),
+		ReasonCode:      ceilingReasonRefused,
+		QueuedAt:        queuedAt,
+		Ceiling:         5,
+		Population:      6,
+		PopulationKnown: true,
+	}
+	if err := repo.SetTaskMetadataKey(ctx, "queued-created", models.MetaKeyDeferredLaunch, models.CeilingRecordKeys(deferral)); err != nil {
+		t.Fatalf("persist ceiling deferral: %v", err)
+	}
+	queued, err := svc.messageQueue.QueueMessage(
+		ctx, "queued-session", "queued-created", "pending Continue", "", messagequeue.QueuedByUser, false, nil,
+	)
+	if err != nil {
+		t.Fatalf("queue Continue: %v", err)
+	}
+
+	sent, err := svc.SendQueuedNow(ctx, "queued-session", QueueSendNowScopeEntry, queued.ID)
+	if err != nil {
+		t.Fatalf("SendQueuedNow: %v", err)
+	}
+	if sent != 1 {
+		t.Fatalf("SendQueuedNow sent %d entries, want 1", sent)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	launched := false
+	for time.Now().Before(deadline) {
+		agentMgr.mu.Lock()
+		descriptionCalls := len(agentMgr.setExecutionDescriptionCalls)
+		descriptions := make([]string, 0, descriptionCalls)
+		for _, call := range agentMgr.setExecutionDescriptionCalls {
+			descriptions = append(descriptions, call.Prompt)
+		}
+		agentMgr.mu.Unlock()
+		if descriptionCalls == 1 {
+			if !strings.Contains(descriptions[0], "workflow prompt @principles") || !strings.Contains(descriptions[0], "pending Continue") ||
+				!strings.Contains(descriptions[0], "Apply the repository principles.") ||
+				strings.Count(descriptions[0], promptReferenceContext) != 1 {
+				t.Fatalf("created-session launch prompt = %q, want workflow prompt, trusted context once, and Continue", descriptions[0])
+			}
+			launched = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !launched {
+		session, sessionErr := repo.GetTaskSession(ctx, "queued-session")
+		status := svc.messageQueue.GetStatus(ctx, "queued-session")
+		agentMgr.mu.Lock()
+		capturedPrompts := append([]string(nil), agentMgr.capturedPrompts...)
+		descriptionCalls := append([]promptCall(nil), agentMgr.setExecutionDescriptionCalls...)
+		agentMgr.mu.Unlock()
+		t.Fatalf("SendQueuedNow did not accept the created-session launch before the timeout: record=%#v session=%#v session_err=%v queue=%#v prompts=%#v descriptions=%#v", deferredLaunchOf(t, svc, "queued-created"), session, sessionErr, status, capturedPrompts, descriptionCalls)
+	}
+
+	// The created-session launch is owned by the Send Now worker. The agent
+	// manager callback above happens before that worker returns and settles the
+	// exact ceiling record, so wait for the durable settlement boundary before
+	// asserting the replay is gone.
+	settleDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(settleDeadline) {
+		record := deferredLaunchOf(t, svc, "queued-created")
+		if record == nil || !models.HasCeilingDeferredIntent(&models.Task{Metadata: map[string]interface{}{
+			models.MetaKeyDeferredLaunch: record,
+		}}) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	record := deferredLaunchOf(t, svc, "queued-created")
+	if record != nil && models.HasCeilingDeferredIntent(&models.Task{Metadata: map[string]interface{}{
+		models.MetaKeyDeferredLaunch: record,
+	}}) {
+		t.Fatalf("SendQueuedNow left the original ceiling launch replayable: %#v", record)
+	}
+	agentMgr.mu.Lock()
+	beforeSweeps := len(agentMgr.setExecutionDescriptionCalls)
+	agentMgr.mu.Unlock()
+
+	// Completion and every later sweep must observe an empty ceiling half. In
+	// particular, a replay must not send the old workflow prompt a second time.
+	svc.drainDeferredCeilingLaunches(ctx)
+	svc.drainDeferredCeilingLaunches(ctx)
+	agentMgr.mu.Lock()
+	afterSweeps := len(agentMgr.setExecutionDescriptionCalls)
+	agentMgr.mu.Unlock()
+	if afterSweeps != beforeSweeps {
+		t.Fatalf("subsequent ceiling sweeps dispatched %d duplicate launches", afterSweeps-beforeSweeps)
+	}
+}
+
 func TestPromptSendNowClaimRejectsPlanCommentWhenTranscriptPersistenceFails(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -627,6 +809,24 @@ func (m *callbackAfterPromptEntryAgentManager) PromptAgentWithDispatchCallback(
 	return result.result, result.err
 }
 
+func (m *callbackAfterPromptEntryAgentManager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	if beforeAdmission != nil {
+		if err := beforeAdmission(); err != nil {
+			return nil, err
+		}
+	}
+	return m.PromptAgentWithDispatchCallback(
+		ctx, executionID, prompt, attachments, dispatchOnly, onDispatched,
+	)
+}
+
 // @covers AC-UI-MESSAGE-QUEUE-SEND-NOW-001.2
 // @covers AC-UI-MESSAGE-QUEUE-SEND-NOW-001.7
 // @covers AC-UI-MESSAGE-QUEUE-SEND-NOW-001.9
@@ -783,6 +983,59 @@ func TestSendQueuedNowCancelsLiveFIFOTurn(t *testing.T) {
 
 			releaseSecondPrompt.Do(func() { close(allowSecondPrompt) })
 		})
+	}
+}
+
+func TestSendQueuedNowCancelsActiveTurnWhenSessionProjectionIsPromptable(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
+	turns := &repoTurnService{repo: repo}
+	if _, err := turns.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+
+	// The turn store can observe a live turn before the session projection moves
+	// out of WAITING_FOR_INPUT. Send Now must use the authoritative active turn
+	// identity instead of admitting a concurrent prompt from the stale projection.
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("persist stale promptable projection: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.turnService = turns
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.messageCreator = &mockMessageCreator{}
+	svc.messageQueue.SetAutoMergeEnabled(false)
+	t.Cleanup(func() { svc.stopSendNowWorkers() })
+
+	for _, content := range []string{"queued A", "urgent B", "queued C"} {
+		if _, err := svc.messageQueue.QueueMessageWithMetadata(
+			ctx, "session-1", "task-1", content, "", messagequeue.QueuedByUser, false, nil, nil,
+		); err != nil {
+			t.Fatalf("queue %q: %v", content, err)
+		}
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if len(status.Entries) != 3 {
+		t.Fatalf("queued entries = %#v, want A, B, C", status.Entries)
+	}
+
+	if _, err := svc.SendQueuedNow(ctx, "session-1", QueueSendNowScopeEntry, status.Entries[1].ID); err != nil {
+		t.Fatalf("Send Now error = %v", err)
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
+		t.Fatalf("cancel calls = %d, want one for the active turn despite the promptable session projection", got)
 	}
 }
 

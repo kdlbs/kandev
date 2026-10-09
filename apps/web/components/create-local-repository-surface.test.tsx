@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { StateProvider } from "@/components/state-provider";
+import type { DirectoryListing } from "@/lib/api/domains/fs-api";
 import type { Repository } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => ({
@@ -32,6 +34,9 @@ const REPOSITORY_NAME = "alpha";
 const REPOSITORY_NAME_LABEL = "Repository name";
 const PARENT_DIRECTORY_LABEL = "Parent directory";
 const CREATE_BUTTON_NAME = "Create repository";
+const NEW_FOLDER_BUTTON_NAME = "New folder";
+const NEW_FOLDER_NAME_LABEL = "New folder name";
+const CREATE_FOLDER_BUTTON_NAME = "Create folder";
 const PROJECTS_PATH = "/work/projects";
 
 const createdRepository = {
@@ -63,7 +68,11 @@ function renderSurface(
     onCreated: vi.fn(),
     ...overrides,
   };
-  render(<CreateLocalRepositorySurface {...props} />);
+  render(
+    <StateProvider>
+      <CreateLocalRepositorySurface {...props} />
+    </StateProvider>,
+  );
   return props;
 }
 
@@ -75,7 +84,10 @@ beforeEach(() => {
   mocks.listDirectory.mockResolvedValue({ path: "/work", parent: "/", entries: [] });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.localStorage.clear();
+});
 
 describe("local repository form helpers", () => {
   it.each(["", ".", "..", "nested/name", "nested\\name", "name\0with-null"])(
@@ -166,14 +178,15 @@ describe("CreateLocalRepositorySurface", () => {
 
     await waitFor(() =>
       expect(
-        (screen.getByRole("button", { name: "New folder" }) as HTMLButtonElement).disabled,
+        (screen.getByRole("button", { name: NEW_FOLDER_BUTTON_NAME }) as HTMLButtonElement)
+          .disabled,
       ).toBe(false),
     );
-    fireEvent.click(screen.getByRole("button", { name: "New folder" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "New folder name" }), {
+    fireEvent.click(screen.getByRole("button", { name: NEW_FOLDER_BUTTON_NAME }));
+    fireEvent.change(screen.getByRole("textbox", { name: NEW_FOLDER_NAME_LABEL }), {
       target: { value: "projects" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Create folder" }));
+    fireEvent.click(screen.getByRole("button", { name: CREATE_FOLDER_BUTTON_NAME }));
 
     await waitFor(() => {
       expect(mocks.createDirectory).toHaveBeenCalledWith("/work", "projects");
@@ -181,6 +194,81 @@ describe("CreateLocalRepositorySurface", () => {
         PROJECTS_PATH,
       );
     });
+  });
+  // @covers AC-WORKSPACES-HIDDEN-FOLDERS-001.4
+  it("exposes the shared reveal control and re-lists this browser with it", async () => {
+    const hiddenListing = {
+      path: "/work",
+      parent: "/",
+      entries: [{ name: ".config", path: "/work/.config" }],
+      choosable: true,
+    };
+    mocks.listDirectory
+      .mockResolvedValueOnce({ ...hiddenListing, entries: [] })
+      .mockResolvedValue(hiddenListing);
+    renderSurface();
+
+    const control = await screen.findByRole("switch", { name: "Hidden folders" });
+    expect(control.getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(control);
+
+    // This browser asks the same shared preference the other directory browsers
+    // read, so a toggle anywhere in the application reaches this surface too.
+    await waitFor(() =>
+      expect(mocks.listDirectory).toHaveBeenLastCalledWith("", { includeHidden: true }),
+    );
+    await waitFor(() => expect(screen.getByText(".config")).toBeTruthy());
+    expect(await screen.findByRole("switch", { name: "Hidden folders" })).toBeTruthy();
+  });
+});
+
+describe("CreateLocalRepositorySurface visibility refresh", () => {
+  it("preserves an unfinished folder name during a visibility refresh", async () => {
+    let finishRefresh!: (listing: DirectoryListing) => void;
+    const refresh = new Promise<DirectoryListing>((resolve) => {
+      finishRefresh = resolve;
+    });
+    const currentListing: DirectoryListing = {
+      path: "/work",
+      parent: "/",
+      entries: [],
+      choosable: true,
+    };
+    mocks.listDirectory.mockResolvedValue(currentListing);
+    renderSurface();
+
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: NEW_FOLDER_BUTTON_NAME }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: NEW_FOLDER_BUTTON_NAME }));
+    const nameInput = screen.getByRole("textbox", { name: NEW_FOLDER_NAME_LABEL });
+    fireEvent.change(nameInput, { target: { value: "unfinished-folder" } });
+    mocks.listDirectory.mockImplementation(
+      (_path: string, options?: { includeHidden?: boolean }) =>
+        options?.includeHidden ? refresh : Promise.resolve(currentListing),
+    );
+    fireEvent.click(await screen.findByRole("switch", { name: "Hidden folders" }));
+
+    await waitFor(() =>
+      expect(mocks.listDirectory).toHaveBeenCalledWith("", { includeHidden: true }),
+    );
+    expect(
+      (screen.getByRole("textbox", { name: NEW_FOLDER_NAME_LABEL }) as HTMLInputElement).value,
+    ).toBe("unfinished-folder");
+
+    await act(async () =>
+      finishRefresh({
+        ...currentListing,
+        entries: [{ name: ".config", path: "/work/.config" }],
+      }),
+    );
+    expect(
+      (screen.getByRole("textbox", { name: NEW_FOLDER_NAME_LABEL }) as HTMLInputElement).value,
+    ).toBe("unfinished-folder");
   });
 });
 
@@ -201,13 +289,21 @@ describe("CreateLocalRepositorySurface async creation", () => {
       executorSelection: directLocalSelection,
       onCreated: previousHandler,
     };
-    const { rerender } = render(<CreateLocalRepositorySurface {...props} />);
+    const { rerender } = render(
+      <StateProvider>
+        <CreateLocalRepositorySurface {...props} />
+      </StateProvider>,
+    );
     fireEvent.change(await screen.findByLabelText(REPOSITORY_NAME_LABEL), {
       target: { value: REPOSITORY_NAME },
     });
     fireEvent.click(screen.getByRole("button", { name: CREATE_BUTTON_NAME }));
     await waitFor(() => expect(mocks.initialize).toHaveBeenCalledOnce());
-    rerender(<CreateLocalRepositorySurface {...props} onCreated={currentHandler} />);
+    rerender(
+      <StateProvider>
+        <CreateLocalRepositorySurface {...props} onCreated={currentHandler} />
+      </StateProvider>,
+    );
     complete(createdRepository);
     await waitFor(() => expect(previousHandler).toHaveBeenCalledWith(createdRepository));
     expect(currentHandler).not.toHaveBeenCalled();
@@ -250,9 +346,11 @@ describe("CreateLocalRepositorySurface submission", () => {
     };
 
     render(
-      <form onSubmit={parentSubmit}>
-        <CreateLocalRepositorySurface {...props} />
-      </form>,
+      <StateProvider>
+        <form onSubmit={parentSubmit}>
+          <CreateLocalRepositorySurface {...props} />
+        </form>
+      </StateProvider>,
     );
 
     fireEvent.change(await screen.findByLabelText(REPOSITORY_NAME_LABEL), {

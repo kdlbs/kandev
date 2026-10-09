@@ -15,6 +15,22 @@ type managedRuntimeSelectionReader struct {
 	err       error
 }
 
+type managedRuntimeOpenCodeSelectionStore struct {
+	managedRuntimeSelectionReader
+	openCodeSelection managedruntime.OpenCodeSelection
+}
+
+func (r managedRuntimeOpenCodeSelectionStore) GetOpenCodeSelection(context.Context) (managedruntime.OpenCodeSelection, bool, error) {
+	return r.openCodeSelection, true, nil
+}
+
+func (r managedRuntimeOpenCodeSelectionStore) Save(context.Context, string, string, string) error {
+	return nil
+}
+func (r managedRuntimeOpenCodeSelectionStore) Delete(context.Context, string, string) error {
+	return nil
+}
+
 func (r managedRuntimeSelectionReader) Get(
 	context.Context,
 	string,
@@ -24,6 +40,7 @@ func (r managedRuntimeSelectionReader) Get(
 }
 
 func TestResolveInferenceCommandUsesActiveExactVersion(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	manager := &Manager{managedRuntimeSelections: managedRuntimeSelectionReader{
 		selection: managedruntime.Selection{Package: "opencode-ai", Version: "1.18.5"},
 		found:     true,
@@ -41,6 +58,7 @@ func TestResolveInferenceCommandUsesActiveExactVersion(t *testing.T) {
 }
 
 func TestResolveInferenceCommandPreservesLegacyAndReportsSelectionErrors(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	agent := agents.NewOpenCodeACP()
 	manager := &Manager{managedRuntimeSelections: managedRuntimeSelectionReader{}}
 	command, err := manager.resolveInferenceCommand(context.Background(), agent.ID(), agent, agents.Command{})
@@ -55,6 +73,25 @@ func TestResolveInferenceCommandPreservesLegacyAndReportsSelectionErrors(t *test
 	manager.managedRuntimeSelections = managedRuntimeSelectionReader{err: wantErr}
 	if _, err := manager.resolveInferenceCommand(context.Background(), agent.ID(), agent, agents.Command{}); !errors.Is(err, wantErr) {
 		t.Fatalf("selection error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestResolveInferenceCommandUsesSelectedOpenCodeFamily(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	selectionStore := managedRuntimeOpenCodeSelectionStore{openCodeSelection: managedruntime.OpenCodeSelection{
+		SchemaVersion: 1, Family: managedruntime.OpenCodeFamilyV2, Source: managedruntime.OpenCodeSourceManaged,
+		Package: "@opencode/cli", SelectedVersion: "2.0.18", AppliedDefaultVersion: "2.0.18", Revision: 1,
+	}}
+	manager := &Manager{managedRuntimeSelections: selectionStore}
+	openCode := agents.NewOpenCodeACP()
+	command, err := manager.resolveInferenceCommand(context.Background(), openCode.ID(), openCode, agents.Command{})
+	if err != nil {
+		t.Fatalf("resolveInferenceCommand: %v", err)
+	}
+	want := []string{"npx", "--yes", "--prefer-offline", "--prefix", managedruntime.NPMProjectPrefix,
+		"@opencode/cli@2.0.18", "acp", "--print-logs"}
+	if !equalStrings(command.Args(), want) {
+		t.Fatalf("command = %#v, want %#v", command.Args(), want)
 	}
 }
 

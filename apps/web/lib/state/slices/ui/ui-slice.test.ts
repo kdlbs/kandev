@@ -1,10 +1,12 @@
+/* eslint-disable max-lines -- UI slice coverage shares one store harness. */
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type StoreApi, type UseBoundStore } from "zustand";
 import { waitFor } from "@testing-library/react";
 import { immer } from "zustand/middleware/immer";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import { createUISlice, migrateView } from "./ui-slice";
-import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
+import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/lib/layout/app-sidebar-geometry";
 import type { SidebarView, SidebarViewDraft } from "./sidebar-view-types";
 import type { UISlice } from "./types";
 import {
@@ -16,11 +18,19 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
   updateUserSettings: vi.fn(() => Promise.resolve({ settings: {} })),
 }));
 
-function makeStore() {
+function makeStore(createSlice: typeof createUISlice = createUISlice) {
   return create<UISlice>()(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    immer((...a) => ({ ...(createUISlice as any)(...a) })),
+    immer((...a) => ({ ...(createSlice as any)(...a), workspaces: { activeId: "ws" } })),
   );
+}
+
+/** Re-evaluates the slice module and returns a store built from it, which is
+ * what a page load does to the stored UI preferences. */
+async function importAfterReload() {
+  vi.resetModules();
+  const fresh = await import("./ui-slice");
+  return makeStore(fresh.createUISlice);
 }
 
 type UIStore = UseBoundStore<StoreApi<UISlice>>;
@@ -40,9 +50,51 @@ function makeSidebarView(id: string, name: string): SidebarView {
     filters: [],
     sort: { key: "state" as const, direction: "asc" as const },
     group: "none" as const,
+    groupIndent: true,
     collapsedGroups: [],
   };
 }
+
+function setSidebarViews(store: UIStore, patch: Partial<UISlice["sidebarViews"]>): void {
+  store.setState((state) => ({
+    ...state,
+    sidebarViewsByWorkspace: { ws: { ...state.sidebarViews, ...patch } },
+  }));
+}
+
+describe("directory browser hidden-entry preference", () => {
+  const SHOW_HIDDEN_KEY = "kandev.directoryBrowser.showHidden";
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  // @covers AC-WORKSPACES-HIDDEN-FOLDERS-001.1
+  it("defaults the directory browser to the current hidden-entry behavior", () => {
+    expect(makeStore().getState().directoryBrowserShowHidden).toBe(false);
+  });
+
+  // @covers AC-WORKSPACES-HIDDEN-FOLDERS-001.5
+  it("restores a stored preference on the next page load", async () => {
+    makeStore().getState().setDirectoryBrowserShowHidden(true);
+    expect(window.localStorage.getItem(SHOW_HIDDEN_KEY)).toBe("true");
+
+    // The slice reads stored UI preferences while the module is evaluated, so a
+    // page load is simulated by re-importing the module rather than by building
+    // a second store from the already-evaluated state.
+    const afterReload = await importAfterReload();
+    expect(afterReload.getState().directoryBrowserShowHidden).toBe(true);
+  });
+
+  it("stays inactive for the next page load after being switched back off", async () => {
+    const store = makeStore();
+    store.getState().setDirectoryBrowserShowHidden(true);
+    store.getState().setDirectoryBrowserShowHidden(false);
+
+    const afterReload = await importAfterReload();
+    expect(afterReload.getState().directoryBrowserShowHidden).toBe(false);
+  });
+});
 
 describe("cancel-turn progress", () => {
   it("tracks pending cancellation independently per session and clears one entry", () => {
@@ -276,15 +328,11 @@ describe("sidebar view sync rollback", () => {
   });
 
   function seedViews(store: UIStore) {
-    store.setState((state) => ({
-      ...state,
-      sidebarViews: {
-        ...state.sidebarViews,
-        views: [makeSidebarView("view-a", "View A"), makeSidebarView("view-b", "View B")],
-        activeViewId: "view-a",
-        draft: null,
-      },
-    }));
+    setSidebarViews(store, {
+      views: [makeSidebarView("view-a", "View A"), makeSidebarView("view-b", "View B")],
+      activeViewId: "view-a",
+      draft: null,
+    });
   }
 
   it("does not roll back an active view changed after a failed view mutation", async () => {
@@ -302,11 +350,13 @@ describe("sidebar view sync rollback", () => {
     store.getState().setSidebarActiveView("view-b");
 
     await waitFor(() => {
-      expect(store.getState().sidebarViews.syncError).toBe(RENAME_FAILED);
+      expect(store.getState().sidebarViewsByWorkspace.ws.syncError).toBe(RENAME_FAILED);
     });
 
-    expect(store.getState().sidebarViews.activeViewId).toBe("view-b");
-    expect(store.getState().sidebarViews.views.find((v) => v.id === "view-a")?.name).toBe("View A");
+    expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe("view-b");
+    expect(
+      store.getState().sidebarViewsByWorkspace.ws.views.find((v) => v.id === "view-a")?.name,
+    ).toBe("View A");
   });
 });
 
@@ -548,31 +598,34 @@ describe("reorderSidebarViews", () => {
 
   it("reorders by id, persists the order, and syncs the backend payload", () => {
     const store = makeStore();
-    store.setState((state) => ({
-      ...state,
-      sidebarViews: {
-        ...state.sidebarViews,
-        views: [
-          makeSidebarView("all", "All"),
-          makeSidebarView("one", "One"),
-          makeSidebarView("two", "Two"),
-        ],
-        activeViewId: "two",
-        draft: null,
-      },
-    }));
+    setSidebarViews(store, {
+      views: [
+        makeSidebarView("all", "All"),
+        makeSidebarView("one", "One"),
+        makeSidebarView("two", "Two"),
+      ],
+      activeViewId: "two",
+      draft: null,
+    });
 
     store.getState().reorderSidebarViews("two", "one");
 
-    expect(store.getState().sidebarViews.views.map((v) => v.id)).toEqual(["all", "two", "one"]);
+    expect(store.getState().sidebarViewsByWorkspace.ws.views.map((v) => v.id)).toEqual([
+      "all",
+      "two",
+      "one",
+    ]);
     expect(updateUserSettings).toHaveBeenCalledWith({
-      sidebar_views: [
-        expect.objectContaining({ id: "all" }),
-        expect.objectContaining({ id: "two" }),
-        expect.objectContaining({ id: "one" }),
-      ],
-      sidebar_active_view_id: "two",
-      sidebar_draft: null,
+      sidebar_view_state: {
+        workspace_id: "ws",
+        views: [
+          expect.objectContaining({ id: "all" }),
+          expect.objectContaining({ id: "two" }),
+          expect.objectContaining({ id: "one" }),
+        ],
+        active_view_id: "two",
+        draft: null,
+      },
     });
   });
 
@@ -582,27 +635,28 @@ describe("reorderSidebarViews", () => {
       filters: [{ id: "c1", dimension: "titleMatch", op: "matches", value: "bug" }],
       sort: { key: "title", direction: "asc" },
       group: "workflow",
+      groupIndent: true,
     };
     const store = makeStore();
-    store.setState((state) => ({
-      ...state,
-      sidebarViews: {
-        ...state.sidebarViews,
-        views: [
-          makeSidebarView("all", "All"),
-          makeSidebarView("one", "One"),
-          makeSidebarView("two", "Two"),
-        ],
-        activeViewId: "one",
-        draft,
-      },
-    }));
+    setSidebarViews(store, {
+      views: [
+        makeSidebarView("all", "All"),
+        makeSidebarView("one", "One"),
+        makeSidebarView("two", "Two"),
+      ],
+      activeViewId: "one",
+      draft,
+    });
 
     store.getState().reorderSidebarViews("two", "all");
 
-    expect(store.getState().sidebarViews.views.map((v) => v.id)).toEqual(["two", "all", "one"]);
-    expect(store.getState().sidebarViews.activeViewId).toBe("one");
-    expect(store.getState().sidebarViews.draft).toEqual(draft);
+    expect(store.getState().sidebarViewsByWorkspace.ws.views.map((v) => v.id)).toEqual([
+      "two",
+      "all",
+      "one",
+    ]);
+    expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe("one");
+    expect(store.getState().sidebarViewsByWorkspace.ws.draft).toEqual(draft);
   });
 
   it("no-ops when ids are equal or missing", () => {
@@ -612,20 +666,22 @@ describe("reorderSidebarViews", () => {
       makeSidebarView("one", "One"),
       makeSidebarView("two", "Two"),
     ];
-    store.setState((state) => ({
-      ...state,
-      sidebarViews: { ...state.sidebarViews, views, activeViewId: "all", draft: null },
-    }));
+    setSidebarViews(store, { views, activeViewId: "all", draft: null });
 
     store.getState().reorderSidebarViews("one", "one");
     store.getState().reorderSidebarViews("missing", "one");
     store.getState().reorderSidebarViews("one", "missing");
 
-    expect(store.getState().sidebarViews.views.map((v) => v.id)).toEqual(["all", "one", "two"]);
+    expect(store.getState().sidebarViewsByWorkspace.ws.views.map((v) => v.id)).toEqual([
+      "all",
+      "one",
+      "two",
+    ]);
     expect(updateUserSettings).not.toHaveBeenCalled();
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- sidebar backend state cases share one payload harness.
 describe("sidebar view backend state", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -634,41 +690,37 @@ describe("sidebar view backend state", () => {
 
   it("syncs active view changes to backend user settings", () => {
     const store = makeStore();
-    store.setState((state) => ({
-      ...state,
-      sidebarViews: {
-        ...state.sidebarViews,
-        views: [makeSidebarView("all", "All"), makeSidebarView("mine", "Mine")],
-        activeViewId: "all",
-        draft: {
-          baseViewId: "all",
-          filters: [],
-          sort: { key: "state", direction: "asc" },
-          group: "state",
-        },
+    setSidebarViews(store, {
+      views: [makeSidebarView("all", "All"), makeSidebarView("mine", "Mine")],
+      activeViewId: "all",
+      draft: {
+        baseViewId: "all",
+        filters: [],
+        sort: { key: "state", direction: "asc" },
+        group: "state",
+        groupIndent: true,
       },
-    }));
+    });
 
     store.getState().setSidebarActiveView("mine");
 
-    expect(store.getState().sidebarViews.activeViewId).toBe("mine");
+    expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe("mine");
     expect(updateUserSettings).toHaveBeenCalledWith({
-      sidebar_active_view_id: "mine",
-      sidebar_draft: null,
+      sidebar_view_state: {
+        workspace_id: "ws",
+        active_view_id: "mine",
+        draft: null,
+      },
     });
   });
 
   it("syncs filter sort and group drafts to backend user settings", () => {
     const store = makeStore();
-    store.setState((state) => ({
-      ...state,
-      sidebarViews: {
-        ...state.sidebarViews,
-        views: [makeSidebarView("all", "All")],
-        activeViewId: "all",
-        draft: null,
-      },
-    }));
+    setSidebarViews(store, {
+      views: [makeSidebarView("all", "All")],
+      activeViewId: "all",
+      draft: null,
+    });
 
     store.getState().updateSidebarDraft({
       sort: { key: "updatedAt", direction: "desc" },
@@ -676,13 +728,17 @@ describe("sidebar view backend state", () => {
     });
 
     expect(updateUserSettings).toHaveBeenCalledWith({
-      sidebar_active_view_id: "all",
-      sidebar_draft: {
-        base_view_id: "all",
-        filters: [],
-        sort: { key: "updatedAt", direction: "desc" },
-        group: "workflow",
-        task_row: expect.any(Object),
+      sidebar_view_state: {
+        workspace_id: "ws",
+        active_view_id: "all",
+        draft: {
+          base_view_id: "all",
+          filters: [],
+          sort: { key: "updatedAt", direction: "desc" },
+          group: "workflow",
+          group_indent: true,
+          task_row: expect.any(Object),
+        },
       },
     });
   });
@@ -693,33 +749,89 @@ describe("sidebar view backend state", () => {
       filters: [],
       sort: { key: "updatedAt", direction: "desc" },
       group: "state",
+      groupIndent: true,
     };
     const store = makeStore();
-    store.setState((state) => ({
-      ...state,
-      sidebarViews: {
-        ...state.sidebarViews,
-        views: [makeSidebarView("all", "All"), makeSidebarView("two", "Two")],
-        activeViewId: "all",
-        draft,
-      },
-    }));
+    setSidebarViews(store, {
+      views: [makeSidebarView("all", "All"), makeSidebarView("two", "Two")],
+      activeViewId: "all",
+      draft,
+    });
 
     store.getState().reorderSidebarViews("two", "all");
 
     expect(updateUserSettings).toHaveBeenCalledWith({
-      sidebar_views: [
-        expect.objectContaining({ id: "two" }),
-        expect.objectContaining({ id: "all" }),
-      ],
-      sidebar_active_view_id: "all",
-      sidebar_draft: {
-        base_view_id: "all",
-        filters: [],
-        sort: { key: "updatedAt", direction: "desc" },
-        group: "state",
-        task_row: expect.any(Object),
+      sidebar_view_state: {
+        workspace_id: "ws",
+        views: [expect.objectContaining({ id: "two" }), expect.objectContaining({ id: "all" })],
+        active_view_id: "all",
+        draft: {
+          base_view_id: "all",
+          filters: [],
+          sort: { key: "updatedAt", direction: "desc" },
+          group: "state",
+          group_indent: true,
+          task_row: expect.any(Object),
+        },
       },
     });
   });
+});
+
+// @covers AC-AGENTS-RUNTIME-NOTIFY-001.3
+it("queues runtime notices arriving in one render and preserves their occurrence identities", () => {
+  const store = makeStore();
+  const gemini = {
+    version: "2.0.0",
+    agent_name: "gemini",
+    title: "Gemini",
+    body: "runtime update",
+    occurrence_id: "gemini-2",
+  };
+  const codex = { ...gemini, agent_name: "codex-app-server", occurrence_id: "codex-2" };
+  store.getState().setUpdateAvailableNotification(gemini);
+  store.getState().setUpdateAvailableNotification(codex);
+  expect(store.getState().updateAvailableNotification).toEqual(gemini);
+  store.getState().setUpdateAvailableNotification(null);
+  expect(store.getState().updateAvailableNotification).toEqual(codex);
+  store.getState().setUpdateAvailableNotification(null);
+  expect(store.getState().updateAvailableNotification).toBeNull();
+});
+
+// @covers AC-AGENTS-RUNTIME-NOTIFY-003.3, AC-AGENTS-RUNTIME-NOTIFY-003.5
+it("queues a grouped runtime notification as one occurrence with its typed members", () => {
+  const store = makeStore();
+  const summary = {
+    notification_kind: "agent_runtime_summary" as const,
+    runtime_updates: [
+      {
+        occurrence_id: "gemini-2",
+        agent_name: "gemini",
+        runtime_id: "npm:@google/gemini-cli",
+        display_name: "Gemini",
+        previous_version: "1.0.0",
+        version: "2.0.0",
+      },
+      {
+        occurrence_id: "codex-3",
+        agent_name: "codex-app-server",
+        runtime_id: "npm:@openai/codex",
+        display_name: "Codex",
+        previous_version: "1.0.0",
+        version: "3.0.0",
+      },
+    ],
+    title: "2 agent runtime updates available",
+    body: "Review the new versions in Settings > Agents.",
+    url: "/settings/agents#runtime-updates",
+    occurrence_id: "summary-codex-gemini",
+  };
+
+  store.getState().setUpdateAvailableNotification(summary);
+  store.getState().setUpdateAvailableNotification({ ...summary });
+
+  expect(store.getState().updateAvailableNotification).toEqual(summary);
+  expect(store.getState().updateAvailableNotificationQueue).toEqual([]);
+  store.getState().setUpdateAvailableNotification(null);
+  expect(store.getState().updateAvailableNotification).toBeNull();
 });

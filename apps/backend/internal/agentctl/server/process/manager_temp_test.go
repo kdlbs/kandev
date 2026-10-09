@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -88,6 +90,138 @@ func TestManager_BuildFinalCommandLeavesUnsetTempEnvironmentUnset(t *testing.T) 
 		}
 	}
 	assertNoAgentTempRoot(t, serviceTemp)
+}
+
+func TestManager_BuildFinalCommandPreparesManagedNpmPrefixOutsideAgentHome(t *testing.T) {
+	home := t.TempDir()
+	workDir := t.TempDir()
+	manager := NewManager(&config.InstanceConfig{
+		WorkDir: workDir,
+		AgentArgs: []string{
+			"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime",
+			"@scope/managed-acp@1.2.3",
+		},
+		AgentEnv: []string{"HOME=" + home},
+	}, newTestLogger(t))
+	manager.adapter = newStubAdapter()
+
+	if err := manager.buildFinalCommand(); err != nil {
+		t.Fatalf("buildFinalCommand() error = %v", err)
+	}
+	prefix := manager.cmd.Args[4]
+	if !filepath.IsAbs(prefix) || !strings.HasPrefix(filepath.Clean(prefix), filepath.Clean(os.TempDir())+string(filepath.Separator)) {
+		t.Fatalf("managed npm prefix = %q, want an absolute path under %q", prefix, os.TempDir())
+	}
+	info, err := os.Stat(prefix)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("managed npm prefix stat = (%v, %v), want an existing directory", info, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".kandev", "managed-npm-runtime")); !os.IsNotExist(err) {
+		t.Fatalf("managed npm prefix was created under agent home, stat error = %v", err)
+	}
+	if manager.cmd.Dir != workDir {
+		t.Fatalf("managed runtime working directory = %q, want workspace %q", manager.cmd.Dir, workDir)
+	}
+}
+
+func TestManager_BuildFinalCommandPreparesOneShotNpmPrefixesWithoutChangingArgs(t *testing.T) {
+	initialArgs := []string{"npx", "--prefix", managedruntime.NPMProjectPrefix, "pkg@1.2.3", "--initial-only"}
+	continueArgs := []string{"npx", "--prefix", managedruntime.NPMProjectPrefix, "pkg@1.2.3", "--continue-only"}
+	manager := NewManager(&config.InstanceConfig{
+		WorkDir:   t.TempDir(),
+		AgentArgs: []string{"persistent-agent", "--persistent-only"},
+	}, newTestLogger(t))
+	manager.adapter = newStubAdapter()
+	manager.adapterCfg = &adapter.Config{OneShotConfig: &adapter.OneShotConfig{
+		InitialArgs:  initialArgs,
+		ContinueArgs: continueArgs,
+	}}
+
+	if err := manager.buildFinalCommand(); err != nil {
+		t.Fatalf("buildFinalCommand() error = %v", err)
+	}
+	oneShot := manager.adapterCfg.OneShotConfig
+	for name, args := range map[string][]string{
+		"initial":  oneShot.InitialArgs,
+		"continue": oneShot.ContinueArgs,
+	} {
+		if len(args) != 5 || args[4] != "--"+name+"-only" {
+			t.Errorf("one-shot %s args = %#v, want its original command arguments", name, args)
+			continue
+		}
+		prefix := args[2]
+		if !filepath.IsAbs(prefix) || !strings.HasPrefix(filepath.Clean(prefix), filepath.Clean(os.TempDir())+string(filepath.Separator)) {
+			t.Errorf("one-shot %s prefix = %q, want an absolute path under %q", name, prefix, os.TempDir())
+		}
+	}
+	if initialArgs[2] != managedruntime.NPMProjectPrefix || continueArgs[2] != managedruntime.NPMProjectPrefix {
+		t.Fatalf("preparing one-shot args mutated source command slices: initial=%#v continue=%#v", initialArgs, continueArgs)
+	}
+}
+
+func TestManager_BuildPipedProcessRequestPreparesManagedNpmPrefixOutsideAgentHome(t *testing.T) {
+	home := t.TempDir()
+	manager := NewManager(&config.InstanceConfig{
+		WorkDir:  t.TempDir(),
+		AgentEnv: []string{"HOME=" + home},
+	}, newTestLogger(t))
+	args := append(managedruntime.NPMProjectPrefixArgs(), "config", "get", "cache")
+
+	req, err := manager.buildPipedProcessRequest(PipedStartRequest{Command: "npm", Args: args})
+	if err != nil {
+		t.Fatalf("buildPipedProcessRequest() error = %v", err)
+	}
+	prefix := req.Args[1]
+	if !filepath.IsAbs(prefix) || !strings.HasPrefix(filepath.Clean(prefix), filepath.Clean(os.TempDir())+string(filepath.Separator)) {
+		t.Fatalf("managed npm prefix = %q, want an absolute path under %q", prefix, os.TempDir())
+	}
+	if _, err := os.Stat(prefix); err != nil {
+		t.Fatalf("managed npm prefix was not provisioned: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".kandev", "managed-npm-runtime")); !os.IsNotExist(err) {
+		t.Fatalf("managed npm prefix was created under agent home, stat error = %v", err)
+	}
+}
+
+func TestManager_BuildFinalCommandFailsSafelyWhenManagedNpmPrefixIsUnavailable(t *testing.T) {
+	tempFile := filepath.Join(t.TempDir(), "not-a-temp-directory")
+	if err := os.WriteFile(tempFile, []byte("temp"), 0o600); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		t.Setenv("TEMP", tempFile)
+		t.Setenv("TMP", tempFile)
+	} else {
+		t.Setenv("TMPDIR", tempFile)
+	}
+	workDir := t.TempDir()
+	agentEnv := []string{"HOME=" + t.TempDir(), "KEEP_THIS=unchanged"}
+	manager := NewManager(&config.InstanceConfig{
+		WorkDir: workDir,
+		AgentArgs: []string{
+			"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime",
+			"@scope/managed-acp@1.2.3",
+		},
+		AgentEnv: agentEnv,
+	}, newTestLogger(t))
+	manager.adapter = newStubAdapter()
+
+	err := manager.buildFinalCommand()
+	if err == nil {
+		t.Fatal("buildFinalCommand() succeeded without an available npm prefix")
+	}
+	if strings.Contains(err.Error(), tempFile) {
+		t.Fatalf("prefix preparation error exposed temp path: %q", err)
+	}
+	if manager.cmd != nil {
+		t.Fatal("agent command was constructed despite unavailable npm prefix")
+	}
+	if got := envValue(manager.cfg.AgentEnv, "KEEP_THIS"); got != "unchanged" {
+		t.Fatalf("agent environment changed: KEEP_THIS=%q", got)
+	}
+	if _, err := os.Stat(filepath.Join(workDir, ".kandev")); !os.IsNotExist(err) {
+		t.Fatalf("workspace received npm state, stat error = %v", err)
+	}
 }
 
 func TestManager_StartShellInheritsAgentEnvironment(t *testing.T) {
@@ -191,7 +325,7 @@ func TestManagerConfigureReplacesOwnedHostHelperAndPreservesIndexedEnvironment(t
 
 	configure := func(env map[string]string) {
 		t.Helper()
-		if err := mgr.Configure("echo", nil, false, env, "", "", nil, false); err != nil {
+		if err := mgr.Configure("echo", nil, false, env, "", nil, false); err != nil {
 			t.Fatalf("Configure() error = %v", err)
 		}
 	}
@@ -248,7 +382,7 @@ func TestManagerConfigureWithEnvironmentReplacesCompleteIndexedBlock(t *testing.
 		"GIT_CONFIG_KEY_2":   "credential.https://github.com.helper",
 		"GIT_CONFIG_VALUE_2": newHelper,
 	}
-	if err := mgr.ConfigureWithEnvironment("echo", nil, false, complete, "", "", nil, false); err != nil {
+	if err := mgr.ConfigureWithEnvironment("echo", nil, false, complete, "", nil, false); err != nil {
 		t.Fatalf("ConfigureWithEnvironment() error = %v", err)
 	}
 	env := environmentMap(mgr.cfg.AgentEnv)
@@ -258,7 +392,7 @@ func TestManagerConfigureWithEnvironmentReplacesCompleteIndexedBlock(t *testing.
 		t.Fatalf("complete configured environment = %#v, want one complete replacement block", env)
 	}
 
-	if err := mgr.ConfigureWithEnvironment("echo", nil, false, nil, "", "", nil, false); err != nil {
+	if err := mgr.ConfigureWithEnvironment("echo", nil, false, nil, "", nil, false); err != nil {
 		t.Fatalf("ConfigureWithEnvironment() removal error = %v", err)
 	}
 	env = environmentMap(mgr.cfg.AgentEnv)
@@ -274,10 +408,9 @@ func TestManagerConfigureWithEnvironmentReplacesCompleteIndexedBlock(t *testing.
 
 func TestManagerConfigureLeavesConfigurationUnchangedWhenEnvironmentIsInvalid(t *testing.T) {
 	mgr := NewManager(&config.InstanceConfig{
-		WorkDir:        t.TempDir(),
-		AgentCommand:   "old-command",
-		AgentArgs:      []string{"old-command", "--old"},
-		ApprovalPolicy: "old-policy",
+		WorkDir:      t.TempDir(),
+		AgentCommand: "old-command",
+		AgentArgs:    []string{"old-command", "--old"},
 		AgentEnv: []string{
 			"KEEP_ME=yes",
 			"GIT_CONFIG_COUNT=1",
@@ -290,14 +423,13 @@ func TestManagerConfigureLeavesConfigurationUnchangedWhenEnvironmentIsInvalid(t 
 	err := mgr.ConfigureWithEnvironment(
 		"new-command", []string{"new-command"}, true,
 		map[string]string{"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "missing-value"},
-		"new-policy", "", nil, false,
+		"", nil, false,
 	)
 	if err == nil {
 		t.Fatal("ConfigureWithEnvironment() succeeded with malformed indexed Git block")
 	}
-	if mgr.cfg.AgentCommand != "old-command" || strings.Join(mgr.cfg.AgentArgs, " ") != "old-command --old" ||
-		mgr.cfg.ApprovalPolicy != "old-policy" {
-		t.Fatalf("configuration mutated after failed composition: command=%q args=%#v policy=%q", mgr.cfg.AgentCommand, mgr.cfg.AgentArgs, mgr.cfg.ApprovalPolicy)
+	if mgr.cfg.AgentCommand != "old-command" || strings.Join(mgr.cfg.AgentArgs, " ") != "old-command --old" {
+		t.Fatalf("configuration mutated after failed composition: command=%q args=%#v", mgr.cfg.AgentCommand, mgr.cfg.AgentArgs)
 	}
 	env := environmentMap(mgr.cfg.AgentEnv)
 	if env["KEEP_ME"] != "yes" || env["GIT_CONFIG_COUNT"] != "1" || env["GIT_CONFIG_VALUE_0"] != "/user/hooks" {
@@ -317,7 +449,7 @@ func TestManagerConfigureRemovesObsoleteManagedCredentialEnvironment(t *testing.
 	}, newTestLogger(t))
 	t.Cleanup(mgr.stopWorkspaceTrackers)
 
-	if err := mgr.Configure("echo", nil, false, nil, "", "", nil, false); err != nil {
+	if err := mgr.Configure("echo", nil, false, nil, "", nil, false); err != nil {
 		t.Fatalf("Configure() error = %v", err)
 	}
 	env := environmentMap(mgr.cfg.AgentEnv)

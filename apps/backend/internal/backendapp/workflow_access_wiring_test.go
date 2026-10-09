@@ -20,6 +20,11 @@ import (
 // again — the defect the guards exist to close, reintroduced with no failing
 // test. A rebase resolving a conflict in this DI function by dropping a line
 // is exactly how that would happen.
+//
+// The wiring lives in wireTaskWorkflowCrossReferences, which provideServices
+// calls unconditionally with the real taskSvc/workflowSvc — inspecting that
+// function directly gives the same protection as inspecting provideServices
+// itself would.
 func TestWorkflowAccessCheckersAreWired(t *testing.T) {
 	want := map[string]string{
 		"SetWorkflowAccessChecker":  "AuthorizeWorkflowAccess",
@@ -28,9 +33,9 @@ func TestWorkflowAccessCheckersAreWired(t *testing.T) {
 		"SetSessionAccessChecker":   "AuthorizeSessionAccess",
 	}
 
-	provideFn := findFuncDecl(t, "services.go", "provideServices")
+	wireFn := findFuncDecl(t, "services.go", "wireTaskWorkflowCrossReferences")
 	got := map[string]string{}
-	ast.Inspect(provideFn, func(n ast.Node) bool {
+	ast.Inspect(wireFn, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
@@ -54,12 +59,36 @@ func TestWorkflowAccessCheckersAreWired(t *testing.T) {
 	for setter, checker := range want {
 		switch arg, called := got[setter]; {
 		case !called:
-			t.Errorf("provideServices never calls workflowSvc.%s; without it the workflow-step "+
+			t.Errorf("wireTaskWorkflowCrossReferences never calls workflowSvc.%s; without it the workflow-step "+
 				"surface falls open to any authenticated user", setter)
 		case arg != "taskSvc."+checker:
 			t.Errorf("workflowSvc.%s(%s), want taskSvc.%s", setter, arg, checker)
 		}
 	}
+
+	if !callsFunction(t, "services.go", "provideServices", "wireTaskWorkflowCrossReferences") {
+		t.Error("provideServices never calls wireTaskWorkflowCrossReferences; the workflow-step " +
+			"surface falls open to any authenticated user")
+	}
+}
+
+// callsFunction reports whether callerName's body contains a call to a
+// function literally named calleeName (bare identifier, not a method).
+func callsFunction(t *testing.T, filename, callerName, calleeName string) bool {
+	t.Helper()
+	callerFn := findFuncDecl(t, filename, callerName)
+	found := false
+	ast.Inspect(callerFn, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == calleeName {
+			found = true
+		}
+		return true
+	})
+	return found
 }
 
 // findFuncDecl parses filename and returns the named top-level function.

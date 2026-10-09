@@ -46,7 +46,7 @@ func TestPostgresMarkerPositionsMigrationOnLegacyDB(t *testing.T) {
 	if _, err := db.Exec(`ALTER TABLE workflow_step_entries DROP COLUMN marker_positions`); err != nil {
 		t.Fatalf("simulate legacy schema (drop marker_positions): %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations on legacy postgres DB: %v", err)
 	}
 

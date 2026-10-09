@@ -40,6 +40,11 @@ const (
 	// outcome. Declared identically in internal/runs/service — both
 	// declarations MUST match.
 	QueueOutcomeNone QueueOutcome = ""
+	// QueueOutcomeRateLimited means an agent-initiated assignment wake was
+	// refused because its task's REQ-OFFICE-ASSIGN-RATE-001 allowance was
+	// already exhausted: no row was inserted and none was merged. Declared
+	// identically in internal/runs/service — both declarations MUST match.
+	QueueOutcomeRateLimited QueueOutcome = "rate_limited"
 )
 
 // QueueRunRequest is the typed payload the engine hands to RunQueueAdapter.
@@ -51,10 +56,22 @@ const (
 type QueueRunRequest struct {
 	AgentProfileID string
 	TaskID         string
+	// CausingTaskID identifies the task whose workflow turn caused this
+	// enqueue. It differs from TaskID when queue_run targets another task.
+	// Keeping the source separate prevents cross-task actions from losing
+	// their causation chain at the target boundary.
+	CausingTaskID  string
 	WorkflowStepID string
 	Reason         string
 	IdempotencyKey string
 	Payload        map[string]any
+	// CausingAgentProfileID is the agent profile whose turn is executing
+	// this action — the trigger session's own agent, not AgentProfileID
+	// (the run being queued). A carrier resolver uses it to scope a
+	// task's currently claimed run to the agent that actually holds it,
+	// since more than one agent can hold a claimed run on the same task.
+	// Empty for triggers with no session (e.g. a routine or wakeup fire).
+	CausingAgentProfileID string
 	// WaveKey and WaveString carry a completion-wave identity through from
 	// OnChildrenCompletedPayload (parent-wake-wave-identity). Empty for
 	// every trigger except on_children_completed.
@@ -250,6 +267,13 @@ type ChildTaskSpec struct {
 	WorkflowID     string
 	StepID         string
 	AgentProfileID string
+	// CausingAgentProfileID is the agent profile whose turn is executing
+	// this action — the trigger session's own agent, not AgentProfileID
+	// (the child task's assignee). A carrier resolver uses it to scope
+	// the parent task's currently claimed run to the agent that actually
+	// holds it, since more than one agent can hold a claimed run on the
+	// same task. Empty for triggers with no session.
+	CausingAgentProfileID string
 }
 
 // TaskCreator is the engine's contract with whoever knows how to create a

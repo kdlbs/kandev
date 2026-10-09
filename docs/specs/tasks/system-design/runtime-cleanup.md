@@ -12,7 +12,7 @@ owners:
 
 ## Purpose and boundaries
 
-This design defines task runtime cleanup for REQ-TASKS-RUNTIME-CLEANUP-001.
+This design owns the technical contract for REQ-TASKS-RUNTIME-CLEANUP-001.
 
 The active implementation authority is split into
 [Archive Cleanup Evidence](archive-cleanup-evidence.md),
@@ -30,6 +30,9 @@ own exact evidence, startup symbols, and table names.
 ## Migrated design source
 
 Decision: [ADR-2026-08-08-task-owned-worktree-lifetime](../../../decisions/2026-08-08-task-owned-worktree-lifetime.md)
+
+Branch retention amendment:
+[ADR-2026-08-30-compact-integrated-managed-branches](../../../decisions/2026-08-30-compact-integrated-managed-branches.md)
 
 ## Why
 
@@ -131,6 +134,9 @@ and local branch ref. Duplicate snapshot references cannot delete a ref retained
 by an earlier pass. Unarchive reuses that environment and branch; absent live
 repository rows use normal preparation. Delete may remove owner rows only after
 capturing the cleanup snapshot.
+
+Managed branch compaction amends that disposition in
+[Managed Branch Compaction](managed-branch-compaction.md).
 
 ## Data Model
 
@@ -389,8 +395,8 @@ reported missing rather than exposed.
   not classified as orphaned.
 - Historical worktree rows for archived tasks remain available to unarchive branch
   recovery even after their on-disk directories are removed.
-- Archive cleanup preserves the task environment owner and the local branch ref.
-  Cleanup retries and duplicate teardown passes keep the same disposition.
+- Archive cleanup preserves the task environment owner and exact branch recovery
+  state. Cleanup retries keep the same disposition.
 - Orphaned OS processes without any durable `executors_running` row are outside
   normal cleanup guarantees; they may be handled by an explicit operator recovery
   tool, but automatic task cleanup must not rely on process-name scanning.
@@ -521,8 +527,7 @@ reported missing rather than exposed.
   unarchived, **THEN** its historical worktree branch metadata remains available
   for local/remote recovery.
 - **GIVEN** a direct or cascade archive removes a task worktree, **WHEN** the
-  remote branch is also absent, **THEN** the task environment, repository row,
-  and local branch ref remain available for normal resume preparation.
+  remote branch is absent, **THEN** exact local recovery state remains available.
 - **GIVEN** an unarchived task environment whose worktree repository row is
   deleted, failed, or tombstoned, **WHEN** its session resumes, **THEN** the
   executor selects normal worktree preparation and recreates or reactivates the
@@ -546,3 +551,4 @@ reported missing rather than exposed.
 - [Backend failure containment](../../../plans/backend-failure-containment/plan.md)
 - [Worktree resume after unarchive](../../../plans/worktree-resume-after-unarchive/plan.md)
 - [Archive resume identity](../../../plans/archive-resume-identity/plan.md)
+- [Compact integrated managed branches](../../../plans/compact-integrated-managed-branches/plan.md)

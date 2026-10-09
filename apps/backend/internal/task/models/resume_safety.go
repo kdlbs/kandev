@@ -72,16 +72,30 @@ func RowMustBePreserved(running *ExecutorRunning, sessionState TaskSessionState)
 
 // SessionArchiveCancelReason and SessionArchiveTreeCancelReason are the
 // TaskSession.ErrorMessage values written when a session is auto-cancelled
-// by archiving — Service.ArchiveTask's CancelActiveTaskSessionsByTaskID call
-// (single-task archive) and HandoffService.cancelActiveRuns (cascade archive)
-// respectively. Distinct reasons keep the cancellation source visible in
+// by archiving. Distinct reasons keep the cancellation source visible in
 // session history and diagnostics.
 const (
 	SessionArchiveCancelReason     = "task archived"
 	SessionArchiveTreeCancelReason = "task tree archived"
 )
 
+// SessionOrphanedCancelReason is the exact TaskSession.ErrorMessage value
+// written when the session reconciliation sweep cancels an active session that
+// no longer has a live execution behind it (for example, after a backend
+// restart) and has been event-silent beyond the sweep's grace window. It is
+// deliberately distinct from archive and explicit-stop reasons: legacy rows
+// with this marker remain eligible for same-session recovery when the user
+// opens the task.
+const SessionOrphanedCancelReason = "orphaned session"
+
 // IsArchiveCancelReason reports whether reason came from an archive path.
 func IsArchiveCancelReason(reason string) bool {
 	return reason == SessionArchiveCancelReason || reason == SessionArchiveTreeCancelReason
+}
+
+// IsOrphanCancelReason reports whether reason is the exact marker emitted by
+// session reconciliation for an execution-less interruption. Callers must not
+// broaden this match: explicit user stops retain their terminal recovery rules.
+func IsOrphanCancelReason(reason string) bool {
+	return reason == SessionOrphanedCancelReason
 }

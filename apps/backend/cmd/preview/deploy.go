@@ -220,18 +220,18 @@ func deployPreviewArtifact(ctx context.Context, tarPath, spritesToken, spriteNam
 // enablePublicURL sets the sprite's URL to public mode and returns the URL.
 // Accepts the already-open client from deployArtifacts to avoid a second auth handshake.
 func enablePublicURL(ctx context.Context, client *sprites.Client, spriteName string) (string, error) {
-	updateCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
-	defer cancel()
-
-	if err := client.UpdateURLSettings(updateCtx, spriteName, &sprites.URLSettings{Auth: "public"}); err != nil {
+	if err := retrySpriteControl(ctx, "update URL settings", func(updateCtx context.Context) error {
+		return client.UpdateURLSettings(updateCtx, spriteName, &sprites.URLSettings{Auth: "public"})
+	}); err != nil {
 		return "", fmt.Errorf("update URL settings: %w", err)
 	}
 
-	getCtx, getCancel := context.WithTimeout(ctx, spriteStepTimeout)
-	defer getCancel()
-
-	sprite, err := client.GetSprite(getCtx, spriteName)
-	if err != nil {
+	var sprite *sprites.Sprite
+	if err := retrySpriteControl(ctx, "get sprite URL", func(getCtx context.Context) error {
+		var err error
+		sprite, err = client.GetSprite(getCtx, spriteName)
+		return err
+	}); err != nil {
 		return "", fmt.Errorf("get sprite URL: %w", err)
 	}
 	if sprite.URL == "" {

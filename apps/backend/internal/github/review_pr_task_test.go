@@ -162,6 +162,7 @@ func TestAssignReviewPRTaskID_UpdatesTaskID(t *testing.T) {
 	); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
+	seedTask(t, store, "task-xyz", false)
 
 	if err := store.AssignReviewPRTaskID(ctx, watch.ID, "acme", "widget", 42, "task-xyz"); err != nil {
 		t.Fatalf("AssignReviewPRTaskID: %v", err)

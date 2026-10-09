@@ -2,15 +2,12 @@
 
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { parseSidebarHoverDelay, type AppearanceState } from "./appearance-settings-state";
-import { SettingsCard } from "./settings-card";
+import { SettingsRow } from "./settings-group";
 import { settingsControlClassName } from "./settings-control";
-import { useSettingsTargetRegistration } from "./settings-target-provider";
 
 export function SidebarHoverSettingsCard({
   draft,
@@ -27,15 +24,17 @@ export function SidebarHoverSettingsCard({
   useEffect(() => {
     if (delay !== null) lastValidDelay.current = String(delay);
   }, [delay]);
-  const toggleTarget = useSettingsTargetRegistration(GENERAL_SETTINGS_TARGETS.sidebarHover);
-  const delayTarget = useSettingsTargetRegistration(GENERAL_SETTINGS_TARGETS.sidebarHoverDelay);
   const enabledDirty = draft.sidebarHoverEnabled !== saved.sidebarHoverEnabled;
   const delayDirty = draft.sidebarHoverDelayMs !== saved.sidebarHoverDelayMs;
   return (
-    <SettingsCard isDirty={enabledDirty || delayDirty} data-testid="sidebar-hover-settings-card">
-      <CardContent className="space-y-4">
-        <div ref={toggleTarget} className="flex items-center justify-between gap-4">
-          <Label htmlFor="sidebar-hover-enabled">{t("settings:sidebarHoverEnabled")}</Label>
+    <div data-testid="sidebar-hover-settings-card" data-settings-dirty={enabledDirty || delayDirty}>
+      <SettingsRow
+        label={t("settings:sidebarHoverEnabled")}
+        controlId="sidebar-hover-enabled"
+        discoveryTargetId={GENERAL_SETTINGS_TARGETS.sidebarHover}
+        isDirty={enabledDirty}
+        touchTarget="switch"
+        control={
           <Switch
             id="sidebar-hover-enabled"
             checked={draft.sidebarHoverEnabled}
@@ -50,9 +49,23 @@ export function SidebarHoverSettingsCard({
             }
             className="data-checked:bg-transparent data-unchecked:bg-transparent dark:data-unchecked:bg-transparent data-[size=default]:h-7 max-md:data-[size=default]:h-11 [@media(pointer:coarse)]:data-[size=default]:h-11 data-[size=default]:w-11 p-2 before:absolute before:left-2 before:top-1/2 before:h-[16.6px] before:w-7 before:-translate-y-1/2 before:rounded-full before:bg-input before:content-[''] data-checked:before:bg-primary dark:data-unchecked:before:bg-input/80 [&_[data-slot=switch-thumb]]:z-10"
           />
-        </div>
-        <div ref={delayTarget} className="space-y-2">
-          <Label htmlFor="sidebar-hover-delay">{t("settings:sidebarHoverDelay")}</Label>
+        }
+      />
+      <SettingsRow
+        label={t("settings:sidebarHoverDelay")}
+        description={
+          delay === null ? (
+            <span id="sidebar-hover-delay-error" className="text-destructive" role="alert">
+              {t("settings:sidebarHoverDelayError")}
+            </span>
+          ) : (
+            <span id="sidebar-hover-help">{t("settings:sidebarHoverHelp")}</span>
+          )
+        }
+        controlId="sidebar-hover-delay"
+        discoveryTargetId={GENERAL_SETTINGS_TARGETS.sidebarHoverDelay}
+        isDirty={delayDirty}
+        control={
           <Input
             id="sidebar-hover-delay"
             type="number"
@@ -72,16 +85,8 @@ export function SidebarHoverSettingsCard({
               updateDraft({ sidebarHoverDelayMs: value });
             }}
           />
-          {delay === null && (
-            <p id="sidebar-hover-delay-error" className="text-sm text-destructive" role="alert">
-              {t("settings:sidebarHoverDelayError")}
-            </p>
-          )}
-        </div>
-        <p id="sidebar-hover-help" className="text-xs text-muted-foreground">
-          {t("settings:sidebarHoverHelp")}
-        </p>
-      </CardContent>
-    </SettingsCard>
+        }
+      />
+    </div>
   );
 }

@@ -1,6 +1,9 @@
 package sqlite
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // The in-tree Slack integration was replaced by kandev-plugin-slack. Its
 // `slack_configs` row is merely dead, but its vault entries are live Slack
@@ -107,7 +110,7 @@ func TestDropRetiredSlackIntegrationReplays(t *testing.T) {
 			t.Fatalf("dropRetiredSlackIntegration pass %d: %v", i+1, err)
 		}
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations replay: %v", err)
 	}
 }

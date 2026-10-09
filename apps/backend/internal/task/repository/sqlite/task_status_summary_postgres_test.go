@@ -29,7 +29,7 @@ func TestPostgresTaskStatusSummarySchemaReplay(t *testing.T) {
 	if _, err := db.Exec(`DROP TABLE task_status_summaries`); err != nil {
 		t.Fatalf("drop summary table to simulate legacy schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay postgres migrations: %v", err)
 	}
 

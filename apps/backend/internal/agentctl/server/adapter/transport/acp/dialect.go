@@ -9,7 +9,11 @@ import (
 // ACP implementation. The Adapter remains responsible for RPC execution,
 // session state, serialization, and event delivery.
 type acpDialect struct {
-	normalizeSessionConfig func(
+	continuationSupport         streams.ContinuationSupport
+	capacityContinuationSupport streams.CapacityContinuationSupport
+	continuationError           func(error) bool
+	retainedApplicationErr      func(error) bool
+	normalizeSessionConfig      func(
 		[]streams.ConfigOption,
 		[]modelInfo,
 		string,
@@ -27,6 +31,8 @@ type acpDialect struct {
 	subagentFrame        func(map[string]any, string, any) (subagentFrame, bool)
 	mcpToolCall          func(map[string]any, any) (mcpToolCallFrame, bool)
 	mcpToolResult        func(any) (any, bool)
+	responseAttemptReset func(map[string]any) bool
+	permissionToolName   func(*string, map[string]any, string, string) *string
 }
 
 type mcpToolCallFrame struct {
@@ -58,6 +64,12 @@ func newACPDialect(agentID string) acpDialect {
 		return newGrokACPDialect()
 	case codexAgentID:
 		return newCodexACPDialect()
+	case cursorAgentID:
+		return newCursorACPDialect()
+	case claudeAgentID:
+		return newClaudeACPDialect()
+	case mockAgentID:
+		return newMockACPDialect()
 	}
 	return acpDialect{}
 }
@@ -147,4 +159,20 @@ func (d acpDialect) promptUsage(
 		return usage
 	}
 	return d.normalizePromptUsage(usage, meta)
+}
+
+func (d acpDialect) resetsResponseAttempt(meta map[string]any) bool {
+	return d.responseAttemptReset != nil && d.responseAttemptReset(meta)
+}
+
+func (d acpDialect) normalizePermissionToolName(
+	name *string,
+	meta map[string]any,
+	title string,
+	actionType string,
+) *string {
+	if d.permissionToolName == nil {
+		return name
+	}
+	return d.permissionToolName(name, meta, title, actionType)
 }

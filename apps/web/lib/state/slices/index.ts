@@ -17,6 +17,10 @@ export { createOfficeSlice, defaultOfficeState } from "./office/office-slice";
 export { createFeaturesSlice, defaultFeaturesState } from "./features/features-slice";
 export { createAuthSlice, defaultAuthState } from "./auth/auth-slice";
 export { createAutomationsSlice, defaultAutomationsState } from "./automations/automations-slice";
+export {
+  createCoordinatorsSlice,
+  defaultCoordinatorsState,
+} from "./coordinators/coordinators-slice";
 export { createSystemSlice, defaultSystemState } from "./system/system-slice";
 export { createPluginsSlice, defaultPluginsState } from "./plugins/plugins-slice";
 export { createReviewSlice, defaultReviewState } from "./review/review-slice";
@@ -25,6 +29,10 @@ export {
   defaultNeedsYouInboxState,
 } from "./needs-you-inbox/needs-you-inbox-slice";
 export { createFailedInboxSlice, defaultFailedInboxState } from "./failed-inbox/failed-inbox-slice";
+export {
+  createInboxHistorySlice,
+  defaultInboxHistoryState,
+} from "./inbox-history/inbox-history-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
@@ -84,10 +92,15 @@ export type {
   AutomationRunsState,
 } from "./automations/types";
 export type {
+  CoordinatorsSlice,
+  CoordinatorsSliceState,
+  CoordinatorsSliceActions,
+  CoordinatorsState,
+} from "./coordinators/types";
+export type {
   SystemSlice,
   SystemSliceState,
   SystemSliceActions,
-  SystemBackupsState,
   SystemJobsMap,
 } from "./system/types";
 export type {
@@ -112,6 +125,19 @@ export type {
   FailedInboxWorkspaceState,
   FailedInboxReadStatus,
 } from "./failed-inbox/types";
+export { createPreviewFeedbackSlice, defaultPreviewFeedbackState } from "./preview-feedback";
+export type {
+  PreviewFeedbackSlice,
+  PreviewFeedbackSliceActions,
+  PreviewFeedbackSliceState,
+} from "./preview-feedback";
+export type {
+  InboxHistorySlice,
+  InboxHistorySliceActions,
+  InboxHistorySliceState,
+  InboxHistoryWorkspaceState,
+  InboxHistoryReadStatus,
+} from "./inbox-history/types";
 
 // Re-export commonly used types from each domain
 export type {

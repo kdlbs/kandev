@@ -4,7 +4,7 @@ import type { ApiClient } from "../../helpers/api-client";
 
 export const LARGE_COLUMN_TASK_COUNT = 440;
 const MAX_MOUNTED_TASK_CARDS = 50;
-const TASK_SEED_BATCH_SIZE = 25;
+const TASK_SEED_CONCURRENCY = 1;
 
 export async function seedLargeColumnTasks(
   apiClient: ApiClient,
@@ -12,8 +12,8 @@ export async function seedLargeColumnTasks(
   titlePrefix: string,
   count = LARGE_COLUMN_TASK_COUNT,
 ): Promise<void> {
-  for (let start = 0; start < count; start += TASK_SEED_BATCH_SIZE) {
-    const batchCount = Math.min(TASK_SEED_BATCH_SIZE, count - start);
+  for (let start = 0; start < count; start += TASK_SEED_CONCURRENCY) {
+    const batchCount = Math.min(TASK_SEED_CONCURRENCY, count - start);
     await Promise.all(
       Array.from({ length: batchCount }, (_, offset) =>
         apiClient.createTask(seedData.workspaceId, `${titlePrefix} ${start + offset + 1}`, {
@@ -38,7 +38,12 @@ export async function mountedTaskCardIds(column: Locator): Promise<string[]> {
 }
 
 export async function expectBoundedMountedCards(column: Locator): Promise<void> {
-  await expect.poll(() => taskCards(column).count()).toBeLessThan(MAX_MOUNTED_TASK_CARDS);
+  await expect
+    .poll(() => taskCards(column).count(), {
+      timeout: 30_000,
+      message: "Waiting for virtualized column card count to settle",
+    })
+    .toBeLessThan(MAX_MOUNTED_TASK_CARDS);
 }
 
 export async function scrollColumnToBottom(scrollOwner: Locator): Promise<void> {
@@ -57,7 +62,7 @@ export async function scrollColumnToBottom(scrollOwner: Locator): Promise<void> 
         return stableBottomSamples >= 2;
       },
       {
-        timeout: 10_000,
+        timeout: 30_000,
         intervals: [50, 100, 250],
         message: "virtualized column did not settle at the bottom",
       },

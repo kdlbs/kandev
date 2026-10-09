@@ -6,6 +6,7 @@ import {
   hasFailedAgentBootAfter,
   hasSessionRecoveryResolutionAfter,
   hasSuccessfulAgentBootAfter,
+  isSelectionFailureRecoveryMetadata,
   isSuccessfulScriptExecutionMetadata,
 } from "./processed-message-filtering";
 
@@ -92,6 +93,22 @@ describe("hasSuccessfulAgentBootAfter", () => {
     const later = { ...bootMessage("2026-05-30T00:02:00Z"), type: "message" } as Message;
     expect(hasSuccessfulAgentBootAfter([bootMessage(AFTER), later], ERROR_AT)).toBe(true);
   });
+
+  it("uses only authoritative metadata for stamped recovery rows", () => {
+    const success = providerRestoredSuccess("failure-1");
+    const metadata = {
+      recovery_resolutions: [
+        { error_stamp: "failure-1", resolved_at: AFTER, attempt_id: "resume-1" },
+      ],
+    };
+    expect(hasSuccessfulAgentBootAfter([success], ERROR_AT, "failure-1", true, metadata)).toBe(
+      true,
+    );
+    expect(hasSuccessfulAgentBootAfter([success], ERROR_AT, "failure-2", true, metadata)).toBe(
+      false,
+    );
+    expect(hasSuccessfulAgentBootAfter([success], ERROR_AT, "failure-1", true)).toBe(false);
+  });
 });
 
 describe("recovery resolution metadata", () => {
@@ -111,7 +128,80 @@ describe("recovery resolution metadata", () => {
       false,
     );
   });
+
+  it("uses an authoritative stamp-specific resolution when the success row is absent", () => {
+    const metadata = {
+      recovery_resolved_at: AFTER,
+      recovery_resolutions: [
+        { error_stamp: "failure-1", resolved_at: AFTER, attempt_id: "resume-1" },
+      ],
+    };
+    expect(
+      hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-1", undefined, true),
+    ).toBe(true);
+    expect(
+      hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-2", undefined, true),
+    ).toBe(false);
+  });
+
+  it("does not let a transcript notice or global timestamp settle a stamped failure", () => {
+    const notice = providerRestoredSuccess("failure-1");
+    const metadata = { recovery_resolved_at: AFTER };
+    expect(hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-1", [notice], true)).toBe(
+      false,
+    );
+    expect(hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-2", [], true)).toBe(
+      false,
+    );
+  });
+
+  it("rejects malformed resolution records and oversized host attempt references", () => {
+    const metadata = {
+      recovery_resolved_at: AFTER,
+      recovery_resolutions: [
+        { error_stamp: "failure-1", resolved_at: AFTER, attempt_id: "resume-99999999999999999999" },
+        { error_stamp: "failure-1", resolved_at: AFTER, attempt_id: "resume-started" },
+      ],
+    };
+    expect(hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-1")).toBe(false);
+  });
+
+  it("keeps a successor failure unresolved when only its predecessor was settled", () => {
+    const metadata = {
+      recovery_resolved_at: AFTER,
+      recovery_resolutions: [
+        { error_stamp: "failure-1", resolved_at: AFTER, attempt_id: "resume-1" },
+      ],
+    };
+    expect(hasSessionRecoveryResolutionAfter(metadata, ERROR_AT, "failure-1")).toBe(true);
+    expect(hasSessionRecoveryResolutionAfter(metadata, AFTER, "successor-failure")).toBe(false);
+  });
 });
+
+describe("selection failure correlation", () => {
+  it("requires an exact occurrence link only for typed model and mode failures", () => {
+    expect(isSelectionFailureRecoveryMetadata({ causes: [{ code: "model_unavailable" }] })).toBe(
+      true,
+    );
+    expect(isSelectionFailureRecoveryMetadata({ code: "permission_mode_mismatch" })).toBe(true);
+    expect(
+      isSelectionFailureRecoveryMetadata({ causes: [{ code: "transport_unavailable" }] }),
+    ).toBe(false);
+  });
+});
+
+function providerRestoredSuccess(resolvedErrorStamp: string): Message {
+  return baseMessage({
+    id: `resume-success-${resolvedErrorStamp}`,
+    type: "status",
+    created_at: AFTER,
+    metadata: {
+      variant: "resume_settings_provider_restored",
+      attempt_id: "resume-2",
+      resolved_error_stamp: resolvedErrorStamp,
+    },
+  });
+}
 
 describe("isSuccessfulScriptExecutionMetadata", () => {
   it("uses the shared exited-zero success rule", () => {
@@ -133,6 +223,23 @@ function baseMessage(overrides: Partial<Message>): Message {
     created_at: "2026-05-30T00:00:00Z",
     ...overrides,
   } as Message;
+}
+
+const PLAN_TURN_ID = "turn-1";
+const AGENT_PLAN_TYPE = "agent_plan";
+const FIRST_PLAN_CONTENT = "# Plan\n\n1. Read";
+const LATEST_PLAN_CONTENT = `${FIRST_PLAN_CONTENT}\n2. Write`;
+const LEGACY_PLAN_1_ID = "legacy-plan-1";
+const LEGACY_PLAN_2_ID = "legacy-plan-2";
+
+function planMessage(id: string, content: string, overrides: Partial<Message> = {}): Message {
+  return baseMessage({
+    id,
+    turn_id: PLAN_TURN_ID,
+    type: AGENT_PLAN_TYPE,
+    content,
+    ...overrides,
+  });
 }
 
 function emptyTurnNotice(turnId: string): Message {
@@ -241,6 +348,89 @@ describe("filterVisibleMessages empty-turn notice supersession", () => {
   });
 });
 
+const filterPlanMessages = (messages: Message[]) =>
+  filterVisibleMessages(messages, new Set<string>(), new Set<string>());
+
+describe("filterVisibleMessages correlated agent plans", () => {
+  // @covers AC-AGENTS-AGENT-PLAN-STREAM-COALESCING-001.1
+  it("keeps only the latest snapshot for a correlated plan stream", () => {
+    const correlation = { tool_call_id: "agent-plan:correlation-1" };
+    const first = planMessage("plan-1", FIRST_PLAN_CONTENT, { metadata: correlation });
+    const latest = planMessage("plan-2", LATEST_PLAN_CONTENT, { metadata: correlation });
+
+    expect(filterPlanMessages([first, latest]).map((message) => message.id)).toEqual(["plan-2"]);
+  });
+
+  it("keeps only the final delivery when repeated snapshots share a message id", () => {
+    const correlation = { tool_call_id: "agent-plan:correlation-1" };
+    const first = planMessage("plan-1", FIRST_PLAN_CONTENT, { metadata: correlation });
+    const latest = planMessage("plan-1", LATEST_PLAN_CONTENT, { metadata: correlation });
+
+    expect(filterPlanMessages([first, latest]).map((message) => message.content)).toEqual([
+      LATEST_PLAN_CONTENT,
+    ]);
+  });
+
+  // @covers AC-AGENTS-AGENT-PLAN-STREAM-COALESCING-001.2
+  it("keeps separate correlated plan streams in one turn", () => {
+    const first = planMessage("plan-1", "# First plan", {
+      metadata: { tool_call_id: "agent-plan:correlation-1" },
+    });
+    const second = planMessage("plan-2", "# Second plan", {
+      metadata: { tool_call_id: "agent-plan:correlation-2" },
+    });
+
+    expect(filterPlanMessages([first, second]).map((message) => message.id)).toEqual([
+      "plan-1",
+      "plan-2",
+    ]);
+  });
+});
+
+describe("filterVisibleMessages legacy agent plans", () => {
+  // @covers AC-AGENTS-AGENT-PLAN-STREAM-COALESCING-001.4
+  it("collapses a contiguous same-turn legacy prefix chain", () => {
+    const first = planMessage(LEGACY_PLAN_1_ID, FIRST_PLAN_CONTENT);
+    const latest = planMessage(LEGACY_PLAN_2_ID, LATEST_PLAN_CONTENT);
+
+    expect(filterPlanMessages([first, latest]).map((message) => message.id)).toEqual([
+      LEGACY_PLAN_2_ID,
+    ]);
+  });
+
+  it("keeps legacy plans separated by another conversation item", () => {
+    const first = planMessage(LEGACY_PLAN_1_ID, FIRST_PLAN_CONTENT);
+    const message = baseMessage({ id: "message-1", turn_id: PLAN_TURN_ID, content: "Working" });
+    const latest = planMessage(LEGACY_PLAN_2_ID, LATEST_PLAN_CONTENT);
+
+    expect(filterPlanMessages([first, message, latest]).map((item) => item.id)).toEqual([
+      LEGACY_PLAN_1_ID,
+      "message-1",
+      LEGACY_PLAN_2_ID,
+    ]);
+  });
+
+  it("keeps legacy prefix plans from different turns", () => {
+    const first = planMessage(LEGACY_PLAN_1_ID, "# Plan");
+    const second = planMessage(LEGACY_PLAN_2_ID, FIRST_PLAN_CONTENT, { turn_id: "turn-2" });
+
+    expect(filterPlanMessages([first, second]).map((message) => message.id)).toEqual([
+      LEGACY_PLAN_1_ID,
+      LEGACY_PLAN_2_ID,
+    ]);
+  });
+
+  it("keeps same-turn legacy plans when the content is not a prefix", () => {
+    const first = planMessage(LEGACY_PLAN_1_ID, "# First plan");
+    const second = planMessage(LEGACY_PLAN_2_ID, "# Different plan");
+
+    expect(filterPlanMessages([first, second]).map((message) => message.id)).toEqual([
+      LEGACY_PLAN_1_ID,
+      LEGACY_PLAN_2_ID,
+    ]);
+  });
+});
+
 describe("filterVisibleMessages recovery history", () => {
   const RECOVERY_MESSAGE = "Could not resume the saved session.";
   const FIRST_RECOVERY_ID = "recovery-1";
@@ -285,6 +475,54 @@ describe("filterVisibleMessages recovery history", () => {
         (message) => message.id,
       ),
     ).toEqual([FIRST_RECOVERY_ID, "recovery-2"]);
+  });
+});
+
+describe("filterVisibleMessages dismissed Git push errors", () => {
+  it("hides only a persisted push failure row, preserving legacy errors and later failures", () => {
+    const dismissed = baseMessage({
+      id: "dismissed-push",
+      type: "error",
+      metadata: {
+        git_operation_error: true,
+        operation: "push",
+        git_operation_error_dismissed_at: "2026-09-25T10:00:00Z",
+      },
+    });
+    const legacyPush = baseMessage({
+      id: "legacy-push",
+      type: "error",
+      metadata: { git_operation_error: true, operation: "push" },
+    });
+    const laterPush = baseMessage({
+      id: "later-push",
+      type: "error",
+      metadata: { git_operation_error: true, operation: "push" },
+    });
+    const unrelated = baseMessage({
+      id: "unrelated-error",
+      type: "error",
+      metadata: {
+        git_operation_error: true,
+        operation: "pull",
+        git_operation_error_dismissed_at: "2026-09-25T10:00:00Z",
+      },
+    });
+    const malformedMarker = baseMessage({
+      id: "malformed-marker",
+      type: "error",
+      metadata: {
+        git_operation_error: "true",
+        operation: "push",
+        git_operation_error_dismissed_at: "2026-09-25T10:00:00Z",
+      },
+    });
+
+    expect(
+      filterPlanMessages([dismissed, legacyPush, laterPush, unrelated, malformedMarker]).map(
+        (message) => message.id,
+      ),
+    ).toEqual(["legacy-push", "later-push", "unrelated-error", "malformed-marker"]);
   });
 });
 

@@ -14,7 +14,8 @@ func TestCreateCustomTUIAgentRequest_MapsCommandArgs(t *testing.T) {
 	payload := `{
 		"display_name": "Spaced Args",
 		"command": "my-cli",
-		"command_args": ["--system-prompt", "you are a helpful agent"]
+		"command_args": ["--system-prompt", "you are a helpful agent"],
+		"disable_bracketed_paste": true
 	}`
 
 	var body createCustomTUIAgentRequest
@@ -29,6 +30,9 @@ func TestCreateCustomTUIAgentRequest_MapsCommandArgs(t *testing.T) {
 	}
 	if req.DisplayName != "Spaced Args" || req.Command != "my-cli" {
 		t.Errorf("unexpected mapping: %+v", req)
+	}
+	if !req.DisableBracketedPaste {
+		t.Error("DisableBracketedPaste = false, want true")
 	}
 }
 

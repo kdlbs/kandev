@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: workspaces
 requirements:
   - REQ-WORKSPACES-WORKTREE-BASE-REFRESH-001
@@ -37,6 +37,7 @@ change Git commands that an agent runs after launch.
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.11` | [Pull-request base reconciliation](#pull-request-base-reconciliation) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.12` | [Pull-request base reconciliation](#pull-request-base-reconciliation) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13` | [Missing-base fallback](#missing-base-fallback) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.14` | [Safe refresh diagnostics](#safe-refresh-diagnostics) |
 
 ## Components and responsibilities
 
@@ -72,8 +73,9 @@ The preparation fields have these contracts:
 `PullBeforeWorktree` is not a universal admission gate. Local-ref availability
 determines whether a failed refresh is recoverable.
 
-The task repository's stored base remains the durable comparison target and
-offline launch fallback. The GitHub task-PR row tracks the provider observation;
+The task repository's stored base remains the branch-only comparison target
+and offline launch fallback. An explicit repository-qualified target takes
+precedence under the proposed amendment below. The GitHub task-PR row tracks the provider observation;
 polling propagates a changed non-empty base to the matching task repository.
 
 ## Pull-request base reconciliation
@@ -94,6 +96,300 @@ incoming non-empty base. On change, it updates the task repository whose task
 and repository IDs match. When more than one association matches, the checkout
 branch must also match the pull-request head. Update failures are logged and do
 not fail the authoritative task-PR sync.
+
+## Repository-qualified PR bases
+
+This section implements criteria .15 through .19. It qualifies the branch-only
+lookup and fallback rules above. Delivery is tracked in the
+[fork PR base resolution package](../../../plans/fork-pr-base-resolution/plan.md).
+
+### Identity and provider lookup
+
+`ResolveRemoteDefaultBranch` retains its origin-default meaning. It cannot
+resolve a PR base because its input contains no task or provider identity.
+Do not replace `repositories.default_branch` with a PR target.
+
+Extend the executor's `PRBaseResolver` result beyond a string. The proposed
+result contains the validated PR identity, head identity, target repository,
+target branch, and optional observed base OID. Reuse `models.ComparisonTarget`
+for repository and branch validation. Keep the observed OID transient; it is
+neither a merge-base nor a replacement for durable branch identity.
+
+Resolve the provider namespace from the exact attachment's existing binding:
+
+1. Use `ComparisonTarget.TargetRepository` and its change number when present.
+2. For `RemoteContribution`, use its validated canonical change identity. PR URL
+   tasks already attach to the target repository and configure a source remote.
+3. Otherwise use an exact linked `TaskPR` identity, matched to this attachment
+   and checkout branch. A bare PR number is not globally unique.
+4. Legacy metadata-only requests can query the attached repository. Accept the
+   response only after its head repository and branch match the attached
+   checkout. For a `RemoteContribution`, compare the PR head to the validated
+   source repository and require the PR target repository to match the
+   attachment. An ambiguous or mismatched response cannot resolve a qualified
+   PR base. Ordinary target-attached PR links use the compatibility path below.
+
+Never choose the first PR in a task-wide list. Validate current binding ownership
+before applying a live retarget. Preserve manual comparison selections and
+historical associations under the existing task-service reconciliation rules.
+
+`githubPRBaseResolver` in `internal/backendapp/orchestrator.go` returns a
+validated target and optional observed base OID. REST uses `base.sha` and
+GraphQL uses `baseRefOid`. The supported `gh pr view/list --json` field set does
+not include `baseRefOid`; `GHClient.GetPR` reads `.base.sha` through `gh api`
+and keeps PR details usable if that best-effort OID read fails. A lookup failure
+can retain a valid stored qualified target, but cannot downgrade that target to
+a bare branch name. A known cross-repository lookup failure or invalid legacy
+association cannot fall back to a stored branch without a qualified target;
+ordinary provider outages remain eligible for the existing stored-base rule.
+
+A stored qualified target can materialize its exact branch without a fresh
+provider snapshot. The fetched commit supplies the current OID. Without a
+validated target identity, a known cross-repository request remains unresolved.
+Same-repository offline branch fallback retains criterion .11.
+
+### Ordinary PR-link launch compatibility
+
+The [PR-link fork launch repair](../../../plans/pr-link-fork-launch/plan.md)
+clarifies criterion .15 for existing browser-created attachments. This amendment
+is implemented. Its plan and work orders record the implementation and
+verification status.
+
+The browser PR-link path stores the target repository, PR number, checkout
+branch, and base branch. It does not create a `RemoteContribution` binding.
+`associatePRFromRepoInputs` links the PR asynchronously. Launch must therefore
+resolve identity correctly before and after that association exists.
+
+Base validation distinguishes these attachment forms:
+
+- With `RemoteContribution`, the persisted source repository and head branch
+  remain authoritative. The provider target must match the attached repository.
+- With a fork-attached checkout, the provider head must match the attached
+  repository and checkout branch. Existing comparison-target checks still apply.
+- With an ordinary target-attached PR checkout, provider resolution must use
+  the attached target namespace and exact PR number. The returned target must
+  match that attachment, and the returned head branch must match the checkout.
+  The validated provider response supplies the source repository for this
+  launch. Missing, malformed, unrelated, or ambiguous identities are rejected.
+
+The last form requires a positive PR number and a non-empty checkout branch.
+It applies only without an explicit contribution or comparison binding.
+It cannot override an explicit source binding after a mismatch. An unrelated
+linked PR cannot authorize this form merely by sharing a number or branch.
+
+`validPRBaseIdentity` must evaluate the attachment form before applying its head
+repository comparison. Do not remove repository checks or accept a branch-only
+match. `githubPRBaseResolver` retains provider namespace validation and exact
+linked-association selection. Without a linked row, it resolves the attached
+namespace directly. Multiple matching linked rows remain an error.
+
+For a target-attached checkout, the existing PR-head fetch uses the target
+repository's PR namespace. The comparison base remains that target repository's
+branch. A fork-attached checkout retains qualified upstream materialization.
+No contribution binding, comparison binding, credential scope, or push destination
+is synthesized by this compatibility path. Provider resolution is read-only.
+
+Retry of an unprepared legacy task uses the same validation. Valid worktree
+reuse and explicit manual-base overrides retain their existing rules.
+A provider outage retains the existing fallback policy. Known cross-repository
+errors and cancellation must not become branch-only fallback successes.
+
+Coverage includes ordinary PR-link metadata with and without a linked row,
+explicit source mismatch, unrelated target, malformed identity, colliding PR
+numbers, and two attachments where only one is valid. A real Git fixture proves
+that PR head and base commits come from their respective repositories.
+
+### Preparation and materialization
+
+Carry the qualified target through `repoInfo`, lifecycle launch and preparation
+requests, and `worktree.CreateRequest`. Audit their copy and conversion methods,
+including multi-repository preparation, workspace-only creation, and recreation.
+Keep checkout-head fetching separate from target-base fetching. A fork-origin
+checkout must not fetch an upstream PR number from the fork's `refs/pull` namespace.
+Use the validated PR host for that ref or the validated head repository/branch.
+
+Before branch-only fallback, select the explicit target when present. Fetch only
+its target branch into `ComparisonTarget.ComparisonRef()`. Resolve the resulting
+commit OID and return it for Git operations. Retain repository/branch identity
+for metadata and diagnostics; do not persist a hash as `BaseBranch`.
+
+Reuse the deterministic comparison remote and collision rules from
+[ADR-2026-08-19-repository-qualified-comparison-targets](../../../decisions/2026-08-19-repository-qualified-comparison-targets.md).
+Extract reusable Git materialization into `internal/common/gitbase` rather than
+importing agentctl process code into the backend. Keep typed consumer errors
+in their existing owners. Agentctl keeps its asynchronous comparison scheduling.
+The shared primitive only validates and materializes a target through an injected,
+classified Git runner. It neither schedules work nor chooses fallback policy.
+
+The remote keeps push disabled. A conflicting configured URL is an error.
+Commands remain bounded and noninteractive under the existing credential route.
+This repair grants no additional private-repository credential scope.
+
+When a provider OID is supplied, verify that exact commit against the fetched
+branch snapshot. A mismatch stops required preparation with a stale-observation
+error. A later retry obtains fresh provider evidence; no automatic merge occurs.
+Do not fetch an arbitrary unvalidated SHA or overwrite a user branch.
+
+Remote executor materialization must receive the same qualified target before
+its base-dependent Git operations. Carry the optional contract through the
+runtime client and `agentctl/server/api/workspace_materialize.go`. Keep branch
+labels separate from resolved refs in existing request validation. An ordinary
+checkout with no qualified target uses the existing route.
+
+Required materialization failure stops new preparation. A valid reused worktree
+still follows the existing reuse policy. Background comparison failure still
+leaves working-tree status usable under the platform status contract.
+
+### Recovery and persistence
+
+`recoverTaskLaunchBranch` currently resolves origin and calls the manual
+`UpdateRepositoryBaseBranch` operation. That operation can clear a comparison
+target, even when the branch name is unchanged.
+
+Reject `retry_default` for a validated cross-repository binding before any
+repository-default or task-base write. Preserve the binding and error stamp.
+Use the existing bounded recovery-error envelope. Do not relabel the action
+or silently treat it as permission to abandon the target. `retry_launch` can
+retry the same qualified preparation. An explicit user-selected base branch
+is marked in task-repository metadata and remains authoritative across provider
+refreshes. Only an explicit comparison-target association clears that marker;
+provider sync and recovery cannot replace the manual selection.
+
+Ordinary `retry_default` still resolves and updates the repository default.
+Recovery must check the exact attachment and current error stamp. A second
+attachment or historical PR cannot supply the selected target.
+
+No database migration is required. Existing contribution/comparison bindings
+remain the durable identity. New OID observations and preparation refs remain
+transient. Provider retarget persistence stays in the existing reconciler.
+
+### Evidence and compatibility
+
+Tests must distinguish identical branch names in two repositories with different
+commits. Include a fork-only origin, a non-default PR target, linked worktrees,
+provider retargeting, target fetch errors, remote collisions, and cancellation.
+Include two PRs with the same number in different namespaces and a mixed task
+with one valid repository and one unresolved cross-repository base.
+
+Preserve the completed comparison-target and stacked-PR packages. Their old
+verification results remain historical. New compatibility results belong to
+this repair's work orders. Issue #3856 owns the separate reconciliation hint.
+
+## Repository checkout settings persistence
+
+AC .20 through .23 extend this owner because repository defaults determine
+ordinary task bases and refresh policy. The
+[workspace settings update design](workspace-settings-updates.md) owns the
+separate `workspaces` table and is only a nearby implementation example.
+
+### Request intent and storage boundary
+
+`Service.UpdateRepository` in `internal/task/service/service_resources.go`
+currently reads a repository, validates and merges optional fields, then calls
+the complete-model store updater. That updater always assigns
+`repositories.default_branch` and `repositories.pull_before_worktree`. The
+secret-binding companion uses that same updater inside its transaction.
+An omitted choice therefore carries an old snapshot into a later write.
+
+Introduce an internal `RepositoryCheckoutIntent` with `DefaultBranch *string`
+and `PullBeforeWorktree *bool` in the neutral `internal/task/models` package,
+aliased by `internal/task/repository`. The repository package already imports
+its SQLite provider, so the concrete store must not import it back. Add a required
+`UpdateRepositoryWithCheckoutIntent` method to `RepositoryEntityRepository`
+and the atomic companion
+`UpdateRepositoryWithSecretBindingsAndCheckoutIntent` to
+`RepositorySecretBindingMutator`. The names are proposed implementation
+symbols. Update in-tree adapters and test doubles at these internal boundaries;
+do not silently fall back to a complete-model write for an ordinary save.
+The optional secret-binding capability remains optional, with its existing
+unavailable-capability error.
+
+For ordinary settings saves, construct intent from the original request
+pointers after the existing validation and normalization. Retain the merged
+model for every other field. A nil checkout pointer leaves its column out of
+the SQL assignments; a non-nil pointer binds its validated value. Empty string
+and false are supplied values. Do not use truthiness or treat blank as absent.
+Empty ordinary requests retain the existing timestamp-refresh/event behavior.
+
+The write keeps the live-row predicate and obtains `default_branch`,
+`pull_before_worktree`, and `updated_at` from `UPDATE ... RETURNING`, using the
+same statement's row. Use a short transaction for the ordinary path and the
+existing transaction for the companion. Close/drain the returning row before
+commit. Retain values locally until commit succeeds, then project them onto
+the service model used for the response and event. A binding insertion or
+commit failure cannot expose a successful result. No pre-write refresh or
+post-commit reread supplies these values.
+
+Keep other assignment expressions and field behavior compatible. This is not
+an all-field patch: another omitted repository field or omitted binding set
+can still reflect existing snapshot behavior. Both checkout values describe
+this committed mutation, not whichever state a later request leaves globally.
+No schema migration, additional public field, revision token, event ordering
+protocol, or advisory-lock framework is introduced. PostgreSQL's statement
+row locking evaluates the assignments against the row after a conflicting
+writer settles; no read-modify-write calculation for these choices remains.
+SQLite uses its existing writer admission. Continue dialect rebinding,
+existing boolean encoding/scanning, and SQLguard rules.
+
+### Complete writes, exact writes, and recovery
+
+Keep `UpdateRepository`, `UpdateRepositoryWithSecretBindings`, and their exact
+timestamp variants as deliberate complete writes. `ExpectedUpdatedAt` saves
+retain the existing service precheck and SQL `updated_at` predicate. Their
+unchanged-version full model is valid; a changed timestamp rejects the entire
+request, including bindings, using the existing conflict outcome.
+
+Keep `UpdateRepositoryDefaultBranch` as the narrow recovery compare-and-set
+on observed branch plus live row. Its semantics do not become an ordinary
+settings patch. Repository creation, provider-resolution backfill through
+the legacy store method, and direct orchestrator complete writes keep their
+existing behavior. These paths are explicit scope boundaries, not claims that
+every repository writer was audited or made universally concurrency-safe.
+
+### Supported save routes and projections
+
+| Existing surface | Checkout choices and compatibility |
+| --- | --- |
+| Registered REST `PATCH /api/v1/repositories/:id` in `RepositoryHandlers` | Both optional pointers; JSON null means omitted. Read-only and scope checks remain. `dto.FromRepository` receives the committed model. |
+| Registered WebSocket `repository.update` | Optional branch only; its schema has no pull-policy field. Preserve the persisted pull choice and return it without adding support for editing it. |
+| Compact `update_settings_kandev` | The server's sensitive wrapper forwards `ActionMCPUpdateSettings` through `guardedMCPDispatcher`, registry validation and `backendapp.settingsOperations.updateDomainSettings` into this service. The repository catalog declares both choices writable and non-nullable. Reject null and empty changes as today; retain caller, target, workspace, permission and redaction checks. |
+| Exact plugin Host workspace administration | `pluginsWorkspaceAdminAdapter.updateRepository` retains expected-resource-version matching, replay admission and `ExpectedUpdatedAt`; no public SDK or protocol changes. |
+| Internal request-driven adapters | Local-path/default-branch updater and provider-ID saves through the service receive the same two-choice protection. Other field semantics remain. |
+
+Only `Service.publishRepositoryEvent` publishes `repository.updated` for
+these service mutations, after successful persistence. Keep its fields,
+RFC3339 timestamps and best-effort publication failure behavior. Do not
+invent events for compact wrappers or exact replay no-ops. Compact results
+continue to sanitize the service result using existing catalog rules.
+
+### Downstream consumers and failure limits
+
+`internal/orchestrator/executor/executor_resume.go` derives the ordinary
+default base and pull flag from the persisted repository. `executor_execute.go`
+projects them into single- and multi-repository launch requests.
+`worktree.Manager.resolveBaseRefWithFallback` in `manager_lifecycle.go`
+applies that pull flag; `worktree.RepositoryAdapter` supplies the repository
+default branch without owning the refresh flag. These consumers keep their
+current selection, fallback, transport, reuse and materialization behavior.
+
+Tests must prove stale-snapshot preservation and physical PostgreSQL lock
+waits for both values, atomic binding rollback, deletion/cancellation and
+exact/legacy controls. Registered routes must verify saved results and actual
+service events, not just decoding or fabricated publishers. The work order
+owns the causal test matrix and execution commands. A bounded real Git
+consumer integration may use existing executor preparation wiring; it must
+not expand runner behavior or substitute manually assembled launch fields
+for producer evidence. The supplied reproduction does not establish that
+consumer proof.
+
+This is backend data-only: no layout, copy, interaction, store, or breakpoint
+change. Mobile uses the same supported persistence paths, so a new browser
+composition or mobile E2E is unnecessary. Public Git lifecycle guidance must
+distinguish registration defaults from omitted fields on existing saves.
+No new ADR is needed: this local correction follows existing supplied-intent,
+statement-result, atomic companion and exact-version boundaries.
+
+Delivery: [Preserve repository checkout defaults](../../../plans/preserve-repository-checkout-defaults/plan.md).
 
 ## Refresh policy
 
@@ -210,6 +506,39 @@ Local fallback reports completion with a warning, not a launch error.
 
 Structured logs record repository identity, refresh route, failure class, and
 selected fallback ref. Logs exclude credential material and raw remote URLs.
+
+### Safe refresh diagnostics
+
+AC .14 extends the existing observability contract. `manager_git.go` captures
+combined command output, but failure paths retain only coarse reasons or an
+exit status. Inspect that output in memory and emit fixed diagnostic values.
+Do not append raw output to logs, returned errors, or progress events.
+
+Keep the existing policy `reason` separate from a diagnostic-only
+`diagnostic_code`. Add an allow-listed classifier in
+`internal/worktree/refresh_diagnostics.go`. It recognizes authentication,
+SSH public-key rejection, SSH host verification, DNS, connection failure,
+TLS verification, missing remote ref, non-fast-forward rejection, repository
+access failure, and lock contention. Unknown output maps to `unknown`.
+Context cancellation and execution timeout take precedence over text matches.
+Each code maps to a fixed English explanation. No explanation includes
+substrings from Git output. Repository access failure does not assert that
+credentials are invalid, and lock contention does not assert a stale lock.
+
+Emit one structured diagnostic per failed fetch or pull with `operation`,
+`repository_path`, `branch`, `reason`, `diagnostic_code`, `detail`, and an exit
+code when available. The local repository path identifies the checkout without
+reading its remote URL. Existing failure or fallback logs can carry these fields
+instead of adding a duplicate diagnostic. Cover both required and best-effort
+paths, including a failed configured fallback branch.
+
+Classification is observational. Do not feed new diagnostic categories into
+missing-base fallback eligibility or alter `syncFailureCause` identities.
+Preserve context errors and current progress/error payloads. Correct the
+`syncFailureCause` comment that implies raw output reaches internal logs.
+No new logging configuration, subprocess, retry, or persistence is required.
+
+Delivery: [Recovery diagnostic fixes](../../../plans/recovery-diagnostics/plan.md).
 
 ## Related decisions
 

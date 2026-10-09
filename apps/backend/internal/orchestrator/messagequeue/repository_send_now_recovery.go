@@ -140,6 +140,9 @@ func (r *sqliteRepository) transferPendingSendNowClaimTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	oldSessionID, newSessionID string,
+	source, destination *QueueSessionIdentity,
+	sourceGeneration int64,
+	queuePositionOffset int64,
 ) error {
 	var claimID, claimJSON string
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
@@ -174,14 +177,30 @@ func (r *sqliteRepository) transferPendingSendNowClaimTx(
 	if err != nil || sessionID != oldSessionID || claim.Dispatch.SessionID != oldSessionID {
 		return ErrSendNowClaimChanged
 	}
+	if claim.Identity.SessionIncarnationID != "" {
+		if source == nil || claim.Identity != *source {
+			return ErrSessionIdentityMismatch
+		}
+		if claim.OperationGeneration != sourceGeneration || claim.SessionGeneration != sourceGeneration {
+			return ErrSendNowClaimChanged
+		}
+	}
+	if destination == nil && claim.Identity.SessionIncarnationID != "" {
+		return ErrSessionIdentityMismatch
+	}
 	for sourceIndex := range claim.Sources {
 		claim.Sources[sourceIndex].SessionID = newSessionID
+		claim.Sources[sourceIndex].Position += queuePositionOffset
 	}
 	claim.Dispatch.SessionID = newSessionID
+	if destination != nil {
+		claim.Identity = *destination
+	}
 	claim.SessionGeneration, err = r.getSendNowGenerationTx(ctx, tx, newSessionID)
 	if err != nil {
 		return err
 	}
+	claim.OperationGeneration = claim.SessionGeneration
 	claimJSONBytes, err := json.Marshal(&claim)
 	if err != nil {
 		return fmt.Errorf("marshal transferred Send Now claim: %w", err)
@@ -257,6 +276,68 @@ func (r *sqliteRepository) MarkPendingSendNowClaimAccepted(ctx context.Context, 
 	if affected != 1 {
 		return ErrSendNowClaimChanged
 	}
+	return tx.Commit()
+}
+
+func (r *sqliteRepository) SetPendingSendNowClaimDelivery(
+	ctx context.Context,
+	claim *SendNowClaim,
+	protocol, submissionID, payloadHash string,
+) error {
+	if claim == nil || claim.ClaimID == "" {
+		return ErrSendNowClaimChanged
+	}
+	if err := r.ensureSendNowClaimRecoverySchema(ctx); err != nil {
+		return err
+	}
+	sessionID, err := sendNowClaimSessionID(claim)
+	if err != nil {
+		return err
+	}
+	tx, err := r.beginSessionMutationTx(ctx, sessionID, "set Send Now claim delivery")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var claimJSON string
+	var accepted int
+	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT claim_json, accepted FROM queue_send_now_claims
+		WHERE session_id = ? AND claim_id = ?
+	`), sessionID, claim.ClaimID).Scan(&claimJSON, &accepted); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrSendNowClaimChanged
+		}
+		return fmt.Errorf("read Send Now claim delivery: %w", err)
+	}
+	if accepted != 0 {
+		return ErrSendNowClaimChanged
+	}
+	var stored SendNowClaim
+	if err := json.Unmarshal([]byte(claimJSON), &stored); err != nil {
+		return fmt.Errorf("unmarshal Send Now claim delivery: %w", err)
+	}
+	stored.ClaimID = claim.ClaimID
+	stored.setDeliverySubmission(protocol, submissionID, payloadHash)
+	updatedJSON, err := json.Marshal(&stored)
+	if err != nil {
+		return fmt.Errorf("marshal Send Now claim delivery: %w", err)
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE queue_send_now_claims SET claim_json = ?
+		WHERE session_id = ? AND claim_id = ? AND accepted = 0
+	`), string(updatedJSON), sessionID, claim.ClaimID)
+	if err != nil {
+		return fmt.Errorf("set Send Now claim delivery: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set Send Now claim delivery rows affected: %w", err)
+	}
+	if affected != 1 {
+		return ErrSendNowClaimChanged
+	}
+	claim.setDeliverySubmission(protocol, submissionID, payloadHash)
 	return tx.Commit()
 }
 

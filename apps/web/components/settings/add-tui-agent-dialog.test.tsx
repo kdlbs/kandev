@@ -3,6 +3,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { ApiError, INTERIM_SETTINGS_INTERLOCK_ERROR_CODE } from "@/lib/api/client";
 import { AddTUIAgentDialog } from "./add-tui-agent-dialog";
 
+const DISPLAY_NAME_LABEL = "Display Name";
+const COMMAND_LABEL = "Command";
+
 afterEach(cleanup);
 
 function renderDialog(onSubmit = vi.fn()) {
@@ -31,8 +34,8 @@ describe("AddTUIAgentDialog", () => {
   it("keeps the {{model}} token in the command placeholder", () => {
     renderDialog();
 
-    expect(screen.getByLabelText("Command").getAttribute("placeholder")).toBe(
-      "e.g. superclaude --yolo --model {{model}}",
+    expect(screen.getByLabelText(COMMAND_LABEL).getAttribute("placeholder")).toBe(
+      "e.g. superagent --yolo --model {{model}}",
     );
   });
 
@@ -50,7 +53,9 @@ describe("AddTUIAgentDialog", () => {
     const onSubmit = vi.fn();
     renderDialog(onSubmit);
 
-    fireEvent.change(screen.getByLabelText("Display Name"), { target: { value: "superclaude" } });
+    fireEvent.change(screen.getByLabelText(DISPLAY_NAME_LABEL), {
+      target: { value: "superagent" },
+    });
     fireEvent.click(screen.getByText("Create"));
 
     expect(screen.getByText("Command is required")).toBeTruthy();
@@ -63,12 +68,67 @@ describe("AddTUIAgentDialog", () => {
     const onSubmit = vi.fn().mockRejectedValue("boom");
     renderDialog(onSubmit);
 
-    fireEvent.change(screen.getByLabelText("Display Name"), { target: { value: "superclaude" } });
-    fireEvent.change(screen.getByLabelText("Command"), { target: { value: "superclaude" } });
+    fireEvent.change(screen.getByLabelText(DISPLAY_NAME_LABEL), {
+      target: { value: "superagent" },
+    });
+    fireEvent.change(screen.getByLabelText(COMMAND_LABEL), { target: { value: "superagent" } });
     fireEvent.click(screen.getByText("Create"));
 
     await waitFor(() => expect(screen.getByText("Failed to create agent")).toBeTruthy());
     expect(onSubmit).toHaveBeenCalledOnce();
+  });
+
+  // A custom agent that speaks ACP has to be created as one: the protocol is
+  // part of the stored definition and decides whether kandev drives the command
+  // over ACP or launches it in a terminal.
+  it("submits the ACP protocol when it is selected", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderDialog(onSubmit);
+
+    fireEvent.click(screen.getByTestId("agent-protocol-select"));
+    fireEvent.click(screen.getByRole("option", { name: /ACP/ }));
+    fireEvent.change(screen.getByLabelText(DISPLAY_NAME_LABEL), {
+      target: { value: "My Agent" },
+    });
+    fireEvent.change(screen.getByLabelText(COMMAND_LABEL), {
+      target: { value: "superagent --acp" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      display_name: "My Agent",
+      command: "superagent --acp",
+      protocol: "acp",
+    });
+  });
+
+  it("defaults to the terminal protocol", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderDialog(onSubmit);
+
+    fireEvent.change(screen.getByLabelText(DISPLAY_NAME_LABEL), {
+      target: { value: "superagent" },
+    });
+    fireEvent.change(screen.getByLabelText(COMMAND_LABEL), { target: { value: "superagent" } });
+    fireEvent.click(screen.getByText("Create"));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
+    expect(onSubmit.mock.calls[0][0].protocol).toBeUndefined();
+  });
+
+  // The passthrough MCP strategies write a config file for the wrapped CLI.
+  // An ACP agent gets its servers in session/new, so the picker would offer a
+  // choice the backend rejects.
+  it("hides the MCP strategy picker for the ACP protocol", () => {
+    renderDialog();
+
+    expect(screen.queryByTestId("mcp-strategy-select")).not.toBeNull();
+
+    fireEvent.click(screen.getByTestId("agent-protocol-select"));
+    fireEvent.click(screen.getByRole("option", { name: /ACP/ }));
+
+    expect(screen.queryByTestId("mcp-strategy-select")).toBeNull();
   });
 
   it("closes without exposing a handled stale-page error", async () => {
@@ -80,8 +140,10 @@ describe("AddTUIAgentDialog", () => {
     const onOpenChange = vi.fn();
     render(<AddTUIAgentDialog open onOpenChange={onOpenChange} onSubmit={onSubmit} />);
 
-    fireEvent.change(screen.getByLabelText("Display Name"), { target: { value: "superclaude" } });
-    fireEvent.change(screen.getByLabelText("Command"), { target: { value: "superclaude" } });
+    fireEvent.change(screen.getByLabelText(DISPLAY_NAME_LABEL), {
+      target: { value: "superagent" },
+    });
+    fireEvent.change(screen.getByLabelText(COMMAND_LABEL), { target: { value: "superagent" } });
     fireEvent.click(screen.getByText("Create"));
 
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));

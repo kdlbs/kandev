@@ -19,6 +19,7 @@ function mapStep(step: StoreStep): WorkflowStepperStep {
     prompt: step.prompt,
     is_start_step: step.is_start_step,
     agent_profile_id: step.agent_profile_id,
+    complete_task_on_enter: step.complete_task_on_enter,
   };
 }
 
@@ -26,9 +27,9 @@ function mapStep(step: StoreStep): WorkflowStepperStep {
  * Resolves the ordered step list for a workflow that is not necessarily the
  * board's active workflow: the previewed task's own workflow, per
  * `plugin-context-api.ts`'s rule. `kanban.steps` covers the active workflow;
- * `kanbanMulti.snapshots` (populated by `useAllWorkflowSnapshots` for every
- * workflow in the workspace) covers every other one, including a task on a
- * workflow the board is not currently filtered to.
+ * `kanbanMulti.snapshots` covers other workflows. The workspace-wide board
+ * uses `useAllWorkflowSnapshots`, while task pages fetch only their own
+ * workflow through `useWorkflowSnapshotById`.
  */
 export function useWorkflowStepsById(workflowId: string | null | undefined): WorkflowStepperStep[] {
   const activeWorkflowId = useAppStore((state) => state.kanban.workflowId);

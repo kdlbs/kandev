@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	agentfamily "github.com/kandev/kandev/internal/agent/agents"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -287,7 +288,37 @@ func TestCreateAgentInstance_RollsBackWhenCanonicalProfileUpdateFails(t *testing
 	}
 }
 
-func TestUpdateAgent_ProfileSelectionDirectsClientsToRouting(t *testing.T) {
+// TestCreateAgentInstance_PersistsEnabledTrue guards against a regression
+// where persistAgent's canonical-profile write round-tripped an AgentInstance
+// whose Enabled field was never set, overwriting the row's own DEFAULT 1
+// with 0 immediately after insert. A repo-only fixture (no profileStore)
+// can't see this: it never exercises profileStore.UpdateAgentProfile, so the
+// disabling write never happens and Enabled reads back as its Go zero value
+// regardless. Only the real settings-store-backed profileStore proves the
+// stored column value.
+func TestCreateAgentInstance_PersistsEnabledTrue(t *testing.T) {
+	svc, _, profileStore := newTestAgentServiceWithProfileStore(t)
+	ctx := context.Background()
+	agent := &models.AgentInstance{
+		WorkspaceID: "ws-1",
+		Name:        "CEO",
+		Role:        models.AgentRoleCEO,
+	}
+
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	stored, err := profileStore.GetAgentProfile(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get agent profile: %v", err)
+	}
+	if !stored.Enabled {
+		t.Fatal("newly created office agent is not enabled; ValidateAssigneeAgentProfile would reject it")
+	}
+}
+
+func TestUpdateAgent_ProfileSelectionRebindsExecutionProfile(t *testing.T) {
 	svc, _, profileStore := newTestAgentServiceWithProfileStore(t)
 	ctx := context.Background()
 	provider := &settingsmodels.Agent{ID: "provider-db-id", Name: "claude-acp"}
@@ -299,6 +330,7 @@ func TestUpdateAgent_ProfileSelectionDirectsClientsToRouting(t *testing.T) {
 		AgentID:          provider.ID,
 		Name:             "Work",
 		AgentDisplayName: "Claude",
+		Enabled:          true,
 		Model:            "opus",
 		Mode:             "bypassPermissions",
 		ConfigOptions:    map[string]string{"effort": "high"},
@@ -323,8 +355,8 @@ func TestUpdateAgent_ProfileSelectionDirectsClientsToRouting(t *testing.T) {
 	}
 
 	rec := newPatchAgentRecorder(t, svc, target.ID, `{"agent_profile_id":"source-profile"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	stored, err := profileStore.GetAgentProfile(ctx, target.ID)
 	if err != nil {
@@ -335,6 +367,10 @@ func TestUpdateAgent_ProfileSelectionDirectsClientsToRouting(t *testing.T) {
 	}
 	if stored.Model == "opus" || stored.Mode == "bypassPermissions" {
 		t.Errorf("Office runtime fields were overwritten: model=%q mode=%q", stored.Model, stored.Mode)
+	}
+	if stored.AgentID != provider.ID || stored.ExecutionAgentProfileID != "" {
+		t.Errorf("concrete source selection = family %q binding %q, want family %q and no dynamic binding",
+			stored.AgentID, stored.ExecutionAgentProfileID, provider.ID)
 	}
 	if stored.AutoApprove || len(stored.CLIFlags) != 0 {
 		t.Errorf("Office permission fields were overwritten: auto=%v flags=%+v", stored.AutoApprove, stored.CLIFlags)
@@ -356,6 +392,7 @@ func TestApplyProfileConfigurationCopiesOnlyProviderFamily(t *testing.T) {
 	}
 	source := &settingsmodels.AgentProfile{
 		ID: "source-profile", AgentID: provider.ID, Name: "Work", Model: "opus",
+		Enabled:     true,
 		AutoApprove: true, EnvVars: []settingsmodels.ProfileEnvVar{{Key: "SECRET", Value: "value"}},
 	}
 	if err := profileStore.CreateAgentProfile(ctx, source); err != nil {
@@ -373,6 +410,68 @@ func TestApplyProfileConfigurationCopiesOnlyProviderFamily(t *testing.T) {
 	}
 }
 
+func TestUpdateAgent_ProfileSelectionBindsDynamicExecutionSource(t *testing.T) {
+	svc, _, profileStore := newTestAgentServiceWithProfileStore(t)
+	ctx := context.Background()
+	dynamicFamily := &settingsmodels.Agent{ID: "dynamic", Name: agentfamily.DynamicAgentID}
+	if err := profileStore.CreateAgent(ctx, dynamicFamily); err != nil {
+		t.Fatalf("create dynamic family: %v", err)
+	}
+	source := &settingsmodels.AgentProfile{
+		ID: "dynamic-source", AgentID: dynamicFamily.ID, Name: "Cascade", Enabled: true,
+	}
+	if err := profileStore.CreateAgentProfile(ctx, source); err != nil {
+		t.Fatalf("create dynamic profile: %v", err)
+	}
+	target := &models.AgentInstance{
+		WorkspaceID: "ws-1", Name: "Existing CEO", Role: models.AgentRoleCEO,
+		AgentID: dynamicFamily.ID, Enabled: true,
+	}
+	if err := svc.CreateAgentInstance(ctx, target); err != nil {
+		t.Fatalf("create office agent: %v", err)
+	}
+
+	rec := newPatchAgentRecorder(t, svc, target.ID, `{"agent_profile_id":"dynamic-source"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	stored, err := profileStore.GetAgentProfile(ctx, target.ID)
+	if err != nil {
+		t.Fatalf("get updated office agent: %v", err)
+	}
+	if stored.ExecutionAgentProfileID != source.ID || stored.AgentID != dynamicFamily.ID {
+		t.Fatalf("dynamic source selection = family %q binding %q, want %q/%q",
+			stored.AgentID, stored.ExecutionAgentProfileID, dynamicFamily.ID, source.ID)
+	}
+}
+
+func TestApplyProfileConfigurationBindsDynamicSource(t *testing.T) {
+	svc, _, profileStore := newTestAgentServiceWithProfileStore(t)
+	ctx := context.Background()
+	provider := &settingsmodels.Agent{ID: "dynamic", Name: "dynamic"}
+	if err := profileStore.CreateAgent(ctx, provider); err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	source := &settingsmodels.AgentProfile{
+		ID: "source-dynamic", AgentID: provider.ID, Name: "Cascade",
+		Enabled: true,
+	}
+	if err := profileStore.CreateAgentProfile(ctx, source); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	target := &models.AgentInstance{WorkspaceID: "ws-1", Name: "CEO"}
+
+	if err := svc.ApplyProfileConfiguration(ctx, target, source.ID); err != nil {
+		t.Fatalf("apply profile configuration: %v", err)
+	}
+	if target.AgentID != provider.ID {
+		t.Fatalf("agent family = %q, want %q", target.AgentID, provider.ID)
+	}
+	if target.ExecutionAgentProfileID != source.ID {
+		t.Fatalf("execution binding = %q, want %q", target.ExecutionAgentProfileID, source.ID)
+	}
+}
+
 func TestApplyProfileConfiguration_RejectsCrossWorkspaceSource(t *testing.T) {
 	svc, _, profileStore := newTestAgentServiceWithProfileStore(t)
 	ctx := context.Background()
@@ -385,6 +484,7 @@ func TestApplyProfileConfiguration_RejectsCrossWorkspaceSource(t *testing.T) {
 		AgentID:     provider.ID,
 		Name:        "Private",
 		WorkspaceID: "ws-other",
+		Enabled:     true,
 		EnvVars: []settingsmodels.ProfileEnvVar{
 			{Key: "PRIVATE_CONFIG", Value: "/private/path"},
 		},

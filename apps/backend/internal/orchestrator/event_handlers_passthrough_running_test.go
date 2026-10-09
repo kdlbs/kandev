@@ -126,6 +126,33 @@ func TestHandleAgentReady_PassthroughQueuedMessageSynchronousRunningEvent(t *tes
 	require.Equal(t, models.TaskSessionStateRunning, updatedSession.State)
 }
 
+func TestHandleAgentReady_PassthroughQueuedMessageDeliveredOnce(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	agentManager := &mockAgentManager{isPassthrough: true}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	svc.messageQueue.SetAutoMergeEnabled(false)
+
+	first, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "peer report", "", "test", false, nil)
+	require.NoError(t, err)
+	second, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "next report", "", "test", false, nil)
+	require.NoError(t, err)
+
+	for range 3 {
+		svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+	}
+
+	require.Len(t, agentManager.passthroughStdinCalls, 2, "each queued message must be delivered exactly once")
+	require.Equal(t, "peer report\r", agentManager.passthroughStdinCalls[0].Data)
+	require.Equal(t, "next report\r", agentManager.passthroughStdinCalls[1].Data)
+	for _, id := range []string{first.ID, second.ID} {
+		_, err = svc.messageQueue.FindEntryByID(ctx, id)
+		require.ErrorIs(t, err, messagequeue.ErrEntryNotFound)
+	}
+}
+
 func TestHandleAgentReady_PassthroughQueuedMessagePublishesAfterWriteFailure(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

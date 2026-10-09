@@ -28,9 +28,15 @@ type AgentWriter interface {
 	UpdateAgentStatusFields(ctx context.Context, agentID, status, pauseReason string) error
 }
 
-// RunQueuer enqueues run requests for agent instances.
+// RunQueuer enqueues run requests for agent instances, attributed to a
+// typed actor (AC-OFFICE-RUN-CAUSATION-001.15).
 type RunQueuer interface {
-	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) (runsservice.QueueOutcome, error)
+	QueueRunWithActor(
+		ctx context.Context,
+		agentInstanceID, reason, payload, idempotencyKey string,
+		actorKind models.ActorKind, actorID string,
+		causingRunID string,
+	) (runsservice.QueueOutcome, error)
 }
 
 // ApprovalService handles approval CRUD and decide logic.
@@ -84,10 +90,14 @@ func (s *ApprovalService) CreateApprovalWithActivity(ctx context.Context, approv
 
 // DecideApproval resolves an approval and performs side effects based on the
 // approval type: activating agents, moving tasks, creating skills, and
-// queuing runs for the requesting agent.
+// queuing runs for the requesting agent. actorKind identifies who decidedBy
+// actually is (an authenticated agent, or a human/UI caller) so the queued
+// approval_resolved run carries a real actor instead of a hardcoded default.
 func (s *ApprovalService) DecideApproval(
 	ctx context.Context,
-	approvalID, status, decidedBy, note string,
+	approvalID, status, decidedBy string,
+	actorKind models.ActorKind,
+	note string,
 ) (*Approval, error) {
 	if status != StatusApproved && status != StatusRejected {
 		return nil, fmt.Errorf("invalid status: %s (must be approved or rejected)", status)
@@ -111,7 +121,7 @@ func (s *ApprovalService) DecideApproval(
 		return nil, fmt.Errorf("update approval: %w", err)
 	}
 
-	if err := s.applyApprovalSideEffects(ctx, approval); err != nil {
+	if err := s.applyApprovalSideEffects(ctx, approval, actorKind); err != nil {
 		s.logger.Error("approval side effects failed",
 			zap.String("approval_id", approvalID),
 			zap.Error(err))
@@ -147,30 +157,32 @@ func (s *ApprovalService) ListApprovals(ctx context.Context, wsID string) ([]*Ap
 // decided. Each case is intentionally simple; complex orchestration belongs
 // in the scheduler/run layer.
 func (s *ApprovalService) applyApprovalSideEffects(
-	ctx context.Context, approval *Approval,
+	ctx context.Context, approval *Approval, actorKind models.ActorKind,
 ) error {
 	if approval.Status == StatusRejected {
 		if approval.Type == ApprovalTypeHireAgent {
-			return s.onHireAgentRejected(ctx, approval)
+			return s.onHireAgentRejected(ctx, approval, actorKind)
 		}
-		return s.queueApprovalRun(ctx, approval)
+		return s.queueApprovalRun(ctx, approval, actorKind)
 	}
 
 	switch approval.Type {
 	case ApprovalTypeHireAgent:
-		return s.onHireAgentApproved(ctx, approval)
+		return s.onHireAgentApproved(ctx, approval, actorKind)
 	case ApprovalTypeTaskReview:
 		// Task state transitions are handled by the orchestrator via runs.
-		return s.queueApprovalRun(ctx, approval)
+		return s.queueApprovalRun(ctx, approval, actorKind)
 	case ApprovalTypeSkillCreation:
 		// Skill creation from approval payload is handled via run.
-		return s.queueApprovalRun(ctx, approval)
+		return s.queueApprovalRun(ctx, approval, actorKind)
 	default:
-		return s.queueApprovalRun(ctx, approval)
+		return s.queueApprovalRun(ctx, approval, actorKind)
 	}
 }
 
-func (s *ApprovalService) onHireAgentApproved(ctx context.Context, approval *Approval) error {
+func (s *ApprovalService) onHireAgentApproved(
+	ctx context.Context, approval *Approval, actorKind models.ActorKind,
+) error {
 	agentID := extractAgentProfileID(approval.Payload)
 	if agentID != "" && s.agentWriter != nil {
 		if err := s.agentWriter.UpdateAgentStatusFields(ctx, agentID, "idle", ""); err != nil {
@@ -179,10 +191,12 @@ func (s *ApprovalService) onHireAgentApproved(ctx context.Context, approval *App
 				zap.Error(err))
 		}
 	}
-	return s.queueApprovalRun(ctx, approval)
+	return s.queueApprovalRun(ctx, approval, actorKind)
 }
 
-func (s *ApprovalService) onHireAgentRejected(ctx context.Context, approval *Approval) error {
+func (s *ApprovalService) onHireAgentRejected(
+	ctx context.Context, approval *Approval, actorKind models.ActorKind,
+) error {
 	agentID := extractAgentProfileID(approval.Payload)
 	if agentID != "" && s.agentWriter != nil {
 		if err := s.agentWriter.UpdateAgentStatusFields(ctx, agentID, "stopped", "hire rejected"); err != nil {
@@ -191,7 +205,7 @@ func (s *ApprovalService) onHireAgentRejected(ctx context.Context, approval *App
 				zap.Error(err))
 		}
 	}
-	return s.queueApprovalRun(ctx, approval)
+	return s.queueApprovalRun(ctx, approval, actorKind)
 }
 
 // extractAgentProfileID attempts to parse an agent_profile_id from the approval payload JSON.
@@ -207,7 +221,9 @@ func extractAgentProfileID(payload string) string {
 	return id
 }
 
-func (s *ApprovalService) queueApprovalRun(ctx context.Context, approval *Approval) error {
+func (s *ApprovalService) queueApprovalRun(
+	ctx context.Context, approval *Approval, actorKind models.ActorKind,
+) error {
 	if approval.RequestedByAgentProfileID == "" {
 		return nil
 	}
@@ -216,7 +232,11 @@ func (s *ApprovalService) queueApprovalRun(ctx context.Context, approval *Approv
 		approval.ID, approval.Type, approval.Status, approval.DecisionNote,
 	)
 	idempotencyKey := "approval:" + approval.ID
-	_, err := s.runs.QueueRun(ctx, approval.RequestedByAgentProfileID,
-		"approval_resolved", payload, idempotencyKey)
+	// An approval decision is triggered by an HTTP request (a human or an
+	// authenticated agent deciding it), not from within an agent's own
+	// run, so there is no live causing run to chain from: this always
+	// roots a new causation chain (AC-OFFICE-RUN-CAUSATION-001.2).
+	_, err := s.runs.QueueRunWithActor(ctx, approval.RequestedByAgentProfileID,
+		"approval_resolved", payload, idempotencyKey, actorKind, approval.DecidedBy, "")
 	return err
 }

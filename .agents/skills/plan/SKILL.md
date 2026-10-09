@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Create a committed implementation plan and work orders from approved requirements and current system designs. Use after specification work and before implementation.
+description: Create an implementation plan and work orders from approved requirements and current system designs. Leave the design package uncommitted for review before implementation.
 ---
 
 # Create an Implementation Plan
@@ -96,6 +96,12 @@ State the result, the implementation order, and the reason for that order.
 
 Name exact files, symbols, schema changes, contracts, and integration points.
 Organize this section by implementation boundary or vertical slice.
+
+For a shared provider or adapter path, include a compact compatibility matrix
+covering the provider, transport, identity or capability shape, intended
+behavior, verification evidence, and unsupported-shape fallback. Shared
+implementation does not imply that every provider is supported; state
+conditional coverage explicitly.
 
 ## ASCII UI preview
 
@@ -251,13 +257,23 @@ before marking Results complete. Record actual results, not planned or stale cou
 Before marking a new plan package complete, run `git diff --check --
 docs/plans/<initiative>` and `git status --short -- docs/plans/<initiative>`;
 the status check catches untracked work orders. Confirm every work order names
-existing `REQ-*`/`AC-*` IDs and an existing system-design path.
+existing `REQ-*`/`AC-*` IDs and an existing system-design path. Also verify that
+every requirement named by a work order is declared by at least one of its
+referenced system designs, and that every work-order design is included by the
+plan's system-design list. Run the repository's PR-documentation coverage
+preflight when one is available; `list-docs` and specification lint alone do
+not prove this cross-reference coverage.
 
 Do not add generic QA, review, simplify, security, or full-verification tasks.
 Task checks provide pre-PR evidence. Configured PR reviewers provide semantic
 review after the PR opens.
 
 ### 5. End the design turn
+
+Leave the full design package, including requirements, system designs, ADRs,
+plan, and work orders, unstaged and uncommitted so the user can review its diff
+in the workspace. Do not stage or commit these files unless the user explicitly
+asks. Check `git status --short` and include the changed paths in the handoff.
 
 Report the requirement IDs, system designs, plan, work orders, dependency
 order, exact checks, and open risks. For UI changes, also render a compact

@@ -12,6 +12,7 @@ import type {
   TaskSessionStateChangedPayload,
 } from "@/lib/types/backend";
 const QUEUE_STATUS_ACTION = `message.queue.status_changed`;
+const AGENTCTL_READY_ACTION = "session.agentctl_ready";
 const CURRENT_INCARNATION = `incarnation-2`;
 const CURRENT_STATUS_EPOCH = `status-epoch-1`;
 
@@ -32,7 +33,9 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     setActiveSession: vi.fn(),
     setActiveSessionAuto: vi.fn(),
     setSessionAgentctlStatus: vi.fn(),
+    invalidateConfirmedConfigOptions: vi.fn(),
     setResumeSkipped: vi.fn(),
+    clearLaunchWarning: vi.fn(),
     setSessionFailureNotification: vi.fn(),
     setContextWindow: vi.fn(),
     clearContextWindow: vi.fn(),
@@ -1446,12 +1449,12 @@ describe("session.state_changed → agentctl ready fallback", () => {
       sessionWorktreesBySessionId: { itemsBySessionId: {} },
       setSessionWorktrees: vi.fn(),
     });
-    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
 
     handler({
       id: "m",
       type: "notification",
-      action: "session.agentctl_ready",
+      action: AGENTCTL_READY_ACTION,
       timestamp: TS,
       payload: {
         task_id: "t-1",
@@ -1483,12 +1486,43 @@ describe("session.state_changed → agentctl ready fallback", () => {
       completeWorkspaceRestoration,
       bumpWorkspaceFilesRefresh,
     });
-    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
 
     handler({
       id: "m",
       type: "notification",
-      action: "session.agentctl_ready",
+      action: AGENTCTL_READY_ACTION,
+      timestamp: TS,
+      payload: { task_id: "t-1", session_id: "s-1", task_environment_id: "env-1" },
+    });
+
+    expect(completeWorkspaceRestoration).toHaveBeenCalledWith(attempt);
+    expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith("s-1");
+  });
+
+  it("clears a failed workspace restore when the matching agentctl becomes ready", () => {
+    const attempt = {
+      taskId: "t-1",
+      sessionId: "s-1",
+      environmentId: "env-1",
+      revision: 2,
+      status: "error",
+      details: "The workspace restore was interrupted.",
+    };
+    const completeWorkspaceRestoration = vi.fn(() => true);
+    const bumpWorkspaceFilesRefresh = vi.fn();
+    const store = makeStore({
+      environmentIdBySessionId: { "s-1": "env-1" },
+      workspaceRestoration: { byEnvironmentId: { "env-1": attempt } },
+      completeWorkspaceRestoration,
+      bumpWorkspaceFilesRefresh,
+    });
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: AGENTCTL_READY_ACTION,
       timestamp: TS,
       payload: { task_id: "t-1", session_id: "s-1", task_environment_id: "env-1" },
     });
@@ -1556,12 +1590,12 @@ describe("session.state_changed → agentctl ready fallback", () => {
       setWorktree: vi.fn(),
       setSessionWorktrees: vi.fn(),
     });
-    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
+    const handler = registerTaskSessionHandlers(store)[AGENTCTL_READY_ACTION]!;
 
     handler({
       id: "m",
       type: "notification",
-      action: "session.agentctl_ready",
+      action: AGENTCTL_READY_ACTION,
       timestamp: TS,
       payload: {
         task_id: "t-1",
@@ -2079,6 +2113,7 @@ describe("session.state_changed resume-skipped clearing", () => {
   it("clears the resume-skipped marker on a RUNNING transition", () => {
     handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "RUNNING" }));
     expect(store.getState().setResumeSkipped).toHaveBeenCalledWith("s-1", false);
+    expect(store.getState().clearLaunchWarning).toHaveBeenCalledWith("s-1");
   });
 
   it("does NOT clear the marker on a STARTING transition (failed resumes keep the retry button)", () => {

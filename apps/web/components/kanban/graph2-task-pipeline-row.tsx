@@ -84,9 +84,11 @@ function RowMenuTrigger({
 function RowInfoColumn({
   task,
   repositoryChips,
+  isMultiSelectMode,
 }: {
   task: Task;
   repositoryChips: ReturnType<typeof resolveTaskRepositoryChips>;
+  isMultiSelectMode?: boolean;
 }) {
   const { t } = useTranslation();
   const sessionCount = task.sessionCount ?? 0;
@@ -94,7 +96,7 @@ function RowInfoColumn({
   return (
     <div className="w-[200px] min-w-0 shrink-0" data-testid="pipeline-row-info">
       <div data-testid="pipeline-row-title">
-        <CardTitle task={task} enableTitleHover />
+        <CardTitle task={task} enableTitleHover={!isMultiSelectMode} />
       </div>
       {/* Height is reserved whether or not the task has a repository, so a
           row with no repository is the same height as one with, and the
@@ -259,7 +261,11 @@ export function PipelineRow({
           />
         </div>
       )}
-      <RowInfoColumn task={task} repositoryChips={repositoryChips} />
+      <RowInfoColumn
+        task={task}
+        repositoryChips={repositoryChips}
+        isMultiSelectMode={isMultiSelectMode}
+      />
       <div
         ref={overflowStage.outerRef}
         data-testid="pipeline-row-overflow-region"

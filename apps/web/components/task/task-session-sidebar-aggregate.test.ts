@@ -233,6 +233,26 @@ describe("aggregateSidebarTasks active precedence", () => {
 
     expect(result.allTasks[0].autopilot).toBe(true);
   });
+
+  // @covers AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.4
+  it("preserves projected Office identity through a newer partial active task", () => {
+    const projected = makeTask("t1", "s1", {
+      isFromOffice: true,
+      updatedAt: "2026-08-03T00:00:00Z",
+    });
+    const active = makeTask("t1", "s1", {
+      updatedAt: "2026-08-03T00:00:01Z",
+    });
+
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [active],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks[0].isFromOffice).toBe(true);
+  });
 });
 
 describe("aggregateSidebarTasks task lifecycle freshness", () => {

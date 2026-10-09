@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -20,6 +20,43 @@ function runGit(cwd: string, ...args: string[]): void {
 }
 
 describe("E2E git shim", () => {
+  it("holds a configured diff enrichment until released", async () => {
+    const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-git-shim-"));
+    tempDirs.push(repoDir);
+    const delayFile = path.join(repoDir, "delay");
+    const startedFile = path.join(repoDir, "started");
+    const releaseFile = path.join(repoDir, "release");
+    runGit(repoDir, "init", "--initial-branch=main");
+    fs.writeFileSync(
+      delayFile,
+      JSON.stringify({ subcommand: "diff", requiredArgs: ["--numstat"], startedFile, releaseFile }),
+    );
+    const child = spawn(
+      process.execPath,
+      [path.resolve("e2e/fixtures/git-shim.mjs"), "diff", "--numstat"],
+      {
+        cwd: repoDir,
+        env: {
+          ...process.env,
+          KANDEV_E2E_GIT_DELAY_FILE: delayFile,
+          KANDEV_E2E_ORIGINAL_PATH: process.env.PATH ?? "",
+        },
+      },
+    );
+    const completion = new Promise<number | null>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("exit", resolve);
+    });
+    try {
+      await expect.poll(() => fs.existsSync(startedFile), { timeout: 1000 }).toBe(true);
+      expect(child.exitCode).toBe(null);
+      fs.writeFileSync(releaseFile, "release");
+      expect(await completion).toBe(0);
+    } finally {
+      child.kill();
+    }
+  });
+
   it.each([
     ["single global flag", ["--no-pager"]],
     ["two-token global option", ["-C", "."]],

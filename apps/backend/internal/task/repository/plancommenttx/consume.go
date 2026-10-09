@@ -106,6 +106,19 @@ func ResolveQueue(
 	return resolve(ctx, tx, db, taskID, sessionID, contentTemplate, refs, requirePrimary, "")
 }
 
+// ValidateTargetSession exposes the shared task/session route guard to other
+// task-owned context admitted by the same message transaction.
+func ValidateTargetSession(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	db *sqlx.DB,
+	taskID, sessionID string,
+	requirePrimary bool,
+	expectedState models.TaskSessionState,
+) error {
+	return validateTargetSession(ctx, tx, db, taskID, sessionID, requirePrimary, expectedState)
+}
+
 func resolve(
 	ctx context.Context,
 	tx *sqlx.Tx,

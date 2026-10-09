@@ -132,6 +132,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 }
 
 func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	mgr := newTestManager(t)
 	tests := []struct {
 		name  string
@@ -162,11 +163,30 @@ func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			want := strings.Join(tt.agent.(agents.ManagedNPMRuntimeAgent).ManagedNPMRuntime().CachedACPCommand().Args(), " ")
+			if tt.name == "opencode" {
+				want = strings.Join(tt.agent.(agents.ManagedNPMRuntimeAgent).ManagedNPMRuntime().NativeCommand().Args(), " ")
+			}
 			cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, tt.agent, true)
 			require.NoError(t, err)
 			require.Equal(t, want, cmds.initial)
 		})
 	}
+
+	// opencode-acp opts into NativeBinaryAgent: when the lifecycle probe finds
+	// the standalone binary on PATH the launch uses it directly (the same
+	// binary-first pattern as CodeNomad), and falls back to the managed npx
+	// runtime when it is absent (containers, remotes, fresh hosts).
+	t.Run("opencode-native", func(t *testing.T) {
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, agents.NewOpenCodeACP(), true)
+		require.NoError(t, err)
+		require.Equal(t, "opencode acp --print-logs", cmds.initial)
+	})
+	t.Run("opencode-npx-fallback", func(t *testing.T) {
+		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, agents.NewOpenCodeACP(), false)
+		require.NoError(t, err)
+		want := strings.Join(agents.NewOpenCodeACP().ManagedNPMRuntime().CachedACPCommand().Args(), " ")
+		require.Equal(t, want, cmds.initial)
+	})
 }
 
 // cliFlagTestAgent is a minimal BuildCommand that produces a stable prefix
@@ -486,22 +506,36 @@ func TestBuildEnvForExecution_ResolvesSecretBackedProfileEnv(t *testing.T) {
 	}
 }
 
-func TestBuildEnvForExecution_FailsClosedWhenProfileSecretIsUnavailable(t *testing.T) {
+// A broken secret reference on one profile env var must not blank the agent's
+// whole launch environment: the bad var is dropped, the rest are delivered
+// (AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-004.1).
+func TestBuildEnvForExecution_DropsOnlyTheUnresolvableProfileSecretVar(t *testing.T) {
 	mgr := newTestManager(t)
-	mgr.secretStore = newInMemorySecretStore()
+	store := newInMemorySecretStore()
+	_ = store.Create(context.Background(), &secrets.SecretWithValue{
+		Secret: secrets.Secret{ID: "sec-ok", Name: "ok"},
+		Value:  "revealed",
+	})
+	mgr.secretStore = store
 
-	_, err := mgr.buildEnvForExecution(
+	env, err := mgr.buildEnvForExecution(
 		context.Background(),
 		"exec-1",
 		&LaunchRequest{AgentProfileID: "profile-1"},
 		nil,
-		&AgentProfileInfo{EnvVars: []settingsmodels.ProfileEnvVar{{
-			Key:      "PROFILE_TOKEN",
-			SecretID: "missing-secret",
-		}}},
+		&AgentProfileInfo{EnvVars: []settingsmodels.ProfileEnvVar{
+			{Key: "GOOD_TOKEN", SecretID: "sec-ok"},
+			{Key: "BROKEN_TOKEN", SecretID: "missing-secret"},
+		}},
 	)
-	if err == nil {
-		t.Fatal("buildEnvForExecution succeeded with an unavailable profile secret")
+	if err != nil {
+		t.Fatalf("buildEnvForExecution: %v", err)
+	}
+	if env["GOOD_TOKEN"] != "revealed" {
+		t.Errorf("GOOD_TOKEN = %q, want revealed", env["GOOD_TOKEN"])
+	}
+	if _, present := env["BROKEN_TOKEN"]; present {
+		t.Errorf("BROKEN_TOKEN should have been dropped, got %q", env["BROKEN_TOKEN"])
 	}
 }
 
@@ -899,7 +933,7 @@ func TestConfigureAndStartAgent_DoesNotSendTaskDescriptionEnv(t *testing.T) {
 		agentctl: client,
 	}
 
-	bootCommand, err := mgr.configureAndStartAgent(context.Background(), execution, "never")
+	bootCommand, err := mgr.configureAndStartAgent(context.Background(), execution)
 	if err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
@@ -932,7 +966,7 @@ func TestConfigureAndStartAgentUsesRuntimeSnapshotWhenProfileSecretIsUnavailable
 	}
 	execution.setRuntimeEnvironment(map[string]string{"PROFILE_ONLY": "captured-value"})
 
-	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution); err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
 	if configuredEnv["PROFILE_ONLY"] != "captured-value" {
@@ -970,7 +1004,7 @@ func TestConfigureAndStartAgentSendsComposedRuntimeEnvironmentAsOverlay(t *testi
 		"GIT_CONFIG_VALUE_2": "!f() { : kandev-host-gh-bridge; '/old/gh' auth git-credential \"$@\"; }; f",
 	})
 
-	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution); err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
 	if replaced {
@@ -1000,7 +1034,7 @@ func TestConfigureAndStartAgent_SendsStructuredArgv(t *testing.T) {
 		agentctl:       client,
 	}
 
-	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution); err != nil {
 		t.Fatalf("configure and start agent: %v", err)
 	}
 	want := []string{"runner", "two words", "", `C:\tools\agent.exe`}
@@ -1031,7 +1065,7 @@ func TestConfigureAndStartAgent_SpillsLargeWakePayloadEnv(t *testing.T) {
 		agentctl: client,
 	}
 
-	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution); err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
 	if _, exists := configuredEnv["KANDEV_WAKE_PAYLOAD_JSON"]; exists {
@@ -1187,27 +1221,35 @@ func (p staticManagedGoCacheEnvironment) ExecutionEnvironment(context.Context) (
 	return map[string]string{"GOCACHE": p.path}, nil
 }
 
-func TestPrepareManagedGoCacheEnvironmentOverridesLocalRequest(t *testing.T) {
+func TestPrepareManagedGoCacheEnvironmentPreservesRequestUntilComposition(t *testing.T) {
 	mgr := newTestManager(t)
 	managedPath := filepath.Join(t.TempDir(), "cache", "go-build")
 	mgr.SetManagedGoCacheEnvironmentProvider(staticManagedGoCacheEnvironment{path: managedPath})
+	requestedPath := "/home/user/.cache/go-build"
 	req := &LaunchRequest{
 		ExecutorType: "local_pc",
-		Env:          map[string]string{"GOCACHE": "/home/user/.cache/go-build"},
+		Env:          map[string]string{"GOCACHE": requestedPath},
 	}
 
 	err := mgr.prepareManagedGoCacheEnvironment(context.Background(), req)
 	if err != nil {
 		t.Fatalf("prepareManagedGoCacheEnvironment() error = %v", err)
 	}
-	if got := req.Env["GOCACHE"]; got != managedPath {
-		t.Fatalf("request GOCACHE = %q, want %q", got, managedPath)
+	if got := req.Env["GOCACHE"]; got != requestedPath {
+		t.Fatalf("request GOCACHE = %q, want preserved input %q", got, requestedPath)
 	}
 	if req.managedGoCachePath != managedPath {
 		t.Fatalf("managedGoCachePath = %q, want %q", req.managedGoCachePath, managedPath)
 	}
 	if got, _ := req.Metadata[managedGoCacheMetadataKey].(string); got != managedPath {
 		t.Fatalf("managed cache metadata = %q, want %q", got, managedPath)
+	}
+	resolved, err := mgr.buildEnvForExecution(context.Background(), "exec-1", req, nil, nil)
+	if err != nil {
+		t.Fatalf("buildEnvForExecution() error = %v", err)
+	}
+	if got := resolved["GOCACHE"]; got != managedPath {
+		t.Fatalf("resolved GOCACHE = %q, want managed path %q", got, managedPath)
 	}
 }
 
@@ -1224,11 +1266,13 @@ func TestManagedGoCacheEnvironmentPropagatesToPrepareAndRuntime(t *testing.T) {
 		t.Fatalf("prepareManagedGoCacheEnvironment() error = %v", err)
 	}
 
-	prepareEnv := buildEnvPrepareRequest(req, "/tmp/workspace", executor.NameStandalone).Env
 	runtimeEnv, err := mgr.buildEnvForExecution(context.Background(), "exec-1", req, nil, nil)
 	if err != nil {
 		t.Fatalf("buildEnvForExecution() error = %v", err)
 	}
+	preparedReq := *req
+	preparedReq.Env = runtimeEnv
+	prepareEnv := buildEnvPrepareRequest(&preparedReq, "/tmp/workspace", executor.NameStandalone).Env
 	if prepareEnv["GOCACHE"] != managedPath || runtimeEnv["GOCACHE"] != managedPath {
 		t.Fatalf("GOCACHE diverged: prepare=%q runtime=%q want=%q",
 			prepareEnv["GOCACHE"], runtimeEnv["GOCACHE"], managedPath)
@@ -1645,22 +1689,58 @@ func TestLaunch_PromotesWorkspaceOnlyExecution(t *testing.T) {
 	require.NoError(t, mgr.executionStore.Add(existing))
 
 	req := &LaunchRequest{
-		TaskID:              "task-1",
-		SessionID:           "session-1",
-		AgentProfileID:      "profile-1",
-		ACPSessionID:        "acp-session-abc",
-		PreviousExecutionID: "exec-prev",
+		TaskID:                "task-1",
+		SessionID:             "session-1",
+		AgentProfileID:        "profile-1",
+		ACPSessionID:          "acp-session-abc",
+		PreviousExecutionID:   "exec-prev",
+		TaskScope:             TaskLaunchScopeTask,
+		SessionSettingsPolicy: SessionSettingsPolicyProviderRestored,
 	}
 
 	got, err := mgr.Launch(context.Background(), req)
 	require.NoError(t, err)
 	require.Same(t, existing, got, "Launch must reuse the workspace-only execution, not create a new one")
+	require.Equal(t, TaskLaunchScopeTask, got.TaskScope)
+	require.Equal(t, SessionSettingsPolicyProviderRestored, got.sessionSettingsStartupPolicy())
+	require.Equal(t, SessionSettingsPolicyProviderRestored, got.sessionSettingsProjectionPolicy())
 	require.NotEmpty(t, got.AgentCommand, "AgentCommand must be populated by promotion")
 	require.GreaterOrEqual(t, len(got.AgentArgs), 2, "promotion must populate structured argv")
 	require.Equal(t, []string{"/opt/wrapper dir/wrapper", "--"}, got.AgentArgs[:2],
 		"promotion must preserve the prefix argv token containing spaces")
 	require.Equal(t, "acp-session-abc", got.ACPSessionID, "ACPSessionID must be carried over from the request")
 	require.True(t, got.isResumedSession, "isResumedSession must be set when PreviousExecutionID is non-empty")
+}
+
+func TestLaunch_PromotesWorkspaceOnlyExecutionWithInitialPrompt(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "profile-prompt",
+		AgentName: "auggie",
+	}}
+
+	existing := &AgentExecution{
+		ID:             "exec-workspace-only-prompt",
+		SessionID:      "session-prompt",
+		TaskID:         "task-prompt",
+		AgentProfileID: "profile-prompt",
+	}
+	require.NoError(t, mgr.executionStore.Add(existing))
+
+	attachment := MessageAttachment{AttachmentID: "attachment-1", Type: "resource", Name: "brief.md"}
+	got, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:          existing.TaskID,
+		SessionID:       existing.SessionID,
+		AgentProfileID:  existing.AgentProfileID,
+		TaskDescription: "start the requested work",
+		TurnID:          "turn-initial",
+		Attachments:     []MessageAttachment{attachment},
+	})
+	require.NoError(t, err)
+	require.Same(t, existing, got)
+	require.Equal(t, "start the requested work", getTaskDescriptionFromMetadata(got))
+	require.Equal(t, []MessageAttachment{attachment}, getAttachmentsFromMetadata(got))
+	require.Equal(t, "turn-initial", got.promptTurnIDSnapshot())
 }
 
 func TestLaunch_DoesNotPromoteWorkspaceExecutionAfterSessionTerminalizes(t *testing.T) {

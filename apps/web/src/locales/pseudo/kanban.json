@@ -41,7 +41,6 @@
   "gitlabMergeRequest": "ĜĩţĹàƀ Ḿēŕĝē Ŕēqũēśţ",
   "goToTask": "Ĝō ţō Ţàśķ",
   "group": "Ĝŕōũƥ",
-  "groupTasksIntoSectionsByState": "Ĝŕōũƥ ţàśķś ĩńţō śēćţĩōńś ƀŷ śţàţē, ŵōŕķƒĺōŵ, ŕēƥōśĩţōŕŷ, ōŕ ńōńē.",
   "healthIssues": "Ĥēàĺţĥ ĩśśũēś",
   "improveKandev": "Ĩḿƥŕōvē Ķàńďēv",
   "jiraTicket": "Ĵĩŕà Ţĩćķēţ",
@@ -94,7 +93,6 @@
   "selectRepository": "Śēĺēćţ ŕēƥōśĩţōŕŷ",
   "selectTask": "Śēĺēćţ ţàśķ {{title}}",
   "selectWorkflow": "Śēĺēćţ ŵōŕķƒĺōŵ",
-  "sendToWorkflow": "Śēńď ţō ŵōŕķƒĺōŵ",
   "selectedFilterCount_one": "{{label}}: {{count}} śēĺēćţēď",
   "selectedFilterCount_other": "{{label}}: {{count}} śēĺēćţēď",
   "sentryIssue": "Śēńţŕŷ Ĩśśũē",
@@ -106,6 +104,7 @@
   "step": "Śţēƥ",
   "subtaskOf": "Śũƀţàśķ ōƒ",
   "taskList": "Ţàśķ ĺĩśţ",
+  "tasksInStep": "Ţàśķś ĩń {{step}}",
   "tasksOverWipLimit": "{{label}} ţàśķś, ōvēŕ ŴĨƤ ĺĩḿĩţ",
   "theseOptionsAffectThisTaskList": "Ţĥēśē ōƥţĩōńś àƒƒēćţ ţĥĩś ţàśķ ĺĩśţ ōńĺŷ.",
   "threads": "Ţĥŕēàďś",
@@ -128,5 +127,11 @@
   "boardSort": "Ɓōàŕď śōŕţ",
   "boardSortCreatedDesc": "Ńēŵēśţ ƒĩŕśţ",
   "boardSortPriorityDesc": "Ƥŕĩōŕĩţŷ",
-  "priorityFilter": "Ƥŕĩōŕĩţŷ ƒĩĺţēŕ"
+  "priorityFilter": "Ƥŕĩōŕĩţŷ ƒĩĺţēŕ",
+  "bulkSelected_one": "{{count}} śēĺēćţēď",
+  "bulkSelected_other": "{{count}} śēĺēćţēď",
+  "bulkActions": "Àćţĩōńś",
+  "selectTasks": "Śēĺēćţ ţàśķś",
+  "cancelTaskSelection": "Ćàńćēĺ śēĺēćţĩōń",
+  "groupTasksIntoSectionsByWorkflowStep": "Ĝŕōũƥ ţàśķś ĩńţō śēćţĩōńś ƀŷ ŵōŕķƒĺōŵ śţēƥ, ŵōŕķƒĺōŵ, ŕēƥōśĩţōŕŷ, ōŕ ńōńē."
 }

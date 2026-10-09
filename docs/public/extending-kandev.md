@@ -20,7 +20,7 @@ Use the smallest seam that owns the behavior, then follow the completion checkli
 
 ## Add an agent
 
-For a local passthrough-only CLI, users can choose **Settings → Agents → Add TUI Agent**. That path persists a custom definition and default profile; no source patch is required.
+For a local CLI, users can choose **Settings → Agents → Add custom agent** and pick Terminal or ACP. That path persists a custom definition and default profile; no source patch is required.
 
 To ship a built-in integration, add an `agents.Agent` implementation under `apps/backend/internal/agent/agents/` and register it in `internal/agent/registry/registry.go`. Structured agents currently need an ACP-speaking process. Optional interfaces add inference, CLI passthrough, native-binary preference, or interactive login.
 

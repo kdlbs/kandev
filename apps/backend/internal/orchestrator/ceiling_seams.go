@@ -173,6 +173,12 @@ func seam1StartPayload(
 			"session_name":   opts.SpawnOrigin.SessionName,
 		}
 	}
+	if opts.ceilingEntryBinding != nil {
+		payload[models.CeilingLaunchEntryBindingKey] = ceilingEntryBindingValue(*opts.ceilingEntryBinding)
+	}
+	if opts.AutomationRun != nil {
+		payload[ceilingPayloadAutomationRunKey] = opts.AutomationRun
+	}
 	return payload
 }
 
@@ -201,6 +207,7 @@ func (s *Service) admitOrDeferSeam1(
 			populationKnown: decision.populationKnown, ceiling: decision.ceiling,
 		}, false, nil
 	}
+	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, "", startPayload)
 
 	if err := s.deferCeilingRefusal(ctx, taskID, "", models.CeilingLaunchStart, startPayload, decision.reasonCode,
 		decision.population, decision.populationKnown, decision.ceiling); err != nil {

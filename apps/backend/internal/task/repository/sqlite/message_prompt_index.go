@@ -137,9 +137,9 @@ func (r *Repository) HasUserPromptHistory(ctx context.Context, sessionID string)
 // claim writes a zero-valued reservation marker; the later visible fallback
 // message then receives prompt ordinal 1 without making the reservation itself
 // an empty transcript row.
-func (r *Repository) ClaimInitialPromptFallback(ctx context.Context, sessionID string) (bool, error) {
-	if sessionID == "" {
-		return false, fmt.Errorf("session ID is required")
+func (r *Repository) ClaimInitialPromptFallback(ctx context.Context, sessionID, incarnationID string) (bool, error) {
+	if sessionID == "" || incarnationID == "" {
+		return false, fmt.Errorf("session ID and incarnation ID are required")
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -148,6 +148,15 @@ func (r *Repository) ClaimInitialPromptFallback(ctx context.Context, sessionID s
 	defer func() { _ = tx.Rollback() }()
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
 		return false, err
+	}
+	var sessionExists bool
+	if err := tx.GetContext(ctx, &sessionExists, r.db.Rebind(
+		`SELECT EXISTS (SELECT 1 FROM task_sessions WHERE id = ? AND queue_incarnation_id = ?)`,
+	), sessionID, incarnationID); err != nil {
+		return false, fmt.Errorf("check fallback session: %w", err)
+	}
+	if !sessionExists {
+		return false, nil
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_session_prompt_seq (task_session_id, last_seq)
@@ -218,6 +227,21 @@ func (r *Repository) createUserMessageWithBoundary(
 	)
 }
 
+func (r *Repository) createUserMessageWithBoundaryReceipt(
+	ctx context.Context,
+	message *models.Message,
+	requestsInput int,
+	messageType, metadataJSON string,
+) (*models.ConversationMutationReceipt, error) {
+	receipt := &models.ConversationMutationReceipt{}
+	driver := r.db.DriverName()
+	nm := dialect.NormalizedMicrosecond(driver, "created_at")
+	if err := r.executeBoundaryTransaction(ctx, message, requestsInput, messageType, metadataJSON, driver, nm, nil, receipt); err != nil {
+		return nil, err
+	}
+	return receipt, nil
+}
+
 func (r *Repository) createUserMessageWithBoundaryAndInitialTaskBrief(
 	ctx context.Context,
 	message *models.Message,
@@ -227,7 +251,7 @@ func (r *Repository) createUserMessageWithBoundaryAndInitialTaskBrief(
 ) error {
 	driver := r.db.DriverName()
 	nm := dialect.NormalizedMicrosecond(driver, "created_at")
-	return r.executeBoundaryTransaction(ctx, message, requestsInput, messageType, metadataJSON, driver, nm, candidate)
+	return r.executeBoundaryTransaction(ctx, message, requestsInput, messageType, metadataJSON, driver, nm, candidate, nil)
 }
 
 // executeBoundaryTransaction runs one per-session write boundary: begin a
@@ -241,6 +265,7 @@ func (r *Repository) executeBoundaryTransaction(
 	requestsInput int,
 	messageType, metadataJSON, driver, nm string,
 	candidate *admission.InitialTaskBriefCandidate,
+	receipt *models.ConversationMutationReceipt,
 ) (err error) {
 	origCreatedAt := message.CreatedAt
 	origUpdatedAt := message.UpdatedAt
@@ -281,6 +306,13 @@ func (r *Repository) executeBoundaryTransaction(
 	if err := lockSessionTurnWrites(ctx, tx, driver, message.TaskSessionID); err != nil {
 		return err
 	}
+	var baseRevision int64
+	if receipt != nil {
+		baseRevision, err = r.ensureConversationRevisionTx(ctx, tx, message.TaskSessionID)
+		if err != nil {
+			return err
+		}
+	}
 	if candidate != nil {
 		if err := r.selectInitialTaskBriefCandidate(ctx, tx, message.TaskSessionID, message, candidate); err != nil {
 			return err
@@ -294,6 +326,11 @@ func (r *Repository) executeBoundaryTransaction(
 	}
 	if err := r.insertMessageRow(ctx, tx, message, requestsInput, messageType, metadataJSON); err != nil {
 		return err
+	}
+	if receipt != nil {
+		if err := r.populateConversationMessageReceipt(ctx, tx, receipt, baseRevision, message, models.ConversationMutationUpsert); err != nil {
+			return err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit user message creation: %w", err)

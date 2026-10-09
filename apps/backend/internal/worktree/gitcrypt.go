@@ -14,6 +14,10 @@ import (
 // usesGitCrypt checks if a repository uses git-crypt by looking for
 // the git-crypt filter in .gitattributes files.
 func (m *Manager) usesGitCrypt(repoPath string) bool {
+	return m.usesGitCryptContext(context.Background(), repoPath)
+}
+
+func (m *Manager) usesGitCryptContext(ctx context.Context, repoPath string) bool {
 	// Check root .gitattributes
 	if hasGitCryptFilter(filepath.Join(repoPath, ".gitattributes")) {
 		return true
@@ -27,7 +31,12 @@ func (m *Manager) usesGitCrypt(repoPath string) bool {
 		}
 	}
 
-	return false
+	// Managed caches have no working tree; read attributes through scoped Git.
+	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
+	defer cancel()
+	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "show", "HEAD:.gitattributes")
+	output, err := runGitCmdCombinedOutput(inspectCtx, cmd)
+	return err == nil && strings.Contains(string(output), "filter=git-crypt")
 }
 
 // hasGitCryptFilter checks if a gitattributes file contains the git-crypt filter.
@@ -102,6 +111,14 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 		if err := disableGitCryptFilters(ctx, worktreePath); err != nil {
 			return &GitCryptError{Op: "disable-filters", Path: worktreePath, Output: "", Err: err}
 		}
+	}
+
+	if hasSparseCheckout(ctx) {
+		if err := applySparseCheckout(ctx, worktreePath); err != nil {
+			return err
+		}
+		m.initSubmodules(ctx, worktreePath)
+		return nil
 	}
 
 	// Exclude submodule paths from checkout to avoid broken gitlink resolution.

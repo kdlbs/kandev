@@ -49,6 +49,41 @@ func TestKubernetesCreateInstanceAcceptsCompleteTypedConfiguration(t *testing.T)
 	}
 }
 
+func TestApplyKubernetesDurableJournalPathUsesPersistentWorkspace(t *testing.T) {
+	for _, mode := range []kubeexecutor.WorkspaceMode{
+		kubeexecutor.WorkspaceModeManagedPVC,
+		kubeexecutor.WorkspaceModeExistingClaim,
+	} {
+		t.Run(string(mode), func(t *testing.T) {
+			request := &agentctl.CreateInstanceRequest{DurableJournalPath: "/stale/path"}
+			executorRequest := &ExecutorCreateRequest{
+				DurableJournalOwnerID: "environment-1",
+				Metadata: map[string]interface{}{
+					MetadataKeyKubernetesRuntimeWorkspaceMode: string(mode),
+				},
+			}
+
+			applyKubernetesDurableJournalPath(request, executorRequest)
+
+			require.Equal(t, "/workspace/.kandev/agentctl-journals/environment-1/delivery.bbolt", request.DurableJournalPath)
+		})
+	}
+}
+
+func TestApplyKubernetesDurableJournalPathRejectsEphemeralWorkspace(t *testing.T) {
+	request := &agentctl.CreateInstanceRequest{DurableJournalPath: "/stale/path"}
+	executorRequest := &ExecutorCreateRequest{
+		DurableJournalOwnerID: "environment-1",
+		Metadata: map[string]interface{}{
+			MetadataKeyKubernetesWorkspaceMode: string(kubeexecutor.WorkspaceModeEmptyDir),
+		},
+	}
+
+	applyKubernetesDurableJournalPath(request, executorRequest)
+
+	require.Empty(t, request.DurableJournalPath)
+}
+
 func TestKubernetesAgentctlCreateReconcilesAmbiguousResponse(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -126,7 +161,7 @@ func TestKubernetesCreateInstanceProvisionsBootstrapsAndForwardsAgentctl(t *test
 			streams:   kubeexecutor.NewStreamOperations(execs, forwards),
 		}, nil
 	}
-	executor.resolveBinary = func(kubeexecutor.Platform) ([]byte, error) {
+	executor.resolveBinary = func(context.Context, *ExecutorCreateRequest, kubeexecutor.Platform) ([]byte, error) {
 		return []byte("agentctl-binary"), nil
 	}
 	req := validKubernetesCreateRequest()
@@ -176,7 +211,9 @@ func TestKubernetesCreateInstanceReconnectsExactPodWithFreshForward(t *testing.T
 			streams:   kubeexecutor.NewStreamOperations(reconnectExecs, reconnectForwards),
 		}, nil
 	}
-	restartedBackend.resolveBinary = func(kubeexecutor.Platform) ([]byte, error) { return []byte("unused"), nil }
+	restartedBackend.resolveBinary = func(context.Context, *ExecutorCreateRequest, kubeexecutor.Platform) ([]byte, error) {
+		return []byte("unused"), nil
+	}
 	reconnectRequest := validKubernetesCreateRequest()
 	reconnectRequest.InstanceID = "new-execution-id"
 	reconnectRequest.PreviousExecutionID = created.InstanceID
@@ -471,6 +508,26 @@ func TestKubernetesStopInstancePreservesOrdinaryStopAndForceCleansManagedResourc
 		require.Equal(t, []string{"pod-rv-1"}, resources.deletedPodResourceVersions)
 		require.Equal(t, []string{"pvc-rv-1"}, resources.deletedPVCResourceVersions)
 		require.Equal(t, []string{"pod", "pvc"}, resources.deletionOrder)
+	})
+
+	t.Run("idle suspension preserves task resources", func(t *testing.T) {
+		controlPort := startKubernetesAgentctlServer(t, true, 41001)
+		instancePort := startKubernetesAgentctlServer(t, false, 0)
+		resources := &fakeKubernetesResources{}
+		forwards := &recordingKubernetesForwarder{localPorts: map[uint16]uint16{
+			uint16(kubeexecutor.DefaultAgentctlPort): controlPort,
+			41001:                                    instancePort,
+		}}
+		executor := newFakeKubernetesExecutorWithForwarder(resources, &recordingKubernetesExec{}, forwards)
+		instance, err := executor.CreateInstance(context.Background(), validKubernetesCreateRequest())
+		require.NoError(t, err)
+		instance.StopReason = StopReasonIdleSuspension
+
+		require.NoError(t, executor.StopInstance(context.Background(), instance, false))
+
+		require.Empty(t, resources.deletedPods)
+		require.Empty(t, resources.deletedPVCs)
+		require.True(t, forwards.lastSession().isClosed(), "idle suspension must close the process-local forward")
 	})
 }
 

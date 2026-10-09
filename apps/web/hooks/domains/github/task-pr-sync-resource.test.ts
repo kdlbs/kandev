@@ -84,9 +84,9 @@ describe("task PR sync resource request ownership", () => {
     const firstListener = vi.fn();
     const secondListener = vi.fn();
 
+    const firstRefresh = resource.refresh(scope);
     const releaseFirst = resource.subscribe(scope, firstListener);
     const releaseSecond = resource.subscribe(scope, secondListener);
-    const firstRefresh = resource.refresh(scope);
     const secondRefresh = resource.refresh(scope);
 
     expect(requester).toHaveBeenCalledTimes(1);
@@ -100,6 +100,20 @@ describe("task PR sync resource request ownership", () => {
     expect(secondListener).toHaveBeenCalled();
     releaseFirst();
     releaseSecond();
+  });
+
+  it("marks only a user refresh as explicit", async () => {
+    const store = createStore();
+    const requester = vi.fn<TaskPRSyncRequester>().mockResolvedValue({ prs: [] });
+    const resource = createTaskPRSyncResource(store, requester, { retryDelayMs: 100 });
+    const release = resource.subscribe(scope, vi.fn());
+
+    await Promise.resolve();
+    expect(requester.mock.calls[0]?.[1]).toEqual({ explicitRefresh: false });
+
+    await resource.refresh(scope);
+    expect(requester.mock.calls[1]?.[1]).toEqual({ explicitRefresh: true });
+    release();
   });
 
   // @covers AC-INTEGRATIONS-GITHUB-TASK-PR-SYNC-COORDINATION-001.4
@@ -362,7 +376,9 @@ describe("task PR sync resource recovery", () => {
 
     const reacquired = resource.subscribe(scope, vi.fn());
     await Promise.resolve();
-    expect(requester).toHaveBeenCalledTimes(2);
+    // The explicit refresh starts a replacement request even though the
+    // original passive request was released while it was in flight.
+    expect(requester).toHaveBeenCalledTimes(3);
     reacquired();
   });
 });

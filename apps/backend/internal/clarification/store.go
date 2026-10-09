@@ -40,8 +40,8 @@ type Store struct {
 	onRespondEntered func(pendingID string)
 
 	// onCancelSessionEntered, if non-nil, is invoked inside CancelSession for
-	// each matching entry, after it has been removed from s.pending and
-	// before that entry's pending.mu is acquired. Tests use it to force a
+	// each matching entry before its cancellation decision acquires the store
+	// and entry locks. Tests use it to force a
 	// specific interleaving against a concurrent Respond; always nil in
 	// production.
 	onCancelSessionEntered func(pendingID string)
@@ -105,6 +105,48 @@ func (s *Store) CreateRequest(req *Request) (string, bool) {
 func (s *Store) CreateRetryRequest(req *Request) (pendingID string, isNew, deliveryMissed bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.createRetryRequestLocked(req)
+}
+
+// CreateRetryRequestWithWaiter pins the registered entry so a retry can join
+// its confirmation even when another waiter removes the map entry meanwhile.
+// A recorded response must already have its durable delivery marker cleared.
+func (s *Store) CreateRetryRequestWithWaiter(req *Request) (
+	pendingID string, isNew, deliveryMissed bool,
+	wait func(context.Context, *Response) (*Response, error),
+) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pendingID, isNew, deliveryMissed = s.createRetryRequestLocked(req)
+	if deliveryMissed {
+		return pendingID, isNew, deliveryMissed, nil
+	}
+	pending := s.pending[pendingID]
+	wait = func(ctx context.Context, recorded *Response) (*Response, error) {
+		return s.waitForRetryResponse(ctx, pendingID, pending, recorded)
+	}
+	return pendingID, isNew, deliveryMissed, wait
+}
+
+func (s *Store) waitForRetryResponse(ctx context.Context, pendingID string, pending *PendingClarification, recorded *Response) (*Response, error) {
+	if recorded != nil {
+		s.mu.RLock()
+		_, deliveryMissed := s.deliveryMisses[pendingID]
+		s.mu.RUnlock()
+		if deliveryMissed && !recorded.Rejected {
+			return nil, fmt.Errorf("%w: detached clarification delivery owns %s", ErrNotFound, pendingID)
+		}
+		pending.mu.Lock()
+		resolved := pending.resolved
+		pending.mu.Unlock()
+		if !resolved {
+			return recorded, nil
+		}
+	}
+	return s.waitForRegisteredResponse(ctx, pendingID, pending)
+}
+
+func (s *Store) createRetryRequestLocked(req *Request) (pendingID string, isNew, deliveryMissed bool) {
 	s.pruneDeliveryMissesLocked(time.Now())
 	if req.PendingID != "" {
 		if _, missed := s.deliveryMisses[req.PendingID]; missed {
@@ -192,7 +234,13 @@ func (s *Store) GetRequest(pendingID string) (*Request, bool) {
 // Returns the response or an error if cancelled/timed out.
 func (s *Store) WaitForResponse(ctx context.Context, pendingID string) (*Response, error) {
 	s.mu.RLock()
-	pending, ok := s.pending[pendingID]
+	pending := s.pending[pendingID]
+	s.mu.RUnlock()
+	return s.waitForRegisteredResponse(ctx, pendingID, pending)
+}
+
+func (s *Store) waitForRegisteredResponse(ctx context.Context, pendingID string, pending *PendingClarification) (*Response, error) {
+	s.mu.RLock()
 	hook := s.onWaitEntered
 	s.mu.RUnlock()
 
@@ -200,7 +248,7 @@ func (s *Store) WaitForResponse(ctx context.Context, pendingID string) (*Respons
 		hook(pendingID)
 	}
 
-	if !ok {
+	if pending == nil {
 		return nil, fmt.Errorf("clarification request not found: %s", pendingID)
 	}
 
@@ -532,30 +580,28 @@ func (s *Store) ListPending() []*Request {
 // unresolved and not already cancelled, checked and set under that entry's
 // own pending.mu -- guarding against a concurrent CancelRequest (or a second
 // CancelSession call) closing the same channel twice and panicking.
+// An in-flight delivery confirmation stays discoverable until its waiter
+// consumes it, so exact retries join that confirmation instead of replaying early.
 func (s *Store) CancelSession(sessionID string) []string {
-	s.mu.Lock()
+	s.mu.RLock()
 	var toCancel []*PendingClarification
-	var cancelled []string
-	for id, pending := range s.pending {
+	for _, pending := range s.pending {
 		if pending.Request.SessionID == sessionID {
 			toCancel = append(toCancel, pending)
-			delete(s.pending, id)
-			cancelled = append(cancelled, id)
 		}
 	}
 	hook := s.onCancelSessionEntered
-	s.mu.Unlock()
+	s.mu.RUnlock()
 
-	for i, pending := range toCancel {
+	var cancelled []string
+	for _, pending := range toCancel {
+		id := pending.Request.PendingID
 		if hook != nil {
-			hook(cancelled[i])
+			hook(id)
 		}
-		pending.mu.Lock()
-		if !pending.resolved && !pending.cancelled {
-			pending.cancelled = true
-			close(pending.CancelCh)
+		if s.cancelSessionPending(id, pending) {
+			cancelled = append(cancelled, id)
 		}
-		pending.mu.Unlock()
 	}
 	return cancelled
 }
@@ -596,6 +642,9 @@ func questionsEqual(a, b []Question) bool {
 		if a[i].Prompt != b[i].Prompt {
 			return false
 		}
+		if clarificationAllowsCustomText(a[i]) != clarificationAllowsCustomText(b[i]) {
+			return false
+		}
 		if !optionsEqual(a[i].Options, b[i].Options) {
 			return false
 		}
@@ -611,6 +660,26 @@ func optionsEqual(a, b []Option) bool {
 		if a[i].ID != b[i].ID || a[i].Label != b[i].Label || a[i].Description != b[i].Description {
 			return false
 		}
+	}
+	return true
+}
+
+// cancelSessionPending makes removal and cancellation atomic with a response
+// claim. A live confirmation remains registered until its waiter consumes it.
+func (s *Store) cancelSessionPending(id string, pending *PendingClarification) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending.mu.Lock()
+	defer pending.mu.Unlock()
+	if pending.resolved && pending.deliveryConfirmation != nil && !pending.deliveryConfirmationComplete {
+		return false
+	}
+	if !pending.resolved && !pending.cancelled {
+		pending.cancelled = true
+		close(pending.CancelCh)
+	}
+	if s.pending[id] == pending {
+		delete(s.pending, id)
 	}
 	return true
 }

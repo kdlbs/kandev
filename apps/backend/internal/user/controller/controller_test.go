@@ -80,6 +80,26 @@ func TestUpdateUserSettingsMapsMCPTaskAgentProfileDefault(t *testing.T) {
 	}
 }
 
+func TestUpdateUserSettingsMapsJiraDefaultViewID(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo := &settingsRepository{settings: &models.UserSettings{JiraDefaultViewID: "old-view"}}
+	controller := NewController(service.NewService(repo, nil, log))
+	want := "custom-view"
+
+	response, err := controller.UpdateUserSettings(context.Background(), dto.UpdateUserSettingsRequest{
+		JiraDefaultViewID: &want,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	if response.Settings.JiraDefaultViewID != want {
+		t.Fatalf("JiraDefaultViewID = %q, want %q", response.Settings.JiraDefaultViewID, want)
+	}
+}
+
 func TestUpdateUserSettingsMapsSidebarTaskColorPatch(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
@@ -168,6 +188,34 @@ func TestUpdateUserSettingsMapsLastSeenDisplay(t *testing.T) {
 	}
 	if response.Settings.LastSeenDisplay != want {
 		t.Fatalf("LastSeenDisplay = %q, want %q", response.Settings.LastSeenDisplay, want)
+	}
+}
+
+// TestUpdateUserSettingsPreservesOmittedAgentTabCloseBehavior verifies the
+// JSON PATCH boundary leaves the saved close behavior unchanged when omitted.
+func TestUpdateUserSettingsPreservesOmittedAgentTabCloseBehavior(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo := &settingsRepository{settings: &models.UserSettings{
+		AgentTabCloseBehavior: models.AgentTabCloseBehaviorHidePanel,
+	}}
+	controller := NewController(service.NewService(repo, nil, log))
+
+	var patch dto.UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{}`), &patch); err != nil {
+		t.Fatalf("decode omitted settings patch: %v", err)
+	}
+	response, err := controller.UpdateUserSettings(context.Background(), patch)
+	if err != nil {
+		t.Fatalf("apply omitted settings patch: %v", err)
+	}
+	if response.Settings.AgentTabCloseBehavior != models.AgentTabCloseBehaviorHidePanel {
+		t.Fatalf("response behavior = %q, want hide_panel", response.Settings.AgentTabCloseBehavior)
+	}
+	if repo.settings.AgentTabCloseBehavior != models.AgentTabCloseBehaviorHidePanel {
+		t.Fatalf("saved behavior = %q, want hide_panel", repo.settings.AgentTabCloseBehavior)
 	}
 }
 

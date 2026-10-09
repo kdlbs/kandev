@@ -15,6 +15,7 @@ func strPtr(s string) *string { return &s }
 func TestClaimNextEligibleRun_Basic(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	seedAgentProfile(t, repo.Writer(), "a1", "ws1")
 
 	req := &models.Run{
 		AgentProfileID: "a1",
@@ -77,6 +78,8 @@ func TestClaimNextEligibleRun_SkipsBusyAgent(t *testing.T) {
 func TestClaimNextEligibleRun_PicksNextEligible(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	seedAgentProfile(t, repo.Writer(), "a1", "ws1")
+	seedAgentProfile(t, repo.Writer(), "a2", "ws2")
 
 	// a1 is at capacity (has a claimed run).
 	atCap := &models.Run{
@@ -129,6 +132,7 @@ func TestClaimNextEligibleRun_ClaimsPausedAgent(t *testing.T) {
 	// The DB-level claim only checks capacity (no active claims).
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	seedAgentProfile(t, repo.Writer(), "paused-agent-1", "ws1")
 
 	req := &models.Run{
 		AgentProfileID: "paused-agent-1",
@@ -266,6 +270,7 @@ func TestClaimNextEligibleRun_ClaimsWithoutCooldownCheck(t *testing.T) {
 	// Cooldown enforcement is now done at the service layer, not the DB query.
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	seedAgentProfile(t, repo.Writer(), "cooldown-agent-1", "ws1")
 
 	req := &models.Run{
 		AgentProfileID: "cooldown-agent-1",
@@ -293,6 +298,7 @@ func TestClaimNextEligibleRun_AllowsAgentPastCooldown(t *testing.T) {
 	// claimed regardless of runtime state stored in office_agent_runtime.
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	seedAgentProfile(t, repo.Writer(), "a-cd2", "ws1")
 
 	// Store runtime state with a past run timestamp.
 	past := time.Now().UTC().Add(-10 * time.Second)
@@ -350,6 +356,7 @@ func TestClaimNextEligibleRun_SkipsScheduledRetryInFuture(t *testing.T) {
 func TestScheduleRetry_ResetsToQueued(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	seedAgentProfile(t, repo.Writer(), "a-sr", "ws1")
 
 	req := &models.Run{
 		AgentProfileID: "a-sr",
@@ -384,6 +391,7 @@ func TestScheduleRetry_ResetsToQueued(t *testing.T) {
 func TestScheduleRetry_PreservesRunPayloadForResume(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
+	seedAgentProfile(t, repo.Writer(), "a-resume", "ws1")
 	payload := `{"task_id":"task-1","session_id":"session-1"}`
 	req := &models.Run{
 		AgentProfileID: "a-resume",

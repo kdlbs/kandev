@@ -34,10 +34,11 @@ Maintainers use pull request size labels to review smaller changes first. The CI
 - **AC-CI-PR-SIZE-001.3:** When the system calculates the count, it shall include application source, test source, and web translation catalogs under `apps/`.
 - **AC-CI-PR-SIZE-001.4:** When the system calculates the count, it shall exclude documentation, workflows, scripts, generated files, dependency files, linter files, tool settings, and assets. Assets are files with known image, font, or binary extensions or files under these asset directories: `apps/backend/internal/notifications/providers/assets/`, `apps/desktop/src-tauri/icons/`, `apps/web/lib/assets/`, `apps/web/public/`, and `apps/web/src/assets/`.
 - **AC-CI-PR-SIZE-001.5:** After a successful recalculation, the pull request shall have exactly one size label. The system shall preserve all unrelated labels.
-- **AC-CI-PR-SIZE-001.6:** When any size label definition does not exist, the system shall create all missing definitions before it changes pull request labels.
+- **AC-CI-PR-SIZE-001.6:** When the selected size label definition does not exist, the system shall create that definition before it applies the label. It shall not modify an existing definition.
 - **AC-CI-PR-SIZE-001.7:** When GitHub does not return a complete changed-file list, the system shall fail without changing the pull request size labels.
 - **AC-CI-PR-SIZE-001.8:** The workflow shall use trusted base-branch code. It shall not check out or execute pull request content.
 - **AC-CI-PR-SIZE-001.9:** After concurrent recalculations complete, the size label shall match the current pull request diff.
+- **AC-CI-PR-SIZE-001.10:** When the selected size label is already present, the recalculation shall not read or write repository label definitions.
 
 ## Out of scope
 
@@ -46,3 +47,7 @@ Maintainers use pull request size labels to review smaller changes first. The CI
 - Automatic updates for open pull requests that receive no new pull request event after deployment.
 - Changes to review, preview, merge, or walkthrough workflows.
 - Pull request sizing for repositories other than `kdlbs/kandev`.
+
+## Implementation plans
+
+- [GitHub API resilience](../../../plans/github-api-resilience/plan.md)

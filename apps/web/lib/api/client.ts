@@ -11,6 +11,10 @@ export type ApiRequestOptions = {
   init?: RequestInit;
 };
 
+export type ConditionalJsonResult<T> =
+  | { status: "not-modified"; data?: undefined; etag: string | null }
+  | { status: "ok"; data: T; etag: string | null };
+
 /**
  * Error thrown by fetchJson on non-2xx responses. `body` carries the parsed
  * JSON response body (if any) so callers can react to structured fields like
@@ -107,7 +111,50 @@ export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOption
   if (response.status === 204) return undefined as T;
   const text = await response.text();
   if (!text) return undefined as T;
-  return JSON.parse(text) as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiError(
+      `Request failed: ${response.status} ${response.statusText}`,
+      response.status,
+      null,
+    );
+  }
+}
+
+/** Fetches JSON while exposing a conditional GET's 304 response as a value. */
+export async function fetchConditionalJson<T>(
+  pathOrUrl: string,
+  options?: ApiRequestOptions,
+): Promise<ConditionalJsonResult<T>> {
+  const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
+  const url = resolveUrl(pathOrUrl, baseUrl);
+  const response = await fetch(url, {
+    ...options?.init,
+    cache: options?.cache ?? "no-store",
+    credentials: "include",
+    headers: buildRequestHeaders(options),
+  });
+  const etag = response.headers.get("ETag");
+  if (response.status === 304) return { status: "not-modified", etag };
+  if (!response.ok) {
+    if (response.status === 401 && isKandevAuthChallenge(response)) onUnauthorized?.();
+    await throwFromResponse(response);
+  }
+  if (response.status === 204) {
+    return { status: "ok", data: undefined as T, etag };
+  }
+  const text = await response.text();
+  if (!text) return { status: "ok", data: undefined as T, etag };
+  try {
+    return { status: "ok", data: JSON.parse(text) as T, etag };
+  } catch {
+    throw new ApiError(
+      `Request failed: ${response.status} ${response.statusText}`,
+      response.status,
+      null,
+    );
+  }
 }
 
 /**

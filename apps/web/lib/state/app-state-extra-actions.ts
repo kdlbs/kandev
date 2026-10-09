@@ -2,6 +2,7 @@ import type { UISliceActions as UIA } from "./slices/ui/types";
 import type {
   SystemSliceActions,
   AutomationsSliceActions,
+  CoordinatorsSliceActions,
   FeaturesSliceActions,
   AuthSliceActions,
   GitHubSliceActions,
@@ -14,6 +15,8 @@ import type {
   ReviewSliceActions,
   NeedsYouInboxSliceActions,
   FailedInboxSliceActions,
+  PreviewFeedbackSliceActions,
+  InboxHistorySliceActions,
 } from "./slices";
 
 // Split out of app-state-types.ts to stay under the file line limit. These
@@ -30,7 +33,10 @@ export type AppStateExtraActions = Pick<UIA, "setThreadActiveView" | "createThre
   FeaturesSliceActions &
   AuthSliceActions &
   AutomationsSliceActions &
+  CoordinatorsSliceActions &
   PluginsSliceActions &
   ReviewSliceActions &
   NeedsYouInboxSliceActions &
-  FailedInboxSliceActions;
+  FailedInboxSliceActions &
+  InboxHistorySliceActions &
+  PreviewFeedbackSliceActions;

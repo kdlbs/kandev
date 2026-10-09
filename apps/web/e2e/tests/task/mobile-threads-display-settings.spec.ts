@@ -25,7 +25,7 @@ for (const action of ["save", "discard"] as const) {
         ],
       });
       await testPage.goto("/threads");
-      const trigger = testPage.getByTestId("threads-mobile-view-trigger");
+      const trigger = testPage.getByTestId("mobile-topbar-page-context");
       await trigger.tap();
       const drawer = testPage.getByTestId("threads-mobile-view-drawer");
       await drawer.getByTestId("threads-mobile-view-settings").tap();
@@ -59,9 +59,13 @@ for (const action of ["save", "discard"] as const) {
       await drawer.getByTestId("threads-mobile-view-back").tap();
       await expect(otherView).toBeEnabled();
       await otherView.tap();
-      await expect(trigger).toContainText("Reviews");
+      await expect
+        .poll(async () => (await captureThreadSettings(apiClient)).thread_active_view_id)
+        .toBe("view-reviews");
       await testPage.reload();
-      await expect(trigger).toContainText("Reviews");
+      await expect
+        .poll(async () => (await captureThreadSettings(apiClient)).thread_active_view_id)
+        .toBe("view-reviews");
       await trigger.tap();
       await drawer.getByTestId("threads-mobile-view-option-view-presentation").tap();
       await trigger.tap();
@@ -91,7 +95,7 @@ test("edits wider-screen preferences in one touch drawer and keeps the phone sin
     await startPresentationThread(testPage, apiClient, seedData, "B phone display");
     await seedThreadPresentation(apiClient, { layout: "columns" });
     await testPage.goto("/threads");
-    await testPage.getByTestId("threads-mobile-view-trigger").tap();
+    await testPage.getByTestId("mobile-topbar-page-context").tap();
     await testPage.getByTestId("threads-mobile-view-settings").tap();
     const drawer = testPage.getByTestId("threads-mobile-view-drawer");
     await expect(drawer).toHaveCount(1);
@@ -143,7 +147,7 @@ test("edits wider-screen preferences in one touch drawer and keeps the phone sin
     });
     await testPage.setViewportSize({ width: 320, height: 740 });
     await testPage.reload();
-    await testPage.getByTestId("threads-mobile-view-trigger").tap();
+    await testPage.getByTestId("mobile-topbar-page-context").tap();
     await testPage.getByTestId("threads-mobile-view-settings").tap();
     await expect(layout).toContainText(/[À-ž]/);
     await drawer.getByTestId("threads-max-columns").scrollIntoViewIfNeeded();

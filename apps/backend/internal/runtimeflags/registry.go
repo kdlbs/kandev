@@ -37,8 +37,14 @@ type runtimeFlagIdentity struct {
 }
 
 const (
-	retiredAppStatusBarKey    = "features.appStatusBar"
-	retiredAppStatusBarEnvVar = "KANDEV_FEATURES_APP_STATUS_BAR"
+	keyCodexAppServer                             = "features.codexAppServer"
+	envCodexAppServer                             = "KANDEV_FEATURES_CODEX_APP_SERVER"
+	retiredAppStatusBarKey                        = "features.appStatusBar"
+	retiredAppStatusBarEnvVar                     = "KANDEV_FEATURES_APP_STATUS_BAR"
+	retiredOfficeSessionIdentityKey               = "features.officeSessionIdentity"
+	retiredOfficeSessionIdentityEnvVar            = "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY"
+	retiredProviderInterruptionContinuationKey    = "features.providerInterruptionContinuation"
+	retiredProviderInterruptionContinuationEnvVar = "KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION"
 )
 
 // retiredRuntimeFlagIdentities is append-only. When a flag graduates, remove
@@ -48,9 +54,28 @@ const (
 var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 	{key: "features.plugins", envVar: "KANDEV_FEATURES_PLUGINS"},
 	{key: retiredAppStatusBarKey, envVar: retiredAppStatusBarEnvVar},
+	{key: retiredOfficeSessionIdentityKey, envVar: retiredOfficeSessionIdentityEnvVar},
+	{key: "features.remoteExecutorPlugins", envVar: "KANDEV_FEATURES_REMOTE_EXECUTOR_PLUGINS"},
+	{key: retiredProviderInterruptionContinuationKey, envVar: retiredProviderInterruptionContinuationEnvVar},
 }
 
 var registrations = []runtimeFlagRegistration{
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.lspBrowserContinuity",
+			EnvVar:          "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY",
+			Kind:            KindFeature,
+			Label:           "LSP browser continuity",
+			Description:     "Keeps supported task-host language-server processes available across browser disconnects.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "Retains the task host and language-server process while an editor is detached; enable only with the bounded lease and idle-release behavior in place.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.LSPBrowserContinuity },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.LSPBrowserContinuity = value },
+	},
 	{
 		definition: RuntimeFlagDefinition{
 			Key:         "features.office",
@@ -161,6 +186,38 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             keyCodexAppServer,
+			EnvVar:          envCodexAppServer,
+			Kind:            KindFeature,
+			Label:           "Codex app server",
+			Description:     "Enables native Codex app-server profiles and conversations, separate from Codex ACP.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "Native Codex conversation and background lifecycle support is experimental. Keep Codex ACP for existing sessions and disable this flag if native sessions behave unexpectedly.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CodexAppServer },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CodexAppServer = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             "features.agentBackgroundWork",
+			EnvVar:          "KANDEV_FEATURES_AGENT_BACKGROUND_WORK",
+			Kind:            KindFeature,
+			Label:           "Agent background work",
+			Description:     "Enables normalized background work tracking, interactive controls, and subagent observation.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskMedium,
+			RiskDescription: "Background work lifecycle management and UI inspection are experimental.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.AgentBackgroundWork },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentBackgroundWork = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.claudeBackgroundPromptHandoff",
 			EnvVar:      "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF",
 			Kind:        KindFeature,
@@ -197,25 +254,6 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
-			Key:         "features.officeSessionIdentity",
-			EnvVar:      "KANDEV_FEATURES_OFFICE_SESSION_IDENTITY",
-			Kind:        KindFeature,
-			Label:       "Office per-agent session identity",
-			Description: "Keys an Office task's session identity on the run's own agent instead of the task's runner seat, and binds an agent's decision re-evaluation to its own calling session.",
-			Stability:   StabilityExperimental,
-			RiskLevel:   RiskHigh,
-			RiskDescription: "Changes durable Office session identity: each participant agent gets its own session per task instead of sharing the runner's, and existing session rows are not migrated. " +
-				"A live (task_id, agent_profile_id) pair is guarded in-transaction on the office session creation path, not by a table-level constraint; pre-existing duplicate rows are deliberately retained and resolved by selection rather than repaired. " +
-				"The guard relies on SQLite's process-local single-writer pool or PostgreSQL's database task-row lock. Two Kandev processes must not write the same SQLite file. " +
-				"Disabling this toggle and restarting reverts to runner-seat binding and task-active-session decision re-evaluation.",
-			RestartRequired: true,
-			Mutable:         true,
-		},
-		read:  func(cfg *config.Config) bool { return cfg.Features.OfficeSessionIdentity },
-		apply: func(cfg *config.Config, value bool) { cfg.Features.OfficeSessionIdentity = value },
-	},
-	{
-		definition: RuntimeFlagDefinition{
 			Key:         "features.agentSurvival",
 			EnvVar:      "KANDEV_FEATURES_AGENT_SURVIVAL",
 			Kind:        KindFeature,
@@ -232,6 +270,40 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.AgentSurvival },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentSurvival = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinator",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR",
+			Kind:        KindFeature,
+			Label:       "Workspace coordinators",
+			Description: "Enables per-workspace coordinators: a copilot conversation that proposes ordinary, unstarted tasks for a human to approve.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskLow,
+			RiskDescription: "Phase 1 only proposes unstarted tasks. With coordinator control enabled, approved resume or move proposals can start an agent on an existing task. " +
+				"A person must approve each proposal. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.Coordinator },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.Coordinator = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorPhase2",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_PHASE2",
+			Kind:        KindFeature,
+			Label:       "Coordinator control",
+			Description: "Adds per-coordinator permissions, watches, standing orders, goals and an activity log on top of workspace coordinators. Requires Workspace coordinators.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "Lets a coordinator act on existing tasks once a human grants the matching permission. Every action stays off until " +
+				"granted, and every attempt is recorded in the activity log. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorPhase2 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorPhase2 = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

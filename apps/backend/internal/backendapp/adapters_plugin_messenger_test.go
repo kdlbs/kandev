@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -19,9 +20,13 @@ import (
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
 type fakeMessengerTaskSvc struct {
+	task                     *taskmodels.Task
+	claim                    *taskmodels.TaskManagementClaim
+	claimErr                 error
 	primary                  *taskmodels.TaskSession
 	primaryErr               error
 	byID                     map[string]*taskmodels.TaskSession
@@ -33,9 +38,27 @@ type fakeMessengerTaskSvc struct {
 	deleteErr                error
 }
 
+func (f *fakeMessengerTaskSvc) GetTask(_ context.Context, id string) (*taskmodels.Task, error) {
+	if f.task != nil {
+		task := *f.task
+		return &task, nil
+	}
+	return &taskmodels.Task{
+		ID: id, WorkspaceID: "ws-1", WorkflowID: "workflow-1", WorkflowStepID: "step-1",
+		UpdatedAt: time.Date(2026, 9, 26, 10, 0, 0, 0, time.UTC),
+	}, nil
+}
+
+func (f *fakeMessengerTaskSvc) GetTaskManagementClaim(context.Context, string) (*taskmodels.TaskManagementClaim, error) {
+	return f.claim, f.claimErr
+}
+
 func (f *fakeMessengerTaskSvc) GetTaskSession(_ context.Context, id string) (*taskmodels.TaskSession, error) {
 	s, ok := f.byID[id]
 	if !ok {
+		if f.primary != nil && f.primary.ID == id {
+			return f.primary, nil
+		}
 		return nil, errors.New("session not found")
 	}
 	return s, nil
@@ -134,7 +157,62 @@ func newMessengerAdapter(t *testing.T, tasks *fakeMessengerTaskSvc, orch *fakeMe
 	if orch.queue == nil {
 		orch.queue = messagequeue.NewServiceMemory(log)
 	}
-	return pluginsTaskMessengerAdapter{tasks: tasks, orch: orch, log: log}
+	for _, session := range append([]*taskmodels.TaskSession{tasks.primary}, sessionMapValues(tasks.byID)...) {
+		if session == nil {
+			continue
+		}
+		if session.UpdatedAt.IsZero() {
+			session.UpdatedAt = time.Date(2026, 9, 26, 10, 0, 0, 0, time.UTC)
+		}
+		identity, err := orch.queue.ResolveSessionIdentity(context.Background(), session.TaskID, session.ID)
+		require.NoError(t, err)
+		session.QueueIncarnationID = identity.SessionIncarnationID
+	}
+	return pluginsTaskMessengerAdapter{
+		tasks: tasks, orch: orch, exactQueue: memoryExactMessageAdmissionQueue{queue: orch.queue}, log: log,
+	}
+}
+
+// memoryExactMessageAdmissionQueue gives the messenger unit tests the same
+// receipt and take behavior as the production queue. The memory repository
+// cannot validate workflow or claim state transactionally, so its adapter is
+// only used with these isolated task-service fakes.
+type memoryExactMessageAdmissionQueue struct {
+	queue *messagequeue.Service
+}
+
+func (q memoryExactMessageAdmissionQueue) ResolveSessionIdentity(ctx context.Context, taskID, sessionID string) (messagequeue.QueueSessionIdentity, error) {
+	return q.queue.ResolveSessionIdentity(ctx, taskID, sessionID)
+}
+
+func (q memoryExactMessageAdmissionQueue) LifecycleGeneration(ctx context.Context, taskID string) (int64, error) {
+	return q.queue.LifecycleGeneration(ctx, taskID)
+}
+
+func (q memoryExactMessageAdmissionQueue) TakeQueuedEntryForSession(ctx context.Context, identity messagequeue.QueueSessionIdentity, entryID string) (*messagequeue.QueuedMessage, bool, error) {
+	return q.queue.TakeQueuedEntryForSession(ctx, identity, entryID)
+}
+
+func (q memoryExactMessageAdmissionQueue) QueueMessageWithMetadataForSessionWithClientQueueIDAtWorkflowEntry(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	_ messagequeue.WorkflowEntryIdentity,
+	clientQueueID, content, model, userID string,
+	planMode bool,
+	attachments []messagequeue.MessageAttachment,
+	metadata map[string]interface{},
+) (*messagequeue.QueuedMessage, bool, error) {
+	return q.queue.QueueMessageWithMetadataForSessionWithClientQueueID(
+		ctx, identity, clientQueueID, content, model, userID, planMode, attachments, metadata, nil,
+	)
+}
+
+func sessionMapValues(sessions map[string]*taskmodels.TaskSession) []*taskmodels.TaskSession {
+	values := make([]*taskmodels.TaskSession, 0, len(sessions))
+	for _, session := range sessions {
+		values = append(values, session)
+	}
+	return values
 }
 
 func TestPluginsMessenger_RunningSessionQueues(t *testing.T) {
@@ -150,6 +228,19 @@ func TestPluginsMessenger_RunningSessionQueues(t *testing.T) {
 	require.Nil(t, tasks.created, "queued path records via the queue, not CreateMessage")
 	require.Zero(t, orch.startCalls+orch.promptCalls)
 	require.Equal(t, 1, orch.queueStatusCalls, "queued message should publish queue status")
+}
+
+func TestPluginsMessenger_LegacyMessageRejectsActiveManagementClaim(t *testing.T) {
+	tasks := &fakeMessengerTaskSvc{
+		primary: &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateRunning},
+		claim:   &taskmodels.TaskManagementClaim{OwnerKind: "plugin", InstallationID: "coordinator", InstanceKey: "main", Generation: 3},
+	}
+	orch := &fakeMessengerOrch{}
+	a := newMessengerAdapter(t, tasks, orch)
+
+	_, err := a.SendMessage(context.Background(), "t1", "", "take this action", "plugin:legacy")
+	require.Equal(t, codes.Aborted, status.Code(err))
+	require.Zero(t, orch.queue.GetStatus(context.Background(), "s1").Count)
 }
 
 func TestPluginsMessenger_QueueStatusSurvivesCancelledRequest(t *testing.T) {
@@ -312,4 +403,50 @@ func TestPluginsMessenger_TerminalSessionRejected(t *testing.T) {
 
 	_, err := a.SendMessage(context.Background(), "t1", "", "hello", "plugin:p")
 	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+}
+
+func TestPluginsMessenger_ImmediateDispatchRejectsBusyWithoutQueueing(t *testing.T) {
+	session := &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateRunning}
+	tasks := &fakeMessengerTaskSvc{primary: session, byID: map[string]*taskmodels.TaskSession{"s1": session}}
+	orch := &fakeMessengerOrch{}
+	a := newMessengerAdapter(t, tasks, orch)
+
+	got, err := a.DispatchImmediate(context.Background(), "t1", session, "run now", "plugin:install", "message-1")
+
+	require.NoError(t, err)
+	require.Equal(t, pluginsdk.ManagedAgentDispatchBusy, got)
+	require.Zero(t, orch.startCalls+orch.promptCalls)
+	require.Zero(t, orch.queue.GetStatus(context.Background(), "s1").Count)
+	require.Nil(t, tasks.created)
+}
+
+func TestPluginsMessenger_ImmediateDispatchRejectsQueuedInputAndStartsIdleSession(t *testing.T) {
+	ctx := context.Background()
+	session := &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateCreated}
+	tasks := &fakeMessengerTaskSvc{primary: session, byID: map[string]*taskmodels.TaskSession{"s1": session}}
+	orch := &fakeMessengerOrch{}
+	a := newMessengerAdapter(t, tasks, orch)
+
+	identity, err := orch.queue.ResolveSessionIdentity(ctx, "t1", "s1")
+	require.NoError(t, err)
+	session.QueueIncarnationID = identity.SessionIncarnationID
+	_, err = orch.queue.QueueMessage(ctx, "s1", "t1", "queued first", "", "user", false, nil)
+	require.NoError(t, err)
+	got, err := a.DispatchImmediate(ctx, "t1", session, "run now", "plugin:install", "message-1")
+	require.NoError(t, err)
+	require.Equal(t, pluginsdk.ManagedAgentDispatchBusy, got)
+	require.Zero(t, orch.startCalls+orch.promptCalls)
+	require.Nil(t, tasks.created)
+
+	queued, err := orch.queue.Snapshot(ctx, identity)
+	require.NoError(t, err)
+	_, err = orch.queue.RemoveEntryForSession(ctx, identity, queued.Entries[0].ID)
+	require.NoError(t, err)
+	got, err = a.DispatchImmediate(ctx, "t1", session, "run now", "plugin:install", "message-2")
+	require.NoError(t, err)
+	require.Equal(t, pluginsdk.ManagedAgentDispatchStarted, got)
+	require.Equal(t, 1, orch.startCalls)
+	require.Zero(t, orch.promptCalls)
+	require.NotNil(t, tasks.created)
+	require.Zero(t, orch.queue.GetStatus(ctx, "s1").Count)
 }

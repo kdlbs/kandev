@@ -11,10 +11,14 @@ import { Textarea } from "@kandev/ui/textarea";
 import { IconCopy, IconCheck, IconEye, IconEyeOff } from "@tabler/icons-react";
 import { revealWebhookSecret } from "@/lib/api/domains/automation-api";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
+import type { WebhookFilter } from "@/lib/types/automation";
+import { WebhookFiltersConfig } from "./webhook-filters-config";
 
 type WebhookConfigProps = {
   automationId: string | null;
   workspaceId: string;
+  config: Record<string, unknown>;
+  onUpdate: (config: Record<string, unknown>) => void;
 };
 
 // Wire syntax the user copies verbatim: the header the backend checks, and the
@@ -69,7 +73,7 @@ function extractKeys(json: string): string[] {
   }
 }
 
-export function WebhookConfig({ automationId, workspaceId }: WebhookConfigProps) {
+export function WebhookConfig({ automationId, workspaceId, config, onUpdate }: WebhookConfigProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState<"url" | "secret" | null>(null);
   const [samplePayload, setSamplePayload] = useState("");
@@ -83,6 +87,8 @@ export function WebhookConfig({ automationId, workspaceId }: WebhookConfigProps)
 
   const detectedKeys = useMemo(() => extractKeys(samplePayload), [samplePayload]);
 
+  const admissionFields = <AdmissionConfigFields config={config} onUpdate={onUpdate} />;
+
   if (!automationId) {
     return (
       <div className="space-y-3">
@@ -92,6 +98,7 @@ export function WebhookConfig({ automationId, workspaceId }: WebhookConfigProps)
           onChange={setSamplePayload}
           detectedKeys={detectedKeys}
         />
+        {admissionFields}
       </div>
     );
   }
@@ -133,6 +140,81 @@ export function WebhookConfig({ automationId, workspaceId }: WebhookConfigProps)
         onChange={setSamplePayload}
         detectedKeys={detectedKeys}
       />
+      {admissionFields}
+    </div>
+  );
+}
+
+// Groups the three config-only members. They apply the moment they're saved,
+// before or after the webhook URL/secret exist — S7's uniform 200 response
+// doesn't depend on any of them.
+function AdmissionConfigFields({
+  config,
+  onUpdate,
+}: {
+  config: Record<string, unknown>;
+  onUpdate: (config: Record<string, unknown>) => void;
+}) {
+  const dedupKey = (config.dedup_key as string) ?? "";
+  const filters = (config.filters as WebhookFilter[]) ?? [];
+  const repository = config.repository as { selector_path?: string } | undefined;
+  const selectorPath = repository?.selector_path ?? "";
+
+  return (
+    <>
+      <DedupKeySection value={dedupKey} onChange={(v) => onUpdate({ ...config, dedup_key: v })} />
+      <WebhookFiltersConfig
+        filters={filters}
+        onChange={(next) => onUpdate({ ...config, filters: next })}
+      />
+      <RepositorySelectorSection
+        value={selectorPath}
+        onChange={(v) => onUpdate({ ...config, repository: v ? { selector_path: v } : undefined })}
+      />
+    </>
+  );
+}
+
+function DedupKeySection({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs">{t("automations:webhookDedupKeyLabel")}</Label>
+      {/* An example JSON payload path — data the user types verbatim, not copy. */}
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="font-mono text-xs"
+        // eslint-disable-next-line i18next/no-literal-string -- example payload path, see above
+        placeholder="issue.id"
+      />
+      <p className="text-xs text-muted-foreground">{t("automations:webhookDedupKeyHelp")}</p>
+    </div>
+  );
+}
+
+function RepositorySelectorSection({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs">{t("automations:webhookRepositorySelectorLabel")}</Label>
+      {/* An example JSON payload path — data the user types verbatim, not copy. */}
+      <Input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="font-mono text-xs"
+        // eslint-disable-next-line i18next/no-literal-string -- example payload path, see above
+        placeholder="service"
+      />
+      <p className="text-xs text-muted-foreground">
+        {t("automations:webhookRepositorySelectorHelp")}
+      </p>
     </div>
   );
 }

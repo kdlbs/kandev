@@ -255,7 +255,7 @@ func runtimeProtocolPath(requestPath string) (string, bool) {
 
 func setRuntimeHeaders(w http.ResponseWriter, policy, origin string) {
 	w.Header().Set("Content-Security-Policy", policy)
-	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Cache-Control", "no-store, no-transform")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
@@ -269,7 +269,7 @@ func setRuntimeHeaders(w http.ResponseWriter, policy, origin string) {
 // responses. It is exported for the protocol adapter, while asset responses
 // additionally receive the response CSP from setRuntimeHeaders.
 func SetProtocolHeaders(w http.ResponseWriter, origin string) {
-	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Cache-Control", "no-store, no-transform")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")

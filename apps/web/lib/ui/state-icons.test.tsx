@@ -269,7 +269,7 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
 });
 
 describe("getTaskStateIcon — status markers", () => {
-  it("renders the accessible interrupted icon with the tooltip label", () => {
+  it("renders the accessible warning triangle with the tooltip label", () => {
     const { container } = render(
       <TooltipProvider>
         {getTaskStateIcon("REVIEW", undefined, { interrupted: true })}
@@ -277,7 +277,9 @@ describe("getTaskStateIcon — status markers", () => {
     );
     const icon = container.querySelector('[data-testid="task-state-interrupted"]');
     expect(icon).not.toBeNull();
-    expect(icon?.className).toContain("text-red-500");
+    expect(icon?.className).toContain("tabler-icon-alert-triangle");
+    expect(icon?.className).not.toContain("tabler-icon-alert-circle");
+    expect(icon?.className).toContain("text-yellow-500");
     expect(container.querySelector('[aria-label="Interrupted by restart"]')).not.toBeNull();
     // The icon itself is decorative; the label lives on the trigger.
     expect(icon?.getAttribute("aria-hidden")).toBe("true");

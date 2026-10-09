@@ -6,7 +6,7 @@ system: canvases
 owners:
   - canvases
 created: 2026-09-10
-last_updated: 2026-09-10
+last_updated: 2026-09-23
 requirements:
   - REQ-CANVASES-LOCAL-CREATION-001
 ---
@@ -20,7 +20,8 @@ owns grant storage, release activation, and runtime enforcement. This design
 implements `REQ-CANVASES-LOCAL-CREATION-001`; the authority, transaction, and
 compatibility sections map to criteria .1-.3, .4-.5, and .6-.7 respectively.
 
-See [the creation authority decision](../../../decisions/2026-09-10-canvas-creation-authority.md)
+See [the creation authority decision](../../../decisions/2026-09-10-canvas-creation-authority.md),
+[its workspace-data amendment](../../../decisions/2026-09-23-task-canvas-workspace-data.md),
 and [plugin grants](../../plugins/system-design/isolated-web-app-contributions.md#instance-grants).
 
 ## Trusted creation authority
@@ -40,7 +41,7 @@ Add a canvas-owned `canvas_creation_authority` table through
 | `canvas_id` | Primary key, references the canvas lifecycle identity |
 | `owner_user_id` | Trusted workspace owner at creation |
 | `creating_session_id` | Trusted source session |
-| `policy_version` | Integer 1 for the initial-publication policy |
+| `policy_version` | Integer 1 for historical task-data grants; version 2 for new workspace-data grants |
 | `consumed_at` | Empty until the first release transaction consumes it |
 
 Create the row in the canvas/instance creation transaction. No agent-facing
@@ -52,7 +53,9 @@ Existing databases acquire the empty table; do not backfill authority.
 At publication require every predicate: a nonzero captured `PublishAuthority`,
 local-canvas instance source, task scope, matching task and workspace, matching
 creating session, unchanged current owner, pending instance, no active or
-persisted release, no previous grant changes, and unconsumed policy version 1.
+persisted release, no previous grant changes, and an unconsumed supported
+policy version. New authority uses version 2; historical version-1 authority
+keeps its task data ceiling and is never upgraded by publication alone.
 Check the full instance snapshot again inside the transaction. Re-read the
 current task/workspace ownership through the same transaction and serialize
 against ownership changes; the adapter's earlier lookup alone is insufficient.
@@ -64,10 +67,12 @@ The trusted adapter supplies the freshly resolved owner; caller-controlled
 ## Grant derivation and transaction
 
 Derive grants from `ManifestPermissions` and the existing static web-app
-capability vocabulary. Restrict Kandev resource access to the recorded task,
-using normal runtime authorization. Normalize each declared external origin
-through `NormalizeNetworkOrigins`; initial external grants count as delegated
-owner approval, with that owner as `ApprovedBy`. This is deliberate: a locally
+capability vocabulary. Version-2 authority binds the approved data scope to
+the recorded workspace while the canvas remains task-placed. Historical
+version-1 authority retains task data scope. See the
+[workspace preview design](task-canvas-workspace-preview.md). Normalize each
+declared external origin through `NormalizeNetworkOrigins`; initial external
+grants count as delegated owner approval, with that owner as `ApprovedBy`. A locally
 requested app can contact its declared HTTPS service on its first run.
 Unsupported capabilities and backend/native contributions cannot gain access
 through this path. Do not add a generic manifest-controlled auto-approve flag.
@@ -96,8 +101,9 @@ schema replay and backup enumeration must include this table.
 ## API and compatibility
 
 Return an additive `initial_permission_policy` field in the create response:
-version 1, eligibility, scope `task`, supported permission kinds, and the exact
-HTTPS-origin constraint. This is descriptive output, never a publish input.
+the policy version, eligibility, placement `task`, data scope, supported
+permission kinds, and exact HTTPS-origin constraint. This is descriptive
+output, never a publish input.
 It must not claim a permission ceiling that the backend does not enforce.
 Keep the existing `activated` and `permission_required` publish result fields.
 

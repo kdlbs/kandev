@@ -147,7 +147,7 @@ it("updates the cache and store after associating the created task", async () =>
 
   await waitFor(() => expect(mocks.cache).toHaveBeenCalledWith(workspaceId, "task-1", linked));
   expect(mocks.setTaskPullRequest).toHaveBeenCalledWith("task-1", linked);
-  expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
+  expect(mocks.push).toHaveBeenCalledWith("/t/task-1");
 });
 
 it("reports a pull request association failure", async () => {
@@ -158,7 +158,7 @@ it("reports a pull request association failure", async () => {
 
   await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Azure association failed"));
   expect(mocks.close).toHaveBeenCalled();
-  expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
+  expect(mocks.push).toHaveBeenCalledWith("/t/task-1");
 });
 
 it("associates and caches a created task for a work item", async () => {

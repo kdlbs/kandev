@@ -3,6 +3,8 @@ package startup
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/binary"
 	"sync"
 	"time"
 
@@ -42,9 +44,12 @@ func (p Phase) Label() string {
 }
 
 type Snapshot struct {
-	Phase          Phase `json:"phase"`
-	ElapsedMS      int64 `json:"elapsed_ms"`
-	PhaseElapsedMS int64 `json:"phase_elapsed_ms"`
+	Phase          Phase         `json:"phase"`
+	Boot           int64         `json:"boot"`
+	Seq            uint64        `json:"seq"`
+	ElapsedMS      int64         `json:"elapsed_ms"`
+	PhaseElapsedMS int64         `json:"phase_elapsed_ms"`
+	Step           *StepSnapshot `json:"step,omitempty"`
 }
 
 type Reporter struct {
@@ -52,13 +57,34 @@ type Reporter struct {
 	started, phaseStarted time.Time
 	phase                 Phase
 	log                   *logger.Logger
+
+	boot               int64
+	seq                uint64
+	active             *stepActivation
+	unregisteredWarned map[StepID]bool
+	mismatchWarned     map[mismatchKey]bool
 }
 
 type contextKey struct{}
 
 func New(log *logger.Logger) *Reporter {
 	now := time.Now()
-	return &Reporter{started: now, phaseStarted: now, phase: OpeningDatabase, log: log}
+	return &Reporter{started: now, phaseStarted: now, phase: OpeningDatabase, log: log, boot: newBoot()}
+}
+
+// newBoot draws a positive, non-guessable, per-process identifier below 2^53
+// so every value decodes exactly when a consumer reads JSON numbers as
+// doubles. crypto/rand.Read never errors on the Go version this module
+// requires, which is what lets New keep its error-free signature.
+func newBoot() int64 {
+	var buf [8]byte
+	for {
+		_, _ = cryptorand.Read(buf[:])
+		v := int64(binary.BigEndian.Uint64(buf[:]) & ((1 << 53) - 1))
+		if v != 0 {
+			return v
+		}
+	}
 }
 func WithReporter(ctx context.Context, r *Reporter) context.Context {
 	return context.WithValue(ctx, contextKey{}, r)
@@ -75,7 +101,18 @@ func SetPhase(ctx context.Context, phase Phase) {
 func (r *Reporter) Snapshot() Snapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return Snapshot{Phase: r.phase, ElapsedMS: time.Since(r.started).Milliseconds(), PhaseElapsedMS: time.Since(r.phaseStarted).Milliseconds()}
+	now := time.Now()
+	snap := Snapshot{
+		Phase:          r.phase,
+		Boot:           r.boot,
+		Seq:            r.seq,
+		ElapsedMS:      now.Sub(r.started).Milliseconds(),
+		PhaseElapsedMS: now.Sub(r.phaseStarted).Milliseconds(),
+	}
+	if r.active != nil {
+		snap.Step = r.active.snapshot(now)
+	}
+	return snap
 }
 func (r *Reporter) Set(phase Phase) {
 	r.mu.Lock()

@@ -152,6 +152,7 @@ export function QueuePanelHeader({
         <Button
           variant="ghost"
           size="sm"
+          disabled={isLoading || cancellationPending}
           className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:px-3"
           onClick={onClear}
           title={t("chat:clearAllQueuedMessages")}

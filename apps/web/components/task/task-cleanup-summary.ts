@@ -1,10 +1,21 @@
 // Executor types match models.ExecutorType in apps/backend/internal/task/models/models.go.
 import { t } from "@/lib/i18n";
+import type { WorkspaceMode } from "@/lib/kanban/map-task";
 
 export type CleanupSummary = {
   effects: string[];
   notes: string[];
 };
+
+export type CleanupSummaryOptions = {
+  sharesParentWorkspace?: boolean;
+};
+
+export function cleanupSharesParentWorkspace(
+  workspaceMode: WorkspaceMode | null | undefined,
+): boolean | undefined {
+  return workspaceMode == null ? undefined : workspaceMode === "inherit_parent";
+}
 
 // mock_remote is test-only and intentionally falls through to the generic effect.
 type KnownExecutor =
@@ -45,6 +56,11 @@ const SINGLE_COPIES: Record<KnownExecutor, CleanupCopy> = {
 };
 
 const GENERIC_EFFECT_KEY = "task:cleanupAgentSessionsStopped";
+const INHERITED_PARENT_WORKSPACE_NOTE_KEY = "task:cleanupInheritedParentWorkspaceNote";
+const ARCHIVE_SINGLE_WORKTREE_COPY: CleanupCopy = {
+  effectKey: "task:archiveSingleWorktreeCleanup",
+  noteKey: "task:archiveWorktreeBranchNote",
+};
 
 function normalize(executorType: string | null | undefined): KnownExecutor | null {
   if (!executorType) return null;
@@ -65,11 +81,28 @@ function resolveCopy(copy: CleanupCopy, options?: { count: number }): CleanupSum
 }
 
 /** Single-task variant. */
-export function getCleanupSummary(executorType: string | null | undefined): CleanupSummary {
+export function getCleanupSummary(
+  executorType: string | null | undefined,
+  options?: CleanupSummaryOptions,
+): CleanupSummary {
+  if (options?.sharesParentWorkspace) {
+    return {
+      effects: [t(GENERIC_EFFECT_KEY)],
+      notes: [t(INHERITED_PARENT_WORKSPACE_NOTE_KEY)],
+    };
+  }
   const known = normalize(executorType);
   return known
     ? resolveCopy(SINGLE_COPIES[known])
     : { effects: [t(GENERIC_EFFECT_KEY)], notes: [] };
+}
+
+/** Archive variant. Delete confirmation keeps the stronger removal warning. */
+export function getArchiveCleanupSummary(executorType: string | null | undefined): CleanupSummary {
+  const known = normalize(executorType);
+  if (known === "worktree") return resolveCopy(ARCHIVE_SINGLE_WORKTREE_COPY);
+  if (known) return resolveCopy(SINGLE_COPIES[known]);
+  return { effects: [t(GENERIC_EFFECT_KEY)], notes: [] };
 }
 
 /** Catalog keys for the grouped variant. */
@@ -92,9 +125,17 @@ const BULK_COPIES: Record<KnownExecutor, CleanupCopy> = {
   k8s: { effectKey: "task:cleanupBulkKubernetes" },
 };
 
-/** Bulk variant. Groups known tasks by executor type and preserves display order. */
-export function getBulkCleanupSummary(
+const ARCHIVE_BULK_COPIES: Record<KnownExecutor, CleanupCopy> = {
+  ...BULK_COPIES,
+  worktree: {
+    effectKey: "task:archiveBulkWorktreeCleanup",
+    noteKey: "task:archiveWorktreeBranchNote",
+  },
+};
+
+function getBulkSummary(
   executorTypes: Array<string | null | undefined>,
+  copies: Record<KnownExecutor, CleanupCopy>,
 ): CleanupSummary {
   const counts = new Map<KnownExecutor, number>();
   for (const executorType of executorTypes) {
@@ -117,10 +158,24 @@ export function getBulkCleanupSummary(
   for (const key of order) {
     const count = counts.get(key);
     if (!count) continue;
-    const copy = BULK_COPIES[key];
+    const copy = copies[key];
     if (copy.effectKey) effects.push(t(copy.effectKey, { count }));
     if (copy.noteKey) notes.push(t(copy.noteKey, { count }));
   }
   effects.push(t(GENERIC_EFFECT_KEY));
   return { effects, notes };
+}
+
+/** Bulk delete variant. Groups known tasks by executor type and preserves display order. */
+export function getBulkCleanupSummary(
+  executorTypes: Array<string | null | undefined>,
+): CleanupSummary {
+  return getBulkSummary(executorTypes, BULK_COPIES);
+}
+
+/** Bulk archive variant with conditional worktree cleanup wording. */
+export function getBulkArchiveCleanupSummary(
+  executorTypes: Array<string | null | undefined>,
+): CleanupSummary {
+  return getBulkSummary(executorTypes, ARCHIVE_BULK_COPIES);
 }

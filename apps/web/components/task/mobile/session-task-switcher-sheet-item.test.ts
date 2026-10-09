@@ -54,6 +54,58 @@ describe("toSheetItem repository projection", () => {
 
     expect(item.priority).toBe("critical");
   });
+
+  it("marks active rows covered by a pending archive", () => {
+    const item = toSheetItem(task(), {
+      ...emptyCtx(),
+      pendingRemovalTaskIds: new Set(["t1"]),
+    });
+
+    expect(item.isPendingRemoval).toBe(true);
+  });
+
+  it("marks archived rows when deletion includes them", () => {
+    const item = toSheetItem(task({ isArchived: true }), {
+      ...emptyCtx(),
+      pendingRemovalTaskIds: new Set(["t1"]),
+    });
+
+    expect(item.isPendingRemoval).toBe(true);
+  });
+});
+
+describe("toSheetItem activity projection", () => {
+  it("preserves task activity and its task-local fallbacks on the phone row", () => {
+    const item = toSheetItem(
+      task({
+        updatedAt: "task-updated",
+        createdAt: "task-created",
+        statusSummary: {
+          revision: 3,
+          updated_at: "summary-refreshed",
+          last_activity_at: "task-activity",
+        },
+      }),
+      emptyCtx(),
+    );
+
+    expect(item.lastActivityAt).toBe("task-activity");
+    expect(item.updatedAt).toBe("summary-refreshed");
+    expect(item.createdAt).toBe("task-created");
+  });
+
+  it("falls back to the task update time instead of summary freshness", () => {
+    const item = toSheetItem(
+      task({
+        updatedAt: "task-updated",
+        createdAt: "task-created",
+        statusSummary: { revision: 3, updated_at: "summary-refreshed" },
+      }),
+      emptyCtx(),
+    );
+
+    expect(item.lastActivityAt).toBe("task-updated");
+  });
 });
 
 describe("toSheetItem remote executor projection", () => {
@@ -73,5 +125,14 @@ describe("toSheetItem remote executor projection", () => {
     expect(item.remoteExecutorType).toBe("k8s");
     expect(item.remoteExecutorName).toBe("Cluster executor");
     expect(item.primarySessionId).toBe("session-1");
+  });
+});
+
+describe("toSheetItem Office identity projection", () => {
+  // @covers AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.4
+  it("carries Office identity into the phone task drawer row", () => {
+    const item = toSheetItem(task({ isFromOffice: true }), emptyCtx());
+
+    expect(item.isFromOffice).toBe(true);
   });
 });

@@ -14,6 +14,11 @@ import {
 import type { ReorderBand, Repository } from "@/lib/types/http";
 import type { WorkflowStep } from "../kanban-column";
 import type { KanbanExternalLinkAvailability } from "../kanban-external-link-availability";
+import { useKanbanOverflow } from "@/hooks/domains/kanban/use-kanban-overflow";
+import { useCompactPrefixMeasurements } from "@/hooks/domains/kanban/use-compact-prefix-measurements";
+import { KanbanOverflowFades } from "./kanban-overflow-fades";
+
+export { getCompactTaskPrefixHeight } from "@/hooks/domains/kanban/use-compact-prefix-measurements";
 
 /** A card picked up for a keyboard reorder gesture (REQ-TASKS-KANBAN-TASK-REORDERING-001.12). */
 export type KeyboardReorderDraft = {
@@ -397,80 +402,123 @@ export function VirtualizedColumnTaskList({
   isMultiSelectMode,
 }: VirtualizedColumnTaskListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const columnTaskIds = useStableTaskIds(orderedTasks);
   const stableExternalLinkAvailability =
     useStableExternalLinkAvailability(externalLinkAvailability);
+  const estimateSize = useCallback(
+    (index: number) => (queuedCount > 0 && index === queuedStartIndex ? 136 : 96),
+    [queuedCount, queuedStartIndex],
+  );
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: orderedTasks.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => (queuedCount > 0 && index === queuedStartIndex ? 136 : 96),
+    estimateSize,
     getItemKey: (index) => orderedTasks[index]?.id ?? index,
     overscan: 5,
   });
   const pointerActiveIndex = findTaskIndex(orderedTasks, activeTaskId);
   const totalHeight = virtualizer.getTotalSize();
+  const virtualItems = virtualizer.getVirtualItems();
+  const compactHeight = useCompactPrefixMeasurements({
+    scrollRef,
+    orderedTasks,
+    taskIds: columnTaskIds,
+    queuedStartIndex,
+    queuedCount,
+    presentation,
+    showMaximizeButton,
+    deletingTaskId,
+    archivingTaskId,
+    externalLinkAvailability,
+    estimateSize,
+    virtualizer,
+  });
+  const overflow = useKanbanOverflow(scrollRef, {
+    axis: "vertical",
+    contentRef,
+    revision: totalHeight,
+  });
   useLayoutEffect(() => {
-    if (scrollRef.current) onContentHeightChange?.(totalHeight, scrollRef.current);
-  }, [onContentHeightChange, totalHeight]);
+    if (scrollRef.current) onContentHeightChange?.(compactHeight, scrollRef.current);
+  }, [compactHeight, onContentHeightChange, totalHeight]);
+
+  const { t } = useTranslation();
 
   return (
-    <div
-      ref={scrollRef}
-      className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-1 pt-1"
-      data-testid="kanban-column-scroll"
-    >
-      <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
-        {virtualizer.getVirtualItems().map((virtualItem) => {
-          const task = orderedTasks[virtualItem.index];
-          if (!task) return null;
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div
+        ref={scrollRef}
+        aria-label={t("kanban:tasksInStep", { step: step.title })}
+        className="kanban-scroll-region min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-auto px-1 pt-1"
+        data-kanban-scroll-active={overflow.isScrolling}
+        data-kanban-scroll-bottom={overflow.canScrollBottom}
+        data-kanban-scroll-top={overflow.canScrollTop}
+        data-testid="kanban-column-scroll"
+        tabIndex={
+          presentation !== "mobile" && (overflow.canScrollTop || overflow.canScrollBottom)
+            ? 0
+            : undefined
+        }
+      >
+        <div
+          ref={contentRef}
+          className="relative w-full"
+          style={{ height: `${virtualizer.getTotalSize()}px` }}
+        >
+          {virtualItems.map((virtualItem) => {
+            const task = orderedTasks[virtualItem.index];
+            if (!task) return null;
 
-          const keyboardInsertionEdge = computeKeyboardInsertionEdge(
-            keyboardDraft,
-            step.id,
-            task.id,
-          );
-          const isKeyboardAdjacent = keyboardInsertionEdge !== null;
-          const insertionEdge = isKeyboardAdjacent
-            ? keyboardInsertionEdge
-            : computeInsertionEdge(queuedStartIndex, pointerActiveIndex, virtualItem.index);
+            const keyboardInsertionEdge = computeKeyboardInsertionEdge(
+              keyboardDraft,
+              step.id,
+              task.id,
+            );
+            const isKeyboardAdjacent = keyboardInsertionEdge !== null;
+            const insertionEdge = isKeyboardAdjacent
+              ? keyboardInsertionEdge
+              : computeInsertionEdge(queuedStartIndex, pointerActiveIndex, virtualItem.index);
 
-          return (
-            <VirtualizedTaskRow
-              key={task.id}
-              task={task}
-              queuedCount={queuedCount}
-              queuedStartIndex={queuedStartIndex}
-              virtualIndex={virtualItem.index}
-              top={virtualItem.start}
-              measureElement={virtualizer.measureElement}
-              insertionEdge={insertionEdge}
-              forceShowIndicator={isKeyboardAdjacent}
-              columnTaskIds={columnTaskIds}
-              step={step}
-              steps={steps}
-              presentation={presentation}
-              workspaceId={workspaceId}
-              repositories={repositories}
-              externalLinkAvailability={stableExternalLinkAvailability}
-              showMaximizeButton={showMaximizeButton}
-              isDeleting={deletingTaskId === task.id}
-              isArchiving={archivingTaskId === task.id}
-              selectedIds={selectedIds}
-              keyboardDraft={keyboardDraft}
-              onCardKeyDown={onCardKeyDown}
-              onPreviewTask={onPreviewTask}
-              onOpenTask={onOpenTask}
-              onEditTask={onEditTask}
-              onDeleteTask={onDeleteTask}
-              onArchiveTask={onArchiveTask}
-              onMoveTask={onMoveTask}
-              onToggleSelect={onToggleSelect}
-              onSelectRange={onSelectRange}
-              isMultiSelectMode={isMultiSelectMode}
-            />
-          );
-        })}
+            return (
+              <VirtualizedTaskRow
+                key={task.id}
+                task={task}
+                queuedCount={queuedCount}
+                queuedStartIndex={queuedStartIndex}
+                virtualIndex={virtualItem.index}
+                top={virtualItem.start}
+                measureElement={virtualizer.measureElement}
+                insertionEdge={insertionEdge}
+                forceShowIndicator={isKeyboardAdjacent}
+                columnTaskIds={columnTaskIds}
+                step={step}
+                steps={steps}
+                presentation={presentation}
+                workspaceId={workspaceId}
+                repositories={repositories}
+                externalLinkAvailability={stableExternalLinkAvailability}
+                showMaximizeButton={showMaximizeButton}
+                isDeleting={deletingTaskId === task.id}
+                isArchiving={archivingTaskId === task.id}
+                selectedIds={selectedIds}
+                keyboardDraft={keyboardDraft}
+                onCardKeyDown={onCardKeyDown}
+                onPreviewTask={onPreviewTask}
+                onOpenTask={onOpenTask}
+                onEditTask={onEditTask}
+                onDeleteTask={onDeleteTask}
+                onArchiveTask={onArchiveTask}
+                onMoveTask={onMoveTask}
+                onToggleSelect={onToggleSelect}
+                onSelectRange={onSelectRange}
+                isMultiSelectMode={isMultiSelectMode}
+              />
+            );
+          })}
+        </div>
       </div>
+      <KanbanOverflowFades axis="vertical" state={overflow} />
     </div>
   );
 }

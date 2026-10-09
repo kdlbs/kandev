@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/kandev/kandev/internal/startup"
 )
 
 // State is the initialization or probe state of a required store.
@@ -248,6 +250,33 @@ func (t *Tracker) Status(id string) (Status, bool) {
 	status.RequiredTables = append([]string(nil), status.RequiredTables...)
 	status.Capabilities = append([]Capability(nil), status.Capabilities...)
 	return status, true
+}
+
+// DescriptorSweep returns the store-admission sweep step that claims id, per
+// its catalog descriptor. A sweep cannot infer its own share at runtime, so
+// this is the declared source recordRequiredStore advances against.
+func (t *Tracker) DescriptorSweep(id string) (startup.StepID, bool) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	index, exists := t.byID[id]
+	if !exists {
+		return "", false
+	}
+	return t.catalog[index].Sweep, true
+}
+
+// SweepTotal returns how many catalog entries claim sweep. This is the
+// sweep's total, read once at BeginStep.
+func (t *Tracker) SweepTotal(sweep startup.StepID) int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	total := 0
+	for _, descriptor := range t.catalog {
+		if descriptor.Sweep == sweep {
+			total++
+		}
+	}
+	return total
 }
 
 func statusFor(descriptor Descriptor, state State) Status {

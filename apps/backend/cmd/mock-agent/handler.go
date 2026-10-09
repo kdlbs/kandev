@@ -366,7 +366,7 @@ func handleAutopilotParentQuestion(e *emitter, prompt string) bool {
 		toolKeyTaskID:          childTaskID,
 		"reply_to_question_id": questionID,
 	})
-	result, err := callMCPTool("kandev", "message_task_kandev", map[string]any{
+	result, err := e.callMCPTool("kandev", "message_task_kandev", map[string]any{
 		toolKeyTaskID:          childTaskID,
 		clarificationPromptKey: "Use the first safe option and continue.",
 		"reply_to_question_id": questionID,
@@ -667,7 +667,11 @@ func emitError(e *emitter, model string) {
 func emitCrash(e *emitter, model string) {
 	randomDelay(model)
 	e.text("Processing your request...")
-	randomDelay(model)
+	// SessionUpdate notifications are not acknowledged by ACP. Give the
+	// backend time to persist the final visible update before terminating the
+	// process, especially when the mock agent is running under a loaded E2E
+	// shard.
+	fixedDelay(500)
 	fmt.Fprintln(os.Stderr, "mock-agent: simulating crash (exit 1)")
 	os.Exit(1)
 }
@@ -820,7 +824,7 @@ func emitCreateSubtask(e *emitter, cmd, model string) {
 	e.startTool(toolID, "create_task_kandev", acp.ToolKindOther, args)
 	randomDelay(model)
 
-	result, err := callMCPTool("kandev", "create_task_kandev", args)
+	result, err := e.callMCPTool("kandev", "create_task_kandev", args)
 	if err != nil {
 		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})
 		e.text(fmt.Sprintf("Failed to create subtask: %v", err))

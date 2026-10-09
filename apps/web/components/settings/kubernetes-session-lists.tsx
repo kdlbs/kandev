@@ -28,7 +28,7 @@ export function MobileSessionList({ sessions }: { sessions: KubernetesSession[] 
     <div className="space-y-3" data-testid="kubernetes-mobile-session-list">
       {sessions.map((session) => (
         <AppLink
-          key={session.session_id}
+          key={`${session.task_id}:${session.session_id}`}
           href={taskHref(session.task_id)}
           aria-label={translateTaskLink(session, t)}
           data-testid="kubernetes-session-task-link"
@@ -62,9 +62,10 @@ export function DesktopSessionTable({ sessions }: { sessions: KubernetesSession[
         </TableHeader>
         <TableBody>
           {sessions.map((session) => {
-            const expanded = expandedSessionId === session.session_id;
+            const rowKey = `${session.task_id}:${session.session_id}`;
+            const expanded = expandedSessionId === rowKey;
             return (
-              <Fragment key={session.session_id}>
+              <Fragment key={`${session.task_id}:${session.session_id}`}>
                 <TableRow data-testid="kubernetes-session-row">
                   <TableCell className="whitespace-nowrap py-2 font-mono text-xs">
                     <AppLink
@@ -99,7 +100,7 @@ export function DesktopSessionTable({ sessions }: { sessions: KubernetesSession[
                             : "executors:kubernetesShowSessionDetails",
                         )}
                         className="cursor-pointer"
-                        onClick={() => setExpandedSessionId(expanded ? null : session.session_id)}
+                        onClick={() => setExpandedSessionId(expanded ? null : rowKey)}
                       >
                         <IconChevronDown
                           aria-hidden="true"

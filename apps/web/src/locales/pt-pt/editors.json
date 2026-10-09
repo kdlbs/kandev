@@ -90,5 +90,9 @@
   "underlineCmdU": "Sublinhado (Cmd+U)",
   "failedToOpenEditor": "Falha ao abrir o editor",
   "downloadFile": "Transferir ficheiro",
-  "symlink": "Ligação simbólica"
+  "symlink": "Ligação simbólica",
+  "failedToOpenFolder": "Não foi possível abrir a pasta",
+  "openFolderOnHost": "Abrir a pasta no computador onde o Kandev está a ser executado",
+  "chooseFolder": "Escolher uma pasta",
+  "openingFolder": "A abrir a pasta…"
 }

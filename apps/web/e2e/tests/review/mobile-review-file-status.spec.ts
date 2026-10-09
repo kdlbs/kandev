@@ -1,8 +1,13 @@
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { getSingleLineTextInVisualOrder } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
-import path from "node:path";
+import {
+  waitForSessionDone,
+  waitForSessionGitHydration,
+  waitForWorkspacePath,
+} from "../../helpers/session";
 
 const MOBILE_FILE =
   ".agents/skills/review/surfaces/with-a-deliberately-long-directory/deeply/nested/mobile-review-status-added.ts";
@@ -17,7 +22,9 @@ test.describe("Review file status on mobile", () => {
     apiClient,
     seedData,
     backend,
+    prCapture,
   }) => {
+    await testPage.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("reviewer");
     await apiClient.mockGitHubAddPRs([
@@ -55,6 +62,9 @@ test.describe("Review file status on mobile", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    expect(task.session_id).toBeTruthy();
+    await waitForSessionDone(apiClient, task.id, task.session_id!, "Mobile review fixture settled");
+    const workspacePath = await waitForWorkspacePath(apiClient, task.id, task.session_id!);
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,
       owner: "testorg",
@@ -73,15 +83,16 @@ test.describe("Review file status on mobile", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle();
+    await waitForSessionGitHydration(testPage, task.session_id!);
 
-    const git = new GitHelper(
-      path.join(backend.tmpDir, "repos", "e2e-repo"),
-      makeGitEnv(backend.tmpDir),
-    );
+    const git = new GitHelper(workspacePath, makeGitEnv(backend.tmpDir));
     git.createFile(MOBILE_FILE, "mobile added file\n");
     git.stageFile(MOBILE_FILE);
 
-    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
     const changesPanel = testPage.getByTestId("mobile-changes-panel");
     await expect(changesPanel).toBeVisible();
     await expect(
@@ -173,7 +184,7 @@ test.describe("Review file status on mobile", () => {
     expect(headerGeometry.moreActionsWidth).toBeGreaterThanOrEqual(44);
     expect(headerGeometry.moreActionsHeight).toBeGreaterThanOrEqual(44);
 
-    await moreActions.click();
+    await moreActions.tap();
     const actionsMenu = testPage.getByTestId("review-file-actions-menu");
     await expect(actionsMenu).toBeVisible();
     await actionsMenu.evaluate((element) =>
@@ -205,9 +216,10 @@ test.describe("Review file status on mobile", () => {
     expect(menuGeometry.bottom).toBeLessThanOrEqual(menuGeometry.viewportHeight);
     expect(menuGeometry.minItemHeight).toBeGreaterThanOrEqual(44);
 
-    await expect(actionsMenu.getByRole("menuitem", { name: "Copy diff" })).toBeVisible();
+    await expect(actionsMenu.getByRole("menuitem", { name: "Copy diff" })).toHaveCount(0);
     await expect(actionsMenu.getByRole("menuitem", { name: "Edit file" })).toBeVisible();
     await expect(actionsMenu.getByRole("menuitem", { name: "Copy path" })).toBeVisible();
+    await expect(actionsMenu.getByRole("menuitem", { name: "Copy path" })).toHaveCount(1);
     await expect(actionsMenu.getByRole("menuitem", { name: "Open folder" })).toBeVisible();
     await expect(actionsMenu.getByRole("menuitem", { name: "Revert changes" })).toBeVisible();
     await expect(
@@ -217,9 +229,22 @@ test.describe("Review file status on mobile", () => {
     const initialWrapState = await wrapLines.getAttribute("aria-checked");
     expect(["true", "false"]).toContain(initialWrapState);
 
-    await wrapLines.click();
+    const copyPath = actionsMenu.getByRole("menuitem", { name: "Copy path" });
+    const copyPathBox = (await copyPath.boundingBox())!;
+    expect(copyPathBox.width).toBeGreaterThanOrEqual(44);
+    expect(copyPathBox.height).toBeGreaterThanOrEqual(44);
+    await prCapture.screenshot("review-copy-path-mobile", {
+      caption: "Phone Review file menu offers Copy path for the current file.",
+    });
+    await copyPath.tap();
+    await expect
+      .poll(() => testPage.evaluate(() => navigator.clipboard.readText()))
+      .toBe(MOBILE_FILE);
+
+    await moreActions.tap();
+    await wrapLines.tap();
     await expect(actionsMenu).not.toBeVisible();
-    await moreActions.click();
+    await moreActions.tap();
     await expect(
       testPage
         .getByTestId("review-file-actions-menu")

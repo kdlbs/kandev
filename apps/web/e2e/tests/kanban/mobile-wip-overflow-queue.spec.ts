@@ -83,7 +83,7 @@ test("moves through the mobile task switcher and shows touch queue status", asyn
   await testPage.goto(`/t/${anchor.task_id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await testPage.getByTestId("mobile-session-menu").tap();
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
   const sheet = testPage.getByRole("dialog", { name: "Tasks" });
   const sourceRow = sheet.getByTestId("sidebar-task-item").filter({
     hasText: "Mobile Moved Queue",
@@ -98,7 +98,7 @@ test("moves through the mobile task switcher and shows touch queue status", asyn
     .toBe(reviewStep.id);
   await testPage.keyboard.press("Escape");
   await expect(testPage.getByRole("dialog", { name: "Tasks" })).toHaveCount(0);
-  await testPage.getByTestId("mobile-session-menu").tap();
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
   const queuedSourceRow = testPage
     .getByRole("dialog", { name: "Tasks" })
     .getByTestId("sidebar-task-item")
@@ -122,7 +122,7 @@ test("moves through the mobile task switcher and shows touch queue status", asyn
 
   await testPage.goto(`/t/${anchor.task_id}`);
   await session.waitForLoad();
-  await testPage.getByTestId("mobile-session-menu").tap();
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
   const admittedRow = testPage
     .getByRole("dialog", { name: "Tasks" })
     .getByTestId("sidebar-task-item")
@@ -136,7 +136,7 @@ test("moves through the mobile task switcher and shows touch queue status", asyn
     .toBe(reviewStep.id);
   await testPage.keyboard.press("Escape");
   await expect(testPage.getByRole("dialog", { name: "Tasks" })).toHaveCount(0);
-  await testPage.getByTestId("mobile-session-menu").tap();
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
   await expect(
     testPage
       .getByRole("dialog", { name: "Tasks" })

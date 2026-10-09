@@ -6,6 +6,7 @@ import (
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
+	"github.com/kandev/kandev/internal/common/acpprovider"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -13,10 +14,19 @@ import (
 // The meta map is agent-scoped because cursor-agent reads it to choose a model
 // picker mode (see acpcompat.ClientCapabilityMeta); every other agent sees the
 // capabilities kandev has always sent.
-func clientCapabilitiesForAgent(agentID string) acp.ClientCapabilities {
-	return acp.ClientCapabilities{
+//
+// gateway advertises clientCapabilities.auth._meta.gateway=true, which is what
+// makes a gateway-capable agent (codex-acp >= 1.7) offer its OpenAI-compatible
+// gateway auth method. Only advertised when this launch actually carries a
+// provider gateway to authenticate against.
+func clientCapabilitiesForAgent(agentID string, gateway bool) acp.ClientCapabilities {
+	caps := acp.ClientCapabilities{
 		Meta: acpcompat.ClientCapabilityMeta(agentID, map[string]any{"terminal_output": true}),
 	}
+	if gateway {
+		caps.Auth = acp.AuthCapabilities{Meta: acpprovider.ClientAuthMeta()}
+	}
+	return caps
 }
 
 // derefStr safely dereferences a pointer to a string or named string type,

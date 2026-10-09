@@ -24,7 +24,7 @@ test("shows the current agent status in the existing phone Move to drawer", asyn
   await testPage.setViewportSize({ width: 360, height: 780 });
   await testPage.goto(`/t/${task.id}`);
   await new SessionPage(testPage).waitForLoad();
-  await testPage.getByTestId("mobile-session-menu").tap();
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
   const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
   const taskRow = taskSheet

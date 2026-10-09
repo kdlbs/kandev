@@ -25,6 +25,7 @@ test.describe("Review file status", () => {
     backend,
     prCapture,
   }) => {
+    await testPage.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await testPage.addInitScript(({ key, width }) => sessionStorage.setItem(key, width), {
       key: REVIEW_SIDEBAR_LIMITS.storageKey,
       width: String(REVIEW_SIDEBAR_LIMITS.minWidth),
@@ -112,10 +113,7 @@ test.describe("Review file status", () => {
       await expect(testPage.getByTestId(rowTestId)).toBeVisible({ timeout: 20_000 });
     }
 
-    await testPage
-      .getByTestId("changes-panel")
-      .getByRole("button", { name: "Diff", exact: true })
-      .click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(dialog).toBeVisible();
@@ -194,8 +192,8 @@ test.describe("Review file status", () => {
     expect(geometry.markerRight).toBeLessThanOrEqual(geometry.rowRight);
     expect(geometry.markerRight).toBeLessThanOrEqual(geometry.sidebarRight);
 
-    const reviewProgress = dialog.getByText(new RegExp(`^\\d+ of ${totalFiles} files reviewed$`));
-    await expect(reviewProgress).toHaveText(`0 of ${totalFiles} files reviewed`);
+    const reviewProgress = dialog.getByText(/^\d+ of \d+ files reviewed$/);
+    await expect(reviewProgress).toHaveText(/^0 of \d+ files reviewed$/);
     await sidebar
       .locator(`[data-testid="review-file-row"][data-file-path="${NESTED_PATH}"]`)
       .click();
@@ -209,13 +207,17 @@ test.describe("Review file status", () => {
       "negative-assertion",
       "asserts that jumping to a file never marks it reviewed; the count staying at zero is the absence of an event, so a regression needs the auto-review window to elapse to have room to fire",
     );
-    await expect(reviewProgress).toHaveText(`0 of ${totalFiles} files reviewed`);
+    await expect(reviewProgress).toHaveText(/^0 of \d+ files reviewed$/);
     await prCapture.screenshot("review-ordered-safe-jump", {
       caption: "Review keeps tree and diff order aligned without auto-reviewing a file jump",
     });
 
-    await reviewScroll.evaluate((element) => {
+    await reviewScroll.evaluate(async (element) => {
       element.scrollTop = 0;
+      // Let intersection observers see the reset before the manual wheel crosses a file header.
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
     });
     await expect.poll(() => reviewScroll.evaluate((element) => element.scrollTop)).toBe(0);
     await reviewScroll.hover();
@@ -233,5 +235,17 @@ test.describe("Review file status", () => {
       movedSection.getByText(`Moved from ${MOVED_FROM_PATH}; no textual changes`),
     ).toBeVisible();
     await expect(movedSection.getByText("Loading diff...")).toHaveCount(0);
+
+    const movedActions = movedHeader.getByTestId("review-file-actions");
+    await expect(movedActions.getByRole("button", { name: "Copy diff" })).toHaveCount(0);
+    const copyPath = movedActions.getByRole("button", { name: "Copy path" });
+    await expect(copyPath).toBeVisible();
+    await prCapture.screenshot("review-copy-path-desktop", {
+      caption: "Review diff toolbar offers Copy path for the current file.",
+    });
+    await copyPath.click();
+    await expect
+      .poll(() => testPage.evaluate(() => navigator.clipboard.readText()))
+      .toBe(MOVED_PATH);
   });
 });

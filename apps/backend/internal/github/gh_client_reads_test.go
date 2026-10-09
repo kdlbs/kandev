@@ -58,7 +58,7 @@ func TestGHClient_ListWorkflowRunsAndJobs(t *testing.T) {
 	calls := newFakeGH(t,
 		ghResponse{
 			Prefix: "api --paginate repos/acme/widget/actions/runs?head_sha=feature%2Fsha&per_page=100",
-			Stdout: `{"id":7,"run_attempt":2,"workflow_id":9,"name":"Run tests","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"feature/sha","head_branch":"feature","head_repository":{"full_name":"contributor/widget-fork","name":"widget-fork","owner":{"login":"contributor"}},"html_url":"https://github.com/acme/widget/actions/runs/7","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T11:00:00Z","pull_requests":[]}
+			Stdout: `{"id":7,"check_suite_id":88,"run_attempt":2,"workflow_id":9,"name":"Run tests","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"feature/sha","head_branch":"feature","head_repository":{"full_name":"contributor/widget-fork","name":"widget-fork","owner":{"login":"contributor"}},"html_url":"https://github.com/acme/widget/actions/runs/7","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T11:00:00Z","pull_requests":[]}
 {"id":8,"run_attempt":1,"workflow_id":10,"name":"Lint","event":"push","status":"completed","conclusion":"success","head_sha":"feature/sha","head_branch":"feature","html_url":"https://github.com/acme/widget/actions/runs/8","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T11:00:00Z","pull_requests":[]}`,
 		},
 		ghResponse{
@@ -78,7 +78,7 @@ func TestGHClient_ListWorkflowRunsAndJobs(t *testing.T) {
 	if len(runs) != 2 || runs[0].HeadRepoOwner != "contributor" || runs[0].HeadRepoName != "widget-fork" {
 		t.Fatalf("runs = %#v", runs)
 	}
-	if runs[0].Conclusion != "action_required" || runs[0].RunAttempt != 2 || len(runs[0].PullRequests) != 0 {
+	if runs[0].Conclusion != "action_required" || runs[0].RunAttempt != 2 || runs[0].CheckSuiteID != 88 || len(runs[0].PullRequests) != 0 {
 		t.Fatalf("run[0] = %#v", runs[0])
 	}
 
@@ -185,6 +185,42 @@ func TestGHClient_GetPR_NotFoundBecomesTypedError(t *testing.T) {
 	if apiErr.Endpoint != "/repos/acme/widget/pulls/7" {
 		t.Errorf("endpoint = %q", apiErr.Endpoint)
 	}
+}
+
+func TestGHClient_GetPRBaseOIDReadFailureKeepsPRDetailsUsable(t *testing.T) {
+	calls := newFakeGH(t,
+		ghResponse{
+			Prefix: "pr view 8",
+			Stdout: `{"number":8,"title":"base SHA unavailable","url":"https://github.com/acme/widget/pull/8","state":"OPEN","headRefName":"feature","headRefOid":"abc","baseRefName":"main","headRepository":{"name":"widget","nameWithOwner":"acme/widget"},"headRepositoryOwner":{"login":"acme"}}`,
+		},
+		ghResponse{
+			Prefix: "api repos/acme/widget/pulls/8",
+			Stderr: "HTTP 403: Forbidden",
+			Exit:   1,
+		},
+	)
+
+	pr, err := NewGHClient().GetPR(context.Background(), "acme", "widget", 8)
+	if err != nil {
+		t.Fatalf("GetPR() error = %v, want PR details to remain available", err)
+	}
+	if pr.Number != 8 || pr.BaseBranch != "main" || pr.BaseSHA != "" {
+		t.Fatalf("PR = %#v, want base branch without optional OID", pr)
+	}
+	if pr.BaseRepoOwner != "" || pr.BaseRepoName != "" || pr.BaseRepoID != 0 {
+		t.Fatalf("PR base repository = (%q, %q, %d), want no inferred identity after REST failure", pr.BaseRepoOwner, pr.BaseRepoName, pr.BaseRepoID)
+	}
+	got := calls(t)
+	if len(got) != 2 {
+		t.Fatalf("gh calls = %v, want PR view and a best-effort REST OID read", got)
+	}
+	if strings.Contains(strings.Join(got[0], " "), "baseRefOid") {
+		t.Fatalf("gh pr view requested unsupported baseRefOid: %v", got[0])
+	}
+	assertGHArgv(t, got, 1, []string{
+		"api", "repos/acme/widget/pulls/8", "--jq",
+		"{sha: .base.sha, ref: .base.ref, repo: {id: .base.repo.id, name: .base.repo.name, owner: .base.repo.owner}}",
+	})
 }
 
 // TestGHClient_GetPR_RequestsOutcomeFields covers AC-09: the --json field
@@ -420,6 +456,9 @@ func TestGHClient_ListAuthoredPRs(t *testing.T) {
 	}
 	if !containsPair(argv, "--state", "open") || !containsPair(argv, "--repo", "acme/widget") {
 		t.Errorf("argv = %q, want --state open and --repo acme/widget", argv)
+	}
+	if strings.Contains(strings.Join(argv, " "), "baseRefOid") {
+		t.Errorf("argv = %q, requests baseRefOid unsupported by gh pr list", argv)
 	}
 	if len(prs) != 2 || prs[0].Number != 1 || prs[1].Number != 2 {
 		t.Fatalf("prs = %#v", prs)

@@ -5,13 +5,12 @@ import (
 	"testing"
 )
 
-func TestBuildContentSecurityPolicyIsGrantBoundAndOpaque(t *testing.T) {
+func TestBuildContentSecurityPolicyIsGrantBoundAndSameOrigin(t *testing.T) {
 	policy, err := BuildContentSecurityPolicy([]string{"https://api.example.com:443", "https://api.example.com:443"}, []string{"http://127.0.0.1:38429", "tauri://localhost", "http://tauri.localhost"})
 	if err != nil {
 		t.Fatalf("BuildContentSecurityPolicy() unexpected error: %v", err)
 	}
 	for _, required := range []string{
-		"sandbox allow-scripts allow-forms",
 		"default-src 'none'",
 		"form-action 'none'",
 		"base-uri 'none'",
@@ -23,6 +22,16 @@ func TestBuildContentSecurityPolicyIsGrantBoundAndOpaque(t *testing.T) {
 		if !strings.Contains(policy, required) {
 			t.Fatalf("policy %q missing %q", policy, required)
 		}
+	}
+	sandbox := ""
+	for _, directive := range strings.Split(policy, "; ") {
+		if strings.HasPrefix(directive, "sandbox ") {
+			sandbox = directive
+			break
+		}
+	}
+	if sandbox != "sandbox allow-scripts allow-forms allow-same-origin" {
+		t.Fatalf("sandbox directive = %q, want the exact trusted same-origin token set", sandbox)
 	}
 	if strings.Count(policy, "api.example.com:443") != 3 {
 		t.Fatalf("policy includes a duplicate or missing origin: %q", policy)

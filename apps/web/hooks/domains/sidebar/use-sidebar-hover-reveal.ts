@@ -82,6 +82,11 @@ export function useSidebarHoverReveal({
     const media = window.matchMedia(HOVER_QUERY);
     const reset = (capabilityChanged = false) => {
       cancelTimer();
+      // A collapse, route change, or capability change can remove the element
+      // under the pointer before the browser dispatches pointerleave. Require
+      // a fresh entry so that a stale inside flag cannot suppress the next
+      // hover gesture.
+      inside.current = false;
       const changed =
         capabilityChanged ||
         previousSettings.current.eligible !== eligible ||

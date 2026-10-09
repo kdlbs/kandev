@@ -1,11 +1,12 @@
 import path from "node:path";
-import { type Page } from "@playwright/test";
+import { type Page, type Request } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+import { chooseCapture, saveDraft } from "../preview/preview-feedback-helpers";
 
 const SAVED_HTML = "<!doctype html><html><body><p>Saved source</p></body></html>";
 const SVG_ASSET =
@@ -170,14 +171,33 @@ test.describe("HTML preview", () => {
     await expect(frame.locator("#value")).toHaveText("1");
 
     const firstSrc = await previewIframe.getAttribute("src");
-    await preview.getByRole("button", { name: "Refresh HTML preview" }).click();
+    const isRefreshRequest = (request: Request) =>
+      request.method() === "POST" && new URL(request.url()).pathname.endsWith("/html-previews");
+    const refreshResponse = testPage
+      .waitForResponse((response) => isRefreshRequest(response.request()), { timeout: 15_000 })
+      .catch(() => null);
+    await expect(async () => {
+      const refreshRequest = testPage.waitForRequest(isRefreshRequest, { timeout: 1_500 });
+      await preview.getByRole("button", { name: "Refresh HTML preview" }).click();
+      await refreshRequest;
+    }).toPass({ timeout: 12_000, intervals: [250, 500, 1_000] });
+    const response = await refreshResponse;
+    if (!response) throw new Error("HTML preview refresh response did not arrive");
+    expect(response.ok()).toBe(true);
+    const refreshed = (await response.json()) as { version: number };
+    expect(refreshed.version).toBe(2);
+    await expect(previewIframe).toHaveAttribute(
+      "src",
+      new RegExp(`[?&]v=${refreshed.version}(?:&|$)`),
+      { timeout: 15_000 },
+    );
     await expect(frame.locator("#native-status")).toHaveText(
       "api:available | image:loaded | path:entry",
       { timeout: 15_000 },
     );
     const refreshedSrc = await previewIframe.getAttribute("src");
     expect(refreshedSrc).not.toBe(firstSrc);
-    expect(refreshedSrc).toContain("v=2");
+    expect(refreshedSrc).toContain(`v=${refreshed.version}`);
 
     const secondHtml = nativePreviewHtml(assetDirectory, fileName, "Republished native preview");
     await preview.getByRole("button", { name: "Show code" }).click();
@@ -203,6 +223,36 @@ test.describe("HTML preview", () => {
     await expect(
       testPage.locator(".monaco-editor:visible").first().locator(".view-lines"),
     ).toContainText("Republished native preview");
+  });
+
+  test("opens HTML preview feedback in its shared collection", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const { session } = await setupDesktopHtmlPreviewTest({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      title: "HTML Preview Feedback Collection",
+    });
+
+    await testPage.getByTestId("html-preview-toggle").first().click();
+    const preview = testPage.getByTestId("html-preview").first();
+    const frame = preview.frameLocator("iframe");
+    await expect(frame.locator("#increment")).toBeVisible({ timeout: 15_000 });
+
+    await chooseCapture(testPage, "Select element");
+    await frame.locator("#increment").click();
+    await saveDraft(testPage, "Keep this HTML preview action visible");
+
+    await session.clickSessionChatTab();
+    await session.activeChat().getByRole("button", { name: "1 preview feedback item" }).click();
+
+    await expect(session.browserPanel).toHaveCount(0);
+    await expect(testPage.getByText("Keep this HTML preview action visible")).toBeVisible();
   });
 
   test("shows a retryable error when the session publish endpoint fails", async ({

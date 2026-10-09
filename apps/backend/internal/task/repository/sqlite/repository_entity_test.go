@@ -50,7 +50,113 @@ func TestRepositoryCloseHonorsDatabaseOwnership(t *testing.T) {
 	}
 }
 
-func seedWorkspace(t *testing.T, repo *Repository, id string) {
+func TestExactWorkspaceConfigurationWritesFenceStoredVersions(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-exact-admin-cas")
+	workspace, err := repo.GetWorkspace(ctx, "ws-exact-admin-cas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleWorkspaceVersion := workspace.UpdatedAt
+	newerWorkspaceVersion := staleWorkspaceVersion.Add(time.Hour)
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE workspaces SET updated_at = ? WHERE id = ?`), newerWorkspaceVersion, workspace.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.CreateRepositoryIfWorkspaceUnchanged(ctx, &models.Repository{
+		ID: "repo-exact-admin-stale", WorkspaceID: workspace.ID, Name: "Stale",
+	}, staleWorkspaceVersion); !errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+		t.Fatalf("CreateRepositoryIfWorkspaceUnchanged error = %v, want version conflict", err)
+	}
+	if _, err := repo.GetRepository(ctx, "repo-exact-admin-stale"); !errors.Is(err, repoerrors.ErrRepositoryNotFound) {
+		t.Fatalf("stale repository insert lookup error = %v, want not found", err)
+	}
+	if err := repo.CreateWorkflowIfWorkspaceUnchanged(ctx, &models.Workflow{
+		ID: "wf-exact-admin-stale", WorkspaceID: workspace.ID, Name: "Stale",
+	}, staleWorkspaceVersion); !errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+		t.Fatalf("CreateWorkflowIfWorkspaceUnchanged error = %v, want version conflict", err)
+	}
+
+	changedWorkspace, err := repo.GetWorkspace(ctx, workspace.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedWorkspace.Name = "Rejected stale update"
+	if err := repo.UpdateWorkspaceIfUnchanged(ctx, changedWorkspace, staleWorkspaceVersion); !errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+		t.Fatalf("UpdateWorkspaceIfUnchanged error = %v, want version conflict", err)
+	}
+	unchangedWorkspace, err := repo.GetWorkspace(ctx, workspace.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchangedWorkspace.Name != workspace.Name {
+		t.Fatalf("stale workspace update changed name to %q", unchangedWorkspace.Name)
+	}
+
+	for _, workflow := range []*models.Workflow{
+		{ID: "wf-exact-admin-a", WorkspaceID: workspace.ID, Name: "A"},
+		{ID: "wf-exact-admin-b", WorkspaceID: workspace.ID, Name: "B"},
+	} {
+		if err := repo.CreateWorkflow(ctx, workflow); err != nil {
+			t.Fatal(err)
+		}
+	}
+	workflowA, err := repo.GetWorkflow(ctx, "wf-exact-admin-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflowB, err := repo.GetWorkflow(ctx, "wf-exact-admin-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflowAVersion := workflowA.UpdatedAt
+	staleWorkflowVersion := workflowB.UpdatedAt
+	newerWorkflowVersion := staleWorkflowVersion.Add(time.Hour)
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE workflows SET updated_at = ? WHERE id = ?`), newerWorkflowVersion, workflowB.ID); err != nil {
+		t.Fatal(err)
+	}
+	workflowA.Name = "Rejected stale update"
+	if err := repo.UpdateWorkflowIfUnchanged(ctx, workflowA, workflowAVersion.Add(-time.Second)); !errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+		t.Fatalf("UpdateWorkflowIfUnchanged error = %v, want version conflict", err)
+	}
+	if err := repo.ReorderWorkflowsIfUnchanged(ctx, workspace.ID,
+		[]string{workflowA.ID, workflowB.ID}, newerWorkspaceVersion,
+		map[string]time.Time{workflowA.ID: workflowAVersion, workflowB.ID: staleWorkflowVersion},
+	); !errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+		t.Fatalf("ReorderWorkflowsIfUnchanged error = %v, want version conflict", err)
+	}
+	ordered, err := repo.ListWorkflows(ctx, workspace.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ordered) != 2 || ordered[0].ID != workflowA.ID || ordered[1].ID != workflowB.ID {
+		t.Fatalf("failed exact reorder changed sort order: %+v", ordered)
+	}
+
+	entity := &models.Repository{ID: "repo-exact-admin-update", WorkspaceID: workspace.ID, Name: "Original"}
+	if err := repo.CreateRepository(ctx, entity); err != nil {
+		t.Fatal(err)
+	}
+	staleRepositoryVersion := entity.UpdatedAt
+	newerRepositoryVersion := staleRepositoryVersion.Add(time.Hour)
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`UPDATE repositories SET updated_at = ? WHERE id = ?`), newerRepositoryVersion, entity.ID); err != nil {
+		t.Fatal(err)
+	}
+	entity.Name = "Rejected stale update"
+	if err := repo.UpdateRepositoryIfUnchanged(ctx, entity, staleRepositoryVersion); !errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+		t.Fatalf("UpdateRepositoryIfUnchanged error = %v, want version conflict", err)
+	}
+	unchangedRepository, err := repo.GetRepository(ctx, entity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchangedRepository.Name != "Original" {
+		t.Fatalf("stale repository update changed name to %q", unchangedRepository.Name)
+	}
+}
+
+func seedWorkspace(t testing.TB, repo *Repository, id string) {
 	t.Helper()
 	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{ID: id, Name: id}); err != nil {
 		t.Fatalf("seed workspace %s: %v", id, err)
@@ -671,10 +777,10 @@ func TestDeleteRepositoryIfNoActiveTaskSessions(t *testing.T) {
 // failures by design).
 func TestRunMigrations_Idempotent(t *testing.T) {
 	repo := newRepoForEntityTests(t)
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("second runMigrations call returned error: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("third runMigrations call returned error: %v", err)
 	}
 }
@@ -698,10 +804,10 @@ func TestRunnerProjectionWorkflowStepColumnsReplayMigration(t *testing.T) {
 			t.Fatalf("drop legacy workflow_steps.%s: %v", column.name, err)
 		}
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations on legacy workflow_steps schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay runMigrations: %v", err)
 	}
 
@@ -741,10 +847,10 @@ func TestRunnerProjectionParticipantCreatedAtReplayMigration(t *testing.T) {
 	if _, err := repo.db.Exec(`ALTER TABLE workflow_step_participants DROP COLUMN created_at`); err != nil {
 		t.Fatalf("drop legacy workflow_step_participants.created_at: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations on legacy workflow_step_participants schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay runMigrations: %v", err)
 	}
 

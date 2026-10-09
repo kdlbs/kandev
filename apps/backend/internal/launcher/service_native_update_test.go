@@ -66,6 +66,8 @@ func TestNativeServiceRenderersIncludeManagedIdentity(t *testing.T) {
 }
 
 func TestInstallSystemdWritesOwnerOnlyNativeMetadata(t *testing.T) {
+	t.Setenv("KANDEV_BUNDLE_DIR", "")
+	t.Setenv("KANDEV_VERSION", "")
 	originalExecutablePath := executablePath
 	originalExecuteServiceCommand := executeServiceCommand
 	originalServicePrintln := servicePrintln
@@ -126,6 +128,8 @@ func TestInstallSystemdWritesOwnerOnlyNativeMetadata(t *testing.T) {
 }
 
 func TestInstallLaunchdWritesNativeMetadata(t *testing.T) {
+	t.Setenv("KANDEV_BUNDLE_DIR", "")
+	t.Setenv("KANDEV_VERSION", "")
 	originalExecutablePath := executablePath
 	originalExecuteServiceCommand := executeServiceCommand
 	originalServicePrintln := servicePrintln

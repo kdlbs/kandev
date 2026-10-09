@@ -290,11 +290,17 @@ class PullRequestSizeLabelWorkflowContractTest(unittest.TestCase):
         ):
             self.assertRegex(self.workflow, rf"{name}: \{{")
             self.assertIn(f"color: '{color}'", self.workflow)
-        self.assertIn("github.rest.issues.getLabel", self.workflow)
         self.assertIn("github.rest.issues.createLabel", self.workflow)
         self.assertIn("github.rest.issues.listLabelsOnIssue", self.workflow)
         self.assertIn("github.rest.issues.addLabels", self.workflow)
         self.assertIn("github.rest.issues.removeLabel", self.workflow)
+        self.assertIn("isMissingLabelDefinitionError", self.workflow)
+        self.assertNotIn(
+            "for (const [name, definition] of Object.entries(sizeLabelDefinitions))",
+            self.workflow,
+        )
+        self.assertEqual(self.workflow.count("github.rest.issues.listLabelsOnIssue"), 1)
+        self.assertEqual(self.workflow.count("github.rest.issues.getLabel"), 0)
 
         stale_labels = extract_function(self.workflow, "staleSizeLabels")
         self.assertEqual(
@@ -333,10 +339,90 @@ class PullRequestSizeLabelWorkflowContractTest(unittest.TestCase):
             )
         )
         create_index = self.workflow.index("github.rest.issues.createLabel")
-        retry_read_index = self.workflow.index(
-            "await github.rest.issues.getLabel", create_index
+        first_add_index = self.workflow.index("github.rest.issues.addLabels")
+        retry_add_index = self.workflow.index(
+            "github.rest.issues.addLabels", first_add_index + 1
         )
-        self.assertLess(create_index, retry_read_index)
+        list_index = self.workflow.index("github.rest.issues.listLabelsOnIssue")
+        self.assertLess(list_index, first_add_index)
+        self.assertLess(first_add_index, create_index)
+        self.assertLess(create_index, retry_add_index)
+
+        missing_definition = extract_function(
+            self.workflow, "isMissingLabelDefinitionError"
+        )
+        self.assertTrue(
+            run_javascript(
+                missing_definition,
+                "isMissingLabelDefinitionError",
+                [
+                    {
+                        "status": 422,
+                        "response": {
+                            "data": {
+                                "errors": [
+                                    {
+                                        "resource": "Label",
+                                        "code": "invalid",
+                                        "field": "name",
+                                        "value": "small",
+                                    }
+                                ]
+                            }
+                        },
+                    },
+                    "small",
+                ],
+            )
+        )
+        self.assertFalse(
+            run_javascript(
+                missing_definition,
+                "isMissingLabelDefinitionError",
+                [
+                    {
+                        "status": 422,
+                        "response": {
+                            "data": {
+                                "errors": [
+                                    {
+                                        "resource": "Label",
+                                        "code": "invalid",
+                                        "field": "name",
+                                        "value": "medium",
+                                    }
+                                ]
+                            }
+                        },
+                    },
+                    "small",
+                ],
+            )
+        )
+        self.assertFalse(
+            run_javascript(
+                missing_definition,
+                "isMissingLabelDefinitionError",
+                [
+                    {
+                        "status": 422,
+                        "response": {
+                            "data": {
+                                "errors": [
+                                    {
+                                        "resource": "Issue",
+                                        "code": "invalid",
+                                        "field": "name",
+                                        "value": "small",
+                                    }
+                                ]
+                            }
+                        },
+                    },
+                    "small",
+                ],
+            )
+        )
 
     # @covers AC-CI-PR-SIZE-001.5
     def test_summary_row_contains_two_string_cells(self) -> None:
@@ -374,7 +460,6 @@ class PullRequestSizeLabelWorkflowContractTest(unittest.TestCase):
         limit_index = self.workflow.index("changedFiles.length >= 3000")
         self.assertIn("throw new Error", self.workflow[limit_index : limit_index + 240])
         for mutation in (
-            "github.rest.issues.getLabel",
             "github.rest.issues.createLabel",
             "github.rest.issues.addLabels",
             "github.rest.issues.removeLabel",

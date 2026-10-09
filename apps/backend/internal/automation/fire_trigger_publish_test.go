@@ -78,7 +78,7 @@ func TestFireTrigger_PublishFailureFailsRunAndReleasesSlot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := service.FireTrigger(ctx, automation.ID, trigger.ID, trigger.Type, json.RawMessage(`{}`), "first"); err == nil {
+	if _, err := service.FireTrigger(ctx, automation.ID, trigger.ID, trigger.Type, json.RawMessage(`{}`), DedupKey("first")); err == nil {
 		t.Fatal("expected publish failure")
 	} else if !strings.Contains(err.Error(), publishErr.Error()) {
 		t.Fatalf("publish error = %q, want %q", err, publishErr)
@@ -106,7 +106,7 @@ func TestFireTrigger_PublishFailureFailsRunAndReleasesSlot(t *testing.T) {
 	}
 
 	eventBus.publishErr = nil
-	second, err := service.FireTrigger(ctx, automation.ID, trigger.ID, trigger.Type, json.RawMessage(`{}`), "second")
+	second, err := service.FireTrigger(ctx, automation.ID, trigger.ID, trigger.Type, json.RawMessage(`{}`), DedupKey("second"))
 	if err != nil {
 		t.Fatalf("second firing: %v", err)
 	}

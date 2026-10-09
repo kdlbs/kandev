@@ -81,7 +81,7 @@ test.describe("Mobile subtask re-parenting by drag and drop", () => {
     await testPage.goto(`/t/${newParent.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
     const taskBlock = (taskId: string) =>
@@ -132,7 +132,7 @@ test.describe("Mobile subtask re-parenting by drag and drop", () => {
     await testPage.goto(`/t/${parent.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
     const taskList = taskSheet.getByTestId("mobile-task-switcher-list");

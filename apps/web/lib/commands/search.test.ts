@@ -190,3 +190,37 @@ describe("selectContentSearchResult", () => {
     expect(selectContentSearchResult([], "anything")).toBe("");
   });
 });
+
+it("waits for idle task results instead of preselecting a task command", () => {
+  const commands = [command("pin", "Pin task")];
+  const loadingSelection = selectCommandSearchResult({
+    commands,
+    search: "",
+    taskResultValues: [],
+    commandsLeadResults: false,
+  });
+  expect(loadingSelection).toBe("");
+  expect(
+    selectCommandSearchResult({
+      commands,
+      search: "",
+      taskResultValues: ["__task:task-1 Active task"],
+      preferredValue: loadingSelection,
+      commandsLeadResults: false,
+    }),
+  ).toBe("__task:task-1 Active task");
+});
+
+it("preselects the first enabled child when a submenu has no query", () => {
+  expect(
+    selectCommandSearchResult({
+      commands: [
+        { ...command("disabled", "Disabled"), disabled: true },
+        command("review", "Review"),
+      ],
+      search: "",
+      taskResultValues: [],
+      commandsLeadResults: true,
+    }),
+  ).toBe("review");
+});

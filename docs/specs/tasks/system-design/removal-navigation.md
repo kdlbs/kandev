@@ -1,10 +1,14 @@
 ---
-status: draft
+status: current
 system: tasks
 created: 2026-09-10
+updated: 2026-09-30
 requirements:
   - REQ-TASKS-REMOVAL-NAVIGATION-001
   - REQ-TASKS-REMOVAL-NAVIGATION-002
+  - REQ-TASKS-REMOVAL-NAVIGATION-003
+  - REQ-TASKS-REMOVAL-NAVIGATION-004
+  - REQ-TASKS-REMOVAL-NAVIGATION-005
 owners:
   - kandev
 ---
@@ -17,7 +21,7 @@ The task system coordinates local removal intent, task presentation, and
 fallback selection. HTTP and WebSocket task state remain authoritative.
 No backend, persistence, permission, or cleanup protocol changes are required.
 
-Source inspection found these gaps:
+The original investigation, before coordinator implementation, found these gaps:
 
 - Desktop and phone delete handlers await `deleteTaskById` before
   `removeTaskFromBoard`; `useTaskCRUD` also waits before removing board rows.
@@ -34,10 +38,141 @@ controlled delayed-response regressions before production changes.
 
 ## Requirement mapping
 
-| Requirement | Design sections |
-| --- | --- |
-| REQ-TASKS-REMOVAL-NAVIGATION-001 | Presentation boundary, navigation, entry points, mobile |
+| Requirement                      | Design sections                                          |
+| -------------------------------- | -------------------------------------------------------- |
+| REQ-TASKS-REMOVAL-NAVIGATION-001 | Presentation boundary, navigation, entry points, mobile  |
 | REQ-TASKS-REMOVAL-NAVIGATION-002 | Operation state, reconciliation, failure recovery, tests |
+| REQ-TASKS-REMOVAL-NAVIGATION-003 | Pending archive presentation in shared task navigation   |
+| REQ-TASKS-REMOVAL-NAVIGATION-004 | Archive progress feedback and notification lifecycle     |
+| REQ-TASKS-REMOVAL-NAVIGATION-005 | Pending delete projection |
+
+## Pending delete projection
+
+REQ-TASKS-REMOVAL-NAVIGATION-005 extends the shipped archive projection below.
+Tasks owns this extension because membership and recovery follow task-removal
+operations. `useWorkspaceSidebarTasks` projects `taskRemoval` membership into
+`pendingRemovalTaskIds`; `buildSidebarItem` and `toSheetItem` carry it as
+`isPendingRemoval` through `TaskSwitcherItem`, `TaskSwitcherRow`, `TaskItem`, and
+`TaskStateIcon`. Membership comes from `pendingTokenByTaskId` and its matching
+`operationsByToken` record in the current workspace. An archive operation marks
+only active rows; a delete marks any visible target, including an archived row.
+Do not add hook-local delete tracking or another store. Use membership rather
+than departure ownership so unselected and bulk targets remain represented.
+
+Preserve the existing dimming, busy/disabled attributes, spinner, row geometry,
+and block row selection while pending so disabled semantics match behavior.
+Rename internal archive-specific helpers to removal
+names. If changing the spinner test ID, retain the old archive ID using
+`data-legacy-testid` and migrate every affected test selector together. No new
+user-facing strings or delete progress toast are required.
+
+The coordinator remains the sole authority for operation release, cache pruning,
+bulk outcomes, navigation, and recovery. Do not delay authoritative removal
+until an HTTP response or synthesize cache rows to retain a spinner. Refreshes
+must reapply pending membership to surviving rows; failures reveal current data.
+Keep archive-only filtering in the data projection rather than dropping pending
+flags on archived rows downstream.
+
+Successful delete reconciliation and authoritative `task.deleted` events notify
+`SidebarTaskPageCache` before local pending membership is released. It clears
+cached pages while retaining in-flight read journals. Each subscribed page removes
+only confirmed IDs and marks its response provisional. Mutation-confirmed
+deletions enter the canonical task-overview journal before notification, just
+like websocket deletions. Late reads reconcile those changes, and the existing
+refresh scheduler coalesces one trailing membership query. This avoids an idle-row
+flash while a delayed refresh catches up, preserves failed/non-target rows, and
+lets newly mounted pickers fetch fresh data without retaining deletion tombstones.
+
+Mobile reuses `session-task-switcher-sheet.tsx`: its existing header trigger,
+inset drawer, visible overflow menu, fixed header, single scrolling list, safe
+areas, and touch targets remain unchanged. A reopened picker reads the same
+pending state as desktop. No composition or breakpoint changes are needed.
+
+Deferred hook/component tests cover AC-005.1 through AC-005.3, including wrong
+workspace, missing/stale tokens, archived delete, mixed bulk outcomes, and archive
+regressions. Desktop and phone browser tests hold DELETE before server processing,
+then prove pending, refusal recovery, and success; retain existing archive tests.
+See the [work package](../../../plans/sidebar-delete-loading/plan.md).
+
+## Immediate sidebar archive projection
+
+`REQ-TASKS-REMOVAL-NAVIGATION-003` extends the existing operation state to the
+sidebar's visible projection. `coordinateTaskRemovalBatch` already publishes
+`beginTaskRemoval` before destination lookup and mutation. Its optimistic
+`switchOnly` path deliberately retains task caches; successful reconciliation
+prunes them later. `useWorkspaceSidebarTasks` currently aggregates those caches
+without subscribing to removal intent. This accounts for the retained row under
+latency; it is source-trace evidence, not a measured browser reproduction.
+
+Subscribe the shared desktop/phone `useWorkspaceSidebarTasks` projection to
+`taskRemoval`. Derive archive-pending task IDs from `taskIds`,
+`pendingTokenByTaskId`, and `operationsByToken`, scoped by task identity and
+operation workspace. Return the rows with their existing order and references,
+plus a pending marker for active rows. Do not reuse a navigation-ownership
+predicate: unselected tasks and operations whose user has navigated still need
+the pending presentation. Delete behavior is outside this extension.
+
+Pass the marker through the sidebar and phone item projections to the shared
+task row. A pending row keeps its normal geometry, becomes visually dimmed,
+sets busy/disabled accessibility state, and replaces its task-state icon with a
+muted spinner. Keep the row in the list so neighboring rows do not jump while
+the request is in flight; prevent stale actions from presenting it as settled.
+
+Retain this pending presentation through operation reconciliation and release it
+through the existing coordinator. Cache refreshes cannot bypass the marker.
+Success must prune active caches before release, as the coordinator currently
+does; the row then disappears and its gap collapses. On failure, releasing the
+marker reveals the latest eligible cache row; do not restore an old snapshot or
+write synthetic archive metadata. Continue applying archive events and
+archived-cache updates so archived-inclusive saved views preserve their existing
+semantics. A confirmed archived row can remain in such a view; it is no longer
+marked pending.
+
+The presentation marker does not alter selection, recent-task preferences,
+persistence, or server cleanup. Existing navigation recovery remains
+authoritative. Unknown outcomes use existing authoritative refresh/recovery;
+never reconstruct a row removed by a server event. Cascade membership uses the
+operation's captured known descendants; later authoritative cascade events
+handle uncached children.
+
+Desktop uses the existing sidebar; phone uses the existing task-switcher sheet
+and visible overflow actions. Their shared data hook owns the pending marker.
+Keep the existing sheet dismissal, scroll owner, safe areas, touch targets, and
+task navigation. Reopening the phone picker while a request is pending must
+still show the dimmed spinner row. No new copy, geometry, or navigation
+composition is required.
+
+## Archive progress feedback
+
+`useTaskActions.archiveTaskById` is the common user-action mutation boundary
+for the board, preview, sidebar, task switcher, task detail, command, message,
+and bulk archive paths. Keep the low-level `archiveTask` API function
+transport-only so API helpers, tests, and non-UI callers do not create browser
+feedback. The `/tasks` listing is the only current user-facing caller that
+invokes `archiveTask` directly; route that action through `useTaskActions` so it
+shares the same progress lifecycle without changing its existing refresh,
+success, or failure handling.
+
+The archive action hook owns one loading-toast record with an in-flight request
+count. The first archive request creates a localized `loading` toast through
+`ToastProvider`; concurrent requests started by the same bulk operation reuse
+that toast and increment the count. Every request decrements the count in a
+`finally` path, and the last settlement dismisses the toast. Independent
+operations started from separate surfaces retain separate feedback, matching
+the existing surface-local concurrency contract.
+
+The loading toast uses the existing non-expiring loading variant, spinner, and
+bottom-right `aria-live="polite"` toast stack. It has the title `Archiving in
+progress` in the English catalog and equivalent copy in every shipped locale.
+It adds no action, drawer, scroll owner, or focus target. Desktop and phone use
+the same toast component; the phone check verifies that the fixed toast remains
+inside the viewport and above the existing app status bar.
+
+The progress lifetime is scoped to the archive mutation request. On settlement
+the action hook dismisses it without claiming an outcome. The existing removal
+coordinator and listing handlers remain the sole owners of success, failure,
+partial-failure, navigation, and recovery notifications, which prevents a
+second terminal toast or a second error report.
 
 ## Operation state
 
@@ -154,6 +289,11 @@ Bulk results retain failed IDs for retry, reconcile successful IDs, and report
 one batch result. Conflicts reuse the existing discard guidance. Avoid duplicate
 toasts between the coordinator, `useTaskActions`, and bulk callers.
 
+Every archive request dismisses its progress contribution in `finally`, so a
+rejection, component transition, or failed recovery cannot strand a loading
+toast. Cancellation never reaches the archive action hook and therefore creates
+no progress notification.
+
 ## Entry points and mobile composition
 
 Integrate desktop sidebar and phone switcher actions, `useTaskCRUD` board actions,
@@ -191,6 +331,12 @@ Keep controls for cold archived views, unselected removal, and remote removal.
 Use real isolated backend fixtures, desktop and mobile projects, and managed
 production builds. Exact scenario mapping and commands belong to the plan.
 
+The existing deferred desktop-sidebar and phone-picker archive scenarios also
+assert the progress toast before releasing the request, its polite live region,
+loading indicator, bottom-right viewport placement, and its removal on failure
+and success. With PR asset capture enabled, those same deterministic pending
+states produce the desktop and phone screenshots used in the pull request.
+
 ## Related records
 
 - [Archive confirmation](archive-confirmation.md)
@@ -200,3 +346,6 @@ production builds. Exact scenario mapping and commands belong to the plan.
 
 This local orchestration change needs no new ADR: its constraints and rationale
 are fully captured by this design and its requirements.
+
+- [Immediate sidebar archive plan](../../../plans/immediate-sidebar-archive/plan.md)
+- [Archive progress feedback plan](../../../plans/archive-progress-feedback/plan.md)

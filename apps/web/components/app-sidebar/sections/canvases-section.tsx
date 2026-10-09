@@ -17,6 +17,7 @@ import {
 } from "@/lib/api/domains/canvas-api";
 import { cn } from "@/lib/utils";
 import { useCanvasLifecycleRevision } from "@/lib/canvas-lifecycle";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
   APP_SIDEBAR_SECTION_IDS,
   SIDEBAR_ITEM_ACTIVE,
@@ -104,7 +105,7 @@ function OpenCanvasSettingsShortcut({ workspaceId }: { workspaceId: string }) {
           href={workspaceCanvasSettingsHref(workspaceId)}
           aria-label={t("canvases:openWorkspaceSettings")}
           data-testid="sidebar-canvases-settings"
-          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-muted/60 hover:text-foreground cursor-pointer"
+          className="flex h-7 w-7 [@media(pointer:coarse)]:size-11 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-muted/60 hover:text-foreground cursor-pointer"
         >
           <IconListDetails className="h-3.5 w-3.5" />
         </Link>
@@ -155,8 +156,10 @@ export function CanvasesSection({ collapsed }: { collapsed: boolean }) {
   const { t } = useTranslation();
   const pathname = usePathname();
   const enabled = useFeature("canvases");
+  const fastActions = useAppStore((state) => state.userSettings.sidebarFastActionsEnabled);
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
-  const workspaceId = enabled ? activeWorkspaceId : null;
+  const { isMobile } = useResponsiveBreakpoint();
+  const workspaceId = enabled && !isMobile ? activeWorkspaceId : null;
   const { canvases, ready } = useWorkspaceCanvasesState(workspaceId);
   const activeCanvases = canvases.filter(isActiveWorkspaceCanvas);
   const sectionHeaderRef = useRef<HTMLButtonElement>(null);
@@ -171,16 +174,29 @@ export function CanvasesSection({ collapsed }: { collapsed: boolean }) {
     >
       {({ onOpen, triggerRef }) => (
         <AppSidebarSection
+          presentation="navigation"
           id={APP_SIDEBAR_SECTION_IDS.canvases}
           label={t("canvases:canvases")}
           collapsed={collapsed}
           icon={IconLayoutGrid}
-          headerAction={<OpenCanvasSettingsShortcut workspaceId={activeWorkspaceId} />}
+          headerAction={
+            fastActions ? <OpenCanvasSettingsShortcut workspaceId={activeWorkspaceId} /> : undefined
+          }
           headerActionVisibility="always"
           collapsedSummary={activeCanvases.length > 0 ? activeCanvases.length : undefined}
           defaultExpanded={false}
           headerRef={sectionHeaderRef}
         >
+          {!fastActions && (
+            <Link
+              href={workspaceCanvasSettingsHref(activeWorkspaceId)}
+              data-testid="sidebar-canvases-settings"
+              className="flex min-h-8 items-center gap-2 rounded px-2.5 text-[13px] text-muted-foreground hover:bg-muted [@media(pointer:coarse)]:min-h-11"
+            >
+              <IconListDetails className="size-3.5" />
+              {t("canvases:openWorkspaceSettings")}
+            </Link>
+          )}
           {ready && activeCanvases.length === 0 ? (
             <EmptyCanvasRow onOpen={onOpen} triggerRef={triggerRef} />
           ) : (

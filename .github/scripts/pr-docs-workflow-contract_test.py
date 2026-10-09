@@ -18,8 +18,8 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
         self.assertTrue(WORKFLOW.is_file(), "Documentation coverage workflow is missing")
         self.workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    # @covers AC-CI-PR-DOCS-001.1, AC-CI-PR-DOCS-002.2
-    def test_runs_for_all_pr_and_manual_retry_events(self) -> None:
+    # @covers AC-CI-PR-DOCS-001.1, AC-CI-PR-DOCS-002.2, AC-CI-PR-DOCS-004.4
+    def test_runs_for_relevant_pr_and_manual_retry_events(self) -> None:
         trigger = self.workflow.partition("on:\n")[2].partition("\nconcurrency:")[0]
         self.assertIn("pull_request_target:", trigger)
         for event in (
@@ -31,12 +31,31 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
             "unlabeled",
             "ready_for_review",
         ):
-            self.assertIn(event, trigger)
+            if event == "ready_for_review":
+                self.assertNotIn(event, trigger)
+            else:
+                self.assertIn(event, trigger)
         self.assertIn("merge_group:", trigger)
         self.assertIn("checks_requested", trigger)
         self.assertIn("workflow_dispatch:", trigger)
         self.assertIn("pr_number:", trigger)
         self.assertNotIn("paths:", trigger)
+
+    # @covers AC-CI-PR-DOCS-002.2, AC-CI-PR-DOCS-004.4
+    def test_unrelated_label_events_are_rejected_at_the_job_boundary(self) -> None:
+        coverage_job = self.workflow.partition("jobs:\n")[2]
+        self.assertIn("github.event_name != 'pull_request_target'", coverage_job)
+        self.assertIn("github.event.action != 'labeled'", coverage_job)
+        self.assertIn("github.event.action != 'unlabeled'", coverage_job)
+        self.assertIn("github.event.label.name == 'no-docs-allow'", coverage_job)
+        self.assertLess(coverage_job.index("github.event.label.name"), coverage_job.index("runs-on:"))
+
+    # @covers AC-CI-PR-DOCS-004.4
+    def test_description_edits_are_rejected_but_base_retargets_run(self) -> None:
+        coverage_job = self.workflow.partition("jobs:\n")[2]
+        self.assertIn("github.event.action != 'edited'", coverage_job)
+        self.assertIn("github.event.changes.base != null", coverage_job)
+        self.assertLess(coverage_job.index("github.event.changes.base"), coverage_job.index("runs-on:"))
 
     # @covers AC-CI-PR-DOCS-003.1, AC-CI-PR-DOCS-003.4
     def test_serializes_prs_without_cancelling_merge_group_runs(self) -> None:
@@ -58,6 +77,7 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
             r"uses: actions/checkout@[0-9a-f]{40} # v[0-9]+",
         )
         self.assertIn("persist-credentials: false", self.workflow)
+        self.assertIn("TRUSTED_CHECKOUT_SHA: ${{ env.CHECKOUT_REF }}", self.workflow)
         self.assertIn("github.event.merge_group.base_sha", self.workflow)
         self.assertNotIn("github.event.pull_request.head.sha", self.workflow)
         self.assertIn("ref: ${{ env.CHECKOUT_REF }}", self.workflow)
@@ -67,6 +87,17 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
         self.assertIn("node .github/scripts/pr-docs.cjs", self.workflow)
         self.assertIn("name: Publish PR documentation coverage status", self.workflow)
         self.assertNotIn("name: PR documentation coverage\n", self.workflow)
+        git_reader = (REPO_ROOT / ".github" / "scripts" / "pr-docs-git.cjs").read_text(
+            encoding="utf-8"
+        )
+        validator = (REPO_ROOT / ".github" / "scripts" / "pr-docs.cjs").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("refs/pull/${this.pullNumber}/head", git_reader)
+        self.assertIn("--filter=blob:none", git_reader)
+        self.assertIn("--no-textconv", git_reader)
+        self.assertNotIn("/search/code", validator)
+        self.assertNotIn("searchCode(", validator)
 
     # @covers AC-CI-PR-DOCS-001.1, AC-CI-PR-DOCS-002.1, AC-CI-PR-DOCS-003.2
     def test_dispatch_is_restricted_to_the_default_branch_and_script_owns_statuses(self) -> None:
@@ -90,10 +121,13 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
         self.assertRegex(
             lint_workflow,
             r"(?m)^      - name: Test pull request documentation validator$\n"
-            r"^        run: node --test .github/scripts/pr-docs.test.cjs$",
+            r"^        run: node --test .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs$",
         )
         makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-        self.assertIn("@node --test .github/scripts/pr-docs.test.cjs", makefile)
+        self.assertIn(
+            "@node --test .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs",
+            makefile,
+        )
 
 
 if __name__ == "__main__":

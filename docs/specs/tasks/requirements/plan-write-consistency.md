@@ -8,17 +8,19 @@ owners:
 
 # Task plan write consistency Requirements
 
+## Implemented agent safety successor
+
+The implemented [safe agent edits contract](plan-safe-edits.md) adds preventive
+rejection and conditional recovery for agent writes. Its
+[transition matrix](../system-design/plan-safe-edits.md#contract-transition)
+identifies the affected clauses and preserves browser behavior.
+
 ## Overview
 
-A task plan write reads the current content and latest revision. It decides if the
-write truncates content and if it can coalesce. These reads and the commit are not
-serialized, so another writer can change the state before the commit.
-
-This capability defines what a plan write must guarantee about the state it reports
-on and the state it commits against. The `tasks` system owns it because the durable
-artifact is the plan and its revision history, not the MCP surface that exposes the
-warning. The missing-task boundary is owned by `REQ-TASKS-DOCUMENTS-001` and is
-unchanged here.
+A task plan write reads current content and history before it decides truncation
+and coalescing. This contract serializes those decisions with the commit.
+The tasks system owns the durable plan and its history.
+The missing-task boundary remains under `REQ-TASKS-DOCUMENTS-001`.
 
 ## Terminology
 

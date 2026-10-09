@@ -333,3 +333,10 @@ not validation of the repair.
 - Office skill synchronization can absorb the canvas skill if embeds overlap.
 - Permission changes can activate broader access before user confirmation.
 - Arbitrary application CSS can still produce a poor phone layout.
+
+## Same-origin follow-up
+
+The [trusted same-origin package](../canvas-same-origin-auth/plan.md) supersedes
+this package's opaque-origin and cookie-isolation assumptions. Existing results
+record the earlier implementation. They do not verify the new runtime behavior.
+The follow-up work orders own the replacement tests and documentation.

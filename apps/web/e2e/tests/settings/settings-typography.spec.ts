@@ -1,7 +1,10 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Settings typography contract on desktop", () => {
-  test("keeps page, section, and card headings distinct", async ({ testPage, prCapture }) => {
+  test("keeps page, section, and preference row roles distinct", async ({
+    testPage,
+    prCapture,
+  }) => {
     await testPage.setViewportSize({ width: 1280, height: 900 });
     await testPage.goto("/settings/preferences/appearance");
 
@@ -14,7 +17,7 @@ test.describe("Settings typography contract on desktop", () => {
     const card = testPage.getByTestId("theme-settings-card");
     await expect(pageTitle).toBeVisible();
     await expect(sectionTitle).toBeVisible();
-    await expect(card.locator("h3")).toHaveCount(1);
+    await expect(card).toHaveAttribute("data-settings-row", "true");
 
     const pageSize = await pageTitle.evaluate((element) =>
       parseFloat(getComputedStyle(element).fontSize),
@@ -22,12 +25,8 @@ test.describe("Settings typography contract on desktop", () => {
     const sectionSize = await sectionTitle.evaluate((element) =>
       parseFloat(getComputedStyle(element).fontSize),
     );
-    const cardSize = await card
-      .locator("h3")
-      .evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
     expect(pageSize).toBeCloseTo(24, 1);
     expect(sectionSize).toBeCloseTo(18, 1);
-    expect(cardSize).toBeCloseTo(16, 1);
     await expect(testPage.getByTestId("theme-settings-card").locator("button")).toHaveCount(1);
     const controlBox = await testPage
       .getByTestId("theme-settings-card")

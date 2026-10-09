@@ -23,6 +23,9 @@ actions are owned by
 
 ## Requirements
 
+The [Change workflow contract](change-workflow.md) defines the form and
+version-checked mapping behavior for single-task cross-workflow actions.
+
 ### REQ-TASKS-TASK-ACTIONS-MENU-003: Action outcomes and post-action navigation
 
 **Intent:** An action taken from one of these surfaces has the same effect on
@@ -71,10 +74,14 @@ coherent rather than on a surface whose subject no longer exists.
   detail surface and the request succeeds, the system shall remove the task and
   apply the same switch-to-next-task outcome as
   AC-TASKS-TASK-ACTIONS-MENU-003.4.
-- **AC-TASKS-TASK-ACTIONS-MENU-003.6:** When the user selects a Move to or Send
-  to workflow target from either surface, the system shall move the subject
-  task alone to that step, shall keep the surface open on that task, and shall
-  not navigate.
+- **AC-TASKS-TASK-ACTIONS-MENU-003.6:** Selecting a **Move to** target or a
+  legacy bulk **Send to workflow** target shall move the subject task alone to
+  that step, keep the surface open on that task, and not navigate. Selecting
+  **Change workflow...** shall open the form defined by
+  [REQ-TASKS-CHANGE-WORKFLOW-001](change-workflow.md); submitting it shall
+  perform the version-checked transition defined by
+  [REQ-TASKS-CHANGE-WORKFLOW-002](change-workflow.md), keep the surface open,
+  and not navigate.
 - **AC-TASKS-TASK-ACTIONS-MENU-003.7:** When a move made from the detail
   surface succeeds, the system shall show the new step as current in the top
   bar's workflow stepper.
@@ -89,7 +96,10 @@ coherent rather than on a surface whose subject no longer exists.
 - **AC-TASKS-TASK-ACTIONS-MENU-003.10:** When the user confirms Detach from
   parent from either surface, the system shall detach the subject task from its
   parent and shall leave the surface open on that task.
-- **AC-TASKS-TASK-ACTIONS-MENU-003.11:** The system shall introduce no API
-  endpoint, request payload, persisted field, permission, or feature flag for
-  any action reached from these surfaces; every action shall use the contract
-  it already uses from the card actions menu.
+- **AC-TASKS-TASK-ACTIONS-MENU-003.11:** Actions governed by this menu
+  requirement shall use their existing contracts and shall add no endpoint,
+  request payload, persisted field, permission, or feature flag. The explicit
+  **Change workflow...** form is the exception: it uses the existing move route
+  with the source-versioned `workflow_change` object specified in
+  [REQ-TASKS-CHANGE-WORKFLOW-002](change-workflow.md), and stores choices in the
+  existing task workflow-agent override field.

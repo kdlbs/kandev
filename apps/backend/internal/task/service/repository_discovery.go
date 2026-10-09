@@ -763,11 +763,38 @@ func normalizeRoots(roots []string) []string {
 	return normalized
 }
 
-func scanRootForRepos(ctx context.Context, root string, maxDepth int) ([]LocalRepository, error) {
+type repositoryDiscoveryScanWarning struct {
+	path string
+	err  error
+}
+
+type repositoryDiscoveryScanResult struct {
+	repositories []LocalRepository
+	warnings     []repositoryDiscoveryScanWarning
+}
+
+type repositoryDiscoveryWalkDir func(string, fs.WalkDirFunc) error
+
+func scanRootForRepos(
+	ctx context.Context,
+	root string,
+	maxDepth int,
+) (repositoryDiscoveryScanResult, error) {
+	return scanRootForReposWithWalk(ctx, root, maxDepth, filepath.WalkDir)
+}
+
+func scanRootForReposWithWalk(
+	ctx context.Context,
+	root string,
+	maxDepth int,
+	walkDir repositoryDiscoveryWalkDir,
+) (repositoryDiscoveryScanResult, error) {
 	if _, err := os.Stat(root); err != nil {
-		return nil, err
+		return repositoryDiscoveryScanResult{}, err
 	}
 	repos := make([]LocalRepository, 0)
+	warnings := make([]repositoryDiscoveryScanWarning, 0)
+	warnedPaths := make(map[string]struct{})
 	home, _ := os.UserHomeDir()
 	walker := &repoWalker{
 		root:        root,
@@ -777,8 +804,15 @@ func scanRootForRepos(ctx context.Context, root string, maxDepth int) ([]LocalRe
 		homeRoot:    home,
 		goos:        runtime.GOOS,
 		ctx:         ctx,
+		onAccessDenied: func(path string, err error) {
+			if _, ok := warnedPaths[path]; ok {
+				return
+			}
+			warnedPaths[path] = struct{}{}
+			warnings = append(warnings, repositoryDiscoveryScanWarning{path: path, err: err})
+		},
 	}
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err := walkDir(root, func(path string, d fs.DirEntry, err error) error {
 		repo, walkErr := walker.visit(path, d, err)
 		if walkErr != nil {
 			return walkErr
@@ -789,35 +823,42 @@ func scanRootForRepos(ctx context.Context, root string, maxDepth int) ([]LocalRe
 		return nil
 	})
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return nil, err
+		return repositoryDiscoveryScanResult{}, err
 	}
 	if err != nil {
-		return nil, err
+		return repositoryDiscoveryScanResult{}, err
 	}
-	return repos, nil
+	return repositoryDiscoveryScanResult{repositories: repos, warnings: warnings}, nil
 }
 
 // repoWalker holds state for the WalkDir callback used in scanRootForRepos.
 type repoWalker struct {
-	root        string
-	maxDepth    int
-	libraryRoot string
-	cacheRoot   string
-	homeRoot    string
-	goos        string
-	ctx         context.Context
+	root           string
+	maxDepth       int
+	libraryRoot    string
+	cacheRoot      string
+	homeRoot       string
+	goos           string
+	ctx            context.Context
+	onAccessDenied func(path string, err error)
 }
 
 // visit is the WalkDir callback. Returns a non-nil *LocalRepository when a git repo is found.
 func (w *repoWalker) visit(path string, d fs.DirEntry, err error) (*LocalRepository, error) {
+	if contextErr := w.ctx.Err(); contextErr != nil {
+		return nil, contextErr
+	}
 	if err != nil {
-		if path == w.root || fsdiagnostics.IsAccessDenied(err) {
+		if path == w.root {
 			return nil, err
 		}
+		if fsdiagnostics.IsAccessDenied(err) {
+			if w.onAccessDenied != nil {
+				w.onAccessDenied(path, err)
+			}
+			return nil, nil
+		}
 		return nil, nil //nolint:nilerr // skip non-permission entries that cannot be accessed
-	}
-	if w.ctx.Err() != nil {
-		return nil, w.ctx.Err()
 	}
 	if path == w.root {
 		return nil, nil

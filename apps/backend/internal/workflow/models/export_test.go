@@ -741,6 +741,23 @@ workflows:
 	})
 }
 
+func TestUnclassifiedFallbackWorkflowVetoRejectsYAMLNull(t *testing.T) {
+	var decoded WorkflowExport
+	err := yaml.Unmarshal([]byte(`
+version: 2
+type: kandev_workflow
+workflows:
+  - name: Current
+    steps:
+      - name: Work
+        position: 0
+        color: blue
+        disable_unclassified_fallback: null
+`), &decoded)
+	assert.ErrorContains(t, err, "disable_unclassified_fallback")
+	assert.ErrorContains(t, err, "not null")
+}
+
 func TestPullFromStepPositionToID(t *testing.T) {
 	position := 0
 	step := StepPortable{

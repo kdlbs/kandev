@@ -49,7 +49,12 @@ const overview = {
     quarantine_retention_hours: 168,
     workspaces: { enabled: true, dependency_cleanup_enabled: false },
     kandev_containers: { enabled: true },
-    go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
+    go_cache: {
+      enabled: false,
+      max_bytes: 16106127360,
+      adopted_path: "",
+      allow_cleanup_while_busy: false,
+    },
     docker: {
       dedicated_daemon_acknowledged: false,
       build_cache_enabled: false,
@@ -448,7 +453,7 @@ describe("StorageMaintenanceSettings pending policy", () => {
 
     fireEvent.click(screen.getByTestId("storage-resource-temporary-artifacts-trigger"));
     fireEvent.click(screen.getByTestId("storage-temporary-artifacts-clean"));
-    expect(screen.getByText("Clean stale Kandev artifacts?")).toBeTruthy();
+    expect(screen.getByText("Clean inactive Kandev temporary files?")).toBeTruthy();
     fireEvent.click(screen.getByTestId("storage-temporary-artifacts-confirm"));
     await waitFor(() =>
       expect(currentController.runNow).toHaveBeenCalledWith(["temporary_artifacts"]),

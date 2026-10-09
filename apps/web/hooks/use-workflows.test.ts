@@ -41,6 +41,7 @@ type WorkspaceContextReadArgs = [
 ];
 
 type MockState = {
+  connection: { status: "connected" | "reconnecting" };
   workflows: { items: Array<{ id: string; workspaceId: string; name: string }> };
   workspaces: { activeId: string | null };
   workspaceContextGeneration: number;
@@ -50,12 +51,16 @@ type MockState = {
   requestWorkspaceContextRefresh?: typeof mockRequestWorkspaceContextRefresh;
 };
 
-let mockState: MockState = {
-  workflows: { items: [] },
-  workspaces: { activeId: null },
-  workspaceContextGeneration: 0,
-  setWorkflows: mockSetWorkflows,
-};
+function initialMockState(activeId: string | null = "ws-A"): MockState {
+  return {
+    connection: { status: "connected" },
+    workflows: { items: [] },
+    workspaces: { activeId },
+    workspaceContextGeneration: 0,
+    setWorkflows: mockSetWorkflows,
+  };
+}
+let mockState = initialMockState(null);
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
@@ -89,12 +94,7 @@ function setVisibility(value: DocumentVisibilityState) {
 describe("useWorkflows — stale response guard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockState = {
-      workflows: { items: [] },
-      workspaces: { activeId: "ws-A" },
-      workspaceContextGeneration: 0,
-      setWorkflows: mockSetWorkflows,
-    };
+    mockState = initialMockState();
   });
 
   it("discards an A response that resolves after reset activates B but before rerender", async () => {
@@ -145,7 +145,10 @@ describe("useWorkflows — stale response guard", () => {
     mockListWorkflows.mockResolvedValueOnce({ workflows: [makeWorkflow("wf-B", "ws-B")] });
     rerender({ workspaceId: "ws-B" });
     await waitFor(() =>
-      expect(mockSetWorkflows).toHaveBeenCalledWith([expect.objectContaining({ id: "wf-B" })]),
+      expect(mockSetWorkflows).toHaveBeenCalledWith(
+        [expect.objectContaining({ id: "wf-B" })],
+        undefined,
+      ),
     );
 
     // Now let A resolve. It must NOT overwrite the store with A's workflows.
@@ -183,7 +186,10 @@ describe("useWorkflows — stale response guard", () => {
     mockListWorkflows.mockResolvedValueOnce({ workflows: [makeWorkflow("wf-B", "ws-B")] });
     rerender({ workspaceId: "ws-B" });
     await waitFor(() =>
-      expect(mockSetWorkflows).toHaveBeenCalledWith([expect.objectContaining({ id: "wf-B" })]),
+      expect(mockSetWorkflows).toHaveBeenCalledWith(
+        [expect.objectContaining({ id: "wf-B" })],
+        undefined,
+      ),
     );
 
     // A's fetch fails after B already succeeded. Catch must NOT wipe the store.
@@ -215,12 +221,7 @@ describe("useWorkflows — stale response guard", () => {
 describe("useWorkflows — explicit workspace selection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockState = {
-      workflows: { items: [] },
-      workspaces: { activeId: "ws-A" },
-      workspaceContextGeneration: 0,
-      setWorkflows: mockSetWorkflows,
-    };
+    mockState = initialMockState();
   });
 
   it("loads workflows when the selected workspace is not globally active", async () => {
@@ -229,9 +230,10 @@ describe("useWorkflows — explicit workspace selection", () => {
     renderHook(() => useWorkflows("ws-B", true));
 
     await waitFor(() =>
-      expect(mockSetWorkflows).toHaveBeenCalledWith([
-        expect.objectContaining({ id: "wf-B", workspaceId: "ws-B" }),
-      ]),
+      expect(mockSetWorkflows).toHaveBeenCalledWith(
+        [expect.objectContaining({ id: "wf-B", workspaceId: "ws-B" })],
+        undefined,
+      ),
     );
   });
 
@@ -243,9 +245,10 @@ describe("useWorkflows — explicit workspace selection", () => {
     renderHook(() => useWorkflows("ws-B", true));
 
     await waitFor(() =>
-      expect(mockSetWorkflows).toHaveBeenCalledWith([
-        expect.objectContaining({ id: "wf-B", prompt: "Do the thing" }),
-      ]),
+      expect(mockSetWorkflows).toHaveBeenCalledWith(
+        [expect.objectContaining({ id: "wf-B", prompt: "Do the thing" })],
+        undefined,
+      ),
     );
   });
 });
@@ -257,17 +260,23 @@ describe("useEnsureWorkspaceWorkflows", () => {
     mockSetWorkspaceContextRead.mockReset();
     mockRequestWorkspaceContextRefresh.mockReset();
     mockListWorkflows.mockResolvedValue({ workflows: [] });
-    mockState = {
-      workflows: { items: [] },
-      workspaces: { activeId: "ws-A" },
-      workspaceContextGeneration: 0,
-      setWorkflows: mockSetWorkflows,
-    };
+    mockState = initialMockState();
   });
 
   it("fetches workflows for the store's active workspace on mount", async () => {
     renderHook(() => useEnsureWorkspaceWorkflows());
     await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledWith("ws-A", expect.anything()));
+  });
+
+  it("refreshes workflow scope metadata after reconnecting", async () => {
+    const { rerender } = renderHook(() => useEnsureWorkspaceWorkflows());
+    await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledTimes(1));
+    mockState = { ...mockState, connection: { status: "reconnecting" } };
+    rerender();
+    await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledTimes(2));
+    mockState = { ...mockState, connection: { status: "connected" } };
+    rerender();
+    await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledTimes(3));
   });
 
   it("re-fetches when the store's active workspace changes", async () => {

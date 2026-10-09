@@ -2,12 +2,19 @@ package process
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+type comparisonTargetCommandError struct {
+	code int
+}
+
+func (e comparisonTargetCommandError) Error() string { return "git command failed" }
+
+func (e comparisonTargetCommandError) ExitCode() int { return e.code }
 
 type comparisonTargetGitFake struct {
 	remoteURL string
@@ -27,7 +34,7 @@ func (f *comparisonTargetGitFake) run(_ context.Context, args ...string) (string
 	}
 	if len(args) >= 3 && args[0] == "config" && args[1] == "--get" && strings.HasPrefix(args[2], "remote.") {
 		if f.remoteURL == "" {
-			return "", errors.New("remote not found")
+			return "", comparisonTargetCommandError{code: 1}
 		}
 		return f.remoteURL, nil
 	}

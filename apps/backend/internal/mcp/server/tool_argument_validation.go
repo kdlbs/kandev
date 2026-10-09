@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kandev/kandev/internal/mcp/toolschema"
 	"github.com/mark3labs/mcp-go/mcp"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
@@ -52,6 +53,9 @@ func compileToolArgumentSchema(toolName string, tool mcp.Tool) (*jsonschema.Sche
 	var schemaDoc map[string]any
 	if err := json.Unmarshal(rawSchema, &schemaDoc); err != nil {
 		return nil, fmt.Errorf("decode schema: %w", err)
+	}
+	if err := toolschema.CheckPortableRoot(schemaDoc); err != nil {
+		return nil, err
 	}
 	schemaDoc["additionalProperties"] = false
 
@@ -118,22 +122,149 @@ func sanitizedToolArgumentError(toolName string, err error) error {
 		failure = validationErr
 		keyword = "schema"
 	}
-	return fmt.Errorf("invalid arguments for %s: validation failed at %s (keyword: %s%s)",
-		toolName, validationInstancePath(failure.InstanceLocation), keyword, missingRequiredProperties(failure))
+	primaryPath := validationInstancePath(failure.InstanceLocation)
+	return fmt.Errorf("invalid arguments for %s: validation failed at %s (keyword: %s%s%s)",
+		toolName, primaryPath, keyword,
+		missingRequiredProperties(validationErr, primaryPath),
+		unknownArgumentDetail(toolName, validationErr, primaryPath))
 }
 
-func missingRequiredProperties(err *jsonschema.ValidationError) string {
-	required, ok := err.ErrorKind.(*kind.Required)
-	if !ok || len(required.Missing) == 0 {
+// sessionBoundTaskTools identifies tools whose task scope is owned by the
+// calling session and cannot be selected through arguments.
+var sessionBoundTaskTools = map[string]bool{
+	"get_task_change_requests_kandev":              true,
+	"update_task_change_request_automation_kandev": true,
+}
+
+const sessionBoundTaskRule = "This tool is bound to the calling task; cross-task targeting is not supported."
+
+// unknownArgumentDetail traverses every validation failure and groups rejected
+// properties by instance path before it formats the diagnostic.
+func unknownArgumentDetail(toolName string, root *jsonschema.ValidationError, primaryPath string) string {
+	propertiesByPath := collectUnknownArgumentsByPath(root)
+	if len(propertiesByPath) == 0 {
 		return ""
 	}
 
-	missing := make([]string, len(required.Missing))
-	for i, property := range required.Missing {
-		missing[i] = strconv.Quote(property)
+	paths := make([]string, 0, len(propertiesByPath))
+	for path := range propertiesByPath {
+		paths = append(paths, path)
 	}
-	sort.Strings(missing)
-	return "; missing: " + strings.Join(missing, ", ")
+	sort.Strings(paths)
+	parts := make([]string, 0, len(paths))
+	hasTaskID := false
+	for _, path := range paths {
+		properties := make([]string, 0, len(propertiesByPath[path]))
+		for property := range propertiesByPath[path] {
+			properties = append(properties, property)
+			if property == mcpKeyTaskID {
+				hasTaskID = true
+			}
+		}
+		sort.Strings(properties)
+		quoted := make([]string, len(properties))
+		for i, property := range properties {
+			quoted[i] = strconv.Quote(property)
+		}
+		part := strings.Join(quoted, ", ")
+		if len(paths) > 1 || path != "$" || primaryPath != "$" {
+			part += " at " + path
+		}
+		parts = append(parts, part)
+	}
+
+	detail := "; unknown arguments: " + strings.Join(parts, "; ")
+	if sessionBoundTaskTools[toolName] && hasTaskID {
+		detail += " " + sessionBoundTaskRule
+	}
+	return detail
+}
+
+func collectUnknownArgumentsByPath(root *jsonschema.ValidationError) map[string]map[string]struct{} {
+	propertiesByPath := make(map[string]map[string]struct{})
+	collectUnknownArguments(root, propertiesByPath)
+	return propertiesByPath
+}
+
+func collectUnknownArguments(
+	failure *jsonschema.ValidationError,
+	propertiesByPath map[string]map[string]struct{},
+) {
+	if failure == nil {
+		return
+	}
+	additional, ok := failure.ErrorKind.(*kind.AdditionalProperties)
+	if ok && len(additional.Properties) > 0 {
+		path := validationInstancePath(failure.InstanceLocation)
+		properties := propertiesByPath[path]
+		if properties == nil {
+			properties = make(map[string]struct{}, len(additional.Properties))
+			propertiesByPath[path] = properties
+		}
+		for _, property := range additional.Properties {
+			properties[property] = struct{}{}
+		}
+	}
+	for _, cause := range failure.Causes {
+		collectUnknownArguments(cause, propertiesByPath)
+	}
+}
+
+func missingRequiredProperties(root *jsonschema.ValidationError, primaryPath string) string {
+	propertiesByPath := collectMissingRequiredByPath(root)
+	if len(propertiesByPath) == 0 {
+		return ""
+	}
+
+	paths := make([]string, 0, len(propertiesByPath))
+	for path := range propertiesByPath {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	parts := make([]string, 0, len(paths))
+	for _, path := range paths {
+		missing := make([]string, 0, len(propertiesByPath[path]))
+		for property := range propertiesByPath[path] {
+			missing = append(missing, strconv.Quote(property))
+		}
+		sort.Strings(missing)
+		part := strings.Join(missing, ", ")
+		if len(paths) > 1 || path != "$" || primaryPath != "$" {
+			part += " at " + path
+		}
+		parts = append(parts, part)
+	}
+	return "; missing: " + strings.Join(parts, "; ")
+}
+
+func collectMissingRequiredByPath(root *jsonschema.ValidationError) map[string]map[string]struct{} {
+	propertiesByPath := make(map[string]map[string]struct{})
+	collectMissingRequired(root, propertiesByPath)
+	return propertiesByPath
+}
+
+func collectMissingRequired(
+	failure *jsonschema.ValidationError,
+	propertiesByPath map[string]map[string]struct{},
+) {
+	if failure == nil {
+		return
+	}
+	required, ok := failure.ErrorKind.(*kind.Required)
+	if ok && len(required.Missing) > 0 {
+		path := validationInstancePath(failure.InstanceLocation)
+		properties := propertiesByPath[path]
+		if properties == nil {
+			properties = make(map[string]struct{}, len(required.Missing))
+			propertiesByPath[path] = properties
+		}
+		for _, property := range required.Missing {
+			properties[property] = struct{}{}
+		}
+	}
+	for _, cause := range failure.Causes {
+		collectMissingRequired(cause, propertiesByPath)
+	}
 }
 
 func firstKeywordFailure(err *jsonschema.ValidationError) (*jsonschema.ValidationError, string) {

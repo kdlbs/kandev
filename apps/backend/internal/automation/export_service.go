@@ -149,6 +149,14 @@ func (s *Service) buildExportAutomation(ctx context.Context, tx *sqlx.Tx, a *Aut
 			}
 			return a.TaskMode
 		}(),
+		ManagedDestination: func() *exportManagedConversationDestination {
+			if a.ManagedDestination == nil {
+				return nil
+			}
+			return &exportManagedConversationDestination{
+				PluginID: a.ManagedDestination.PluginID, InstanceKey: a.ManagedDestination.InstanceKey,
+			}
+		}(),
 		RepositoryMode: func() RepositoryMode {
 			if a.RepositoryMode == "" {
 				if len(a.RepositoryIDs) > 0 {

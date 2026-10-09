@@ -56,6 +56,10 @@ test.describe("Mobile Kanban card archive confirmation", () => {
     const task = await apiClient.createTask(seedData.workspaceId, TASK_TITLE, {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
+      agent_profile_id: seedData.agentProfileId,
+      prepare_session: true,
+      repository_ids: [seedData.repositoryId],
+      executor_profile_id: seedData.worktreeExecutorProfileId,
     });
     await apiClient.createTask(seedData.workspaceId, "Mobile Kanban archive neighbor", {
       workflow_id: seedData.workflowId,
@@ -78,6 +82,8 @@ test.describe("Mobile Kanban card archive confirmation", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText(TASK_TITLE);
     await expect(dialog.getByTestId("task-confirmation-outcome")).toContainText(TASK_TITLE);
+    await expect(dialog).toContainText("Clean Git worktrees are removed.");
+    await expect(dialog).toContainText("Unpublished local branches remain available.");
     await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Archive", exact: true })).toBeVisible();
     await expect(testPage.getByTestId(INLINE_CONFIRMATION_TEST_ID)).toHaveCount(0);

@@ -182,6 +182,9 @@ func applyServiceOverrides(opts *service.ServiceOptions, o service.ServiceOption
 	if o.TaskCanceller != nil {
 		opts.TaskCanceller = o.TaskCanceller
 	}
+	if o.RunExecutionStopper != nil {
+		opts.RunExecutionStopper = o.RunExecutionStopper
+	}
 	if o.TaskWorkspace != nil {
 		opts.TaskWorkspace = o.TaskWorkspace
 	}

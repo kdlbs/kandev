@@ -42,7 +42,7 @@ The existing external-runner contract retains ownership of fleet selection and t
 - **AC-PLATFORM-CI-PERFORMANCE-002.1:** A successful frontend dependency installation shall support cache reuse by a later compatible run. Evidence shall show an actual save and restore.
 - **AC-PLATFORM-CI-PERFORMANCE-002.2:** A missing or unavailable cache shall permit a complete dependency installation. Dependency resolution shall continue to enforce the lockfile.
 
-### REQ-PLATFORM-CI-PERFORMANCE-003: Complete frontend verification with less overhead
+### REQ-PLATFORM-CI-PERFORMANCE-003: Complete verification with less overhead
 
 **Intent:** Reduce repeated test setup and shorten feedback without weakening verification.
 
@@ -51,6 +51,8 @@ The existing external-runner contract retains ownership of fleet selection and t
 - **AC-PLATFORM-CI-PERFORMANCE-003.1:** Optimized frontend verification shall retain every selected test file and test case exactly once across its test partitions.
 - **AC-PLATFORM-CI-PERFORMANCE-003.2:** Browser, multilingual, and production-environment regression tests shall retain their existing behavior. Test files shall retain isolated state.
 - **AC-PLATFORM-CI-PERFORMANCE-003.3:** Required frontend verification shall fail when any selected partition or mandatory check fails or is cancelled. Deliberate change-based skips shall remain valid.
+- **AC-PLATFORM-CI-PERFORMANCE-003.4:** Partitioned Windows process verification shall retain every runnable native test, fuzz seed corpus, example, and nested subtest in the existing package selection exactly once, with race detection and the existing per-command and job budgets preserved.
+- **AC-PLATFORM-CI-PERFORMANCE-003.5:** Windows process verification shall fail when native enumeration, complete disjoint selection, any selected command, or completion evidence fails. A failed or cancelled cohort shall block the existing required backend gate; other started cohorts shall still be joined. Existing independent native Windows checks shall remain required.
 
 ### REQ-PLATFORM-CI-PERFORMANCE-004: Attributable performance evidence
 
@@ -77,3 +79,4 @@ The existing external-runner contract retains ownership of fleet selection and t
 ## Implementation plans
 
 - [CI performance](../../../plans/ci-performance/plan.md)
+- [First-commit Unstage delivery dependency](../../../plans/unstage-all-before-first-commit/plan.md)

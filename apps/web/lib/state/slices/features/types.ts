@@ -7,6 +7,7 @@
 export const defaultFeatureFlags = {
   // New release toggles start disabled in every frontend state. The SSR layer
   // overwrites this with the backend's effective values after startup.
+  lspBrowserContinuity: false,
   office: false,
   auth: false,
   canvases: false,
@@ -14,9 +15,12 @@ export const defaultFeatureFlags = {
   dynamicAgentRouting: false,
   claudeBackgroundPromptHandoff: false,
   claudeMidTurnSteering: false,
-  officeSessionIdentity: false,
   needsYouInbox: false,
   agentSurvival: false,
+  coordinator: false,
+  coordinatorPhase2: false,
+  codexAppServer: false,
+  agentBackgroundWork: false,
 } as const;
 
 export type FeatureName = keyof typeof defaultFeatureFlags;

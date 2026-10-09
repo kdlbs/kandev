@@ -29,7 +29,7 @@ test.describe("Office workspace kill switch", () => {
     expect(baselineFire.status).toBe(200);
 
     await testPage.goto(`/office?workspaceId=${officeSeed.workspaceId}`);
-    await expect(testPage.getByTestId("office-workspace-running-bar")).toBeVisible({
+    await expect(testPage.getByTestId("office-pause-workspace-button")).toBeVisible({
       timeout: 10_000,
     });
     await expect(testPage.getByTestId("office-workspace-paused-banner")).toHaveCount(0);
@@ -78,7 +78,7 @@ test.describe("Office workspace kill switch", () => {
     await resumePosted;
 
     await expect(testPage.getByTestId("office-workspace-paused-banner")).toHaveCount(0);
-    await expect(testPage.getByTestId("office-workspace-running-bar")).toBeVisible();
+    await expect(testPage.getByTestId("office-pause-workspace-button")).toBeVisible();
 
     // Resume is effective (AC-005.2/-005.3): the same routine can fire again.
     const resumedFire = await officeApi.runRoutine(routine.id);
@@ -91,7 +91,7 @@ test.describe("Office workspace kill switch", () => {
     officeSeed,
   }) => {
     await testPage.goto(`/office?workspaceId=${officeSeed.workspaceId}`);
-    await expect(testPage.getByTestId("office-workspace-running-bar")).toBeVisible({
+    await expect(testPage.getByTestId("office-pause-workspace-button")).toBeVisible({
       timeout: 10_000,
     });
 
@@ -101,7 +101,7 @@ test.describe("Office workspace kill switch", () => {
 
     // AC-006.13: refresh re-reads and displays what the server holds.
     const refreshRead = waitForHttp(testPage, "GET", /\/office\/workspaces\/[^/]+\/pause$/);
-    await testPage.getByTestId("office-pause-refresh-running").click();
+    await testPage.getByTestId("office-pause-refresh-topbar").click();
     await refreshRead;
 
     const banner = testPage.getByTestId("office-workspace-paused-banner");

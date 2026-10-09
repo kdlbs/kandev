@@ -2,6 +2,7 @@
 
 import {
   useState,
+  type ComponentPropsWithRef,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
@@ -35,7 +36,7 @@ type RemoteCloudTooltipProps = {
   executorType?: string | null;
   fallbackName?: string | null;
   iconClassName?: string;
-  /** When provided, uses this data directly instead of fetching via WS on hover. */
+  /** When provided, uses this data directly instead of subscribing to live status. */
   status?: RemoteExecutorStatusData | null;
 };
 
@@ -55,7 +56,7 @@ const CLOUD_STATE_CLASSES: Record<ReturnType<typeof getCloudState>, string> = {
   stale: "text-muted-foreground",
 };
 
-type StatusTriggerProps = {
+type StatusTriggerProps = Omit<ComponentPropsWithRef<"span">, "onFocus" | "onBlur"> & {
   touch: boolean;
   expanded: boolean;
   label: string;
@@ -83,10 +84,12 @@ function StatusTrigger({
   onBlur,
   onTouchClick,
   onTouchKeyDown,
+  ...triggerProps
 }: StatusTriggerProps) {
   const Icon = icon.Icon;
   return (
     <span
+      {...triggerProps}
       data-testid="remote-executor-status-trigger"
       role={touch ? "button" : "img"}
       tabIndex={0}
@@ -97,11 +100,18 @@ function StatusTrigger({
       onPointerLeave={onPointerLeave}
       onFocus={onFocus}
       onBlur={onBlur}
-      onClick={onTouchClick}
-      onKeyDown={onTouchKeyDown}
+      onClick={(event) => {
+        onTouchClick?.(event);
+        triggerProps.onClick?.(event);
+      }}
+      onKeyDown={(event) => {
+        onTouchKeyDown?.(event);
+        triggerProps.onKeyDown?.(event);
+      }}
       className={cn(
         "relative inline-flex shrink-0 items-center justify-center",
         CLOUD_STATE_CLASSES[cloudState],
+        triggerProps.className,
         touch &&
           "cursor-pointer transition-transform duration-150 ease-out active:scale-[0.96] after:absolute after:left-1/2 after:top-1/2 after:size-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']",
       )}

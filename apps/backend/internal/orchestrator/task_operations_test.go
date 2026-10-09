@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -308,14 +310,10 @@ func TestCreateStartSession_OfficeUnassignedReusesResolvedProfileSession(t *test
 	}
 }
 
-// TestCreateStartSession_ReviewerRunFlagOff is the regression baseline: a
-// review run whose agent (ceo-reviewer) differs from the task's runner seat
-// (pm-runner) lands in the runner's session when features.officeSessionIdentity
-// is off (the default), reproducing the FORBIDDEN bug this task fixes —
-// record_step_decision_kandev resolves the session's AgentProfileID as the
-// decider identity, so the reviewer's own decision is checked against seats
-// the runner (not the reviewer) occupies.
-func TestCreateStartSession_ReviewerRunFlagOff(t *testing.T) {
+// TestCreateStartSession_ReviewerRunUsesParticipantSession verifies that an
+// Office review run uses the reviewer's session even when no feature override
+// is configured.
+func TestCreateStartSession_ReviewerRunUsesParticipantSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	now := time.Now().UTC()
@@ -360,16 +358,12 @@ func TestCreateStartSession_ReviewerRunFlagOff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
-	if session.AgentProfileID != "pm-runner" {
-		t.Fatalf("session owner = %q, want pm-runner (flag off preserves runner-keyed identity)", session.AgentProfileID)
+	if session.AgentProfileID != "ceo-reviewer" {
+		t.Fatalf("session owner = %q, want ceo-reviewer", session.AgentProfileID)
 	}
 }
 
-// TestCreateStartSession_ReviewerRunFlagOnGetsOwnSession is the fix's green
-// case: with features.officeSessionIdentity on, the same reviewer run lands
-// in a session keyed on the run's own agent (ceo-reviewer), not the task's
-// runner seat (pm-runner).
-func TestCreateStartSession_ReviewerRunFlagOnGetsOwnSession(t *testing.T) {
+func TestCreateStartSession_ReviewerRunCreatesOwnSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	now := time.Now().UTC()
@@ -403,8 +397,6 @@ func TestCreateStartSession_ReviewerRunFlagOnGetsOwnSession(t *testing.T) {
 	}
 
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
-	svc.config.OfficeSessionIdentity = true
-
 	sessionID, created, err := svc.createStartSession(ctx, task.ToAPI(), "ceo-reviewer", "ceo-reviewer", "", "", "")
 	if err != nil {
 		t.Fatalf("create start session: %v", err)
@@ -1516,25 +1508,8 @@ func TestCancelAgentSilent_AllowsAcknowledgementStreamToDrain(t *testing.T) {
 	}
 	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 
-	lock, release := svc.acquireCancelInFlightGuard("session-silent-stream-drain")
-	lock.Lock()
-	guardLocked := true
-	unlockGuard := func() {
-		if guardLocked {
-			lock.Unlock()
-			guardLocked = false
-		}
-	}
-	relockGuard := func() {
-		if !guardLocked {
-			lock.Lock()
-			guardLocked = true
-		}
-	}
-	defer func() {
-		unlockGuard()
-		release()
-	}()
+	guard := svc.lockCancelInFlightGuard("session-silent-stream-drain")
+	defer guard.release()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -1542,8 +1517,8 @@ func TestCancelAgentSilent_AllowsAcknowledgementStreamToDrain(t *testing.T) {
 		ctx,
 		"task-silent-stream-drain",
 		"session-silent-stream-drain",
-		unlockGuard,
-		relockGuard,
+		guard.unlock,
+		guard.relockWithContext,
 	)
 	require.NoError(t, err)
 	select {
@@ -4753,12 +4728,21 @@ type mockMessageCreator struct {
 	thinkingWrites            int
 	toolCallWrites            int
 	toolUpdateWrites          int
+	lastToolUpdateID          string
+	lastToolUpdateTitle       string
+	lastToolUpdateType        string
+	agentPlanUpserts          int
+	lastAgentPlanToolCallID   string
+	lastAgentPlanContent      string
 	userMessageErr            error
 	idempotentUserMessages    map[string]struct{}
 	permissionClaimFn         func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
 	permissionFinishFn        func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
 	permissionAuditFn         func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
 	permissionUpdateFn        func(context.Context, string, string, string, string, models.PermissionStatus) error
+	permissionMessageDecision *models.PermissionDecision
+	permissionMessageWrites   int
+	permissionMessageCreateFn func(context.Context, string, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}, *models.PermissionDecision) (string, error)
 }
 
 type mockUserMessage struct {
@@ -4816,8 +4800,25 @@ func (m *mockMessageCreator) CreateToolCallMessage(context.Context, string, stri
 	return nil
 }
 
-func (m *mockMessageCreator) UpdateToolCallMessage(context.Context, string, string, string, string, string, string, string, string, string, *streams.NormalizedPayload) error {
+func (m *mockMessageCreator) UpdateToolCallMessage(
+	_ context.Context,
+	_, toolCallID, _, _, _, _, title, _, msgType string,
+	_ *streams.NormalizedPayload,
+) error {
 	m.toolUpdateWrites++
+	m.lastToolUpdateID = toolCallID
+	m.lastToolUpdateTitle = title
+	m.lastToolUpdateType = msgType
+	return nil
+}
+
+func (m *mockMessageCreator) UpsertAgentPlanMessage(
+	_ context.Context,
+	_, sourceToolCallID, _, content, _ string,
+) error {
+	m.agentPlanUpserts++
+	m.lastAgentPlanToolCallID = sourceToolCallID
+	m.lastAgentPlanContent = content
 	return nil
 }
 
@@ -4846,6 +4847,7 @@ func (m *mockMessageCreator) CreateSessionMessage(_ context.Context, taskID, con
 func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, messageID, taskID, content, sessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.sessionMessageAttempts++
 	if m.sessionMessageErr != nil {
 		return m.sessionMessageErr
 	}
@@ -4865,10 +4867,35 @@ func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, m
 		metadata:      metadata,
 		requestsInput: requestsInput,
 	})
+	if m.sessionMessageDone != nil {
+		m.sessionMessageOnce.Do(func() { close(m.sessionMessageDone) })
+	}
 	return nil
 }
 
-func (m *mockMessageCreator) CreatePermissionRequestMessage(context.Context, string, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}) (string, error) {
+func (m *mockMessageCreator) CreateLifecycleSessionMessage(_ context.Context, taskID, content, sessionID, messageType string, metadata map[string]interface{}) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sessionMessageAttempts++
+	if m.sessionMessageErr != nil {
+		return m.sessionMessageErr
+	}
+	m.sessionMessages = append(m.sessionMessages, mockSessionMessage{
+		taskID:      taskID,
+		content:     content,
+		sessionID:   sessionID,
+		messageType: messageType,
+		metadata:    metadata,
+	})
+	return nil
+}
+
+func (m *mockMessageCreator) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error) {
+	m.permissionMessageDecision = decision
+	m.permissionMessageWrites++
+	if m.permissionMessageCreateFn != nil {
+		return m.permissionMessageCreateFn(ctx, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID, options, actionType, actionDetails, decision)
+	}
 	return "", nil
 }
 
@@ -5432,6 +5459,58 @@ func TestStartTask_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	assert.False(t, launchCalled)
 }
 
+func TestStartTask_OfficeRecoveryBlockStopsAutonomousLaunch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+
+	task, err := repo.GetTask(ctx, "task1")
+	require.NoError(t, err)
+	task.ProjectID = "office-project"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	session.AgentProfileID = "office-runner"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	incarnationID := session.QueueIncarnationID
+	if incarnationID == "" {
+		incarnationID = session.ID
+	}
+	require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, &models.SessionRecoveryBlock{
+		ID:                 "block-1",
+		SessionID:          "session1",
+		IncarnationID:      incarnationID,
+		ExpectedGeneration: 0,
+		Reason:             "native_state_missing",
+		State:              models.RecoveryBlockOpen,
+	}))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID: "task1", Title: "Office task", State: v1.TaskStateInProgress,
+	}
+	launchCalled := false
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalled = true
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	_, err = svc.StartTaskWithEnv(
+		ctx, "task1", "office-runner", "", "", "", "Do the work",
+		"", false, false, nil, validOfficeRuntimeEnv(),
+	)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrSessionRecoveryRequired)
+	assert.False(t, launchCalled)
+
+	block, err := repo.GetOpenSessionRecoveryBlock(ctx, "session1", incarnationID, 0)
+	require.NoError(t, err)
+	assert.Equal(t, "block-1", block.ID)
+}
+
 func TestStartTaskPublishesCreatedSessionBeforeLaunch(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -5709,6 +5788,47 @@ func TestResumeTaskSession_WrongTask(t *testing.T) {
 	}
 }
 
+func TestResumeTaskSession_DynamicRouteActionOwnsRecovery(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentProfileID = "profile1"
+	session.RouteState = dynamicRouteStatusActionRequired
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	var launchCalls atomic.Int32
+	agentMgr := &mockAgentManager{
+		isAgentRunningFn: func(context.Context, string) bool { return false },
+		isAgentReadyFn:   func(context.Context, string) bool { return true },
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalls.Add(1)
+			if err := repo.UpdateTaskSessionState(ctx, "session1", models.TaskSessionStateWaitingForInput, ""); err != nil {
+				t.Fatalf("failed to make resumed session ready: %v", err)
+			}
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-replacement"}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	_, err = svc.ResumeTaskSession(ctx, "task1", "session1")
+	var blocked *sessionOpenRecoveryBlockedError
+	if !errors.As(err, &blocked) || blocked.reason != autoResumeBlockedDynamicRoute {
+		t.Fatalf("ResumeTaskSession error = %v, want dynamic-route ownership rejection", err)
+	}
+	if got := launchCalls.Load(); got != 0 {
+		t.Fatalf("dynamic-route-owned session launched %d replacement processes, want 0", got)
+	}
+}
+
 func TestResumeTaskSession_OfficeWithoutSchedulerFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -5960,6 +6080,7 @@ func TestResumeTaskSession_FailedKeepsResumeToken(t *testing.T) {
 // without turning it into a fresh session or provider conversation. Worktree
 // materialization itself is covered by the lifecycle tests; this boundary test
 // verifies the request that reaches that materializer.
+// @covers AC-TASKS-WORKTREE-METADATA-RECOVERY-004.9
 func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -6013,6 +6134,20 @@ func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *te
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}))
+	const recoveryEnvironmentID = "environment-recover-new-branch"
+	worktreePath := filepath.Join(t.TempDir(), "tasks", "task-recover-new-branch", "backend")
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: recoveryEnvironmentID, TaskID: "task-recover-new-branch",
+		ExecutorType: string(models.ExecutorTypeWorktree), ExecutorID: models.ExecutorIDWorktree,
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: filepath.Dir(worktreePath),
+		TaskDirName: "task-recover-new-branch", OwnershipGeneration: 1,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "environment-repo-recover-new-branch", TaskEnvironmentID: recoveryEnvironmentID,
+			RepositoryID: "repo-recover-new-branch",
+			BranchSlug:   "main", WorktreeID: "worktree-recover-new-branch", WorktreePath: worktreePath,
+			WorktreeBranch: "main", Status: "active", Position: 0,
+		}}, CreatedAt: now, UpdatedAt: now,
+	}))
 
 	session, err := repo.GetTaskSession(ctx, "session-recover-new-branch")
 	require.NoError(t, err)
@@ -6020,6 +6155,7 @@ func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *te
 	session.ExecutorID = "executor-recover-new-branch"
 	session.RepositoryID = "repo-recover-new-branch"
 	session.BaseBranch = "main"
+	session.TaskEnvironmentID = recoveryEnvironmentID
 	require.NoError(t, repo.UpdateTaskSession(ctx, session))
 	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
 		ID:               "running-recover-new-branch",
@@ -6032,6 +6168,11 @@ func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *te
 		UpdatedAt:        now,
 	}))
 
+	var preflightRequests []worktree.RecoveryAdmissionRequest
+	svc.executor.SetSelectedWorktreeRecoveryAdmission(func(_ context.Context, req worktree.RecoveryAdmissionRequest) (*worktree.RecoveryAdmission, error) {
+		preflightRequests = append(preflightRequests, req)
+		return nil, nil
+	})
 	response, err := svc.RecoverSession(ctx, "task-recover-new-branch", "session-recover-new-branch", "resume_new_branch")
 	require.NoError(t, err)
 	require.NotNil(t, response)
@@ -6041,6 +6182,11 @@ func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *te
 	require.Equal(t, "session-recover-new-branch", captured.SessionID)
 	require.Equal(t, "acp-session-recover-new-branch", captured.ACPSessionID)
 	require.True(t, captured.AllowBranchReplacement)
+	require.NotEmpty(t, preflightRequests, "explicit recovery action must reach selected-environment preflight")
+	for _, request := range preflightRequests {
+		require.True(t, request.AllowBranchReplacement, "resume_new_branch preflight must retain its explicit authorization")
+		require.Equal(t, recoveryEnvironmentID, request.TaskEnvironmentID)
+	}
 	require.True(t, captured.UseWorktree)
 	require.Equal(t, "main", captured.Branch)
 	require.Equal(t, "main", captured.BaseBranch)
@@ -6056,6 +6202,92 @@ func TestRecoverSession_ResumeNewBranchPreservesSessionAndProviderIdentity(t *te
 	sessions, err := repo.ListTaskSessions(ctx, "task-recover-new-branch")
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
+}
+
+func TestRecoverSessionDirtyCloneRefusalPreservesResumeTokenAndStampsRepairAction(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedTaskAndSession(t, repo, "task-dirty-recovery", "session-dirty-recovery", models.TaskSessionStateFailed)
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-dirty-recovery", WorkspaceID: "ws1", Name: "backend", SourceType: "local",
+		LocalPath: t.TempDir(), CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-dirty-recovery", TaskID: "task-dirty-recovery",
+		ExecutorType: string(models.ExecutorTypeWorktree), Status: models.TaskEnvironmentStatusReady,
+		WorkspacePath:       t.TempDir(),
+		OwnershipGeneration: 1, Repos: []*models.TaskEnvironmentRepo{{
+			ID: "env-repo-dirty-recovery", RepositoryID: "repo-dirty-recovery", BranchSlug: "backend",
+			WorktreeID: "wt-dirty-recovery", WorktreePath: filepath.Join(t.TempDir(), "worktree"),
+			WorktreeBranch: "feature/task", Position: 0, CreatedAt: now, UpdatedAt: now,
+		}},
+	}))
+	session, err := repo.GetTaskSession(ctx, "session-dirty-recovery")
+	require.NoError(t, err)
+	session.AgentProfileID = "profile-dirty-recovery"
+	session.TaskEnvironmentID = "env-dirty-recovery"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "running-dirty-recovery", SessionID: session.ID, TaskID: session.TaskID,
+		ResumeToken: "provider-conversation-1", Resumable: true, CreatedAt: now, UpdatedAt: now,
+	}))
+	preflightCalls := 0
+	svc.SetWorkspaceRecoveryErrorReporter(workspaceRecoveryErrorReporterFunc(func(
+		reportCtx context.Context,
+		observation models.WorkspaceRecoveryErrorObservation,
+	) (string, error) {
+		projected := models.LastAgentError{
+			Message: "workspace needs explicit relocation", OccurredAt: time.Now().UTC(),
+			Scope: models.ErrorScopeSession, Phase: models.LaunchErrorPhaseBootstrap,
+			Code:            models.LaunchErrorCategoryManagedCloneRelocationRequired,
+			RecoveryActions: []string{models.RecoveryActionRelocateAndResume}, StampValue: "dirty-recovery-test-stamp",
+		}
+		_, stamp, err := repo.CommitWorkspaceRecoveryErrorIfCurrent(reportCtx, observation, projected)
+		return stamp, err
+	}))
+	svc.executor.SetSelectedWorktreeRecoveryAdmission(func(_ context.Context, req worktree.RecoveryAdmissionRequest) (*worktree.RecoveryAdmission, error) {
+		preflightCalls++
+		if req.TaskEnvironmentID != "env-dirty-recovery" || len(req.Slots) != 1 {
+			t.Fatalf("preflight request = %+v, want selected task environment and slot", req)
+		}
+		return nil, &worktree.ManagedCloneRelocationRequiredError{TaskID: req.TaskID}
+	})
+
+	_, err = svc.RecoverSession(ctx, session.TaskID, session.ID, "fresh_start")
+	var repairErr *ManagedCloneRelocationRecoveryError
+	require.ErrorAs(t, err, &repairErr)
+	require.False(t, repairErr.Stale)
+	require.NotEmpty(t, repairErr.Stamp)
+	require.Equal(t, 1, preflightCalls)
+	running, err := repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, "provider-conversation-1", running.ResumeToken, "fresh start must not clear provider identity before worktree recovery")
+	storedSession, err := repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	lastError, found := models.LoadLastAgentError(storedSession.Metadata)
+	require.True(t, found)
+	require.Equal(t, models.LaunchErrorCategoryManagedCloneRelocationRequired, lastError.Code)
+	require.Equal(t, []string{models.RecoveryActionRelocateAndResume}, lastError.RecoveryActions)
+	require.Equal(t, repairErr.Stamp, lastError.Stamp())
+
+	_, err = svc.RecoverSession(ctx, session.TaskID, session.ID, "relocate_and_resume", "stale-stamp")
+	require.ErrorAs(t, err, &repairErr)
+	require.True(t, repairErr.Stale)
+	require.Equal(t, 1, preflightCalls, "stale stamp must be rejected before touching the worktree")
+	session.State = models.TaskSessionStateRunning
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	_, err = svc.RecoverSession(ctx, session.TaskID, session.ID, "relocate_and_resume", repairErr.Stamp)
+	require.ErrorAs(t, err, &repairErr)
+	require.True(t, repairErr.Stale, "an active session cannot authorize worktree transfer")
+	require.Equal(t, 1, preflightCalls, "active sessions must be rejected before worktree inspection")
+	running, err = repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, "provider-conversation-1", running.ResumeToken)
 }
 
 // TestResumeTaskSession_ArchiveCancelledSessionResumesSuccessfully is the

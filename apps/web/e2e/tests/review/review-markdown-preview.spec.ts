@@ -42,7 +42,7 @@ test.describe("Review Markdown preview", () => {
     await expect(session.changes.getByTestId(`file-row-${MARKDOWN_FILE}`)).toBeVisible({
       timeout: 20_000,
     });
-    await session.changes.getByRole("button", { name: "Diff", exact: true }).click();
+    await session.openChangesDiff();
     await testPage.getByRole("button", { name: "Expand review" }).click();
 
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });

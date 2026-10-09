@@ -14,14 +14,25 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/common/npmresolution"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
+type runtimeActivationGuard func(context.Context, func() error) error
+
 type AgentUpdateJob struct {
+	RuntimeID        string
+	Automatic        bool
+	ManagedFallback  bool
+	PreviousVersion  string
+	activationGuard  runtimeActivationGuard
+	beforeStart      func() error
+	context          context.Context
 	ID               string
 	AgentName        string
 	Package          string
+	UpdateMode       dto.AgentUpdateMode
 	Status           dto.AgentUpdateJobStatus
 	Operation        managedruntime.Operation
 	CurrentVersion   string
@@ -29,7 +40,12 @@ type AgentUpdateJob struct {
 	ActiveVersion    string
 	EffectiveVersion string
 	TargetVersion    string
+	TargetFamily     managedruntime.OpenCodeFamily
+	RuntimeRevision  uint64
+	Migration        bool
+	ExpectedRevision uint64
 	UseDefault       bool
+	NativeRuntime    bool
 	Output           *ringBuffer
 	StartedAt        time.Time
 	FinishedAt       *time.Time
@@ -38,17 +54,22 @@ type AgentUpdateJob struct {
 }
 
 type AgentUpdateJobStore struct {
-	mu                  sync.Mutex
-	jobs                map[string]*AgentUpdateJob
-	activeByAgt         map[string]*AgentUpdateJob
-	semaphore           chan struct{}
-	hub                 JobBroadcaster
-	log                 *zap.Logger
-	updater             RuntimeUpdater
-	maintenance         *maintenanceCoordinator
-	onRefresh           func()
-	selectionStore      managedruntime.SelectionStore
-	onStatusInvalidated func(string)
+	automaticWorkers        sync.WaitGroup
+	mu                      sync.Mutex
+	jobs                    map[string]*AgentUpdateJob
+	activeByAgt             map[string]*AgentUpdateJob
+	semaphore               chan struct{}
+	hub                     JobBroadcaster
+	log                     *zap.Logger
+	updater                 RuntimeUpdater
+	maintenance             *maintenanceCoordinator
+	onRefresh               func()
+	onFinished              func(dto.AgentUpdateJobDTO)
+	selectionStore          managedruntime.SelectionStore
+	onStatusInvalidated     func(string)
+	openCodeSelectionReader managedruntime.OpenCodeSelectionReader
+	openCodeSelections      managedruntime.OpenCodeSelectionWriter
+	migrationGuard          OpenCodeMigrationGuard
 }
 
 func NewAgentUpdateJobStore(
@@ -84,20 +105,50 @@ func (s *AgentUpdateJobStore) Enqueue(
 	spec agents.ManagedNPMRuntimeSpec,
 	targetVersions ...string,
 ) (*AgentUpdateJob, error) {
-	return s.enqueue(agentName, spec, false, targetVersions...)
+	return s.enqueue(agentName, spec, false, nil, targetVersions...)
 }
 
 func (s *AgentUpdateJobStore) EnqueueDefault(
 	agentName string,
 	spec agents.ManagedNPMRuntimeSpec,
 ) (*AgentUpdateJob, error) {
-	return s.enqueue(agentName, spec, true)
+	return s.enqueue(agentName, spec, true, nil)
+}
+
+func (s *AgentUpdateJobStore) enqueueAutomatic(ctx context.Context, name string, spec agents.ManagedNPMRuntimeSpec, target, previous, id, runtimeID string, guard runtimeActivationGuard) (*AgentUpdateJob, error) {
+	return s.enqueue(name, spec, false, &AgentUpdateJob{ID: id, RuntimeID: runtimeID, Automatic: true, PreviousVersion: previous, context: ctx, activationGuard: guard}, target)
+}
+
+func (s *AgentUpdateJobStore) enqueueManual(name string, spec agents.ManagedNPMRuntimeSpec, useDefault bool, target string, fallback bool, beforeStart func() error) (*AgentUpdateJob, error) {
+	return s.enqueue(name, spec, useDefault, &AgentUpdateJob{ManagedFallback: fallback, beforeStart: beforeStart}, target)
 }
 
 func (s *AgentUpdateJobStore) enqueue(
 	agentName string,
 	spec agents.ManagedNPMRuntimeSpec,
 	useDefault bool,
+	options *AgentUpdateJob,
+	targetVersions ...string,
+) (*AgentUpdateJob, error) {
+	return s.enqueueConfigured(agentName, spec, useDefault, false, 0, options, targetVersions...)
+}
+
+func (s *AgentUpdateJobStore) EnqueueOpenCodeMigration(
+	agentName string,
+	spec agents.ManagedNPMRuntimeSpec,
+	targetVersion string,
+	expectedRevision uint64,
+) (*AgentUpdateJob, error) {
+	return s.enqueueConfigured(agentName, spec, false, true, expectedRevision, nil, targetVersion)
+}
+
+func (s *AgentUpdateJobStore) enqueueConfigured(
+	agentName string,
+	spec agents.ManagedNPMRuntimeSpec,
+	useDefault bool,
+	migration bool,
+	expectedRevision uint64,
+	options *AgentUpdateJob,
 	targetVersions ...string,
 ) (*AgentUpdateJob, error) {
 	s.mu.Lock()
@@ -106,13 +157,30 @@ func (s *AgentUpdateJobStore) enqueue(
 		return existing, nil
 	}
 	job := &AgentUpdateJob{
-		ID:         uuid.NewString(),
-		AgentName:  agentName,
-		Package:    spec.Package,
-		Status:     dto.AgentUpdateJobStatusQueued,
-		Output:     newRingBuffer(jobOutputRingSize),
-		StartedAt:  time.Now().UTC(),
-		UseDefault: useDefault,
+		ID:               uuid.NewString(),
+		UpdateMode:       dto.AgentUpdateModePinned,
+		AgentName:        agentName,
+		Package:          spec.Package,
+		Status:           dto.AgentUpdateJobStatusQueued,
+		Output:           newRingBuffer(jobOutputRingSize),
+		StartedAt:        time.Now().UTC(),
+		UseDefault:       useDefault,
+		Migration:        migration,
+		ExpectedRevision: expectedRevision,
+	}
+	if migration {
+		job.Operation = managedruntime.OperationMigrate
+		job.TargetFamily = managedruntime.OpenCodeFamilyV2
+		job.RuntimeRevision = expectedRevision
+	}
+	if options != nil {
+		if options.ID != "" {
+			job.ID = options.ID
+		}
+		job.Automatic, job.PreviousVersion = options.Automatic, options.PreviousVersion
+		job.ManagedFallback = options.ManagedFallback
+		job.RuntimeID = options.RuntimeID
+		job.context, job.activationGuard = options.context, options.activationGuard
 	}
 	requestedTarget := ""
 	if len(targetVersions) > 0 {
@@ -129,12 +197,27 @@ func (s *AgentUpdateJobStore) enqueue(
 		s.mu.Unlock()
 		return existing, nil
 	}
+	if options != nil && options.beforeStart != nil {
+		if err := options.beforeStart(); err != nil {
+			s.maintenance.release(agentName, ref)
+			s.mu.Unlock()
+			return nil, err
+		}
+	}
 	s.jobs[job.ID] = job
 	s.activeByAgt[agentName] = job
 	s.mu.Unlock()
 
 	s.broadcast(ws.ActionAgentUpdateStarted, job.snapshot())
-	go s.run(job, spec, requestedTarget, ref)
+	if job.Automatic {
+		s.automaticWorkers.Add(1)
+	}
+	go func() {
+		if job.Automatic {
+			defer s.automaticWorkers.Done()
+		}
+		s.run(job, spec, requestedTarget, ref)
+	}()
 	return job, nil
 }
 
@@ -144,6 +227,24 @@ func (s *AgentUpdateJobStore) SetStatusInvalidator(invalidator func(string)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onStatusInvalidated = invalidator
+}
+
+func (s *AgentUpdateJobStore) SetOpenCodeSelections(writer managedruntime.OpenCodeSelectionWriter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.openCodeSelections = writer
+}
+
+func (s *AgentUpdateJobStore) SetOpenCodeSelectionReader(reader managedruntime.OpenCodeSelectionReader) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.openCodeSelectionReader = reader
+}
+
+func (s *AgentUpdateJobStore) SetOpenCodeMigrationGuard(guard OpenCodeMigrationGuard) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.migrationGuard = guard
 }
 
 func (s *AgentUpdateJobStore) Get(jobID string) (*dto.AgentUpdateJobDTO, bool) {
@@ -185,11 +286,25 @@ func (s *AgentUpdateJobStore) run(
 	requestedTarget string,
 	ref MaintenanceJobRef,
 ) {
-	s.semaphore <- struct{}{}
-	defer func() { <-s.semaphore }()
-
-	ctx, cancel := context.WithTimeout(context.Background(), jobHardTimeout)
+	parent := job.context
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, jobHardTimeout)
 	defer cancel()
+	select {
+	case s.semaphore <- struct{}{}:
+	case <-ctx.Done():
+		s.finishFailed(job, ctx, ctx.Err(), ref)
+		return
+	}
+	defer func() { <-s.semaphore }()
+	if job.activationGuard != nil {
+		if err := job.activationGuard(ctx, func() error { return nil }); err != nil {
+			s.finishFailed(job, ctx, err, ref)
+			return
+		}
+	}
 	s.setStatus(job, dto.AgentUpdateJobStatusResolving)
 
 	var (
@@ -210,28 +325,31 @@ func (s *AgentUpdateJobStore) run(
 		s.finishFailed(job, ctx, fmt.Errorf("resolve target version: %w", err), ref)
 		return
 	}
-	currentVersion := ""
-	if caps, ok := s.updater.CurrentCapabilities(job.AgentName); ok {
-		currentVersion = caps.AgentVersion
-		s.mu.Lock()
-		job.CurrentVersion = currentVersion
-		s.mu.Unlock()
+	if job.Migration {
+		s.runOpenCodeMigration(ctx, job, spec, target, ref)
+		return
 	}
-	activeVersion := ""
-	if s.selectionStore != nil {
-		selection, found, selectionErr := s.selectionStore.Get(ctx, job.AgentName, spec.Package)
-		if selectionErr != nil {
-			s.finishFailed(job, ctx, fmt.Errorf("read active runtime version: %w", selectionErr), ref)
-			return
-		}
-		if found {
-			activeVersion = selection.Version
-		}
-	}
+	activeVersion, nativeRuntime, selectionErr := s.activeRuntimeSelection(ctx, job, spec)
 	defaultVersion := spec.DefaultVersionOrPinned()
 	effectiveVersion := defaultVersion
 	if activeVersion != "" {
 		effectiveVersion = activeVersion
+	}
+	// A fallback observation depends on the effective version, which is unknown
+	// when the selection cannot be read; a host observation does not.
+	currentVersion := ""
+	if selectionErr == nil || !job.ManagedFallback {
+		currentVersion = managedCurrentVersion(ctx, s.updater, s.selectionStore, managedVersionState{
+			agentName: job.AgentName, packageName: spec.Package, fallback: job.ManagedFallback,
+			active: activeVersion, effective: effectiveVersion,
+		})
+	}
+	s.mu.Lock()
+	job.CurrentVersion = currentVersion
+	s.mu.Unlock()
+	if selectionErr != nil {
+		s.finishFailed(job, ctx, selectionErr, ref)
+		return
 	}
 	operation, err := managedruntime.ClassifyEffectiveOperation(
 		job.UseDefault, activeVersion, effectiveVersion, currentVersion, target, defaultVersion,
@@ -246,6 +364,7 @@ func (s *AgentUpdateJobStore) run(
 	job.DefaultVersion = defaultVersion
 	job.ActiveVersion = activeVersion
 	job.EffectiveVersion = effectiveVersion
+	job.NativeRuntime = nativeRuntime
 	s.mu.Unlock()
 	if operation == managedruntime.OperationUpToDate ||
 		(s.selectionStore == nil && currentVersion != "" && currentVersion == target) {
@@ -259,13 +378,32 @@ func (s *AgentUpdateJobStore) run(
 
 	s.setStatus(job, dto.AgentUpdateJobStatusUpdating)
 	flusher := newUpdateOutputFlusher(s, job)
+	useNative, sourceErr := s.useNativeRuntime(ctx, spec)
+	if sourceErr != nil {
+		s.finishFailed(job, ctx, fmt.Errorf("resolve OpenCode runtime source: %w", sourceErr), ref)
+		return
+	}
 	prepareCommand := spec.CacheUpdateCommand()
 	if exactTarget {
 		prepareCommand = spec.CacheUpdateCommand(target)
 	}
-	err = s.updater.RunUpdate(ctx, prepareCommand, flusher.append)
-	flusher.flush()
-	if err != nil {
+	if useNative {
+		prepareCommand = spec.NativeUpdateCommand(target)
+	}
+	packageSpec := ""
+	if !useNative {
+		if exactTarget {
+			packageSpec = spec.PackageSpec(target)
+		} else {
+			packageSpec = spec.PackageSpec("")
+		}
+	}
+	err = runManagedRuntimeUpdate(ctx, s.updater, prepareCommand, packageSpec, flusher)
+	if err != nil && !useNative {
+		if isManagedRuntimeNpmPolicyError(err) {
+			s.finishFailed(job, ctx, err, ref)
+			return
+		}
 		flusher.append("managed runtime cache appears stale; repairing execution cache\n")
 		flusher.flush()
 		if repairErr := s.updater.InvalidateExecutionCache(ctx, spec.Package); repairErr != nil {
@@ -274,8 +412,7 @@ func (s *AgentUpdateJobStore) run(
 		}
 		flusher.append("retrying managed runtime update\n")
 		flusher.flush()
-		err = s.updater.RunUpdate(ctx, prepareCommand, flusher.append)
-		flusher.flush()
+		err = runManagedRuntimeUpdate(ctx, s.updater, prepareCommand, packageSpec, flusher)
 		if err != nil {
 			s.finishFailed(job, ctx, fmt.Errorf("update runtime after cache repair: %w", err), ref)
 			return
@@ -283,12 +420,269 @@ func (s *AgentUpdateJobStore) run(
 	}
 
 	s.setStatus(job, dto.AgentUpdateJobStatusRefreshing)
-	refreshCommand := spec.CachedACPCommand()
-	if exactTarget {
-		refreshCommand = spec.ACPCommand(target)
-	}
-	caps, refreshErr := s.updater.Refresh(ctx, job.AgentName, refreshCommand)
+	caps, refreshErr := s.updater.Refresh(ctx, job.AgentName, spec.RefreshCommand(target))
 	s.finishRefresh(job, ctx, caps, refreshErr, ref)
+}
+
+func (s *AgentUpdateJobStore) runOpenCodeMigration(
+	ctx context.Context,
+	job *AgentUpdateJob,
+	spec agents.ManagedNPMRuntimeSpec,
+	target string,
+	ref MaintenanceJobRef,
+) {
+	selection, candidate, err := s.validateOpenCodeMigration(ctx, job, spec)
+	if err != nil {
+		s.finishFailed(job, ctx, err, ref)
+		return
+	}
+	s.setStatus(job, dto.AgentUpdateJobStatusUpdating)
+	flusher := newUpdateOutputFlusher(s, job)
+	if err := s.stageOpenCodeMigration(ctx, spec, target, flusher); err != nil {
+		s.finishFailed(job, ctx, err, ref)
+		return
+	}
+	s.setStatus(job, dto.AgentUpdateJobStatusProbing)
+	caps, err := candidate.ProbeIsolated(ctx, job.AgentName, spec.ACPCommand(target))
+	if err != nil {
+		s.finishFailed(job, ctx, fmt.Errorf("probe isolated OpenCode v2 candidate: %w", err), ref)
+		return
+	}
+	if caps.Status != hostutility.StatusOK {
+		s.finishFailed(job, ctx, errors.New(capabilityRefreshError(caps)), ref)
+		return
+	}
+	newSelection, err := s.activateOpenCodeMigration(ctx, job, spec, target, selection)
+	if err != nil {
+		s.finishFailed(job, ctx, err, ref)
+		return
+	}
+	s.mu.Lock()
+	job.RuntimeRevision = newSelection.Revision
+	job.ActiveVersion = target
+	job.EffectiveVersion = target
+	s.mu.Unlock()
+	refreshed, refreshErr := s.updater.Refresh(ctx, job.AgentName, spec.ACPCommand(target))
+	if refreshErr == nil && refreshed.Status != hostutility.StatusOK {
+		refreshErr = errors.New(capabilityRefreshError(refreshed))
+	}
+	if refreshErr != nil {
+		s.finishActivatedWithRefreshError(job, target, refreshErr.Error(), ref)
+		return
+	}
+	s.finishActivated(job, target, ref)
+}
+
+func (s *AgentUpdateJobStore) validateOpenCodeMigration(
+	ctx context.Context,
+	job *AgentUpdateJob,
+	spec agents.ManagedNPMRuntimeSpec,
+) (managedruntime.OpenCodeSelection, IsolatedRuntimeCandidateUpdater, error) {
+	reader, ok := s.selectionStore.(managedruntime.OpenCodeSelectionReader)
+	if !ok || s.openCodeSelections == nil {
+		return managedruntime.OpenCodeSelection{}, nil, errors.New("OpenCode selection persistence is unavailable")
+	}
+	candidate, ok := s.updater.(IsolatedRuntimeCandidateUpdater)
+	if !ok {
+		return managedruntime.OpenCodeSelection{}, nil, errors.New("isolated OpenCode candidate probe is unavailable")
+	}
+	selection, found, err := reader.GetOpenCodeSelection(ctx)
+	if err != nil {
+		return managedruntime.OpenCodeSelection{}, nil, fmt.Errorf("read OpenCode runtime selection: %w", err)
+	}
+	if !found || selection.Revision != job.ExpectedRevision || selection.Family != managedruntime.OpenCodeFamilyV1 {
+		return managedruntime.OpenCodeSelection{}, nil, managedruntime.ErrOpenCodeSelectionRevisionConflict
+	}
+	if spec.Package != managedruntime.OpenCodeV2Package || job.TargetFamily != managedruntime.OpenCodeFamilyV2 {
+		return managedruntime.OpenCodeSelection{}, nil, errors.New("unsupported OpenCode migration target")
+	}
+	if err := ctx.Err(); err != nil {
+		return managedruntime.OpenCodeSelection{}, nil, err
+	}
+	return selection, candidate, nil
+}
+
+func (s *AgentUpdateJobStore) stageOpenCodeMigration(
+	ctx context.Context,
+	spec agents.ManagedNPMRuntimeSpec,
+	target string,
+	flusher *updateOutputFlusher,
+) error {
+	packageSpec := spec.PackageSpec(target)
+	err := runManagedRuntimeUpdate(ctx, s.updater, spec.CacheUpdateCommand(target), packageSpec, flusher)
+	if err == nil || isManagedRuntimeNpmPolicyError(err) {
+		return err
+	}
+	flusher.append("managed runtime cache appears stale; repairing exact execution cache\n")
+	flusher.flush()
+	invalidator, ok := s.updater.(ExactRuntimeCacheInvalidator)
+	if !ok {
+		return fmt.Errorf("repair exact OpenCode runtime cache: %w", err)
+	}
+	if repairErr := invalidator.InvalidateExecutionCacheVersion(ctx, spec.Package, target); repairErr != nil {
+		return fmt.Errorf("repair exact OpenCode runtime cache: %w", repairErr)
+	}
+	flusher.append("retrying managed runtime update\n")
+	flusher.flush()
+	if retryErr := runManagedRuntimeUpdate(ctx, s.updater, spec.CacheUpdateCommand(target), packageSpec, flusher); retryErr != nil {
+		return fmt.Errorf("stage OpenCode v2 runtime: %w", retryErr)
+	}
+	return nil
+}
+
+func (s *AgentUpdateJobStore) activateOpenCodeMigration(
+	ctx context.Context,
+	job *AgentUpdateJob,
+	spec agents.ManagedNPMRuntimeSpec,
+	target string,
+	selection managedruntime.OpenCodeSelection,
+) (managedruntime.OpenCodeSelection, error) {
+	s.mu.Lock()
+	guard := s.migrationGuard
+	s.mu.Unlock()
+	if guard == nil {
+		return managedruntime.OpenCodeSelection{}, errors.New("OpenCode migration admission is unavailable")
+	}
+	activationCtx, release, err := guard(ctx)
+	if err != nil {
+		return managedruntime.OpenCodeSelection{}, fmt.Errorf("%w: %v", ErrRuntimeMigrationBlocked, err)
+	}
+	defer release()
+	s.setStatus(job, dto.AgentUpdateJobStatusSaving)
+	if activationCtx.Err() != nil || ctx.Err() != nil {
+		return managedruntime.OpenCodeSelection{}, errors.New("OpenCode migration was interrupted before activation")
+	}
+	newSelection := managedruntime.OpenCodeSelection{
+		SchemaVersion:         selection.SchemaVersion,
+		Family:                managedruntime.OpenCodeFamilyV2,
+		Source:                managedruntime.OpenCodeSourceManaged,
+		Package:               spec.Package,
+		SelectedVersion:       target,
+		AppliedDefaultVersion: spec.DefaultVersionOrPinned(),
+		Revision:              selection.Revision + 1,
+	}
+	err = s.openCodeSelections.SaveOpenCodeSelection(activationCtx, job.ExpectedRevision, newSelection)
+	if err != nil {
+		return managedruntime.OpenCodeSelection{}, fmt.Errorf("activate OpenCode v2 selection: %w", err)
+	}
+	if invalidator, ok := s.updater.(RuntimeCapabilityInvalidator); ok {
+		invalidator.InvalidateCapabilities(job.AgentName)
+	}
+	return newSelection, nil
+}
+
+func (s *AgentUpdateJobStore) activeRuntimeSelection(
+	ctx context.Context,
+	job *AgentUpdateJob,
+	spec agents.ManagedNPMRuntimeSpec,
+) (string, bool, error) {
+	if s.openCodeSelectionReader != nil && isOpenCodeRuntimePackage(spec.Package) {
+		return s.openCodeActiveRuntimeSelection(ctx, spec.Package)
+	}
+	if s.selectionStore == nil {
+		return "", false, nil
+	}
+	selection, found, err := s.selectionStore.Get(ctx, job.AgentName, spec.Package)
+	if err != nil {
+		return "", false, fmt.Errorf("read active runtime version: %w", err)
+	}
+	if !found {
+		return "", false, nil
+	}
+	return selection.Version, false, nil
+}
+
+func (s *AgentUpdateJobStore) openCodeActiveRuntimeSelection(
+	ctx context.Context,
+	packageName string,
+) (string, bool, error) {
+	selection, found, err := s.openCodeSelectionReader.GetOpenCodeSelection(ctx)
+	if err != nil {
+		return "", false, fmt.Errorf("read OpenCode runtime selection: %w", err)
+	}
+	if !found || selection.Package != packageName {
+		return "", false, nil
+	}
+	return selection.SelectedVersion, selection.Source == managedruntime.OpenCodeSourceNative, nil
+}
+
+func (s *AgentUpdateJobStore) runtimeCandidateProbeCommand(
+	ctx context.Context,
+	job *AgentUpdateJob,
+	spec agents.ManagedNPMRuntimeSpec,
+	target string,
+) agents.Command {
+	refreshCommand := spec.RefreshCommand(target)
+	if s.openCodeSelectionReader == nil || !isOpenCodeRuntimePackage(spec.Package) {
+		return refreshCommand
+	}
+	selection, found, err := s.openCodeSelectionReader.GetOpenCodeSelection(ctx)
+	if err == nil && found && selection.Package == spec.Package &&
+		selection.Source == managedruntime.OpenCodeSourceManaged {
+		return spec.ACPCommand(target)
+	}
+	return refreshCommand
+}
+
+func (s *AgentUpdateJobStore) persistRuntimeSelection(
+	ctx context.Context,
+	job *AgentUpdateJob,
+	spec agents.ManagedNPMRuntimeSpec,
+	target string,
+) error {
+	if s.openCodeSelectionReader != nil && s.openCodeSelections != nil && isOpenCodeRuntimePackage(spec.Package) {
+		return s.persistOpenCodeRuntimeSelection(ctx, job, spec, target)
+	}
+	if job.UseDefault {
+		if err := s.selectionStore.Delete(ctx, job.AgentName, spec.Package); err != nil {
+			return fmt.Errorf("clear active runtime version: %w", err)
+		}
+		return nil
+	}
+	if err := s.selectionStore.Save(ctx, job.AgentName, spec.Package, target); err != nil {
+		return fmt.Errorf("persist active runtime version: %w", err)
+	}
+	return nil
+}
+
+func (s *AgentUpdateJobStore) persistOpenCodeRuntimeSelection(
+	ctx context.Context,
+	job *AgentUpdateJob,
+	spec agents.ManagedNPMRuntimeSpec,
+	target string,
+) error {
+	selection, found, err := s.openCodeSelectionReader.GetOpenCodeSelection(ctx)
+	if err != nil || !found || selection.Package != spec.Package {
+		if err == nil {
+			err = errors.New("OpenCode runtime selection changed before update activation")
+		}
+		return fmt.Errorf("read OpenCode runtime selection before activation: %w", err)
+	}
+	if selection.Source == managedruntime.OpenCodeSourceNative {
+		s.mu.Lock()
+		job.RuntimeRevision = selection.Revision
+		s.mu.Unlock()
+		return nil
+	}
+	expectedRevision := selection.Revision
+	selection.Revision++
+	selection.AppliedDefaultVersion = spec.DefaultVersionOrPinned()
+	if job.UseDefault {
+		selection.SelectedVersion = ""
+	} else {
+		selection.SelectedVersion = target
+	}
+	if err := s.openCodeSelections.SaveOpenCodeSelection(ctx, expectedRevision, selection); err != nil {
+		return fmt.Errorf("persist OpenCode runtime selection: %w", err)
+	}
+	s.mu.Lock()
+	job.RuntimeRevision = selection.Revision
+	s.mu.Unlock()
+	return nil
+}
+
+func isOpenCodeRuntimePackage(packageName string) bool {
+	return packageName == managedruntime.OpenCodeV1Package || packageName == managedruntime.OpenCodeV2Package
 }
 
 func (s *AgentUpdateJobStore) resolveTarget(
@@ -329,7 +723,7 @@ func (s *AgentUpdateJobStore) resolveTargetFromMetadata(
 	if err != nil {
 		return "", true, err
 	}
-	catalogue, err := managedruntime.BuildCatalogue(metadata.Versions, metadata.Latest)
+	catalogue, err := managedruntime.BuildCatalogueForPackage(packageName, metadata.Versions, metadata.Latest)
 	if err != nil {
 		return "", true, err
 	}
@@ -346,10 +740,25 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 ) {
 	s.setStatus(job, dto.AgentUpdateJobStatusUpdating)
 	flusher := newUpdateOutputFlusher(s, job)
+	useNative, sourceErr := s.useNativeRuntime(ctx, spec)
+	if sourceErr != nil {
+		s.finishFailed(job, ctx, fmt.Errorf("resolve OpenCode runtime source: %w", sourceErr), ref)
+		return
+	}
 	prepareCommand := spec.CacheUpdateCommand(target)
-	err := s.updater.RunUpdate(ctx, prepareCommand, flusher.append)
-	flusher.flush()
-	if err != nil {
+	if useNative {
+		prepareCommand = spec.NativeUpdateCommand(target)
+	}
+	packageSpec := ""
+	if !useNative {
+		packageSpec = spec.PackageSpec(target)
+	}
+	err := runManagedRuntimeUpdate(ctx, s.updater, prepareCommand, packageSpec, flusher)
+	if err != nil && !useNative {
+		if isManagedRuntimeNpmPolicyError(err) {
+			s.finishFailed(job, ctx, err, ref)
+			return
+		}
 		flusher.append("managed runtime cache appears stale; repairing exact execution cache\n")
 		flusher.flush()
 		var repairErr error
@@ -364,8 +773,7 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 		}
 		flusher.append("retrying managed runtime update\n")
 		flusher.flush()
-		err = s.updater.RunUpdate(ctx, prepareCommand, flusher.append)
-		flusher.flush()
+		err = runManagedRuntimeUpdate(ctx, s.updater, prepareCommand, packageSpec, flusher)
 		if err != nil {
 			s.finishFailed(job, ctx, fmt.Errorf("update runtime after cache repair: %w", err), ref)
 			return
@@ -373,7 +781,8 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 	}
 
 	s.setStatus(job, dto.AgentUpdateJobStatusRefreshing)
-	caps, probeErr := candidate.Probe(ctx, job.AgentName, spec.ACPCommand(target))
+	probeCommand := s.runtimeCandidateProbeCommand(ctx, job, spec, target)
+	caps, probeErr := candidate.Probe(ctx, job.AgentName, probeCommand)
 	if probeErr != nil {
 		s.finishFailed(job, ctx, fmt.Errorf("probe runtime candidate: %w", probeErr), ref)
 		return
@@ -382,19 +791,26 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 		s.finishFailed(job, ctx, errors.New(capabilityRefreshError(caps)), ref)
 		return
 	}
-	s.mu.Lock()
-	job.CurrentVersion = caps.AgentVersion
-	s.mu.Unlock()
-	if job.UseDefault {
-		if err := s.selectionStore.Delete(ctx, job.AgentName, spec.Package); err != nil {
-			s.finishFailed(job, ctx, fmt.Errorf("clear active runtime version: %w", err), ref)
-			return
+	activate := func() error {
+		if err := s.persistRuntimeSelection(ctx, job, spec, target); err != nil {
+			return err
 		}
-	} else if err := s.selectionStore.Save(ctx, job.AgentName, spec.Package, target); err != nil {
-		s.finishFailed(job, ctx, fmt.Errorf("persist active runtime version: %w", err), ref)
+		if !job.ManagedFallback {
+			candidate.PublishCapabilities(job.AgentName, caps)
+		}
+		return nil
+	}
+	if job.activationGuard != nil {
+		err = job.activationGuard(ctx, activate)
+	} else {
+		err = activate()
+	}
+	if err != nil {
+		s.finishFailed(job, ctx, err, ref)
 		return
 	}
 	s.mu.Lock()
+	job.CurrentVersion = caps.AgentVersion
 	if job.UseDefault {
 		job.ActiveVersion = ""
 		job.EffectiveVersion = job.DefaultVersion
@@ -403,8 +819,83 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 		job.EffectiveVersion = target
 	}
 	s.mu.Unlock()
-	candidate.PublishCapabilities(job.AgentName, caps)
+	if job.ManagedFallback {
+		s.recordValidatedFallback(ctx, job.AgentName, spec.Package, target)
+	}
 	s.finishActivated(job, target, ref)
+}
+
+// recordValidatedFallback persists the version a fallback activation probed.
+// It records the exact target because that is the effective version after
+// activation, which managedCurrentVersion compares the record against. The
+// activation has already committed, so a failed write leaves the version
+// unknown rather than failing the job.
+func (s *AgentUpdateJobStore) recordValidatedFallback(ctx context.Context, agentName, packageName, version string) {
+	records, ok := s.selectionStore.(managedruntime.ValidatedVersionStore)
+	if !ok {
+		return
+	}
+	if err := records.SaveValidated(ctx, agentName, packageName, version); err != nil {
+		s.log.Warn("record validated managed fallback version",
+			zap.String("agent", agentName), zap.String("package", packageName),
+			zap.String("version", version), zap.Error(err))
+	}
+}
+
+func (s *AgentUpdateJobStore) useNativeRuntime(
+	ctx context.Context,
+	spec agents.ManagedNPMRuntimeSpec,
+) (bool, error) {
+	if s.openCodeSelectionReader == nil || (spec.Package != managedruntime.OpenCodeV1Package && spec.Package != managedruntime.OpenCodeV2Package) {
+		return spec.NativeBinaryOnPath(), nil
+	}
+	selection, found, err := s.openCodeSelectionReader.GetOpenCodeSelection(ctx)
+	if err != nil {
+		return false, err
+	}
+	if !found || selection.Package != spec.Package {
+		return spec.NativeBinaryOnPath(), nil
+	}
+	return selection.Source == managedruntime.OpenCodeSourceNative, nil
+}
+
+const managedRuntimeUpdateDiagnosticLimit = 64 * 1024
+
+type managedRuntimeNpmPolicyError struct {
+	packageSpec string
+}
+
+func (e *managedRuntimeNpmPolicyError) Error() string {
+	return fmt.Sprintf(
+		"managed runtime package %s blocked by npm release-age policy (%s)",
+		e.packageSpec,
+		npmresolution.ReleaseDateMarker,
+	)
+}
+
+func isManagedRuntimeNpmPolicyError(err error) bool {
+	var policyErr *managedRuntimeNpmPolicyError
+	return errors.As(err, &policyErr)
+}
+
+func runManagedRuntimeUpdate(
+	ctx context.Context,
+	updater RuntimeUpdater,
+	command agents.Command,
+	packageSpec string,
+	flusher *updateOutputFlusher,
+) error {
+	diagnostic := newRingBuffer(managedRuntimeUpdateDiagnosticLimit)
+	err := updater.RunUpdate(ctx, command, func(chunk string) {
+		_, _ = diagnostic.Write([]byte(chunk))
+		flusher.append(chunk)
+	})
+	flusher.flush()
+	if err != nil && packageSpec != "" &&
+		npmresolution.MatchesRawReleaseAgePolicy(diagnostic.String(), packageSpec) {
+		return &managedRuntimeNpmPolicyError{packageSpec: packageSpec}
+	}
+	return err
 }
 
 func (s *AgentUpdateJobStore) setStatus(job *AgentUpdateJob, status dto.AgentUpdateJobStatus) {
@@ -433,6 +924,7 @@ func (s *AgentUpdateJobStore) finishFailed(
 	s.finishLocked(job)
 	snapshot := job.snapshot()
 	s.mu.Unlock()
+	s.complete(snapshot)
 	s.broadcast(ws.ActionAgentUpdateFinished, snapshot)
 	s.scheduleEviction(job.ID)
 }
@@ -445,6 +937,7 @@ func (s *AgentUpdateJobStore) finishAlreadyUpToDate(job *AgentUpdateJob, ref Mai
 	s.finishLocked(job)
 	snapshot := job.snapshot()
 	s.mu.Unlock()
+	s.complete(snapshot)
 	s.broadcast(ws.ActionAgentUpdateFinished, snapshot)
 	s.scheduleEviction(job.ID)
 }
@@ -454,12 +947,26 @@ func (s *AgentUpdateJobStore) finishActivated(
 	target string,
 	ref MaintenanceJobRef,
 ) {
+	s.finishActivatedWithRefreshError(job, target, "", ref)
+}
+
+func (s *AgentUpdateJobStore) finishActivatedWithRefreshError(
+	job *AgentUpdateJob,
+	target string,
+	refreshError string,
+	ref MaintenanceJobRef,
+) {
 	s.mu.Lock()
 	job.Status = dto.AgentUpdateJobStatusSucceeded
-	if !job.UseDefault {
+	job.RefreshError = refreshError
+	switch {
+	case job.NativeRuntime:
+		job.ActiveVersion = ""
+		job.EffectiveVersion = job.CurrentVersion
+	case !job.UseDefault:
 		job.ActiveVersion = target
 		job.EffectiveVersion = target
-	} else {
+	default:
 		job.ActiveVersion = ""
 		job.EffectiveVersion = job.DefaultVersion
 	}
@@ -469,6 +976,7 @@ func (s *AgentUpdateJobStore) finishActivated(
 	statusInvalidator := s.onStatusInvalidated
 	packageName := job.Package
 	s.mu.Unlock()
+	s.complete(snapshot)
 	if statusInvalidator != nil && packageName != "" {
 		statusInvalidator(packageName)
 	}
@@ -514,6 +1022,7 @@ func (s *AgentUpdateJobStore) finishRefresh(
 	statusInvalidator := s.onStatusInvalidated
 	packageName := job.Package
 	s.mu.Unlock()
+	s.complete(snapshot)
 	if refreshed && statusInvalidator != nil && packageName != "" {
 		statusInvalidator(packageName)
 	}
@@ -527,7 +1036,9 @@ func (s *AgentUpdateJobStore) finishRefresh(
 func (s *AgentUpdateJobStore) finishLocked(job *AgentUpdateJob) {
 	now := time.Now().UTC()
 	job.FinishedAt = &now
-	delete(s.activeByAgt, job.AgentName)
+	if !job.Automatic {
+		delete(s.activeByAgt, job.AgentName)
+	}
 }
 
 func capabilityRefreshError(caps hostutility.AgentCapabilities) string {
@@ -552,6 +1063,20 @@ func (s *AgentUpdateJobStore) scheduleEviction(jobID string) {
 	})
 }
 
+func (s *AgentUpdateJobStore) complete(payload dto.AgentUpdateJobDTO) {
+	if s.onFinished != nil {
+		s.onFinished(payload)
+	}
+	if payload.Automatic {
+		// Keep the attempt active until its durable outcome has been retained.
+		s.mu.Lock()
+		if active := s.activeByAgt[payload.AgentName]; active != nil && active.ID == payload.JobID {
+			delete(s.activeByAgt, payload.AgentName)
+		}
+		s.mu.Unlock()
+	}
+}
+
 func (s *AgentUpdateJobStore) broadcast(action string, payload dto.AgentUpdateJobDTO) {
 	if s.hub == nil {
 		return
@@ -563,7 +1088,11 @@ func (s *AgentUpdateJobStore) broadcast(action string, payload dto.AgentUpdateJo
 
 func (j *AgentUpdateJob) snapshot() dto.AgentUpdateJobDTO {
 	snapshot := dto.AgentUpdateJobDTO{
+		UpdateMode:       j.UpdateMode,
+		RuntimeID:        j.RuntimeID,
 		JobID:            j.ID,
+		Automatic:        j.Automatic,
+		PreviousVersion:  j.PreviousVersion,
 		AgentName:        j.AgentName,
 		Status:           j.Status,
 		Operation:        string(j.Operation),
@@ -572,6 +1101,9 @@ func (j *AgentUpdateJob) snapshot() dto.AgentUpdateJobDTO {
 		ActiveVersion:    j.ActiveVersion,
 		EffectiveVersion: j.EffectiveVersion,
 		TargetVersion:    j.TargetVersion,
+		TargetFamily:     string(j.TargetFamily),
+		RuntimeRevision:  j.RuntimeRevision,
+		Migration:        j.Migration,
 		Output:           j.Output.String(),
 		Error:            j.Error,
 		RefreshError:     j.RefreshError,

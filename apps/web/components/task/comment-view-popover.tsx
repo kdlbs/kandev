@@ -4,13 +4,13 @@ import { useRef, useState, useCallback } from "react";
 import { IconEdit, IconTrash, IconGripHorizontal } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import { CommentForm } from "@/components/diff/comment-form";
 import { useDraggablePopover, usePopoverDismiss } from "@/components/task/use-draggable-popover";
 import { useTranslation } from "react-i18next";
 
 type CommentViewPopoverProps = {
-  comments: DiffComment[];
+  comments: ReviewComment[];
   position: { x: number; y: number };
   onDelete: (commentId: string) => void;
   onUpdate?: (commentId: string, text: string) => void;
@@ -29,7 +29,7 @@ function CommentItem({
   onStartEdit,
   onCancelEdit,
 }: {
-  comment: DiffComment;
+  comment: ReviewComment;
   onDelete: (id: string) => void;
   onUpdate?: (id: string, text: string) => void;
   isEditing: boolean;
@@ -49,7 +49,9 @@ function CommentItem({
     <div className="p-3">
       <div className="flex items-center justify-between mb-2">
         <span className="px-2 py-0.5 rounded-md bg-muted text-[10px] font-mono text-muted-foreground">
-          {formatLineRange(comment.startLine, comment.endLine)}
+          {comment.source === "review-file"
+            ? t("review:fileComment")
+            : formatLineRange(comment.startLine, comment.endLine)}
         </span>
         <div className="flex items-center gap-1">
           {onUpdate && !isEditing && (
@@ -85,7 +87,7 @@ function CommentItem({
         />
       ) : (
         <>
-          {comment.codeContent && (
+          {comment.source === "diff" && comment.codeContent && (
             <pre className="mb-2 p-2 rounded-md bg-muted/50 text-[10px] text-muted-foreground font-mono max-h-[80px] overflow-auto whitespace-pre-wrap">
               {comment.codeContent}
             </pre>

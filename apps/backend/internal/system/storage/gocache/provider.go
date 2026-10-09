@@ -3,15 +3,13 @@ package gocache
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"time"
+	"sync"
 
-	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/storage/filescan"
 )
@@ -32,47 +30,49 @@ type SettingsSource interface {
 	GetSettings(ctx context.Context) (storage.StorageMaintenanceSettings, error)
 }
 
-// QuarantineStore persists cache rotations before filesystem mutation.
-type QuarantineStore interface {
-	CreateQuarantineEntry(ctx context.Context, entry *storage.QuarantineEntry) error
-	TransitionQuarantineEntry(ctx context.Context, id string, next storage.QuarantineState, lastError string) (storage.QuarantineEntry, error)
-	ListQuarantineEntries(ctx context.Context, includeTerminal bool) ([]storage.QuarantineEntry, error)
-}
-
 // Config contains the provider's install-owned paths and persistence dependencies.
 type Config struct {
 	HomeDir    string
 	TrashDir   string
 	Settings   SettingsSource
-	Store      QuarantineStore
+	Mutations  *storage.MutationGate
 	Scanner    *filescan.Limiter
 	OnProgress func(filescan.Progress)
+	mountID    func(string) (string, error)
 }
 
 // Provider manages the single Go cache selected by persisted settings.
 type Provider struct {
-	config Config
+	config       Config
+	cleanupMu    sync.Mutex
+	cleanupState *cleanupSession
 }
 
 // Analysis describes the configured cache without changing it.
 type Analysis struct {
-	Path               string `json:"path"`
-	SizeBytes          int64  `json:"size_bytes"`
-	Owned              bool   `json:"owned"`
-	Enabled            bool   `json:"enabled"`
-	UnmanagedPath      string `json:"unmanaged_path,omitempty"`
-	UnmanagedSizeBytes int64  `json:"unmanaged_size_bytes,omitempty"`
+	Path                     string `json:"path"`
+	SizeBytes                int64  `json:"size_bytes"`
+	CleanupEligibleSizeBytes *int64 `json:"cleanup_eligible_size_bytes,omitempty"`
+	Owned                    bool   `json:"owned"`
+	Enabled                  bool   `json:"enabled"`
+	UnmanagedPath            string `json:"unmanaged_path,omitempty"`
+	// A nil size means that the distinct user cache was not measured. A pointer
+	// preserves an explicitly measured zero in the successful response.
+	UnmanagedSizeBytes *int64 `json:"unmanaged_size_bytes,omitempty"`
 }
 
-// CleanupResult describes one cache rotation.
+// CleanupResult describes bounded deletion of Go build-cache contents.
 type CleanupResult struct {
-	Path            string                   `json:"path"`
-	Skipped         bool                     `json:"skipped"`
-	Reason          string                   `json:"reason,omitempty"`
-	BytesBefore     int64                    `json:"bytes_before"`
-	BytesAfter      int64                    `json:"bytes_after"`
-	ReclaimedBytes  int64                    `json:"reclaimed_bytes"`
-	QuarantineEntry *storage.QuarantineEntry `json:"quarantine_entry"`
+	Path                string                   `json:"path"`
+	Skipped             bool                     `json:"skipped"`
+	Reason              string                   `json:"reason,omitempty"`
+	BytesBefore         int64                    `json:"bytes_before"`
+	BytesBeforeComplete bool                     `json:"bytes_before_complete"`
+	BytesAfter          *int64                   `json:"bytes_after"`
+	ReclaimedBytes      int64                    `json:"reclaimed_bytes"`
+	Partial             bool                     `json:"partial,omitempty"`
+	Errors              []string                 `json:"errors,omitempty"`
+	QuarantineEntry     *storage.QuarantineEntry `json:"quarantine_entry"`
 }
 
 // New creates a managed Go-cache provider.
@@ -125,12 +125,24 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 	if scanner == nil {
 		scanner = filescan.NewLimiter(4)
 	}
+	managedMountSkip, err := p.mountBoundarySkip(cachePath)
+	if err != nil {
+		return Analysis{}, fmt.Errorf("identify Go-cache mount: %w", err)
+	}
 	measurementRoots := []filescan.Root{
 		{
 			Path: cachePath, MissingOK: true, SymlinkPolicy: filescan.RejectSymlinks,
-			Exclude: func(path string, _ fs.DirEntry) bool { return path == markerPath(cachePath) },
+			Exclude: func(path string, _ fs.DirEntry) bool {
+				return path == markerPath(cachePath) || path == filepath.Join(cachePath, fuzzDirectoryName)
+			},
+			ShouldSkip: managedMountSkip,
+		},
+		{
+			Path: filepath.Join(cachePath, fuzzDirectoryName), MissingOK: true,
+			SymlinkPolicy: filescan.SkipSymlinks, ShouldSkip: managedMountSkip,
 		},
 	}
+	unmanagedIndex := len(measurementRoots)
 	unmanagedPath, hasUnmanagedPath := defaultGoCachePath()
 	if hasUnmanagedPath && unmanagedPath != cachePath {
 		measurementRoots = append(measurementRoots, filescan.Root{
@@ -144,17 +156,23 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 	if err := measurements[0].Err; err != nil {
 		return Analysis{}, fmt.Errorf("measure Go cache: %w", err)
 	}
+	if err := measurements[1].Err; err != nil {
+		return Analysis{}, fmt.Errorf("measure Go cache fuzz corpus: %w", err)
+	}
+	eligibleBytes := measurements[0].Bytes
 	analysis := Analysis{
-		Path: cachePath, SizeBytes: measurements[0].Bytes, Owned: owned, Enabled: settings.GoCache.Enabled,
+		Path: cachePath, SizeBytes: saturatingAdd(eligibleBytes, measurements[1].Bytes),
+		CleanupEligibleSizeBytes: &eligibleBytes, Owned: owned, Enabled: settings.GoCache.Enabled,
 	}
 	if !hasUnmanagedPath || unmanagedPath == cachePath {
 		return analysis, nil
 	}
-	if err := measurements[1].Err; err != nil {
+	if err := measurements[unmanagedIndex].Err; err != nil {
 		return Analysis{}, fmt.Errorf("measure Go cache: %w", err)
 	}
 	analysis.UnmanagedPath = unmanagedPath
-	analysis.UnmanagedSizeBytes = measurements[1].Bytes
+	unmanagedSizeBytes := measurements[unmanagedIndex].Bytes
+	analysis.UnmanagedSizeBytes = &unmanagedSizeBytes
 	return analysis, nil
 }
 
@@ -162,7 +180,7 @@ func (p *Provider) AnalyzeWithProgress(
 	ctx context.Context,
 	onProgress func(filescan.Progress),
 ) (Analysis, error) {
-	copy := *p
+	copy := &Provider{config: p.config}
 	copy.config.OnProgress = onProgress
 	return copy.Analyze(ctx)
 }
@@ -197,21 +215,86 @@ func defaultGoCachePath() (string, bool) {
 	return filepath.Join(cacheDir, "go-build"), true
 }
 
-// Cleanup rotates an above-threshold cache into Kandev trash.
+func (p *Provider) mountBoundarySkip(rootPath string) (func(string, fs.DirEntry) (bool, error), error) {
+	identify := p.config.mountID
+	if identify == nil {
+		identify = cacheMountIdentity
+	}
+	rootMount, err := identify(rootPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return func(path string, _ fs.DirEntry) (bool, error) {
+		mount, err := identify(path)
+		if err != nil {
+			return false, err
+		}
+		return mount != rootMount, nil
+	}, nil
+}
+
+// Cleanup deletes an above-threshold cache's build data in place.
 func (p *Provider) Cleanup(ctx context.Context) (CleanupResult, error) {
 	return p.cleanup(ctx, false)
 }
 
-// CleanupExplicit rotates an above-threshold cache even when scheduled maintenance is disabled.
+func (p *Provider) CleanupWithSettings(
+	ctx context.Context,
+	settings storage.StorageMaintenanceSettings,
+) (CleanupResult, error) {
+	return p.cleanupWithSettings(ctx, settings, false)
+}
+
+// CleanupExplicit deletes above-threshold cache data even when scheduling is disabled.
 func (p *Provider) CleanupExplicit(ctx context.Context) (CleanupResult, error) {
 	return p.cleanup(ctx, true)
 }
 
+func (p *Provider) CleanupExplicitWithSettings(
+	ctx context.Context,
+	settings storage.StorageMaintenanceSettings,
+) (CleanupResult, error) {
+	return p.cleanupWithSettings(ctx, settings, true)
+}
+
 func (p *Provider) cleanup(ctx context.Context, explicit bool) (CleanupResult, error) {
-	settings, err := p.loadSettings(ctx)
+	cleanupCtx, cancel := context.WithTimeout(ctx, cleanupDeadline)
+	defer cancel()
+	release, err := p.config.Mutations.Acquire(cleanupCtx)
+	if err != nil {
+		return CleanupResult{Partial: true, Errors: []string{cancellationIssue(err)}}, err
+	}
+	defer release()
+	settings, err := p.loadSettings(cleanupCtx)
 	if err != nil {
 		return CleanupResult{}, err
 	}
+	return p.cleanupWithSettingsLocked(cleanupCtx, settings, explicit)
+}
+
+func (p *Provider) cleanupWithSettings(
+	ctx context.Context,
+	settings storage.StorageMaintenanceSettings,
+	explicit bool,
+) (CleanupResult, error) {
+	cleanupCtx, cancel := context.WithTimeout(ctx, cleanupDeadline)
+	defer cancel()
+	release, err := p.config.Mutations.Acquire(cleanupCtx)
+	if err != nil {
+		return CleanupResult{Partial: true, Errors: []string{cancellationIssue(err)}}, err
+	}
+	defer release()
+	return p.cleanupWithSettingsLocked(cleanupCtx, settings, explicit)
+}
+
+func (p *Provider) cleanupWithSettingsLocked(
+	ctx context.Context,
+	settings storage.StorageMaintenanceSettings,
+	explicit bool,
+) (CleanupResult, error) {
 	cachePath, adopted, err := p.cachePath(settings)
 	if err != nil {
 		return CleanupResult{}, err
@@ -220,34 +303,21 @@ func (p *Provider) cleanup(ctx context.Context, explicit bool) (CleanupResult, e
 	if !settings.GoCache.Enabled && !explicit {
 		return result, nil
 	}
-	if err := p.validateCacheAndTrash(cachePath); err != nil {
-		return result, err
+	trashRoot := filepath.Clean(p.config.TrashDir)
+	if !filepath.IsAbs(trashRoot) {
+		return result, fmt.Errorf("go-cache trash path must be absolute: %q", trashRoot)
 	}
-	if !adopted && !hasValidMarker(cachePath) {
-		return result, ErrNotOwned
+	if pathsOverlap(cachePath, trashRoot) {
+		return result, errors.New("go cache and Kandev trash must not contain each other")
 	}
-	result.BytesBefore, err = directorySize(cachePath)
+	rootHandle, err := p.openValidatedCacheRoot(cachePath, adopted, cacheFilesystemIdentity)
 	if err != nil {
 		return result, err
 	}
-	if result.BytesBefore <= settings.GoCache.MaxBytes {
-		result.BytesAfter = result.BytesBefore
-		return result, nil
-	}
-	entry, err := p.rotate(ctx, cachePath, result.BytesBefore, settings.QuarantineRetentionHours, adopted)
-	if err != nil {
-		var activeErr *storage.ActiveQuarantineIntentError
-		if errors.As(err, &activeErr) {
-			result.BytesAfter = result.BytesBefore
-			result.Skipped = true
-			result.Reason = "active_quarantine"
-			return result, nil
-		}
-		return result, err
-	}
-	result.QuarantineEntry = entry
-	result.ReclaimedBytes = result.BytesBefore
-	return result, nil
+	return p.cleanupContentsWithPreparedRoot(
+		ctx, cachePath, adopted, settings.GoCache.MaxBytes, cleanupEntryLimit,
+		"filesystem", cacheFilesystemIdentity, rootHandle,
+	)
 }
 
 // ValidateAdoption verifies an explicitly confirmed external cache path.
@@ -272,7 +342,7 @@ func (p *Provider) ValidateAdoption(_ context.Context, path, confirmation string
 	if err := p.validateCacheAndTrash(path); err != nil {
 		return err
 	}
-	return probeAtomicRename(path, trashRoot)
+	return nil
 }
 
 func (p *Provider) loadSettings(ctx context.Context) (storage.StorageMaintenanceSettings, error) {
@@ -296,78 +366,6 @@ func (p *Provider) cachePath(settings storage.StorageMaintenanceSettings) (strin
 		return "", false, fmt.Errorf("managed Go-cache path must be absolute: %q", path)
 	}
 	return filepath.Clean(path), adopted, nil
-}
-
-func (p *Provider) rotate(
-	ctx context.Context,
-	cachePath string,
-	sizeBytes int64,
-	retentionHours int,
-	adopted bool,
-) (*storage.QuarantineEntry, error) {
-	if p.config.Store == nil {
-		return nil, errors.New("go-cache quarantine store is required")
-	}
-	trashRoot := filepath.Clean(p.config.TrashDir)
-	if !filepath.IsAbs(trashRoot) {
-		return nil, fmt.Errorf("go-cache trash path must be absolute: %q", trashRoot)
-	}
-	if err := p.validateCacheAndTrash(cachePath); err != nil {
-		return nil, err
-	}
-	quarantineDir := filepath.Join(trashRoot, "go-cache")
-	anchor, err := storage.CommonPath(p.config.HomeDir, cachePath, trashRoot)
-	if err != nil {
-		return nil, err
-	}
-	if err := storage.ValidateNoSymlinkPath(anchor, quarantineDir); err != nil {
-		return nil, fmt.Errorf("validate Go-cache quarantine directory: %w", err)
-	}
-	if err := os.MkdirAll(quarantineDir, 0o700); err != nil {
-		return nil, fmt.Errorf("create Go-cache trash: %w", err)
-	}
-	if _, err := storage.ReleaseFailedQuarantineIntent(
-		ctx, p.config.Store, storage.ResourceTypeGoCache, cachePath,
-	); err != nil {
-		return nil, err
-	}
-	now := time.Now().UTC()
-	id := uuid.NewString()
-	ownership := "managed"
-	if adopted {
-		ownership = "adopted"
-	}
-	metadata, _ := json.Marshal(map[string]string{"ownership": ownership})
-	entry := &storage.QuarantineEntry{
-		ID:             id,
-		ResourceType:   storage.ResourceTypeGoCache,
-		OriginalPath:   cachePath,
-		QuarantinePath: filepath.Join(quarantineDir, id),
-		SizeBytes:      sizeBytes,
-		State:          storage.QuarantineStateQuarantined,
-		QuarantinedAt:  now,
-		DeleteAfter:    now.Add(time.Duration(retentionHours) * time.Hour),
-		Metadata:       metadata,
-	}
-	if err := p.config.Store.CreateQuarantineEntry(ctx, entry); err != nil {
-		return nil, fmt.Errorf("persist Go-cache quarantine intent: %w", err)
-	}
-	if err := os.Rename(cachePath, entry.QuarantinePath); err != nil {
-		_, _ = p.config.Store.TransitionQuarantineEntry(ctx, id, storage.QuarantineStateFailed, err.Error())
-		return nil, fmt.Errorf("quarantine Go cache: %w", err)
-	}
-	if err := p.validateCachePath(cachePath); err != nil {
-		return nil, fmt.Errorf("validate replacement Go cache: %w", err)
-	}
-	if err := os.MkdirAll(cachePath, 0o755); err != nil {
-		return nil, fmt.Errorf("recreate managed Go cache: %w", err)
-	}
-	if !adopted {
-		if err := writeMarker(cachePath); err != nil {
-			return nil, fmt.Errorf("restore Go-cache ownership marker: %w", err)
-		}
-	}
-	return entry, nil
 }
 
 func writeMarker(cachePath string) error {
@@ -482,49 +480,6 @@ func rejectSymlink(path string) error {
 	return nil
 }
 
-func directorySize(root string) (int64, error) {
-	return directorySizeWithSymlinkPolicy(root, false)
-}
-
-func directorySizeNoFollow(root string) (int64, error) {
-	return directorySizeWithSymlinkPolicy(root, true)
-}
-
-func directorySizeWithSymlinkPolicy(root string, skipSymlinks bool) (int64, error) {
-	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
-		return 0, nil
-	} else if err != nil {
-		return 0, fmt.Errorf("inspect Go-cache path: %w", err)
-	}
-	var total int64
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			if skipSymlinks {
-				return nil
-			}
-			return fmt.Errorf("symlink found in Go cache: %s", entry.Name())
-		}
-		if path == markerPath(root) {
-			return nil
-		}
-		if entry.Type().IsRegular() {
-			info, err := entry.Info()
-			if err != nil {
-				return err
-			}
-			total += info.Size()
-		}
-		return nil
-	})
-	if err != nil {
-		return 0, fmt.Errorf("measure Go cache: %w", err)
-	}
-	return total, nil
-}
-
 func pathsOverlap(first, second string) bool {
 	return pathContains(first, second) || pathContains(second, first)
 }
@@ -536,47 +491,4 @@ func pathContains(parent, child string) bool {
 
 func startsWithParent(rel string) bool {
 	return len(rel) >= 3 && rel[:3] == ".."+string(filepath.Separator)
-}
-
-func probeAtomicRename(cachePath, trashRoot string) error {
-	anchor, err := storage.CommonPath(cachePath, trashRoot)
-	if err != nil {
-		return err
-	}
-	root, err := os.OpenRoot(anchor)
-	if err != nil {
-		return fmt.Errorf("open Go-cache adoption root: %w", err)
-	}
-	defer func() { _ = root.Close() }()
-
-	cacheRel, err := filepath.Rel(anchor, cachePath)
-	if err != nil {
-		return fmt.Errorf("resolve Go-cache probe path: %w", err)
-	}
-	trashRel, err := filepath.Rel(anchor, trashRoot)
-	if err != nil {
-		return fmt.Errorf("resolve Go-cache trash path: %w", err)
-	}
-	if err := root.MkdirAll(trashRel, 0o700); err != nil {
-		return fmt.Errorf("create Go-cache trash: %w", err)
-	}
-	probeName := ".kandev-adoption-probe-" + uuid.NewString()
-	source := filepath.Join(cacheRel, probeName)
-	probe, err := root.OpenFile(source, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return fmt.Errorf("create adoption probe: %w", err)
-	}
-	if err := probe.Close(); err != nil {
-		_ = root.Remove(source)
-		return fmt.Errorf("close adoption probe: %w", err)
-	}
-	destination := filepath.Join(trashRel, probeName)
-	if err := root.Rename(source, destination); err != nil {
-		_ = root.Remove(source)
-		return fmt.Errorf("adopted Go cache must support atomic rename into Kandev trash: %w", err)
-	}
-	if err := root.Remove(destination); err != nil {
-		return fmt.Errorf("remove adoption probe: %w", err)
-	}
-	return nil
 }

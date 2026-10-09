@@ -3,10 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { SessionStoppedBannerProps } from "./session-stopped-banner";
+import type { SessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
+import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
 import { WebSocketRequestError } from "@/lib/ws/client";
+
+const MORE_OPTIONS = "More options";
+const FAILED_TO_RESUME_MESSAGE = "Failed to resume session";
+const MANAGED_CLONE_RELOCATE_BUTTON = "managed-clone-relocate-button";
+const RETRY_CONNECTION_BUTTON = "recovery-retry-connection-button";
+const STOP_BUTTON = "recovery-stop-button";
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
+  stop: vi.fn(),
   agentProfiles: [{ id: "profile-1" }],
 }));
 
@@ -24,6 +33,10 @@ vi.mock("@/components/state-provider", () => ({
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: mocks.request }),
+}));
+
+vi.mock("@/hooks/domains/session/use-session-actions", () => ({
+  useSessionActions: () => ({ stop: mocks.stop }),
 }));
 
 vi.mock("@/components/task/new-session-dialog", () => ({
@@ -44,6 +57,12 @@ vi.mock("react-i18next", () => ({
         "task:sessionCompleted": "This session is complete.",
         "task:newAgent": "New Agent",
         "task:agentHasStopped": "This agent has stopped.",
+        "task:durableDeliveryUncertain":
+          "Delivery was interrupted. The prompt outcome is uncertain.",
+        "task:durableDeliveryReconnecting":
+          "Reconnecting to the agent. Your prompt will not be sent again.",
+        "task:deliveryStopOutcomeUnconfirmed":
+          "Stop was requested. The prompt outcome is still unknown.",
         "task:resume": "Resume",
         "task:resuming": "Resuming...",
         "task:starting": "Starting...",
@@ -52,7 +71,22 @@ vi.mock("react-i18next", () => ({
         "task:continueOnNewBranch": "Continue on a new branch",
         "task:restoreReadOnlyWorkspace": "Restore read-only workspace",
         "task:retry": "Retry",
+        "task:retryConnection": "Retry connection",
+        "task:retryingConnection": "Retrying connection...",
+        "task:stop": "Stop",
+        "task:stopping": "Stopping...",
+        "task:recoveryMoreOptions": MORE_OPTIONS,
         "task:couldnTStartASession": "Session recovery failed",
+        "task:failedToResumeSession": FAILED_TO_RESUME_MESSAGE,
+        "task:failedToRestoreWorkspace": "Failed to restore workspace",
+        "task:managedCloneRelocationTitle": "Workspace needs repair",
+        "task:managedCloneRelocationBody": "Move files to the current clone to resume.",
+        "task:managedCloneRelocateResume": "Move files and resume",
+        "task:managedCloneRelocationConfirmTitle": "Move workspace files?",
+        "task:managedCloneRelocationConfirmBody": "A snapshot will be kept.",
+        "task:managedCloneRelocationConfirmWarning": "Git staging choices do not transfer.",
+        "task:managedCloneRelocationConfirm": "Move files and resume",
+        "common:cancel": "Cancel",
       })[key] ?? key,
   }),
 }));
@@ -90,6 +124,7 @@ function BannerHarness({
 
 beforeEach(() => {
   mocks.request.mockReset().mockResolvedValue(undefined);
+  mocks.stop.mockReset().mockResolvedValue(true);
   mocks.agentProfiles.splice(0, mocks.agentProfiles.length, { id: "profile-1" });
 });
 
@@ -101,7 +136,7 @@ describe("SessionStoppedBanner basics", () => {
 
     expect(screen.getByTestId("completed-session-banner")).toBeTruthy();
     expect(screen.getByText("This session is complete.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "New Agent" })).toBeTruthy();
+    expect(screen.getByTestId("completed-session-new-agent-button")).toBeTruthy();
     expect(screen.getByTestId(RESUME_BUTTON_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();
 
@@ -114,7 +149,7 @@ describe("SessionStoppedBanner basics", () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "New Agent" }));
+    fireEvent.click(screen.getByTestId("completed-session-new-agent-button"));
 
     expect(await screen.findByTestId("new-session-dialog")).toBeTruthy();
   });
@@ -133,10 +168,7 @@ describe("SessionStoppedBanner basics", () => {
       </TooltipProvider>,
     );
 
-    const button = screen.getByRole("button", { name: "New Agent" }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-
-    fireEvent.click(button);
+    expect(screen.queryByRole("button", { name: "New Agent" })).toBeNull();
 
     expect(onShowDialog).not.toHaveBeenCalled();
   });
@@ -167,13 +199,16 @@ describe("SessionStoppedBanner basics", () => {
     mocks.agentProfiles.splice(0, mocks.agentProfiles.length);
     render(<BannerHarness mode="recoverable" />);
 
-    expect(screen.getByTestId(RESUME_BUTTON_TEST_ID).getAttribute("disabled")).not.toBeNull();
+    expect(screen.getByText("The agent profile no longer exists.")).toBeTruthy();
+
     fireEvent.click(screen.getByTestId(FRESH_BUTTON_TEST_ID));
 
     expect(await screen.findByTestId("new-session-dialog")).toBeTruthy();
     expect(mocks.request).not.toHaveBeenCalled();
   });
+});
 
+describe("SessionStoppedBanner delivery recovery", () => {
   it("preserves executor-unavailable recovery copy and controls", () => {
     render(
       <BannerHarness
@@ -186,9 +221,259 @@ describe("SessionStoppedBanner basics", () => {
     );
 
     expect(screen.getByText("Executor environment is unavailable")).toBeTruthy();
-    expect(screen.getByText("(Docker is offline)")).toBeTruthy();
+    expect(screen.getByText(/Docker is offline/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Restart" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Start fresh session" })).toBeTruthy();
+
+    expect(screen.getByTestId(FRESH_BUTTON_TEST_ID)).toBeTruthy();
+  });
+
+  it("offers connection retry and Stop for an uncertain prompt outcome", async () => {
+    render(<BannerHarness mode="recoverable" uncertainDelivery />);
+
+    expect(
+      screen.getByText("Delivery was interrupted. The prompt outcome is uncertain."),
+    ).toBeTruthy();
+    expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.getByTestId(RETRY_CONNECTION_BUTTON)).toBeTruthy();
+    expect(screen.getByTestId(STOP_BUTTON)).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId(RETRY_CONNECTION_BUTTON));
+    await waitFor(() =>
+      expect(mocks.request).toHaveBeenCalledWith(
+        SESSION_RECOVER_ACTION,
+        { task_id: TASK_ID, session_id: SESSION_ID, action: "retry_connection" },
+        30000,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId(STOP_BUTTON));
+    await waitFor(() => expect(mocks.stop).toHaveBeenCalledTimes(1));
+    expect((await screen.findByTestId("delivery-stop-outcome-unconfirmed")).textContent).toBe(
+      "Stop was requested. The prompt outcome is still unknown.",
+    );
+  });
+
+  it.each([null, "older-workspace-error"])(
+    "keeps uncertain delivery fenced during inspection contention (workspace stamp: %s)",
+    (managedCloneRecoveryStamp) => {
+      const actions: SessionRecoveryActions = {
+        ...guardRecoveryActions("", "resume"),
+        recoveryError: null,
+        guardDetails: null,
+        manualRecoveryFailure: null,
+        recoveryNoticeKind: "inspection_busy",
+        managedCloneRecoveryStamp,
+      };
+      render(<BannerHarness mode="recoverable" uncertainDelivery recoveryActions={actions} />);
+
+      expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+      expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();
+      expect(screen.queryByTestId(MANAGED_CLONE_RELOCATE_BUTTON)).toBeNull();
+      expect(screen.getByTestId(STOP_BUTTON)).toBeTruthy();
+      fireEvent.click(screen.getByTestId(RETRY_CONNECTION_BUTTON));
+      expect(actions.handleRecover).toHaveBeenCalledWith("retry_connection");
+      expect(actions.handleRetry).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps inspection retry ahead of an older workspace relocation action", () => {
+    const actions: SessionRecoveryActions = {
+      ...guardRecoveryActions("", "resume"),
+      recoveryError: null,
+      guardDetails: null,
+      manualRecoveryFailure: null,
+      recoveryNoticeKind: "inspection_busy",
+      managedCloneRecoveryStamp: "older-workspace-error",
+    };
+    render(<BannerHarness mode="recoverable" recoveryActions={actions} />);
+
+    expect(screen.queryByTestId(MANAGED_CLONE_RELOCATE_BUTTON)).toBeNull();
+    expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();
+    fireEvent.click(screen.getByTestId(RESUME_BUTTON_TEST_ID));
+    expect(actions.handleRetry).toHaveBeenCalledTimes(1);
+    expect(actions.handleManagedCloneRelocation).not.toHaveBeenCalled();
+  });
+
+  it("keeps reconnecting distinct from an uncertain outcome", () => {
+    render(
+      <BannerHarness mode="recoverable" uncertainDelivery deliveryRecoveryPhase="reconnecting" />,
+    );
+
+    expect(
+      screen.getByText("Reconnecting to the agent. Your prompt will not be sent again."),
+    ).toBeTruthy();
+    expect(screen.getByTestId(RETRY_CONNECTION_BUTTON)).toBeTruthy();
+    expect(screen.getByTestId(STOP_BUTTON)).toBeTruthy();
+  });
+});
+
+describe("SessionStoppedBanner historical workspace recovery", () => {
+  it("keeps normal stop actions after a historical relocation completed", () => {
+    const completedRelocation = {
+      task_id: TASK_ID,
+      environment_id: "environment-1",
+      session_id: SESSION_ID,
+      operation_id: "operation-1",
+      attempt_id: "attempt-1",
+      ownership_generation: "generation-1",
+      revision: "3",
+      kind: "managed_clone_relocation",
+      error_stamp: "old-relocation-stamp",
+      state: "complete",
+      phase: "complete",
+      repository_position: 1,
+      repository_total: 1,
+      completed_slots: 1,
+      workspace_complete: true,
+      agent_ready: true,
+      runner_live: false,
+      started_at: "2026-10-05T12:00:00Z",
+      updated_at: "2026-10-05T12:01:00Z",
+    } satisfies WorkspaceRecoveryProjection;
+    const recoveryActions: SessionRecoveryActions = {
+      ...guardRecoveryActions("", "resume"),
+      guardDetails: null,
+      recoveryError: null,
+      workspaceRecovery: completedRelocation,
+      workspaceRecoveryMatchesCurrentFailure: false,
+      handleRecover: vi.fn().mockResolvedValue(true),
+    };
+
+    render(<BannerHarness mode="recoverable" recoveryActions={recoveryActions} />);
+
+    expect(screen.getByTestId(RESUME_BUTTON_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId(FRESH_BUTTON_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId(MANAGED_CLONE_RELOCATE_BUTTON)).toBeNull();
+  });
+
+  it("shows a sibling environment runner without offering competing recovery actions", () => {
+    const activeRelocation = {
+      task_id: TASK_ID,
+      environment_id: "environment-1",
+      session_id: "session-initiator",
+      operation_id: "operation-2",
+      attempt_id: "attempt-2",
+      ownership_generation: "2",
+      revision: "1",
+      kind: "managed_clone_relocation",
+      error_stamp: "initiator-error-stamp",
+      state: "running",
+      phase: "restoring",
+      repository_position: 1,
+      repository_total: 1,
+      completed_slots: 0,
+      workspace_complete: false,
+      agent_ready: false,
+      runner_live: true,
+      started_at: "2026-10-05T12:00:00Z",
+      updated_at: "2026-10-05T12:01:00Z",
+    } satisfies WorkspaceRecoveryProjection;
+    const recoveryActions: SessionRecoveryActions = {
+      ...guardRecoveryActions("", "resume"),
+      guardDetails: null,
+      recoveryError: null,
+      workspaceRecovery: activeRelocation,
+      workspaceRecoveryMatchesCurrentFailure: false,
+    };
+
+    render(<BannerHarness mode="recoverable" recoveryActions={recoveryActions} />);
+
+    expect(screen.getByTestId("workspace-recovery-progress")).toBeTruthy();
+    expect(screen.getByTestId(RESUME_BUTTON_TEST_ID).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByTestId(FRESH_BUTTON_TEST_ID).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByTestId(MANAGED_CLONE_RELOCATE_BUTTON)).toBeNull();
+  });
+});
+
+describe("SessionStoppedBanner provider-restored Resume", () => {
+  it("shows the durable relocation projection after the local error state is gone", () => {
+    const recoveryActions: SessionRecoveryActions = {
+      providerRestoredResumeEligible: false,
+      busyAction: null,
+      workspaceRecovery: {
+        task_id: TASK_ID,
+        environment_id: "environment-1",
+        session_id: SESSION_ID,
+        operation_id: "operation-1",
+        attempt_id: "attempt-1",
+        ownership_generation: "generation-1",
+        revision: "2",
+        kind: "managed_clone_relocation",
+        error_stamp: "relocation-error-stamp",
+        state: "running",
+        phase: "publishing",
+        repository_position: 2,
+        repository_total: 2,
+        completed_slots: 1,
+        workspace_complete: false,
+        agent_ready: false,
+        runner_live: true,
+        started_at: "2026-10-05T12:00:00Z",
+        updated_at: "2026-10-05T12:01:00Z",
+      } satisfies WorkspaceRecoveryProjection,
+      workspaceRecoveryRepositoryName: "landing",
+      workspaceRecoveryMatchesCurrentFailure: true,
+      workspaceRecoveryStatusCheck: "idle",
+      checkWorkspaceRecoveryStatus: vi.fn().mockResolvedValue({ resolved: true, projection: null }),
+      recoveryError: null,
+      branchDetails: null,
+      guardDetails: null,
+      continuationDetails: null,
+      managedCloneRecoveryStamp: null,
+      lastFailedAction: null,
+      recoveryNotice: null,
+      manualRecoveryFailure: null,
+      handleRecover: vi.fn().mockResolvedValue(true),
+      handleRetry: vi.fn().mockResolvedValue(true),
+      handleRestore: vi.fn().mockResolvedValue(undefined),
+      handleNewBranch: vi.fn().mockResolvedValue(true),
+      handleContinueFromHistory: vi.fn().mockResolvedValue(true),
+      handleManagedCloneRelocation: vi.fn().mockResolvedValue(true),
+    };
+
+    render(<BannerHarness mode="recoverable" recoveryActions={recoveryActions} />);
+
+    expect(
+      screen.getByTestId("workspace-recovery-progress").getAttribute("data-recovery-phase"),
+    ).toBe("publishing");
+    expect(screen.getByText("Workspace needs repair")).toBeTruthy();
+    expect(screen.getByTestId(MANAGED_CLONE_RELOCATE_BUTTON).parentElement?.className).toContain(
+      "hidden",
+    );
+  });
+
+  it("discloses skipped settings before Resume for eligible recovery", () => {
+    const recoveryActions: SessionRecoveryActions = {
+      providerRestoredResumeEligible: true,
+      busyAction: null,
+      workspaceRecovery: null,
+      workspaceRecoveryRepositoryName: null,
+      workspaceRecoveryStatusCheck: "idle",
+      checkWorkspaceRecoveryStatus: vi.fn().mockResolvedValue({ resolved: true, projection: null }),
+      recoveryError: null,
+      branchDetails: null,
+      continuationDetails: null,
+      guardDetails: null,
+      managedCloneRecoveryStamp: null,
+      lastFailedAction: null,
+      recoveryNotice: null,
+      manualRecoveryFailure: null,
+      handleRecover: vi.fn().mockResolvedValue(true),
+      handleRetry: vi.fn().mockResolvedValue(true),
+      handleRestore: vi.fn().mockResolvedValue(undefined),
+      handleNewBranch: vi.fn().mockResolvedValue(true),
+      handleManagedCloneRelocation: vi.fn().mockResolvedValue(true),
+      handleContinueFromHistory: vi.fn().mockResolvedValue(true),
+    };
+    render(<BannerHarness mode="recoverable" recoveryActions={recoveryActions} />);
+
+    const disclosure = screen.getByTestId("provider-restored-resume-disclosure");
+    const resume = screen.getByTestId(RESUME_BUTTON_TEST_ID);
+    expect(disclosure.textContent).toBe("task:providerRestoredResumeDisclosure");
+    expect(
+      disclosure.compareDocumentPosition(resume) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });
 
@@ -211,7 +496,8 @@ describe("SessionStoppedBanner recovery failures", () => {
 
     expect(await screen.findByText("The saved branch is no longer available.")).toBeTruthy();
     expect(screen.getByTestId("recovery-new-branch-button")).toBeTruthy();
-    expect(screen.getByTestId("recovery-restore-workspace-button")).toBeTruthy();
+
+    expect(screen.getByTestId(RESTORE_BUTTON_TEST_ID)).toBeTruthy();
 
     fireEvent.click(screen.getByTestId("recovery-new-branch-button"));
 
@@ -233,6 +519,141 @@ describe("SessionStoppedBanner recovery failures", () => {
 
     expect(await screen.findByText("Provider is unavailable")).toBeTruthy();
     expect(screen.queryByTestId("recovery-new-branch-button")).toBeNull();
-    expect(screen.getByTestId("recovery-restore-workspace-button")).toBeTruthy();
+
+    expect(screen.getByTestId(RESTORE_BUTTON_TEST_ID)).toBeTruthy();
+  });
+
+  it("offers only confirmed relocation after a typed managed clone refusal", () => {
+    const relocate = vi.fn();
+    render(
+      <BannerHarness
+        mode="recoverable"
+        recoveryActions={{
+          ...guardRecoveryActions(FAILED_TO_RESUME_MESSAGE, "resume"),
+          guardDetails: null,
+          managedCloneRecoveryStamp: "managed-stamp",
+          handleManagedCloneRelocation: relocate,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Workspace needs repair")).toBeTruthy();
+    expect(screen.getByText("Move files to the current clone to resume.")).toBeTruthy();
+    expect(screen.getByTestId(MANAGED_CLONE_RELOCATE_BUTTON)).toBeTruthy();
+    expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(RESTORE_BUTTON_TEST_ID)).toBeNull();
+
+    fireEvent.click(screen.getByTestId(MANAGED_CLONE_RELOCATE_BUTTON));
+    expect(screen.getByTestId("managed-clone-relocation-confirm")).toBeTruthy();
+    expect(document.body.textContent).toContain("Git staging choices do not transfer.");
+    fireEvent.click(screen.getByTestId("managed-clone-relocation-confirm"));
+    expect(relocate).toHaveBeenCalledOnce();
+  });
+
+  it("shows a retryable failure when explicit relocation is refused", () => {
+    render(
+      <BannerHarness
+        mode="recoverable"
+        recoveryActions={{
+          ...guardRecoveryActions("workspace is still active", "resume"),
+          guardDetails: null,
+          managedCloneRecoveryStamp: "managed-stamp",
+          lastFailedAction: "relocate_and_resume",
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("session-recovery-error").textContent).toBe(FAILED_TO_RESUME_MESSAGE);
+    expect(screen.getByTestId(MANAGED_CLONE_RELOCATE_BUTTON)).toBeTruthy();
   });
 });
+
+it("does not claim a deleted profile when there is no session", () => {
+  render(<BannerHarness mode="completed" sessionId={null} />);
+  expect(screen.queryByText("The agent profile no longer exists.")).toBeNull();
+});
+
+it("redacts retained workspace diagnostics alongside a retryable guard", () => {
+  render(
+    <BannerHarness
+      mode="recoverable"
+      recoveryActions={guardRecoveryActions(
+        "Restore failed: token=stopped-secret-fixture",
+        "restore_workspace",
+      )}
+    />,
+  );
+  expect(document.body.textContent).not.toContain("stopped-secret-fixture");
+});
+
+const RESTORE_BUTTON_TEST_ID = "recovery-restore-workspace-button";
+
+it.each([
+  ["resume", FAILED_TO_RESUME_MESSAGE],
+  ["restore_workspace", "Failed to restore workspace"],
+] as const)(
+  "keeps an operation-specific explanation for empty %s diagnostics",
+  (operation, expected) => {
+    render(
+      <BannerHarness
+        mode="recoverable"
+        recoveryActions={guardRecoveryActions("\u001b[31m\u001b[0m", operation)}
+      />,
+    );
+    expect(screen.getByTestId("session-recovery-error").textContent).toBe(expected);
+  },
+);
+
+it("withholds workspace restore while a retryable startup guard owns the session", async () => {
+  mocks.request.mockRejectedValueOnce(
+    new WebSocketRequestError("busy", "CONFLICT", {
+      kind: "session_recovery_in_progress",
+      retryable: true,
+    }),
+  );
+  render(<BannerHarness mode="recoverable" />);
+  fireEvent.click(screen.getByTestId(RESUME_BUTTON_TEST_ID));
+  await screen.findByTestId("session-recovery-error");
+  expect(screen.queryByTestId(RESTORE_BUTTON_TEST_ID)).toBeNull();
+  expect(screen.getByTestId(RESUME_BUTTON_TEST_ID)).toHaveProperty("disabled", false);
+});
+
+it("redacts the stopped-session primary message", () => {
+  render(<BannerHarness mode="recoverable" message="Failure: token=primary-secret-fixture" />);
+  expect(document.body.textContent).not.toContain("primary-secret-fixture");
+});
+
+function guardRecoveryActions(
+  message: string,
+  operation: "resume" | "restore_workspace",
+): NonNullable<SessionStoppedBannerProps["recoveryActions"]> {
+  return {
+    busyAction: null,
+    workspaceRecovery: null,
+    workspaceRecoveryRepositoryName: null,
+    workspaceRecoveryStatusCheck: "idle",
+    checkWorkspaceRecoveryStatus: vi.fn().mockResolvedValue({ resolved: true, projection: null }),
+    recoveryError: new Error(message),
+    branchDetails: null,
+    providerRestoredResumeEligible: false,
+    continuationDetails: null,
+    guardDetails: { kind: "session_recovery_in_progress", retryable: true },
+    recoveryNotice: null,
+    managedCloneRecoveryStamp: null,
+    lastFailedAction: null,
+    manualRecoveryFailure: {
+      operation,
+      sessionId: "session-1",
+      errorStamp: "failure-1",
+      requestKey: "task-1\u0000session-1\u0000failure-1",
+      operationId: 1,
+    },
+    handleRecover: vi.fn().mockResolvedValue(false),
+    handleRestore: vi.fn().mockResolvedValue(undefined),
+    handleRetry: vi.fn().mockResolvedValue(false),
+    handleNewBranch: vi.fn().mockResolvedValue(false),
+    handleManagedCloneRelocation: vi.fn().mockResolvedValue(false),
+    handleContinueFromHistory: vi.fn().mockResolvedValue(false),
+  };
+}

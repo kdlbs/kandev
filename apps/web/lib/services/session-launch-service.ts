@@ -1,6 +1,8 @@
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskPriority } from "@/lib/types/http";
 
+const DEFAULT_SESSION_LAUNCH_TIMEOUT_MS = 60_000;
+
 export type SessionIntent =
   | "prepare"
   | "start"
@@ -8,6 +10,8 @@ export type SessionIntent =
   | "resume"
   | "workflow_step"
   | "restore_workspace";
+
+export type LaunchActivationSource = "user_action" | "session_open" | "session_focus";
 
 export type MessageAttachment = {
   type: "image" | "audio" | "resource";
@@ -35,6 +39,7 @@ export type LaunchSessionRequest = {
   skip_message_record?: boolean;
   auto_start?: boolean;
   attachments?: MessageAttachment[];
+  activation_source?: LaunchActivationSource;
 };
 
 export type LaunchSessionResponse = {
@@ -47,6 +52,8 @@ export type LaunchSessionResponse = {
   worktree_path?: string;
   worktree_branch?: string;
   error?: string;
+  activation_disposition?: "queued" | "suppressed";
+  activation_reason?: string;
 };
 
 export async function launchSession(
@@ -55,8 +62,25 @@ export async function launchSession(
 ): Promise<LaunchSessionResponse> {
   const client = getWebSocketClient();
   if (!client) throw new Error("WebSocket client not available");
-  const effectiveTimeout = timeout ?? (request.intent === "resume" ? 30_000 : 15_000);
+  const effectiveTimeout = timeout ?? DEFAULT_SESSION_LAUNCH_TIMEOUT_MS;
   return client.request<LaunchSessionResponse>("session.launch", request, effectiveTimeout);
+}
+
+export type ForkConversationResponse = {
+  task_id: string;
+  session_id: string;
+  state: string;
+};
+
+export async function forkConversation(request: {
+  task_id: string;
+  session_id: string;
+  turn_id: string;
+  request_id: string;
+}): Promise<ForkConversationResponse> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error("WebSocket client not available");
+  return client.request<ForkConversationResponse>("session.fork", request, 60_000);
 }
 
 export type EnsureSessionResponse = {
@@ -70,9 +94,13 @@ export type EnsureSessionResponse = {
     | "existing_newest"
     | "created_prepare"
     | "created_start"
-    | "skipped_terminal_pr";
+    | "skipped_terminal_pr"
+    | "queued"
+    | "existing_queued";
   newly_created: boolean;
   workspace_path?: string;
+  activation_disposition?: "queued" | "suppressed";
+  activation_reason?: string;
 };
 
 /**
@@ -84,7 +112,12 @@ export type EnsureSessionResponse = {
  */
 export async function ensureTaskSession(
   taskId: string,
-  opts?: { ensureExecution?: boolean; autoStart?: boolean; timeout?: number },
+  opts?: {
+    ensureExecution?: boolean;
+    autoStart?: boolean;
+    activationSource?: LaunchActivationSource;
+    timeout?: number;
+  },
 ): Promise<EnsureSessionResponse> {
   const client = getWebSocketClient();
   if (!client) throw new Error("WebSocket client not available");
@@ -94,7 +127,8 @@ export async function ensureTaskSession(
       task_id: taskId,
       ensure_execution: opts?.ensureExecution,
       ...(opts?.autoStart !== undefined ? { auto_start: opts.autoStart } : {}),
+      ...(opts?.activationSource !== undefined ? { activation_source: opts.activationSource } : {}),
     },
-    opts?.timeout ?? 15_000,
+    opts?.timeout ?? DEFAULT_SESSION_LAUNCH_TIMEOUT_MS,
   );
 }

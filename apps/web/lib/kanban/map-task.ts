@@ -11,6 +11,7 @@ import type {
   TaskPriority,
   TaskState,
   TaskSessionState,
+  WorkflowAgentOverrides,
 } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
@@ -31,7 +32,9 @@ export type TaskLike = {
   workspace_id?: string;
   workflow_id?: string;
   workflow_step_id?: string;
+  workflow_agent_overrides?: WorkflowAgentOverrides;
   title?: string;
+  identifier?: string;
   description?: string | null;
   autopilot?: boolean;
   position?: number;
@@ -84,6 +87,7 @@ export type TaskLike = {
   primary_agent_profile_id?: string | null;
   labels?: string | string[] | null;
   is_remote_executor?: boolean;
+  is_from_office?: boolean;
   parent_id?: string | null;
   assignee_user_id?: string;
   updated_at?: string;
@@ -275,7 +279,9 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     workspaceId: source.workspace_id,
     workflowId: source.workflow_id,
     workflowStepId: source.workflow_step_id ?? "",
+    workflowAgentOverrides: source.workflow_agent_overrides,
     title: source.title ?? "",
+    identifier: source.identifier ?? undefined,
     description: source.description ?? undefined,
     autopilot: source.autopilot,
     priority: source.priority,
@@ -305,6 +311,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     primaryAgentName: source.primary_agent_name ?? undefined,
     labels: pickLabels(source),
     assigneeUserId: pickAssignee(source.assignee_user_id),
+    isFromOffice: source.is_from_office,
     parentTaskId: source.parent_id ?? undefined,
     workspaceMode: workspaceModeFromMetadata(source.metadata),
     updatedAt: source.updated_at,

@@ -3,7 +3,7 @@ import { KanbanPage } from "../../pages/kanban-page";
 import type { Page } from "@playwright/test";
 import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
-const TASK_VISIBLE_TIMEOUT = 10_000;
+const TASK_VISIBLE_TIMEOUT = 30_000;
 const ALPHA_TASK = "Alpha task";
 const BETA_TASK = "Beta task";
 
@@ -45,8 +45,7 @@ test.describe("Kanban workflow filter", () => {
   // Pull `testPage` so its fixture (which runs `e2eReset` and resets user
   // settings) is set up before this hook seeds workflows/tasks — otherwise
   // the reset wipes the seed data the moment a test first reads testPage.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  test.beforeEach(async ({ apiClient, seedData, testPage }) => {
+  test.beforeEach(async ({ apiClient, seedData, testPage: _testPage }) => {
     const workflowB = await apiClient.createWorkflow(seedData.workspaceId, "Workflow B", "simple");
     workflowBId = workflowB.id;
     const stepsB = (await apiClient.listWorkflowSteps(workflowB.id)).steps;
@@ -61,6 +60,10 @@ test.describe("Kanban workflow filter", () => {
       workflow_step_id: startB.id,
     });
     betaTaskId = beta.id;
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: seedData.workflowId,
+    });
   });
 
   test.afterEach(async ({ apiClient, seedData }) => {

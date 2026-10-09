@@ -4,8 +4,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"testing"
 )
@@ -55,6 +55,7 @@ var unattendedForTest = map[string]bool{
 	"agent_error":           true,
 	"budget_alert":          true,
 	"heartbeat":             true,
+	"queue_run":             true,
 	"routine_dispatch":      true,
 	"routine_dispatch_cron": true,
 	"routine_trigger":       true,
@@ -95,11 +96,11 @@ var excludedIdentifiers = map[string]bool{
 
 func thisDir(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller(0) failed; cannot locate test file for relative source paths")
+	packageDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("locate test package: %v", err)
 	}
-	return filepath.Dir(file)
+	return packageDir
 }
 
 // findConstBlock parses path and returns the *ast.GenDecl (Tok == CONST)

@@ -91,6 +91,16 @@ test.describe("mobile task launch failure recovery", () => {
 
       const sharedError = testPage.getByTestId("task-shared-error");
       await expect(sharedError).toBeVisible({ timeout: 30_000 });
+      const mobileLayout = testPage.getByTestId("mobile-task-layout");
+      const fixedHeader = mobileLayout.locator(":scope > div.fixed.top-0");
+      const [headerBox, errorBox] = await Promise.all([
+        fixedHeader.boundingBox(),
+        sharedError.boundingBox(),
+      ]);
+      expect(headerBox).not.toBeNull();
+      expect(errorBox).not.toBeNull();
+      if (!headerBox || !errorBox) throw new Error("mobile shared-error geometry is unavailable");
+      expect(errorBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height);
       await testPage.getByTestId("task-shared-error-details").tap();
       const card = testPage.getByTestId("task-launch-error-entry");
       await expect(card).toHaveCount(1);
@@ -270,6 +280,7 @@ test.describe("mobile task launch failure recovery", () => {
     ).join("\n");
     await apiClient.seedTaskSession(task.id, {
       state: "WAITING_FOR_INPUT",
+      errorMessage: "The agent could not start.",
       sessionId: task.session_id,
       agentProfileId: seedData.agentProfileId,
       metadata: {
@@ -277,9 +288,9 @@ test.describe("mobile task launch failure recovery", () => {
           message: "The agent could not start.",
           occurred_at: failureCreatedAt,
           agent_execution_id: "mobile-bootstrap-execution-e2e",
-          execution_id: "mobile-bootstrap-execution-e2e",
+          execution_id: "650e8400-e29b-41d4-a716-446655440002",
           phase: "bootstrap",
-          attempt_id: "mobile-bootstrap-execution-e2e",
+          attempt_id: "resume-1",
           code: "generic_launch_failure",
           details: longDetails,
           scope: "session",
@@ -303,6 +314,16 @@ test.describe("mobile task launch failure recovery", () => {
         scope: "session",
         error_stamp: failureStamp,
         error_output: longDetails,
+        phase: "bootstrap",
+        attempt_id: "resume-1",
+        execution_id: "650e8400-e29b-41d4-a716-446655440002",
+        causes: [
+          {
+            operation: "resume",
+            code: "permission_denied",
+            detail: "The required contribution access was denied.",
+          },
+        ],
         actions: [
           {
             type: "ws_request",
@@ -332,9 +353,10 @@ test.describe("mobile task launch failure recovery", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     const failureText = "Agent startup failed: The agent could not start.";
-    const failureRows = testPage.locator("[id^='msg-']").filter({ hasText: failureText });
+    const failureRows = testPage.getByTestId("session-recovery-history");
     await expect(failureRows).toHaveCount(1, { timeout: 30_000 });
     const failureRow = failureRows.first();
+    await expect(failureRow).toContainText("This failure is explained in the recovery card above.");
     await expect(testPage.getByTestId("task-shared-error")).toHaveCount(0);
     const transcript = session.activeChat().locator(".chat-message-list").first();
     await expect
@@ -343,10 +365,10 @@ test.describe("mobile task launch failure recovery", () => {
     const initialScroll = await readTranscriptScrollState(transcript);
     expect(initialScroll.scrollHeight).toBeGreaterThan(initialScroll.clientHeight);
     expect(initialScroll.scrollTop).toBeGreaterThan(0);
-    await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
+    await expect(session.activeChat().getByTestId("session-recovery-card")).toBeVisible();
 
     for (const testId of ["recovery-resume-button", "recovery-fresh-button"]) {
-      const button = failureRow.getByTestId(testId);
+      const button = testPage.getByTestId(testId);
       await expect(button).toBeVisible();
       await expect(button).toBeInViewport();
       const box = await button.boundingBox();
@@ -354,13 +376,14 @@ test.describe("mobile task launch failure recovery", () => {
       expect(box!.height).toBeGreaterThanOrEqual(44);
     }
 
-    const details = failureRow.getByText("Technical details", { exact: true });
+    const recoveryCard = session.activeChat().getByTestId("session-recovery-card");
+    const details = recoveryCard.getByText("Technical details", { exact: true });
     await details.tap();
-    const detailsPanel = failureRow.locator("details");
+    const detailsPanel = recoveryCard.locator("details");
     await expect(detailsPanel).toHaveAttribute("open", "");
-    await expect(detailsPanel).toContainText(
-      "agent_bootstrap; diagnostic_line=1; cause=permission_denied",
-    );
+    await expect(detailsPanel).toContainText("Attempt: resume-1");
+    await expect(detailsPanel).toContainText("Phase: bootstrap");
+    await expect(detailsPanel).toContainText("The required contribution access was denied.");
     const expandedScroll = await readTranscriptScrollState(transcript);
     expect(expandedScroll.scrollOwnerCount).toBe(1);
     expect(expandedScroll.scrollHeight).toBeGreaterThan(expandedScroll.clientHeight);
@@ -370,23 +393,32 @@ test.describe("mobile task launch failure recovery", () => {
     );
     expect(middleScrollTop).toBeGreaterThan(0);
 
+    const resolutionAt = new Date(Date.now() + 1_000).toISOString();
     await apiClient.seedTaskSession(task.id, {
       state: "WAITING_FOR_INPUT",
+      errorMessage: "",
       sessionId: task.session_id,
       agentProfileId: seedData.agentProfileId,
       metadata: {
+        recovery_resolved_at: resolutionAt,
+        recovery_resolutions: [
+          {
+            error_stamp: failureStamp,
+            attempt_id: "resume-1",
+            resolved_at: resolutionAt,
+          },
+        ],
         last_agent_error: {
           message: "The agent could not start.",
           occurred_at: failureCreatedAt,
           agent_execution_id: "mobile-bootstrap-execution-e2e",
-          execution_id: "mobile-bootstrap-execution-e2e",
+          execution_id: "650e8400-e29b-41d4-a716-446655440002",
           phase: "bootstrap",
-          attempt_id: "mobile-bootstrap-execution-e2e",
+          attempt_id: "resume-1",
           code: "generic_launch_failure",
           details: longDetails,
           scope: "session",
           stamp: failureStamp,
-          dismissed_at: new Date(Date.now() + 1_000).toISOString(),
         },
       },
     });
@@ -406,7 +438,6 @@ test.describe("mobile task launch failure recovery", () => {
       content: "Recovered agent output",
       createdAt: new Date(Date.now() + 3_000).toISOString(),
     });
-    await expect(failureRow).toContainText(failureText);
     await expect(failureRow.getByTestId("recovery-resume-button")).toHaveCount(0);
     await expect
       .poll(async () => (await readTranscriptScrollState(transcript)).scrollTop)
@@ -416,20 +447,36 @@ test.describe("mobile task launch failure recovery", () => {
     const nextFailureCreatedAt = new Date(Date.now() + 4_000).toISOString();
     await apiClient.seedTaskSession(task.id, {
       state: "WAITING_FOR_INPUT",
+      errorMessage: "The agent could not start.",
       sessionId: task.session_id,
       agentProfileId: seedData.agentProfileId,
       metadata: {
+        recovery_resolved_at: resolutionAt,
+        recovery_resolutions: [
+          {
+            error_stamp: failureStamp,
+            attempt_id: "resume-1",
+            resolved_at: resolutionAt,
+          },
+        ],
         last_agent_error: {
           message: "The agent could not start.",
           occurred_at: nextFailureCreatedAt,
           agent_execution_id: "mobile-bootstrap-execution-e2e-new",
-          execution_id: "mobile-bootstrap-execution-e2e-new",
+          execution_id: "650e8400-e29b-41d4-a716-446655440003",
           phase: "bootstrap",
-          attempt_id: "mobile-bootstrap-execution-e2e-new",
+          attempt_id: "resume-2",
           code: "generic_launch_failure",
           details: longDetails,
           scope: "session",
           stamp: nextFailureStamp,
+          causes: [
+            {
+              operation: "resume",
+              code: "workspace_unavailable",
+              detail: "The project folder could not be opened.",
+            },
+          ],
         },
       },
     });
@@ -442,6 +489,16 @@ test.describe("mobile task launch failure recovery", () => {
         scope: "session",
         error_stamp: nextFailureStamp,
         error_output: longDetails,
+        phase: "bootstrap",
+        attempt_id: "resume-2",
+        execution_id: "650e8400-e29b-41d4-a716-446655440003",
+        causes: [
+          {
+            operation: "resume",
+            code: "workspace_unavailable",
+            detail: "The project folder could not be opened.",
+          },
+        ],
         actions: [
           {
             type: "ws_request",
@@ -458,15 +515,32 @@ test.describe("mobile task launch failure recovery", () => {
     });
     await expect(failureRows).toHaveCount(2);
     const currentFailureRow = failureRows.last();
-    await expect(currentFailureRow.getByTestId("recovery-resume-button")).toBeVisible();
+    await expect(currentFailureRow).toContainText(
+      "This failure is explained in the recovery card above.",
+    );
+    await expect(currentFailureRow.getByTestId("recovery-resume-button")).toHaveCount(0);
+    await expect(
+      testPage.getByTestId("session-recovery-card").getByTestId("recovery-resume-button"),
+    ).toBeVisible();
     await expect(failureRow.getByTestId("recovery-resume-button")).toHaveCount(0);
 
     await testPage.reload();
     await session.waitForLoad();
-    const reloadedFailureRows = testPage.locator("[id^='msg-']").filter({ hasText: failureText });
+    const reloadedFailureRows = testPage.getByTestId("session-recovery-history");
     await expect(reloadedFailureRows).toHaveCount(2);
+    await expect(
+      reloadedFailureRows.first().getByTestId("session-recovery-resolved"),
+    ).toBeVisible();
+    await expect(reloadedFailureRows.last()).toContainText(
+      "This failure is explained in the recovery card above.",
+    );
+    await reloadedFailureRows.first().getByText("Technical details", { exact: true }).tap();
+    await expect(reloadedFailureRows.first().locator("details")).toContainText("Attempt: resume-1");
     await expect(reloadedFailureRows.first().getByTestId("recovery-resume-button")).toHaveCount(0);
-    await expect(reloadedFailureRows.last().getByTestId("recovery-resume-button")).toBeVisible();
+    await expect(reloadedFailureRows.last().getByTestId("recovery-resume-button")).toHaveCount(0);
+    await expect(
+      testPage.getByTestId("session-recovery-card").getByTestId("recovery-resume-button"),
+    ).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage, "mobile bootstrap recovery presentation");
 
     await testPage.screenshot({

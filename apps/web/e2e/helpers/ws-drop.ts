@@ -16,9 +16,20 @@ type MessageAddResponseDropController = {
   droppedCount: () => number;
 };
 
+type PreviewFeedbackCreateFailureController = {
+  failNextCreate: () => void;
+  failedCount: () => number;
+};
+
 type ExpiredPluginSnapshotController = {
   expireNextPluginSnapshot: () => void;
   modifiedCount: () => number;
+  pluginSubscribeCount: () => number;
+};
+
+type ConversationChangeDropController = {
+  dropChange: (content: string) => void;
+  droppedCount: () => number;
   pluginSubscribeCount: () => number;
 };
 
@@ -27,8 +38,23 @@ export type QueueAdmissionDropController = {
   dropNextQueueAddResponse: (count?: number) => void;
   dropQueueAdmissionReconciliation: () => void;
   queueAddRequestCount: () => number;
+  queueAddRequests: () => QueueAddRequestDiagnostic[];
+  queueSnapshots: () => QueueSnapshotDiagnostic[];
   droppedRequestCount: () => number;
   droppedResponseCount: () => number;
+};
+
+export type QueueAddRequestDiagnostic = {
+  sequence: number;
+  requestId: string;
+  clientQueueId?: string;
+  contentPreview?: string;
+};
+
+export type QueueSnapshotDiagnostic = {
+  sequence: number;
+  requestId: string;
+  entryIds: string[];
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -36,9 +62,9 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function parseJSONFrames(message: string | Buffer): Array<Record<string, unknown>> {
-  if (typeof message !== "string") return [];
+  const text = typeof message === "string" ? message : message.toString("utf8");
   const frames: Array<Record<string, unknown>> = [];
-  for (const part of message.split("\n")) {
+  for (const part of text.split("\n")) {
     if (!part.trim()) continue;
     try {
       const parsed = asRecord(JSON.parse(part));
@@ -100,6 +126,11 @@ function filterServerFrame(
       if (isTargetUserMessageAdded(parsed, prompt)) {
         didDrop = true;
         dropped.push({ action: targetAction(parsed), content: parsed.payload.content });
+        continue;
+      }
+      if (hasConversationChangeContent(parsed, prompt)) {
+        didDrop = true;
+        dropped.push({ action: "session.conversation.changed", content: prompt });
         continue;
       }
     } catch {
@@ -276,6 +307,64 @@ export async function routeMainWebSocketWithMessageAddResponseDrop(
 }
 
 /**
+ * Rejects one preview-feedback create request before it reaches the backend.
+ * The next request is forwarded normally, so a screenshot draft can exercise
+ * create failure and retry without leaving a server-side row behind.
+ */
+export async function routeMainWebSocketWithPreviewFeedbackCreateFailure(
+  page: Page,
+): Promise<PreviewFeedbackCreateFailureController> {
+  const state = { armed: false, failed: 0 };
+
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => {
+      if (typeof message !== "string") {
+        server.send(message);
+        return;
+      }
+
+      const forwarded: string[] = [];
+      for (const part of message.split("\n")) {
+        const frame = parseQueueAdmissionFrame(part);
+        if (
+          state.armed &&
+          frame?.type === "request" &&
+          frame.action === "task.preview_feedback.create" &&
+          typeof frame.id === "string"
+        ) {
+          state.armed = false;
+          state.failed += 1;
+          ws.send(
+            JSON.stringify({
+              type: "error",
+              id: frame.id,
+              action: frame.action,
+              payload: {
+                code: "INTERNAL_ERROR",
+                message: "Injected preview feedback create failure",
+              },
+            }),
+          );
+          continue;
+        }
+        forwarded.push(part);
+      }
+      const next = forwarded.join("\n");
+      if (next.trim()) server.send(next);
+    });
+    server.onMessage((message) => ws.send(message));
+  });
+
+  return {
+    failNextCreate: () => {
+      state.armed = true;
+    },
+    failedCount: () => state.failed,
+  };
+}
+
+/**
  * Injects one pre-server request loss or one post-admission response loss for
  * `message.queue.add`. Every other gateway frame continues through the proxy.
  */
@@ -285,6 +374,12 @@ type QueueAdmissionProxyState = {
   dropResponseCount: { value: number };
   dropReconciliation: { value: boolean };
   queueAddRequests: { value: number };
+  queueAddRequestBaseline: { value: number };
+  queueAddRequestDiagnostics: QueueAddRequestDiagnostic[];
+  captureQueueSnapshots: { value: boolean };
+  queueSnapshotRequestSequences: Map<string, number>;
+  queueSnapshotDiagnostics: QueueSnapshotDiagnostic[];
+  diagnosticSequence: number;
   droppedRequests: { value: number };
   droppedResponses: { value: number };
 };
@@ -311,12 +406,75 @@ function filterQueueAdmissionFrames(
     .join("\n");
 }
 
+function trackQueueSnapshotRequest(
+  frame: Record<string, unknown>,
+  state: QueueAdmissionProxyState,
+) {
+  if (
+    !state.captureQueueSnapshots.value ||
+    frame.type !== "request" ||
+    frame.action !== "message.queue.get" ||
+    typeof frame.id !== "string"
+  ) {
+    return;
+  }
+  state.diagnosticSequence += 1;
+  state.queueSnapshotRequestSequences.set(frame.id, state.diagnosticSequence);
+  if (state.queueSnapshotRequestSequences.size > 16) {
+    const oldestRequestID = state.queueSnapshotRequestSequences.keys().next().value;
+    if (oldestRequestID) state.queueSnapshotRequestSequences.delete(oldestRequestID);
+  }
+}
+
+function recordQueueSnapshotResponse(
+  frame: Record<string, unknown>,
+  state: QueueAdmissionProxyState,
+) {
+  if (
+    state.dropReconciliation.value ||
+    !state.captureQueueSnapshots.value ||
+    frame.type !== "response" ||
+    frame.action !== "message.queue.get" ||
+    typeof frame.id !== "string"
+  ) {
+    return;
+  }
+  const sequence = state.queueSnapshotRequestSequences.get(frame.id);
+  if (sequence === undefined) return;
+
+  state.queueSnapshotRequestSequences.delete(frame.id);
+  const payload = asRecord(frame.payload);
+  const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+  const entryIds = entries
+    .slice(0, 20)
+    .map((entry) => asRecord(entry)?.id)
+    .filter((id): id is string => typeof id === "string");
+  state.queueSnapshotDiagnostics.push({ requestId: frame.id, sequence, entryIds });
+  if (state.queueSnapshotDiagnostics.length > 8) state.queueSnapshotDiagnostics.shift();
+}
+
 function inspectQueueAdmissionRequest(
   frame: Record<string, unknown>,
   state: QueueAdmissionProxyState,
 ): boolean {
+  trackQueueSnapshotRequest(frame, state);
   if (frame.type !== "request" || frame.action !== "message.queue.add") return false;
   state.queueAddRequests.value += 1;
+  if (state.captureQueueSnapshots.value && typeof frame.id === "string") {
+    const payload = asRecord(frame.payload);
+    state.diagnosticSequence += 1;
+    state.queueAddRequestDiagnostics.push({
+      sequence: state.diagnosticSequence,
+      requestId: frame.id,
+      ...(typeof payload?.client_queue_id === "string"
+        ? { clientQueueId: payload.client_queue_id }
+        : {}),
+      ...(typeof payload?.content === "string"
+        ? { contentPreview: payload.content.slice(0, 80) }
+        : {}),
+    });
+    if (state.queueAddRequestDiagnostics.length > 8) state.queueAddRequestDiagnostics.shift();
+  }
   if (state.dropRequest.value) {
     state.dropRequest.value = false;
     state.droppedRequests.value += 1;
@@ -332,6 +490,7 @@ function inspectQueueAdmissionResponse(
   frame: Record<string, unknown>,
   state: QueueAdmissionProxyState,
 ): boolean {
+  recordQueueSnapshotResponse(frame, state);
   const isReconciliationResponse =
     state.dropReconciliation.value &&
     frame.type === "response" &&
@@ -361,6 +520,12 @@ export async function routeMainWebSocketWithQueueAdmissionDrops(
     dropResponseCount: { value: 0 },
     dropReconciliation: { value: false },
     queueAddRequests: { value: 0 },
+    queueAddRequestBaseline: { value: 0 },
+    queueAddRequestDiagnostics: [],
+    captureQueueSnapshots: { value: false },
+    queueSnapshotRequestSequences: new Map<string, number>(),
+    queueSnapshotDiagnostics: [],
+    diagnosticSequence: 0,
     droppedRequests: { value: 0 },
     droppedResponses: { value: 0 },
   };
@@ -398,11 +563,24 @@ export async function routeMainWebSocketWithQueueAdmissionDrops(
       state.dropResponseCount.value = Math.max(1, count);
       state.dropReconciliation.value = false;
       state.droppedResponses.value = 0;
+      state.captureQueueSnapshots.value = true;
+      state.queueAddRequestBaseline.value = state.queueAddRequests.value;
+      state.queueAddRequestDiagnostics.length = 0;
+      state.queueSnapshotRequestSequences.clear();
+      state.queueSnapshotDiagnostics.length = 0;
+      state.diagnosticSequence = 0;
     },
     dropQueueAdmissionReconciliation: () => {
       state.dropReconciliation.value = true;
     },
-    queueAddRequestCount: () => state.queueAddRequests.value,
+    queueAddRequestCount: () => state.queueAddRequests.value - state.queueAddRequestBaseline.value,
+    queueAddRequests: () => state.queueAddRequestDiagnostics.map((request) => ({ ...request })),
+    queueSnapshots: () =>
+      state.queueSnapshotDiagnostics.map((snapshot) => ({
+        sequence: snapshot.sequence,
+        requestId: snapshot.requestId,
+        entryIds: [...snapshot.entryIds],
+      })),
     droppedRequestCount: () => state.droppedRequests.value,
     droppedResponseCount: () => state.droppedResponses.value,
   };
@@ -486,6 +664,91 @@ export async function routeMainWebSocketWithExpiredPluginSnapshot(
       armed = true;
     },
     modifiedCount: () => modified,
+    pluginSubscribeCount: () => pluginSubscribeRequests,
+  };
+}
+
+function hasConversationChangeContent(message: unknown, content: string): boolean {
+  const envelope = asRecord(message);
+  if (envelope?.action !== "session.conversation.changed") {
+    return false;
+  }
+  return JSON.stringify(envelope).includes(content);
+}
+
+function filterConversationChange(
+  message: string | Buffer,
+  content: string | null,
+  state: { value: number },
+): string | Buffer {
+  if (content === null) return message;
+  const text = typeof message === "string" ? message : message.toString("utf8");
+  const kept: string[] = [];
+  let didDrop = false;
+  for (const part of text.split("\n")) {
+    const trimmed = part.trim();
+    if (!trimmed) {
+      kept.push(part);
+      continue;
+    }
+    let frame: unknown;
+    try {
+      frame = JSON.parse(trimmed);
+    } catch {
+      kept.push(part);
+      continue;
+    }
+    if (hasConversationChangeContent(frame, content)) {
+      state.value += 1;
+      didDrop = true;
+      continue;
+    }
+    kept.push(part);
+  }
+  if (!didDrop) return message;
+  const filtered = kept.join("\n");
+  return typeof message === "string" ? filtered : Buffer.from(filtered, "utf8");
+}
+
+/**
+ * Drops one durable plugin conversation change while preserving the socket.
+ * The following change creates a revision gap and exercises source recovery.
+ */
+export async function routeMainWebSocketWithConversationChangeDrop(
+  page: Page,
+): Promise<ConversationChangeDropController> {
+  let contentToDrop: string | null = null;
+  const dropped = { value: 0 };
+  let pluginSubscribeRequests = 0;
+
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => {
+      for (const frame of parseJSONFrames(message)) {
+        const payload = asRecord(frame.payload);
+        if (
+          frame.type === "request" &&
+          frame.action === "session.conversation.subscribe" &&
+          payload?.consumer_kind === "plugin"
+        ) {
+          pluginSubscribeRequests += 1;
+        }
+      }
+      server.send(message);
+    });
+    server.onMessage((message) => {
+      const filtered = filterConversationChange(message, contentToDrop, dropped);
+      if (dropped.value > 0 && filtered !== message) contentToDrop = null;
+      ws.send(filtered);
+    });
+  });
+
+  return {
+    dropChange: (content: string) => {
+      contentToDrop = content;
+      dropped.value = 0;
+    },
+    droppedCount: () => dropped.value,
     pluginSubscribeCount: () => pluginSubscribeRequests,
   };
 }

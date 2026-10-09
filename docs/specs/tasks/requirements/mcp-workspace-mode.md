@@ -120,7 +120,13 @@ from the advertised contract.
   out-of-enum input before backend dispatch, including `shared`, `shared_group`,
   empty strings, whitespace-only strings, and padded mode names. Public caller
   guidance shall explain using omission instead of blank input for defaulting.
-  Backend handling of blank values shall remain unchanged.
+- **AC-TASKS-MCP-WORKSPACE-MODE-004.5:** When an `inherit_parent` task request
+  supplies explicit repository input or a top-level branch override and the
+  parent has a materialized environment, every requested repository and branch
+  slot shall match exactly one active canonical inventory entry. A missing or
+  ambiguous match shall fail before task or session creation, without mutation,
+  and shall direct the caller to `new_workspace` when it needs a different
+  checkout.
 
 ## Exclusions
 

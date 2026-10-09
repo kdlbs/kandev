@@ -7,6 +7,7 @@ package sqlite
 // is untouched by boot/replay, and there is no migration step to reverse.
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -52,10 +53,10 @@ func TestPreActivationTurnIsNotBackfilledWithStepStamp(t *testing.T) {
 
 	// Replay schema init/migrations twice more, mirroring a boot after
 	// activation. Nothing about this table's rows should change.
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay migrations: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay migrations twice: %v", err)
 	}
 

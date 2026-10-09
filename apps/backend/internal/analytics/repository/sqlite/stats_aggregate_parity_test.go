@@ -53,7 +53,10 @@ func TestStatsRepositoryAndDailyAggregatesAvoidTurnsMessagesProduct(t *testing.T
 		t.Fatalf("NewWithDB failed: %v", err)
 	}
 
-	now := time.Now().UTC()
+	// Keep every seeded turn inside the current UTC day so the daily query's
+	// date range includes the complete fixture even when the test runs near UTC
+	// midnight.
+	now := time.Now().UTC().Truncate(24 * time.Hour).Add(12 * time.Hour)
 	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-heavy', 'Heavy', ?, ?)`, now, now)
 	execOrFatal(t, dbConn, `INSERT INTO repositories (id, workspace_id, name, created_at, updated_at) VALUES ('repo-heavy', 'ws-heavy', 'Heavy', ?, ?)`, now, now)
 	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-heavy', 'ws-heavy', 'board-heavy', 'Heavy', 0, ?, ?)`, now, now)

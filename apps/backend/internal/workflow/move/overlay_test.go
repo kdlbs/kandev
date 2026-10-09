@@ -6,6 +6,25 @@ import (
 	"github.com/kandev/kandev/internal/workflow/models"
 )
 
+func TestShouldAutoStartAgentMatchesMoveEntryGates(t *testing.T) {
+	step := &models.WorkflowStep{
+		Events: models.StepEvents{OnEnter: []models.OnEnterAction{{Type: models.OnEnterAutoStartAgent}}},
+	}
+
+	if !ShouldAutoStartAgent(step, nil) {
+		t.Fatal("an auto-start step should launch without move options")
+	}
+	if ShouldAutoStartAgent(&models.WorkflowStep{}, nil) {
+		t.Fatal("a step without auto_start_agent should not launch")
+	}
+	if ShouldAutoStartAgent(step, &EntryOptions{SkipStepPrompt: true}) {
+		t.Fatal("skip_step_prompt without instructions should not launch")
+	}
+	if !ShouldAutoStartAgent(step, &EntryOptions{SkipStepPrompt: true, Instructions: "  handoff  "}) {
+		t.Fatal("skip_step_prompt with instructions should launch")
+	}
+}
+
 func TestOverlayStep_DoesNotMutateOriginal(t *testing.T) {
 	step := &models.WorkflowStep{
 		ID:             "step-qa",

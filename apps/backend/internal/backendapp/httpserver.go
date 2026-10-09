@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/startup"
+	"github.com/kandev/kandev/internal/webapp"
 	"go.uber.org/zap"
 )
 
@@ -53,11 +54,16 @@ func (hs *handlerSwitch) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // token header, if configured) so the launcher's liveness probe
 // (internal/launcher/health.go) succeeds regardless of startup progress —
 // making liveness depend on readiness here would bring back the crash loop
-// this handler exists to fix. Every other path returns a deterministic 503
-// with a parseable "starting" body instead of hanging, resetting, or 404ing.
-// GET /health's body is identical to healthHandler's in helpers.go (status
-// "ok", service, mode, version) since /health is a pure liveness probe and
-// its shape must not depend on startup progress.
+// this handler exists to fix. GET /health's body is identical to
+// healthHandler's in helpers.go (status "ok", service, mode, version) since
+// /health is a pure liveness probe and its shape must not depend on startup
+// progress.
+//
+// A GET on an application route (per webapp.IsSPARoute, excluding /ready
+// itself — see AC-PLATFORM-STARTUP-PROGRESS-003.3) whose Accept header
+// prefers HTML gets the server-rendered startup page instead of the
+// machine-readable body. Every other request gets a deterministic 503 with
+// a parseable "starting" body instead of hanging, resetting, or 404ing.
 func newBootstrapHandler(version string, reporters ...*startup.Reporter) http.Handler {
 	progress := startup.New(nil)
 	if len(reporters) > 0 {
@@ -65,6 +71,11 @@ func newBootstrapHandler(version string, reporters ...*startup.Reporter) http.Ha
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != healthRoutePath {
+			if r.Method == http.MethodGet && r.URL.Path != readyRoutePath &&
+				webapp.IsSPARoute(r.URL.Path) && webapp.PrefersHTML(r.Header.Get("Accept")) {
+				writeStartupPage(w, r, progress.Snapshot())
+				return
+			}
 			body := map[string]any{
 				statusKey:       startingStatus,
 				serviceFieldKey: kandevName,

@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- WebSocketClient intentionally owns one connection's complete request, subscription, and reconnect lifecycle. */
 
 import type { BackendMessageMap, BackendMessageType } from "@/lib/types/backend";
+import type { ConversationChangedPayload } from "@/lib/types/session-events";
 import type { ConnectionStatus } from "@/lib/types/connection";
 import { generateUUID } from "@/lib/utils";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
@@ -50,6 +51,7 @@ export interface ReconnectOptions {
   initialDelay?: number;
   maxDelay?: number;
   backoffMultiplier?: number;
+  conversationProtocol?: "v1" | "v2";
 }
 
 export interface SessionSubscriptionHandle {
@@ -58,6 +60,189 @@ export interface SessionSubscriptionHandle {
 }
 
 export type CoreSessionRecoveryHandler = () => Promise<boolean>;
+
+export type SessionGitRefreshMode = "fresh" | "recover" | "replay";
+
+export type SessionGitRefreshResponse = {
+  success: boolean;
+  session_id: string;
+  task_environment_id?: string;
+  mode: SessionGitRefreshMode;
+  status_state: "ready" | "unavailable";
+  error_code?: string;
+  snapshots: Array<BackendMessageMap["session.git.event"]>;
+};
+
+const CORE_CONVERSATION_ACTIONS = new Set<BackendMessageType>([
+  "session.message.added",
+  "session.message.updated",
+  "session.message.deleted",
+  "session.turn.started",
+  "session.turn.completed",
+  "session.turn.removed",
+]);
+const SESSION_SUBSCRIBE_ACTION = "session.subscribe";
+const SESSION_UNSUBSCRIBE_ACTION = "session.unsubscribe";
+const SESSION_CONVERSATION_CHANGED_ACTION = "session.conversation.changed" as const;
+
+function isConversationNotificationAction(action: BackendMessageType): boolean {
+  return CORE_CONVERSATION_ACTIONS.has(action);
+}
+
+function isCoreConversationOperation(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const operation = value as {
+    kind?: unknown;
+    entity?: unknown;
+    id?: unknown;
+    message?: unknown;
+    turn?: unknown;
+  };
+  if (
+    (operation.kind !== "upsert" && operation.kind !== "remove") ||
+    (operation.entity !== "message" && operation.entity !== "turn") ||
+    typeof operation.id !== "string" ||
+    operation.id === ""
+  ) {
+    return false;
+  }
+  if (operation.kind === "remove") return true;
+  const payload = operation.entity === "message" ? operation.message : operation.turn;
+  return Boolean(payload && typeof payload === "object" && !Array.isArray(payload));
+}
+
+type ParsedCoreConversationChange = {
+  sessionId: string;
+  payload: Partial<ConversationChangedPayload> & { operations?: unknown[] };
+  valid: boolean;
+};
+
+function isDecimalRevision(value: unknown): value is string {
+  return typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value);
+}
+
+function parseCoreConversationChange(value: unknown): ParsedCoreConversationChange | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const payload = value as Partial<ConversationChangedPayload> & { operations?: unknown[] };
+  if (typeof payload.session_id !== "string") return null;
+  const valid =
+    payload.protocol_version === 2 &&
+    typeof payload.scope_id === "string" &&
+    typeof payload.epoch === "string" &&
+    isDecimalRevision(payload.base_revision) &&
+    isDecimalRevision(payload.revision) &&
+    Array.isArray(payload.operations) &&
+    payload.operations.length <= 256 &&
+    payload.operations.every(isCoreConversationOperation) &&
+    BigInt(payload.revision) > BigInt(payload.base_revision);
+  return { sessionId: payload.session_id, payload, valid };
+}
+
+function needsCoreConversationRecovery(
+  parsed: ParsedCoreConversationChange,
+  stream: CoreSessionStream,
+): boolean {
+  return !parsed.valid || parsed.payload.scope_id !== stream.conversationScopeId;
+}
+
+function hasCoreConversationRevisionGap(
+  payload: ConversationChangedPayload,
+  stream: CoreSessionStream,
+  appliedRevision: string,
+): boolean {
+  return (
+    payload.reset === true ||
+    payload.epoch !== stream.conversationEpoch ||
+    payload.base_revision !== appliedRevision
+  );
+}
+
+type CoreConversationOperation = {
+  kind: "upsert" | "remove";
+  entity: "message" | "turn";
+  id: string;
+  message?: Record<string, unknown>;
+  turn?: Record<string, unknown>;
+};
+
+function coreTurnAction(operation: CoreConversationOperation): BackendMessageType {
+  if (operation.kind === "remove") return "session.turn.removed";
+  return operation.turn?.completed_at ? "session.turn.completed" : "session.turn.started";
+}
+
+function projectCoreMessageOperation(
+  sessionId: string,
+  operation: CoreConversationOperation & { entity: "message" },
+): { action: BackendMessageType; payload: Record<string, unknown> } {
+  const message = operation.message;
+  const payload: Record<string, unknown> = {
+    type: operation.kind === "remove" ? "message.deleted" : (message?.type ?? "message"),
+    session_id: sessionId,
+    task_id: message?.task_id ?? null,
+    message_id: operation.id,
+  };
+  if (operation.kind === "upsert" && message) {
+    Object.assign(payload, {
+      author_type: message.author_type,
+      author_id: message.author_id,
+      content: message.content,
+      raw_content: message.raw_content,
+      message_type: message.type,
+      turn_id: message.turn_id,
+      metadata: message.metadata,
+      requests_input: message.requests_input,
+      created_at: message.created_at,
+      updated_at: message.updated_at ?? message.created_at,
+      prompt_index: message.prompt_index,
+    });
+  }
+  return {
+    action: operation.kind === "remove" ? "session.message.deleted" : "session.message.added",
+    payload,
+  };
+}
+
+function projectCoreTurnOperation(
+  sessionId: string,
+  operation: CoreConversationOperation & { entity: "turn" },
+): { action: BackendMessageType; payload: Record<string, unknown> } {
+  const turn = operation.turn;
+  const payload: Record<string, unknown> = {
+    type: operation.kind === "remove" ? "session.turn.removed" : "session.turn.started",
+    session_id: sessionId,
+    task_id: turn?.task_id ?? null,
+    id: operation.id,
+  };
+  if (operation.kind === "upsert" && turn) {
+    Object.assign(payload, {
+      started_at: turn.started_at,
+      completed_at: turn.completed_at,
+      updated_at: turn.updated_at ?? turn.started_at,
+      created_at: turn.created_at ?? turn.started_at,
+      execution_profile_id: turn.execution_profile_id,
+      route_generation: turn.route_generation,
+      metadata: turn.metadata,
+      had_output: turn.had_output,
+    });
+  }
+  return { action: coreTurnAction(operation), payload };
+}
+
+function projectCoreConversationOperation(
+  sessionId: string,
+  operation: CoreConversationOperation,
+): { action: BackendMessageType; payload: Record<string, unknown> } {
+  if (operation.entity === "message") {
+    return projectCoreMessageOperation(
+      sessionId,
+      operation as CoreConversationOperation & { entity: "message" },
+    );
+  }
+  return projectCoreTurnOperation(
+    sessionId,
+    operation as CoreConversationOperation & { entity: "turn" },
+  );
+}
 
 type SessionSubscriptionReadiness = {
   promise: Promise<void>;
@@ -167,11 +352,16 @@ const DEFAULT_RECONNECT_OPTIONS: Required<ReconnectOptions> = {
   initialDelay: 1000,
   maxDelay: 30000,
   backoffMultiplier: 1.5,
+  conversationProtocol: "v2",
 };
 // i18n-exempt: transport/API diagnostic. Callers branch on the error code and
 // render translated copy; this text only ever appears in a console or as an
 // interpolated English diagnostic (see docs/i18n.md on interpolated values).
 const WEBSOCKET_CONNECTION_CLOSED_ERROR = "WebSocket connection closed";
+
+function requestAbortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error("");
+}
 
 export class WebSocketClient {
   private socket: WebSocket | null = null;
@@ -182,7 +372,11 @@ export class WebSocketClient {
     {
       resolve: (payload: unknown) => void;
       reject: (error: Error) => void;
-      timeout: ReturnType<typeof setTimeout>;
+      timeout: ReturnType<typeof setTimeout> | null;
+      timeoutMs: number;
+      action: string;
+      signal?: AbortSignal;
+      abortHandler?: () => void;
     }
   >();
   private rawSessionEventHandlers = new Set<(event: RawSessionEvent) => void>();
@@ -197,6 +391,7 @@ export class WebSocketClient {
   private sessionSubscriptionReadiness = new Map<string, SessionSubscriptionReadiness>();
   private coreSessionStreams = new Map<string, CoreSessionStream>();
   private coreSessionRecoveryHandlers = new Map<string, Set<CoreSessionRecoveryHandler>>();
+  private coreConversationSessions = new Set<string>();
   // Ref-counted focus signals: a session can be focused by both the task panel
   // and the task details page if both are mounted. Backend wakes its workspace
   // tracker into fast-poll mode while any client has focus, falling back to
@@ -291,20 +486,33 @@ export class WebSocketClient {
       return;
     }
     this.socket.send(data);
+    this.startRequestTimeoutFromPayload(payload);
   }
 
-  request<T>(action: string, payload: unknown, timeoutMs = 5000): Promise<T> {
+  request<T>(action: string, payload: unknown, timeoutMs = 5000, signal?: AbortSignal): Promise<T> {
     const id = generateUUID();
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(id);
-        reject(new WebSocketRequestTimeoutError(action));
-      }, timeoutMs);
-      this.pendingRequests.set(id, {
+      if (signal?.aborted) {
+        reject(requestAbortError(signal));
+        return;
+      }
+      const pending = {
         resolve: resolve as (payload: unknown) => void,
         reject,
-        timeout,
-      });
+        timeout: null,
+        timeoutMs,
+        action,
+        signal,
+        abortHandler: undefined as (() => void) | undefined,
+      };
+      if (signal) {
+        pending.abortHandler = () => {
+          this.removePendingRequest(id);
+          reject(requestAbortError(signal));
+        };
+        signal.addEventListener("abort", pending.abortHandler, { once: true });
+      }
+      this.pendingRequests.set(id, pending);
       this.send({ id, type: "request", action, payload });
     });
   }
@@ -389,15 +597,19 @@ export class WebSocketClient {
    * explicit git refresh keeps tab activation from replaying session data during
    * ordinary task switching.
    */
-  refreshSessionData(sessionId: string) {
-    if (this.status !== "connected") return;
-    if (!this.sessionFocusCounts.get(sessionId)) return;
-    this.send({
-      id: generateUUID(),
-      type: "request",
-      action: "session.git.refresh",
-      payload: { session_id: sessionId },
-    });
+  refreshSessionData(
+    sessionId: string,
+    mode: SessionGitRefreshMode = "fresh",
+    signal?: AbortSignal,
+  ) {
+    if (this.status !== "connected" || !this.sessionFocusCounts.get(sessionId)) return undefined;
+    const timeoutMs = mode === "recover" ? 65_000 : 5_000;
+    return this.request<SessionGitRefreshResponse>(
+      "session.git.refresh",
+      { session_id: sessionId, mode },
+      timeoutMs,
+      signal,
+    );
   }
 
   unfocusSession(sessionId: string) {
@@ -459,11 +671,15 @@ export class WebSocketClient {
       this.sessionSubscriptions.delete(sessionId);
       this.cancelSessionSubscriptionReadiness(sessionId);
       const stream = this.coreSessionStreams.get(sessionId);
-      if (this.status === "connected" && stream) {
+      if (
+        this.status === "connected" &&
+        stream &&
+        this.reconnectOptions.conversationProtocol === "v1"
+      ) {
         this.send({
           id: generateUUID(),
           type: "request",
-          action: "session.unsubscribe",
+          action: SESSION_UNSUBSCRIBE_ACTION,
           payload: {
             session_id: sessionId,
             consumer_kind: "core",
@@ -471,13 +687,31 @@ export class WebSocketClient {
           },
         });
       }
+      if (
+        this.status === "connected" &&
+        stream &&
+        this.reconnectOptions.conversationProtocol === "v2"
+      ) {
+        this.send({
+          id: generateUUID(),
+          type: "request",
+          action: "session.conversation.unsubscribe",
+          payload: {
+            scope_id: stream.conversationScopeId,
+            session_id: sessionId,
+            consumer_kind: "core",
+          },
+        });
+      }
+      clearTimeout(stream?.conversationCheckTimer);
       this.coreSessionStreams.delete(sessionId);
+      this.coreConversationSessions.delete(sessionId);
       this.coreSessionRecoveryHandlers.delete(sessionId);
       if (this.status === "connected") {
         this.send({
           id: generateUUID(),
           type: "request",
-          action: "session.unsubscribe",
+          action: SESSION_UNSUBSCRIBE_ACTION,
           payload: { session_id: sessionId },
         });
       }
@@ -631,14 +865,19 @@ export class WebSocketClient {
       this.rawSessionEventHandlers.forEach((handler) => handler(value));
       return;
     }
-    if (this.handleMalformedSessionEnvelope(value)) return;
-    if (!value || typeof value !== "object" || !("type" in value)) return;
-    const rawMessage = value as RawWebSocketMessage;
-    if (this.handleRequestResult(rawMessage)) return;
-    const message = value as BackendMessageMap[BackendMessageType];
-    if (message.type !== "notification") return;
+    if (this.handleControlFrame(value)) return;
+    const message = this.notificationMessage(value);
+    if (!message) return;
     const action = message.action;
-    if (!action) return;
+    if (action === SESSION_CONVERSATION_CHANGED_ACTION) {
+      this.dispatchConversationChanged(message);
+      return;
+    }
+    const payloadSessionID =
+      message.payload && typeof message.payload === "object"
+        ? (message.payload as { session_id?: unknown }).session_id
+        : undefined;
+    if (this.shouldSuppressCoreConversationNotification(action, payloadSessionID)) return;
     const handlers = this.handlers.get(action);
     this.debugNotification(action, message.payload, handlers?.size ?? 0);
     if (handlers) {
@@ -646,6 +885,185 @@ export class WebSocketClient {
     }
     dispatchToPluginWsHandlers(action, message.payload);
   }
+
+  private handleControlFrame(value: unknown): boolean {
+    if (this.handleMalformedSessionEnvelope(value)) return true;
+    if (!value || typeof value !== "object" || !("type" in value)) return true;
+    return this.handleRequestResult(value as RawWebSocketMessage);
+  }
+
+  private notificationMessage(value: unknown): BackendMessageMap[BackendMessageType] | null {
+    if (!value || typeof value !== "object" || !("type" in value)) return null;
+    const message = value as BackendMessageMap[BackendMessageType];
+    if (message.type !== "notification" || !message.action) return null;
+    return message;
+  }
+
+  private dispatchConversationChanged(
+    message: BackendMessageMap[typeof SESSION_CONVERSATION_CHANGED_ACTION],
+  ) {
+    this.handleCoreConversationChanged(message.payload);
+    const handlers = this.handlers.get(SESSION_CONVERSATION_CHANGED_ACTION);
+    this.debugNotification(
+      SESSION_CONVERSATION_CHANGED_ACTION,
+      message.payload,
+      handlers?.size ?? 0,
+    );
+    handlers?.forEach((handler) => handler(message));
+    dispatchToPluginWsHandlers(SESSION_CONVERSATION_CHANGED_ACTION, message.payload);
+  }
+
+  private shouldSuppressCoreConversationNotification(
+    action: BackendMessageType,
+    sessionId: unknown,
+  ): boolean {
+    return (
+      this.reconnectOptions.conversationProtocol === "v2" &&
+      typeof sessionId === "string" &&
+      this.coreConversationSessions.has(sessionId) &&
+      isConversationNotificationAction(action)
+    );
+  }
+
+  private handleCoreConversationChanged(value: unknown) {
+    const parsed = parseCoreConversationChange(value);
+    if (!parsed) return;
+    const { sessionId } = parsed;
+    const stream = this.coreSessionStreams.get(sessionId);
+    if (!stream || this.reconnectOptions.conversationProtocol !== "v2") return;
+    if (this.handleCoreConversationControl(parsed, stream)) return;
+    if (needsCoreConversationRecovery(parsed, stream)) {
+      this.beginCoreConversationRecovery(
+        sessionId,
+        stream,
+        stream.conversationAppliedRevision ?? "0",
+      );
+      return;
+    }
+    if (!parsed.valid) return;
+    const validPayload = parsed.payload as ConversationChangedPayload;
+    if (!stream.ready || stream.needsHydration || stream.projectionPaused) {
+      stream.conversationPendingChanges.push(validPayload);
+      this.trimCoreConversationPendingChanges(sessionId, stream, validPayload.revision);
+      return;
+    }
+    const applied = stream.conversationAppliedRevision ?? "0";
+    const revision = validPayload.revision;
+    if (BigInt(revision) <= BigInt(applied)) return;
+    if (hasCoreConversationRevisionGap(validPayload, stream, applied)) {
+      stream.conversationPendingChanges.push(validPayload);
+      this.beginCoreConversationRecovery(sessionId, stream, revision);
+      return;
+    }
+    stream.conversationAppliedRevision = revision;
+    this.projectCoreConversationOperations(sessionId, validPayload.operations ?? []);
+  }
+
+  private handleCoreConversationControl(
+    parsed: ParsedCoreConversationChange,
+    stream: CoreSessionStream,
+  ): boolean {
+    const { sessionId } = parsed;
+    if (parsed.payload.scope_id !== stream.conversationScopeId) return true;
+    if (parsed.payload.terminal) {
+      clearTimeout(stream.conversationCheckTimer);
+      stream.projectionPaused = true;
+      stream.conversationPendingChanges.length = 0;
+      this.handlers.get("session.removed")?.forEach((handler) =>
+        handler({
+          type: "notification",
+          action: "session.removed",
+          payload: { session_id: sessionId },
+        }),
+      );
+      return true;
+    }
+    if (parsed.payload.check) {
+      this.checkCoreConversationRevision(sessionId, stream, parsed.payload);
+      return true;
+    }
+    return false;
+  }
+
+  private checkCoreConversationRevision(
+    sessionId: string,
+    stream: CoreSessionStream,
+    payload: Partial<ConversationChangedPayload>,
+  ) {
+    const applied = stream.conversationAppliedRevision ?? "0";
+    if (
+      !isDecimalRevision(payload.revision) ||
+      payload.epoch !== stream.conversationEpoch ||
+      BigInt(payload.revision) < BigInt(applied)
+    ) {
+      this.beginCoreConversationRecovery(sessionId, stream, applied);
+      return;
+    }
+    if (payload.revision === applied || stream.conversationCheckTimer !== undefined) return;
+    const observed = payload.revision;
+    stream.conversationCheckTimer = setTimeout(() => {
+      stream.conversationCheckTimer = undefined;
+      if (this.coreSessionStreams.get(sessionId) !== stream || this.status !== "connected") return;
+      if (BigInt(observed) > BigInt(stream.conversationAppliedRevision ?? "0")) {
+        this.beginCoreConversationRecovery(sessionId, stream, observed);
+      }
+    }, 1000);
+  }
+
+  private trimCoreConversationPendingChanges(
+    sessionId: string,
+    stream: CoreSessionStream,
+    recoveryRevision: string,
+  ) {
+    if (stream.conversationPendingChanges.length <= 256) return;
+    stream.conversationPendingChanges.splice(0, stream.conversationPendingChanges.length - 256);
+    this.beginCoreConversationRecovery(sessionId, stream, recoveryRevision);
+  }
+
+  private drainCoreConversationChanges(sessionId: string, stream: CoreSessionStream) {
+    if (!stream.ready || stream.needsHydration || stream.projectionPaused) return;
+    const pending = stream.conversationPendingChanges.splice(0);
+    for (const change of pending) {
+      this.handleCoreConversationChanged(change);
+      if (stream.needsHydration || stream.projectionPaused) return;
+    }
+    if (this.coreSessionStreams.get(sessionId) !== stream) return;
+  }
+
+  private projectCoreConversationOperations(sessionId: string, operations: unknown[]) {
+    for (const value of operations) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const operation = value as CoreConversationOperation;
+      if (!isCoreConversationOperation(operation)) continue;
+      const projected = projectCoreConversationOperation(sessionId, operation);
+      this.dispatchConversationNotification(projected.action, projected.payload);
+    }
+  }
+
+  private dispatchConversationNotification(action: BackendMessageType, payload: unknown) {
+    const handlers = this.handlers.get(action);
+    this.debugNotification(action, payload, handlers?.size ?? 0);
+    handlers?.forEach((handler) => handler({ type: "notification", action, payload } as never));
+    dispatchToPluginWsHandlers(action, payload);
+  }
+
+  private beginCoreConversationRecovery(
+    sessionId: string,
+    stream: CoreSessionStream,
+    revision: string,
+  ) {
+    stream.projectionPaused = true;
+    stream.needsHydration = true;
+    if (
+      !stream.conversationRecoveryRevision ||
+      BigInt(revision) > BigInt(stream.conversationRecoveryRevision)
+    ) {
+      stream.conversationRecoveryRevision = revision;
+    }
+    stream.recoveryGeneration += 1;
+    void this.continueCoreSessionRecovery(sessionId, stream);
+  }
+
   /**
    * A frame that is session.event-shaped but fails the strict envelope check
    * (bad protocol version, missing identity fields, malformed payload) can
@@ -726,8 +1144,7 @@ export class WebSocketClient {
   private resolvePendingRequest(msgId: string, payload: unknown) {
     const pending = this.pendingRequests.get(msgId);
     if (!pending) return;
-    clearTimeout(pending.timeout);
-    this.pendingRequests.delete(msgId);
+    this.removePendingRequest(msgId);
     pending.resolve(payload);
   }
 
@@ -737,9 +1154,18 @@ export class WebSocketClient {
   private rejectPendingRequest(msgId: string, payload: unknown) {
     const pending = this.pendingRequests.get(msgId);
     if (!pending) return;
-    clearTimeout(pending.timeout);
-    this.pendingRequests.delete(msgId);
+    this.removePendingRequest(msgId);
     pending.reject(toWebSocketRequestError(payload));
+  }
+
+  private removePendingRequest(msgId: string) {
+    const pending = this.pendingRequests.get(msgId);
+    if (!pending) return;
+    if (pending.timeout !== null) clearTimeout(pending.timeout);
+    if (pending.signal && pending.abortHandler) {
+      pending.signal.removeEventListener("abort", pending.abortHandler);
+    }
+    this.pendingRequests.delete(msgId);
   }
 
   private handleDisconnect(event: CloseEvent) {
@@ -802,10 +1228,10 @@ export class WebSocketClient {
 
   private cleanupPendingRequests() {
     // Reject all pending requests
-    this.pendingRequests.forEach(({ reject, timeout }) => {
-      clearTimeout(timeout);
+    this.pendingRequests.forEach(({ reject }) => {
       reject(new Error(WEBSOCKET_CONNECTION_CLOSED_ERROR));
     });
+    for (const id of this.pendingRequests.keys()) this.removePendingRequest(id);
     this.pendingRequests.clear();
   }
 
@@ -844,15 +1270,19 @@ export class WebSocketClient {
     readiness.requestStarted = true;
     readiness.attempt += 1;
     const stream = this.getOrCreateCoreSessionStream(sessionId);
+    if (this.reconnectOptions.conversationProtocol === "v2") {
+      this.startSourceSessionSubscription(sessionId, readiness, stream);
+      return;
+    }
     stream.ready = false;
     stream.pendingEvents.length = 0;
     const legacySubscription = this.request(
-      "session.subscribe",
+      SESSION_SUBSCRIBE_ACTION,
       { session_id: sessionId },
       SESSION_ENTRY_REQUEST_TIMEOUT_MS,
     );
     const orderedSubscription = this.request<unknown>(
-      "session.subscribe",
+      SESSION_SUBSCRIBE_ACTION,
       {
         session_id: sessionId,
         consumer_kind: "core",
@@ -912,17 +1342,105 @@ export class WebSocketClient {
       });
   }
 
+  private startSourceSessionSubscription(
+    sessionId: string,
+    readiness: SessionSubscriptionReadiness,
+    stream: CoreSessionStream,
+  ) {
+    stream.ready = false;
+    stream.conversationPendingChanges.length = 0;
+    const legacySubscription = this.request(
+      SESSION_SUBSCRIBE_ACTION,
+      { session_id: sessionId },
+      SESSION_ENTRY_REQUEST_TIMEOUT_MS,
+    );
+    const conversationSubscription = this.request<unknown>(
+      "session.conversation.subscribe",
+      {
+        scope_id: stream.conversationScopeId,
+        session_id: sessionId,
+        consumer_kind: "core",
+      },
+      SESSION_ENTRY_REQUEST_TIMEOUT_MS,
+    ).then((response) => {
+      const payload = response as Partial<ConversationChangedPayload> & {
+        success?: boolean;
+        error?: unknown;
+      };
+      if (
+        payload.success !== true ||
+        payload.protocol_version !== 2 ||
+        payload.scope_id !== stream.conversationScopeId ||
+        payload.session_id !== sessionId ||
+        typeof payload.epoch !== "string" ||
+        typeof payload.revision !== "string" ||
+        !/^(0|[1-9][0-9]*)$/.test(payload.revision)
+      ) {
+        // i18n-exempt: transport/API diagnostic. The caller renders the
+        // structured error code through translated UI copy.
+        throw new Error("Invalid conversation subscription response");
+      }
+      const hadConversationState = stream.conversationEpoch !== undefined;
+      const missedConversationState =
+        hadConversationState &&
+        (stream.conversationEpoch !== payload.epoch ||
+          BigInt(payload.revision) > BigInt(stream.conversationAppliedRevision ?? "0"));
+      stream.conversationEpoch = payload.epoch;
+      if (!missedConversationState) stream.conversationAppliedRevision = payload.revision;
+      if (missedConversationState) {
+        stream.needsHydration = true;
+        stream.projectionPaused = true;
+        stream.conversationRecoveryRevision = payload.revision;
+        stream.recoveryGeneration += 1;
+      }
+      stream.ready = true;
+      this.coreConversationSessions.add(sessionId);
+      this.drainCoreConversationChanges(sessionId, stream);
+    });
+    void Promise.all([legacySubscription, conversationSubscription])
+      .then(() => {
+        if (this.sessionSubscriptionReadiness.get(sessionId) !== readiness) return;
+        readiness.retryTimer = null;
+        readiness.settled = true;
+        readiness.resolve();
+        if (stream.needsHydration) void this.continueCoreSessionRecovery(sessionId, stream);
+      })
+      .catch((error: unknown) => {
+        stream.ready = false;
+        stream.conversationPendingChanges.length = 0;
+        if (this.sessionSubscriptionReadiness.get(sessionId) !== readiness) return;
+        readiness.requestStarted = false;
+        if (
+          isWebSocketRequestTimeoutError(error) &&
+          readiness.attempt < MAX_SESSION_SUBSCRIPTION_ATTEMPTS &&
+          this.status === "connected" &&
+          this.socket
+        ) {
+          readiness.retryTimer = setTimeout(() => {
+            readiness.retryTimer = null;
+            this.startSessionSubscription(sessionId, readiness);
+          }, SESSION_ENTRY_RETRY_DELAY_MS);
+          return;
+        }
+        this.sessionSubscriptionReadiness.delete(sessionId);
+        readiness.settled = true;
+        readiness.reject(error);
+      });
+  }
+
   private getOrCreateCoreSessionStream(sessionId: string): CoreSessionStream {
     const current = this.coreSessionStreams.get(sessionId);
     if (current) return current;
     const stream = {
       wireId: `core:web:${generateUUID()}`,
+      conversationScopeId: `core:web:${generateUUID()}`,
       lastSeenSequence: 0,
       ready: false,
       pendingEvents: [],
       projectionPaused: false,
       needsHydration: false,
       recoveryGeneration: 0,
+      conversationPendingChanges: [],
     };
     this.coreSessionStreams.set(sessionId, stream);
     return stream;
@@ -1019,7 +1537,7 @@ export class WebSocketClient {
     stream.projectionPaused = true;
     stream.recoveryGeneration += 1;
     stream.recoveryWatermark = undefined;
-    stream.poisonRecovery = this.request("session.subscribe", {
+    stream.poisonRecovery = this.request(SESSION_SUBSCRIBE_ACTION, {
       session_id: sessionId,
       consumer_kind: "core",
       wire_id: stream.wireId,
@@ -1045,7 +1563,13 @@ export class WebSocketClient {
     sessionId: string,
     stream: CoreSessionStream,
   ): Promise<boolean> {
-    if (!stream.needsHydration || stream.recoveryWatermark === undefined) {
+    if (
+      !stream.needsHydration ||
+      (this.reconnectOptions.conversationProtocol === "v1" &&
+        stream.recoveryWatermark === undefined) ||
+      (this.reconnectOptions.conversationProtocol === "v2" &&
+        stream.conversationRecoveryRevision === undefined)
+    ) {
       return Promise.resolve(false);
     }
     const existing = stream.recoveryHydration;
@@ -1062,15 +1586,31 @@ export class WebSocketClient {
         ) {
           return false;
         }
-        const watermark = stream.recoveryWatermark;
-        if (watermark === undefined) return false;
-        stream.lastSeenSequence = Math.max(stream.lastSeenSequence, watermark);
-        stream.pendingEvents = stream.pendingEvents.filter(
-          (event) => event.sequence > stream.lastSeenSequence,
-        );
+        if (this.reconnectOptions.conversationProtocol === "v2") {
+          const revision = stream.conversationRecoveryRevision;
+          if (revision === undefined) return false;
+          stream.conversationAppliedRevision = revision;
+          stream.conversationPendingChanges = stream.conversationPendingChanges.filter((change) => {
+            if (!change || typeof change !== "object") return false;
+            const candidate = change as { revision?: unknown };
+            return (
+              typeof candidate.revision === "string" &&
+              BigInt(candidate.revision) > BigInt(revision)
+            );
+          });
+          stream.conversationRecoveryRevision = undefined;
+        } else {
+          const watermark = stream.recoveryWatermark;
+          if (watermark === undefined) return false;
+          stream.lastSeenSequence = Math.max(stream.lastSeenSequence, watermark);
+          stream.pendingEvents = stream.pendingEvents.filter(
+            (event) => event.sequence > stream.lastSeenSequence,
+          );
+        }
         stream.needsHydration = false;
         stream.projectionPaused = false;
         stream.recoveryWatermark = undefined;
+        this.drainCoreConversationChanges(sessionId, stream);
         this.drainCoreSessionEvents(sessionId, stream);
         return true;
       })
@@ -1183,8 +1723,26 @@ export class WebSocketClient {
 
   private flushQueue() {
     if (!this.socket || this.status !== "connected") return;
-    this.pendingQueue.forEach((data) => this.socket?.send(data));
+    this.pendingQueue.forEach((data) => {
+      this.socket?.send(data);
+      this.startRequestTimeoutFromPayload(JSON.parse(data));
+    });
     this.pendingQueue = [];
+  }
+
+  private startRequestTimeout(id: string) {
+    const pending = this.pendingRequests.get(id);
+    if (!pending || pending.timeout !== null) return;
+    pending.timeout = setTimeout(() => {
+      this.removePendingRequest(id);
+      pending.reject(new WebSocketRequestTimeoutError(pending.action));
+    }, pending.timeoutMs);
+  }
+
+  private startRequestTimeoutFromPayload(payload: unknown) {
+    const request = payload as { id?: unknown; type?: unknown } | null;
+    if (request?.type !== "request" || typeof request.id !== "string") return;
+    this.startRequestTimeout(request.id);
   }
 
   private setStatus(status: WebSocketStatus) {

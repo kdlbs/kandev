@@ -105,10 +105,10 @@ func TestHTTPListMessagesRequiresSessionID(t *testing.T) {
 	require.Zero(t, repo.listCalls)
 }
 
-// TestHTTPListMessagesUsesTheUnpaginatedPathByDefault pins the mode switch:
-// with no cursor, sort or limit the handler must take the plain list, whose
-// response carries no cursor.
-func TestHTTPListMessagesUsesTheUnpaginatedPathByDefault(t *testing.T) {
+// TestHTTPListMessagesDefaultsToABoundedFirstPage pins the mode switch: with
+// no cursor, sort or limit the handler must still take the bounded paginated
+// path (DefaultMessagesPageSize), never the unbounded full-session read.
+func TestHTTPListMessagesDefaultsToABoundedFirstPage(t *testing.T) {
 	repo := &messageListRepo{}
 	h := newMessageListHandlers(t, repo)
 	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages", "sess-b")
@@ -118,11 +118,9 @@ func TestHTTPListMessagesUsesTheUnpaginatedPathByDefault(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	var resp dto.ListMessagesResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Equal(t, 2, resp.Total)
-	require.Equal(t, 1, repo.listCalls)
-	require.Empty(t, repo.paginatedOptions, "the paginated query must not run")
-	require.Empty(t, resp.Cursor)
-	require.False(t, resp.HasMore)
+	require.Zero(t, repo.listCalls, "the unbounded query must not run")
+	require.Len(t, repo.paginatedOptions, 1)
+	require.Equal(t, service.DefaultMessagesPageSize, repo.paginatedOptions[0].Limit)
 }
 
 // TestHTTPListMessagesSwitchesToPaginationOnAnyCursorParam covers each param
@@ -262,7 +260,7 @@ func TestHTTPListMessagesPassesAuthorFilterAndAround(t *testing.T) {
 }
 
 func TestHTTPListMessagesSurfacesRepositoryFailure(t *testing.T) {
-	repo := &messageListRepo{listErr: errors.New("database unavailable")}
+	repo := &messageListRepo{paginatedErr: errors.New("database unavailable")}
 	h := newMessageListHandlers(t, repo)
 	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages", "sess-b")
 
@@ -365,6 +363,23 @@ func TestWSListMessagesReturnsPageAndCursor(t *testing.T) {
 	require.Len(t, repo.paginatedOptions, 1)
 	require.Equal(t, 10, repo.paginatedOptions[0].Limit)
 	require.Equal(t, "asc", repo.paginatedOptions[0].Sort)
+}
+
+// TestWSListMessagesDefaultsToABoundedFirstPage mirrors
+// TestHTTPListMessagesDefaultsToABoundedFirstPage for the WebSocket path: a
+// request with no limit/before/after/sort must still bound the query.
+func TestWSListMessagesDefaultsToABoundedFirstPage(t *testing.T) {
+	repo := &messageListRepo{}
+	h := newMessageListHandlers(t, repo)
+
+	resp, err := h.wsListMessages(context.Background(),
+		wsWorkflowRequest(t, ws.ActionMessageList, map[string]any{"session_id": "sess-b"}))
+
+	require.NoError(t, err)
+	var page dto.ListMessagesResponse
+	wsWorkflowResponse(t, resp, &page)
+	require.Len(t, repo.paginatedOptions, 1)
+	require.Equal(t, service.DefaultMessagesPageSize, repo.paginatedOptions[0].Limit)
 }
 
 func TestWSListMessagesSurfacesRepositoryFailure(t *testing.T) {

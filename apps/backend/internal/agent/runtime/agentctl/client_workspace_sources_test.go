@@ -9,9 +9,21 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestMaterializeRepository_ReturnsTypedRemoteError(t *testing.T) {
+	qualifiedBase := models.PRBase{Target: models.ComparisonTarget{
+		Version: models.ComparisonTargetVersion, Provider: models.ComparisonTargetProviderGitHub,
+		Kind: models.ComparisonTargetKindPullRequest, Number: 42,
+		HeadBranch: "feature/work", TargetBranch: "main",
+		HeadRepository: models.ComparisonTargetRepository{
+			Host: "github.com", Path: "contributor/widget", ProviderID: "fork-id", RemoteURL: "https://github.com/contributor/widget.git",
+		},
+		TargetRepository: models.ComparisonTargetRepository{
+			Host: "github.com", Path: "upstream/widget", ProviderID: "base-id", RemoteURL: "https://github.com/upstream/widget.git",
+		},
+	}}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
 			t.Fatalf("authorization = %q", got)
@@ -20,8 +32,9 @@ func TestMaterializeRepository_ReturnsTypedRemoteError(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body.BaseBranch != "main" || body.CheckoutBranch != "feature/work" {
-			t.Fatalf("branches = base:%q checkout:%q", body.BaseBranch, body.CheckoutBranch)
+		if body.BaseBranch != "main" || body.CheckoutBranch != "feature/work" || body.PRNumber != 42 ||
+			body.QualifiedPRBase == nil || body.QualifiedPRBase.Target.TargetRepository.Path != "upstream/widget" {
+			t.Fatalf("materialization identity = %#v", body)
 		}
 		w.WriteHeader(http.StatusConflict)
 		_, _ = w.Write([]byte(`{"error":"destination already exists"}`))
@@ -35,10 +48,12 @@ func TestMaterializeRepository_ReturnsTypedRemoteError(t *testing.T) {
 	c := &Client{baseURL: server.URL, httpClient: server.Client(), logger: log}
 	c.httpClient.Transport = &authTransport{token: "test-token", base: c.httpClient.Transport}
 	_, err = c.MaterializeRepository(context.Background(), MaterializeRepositoryRequest{
-		RepositoryURL:  "https://github.com/kdlbs/kandev.git",
-		Destination:    "kandev",
-		BaseBranch:     "main",
-		CheckoutBranch: "feature/work",
+		RepositoryURL:   "https://github.com/kdlbs/kandev.git",
+		Destination:     "kandev",
+		BaseBranch:      "main",
+		CheckoutBranch:  "feature/work",
+		PRNumber:        42,
+		QualifiedPRBase: &qualifiedBase,
 	})
 
 	var remoteErr *WorkspaceMaterializationError

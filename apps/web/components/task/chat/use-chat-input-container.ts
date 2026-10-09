@@ -8,7 +8,7 @@ import { useChatInputState } from "./use-chat-input-state";
 import type { TipTapInputHandle } from "./tiptap-input";
 import type { ContextItem } from "@/lib/types/context";
 import type { Message } from "@/lib/types/http";
-import type { DiffComment } from "@/lib/diff/types";
+import type { ReviewComment } from "@/lib/state/slices/comments";
 import type {
   ChatSubmitPayload,
   ChatSubmitResult,
@@ -26,6 +26,7 @@ import type { ComposerActivity } from "./use-composer-disclosure";
 type UseChatInputContainerParams = {
   ref: React.ForwardedRef<ChatInputContainerHandle>;
   sessionId: string | null;
+  taskId: string | null;
   workspaceId?: string | null;
   isSending: boolean;
   isStarting: boolean;
@@ -52,7 +53,7 @@ type UseChatInputContainerParams = {
   contextItems: ContextItem[];
   pendingClarification: Message | null | undefined;
   onClarificationResolved: (() => void) | undefined;
-  pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
+  pendingCommentsByFile: Record<string, ReviewComment[]> | undefined;
   hasContextComments: boolean;
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss: (() => void) | undefined;
@@ -63,6 +64,8 @@ function useInputHandle(
   ref: React.ForwardedRef<ChatInputContainerHandle>,
   inputRef: React.RefObject<TipTapInputHandle | null>,
   getAttachments: () => MessageAttachment[],
+  clearAcceptedPayload: NonNullable<ChatInputContainerHandle["clearAcceptedPayload"]>,
+  restoreStagedAttachments: NonNullable<ChatInputContainerHandle["restoreStagedAttachments"]>,
 ) {
   const focusInput = useComposerFocus(inputRef);
   useImperativeHandle(
@@ -75,10 +78,12 @@ function useInputHandle(
       insertText: (text: string, from: number, to: number) => {
         inputRef.current?.insertText(text, from, to);
       },
+      clearAcceptedPayload,
+      restoreStagedAttachments,
       clear: () => inputRef.current?.clear(),
       getAttachments,
     }),
-    [inputRef, getAttachments, focusInput],
+    [inputRef, getAttachments, clearAcceptedPayload, restoreStagedAttachments, focusInput],
   );
 }
 
@@ -136,7 +141,7 @@ function computeDerivedState(params: {
   executorUnavailable: boolean;
   pendingClarification: Message | null | undefined;
   onClarificationResolved: (() => void) | undefined;
-  pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
+  pendingCommentsByFile: Record<string, ReviewComment[]> | undefined;
   allItemsLength: number;
   hasPendingAttachmentUploads: boolean;
   isInputFocused: boolean;
@@ -252,6 +257,8 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     addFiles,
     handleChange,
     handleSubmit,
+    clearAcceptedPayload: clearAcceptedPayloadFromState,
+    restoreStagedAttachments,
     allItems,
     getAttachments,
     hasPendingAttachmentUploads,
@@ -259,7 +266,12 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
 
   useSyncTipTapRef(tiptapRef, inputRef);
 
-  useInputHandle(ref, inputRef, getAttachments);
+  const clearAcceptedPayload = useCallback(
+    (payload: Parameters<NonNullable<ChatInputContainerHandle["clearAcceptedPayload"]>>[0]) =>
+      clearAcceptedPayloadFromState(payload, resetHeight),
+    [clearAcceptedPayloadFromState, resetHeight],
+  );
+  useInputHandle(ref, inputRef, getAttachments, clearAcceptedPayload, restoreStagedAttachments);
   const addFilesWithHold = useComposerInputPresentation({
     inputRef,
     addFiles,

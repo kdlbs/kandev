@@ -18,7 +18,8 @@ function profile(id: string, name: string): AgentProfile {
 }
 
 const ALPHA_PROFILE_NAME = "Alpha";
-const PROFILE_ROW_SELECTOR = '[data-testid="agent-profile-row"]';
+const PROFILE_ROW_TEST_ID = "agent-profile-row";
+const PROFILE_ROW_SELECTOR = `[data-testid="${PROFILE_ROW_TEST_ID}"]`;
 const PROFILE_ACTIONS_MENU_SELECTOR = '[data-testid="profile-actions-menu-p-1"]';
 
 const AGENT = {
@@ -34,6 +35,7 @@ const EMPTY_AGENT = { ...AGENT, profiles: [] } as unknown as Agent;
 let storeState: {
   settingsAgents: { items: Agent[] };
   agentProfiles: { items: Array<{ id: string }> };
+  features?: { codexAppServer: boolean };
   // The row's actions are gated on org.config.manage, which useIsAdmin reads
   // off the auth slice. Auth disabled is the default install and resolves to
   // an administrator, matching the backend's synthetic identity.
@@ -88,13 +90,20 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
   DropdownMenuItem: ({
     children,
     onSelect,
+    disabled,
     "data-testid": testId,
   }: {
     children?: ReactNode;
     onSelect?: () => void;
+    disabled?: boolean;
     "data-testid"?: string;
   }) => (
-    <button type="button" data-testid={testId ?? "delete-item"} onClick={onSelect}>
+    <button
+      type="button"
+      disabled={disabled}
+      data-testid={testId ?? "delete-item"}
+      onClick={onSelect}
+    >
       {children}
     </button>
   ),
@@ -115,6 +124,99 @@ function renderRows() {
     </>,
   );
 }
+describe("ProfileRow fallback summary", () => {
+  const PROFILE_BADGES_SELECTOR = '[data-slot="badge"]';
+  const MODEL_NAME = "start-model";
+  beforeEach(() => {
+    storeState = {
+      settingsAgents: { items: [] },
+      agentProfiles: { items: [] },
+      auth: { mode: undefined, user: undefined },
+    };
+    mocks.responsive.isFullDesktop = false;
+    mocks.responsive.isFinePointer = false;
+  });
+  afterEach(() => cleanup());
+
+  it("renders the opaque fallback badge immediately after the model badge", () => {
+    const fallbackModel = "  provider/model:with spaces  ";
+    const fallbackProfile = {
+      ...profile("p-fallback", "Fallback"),
+      model: MODEL_NAME,
+      fallbackModel,
+      autoFallback: false,
+    } as AgentProfile;
+
+    renderWithTooltipProvider(<ProfileRow agent={AGENT} profile={fallbackProfile} />);
+
+    const badges = Array.from(
+      screen.getByTestId(PROFILE_ROW_TEST_ID).querySelectorAll(PROFILE_BADGES_SELECTOR),
+    ).map((badge) => badge.textContent);
+    expect(badges).toEqual([MODEL_NAME, `fallback: ${fallbackModel}`]);
+  });
+  it("renders the no-configured-fallback label", () => {
+    const strictProfile = {
+      ...profile("p-strict", "Strict"),
+      model: MODEL_NAME,
+      fallbackModel: "",
+      autoFallback: false,
+    } as AgentProfile;
+
+    renderWithTooltipProvider(<ProfileRow agent={AGENT} profile={strictProfile} />);
+
+    const badges = screen
+      .getByTestId(PROFILE_ROW_TEST_ID)
+      .querySelectorAll(PROFILE_BADGES_SELECTOR);
+    expect(badges[1]?.textContent).toBe("fallback: none");
+  });
+  it("renders exact when exact-model selection keeps a saved explicit fallback", () => {
+    const exactProfile = {
+      ...profile("p-exact", "Exact"),
+      model: MODEL_NAME,
+      fallbackModel: "saved-explicit-model",
+      autoFallback: false,
+      requireExactModel: true,
+    } as AgentProfile;
+
+    renderWithTooltipProvider(<ProfileRow agent={AGENT} profile={exactProfile} />);
+
+    const badges = screen
+      .getByTestId(PROFILE_ROW_TEST_ID)
+      .querySelectorAll(PROFILE_BADGES_SELECTOR);
+    expect(badges[1]?.textContent).toBe("fallback: exact");
+  });
+  it("renders exact when exact-model selection keeps automatic fallback enabled", () => {
+    const exactProfile = {
+      ...profile("p-exact-auto", "Exact automatic"),
+      model: MODEL_NAME,
+      fallbackModel: "",
+      autoFallback: true,
+      requireExactModel: true,
+    } as AgentProfile;
+
+    renderWithTooltipProvider(<ProfileRow agent={AGENT} profile={exactProfile} />);
+
+    const badges = screen
+      .getByTestId(PROFILE_ROW_TEST_ID)
+      .querySelectorAll(PROFILE_BADGES_SELECTOR);
+    expect(badges[1]?.textContent).toBe("fallback: exact");
+  });
+  it("renders next when automatic fallback takes precedence", () => {
+    const automaticProfile = {
+      ...profile("p-automatic", "Automatic"),
+      model: MODEL_NAME,
+      fallbackModel: "saved-explicit-model",
+      autoFallback: true,
+    } as AgentProfile;
+
+    renderWithTooltipProvider(<ProfileRow agent={AGENT} profile={automaticProfile} />);
+
+    const badges = screen
+      .getByTestId(PROFILE_ROW_TEST_ID)
+      .querySelectorAll(PROFILE_BADGES_SELECTOR);
+    expect(badges[1]?.textContent).toBe("fallback: next");
+  });
+});
 
 function confirmDeleteFor(name: string) {
   const row = screen.getByLabelText(name).closest(PROFILE_ROW_SELECTOR);
@@ -250,6 +352,15 @@ describe("ProfileRow duplicate", () => {
 
     await waitFor(() => expect(mocks.duplicateAgentProfileAction).toHaveBeenCalledWith("p-1"));
   });
+
+  it("keeps saved native Codex profiles while disabling duplicate when the feature is off", () => {
+    const nativeAgent = { ...AGENT, name: "codex-app-server" } as Agent;
+    storeState.features = { codexAppServer: false };
+    renderWithTooltipProvider(<ProfileRow agent={nativeAgent} profile={nativeAgent.profiles[0]} />);
+
+    expect((screen.getByTestId("duplicate-profile-p-1") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId("delete-profile-p-1") as HTMLButtonElement).disabled).toBe(false);
+  });
 });
 
 describe("ProfileRow responsive actions", () => {
@@ -344,7 +455,7 @@ describe("AgentProfilesSubList layout", () => {
     renderWithTooltipProvider(<AgentProfilesSubList savedAgent={AGENT} agentName="claude" />);
 
     expect(screen.queryByText("2 profiles", { exact: true })).toBeNull();
-    expect(screen.getAllByTestId("agent-profile-row")).toHaveLength(2);
+    expect(screen.getAllByTestId(PROFILE_ROW_TEST_ID)).toHaveLength(2);
     expect(screen.queryByTestId("new-profile-claude")).toBeNull();
   });
 

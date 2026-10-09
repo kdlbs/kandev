@@ -238,9 +238,11 @@ test.describe("Workflow start step placement", () => {
     });
 
     // Agent responds after the delay
-    await expect(session.chat.getByText("delayed mock response", { exact: false })).toBeVisible({
-      timeout: 30_000,
-    });
+    const delayedResponse = session.chat
+      .getByTestId("agent-message-highlight")
+      .filter({ hasText: "delayed mock response" });
+    await expect(delayedResponse).toHaveCount(1, { timeout: 30_000 });
+    await expect(delayedResponse).toBeVisible();
 
     // on_turn_complete fires on In Progress → task moves to Done
     await expect(session.stepperStep("Done")).toHaveAttribute("aria-current", "step", {

@@ -61,9 +61,15 @@ decoupled from the code-review App token. The job runs for `opened`,
 runs when the label is `generate-pr-walkthrough`.
 
 Use the shared base-controlled setup action for OpenCode. Select
-`opencode-go/muse-spark-1.2-contributor` with `--model`. Select its built-in
+`opencode/muse-spark-1.3-contributor-free` with `--model`. Select its built-in
 `high` reasoning variant with `--variant`. The pinned OpenCode 1.17.7 model
 catalog declares this variant, so no custom provider override is necessary.
+
+This model is free but may use prompts and completions to train future Meta
+models. This is an accepted, explicit decision: the PR patch and prepared
+PR-head context are subject to that data policy. To revoke, restore a
+non-training model such as `opencode-go/muse-spark-1.3-contributor` in
+`.github/workflows/pr-walkthrough.yml`.
 
 The job will:
 

@@ -101,6 +101,24 @@ Kanban root creation in another permitted Kanban workspace must not inherit
 source repositories owned by a different workspace. Preserve applicable
 profile precedence after admission.
 
+### Inherited repository compatibility
+
+An explicit repository selection does not change what `inherit_parent` means:
+the child must attach to the parent's existing materialized checkout. Before
+task insertion, the MCP creation handler asks the task service to validate
+explicit repository inputs against the parent's active task environment when
+one exists. Each requested repository plus effective branch identity must match
+exactly one active `task_environment_repos` row. Deleted, failed, missing, or
+duplicate matches are unsafe.
+
+The validation runs after repository defaults and workspace policy are resolved
+but before remote-contribution registration, task insertion, session creation,
+or launch. It is read-only. A mismatch returns the existing validation envelope
+with bounded guidance to select `workspace_mode=new_workspace`; it does not
+rewrite the repository input, silently change workspace mode, or alter the
+parent environment. A parent without a materialized environment retains the
+existing launch-time validation path.
+
 Kanban sessions cannot target Office workspaces, Office parents, or
 project-linked Office tasks, including inconsistent legacy combinations.
 External callers retain both modes; selecting an Office workspace must not

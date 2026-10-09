@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import type { FileTreeNode } from "@/lib/types/backend";
+import { isWorkspaceTreePath } from "@/lib/workspace-file-path";
 import { findUnloadedAncestor, getAncestorPaths } from "./file-tree-utils";
 
 const DEFAULT_RETRY_DELAYS_MS = [250, 1_000] as const;
@@ -62,16 +63,17 @@ export function useFileTreeReveal(params: FileTreeRevealParams) {
   latestRef.current = { isLoading, loadChildren, retryDelaysMs };
   const runRef = useRef<RevealRun | null>(null);
   const [revision, setRevision] = useState(0);
-  const revealKey = activeFilePath ? `${sessionId}\0${activeFilePath}` : null;
+  const targetPath = activeFilePath && isWorkspaceTreePath(activeFilePath) ? activeFilePath : null;
+  const revealKey = targetPath ? `${sessionId}\0${targetPath}` : null;
   const treeAvailable = tree !== null;
 
   useEffect(() => {
-    if (!activeFilePath || !treeAvailable) return;
-    expandAncestors(activeFilePath, setExpandedPaths);
-  }, [activeFilePath, revealKey, setExpandedPaths, treeAvailable]);
+    if (!targetPath || !treeAvailable) return;
+    expandAncestors(targetPath, setExpandedPaths);
+  }, [revealKey, setExpandedPaths, targetPath, treeAvailable]);
 
   useEffect(() => {
-    if (!activeFilePath || !revealKey || !tree) {
+    if (!targetPath || !revealKey || !tree) {
       clearRetry(runRef.current);
       runRef.current = null;
       return;
@@ -82,7 +84,7 @@ export function useFileTreeReveal(params: FileTreeRevealParams) {
       runRef.current = createRun(revealKey);
     }
     const run = runRef.current;
-    const ancestor = findUnloadedAncestor(tree, activeFilePath, getAncestorPaths(activeFilePath));
+    const ancestor = findUnloadedAncestor(tree, targetPath, getAncestorPaths(targetPath));
     if (!ancestor) {
       clearRetry(run);
       return;
@@ -125,7 +127,7 @@ export function useFileTreeReveal(params: FileTreeRevealParams) {
         run.inFlightPath = null;
         console.error("Failed to reveal file tree path", error);
       });
-  }, [activeFilePath, revealKey, revision, tree]);
+  }, [revealKey, revision, targetPath, tree]);
 
   useEffect(
     () => () => {

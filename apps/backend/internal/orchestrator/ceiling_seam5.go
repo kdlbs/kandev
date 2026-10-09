@@ -22,6 +22,18 @@ func seam5DynamicRelaunchPayload(data watcher.AgentEventData, executionProfileID
 	}
 }
 
+func seam5DynamicRelaunchPayloadWithBinding(
+	data watcher.AgentEventData,
+	executionProfileID string,
+	binding *models.CeilingWorkflowEntryBinding,
+) map[string]interface{} {
+	payload := seam5DynamicRelaunchPayload(data, executionProfileID)
+	if binding != nil {
+		payload[models.CeilingLaunchEntryBindingKey] = ceilingEntryBindingValue(*binding)
+	}
+	return payload
+}
+
 // admitOrDeferSeam5 is Service.relaunchDynamicTaskAfterFailure's gate, consulted
 // at entry, before the CREATED transition and before the Office/non-Office
 // fork. It uses handOffOrAdmit rather than admit: on the automatic path the
@@ -37,6 +49,17 @@ func seam5DynamicRelaunchPayload(data watcher.AgentEventData, executionProfileID
 func (s *Service) admitOrDeferSeam5(
 	ctx context.Context, taskID string, origin launchOrigin, relaunchPayload map[string]interface{},
 ) (reservation *sessionKeyedCeilingReservation, deferred bool, err error) {
+	return s.admitOrDeferSeam5WithBinding(ctx, taskID, origin, relaunchPayload, nil)
+}
+
+func (s *Service) admitOrDeferSeam5WithBinding(
+	ctx context.Context, taskID string, origin launchOrigin, relaunchPayload map[string]interface{},
+	binding *models.CeilingWorkflowEntryBinding,
+) (reservation *sessionKeyedCeilingReservation, deferred bool, err error) {
+	if binding != nil {
+		relaunchPayload = cloneCeilingPayload(relaunchPayload)
+		relaunchPayload[models.CeilingLaunchEntryBindingKey] = ceilingEntryBindingValue(*binding)
+	}
 	sessionID, _ := relaunchPayload[metaKeySessionID].(string)
 	decision := s.sessionCeiling.handOffOrAdmit(ctx, admissionRequest{
 		taskID:    taskID,
@@ -51,6 +74,7 @@ func (s *Service) admitOrDeferSeam5(
 			populationKnown: decision.populationKnown, ceiling: decision.ceiling,
 		}, false, nil
 	}
+	relaunchPayload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, relaunchPayload)
 
 	if err := s.deferCeilingRefusal(ctx, taskID, sessionID, models.CeilingLaunchDynamicRelaunch, relaunchPayload, decision.reasonCode,
 		decision.population, decision.populationKnown, decision.ceiling); err != nil {

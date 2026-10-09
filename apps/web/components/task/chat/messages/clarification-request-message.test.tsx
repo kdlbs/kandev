@@ -1,5 +1,5 @@
-import { render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -7,6 +7,16 @@ import {
   type Message,
 } from "@/lib/types/http";
 import { ClarificationRequestMessage } from "./clarification-request-message";
+
+const mockUpdateMessage = vi.hoisted(() => vi.fn());
+vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({
+    getState: () => ({
+      updateMessage: mockUpdateMessage,
+      messages: { bySession: {} },
+    }),
+  }),
+}));
 
 function answeredClarification(): Message {
   const metadata: ClarificationRequestMetadata = {
@@ -45,6 +55,8 @@ function answeredClarification(): Message {
 }
 
 describe("ClarificationRequestMessage", () => {
+  afterEach(cleanup);
+
   it("renders agent question Markdown but keeps custom answer text literal", () => {
     const { container } = render(<ClarificationRequestMessage comment={answeredClarification()} />);
 
@@ -60,5 +72,80 @@ describe("ClarificationRequestMessage", () => {
     );
     expect(customText).toBeDefined();
     expect(customText?.querySelector("code, strong")).toBeNull();
+  });
+
+  it("offers an answer-as-new-message action for an unanswered historical question", () => {
+    const message = answeredClarification();
+    message.metadata = {
+      ...(message.metadata as ClarificationRequestMetadata),
+      status: "pending",
+      response: undefined,
+    };
+
+    render(<ClarificationRequestMessage comment={message} />);
+
+    expect(screen.getByTestId("clarification-answer-as-new-message")).toBeTruthy();
+  });
+
+  it("does not offer a second action for the current pending turn", () => {
+    const message = answeredClarification();
+    message.metadata = {
+      ...(message.metadata as ClarificationRequestMetadata),
+      status: "pending",
+      response: undefined,
+    };
+
+    render(<ClarificationRequestMessage comment={message} isCurrentTurn />);
+
+    expect(screen.queryByTestId("clarification-answer-as-new-message")).toBeNull();
+  });
+
+  it("sends a selected historical answer through the late-message callback", async () => {
+    const onLateAnswer = vi.fn().mockResolvedValue("sent" as const);
+    render(
+      <ClarificationRequestMessage
+        comment={{
+          ...answeredClarification(),
+          metadata: {
+            ...(answeredClarification().metadata as ClarificationRequestMetadata),
+            status: "expired",
+            response: undefined,
+          },
+        }}
+        onLateAnswer={onLateAnswer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /answer as new message/i }));
+    fireEvent.click(screen.getByTestId("clarification-option"));
+    fireEvent.click(screen.getByTestId("clarification-late-submit"));
+
+    await waitFor(() => expect(onLateAnswer).toHaveBeenCalledTimes(1));
+    expect(onLateAnswer.mock.calls[0][0].answers).toEqual([
+      { question_id: "question-1", selected_options: ["fast"] },
+    ]);
+  });
+
+  it("closes the historical form without admitting a message", () => {
+    const onLateAnswer = vi.fn().mockResolvedValue("sent" as const);
+    render(
+      <ClarificationRequestMessage
+        comment={{
+          ...answeredClarification(),
+          metadata: {
+            ...(answeredClarification().metadata as ClarificationRequestMetadata),
+            status: "expired",
+            response: undefined,
+          },
+        }}
+        onLateAnswer={onLateAnswer}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /answer as new message/i }));
+    fireEvent.click(screen.getByTestId("clarification-late-close"));
+
+    expect(onLateAnswer).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /answer as new message/i })).toBeTruthy();
   });
 });

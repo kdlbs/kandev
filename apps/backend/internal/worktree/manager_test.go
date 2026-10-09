@@ -24,6 +24,9 @@ func newTestLogger() *logger.Logger {
 
 func newTestConfig(t *testing.T) Config {
 	tmpDir := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(tmpDir); err == nil {
+		tmpDir = resolved
+	}
 	return Config{
 		Enabled:       true,
 		TasksBasePath: tmpDir,
@@ -116,6 +119,47 @@ func (s *mockStore) ListActiveWorktreePaths(_ context.Context) ([]string, error)
 
 func (s *mockStore) CountActiveWorktreeReferences(_ context.Context, _ string, _ []string) (int, error) {
 	return 0, nil
+}
+
+func (s *mockStore) CountWorktreeBranchOwners(_ context.Context, repositoryPath, branch string) (int, error) {
+	count := 0
+	for _, wt := range s.worktrees {
+		if wt.RepositoryPath == repositoryPath && wt.Branch == branch {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (s *mockStore) PersistBranchRecoveryHead(_ context.Context, worktreeID, expected, recoveryHead string) (bool, error) {
+	wt := s.worktrees[worktreeID]
+	if wt == nil || (wt.RecoveryHeadSHA != expected && wt.RecoveryHeadSHA != recoveryHead) {
+		return false, nil
+	}
+	wt.RecoveryHeadSHA = recoveryHead
+	return true, nil
+}
+
+func (s *mockStore) PersistBranchCompactionComplete(
+	_ context.Context, worktreeID, expectedRecoveryHead string,
+) (bool, error) {
+	wt := s.worktrees[worktreeID]
+	if wt == nil || wt.RecoveryHeadSHA != expectedRecoveryHead || wt.BranchCompactedAt != nil {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	wt.BranchCompactedAt = &now
+	return true, nil
+}
+
+func (s *mockStore) PersistBranchRecoveryRestored(_ context.Context, worktreeID, expectedRecoveryHead string) (bool, error) {
+	wt := s.worktrees[worktreeID]
+	if wt == nil || wt.RecoveryHeadSHA != expectedRecoveryHead {
+		return false, nil
+	}
+	wt.RecoveryHeadSHA = ""
+	wt.BranchCompactedAt = nil
+	return true, nil
 }
 
 // GetWorktreesBySessionID — MultiRepoStore.

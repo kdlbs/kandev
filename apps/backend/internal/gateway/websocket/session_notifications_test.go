@@ -117,7 +117,16 @@ func TestSessionStreamBroadcaster_Close(t *testing.T) {
 	}
 }
 
+type hasGetSessionID struct {
+	sessionID string
+}
+
+func (h hasGetSessionID) GetSessionID() string {
+	return h.sessionID
+}
+
 func TestExtractSessionID(t *testing.T) {
+
 	tests := []struct {
 		name     string
 		data     any
@@ -127,6 +136,16 @@ func TestExtractSessionID(t *testing.T) {
 			name:     "nil data",
 			data:     nil,
 			expected: "",
+		},
+		{
+			name:     "struct with GetSessionID",
+			data:     hasGetSessionID{sessionID: "session-struct-123"},
+			expected: "session-struct-123",
+		},
+		{
+			name:     "pointer with GetSessionID",
+			data:     &hasGetSessionID{sessionID: "session-ptr-123"},
+			expected: "session-ptr-123",
 		},
 		{
 			name: "map with session_id",
@@ -233,6 +252,173 @@ func TestSessionStreamBroadcaster_BroadcastsFallbackNotification(t *testing.T) {
 			}
 		case <-timeout:
 			t.Fatalf("client did not receive %s", ws.ActionSessionModelFallback)
+		}
+	}
+}
+
+// TestSessionStreamBroadcaster_SubscribesLaunchWarningSubject verifies the
+// session stream broadcaster subscribes the session.launch.warning wildcard
+// subject task 05 publishes on. Without this the event never leaves the bus.
+func TestSessionStreamBroadcaster_SubscribesLaunchWarningSubject(t *testing.T) {
+	log := testLogger()
+	eventBus := &subscriptionRecordingEventBus{MemoryEventBus: bus.NewMemoryEventBus(log)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	hub := NewHub(nil, log)
+	b := RegisterSessionStreamNotifications(ctx, eventBus, hub, log)
+	_ = b
+
+	for _, subject := range eventBus.subjects {
+		if subject == events.BuildSessionLaunchWarningWildcardSubject() {
+			return
+		}
+	}
+	t.Fatalf("session stream broadcaster must subscribe the launch warning wildcard subject %q",
+		events.BuildSessionLaunchWarningWildcardSubject())
+}
+
+// TestSessionStreamBroadcaster_BroadcastsLaunchWarningNotification verifies a
+// published session.launch.warning event is routed to the session's
+// subscribers as the session.launch.warning action.
+func TestSessionStreamBroadcaster_BroadcastsLaunchWarningNotification(t *testing.T) {
+	hub := newAccessTestHub(t)
+	eventBus := bus.NewMemoryEventBus(testLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = RegisterSessionStreamNotifications(ctx, eventBus, hub, testLogger())
+
+	client := registerAccessClient(t, hub, "client-launch-warning", authn.Identity{UserID: "user-1", Role: authn.RoleMember})
+	raw, err := json.Marshal(map[string]interface{}{"session_id": "session-warn-1"})
+	if err != nil {
+		t.Fatalf("marshal subscribe payload: %v", err)
+	}
+	client.handleSessionSubscribe(&ws.Message{
+		ID: "1", Type: ws.MessageTypeRequest, Action: ws.ActionSessionSubscribe, Payload: raw,
+	})
+
+	sessionID := "session-warn-1"
+	_ = eventBus.Publish(ctx, events.BuildSessionLaunchWarningSubject(sessionID), bus.NewEvent(
+		events.SessionLaunchWarning,
+		"test",
+		&lifecycle.LaunchWarningEventPayload{
+			TaskID:     "task-1",
+			SessionID:  sessionID,
+			ExecutorID: "executor-1",
+			Host:       "10.0.0.5",
+			State:      "unreachable",
+			Reason:     "timeout",
+			Timestamp:  time.Now().UTC().Format(time.RFC3339),
+		},
+	))
+
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case raw := <-client.send:
+			var msg ws.Message
+			if err := json.Unmarshal(raw, &msg); err == nil && msg.Action == ws.ActionSessionLaunchWarning {
+				return
+			}
+		case raw := <-client.controlSend:
+			var msg ws.Message
+			if err := json.Unmarshal(raw, &msg); err == nil && msg.Action == ws.ActionSessionLaunchWarning {
+				return
+			}
+		case <-timeout:
+			t.Fatalf("client did not receive %s", ws.ActionSessionLaunchWarning)
+		}
+	}
+}
+
+func TestSessionStreamBroadcaster_BroadcastsWorkspaceRecoveryToAllSessions(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload any
+		marshal bool
+	}{
+		{
+			name: "memory bus string slice",
+			payload: map[string]any{
+				"session_ids":  []string{"session-recovery-a", "session-recovery-b"},
+				"operation_id": "operation-1",
+			},
+		},
+		{
+			name: "production event JSON round trip",
+			payload: map[string]any{
+				"session_ids":  []string{"session-recovery-a", "session-recovery-b"},
+				"operation_id": "operation-1",
+			},
+			marshal: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hub := newAccessTestHub(t)
+			eventBus := bus.NewMemoryEventBus(testLogger())
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			_ = RegisterSessionStreamNotifications(ctx, eventBus, hub, testLogger())
+
+			clients := []*Client{
+				registerAccessClient(t, hub, "client-recovery-a", authn.Identity{UserID: "user-1", Role: authn.RoleMember}),
+				registerAccessClient(t, hub, "client-recovery-b", authn.Identity{UserID: "user-1", Role: authn.RoleMember}),
+			}
+			sessionIDs := []string{"session-recovery-a", "session-recovery-b"}
+			for i, client := range clients {
+				raw, err := json.Marshal(map[string]any{"session_id": sessionIDs[i]})
+				if err != nil {
+					t.Fatalf("marshal subscribe payload: %v", err)
+				}
+				client.handleSessionSubscribe(&ws.Message{
+					ID: "1", Type: ws.MessageTypeRequest, Action: ws.ActionSessionSubscribe, Payload: raw,
+				})
+			}
+
+			event := bus.NewEvent(events.SessionWorkspaceRecoveryChanged, "task-service", tt.payload)
+			if tt.marshal {
+				raw, err := json.Marshal(event)
+				if err != nil {
+					t.Fatalf("marshal production event: %v", err)
+				}
+				if err := json.Unmarshal(raw, event); err != nil {
+					t.Fatalf("unmarshal production event: %v", err)
+				}
+				payload := event.Data.(map[string]any)
+				if _, ok := payload["session_ids"].([]any); !ok {
+					t.Fatalf("JSON event session_ids has type %T, want []any", payload["session_ids"])
+				}
+			}
+			if err := eventBus.Publish(ctx, events.SessionWorkspaceRecoveryChanged, event); err != nil {
+				t.Fatalf("publish recovery event: %v", err)
+			}
+
+			for _, client := range clients {
+				assertClientReceivesAction(t, client, ws.ActionSessionWorkspaceRecoveryChanged)
+			}
+		})
+	}
+}
+
+func assertClientReceivesAction(t *testing.T, client *Client, action string) {
+	t.Helper()
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case raw := <-client.send:
+			var msg ws.Message
+			if err := json.Unmarshal(raw, &msg); err == nil && msg.Action == action {
+				return
+			}
+		case raw := <-client.controlSend:
+			var msg ws.Message
+			if err := json.Unmarshal(raw, &msg); err == nil && msg.Action == action {
+				return
+			}
+		case <-timeout:
+			t.Fatalf("client did not receive %s", action)
 		}
 	}
 }

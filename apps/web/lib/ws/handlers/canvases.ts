@@ -15,6 +15,7 @@ export function registerCanvasesHandlers(_store: StoreApi<AppState>): WsHandlers
     recordCanvasLifecycle(message.action, message.payload);
   return {
     "canvas.created": invalidate,
+    "canvas.updated": invalidate,
     "canvas.release.activated": invalidate,
     "canvas.release.permission_required": invalidate,
     "canvas.promoted": invalidate,

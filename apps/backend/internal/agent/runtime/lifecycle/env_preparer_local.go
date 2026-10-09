@@ -218,7 +218,16 @@ func validateLocalRepositoryWorkspace(ctx context.Context, workspacePath, reposi
 	if err != nil {
 		return err
 	}
-	if workspaceCommonDir != repositoryCommonDir {
+	workspaceCommonInfo, err := os.Stat(workspaceCommonDir)
+	if err != nil {
+		return worktree.ErrReuseWorktreeUnavailable
+	}
+	repositoryCommonInfo, err := os.Stat(repositoryCommonDir)
+	if err != nil {
+		return worktree.ErrReuseWorktreeUnavailable
+	}
+	if !workspaceCommonInfo.IsDir() || !repositoryCommonInfo.IsDir() ||
+		!os.SameFile(workspaceCommonInfo, repositoryCommonInfo) {
 		return worktree.ErrReuseWorktreeUnavailable
 	}
 	return nil
@@ -243,9 +252,9 @@ func localGitTopLevel(ctx context.Context, path string) (string, error) {
 }
 
 // localGitCommonDir returns the canonical Git directory shared by a checkout
-// and all of its linked worktrees. Comparing this value, instead of the
-// worktree top-level paths, proves that a linked worktree belongs to the
-// selected repository while still rejecting an unrelated Git checkout.
+// and all of its linked worktrees. Its filesystem identity, rather than its
+// path spelling, proves that a linked worktree belongs to the selected
+// repository while still rejecting an unrelated Git checkout.
 func localGitCommonDir(ctx context.Context, path string) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil || !info.IsDir() {

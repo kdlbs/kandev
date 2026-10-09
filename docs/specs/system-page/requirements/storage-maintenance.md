@@ -2,7 +2,7 @@
 status: active
 system: system-page
 created: 2026-07-14
-updated: 2026-09-12
+updated: 2026-10-05
 owners:
   - cfl
 ---
@@ -48,6 +48,9 @@ of treating a `/tmp` name or mtime as sufficient evidence.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.6:** Maintenance settings use separate cards grouped by scope: schedule, workspaces and containers, Go build cache, Docker cleanup, and quarantine safety. Every option includes focusable, pointer-accessible help that explains what it can change, when it runs, and which safety checks apply. Threshold and path fields are disabled while their parent cleanup option is disabled; quarantine retention remains independently editable because it governs entries created by future cleanup even when the other resource rules are disabled.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.7:** Read-only analysis is available even when scheduled maintenance is disabled. It reports total task workspace bytes alongside active and orphan-candidate bytes, active quarantined count and bytes, the managed Go cache, the service user's default Go cache when it is a distinct path, Kandev-managed container count and writable-layer bytes, Docker image-layer bytes, Docker build cache, and unused Docker images.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.8:** Storage analysis shows a total counted size derived from the available non-overlapping top-level measurements: total task workspaces, quarantine, managed and distinct user Go caches, registered temporary artifacts, Kandev-managed container writable layers, Docker image layers, and Docker build cache. Active and candidate workspace/temporary-artifact bytes and unused-image bytes remain visible subset measurements and are not added again. If any top-level measurement is unavailable, the total is visibly identified as partial rather than presented as complete host disk usage.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.9:** When unrelated directories coexist with task workspaces, analysis shall report recognized workspace sizes on desktop and phone. Its response shall identify omitted unclassified directories. A permission-denied directory without positive task-layout evidence shall be preserved, omitted, and reported as unclassified; permission errors on recognized paths shall remain errors.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.10:** Ordinary repository symlinks shall not prevent recognized workspace measurements. Analysis and cleanup shall never follow their targets. Unsafe workspace roots and ownership controls shall retain rejection.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.11:** Supported marked and legacy workspace layouts shall remain measurable. Unclassified directories and their ordinary subdirectories shall never become cleanup candidates. Inventory failure shall prevent cleanup.
 
 ### REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-002: Database footprint visibility
 
@@ -90,6 +93,7 @@ The existing application size-unit convention remains unchanged.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.7:** Analysis shall not read file contents, follow nested symlinks, cross nested mounts, change ownership, or remove files.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.8:** Desktop and phone users shall inspect sizes, long paths, and limitations without horizontal page scrolling. Copy shall use the selected language.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.9:** Existing storage access restrictions shall apply. Analysis requests shall not accept arbitrary paths from clients.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.10:** When the temporary-folder scan reaches its deadline, the expanded row shall show one localized timeout explanation and retain sampled bytes and partial status. Repeated deadline messages shall not appear. Other diagnostics shall remain bounded to ten distinct examples, with existing skipped-entry counts preserved.
 
 ### REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-004: Scheduled cleanup of owned temporary artifacts
 
@@ -114,7 +118,69 @@ Shared-file deletion, legacy-directory adoption, arbitrary cleanup paths, config
 new artifact producers, remote temporary folders, and changes to inherited agent temporary variables
 are outside this extension. Whole-host disk reconciliation remains outside storage analysis.
 
+### REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-005: Relative storage usage bars
+
+**Intent:** Operators can identify the largest measured categories without opening each storage row.
+
+#### Acceptance criteria
+
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.1:** Analysis rows shall sort by measured bytes, largest first. Equal sizes shall retain their existing category order. Unmeasured rows shall appear last in that order.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.2:** Each measured row shall show its size and a proportional bar in the collapsible header. Every bar shall use zero as its origin and the largest displayed measurement as its maximum.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.3:** Measured zero shall show an empty track and its size. Unknown, pending, failed, and not-applicable rows shall retain their status without a measured bar. Partial measurements shall use sampled bytes and retain visible partial status.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.4:** Rows shall retain independent expansion, keyboard activation, and existing detail actions. Sorting and refreshed measurements shall preserve expansion and focus for each remaining row.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.5:** Bars shall compare category footprints without changing Total counted or the separate filesystem-capacity indicator. Visible copy shall explain relative sizing and possible category overlap. Bar color shall not imply a cleanup recommendation or capacity threshold.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.6:** Desktop headers shall show label, bar, size, and chevron. Phone headers shall place the bar beneath the label and size. Labels and details shall wrap without horizontal page scrolling. Phone triggers shall have a touch target of at least 44 pixels.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.7:** Text shall communicate size, measurement status, and expansion without reliance on color. All new copy shall use the selected language. Bars shall not add keyboard stops or announce scan completion.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-005.8:** First-scan progress shall retain distinct unmeasured states as measured rows enter size order. A refresh shall keep the previous snapshot until its atomic replacement. Existing refresh and failure behavior shall remain available.
+
+#### Exclusions
+
+New categories, sorting controls, saved order preferences, per-file drilldown, cleanup policy changes,
+scan deadline changes, and host-wide disk attribution are outside this extension.
+
+### REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-006: Optional managed Go cache
+
+**Status:** Active.
+
+**Intent:** An unusable optional cache does not prevent otherwise valid task execution.
+
+#### Acceptance criteria
+
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.1:** When managed Go-cache preparation fails, an otherwise valid host-local launch shall continue without a managed cache override. This includes adopted-root symlinks, ancestor symlinks, settings errors, and filesystem errors.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.2:** Resume, Start fresh, and workspace recovery shall use the same fallback. A cache-only error shall not create a task or session launch failure.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.3:** Fallback shall preserve independently configured `GOCACHE` values and normal environment precedence. Without such a value, tools shall retain their ordinary inherited environment and defaults.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.4:** A valid enabled cache shall supply the same managed `GOCACHE` to preparation, agent, shell, cleanup, test, and build processes within one execution. Fallback shall remain consistent within that execution. Promotion of a live workspace execution shall retain its established cache decision.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.5:** A new or recovered execution shall not inherit a managed override rejected during its preparation. A later execution shall evaluate the current setting again.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.6:** Caller cancellation or deadline expiry shall prevent startup. Wrapped provider cancellation or deadline errors shall remain errors rather than cache fallbacks.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.7:** Disabled management shall add no managed override. Container and remote executions shall receive no host-managed cache override or host cache preparation.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.8:** Cache fallback shall emit one bounded backend warning per preparation decision, with task and session IDs when available. The warning shall explain the skipped managed override without exposing paths, credentials, or raw provider output.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.9:** Fallback shall preserve saved cache settings and filesystem ownership. Adoption, cleanup, rotation, quarantine, restore, and permanent deletion shall continue rejecting unsafe symlink paths without changing their targets.
+
+#### Exclusions
+
+Host cache repair, automatic adoption of symlink targets, new settings, and new interface controls are outside this extension.
+Fallback does not guarantee that an independently configured cache or a tool's default cache is usable.
+
+## Implemented Go-cache policy
+
+The [Go cache reclamation requirements](go-cache-reclamation.md) define one shared cache and
+optional direct deletion during active work. They preserve requirement 006's optional fallback.
+The Go-cache policy supersedes quarantine rotation and global-idle admission for new cleanup; other
+resources and historical quarantine retain their existing rules.
+
 ## System design
+
+The current [workspace discovery design](../system-design/workspace-storage-discovery.md)
+defines workspace recognition. Its [implementation package](../../../plans/workspace-storage-discovery/plan.md)
+records the completed implementation and regression evidence.
+
+The implemented optional-cache contract is defined in the
+[managed Go-cache launch fallback design](../system-design/managed-go-cache-launch-fallback.md).
+Its [fix package](../../../plans/managed-go-cache-launch-fallback/plan.md) records completed implementation and verification evidence.
+
+The implemented usage bars and timeout feedback are defined in
+[Storage analysis presentation](../system-design/storage-analysis-presentation.md).
+The [plan package](../../../plans/storage-analysis-presentation/plan.md) records implementation and verification evidence.
 
 The implemented temporary-storage extension is defined in
 [Temporary storage visibility and cleanup](../system-design/storage-temporary-folders.md).

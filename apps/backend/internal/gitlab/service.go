@@ -116,8 +116,12 @@ type Service struct {
 	repositoryLookup         RepositoryLookup
 	dependencyValidator      WatchDependencyValidator
 	taskAuthorizer           TaskAuthorizer
-	promptResolver           PromptResolver
-	logger                   *logger.Logger
+	// workspaceAuthorizer is the per-user workspace access boundary, wired
+	// post-construction via SetWorkspaceAuthorizer. Nil (unit tests, auth
+	// disabled) means unscoped — every workspace is visible, as before auth.
+	workspaceAuthorizer func(context.Context, string) error
+	promptResolver      PromptResolver
+	logger              *logger.Logger
 }
 
 // PromptResolver resolves editable prompt content by name. Mirrors
@@ -202,6 +206,29 @@ func (s *Service) authorizeTaskMRAccess(ctx context.Context, taskID string) erro
 		return nil
 	}
 	return authorizer.AuthorizeTaskAccess(ctx, taskID)
+}
+
+// SetWorkspaceAuthorizer installs the per-user workspace access boundary
+// applied to ListAllIssueWatches. Wired to taskSvc.AuthorizeWorkspaceAccess so
+// an unscoped list (workspace_id omitted) returns only the caller's own
+// workspaces' watches.
+func (s *Service) SetWorkspaceAuthorizer(authorizer func(context.Context, string) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspaceAuthorizer = authorizer
+}
+
+// authorizeWorkspaceAccess denies access to a workspace a scoped caller
+// cannot reach. A nil authorizer (not wired, e.g. unit tests) or an unscoped
+// caller (internal callers, auth disabled) is a no-op.
+func (s *Service) authorizeWorkspaceAccess(ctx context.Context, workspaceID string) error {
+	s.mu.RLock()
+	authorizer := s.workspaceAuthorizer
+	s.mu.RUnlock()
+	if authorizer == nil {
+		return nil
+	}
+	return authorizer(ctx, workspaceID)
 }
 
 func (s *Service) validateWatchDependencies(ctx context.Context, workspaceID, workflowID, stepID, agentProfileID, executorProfileID string) error {

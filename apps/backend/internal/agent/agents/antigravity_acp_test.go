@@ -234,7 +234,7 @@ func TestAntigravityACP_DisplayOrderUnique(t *testing.T) {
 		NewIFlowACP(), NewDroidACP(), NewKilocodeACP(), NewPiACP(),
 		NewCursorACP(), NewKimiACP(), NewKiroACP(), NewQoderACP(),
 		NewTraeACP(), NewOmpACP(), NewDevinACP(), NewGrokACP(),
-		NewHermesACP(), NewAntigravityACP(), NewMockAgent(),
+		NewHermesACP(), NewAntigravityACP(), NewMuseACP(), NewMockAgent(),
 	}
 	seen := map[int]string{}
 	for _, ag := range all {

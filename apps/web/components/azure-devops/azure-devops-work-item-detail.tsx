@@ -26,7 +26,12 @@ import type {
   AzureDevOpsBoardWorkItem,
   AzureDevOpsWorkItem,
 } from "@/lib/types/azure-devops";
-import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
+import {
+  markdownComponents,
+  rehypePlugins,
+  remarkPlugins,
+} from "@/components/shared/markdown-components";
+import { markdownMathSanitizeSchema } from "@/lib/markdown/math-sanitize-schema";
 import { useTranslation } from "react-i18next";
 import { azureActionDisplayCopy } from "./azure-devops-workspace-defaults";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
@@ -78,7 +83,7 @@ function Description({ value }: { value: string }) {
     >
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={[rehypeRaw, rehypeSanitize]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, markdownMathSanitizeSchema], ...rehypePlugins]}
         components={markdownComponents}
       >
         {value}

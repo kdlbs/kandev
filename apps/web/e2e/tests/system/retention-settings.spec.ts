@@ -1,4 +1,13 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
+
+async function saveChanges(page: Page): Promise<void> {
+  const saveBar = page.getByTestId("settings-floating-save");
+  await expect(saveBar).toBeAttached();
+  await saveBar.scrollIntoViewIfNeeded();
+  await saveBar.getByRole("button", { name: "Save changes" }).click();
+  await expect(saveBar).toContainText("Saved");
+}
 
 /**
  * Office run-history retention (docs/specs/office/requirements/run-history-retention*.md).
@@ -14,7 +23,8 @@ test.describe("System retention settings", () => {
     backend,
   }) => {
     test.setTimeout(90_000);
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage?tab=office-retention");
+    await testPage.getByTestId("retention-advanced-settings").locator("summary").click();
     const batchLimit = testPage.getByTestId("retention-batch-limit");
     await expect(batchLimit).toBeVisible();
     const original = await batchLimit.inputValue();
@@ -22,19 +32,21 @@ test.describe("System retention settings", () => {
 
     try {
       await batchLimit.fill(updated);
-      await testPage.getByRole("button", { name: "Save changes" }).click();
-      await expect(testPage.getByTestId("settings-floating-save")).toContainText("Saved");
+      await saveChanges(testPage);
 
       await testPage.reload();
+      await testPage.getByTestId("retention-advanced-settings").locator("summary").click();
       await expect(testPage.getByTestId("retention-batch-limit")).toHaveValue(updated);
 
       await backend.restart();
       await testPage.reload();
+      await testPage.getByTestId("retention-advanced-settings").locator("summary").click();
       await expect(testPage.getByTestId("retention-batch-limit")).toHaveValue(updated);
     } finally {
+      await testPage.goto("/settings/system/storage?tab=office-retention");
+      await testPage.getByTestId("retention-advanced-settings").locator("summary").click();
       await testPage.getByTestId("retention-batch-limit").fill(original);
-      await testPage.getByRole("button", { name: "Save changes" }).click();
-      await expect(testPage.getByTestId("settings-floating-save")).toContainText("Saved");
+      await saveChanges(testPage);
     }
   });
 
@@ -45,7 +57,8 @@ test.describe("System retention settings", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage?tab=office-retention");
+    await testPage.getByTestId("retention-advanced-settings").locator("summary").click();
     const warnField = testPage.getByTestId("retention-runs-warn-rows");
     await expect(warnField).toBeVisible();
     const originalWarnRows = await warnField.inputValue();
@@ -70,8 +83,7 @@ test.describe("System retention settings", () => {
 
     try {
       await warnField.fill(String(newWarnRows));
-      await testPage.getByRole("button", { name: "Save changes" }).click();
-      await expect(testPage.getByTestId("settings-floating-save")).toContainText("Saved");
+      await saveChanges(testPage);
 
       // The census only re-evaluates on its interval timer or at scheduler Start; a
       // restart forces an immediate re-evaluation against the settings just saved and
@@ -83,15 +95,15 @@ test.describe("System retention settings", () => {
       await expect(issue).toBeVisible({ timeout: 15_000 });
       await expect(issue).toContainText("over its threshold");
 
-      await testPage.goto("/settings/system/data-storage");
+      await testPage.goto("/settings/system/storage?tab=office-retention");
       const retainedRuns = testPage.getByTestId("retention-retained-runs");
       await expect(retainedRuns).toBeVisible();
       await expect(retainedRuns).toContainText(String(expectedRetained));
     } finally {
-      await testPage.goto("/settings/system/data-storage");
+      await testPage.goto("/settings/system/storage?tab=office-retention");
+      await testPage.getByTestId("retention-advanced-settings").locator("summary").click();
       await testPage.getByTestId("retention-runs-warn-rows").fill(originalWarnRows);
-      await testPage.getByRole("button", { name: "Save changes" }).click();
-      await expect(testPage.getByTestId("settings-floating-save")).toContainText("Saved");
+      await saveChanges(testPage);
     }
   });
 });

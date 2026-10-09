@@ -11,7 +11,7 @@ const TASK_CRITICAL = "Mobile sort task critical";
 const TASK_MEDIUM = "Mobile sort task medium";
 
 async function openMobileMenu(testPage: import("@playwright/test").Page) {
-  await testPage.getByRole("button", { name: "Open menu" }).tap();
+  await testPage.getByTestId("mobile-topbar-page-context").tap();
   await testPage.getByTestId("mobile-home-menu-card").waitFor({ state: "visible" });
 }
 

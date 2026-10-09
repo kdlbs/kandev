@@ -89,7 +89,7 @@ test.describe("Mobile archive task redirect", () => {
     });
     const documentRequestsBeforeArchive = documentRequests.length;
 
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const parentRow = drawer.getByTestId("sidebar-task-item").filter({ hasText: parentTitle });
     await expect(parentRow).toBeVisible({ timeout: 15_000 });
@@ -108,7 +108,7 @@ test.describe("Mobile archive task redirect", () => {
     });
     expect(documentRequests).toHaveLength(documentRequestsBeforeArchive);
 
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const postArchiveDrawer = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(
       postArchiveDrawer.getByTestId("sidebar-task-item").filter({ hasText: parentTitle }),

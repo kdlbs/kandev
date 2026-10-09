@@ -43,8 +43,9 @@ The same pattern applies to other inline confirmations:
   returns to the draft; a failed removal keeps the confirmation available to retry.
 
 Full task-delete and discard-consent dialogs retain their existing layout and
-safeguards, as do in-use conflict and system maintenance dialogs. Desktop and
-tablet confirmation layouts are unchanged.
+safeguards, as do in-use conflict and system maintenance dialogs.
+File deletion also uses a compact sheet on touch tablets.
+Other desktop and tablet confirmation layouts are unchanged.
 
 ## How a phone request reaches an agent
 

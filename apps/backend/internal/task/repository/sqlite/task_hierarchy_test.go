@@ -8,6 +8,7 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -356,5 +357,29 @@ func TestGetTasksByIDsFetchesRequestedRowsAndSkipsUnknown(t *testing.T) {
 	}
 	if len(empty) != 0 {
 		t.Errorf("GetTasksByIDs(nil) = %v, want empty", taskIDs(empty))
+	}
+}
+
+func TestGetTasksByIDsChunksAcrossHostParamLimit(t *testing.T) {
+	repo := seedHierarchy(t)
+	ctx := context.Background()
+
+	// SQLite's compiled-in SQLITE_MAX_VARIABLE_NUMBER on this build is
+	// 32766; pad well past it (and past sqliteMaxHostParams's much lower
+	// safety margin) so an unchunked IN-clause query would error, with the
+	// real id placed last so it lands in the final chunk.
+	const padCount = 33000
+	ids := make([]string, 0, padCount+1)
+	for i := 0; i < padCount; i++ {
+		ids = append(ids, fmt.Sprintf("padding-task-%d", i))
+	}
+	ids = append(ids, "task-child-a")
+
+	got, err := repo.GetTasksByIDs(ctx, ids)
+	if err != nil {
+		t.Fatalf("GetTasksByIDs with %d ids: %v", len(ids), err)
+	}
+	if len(got) != 1 || got[0].ID != "task-child-a" {
+		t.Fatalf("GetTasksByIDs = %v, want exactly [task-child-a]", taskIDs(got))
 	}
 }

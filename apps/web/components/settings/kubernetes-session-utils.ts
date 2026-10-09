@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 import { formatDateTime } from "@/lib/i18n/formats";
+import { linkToTask } from "@/lib/links";
 import type { KubernetesSession } from "@/lib/types/http-kubernetes";
 
 const POD_STATUS_LABEL_KEYS: Record<string, string> = {
@@ -86,7 +87,7 @@ export function translateTaskLink(session: KubernetesSession, t: TFunction): str
 }
 
 export function taskHref(taskId: string): string {
-  return `/t/${encodeURIComponent(taskId)}`;
+  return linkToTask(taskId);
 }
 
 export function shortId(value: string): string {

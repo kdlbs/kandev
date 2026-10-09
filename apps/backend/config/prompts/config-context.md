@@ -4,6 +4,13 @@ Always use the exact tool names shown below (they include the _kandev suffix).
 
 Session ID: {session_id}
 
+AUTOMATION CREATION:
+- create_automation_kandev: Create an enabled workspace automation with optional initial triggers. Required: workspace_id, name. Discover exact workspace, workflow, repository, agent and executor profile IDs with the existing list tools or list_settings_resources_kandev; never invent IDs. Inspect the tool schema for optional fields and trigger config shapes.
+- Hidden automation_run is the default task_mode; workflow and repositories are optional. normal_task requires a workflow. Empty repositories means no repository attachment. Omitted continuation_policy uses new_task and max_concurrent_runs defaults to 1.
+- Each trigger has type, config, and enabled. Set enabled explicitly to true when the user wants it active; omission leaves that trigger disabled. Creation does not manually run the automation, but enabled triggers can fire normally after it is saved.
+- Scheduled example: {"workspace_id":"<workspace ID>","name":"Daily report","prompt":"Summarize progress","triggers":[{"type":"scheduled","config":{"cron_expression":"0 9 * * *","timezone":"UTC"},"enabled":true}]}.
+- Report the returned automation ID and saved triggers. Creation is not idempotent: after an uncertain result, inspect saved automations through settings discovery before retrying. The create result includes the webhook secret once; subsequent reads redact it. Existing settings tools can read and edit saved automations.
+
 WORKFLOW TOOLS:
 - list_workspaces_kandev: List all workspaces to get workspace IDs.
 - list_workflows_kandev: List workflows in a workspace. Required: workspace_id.
@@ -42,9 +49,14 @@ MCP CONFIG TOOLS:
 SAVED PROMPT TOOLS:
 - list_shared_prompts_kandev: List saved prompt summaries without content.
 - get_shared_prompt_kandev: Read one saved prompt by exact name. Required: name.
-Saved prompt names are case-sensitive. Surrounding whitespace is ignored. Use
-the list result to discover names before reading a prompt. These tools are
-read-only and do not create, update, delete, or expand saved prompts.
+- create_shared_prompt_kandev: Create a saved prompt. Required: name, content. Duplicate names fail. New prompts allow subsequent agent edits.
+- update_shared_prompt_kandev: Replace saved content by exact name. Required: name, content. Built-in prompts and prompts without Allow agent edits reject writes.
+Saved prompt names are case-sensitive; surrounding whitespace is ignored. List
+and read existing prompts before editing. Apply the operator's agreed shared
+prompt changes before updating workflow steps that reference them, then read back
+both prompts and steps. A shared prompt edit affects every future reference.
+Only an operator can enable Allow agent edits in Settings > Prompts. Generic
+settings writes obey the same restriction. These tools do not delete prompts.
 
 SETTINGS TOOLS:
 - search_settings_kandev: Search setting definitions by metadata. This does not read saved values.

@@ -67,11 +67,14 @@ function Preparation({
             data-testid="tool-payload-retry"
             onClick={() =>
               act(
-                remote.save({
-                  ...status.policy,
-                  enabled: true,
-                  backup_choice: status.preparation.choice || undefined,
-                }),
+                remote.save(
+                  {
+                    ...status.policy,
+                    enabled: true,
+                    backup_choice: status.preparation.choice || undefined,
+                  },
+                  { backupChoiceAttempt: status.preparation.choice === "backup" },
+                ),
               )
             }
           >
@@ -135,7 +138,7 @@ function CleanupActions({ remote, model }: { remote: Remote; model: Model }) {
 }
 function RetentionError({ remote }: { remote: Remote }) {
   const { t } = useTranslation();
-  if (remote.error == null) return null;
+  if (remote.statusError == null && remote.actionError == null) return null;
   return (
     <div
       role="alert"
@@ -143,7 +146,8 @@ function RetentionError({ remote }: { remote: Remote }) {
       className="space-y-2 break-words text-sm text-destructive"
       data-testid="tool-payload-error"
     >
-      <p>{t(errorKey(remote.error))}</p>
+      {remote.statusError != null && <p>{t("system:toolPayload.statusUnavailable")}</p>}
+      {remote.actionError != null && <p>{t(errorKey(remote.actionError))}</p>}
       <Button
         variant="outline"
         className={actionClass}
@@ -211,7 +215,7 @@ export function ToolPayloadRetentionCard() {
     <SettingsCard
       discoveryTargetId={SYSTEM_SETTINGS_TARGETS.toolPayloadRetention}
       data-testid="tool-payload-retention-card"
-      className="min-w-0 max-w-3xl"
+      className="min-w-0"
     >
       <SettingsCardHeader
         title={t("system:toolPayload.title")}

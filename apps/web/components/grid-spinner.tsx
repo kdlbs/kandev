@@ -6,6 +6,7 @@ import { createPersistentMotionVisibility } from "@kandev/ui/persistent-motion-v
 
 type GridSpinnerProps = {
   className?: string;
+  ariaLabel?: string;
 };
 
 const gridKeyframes: Keyframe[] = [
@@ -17,7 +18,7 @@ const gridKeyframes: Keyframe[] = [
 
 const useCompositorEffect = typeof window === "undefined" ? React.useEffect : React.useLayoutEffect;
 
-export function GridSpinner({ className }: GridSpinnerProps) {
+export function GridSpinner({ className, ariaLabel }: GridSpinnerProps) {
   const { t } = useTranslation();
   const gridRef = React.useRef<HTMLSpanElement>(null);
 
@@ -29,21 +30,25 @@ export function GridSpinner({ className }: GridSpinnerProps) {
     if (!grid) return;
     const visibility = createPersistentMotionVisibility(grid);
     const registrations = cubes.map((cube) => visibility.register(cube));
-    const animations = startGridAnimations(cubes);
-    if (!animations) {
-      return () => {
-        for (const registration of registrations) registration.unregister();
-        visibility.dispose();
-      };
-    }
-
-    for (let index = 0; index < cubes.length; index += 1) {
-      registrations[index]?.setAnimation(animations[index] ?? null);
-      cubes[index].style.animation = "none";
-    }
+    let animations: Animation[] | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // CSS already supplies the initial motion. Promote after the first frame
+    // so reading animation styles cannot block the task's initial paint.
+    const frame = requestAnimationFrame(() => {
+      timer = setTimeout(() => {
+        animations = startGridAnimations(cubes);
+        if (!animations) return;
+        for (let index = 0; index < cubes.length; index += 1) {
+          registrations[index]?.setAnimation(animations[index] ?? null);
+          cubes[index].style.animation = "none";
+        }
+      }, 0);
+    });
 
     return () => {
-      for (const animation of animations) animation.cancel();
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      for (const animation of animations ?? []) animation.cancel();
       for (const registration of registrations) registration.unregister();
       visibility.dispose();
       for (const cube of cubes) cube.style.removeProperty("animation");
@@ -55,7 +60,7 @@ export function GridSpinner({ className }: GridSpinnerProps) {
       ref={gridRef}
       className={`spinner-grid ${className ?? ""}`}
       role="status"
-      aria-label={t("common:loadingIndicatorLabel")}
+      aria-label={ariaLabel ?? t("common:loadingIndicatorLabel")}
     >
       <span className="spinner-grid-cube" />
       <span className="spinner-grid-cube" />

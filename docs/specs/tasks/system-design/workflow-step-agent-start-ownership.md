@@ -6,6 +6,8 @@ requirements:
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003
   - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004
+  - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005
+  - REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-006
 ---
 
 # Workflow Step Agent Start Ownership System Design
@@ -26,6 +28,8 @@ The design preserves runtime configuration through the existing reset contract. 
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002` | [Active-turn reset flow](#active-turn-reset-flow), [Bounded predecessor wait](#bounded-predecessor-wait), [Reset failure containment](#reset-failure-containment) |
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003` | [Prompt fallback ownership](#prompt-fallback-ownership), [Prompt-history contract](#prompt-history-contract), [Workflow-entry prompt flow](#workflow-entry-prompt-flow) |
 | `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004` | [Creation destination routing](#creation-destination-routing) |
+| `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-005` | [Asynchronous launch prompt preservation](#asynchronous-launch-prompt-preservation) |
+| `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-006` | [Initial creation prompt admission](#initial-creation-prompt-admission) |
 
 ## Components and responsibilities
 
@@ -71,6 +75,71 @@ handler. The implementation does not change their layout, labels, touch
 targets, or navigation. Separate Playwright scenarios exercise the desktop
 split-menu action and the mobile plan-mode action.
 
+## Initial creation prompt admission
+
+This draft extension preserves initial placement from requirement `004`.
+The explicit step remains the source of the first user-message transition.
+The task system already owns this transition through `ProcessOnTurnStart`.
+The correction connects immediate REST and MCP creation to that existing boundary.
+
+### Eligibility and transport ownership
+
+Capture explicit step selection from the original create request before destination resolution.
+MCP fills `WorkflowStepID` even when the caller omits it, so the resolved value cannot prove explicit selection.
+Set a private `InitialCreatePrompt` marker on `LaunchSessionRequest` with `json:"-"`.
+The marker applies only to an admitted immediate create with an explicit step and non-empty textual input.
+It is not an agent-supplied or WebSocket-supplied launch option.
+
+REST preserves its synchronous `IntentPrepare` and asynchronous `IntentStartCreated` sequence.
+MCP preserves its existing asynchronous boundary and creation-settlement checks.
+For a marked MCP `IntentStart`, prepare a session through the existing prepare path with `DeferredStart: true`.
+Then use the same marked prepared-session dispatch as REST.
+Unmarked starts retain their current path. Do not infer eligibility from `AutoStart`, which has different workflow and scheduling semantics.
+
+Keep the shared orchestration in a focused helper, proposed as `task_create_prompt.go`.
+Keep `StartCreatedSession` free of unconditional trigger processing because workflow automatic starts also call it.
+
+### Transition before composition
+
+After preparation and before prompt composition, call `ProcessOnTurnStart` once.
+Use its existing transition lifecycle, which suppresses the destination's competing automatic prompt.
+Do not invoke the full `on_enter` sequence separately.
+Reload the task and resolve the resulting session using the same ownership rules as ordinary message submission.
+Reject a terminal or superseded session instead of reviving it.
+
+Resolve the effective profile and session settings from the resulting route.
+Build workflow content and the Kandev system block only after this resolution.
+Retain initial-task-brief admission, attachments, saved prompt expansion, and the existing first-message record.
+Do not duplicate the original description or persist two user messages.
+
+### Queues and running notifications
+
+If `ProcessOnTurnStartResult.Queued` is true, retain the input through the existing message queue and WIP admission path.
+Set `MetaKeyTurnStartAlreadyProcessed` on that queued input.
+Do not send the prompt or allocate a second session while WIP admission is pending.
+Queue insertion must retain attachment ownership and existing session-incarnation checks.
+
+For passthrough, the initial running notification must not evaluate the same trigger again.
+Bind the processed-trigger evidence to the admitted initial turn and execution identity.
+Consume or retire it through the matching running, failure, cancellation, or replacement path.
+A session-wide permanent skip flag would suppress later terminal input and is prohibited.
+Unmarked passthrough launches retain their existing event-driven trigger behavior.
+Queue replay must transfer the processed evidence to its actual dispatch identity.
+
+### Failures and verification
+
+Return processing and session-resolution errors before provider dispatch.
+Use existing launch-error persistence so asynchronous failure remains visible.
+Do not convert an error into a successful launch or bypass creation settlement, dependency, WIP, cancellation, or terminal-session gates.
+The existing engine logs identify successful transitions; failure logs include task and session identity without prompt text.
+
+Test both transport adapters and the real orchestration/engine path with controlled executor callbacks.
+At the first dispatch boundary, assert the step, session, profile, content, and dispatch count.
+Cover WIP release, profile switching, passthrough duplicate events, and a subsequent user turn.
+Keep automatic-entry and omitted-step controls to prevent cascading transitions.
+This package changes no rendered UI, public request field, storage schema, or provider protocol.
+The existing board projection shows the resulting step on desktop and phone.
+
 ## Session states
 
 A `CREATED` session has no conversation to reset. The workflow reset skips provider work and leaves the first start to `auto_start_agent`.
@@ -105,7 +174,49 @@ If the timeout expires, the function returns a typed transient error. It does no
 
 The error releases `promptMu` and the orchestrator dispatch guard through existing deferred cleanup. Queued workflow prompts return to the queue through existing transient-error handling.
 
-After guard release, cancellation can use its existing escalation path. That path clears the pending flag and emits a generation-bound synthetic completion signal.
+After guard release, cancellation can use its existing escalation path. When cancellation owns `promptMu`, that path clears the pending flag and emits a generation-bound synthetic completion signal. The contended-consumer path is defined below.
+
+## Dispatch-only cancellation completion
+
+The [dispatch cancellation package](../../../plans/dispatch-only-cancel-completion/plan.md)
+repairs the cancellation input to `REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-002`.
+The reset admission and failure-containment rules remain authoritative.
+
+`promptFinished` describes a `SendPrompt` call, not provider turn completion.
+A dispatch-only call can leave this channel nil or retain a closed predecessor channel.
+Neither shape proves a cancellation timeout.
+
+After a successful cancel RPC, lifecycle waits for the captured prompt to settle.
+One `cancelWaitTimeout` budget covers barrier and dispatch-completion waits.
+The caller context can end this wait sooner.
+Explicit unacknowledged cancellation and stream disconnection retain their existing escalation behavior.
+
+The ordinary prompt path waits for `promptFinished` without consuming `promptDoneCh`.
+The dispatch-only path consumes its accepted completion through a small lifecycle helper.
+That helper serializes with `waitForPendingDispatchedPrompt` through `promptMu`.
+Lock acquisition must share the cancellation deadline and must not use an unbounded `Lock`.
+A bounded `TryLock` retry can acquire the existing mutex without adding another completion consumer or detached goroutine.
+After acquisition, recheck the captured execution and prompt generation before reading or clearing the pending gate.
+If a predecessor waiter already consumed completion, the helper must not wait for another signal.
+If ownership changed, return an ownership error without clearing or escalating the successor.
+
+An accepted completion for the captured current generation remains authoritative if it arrives while `triggerPrompt` is still returning and before dispatch bookkeeping records that generation. Execution identity and current-generation checks still fence successors.
+
+An admitted current generation is cancellation-owned before `MarkPromptDispatched` records it. A nil or closed predecessor `promptFinished` barrier cannot make that unresolved generation appear idle. The lifecycle waits for its dispatch/completion transition within the original cancellation budget.
+
+If cancellation cannot acquire `promptMu` because the predecessor waiter holds it, cancellation rechecks the captured execution and generation under the prompt-lifecycle lock. For an unresolved dispatched generation, it marks that generation ready and queues a generation-bound synthetic completion signal before releasing the lifecycle lock. The existing waiter remains the only receiver and clears the pending gate. The cancellation path does not read from `promptDoneCh`, clear the gate behind that consumer, or mutate execution state after signaling it. The waiter ignores signals for any other generation, and cancellation returns `ErrCancelEscalated` for this local release.
+
+The same lockless escalation applies while an admitted prompt is still waiting for its dispatch acknowledgement. It raises the pending gate before queuing the wake signal so the existing prompt path consumes that generation's signal after dispatch returns.
+
+A matching completion clears the captured dispatch gate before cancellation returns success.
+A stale signal cannot satisfy the wait or release a later generation's gate. A transport-error signal cannot prove provider quiescence.
+At the deadline, check for an available matching completion before escalation. Preserve a matching transport-error signal's detail when escalation reports the missing completion.
+A missing completion retains `ErrCancelEscalated` and the existing bounded cleanup.
+Cancellation never resets its deadline after observing a closed barrier or stale signal.
+
+Tests cover nil and closed barriers, pre-dispatch admission, completion before and after cancel, timeout, caller cancellation, and competing predecessor waiters.
+They also cover ordinary prompts, generation replacement, stale signals, timeout transport details, and the existing asynchronous escalation publication.
+Workflow tests retain the distinction between confirmed completion and local escalation.
 
 ## Completion ownership
 
@@ -156,6 +267,14 @@ Ordinary unsupported-reset errors retain the existing restart fallback and captu
 Timeout changes neither that fallback's semantics nor its separate initialization budget.
 Contention on `remoteInstanceLifecycleMu` or `streamWriteMu` is a separate wait from the unanswered request addressed here.
 Tests must establish that the peer received the request before measuring its response deadline.
+
+For a passthrough reset, lifecycle replaces the PTY under
+`passthroughLifecycleMu`, then releases that lock and waits for the replacement's
+first-idle callback to finish before returning. The callback needs the same
+lock. This keeps startup readiness from consuming the next workflow prompt's
+running state. The readiness wait honors caller cancellation and has a 60-second
+ceiling, matching initial stdin-prompt readiness. Failure returns through the
+existing reset-error path and prevents automatic prompt dispatch.
 
 ### Persist a visible failure
 
@@ -268,6 +387,81 @@ This repair does not reconcile sessions that became stuck before the new boundar
 The prompt counter and fallback claim are durable across backend restarts. A
 restart cannot make an earlier task description eligible for another fallback
 dispatch, and deleting/recreating a session ID starts a new prompt boundary.
+
+## Asynchronous launch prompt preservation
+
+This extension belongs to the task system because workflow entry owns the pending input.
+The [implementation package](../../../plans/workflow-async-start-prompt-preservation/plan.md)
+delivers the design and its regression matrix.
+
+### Capture before asynchronous admission
+
+`autoStartStepPrompt` already separates recorded content, agent content, references, attachments, and completion handoff text.
+Capture the queue-form input before `startCreatedSessionWithComposedPrompt` admits the launch.
+Use a private, immutable attempt envelope in the orchestrator, carried through the launch context.
+Existing executor context propagation preserves values through `context.WithoutCancel` and dynamic launch paths.
+The executor need not interpret the prompt envelope or import workflow composition types.
+
+The envelope includes task, session, workflow step, unique launch token, initial turn identity, and the queue-form input.
+Bind the turn identity in `startCreatedSession` before `launchPreparedSessionWithDynamicFallback` starts asynchronous work.
+Copy mutable slices and metadata. Preserve the actual `userMsgRecorded` result rather than assuming that transcript persistence succeeded.
+Do not recover from the mutable `lastTurnPrompt` cache or select the latest transcript row.
+Neither source binds all workflow metadata to the failed attempt.
+
+An attempt-local completion claim permits one preservation operation.
+Synchronous rejection retires the envelope and retains `handleCreatedAutoStartLaunchFailure` as its sole queue owner.
+Success retires the envelope without queue insertion. Context lifetime bounds retention after the launch callback returns.
+Dynamic fallback attempts must not independently preserve the same logical prompt while another candidate can still start.
+Only the final accepted startup failure can consume the preservation claim.
+
+### Preserve through the accepted failure path
+
+Extend `handleAgentStartFailed` after its cancellation, terminal-session, and execution checks.
+Under the existing cancellation guard, validate the captured turn and workflow entry before queue persistence.
+An execution ID alone is insufficient when successive attempts reuse a prepared execution.
+Reject superseded attempts, completed or cancelled sessions, archived tasks, and missing sessions.
+Queue admission must retain the existing session-incarnation and purge-generation protections.
+Do not treat the unconditional `onAgentProcessStartFailed` notification as evidence that a failure passed these guards.
+
+Persist the envelope using the existing message-queue service and workflow metadata format.
+Extract persistence from `queueAutoStartPrompt` so this call does not run `scheduleAutoResumeForWorkflowQueue`.
+Preservation must not start a replacement before failure cleanup finishes.
+Leave the user's `auto_run` policy unchanged.
+After explicit recovery, existing boot-ready admission can drain the entry when all eligibility checks pass.
+
+The queue contains the composed visible workflow input, with entity references and completion handoff in their existing metadata fields.
+It must not contain a second injected Kandev system block or independently restored copy of an already-merged handoff.
+`executeQueuedMessage` continues to honor `user_message_recorded` and compose dispatch context through the existing path.
+The queue uses its existing storage, attachment ownership, capacity limits, transfer rules, and restart recovery.
+No new table, public payload, or provider API is required.
+
+### Failure and recovery boundaries
+
+The original error continues through auth, managed-runtime, or generic bootstrap handling.
+The [launch recovery design](task-launch-failure-recovery.md) remains authoritative for safe errors, stamps, history, and recovery authorization.
+`RecoverTaskLaunch` already routes session-owned retry through `RecoverSession` on the same session.
+Recovery boots the session and lets the existing queue drain send its preserved input.
+Do not send the same prompt as both a launch description and a queue entry.
+
+A queue write failure does not mask the original startup failure.
+The attempt-owned preservation path retries queue admission once while its
+claim remains current. It releases the claim only after that retry fails, so a
+later callback can retry only with the same launch ownership. Log a separate
+bounded preservation diagnostic with task, session, execution, and attempt
+identity, without input text or attachment contents.
+The existing persistent launch error remains the visible recovery signal.
+No frontend layout or copy changes are required by this package.
+
+The guarantee starts when a live failure callback accepts ownership and persists the queue entry.
+A process crash before that point is excluded. Successful process startup is not proof of exactly-once provider execution after an ambiguous prompt error.
+Post-start prompt failures keep their separate correlated terminal path and do not use this replay mechanism.
+
+### Verification
+
+Use controlled startup barriers to prove preservation after the launch call already returned success.
+Cover duplicate callbacks, replacement execution, same-execution successor turn, terminal races, and dynamic fallback ownership.
+Exercise real queue persistence and the service recovery-to-boot-ready-to-dispatch path.
+Verify one transcript row, one delivered prompt, preserved metadata, paused queues, and restart after queue persistence.
 
 ## Observability
 

@@ -1,15 +1,31 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { SettingsSaveProvider, useSettingsSaveContributor } from "./settings-save-provider";
-import { resolveAgentModelConfig } from "@/lib/api/domains/settings-api";
+import { fetchDynamicModels, resolveAgentModelConfig } from "@/lib/api/domains/settings-api";
 import { __resetModelConfigResolutionCache } from "@/hooks/domains/settings/use-dynamic-models";
 import { ProfileFormFields, type ProfileFormData } from "./profile-form-fields";
-import type { ModelConfig } from "@/lib/types/http";
+import type { DynamicModelsResponse, ModelConfig } from "@/lib/types/http";
+
+const probeAgentProfileMock = vi.fn<(...args: unknown[]) => Promise<DynamicModelsResponse>>(
+  async () => ({
+    agent_name: mockAgentName,
+    status: "ok",
+    models: [
+      { id: "model-a", name: "Model A" },
+      { id: "model-b", name: "Model B" },
+    ],
+    modes: [],
+    commands: [],
+    context_revision: "profile-form-test",
+    error: null,
+  }),
+);
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
+  probeAgentProfile: (...args: unknown[]) => probeAgentProfileMock(...args),
   fetchDynamicModels: vi.fn(async () => ({
     agent_name: "opencode",
     status: "ok",
@@ -38,7 +54,25 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
   })),
 }));
 
-afterEach(cleanup);
+vi.mock("@/lib/api/domains/profile-capability-api", () => ({
+  probeAgentProfile: (...args: unknown[]) => probeAgentProfileMock(...args),
+}));
+
+afterEach(() => {
+  cleanup();
+  probeAgentProfileMock.mockReset().mockImplementation(async () => ({
+    agent_name: mockAgentName,
+    status: "ok",
+    models: [
+      { id: "model-a", name: "Model A" },
+      { id: "model-b", name: "Model B" },
+    ],
+    modes: [],
+    commands: [],
+    context_revision: "profile-form-test",
+    error: null,
+  }));
+});
 
 const modelConfig: ModelConfig = {
   default_model: "mock-fast",
@@ -49,6 +83,7 @@ const modelConfig: ModelConfig = {
 const reasoningEffortOptionId = "reasoning_effort";
 const reasoningEffortName = "Reasoning effort";
 const profileStartModelSettingsLabel = "Profile start model settings";
+const mockAgentName = "mock-agent";
 
 function formData(overrides: Partial<ProfileFormData> = {}): ProfileFormData {
   return {
@@ -66,31 +101,47 @@ function renderForm(
   profile: ProfileFormData,
   config: ModelConfig = modelConfig,
   onChange: (patch: Partial<ProfileFormData>) => void = vi.fn(),
+  cursorMcpAuthSupported = false,
 ) {
   return render(
-    <TooltipProvider>
-      <ProfileFormFields
-        profile={profile}
-        onChange={onChange}
-        modelConfig={config}
-        permissionSettings={{}}
-        passthroughConfig={null}
-        agentName="mock-agent"
-      />
-    </TooltipProvider>,
+    <StateProvider>
+      <TooltipProvider>
+        <ProfileFormFields
+          profile={profile}
+          baselineProfile={profile}
+          onChange={onChange}
+          modelConfig={config}
+          permissionSettings={{}}
+          passthroughConfig={null}
+          agentName={mockAgentName}
+          capabilityProfileId="test-profile"
+          cursorMcpAuthSupported={cursorMcpAuthSupported}
+        />
+      </TooltipProvider>
+    </StateProvider>,
   );
 }
+
+it("keeps a single refresh action when the profile advertises modes", () => {
+  renderForm(formData(), {
+    ...modelConfig,
+    available_modes: [{ id: "default", name: "Default" }],
+  });
+  expect(screen.getAllByTestId("profile-refresh-capabilities")).toHaveLength(1);
+});
 
 function renderStatefulForm(
   profile: ProfileFormData,
   config: ModelConfig,
   onChange: (patch: Partial<ProfileFormData>) => void,
+  cursorMcpAuthSupported = false,
 ) {
   function StatefulForm() {
     const [currentProfile, setCurrentProfile] = useState(profile);
     return (
       <ProfileFormFields
         profile={currentProfile}
+        baselineProfile={profile}
         onChange={(patch) => {
           onChange(patch);
           setCurrentProfile((current) => ({ ...current, ...patch }));
@@ -98,15 +149,19 @@ function renderStatefulForm(
         modelConfig={config}
         permissionSettings={{}}
         passthroughConfig={null}
-        agentName="mock-agent"
+        agentName={mockAgentName}
+        capabilityProfileId="test-profile"
+        cursorMcpAuthSupported={cursorMcpAuthSupported}
       />
     );
   }
 
   return render(
-    <TooltipProvider>
-      <StatefulForm />
-    </TooltipProvider>,
+    <StateProvider>
+      <TooltipProvider>
+        <StatefulForm />
+      </TooltipProvider>
+    </StateProvider>,
   );
 }
 
@@ -138,6 +193,26 @@ describe("ProfileFormFields command prefix visibility", () => {
     renderForm(formData({ cli_passthrough: true, command_prefix: "greywall --" }));
 
     expect(screen.queryByTestId("command-prefix-input")).toBeNull();
+  });
+});
+
+describe("ProfileFormFields Cursor MCP auth preference", () => {
+  it("does not show the preference for an unsupported profile", () => {
+    renderForm(formData(), modelConfig, vi.fn(), false);
+    expect(
+      screen.queryByRole("checkbox", { name: /Share local Cursor MCP credentials/ }),
+    ).toBeNull();
+  });
+
+  it("shows a default-enabled checkbox and emits an explicit false value", () => {
+    const onChange = vi.fn();
+    renderStatefulForm(formData(), modelConfig, onChange, true);
+
+    const checkbox = screen.getByRole("checkbox", { name: /Share local Cursor MCP credentials/ });
+    expect(checkbox.getAttribute("data-state")).toBe("checked");
+    fireEvent.click(checkbox);
+    expect(onChange).toHaveBeenCalledWith({ cursor_mcp_auth_enabled: false });
+    expect(screen.getByText(/Running sessions keep credentials already loaded/)).toBeTruthy();
   });
 });
 
@@ -224,23 +299,80 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
   });
 });
 
-describe("ProfileFormFields model options", () => {
-  it("constrains a single start model field on desktop", () => {
-    renderForm(formData());
+describe("ProfileFormFields Copilot model options", () => {
+  const opusId = "claude-opus-5";
+  const opusName = "Claude Opus 5";
+  const haikuId = "claude-haiku-4.5";
+  const haikuName = "Claude Haiku 4.5";
+  const copilotModelConfig: ModelConfig = {
+    default_model: opusId,
+    available_models: [
+      { id: opusId, name: opusName, meta: { copilotUsage: "15x" } },
+      { id: haikuId, name: haikuName, meta: { copilotUsage: "0.33x" } },
+    ],
+    supports_dynamic_models: false,
+    config_options: [
+      {
+        type: "select",
+        id: "model",
+        name: "Model",
+        category: "model",
+        current_value: opusId,
+        options: [
+          { value: opusId, name: opusName, description: opusName },
+          { value: haikuId, name: haikuName, description: haikuName },
+        ],
+      },
+    ],
+  };
 
-    const row = screen.getByTestId("profile-capabilities-model-row");
-    expect(row.firstElementChild?.className).toContain("md:max-w-xl");
+  it("shows the usage multiplier and drops the duplicated name from the config-option list", () => {
+    renderForm(formData({ model: opusId }), copilotModelConfig);
+
+    fireEvent.click(screen.getByRole("button", { name: profileStartModelSettingsLabel }));
+
+    const opusOption = screen.getByRole("option", { name: /Claude Opus 5/ });
+    // The multiplier survives the config-option path (it lives on available_models meta).
+    expect(within(opusOption).getByText("15x")).not.toBeNull();
+    // The duplicated name is replaced by the model id, not shown twice.
+    expect(within(opusOption).getByText(opusId)).not.toBeNull();
+    expect(within(opusOption).queryAllByText(opusName)).toHaveLength(1);
+
+    const haikuOption = screen.getByRole("option", { name: /Claude Haiku 4\.5/ });
+    expect(within(haikuOption).getByText("0.33x")).not.toBeNull();
+  });
+});
+
+describe("ProfileFormFields model options", () => {
+  it("uses a free-text model input for an OpenAI-compatible provider", async () => {
+    __resetModelConfigResolutionCache();
+    vi.mocked(fetchDynamicModels).mockClear();
+    vi.mocked(resolveAgentModelConfig).mockClear();
+    const onChange = vi.fn();
+
+    renderForm(
+      formData({ provider_kind: "openai_compatible", model: "gateway-model" }),
+      { ...modelConfig, supports_dynamic_models: true },
+      onChange,
+    );
+
+    const input = screen.getByTestId("profile-model-input");
+    expect((input as HTMLInputElement).value).toBe("gateway-model");
+    fireEvent.change(input, { target: { value: "gateway-only" } });
+    expect(onChange).toHaveBeenCalledWith({ model: "gateway-only" });
+    await waitFor(() => {
+      expect(fetchDynamicModels).not.toHaveBeenCalled();
+      expect(resolveAgentModelConfig).not.toHaveBeenCalled();
+    });
   });
 
-  it("keeps the model and mode fields balanced when modes are available", () => {
+  it("retains the mode selector when modes are available", () => {
     renderForm(formData({ mode: "default" }), {
       ...modelConfig,
       available_modes: [{ id: "default", name: "Default" }],
       current_mode_id: "default",
     });
 
-    const row = screen.getByTestId("profile-capabilities-model-row");
-    expect(row.firstElementChild?.className).toContain("flex-1");
     expect(screen.getByTestId("profile-mode-field")).not.toBeNull();
   });
 
@@ -303,7 +435,7 @@ describe("ProfileFormFields model options", () => {
 });
 
 describe("ProfileFormFields initial model options", () => {
-  it("uses matching initial model options without probing again", async () => {
+  it("resolves initial model options with the saved profile context", async () => {
     __resetModelConfigResolutionCache();
     vi.mocked(resolveAgentModelConfig).mockClear();
     const dynamicModelConfig: ModelConfig = {
@@ -327,10 +459,14 @@ describe("ProfileFormFields initial model options", () => {
       expect(screen.getByRole("button", { name: profileStartModelSettingsLabel })).toBeTruthy(),
     );
 
-    expect(resolveAgentModelConfig).not.toHaveBeenCalled();
+    await waitFor(() => expect(resolveAgentModelConfig).toHaveBeenCalledTimes(1));
+    expect(resolveAgentModelConfig).toHaveBeenCalledWith(mockAgentName, {
+      model: "model-a",
+      profile_id: "test-profile",
+    });
   });
 
-  it("uses a matching initial model snapshot without probing again", async () => {
+  it("resolves initial model options even when the agent-wide snapshot is populated", async () => {
     __resetModelConfigResolutionCache();
     vi.mocked(resolveAgentModelConfig).mockClear();
     const dynamicModelConfig: ModelConfig = {
@@ -347,12 +483,24 @@ describe("ProfileFormFields initial model options", () => {
       expect(screen.getByRole("button", { name: profileStartModelSettingsLabel })).toBeTruthy(),
     );
 
-    expect(resolveAgentModelConfig).not.toHaveBeenCalled();
+    await waitFor(() => expect(resolveAgentModelConfig).toHaveBeenCalledTimes(1));
+    expect(resolveAgentModelConfig).toHaveBeenCalledWith(mockAgentName, {
+      model: "model-a",
+      profile_id: "test-profile",
+    });
   });
 
   it("does not probe again when the initial capability snapshot failed", async () => {
     __resetModelConfigResolutionCache();
     vi.mocked(resolveAgentModelConfig).mockClear();
+    probeAgentProfileMock.mockResolvedValueOnce({
+      agent_name: mockAgentName,
+      status: "failed",
+      models: [],
+      modes: [],
+      commands: [],
+      error: "mock-agent is not available",
+    });
     const dynamicModelConfig: ModelConfig = {
       default_model: "mock-fast",
       current_model_id: "mock-fast",
@@ -373,70 +521,6 @@ describe("ProfileFormFields initial model options", () => {
 });
 
 describe("ProfileFormFields model options after selection", () => {
-  it("keeps the model selector open while resolving the selected model options", async () => {
-    __resetModelConfigResolutionCache();
-    let resolveResponse: ((value: unknown) => void) | undefined;
-    const response = new Promise((resolve) => {
-      resolveResponse = resolve;
-    });
-    vi.mocked(resolveAgentModelConfig).mockReturnValueOnce(response as never);
-
-    const dynamicModelConfig: ModelConfig = {
-      default_model: "model-a",
-      current_model_id: "model-a",
-      available_models: [
-        { id: "model-a", name: "Model A" },
-        { id: "model-b", name: "Model B" },
-      ],
-      config_options: [
-        {
-          type: "select",
-          id: reasoningEffortOptionId,
-          name: reasoningEffortName,
-          current_value: "medium",
-          options: [{ value: "medium", name: "Medium" }],
-        },
-      ],
-      supports_dynamic_models: true,
-    };
-
-    renderStatefulForm(
-      formData({ model: "model-a", config_options: { [reasoningEffortOptionId]: "medium" } }),
-      dynamicModelConfig,
-      vi.fn(),
-    );
-
-    const selector = await screen.findByRole("button", { name: profileStartModelSettingsLabel });
-    fireEvent.click(selector);
-    fireEvent.click(screen.getByRole("option", { name: /Model B/ }));
-
-    await waitFor(() => expect(screen.getByTestId("model-config-options-loading")).toBeTruthy());
-    expect(screen.queryByTestId(`config-option-trigger-${reasoningEffortOptionId}`)).toBeNull();
-
-    await act(async () => {
-      resolveResponse?.({
-        agent_name: "mock-agent",
-        model: "model-b",
-        status: "ok",
-        config_options: [
-          {
-            type: "select",
-            id: reasoningEffortOptionId,
-            name: reasoningEffortName,
-            current_value: "max",
-            options: [{ value: "max", name: "Max" }],
-          },
-        ],
-        error: null,
-      });
-    });
-
-    await waitFor(() =>
-      expect(screen.getByTestId("config-option-trigger-reasoning_effort")).toBeTruthy(),
-    );
-    expect(screen.queryByTestId("model-config-options-loading")).toBeNull();
-  });
-
   it("removes a saved option value after the user changes the model", async () => {
     const onChange = vi.fn();
     const dynamicModelConfig: ModelConfig = {
@@ -484,7 +568,16 @@ describe("ProfileFormFields save coordination", () => {
     const response = new Promise((resolve) => {
       resolveResponse = resolve;
     });
-    vi.mocked(resolveAgentModelConfig).mockReturnValueOnce(response as never);
+    vi.mocked(resolveAgentModelConfig).mockImplementation(async (_agentName, request) => {
+      if (request.model === "model-b") return response as never;
+      return {
+        agent_name: mockAgentName,
+        model: request.model,
+        status: "ok",
+        config_options: [],
+        error: null,
+      };
+    });
     const save = vi.fn();
     const dynamicModelConfig: ModelConfig = {
       default_model: "model-a",
@@ -496,6 +589,7 @@ describe("ProfileFormFields save coordination", () => {
 
     function SaveHarness() {
       const [pending, setPending] = useState(false);
+      const [profile, setProfile] = useState(formData({ model: "model-a" }));
       useSettingsSaveContributor({
         id: "profile:model-config",
         revision: 1,
@@ -507,12 +601,14 @@ describe("ProfileFormFields save coordination", () => {
       });
       return (
         <ProfileFormFields
-          profile={formData({ model: "model-a" })}
-          onChange={vi.fn()}
+          profile={profile}
+          baselineProfile={formData({ model: "model-a" })}
+          onChange={(patch) => setProfile((current) => ({ ...current, ...patch }))}
           modelConfig={dynamicModelConfig}
           permissionSettings={{}}
           passthroughConfig={null}
-          agentName="mock-agent"
+          agentName={mockAgentName}
+          capabilityProfileId="test-profile"
           onModelConfigResolutionPendingChange={setPending}
         />
       );
@@ -528,6 +624,13 @@ describe("ProfileFormFields save coordination", () => {
       </StateProvider>,
     );
 
+    await waitFor(() =>
+      expect(screen.getByTestId("profile-capability-status").getAttribute("data-status")).toBe(
+        "ready",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: profileStartModelSettingsLabel }));
+    fireEvent.click(screen.getByRole("option", { name: /Model B/ }));
     const saveButton = await screen.findByRole("button", { name: "Save changes" });
     await waitFor(() => expect(saveButton.hasAttribute("disabled")).toBe(true));
     fireEvent.click(saveButton);
@@ -535,8 +638,8 @@ describe("ProfileFormFields save coordination", () => {
 
     await act(async () => {
       resolveResponse?.({
-        agent_name: "mock-agent",
-        model: "model-a",
+        agent_name: mockAgentName,
+        model: "model-b",
         status: "ok",
         config_options: [],
         error: null,
@@ -545,5 +648,28 @@ describe("ProfileFormFields save coordination", () => {
     await waitFor(() => expect(saveButton.hasAttribute("disabled")).toBe(false));
     fireEvent.click(saveButton);
     await waitFor(() => expect(save).toHaveBeenCalledOnce());
+  });
+});
+
+describe("ProfileFormFields Cursor MCP preferences", () => {
+  it("renders Cursor plugin MCP import preference when supported and toggles it", () => {
+    const onChange = vi.fn();
+    renderForm(formData({ cursor_plugins_mcp_enabled: true }), modelConfig, onChange, true);
+
+    const checkbox = screen.getByRole("checkbox", {
+      name: "Import local Cursor plugin MCP servers",
+    });
+    expect(checkbox).toBeDefined();
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(checkbox);
+    expect(onChange).toHaveBeenCalledWith({ cursor_plugins_mcp_enabled: false });
+  });
+
+  it("hides Cursor plugin MCP import preference when not supported", () => {
+    renderForm(formData(), modelConfig, vi.fn(), false);
+    expect(
+      screen.queryByRole("checkbox", { name: "Import local Cursor plugin MCP servers" }),
+    ).toBeNull();
   });
 });

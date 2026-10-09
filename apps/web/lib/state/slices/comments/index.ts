@@ -2,6 +2,9 @@ export { useCommentsStore } from "./comments-store";
 export {
   type Comment,
   type DiffComment,
+  type ReviewComment,
+  type ReviewFileComment,
+  isReviewComment,
   type PlanComment,
   type FileEditorComment,
   type PRFeedbackComment,

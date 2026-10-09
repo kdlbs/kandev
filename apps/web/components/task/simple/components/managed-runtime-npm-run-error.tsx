@@ -8,6 +8,7 @@ import { AgentAvatar } from "@/app/office/components/agent-avatar";
 import type { RunError } from "@/app/office/tasks/[id]/types";
 import { formatRelativeTime } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { managedRuntimeStartupCopy } from "@/components/task/chat/managed-runtime-startup-copy";
 
 export function ManagedRuntimeNpmRunError({
   error,
@@ -20,6 +21,18 @@ export function ManagedRuntimeNpmRunError({
 }) {
   const { t } = useTranslation();
   const [showDetails, setShowDetails] = useState(false);
+  const isPolicyFailure = error.failureCode === "managed_runtime_npm_policy";
+  const isStartupFailure = error.failureCode === "managed_runtime_startup";
+  const startupCopy = isStartupFailure
+    ? managedRuntimeStartupCopy(
+        {
+          startup_reason: error.startupReason,
+          startup_attempts: error.startupAttempts,
+          startup_npm_code: error.startupNpmCode,
+        },
+        t,
+      )
+    : null;
   const technicalDetails = error.failureDetails;
 
   return (
@@ -34,13 +47,21 @@ export function ManagedRuntimeNpmRunError({
           <span className="text-sm font-medium">{agentName}</span>
           <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
             <IconAlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-            {t("chat:managedRuntimeNpmTitle")}
+            {startupCopy?.title ??
+              t(
+                isPolicyFailure
+                  ? "chat:managedRuntimeNpmPolicyTitle"
+                  : "chat:managedRuntimeNpmTitle",
+              )}
           </span>
           <span className="text-xs text-muted-foreground">
             {formatRelativeTime(error.failedAt)}
           </span>
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">{t("chat:managedRuntimeNpmBody")}</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {startupCopy?.summary ??
+            t(isPolicyFailure ? "chat:managedRuntimeNpmPolicyBody" : "chat:managedRuntimeNpmBody")}
+        </p>
         {technicalDetails && (
           <Collapsible open={showDetails} onOpenChange={setShowDetails} className="mt-2">
             <CollapsibleTrigger className="flex min-h-11 cursor-pointer items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground sm:min-h-8">

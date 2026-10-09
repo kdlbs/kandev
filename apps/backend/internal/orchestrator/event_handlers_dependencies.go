@@ -54,7 +54,7 @@ func (s *Service) dependencyBlocksAutoStart(ctx context.Context, taskID, eventNa
 		return true, true
 	}
 	if isBlocked {
-		s.logger.Debug(eventName+": task has unresolved dependencies; skipping auto-start",
+		s.logger.Warn(eventName+": task has unresolved dependencies; skipping auto-start",
 			zap.String("task_id", taskID), zap.String("blocked_reason", reason))
 	}
 	return isBlocked, false

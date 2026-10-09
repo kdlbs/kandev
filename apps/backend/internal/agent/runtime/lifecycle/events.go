@@ -4,6 +4,7 @@ package lifecycle
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -102,9 +103,9 @@ func (p *EventPublisher) PublishAgentStalled(
 }
 
 // publishAgentEventPayload publishes an immutable agent lifecycle snapshot.
-func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType string, payload AgentEventPayload) {
+func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType string, payload AgentEventPayload) error {
 	if p.eventBus == nil {
-		return
+		return fmt.Errorf("event bus is unavailable")
 	}
 
 	event := bus.NewEvent(eventType, "agent-manager", payload)
@@ -114,11 +115,13 @@ func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType
 			zap.String("event_type", eventType),
 			zap.String("instance_id", payload.AgentExecutionID),
 			zap.Error(err))
+		return err
 	} else {
 		p.logger.Debug("published agent event",
 			zap.String("event_type", eventType),
 			zap.String("instance_id", payload.AgentExecutionID))
 	}
+	return nil
 }
 
 func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
@@ -134,32 +137,49 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 	turnID string,
 	evidence *PromptAttemptEvidence,
 ) AgentEventPayload {
+	startupFailure := execution.startupFailureMetadataSnapshot()
 	payload := AgentEventPayload{
-		AgentExecutionID:   execution.ID,
-		AttemptID:          execution.currentStartupAttemptID(),
-		RunID:              execution.RunID,
-		TaskID:             execution.TaskID,
-		SessionID:          execution.SessionID,
-		TaskEnvironmentID:  execution.TaskEnvironmentID,
-		TurnID:             turnID,
-		AgentID:            execution.AgentID,
-		AgentProfileID:     execution.officeProfileID(),
-		ExecutionProfileID: execution.AgentProfileID,
-		ContainerID:        execution.ContainerID,
-		Status:             string(execution.Status),
-		StartedAt:          execution.StartedAt,
-		FinishedAt:         execution.FinishedAt,
-		ErrorMessage:       execution.ErrorMessage,
-		FailureCode:        execution.FailureCode,
-		FailureDetails:     execution.FailureDetails,
-		ProviderError:      execution.ProviderError,
-		ExitCode:           execution.ExitCode,
-		PromptGeneration:   execution.promptGeneration,
+		AgentExecutionID:       execution.ID,
+		AttemptID:              execution.currentStartupAttemptID(),
+		OwnerKind:              executionOwnerKind(execution),
+		WorkspaceID:            execution.WorkspaceID,
+		RunID:                  execution.RunID,
+		RunSessionID:           execution.RunSessionID,
+		RunAttempt:             execution.RunAttempt,
+		TaskID:                 execution.TaskID,
+		SessionID:              execution.SessionID,
+		TaskEnvironmentID:      execution.TaskEnvironmentID,
+		TurnID:                 turnID,
+		AgentID:                execution.AgentID,
+		AgentProfileID:         execution.officeProfileID(),
+		ExecutionProfileID:     execution.AgentProfileID,
+		ContainerID:            execution.ContainerID,
+		Status:                 string(execution.Status),
+		StartedAt:              execution.StartedAt,
+		FinishedAt:             execution.FinishedAt,
+		ErrorMessage:           execution.ErrorMessage,
+		FailureCode:            execution.FailureCode,
+		FailureDetails:         execution.FailureDetails,
+		StartupFailureReason:   startupFailure.reason,
+		StartupFailureAttempts: startupFailure.attempts,
+		StartupFailureNPMCode:  startupFailure.npmCode,
+		ProviderError:          execution.ProviderError,
+		SessionSettingsPolicy:  sessionSettingsProjectionPolicy(execution.sessionSettingsProjectionPolicy()),
+		ExitCode:               execution.ExitCode,
+		PromptGeneration:       execution.promptGeneration,
 	}
 	if evidence != nil {
 		payload.EvidenceKnown = evidence.EvidenceKnown
 		payload.OutputObserved = evidence.OutputObserved
 		payload.EffectObserved = evidence.EffectObserved
+		if evidence.ContinuationSafety != nil {
+			snapshot := *evidence.ContinuationSafety
+			payload.ContinuationSafety = &snapshot
+		}
+		if evidence.CapacityContinuation != nil {
+			snapshot := *evidence.CapacityContinuation
+			payload.CapacityContinuation = &snapshot
+		}
 		payload.ProviderDiagnosticCandidate = evidence.ProviderDiagnosticCandidate
 		payload.ProviderDiagnosticText = evidence.ProviderDiagnosticText
 	}
@@ -171,6 +191,44 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 	if p.eventBus == nil {
 		return
 	}
+	p.publishAgentctlEventPayload(ctx, eventType, p.agentctlEventPayload(ctx, execution, errMsg))
+}
+
+// PublishAgentctlDeliveryRecovery publishes an immutable reconciliation state
+// captured by the reconciliation owner.
+func (p *EventPublisher) PublishAgentctlDeliveryRecovery(
+	ctx context.Context,
+	execution *AgentExecution,
+	identity DeliveryReconciliationIdentity,
+	phase DeliveryReconciliationPhase,
+) {
+	if p.eventBus == nil || execution == nil {
+		return
+	}
+	message := "reconnecting to the agent delivery stream"
+	switch phase {
+	case DeliveryReconciliationPhaseUncertain:
+		message = ErrUncertainPromptDelivery.Error()
+	case DeliveryReconciliationPhaseRecovered:
+		message = "the original agent delivery stream is reattached"
+	}
+	payload := p.agentctlEventPayload(ctx, execution, message)
+	payload.DeliveryRecoveryPhase = string(phase)
+	payload.DeliverySubmissionID = identity.SubmissionID
+	payload.DeliveryStreamID = identity.StreamID
+	payload.DeliveryIncarnationID = identity.IncarnationID
+	payload.DeliveryHarnessGeneration = identity.HarnessGeneration
+	payload.PromptGeneration = identity.PromptGeneration
+	payload.FailureCode = deliveryReconciliationFailureCode(phase)
+	payload.FailureDetails = identity.SubmissionID
+	p.publishAgentctlEventPayload(ctx, events.AgentctlError, payload)
+}
+
+func (p *EventPublisher) agentctlEventPayload(
+	ctx context.Context,
+	execution *AgentExecution,
+	errMsg string,
+) AgentctlEventPayload {
 
 	var worktreeID string
 	var worktreeBranch string
@@ -181,28 +239,40 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 		worktreeBranch, _ = branch.(string)
 	}
 
+	startupFailure := execution.startupFailureMetadataSnapshot()
 	payload := AgentctlEventPayload{
-		TaskID:            execution.TaskID,
-		SessionID:         execution.SessionID,
-		TaskEnvironmentID: execution.TaskEnvironmentID,
-		AgentExecutionID:  execution.ID,
-		AttemptID:         execution.currentStartupAttemptID(),
-		ErrorMessage:      errMsg,
-		FailureCode:       execution.FailureCode,
-		FailureDetails:    execution.FailureDetails,
-		WorktreeID:        worktreeID,
-		WorktreePath:      execution.WorkspacePath,
-		WorktreeBranch:    worktreeBranch,
+		OwnerKind:              executionOwnerKind(execution),
+		WorkspaceID:            execution.WorkspaceID,
+		RunID:                  execution.RunID,
+		RunSessionID:           execution.RunSessionID,
+		RunAttempt:             execution.RunAttempt,
+		TaskID:                 execution.TaskID,
+		SessionID:              execution.SessionID,
+		TaskEnvironmentID:      execution.TaskEnvironmentID,
+		AgentExecutionID:       execution.ID,
+		AttemptID:              execution.currentStartupAttemptID(),
+		ErrorMessage:           errMsg,
+		FailureCode:            execution.FailureCode,
+		FailureDetails:         execution.FailureDetails,
+		StartupFailureReason:   startupFailure.reason,
+		StartupFailureAttempts: startupFailure.attempts,
+		StartupFailureNPMCode:  startupFailure.npmCode,
+		WorktreeID:             worktreeID,
+		WorktreePath:           execution.WorkspacePath,
+		WorktreeBranch:         worktreeBranch,
 	}
 	if attemptID := ResumeAttemptIDFromContext(ctx); attemptID != "" {
 		payload.AttemptID = attemptID
 	}
+	return payload
+}
 
+func (p *EventPublisher) publishAgentctlEventPayload(ctx context.Context, eventType string, payload AgentctlEventPayload) {
 	event := bus.NewEvent(eventType, "agent-manager", payload)
 	if err := p.eventBus.Publish(ctx, eventType, event); err != nil {
 		p.logger.Error("failed to publish agentctl event",
 			zap.String("event_type", eventType),
-			zap.String("instance_id", execution.ID),
+			zap.String("instance_id", payload.AgentExecutionID),
 			zap.Error(err))
 	}
 }
@@ -225,12 +295,15 @@ func (p *EventPublisher) PublishACPSessionCreatedWithAttempt(execution *AgentExe
 	}
 
 	payload := ACPSessionCreatedPayload{
-		TaskID:           execution.TaskID,
-		SessionID:        execution.SessionID,
-		AgentProfileID:   execution.ID,
-		AgentExecutionID: execution.ID,
-		AttemptID:        attemptID,
-		ACPSessionID:     sessionID,
+		TaskID:                    execution.TaskID,
+		SessionID:                 execution.SessionID,
+		AgentProfileID:            execution.ID,
+		AgentExecutionID:          execution.ID,
+		AttemptID:                 attemptID,
+		ACPSessionID:              sessionID,
+		DeliveryStreamID:          execution.DeliveryStreamID,
+		DeliveryIncarnationID:     execution.DeliveryIncarnationID,
+		DeliveryHarnessGeneration: execution.DeliveryHarnessGeneration,
 	}
 
 	event := bus.NewEvent(events.AgentACPSessionCreated, "agent-manager", payload)
@@ -245,6 +318,9 @@ func (p *EventPublisher) PublishACPSessionCreatedWithAttempt(execution *AgentExe
 // PublishAgentStreamEvent publishes an agent stream event to the event bus for WebSocket streaming.
 // This is different from PublishAgentEvent which publishes lifecycle events (started, stopped, etc.).
 func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	if event.SessionSettingsSourceGeneration == 0 {
+		event.SessionSettingsSourceGeneration = execution.startupAttemptSnapshot()
+	}
 	p.publishAgentStreamEventWithAttempt(execution, event, event.AttemptID)
 }
 
@@ -270,19 +346,29 @@ func (p *EventPublisher) publishAgentStreamEventWithAttempt(
 	// session_id is the task session ID (execution.SessionID)
 	// acp_session_id in eventData is the internal agent protocol session
 	payload := AgentStreamEventPayload{
-		Type:           "agent/event",
-		Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:        execution.ID,
-		ExecutionID:    execution.ID,
-		AttemptID:      attemptID,
-		AgentProfileID: execution.officeProfileID(),
-		TaskID:         execution.TaskID,
-		SessionID:      execution.SessionID,
-		Data:           eventData,
+		Type:                            "agent/event",
+		Timestamp:                       time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:                         execution.ID,
+		ExecutionID:                     execution.ID,
+		AttemptID:                       attemptID,
+		SessionSettingsSourceGeneration: event.SessionSettingsSourceGeneration,
+		OwnerKind:                       executionOwnerKind(execution),
+		WorkspaceID:                     execution.WorkspaceID,
+		RunID:                           execution.RunID,
+		RunSessionID:                    execution.RunSessionID,
+		RunAttempt:                      execution.RunAttempt,
+		AgentProfileID:                  execution.officeProfileID(),
+		ExecutionProfileID:              execution.AgentProfileID,
+		AgentType:                       execution.AgentID,
+		TaskID:                          execution.TaskID,
+		SessionID:                       execution.SessionID,
+		Data:                            eventData,
 	}
 
 	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", payload)
-	subject := events.BuildAgentStreamSubject(execution.SessionID)
+	subject := events.BuildAgentStreamSubject(agentStreamSubjectID(
+		executionOwnerKind(execution), execution.SessionID, execution.RunSessionID,
+	))
 
 	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
 		p.logger.Error("failed to publish agent stream event",
@@ -297,6 +383,8 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 	return &AgentStreamEventData{
 		Type:                        event.Type,
 		ACPSessionID:                event.SessionID,
+		OperationID:                 event.OperationID,
+		ProtocolMessageID:           event.ProtocolMessageID,
 		Text:                        event.Text,
 		ProviderDiagnosticCandidate: event.ProviderDiagnosticCandidate,
 		ToolCallID:                  event.ToolCallID,
@@ -307,17 +395,26 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		ToolTitle:                   event.ToolTitle,
 		ToolStatus:                  event.ToolStatus,
 		Error:                       event.Error,
+		PromptFailureDisposition:    event.PromptFailureDisposition,
 		ProviderError:               event.ProviderError,
 		SessionStatus:               event.SessionStatus,
+		SessionSettingsPolicy:       event.SessionSettingsPolicy,
+		SessionSettingsGeneration:   event.SessionSettingsGeneration,
 		PromptGeneration:            event.PromptGeneration,
+		RetractedMessageIDs:         append([]string(nil), event.RetractedMessageIDs...),
 		TurnID:                      event.TurnID,
 		Data:                        event.Data,
+		CanonicalProjection:         event.CanonicalProjection,
+		MessageID:                   event.CanonicalMessageID,
+		IsAppend:                    event.CanonicalMessageAppend,
+		MessageType:                 canonicalMessageType(event),
 		Normalized:                  event.NormalizedPayload,
 		AvailableCommands:           event.AvailableCommands,
 		ToolCallContents:            event.ToolCallContents,
 		ContentBlocks:               event.ContentBlocks,
 		Role:                        event.Role,
 		CurrentModeID:               event.CurrentModeID,
+		RequestedModeID:             event.RequestedModeID,
 		AvailableModes:              event.AvailableModes,
 		SupportsImage:               event.SupportsImage,
 		SupportsAudio:               event.SupportsAudio,
@@ -335,10 +432,13 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		SessionUpdatedAt:            event.SessionUpdatedAt,
 		SessionMeta:                 event.SessionMeta,
 		Usage:                       event.Usage,
+		UsageObservation:            event.UsageObservation,
 		PlanEntries:                 event.PlanEntries,
 		PlanContent:                 event.PlanContent,
 		MCPAttachment:               event.MCPAttachment,
 		MCPAttachmentAttempt:        event.MCPAttachmentAttempt,
+		BackgroundWork:              event.BackgroundWork,
+		BackgroundWorkOutput:        event.BackgroundWorkOutput,
 	}
 }
 
@@ -350,7 +450,9 @@ func (p *EventPublisher) PublishAgentStreamEventPayload(payload *AgentStreamEven
 	}
 
 	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", *payload)
-	subject := events.BuildAgentStreamSubject(payload.SessionID)
+	subject := events.BuildAgentStreamSubject(agentStreamSubjectID(
+		payload.OwnerKind, payload.SessionID, payload.RunSessionID,
+	))
 
 	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
 		p.logger.Error("failed to publish agent stream event payload",
@@ -358,6 +460,13 @@ func (p *EventPublisher) PublishAgentStreamEventPayload(payload *AgentStreamEven
 			zap.String("session_id", payload.SessionID),
 			zap.Error(err))
 	}
+}
+
+func agentStreamSubjectID(ownerKind ExecutionOwnerKind, sessionID, runSessionID string) string {
+	if ownerKind == ExecutionOwnerRun && runSessionID != "" {
+		return runSessionID
+	}
+	return sessionID
 }
 
 // PublishGitEvent publishes a unified git event to the event bus.
@@ -391,6 +500,13 @@ func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *age
 		AgentID:           execution.ID,
 		Timestamp:         update.Timestamp.Format(time.RFC3339Nano),
 		Status: &GitStatusData{
+			StatusState:         update.StatusState,
+			FilesComplete:       update.FilesComplete,
+			DetailState:         update.DetailState,
+			ErrorCode:           update.ErrorCode,
+			TrackerID:           update.TrackerID,
+			TrackerEpoch:        update.TrackerEpoch,
+			SnapshotRevision:    update.SnapshotRevision,
 			Branch:              update.Branch,
 			RemoteBranch:        update.RemoteBranch,
 			HeadCommit:          update.HeadCommit,
@@ -505,9 +621,15 @@ func (p *EventPublisher) PublishFileChange(execution *AgentExecution, notificati
 }
 
 // PublishPermissionRequest publishes a permission request event to the event bus.
-func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, event agentctl.AgentEvent) {
+func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, event agentctl.AgentEvent) error {
 	if p.eventBus == nil {
-		return
+		if event.AutoApprovedOptionID != "" {
+			err := fmt.Errorf("event bus unavailable for automatic permission decision")
+			p.logger.Error("failed to publish permission_request event",
+				permissionRequestLogFields(execution, event, err)...)
+			return err
+		}
+		return nil
 	}
 
 	// Convert options to typed format
@@ -533,24 +655,57 @@ func (p *EventPublisher) PublishPermissionRequest(execution *AgentExecution, eve
 		Options:       options,
 		ActionType:    event.ActionType,
 		ActionDetails: event.ActionDetails,
+
+		AutoApprovedOptionID:   event.AutoApprovedOptionID,
+		AutoApprovalPending:    event.AutoApprovalPending,
+		AutoApprovedOptionKind: event.AutoApprovedOptionKind,
+		AutoApprovalSource:     event.AutoApprovalSource,
 	}
 
 	busEvent := bus.NewEvent(events.PermissionRequestReceived, "agent-manager", payload)
 	subject := events.BuildPermissionRequestSubject(execution.SessionID)
 
-	if err := p.eventBus.Publish(context.Background(), subject, busEvent); err != nil {
-		p.logger.Error("failed to publish permission_request event",
-			zap.String("instance_id", execution.ID),
-			zap.String("task_id", execution.TaskID),
-			zap.String("session_id", execution.SessionID),
-			zap.Error(err))
-	} else {
-		p.logger.Debug("published permission_request event",
-			zap.String("task_id", execution.TaskID),
-			zap.String("session_id", execution.SessionID),
-			zap.String("pending_id", event.PendingID),
-			zap.String("title", event.PermissionTitle))
+	const maxAttempts = 3
+	var publishErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		publishErr = p.eventBus.Publish(context.Background(), subject, busEvent)
+		if publishErr == nil {
+			p.logger.Debug("published permission_request event",
+				zap.String("task_id", execution.TaskID),
+				zap.String("session_id", execution.SessionID),
+				zap.String("pending_id", event.PendingID),
+				zap.String("title", event.PermissionTitle),
+				zap.Int("attempt", attempt))
+			return nil
+		}
+		if attempt < maxAttempts {
+			timer := time.NewTimer(time.Duration(attempt) * 50 * time.Millisecond)
+			<-timer.C
+		}
 	}
+	fields := permissionRequestLogFields(execution, event, publishErr)
+	fields = append(fields, zap.Int("attempts", maxAttempts))
+	p.logger.Error("failed to publish permission_request event", fields...)
+	return publishErr
+}
+
+func permissionRequestLogFields(execution *AgentExecution, event agentctl.AgentEvent, err error) []zap.Field {
+	fields := []zap.Field{
+		zap.String("instance_id", execution.ID),
+		zap.String("task_id", execution.TaskID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("request_id", event.RequestID),
+		zap.String("pending_id", event.PendingID),
+		zap.Error(err),
+	}
+	if event.AutoApprovedOptionID != "" {
+		fields = append(fields,
+			zap.String("auto_approved_option_id", event.AutoApprovedOptionID),
+			zap.String("auto_approved_option_kind", event.AutoApprovedOptionKind),
+			zap.String("auto_approval_source", event.AutoApprovalSource),
+		)
+	}
+	return fields
 }
 
 // PublishShellOutput publishes a shell output event to the event bus.

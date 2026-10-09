@@ -78,6 +78,8 @@ export function getLspConnectionLabel(status: LspStatus, progress?: LspProgressS
       return t("lsp:off");
     case "connecting":
       return t("lsp:connecting");
+    case "reconnecting":
+      return t("lsp:reconnecting");
     case "installing":
       return t("lsp:installingLanguageServer");
     case "starting":

@@ -71,6 +71,22 @@ The event bus in `internal/events/` is live fan-out, not durable storage. In-mem
 
 SQLite is the default. PostgreSQL uses the same domain repositories where supported, with `sqlx.Rebind` and helpers in `internal/db/dialect/`. A package name such as `internal/task/repository/sqlite` does not prove SQLite-only behavior.
 
+`db.OpenSQLite` is the single-connection writer factory. Its supported driver
+`_txlock=immediate` mode acquires SQLite's writer at transaction entry, before
+repositories read the current rows they will change. This applies even to a
+read-only transaction opened on that writer. Use `db.OpenSQLiteReader` for
+read-only transactions: its separate deferred pool permits WAL snapshot reads
+while an independent writer waits. PostgreSQL retains READ COMMITTED and its
+explicit domain lock ordering.
+
+SQLite writer entry uses the existing five-second busy timeout. Cancellation
+while another connection holds the writer can settle when that native wait
+returns; it does not guarantee immediate interruption. Check cancellation
+before admission, join the failed entry or roll back a returned transaction,
+and settle connection ownership before reuse. Keep external stop, worktree and
+canvas I/O outside database transactions. Arbitrary injected deferred pools do
+not inherit the factory's wait behavior and can fail safely with BUSY.
+
 Kandev has no central migration directory or external migration runner. Each repository/store creates its fresh schema and applies ordered upgrade steps during backend startup. A schema change must therefore:
 
 1. update the fresh-schema definition;

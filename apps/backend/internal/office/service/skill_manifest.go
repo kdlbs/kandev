@@ -26,6 +26,7 @@ type SkillManifest struct {
 // ManifestSkill represents a single skill's content.
 type ManifestSkill struct {
 	ID          string
+	DisplayName string
 	Slug        string
 	Content     string // SKILL.md content
 	Version     string
@@ -97,6 +98,7 @@ func (si *SchedulerIntegration) appendConfiguredSkill(
 	}
 	manifest.Skills = append(manifest.Skills, ManifestSkill{
 		ID:          skill.ID,
+		DisplayName: skill.Name,
 		Slug:        skill.Slug,
 		Content:     skill.Content,
 		Version:     skill.Version,

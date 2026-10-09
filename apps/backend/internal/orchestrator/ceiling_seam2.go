@@ -19,7 +19,7 @@ func seam2StartCreatedPayload(
 	promptReferenceContext string,
 	options startCreatedSessionOptions,
 ) map[string]interface{} {
-	return map[string]interface{}{
+	payload := map[string]interface{}{
 		metaKeySessionID:                 sessionID,
 		metaKeyAgentProfileID:            agentProfileID,
 		metaKeyPrompt:                    prompt,
@@ -37,6 +37,16 @@ func seam2StartCreatedPayload(
 		"prompt_references_prepared":     options.promptReferencesPrepared,
 		"preserve_direct_prompt":         options.preserveDirectPrompt,
 	}
+	if options.ceilingEntryBinding != nil {
+		payload[models.CeilingLaunchEntryBindingKey] = map[string]interface{}{
+			"workflow_id":            options.ceilingEntryBinding.WorkflowID,
+			"destination_step_id":    options.ceilingEntryBinding.DestinationStepID,
+			"route_operation_id":     options.ceilingEntryBinding.RouteOperationID,
+			"entry_identity":         options.ceilingEntryBinding.EntryIdentity,
+			"destination_session_id": options.ceilingEntryBinding.DestinationSessionID,
+		}
+	}
+	return payload
 }
 
 // admitOrDeferSeam2 is Service.startCreatedSession's AC-4d gate: consulted

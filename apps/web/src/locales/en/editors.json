@@ -90,5 +90,9 @@
   "underlineCmdU": "Underline (Cmd+U)",
   "failedToOpenEditor": "Failed to open editor",
   "downloadFile": "Download file",
-  "symlink": "Symlink"
+  "symlink": "Symlink",
+  "failedToOpenFolder": "Failed to open folder",
+  "openFolderOnHost": "Open folder on the machine running Kandev",
+  "chooseFolder": "Choose a folder",
+  "openingFolder": "Opening folder…"
 }

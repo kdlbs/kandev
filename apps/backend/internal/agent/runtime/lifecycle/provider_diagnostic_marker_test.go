@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/stretchr/testify/require"
 )
 
 // TestPublishAgentStreamEvent_CarriesProviderDiagnosticCandidate pins
@@ -32,4 +33,13 @@ func TestPublishAgentStreamEvent_CarriesProviderDiagnosticCandidate(t *testing.T
 	if streamEvents[0].Data == nil || !streamEvents[0].Data.ProviderDiagnosticCandidate {
 		t.Fatalf("published AgentStreamEventData did not carry the marker: %+v", streamEvents[0].Data)
 	}
+}
+
+func TestAgentStreamSubjectUsesRunSessionForTasklessExecution(t *testing.T) {
+	require.Equal(t, "run-session-1", agentStreamSubjectID(
+		ExecutionOwnerRun, "", "run-session-1",
+	))
+	require.Equal(t, "task-session-1", agentStreamSubjectID(
+		ExecutionOwnerTask, "task-session-1", "run-session-ignored",
+	))
 }

@@ -588,3 +588,14 @@ describe("RemoteRepoChip — trigger label", () => {
     expect(screen.getByTestId(TRIGGER_TID).textContent).toContain("github.com/foo/bar");
   });
 });
+
+describe("RemoteRepoChip checkout gear visibility", () => {
+  it("does not offer checkout options before a repository is selected", () => {
+    renderRemoteRepoChip({ onOptionsChange: vi.fn() });
+    expect(screen.queryByTestId("repository-options-trigger")).toBeNull();
+  });
+  it("offers checkout options for a selected repository", () => {
+    renderRemoteRepoChip({ row: row({ url: URL_ACME_SITE }), onOptionsChange: vi.fn() });
+    expect(screen.getByTestId("repository-options-trigger")).toBeTruthy();
+  });
+});

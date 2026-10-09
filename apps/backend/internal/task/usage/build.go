@@ -58,6 +58,22 @@ func (w *Writer) buildRow(ctx context.Context, p *usageEventPayload, occurredAt 
 		OccurredAt:      occurredAt,
 		CreatedAt:       occurredAt,
 	}
+	if observation := p.UsageObservation; observation != nil {
+		event.ProviderThreadID = observation.ProviderThreadID
+		event.ProviderTurnID = observation.ProviderTurnID
+		event.ProviderResponseID = observation.ProviderResponseID
+		event.NativeScope = observation.Scope
+		event.MeasurementSource = observation.Source
+		event.UsageCompleteness = observation.Completeness
+		event.UsageSchemaVersion = observation.SchemaVersion
+		event.ReasoningOutputTokens = observation.ReasoningOutputTokens
+		event.ReportedCacheWriteTokens = observation.ReportedCacheWriteTokens
+		event.ReportedTotalTokens = observation.ReportedTotalTokens
+		if observation.Model != "" {
+			event.Model = observation.Model
+			event.Provider = resolveProvider(event.AgentType, p.AgentID, event.Model)
+		}
+	}
 
 	event.TokensIn = usage.InputTokens
 	cachedRead := usage.CachedReadTokens
@@ -78,7 +94,11 @@ func (w *Writer) buildRow(ctx context.Context, p *usageEventPayload, occurredAt 
 		return nil
 	}
 
-	w.resolveCost(ctx, event, usage)
+	if p.UsageObservation != nil && p.UsageObservation.PriceSuppressed {
+		event.CostSource = CostSourceUnpriced
+	} else {
+		w.resolveCost(ctx, event, usage)
+	}
 
 	return event
 }

@@ -53,6 +53,9 @@ type Repository interface {
 	// otherwise ErrProfileChanged is returned and no row is created.
 	DuplicateAgentProfile(ctx context.Context, input DuplicateAgentProfileInput) error
 	UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error
+	// UpdateAgentProfileWithEnabledIntent preserves the stored enabled value
+	// when enabled is nil and returns the written value in profile.Enabled.
+	UpdateAgentProfileWithEnabledIntent(ctx context.Context, profile *models.AgentProfile, enabled *bool) error
 	UpdateAgentProfileEnabled(ctx context.Context, id string, enabled bool) (time.Time, error)
 	DeleteAgentProfile(ctx context.Context, id string) error
 	GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error)
@@ -93,6 +96,13 @@ type AgentProfileMcpConfigPatcher interface {
 	) (*models.AgentProfileMcpConfig, error)
 }
 
+// AgentProfileModelAdopter fills an unset profile model without replacing the
+// rest of the profile row. The boolean is false when the profile already has a
+// model or was deleted before the background probe completed.
+type AgentProfileModelAdopter interface {
+	UpdateAgentProfileModelIfEmpty(ctx context.Context, profileID, model string) (bool, error)
+}
+
 // DynamicProfileRepository is the optional extension implemented by settings
 // stores that persist the dynamic profile document. Keeping it separate from
 // Repository lets small controller fakes and plugin adapters retain the
@@ -115,5 +125,13 @@ type AtomicDynamicProfileRepository interface {
 		dynamic *models.DynamicAgentProfile,
 		expectedVersion int64,
 		routes []models.DynamicAgentRoute,
+	) error
+	UpdateAgentProfileWithDynamicEnabledIntent(
+		ctx context.Context,
+		profile *models.AgentProfile,
+		dynamic *models.DynamicAgentProfile,
+		expectedVersion int64,
+		routes []models.DynamicAgentRoute,
+		enabled *bool,
 	) error
 }

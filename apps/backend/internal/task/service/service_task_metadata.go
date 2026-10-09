@@ -17,24 +17,23 @@ func cloneTaskMetadata(metadata map[string]interface{}) map[string]interface{} {
 	return cloned
 }
 
-// protectedTaskMetadataUpdate applies a generic metadata replacement while
-// keeping server-managed deferred-launch and step-handoff records owned by the
-// server. The HTTP PATCH surface may replace ordinary metadata, but it cannot
-// create, replace, or remove either record.
+// protectedTaskMetadataUpdate retains the shared task-model ownership rules.
 func protectedTaskMetadataUpdate(existing, requested map[string]interface{}) map[string]interface{} {
-	updated := cloneTaskMetadata(requested)
-	if updated == nil {
-		updated = make(map[string]interface{})
+	return models.ProtectedTaskMetadataUpdate(existing, requested)
+}
+
+// protectedTaskMetadataForCreate strips server-managed records from ordinary
+// task creation. The handoff path opts in after it has built and authorized the
+// provenance payload itself. Office causation carriers always come from the
+// separate trusted request field and are never accepted from Metadata.
+func protectedTaskMetadataForCreate(metadata map[string]interface{}, trustedHandoff bool) map[string]interface{} {
+	created := cloneTaskMetadata(metadata)
+	models.StripOfficeCarrierMetadata(created)
+	delete(created, models.MetaKeyDeferredLaunch)
+	delete(created, models.MetaKeyStepHandoffCarry)
+	if !trustedHandoff {
+		delete(created, models.MetaKeyHandoffSource)
+		delete(created, models.MetaKeyHandoffs)
 	}
-	if deferred, ok := existing[models.MetaKeyDeferredLaunch]; ok {
-		updated[models.MetaKeyDeferredLaunch] = deferred
-	} else {
-		delete(updated, models.MetaKeyDeferredLaunch)
-	}
-	if carry, ok := existing[models.MetaKeyStepHandoffCarry]; ok {
-		updated[models.MetaKeyStepHandoffCarry] = carry
-	} else {
-		delete(updated, models.MetaKeyStepHandoffCarry)
-	}
-	return updated
+	return created
 }

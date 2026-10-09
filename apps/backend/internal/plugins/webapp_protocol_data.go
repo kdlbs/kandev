@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/instances"
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/webapp"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
@@ -39,31 +40,76 @@ func (s *Service) listWebAppTasks(ctx context.Context, w http.ResponseWriter, r 
 		IncludeArchived:  includeArchived,
 		IncludeEphemeral: true,
 	}
-	if binding.ScopeKind == instances.ScopeTask {
-		task, err := host.Tasks().Get(ctx, binding.TaskID)
-		if err != nil || task == nil {
+	if instances.EffectiveDataScopeKind(binding.ScopeKind, binding.DataScopeKind) == instances.ScopeTask {
+		// Resolved via the non-attaching fetchTask, and dependencies attached
+		// only below, after the discard checks: matching the attachment rule
+		// the non-task-scope branch below already documents for itself.
+		dto, model, err := host.fetchTask(ctx, binding.TaskID)
+		if err != nil || dto == nil {
 			writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 			return
 		}
-		if !webAppTaskMatches(ctx, host, binding, *task) || !webAppTaskMatchesFilter(*task, filter) || (!includeArchived && task.ArchivedAt != nil) {
+		if !webAppTaskMatches(ctx, host, binding, *dto) || !webAppTaskMatchesFilter(*dto, filter) || (!includeArchived && dto.ArchivedAt != nil) {
 			writeWebAppJSON(w, r, http.StatusOK, webAppPage[webAppTask]{Items: []webAppTask{}, PageInfo: webAppPageInfo{}})
 			return
 		}
-		items, info := paginate([]webAppTask{webAppTaskFromSDK(*task)}, page)
+		fetched := []pluginsdk.Task{*dto}
+		host.attachPullRequests(ctx, fetched)
+		var models []*taskmodels.Task
+		if model != nil {
+			models = []*taskmodels.Task{model}
+		}
+		if err := host.attachDependencies(ctx, fetched, models, false, "ListWebAppTasks"); err != nil {
+			writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
+			return
+		}
+		scope := dependencyRedactionScopeFromBinding(binding, nil)
+		items, info := paginate([]webAppTask{webAppTaskFromSDK(fetched[0], scope)}, page)
 		writeWebAppJSON(w, r, http.StatusOK, webAppPageFromSDK(items, info))
 		return
 	}
 
-	items, info, err := host.Tasks().List(ctx, filter, page)
+	// Fetches without deriving dependencies: the binding scope (repository or
+	// session) narrows the fetched page further below, and deriving before
+	// that narrowing would both waste work on tasks the caller never sees and
+	// risk tripping the fan-out cap on a page the actual response never
+	// approaches.
+	if !host.capabilities.CanRead(resourceTasks) {
+		writeWebAppError(w, http.StatusForbidden, "plugin_permission_denied")
+		return
+	}
+	if host.taskData == nil {
+		_, _, err := host.UnimplementedHostData.Tasks().List(ctx, filter, page)
+		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
+		return
+	}
+	models, info, err := host.fetchTaskPage(ctx, filter, page)
 	if err != nil {
 		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 		return
 	}
-	filtered := make([]webAppTask, 0, len(items))
-	for _, item := range items {
-		if webAppTaskMatches(ctx, host, binding, item) {
-			filtered = append(filtered, webAppTaskFromSDK(item))
+	dtos := tasksToDTOs(models)
+	host.attachPullRequests(ctx, dtos)
+	survivingModels := make([]*taskmodels.Task, 0, len(dtos))
+	survivingDTOs := make([]pluginsdk.Task, 0, len(dtos))
+	for i, dto := range dtos {
+		if webAppTaskMatches(ctx, host, binding, dto) {
+			survivingDTOs = append(survivingDTOs, dto)
+			survivingModels = append(survivingModels, models[i])
 		}
+	}
+	if err := host.attachDependencies(ctx, survivingDTOs, survivingModels, true, "ListWebAppTasks"); err != nil {
+		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
+		return
+	}
+	directlyReadableIDs := make([]string, len(survivingDTOs))
+	for i, dto := range survivingDTOs {
+		directlyReadableIDs[i] = dto.ID
+	}
+	scope := dependencyRedactionScopeFromBinding(binding, directlyReadableIDs)
+	filtered := make([]webAppTask, len(survivingDTOs))
+	for i, dto := range survivingDTOs {
+		filtered[i] = webAppTaskFromSDK(dto, scope)
 	}
 	writeWebAppJSON(w, r, http.StatusOK, webAppPageFromSDK(filtered, info))
 }
@@ -73,16 +119,29 @@ func (s *Service) getWebAppTask(ctx context.Context, w http.ResponseWriter, r *h
 		writeWebAppError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	task, err := host.Tasks().Get(ctx, taskID)
-	if err != nil || task == nil {
+	// Resolved via the non-attaching fetchTask, and dependencies attached only
+	// below, after the scope check that can discard the result and 404.
+	dto, model, err := host.fetchTask(ctx, taskID)
+	if err != nil || dto == nil {
 		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 		return
 	}
-	if !webAppTaskMatches(ctx, host, binding, *task) {
+	if !webAppTaskMatches(ctx, host, binding, *dto) {
 		writeWebAppError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	writeWebAppJSON(w, r, http.StatusOK, webAppTaskFromSDK(*task))
+	fetched := []pluginsdk.Task{*dto}
+	host.attachPullRequests(ctx, fetched)
+	var models []*taskmodels.Task
+	if model != nil {
+		models = []*taskmodels.Task{model}
+	}
+	if err := host.attachDependencies(ctx, fetched, models, false, "GetWebAppTask"); err != nil {
+		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
+		return
+	}
+	scope := dependencyRedactionScopeFromBinding(binding, []string{fetched[0].ID})
+	writeWebAppJSON(w, r, http.StatusOK, webAppTaskFromSDK(fetched[0], scope))
 }
 
 type webAppTaskPatch struct {
@@ -105,7 +164,7 @@ func (s *Service) updateWebAppTask(ctx context.Context, w http.ResponseWriter, r
 		writeWebAppError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	task, err := host.Tasks().Get(ctx, taskID)
+	task, err := host.fetchTaskForScopeCheck(ctx, taskID)
 	if err != nil || task == nil {
 		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 		return
@@ -121,12 +180,25 @@ func (s *Service) updateWebAppTask(ctx context.Context, w http.ResponseWriter, r
 	}
 	var updated *pluginsdk.Task
 	if patch.hasTaskFields() {
-		updated, err = host.Tasks().Update(ctx, pluginsdk.UpdateTaskInput{
+		updateInput := pluginsdk.UpdateTaskInput{
 			ID: taskID, Title: patch.Title, Description: patch.Description, State: patch.State,
-		})
-		if err != nil {
-			writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
-			return
+		}
+		if patch.WorkflowStepID != nil {
+			// A body naming both a task field and workflow_step_id takes both
+			// this branch and the Move branch below, but only Move's result is
+			// serialized -- so this write must not attach dependencies on a
+			// result nobody sees. The one derivation the response makes runs
+			// on Move's result, below.
+			if _, err = host.writeTaskUpdate(ctx, updateInput); err != nil {
+				writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
+				return
+			}
+		} else {
+			updated, err = host.Tasks().Update(ctx, updateInput)
+			if err != nil {
+				writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
+				return
+			}
 		}
 	}
 	if patch.WorkflowStepID != nil {
@@ -150,7 +222,8 @@ func (s *Service) updateWebAppTask(ctx context.Context, w http.ResponseWriter, r
 		writeWebAppError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	writeWebAppJSON(w, r, http.StatusOK, webAppTaskFromSDK(*updated))
+	scope := dependencyRedactionScopeFromBinding(binding, []string{updated.ID})
+	writeWebAppJSON(w, r, http.StatusOK, webAppTaskFromSDK(*updated, scope))
 }
 
 type webAppMessageRequest struct {
@@ -163,7 +236,7 @@ func (s *Service) sendWebAppMessage(ctx context.Context, w http.ResponseWriter, 
 		writeWebAppError(w, http.StatusNotFound, "not_found")
 		return
 	}
-	task, err := host.Tasks().Get(ctx, taskID)
+	task, err := host.fetchTaskForScopeCheck(ctx, taskID)
 	if err != nil || task == nil {
 		writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 		return
@@ -205,8 +278,8 @@ func (s *Service) listWebAppWorkflows(ctx context.Context, w http.ResponseWriter
 		}
 		workflows = append(workflows, items...)
 	}
-	if binding.ScopeKind == instances.ScopeTask {
-		task, err := host.Tasks().Get(ctx, binding.TaskID)
+	if instances.EffectiveDataScopeKind(binding.ScopeKind, binding.DataScopeKind) == instances.ScopeTask {
+		task, err := host.fetchTaskForScopeCheck(ctx, binding.TaskID)
 		if err != nil || task == nil {
 			writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
 			return
@@ -245,8 +318,8 @@ func (s *Service) listWebAppWorkflowSteps(ctx context.Context, w http.ResponseWr
 			}
 		}
 	}
-	if binding.ScopeKind == instances.ScopeTask {
-		task, err := host.Tasks().Get(ctx, binding.TaskID)
+	if instances.EffectiveDataScopeKind(binding.ScopeKind, binding.DataScopeKind) == instances.ScopeTask {
+		task, err := host.fetchTaskForScopeCheck(ctx, binding.TaskID)
 		if err != nil || task == nil || task.WorkflowID != workflowID {
 			writeWebAppError(w, http.StatusNotFound, "not_found")
 			return
@@ -307,13 +380,14 @@ func (s *Service) webAppWorkflowWorkspaceIDs(ctx context.Context, r *http.Reques
 }
 
 func webAppTaskMatches(ctx context.Context, host *pluginHost, binding webapp.CapabilityBinding, task pluginsdk.Task) bool {
-	if binding.ScopeKind == instances.ScopeInstance {
+	dataScope := instances.EffectiveDataScopeKind(binding.ScopeKind, binding.DataScopeKind)
+	if dataScope == instances.ScopeInstance {
 		return true
 	}
 	if task.WorkspaceID != binding.WorkspaceID {
 		return false
 	}
-	switch binding.ScopeKind {
+	switch dataScope {
 	case instances.ScopeWorkspace:
 		return true
 	case instances.ScopeTask:
@@ -403,6 +477,8 @@ func webAppErrorCode(err error) string {
 		return "plugin_state_conflict"
 	case codes.Unimplemented:
 		return webAppRuntimeUnavailable
+	case codes.ResourceExhausted:
+		return "response_too_large"
 	default:
 		return webAppRuntimeUnavailable
 	}

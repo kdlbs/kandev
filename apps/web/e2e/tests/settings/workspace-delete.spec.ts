@@ -184,7 +184,6 @@ test.describe("Workspace settings", () => {
       workflow_filter_id: seedData.workflowId,
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
-      sidebar_views: [],
     });
   });
 });

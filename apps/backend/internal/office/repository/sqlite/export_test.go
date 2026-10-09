@@ -15,3 +15,12 @@ func SetClaimWindowHook(fn func(ctx context.Context, tx *sqlx.Tx, seatID string)
 	claimWindowHook = fn
 	return func() { claimWindowHook = prev }
 }
+
+// ChunkTaskIDsCount reports how many chunks chunkTaskIDs would split ids
+// into. External tests use this to assert that a batched lookup actually
+// split its input rather than relying on the database's own host-parameter
+// ceiling to fail the call, since that ceiling can sit far above the chunk
+// size the production code chose.
+func ChunkTaskIDsCount(ids []string) int {
+	return len(chunkTaskIDs(ids))
+}

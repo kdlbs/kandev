@@ -33,16 +33,14 @@ a stuck menu, or a silent failure.
   AC-TASKS-TASK-ACTIONS-MENU-004.2 closes the menu on a terminal activation,
   and archive, delete and detach are terminal, this state is observed by
   reopening the menu while the request is still in flight.
-- **AC-TASKS-TASK-ACTIONS-MENU-004.1a:** Move to, Send to workflow, and Link are
-  deliberately outside AC-TASKS-TASK-ACTIONS-MENU-004.1, matching the card,
-  whose menu carries no pending state for them either. Selecting a Link entry
+- **AC-TASKS-TASK-ACTIONS-MENU-004.1a:** Move to, Change workflow, and Link are
+  deliberately outside AC-TASKS-TASK-ACTIONS-MENU-004.1. Selecting a Link entry
   opens a dialog and starts no task-state request, so the dialog owns its own
-  submit state. For Move to and Send to workflow the system shall permit a
-  second target to be selected before the first request settles, shall issue
-  each as an independent request, and shall let the last one the server applies
-  determine the task's step, on
-  AC-TASKS-TASK-ACTIONS-MENU-004.3a's terms. The system shall not introduce a
-  menu-level in-flight lock for these entries.
+  submit state. A single-task Change workflow entry opens a guarded form that
+  prevents duplicate submissions and handles stale-source conflicts as defined
+  by [Change workflow](change-workflow.md). Move to and the bulk workflow
+  submenu retain their existing independent-request behavior. The system shall
+  not introduce a menu-level in-flight lock for these entries.
 - **AC-TASKS-TASK-ACTIONS-MENU-004.1b:** The in-flight disabled state of
   AC-TASKS-TASK-ACTIONS-MENU-004.1 is scoped to the surface that started the
   request. A surface's menu shall disable its entries only for a request that
@@ -55,12 +53,13 @@ a stuck menu, or a silent failure.
   the card, whose own pending flags are board-scoped or hook-local and are
   already not shared with any other surface.
 - **AC-TASKS-TASK-ACTIONS-MENU-004.1c:** When the subject task's board row stops
-  being resolvable while a Move to or Send to workflow submenu is open, the
-  system shall demote those entries per AC-TASKS-TASK-ACTIONS-MENU-002.6, which
-  removes the submenu's parent entry and so closes the open submenu while
-  leaving the top-level menu open. A move request already in flight shall be
-  left to complete or fail on its own terms; the system shall not cancel it, and
-  shall keep the surface open on the subject task per
+  being resolvable while a Move to submenu is open, the system shall demote that
+  entry per AC-TASKS-TASK-ACTIONS-MENU-002.6, which removes the submenu's parent
+  entry while leaving the top-level menu open. A Change workflow form uses its
+  own task snapshot and remains open; a source-version conflict refreshes the
+  task and keeps valid draft choices for review. A move request already in
+  flight shall be left to complete or fail on its own terms; the system shall
+  not cancel it, and shall keep the surface open on the subject task per
   AC-TASKS-TASK-ACTIONS-MENU-003.6. Losing the board row is not losing the task:
   AC-TASKS-TASK-ACTIONS-MENU-004.5 governs the latter.
 - **AC-TASKS-TASK-ACTIONS-MENU-004.2:** When the user activates a *terminal*
@@ -68,19 +67,22 @@ a stuck menu, or a silent failure.
   plugin action, the system
   shall close the menu, so a single activation produces at most one confirmation
   and at most one request. Opening a submenu is not a terminal activation: when
-  the user opens the Move to or Send to workflow submenu required by
+  the user opens the Move to submenu required by
   AC-TASKS-TASK-ACTIONS-MENU-002.2, the system shall leave both that submenu and
-  the top-level menu open until a target inside it is chosen, and choosing that
-  target is itself a terminal activation and closes both.
+  the top-level menu open until a target inside it is chosen. Activating the
+  single-task Change workflow entry is terminal: it closes the menu and opens
+  the shared form.
 - **AC-TASKS-TASK-ACTIONS-MENU-004.3:** When the same task is acted on
   concurrently from two surfaces by a *one-shot* action, meaning Archive or
   Delete, the system shall send each confirmed request independently; the first
   request to be applied determines task state, and the later request shall
   surface the existing failure feedback for its action rather than a new error
-  surface. Two actions are deliberately outside this criterion because neither
-  is one-shot: Move to and Send to workflow are repeatable and are governed by
-  AC-TASKS-TASK-ACTIONS-MENU-004.3a, and Detach from parent is idempotent and is
-  governed by AC-TASKS-TASK-ACTIONS-MENU-004.3b.
+surface. Two actions are deliberately outside this criterion because neither
+is one-shot: Move to and the bulk workflow action are repeatable and are
+governed by AC-TASKS-TASK-ACTIONS-MENU-004.3a, and Detach from parent is
+idempotent and is governed by AC-TASKS-TASK-ACTIONS-MENU-004.3b. A single-task
+Change workflow request has a source-version precondition and is not silently
+reapplied after an uncertain response.
 - **AC-TASKS-TASK-ACTIONS-MENU-004.3a:** When the same task is moved
   concurrently, whether from two surfaces or twice from one menu, the system
   shall send each move independently and shall not treat the later move as a
@@ -96,8 +98,8 @@ a stuck menu, or a silent failure.
   parentless and shall produce no failure feedback. Failure feedback for a
   detach is raised only when the detach operation fails, per
   AC-TASKS-TASK-ACTIONS-MENU-004.4.
-- **AC-TASKS-TASK-ACTIONS-MENU-004.4:** When an archive, delete, move, detach,
-  or link request started from either surface fails, the system shall surface
+- **AC-TASKS-TASK-ACTIONS-MENU-004.4:** When an archive, delete, move,
+  workflow-change, detach, or link request started from either surface fails, the system shall surface
   the existing failure feedback for that action, shall leave the task in its
   last confirmed state, and shall keep the surface open on that task.
 - **AC-TASKS-TASK-ACTIONS-MENU-004.4a:** AC-TASKS-TASK-ACTIONS-MENU-004.5 takes

@@ -53,6 +53,68 @@ type ExportMetadata struct {
 	RepoURL          string `json:"repo_url,omitempty"`
 }
 
+// MinimumCanvasDistributionVersion is the first tagged Kandev release with
+// portable canvas distribution support.
+const MinimumCanvasDistributionVersion = "0.95.0"
+
+type ExportDefaults struct {
+	ExpectedReleaseID string         `json:"expected_release_id"`
+	Metadata          ExportMetadata `json:"metadata"`
+	MissingRequired   []string       `json:"missing_required"`
+}
+
+// GetExportDefaults derives a temporary share draft from the active release.
+func (s *DistributionService) GetExportDefaults(ctx context.Context, userID, workspaceID, canvasID string) (ExportDefaults, error) {
+	if err := s.validateReady(userID, workspaceID, canvasID); err != nil {
+		return ExportDefaults{}, err
+	}
+	if err := s.authorizeWorkspace(ctx, workspaceID); err != nil {
+		return ExportDefaults{}, err
+	}
+	item, err := s.canvases.Get(ctx, canvasID)
+	if err != nil || !validExportCanvas(item, ExportRequest{WorkspaceID: workspaceID}) {
+		return ExportDefaults{}, ErrCanvasNotFound
+	}
+	_, release, files, err := s.loadExportSnapshot(ctx, ExportRequest{WorkspaceID: workspaceID, CanvasID: canvasID, ExpectedReleaseID: item.ActiveReleaseID})
+	if err != nil {
+		return ExportDefaults{}, err
+	}
+	current := releaseManifest(release)
+	metadata := fillExportMetadata(ExportMetadata{}, current)
+	if current.Distribution == nil && !staticExportAvailable(current, files) {
+		metadata.SourceMode = ""
+	}
+	if metadata.DisplayName == "" {
+		metadata.DisplayName = item.Title
+	}
+	if metadata.MinKandevVersion == "" {
+		metadata.MinKandevVersion = MinimumCanvasDistributionVersion
+	}
+	missing := make([]string, 0, 8)
+	for _, field := range []struct{ key, value string }{
+		{"package_id", metadata.PackageID}, {"version", metadata.Version}, {"display_name", metadata.DisplayName},
+		{"description", metadata.Description}, {"author", metadata.Author}, {"license", metadata.License},
+		{"source_mode", metadata.SourceMode}, {"min_kandev_version", metadata.MinKandevVersion},
+	} {
+		if strings.TrimSpace(field.value) == "" {
+			missing = append(missing, field.key)
+		}
+	}
+	return ExportDefaults{ExpectedReleaseID: release.ID, Metadata: metadata, MissingRequired: missing}, nil
+}
+
+func staticExportAvailable(current manifest.Manifest, files map[string][]byte) bool {
+	if !current.IsStaticWebAppOnly() {
+		return false
+	}
+	for _, app := range current.UI.WebApps {
+		if _, ok := files[app.Entry]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 type ExportRequest struct {
 	UserID            string
 	WorkspaceID       string
@@ -164,9 +226,13 @@ func (s *DistributionService) PrepareExport(ctx context.Context, request ExportR
 	if err != nil {
 		return ExportReview{}, err
 	}
-	metadata, err := normalizeExportMetadata(request.Metadata, releaseManifest(release))
+	current := releaseManifest(release)
+	metadata, err := normalizeExportMetadata(request.Metadata, current)
 	if err != nil {
 		return ExportReview{}, err
+	}
+	if metadata.SourceMode == manifest.SourceModeStatic && !staticExportAvailable(current, files) {
+		return ExportReview{}, fmt.Errorf("%w: static export is unavailable", ErrExportInvalid)
 	}
 	manifestValue, err := exportManifest(release.ManifestJSON, metadata)
 	if err != nil {

@@ -230,6 +230,13 @@ func TestSSHStopInstanceKillsRemoteAgentctlOnlyWhenCleanupIsRequired(t *testing.
 			want: true,
 		},
 		{
+			name: "idle suspension stops only the session agentctl",
+			instance: &ExecutorInstance{
+				StopReason: StopReasonIdleSuspension,
+			},
+			want: true,
+		},
+		{
 			name: "stale replacement cleanup kills agentctl",
 			instance: &ExecutorInstance{
 				StopReason: stopReasonStaleExecutionCleanup,

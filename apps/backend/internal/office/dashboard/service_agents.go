@@ -590,6 +590,7 @@ func (s *DashboardService) GetDashboardData(ctx context.Context, wsID string) (*
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+	s.enrichActivityLabels(ctx, wsID, b.activity, b.agents)
 
 	agentCounts := countAgentsByStatus(b.agents)
 	return &models.DashboardData{

@@ -137,6 +137,24 @@ func TestErrorCoversFullVocabulary(t *testing.T) {
 	})
 }
 
+func TestSafePlanAppendTruncationFlagMapsToValidation(t *testing.T) {
+	out, mapErr := UpdateError(request(), &service.PlanSafetyError{
+		Code:       service.PlanErrorAppendTruncationFlag,
+		Message:    "append truncation flag is not applicable",
+		NextAction: "retry the append without the flag",
+	})
+	payload := decode(t, out, mapErr)
+	if payload.Code != ws.ErrorCodeValidation {
+		t.Fatalf("code = %q, want %q", payload.Code, ws.ErrorCodeValidation)
+	}
+	if payload.Details["reason"] != service.PlanErrorAppendTruncationFlag {
+		t.Fatalf("reason = %v, want %q", payload.Details["reason"], service.PlanErrorAppendTruncationFlag)
+	}
+	if payload.Details["write_applied"] != false {
+		t.Fatalf("write_applied = %v, want false", payload.Details["write_applied"])
+	}
+}
+
 // TestSentinelsMatchThroughWrapping guards the mappers against a service that
 // starts annotating its errors: errors.Is, not equality, decides the code.
 func TestSentinelsMatchThroughWrapping(t *testing.T) {

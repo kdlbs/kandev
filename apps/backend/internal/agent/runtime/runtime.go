@@ -19,9 +19,55 @@ import (
 	"errors"
 	"time"
 
+	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+)
+
+// These aliases keep higher-level callers on the runtime seam while the
+// lifecycle package remains the implementation owner of the wire contracts.
+type ExecutionOwnerKind = lifecycle.ExecutionOwnerKind
+type ExecutionOwner = lifecycle.ExecutionOwner
+type OwnerAdmission = lifecycle.OwnerAdmission
+type LaunchRequest = lifecycle.LaunchRequest
+type RouteOverride = lifecycle.RouteOverride
+type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
+type AgentExecution = lifecycle.AgentExecution
+type CachedModeState = lifecycle.CachedModeState
+type IdleSuspensionIdentity = lifecycle.IdleSuspensionIdentity
+type RetainedPromptFailureError = lifecycle.RetainedPromptFailureError
+type WorkspaceRecoveryProjectionError = lifecycle.WorkspaceRecoveryProjectionError
+type BackgroundWorkloadProbeResult = client.ProbeResult
+
+const (
+	BackgroundWorkloadProbeResultLive    = client.ProbeResultLive
+	BackgroundWorkloadProbeResultSettled = client.ProbeResultSettled
+	BackgroundWorkloadProbeResultUnknown = client.ProbeResultUnknown
+)
+
+type CursorMCPAuthenticationSpec = lifecycle.CursorMCPAuthenticationSpec
+type CursorMCPRetryResult = lifecycle.CursorMCPRetryResult
+
+// ErrNoExecutionForSession reports that a session has no live execution.
+var (
+	ErrNoExecutionForSession              = lifecycle.ErrNoExecutionForSession
+	ErrCursorMCPAuthenticationUnsupported = lifecycle.ErrCursorMCPAuthenticationUnsupported
+	ErrCursorMCPRecoverySessionBusy       = lifecycle.ErrCursorMCPRecoverySessionBusy
+	ErrCursorMCPRecoveryUnavailable       = lifecycle.ErrCursorMCPRecoveryUnavailable
+)
+
+// SessionExecutionControl is the runtime seam for looking up an execution by
+// session and applying a provider-supported session mode.
+type SessionExecutionControl interface {
+	GetExecutionBySessionID(sessionID string) (*AgentExecution, bool)
+	GetModeStateForSession(sessionID string) *CachedModeState
+	SetSessionMode(ctx context.Context, executionID, acpSessionID, modeID string) error
+}
+
+const (
+	ExecutionOwnerTask = lifecycle.ExecutionOwnerTask
+	ExecutionOwnerRun  = lifecycle.ExecutionOwnerRun
 )
 
 // Runtime is the public surface for launching, resuming, stopping, and
@@ -33,11 +79,24 @@ type Runtime interface {
 	// returns a reference to the execution.
 	Launch(ctx context.Context, spec LaunchSpec) (ExecutionRef, error)
 
+	// Start prepares the process for a newly launched execution and delivers
+	// the initial prompt exactly once through the lifecycle startup seam.
+	Start(ctx context.Context, spec LaunchSpec) (ExecutionRef, error)
+
+	// StartExecution starts a previously registered execution. Callers that
+	// need to persist the execution identity before process startup use this
+	// split launch/start boundary.
+	StartExecution(ctx context.Context, executionID string) error
+
 	// Resume sends a follow-up prompt to an existing execution.
 	Resume(ctx context.Context, executionID string, prompt string) error
 
 	// Stop terminates an execution and records the supplied reason.
 	Stop(ctx context.Context, executionID string, reason string) error
+
+	// SuspendIdle stops one settled task execution while preserving its
+	// durable conversation identity for the policy-driven resume path.
+	SuspendIdle(ctx context.Context, identity IdleSuspensionIdentity) error
 
 	// GetExecution returns a snapshot view of an execution by ID.
 	GetExecution(ctx context.Context, executionID string) (*Execution, error)
@@ -49,6 +108,9 @@ type Runtime interface {
 
 	// SetMcpMode swaps the MCP tool mode for a running execution.
 	SetMcpMode(ctx context.Context, executionID string, mode string) error
+
+	// ExecuteBackgroundWorkAction executes an action on a background workload in the running execution.
+	ExecuteBackgroundWorkAction(ctx context.Context, executionID string, req streams.BackgroundWorkActionRequest) (streams.BackgroundWorkActionResponse, error)
 }
 
 // LaunchSpec carries everything the runtime needs to start an agent.
@@ -60,6 +122,11 @@ type Runtime interface {
 // as a `*lifecycle.LaunchRequest` until later phases canonicalise them
 // onto LaunchSpec directly.
 type LaunchSpec struct {
+	// Owner and OwnerAdmission are optional for legacy task launches. Run-owned
+	// Office launches must provide both so admission remains strict.
+	Owner          lifecycle.ExecutionOwner
+	OwnerAdmission OwnerAdmission
+
 	// AgentProfileID identifies the agent profile to run (e.g. "claude-acp-default").
 	AgentProfileID string
 
@@ -123,6 +190,7 @@ type Execution struct {
 	ExitCode       *int
 	ErrorMessage   string
 	ACPSessionID   string
+	Owner          lifecycle.ExecutionOwner
 	Metadata       map[string]interface{}
 }
 
@@ -146,11 +214,19 @@ var ErrUnsupported = errors.New("runtime: operation not supported")
 // constructing a full lifecycle Manager.
 type Backend interface {
 	Launch(ctx context.Context, req *lifecycle.LaunchRequest) (*lifecycle.AgentExecution, error)
+	StartAgentProcess(ctx context.Context, executionID string) error
 	PromptAgent(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*lifecycle.PromptResult, error)
 	StopAgentWithReason(ctx context.Context, executionID string, reason string, force bool) error
 	GetExecution(executionID string) (*lifecycle.AgentExecution, bool)
 	SetMcpMode(ctx context.Context, executionID string, mode string) error
+	ExecuteBackgroundWorkAction(ctx context.Context, executionID string, req streams.BackgroundWorkActionRequest) (streams.BackgroundWorkActionResponse, error)
 }
 
 // Compile-time check: the lifecycle Manager satisfies Backend.
 var _ Backend = (*lifecycle.Manager)(nil)
+
+// RunOwnerRecovery reconciles durable run inventory before Office retries work.
+// Implemented by the shared lifecycle backend; uncertain liveness is an error.
+type RunOwnerRecovery interface {
+	StopRunOwnerForRecovery(context.Context, ExecutionOwner) error
+}

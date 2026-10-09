@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -27,6 +28,9 @@ const (
 	gitNoTags                = "--no-tags"
 )
 
+// ArchivedBranchMaintenanceBatchLimit bounds one storage-maintenance revisit.
+const ArchivedBranchMaintenanceBatchLimit = 100
+
 // repoLockEntry tracks a repository lock and its reference count.
 type repoLockEntry struct {
 	mu       *sync.Mutex
@@ -35,9 +39,10 @@ type repoLockEntry struct {
 
 // Manager handles Git worktree operations for concurrent agent execution.
 type Manager struct {
-	config Config
-	logger *logger.Logger
-	store  Store
+	config                   Config
+	logger                   *logger.Logger
+	store                    Store
+	recoveryProgressReporter RecoveryProgressReporter
 	// worktrees is the in-memory cache keyed by cacheKey(sessionID, repositoryID).
 	// For legacy single-repo writes the repositoryID may be empty, in which
 	// case the cache key collapses to "{sessionID}|" — still distinct from
@@ -58,6 +63,16 @@ type Manager struct {
 	pullTimeout  time.Duration
 	// Bound for cheap git ref-inspection commands (branchExists, currentBranch).
 	inspectTimeout time.Duration
+}
+
+// SetRecoveryProgressReporter wires the durable operation projection used by
+// selected environment recovery. It remains optional for non-production
+// manager tests and legacy integrations.
+func (m *Manager) SetRecoveryProgressReporter(reporter RecoveryProgressReporter) {
+	if m == nil {
+		return
+	}
+	m.recoveryProgressReporter = reporter
 }
 
 // ScriptEnvironmentProvider supplies install-managed environment variables to
@@ -106,6 +121,15 @@ type Store interface {
 	CountActiveWorktreeReferences(ctx context.Context, worktreeID string, excludeSessionIDs []string) (int, error)
 }
 
+// RecoverySelectionSnapshotReader reads the complete selected environment
+// identity and active repository inventory used to reject stale preflight.
+type RecoverySelectionSnapshotReader interface {
+	ReadRecoverySelectionSnapshot(
+		ctx context.Context,
+		expected models.WorkspaceRecoverySelectionSnapshot,
+	) (models.WorkspaceRecoverySelectionSnapshot, error)
+}
+
 // MultiRepoStore is an optional capability some stores implement to support
 // multi-repo task sessions (one worktree per repository per session). The
 // Manager checks at runtime whether its Store satisfies this interface and
@@ -118,6 +142,30 @@ type MultiRepoStore interface {
 	// branchSlug scopes the lookup for multi-branch tasks; empty matches the
 	// legacy single-branch persistence shape.
 	GetWorktreeBySessionAndRepository(ctx context.Context, sessionID, repositoryID, branchSlug string) (*Worktree, error)
+}
+
+// BranchMetadataStore is the fail-closed persistence capability required for
+// managed-branch compaction. Stores without it retain every branch.
+type BranchMetadataStore interface {
+	CountWorktreeBranchOwners(ctx context.Context, repositoryPath, branch string) (int, error)
+	PersistBranchRecoveryHead(ctx context.Context, worktreeID, expected, recoveryHead string) (bool, error)
+	PersistBranchCompactionComplete(ctx context.Context, worktreeID, expectedRecoveryHead string) (bool, error)
+	PersistBranchRecoveryRestored(ctx context.Context, worktreeID, expectedRecoveryHead string) (bool, error)
+}
+
+// ArchivedBranchMaintenanceStore supplies only durable archived worktree
+// candidates. The Manager remains responsible for every Git safety check and
+// mutation after selection.
+type ArchivedBranchMaintenanceStore interface {
+	ListArchivedBranchCandidates(ctx context.Context, limit int) ([]*Worktree, error)
+	IsArchivedBranchCandidate(ctx context.Context, worktreeID string) (bool, error)
+	PersistArchivedBranchRecoveryHead(
+		ctx context.Context, worktreeID, expected, recoveryHead string,
+	) (bool, error)
+	PersistArchivedBranchCompactionComplete(
+		ctx context.Context, worktreeID, expectedRecoveryHead string,
+	) (bool, error)
+	TouchArchivedBranchCandidate(ctx context.Context, worktreeID string) error
 }
 
 // NewManager creates a new worktree manager.
@@ -194,6 +242,14 @@ func (m *Manager) IsEnabled() bool {
 	return m.config.Enabled
 }
 
+// TasksBasePath returns the configured task-worktree root with home expansion.
+func (m *Manager) TasksBasePath() (string, error) {
+	if m == nil {
+		return "", nil
+	}
+	return m.config.ExpandedTasksBasePath()
+}
+
 // AdmitTaskRecovery prevents a task from creating a session while one of its
 // persisted checkouts is present but no longer has trustworthy linked-worktree
 // metadata. Missing paths remain eligible for ordinary materialization.
@@ -248,20 +304,23 @@ func (m *Manager) admitPersistedWorktreeRecovery(ctx context.Context, taskID str
 	if err := m.validateExistingWorktreePathOwner(wt.Path, wt); err != nil {
 		return &WorktreeRecoveryError{TaskID: taskID, Checkout: wt.Path, State: string(linkedWorktreeAmbiguous), Reason: err.Error()}
 	}
-	inspection := inspectLinkedWorktree(wt.Path)
-	if inspection.class == linkedWorktreeHealthy {
+	inspection := m.inspectCheckout(ctx, wt.Path, handle)
+	if inspection.operationalErr != nil {
+		return fmt.Errorf("inspect persisted checkout: %w", inspection.operationalErr)
+	}
+	if inspection.class == checkoutLinkedHealthy || inspection.class == checkoutMainHealthy {
 		return handle.VerifyPath(filepath.Clean(wt.Path))
 	}
-	if inspection.class != linkedWorktreeMissingAdmin {
+	if inspection.class != checkoutLinkedMissingAdmin {
 		return &WorktreeRecoveryError{
-			TaskID: taskID, Checkout: wt.Path, PointerTarget: inspection.adminPath,
-			ExpectedBacklink: inspection.expectedBacklink, ActualBacklink: inspection.actualBacklink,
-			State: string(inspection.class), Reason: inspection.reason,
+			TaskID: taskID, Checkout: wt.Path, PointerTarget: inspection.linked.adminPath,
+			ExpectedBacklink: inspection.linked.expectedBacklink, ActualBacklink: inspection.linked.actualBacklink,
+			State: string(linkedWorktreeAmbiguous), Reason: inspection.reason,
 		}
 	}
-	if err := validateMissingLinkedWorktreeAdmin(wt.RepositoryPath, inspection.adminPath); err != nil {
+	if err := validateMissingLinkedWorktreeAdmin(wt.RepositoryPath, inspection.linked.adminPath); err != nil {
 		return &WorktreeRecoveryError{
-			TaskID: taskID, Checkout: wt.Path, PointerTarget: inspection.adminPath,
+			TaskID: taskID, Checkout: wt.Path, PointerTarget: inspection.linked.adminPath,
 			State: string(linkedWorktreeAmbiguous), Reason: err.Error(),
 		}
 	}

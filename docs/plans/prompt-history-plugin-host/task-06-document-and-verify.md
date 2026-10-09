@@ -19,6 +19,14 @@ system_design:
 
 # Task 06: Document and Verify Host Prerequisites
 
+
+## Replacement scope, 2026-09-16
+
+The [conversation storage replacement](../conversation-storage-replacement/plan.md) owns the next implementation.
+This file preserves historical scope and results. Do not execute its durable replay mechanics as new work.
+The replacement work orders preserve public behavior and provide new source-reconciliation, upgrade, and E2E evidence.
+
+
 ## Scope
 
 Finish the public reference/how-to documentation and run the package-level validation matrix. Update artifact statuses/results only after the behavior and docs are proven. Keep external-plugin and core-removal work explicitly deferred.

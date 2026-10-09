@@ -18,6 +18,7 @@ import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginTaskMenuContext } from "@/lib/plugins/types";
 import type { TaskPriority, TaskState } from "@/lib/types/http";
 import { buildTaskActionsMenuEntries } from "@/lib/kanban/task-actions-menu-entries";
+import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
 
 export type TaskActionsMenuBoardRow = {
   id: string;
@@ -86,7 +87,7 @@ type ComputeEntriesArgs = {
   linkHandlers: ReturnType<typeof buildLinkHandlers>;
   pluginLinkActions: ReturnType<typeof useTaskPluginLinkActions>;
   onMoveToStep: (stepId: string) => void;
-  onSendToWorkflow: (workflowId: string, stepId: string) => void;
+  onChangeWorkflow: () => void;
   pluginMenuContext: PluginTaskMenuContext;
   onSelectPriority: (priority: TaskPriority) => void;
 };
@@ -124,7 +125,7 @@ function computeTaskActionsMenuEntries(args: ComputeEntriesArgs) {
     ...args.linkHandlers,
     pluginLinkActions: args.pluginLinkActions,
     onMoveToStep: args.onMoveToStep,
-    onSendToWorkflow: args.onSendToWorkflow,
+    onChangeWorkflow: args.onChangeWorkflow,
     pluginMenuContext: args.pluginMenuContext,
   });
 }
@@ -176,7 +177,20 @@ function useSubjectScopedDialogs(
     }, 300);
   }, [dialogs, taskId]);
 
-  return { closeDialogs, requestDetachConfirmation, requestArchiveConfirmation };
+  const requestChangeWorkflow = useCallback(() => {
+    const requestedForTaskId = taskId;
+    window.setTimeout(() => {
+      if (taskIdRef.current !== requestedForTaskId) return;
+      dialogs.setShowChangeWorkflow(true);
+    }, 300);
+  }, [dialogs.setShowChangeWorkflow, taskId]);
+
+  return {
+    closeDialogs,
+    requestDetachConfirmation,
+    requestArchiveConfirmation,
+    requestChangeWorkflow,
+  };
 }
 
 type UseTaskActionsMenuArgs = {
@@ -192,7 +206,7 @@ type UseTaskActionsMenuArgs = {
   isArchiving?: boolean;
   isDeleting?: boolean;
   onArchive: (opts: { cascade: boolean }) => void | Promise<void>;
-  onDelete: (opts: { cascade: boolean }) => void | Promise<void>;
+  onDelete: (opts: DeleteTaskParams & { cascade: boolean }) => void | Promise<void>;
   /** The subject's own workflow step, independent of `boardRow` (AC-002.4b's
    * plugin task-menu context must not go stale just because the board
    * excludes the subject, e.g. an archived task). Falls back to
@@ -231,8 +245,12 @@ export function useTaskActionsMenu({
 
   const disabled = Boolean(isArchiving || isDeleting || isDetaching);
 
-  const { closeDialogs, requestDetachConfirmation, requestArchiveConfirmation } =
-    useSubjectScopedDialogs(taskId, dialogs, editDialog);
+  const {
+    closeDialogs,
+    requestDetachConfirmation,
+    requestArchiveConfirmation,
+    requestChangeWorkflow,
+  } = useSubjectScopedDialogs(taskId, dialogs, editDialog);
 
   const handleDetachConfirm = useCallback(async () => {
     if (!taskId) return;
@@ -252,16 +270,6 @@ export function useTaskActionsMenu({
       });
     },
     [moveTasks, moveTargets.currentWorkflowId, taskId],
-  );
-
-  const onSendToWorkflow = useCallback(
-    (workflowId: string, stepId: string) => {
-      if (!taskId) return;
-      void moveTasks([taskId], workflowId, stepId, "workflow").catch(() => {
-        // useTaskWorkflowMove already shows the failure toast.
-      });
-    },
-    [moveTasks, taskId],
   );
 
   const pluginMenuContext: PluginTaskMenuContext = {
@@ -291,7 +299,7 @@ export function useTaskActionsMenu({
     linkHandlers,
     pluginLinkActions,
     onMoveToStep,
-    onSendToWorkflow,
+    onChangeWorkflow: requestChangeWorkflow,
     pluginMenuContext,
     onSelectPriority,
   });
