@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: executors
 created: 2026-09-30
 owners:
@@ -56,7 +56,9 @@ that the retained resource and conversation evidence actually permit.
 - **AC-EXECUTORS-FAILURE-VISIBILITY-001.6:** Before control exec or resume against
   a known failed executor, Kandev shall expose the retained actionable cause.
   Failed status checks shall say that current state is unknown and shall preserve
-  known historical evidence. Unsupported providers shall not gain invented causes.
+  known historical evidence. Passive Files or Terminal access shall not recreate
+  compute while its matching executor incident remains active. Unsupported providers
+  shall not gain invented causes.
 - **AC-EXECUTORS-FAILURE-VISIBILITY-001.7:** Recovery guidance shall distinguish
   verified retained workspace, unavailable workspace, and unknown retention from
   restored, lost, or unknown provider conversation. A retained PVC shall not imply

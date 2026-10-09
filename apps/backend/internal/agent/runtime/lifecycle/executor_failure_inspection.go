@@ -33,11 +33,18 @@ func (m *Manager) InspectExecutor(ctx context.Context, target models.ExecutorObs
 	}
 	inspectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	metadata := target.Metadata
+	if target.Runtime == string(agentruntime.RuntimeKubernetes) {
+		metadata, err = m.currentKubernetesConnectionMetadata(inspectCtx, metadata)
+		if err != nil {
+			return unknown, routingerr.SanitizeError(err)
+		}
+	}
 	instanceID := target.ExecutionID
 	if instanceID == "" {
 		instanceID = target.EnvironmentID
 	}
-	status, err := provider.GetRemoteStatus(inspectCtx, &ExecutorInstance{InstanceID: instanceID, TaskID: target.TaskID, SessionID: target.SessionID, RuntimeName: agentruntime.Runtime(target.Runtime), ContainerID: target.ContainerID, Metadata: target.Metadata})
+	status, err := provider.GetRemoteStatus(inspectCtx, &ExecutorInstance{InstanceID: instanceID, TaskID: target.TaskID, SessionID: target.SessionID, RuntimeName: agentruntime.Runtime(target.Runtime), ContainerID: target.ContainerID, Metadata: metadata})
 	if err != nil {
 		return unknown, routingerr.SanitizeError(err)
 	}

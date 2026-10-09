@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -36,6 +37,9 @@ func (m *Manager) ensureWorkspaceSessionAdmitted(ctx context.Context, taskID str
 	if err := m.ensureWorkspaceTaskAdmission(ctx, snapshot.session); err != nil {
 		return err
 	}
+	if err := m.ensureWorkspaceExecutorFailureInactive(ctx, snapshot); err != nil {
+		return err
+	}
 	if err := m.ensureWorkspaceCleanupInactive(ctx, taskID, snapshot); err != nil {
 		return err
 	}
@@ -49,6 +53,30 @@ func (m *Manager) ensureWorkspaceSessionAdmitted(ctx context.Context, taskID str
 	}
 	if err := m.ensureWorkspaceTaskAdmission(ctx, latest.session); err != nil {
 		return fmt.Errorf("reverify workspace admission: %w", err)
+	}
+	return m.ensureWorkspaceExecutorFailureInactive(ctx, latest)
+}
+
+// Passive workspace access cannot replace compute owned by an active incident.
+func (m *Manager) ensureWorkspaceExecutorFailureInactive(ctx context.Context, snapshot *workspaceAdmissionSnapshot) error {
+	reader, ok := m.runningWriter.(interface {
+		GetActiveExecutorFailure(context.Context, models.ExecutorObservationTarget) (*models.ExecutorFailureEpisode, error)
+	})
+	if !ok {
+		return nil
+	}
+	target := models.ExecutorObservationTarget{TaskID: snapshot.session.TaskID, SessionID: snapshot.session.ID}
+	if snapshot.env != nil {
+		target.TaskID = snapshot.env.TaskID
+		target.EnvironmentID = snapshot.env.ID
+		target.OwnershipGeneration = snapshot.env.OwnershipGeneration
+	}
+	episode, err := reader.GetActiveExecutorFailure(ctx, target)
+	if err != nil {
+		return fmt.Errorf("%w: verify executor failure: %w", ErrSessionWorkspaceNotReady, routingerr.SanitizeError(err))
+	}
+	if episode != nil {
+		return fmt.Errorf("%w: executor recovery must be verified before workspace access", ErrSessionWorkspaceNotReady)
 	}
 	return nil
 }

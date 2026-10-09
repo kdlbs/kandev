@@ -73,6 +73,13 @@ func (m *Manager) currentKubernetesConnectionMetadata(
 ) (map[string]interface{}, error) {
 	reader, ok := m.runningWriter.(kubernetesExecutorReader)
 	executorID := strings.TrimSpace(getMetadataString(metadata, "executor_id"))
+	resourceExecutorID := strings.TrimSpace(getMetadataString(metadata, MetadataKeyKubernetesResourceExecutorID))
+	if executorID != "" && resourceExecutorID != "" && executorID != resourceExecutorID {
+		return nil, errors.New("kubernetes connection executor does not match recorded resource ownership")
+	}
+	if executorID == "" {
+		executorID = resourceExecutorID
+	}
 	if !ok || executorID == "" {
 		return metadata, nil
 	}

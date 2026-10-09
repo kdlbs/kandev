@@ -57,6 +57,10 @@ func (r *Repository) GetExecutorFailure(ctx context.Context, taskID string) (*mo
 	return scanExecutorFailure(r.ro.QueryRowContext(ctx, r.ro.Rebind(executorFailureSelect+` WHERE task_id=? ORDER BY CASE WHEN state='active' THEN 0 ELSE 1 END,last_observed_at DESC,id DESC LIMIT 1`), taskID))
 }
 
+func (r *Repository) GetActiveExecutorFailure(ctx context.Context, target models.ExecutorObservationTarget) (*models.ExecutorFailureEpisode, error) {
+	return scanExecutorFailure(r.ro.QueryRowContext(ctx, r.ro.Rebind(executorFailureSelect+` WHERE task_id=? AND environment_id=? AND ownership_generation=? AND state='active' AND (environment_id!='' OR session_id=?) ORDER BY last_observed_at DESC,id DESC LIMIT 1`), target.TaskID, target.EnvironmentID, target.OwnershipGeneration, target.SessionID))
+}
+
 func (r *Repository) ObserveExecutorFailure(ctx context.Context, target models.ExecutorObservationTarget, observation *models.ExecutorObservation) (*models.ExecutorFailureEpisode, bool, error) {
 	if observation == nil || observation.ObservedAt.IsZero() || target.TaskID == "" || target.ResourceKey == "" || observation.ResourceKey != target.ResourceKey {
 		return nil, false, fmt.Errorf("executor observation identity unavailable")
@@ -259,7 +263,7 @@ func (r *Repository) ListExecutorObservationTargets(ctx context.Context, after s
  UNION ALL
  SELECT '~session:'||r.session_id,'',r.task_id,0,r.runtime,r.container_id,r.metadata,0,r.session_id,r.agent_execution_id,r.updated_at,r.local_pid,r.session_id
  FROM executors_running r JOIN task_sessions s ON s.id=r.session_id JOIN tasks t ON t.id=r.task_id
- WHERE t.archived_at IS NULL AND COALESCE(s.task_environment_id,'')='' AND r.status!='stopped' AND r.runtime!='' AND (r.container_id!='' OR (r.runtime='standalone' AND r.local_pid>0))
+ WHERE t.archived_at IS NULL AND COALESCE(s.task_environment_id,'')='' AND r.status!='stopped' AND r.runtime!='' AND (r.container_id!='' OR (r.runtime='standalone' AND r.local_pid>0) OR (r.runtime='k8s' AND r.metadata!='{}'))
  ) SELECT cursor,environment_id,task_id,ownership_generation,runtime,container_id,metadata,revision,session_id,execution_id,updated_at,local_pid,authority_session_id FROM inventory WHERE cursor>? ORDER BY cursor LIMIT ?`), after, limit)
 	if err != nil {
 		return nil, err

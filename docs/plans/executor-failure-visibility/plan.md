@@ -1,6 +1,6 @@
 ---
 created: 2026-09-30
-status: in_progress
+status: completed
 requirements:
   - REQ-EXECUTORS-FAILURE-VISIBILITY-001
 system_design:
@@ -14,7 +14,7 @@ legacy_specs: []
 
 Preserve actionable executor evidence, then admit durable scoped episodes and
 settle only proven lost executions, then expose tested recovery guidance on every
-task surface. Work orders are sequential. Implementation is authorized and in progress.
+task surface. Work orders are sequential. Implementation and local acceptance are complete; PR CI and review remain delivery gates.
 Backend and frontend regressions, rendered acceptance and final checks are tracked
 in each work order. No production task or cluster resources are used for testing.
 
@@ -180,12 +180,13 @@ AC .1-.8, .11-.14.
 
 - [x] [Task 01: Preserve and classify executor observations](task-01-observations.md)
 - [x] [Task 02: Persist and reconcile executor failure episodes](task-02-durable-episodes.md)
-- [ ] [Task 03: Deliver visible recovery and regression evidence](task-03-visible-recovery.md)
+- [x] [Task 03: Deliver visible recovery and regression evidence](task-03-visible-recovery.md)
 
 ## Verification results
 
-Implementation and affected checks are complete except for the owned Kind
-acceptance gate described below. Design-package validation passed on 2026-09-30:
+Implementation and affected local checks are complete. The final owned Kind
+Pod-loss acceptance passed with retries disabled; see task 03 for the proof and
+preceding red regressions. Remote PR CI/review remain separate delivery gates. Design-package validation passed on 2026-09-30:
 `python3 scripts/list-docs.py validate` (333 decisions, 1262 specifications),
 `python3 scripts/lint-spec-files.py --all`, and `git diff --check`.
 Each work order contains independently rooted commands and its actual results.
@@ -300,3 +301,14 @@ inline phone recovery. The recovered example copy now describes history rather
 than directing users to nonexistent active error controls. No production instance
 or Kubernetes resource was changed. The original real Kubernetes Pod-loss gate
 remains open; task 03 and the overall plan remain in progress and uncommitted.
+
+### Final Kubernetes acceptance
+
+The initial real scenario exposed missing connection hydration, then unsafe
+passive workspace recreation after restart. Both defects now have red/green
+backend regressions. The fresh managed Kubernetes scenario passed with retries
+disabled, proving durable missing-Pod evidence, retained volume identity,
+restart/reload, the regular composer card, read-only recheck, no replacement Pod,
+and no prompt replay. Its owned cluster, image, and backend were cleaned up.
+Task 03 records the final local regression, race, lint, and documentation results.
+PR #4345 current-head remote CI/review remain delivery gates, not local acceptance.

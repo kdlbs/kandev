@@ -558,6 +558,8 @@ A confirmed Docker container or Kubernetes Pod failure is recorded separately fr
 
 Kubernetes details distinguish Pod phase from container readiness and preserve available reasons, messages, exit codes, restart evidence, and observation times. A `Running` Pod can still contain an unavailable or crashing agent container. Exit code `137` alone does not prove an out-of-memory failure: for example, `Evicted` with an `emptyDir` size-limit message describes a storage eviction. A later missing-resource check retains the earlier physical cause. Cleanup timeout or authorization failures appear separately in the technical details.
 
+Opening Files or Terminal does not replace compute while its executor failure remains active. Repair the executor and verify recovery with **Recheck status** before reconnecting the workspace.
+
 If inspection is unavailable, Kandev keeps the last confirmed cause and reports that the current status is unverified. Repair the recorded executor or contact its operator, then recheck. A healthy resource clears the active failure surface; the historical cause remains recorded. A transient transport disconnect without proof of resource loss does not trigger automatic prompt replay or environment replacement.
 
 A retained persistent volume is evidence about the workspace at the displayed check time, not a guarantee of conversation recovery. Provider recovery records whether the original conversation was restored, a new conversation was started, or continuity remains unverified. The Kandev transcript is separate from the provider's native conversation. A successful Resume does not establish continuity by itself; temporary bootstrap credentials and global Git configuration may also need operator repair after a worker restart.

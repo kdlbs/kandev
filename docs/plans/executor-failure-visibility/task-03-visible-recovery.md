@@ -1,7 +1,7 @@
 ---
 id: "03-visible-recovery"
 title: "Deliver visible recovery and regression evidence"
-status: in_progress
+status: completed
 wave: 3
 depends_on:
   - "02-durable-episodes"
@@ -366,3 +366,58 @@ that fixture source change was restored before delivery. The normal managed
 backend, web, and plugin builds had completed immediately before this run. The
 current-head CI Docker assertion supplies the red evidence; the earlier default
 daemon local attempt failed at image setup and is not assertion evidence.
+
+### Persisted Kubernetes inspection correction
+
+The retries-disabled, freshly built Kubernetes acceptance test reached provider
+acceptance, wrote its managed-workspace sentinel, and deleted only the fixture's
+owned Pod. It then failed to record `PodNotFound` within the admission deadline.
+A backend regression reproduces the underlying status-client configuration
+error: durable resource inventory omits connection settings, while inspection
+previously tried to reconstruct a client directly from that inventory.
+
+Inspection now overlays current executor connection settings while preserving
+recorded namespace, Pod UID, and ownership. Resource-only executor identity
+supports restored inventory; conflicting identities fail closed before an API
+query. Regression coverage verifies current connection changes, immutable target
+metadata, no control handshake or agent creation, and no Pod/PVC deletion. A
+second red regression proves legacy Kubernetes inventory must use its Pod UID
+without requiring a Docker-style container ID; the portable inventory query now
+admits those retained session records.
+
+These fixes restore the existing documented inspection contract. Public recovery
+controls, workspace uncertainty, and provider continuity semantics do not change.
+Focused backend regression and real Kubernetes acceptance results remain pending
+at this checkpoint; the earlier Kubernetes failure is not claimed as a pass.
+
+The next real Kubernetes run passed missing-Pod admission and durable reload, but
+failed the final absence assertion: a passive workspace request from the rendered
+Files/Terminal area created a replacement Pod after restart. The fixture's owned
+cluster and image were cleaned up. This run is a red safety regression, not a
+pass. New backend regressions cover cold and cached workspace entry points,
+failed failure-inventory reads, and exact environment/generation versus legacy
+session scope. Passive workspace admission now refuses an active incident before
+runtime creation or registration; unrelated scopes and resolved incidents retain
+ordinary workspace admission. Public executor guidance records that boundary.
+
+### Final local acceptance results
+
+The fresh managed-build Kubernetes Pod-loss scenario passed with retries disabled
+(one scenario, 2.8 minutes; 9.4 minutes including isolated setup and cleanup). It
+verified persisted `PodNotFound` evidence and retained PVC identity before and
+after backend restart, the regular composer card and inline details, read-only
+Recheck, no replacement Pod, and unchanged provider reply IDs. Passive terminal
+requests were refused before runtime creation while the episode remained active.
+The exact owned cluster, worker image, and backend were removed by the fixture.
+No production task, instance, cluster resource, or provider conversation was used.
+
+The final affected lifecycle, workspace admission, persistence, and task-service
+regressions passed. Source lint for both changed Go packages reported zero issues.
+SQL guard and the persistence store-conformance race suite passed. Public docs
+validation passed 63 tests and 47 pages; specification catalog and lint passed.
+Accepted requirements/design statuses now reflect the approved contract. No new
+rendering or translated copy was introduced by this backend correction; existing
+composer/history desktop and phone assets remain representative.
+
+Local implementation acceptance is complete. PR #4345 remote CI and review
+readiness remain separate delivery gates, tracked in the live PR validation block.

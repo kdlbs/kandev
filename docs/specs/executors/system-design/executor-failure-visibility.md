@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: executors
 requirements:
   - REQ-EXECUTORS-FAILURE-VISIBILITY-001
@@ -229,6 +229,14 @@ repair guidance, not an automatic replacement or a futile exec-based retry. Exis
 missing-Pod recovery remains governed by exact PVC/identity/admission rules, outside
 this observer. A provider timeout retains historical cause and reports current
 uncertainty. Failed recovery does not overwrite the original cause with a wrapper.
+
+Passive workspace attachment reads the active incident for the selected environment
+owner and generation, or the exact legacy session. Repeat that admission check after
+workspace identity is revalidated. An active incident or unavailable incident read
+refuses cold and cached workspace access before runtime creation or registration.
+Shared attached sessions use their environment scope; unrelated legacy sessions,
+replacement generations, and resolved incidents retain ordinary admission. Files
+and Terminal requests do not grant recovery authority or bypass this gate.
 
 Carry a typed primary observation plus ordered, bounded secondary operation causes
 through stale cleanup and recovery. Preserve existing `errors.Is`/`errors.As`

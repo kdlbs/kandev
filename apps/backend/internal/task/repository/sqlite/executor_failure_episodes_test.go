@@ -493,3 +493,17 @@ func TestExecutorFailureUnavailableWorkerWarningSurvivesReload(t *testing.T) {
 	require.True(t, changed)
 	require.Equal(t, "resolved", resolved.State)
 }
+
+func TestExecutorFailureInventoryIncludesLegacyKubernetesPodWithoutContainerID(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	seedRecoveryClaimEnvironment(t, repo, "legacy-task", "legacy-env")
+	require.NoError(t, repo.CreateTaskSession(t.Context(), &models.TaskSession{ID: "legacy-session", TaskID: "legacy-task", State: models.TaskSessionStateRunning}))
+	require.NoError(t, repo.UpsertExecutorRunning(t.Context(), &models.ExecutorRunning{ID: "legacy-row", SessionID: "legacy-session", TaskID: "legacy-task", AgentExecutionID: "legacy-execution", Runtime: "k8s", Metadata: map[string]interface{}{"kubernetes_pod_uid": "owned-pod-uid"}, Status: "running"}))
+	targets, err := repo.ListExecutorObservationTargets(t.Context(), "", 1)
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	require.Equal(t, "owned-pod-uid", targets[0].ResourceKey)
+	require.Equal(t, "legacy-session", targets[0].SessionID)
+	require.Empty(t, targets[0].ContainerID)
+	require.False(t, targets[0].ExpectedExecutorUpdatedAt.IsZero())
+}
