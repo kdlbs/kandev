@@ -105,9 +105,60 @@ test.describe("Session recovery", () => {
   test.describe("unaccepted startup cancellation", () => {
     test.describe.configure({ retries: 0 });
 
+    test("cancelling delayed resume fences the old work before a retry", async ({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+    }) => {
+      test.setTimeout(150_000);
 
+      // The cancelled startup and the retry both load this session. Keep each
+      // injected delay short enough for the response assertion after cleanup.
+      const fixture = await seedDelayedResumeFixture(testPage, apiClient, seedData, backend, {
+        title: "Session cancel and retry recovery",
+        resumeDelay: "15s",
+      });
+
+      try {
+        // Cancel the actual STARTING session while the provider load is held by
+        // the delayed mock agent. This is the browser path that used to leave a
+        // resume continuation alive after cancellation.
+        await expect(fixture.session.cancelAgentButton()).toBeVisible({ timeout: 15_000 });
+        await expect(
+          fixture.session.activeChat().getByText(/delaying resume for session .* by 15s/),
+        ).toBeVisible({ timeout: 15_000 });
+        // The running subprocess already captured its delayed-load environment.
+        // Remove the delay before cancellation so the retry uses the normal path.
+        await apiClient.updateAgentProfile(fixture.delayedProfileId, { env_vars: [] });
+        await fixture.session.cancelAgentButton().click();
+        await waitForSessionState(apiClient, {
+          taskId: fixture.task.id,
+          sessionId: fixture.identity.sessionId,
+          expectedState: "WAITING_FOR_INPUT",
+          message: "Waiting for delayed resume cancellation",
+          timeout: 30_000,
+        });
+        // Retry the same saved conversation through the normal composer. The
+        // old delayed callback must not publish a second response or consume
+        // this new attempt.
+        await waitForSessionReady(
+          testPage,
+          apiClient,
+          fixture.task.id,
+          fixture.identity.sessionId,
+          90_000,
+        );
+        await fixture.session.composerReady();
+        await fixture.session.sendMessage("/e2e:simple-message");
+        await fixture.session.expectChatResponseVisible("simple mock response", 1, {
+          timeout: 60_000,
+        });
+        await expect(fixture.session.activeChat().getByText("simple mock response")).toHaveCount(2);
+      } finally {
+        await cleanupDelayedResumeFixture(apiClient, fixture);
+      }
     });
-
   });
 
   test("pausing an accepted lazy resume preserves the runtime for later turns", async ({
