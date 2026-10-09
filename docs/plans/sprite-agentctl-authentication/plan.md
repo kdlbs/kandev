@@ -109,7 +109,8 @@ Design-package checks on 2026-10-09:
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `python3 scripts/lint-spec-files.test.py`: passed, 36 tests.
 - `validateCoverage` from `.github/scripts/pr-docs.cjs`: passed with status `covered` for the planned production path and all four artifacts.
-- `git diff --check`: passed. Package artifacts remain unstaged and uncommitted.
+- `git diff --check`: passed. Package artifacts were included with the implementation.
+- PR review follow-up: the authenticated-mode test rejects an empty Bearer credential on both control and instance routes, and fixture cleanup bounds each instance deletion with a 15-second context. `go test -trimpath -race ./cmd/agentctl -run '^TestAgentctlAuthenticationModes' -count=1 -timeout=5m` passed. These updates affect test coverage and cleanup only; the authentication contract is unchanged.
 
 The [work order](task-01-restore-tokenless-startup.md#verification) contains exact implementation commands and the local documentation preflight.
 

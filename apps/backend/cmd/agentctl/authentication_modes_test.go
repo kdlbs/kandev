@@ -25,11 +25,12 @@ import (
 )
 
 const (
-	agentctlAuthTestHelperEnv = "KANDEV_AGENTCTL_AUTH_TEST_HELPER"
-	agentctlAuthTestHelperArg = "agentctl-authentication-modes-helper"
-	agentctlAuthTestNonce     = "authentication-modes-test-bootstrap-nonce"
-	agentctlAuthFailureEnv    = "KANDEV_AGENTCTL_AUTH_TEST_FAILURE_HELPER"
-	agentctlAuthFailureReady  = "agentctl-authentication-modes-failure-helper-ready"
+	agentctlAuthTestHelperEnv  = "KANDEV_AGENTCTL_AUTH_TEST_HELPER"
+	agentctlAuthTestHelperArg  = "agentctl-authentication-modes-helper"
+	agentctlAuthTestNonce      = "authentication-modes-test-bootstrap-nonce"
+	agentctlAuthFailureEnv     = "KANDEV_AGENTCTL_AUTH_TEST_FAILURE_HELPER"
+	agentctlAuthFailureReady   = "agentctl-authentication-modes-failure-helper-ready"
+	agentctlAuthCleanupTimeout = 15 * time.Second
 )
 
 func TestAgentctlAuthenticationModes(t *testing.T) {
@@ -189,7 +190,7 @@ func verifyAgentctlAuthenticationMode(t *testing.T, mockAgent string, authentica
 	}
 
 	if authenticated {
-		for _, authorization := range []string{"", "Basic malformed", "Bearer incorrect-token"} {
+		for _, authorization := range []string{"", "Basic malformed", "Bearer", "Bearer incorrect-token"} {
 			assertAuthenticationModesUnauthorized(t, controlPort, "/api/v1/instances", authorization, "")
 		}
 
@@ -205,7 +206,7 @@ func verifyAgentctlAuthenticationMode(t *testing.T, mockAgent string, authentica
 	firstInstance := createAuthenticationModesInstance(t, ctx, server, mockAgent)
 	firstClient := newAuthenticationModesInstanceClient(t, server, firstInstance.ID, firstInstance.Port)
 	if authenticated {
-		for _, authorization := range []string{"", "Basic malformed", "Bearer incorrect-token"} {
+		for _, authorization := range []string{"", "Basic malformed", "Bearer", "Bearer incorrect-token"} {
 			assertAuthenticationModesUnauthorized(t, firstInstance.Port, "/api/v1/status", authorization, firstInstance.ID)
 		}
 	}
@@ -489,7 +490,10 @@ func (s *authenticationModesServer) close(t *testing.T) error {
 	}
 	if s.control != nil {
 		for _, instanceID := range s.instances {
-			if err := s.control.DeleteInstance(context.Background(), instanceID); err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), agentctlAuthCleanupTimeout)
+			err := s.control.DeleteInstance(ctx, instanceID)
+			cancel()
+			if err != nil {
 				t.Errorf("delete test instance %s: %v", instanceID, err)
 			}
 		}
