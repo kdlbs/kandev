@@ -280,3 +280,20 @@ on desktop and 320.60 ms sooner on phone. See the manifest's
 timings, provenance, raw evidence and the corrected phone clock-test sequencing.
 Screenshots were inspected; disposable probes were retained outside the product
 tree. Changes are uncommitted; no push or PR was performed.
+
+### PR remediation validation
+
+The initial remote E2E failures and fixture-only scope are recorded in the
+[manifest](plan.md#pr-ci-remediation-2026-10-09). Post-main integration, the four
+search Vitest suites still pass 26 tests. Focused ESLint and Prettier passed for
+the two repaired specs. Managed E2E reproduction used one worker and one shard,
+with `--retries=0`; the three desktop leaf failures passed two repetitions each
+and the mobile leaf passed three. Full repaired specs passed with `--retries=0`: 13 multi-session tests and two
+mobile admission tests. Original search E2E gates passed again: 11 desktop and
+four phone tests with retries disabled. Commands, run logs and policy evidence are retained under
+`.tmp/task-search-debounce/fixup/`; fresh remote results remain a delivery gate.
+
+```sh
+PATH=/usr/local/go/bin:$PATH pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/session/multi-session-ux.spec.ts -- --retries=0
+PATH=/usr/local/go/bin:$PATH pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome tests/chat/mobile-queue-admission-reliability.spec.ts -- --retries=0
+```

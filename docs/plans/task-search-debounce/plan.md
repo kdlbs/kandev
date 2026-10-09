@@ -321,3 +321,42 @@ authorization. No completion signal, title mutation, persistent plan write
 or parent message is inferred from file creation. Kandev tools are absent from
 the available catalog, so requested title/parent-message operations could not
 be performed. Final conversation handoff reports the completed implementation and checks.
+
+## PR CI remediation (2026-10-09)
+
+PR #4371's initial E2E run `37922695045` used synthetic merge
+`a17270ff66a47fe037f80cffac23ba5da6e3a3bf` (base `d7a44e96e`, head `232981e7a`).
+Four failed shards exposed session-resume projection timing, plan-comments fixture
+navigation, a retired runtime lease during workflow profile startup, and mobile
+Quick Chat setup racing the opening turn. Three were flaky successes on retry;
+mobile admission failed with its busy prompt still in the editor. CI rejects
+flaky outcomes, so these remained failures.
+
+Integrated authoritative main `3fed5570cec533f468c25ed03c84967bdc972588` before
+remediation. It already includes the session-list settlement barrier. The three
+desktop leaf cases passed twice each with retries disabled (six tests), and the
+original mobile leaf passed three no-retry repetitions. That local evidence
+alone does not waive a red remote check.
+
+Two fixture-only corrections are scoped to the failed assertions:
+
+- `session/multi-session-ux.spec.ts`: the plan-comments case opts into existing
+  direct navigation by authoritative task ID, removing unrelated Kanban hydration
+  from a session-switching assertion.
+- `chat/mobile-queue-admission-reliability.spec.ts`: establish the exact created
+  session's server-confirmed settled baseline and direct composer mode before
+  sending the busy prompt, matching the desktop admission test. No timeout,
+  retry, failure policy or queue/drop assertion is relaxed.
+
+No new product behavior, copy or public documentation contract is introduced by
+these fixture repairs; the original production correction remains List-only.
+Raw job logs, artifacts and no-retry results are retained under
+`.tmp/task-search-debounce/fixup/`. Full repaired specs passed with retries disabled: 13 desktop multi-session tests
+and two mobile admission tests. The four search unit suites passed 26 tests.
+ESLint, Prettier, catalog/spec lint and whitespace checks passed. The original search/list gates also passed after the base update: 11 desktop
+and four phone tests, each with retries disabled. Fresh remote CI/reviews must still pass before reporting merge readiness.
+
+Required-policy recovery uses GraphQL to confirm main has no legacy protection
+rule, plus the active main ruleset (13341245) for all six required contexts. A
+local ignored read-only adapter supplies that verified policy to `pr-await`; no
+repository monitoring script or protection setting is changed.

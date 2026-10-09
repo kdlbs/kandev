@@ -163,6 +163,7 @@ test.describe("Multi-session UX", () => {
       apiClient,
       seedData,
       "Plan comment session task",
+      false,
     );
     const { sessions: primarySessions } = await apiClient.listTaskSessions(task.id);
     const primarySessionId = primarySessions[0]?.id;
