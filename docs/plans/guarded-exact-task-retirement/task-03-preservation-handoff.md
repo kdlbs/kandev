@@ -55,7 +55,12 @@ provider tokens stay outside the retirement receipt.
 2. Require a platform-verified immutable archive-byte receipt that binds both
    exact task IDs, the repository/environment/worktree identities, manifest
    and Git-index digests, complete file/link/metadata inventory, and a
-   successful source-byte rehash. It must also bind the preserved commit OIDs
+   successful source-byte rehash. The platform verifier must read back and
+   hash every immutable archive entry, compare it with the independently
+   captured source-byte hash, and verify exact file/link/metadata inventory
+   equality before `PASS`. Matching paths and metadata alone never prove byte
+   equality; missing, extra, or changed archive entries cannot pass. It must
+   also bind the preserved commit OIDs
    and independently verified reachability evidence for those exact commits,
    including the repository/ref identity and observed generation. Include
    those identities, verification results, and generations in the evidence
@@ -92,9 +97,34 @@ provider tokens stay outside the retirement receipt.
    authorized operation records its exact terminal disposition; W03 never
    invokes cancellation.
 
-The preview aggregates only these read-only receipts. Any adapter failure,
-identity mismatch, stale generation, or unimplemented integration is
-`UNKNOWN` and keeps the preview ineligible.
+## Remaining terminal-disposition designs
+
+W03 also owns the read-only receipt design and focused validation for every
+remaining predicate in W02's closed registry. The task service coordinates
+these designs with each evidence-owning subsystem; it does not perform the
+terminal operation. No Task 04-07 work order currently assigns these adapter
+designs, so they must not be treated as covered by an unspecified later task.
+
+| Predicate | W03 design responsibility | Required focused validation |
+| --- | --- | --- |
+| `relationships` | Exact dependency/subtask inventory and terminal-disposition evidence from the task relationship owner. | Outstanding dependencies/subtasks block; foreign identities, changed generations, or unavailable inspection are `UNKNOWN`. |
+| `pr_watch` | Exact PR association/watch inventory and terminal-disposition evidence from the PR/watch owner. | An active watcher or unresolved PR association blocks; omitted watches, stale generations, or unavailable inspection are `UNKNOWN`. |
+| `environment_runtime` | Exact environment/runtime/session inventory and terminal-disposition evidence from their owners. | A live runtime or session blocks; foreign environment identity, uncertain liveness, or unavailable inspection are `UNKNOWN`. |
+| `lease_consumer` | Exact lease/consumer inventory and terminal-disposition evidence from the owning subsystem. | An active lease or consumer blocks; omitted consumers, changed ownership/generations, or unavailable inspection are `UNKNOWN`. |
+| `replacement_ownership` | Exact handoff inventory and replacement-bound preservation/acceptance evidence from the task service and replacement owner. | An undisposed handoff or unacknowledged intake blocks; foreign replacement/session identity, stale evidence, or unavailable inspection are `UNKNOWN`. |
+
+Each design must bind the exact resource identities, observed generations, and
+terminal evidence digests without exposing resource contents, and validate no
+mutation for every outcome. These adapters remain unimplemented and
+`UNKNOWN/INVENTORY_UNAVAILABLE` until their independently reviewed read-only
+contracts exist. Recording this design work order does not complete
+AC-TASKS-EXACT-RETIREMENT-002.1 or make the preview eligible.
+
+The preview retains W02's full registry: its existing identity authorization,
+session/FIFO, move/dispatch, preservation/Git, and every predicate above. It
+must never aggregate a passing subset. Any adapter failure, identity mismatch,
+stale generation, or unimplemented integration is `UNKNOWN` and keeps the
+preview ineligible.
 
 ## Focused test plan
 
@@ -105,7 +135,9 @@ identity mismatch, stale generation, or unimplemented integration is
   worktree-ID mismatch, unverified archive location, incomplete metadata
   inventory, missing commit OIDs or reachability proof, and unpushed/unreachable
   commit evidence. Assert commit/ref/generation changes alter the evidence
-  digest and invalidate the receipt before any later cleanup claim.
+  digest and invalidate the receipt before any later cleanup claim. Reject
+  differing archive bytes even when paths and metadata match; reject missing
+  or extra archive entries and absent per-entry readback verification.
 - FIFO handoff: assert deterministic `(session incarnation, position, entry
   ID)` ordering and one-to-one source-to-intake acknowledgement mapping; reject
   changed, omitted, duplicated, reordered, hash-mismatched, attachment- or
@@ -122,6 +154,12 @@ identity mismatch, stale generation, or unimplemented integration is
   or unavailable census outcomes to `UNKNOWN`. Assert no queue, session, task,
   or pending-move mutation for every result.
 
+- Remaining predicates: exercise every case in the ownership table, preserve
+  all closed-registry categories, and assert the preview stays ineligible when
+  any category is unavailable or lacks an exact terminal disposition. None of
+  these read-only tests may terminate sessions, settle relationships, stop
+  watches, release leases, acknowledge handoffs, or repair inventories.
+
 The intended focused command, once adapters exist, is:
 
 ```sh
@@ -137,7 +175,9 @@ plane: it must merge its read-only exact census and fenced cancellation
 contract into the intended base before W03 can consume a terminal move
 disposition. Independently, no current contract supplies the immutable
 archive-byte receipt, replacement-bound ordered FIFO acknowledgement, or
-read-only exact dispatch-claim census; those are W03 adapter work still to be
-designed and implemented after the branch incorporates the merged
-source-manifest baseline. Until all are present, W03 remains fail-closed and
-W04-W07 remain out of scope.
+read-only exact dispatch-claim census. The remaining terminal-disposition
+adapters assigned above are also unavailable. These are W03 design and
+validation responsibilities still to be completed with their subsystem
+owners after the branch incorporates the merged source-manifest baseline.
+Until every closed-registry predicate has its required verified evidence,
+W03 remains fail-closed and W04-W07 remain out of scope.
