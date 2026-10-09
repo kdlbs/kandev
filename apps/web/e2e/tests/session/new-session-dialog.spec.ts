@@ -473,37 +473,52 @@ test.describe("New session dialog", () => {
       )
       .toBe(true);
 
-    // 3. Navigate to the task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    const { settings: priorSettings } = await apiClient.getUserSettings();
+    const otherWorkflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Unrelated dialog workflow",
+      "simple",
+    );
+    try {
+      await apiClient.saveUserSettings({ workflow_filter_id: otherWorkflow.id });
 
-    const card = kanban.taskCardByTitle("Cancel Dialog Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+      // 3. Navigate to the task
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto(seedData.workflowId);
 
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
+      const card = kanban.taskCardByTitle("Cancel Dialog Task");
+      await expect(card).toBeVisible({ timeout: 10_000 });
+      await card.click();
+      await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
-    // 4. Open and cancel the dialog
-    await session.openNewSessionDialog();
-    await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+        timeout: 15_000,
+      });
 
-    // Type something to verify it doesn't accidentally submit
-    await session.newSessionPromptInput().fill("should not create");
+      // 4. Open and cancel the dialog
+      await session.openNewSessionDialog();
+      await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });
 
-    // Click cancel
-    const cancelBtn = session.newSessionDialog().getByRole("button", { name: "Cancel" });
-    await cancelBtn.click();
+      // Type something to verify it doesn't accidentally submit
+      await session.newSessionPromptInput().fill("should not create");
 
-    // 5. Verify dialog closed and no new session was created
-    await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 5_000 });
+      // Click cancel
+      const cancelBtn = session.newSessionDialog().getByRole("button", { name: "Cancel" });
+      await cancelBtn.click();
 
-    const { sessions } = await apiClient.listTaskSessions(task.id);
-    expect(sessions).toHaveLength(1);
+      // 5. Verify dialog closed and no new session was created
+      await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 5_000 });
+
+      const { sessions } = await apiClient.listTaskSessions(task.id);
+      expect(sessions).toHaveLength(1);
+    } finally {
+      await apiClient.saveUserSettings({
+        workflow_filter_id: priorSettings.workflow_filter_id ?? "",
+      });
+      await apiClient.deleteWorkflow(otherWorkflow.id);
+    }
   });
 
   test("+ dropdown lists sessions with status and primary indicators", async ({
@@ -539,7 +554,7 @@ test.describe("New session dialog", () => {
 
     // 3. Navigate to the task
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    await kanban.goto(seedData.workflowId);
 
     const card = kanban.taskCardByTitle("Session List Task");
     await expect(card).toBeVisible({ timeout: 10_000 });

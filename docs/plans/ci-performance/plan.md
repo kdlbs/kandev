@@ -289,3 +289,17 @@ Local validation:
   and 113 CI helper/measurement tests: passed.
 - `pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome tests/git/mobile-diff-refresh-continuity.spec.ts tests/task/mobile-html-preview.spec.ts --retries=0`: five passed, no retries.
 - Final hosted CI is pending the remediation push.
+
+
+A later hosted run passed the original diff-continuity shard and all frontend
+and backend checks, but shard 2 failed the session-dialog cancel test. Home
+showed a different empty workflow while the seeded task remained in the sidebar.
+The two board-based cases now navigate with the seeded workflow ID. The cancel
+case also seeds a conflicting remembered workflow and restores that preference
+and disposable workflow in `finally`. This precondition reproduced the same
+missing-card failure before the navigation fix. The earlier no-build attempt
+failed during fixture startup; a fresh managed build reached the intended RED.
+Existing dialog, session-count, and board-navigation assertions are retained.
+`pnpm --dir apps/web e2e:run --host --no-build --project chromium tests/session/new-session-dialog.spec.ts --retries=0` passed all nine cases. Typecheck,
+focused ESLint/Prettier, and the diff check passed. A new hosted run remains
+pending the second remediation push.
