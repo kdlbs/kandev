@@ -24,7 +24,6 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
 import { useRouter } from "@/lib/routing/client-router";
 import { classifyAgentProfileFallback } from "@/lib/agent-profile-fallback";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 import { RecordDot } from "@/components/settings/record-dot";
 import { DisabledBadge } from "@/components/settings/record-badges";
@@ -375,13 +374,9 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
         profiles: item.profiles.filter((p) => p.id !== profile.id),
       }));
       setSettingsAgents(nextAgents);
-      // `agentProfiles` is the flattened picker list over the same data. Every
-      // other writer updates the pair together, and its only refetch is a
-      // one-shot guarded by `agentsLoaded`, so skipping it here left the
-      // deleted profile selectable until a reload.
-      setAgentProfiles(
-        nextAgents.flatMap((item) => item.profiles.map((p) => toAgentProfileOption(item, p))),
-      );
+      // Picker options can exist without a settings owner row. Deletion owns
+      // only the accepted profile ID, so preserve every other current option.
+      setAgentProfiles(store.getState().agentProfiles.items.filter((p) => p.id !== profile.id));
       return;
     }
     // Conflicts (active sessions, watchers, routing tiers) carry a guided
