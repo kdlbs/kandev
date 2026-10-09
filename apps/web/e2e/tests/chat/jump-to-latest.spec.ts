@@ -154,6 +154,12 @@ test("archived transcript keeps Jump to latest available without a composer", as
   const list = chat.locator(".chat-message-list");
   const button = chat.getByTestId("jump-to-latest-button");
   await expect(testPage.getByTestId("task-unarchive-button")).toBeVisible();
+  await expect(assistantReply(chat, LATEST_MARKER)).toBeInViewport();
+  await expect
+    .poll(async () =>
+      list.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight),
+    )
+    .toBeLessThan(10);
   await scrollUp(testPage, list);
   await expect(button).toBeVisible();
   await button.click();

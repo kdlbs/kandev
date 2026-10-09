@@ -136,7 +136,18 @@ export async function waitForWorkflowMoveLifecycle(apiClient: ApiClient, taskId:
       async () => {
         const task = await apiClient.getTask(taskId);
         const metadata = task.metadata ?? {};
-        return Object.hasOwn(metadata, "manual_move_lifecycle_pending") ? "busy" : "idle";
+        if (!Object.hasOwn(metadata, "manual_move_lifecycle_pending")) return "idle";
+        const { sessions } = await apiClient.listTaskSessions(taskId);
+        const lastState = {
+          workflow_step_id: task.workflow_step_id,
+          primary_session_id: task.primary_session_id,
+          sessions: sessions.map((session) => ({
+            id: session.id,
+            state: session.state,
+            error: session.error,
+          })),
+        };
+        return JSON.stringify(lastState);
       },
       { timeout: 30_000, message: `task ${taskId} did not finish its workflow move lifecycle` },
     )

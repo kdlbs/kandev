@@ -716,3 +716,16 @@ not attach a build-container interface to its missing bridge. This is an
 unavailable local browser check, not a passing reproduction. No host daemon or
 production resources were changed. The exact updated integration flow requires
 fresh container CI evidence before delivery can be considered ready.
+
+The same run also reported archived-transcript scroll observation and mobile
+workflow-return failures in a normal shard. The archived flow lacked the
+settled-bottom precondition used by its active-transcript counterpart. It now
+observes the latest reply and native bottom position before issuing its wheel
+input; both chat cases passed with retries disabled. The mobile workflow flow
+passed unchanged in isolation and after its preceding command-palette test
+(three cases total, retries disabled). Its CI failure remains unexplained:
+the manual-move marker persisted while the original session was starting.
+The existing assertion now includes bounded session states and error summaries
+when that marker remains, without extending its timeout or accepting a busy
+move. No workflow production behavior changed. Fresh CI must validate this
+flow; local passes do not establish the original failure's cause.
