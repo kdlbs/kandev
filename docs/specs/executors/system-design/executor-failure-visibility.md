@@ -238,6 +238,13 @@ Shared attached sessions use their environment scope; unrelated legacy sessions,
 replacement generations, and resolved incidents retain ordinary admission. Files
 and Terminal requests do not grant recovery authority or bypass this gate.
 
+Session-open and focus recovery use the same current environment/generation or
+legacy session scope in automatic-resume eligibility. Recheck this eligibility
+at launch admission, so a failure recorded after the initial status read still
+blocks passive resume before executor startup. An unavailable failure read blocks
+automatic recovery with an ownership-unavailable disposition. Explicit user
+recovery remains governed by its existing authorization and recovery checks.
+
 Carry a typed primary observation plus ordered, bounded secondary operation causes
 through stale cleanup and recovery. Preserve existing `errors.Is`/`errors.As`
 control-flow semantics for underlying operation failures while projecting the

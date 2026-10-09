@@ -442,7 +442,8 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     await session.expectTerminalHasText("terminal-after-restart");
   });
 
-  test("page refresh after an external stop resumes the same Docker container", async ({
+  // @covers AC-EXECUTORS-FAILURE-VISIBILITY-001.3, .5, .6, .8
+  test("page refresh preserves an external stop until the original Docker container is repaired", async ({
     apiClient,
     seedData,
     testPage,
@@ -464,6 +465,11 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     await waitForLatestSessionDone(apiClient, task.id, 1, "Waiting for first Docker session");
     const before = await apiClient.getTaskEnvironment(task.id);
     expect(before?.container_id).toBeTruthy();
+    const initialMessages = await apiClient.listSessionMessages(task.session_id!);
+    const initialAgentMessageIDs = initialMessages.messages
+      .filter((message) => message.author_type === "agent" && message.type !== "status")
+      .map((message) => message.id);
+    expect(initialAgentMessageIDs.length).toBeGreaterThan(0);
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
@@ -477,26 +483,56 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
       })
       .toBe("exited");
 
+    const card = testPage.getByTestId("session-executor-failure-card");
+    await expect(card).toContainText("Executor stopped", { timeout: 90_000 });
+    async function episodeID(): Promise<string | undefined> {
+      const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+      return tasks.find((candidate) => candidate.id === task.id)?.status_summary?.executor_failure
+        ?.id;
+    }
+    const originalEpisodeID = await episodeID();
+    expect(originalEpisodeID).toBeTruthy();
     await testPage.reload();
     await session.waitForLoad();
 
-    await expect
-      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.container_id, {
-        timeout: 30_000,
-        message: "Refresh resume must keep the original task container",
-      })
-      .toBe(before!.container_id);
+    await expect(card).toContainText("Executor stopped");
+    expect(await episodeID()).toBe(originalEpisodeID);
+    expect(dockerState(before!.container_id!)).toBe("exited");
+    await expect(session.recoveryResumeButton()).toBeHidden();
+    const recheck = card.getByTestId("executor-recheck");
+    await recheck.click();
+    await expect(recheck).toBeEnabled();
+    await expect(card).toBeVisible();
+    expect(await episodeID()).toBe(originalEpisodeID);
+    expect(dockerState(before!.container_id!)).toBe("exited");
+    const stopped = await apiClient.getTaskEnvironment(task.id);
+    expect(stopped?.id).toBe(before!.id);
+    expect(stopped?.container_id).toBe(before!.container_id);
+
+    // Repair only this fixture-owned container, independently of refresh and recheck.
+    dockerStart(before!.container_id!);
     await expect
       .poll(() => dockerState(before!.container_id!), {
-        timeout: 60_000,
-        message: "Waiting for refresh resume to restart the original container",
+        timeout: 10_000,
+        message: "Waiting for explicit repair of the original container",
       })
       .toBe("running");
+    await recheck.click();
+    await expect(card).toBeHidden();
+    const after = await apiClient.getTaskEnvironment(task.id);
+    expect(after?.id).toBe(before!.id);
+    expect(after?.container_id).toBe(before!.container_id);
 
     await session.clickTab("Terminal");
     await session.expectTerminalConnected(30_000);
     await session.typeInTerminal("printf terminal-after-refresh");
     await session.expectTerminalHasText("terminal-after-refresh");
+    const finalMessages = await apiClient.listSessionMessages(task.session_id!);
+    expect(
+      finalMessages.messages
+        .filter((message) => message.author_type === "agent" && message.type !== "status")
+        .map((message) => message.id),
+    ).toEqual(initialAgentMessageIDs);
   });
 
   test("reset environment from executor settings popover removes the Docker container", async ({

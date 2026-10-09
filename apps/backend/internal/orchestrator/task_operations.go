@@ -4758,10 +4758,8 @@ func (s *Service) sessionOpenRecoveryBlockReason(
 	return reason
 }
 
-// autoResumeEligibility is intentionally conservative about deferred launches.
-// Passive inspection may resume a session unless a valid durable launch belongs
-// to that exact session. A malformed deferred record blocks recovery instead of
-// falling back to a fresh launch.
+// Passive recovery respects durable launch ownership and active executor failures.
+// Unreadable ownership blocks recovery instead of falling back to a fresh launch.
 //
 //nolint:cyclop // Passive recovery checks each ownership source independently.
 func (s *Service) autoResumeEligibility(
@@ -4775,6 +4773,9 @@ func (s *Service) autoResumeEligibility(
 	}
 	if session.RouteState != "" && session.RouteState != dynamicRouteStatusActive {
 		return false, autoResumeBlockedDynamicRoute
+	}
+	if reason := s.executorFailureRecoveryBlockReason(ctx, session); reason != "" {
+		return false, reason
 	}
 	raw, present := task.Metadata[models.MetaKeyDeferredLaunch]
 	if !present || raw == nil {

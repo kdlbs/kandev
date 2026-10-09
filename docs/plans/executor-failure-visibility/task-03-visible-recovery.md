@@ -421,3 +421,27 @@ composer/history desktop and phone assets remain representative.
 
 Local implementation acceptance is complete. PR #4345 remote CI and review
 readiness remain separate delivery gates, tracked in the live PR validation block.
+
+### Automatic session-open admission regression
+
+The container CI shard exposed an outdated refresh expectation that implicitly
+authorized restarting an externally stopped executor. The repaired browser case
+checks physical container state, unchanged environment and episode identity, and
+unchanged provider reply IDs through reload and read-only Recheck, followed by
+explicit fixture-owned repair and terminal reconnection. Its stronger assertion
+also exposed a real automatic `session.launch` path that bypassed workspace
+admission and started the container on reload.
+
+Focused persistence-backed tests reproduced automatic-resume eligibility allowing
+an active legacy or shared environment incident. Automatic eligibility now reads
+the matching active incident, preserves scope and generation, and fails closed
+when the incident read is unavailable. Session-open launch admission and session
+focus reuse that eligibility check; explicit recovery retains its existing owner.
+The focused Go regressions and existing session-open tests passed; the complete
+orchestrator package also passed. Both affected real Docker scenarios passed with
+retries disabled after a fresh managed build. Temporarily removing automatic
+admission made the repaired refresh case fail at its physical-state assertion
+(expected `exited`, observed `running`). The source was restored byte for byte
+before final verification. Go and browser-test lint passed. Documentation and
+specification validation passed. No rendered copy changed. Remote CI/review
+readiness remains a separate delivery gate for the pushed head.
