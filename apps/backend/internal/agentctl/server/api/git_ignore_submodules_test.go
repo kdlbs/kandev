@@ -105,6 +105,11 @@ func ignoredHTTPFixture(t *testing.T, mode string, initialized bool) (*Server, [
 			ignoredHTTPGit(t, env, repo.parent, "submodule", "deinit", "--force", "--all")
 		}
 	}
+	return ignoredHTTPServer(t, env, root), repos, env
+}
+
+func ignoredHTTPServer(t *testing.T, env []string, root string) *Server {
+	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error"})
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +121,7 @@ func ignoredHTTPFixture(t *testing.T, mode string, initialized bool) (*Server, [
 			t.Error(err)
 		}
 	})
-	return NewServer(cfg, manager, nil, nil, log), repos, env
+	return NewServer(cfg, manager, nil, nil, log)
 }
 
 func ignoredHTTPPatch(t *testing.T, env []string, repo, base string) string {
@@ -263,4 +268,45 @@ func TestGitComparisonIgnoreSubmodulesMultiRepoHTTP(t *testing.T) {
 func TestGitComparisonIgnoreSubmodulesInitializedChildHTTP(t *testing.T) {
 	server, repos, env := ignoredHTTPFixture(t, "all", true)
 	assertIgnoredHTTPAggregate(t, server, repos, env, true)
+}
+
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.13
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.14
+func TestGitComparisonIgnoreSubmodulesChildDirtHTTP(t *testing.T) {
+	env, root := ignoredHTTPEnv(t), t.TempDir()
+	repos := []ignoredHTTPRepo{ignoredHTTPSeed(t, env, root, "alpha"), ignoredHTTPSeed(t, env, root, "beta")}
+	for i := range repos {
+		r := &repos[i]
+		ignoredHTTPGit(t, env, r.parent, "config", "diff.ignoreSubmodules", "all")
+		ignoredHTTPGit(t, env, r.parent, "update-ref", "refs/heads/main", r.head)
+		r.base, r.old = r.head, r.next
+		writeFileAPI(t, r.child, "payload.txt", r.scope+" dirty child bytes\n")
+		if !strings.Contains(ignoredHTTPPatch(t, env, r.parent, r.base), "-dirty") {
+			t.Fatal("ignore-none parent control did not expose child dirt")
+		}
+		patch := ignoredHTTPGit(t, env, r.parent, "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--submodule=short", "--ignore-submodules=dirty", "--src-prefix=a/", "--dst-prefix=b/", r.base)
+		if patch != "" {
+			t.Fatalf("unchanged parent pointer oracle = %q", patch)
+		}
+	}
+	server := ignoredHTTPServer(t, env, root)
+	var result process.CumulativeDiffResult
+	readIgnoredHTTP(t, server, repos, env, "/api/v1/git/cumulative-diff?base="+repos[0].base, &result)
+	if !result.Success || result.TotalCommits != 0 || result.TruncatedFilesCount != 0 || len(result.Files) != 2 {
+		t.Errorf("aggregate child-only dirt = %+v", result)
+	}
+	for _, r := range repos {
+		if parent, present := result.Files[r.scope+"\x00"+ignoredHTTPGitlink]; present {
+			t.Errorf("unchanged parent pointer returned child dirt: %#v", parent)
+		}
+		scope := r.scope + "/" + ignoredHTTPGitlink
+		patch := ignoredHTTPPatch(t, env, r.child, r.old)
+		if !strings.Contains(patch, "+"+r.scope+" dirty child bytes") {
+			t.Fatal("child oracle did not preserve independently owned dirty bytes")
+		}
+		child := assertStatusMetadataHTTPFile(t, result.Files, scope+"\x00payload.txt", "payload.txt", "modified", 1, 1, patch)
+		if child["repository_name"] != scope || child["base_ref"] != r.old || child["is_submodule"] != true {
+			t.Errorf("dirty child scope/parent anchor = %#v", child)
+		}
+	}
 }

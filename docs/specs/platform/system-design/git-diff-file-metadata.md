@@ -47,16 +47,22 @@ pointer update from both patch producers before the existing parser saw a
 section. With the child unavailable, this removed the only evidence needed by
 [AC-UI-SUBMODULE-REVIEW-001.5](../../ui/requirements/submodule-review.md).
 
-The exact argument list of `securityutil.IsKnownSafeGitFlag` in
-`apps/backend/internal/common/securityutil/git.go` admits only exact
-`--ignore-submodules=none`. It rejects the bare/abbreviated
-name, other or empty values, suffixes, whitespace and control-character variants.
-No safe prefix or validation bypass is needed. This exact admission was absent
-at qualified repair baseline `bd63da3163271e3229bf387649135855caac300d`;
-it is implemented as the dependency of both producer changes.
+At initial published repair `15e0e6a30605da37f8e3d20da15d3d63d90d3e54`, both
+patch producers passed exact `--ignore-submodules=none`. This restored recorded
+pointer changes but allowed the cumulative working-tree comparison to decorate
+an unchanged child HEAD with `-dirty` for child-only tracked or untracked files.
+That decoration is not recorded parent pointer evidence.
 
-The two existing patch argv of `ShowCommit` and `GetCumulativeDiff` in
-`git_log.go` pass the admitted flag after the subcommand and before the ref.
+The bounded corrective policy keeps `ShowCommit` on exact
+`--ignore-submodules=none` and uses exact `--ignore-submodules=dirty` for
+`GetCumulativeDiff`. Git's dirty mode retains real pointer changes, including a
+changed child HEAD, while excluding child-only worktree dirt from the parent
+patch. The exact argument list in `securityutil.IsKnownSafeGitFlag` admits only
+these two values; bare/abbreviated/empty names, unsupported values, suffixes,
+whitespace and control-character variants remain rejected. No prefix admission
+or validation bypass is needed. Exact dirty admission precedes the cumulative
+argv correction; none admission remains required for commit detail.
+
 Retain `--submodule=short`, first-parent semantics, color/textconv suppression,
 cumulative external-diff suppression, fixed prefixes, captured environment,
 managed execution, admission and cancellation. The no-patch commit metadata
@@ -70,15 +76,18 @@ with parent-recorded anchors. Review's existing
 `suppressAvailableGitlinkFiles` in `apps/web/components/review/types.ts` retains
 the parent when no child contributes files and suppresses it when child files
 are available. This repair does not redefine discovery, source precedence,
-child-only dirt policy or presentation. A missing parent map does not establish
+child file collection or presentation. Parent cumulative patches exclude child-only dirt; initialized child patches retain their existing worktree behavior. A missing parent map does not establish
 that initialized-child aggregate data is empty.
 
 Independent permanent regressions use real Git operators and their own registered
 selected/aggregate HTTP fixture. A real declared submodule is deinitialized after
 committing its pointer advance, so the child cannot supply alternate evidence.
-Use explicit positive old/new commit IDs and raw built-in short/ignore-none patch
-oracles with color, external diff and textconv disabled, never the production
-parser or equality of empty results. Bound ignore-mode controls rather than
+Use explicit positive old/new commit IDs and raw built-in short patch
+oracles with explicit ignore-none for commit and ignore-dirty for cumulative with color, external diff and textconv disabled, never the production
+parser or equality of empty results. Focused tracked/untracked child-dirt cases assert an unchanged parent produces no
+section, while changed-pointer-plus-dirt retains exact old/new IDs without
+`-dirty`. A registered aggregate case proves dirty child files remain in their
+own scopes and parent-recorded anchors with parent entries absent. Bound ignore-mode controls rather than
 crossing every child state, operation and setting. Independent HTTP repositories
 share a gitlink path but have distinct child IDs and parent bases; initialized
 child evidence separately verifies existing anchors and metadata. Snapshot owned

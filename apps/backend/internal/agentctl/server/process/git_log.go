@@ -296,7 +296,7 @@ func (g *GitOperator) GetCumulativeDiff(ctx context.Context, baseCommit string) 
 		"--no-ext-diff",
 		"--no-textconv",
 		"--submodule=short",
-		"--ignore-submodules=none",
+		"--ignore-submodules=dirty",
 		"--src-prefix=a/",
 		"--dst-prefix=b/",
 		baseCommit,

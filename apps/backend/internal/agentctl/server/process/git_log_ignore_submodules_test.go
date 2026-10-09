@@ -128,7 +128,7 @@ func ignoreGitlinkState(t *testing.T, f ignoreGitlinkFixture) map[string]string 
 		state[repo+"entries"] = ignoreGitlinkGit(t, f.env, repo, "ls-files", "--stage", "-z")
 		state[repo+"status"] = ignoreGitlinkGit(t, f.env, repo, "--no-optional-locks", "status", "--porcelain=v1", "--ignore-submodules=none", "-z")
 		state[repo+"patch"] = ignoreGitlinkGit(t, f.env, repo, "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--submodule=short", "--ignore-submodules=none", "HEAD")
-		for _, name := range []string{".gitmodules", "code.txt", "ordinary.txt"} {
+		for _, name := range []string{".gitmodules", "code.txt", "ordinary.txt", "untracked.txt"} {
 			data, err := os.ReadFile(filepath.Join(repo, name))
 			if err == nil {
 				state[repo+name] = string(data)
@@ -275,4 +275,58 @@ func TestGitComparisonIgnoreSubmodulesControls(t *testing.T) {
 		ignoreGitlinkGit(t, f.env, f.parent, "config", "diff.ignoreSubmodules", "all")
 		assertIgnoreGitlinkRead(t, f, false, ignoreGitlinkPath, 0)
 	})
+}
+
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.14
+func TestGitComparisonIgnoreSubmodulesChildDirt(t *testing.T) {
+	for _, scenario := range []struct {
+		name, path string
+		pointer    bool
+	}{
+		{name: "tracked", path: "code.txt"},
+		{name: "untracked", path: "untracked.txt"},
+		{name: "pointer_and_tracked", path: "code.txt", pointer: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			f := newIgnoreGitlinkFixture(t, false)
+			if !scenario.pointer {
+				f.base = f.head
+			}
+			ignoreGitlinkGit(t, f.env, f.parent, "config", "diff.ignoreSubmodules", "all")
+			writeFile(t, f.child, scenario.path, "child-only dirt\n")
+			if strings.TrimSpace(ignoreGitlinkGit(t, f.env, f.child, "rev-parse", "HEAD")) != f.next {
+				t.Fatal("child dirt must not change the child HEAD")
+			}
+			if !strings.Contains(ignoreGitlinkPatch(t, f, false), "-dirty") {
+				t.Fatal("ignore-none positive control did not expose child dirt")
+			}
+			patch := ignoreGitlinkGit(t, f.env, f.parent, "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--submodule=short", "--ignore-submodules=dirty", "--src-prefix=a/", "--dst-prefix=b/", f.base)
+			before := ignoreGitlinkState(t, f)
+			op := NewGitOperator(f.parent, newTestLogger(t), nil)
+			op.setEnvironmentProvider(func() []string { return append([]string(nil), f.env...) })
+			result, err := op.GetCumulativeDiff(context.Background(), f.base)
+			if err != nil || result == nil || !result.Success {
+				t.Fatalf("cumulative child dirt = %+v, %v", result, err)
+			}
+			if after := ignoreGitlinkState(t, f); !reflect.DeepEqual(before, after) {
+				t.Error("child-dirt comparison mutated owned state")
+			}
+			assertIgnoreGitlinkChildDirtResult(t, f, result, patch, scenario.pointer)
+		})
+	}
+}
+
+func assertIgnoreGitlinkChildDirtResult(t *testing.T, f ignoreGitlinkFixture, result *CumulativeDiffResult, patch string, pointer bool) {
+	t.Helper()
+	path, commits := "", 0
+	if pointer {
+		path, commits = ignoreGitlinkPath, 1
+	}
+	if result.BaseCommit != f.base || result.HeadCommit != f.head || result.TotalCommits != commits || result.TruncatedFilesCount != 0 {
+		t.Errorf("child-dirt metadata = %+v", result)
+	}
+	if strings.Contains(patch, "-dirty") {
+		t.Fatalf("pointer-only oracle contains child dirt: %q", patch)
+	}
+	assertIgnoreGitlinkFile(t, result.Files, f, path, patch)
 }

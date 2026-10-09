@@ -12,9 +12,10 @@ legacy_specs: []
 
 ## Overview
 
-One sequential work order first proves and admits exact
-`--ignore-submodules=none`, then adds it to the two existing comparison patch
-argument lists. Platform owns faithful shared comparison data, so extend the
+One sequential work order preserves recorded parent gitlinks with exact
+`--ignore-submodules=none` for commit detail and exact
+`--ignore-submodules=dirty` for cumulative working-tree comparisons. The latter
+retains actual pointer changes without child-only dirt decorations. Platform owns faithful shared comparison data, so extend the
 existing [requirement](../../specs/platform/requirements/git-diff-file-metadata.md)
 with only .14 and its [design](../../specs/platform/system-design/git-diff-file-metadata.md#visible-parent-gitlink-comparisons).
 Existing .3, .5, .12 and .13 provide metadata, read-only and nested-scope constraints.
@@ -60,7 +61,7 @@ All six qualified source SHA256 values match at design start:
 HEAD and material sources were rechecked at implementation admission and matched.
 Future material drift checkpoints ROOT without a rebase or alternative experiment.
 
-## Scope and technical approach
+## Initial implementation scope and technical approach (historical)
 
 Production ownership is limited to `securityutil/git.go` exact admission and
 the patch argv in `process/git_log.go`'s `ShowCommit` and `GetCumulativeDiff`.
@@ -183,7 +184,7 @@ handoff all four files were unstaged/uncommitted, backend/frontend and staged
 diffs were empty, and HEAD/main were unchanged. Implementation subsequently
 ran only after the explicit ROOT release below.
 
-## Released implementation results
+## Initial released implementation results (historical)
 
 ROOT accepted the four design artifacts and released implementation after actual
 END/WFI07:36:31. Original native/subprocess receipts and raw logs are retained in
@@ -268,3 +269,86 @@ and is not retried when full. ROOT reads own plan/primary directly.
   before environment isolation can disguise routing defects as fixture failures.
 - Child-only dirt/status policy and missing-child discovery are separate owners;
   this repair must not expand into them.
+
+
+## Bounded current corrective work
+
+ROOT released this same work order for the actual current-head CodeRabbit
+finding that cumulative ignore-none emits parent `-dirty` evidence without a
+pointer change. Runtime causal RED is required before production correction.
+The requirement now explicitly separates parent pointer evidence from initialized
+child file evidence. No UI/parser/discovery/routing/anchors/global Git redesign.
+
+After causal RED, admit only exact ignore-dirty in addition to exact ignore-none;
+change only GetCumulativeDiff's argument to dirty and leave ShowCommit on none.
+Independent permanent cases cover unchanged-parent tracked and untracked child
+dirt under all, real pointer changes plus dirt with clean old/new identities,
+and registered aggregate child file ownership with parent entries absent. Private
+native Git/env/snapshots remain required; no protected or shared fixture access.
+Use explicit built-in dirty parent cumulative oracles and none commit oracles.
+
+Run affected anchored race checks with pointer/fallback/initialized-child controls,
+then ONE full changed backend lint at actual authoritative PR base with existing
+resource limits. No root/budget/color replay, optional per-submodule configuration
+matrix or docstring polish. New conventional commit/active hooks/push, truthful
+thread dispositions and current-head revalidation follow. Original collector6859
+stays attached across the fixup and push; it is the sole overlap exception.
+Explicit FIXUP LOCAL-HEAVY RETURN permits same-turn hosted continuation, with no
+extra phase handoff. All readiness/actual-parent/semantic/current-head gates and
+separate ROOT merge grant remain; MERGE NONE. Corrective acceptance is complete; see the current results below.
+
+
+## Corrective resource checkpoint (historical)
+
+Meaningful runtime RED established unchanged-pointer tracked/untracked child dirt
+and contaminated pointer-plus-dirt evidence. The first HTTP RED also exposed
+fixture setup after manager anchor capture; the corrected fixture-only rerun
+failed solely on false parent rows while dirty child bytes/anchors passed.
+Exact dirty admission RED failed while none/variant controls passed.
+
+Affected GREEN passed: securityutil 1.013s, process 3.634s and registered HTTP
+3.760s, including the relevant original pointer/fallback/initialized controls
+once. The production delta remains cumulative none-to-dirty and exact dirty
+admission only; ShowCommit none is preserved.
+
+The mandatory ONE full changed backend lint at freshly verified actual base
+`bd63da3163271e3229bf387649135855caac300d`, concurrency2/allowserial,
+GOMAX2/GOMEM1GiB/CLI5m/GNU6m/kill10, hit the outer timeout with exit124 and
+no diagnostics. Original53516/90d8a7->16ad70 and subprocess1039927 were
+actually joined; fresh exact owned absence is empty. This is NOT lint success.
+No retry, alternative command, commit, push or thread resolution followed.
+All eight corrective local-heavy originals have verified serial intervals and
+raw hashes in `/tmp/kandev-child97-ignore-review-20261009/fixup-timeout-checkpoint.json`.
+
+Local heavy is paused for the mandatory ROOT resource checkpoint. All nine
+corrective files remain unstaged/uncommitted at published head15e0e6a30.
+Original collector6859/wrapper956186/subprocess956187 remains attached and
+retained, never stopped/restarted/replaced. It is the only allowed overlapping
+resource. ROOT must direct the next bounded step before any local alternative.
+Protected source/managed worktree/deps/caches/foreign resources remain untouched.
+Publication, fresh-head semantic/CI gates and delivery remain pending; MERGE NONE.
+
+
+## Completed bounded corrective results
+
+ROOT independently qualified the original timeout and authorized exactly ONE
+identical warm-cache recovery with retained caches and unchanged bounds/base.
+Original60157/cea5b9->883c0b returned exit0 and actual `0 issues.`; both native
+and subprocess1076125 joined with fresh exact owned absence empty. Original
+53516 remains FAILED exit124 with empty diagnostics and unproved cause. No
+source changes or passing tests were replayed during recovery; no cache wipe,
+runtime/memory adjustment or foreign-resource mutation occurred.
+
+Actual runtime RED and affected race GREEN protect tracked/untracked child-only
+dirt, real pointer changes plus dirt, parent fallback and distinct initialized
+child ownership/anchors. Exact dirty admission supplements none; only cumulative
+uses dirty, while ShowCommit remains none. No parser/UI/config/discovery/API
+redesign or optional test-matrix/docstring expansion.
+
+The same ONE work order's local implementation and full changed lint acceptance
+are complete. Normal active-hook fixup publication, actual thread dispositions,
+canonical FIVEfalse and explicit local-heavy RETURN are recorded externally in
+the own versioned task plan. Original collector6859 remains attached across
+push; prior-head review coverage is historical once the new head is published.
+Same-turn authorized hosted continuation requires all current readiness gates;
+MERGE NONE until distinct ROOT serial static grant. Task delivery is incomplete.
