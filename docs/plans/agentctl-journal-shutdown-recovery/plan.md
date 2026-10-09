@@ -329,3 +329,11 @@ Linux host process proof was exercised. Darwin/Windows runtime behavior, real pr
 - [Session reconciliation](../durable-agent-session-reconciliation/plan.md).
 
 Their earlier results remain historical evidence. They do not cover this incident or the new browser interaction.
+
+## PR review follow-up
+
+Prepared checkpoints retry through the existing admission gates. Canonical acceptance evidence can complete failed bookkeeping without dispatching again. Browser requests and results use the full interruption identity, and pending continuation announces progress with a stable action name. Earlier runtime and reattachment plans now identify all four completed work orders.
+
+The first-instruction persistence guard also accepts the matching canonical submission from the orchestrator launch handoff before the execution dispatches its first prompt. The desktop monitor, board Copilot, coordinator proposal, and phone Configuration Chat scenarios reproduced the original failure and passed after the correction. Focused race regressions also verify admission callbacks, launch handoffs, duplicate refusal, and foreign-owner refusal.
+
+Final review validation passed: the exact five-package SQLite race command, SQL guard, SQLite store conformance, changed-scope Go lint, 147 frontend tests, type checking, web lint, translation checks, and documentation validation. Both recovery browser selections passed sequentially (Chromium 39.5 seconds; mobile-chrome 28.8 seconds), and all four reproduced CI scenarios passed. Four fresh screenshots document the final UI. Storage contracts did not change during this follow-up, so the earlier PostgreSQL validation remains applicable.

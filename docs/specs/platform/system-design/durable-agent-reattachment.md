@@ -129,8 +129,12 @@ After native load succeeds, retire only the proven interrupted submission throug
 The existing retirement method writes `cancelled` and drops the payload. Extend its explicit recovery contract to retain the original uncertain outcome and evidence.
 This retirement must remain effective in capability, recovery-descriptor, and admission queries without claiming provider cancellation.
 Persist recovery progress before dispatch. A crash between native load, retirement, projection, and dispatch must resume the same recovery operation.
+A prepared checkpoint precedes the atomic generation commit, so a retry may restore it after rechecking process termination, ownership, revision, and independent blocks.
+A restored checkpoint can have dispatched already. Retry checks its stable canonical instruction message, which is written only at agentctl acceptance, before completing acceptance bookkeeping.
+Backend submission admission alone is not receiver acceptance. Missing acceptance evidence remains restored-but-blocked without redispatch.
 Do not advertise a ready session merely because native loading or stream attachment succeeded.
 Native initialization defers its default prompt. Only the explicitly supplied new instruction receives a new submission identifier.
+For ordinary first-instruction launch, the runtime accepts an already admitted canonical row only when the launch handoff identifies that message, its full owner and payload match, and this execution has not dispatched a prompt. Runtime-owned duplicates still require reconciliation.
 The interrupted payload, queued claims, permissions, and tool calls are never replayed by this action.
 Duplicate requests return the first operation result without another dispatch.
 Unrelated recovery blocks and Office scheduler ownership remain effective.
@@ -148,6 +152,9 @@ Selection is explicit; the number of disconnected streams alone cannot identify 
 The batch delegates to the same generation-fenced per-session recovery operation with bounded concurrency.
 Each item carries its own observed identity, recovery revision, continuation instruction, and idempotency key.
 One blocked session does not prevent other eligible sessions from recovering. Refresh preserves progress and completed item results.
+Browser requests, in-flight operations, and results are scoped to the task, session, and full recovery identity. A later interruption starts with a blank instruction and unchecked acknowledgment.
+A completed result stays visible when the same identity advances its recovery revision. Late replies cannot overwrite a different interruption's checkpoint or current batch result.
+The Resume button keeps its accessible name while a translated status region announces progress.
 Preserve queued user instructions and their order without redispatching an uncertain claim.
 The operation never uses fresh-start, a new Kandev session, or history replacement as an implicit fallback.
 Report restored-but-blocked separately from work that has actually accepted its continuation instruction.

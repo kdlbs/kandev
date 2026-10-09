@@ -151,4 +151,4 @@ Task 01's full process race suite still has the independently reported `TestWork
 
 The [repair package](../agentctl-journal-shutdown-recovery/plan.md) owns the observed journal-close panic and retry failure after execution removal.
 It also covers recovery-control alignment and the complete post-crash desktop/phone interaction.
-Its three work orders are pending. Earlier results and outstanding release gates remain unchanged.
+Its four work orders are completed. The repair package records the backend, desktop, and phone validation results. Earlier results and outstanding release gates remain unchanged.

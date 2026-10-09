@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -49,8 +50,26 @@ func (sm *SessionManager) persistInitialDeliveryBeforeDispatch(ctx context.Conte
 		return fmt.Errorf("persist initial durable submission: %w", err)
 	}
 	if !created {
-		return errors.New("initial durable submission already exists; reconciliation is required")
+		stored, readErr := store.GetAgentDeliverySubmission(ctx, id)
+		if readErr != nil || !callerAdmittedInitialSubmissionMatches(stored, execution, id, payload) {
+			return errors.New("initial durable submission admission identity changed")
+		}
 	}
 	execution.setMetadataValue(initialDeliverySubmissionIDMetadataKey, id)
 	return nil
+}
+
+func callerAdmittedInitialSubmissionMatches(stored *models.AgentDeliverySubmission, execution *AgentExecution, id string, payload []byte) bool {
+	// The launch handoff identifies the canonical first instruction. Runtime-owned
+	// records and an execution that already dispatched require reconciliation.
+	initialID := execution.metadataString(initialDeliverySubmissionIDMetadataKey)
+	return initialID != "" && deliverySubmissionIdentityForPrompt(initialID, "") == id &&
+		execution.promptGenerationSnapshot() == 0 &&
+		stored != nil && stored.ID == id && stored.SessionID == execution.SessionID &&
+		stored.IncarnationID == execution.DeliveryIncarnationID &&
+		stored.HarnessGeneration == int64(execution.DeliveryHarnessGeneration) &&
+		stored.OwnerGeneration == int64(execution.DeliveryHarnessGeneration) &&
+		stored.DispatchAttemptID != "" && deliverySubmissionIdentityForPrompt(stored.DispatchAttemptID, "") == id &&
+		stored.State == models.DeliverySubmissionDispatching &&
+		stored.PayloadHash == journal.SubmissionHash(payload) && bytes.Equal(stored.Payload, payload)
 }

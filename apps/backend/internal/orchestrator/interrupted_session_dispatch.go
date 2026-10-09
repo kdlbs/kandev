@@ -6,7 +6,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -71,7 +70,7 @@ func (s *Service) recordInterruptedInstruction(ctx context.Context, taskID, sess
 	if s.messageCreator == nil {
 		return errors.New("continuation message persistence unavailable")
 	}
-	messageID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("kandev:interrupted-instruction:"+checkpoint.snapshotID)).String()
+	messageID := interruptedInstructionMessageID(checkpoint.snapshotID)
 	return s.messageCreator.CreateUserMessageIdempotent(ctx, messageID, taskID, checkpoint.request.Instruction,
 		sessionID, turnID, NewUserMessageMeta().ToMap())
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
@@ -7,6 +7,7 @@ import type { SessionDeliveryRecoveryResponse } from "@/lib/services/session-rec
 import { sessionDeliveryRecoveryMessage } from "@/lib/services/session-recovery-service";
 import {
   continueInterruptedSession,
+  interruptedRecoveryKey,
   readInterruptedCheckpoint,
 } from "@/lib/services/interrupted-session-recovery";
 
@@ -15,8 +16,28 @@ export function InterruptedSessionContinuation({
 }: {
   observed: SessionDeliveryRecoveryResponse;
 }) {
+  return (
+    <InterruptedSessionContinuationForm
+      key={`${interruptedRecoveryKey(observed)}:${observed.recovery_revision}`}
+      observed={observed}
+    />
+  );
+}
+
+function InterruptedSessionContinuationForm({
+  observed,
+}: {
+  observed: SessionDeliveryRecoveryResponse;
+}) {
   const { t } = useTranslation();
-  const saved = readInterruptedCheckpoint(observed.task_id, observed.session_id);
+  const saved = readInterruptedCheckpoint(observed.task_id, observed.session_id, observed);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const [instruction, setInstruction] = useState(saved?.request.instruction ?? "");
   const [acknowledged, setAcknowledged] = useState(Boolean(saved));
   const [busy, setBusy] = useState(false);
@@ -36,11 +57,12 @@ export function InterruptedSessionContinuation({
         acknowledged,
         failureMessage: t("task:interruptedRecoveryFailed"),
       });
-      if (completed.result) setNotice(sessionDeliveryRecoveryMessage(completed.result, t));
+      if (mounted.current && completed.result)
+        setNotice(sessionDeliveryRecoveryMessage(completed.result, t));
     } catch {
-      setNotice(t("task:interruptedRecoveryFailed"));
+      if (mounted.current) setNotice(t("task:interruptedRecoveryFailed"));
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   };
   if (hidden) return null;
@@ -78,7 +100,7 @@ export function InterruptedSessionContinuation({
             "w-full cursor-pointer whitespace-normal md:w-auto",
           )}
         >
-          {busy ? t("task:resuming") : t("task:interruptedRecoveryResume")}
+          {t("task:interruptedRecoveryResume")}
         </Button>
         <Button
           type="button"
@@ -90,9 +112,9 @@ export function InterruptedSessionContinuation({
           {t("task:interruptedRecoveryCancel")}
         </Button>
       </div>
-      {notice && (
+      {(busy || notice) && (
         <p role="status" className="break-words text-sm" data-testid="interrupted-recovery-result">
-          {notice}
+          {busy ? t("task:resuming") : notice}
         </p>
       )}
     </div>

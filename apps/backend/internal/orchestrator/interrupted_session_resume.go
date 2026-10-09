@@ -69,12 +69,8 @@ func (s *Service) resumeInterruptedSessionAdmitted(ctx context.Context, taskID, 
 	encoded, _ := json.Marshal(request)
 	contentHash := fmt.Sprintf("%x", sha256.Sum256(encoded))
 	snapshotID := fmt.Sprintf("interrupted:%x", sha256.Sum256([]byte(taskID+"\x00"+sessionID+"\x00"+request.IdempotencyKey)))
-	snapshot, err := store.GetContinuationSnapshot(ctx, snapshotID)
-	if err == nil && snapshot != nil {
-		return interruptedCheckpointResponse(taskID, sessionID, request, snapshot, contentHash), nil
-	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
+	if response, err := s.reconcileInterruptedCheckpoint(ctx, taskID, sessionID, request, store, snapshotID, contentHash); response != nil || err != nil {
+		return response, err
 	}
 	response, err := s.RetrySessionDelivery(ctx, taskID, sessionID)
 	if err != nil {
@@ -96,10 +92,33 @@ func (s *Service) resumeInterruptedSessionAdmitted(ctx context.Context, taskID, 
 	return s.launchInterruptedContinuation(ctx, taskID, sessionID, checkpoint), nil
 }
 
+func (s *Service) reconcileInterruptedCheckpoint(ctx context.Context, taskID, sessionID string, request InterruptedSessionResumeRequest, store interruptedContinuationStore, snapshotID, contentHash string) (*SessionDeliveryRecoveryResponse, error) {
+	snapshot, err := store.GetContinuationSnapshot(ctx, snapshotID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if snapshot == nil {
+		return nil, errors.New("continuation checkpoint unavailable")
+	}
+	response := interruptedCheckpointResponse(taskID, sessionID, request, snapshot, contentHash)
+	if response.Outcome == SessionDeliveryRecoveryBlocked || snapshot.Status == models.ContinuitySnapshotConsumed {
+		return response, nil
+	}
+	// Prepared snapshots precede the atomic native-generation commit and cannot
+	// have dispatched an instruction. Retry still rechecks every admission gate.
+	if snapshot.Status == models.ContinuitySnapshotPrepared {
+		return nil, nil
+	}
+	return s.reconcileInterruptedAcceptance(ctx, taskID, sessionID, request, snapshot, store, response), nil
+}
+
 func interruptedCheckpointResponse(taskID, sessionID string, request InterruptedSessionResumeRequest, snapshot *models.ContinuationSnapshot, contentHash string) *SessionDeliveryRecoveryResponse {
 	outcome := SessionDeliveryRecoveryRestoredBlocked
 	reason := "continuation_outcome_unknown"
-	if snapshot.SessionID != sessionID || snapshot.ContentHash != contentHash {
+	if snapshot.SessionID != sessionID || snapshot.ContentHash != contentHash || snapshot.Content != request.Instruction || snapshot.TargetGeneration != request.RecoveryIdentity.HarnessGeneration+1 || snapshot.SubmissionID != "prompt:"+snapshot.ID {
 		outcome = SessionDeliveryRecoveryBlocked
 		reason = "idempotency_conflict"
 	} else if snapshot.Status == models.ContinuitySnapshotConsumed {
@@ -127,12 +146,16 @@ func (s *Service) prepareInterruptedContinuation(ctx context.Context, sessionID 
 		return nil, err
 	}
 	now := time.Now().UTC()
-	if err = store.CreateRestoreAttempt(ctx, &models.RestoreAttempt{ID: snapshotID, SessionID: sessionID, IncarnationID: recovery.IncarnationID, ExpectedGeneration: recovery.HarnessGeneration, Action: string(SessionDeliveryRecoveryActionContinueInterrupted), Authorized: true, CreatedAt: now}); err != nil {
-		return nil, err
-	}
 	submissionID := "prompt:" + snapshotID
-	if err = store.CreateContinuationSnapshot(ctx, &models.ContinuationSnapshot{ID: snapshotID, AttemptID: snapshotID, SessionID: sessionID, TargetGeneration: recovery.HarnessGeneration + 1, SubmissionID: submissionID, Content: request.Instruction, ByteCount: len(request.Instruction), ContentHash: contentHash, Status: models.ContinuitySnapshotPrepared, CreatedAt: now}); err != nil {
-		return nil, err
+	if _, snapshotErr := store.GetContinuationSnapshot(ctx, snapshotID); errors.Is(snapshotErr, sql.ErrNoRows) {
+		if err = store.CreateRestoreAttempt(ctx, &models.RestoreAttempt{ID: snapshotID, SessionID: sessionID, IncarnationID: recovery.IncarnationID, ExpectedGeneration: recovery.HarnessGeneration, Action: string(SessionDeliveryRecoveryActionContinueInterrupted), Authorized: true, CreatedAt: now}); err != nil {
+			return nil, err
+		}
+		if err = store.CreateContinuationSnapshot(ctx, &models.ContinuationSnapshot{ID: snapshotID, AttemptID: snapshotID, SessionID: sessionID, TargetGeneration: recovery.HarnessGeneration + 1, SubmissionID: submissionID, Content: request.Instruction, ByteCount: len(request.Instruction), ContentHash: contentHash, Status: models.ContinuitySnapshotPrepared, CreatedAt: now}); err != nil {
+			return nil, err
+		}
+	} else if snapshotErr != nil {
+		return nil, snapshotErr
 	}
 	return &interruptedContinuationCheckpoint{store: store, request: request, recovery: recovery, generation: *generation, blockID: block.ID, snapshotID: snapshotID, contentHash: contentHash, submissionID: submissionID}, nil
 }

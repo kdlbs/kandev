@@ -6,6 +6,7 @@ import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { useAppStore } from "@/components/state-provider";
 import { readAgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery";
 import { sessionDeliveryRecoveryMessage } from "@/lib/services/session-recovery-service";
+import { interruptedRecoveryKey } from "@/lib/services/interrupted-session-recovery";
 import {
   useInterruptedRecoveryBatch,
   type InterruptedRecoveryCandidate,
@@ -42,7 +43,11 @@ export function InterruptedSessionsRecovery() {
       },
     ];
   });
-  return <InterruptedSessionsRecoveryContent candidates={candidates} />;
+  const scope = candidates
+    .map((item) => interruptedRecoveryKey(item.observed))
+    .sort()
+    .join(";");
+  return <InterruptedSessionsRecoveryContent key={scope} candidates={candidates} />;
 }
 
 function InterruptedSessionsRecoveryContent({

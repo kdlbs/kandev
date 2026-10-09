@@ -6,6 +6,7 @@ import {
 } from "@/lib/services/session-recovery-service";
 import {
   continueInterruptedSession,
+  interruptedRecoveryKey,
   readInterruptedCheckpoint,
   readInterruptedRecoveryResult,
 } from "@/lib/services/interrupted-session-recovery";
@@ -59,12 +60,19 @@ export function useInterruptedRecoveryBatch(candidates: InterruptedRecoveryCandi
           );
           const result = checkpoint.result;
           if (mounted.current && result)
-            setResults((current) => ({ ...current, [item.sessionId]: result }));
+            setResults((current) => ({
+              ...current,
+              [interruptedRecoveryKey(item.observed)]: result,
+            }));
         } catch (cause) {
           if (!mounted.current) continue;
           const blocked = blockedBatchResult(cause);
-          if (blocked) setResults((current) => ({ ...current, [item.sessionId]: blocked }));
-          else setFailures((current) => [...current, item.sessionId]);
+          if (blocked)
+            setResults((current) => ({
+              ...current,
+              [interruptedRecoveryKey(item.observed)]: blocked,
+            }));
+          else setFailures((current) => [...current, interruptedRecoveryKey(item.observed)]);
         } finally {
           if (mounted.current) setCompleted(index + 1);
         }
@@ -76,7 +84,9 @@ export function useInterruptedRecoveryBatch(candidates: InterruptedRecoveryCandi
   };
   const persistedResults = Object.fromEntries(
     candidates.flatMap((item) => {
-      const result = readInterruptedRecoveryResult(item.taskId, item.sessionId);
+      const result =
+        results[interruptedRecoveryKey(item.observed)] ??
+        readInterruptedRecoveryResult(item.taskId, item.sessionId, item.observed);
       return result ? [[item.sessionId, result]] : [];
     }),
   );
@@ -86,8 +96,10 @@ export function useInterruptedRecoveryBatch(candidates: InterruptedRecoveryCandi
     run,
     busy,
     completed,
-    results: { ...persistedResults, ...results },
-    failures,
+    results: persistedResults,
+    failures: candidates
+      .filter((item) => failures.includes(interruptedRecoveryKey(item.observed)))
+      .map((item) => item.sessionId),
   };
 }
 
@@ -97,18 +109,11 @@ function continueBatchItem(
   acknowledged: boolean,
   failureMessage: string,
 ) {
-  const previous = readInterruptedCheckpoint(item.taskId, item.sessionId);
-  const observed = previous
-    ? {
-        ...item.observed,
-        recovery_revision: previous.request.recovery_revision,
-        recovery_identity: previous.request.recovery_identity,
-      }
-    : item.observed;
+  const previous = readInterruptedCheckpoint(item.taskId, item.sessionId, item.observed);
   return continueInterruptedSession({
     taskId: item.taskId,
     sessionId: item.sessionId,
-    observed,
+    observed: item.observed,
     instruction: previous?.request.instruction ?? instruction,
     acknowledged,
     failureMessage,

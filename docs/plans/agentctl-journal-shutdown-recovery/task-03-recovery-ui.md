@@ -185,3 +185,10 @@ Completed on 2026-10-09.
 - Fresh desktop and phone screenshots were captured for explicit continuation and persistent results. Public recovery documentation was updated.
 
 The browser full-journal scenario uses a confirmed stopped owner. Live producer pause, bounded cancellation, responsive control routes, and refusal to replace a live owner are covered by backend regressions; they are not claimed as live-provider browser evidence.
+
+PR review follow-up:
+
+- Browser checkpoints, pending requests, and batch results now belong to the full interruption identity. A later interruption resets the instruction and acknowledgment. Late preflight and dispatch responses cannot replace a newer checkpoint. Service, hook, and component regressions passed.
+- The Resume action keeps its accessible name while a separate status announces progress. The component regression covers pending state, interruption replacement, and a late response.
+- The final combined frontend run passed 147 tests across ten files. Type checking, full web lint, changed-service lint, and translation validation passed.
+- The final browser selections passed sequentially: two Chromium specs in 39.5 seconds and two mobile-chrome specs in 28.8 seconds. Four fresh screenshots were captured and inspected. The staged translation ratchet and documentation coverage preflight passed.
