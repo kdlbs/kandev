@@ -2735,5 +2735,6 @@
   "sortOldestFirst": "Ōĺďēśţ ƒĩŕśţ",
   "sortAscending": "Àśćēńďĩńĝ",
   "sortMatchingFirst": "Ḿàţćĥĩńĝ ƒĩŕśţ",
-  "sortRuleColor": "Ćōĺōŕ ƒōŕ śōŕţ ƒĩēĺď {{position}}"
+  "sortRuleColor": "Ćōĺōŕ ƒōŕ śōŕţ ƒĩēĺď {{position}}",
+  "workspaceFolderLiveLinkNotice": "[Ƒôľďêřš åřê ľîṽê ľîñķš. Êďîţš çĥåñĝê ţĥê ôřîĝîñåľ ƒîľêš. Åĝêñţ åççêšš řûľêš šţîľľ åþþľý. Ûþľôåď ƒôľďêř çřêåţêš å šêþåřåţê çôþý.]"
 }

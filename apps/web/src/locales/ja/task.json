@@ -2745,5 +2745,6 @@
   "sortOldestFirst": "古い順",
   "sortAscending": "昇順",
   "sortMatchingFirst": "一致する項目を優先",
-  "sortRuleColor": "並べ替え項目 {{position}} の色"
+  "sortRuleColor": "並べ替え項目 {{position}} の色",
+  "workspaceFolderLiveLinkNotice": "フォルダーは元の場所へのリンクです。編集すると元のファイルが変更されます。エージェントのアクセス規則は引き続き適用されます。「フォルダーをアップロード」は別のコピーを作成します。"
 }

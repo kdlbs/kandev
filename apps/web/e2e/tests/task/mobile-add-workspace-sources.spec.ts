@@ -267,6 +267,12 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   );
   await expect(rows).toHaveCount(2);
   await expect(testPage.getByTestId("folder-picker-popover")).toHaveCount(0);
+  await drawer.getByText(/Folders are live links/).scrollIntoViewIfNeeded();
+  await expect(drawer.getByText(/Folders are live links/)).toBeInViewport();
+  const removeBox = await rows.first().getByRole("button", { name: "Remove source" }).boundingBox();
+  expect(removeBox).not.toBeNull();
+  expect(removeBox!.height).toBeGreaterThanOrEqual(44);
+  expect(removeBox!.width).toBeGreaterThanOrEqual(44);
   await prCapture.screenshot("workspace-actions-mixed-sources", {
     caption: "Pixel 5 Add to workspace drawer with a local repository and folder configured",
   });
@@ -275,7 +281,10 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   const [footerBox, submitBox] = await Promise.all([footer.boundingBox(), submit.boundingBox()]);
   expect(footerBox).not.toBeNull();
   expect(submitBox).not.toBeNull();
+  expect(submitBox!.height).toBeGreaterThanOrEqual(44);
   expect(submitBox!.y + submitBox!.height).toBeLessThanOrEqual(drawerBox!.y + drawerBox!.height);
+  await drawer.getByRole("radio", { name: /Inside the current/ }).tap();
+  await expect(submit).toBeEnabled();
   await submit.tap();
   await expect(drawer).not.toBeVisible();
   await expect(entryPoint).toBeEnabled();

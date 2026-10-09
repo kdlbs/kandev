@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { IconX } from "@tabler/icons-react";
 import { Input } from "@kandev/ui/input";
+import { Button } from "@kandev/ui/button";
 import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
 import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
 import { useRemoteRepositories } from "@/hooks/domains/integrations/use-remote-repositories";
@@ -73,6 +74,9 @@ export function SourceForm({
           {t("task:savedAndLocalGitRepositoriesMust")}
         </p>
       )}
+      {rows.some((row) => row.kind === "folder") && (
+        <p className="text-sm text-muted-foreground">{t("task:workspaceFolderLiveLinkNotice")}</p>
+      )}
       {rows.map((row) => (
         <SourceRow
           key={row.key}
@@ -135,14 +139,16 @@ function SourceRow({
     <fieldset className="space-y-2 rounded border p-3" data-testid="workspace-source-row">
       <div className="flex items-center justify-between">
         <legend className="text-sm font-medium">{labelFor(type)}</legend>
-        <button
+        <Button
+          variant="ghost"
+          size="icon"
           type="button"
           aria-label={t("task:removeSource")}
-          className="min-h-11 min-w-11 cursor-pointer text-muted-foreground"
+          className="cursor-pointer text-muted-foreground"
           onClick={() => onRemove(row.key)}
         >
           <IconX className="mx-auto h-4 w-4" />
-        </button>
+        </Button>
       </div>
       {type === "saved_repository" && (
         <SavedRepositorySourceRow

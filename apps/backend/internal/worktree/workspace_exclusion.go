@@ -302,6 +302,9 @@ func (m *Manager) nestedWorkspaceExcludeTarget(worktreePath string) (nestedWorks
 	}
 	condition := conditionPrefix + filepath.ToSlash(gitDir)
 	pattern := "/" + strings.Trim(filepath.ToSlash(relative), "/") + "/"
+	if info, statErr := os.Lstat(worktreePath); statErr == nil && isPlatformDirectoryLink(info, worktreePath) {
+		pattern = strings.TrimSuffix(pattern, "/")
+	}
 	includePath := filepath.Join(gitDir, "kandev-nested-workspace.include")
 	return nestedWorkspaceExclusionTarget{
 		outerRoot:        outerRoot,
@@ -487,7 +490,10 @@ func (m *Manager) verifyNestedWorkspaceExclusion(ctx context.Context, target nes
 			return fmt.Errorf("verify outer worktree destination %q: %w", relative, trackedErr)
 		}
 	}
-	probe := filepath.ToSlash(filepath.Join(relative, ".kandev-ignore-probe"))
+	probe := relative
+	if strings.HasSuffix(target.pattern, "/") {
+		probe = filepath.ToSlash(filepath.Join(relative, ".kandev-ignore-probe"))
+	}
 	_, err := runGitCmdCombinedOutput(ctx, m.newNonInteractiveGitCmd(ctx, target.outerRoot, "check-ignore", "--no-index", "--quiet", "--", probe))
 	if err == nil {
 		return nil
@@ -665,4 +671,15 @@ func containsPath(paths []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// EnsureWorkspaceLinkExclusion protects a materialized source link from staging
+// in its containing repository without changing tracked or global ignore files.
+func (m *Manager) EnsureWorkspaceLinkExclusion(ctx context.Context, linkPath string) (bool, error) {
+	return m.addNestedWorkspaceExclusion(ctx, "", linkPath)
+}
+
+// RemoveWorkspaceLinkExclusion compensates an attachment before its link is removed.
+func (m *Manager) RemoveWorkspaceLinkExclusion(ctx context.Context, linkPath string) error {
+	return m.removeNestedWorkspaceExclusion(ctx, "", linkPath)
 }

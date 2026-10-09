@@ -322,3 +322,41 @@ func TestPrepareTaskRelativeWorktreePathRejectsOccupiedTarget(t *testing.T) {
 		t.Fatalf("prepareTaskRelativeWorktreePath error = %v, want ErrWorkspacePathOccupied", err)
 	}
 }
+
+func TestNestedWorkspaceExclusionProtectsDirectoryLinksAndRollsBack(t *testing.T) {
+	root := t.TempDir()
+	if output, err := exec.Command("git", "init", root).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, output)
+	}
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	link, err := CreateOwnedDirectoryLink(root, "notes", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := mgr.addNestedWorkspaceExclusion(context.Background(), root, link)
+	if err != nil {
+		t.Fatalf("protect folder link: %v", err)
+	}
+	if !changed {
+		t.Fatal("folder link exclusion was not created")
+	}
+	if output, err := exec.Command("git", "-C", root, "check-ignore", "--quiet", "--", "notes").CombinedOutput(); err != nil {
+		t.Fatalf("folder link is not ignored: %v: %s", err, output)
+	}
+	changed, err = mgr.addNestedWorkspaceExclusion(context.Background(), root, link)
+	if err != nil || changed {
+		t.Fatalf("repeat exclusion changed=%v err=%v", changed, err)
+	}
+	if err := mgr.removeNestedWorkspaceExclusion(context.Background(), root, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", root, "check-ignore", "--quiet", "--", "notes").Run(); err == nil {
+		t.Fatal("rollback left the folder link ignored")
+	}
+	if _, err := os.Stat(link); err != nil {
+		t.Fatalf("exclusion rollback changed the folder link: %v", err)
+	}
+}

@@ -2735,5 +2735,6 @@
   "sortOldestFirst": "Oldest first",
   "sortAscending": "Ascending",
   "sortMatchingFirst": "Matching first",
-  "sortRuleColor": "Color for sort field {{position}}"
+  "sortRuleColor": "Color for sort field {{position}}",
+  "workspaceFolderLiveLinkNotice": "Folders are live links. Edits change the original files. Agent access rules still apply. Upload folder creates a separate copy."
 }

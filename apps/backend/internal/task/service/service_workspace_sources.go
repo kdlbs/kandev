@@ -152,7 +152,7 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 	batch.ExpectedParentID = req.ExpectedParentID
 	batch.ExpectedParentWorkspaceID = req.ExpectedParentWorkspaceID
 	if len(batch.Sources) == 0 && len(batch.RepositoryUpdates) == 0 && req.RepositoryPlacement != "" {
-		if err := s.validateExactWorkspaceRepositoryPlacement(ctx, task, req.Sources, req.RepositoryPlacement); err != nil {
+		if err := s.validateExactWorkspaceRepositoryPlacement(ctx, task, inputs, req.RepositoryPlacement); err != nil {
 			return nil, err
 		}
 		if err := guardWorkspaceSourceParent(ctx, store, task, req); err != nil {
@@ -161,6 +161,7 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 		return s.hydrateWorkspaceSourceResult(ctx, task, store)
 	}
 	if err := s.applyWorkspaceRepositoryPlacement(ctx, task, batch, req.RepositoryPlacement, req.PreviewRevision); err != nil {
+		cleanupCreated(context.WithoutCancel(ctx))
 		return nil, err
 	}
 	if len(batch.Sources) == 0 && len(batch.RepositoryUpdates) == 0 {

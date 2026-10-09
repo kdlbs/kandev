@@ -2735,5 +2735,6 @@
   "sortOldestFirst": "最早優先",
   "sortAscending": "升序",
   "sortMatchingFirst": "匹配項優先",
-  "sortRuleColor": "排序欄位 {{position}} 的顏色"
+  "sortRuleColor": "排序欄位 {{position}} 的顏色",
+  "workspaceFolderLiveLinkNotice": "資料夾是實時連結。編輯會更改原始檔案。代理的存取規則仍然適用。「上傳資料夾」會建立單獨的副本。"
 }

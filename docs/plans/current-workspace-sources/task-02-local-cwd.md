@@ -170,3 +170,19 @@ Verification passed:
 ## Dialog refinement (2026-09-16)
 
 Desktop uses a viewport-constrained 960px dialog and full-width stacked placement rows. Source selection comes first, followed by locations and impact information. Only selected root expansion shows the prominent restart warning; unchanged-CWD additions show a short neutral continuity note. Use Source location for repository or folder placement and omit expansion for folder-only batches. The phone retains its full-height drawer and fixed footer. These refinements apply to the saved UI-02/UI-03/UI-04 previews.
+
+## Browser QA repair checklist (2026-10-09)
+
+Status: implemented and locally verified; rebased verification pending. The user authorized remediation of the [QA findings](qa-2026-10-09.md).
+These repairs implement the existing acceptance criteria and UI-02/UI-04 previews.
+
+- F1: Materialize ready Local and scratch environments without a managed task directory.
+- F2: Preserve the established Worktree root for folder attachment and persist destinations.
+- F3: Preview local repository paths and remote URLs without creating repository records.
+- F4: Allow safe legacy branch metadata backfill with explicit placement.
+- F5: Disclose live folder links, original-file edits, and provider access restrictions.
+- F6: Restore compact desktop buttons while preserving 44px touch targets.
+
+Validation: reproduce runtime defects with focused Go regressions, then exercise desktop and phone
+attachment in a browser. Run affected backend packages, frontend checks, localization, and docs checks.
+Preserve the separate root-expansion recovery gate on PR #3598.

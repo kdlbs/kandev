@@ -474,16 +474,16 @@ and running processes. **Cancel** or closing the surface sends no request and ch
 submitted batch remains all-or-nothing.
 
 For a single-repository Worktree task that still uses the repository as its workspace root, a
-repository-only batch lets you choose **Inside kandev/** or **Inside the current repository**. Both
+repository, folder, or mixed batch lets you choose **Inside kandev/** or **Inside the current repository**. Both
 choices keep the agent CWD and running workspace processes unchanged. Kandev records the selected
 relative path, previews the destination, and protects the outer repository from staging the nested
 worktree. The **Expand workspace root** choice remains unavailable until explicit idle session
-recovery is available. A task that already starts in a parent workspace adds repositories as
-siblings and does not show these placement choices.
+recovery is available. A task that already starts in a parent workspace uses the current-root placement.
+Previews support saved repositories, local Git paths, and remote URLs.
 
 Local folder, Local scratch, and supported remote/container workspaces keep their established root,
 agent CWD, and running processes unchanged. Local sources are live links into the current workspace;
-folder edits therefore affect the original host folder. Docker, Kubernetes, SSH, and Sprites clone
+folder edits therefore affect the original host folder. Agent access rules still apply. Docker, Kubernetes, SSH, and Sprites clone
 repository sources inside the current executor workspace. Local Git rows need a cloneable origin on
 those executors. Host folders are unavailable there; **Upload folder** remains a separate copy flow
 when uploads are supported. This current-workspace flow does not expand the root or replace a native

@@ -84,6 +84,7 @@ type hostWorkspaceMaterialization struct {
 	priorRoots      []string
 	postRoots       []string
 	linkUndo        []ownedDirectoryLinkUndo
+	linkExclusions  []string
 }
 
 type ownedDirectoryLinkUndo struct {
@@ -127,7 +128,7 @@ func (m *workspaceSourceMaterializer) MaterializeWorkspaceSources(ctx context.Co
 		return &taskservice.WorkspaceSourceMaterializationResult{}, nil
 	}
 	if state.environment.Status == models.TaskEnvironmentStatusCreating ||
-		(isHostWorkspaceExecutor(state.environment.ExecutorType) && state.environment.TaskDirName == "") {
+		(state.environment.ExecutorType == string(models.ExecutorTypeWorktree) && state.environment.TaskDirName == "") {
 		m.logger.Info("deferring workspace source materialization until the task environment is provisioned",
 			zap.String("task_id", taskID), zap.String("task_environment_id", state.environment.ID))
 		return &taskservice.WorkspaceSourceMaterializationResult{}, nil
@@ -173,6 +174,9 @@ func (m *workspaceSourceMaterializer) materializeHostWorkspaceSources(ctx contex
 	}
 	if materializeErr != nil {
 		return nil, materializeErr
+	}
+	if err := m.protectWorkspaceSourceLinks(ctx, materialization); err != nil {
+		return nil, err
 	}
 	if workspaceSourcePlacementKeepsRoot(batch) || sameWorkspacePath(materialization.root, materialization.oldPath) {
 		ids, rescanned, inventory, nestedErr := m.materializeNestedHostWorkspaceSources(ctx, state, batch, materialization, branchMaterializations)
@@ -252,7 +256,7 @@ func (m *workspaceSourceMaterializer) prepareHostWorkspaceMaterialization(ctx co
 	if err != nil {
 		return nil, err
 	}
-	root, err := m.resolveHostWorkspaceRoot(state, batch)
+	root, err := m.resolveHostWorkspaceRoot(state)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +275,7 @@ func (m *workspaceSourceMaterializer) prepareHostWorkspaceMaterialization(ctx co
 	}, nil
 }
 
-func (m *workspaceSourceMaterializer) resolveHostWorkspaceRoot(state *workspaceSourceMaterializationState, batch *models.WorkspaceSourceBatch) (string, error) {
+func (m *workspaceSourceMaterializer) resolveHostWorkspaceRoot(state *workspaceSourceMaterializationState) (string, error) {
 	if isLocalWorkspaceExecutor(state.environment.ExecutorType) && state.environment.WorkspacePath != "" {
 		root, err := filepath.Abs(filepath.Clean(state.environment.WorkspacePath))
 		if err != nil {
@@ -283,7 +287,7 @@ func (m *workspaceSourceMaterializer) resolveHostWorkspaceRoot(state *workspaceS
 	if err != nil {
 		return "", fmt.Errorf("resolve owned task root: %w", err)
 	}
-	if !workspaceSourcePlacementKeepsRoot(batch) || taskservice.EffectiveTaskEnvironmentWorkspaceLayout(state.environment) == taskservice.WorkspaceLayoutTaskRoot {
+	if taskservice.EffectiveTaskEnvironmentWorkspaceLayout(state.environment) == taskservice.WorkspaceLayoutTaskRoot {
 		return root, nil
 	}
 	return nestedWorkspaceMaterializationRoot(root, state.environment.WorkspacePath)
@@ -458,6 +462,9 @@ func (m *workspaceSourceMaterializer) rollbackHostWorkspaceMaterialization(ctx c
 	rollbackErr = errors.Join(rollbackErr, m.restoreSessionWorkspaces(ctx, adopted, materialization.oldPath, materialization.priorRoots))
 	if err := m.deleteEnvironmentRepositoryInventory(context.WithoutCancel(ctx), createdInventory); err != nil {
 		rollbackErr = errors.Join(rollbackErr, err)
+	}
+	for _, path := range materialization.linkExclusions {
+		rollbackErr = errors.Join(rollbackErr, m.worktreeMgr.RemoveWorkspaceLinkExclusion(context.WithoutCancel(ctx), path))
 	}
 	if err := rollbackOwnedDirectoryLinks(materialization.linkUndo); err != nil {
 		rollbackErr = errors.Join(rollbackErr, err)
@@ -734,4 +741,17 @@ func (m *workspaceSourceMaterializer) loadMaterializationState(ctx context.Conte
 		entities[taskRepository.RepositoryID] = entity
 	}
 	return &workspaceSourceMaterializationState{environment: environment, sessions: sessions, repositories: repositories, folders: folders, entities: entities}, nil
+}
+
+func (m *workspaceSourceMaterializer) protectWorkspaceSourceLinks(ctx context.Context, materialization *hostWorkspaceMaterialization) error {
+	for _, link := range materialization.linkUndo {
+		changed, err := m.worktreeMgr.EnsureWorkspaceLinkExclusion(ctx, link.Path)
+		if err != nil {
+			return fmt.Errorf("protect workspace source link: %w", err)
+		}
+		if changed {
+			materialization.linkExclusions = append(materialization.linkExclusions, link.Path)
+		}
+	}
+	return nil
 }

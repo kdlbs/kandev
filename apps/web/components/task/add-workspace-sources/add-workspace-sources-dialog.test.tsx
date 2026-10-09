@@ -248,7 +248,7 @@ describe("AddWorkspaceSourcesDialog", () => {
     expect(screen.queryByTestId("source-mode-remote")).toBeNull();
     const addRepository = screen.getByRole("button", { name: "Add repository" });
     const submit = screen.getByTestId(ADD_WORKSPACE_SOURCES_SUBMIT_TEST_ID);
-    expect(addRepository.className).toContain("min-h-11");
+    expect(addRepository.className).toContain("max-md:h-11");
     expect((submit as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "Add folder" }));
@@ -294,7 +294,9 @@ describe("AddWorkspaceSourcesDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
     expect(screen.queryByRole("button", { name: /Add folder/ })).toBeNull();
   });
+});
 
+describe("AddWorkspaceSourcesDialog focus restoration", () => {
   it.each(SURFACE_CASES)(
     "returns focus to the external %s opener after Cancel",
     async (_, mobile, surfaceTestId) => {
@@ -333,7 +335,19 @@ describe("AddWorkspaceSourcesDialog", () => {
       const surface = await screen.findByTestId(surfaceTestId);
       await waitFor(() => expect(opener.disabled).toBe(true));
       fireEvent.click(screen.getByRole("button", { name: "Add folder" }));
+      previewTaskWorkspaceSources.mockResolvedValue({
+        revision: "revision-1",
+        workspace_path: "/workspace/task-1",
+        sources: [],
+        supported_placements: [{ placement: "current_root", enabled: true }],
+      });
       fireEvent.click(screen.getByRole("button", { name: "Choose local folder" }));
+      fireEvent.click(screen.getByRole("radio", { name: /Inside the current/ }));
+      await waitFor(() =>
+        expect(
+          (screen.getByTestId(ADD_WORKSPACE_SOURCES_SUBMIT_TEST_ID) as HTMLButtonElement).disabled,
+        ).toBe(false),
+      );
       fireEvent.click(screen.getByTestId(ADD_WORKSPACE_SOURCES_SUBMIT_TEST_ID));
 
       await waitFor(() => expect(opener.disabled).toBe(false));

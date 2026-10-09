@@ -2735,5 +2735,6 @@
   "sortOldestFirst": "Mais antigas primeiro",
   "sortAscending": "Ascendente",
   "sortMatchingFirst": "Correspondentes primeiro",
-  "sortRuleColor": "Cor do campo de ordenação {{position}}"
+  "sortRuleColor": "Cor do campo de ordenação {{position}}",
+  "workspaceFolderLiveLinkNotice": "As pastas são ligações ativas. As edições alteram os ficheiros originais. As regras de acesso do agente continuam a aplicar-se. Carregar pasta cria uma cópia separada."
 }

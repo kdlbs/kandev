@@ -78,7 +78,7 @@ func (s *Service) applyWorkspaceRepositoryPlacement(
 	expectedRevision string,
 ) error {
 	if placement == "" {
-		return nil
+		return s.applyDefaultWorkspaceSourcePlacement(ctx, task, batch)
 	}
 	if err := validateWorkspaceRepositoryPlacementBatch(batch, placement); err != nil {
 		return err
@@ -96,9 +96,6 @@ func (s *Service) applyWorkspaceRepositoryPlacement(
 	}
 	if revision != expectedRevision {
 		return fmt.Errorf("%w: refresh the workspace preview", ErrWorkspaceSourcePreviewStale)
-	}
-	if workspaceRepositoryPlacementHasFolders(batch) && !isLocalWorkspaceExecutor(env.ExecutorType) {
-		return fmt.Errorf("%w: folder placement requires a Local environment", ErrUnsupportedWorkspaceSource)
 	}
 	placements, paths, err := s.buildWorkspaceRepositoryPlacementTargets(ctx, task.WorkspaceID, env, batch.Sources, placement)
 	if err != nil {
@@ -130,9 +127,6 @@ func validateWorkspaceRepositoryPlacementBatch(batch *models.WorkspaceSourceBatc
 	if batch == nil || len(batch.Sources) == 0 {
 		return fmt.Errorf("%w: placement requires workspace sources", ErrInvalidWorkspaceRepositoryPlacement)
 	}
-	if len(batch.RepositoryUpdates) > 0 {
-		return fmt.Errorf("%w: placement cannot be combined with branch updates", ErrInvalidWorkspaceRepositoryPlacement)
-	}
 	for _, source := range batch.Sources {
 		if source.Repository == nil && source.Folder == nil {
 			return fmt.Errorf("%w: placement requires a repository or folder source", ErrInvalidWorkspaceRepositoryPlacement)
@@ -149,7 +143,7 @@ func (s *Service) workspaceRepositoryPlacementEnvironment(ctx context.Context, t
 	if err != nil {
 		return nil, err
 	}
-	if env == nil || (!isLocalWorkspaceExecutor(env.ExecutorType) && env.ExecutorType != string(models.ExecutorTypeWorktree)) {
+	if env == nil || !isHostWorkspaceSourceExecutor(env.ExecutorType) {
 		return nil, fmt.Errorf("%w: explicit placement requires a Local or Worktree environment", ErrUnsupportedWorkspaceSource)
 	}
 	if env.WorkspacePath == "" || (env.ExecutorType == string(models.ExecutorTypeWorktree) && env.TaskDirName == "") {
@@ -169,14 +163,14 @@ func (s *Service) buildWorkspaceRepositoryPlacementTargets(ctx context.Context, 
 		case source.Repository != nil && source.Folder == nil:
 			target, path, err = s.buildWorkspaceRepositoryPlacementTarget(ctx, workspaceID, env, source.Repository, placement)
 		case source.Folder != nil && source.Repository == nil:
-			if !isLocalWorkspaceExecutor(env.ExecutorType) {
+			if !isHostWorkspaceSourceExecutor(env.ExecutorType) {
 				return nil, nil, fmt.Errorf("%w: folders are unavailable for executor %q", ErrUnsupportedWorkspaceSource, env.ExecutorType)
 			}
 			relative, relativeErr := workspaceFolderRelativePath(env, placement, source.Folder.DisplayName)
 			if relativeErr != nil {
 				return nil, nil, relativeErr
 			}
-			path, err = workspaceRepositoryPlacementPath(env, relative)
+			path = filepath.Join(env.WorkspacePath, filepath.FromSlash(relative))
 			target = workspaceRepositoryPlacementTarget{folder: source.Folder, relative: relative}
 		default:
 			return nil, nil, fmt.Errorf("%w: workspace source kind is required", ErrInvalidWorkspaceRepositoryPlacement)
@@ -195,6 +189,10 @@ func (s *Service) buildWorkspaceRepositoryPlacementTarget(ctx context.Context, w
 	if err != nil {
 		return workspaceRepositoryPlacementTarget{}, "", err
 	}
+	return buildWorkspaceRepositoryEntityPlacementTarget(env, entity, tr, placement)
+}
+
+func buildWorkspaceRepositoryEntityPlacementTarget(env *models.TaskEnvironment, entity *models.Repository, tr *models.TaskRepository, placement WorkspaceRepositoryPlacement) (workspaceRepositoryPlacementTarget, string, error) {
 	name, err := WorkspaceSourceRuntimeEntryName(env.ExecutorType, entity, tr)
 	if err != nil {
 		return workspaceRepositoryPlacementTarget{}, "", err
@@ -211,7 +209,7 @@ func (s *Service) buildWorkspaceRepositoryPlacementTarget(ctx context.Context, w
 }
 
 func workspaceFolderRelativePath(env *models.TaskEnvironment, placement WorkspaceRepositoryPlacement, name string) (string, error) {
-	if env == nil || !isLocalWorkspaceExecutor(env.ExecutorType) || name == "" || filepath.Base(name) != name || worktree.SanitizeRepoDirName(name) != name {
+	if env == nil || !isHostWorkspaceSourceExecutor(env.ExecutorType) || name == "" || filepath.Base(name) != name || worktree.SanitizeRepoDirName(name) != name {
 		return "", fmt.Errorf("%w: unsafe folder entry", ErrInvalidWorkspaceRepositoryPlacement)
 	}
 	switch placement {
@@ -387,7 +385,7 @@ func (s *Service) PreviewWorkspaceRepositoryPlacement(ctx context.Context, taskI
 		return nil, err
 	}
 	layout := EffectiveTaskEnvironmentWorkspaceLayout(env)
-	if hasWorkspaceFolderSourceInput(sources) && !isLocalWorkspaceExecutor(env.ExecutorType) {
+	if hasWorkspaceFolderSourceInput(sources) && !isHostWorkspaceSourceExecutor(env.ExecutorType) {
 		return nil, fmt.Errorf("%w: folders are unavailable for executor %q", ErrUnsupportedWorkspaceSource, env.ExecutorType)
 	}
 	if placement == WorkspacePlacementKandevDirectory && layout == WorkspaceLayoutTaskRoot {
@@ -460,10 +458,7 @@ func (s *Service) buildWorkspaceRepositoryPlacementPreviewSources(ctx context.Co
 func (s *Service) buildWorkspaceRepositoryPlacementPreviewSource(ctx context.Context, workspaceID string, env *models.TaskEnvironment, source WorkspaceSourceInput, placement WorkspaceRepositoryPlacement) (WorkspaceRepositoryPreviewSource, string, error) {
 	switch source.Kind {
 	case WorkspaceSourceRepository:
-		if source.RepositoryID == "" || repositoryLocatorCount(source) != 1 {
-			return WorkspaceRepositoryPreviewSource{}, "", fmt.Errorf("%w: preview requires existing repository IDs", ErrInvalidWorkspaceSource)
-		}
-		entity, err := s.repositoryEntityInWorkspace(ctx, workspaceID, source.RepositoryID)
+		entity, err := s.previewWorkspaceRepositoryEntity(ctx, workspaceID, source)
 		if err != nil {
 			return WorkspaceRepositoryPreviewSource{}, "", err
 		}
@@ -471,13 +466,13 @@ func (s *Service) buildWorkspaceRepositoryPlacementPreviewSource(ctx context.Con
 		if tr.BaseBranch == "" {
 			tr.BaseBranch = entity.DefaultBranch
 		}
-		target, path, err := s.buildWorkspaceRepositoryPlacementTarget(ctx, workspaceID, env, tr, placement)
+		target, path, err := buildWorkspaceRepositoryEntityPlacementTarget(env, entity, tr, placement)
 		if err != nil {
 			return WorkspaceRepositoryPreviewSource{}, "", err
 		}
 		return WorkspaceRepositoryPreviewSource{Kind: WorkspaceSourceRepository, RepositoryID: entity.ID, RepositoryName: entity.Name, SourceName: entity.Name, WorkspaceRelativePath: target.relative}, path, nil
 	case WorkspaceSourceFolder:
-		if !isLocalWorkspaceExecutor(env.ExecutorType) {
+		if !isHostWorkspaceSourceExecutor(env.ExecutorType) {
 			return WorkspaceRepositoryPreviewSource{}, "", fmt.Errorf("%w: folders are unavailable for executor %q", ErrUnsupportedWorkspaceSource, env.ExecutorType)
 		}
 		path, err := canonicalFolder(source.LocalPath)
@@ -492,10 +487,7 @@ func (s *Service) buildWorkspaceRepositoryPlacementPreviewSource(ctx context.Con
 		if err != nil {
 			return WorkspaceRepositoryPreviewSource{}, "", err
 		}
-		destination, err := workspaceRepositoryPlacementPath(env, relative)
-		if err != nil {
-			return WorkspaceRepositoryPreviewSource{}, "", err
-		}
+		destination := filepath.Join(env.WorkspacePath, filepath.FromSlash(relative))
 		return WorkspaceRepositoryPreviewSource{Kind: WorkspaceSourceFolder, RepositoryName: name, SourceName: name, WorkspaceRelativePath: relative}, destination, nil
 	default:
 		return WorkspaceRepositoryPreviewSource{}, "", fmt.Errorf("%w: unsupported workspace source kind %q", ErrInvalidWorkspaceSource, source.Kind)
@@ -529,7 +521,7 @@ func (s *Service) exactWorkspaceRepositoryPlacementState(ctx context.Context, ta
 	if err != nil {
 		return nil, nil, err
 	}
-	if env == nil || (!isLocalWorkspaceExecutor(env.ExecutorType) && env.ExecutorType != string(models.ExecutorTypeWorktree)) || env.WorkspacePath == "" || (env.ExecutorType == string(models.ExecutorTypeWorktree) && env.TaskDirName == "") {
+	if env == nil || !isHostWorkspaceSourceExecutor(env.ExecutorType) || env.WorkspacePath == "" || (env.ExecutorType == string(models.ExecutorTypeWorktree) && env.TaskDirName == "") {
 		return nil, nil, fmt.Errorf("%w: the task workspace root is not ready", ErrInvalidWorkspaceRepositoryPlacement)
 	}
 	existing, err := s.taskRepos.ListTaskRepositories(ctx, taskID)
@@ -540,10 +532,10 @@ func (s *Service) exactWorkspaceRepositoryPlacementState(ctx context.Context, ta
 }
 
 func (s *Service) validateExactWorkspaceRepositorySource(ctx context.Context, workspaceID string, env *models.TaskEnvironment, existing []*models.TaskRepository, source WorkspaceSourceInput, placement WorkspaceRepositoryPlacement) error {
-	if source.Kind != WorkspaceSourceRepository || source.RepositoryID == "" || repositoryLocatorCount(source) != 1 {
-		return fmt.Errorf("%w: exact placement retries require repository IDs", ErrInvalidWorkspaceSource)
+	if source.Kind != WorkspaceSourceRepository || repositoryLocatorCount(source) != 1 {
+		return fmt.Errorf("%w: exact placement retries require repository sources", ErrInvalidWorkspaceSource)
 	}
-	entity, err := s.repositoryEntityInWorkspace(ctx, workspaceID, source.RepositoryID)
+	entity, err := s.previewWorkspaceRepositoryEntity(ctx, workspaceID, source)
 	if err != nil {
 		return err
 	}
@@ -551,7 +543,7 @@ func (s *Service) validateExactWorkspaceRepositorySource(ctx context.Context, wo
 	if base == "" {
 		base = entity.DefaultBranch
 	}
-	matched := findExactWorkspaceRepository(existing, source.RepositoryID, base, source.CheckoutBranch)
+	matched := findExactWorkspaceRepository(existing, entity.ID, base, source.CheckoutBranch)
 	if matched == nil {
 		return fmt.Errorf("%w: source was not already attached", ErrWorkspaceSourcePreviewStale)
 	}
@@ -567,22 +559,6 @@ func (s *Service) validateExactWorkspaceRepositorySource(ctx context.Context, wo
 		return fmt.Errorf("%w: refresh the workspace preview", ErrWorkspaceSourcePreviewStale)
 	}
 	return nil
-}
-
-func workspaceRepositoryPlacementHasFolders(batch *models.WorkspaceSourceBatch) bool {
-	if batch == nil {
-		return false
-	}
-	return slicesContainsFolder(batch.Sources)
-}
-
-func slicesContainsFolder(sources []models.WorkspaceSource) bool {
-	for _, source := range sources {
-		if source.Folder != nil {
-			return true
-		}
-	}
-	return false
 }
 
 func hasWorkspaceFolderSourceInput(sources []WorkspaceSourceInput) bool {

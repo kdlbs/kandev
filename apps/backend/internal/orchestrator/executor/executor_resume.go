@@ -2651,6 +2651,8 @@ func (e *Executor) applyResumeRepoConfig(
 	applyResumeRepoBasics(req, repository, repositoryPath, shouldUseWorktree(req.ExecutorType))
 	for _, info := range allRepos {
 		if info != nil && info.RepositoryID == repositoryID {
+			req.TaskRepositoryID = info.TaskRepositoryID
+			req.WorkspaceRelativePath = info.WorkspaceRelativePath
 			req.ContributionDestination = info.ContributionDestination
 			break
 		}
