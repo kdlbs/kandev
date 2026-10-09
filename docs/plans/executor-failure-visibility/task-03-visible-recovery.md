@@ -640,3 +640,14 @@ plus desktop and phone sort editing (2.2 and 1.6 minutes). Typecheck, full
 localization checks, changed-file lint and trusted documentation coverage passed.
 Final captures and new remote checks remain delivery gates; old-head success is
 not final delivery proof.
+
+The ninth CI E2E build stopped in test discovery before scheduling the browser
+shards. A marker-free base merge left two imports of the same readiness helper
+in the workflow override fixture. Full Playwright discovery reproduced the
+syntax error; removing the duplicate preserved both sides' readiness assertions.
+Full discovery and the exact CI shard planner then passed, followed by the
+fixture's ESLint check. After future base integrations, full discovery and shard
+planning supplement focused browser tests so unexecuted fixtures are parsed too.
+The final native capture build passed using a task-owned Go cache after a shared
+cache file disappeared during compilation. No shared cache was cleared and no
+test timeout, retry setting, or source gate was weakened.

@@ -4,7 +4,6 @@ import { waitForSessionDone } from "../../helpers/session";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import { waitForSessionDone } from "../../helpers/session";
 import {
   createOverrideTask,
   deleteFixtureTasks,
