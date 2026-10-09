@@ -11,7 +11,8 @@ owners:
 ## Overview
 
 Users need the same profile controls regardless of how they reach an executor
-profile. The executor system owns this contract because it owns profiles and
+profile. Creation and editing must retain independently received catalogue
+choices. The executor system owns this contract because it owns profiles and
 their available settings.
 
 ## Requirements
@@ -37,6 +38,9 @@ their available settings.
 - **AC-EXECUTORS-PROFILE-EDITOR-001.13:** When an existing built-in profile save succeeds while its owning executor remains available, the accepted profile shall appear in the shared catalogue without undoing any unrelated executor or sibling-profile addition, update, or removal received while the request was pending. Every unrelated current entry and the owning executor's current metadata shall be retained; unrelated entries removed meanwhile shall remain absent. Desktop and phone task creation and subtask choices shall continue to expose the retained eligible profiles with their current names and executor metadata.
 - **AC-EXECUTORS-PROFILE-EDITOR-001.14:** A rejected or failed built-in profile save shall leave the current shared catalogue unchanged, retain the unsaved draft and dirty state, and report the existing failure. A successful save shall retain the existing contributor, saved-state, permission, and notification behavior.
 - **AC-EXECUTORS-PROFILE-EDITOR-001.15:** When deletion of a built-in profile succeeds, only that profile shall be removed from the current shared catalogue. All unrelated current executors, owning-executor metadata, and sibling profiles shall be retained, and unrelated entries removed during the request shall remain absent. The existing successful delete navigation shall remain available. A failed deletion shall not publish a catalogue change or successful navigation and shall retain the existing failure handling.
+- **AC-EXECUTORS-PROFILE-EDITOR-001.16:** When normal Local, Worktree, Docker, or Sprites profile creation succeeds while its owning executor remains available, the accepted new profile shall appear without undoing any unrelated executor or profile addition, update, or removal received during the request. Every unrelated current entry, including sibling profiles and the owning executor's current metadata, shall be retained; unrelated entries removed meanwhile shall remain absent. Desktop and phone task creation and subtask choices shall expose the retained eligible profiles with their current names and executor metadata.
+- **AC-EXECUTORS-PROFILE-EDITOR-001.17:** When a live creation notification has already published the accepted new profile before its normal creation response is applied, applying that response shall leave exactly one membership for that profile in its current owning executor and one corresponding eligible task-picker choice. The accepted response shall supply that membership's profile values without altering unrelated entries.
+- **AC-EXECUTORS-PROFILE-EDITOR-001.18:** Normal built-in creation shall retain its existing submitted values, validation, permissions, contributor and dirty-state behavior, and successful navigation to the accepted profile's complete editor. A rejected or failed creation shall leave the current catalogue unchanged, retain the unsaved draft and failed contributor state, report the existing failure, and stay on the creation route.
 
 ## Related requirements
 
@@ -52,9 +56,11 @@ editor reachability without redesigning those controls.
 - Concurrent omission preservation for other profile fields or stale editor drafts that explicitly submit both scripts.
 - Changes to script execution timing, running resources, credentials, or runtime cleanup policy.
 - Concurrent server arbitration for the edited profile, target deletion versus save ordering, retired-page request ownership, or catalogue-wide revision policies.
+- Restoring an executor removed during creation, arbitration against a newer update of the accepted target, repairing previously duplicated catalogue rows, or redesigning live notification writers and separate SSH, Remote Docker, Kubernetes, or plugin creation flows.
 
 ## Implementation plans
 
 - [Unified profile editor](../../../plans/executor-profile-editor-unification/plan.md)
 - [Preserve scripts during partial saves](../../../plans/executor-profile-script-preservation/plan.md)
 - [Preserve the current catalogue during profile mutations](../../../plans/executor-profile-catalogue-preservation/plan.md)
+- [Preserve choices during built-in profile creation](../../../plans/executor-profile-create-catalogue-preservation/plan.md)

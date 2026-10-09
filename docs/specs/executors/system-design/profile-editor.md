@@ -23,6 +23,7 @@ pages retain their existing routes and behavior.
 | AC-EXECUTORS-PROFILE-EDITOR-001.6 | Phone composition |
 | AC-EXECUTORS-PROFILE-EDITOR-001.8 through .12 | Partial-save script persistence |
 | AC-EXECUTORS-PROFILE-EDITOR-001.13 through .15 | Current catalogue publication |
+| AC-EXECUTORS-PROFILE-EDITOR-001.16 through .18 | Normal creation catalogue publication |
 
 ## Components and navigation
 
@@ -273,8 +274,105 @@ change. The mobile-parity state/data exception permits these targeted component
 tests instead of new phone/browser tests or builds. No new persistence, schema,
 API, telemetry or arbitration boundary is introduced, so no new ADR is needed.
 
+## Normal creation catalogue publication
+
+`CreateProfilePage` at `/settings/executors/new/:type` dispatches `local`,
+`worktree`, `local_docker`, and `sprites` to `CreateProfileForm` and its
+`useCreateProfileSave` in `apps/web/app/settings/executors/new/[type]/page.tsx`.
+`EXECUTOR_TYPE_MAP` resolves their owners to `exec-local`, `exec-worktree`,
+`exec-local-docker`, and `exec-sprites`. Their common contributor uses the
+production `SettingsSaveProvider` coordinator. Keep payload construction,
+validation, build/secret prerequisites, permissions and contributor identity
+with their existing owners.
+
+The creation hook must not map a catalogue captured before
+`createExecutorProfile` completes. Because `setExecutors` replaces the array,
+that would erase a profile that the registered `executor.profile.created`
+handler published for another existing executor while the POST was pending.
+This is a client catalogue loss; the service does not delete the independent
+profile. Task-create and subtask options consume this same catalogue through
+the fallback projection and `useExecutorProfileOptions` described above.
+
+### Acknowledgement publication
+
+Acquire the owning store through `useAppStoreApi`. After the POST succeeds,
+read `store.getState().executors.items`, resolve the current executor by the
+captured `executorId`, and publish synchronously over that current catalogue.
+There must be no intervening await. Reuse the existing
+`upsertExecutorProfile` from `profile-edit-page-chrome.tsx`, passing the
+current owner rather than a pre-request executor snapshot. It preserves
+current metadata and siblings, replaces a matching target ID, and appends
+only when that target is absent. Guard an absent current owner: leave the
+catalogue unchanged rather than restoring the removed executor.
+Do not use the helper's missing-owner synthesis for this route.
+
+Remove the captured catalogue subscription from this hook's publication input
+and callback dependencies. Keep all form state and the shared contributor's
+revision tracking, `isDirty`, `canSave`, saving/error state, rejection
+propagation, navigation blocker bypass, and canonical destination intact.
+Creation does not gain the existing editor's draft baseline or discard policy.
+On failure, no acknowledgement publication or successful navigation occurs;
+live updates received during the pending request remain visible.
+
+### Event-before-response membership
+
+`Service.CreateExecutorProfile` persists the profile and calls
+`publishExecutorProfileEvent(..., events.ExecutorProfileCreated, profile)`
+before returning to `httpCreateProfile`, which then returns the profile DTO.
+WebSocket arrival can therefore precede HTTP arrival. The registered created
+handler appends to the current owner. A current-catalogue append in the
+creation hook would then introduce a second target membership. The selected
+upsert replaces the already published target by ID with the accepted response.
+Prove this order with the actual handler and API adapter in the page test,
+including an independent live choice in the same pending interval. Assert
+target membership and target option counts, not just a name's presence.
+
+This boundary covers a single creation notification delivered before its HTTP
+acknowledgement. It introduces no duplicate-event handling, notification-after-
+acknowledgement writer redesign, timestamp arbitration, generic cache, global
+revision, persistence, schema, API, or framework change. Same-owner sibling
+preservation requires independently authored causal page coverage before the
+repair can claim it. The earlier normal editor correction remains separate.
+
+### Caller and verification boundaries
+
+SSH and Remote Docker dispatch to their separate create pages, which read
+`store.getState()` after their executor/profile requests. Kubernetes dispatches
+to `KubernetesCreatePage` and its existing current-store resource hook. Plugin
+creation does not enter this normal form. Audit these callers without changing
+them. The four normal callers share the repaired hook; Docker build checks and
+Sprites secret/network configuration retain their current behavior.
+
+Independently author permanent component integration tests only after the later
+implementation release. Mount the real `CreateProfilePage`,
+`StateProvider`/`createAppStore`, `ToastProvider`, `SettingsSaveProvider`,
+`createExecutorProfile`, registered executor-profile WebSocket handlers, and
+actual `useExecutorProfileOptions`. Hold only external `fetchJson` transport;
+the external Monaco renderer/loader capability may be stubbed for the test
+environment. Do not mock the page, router, store, save contributor, API adapter,
+WebSocket handler, options hook, or internal form sections.
+
+First keep strict unchanged-catalogue creation and rejection controls. Then
+prove different-owner live creation loss with both current-store and actual-
+options soft assertions, zero unhandled errors, and accepted target success.
+Independently prove mixed different-owner additions/updates/removals and
+same-owner sibling/metadata changes. Include event-before-response uniqueness,
+rejection after a live update, and missing-owner non-resurrection controls.
+Assert production fallback metadata and eligibility as well as IDs and names.
+Settle all held promises and coordinator completions, unmount providers,
+restore history/navigation guards and clear owned timers on every exit.
+
+This repair changes only state/data publication inside the existing form.
+Composition, copy, touch behavior, scrolling, navigation structure and
+viewport-dependent interaction stay unchanged. The mobile-parity state/data
+exception permits targeted component integration evidence without new phone
+Playwright tests, UI sketches, or browser builds. Reassess that exception if
+implementation changes any of those surfaces. Existing store ownership and
+upsert semantics supply this correction; no new ADR is required.
+
 ## Implementation plans
 
 - [Unified profile editor](../../../plans/executor-profile-editor-unification/plan.md)
 - [Preserve scripts during partial saves](../../../plans/executor-profile-script-preservation/plan.md)
 - [Preserve the current catalogue during profile mutations](../../../plans/executor-profile-catalogue-preservation/plan.md)
+- [Preserve choices during built-in profile creation](../../../plans/executor-profile-create-catalogue-preservation/plan.md)
