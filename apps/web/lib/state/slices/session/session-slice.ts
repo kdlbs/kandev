@@ -4,10 +4,12 @@ import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
 
 import type { Draft } from "immer";
 import { original } from "immer";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import type { Message, TaskSession, WorkspaceRecoveryProjection } from "@/lib/types/http";
 import type {
   QueueMeta,
   QueueOperationToken,
+  SessionAgentctlStatus,
   SessionSlice,
   SessionSliceState,
   TaskSessionHydrationEpoch,
@@ -970,6 +972,15 @@ function promoteAgentctlReadyFromSessionSnapshot(
   session: Pick<TaskSession, "id" | "state" | "updated_at" | "agent_execution_id">,
 ): void {
   const current = draft.sessionAgentctl.itemsBySessionId[session.id];
+  const previousObservedAt = parseStrictRfc3339Timestamp(current?.updatedAt);
+  const snapshotObservedAt = parseStrictRfc3339Timestamp(session.updated_at);
+  if (
+    previousObservedAt !== null &&
+    snapshotObservedAt !== null &&
+    snapshotObservedAt < previousObservedAt
+  ) {
+    return;
+  }
   if (
     !sessionStateConfirmsAgentctlExecutionReady(
       session.state,
@@ -1324,7 +1335,7 @@ export const createSessionSlice: SliceCreator<SessionSlice> = (set, get) => ({
           session?.agent_execution_id,
           status.agentExecutionId,
         );
-      const nextStatus = sameLiveExecution
+      const nextStatus: SessionAgentctlStatus = sameLiveExecution
         ? { ...status, status: "ready", startingExecutionId: status.agentExecutionId }
         : status;
       const previous = draft.sessionAgentctl.itemsBySessionId[sessionId];
