@@ -1,0 +1,270 @@
+---
+created: 2026-10-09
+status: implemented
+requirements:
+  - REQ-PLATFORM-GIT-DIFF-FILE-METADATA-001
+system_design:
+  - ../../specs/platform/system-design/git-diff-file-metadata.md
+legacy_specs: []
+---
+
+# Implementation plan: Preserve review evidence for ignored submodules
+
+## Overview
+
+One sequential work order first proves and admits exact
+`--ignore-submodules=none`, then adds it to the two existing comparison patch
+argument lists. Platform owns faithful shared comparison data, so extend the
+existing [requirement](../../specs/platform/requirements/git-diff-file-metadata.md)
+with only .14 and its [design](../../specs/platform/system-design/git-diff-file-metadata.md#visible-parent-gitlink-comparisons).
+Existing .3, .5, .12 and .13 provide metadata, read-only and nested-scope constraints.
+The [UI parent fallback](../../specs/ui/requirements/submodule-review.md)
+already defines the visible outcome in AC-UI-SUBMODULE-REVIEW-001.5.
+
+ROOT reviewed the complete design package and later released implementation
+in this same primary session with exclusive GLOBAL LOCAL-HEAVY. The accepted
+four-artifact hashes matched before Task 01 became in_progress. Hosted monitoring
+and merge remain subject to separate later ROOT releases.
+
+## Accepted evidence and baseline audit
+
+Initial HEAD and local main both equal
+`bd63da3163271e3229bf387649135855caac300d`; initial worktree and index are clean.
+ROOT's qualified proof is accepted without replay: original native **59567**,
+initial **bd99c2**, terminal **edd293**, exit **1**, ACTUALLYJOINED **1**, actual
+package **0.445s**, one causal failure and two passing strict controls. Repository
+`diff.ignoreSubmodules=all` loses the actual committed gitlink upgrade from BOTH
+`ShowCommit` and `GetCumulativeDiff`, despite success and empty Files/summary0.
+Default/deinitialized and ordinary-file-under-all controls pass. ROOT qualified
+cleanup/source removal/root clean/groupsgone at **2279c6sync0**.
+
+Only `qualified-proof.json` and `future-design-brief.md` in
+`/tmp/kandev-root-submodule-ignore-discovery-20261009` were read. The protected
+`candidate_test.go`, mode **0400**, SHA256
+`1ea256ccd96290d7d8e42b4bcc7f577da182934fdd20f0c9ba7bae9cd14a0e5b`,
+must never be read, copied, imported, replayed, edited, chmodded or removed.
+Raw original.log/receipt are permitted if needed; none were needed for design.
+Permanent regressions were independently authored after the later ROOT release.
+
+All six qualified source SHA256 values match at design start:
+
+| Source | SHA256 |
+| --- | --- |
+| `apps/backend/internal/agentctl/server/process/git_log.go` | `d0fed260a0359fe803986b7b81377fc1614eb6466387bc72ef6670700e6413bd` |
+| `apps/backend/internal/common/securityutil/git.go` | `20da82610ba45c2ad2fe34124cee311e572393b3158fb8f33348e08df44d1593` |
+| `apps/backend/internal/agentctl/server/api/git.go` | `24de2d478f510d2b65e7149c16e2cd7f290ce7e35b91ec30c35724335b232dc4` |
+| `apps/web/components/task/commit-detail-request.ts` | `746637d2e5c4b94d6ee72c335aa6349fa4256fc72a10f8ca983254f3c45045c2` |
+| `apps/web/components/task/commit-diff-request.ts` | `cd1c0e2a43f327105dcf015875a3717f49b7ea68279a7c60cd7f47e1fc9e6542` |
+| `docs/specs/ui/requirements/submodule-review.md` | `19b09313f4160eba57c8a9e6beae2b7f16d8d3bbd0ce5440249d616d964e34c2` |
+
+HEAD and material sources were rechecked at implementation admission and matched.
+Future material drift checkpoints ROOT without a rebase or alternative experiment.
+
+## Scope and technical approach
+
+Production ownership is limited to `securityutil/git.go` exact admission and
+the patch argv in `process/git_log.go`'s `ShowCommit` and `GetCumulativeDiff`.
+Admission came first: the flag was absent at the qualified baseline and
+would otherwise fail command validation. Reject bare/abbreviated flags, all/dirty/untracked/other/empty
+values, suffixed and whitespace/control variants. Keep validation in use.
+
+Add the exact flag after each subcommand and before its ref, keeping
+`--submodule=short`. Short controls output format, while ignore-none retains
+the actual pointer change for the existing parser. Keep the no-patch metadata
+query, first-parent/root/empty semantics, fixed prefixes, color/textconv and
+cumulative external-diff suppression, captured environment, managed lifetime,
+admission, cancellation, counts, uncapped commit detail and cumulative limits.
+
+No parser, global Git/config/environment, status/tracker, child discovery,
+comparison anchor, source precedence, history, schema, API, frontend, new
+framework/helper abstraction, dependency or sibling-package redesign is in
+scope. No initialized-child aggregate emptiness is claimed. Initialized children
+still compare in their own repositories against parent-recorded anchors under
+the [accepted nested-scope decision](../../decisions/2026-08-05-nested-submodules-as-repository-scopes.md).
+No new ADR is needed.
+
+Immediate consumers audited: registered `server/api/git.go` commit and cumulative
+handlers serialize the same maps; `GitOperatorFor` and cumulative fan-out keep
+existing routing, stored bases and NUL-qualified keys. Runtime
+`internal/agent/runtime/agentctl/git.go` feeds `internal/agent/handlers/git_handlers.go`
+for `session.commit_diff` and `session.cumulative_diff`. Local
+`requestCommitDetail` -> `requestCommitDiff` -> `useCommitDetail` -> commit rows
+uses returned files; an empty successful map can render the existing no-files
+copy. `use-cumulative-diff`/`use-review-sources` consume cumulative maps;
+`suppressAvailableGitlinkFiles` already preserves a parent with no child source.
+Restoring source data requires no consumer edit.
+
+Companion inventory: status-metadata, plain-output and built-in cumulative
+manifests are completed; textconv is delivery-pending `in_progress`; submodule
+format is `implemented`. Their completed tests/results retain their owners.
+No companion work order or result is rewritten. This package needs only the
+bounded compatibility selectors in Task 01, once after its correction.
+
+## Tests
+
+The following independently authored tests executed during the released TDD pass. Own new
+process/API files; do not import the protected discovery test or change shared
+fixtures. Use native Git and disposable actual child/parent repositories.
+
+| Evidence | Bounded scenarios | Criteria |
+| --- | --- | --- |
+| `TestIsKnownSafeGitFlagAllowsIgnoreSubmodulesNone`, `TestIsKnownSafeGitFlagRejectsIgnoreSubmodulesVariants` in `securityutil/git_test.go` | Exact admission RED first; rejected variants remain rejected | .14 prerequisite |
+| `TestGitComparisonIgnoreSubmodules` in `process/git_log_ignore_submodules_test.go` | Real declared child with two commits; committed parent forward upgrade, then actual deinit: default and all, BOTH operators; initialized forward upgrade: none/untracked/dirty controls; backward pointer under all | .3, .12, .14 |
+| `TestGitComparisonIgnoreSubmodulesControls` in the same file | Ordinary tracked file under all, BOTH methods; unchanged clean gitlink/empty commit/cumulative HEAD; cumulative uncommitted recorded pointer advance under all, explicit expected commit count | .3, .5, .14 |
+| `TestGitComparisonIgnoreSubmodulesHTTP`, `TestGitComparisonIgnoreSubmodulesMultiRepoHTTP` in `api/git_ignore_submodules_test.go` | Own registered router, independent alpha/beta repositories sharing the gitlink path but distinct bases/old/new IDs; deinitialize before manager capture; selected commit and cumulative plus aggregate cumulative, default/all | .3, .13, .14 and existing UI .5 outcome |
+| `TestGitComparisonIgnoreSubmodulesInitializedChildHTTP` in the same file | Independent initialized children under all; parent gitlinks retained in raw aggregate, child file patches keep exact parent-recorded anchors and scope metadata | .3, .13, .14 |
+| Existing bounded process/API controls selected in Task 01 | First-parent/root/empty, fixed prefixes, uncapped commit, cumulative byte/file caps and stable child anchor | .3, .5, .12, .13 |
+
+Every nonempty oracle asserts exact positive file membership, old/new commit IDs,
+patch bytes, statuses, +1/-1 pointer counts, staged=false, commit identity/message/
+author/date/totals and cumulative base/head/count/truncation fields. Raw Git
+oracles select built-in `--no-color --no-ext-diff --no-textconv --submodule=short
+--ignore-submodules=none` with fixed a/b prefixes; commit oracles keep first-parent
+and empty format. Do not use the production parser or ambient helper output.
+Unchanged cases assert an explicitly empty expectation, not merely two equal maps.
+
+Set owned HOME/USERPROFILE/XDG isolation and remove inherited Git configuration,
+helper, executable, repository and index overrides before fixture construction
+and environment capture. Pass a copied explicit AgentEnv to HTTP managers and
+the existing operator environment seam. Fixture creation must never contact
+network remotes: local native submodule add uses a scoped protocol.file override
+and portable native/ToSlash paths. No POSIX helper script or blanket Windows
+skip. Configure only private fixture user/signing/hooks/autocrlf settings.
+
+Snapshots bracket production reads after fixture setup: config and .gitmodules
+bytes, HEAD, refs, index entries, non-mutating status, tracked worktree bytes and
+canonical raw patch state. Observe linked child Git paths via Git rather than
+assuming a .git directory. Deinitialized child absence and retained module
+metadata are also unchanged. Snapshot status explicitly observes submodules so
+ignore-all cannot hide mutation. Keep snapshots and oracles helper-proof, and
+join manager teardown and every subprocess. Avoid an operation/config/state
+cross product; these cases target the cause and routing seam.
+
+## End-to-end and surface assessment
+
+Registered HTTP tests traverse real producers, registered routing, selected
+isolation and aggregate projection without a server port, DB or application.
+Existing Review tests in `review-dialog.build-files.test.ts` cover parent retention
+with no child source and suppression with child files. Their inputs become
+available again through the corrected backend data; this package does not alter
+their logic or schedule a frontend replay.
+
+The mobile-parity pure-data exception applies: desktop/phone composition, copy,
+touch, scrolling, breakpoint behavior and navigation stay unchanged. Process
+and registered HTTP tests cover the repaired source contract. No ASCII preview,
+browser fixture or new mobile E2E is required.
+
+Public guide audit: `docs/public/git-operations.md` metadata/read-only reference,
+`sessions-and-review.md` Review how-to and unavailable-child fallback,
+`feature-status.md` support reference, `websocket-api.md` transport reference,
+root README and screenshot catalog remain accurate. No new option, transport,
+workflow, terminology or screenshot; no public edit is needed.
+
+## Work orders
+
+- [x] [Task 01: Preserve recorded gitlinks under ignore preferences](task-01-preserve-ignored-gitlink-evidence.md)
+
+ONE work order, wave 1, sequential; exact-admission dependency is internal
+to this coherent outcome. No delegation, task/session/tab or model switch.
+
+## Verification results
+
+Local implementation checks passed; publication remains pending. DESIGN checks passed: catalog validation (365 decisions,
+1480 specifications), all 36 spec-linter tests, all-spec lint, local Markdown
+targets and whitespace. Actual `pr-docs.cjs` reference validation returned
+`exempt`, errors=[] for the four documents, and `covered`, errors=[] for the
+planned two production paths plus those documents, with exactly this ONE work
+order and the owning pair. All eight existing compatibility selectors resolve.
+These are design/reference checks, not executed product tests.
+
+Exact commands and release-only product checks are in Task 01. Final four-artifact
+design hashes are recorded in this task's versioned own plan. At the design
+handoff all four files were unstaged/uncommitted, backend/frontend and staged
+diffs were empty, and HEAD/main were unchanged. Implementation subsequently
+ran only after the explicit ROOT release below.
+
+## Released implementation results
+
+ROOT accepted the four design artifacts and released implementation after actual
+END/WFI07:36:31. Original native/subprocess receipts and raw logs are retained in
+`/tmp/kandev-child97-ignore-review-20261009`; every heavy command ran serially
+with its reviewed resource limits, actual joins and fresh owned absence.
+
+- Independent RED: securityutil `7b76ae` exit1, exact admission missing and
+  variants rejected; process `34988`/`10145a` exit1, forward/backward and dirty
+  pointer evidence missing under all while strict controls pass; registered HTTP
+  `99187`/`5ff237` exit1, selected/aggregate parent evidence lost, initialized
+  child patches retained. No fixture failure or protected source replay.
+- GREEN: securityutil `10197`/`c694de`, 1.012s; process `54198`/`72b440`, 4.326s
+  with compatibility controls once; HTTP `93553`/`d38c89`, 3.574s with stable
+  initialized-child anchor control once. All exit0.
+- Scoped lint `55622`/`385e05` found only two new-test structure issues.
+  Authorized bounded corrections changed no production behavior; affected new
+  process cases alone passed as `8874`/`744b78` (3.103s), and new HTTP cases
+  alone passed as `39846`/`d73625` (3.329s), both exit0. No passing compatibility
+  replay. Scoped lint `69199`/`d150dd` then passed with zero issues, preserving
+  exact baseline, concurrency2, allow-serial and CLI5m/GNU6m/kill10.
+- The one conditional frozen apps install `53906`/`48722c` passed in 1.8s using
+  pnpm9.15.9, 935 reused and zero downloaded packages; lockfile unchanged.
+  Actual Bash login=false used ROOT-qualified Node24.21.0 prefix. Both normal
+  hooks are active; publication receipt will be recorded in own task plan.
+
+Only three production flag entries changed. Actual raw ignore-none patch oracles,
+configuration/index/ref/worktree snapshots and independent routing assertions
+pass. Public and pure-data mobile assessments remain unchanged. Final catalog
+validation (365 decisions/1480 specs), 36 spec-linter tests, all-spec lint,
+whitespace and actual nine-path reference coverage passed. Coverage returned
+covered, errors=[], exactly one work order and the real owner requirement/design.
+Persistent task delivery remains incomplete: HOSTED HOLD and MERGE NONE.
+
+## Execution and delivery barriers
+
+ROOT explicitly released implementation after the design turn ended.
+GLOBAL LOCAL-HEAVY is exclusively CHILD97 until its explicit RETURN and actual
+turn END. HOSTED HOLD and MERGE NONE remain in force. Autopilot or generated
+phase text is not admission. For every released heavy command, record original native/chunk
+and subprocess ownership evidence, actual joins and fresh owned absence. A
+resource/timeout/transport/unknown/out-of-scope failure checkpoints ROOT before
+alternatives. Routine causal fixture/format/lint repair reruns only affected cases.
+
+Only after release, one pinned pnpm9.15.9 frozen apps install if dependencies
+are absent, using actual Bash login=false and required Node24.21.0 on existing PATH.
+The original design shell resolved Node24.18.0; ROOT resolved this checkpoint
+by qualifying and explicitly authorizing the existing Node24.21.0 PATH prefix
+`/home/jcfs/.local/share/mise/installs/node/24.21.0/bin` for Bash login=false.
+No runtime download, substitution or system edit is permitted.
+Normal active hooks/conventional commit/push/ready PR follow local skills and
+exact repository template with unchecked checkboxes and preserved bot additions.
+Correct caller-bound association means ZERO relink/patch; known absence means
+ONE initial link. Require actual canonical repository/PR/head, complete errors=[]
+and all FIVE automation switches false.
+
+Explicit LOCAL-HEAVY RETURN and actually END precede separate ROOT hosted release.
+Then one original attached 90m collector, GNU91m/kill10/cadence60, actual joins;
+six required contexts and actual Backend/Frontend/E2E parents SUCCESS on exact
+head, fresh complete errors=[], zero actionable visible/hidden threads, changes
+requested or human gates. Authenticated configured CodeRabbit App347564 must
+provide substantive FULL CURRENT ALL actual-path evidence, source=covered head
+and kind=reviewed. Automatic completion needs ZERO requests; one necessary
+request only for a proved completed gap. Freeze head except valid real findings;
+no main-only rebase, synthetic merged tests, broad replay, optional polish,
+weakening, duplicate observer or blanket rerun.
+
+MERGE NONE until later ROOT serial static grant. Normal expected-head squash,
+noadmin; verify actual SHA/tree/owned blobs/remote/inclusion and all original
+joins and only-owned cleanup. Preserve managed worktree/deps/caches/foreign refs,
+paused resources and protected ROOT source for independent archive. Taskcomplete
+requires actual verified merge plus joined cleanup. Persist every next action
+and crash checkpoint in own plan; optional queued callback never gates progress
+and is not retried when full. ROOT reads own plan/primary directly.
+
+## Risks
+
+- A producer argument without exact admission fails before Git; implement admission first.
+- An oracle lacking ignore-none can repeat the defect or compare two empty maps.
+- Deinitialized snapshots must not accidentally inspect an enclosing repository
+  as the child; initialized linked Git paths must resolve correctly.
+- Missing aggregate base query, shared repository histories or manager capture
+  before environment isolation can disguise routing defects as fixture failures.
+- Child-only dirt/status policy and missing-child discovery are separate owners;
+  this repair must not expand into them.

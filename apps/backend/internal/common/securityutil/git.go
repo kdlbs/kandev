@@ -117,6 +117,7 @@ func IsKnownSafeGitFlag(arg string) bool {
 		"--no-ext-diff",
 		"--no-textconv",
 		"--submodule=short",
+		"--ignore-submodules=none",
 		"-z",
 		"--untracked-files=no",
 	}

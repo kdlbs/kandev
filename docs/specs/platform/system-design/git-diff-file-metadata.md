@@ -37,13 +37,72 @@ literal selection, and porcelain-owned workspace classification.
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.8, .9 | Built-in cumulative patches; Callers and transport |
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.10, .11 | Actual-byte comparison patches; Callers and transport |
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.12, .13 | Short parent gitlink patches; Callers and transport |
+| AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.14 | Visible parent gitlink comparisons; Callers and transport |
+
+## Visible parent gitlink comparisons
+
+Short output selects a format; it does not override `diff.ignoreSubmodules`.
+At the qualified repair baseline, an `all` preference removed a real committed
+pointer update from both patch producers before the existing parser saw a
+section. With the child unavailable, this removed the only evidence needed by
+[AC-UI-SUBMODULE-REVIEW-001.5](../../ui/requirements/submodule-review.md).
+
+The exact argument list of `securityutil.IsKnownSafeGitFlag` in
+`apps/backend/internal/common/securityutil/git.go` admits only exact
+`--ignore-submodules=none`. It rejects the bare/abbreviated
+name, other or empty values, suffixes, whitespace and control-character variants.
+No safe prefix or validation bypass is needed. This exact admission was absent
+at qualified repair baseline `bd63da3163271e3229bf387649135855caac300d`;
+it is implemented as the dependency of both producer changes.
+
+The two existing patch argv of `ShowCommit` and `GetCumulativeDiff` in
+`git_log.go` pass the admitted flag after the subcommand and before the ref.
+Retain `--submodule=short`, first-parent semantics, color/textconv suppression,
+cumulative external-diff suppression, fixed prefixes, captured environment,
+managed execution, admission and cancellation. The no-patch commit metadata
+query, parser, counts, budgets, status/tracker, history and other Git operations
+keep their existing contracts. No config write, retry, new subprocess, API or
+frontend change is required.
+
+The parent map supplies the gitlink fallback through the existing registered
+HTTP and WebSocket projections. Initialized children remain distinct scopes
+with parent-recorded anchors. Review's existing
+`suppressAvailableGitlinkFiles` in `apps/web/components/review/types.ts` retains
+the parent when no child contributes files and suppresses it when child files
+are available. This repair does not redefine discovery, source precedence,
+child-only dirt policy or presentation. A missing parent map does not establish
+that initialized-child aggregate data is empty.
+
+Independent permanent regressions use real Git operators and their own registered
+selected/aggregate HTTP fixture. A real declared submodule is deinitialized after
+committing its pointer advance, so the child cannot supply alternate evidence.
+Use explicit positive old/new commit IDs and raw built-in short/ignore-none patch
+oracles with color, external diff and textconv disabled, never the production
+parser or equality of empty results. Bound ignore-mode controls rather than
+crossing every child state, operation and setting. Independent HTTP repositories
+share a gitlink path but have distinct child IDs and parent bases; initialized
+child evidence separately verifies existing anchors and metadata. Snapshot owned
+config, HEAD, refs, index entries and worktree status/content around reads,
+resolving linked child Git paths. Isolate HOME/USERPROFILE/XDG and Git environment
+before fixture creation and operator/manager capture. Native Git and portable
+paths provide native Windows coverage without shell helper fixtures or shared
+fixture edits.
+
+The pure-data mobile exception applies: composition, copy, touch, scrolling,
+navigation and breakpoints are unchanged. Registered HTTP and operator evidence
+prove the repaired data seam; no browser fixture or preview is required. Public
+Git operations, sessions/Review, feature-status and WebSocket guidance, README
+and screenshots already describe faithful metadata, nested anchors and unavailable
+child fallback; they need no edit. This remains within accepted nested-scope and
+shared comparison boundaries, so no new ADR is needed. Delivery is in the
+[one sequential work-order package](../../../plans/git-submodule-ignore-review-evidence/plan.md).
 
 ## Short parent gitlink patches
 
 The prerequisite is exact safe-flag admission: add only `--submodule=short`
 to the exact argument list in `securityutil.IsKnownSafeGitFlag`
-(`apps/backend/internal/common/securityutil/git.go`). It is absent at the
-qualified baseline. Reject abbreviated names, other values, extra suffixes,
+(`apps/backend/internal/common/securityutil/git.go`). It was absent at the format repair
+baseline `993f60ce889b6dcca1ca19fe98703a9159ab28c3` and is now admitted. Reject abbreviated names, other values, extra suffixes,
 empty values and whitespace variants. Do not admit a `--submodule` prefix,
 bypass validation, or change global Git configuration/environment policy.
 
@@ -196,7 +255,7 @@ application instance, browser, database, or external service is needed.
 
 ## Preserved contracts
 
-Apart from the plain-output flags, cumulative external-diff suppression, these two producers' text-conversion suppression and short gitlink display, keep Git argv/environments, first-parent and root behavior, genuinely empty
+Apart from the plain-output flags, cumulative external-diff suppression, these two producers' text-conversion suppression, short gitlink display and explicit gitlink visibility, keep Git argv/environments, first-parent and root behavior, genuinely empty
 results, fixed prefixes, exact paths and patch bytes, line counts and aggregates,
 per-file/total/file-count limits, skip reasons, and all response shapes.
 Workspace mutation and history-provider code are outside this helper's boundary.

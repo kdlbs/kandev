@@ -2,6 +2,27 @@ package securityutil
 
 import "testing"
 
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.14
+func TestIsKnownSafeGitFlagAllowsIgnoreSubmodulesNone(t *testing.T) {
+	if !IsKnownSafeGitFlag("--ignore-submodules=none") {
+		t.Fatal("the gitlink visibility comparison flag must be allowed")
+	}
+}
+
+func TestIsKnownSafeGitFlagRejectsIgnoreSubmodulesVariants(t *testing.T) {
+	for _, flag := range []string{
+		"--ignore-submodules", "--ignore-submodule", "--ignore-submod", "--ignore-submodules=",
+		"--ignore-submodules=all", "--ignore-submodules=dirty", "--ignore-submodules=untracked",
+		"--ignore-submodules=other", "--ignore-submodules=none-extra", "--ignore-submodules=none=all",
+		" --ignore-submodules=none", "--ignore-submodules=none ", "--ignore-submodules=none\t",
+		"--ignore-submodules=none\n", "--ignore-submodules=none\x00",
+	} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Errorf("unsupported gitlink visibility flag %q admitted", flag)
+		}
+	}
+}
+
 // @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.12
 func TestIsKnownSafeGitFlagAllowsSubmoduleShort(t *testing.T) {
 	if !IsKnownSafeGitFlag("--submodule=short") {
