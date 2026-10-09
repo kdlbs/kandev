@@ -24,6 +24,7 @@ pages retain their existing routes and behavior.
 | AC-EXECUTORS-PROFILE-EDITOR-001.8 through .12 | Partial-save script persistence |
 | AC-EXECUTORS-PROFILE-EDITOR-001.13 through .15 | Current catalogue publication |
 | AC-EXECUTORS-PROFILE-EDITOR-001.16 through .18 | Normal creation catalogue publication |
+| AC-EXECUTORS-PROFILE-EDITOR-001.19, .20 | Executor policy acknowledgement publication |
 
 ## Components and navigation
 
@@ -370,9 +371,99 @@ Playwright tests, UI sketches, or browser builds. Reassess that exception if
 implementation changes any of those surfaces. Existing store ownership and
 upsert semantics supply this correction; no new ADR is required.
 
+## Executor policy acknowledgement publication
+
+`ExecutorEditPage` and its `ExecutorEditForm` in
+`apps/web/app/settings/executor/[id]/page.tsx` own executor-wide MCP-policy
+editing. The shared `SettingsSaveProvider` snapshots the contributor and
+revision, then awaits its `handleSave`. A subscribed `executors.items` captured
+by that callback is not a safe publication base after transport: `setExecutors`
+replaces the whole array. Registered handlers in
+`apps/web/lib/ws/handlers/executor-profiles.ts` already apply created, updated,
+and deleted profile events over their current store. Republishing the captured
+array loses those independently received choices.
+
+Acquire the form's owning store with `useAppStoreApi`. After the existing
+`executor.update` request or `updateExecutorAction` resolves, read that store's
+current `executors.items` immediately before synchronous publication. Map only
+the matching accepted executor ID with the existing `{ ...item, ...updated }`
+merge. Leave all other current entries intact, and do not insert a missing
+executor. Remove the form's captured catalogue subscription as publication
+input. Keep `ExecutorEditPage`'s subscribed owner resolution and the distinct
+`DeleteExecutorSection` intact. Do not add an await between the read and write,
+a new store action, global singleton, revision scheme, or cache owner.
+
+### Response and draft boundaries
+
+The REST action calls PATCH `/api/v1/executors/:id` using its existing `fetch`;
+the WebSocket branch requests `executor.update`. Both registered backend update
+handlers use `dto.FromExecutor`, which includes accepted metadata/config but
+does not populate `profiles`. Only the executor-list path attaches profiles.
+The current-item merge therefore retains the matching executor's live profile
+membership. Keep the existing response contract and spread semantics rather
+than synthesizing a replacement profile list or changing an API adapter.
+Concurrent server writes to the saved executor's fields remain outside this
+client-publication contract.
+
+Keep the existing payload construction: captured executor config plus submitted
+`mcp_policy`, with `name` omitted for system executors. The accepted
+`updated.config?.mcp_policy ?? ""` remains the saved baseline. The raw current
+draft is not rewritten by success. Matching accepted/submitted policy clears
+dirty state; a newer draft or a differing normalized response retains the
+existing draft-versus-baseline dirty comparison. Discard restores the accepted
+baseline through the existing contributor. Transport rejection occurs before
+baseline/publication and propagates to the shared coordinator's failure state.
+This repair adds no normalization or navigation policy.
+
+### Immediate writers and consumers
+
+`ExecutorProfilesCard.refreshProfiles` awaits `listExecutorProfiles` and maps a
+captured catalogue; its create/delete callbacks invoke that separate refresh.
+Policy `handleSave` never invokes it, and there is no mount-time refresh.
+Neither that writer nor `DeleteExecutorSection.handleDelete` is a causal
+dependency of the qualified policy-save loss. They remain outside this package.
+An independently proved dependency would require a scope checkpoint before
+expanding production edits.
+
+Task-create and subtask subscriptions, fallback `executor_type`/`executor_name`
+projection, and actual `useExecutorProfileOptions` are described under
+[Current catalogue publication](#current-catalogue-publication). Reuse those
+real consumers for evidence; preserve their provider and capability gates.
+New-session labels remain a consumer, not a profile-picker repair target.
+
+### Verification and phone boundary
+
+Mount the real `ExecutorEditPage`, `StateProvider`/`createAppStore`, and
+`SettingsSaveProvider` with its real coordinator. Control only external REST
+`fetch` or the external WebSocket request boundary and the external Monaco
+renderer where required; preserve actual loader exports. Keep the page, forms,
+store actions, contributor, action adapter, connection selection, registered
+profile handlers, router, and actual options hook real. Capture the store from
+inside its provider and observe actual task-start options with the production
+fallback projection. Verify eligibility and current metadata, not names alone.
+
+Independently author deferred-transport regressions for changed-other-owner
+profile creation/update/deletion, whole-owner insertion/removal, and a mixed
+catalogue. Also cover current saved-owner profile membership, missing saved
+owner non-resurrection, unchanged success, submitted/accepted policy, normalized
+response, failure with live updates, in-flight draft edits, and separate live
+providers/stores. Controls prove transport is actually held and live changes
+are visible before settlement; causal assertions then check both catalogue
+and options after success. Settle held promises/coordinator work, unmount,
+restore connection/history/guards, and drain owned timers on all exits.
+
+This is state/data publication in an existing component, with unchanged layout,
+copy, touch behavior, scrolling, navigation and breakpoint behavior. The
+mobile-parity state/data exception permits real rendered component and task-start
+view-model evidence without browser/build/E2E runs or UI sketches. No new
+architecture or operational boundary warrants an ADR. Public executor and MCP
+guides retain the same configuration and user steps; this repair restores their
+existing behavior.
+
 ## Implementation plans
 
 - [Unified profile editor](../../../plans/executor-profile-editor-unification/plan.md)
 - [Preserve scripts during partial saves](../../../plans/executor-profile-script-preservation/plan.md)
 - [Preserve the current catalogue during profile mutations](../../../plans/executor-profile-catalogue-preservation/plan.md)
 - [Preserve choices during built-in profile creation](../../../plans/executor-profile-create-catalogue-preservation/plan.md)
+- [Preserve choices during executor policy saves](../../../plans/executor-policy-catalogue-preservation/plan.md)

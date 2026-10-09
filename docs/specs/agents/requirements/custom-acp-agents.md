@@ -2,7 +2,7 @@
 status: draft
 system: agents
 created: 2026-09-22
-updated: 2026-09-28
+updated: 2026-10-09
 owners:
   - jnmanso
 ---
@@ -46,6 +46,22 @@ keeping registry changes visible without a restart.
 - **AC-AGENTS-CUSTOM-ACP-001.7:** When the capability probe spawns an operator-registered command, it
   shall accept that command even though no compiled-in literal can cover it, while a command that
   claims to be built-in shall still resolve against the allow-list.
+- **AC-AGENTS-CUSTOM-ACP-001.8:** When a terminal definition's MCP strategy save succeeds, the
+  open Agents settings surface shall reflect the accepted strategy and MCP support while retaining
+  every currently received profile creation, edit, and deletion, current agent membership, and
+  unrelated agent settings, including changes to the saving agent received while the save was pending.
+- **AC-AGENTS-CUSTOM-ACP-001.9:** When different terminal definitions save their MCP strategies
+  independently, both accepted strategies shall remain visible regardless of acknowledgement order.
+  A late acknowledgement for a definition removed from the current settings list shall not restore it.
+- **AC-AGENTS-CUSTOM-ACP-001.10:** When a terminal definition's MCP strategy save fails, the
+  current agent and profile data shall remain intact, the control shall become usable again, and the
+  existing error presentation shall apply. These save outcomes shall be shared by desktop and phone.
+
+#### MCP settings publication exclusions
+
+- Ordering competing strategy writes to the same definition across clients.
+- Changing profile selection, task launch, discovery fetching, or running sessions.
+- Changing the terminal strategy picker layout, protocol eligibility, or backend mutation contract.
 
 ### REQ-AGENTS-CUSTOM-ACP-002: Operator-Registered ACP Agents Keep Their Conversation Across Reconnects
 
