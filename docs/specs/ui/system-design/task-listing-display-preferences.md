@@ -31,6 +31,7 @@ session selection, resource budgets, swipe feedback, or topbar composition.
 | `REQ-UI-TASK-LISTING-DISPLAY-PREFERENCES-001` | Preference ownership; Remembered listing and list details |
 | `REQ-UI-TASK-LISTING-DISPLAY-PREFERENCES-002` | Portable settings contract; Entry resolution; Failure and recovery |
 | `REQ-UI-TASK-LISTING-DISPLAY-PREFERENCES-003` | Portable settings contract; Entry resolution; Home consumers; Settings and mobile composition; Verification |
+| `REQ-UI-TASK-LISTING-DISPLAY-PREFERENCES-001` criteria .13-.15 | List search admission |
 
 ## Preference ownership
 
@@ -206,6 +207,48 @@ controls, and `tasks-list-view.tsx`. Details remain false by default, portable,
 and independent of Home selection. Missing metadata omits only that metadata;
 secondary row actions do not activate the row. No rich-row implementation
 change is required for Threads Home.
+
+## List search admission
+
+Criteria `AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-001.13` through `.15` map to
+this section. Delivery and validation are recorded in the
+[single-debounce package](../../../plans/task-search-debounce/plan.md).
+
+Retain `TaskSearchInput` as the single owner of the existing trailing 300 ms
+timer. Its local input value renders immediately, later edits replace its
+pending callback, and clear/unmount cancel that callback. `KanbanHeader` serves
+desktop/tablet inputs; `TasksPageContent` renders `MobileSearchBar` for phone
+search. All those List inputs publish through `TasksPageClient`'s
+`setSearchQuery`. The tablet menu's `MobileSearchSection` uses the same input.
+The phone view-options action hides search by publishing an empty query and
+unmounting `MobileSearchBar`.
+
+In `app/tasks/tasks-page-client.tsx`, consume that already-admitted query
+directly in `useTaskOperations` and `useTasksPageEffects`. Remove only this
+page's `useDebounce` call and import. Name its internal effective value
+`searchQuery`; retain the existing `debouncedQuery` field of
+`shouldSkipInitialTasksFetch` by passing `debouncedQuery: searchQuery`.
+The hook itself and all shared search components keep their current APIs.
+
+Preserve the existing pagination reset effect and initial-data skip policy.
+`listTasksByWorkspace` continues to receive the query with the existing
+workflow/repository/archive/sort/page parameters. Page changes, explicit
+refreshes, mutations, and foreground refresh reuse the admitted query.
+`useLatestWorkspaceRequest` continues to fence success, error, and finalizer
+publication by started-request sequence and workspace. This correction does
+not introduce raw-input generations or change the existing freshness boundary
+while a later input is still queued. Grouping and plugin facet sorting remain
+projections of accepted rows, rather than new query owners.
+
+Keep the existing desktop header and phone view-options -> focused inline
+search -> list composition, dismissal, scroll owners, safe areas, and touch
+geometry. No new surface, persisted state, API, metric, or dependency is needed.
+Shared Kanban search already filters locally after this input's debounce;
+changing its timer would alter an independent caller. Tests must exercise real
+input timers through List page wiring, with the API mocked at the transport
+boundary, plus focused native desktop/phone flows. No new ADR is needed for
+this local removal of a redundant timer; the work order preserves the choice
+and its compatibility rationale.
 
 ## Settings and mobile composition
 
