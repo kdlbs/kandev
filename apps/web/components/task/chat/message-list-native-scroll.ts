@@ -100,7 +100,7 @@ export function shouldPreserveFollowOnScroll(
   const scrollTopDelta = current.scrollTop - previous.scrollTop;
   if (Math.abs(scrollTopDelta) <= 2) return true;
   const contentGrowth = current.scrollHeight - previous.scrollHeight;
-  return contentGrowth > 0 && Math.abs(scrollTopDelta - contentGrowth) <= 2;
+  return contentGrowth > 0 && scrollTopDelta > 0 && scrollTopDelta <= contentGrowth + 2;
 }
 
 function resolvePaginationSettleReason(

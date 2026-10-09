@@ -317,6 +317,7 @@ function AutoScrollHarness({
   initialPlacementPending?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  useNativeScrollMetrics(scrollRef, metrics);
   const useAutoScrollWithVisibility = useAutoScroll as unknown as (
     params: Parameters<typeof useAutoScroll>[0] & { isVisible: boolean },
   ) => ReturnType<typeof useAutoScroll>;
@@ -332,7 +333,6 @@ function AutoScrollHarness({
     isProgrammaticScrollLocked: NEVER_LOCKED,
     isVisible,
   });
-  useNativeScrollMetrics(scrollRef, metrics);
   if (markRef) markRef.current = markNotNearBottom;
   return (
     <div ref={scrollRef} data-testid={AUTO_SCROLL_CONTAINER_TEST_ID}>

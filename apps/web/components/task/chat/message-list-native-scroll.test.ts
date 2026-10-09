@@ -90,6 +90,15 @@ describe("shouldPreserveFollowOnScroll", () => {
     ).toBe(true);
   });
 
+  it("keeps follow when native anchoring only accounts for part of inserted content", () => {
+    expect(
+      shouldPreserveFollowOnScroll(
+        { scrollTop: 800, scrollHeight: 1000 },
+        { scrollTop: 900, scrollHeight: 1200 },
+      ),
+    ).toBe(true);
+  });
+
   it("does not preserve follow when scroll movement is unrelated to content growth", () => {
     expect(
       shouldPreserveFollowOnScroll(
