@@ -535,8 +535,12 @@ export function handleSocketRequest(socketId: string, raw: string) {
     respond(socketId, id, { success: true });
     return;
   }
-  if (action === "session.stop") {
-    const session = state.sessions.find((item) => item.id === payload.session_id);
+  if (["session.stop", "agent.cancel", "orchestrator.stop"].includes(action)) {
+    const sessionId =
+      action === "orchestrator.stop"
+        ? findTask(String(payload.task_id))?.primary_session_id
+        : payload.session_id;
+    const session = state.sessions.find((item) => item.id === sessionId);
     if (!session) {
       respond(socketId, id, { message: "Session not found" }, true);
       return;

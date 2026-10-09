@@ -113,44 +113,52 @@ describe("demo lifecycle recovery", () => {
     expect((await messages(task.session_id)).messages.at(-1)?.turn_id).toBe("after-reload-reply");
   });
 
-  it("stops timers and queued turns without affecting a replacement run", async () => {
-    const task = await startTask();
-    await vi.advanceTimersByTimeAsync(500);
-    request("message.add", {
-      task_id: task.id,
-      session_id: task.session_id,
-      content: "Old follow-up",
-      client_message_id: "old",
-    });
-    request("message.queue.add", {
-      task_id: task.id,
-      session_id: task.session_id,
-      session_incarnation_id: `${task.session_id}-queue`,
-      content: "Old queue",
-      client_queue_id: "old-queue",
-    });
-    const before = await messages(task.session_id);
-    expect(request("session.stop", { session_id: task.session_id })).toMatchObject({
-      type: "response",
-      payload: { success: true },
-    });
-    expect(await http("GET", `/api/v1/tasks/${task.id}`)).toMatchObject({
-      body: { primary_session_state: "IDLE" },
-    });
-    expect(
-      request("message.queue.get", { task_id: task.id, session_id: task.session_id }),
-    ).toMatchObject({ payload: { count: 0 } });
-    request("message.add", {
-      task_id: task.id,
-      session_id: task.session_id,
-      content: "New follow-up",
-      client_message_id: "new",
-    });
-    await vi.runAllTimersAsync();
-    const after = (await messages(task.session_id)).messages;
-    expect(after).toHaveLength(before.messages.length + 4);
-    expect(after.at(-1)?.turn_id).toBe("new-reply");
-  });
+  it.each(["session.stop", "agent.cancel", "orchestrator.stop"])(
+    "%s stops timers and queued turns without affecting a replacement run",
+    async (action) => {
+      const task = await startTask();
+      await vi.advanceTimersByTimeAsync(500);
+      request("message.add", {
+        task_id: task.id,
+        session_id: task.session_id,
+        content: "Old follow-up",
+        client_message_id: "old",
+      });
+      request("message.queue.add", {
+        task_id: task.id,
+        session_id: task.session_id,
+        session_incarnation_id: `${task.session_id}-queue`,
+        content: "Old queue",
+        client_queue_id: "old-queue",
+      });
+      const before = await messages(task.session_id);
+      expect(
+        request(
+          action,
+          action === "orchestrator.stop" ? { task_id: task.id } : { session_id: task.session_id },
+        ),
+      ).toMatchObject({
+        type: "response",
+        payload: { success: true },
+      });
+      expect(await http("GET", `/api/v1/tasks/${task.id}`)).toMatchObject({
+        body: { primary_session_state: "IDLE" },
+      });
+      expect(
+        request("message.queue.get", { task_id: task.id, session_id: task.session_id }),
+      ).toMatchObject({ payload: { count: 0 } });
+      request("message.add", {
+        task_id: task.id,
+        session_id: task.session_id,
+        content: "New follow-up",
+        client_message_id: "new",
+      });
+      await vi.runAllTimersAsync();
+      const after = (await messages(task.session_id)).messages;
+      expect(after).toHaveLength(before.messages.length + 4);
+      expect(after.at(-1)?.turn_id).toBe("new-reply");
+    },
+  );
 
   it("rejects unsupported actions and missing stop targets", () => {
     expect(request("unsupported.action", {})).toMatchObject({ type: "error" });
