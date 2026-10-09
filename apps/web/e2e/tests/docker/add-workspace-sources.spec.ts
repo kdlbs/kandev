@@ -97,6 +97,25 @@ test.describe("Docker executor — attach workspace sources", () => {
       const session = new SessionPage(testPage);
       await session.waitForLoad();
       await session.clickTab("Files");
+      const sessionId = await session.activeChat().getAttribute("data-session-id");
+      expect(sessionId).toBeTruthy();
+      await expect
+        .poll(() =>
+          testPage.evaluate((sid) => {
+            type GitStatusWindow = Window & {
+              __KANDEV_E2E_STORE__?: {
+                getState: () => {
+                  environmentIdBySessionId: Record<string, string>;
+                  gitStatus: { byEnvironmentId: Record<string, unknown> };
+                };
+              };
+            };
+            const state = (window as GitStatusWindow).__KANDEV_E2E_STORE__?.getState();
+            const environmentId = state?.environmentIdBySessionId[sid!] ?? sid!;
+            return state?.gitStatus.byEnvironmentId[environmentId] !== undefined;
+          }, sessionId),
+        )
+        .toBe(true);
       await testPage.getByTestId("files-workspace-actions").click();
       await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
       const dialog = testPage.getByTestId("add-workspace-sources-dialog");
@@ -126,9 +145,11 @@ test.describe("Docker executor — attach workspace sources", () => {
           "/workspace/fixture-docker-second-source-main/remote-source.txt",
         ),
       ).toBe("docker-second-source fixture\n");
-      // Attaching the repository creates an untracked change and can activate
-      // the Changes tab after the earlier Files selection. Restore Files at
-      // the observation point and reveal the row if the tree is virtualized.
+      // Observe the native change notification and its panel activation before
+      // selecting Files, so a delayed notification cannot overtake the click.
+      await expect(
+        session.changes.getByText("fixture-docker-second-source-main", { exact: true }),
+      ).toBeVisible();
       await session.clickTab("Files");
       await session.fileTree.waitForFileTreeNode("fixture-docker-second-source-main", 60_000);
 

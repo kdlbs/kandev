@@ -703,3 +703,16 @@ disabled (one case each). Changed-file ESLint, typecheck, all twenty shard
 manifests and documentation validators passed. The final full-report audit and
 fresh remote CI remain delivery gates. Product cancellation and integration
 reset policy are unchanged.
+
+The next CI run passed all six container shards except the workspace-source
+observation test. Its first-failure screenshot shows the added repository in
+Changes while the test waits for a visible Files viewport; the physical file
+assertion inside the container had already passed. The test now awaits initial
+native Git status, then the actual new Changes folder and panel activation
+before selecting Files. Production panel activation policy is unchanged.
+Changed-file ESLint and web typecheck passed. Local retries-disabled execution
+was blocked before the test by image-build networking: the Docker daemon could
+not attach a build-container interface to its missing bridge. This is an
+unavailable local browser check, not a passing reproduction. No host daemon or
+production resources were changed. The exact updated integration flow requires
+fresh container CI evidence before delivery can be considered ready.
