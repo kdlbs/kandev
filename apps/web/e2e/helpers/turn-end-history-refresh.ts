@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 export const LOADING_ROWS =
   "[data-testid='session-history-loading'], [data-testid='conversation-loading-state']";
@@ -55,6 +55,8 @@ function readSuccessfulMessageListResponse(
 
 /** Records whether either transcript loading row is ever inserted. */
 export async function watchLoadingRows(page: Page) {
+  // Initial history hydration is allowed to load; observe recovery only once it settles.
+  await expect(page.locator(LOADING_ROWS)).toHaveCount(0);
   await page.evaluate((selector) => {
     const w = window as unknown as { __loadingRowSeen?: boolean };
     w.__loadingRowSeen = false;

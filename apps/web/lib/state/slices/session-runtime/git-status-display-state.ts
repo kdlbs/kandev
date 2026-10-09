@@ -84,11 +84,8 @@ function nextScope(
     branch,
     headCommit: scopedCommit(incoming.head_commit, previous?.headCommit, preserveEmpty),
     baseCommit: scopedCommit(incoming.base_commit, previous?.baseCommit, preserveEmpty),
-    comparisonTarget: scopedCommit(
-      incoming.comparison_target,
-      previous?.comparisonTarget,
-      preserveEmpty,
-    ),
+    comparisonTarget:
+      scopedCommit(incoming.comparison_target, previous?.comparisonTarget, preserveEmpty) || null,
   };
 }
 

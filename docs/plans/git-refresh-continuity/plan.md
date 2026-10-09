@@ -142,6 +142,19 @@ Package validation passed: specification catalog, full specification lint, 36 sp
 The repository documentation-coverage validator accepted the work order references using the planned renderer change as its coverage trigger.
 Post-PR fixup verification passed the focused checkout-scope hook suite (16 tests), the mobile refresh-recovery E2E with retries disabled, four isolated mobile checkout-history runs, and four retries-disabled slash-command runs. Typecheck, strict touched-file ESLint, and the production E2E build passed.
 
+## PR #3113 CI follow-up (2026-10-09)
+
+A comparison target changed from absent to empty while its branch, HEAD, base, and checkout generation stayed unchanged.
+That representation change reset expanded diff context. The display scope now normalizes both values to `null` without changing raw snapshots.
+Real target replacement still retires retained content.
+
+The focused suite passed 40 tests. The production-build browser suites passed 18 desktop and 14 phone cases without retries.
+The original six-repeat Expand all reproduction also passed without retries after the correction.
+Each browser run used one worker in the CI runtime image with 2 CPUs and 4 GiB of memory.
+Typecheck, strict touched-file ESLint, i18n checks, the production build, documentation validation, and specification lint passed.
+The [work order](task-01-preserve-reading-state.md#pr-3113-ci-follow-up-2026-10-09) records the focused commands.
+Fresh exact-head CI and the complete retry report audit remain delivery gates.
+
 ## Risks
 
 - Scope eligibility must retire old representations on checkout and comparison changes without treating enrichment-only missing metadata as replacement.

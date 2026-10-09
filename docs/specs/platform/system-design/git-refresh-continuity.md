@@ -64,6 +64,9 @@ Bind eligibility to the canonical environment and repository, checkout generatio
 Use `gitCheckoutGeneration`, `bumpSessionGitCheckoutGeneration`, and `clearGitStatus` lifecycle paths.
 Reset, branch switch, changed HEAD, environment replacement, and comparison retarget retire affected representations.
 Missing enrichment-only comparison metadata does not prove a retarget; use the explicit target and its invalidation path.
+The display scope normalizes an omitted or empty comparison target to `null`.
+These absent-target representations do not retire content or reset expanded context. Raw snapshots remain unchanged.
+Removing a real comparison target still retires its previous display scope.
 Do not invalidate display content solely for a tracker lifetime, timestamp, or publication revision change.
 Sibling repositories and sessions sharing one environment keep their own correct scope.
 A new consumer can reuse an eligible shared display snapshot; local component refs alone are insufficient.
