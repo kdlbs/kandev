@@ -147,10 +147,10 @@ test.describe("desktop Git diff refresh continuity", () => {
           `[data-review-file-key="${encodeURIComponent(TARGET_PATH)}"]`,
         );
         await expect(targetSection).toBeVisible({ timeout: 30_000 });
+        await expectDiffText(testPage, renderer, TARGET_PATH, INITIAL_MARKER, true);
         await scrollDiffIntoReadingPosition(testPage, renderer, TARGET_PATH);
         const anchorBefore = await visibleDiffAnchor(testPage, renderer, TARGET_PATH);
         expect(anchorBefore?.line).toBeGreaterThan(30);
-        await expectDiffText(testPage, renderer, TARGET_PATH, INITIAL_MARKER, true);
         await rememberDiffViewerNode(testPage, renderer, TARGET_PATH);
         await prCapture.screenshot(`git-diff-continuity-desktop-${renderer}-ready`, {
           caption: `A long ${renderer} diff is ready at a manually selected reading position`,
