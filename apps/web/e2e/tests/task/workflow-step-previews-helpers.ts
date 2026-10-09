@@ -33,16 +33,25 @@ export async function expectWorkflowStepPreviewsLoaded(
               const group = document.querySelector<HTMLElement>(
                 `[data-testid="workflow-option-steps-${id}"]`,
               );
-              const text = group?.textContent ?? "";
+              const titles = Array.from(
+                group?.querySelectorAll("span.wrap-anywhere") ?? [],
+                (element) => element.textContent,
+              );
               let previousPosition = -1;
               for (const name of stepNames) {
-                const position = text.indexOf(name);
+                const position = titles.indexOf(name);
                 if (position <= previousPosition) return true;
                 previousPosition = position;
               }
               return false;
             })
-            .map(({ id }) => id);
+            .map(({ id, stepNames }) => ({
+              id,
+              expected: stepNames,
+              rendered: document.querySelector<HTMLElement>(
+                `[data-testid="workflow-option-steps-${id}"]`,
+              )?.textContent,
+            }));
         }, workflows),
       { message: "Workflow preview steps should render in order" },
     )
@@ -132,7 +141,10 @@ const overflowStageNames = [
 ];
 
 function getOverflowStageNames(workflowName: string): string[] {
-  return overflowStageNames.map((name, index) => `${workflowName}: ${name} ${index + 1}`);
+  const names = overflowStageNames.map((name, index) => `${workflowName}: ${name} ${index + 1}`);
+  // An earlier label contains a later label, so order checks must match whole titles.
+  names[0] = `${names[1]} (architecture consultation)`;
+  return names;
 }
 
 export async function seedWorkflowStepPreviewScenario(

@@ -8,10 +8,11 @@ import {
   restoreE2EAgentRegistry,
 } from "../../helpers/managed-runtime-recovery";
 import { waitForSessionDone, waitForSessionState } from "../../helpers/session";
-import { dwell } from "../../helpers/causal-waits";
+import { dwell, watchWs } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("managed runtime startup retry", () => {
+  test.describe.configure({ retries: 0 });
   test("retries a transient npm failure in the same session and preserves shared files", async ({
     apiClient,
     backend,
@@ -257,12 +258,13 @@ test.describe("managed runtime startup retry", () => {
       });
       profileId = prepared.profile.id;
       hostFixturePath = prepared.hostFixturePath ?? "";
-      const task = await apiClient.createTaskWithAgent(
+      const task = await apiClient.createTask(
         seedData.workspaceId,
         "Cancel managed runtime retry",
-        prepared.profile.id,
         {
           description: "/e2e:simple-message",
+          agent_profile_id: prepared.profile.id,
+          prepare_session: true,
           workflow_id: seedData.workflowId,
           workflow_step_id: seedData.startStepId,
           repository_ids: [seedData.repositoryId],
@@ -270,21 +272,30 @@ test.describe("managed runtime startup retry", () => {
       );
       if (!task.session_id) throw new Error("managed runtime task did not return a session ID");
 
+      const retryEvents = watchWs(testPage);
       await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);
       await session.waitForLoad();
-      await expect(
-        session.activeChat().getByText("Retrying agent startup (attempt 2 of 2)", { exact: true }),
-      ).toBeVisible({ timeout: 30_000 });
-      expect(
-        (
-          await apiClient.stopSession({
-            session_id: task.session_id,
+      await session.waitForChatIdle();
+      const sessionId = task.session_id;
+      const stopping = retryEvents
+        .waitForEvent("session.message.updated", {
+          where: (payload) =>
+            payload.session_id === sessionId &&
+            (payload.metadata as Record<string, unknown> | undefined)?.startup_retrying === true,
+        })
+        .then(() => {
+          expect(fs.readFileSync(managedRuntimeStartupAttemptFile(launchId), "utf8").trim()).toBe(
+            "1",
+          );
+          return apiClient.stopSession({
+            session_id: sessionId,
             reason: "cancel retry backoff",
             force: true,
-          })
-        ).success,
-      ).toBe(true);
+          });
+        });
+      const [, stopped] = await Promise.all([session.sendMessage("/e2e:simple-message"), stopping]);
+      expect(stopped.success).toBe(true);
       await waitForSessionState(apiClient, {
         taskId: task.id,
         sessionId: task.session_id,

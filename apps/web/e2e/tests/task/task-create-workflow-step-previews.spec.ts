@@ -19,6 +19,7 @@ import {
 } from "./workflow-step-previews-helpers";
 
 useRegularMode();
+test.describe.configure({ retries: 0 });
 
 // @covers AC-TASKS-CREATE-WORKFLOW-STEPS-001.1 AC-TASKS-CREATE-WORKFLOW-STEPS-001.2 AC-TASKS-CREATE-WORKFLOW-STEPS-001.3 AC-TASKS-CREATE-WORKFLOW-STEPS-001.5 AC-TASKS-CREATE-WORKFLOW-STEPS-001.6
 test("loads every workflow preview from a task page and retries one failed row", async ({
