@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: done
 created: 2026-10-08
 requirements:
   - REQ-ARCHITECTURE-LINT-MIGRATED-SYSTEM-QUERY-OWNER-001
@@ -38,4 +38,5 @@ browser or E2E test is required because the work changes enforcement only.
 
 ## Status
 
-Implementation is in progress under the approved bounded scope.
+Implementation is complete under the approved bounded scope. Pull request
+delivery checks and review evidence are tracked on [PR #4357](https://github.com/kdlbs/kandev/pull/4357).

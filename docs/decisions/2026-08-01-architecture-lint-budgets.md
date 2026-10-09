@@ -61,7 +61,7 @@ The scanner-module, Python-test, central-registry, and baseline contract in this
 Python architecture-lint engine. The bounded migrated System Query owner guard uses the existing
 frontend ESLint AST path as a complementary check; it does not change the Python registry,
 baselines, shrink-only comparison, or `make lint-architecture` entry point. Its exact scope and
-limitations are recorded in the proposed
+limitations are recorded in the accepted
 [frontend ESLint architecture guard decision](2026-10-08-bounded-frontend-eslint-architecture-guard.md)
 and [system design](../specs/architecture-lint/system-design/migrated-system-query-owner.md).
 
