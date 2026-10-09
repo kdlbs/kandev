@@ -444,3 +444,73 @@ No passing product/type/i18n/backend suites replayed. Historical failed checks
 and earlier barriers remain retained; same work order, no new plan. The task is
 not complete merely because this local remediation is implemented: later ROOT
 hosted and serial merge grants remain mandatory after explicit heavy return.
+
+## Later shared seed setup-failure correction (2026-10-09, implemented)
+
+ROOT reviewed App347564 review5470668211/run e51171c3 and personally qualified
+source97's real-Git RED, exact code/tests and return in
+`/tmp/kandev-root-child97-seed-failure-return-qualified-20261009.json`.
+Seeding can throw before returning its restore callback, leaving earlier private
+commits or partially created preview files. The exact reviewed helper catches
+setup errors, attempts baseline reset and deletes only its twelve fixed preview
+paths, preserving unrelated files. It rethrows the original setup error after
+successful rollback and reports setup plus cleanup errors through AggregateError
+when restoration fails. Each commit stages only its four owning paths.
+
+The exact two-path transfer SHA256 is
+`69df44ae42a4d1845b3e25baf300b7f579d6dd3d29c32e79082708ac758eff3d`.
+Existing `apps/web/e2e/tests/git/git-continuity-preview-history.ts` changes from
+blob193208631eac7948401dcbc13f827b672eccf113 to
+blob1bfb02017eeb31dfe6496762af20bee1e3cf6277; new
+`apps/web/e2e/helpers/git-continuity-preview-history.test.ts` is blob
+4f0e25807f28fdbf78893df042b8df81517abb4e. No sibling worktree access, product
+change, geometry/assertion/timeout change, or repository runner-config change.
+
+This candidate runs exactly five real-Git Node helper cases with private exact
+Vitest selection and one worker; these cover early/later setup failure, ordinary
+three-commit success, unrelated-file preservation, and visible reset/delete
+cleanup failures. One fresh guarded Chromium Pierre continuity success control
+uses GNU900s/kill10, host/shard1, workers1/retries0/repeat1, strict fail-on-flaky,
+GOMAXPROCS2/GOFLAGS-p2/GOMEMLIMIT512MiB/Node4GiB. Then only affected helper/test
+lint/format and own docs/actual eleven-path coverage precede normal hooks and
+corrective commit/push. Source causal RED is reused without replay. No install,
+product25/type/i18n/backend/Monaco/mobile/full-shard replay, CI retry or merge.
+
+The replacement original31443/fa522c to f04763 actually joined native/subprocess
+exit143 after identity-guarded TERM to only its GNU2386385 group; all733 known
+own identities were freshly absent. Last39passed/3failed/7pending is no terminal
+CI verdict. Current old-head Shards1,5,13 diagnostics remain truthful and causal
+UNKNOWN; this helper correction is not claimed to fix them. Original89292 stays
+LOST/no verdict after the machine crash. Raw evidence is retained under
+`/tmp/kandev-child98-crash-recovery-20261009/`. Mobile probe stays unapplied/unrun.
+The same order must return the heavy lease and END/WFI after publication before
+any later hosted release. Merge remains unauthorized.
+
+### Own shared seed correction result
+
+The reviewed transfer matched both exact before/after code blobs and SHA256.
+Original helper GREEN47757/e7132e to6f054b actually joined native/subprocess
+exit0, one file/five real-Git cases passed in832ms. The private selector uses the
+existing pinned Vitest4.1.11 in Node, one worker, without repository config changes.
+Actual Node24.21.0 and pnpm9.15.9 were qualified in apps; existing dependencies
+were retained and no install performed. Source causal RED remains reused.
+
+Original Pierre GREEN72703/399023 to53f317 actually joined exit0, exactly one
+Chromium test passed in17.0s with zero failed/flaky/skipped/retries. Normal
+host/shard1/strict/workers1 guards and all five fresh backend/Vite/plugin artifact
+hashes/mtimes are retained in `green-qualified.json`. All58 recorded own
+process identities were absent at join. Managed raw log SHA256 is
+`79f51b05a5442bc051d2a648efb43b5214e9de92eb74c9e4c542aa491dfcc595`.
+Affected helper/test Prettier and ESLint passed, original28620/cc76bf to0a78e4
+joined exit0; raw command receipts, argv/cwd/env/bounds and hashes are under
+`/tmp/kandev-child98-seed-failure-fixup-20261009/`. Docs/actual eleven-path
+coverage and normal hooks/publication are retained separately.
+
+Original product/page tests, requirement/design, readiness helper and owning
+Pierre spec retain exact cde bytes. Public documentation impact is absent:
+private E2E rollback introduces no workflow, copy, configuration or API change.
+Old cde three failing CI leaves remain unresolved/causal UNKNOWN; this result is
+not represented as their fix. No broad product/type/i18n/backend/mobile/Monaco
+replay or additional review request, CI retry, observer or merge during this
+local turn. Explicit heavy return and actual END/WFI precede any later hosted
+release; the task is still incomplete until actual authorized merge verification.

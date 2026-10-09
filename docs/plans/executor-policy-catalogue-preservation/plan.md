@@ -10,7 +10,7 @@ legacy_specs: []
 
 # Implementation Plan: Preserve executor choices during policy saves
 
-Current work-order continuation: ROOT admitted the scoped shared-fixture cleanup
+Previous implemented continuation: ROOT admitted the scoped shared-fixture cleanup
 finding from review5469963689 on frozen98f2e6ea. The same order is implemented
 for its owning spec only: restore baseline and remove exactly its three untracked
 paths in nested cleanup, with real-repository post-cleanup assertions. Original
@@ -29,6 +29,19 @@ The [same work-order continuation](task-01-preserve-policy-catalogue.md#later-sc
 records scoped ownership, real post-cleanup assertions and raw receipt references.
 Later doc/coverage gates and normal publication are retained separately; no
 earlier product result or interrupted hosted verdict is promoted.
+
+Current continuation: ROOT released the reviewed preview-history setup-failure
+rollback correction to this same primary. The same order is implemented for
+exactly the existing seed helper and one real-Git regression file. The source
+causal RED is already ROOT-qualified and is accepted without replay. This
+candidate passed five real-Git helper cases and one fresh managed desktop
+Pierre control in 17.0s; affected helper/test lint and formatting passed.
+Docs/eleven-path coverage and normal publication retain separate receipts. No executor-policy behavior or public docs change.
+Original replacement observer31443 was explicitly stopped and joined exit143;
+its last39passed/3failed/7pending snapshot is retained with no CI terminal
+verdict. The three unrelated CI causes remain unknown. Evidence lives in
+`/tmp/kandev-child98-seed-failure-fixup-20261009/`. Later hosted and merge gates
+remain separate after explicit heavy return and actual END/WFI.
 
 ## Overview
 
