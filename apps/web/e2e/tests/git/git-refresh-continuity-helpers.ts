@@ -56,19 +56,24 @@ export async function scrollDiffIntoReadingPosition(
   filePath: string,
   interaction: "programmatic" | "touch" = "programmatic",
 ) {
-  await page.locator('[data-testid="review-diff-scroll"]').evaluate((element, path) => {
-    const root = element as HTMLElement;
-    const section = root.querySelector<HTMLElement>(
-      `[data-review-file-key="${encodeURIComponent(path)}"]`,
-    );
-    if (!section) throw new Error(`Missing diff section for ${path}`);
-    root.scrollTop = Math.max(0, section.offsetTop - root.offsetTop);
-  }, filePath);
   await expect
-    .poll(() => visibleDiffAnchor(page, renderer, filePath), {
-      timeout: 30_000,
-      message: "the selected diff should render visible line metadata",
-    })
+    .poll(
+      async () => {
+        await page.locator('[data-testid="review-diff-scroll"]').evaluate((element, path) => {
+          const root = element as HTMLElement;
+          const section = root.querySelector<HTMLElement>(
+            `[data-review-file-key="${encodeURIComponent(path)}"]`,
+          );
+          if (!section) throw new Error(`Missing diff section for ${path}`);
+          root.scrollTop += section.getBoundingClientRect().top - root.getBoundingClientRect().top;
+        }, filePath);
+        return visibleDiffAnchor(page, renderer, filePath);
+      },
+      {
+        timeout: 30_000,
+        message: "the selected diff should render visible line metadata",
+      },
+    )
     .not.toBeNull();
 
   if (interaction === "touch") {

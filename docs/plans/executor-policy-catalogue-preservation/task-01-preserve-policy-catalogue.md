@@ -315,3 +315,90 @@ and formatting. All completed subprocesses actually joined; their exact own
 groups were gone at join. Final fresh cleanup reconciliation is required before
 heavy return. Normal hooks/publication follow without product reruns or scope
 expansion. Hosted collection and merge remain separately gated.
+
+## Later targeted CI remediation (2026-10-09, implemented)
+
+ROOT released the same primary with an exclusive serial heavy lease after the
+original implementation and diagnostic handoffs. Actual current-head Shard11
+failed at the Pierre visible-anchor readiness assertion with NULL before refresh.
+ROOT independently qualified the matching shared-helper cause, permanent RED and
+Pierre/Monaco/mobile GREEN at source candidate
+`cd8ffc66a937e33e6fec1eab9e9e8c53129a33cf`. Those original causal receipts are
+accepted without replay: `/tmp/kandev-root-child97-causal-helper-checks-qualified-20261009.json`.
+
+This later exception to the original browser/E2E exclusion admits exactly
+`apps/web/e2e/tests/git/git-refresh-continuity-helpers.ts`,
+`apps/web/e2e/tests/git/diff-refresh-continuity.spec.ts`, and
+`apps/web/e2e/tests/git/git-continuity-preview-history.ts`. The readiness poll
+aligns the selected section and scroll root using their common viewport
+rectangles on each existing attempt. A private three-commit preview history
+establishes the 14-file regression and restores its original private repository
+head in the existing cleanup. Existing timeout, refresh assertions, strict WS
+accounting and fail-on-flaky policy remain intact. This changes only E2E setup;
+the executor-policy production fix, owning requirement/design and page tests
+retain their exact previously verified bytes. No new plan or specification owner.
+
+Transfer is only the ROOT-reviewed patch with SHA256
+`a8e7e332c3214fdb8b1835df4db5489769512b21a5449a2f7a4a9fe41d591f22`,
+manifest `/tmp/kandev-root-shared-pierre-correction-20261009/manifest.json`;
+both original changed code blobs match this candidate exactly. One new helper
+was absent. No sibling worktree/protected proof or source build artifact reused.
+
+Only ONE fresh candidate desktop Pierre continuity GREEN is admitted, with
+managed fresh backend/Vite/plugin builds, normal guards, one shard/worker,
+retries0/repeat1, strict fail-on-flaky, GNU15m/kill10, GOMAXPROCS2,
+GOFLAGS=-p=2, GOMEMLIMIT512MiB and Node4GiB. Exact selection is
+`chromium`, `tests/git/diff-refresh-continuity.spec.ts`, anchored grep
+`desktop Git diff refresh continuity retains counts and reading state with pierre-diffs$`.
+Changed-three-file ESLint/format, docs validation and actual ten-path coverage
+plus discovery and normal commit hooks precede the authorized fixup commit/push.
+No broad page/type/i18n/backend-lint replay or expanded E2E typecheck is admitted.
+
+The prepared mobile observation remains unapplied/unrun. The distinct Shard5
+mobile setup/follow cause is unproved; its assertion/fixture/production behavior
+is unchanged. A fresh automatic first CI attempt on the substantive helper
+correction is distinct from a manual hosted retry, whose budget remains unspent
+and unauthorized. No CI collector, manual review request or merge during this
+local turn; later hosted and serial merge releases remain mandatory.
+
+Original raw failed checks remain truthful. Retain every original process/native
+join/argv/cwd/env/bound/raw hash and fresh exact own process/group absence under
+`/tmp/kandev-child98-ci-remediation-20261009/`. Resource, timeout, unknown or
+out-of-scope failures checkpoint ROOT before alternatives. Publish one frozen
+candidate, preserve canonical association/FIVE flags FALSE/unchecked author body
+and bot additions, return heavy explicitly, then END/WFI. No foreign cleanup.
+
+### Own candidate remediation result
+
+The reviewed three-file transfer matched its admitted patch SHA and all new
+code blobs. On this candidate, guarded discovery found exactly one intended
+desktop Pierre case. The ONE original managed GREEN rebuilt this worktree's
+backend, Vite assets and fixture plugin from its current source, then passed
+one test in 18.8s, with zero retries/failed/flaky/skipped results. Normal guards
+reported host/shard1/chromium/strict1/workers1; no source build reused or freshness
+bypass. The original native90356/b99060 -> 1694af actually joined exit0; all
+148 observed exact own descendant identities were absent at its join. Five
+fresh artifact hashes/mtimes and exact transferred blobs are retained in
+`green-qualified.json`, raw managed log SHA256
+`738a175f460cafdda886ccea6bf4c34eab1546ea666e0dfcf39003923ecdb8e2`.
+
+Changed-three-file Prettier and ESLint passed (original29582/96cb46 -> 86216b;
+4947/372b1e -> f774f6). Catalog validation passed (80772/449f57 -> b65bb2),
+as did full spec lint (inline117b7c). The original docs-spec-lint returned
+inline exit0 before a checkpoint writer rejected an absent optional session
+field; its exact result was retained before that writer error and reconciled
+without replay. There was no product/check failure or unknown live process.
+Final diff/actual ten-path coverage and normal hooks/publication retain their
+separate original receipts in the same evidence directory.
+
+The original page fix, its two permanent test files and owning requirement/design
+remain byte-identical to the earlier frozen head. No public documentation
+change: the correction affects private E2E setup/readiness only, with no new
+user workflow, copy, configuration, API or executor behavior. The shared helper's
+Monaco/mobile controls were already causally qualified by ROOT and are not
+duplicated. The distinct mobile-last-prompt observation remains unapplied/unrun;
+its cause and eventual new-head CI outcome are not represented as resolved.
+No passing product/type/i18n/backend suites replayed. Historical failed checks
+and earlier barriers remain retained; same work order, no new plan. The task is
+not complete merely because this local remediation is implemented: later ROOT
+hosted and serial merge grants remain mandatory after explicit heavy return.
