@@ -386,10 +386,10 @@ test.describe("sidebar scrolling", () => {
         "true",
       );
       await expect
-        .poll(
-          () => reveal.evaluate(({ observation }) => observation.seen),
-          { timeout: 10_000, message: "command selection should reveal its task row" },
-        )
+        .poll(() => reveal.evaluate(({ observation }) => observation.seen), {
+          timeout: 10_000,
+          message: "command selection should reveal its task row",
+        })
         .toBe(true);
       await expect
         .poll(
@@ -407,7 +407,6 @@ test.describe("sidebar scrolling", () => {
           { timeout: 10_000 },
         )
         .toBe(true);
-
 
       await expect
         .poll(() => testPage.evaluate(() => ({ scrollX, scrollY })))
@@ -590,10 +589,10 @@ test.describe("sidebar scrolling", () => {
         "true",
       );
       await expect
-        .poll(
-          () => reveal.evaluate(({ observation }) => observation.seen),
-          { timeout: 10_000, message: "command selection should reveal its task row" },
-        )
+        .poll(() => reveal.evaluate(({ observation }) => observation.seen), {
+          timeout: 10_000,
+          message: "command selection should reveal its task row",
+        })
         .toBe(true);
       await expect
         .poll(
@@ -603,12 +602,13 @@ test.describe("sidebar scrolling", () => {
               if (!row || viewport.getClientRects().length === 0) return false;
               const viewportRect = viewport.getBoundingClientRect();
               const rowRect = row.getBoundingClientRect();
-              return rowRect.top >= viewportRect.top - 1 && rowRect.bottom <= viewportRect.bottom + 1;
+              return (
+                rowRect.top >= viewportRect.top - 1 && rowRect.bottom <= viewportRect.bottom + 1
+              );
             }, targetTask.id),
           { timeout: 10_000, message: "command selection should reveal its task row" },
         )
         .toBe(true);
-
 
       await expect
         .poll(() => testPage.evaluate(() => ({ scrollX, scrollY })))
