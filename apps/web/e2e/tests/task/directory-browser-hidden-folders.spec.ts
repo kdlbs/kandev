@@ -6,7 +6,6 @@ import { mockFolderAvailability } from "../../helpers/open-task-folder";
 import type { Locator, Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
-import { SessionPage } from "../../pages/session-page";
 import type { BackendContext } from "../../fixtures/backend";
 import type { ApiClient } from "../../helpers/api-client";
 
