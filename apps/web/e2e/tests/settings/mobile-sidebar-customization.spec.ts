@@ -99,7 +99,7 @@ test.describe("Sidebar customization on phone", () => {
       });
     }
     await testPage.goto("/settings/preferences/layouts?tab=sidebar");
-    const visibility = testPage.getByTestId("sidebar-layout-node-canvases").getByRole("switch");
+    const visibility = testPage.getByTestId("sidebar-layout-node-coordinators").getByRole("switch");
     await expect(visibility).toBeChecked();
     await visibility.tap();
     await testPage
@@ -115,6 +115,7 @@ test.describe("Sidebar customization on phone", () => {
     await testPage.goto("/tasks");
     await testPage.getByTestId("app-nav-trigger").tap();
     const menu = testPage.getByTestId("app-nav-sheet");
+    await expect(menu.getByRole("button", { name: "Coordinators", exact: true })).toHaveCount(0);
     const tasks = menu.getByTestId("mobile-navigation-tasks-toggle");
     const automations = menu.getByRole("button", { name: "Automations", exact: true });
     const plugins = menu.getByRole("region", { name: "Plugins", exact: true });

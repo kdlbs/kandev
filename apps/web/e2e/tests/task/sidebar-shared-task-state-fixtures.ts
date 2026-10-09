@@ -1,6 +1,7 @@
 import { expect, type Page, type Locator } from "@playwright/test";
 import type { StoreApi } from "zustand";
 import type { AppState } from "../../../lib/state/store";
+import type { SidebarTaskQuery } from "../../../lib/types/http";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
@@ -207,6 +208,11 @@ export async function exerciseSharedFirstResponse(
     trailing = gate();
   let requests = 0;
   await page.route("**/sidebar/query", async (route) => {
+    const query = route.request().postDataJSON() as SidebarTaskQuery;
+    if (!query.filters.some((filter) => filter.dimension === "archived" && filter.value === true)) {
+      await route.continue();
+      return;
+    }
     requests++;
     if (requests === 1) {
       const response = await route.fetch();

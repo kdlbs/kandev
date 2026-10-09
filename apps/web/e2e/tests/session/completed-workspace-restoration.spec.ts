@@ -10,8 +10,6 @@ import {
 } from "./completed-workspace-restoration-helpers";
 
 test.describe("Completed workspace restoration", () => {
-  test.describe.configure({ retries: 1 });
-
   test("restores a cold workspace and recovers a bounded failure", async ({
     testPage,
     apiClient,

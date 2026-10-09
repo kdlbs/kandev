@@ -24,6 +24,8 @@ test.describe("Changes panel Git refresh recovery", () => {
     git.exec("git reset --hard HEAD");
     git.exec("git clean -fd");
 
+    const gate = createGitEnrichmentGate(backend.tmpDir);
+    gate.arm();
     const profile = await createStandardProfile(apiClient, "Initial Git Loading Profile");
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -42,6 +44,7 @@ test.describe("Changes panel Git refresh recovery", () => {
 
     try {
       const session = await openTaskSession(testPage, "Initial Git Loading");
+      await gate.waitUntilStarted();
       await expect(session.agentStatus()).toBeVisible({ timeout: 30_000 });
       await session.clickTab("Changes");
       await expect(session.changes).toBeVisible();
@@ -50,17 +53,7 @@ test.describe("Changes panel Git refresh recovery", () => {
       const status = session.changes.getByTestId("changes-refresh-status");
       await expect(status).toContainText("Loading changes...");
       const emptyState = session.changes.getByText("Your changed files will appear here");
-      // A ready snapshot for this session can arrive before the held refresh;
-      // its empty state is valid while the next refresh is pending.
-      await expect
-        .poll(
-          async () =>
-            bridge.readyNotificationCount(task.session_id) > 0 || (await emptyState.count()) === 0,
-          {
-            message: "Hide the empty state until a ready Git membership snapshot is available",
-          },
-        )
-        .toBe(true);
+      await expect(emptyState).toHaveCount(0);
       const toolbar = session.changes.locator(":scope > div").first();
       const pendingToolbarBox = await toolbar.boundingBox();
       const panelBox = await session.changes.boundingBox();
@@ -76,6 +69,7 @@ test.describe("Changes panel Git refresh recovery", () => {
       });
 
       const priorFreshResponses = bridge.responseCount("fresh");
+      gate.release();
       bridge.releaseReadyGitStatusNotifications();
       bridge.releaseFreshGitRefreshRequests();
       const response = await bridge.waitForResponse("fresh", priorFreshResponses);
@@ -87,6 +81,7 @@ test.describe("Changes panel Git refresh recovery", () => {
         caption: "The loading feedback clears without changing the narrow toolbar height",
       });
     } finally {
+      gate.dispose();
       bridge.releaseReadyGitStatusNotifications();
       bridge.releaseFreshGitRefreshRequests();
     }

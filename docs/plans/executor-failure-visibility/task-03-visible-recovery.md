@@ -751,3 +751,29 @@ bridge in the default error output; it remains an unavailable integration
 check. That local cause does not establish the remote hosted runner cause.
 Fresh remote logs and container assertions remain delivery gates. This internal
 test diagnostic change has no user-facing copy or public documentation impact.
+
+
+The diagnostic head subsequently passed every browser and container leaf. The
+complete twenty-report audit and official retry summary agree: 3,971 first
+attempt passes, four retry passes, 47 skips and no final failures or timeouts.
+Desktop/phone executor recovery, worker-outage uncertainty, real Kubernetes
+Pod loss and both Docker source flows passed on their first attempts. Retry
+passes occurred in SSH reachability, Git diff continuity, agent settings and
+configuration-chat restart. The legacy strict audit flags those retries;
+current upstream CI accepts them. The original masked image-build cause remains
+unknown and is not inferred from the local Docker failure.
+
+Main advanced during that run and introduced two E2E conflicts. Integration
+preserves explicit zero retries for diff expansion, both native UI and stored
+session settlement before inspecting a seeded diff, and the upstream minimum
+44-pixel mobile plugin target together with animation settlement. Upstream
+explicit history-continuation admission and generation propagation are retained
+alongside executor incident reporting. Combined lifecycle and orchestrator child packages passed, as did 46 recovery
+card tests, nine additional history/model/build-error tests, web typecheck,
+changed-file lint and documentation validation. All eight desktop diff cases
+and five native phone plugin cases passed with retries disabled. The broad
+orchestrator root package reached its default ten-minute overall limit while
+entering a test reported as running for zero seconds, with no assertion failure;
+that run is recorded as failed, not a full-package pass. Focused recovery,
+admission and clarification tests then passed, including the test executing at
+the overall timeout. Updated-head remote CI remains required after integration.

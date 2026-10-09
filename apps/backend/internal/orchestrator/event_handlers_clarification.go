@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -228,6 +229,9 @@ func (s *Service) resumeDetachedClarificationWithPrompt(
 	if err := s.authorizeTaskSessionPair(ctx, data.TaskID, data.SessionID); err != nil {
 		return err
 	}
+	if options.deliverySubmissionID == "" {
+		options.deliverySubmissionID = "clarification:" + uuid.NewString()
+	}
 	prompt := buildClarificationPrompt(data)
 
 	s.logger.Info("resuming agent with clarification answer",
@@ -406,7 +410,10 @@ func (s *Service) resumeClarificationViaFallback(ctx context.Context, data clari
 		nil,
 		false,
 		launchOriginAutomatic,
-		promptTaskOptions{expectedCurrentTurnID: data.ClarificationTurnID},
+		promptTaskOptions{
+			expectedCurrentTurnID: data.ClarificationTurnID,
+			deliverySubmissionID:  "clarification:" + uuid.NewString(),
+		},
 	); err != nil {
 		if !s.retryClarificationAfterCancel(ctx, data, prompt, err) {
 			s.logger.Error("failed to resume agent via clarification watchdog fallback",

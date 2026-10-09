@@ -165,6 +165,7 @@ describe("doFetchMessages background refresh", () => {
     // A recovery resets the fetched marker, so this is also its first fetch.
     const fetch = doFetchMessages({ ...params, background: true } as never);
     expect(params.setIsLoading).not.toHaveBeenCalledWith(true);
+    expect(params.setIsWaitingForInitialMessages).not.toHaveBeenCalledWith(true);
     expect(params.setHistoryStatus).not.toHaveBeenCalledWith("loading");
     // The shared store flag drives the transcript's loading row, so it stays off too.
     expect(setMessagesLoading).not.toHaveBeenCalledWith(SESSION_ID, true);

@@ -18,6 +18,7 @@ type SocketMessage = string | Buffer;
 type DeferredRecoveryState = {
   retryRequestId: string | undefined;
   deferredReadiness: string[];
+  workspaceRestored: boolean;
 };
 
 function parseGatewayFrame(value: string): GatewayFrame | null {
@@ -57,18 +58,14 @@ function deferWorkspaceReadiness(
   frame: GatewayFrame | null,
   part: string,
   sessionId: string,
-  failRestores: boolean,
   state: DeferredRecoveryState,
 ): boolean {
   if (frame?.action !== "session.agentctl_ready" || frame.payload?.session_id !== sessionId) {
     return false;
   }
-  if (failRestores) {
-    state.deferredReadiness.push(part);
-    return true;
-  }
-  state.deferredReadiness = [];
-  return false;
+  if (state.workspaceRestored) return false;
+  state.deferredReadiness.push(part);
+  return true;
 }
 
 function forwardSuccessfulWorkspaceRetry(
@@ -86,8 +83,11 @@ function forwardSuccessfulWorkspaceRetry(
 
   state.retryRequestId = undefined;
   forwarded.push(part);
-  if (frame.payload?.success === true) forwarded.push(...state.deferredReadiness);
-  state.deferredReadiness = [];
+  if (frame.payload?.success === true) {
+    state.workspaceRestored = true;
+    forwarded.push(...state.deferredReadiness);
+    state.deferredReadiness = [];
+  }
   return true;
 }
 
@@ -103,6 +103,7 @@ export async function failWorkspaceRestoresUntilReleased(
   const recoveryState: DeferredRecoveryState = {
     retryRequestId: undefined,
     deferredReadiness: [],
+    workspaceRestored: false,
   };
 
   await page.routeWebSocket(/\/ws$/, (socket) => {
@@ -137,7 +138,7 @@ export async function failWorkspaceRestoresUntilReleased(
       const forwarded: string[] = [];
       for (const part of message.split("\n")) {
         const frame = parseGatewayFrame(part.trim());
-        if (deferWorkspaceReadiness(frame, part, sessionId, failRestores, recoveryState)) continue;
+        if (deferWorkspaceReadiness(frame, part, sessionId, recoveryState)) continue;
         if (forwardSuccessfulWorkspaceRetry(frame, part, recoveryState, forwarded)) continue;
         if (part.trim()) forwarded.push(part);
       }

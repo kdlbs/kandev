@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -576,11 +578,27 @@ func deleteTaskForE2EReset(
 	taskDeleter e2eResetTaskDeleter,
 	taskID string,
 ) error {
-	return taskDeleter.DeleteTaskWithOptions(ctx, taskID, taskservice.DeleteTaskOptions{
-		// E2E reset is an explicit test cleanup boundary. It must remove
-		// disposable local changes left by the test that created the task.
-		DiscardWorktreeChanges: true,
-	})
+	waitCtx, cancel := context.WithTimeout(ctx, e2eTaskCleanupWaitTimeout)
+	defer cancel()
+	ticker := time.NewTicker(e2eTaskCleanupPollInterval)
+	defer ticker.Stop()
+	for {
+		if err := waitCtx.Err(); err != nil {
+			return err
+		}
+		err := taskDeleter.DeleteTaskWithOptions(waitCtx, taskID, taskservice.DeleteTaskOptions{
+			// E2E reset removes disposable local changes after session transfers settle.
+			DiscardWorktreeChanges: true,
+		})
+		if !errors.Is(err, messagequeue.ErrSessionTransferInProgress) {
+			return err
+		}
+		select {
+		case <-waitCtx.Done():
+			return waitCtx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func waitForE2ETaskCleanup(ctx context.Context, database *sql.DB, taskIDs []string) error {

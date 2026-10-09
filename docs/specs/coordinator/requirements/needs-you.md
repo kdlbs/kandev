@@ -215,16 +215,19 @@ Mockup:
 #### Acceptance criteria
 
 - **AC-COORDINATOR-NEEDS-YOU-006.1:** When the flag is on and a workspace is
-  active, the sidebar shall show a "Coordinators" section, immediately above
-  the Automations section, with one row per coordinator, by name and in the
+  active, the sidebar shall offer a "Coordinators" entry, by default immediately above
+  the Automations entry, with one row per coordinator, by name and in the
   order of `AC-COORDINATOR-COORDINATORS-003.1`, each linking to that
   coordinator's Needs you screen. The section shall be expanded until the user
-  folds it, shall keep its folded state across reloads, shall have a header
+  folds it, shall keep its folded state across reloads, shall provide a
   shortcut to `/workspaces/:id/coordinator`, and shall not render before the
   coordinator list has loaded. The phone menu shall show the same section: an
-  expandable "Coordinators" group immediately above its Automations section,
+  expandable "Coordinators" group with the same saved visibility and tool order,
   expanded until folded, with the same rows, folded summary, header shortcut
-  and empty row, and 44px touch targets.
+  and empty row, and 44px touch targets. Saved visibility, order, navigation
+  presentation, and fast action placement follow
+  [Sidebar customization](../../ui/requirements/sidebar-customization.md).
+  Personal visibility never changes the underlying coordinator capability.
 - **AC-COORDINATOR-NEEDS-YOU-006.2:** A coordinator's row shall show a badge
   with its open proposal count when that count is above zero and no badge
   at zero, and the badge shall update from `coordinator.updated` without reload.

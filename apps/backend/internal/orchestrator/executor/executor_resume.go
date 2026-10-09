@@ -1977,7 +1977,7 @@ func (e *Executor) refreshResumeSessionState(
 func (e *Executor) rejectRunningResume(session *models.TaskSession, options ResumeOptions) error {
 	completedResume := options.AllowCompletedSessionResume &&
 		session.State == models.TaskSessionStateCompleted
-	if isTerminalSessionState(session.State) || completedResume {
+	if isTerminalSessionState(session.State) || completedResume || options.ForceContextContinuation {
 		return nil
 	}
 	if existing, ok := e.GetExecutionBySession(session.ID); ok && existing != nil {

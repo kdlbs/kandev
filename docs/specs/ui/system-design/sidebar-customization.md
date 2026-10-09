@@ -237,6 +237,78 @@ the settings editor supplies Add shortcut. Never add or run anything implicitly.
 The agreed icon header and labelled expanded list are fixed interaction choices.
 An optional icon-plus-label header style is deferred: it would crowd this layout.
 
+## Feature-gated layout entries
+
+UI owns the reusable layout contract across feature owners. Coordinator identity,
+list order, proposals, badge counts, and route permissions stay with Coordinator.
+The [coordinator sidebar contract](../../coordinator/requirements/needs-you.md)
+defines its contents. This extension implements
+AC-UI-SIDEBAR-CUSTOMIZATION-001.6 through 001.9.
+
+Add `coordinators` as a version-1 builtin node and destination identity.
+`internal/user/models.DefaultSidebarLayout` places it before `automations`.
+The backend settings projection adds a missing node before that anchor, or last
+when the anchor is absent. It never changes existing nodes or writes on a read.
+PATCH continues to replace one full workspace layout through the existing CAS
+contract. Defaults and reset include the identity even when the feature is off.
+Eligibility changes presentation, not the stored skeleton or revision.
+
+`lib/sidebar/layout-types.ts` mirrors the wire identity and compatibility rule.
+Generalize its existing missing-Inbox materialization without changing Inbox
+placement. Preserve navigation geometry, unsupported-version handling, hidden
+nodes, and revisions. Canonical defaults remain backend-owned.
+
+Add a small presentation descriptor table, proposed as
+`lib/sidebar/builtin-layout-nodes.ts`. It contains builtin labels, icons, and
+eligibility predicates over the existing feature and workspace context.
+It covers Home, New Task, both Inbox identities, Coordinators, Automations,
+Canvases, and Integrations. It is layout metadata, not a second destination
+manifest or runtime flag registry. Existing registered plugin destinations keep
+`materializeSidebarPluginNodes` and owner-qualified identities.
+
+Use this metadata in `useSidebarLayoutNavigation`, `SidebarLayoutEditor`, and
+node titles. Produce the same eligible node set for desktop customization and
+`MobileSidebarCustomization`. Hidden eligible nodes remain choices.
+Settings projects the full draft: unavailable builtin nodes have translated
+labels and unavailable state. It does not remove them from the draft or full
+replacement payload. Editing cannot activate unavailable targets.
+The editor preview and shortcut picker apply the same eligibility rules.
+Domain self-gates remain as defense at activation boundaries.
+
+`SidebarLayoutNavigation` renders Coordinators only for its own node.
+Remove its insertion beside Automations and the fallback outside
+`SidebarCustomizeMenu`. Each node gets its own drag and context-menu wrapper.
+The phone renderer follows the same rule; remove the Automations wrapper and
+`MobileRequiredRows` fallback. Respect omitted destinations and sections in the
+phone surface. A saved hidden Coordinators node must not reappear through a
+fallback. Preserve current workspace eligibility rather than adding a new
+Office-mode restriction. Fixed Office-only sections keep their current owner.
+
+`CoordinatorsSection` uses `AppSidebarSection` with
+`presentation="navigation"`. Keep `defaultExpanded=true`, the existing collapse
+identity, rows, empty state, badge summary, rail launcher, and readiness guard.
+Its header shortcut follows `sidebarFastActionsEnabled`, like Canvases.
+When the shortcut is hidden, a labelled list link remains in the disclosure body.
+Use a 28px fine-pointer shortcut and a 44px coarse-pointer shortcut.
+Do not change the shared Tasks section style.
+
+Phone composition reuses `AppNavSheet`, `MobileCoordinatorsSection`, and
+`MobileSidebarCustomization`: an inset navigation drawer with one scroller,
+then a temporary customization drawer. Settings remains direct page navigation.
+These shipped surfaces supply safe-area clearance and dynamic viewport bounds.
+Use the coordinator icon and sentence-case label in its phone disclosure.
+Share layout state and operations; retain 44px touch controls and explicit moves.
+Phone composition never rewrites saved desktop order.
+
+Flag-off reads do not fetch coordinator resources or make disabled destinations
+available. A list read in progress can hide the navigation section under the
+existing readiness rule, but cannot hide its eligible customization choice.
+Failed direct writes, dirty Settings drafts, and workspace switches retain the
+existing recovery and revision rules.
+
+The flag defaults, registry metadata, and rollout state remain unchanged.
+No new API, storage table, schema version, or ADR is required.
+
 ## Activity
 
 Reuse `automationState(automation, openRuns)` from `automation-rows.ts`.
@@ -402,3 +474,5 @@ Home, and End. Use local preview geometry until drop. Escape, lost pointer captu
 unmount, and workspace changes cancel previews and restore cursor state without
 saving. Scroll/expanded state follows authoritative updates. Do not activate the
 split in Office, the collapsed rail, phone navigation, or Settings takeover.
+
+- [Flagged sidebar entries update](../../../plans/flagged-sidebar-entries/plan.md)

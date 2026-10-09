@@ -40,6 +40,7 @@ async function seedExpansionTask(
   await expect(
     session.chat.getByText("diff-expansion-setup complete", { exact: false }),
   ).toBeVisible({ timeout: 45_000 });
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   await waitForSessionDone(
     apiClient,
@@ -145,7 +146,7 @@ async function hoverUntilGutterSlotAppears(testPage: Page) {
 }
 
 test.describe("Diff expansion — Pierre Diffs provider", () => {
-  test.describe.configure({ timeout: 120_000 });
+  test.describe.configure({ retries: 0, timeout: 120_000 });
 
   test("diff viewer background matches app --background (regression for pierre 1.1.22 selector rename)", async ({
     testPage,

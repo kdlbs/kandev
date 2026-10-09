@@ -1,19 +1,33 @@
 import { expect, test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { openTaskSession } from "../../helpers/session";
+import { openTaskSession, waitForSessionDone } from "../../helpers/session";
 import {
   createSettledHistoryTask,
   routeSessionEntryRecovery,
 } from "../../helpers/session-entry-recovery";
 
 async function createEntryTask(apiClient: ApiClient, seedData: SeedData, title: string) {
-  return apiClient.createTaskWithAgent(seedData.workspaceId, title, seedData.agentProfileId, {
-    description: "/e2e:simple-message",
-    workflow_id: seedData.workflowId,
-    workflow_step_id: seedData.startStepId,
-    repository_ids: [seedData.repositoryId],
-  });
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    title,
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  if (!task.session_id) throw new Error("entry fixture did not return a session_id");
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "Waiting for the seeded entry conversation to settle",
+    45_000,
+  );
+  return task;
 }
 
 test.describe("session entry recovery", () => {
