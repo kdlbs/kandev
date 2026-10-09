@@ -508,3 +508,37 @@ receipt remains failed and does not count as a product failure or causal RED.
 Scoped-check and normal publication receipts are retained in the own task plan.
 Hosted new-head evidence remains pending a later ROOT release after explicit
 local-heavy return and actual END/WFI; prior-head CI/review evidence is historical.
+
+## Released shared asset-directory symlink correction (local implementation complete)
+
+ROOT validated grouped review5472731607 and released SOURCE97 after the original
+hosted observer was identity-guarded, stopped and actually joined (143, no CI
+terminal verdict). Reject symlinks at all three fixed asset directories before
+any fixture write, preserving ordinary directories, all twelve leaf checks and
+attempted-only rollback. Independently prove early/later external-directory
+symlink rejection with native Git, zero create admissions and unchanged external
+sentinels, link, HEAD, index and worktree; retain nine existing helper controls.
+Run affected helper GREEN and one fresh strict Pierre desktop success control,
+then scoped lint/format/catalog/spec/reference/coverage checks and normal hooks,
+commit and push. No product or shared GitHelper changes, generalized filesystem
+framework, TOCTOU guarantee, passing backend/mobile replay or hosted retry.
+Public docs and mobile composition/copy/touch/breakpoints/navigation are unchanged.
+Actual RED: original76909/ad40cf→027e66 exit1, two early/later native-Git
+symlink cases admitted four/twelve writes and changed prepared index/worktree
+state during rollback; zero-write and exact snapshot assertions failed. Nine
+existing controls were intentionally skipped in this focused RED. GREEN:
+original94008/b075b2→6e4b04 exit0, all eleven native-Git cases pass, including
+nine prior controls and ordinary-directory success. The exact original Pierre
+control61613/2786c6→601728 passed once (15.7s), strict worker1/retries0/repeat1,
+fresh managed backend/Vite/plugin build, GOMAX2/-p2/GOMEM512MiB/Node4GiB,
+GNU900s/kill10. Assertions, timeout and product behavior are unchanged.
+Each original native/subprocess/monitor was actually joined before the next
+heavy invocation, with known owned absence. Receipts and raw hashes reside in
+`/tmp/kandev-child97-ignore-review-20261009/symlink-fixup`. Green unit fixture
+root/environment console metadata was not captured and remains unknown; no
+replay is claimed. Formatting and scoped ESLint/Prettier/catalog (365 decisions, 1480
+specifications)/all-spec lint/whitespace passed, original59326/54869c→bc40b5
+exit0; formatting original7dd616 actually joined0. Actual owning references and all thirteen changed paths are covered with
+errors=[] and this ONE work order (preflight33962/252012→885102 exit0;
+coverage originalc86496 joined0). Normal publication checks follow this pass. Hosted CI and full review at the new
+corrective head remain for a separate later ROOT release. No merge authority.

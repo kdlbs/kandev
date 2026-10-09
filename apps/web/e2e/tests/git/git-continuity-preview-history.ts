@@ -71,6 +71,16 @@ function nativePreviewScript(entryName: string): string {
 export function seedContinuityPreviewHistory(git: GitHelper) {
   const initialHead = git.getCurrentSha();
   const directory = git.exec("git rev-parse --show-toplevel").trim();
+  for (const suffix of HISTORY_SUFFIXES) {
+    const assetDirectory = `preview-assets-${suffix}`;
+    if (
+      fs
+        .lstatSync(path.join(directory, assetDirectory), { throwIfNoEntry: false })
+        ?.isSymbolicLink()
+    ) {
+      throw new Error(`Preview history fixture directory is a symlink: ${assetDirectory}`);
+    }
+  }
   for (const name of HISTORY_SUFFIXES.flatMap(previewPaths)) {
     if (fs.lstatSync(path.join(directory, name), { throwIfNoEntry: false })) {
       throw new Error(`Preview history fixture path already exists: ${name}`);

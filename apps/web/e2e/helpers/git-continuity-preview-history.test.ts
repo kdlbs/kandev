@@ -75,6 +75,47 @@ function expectRestored(git: GitHelper, directory: string, initialHead: string) 
 }
 
 describe("seedContinuityPreviewHistory real Git rollback", () => {
+  it.each([1, 3])("rejects symlinked asset directory %s before any fixture write", (number) => {
+    withRepository((git, directory) => {
+      const assetDirectory = `preview-assets-0${number}-continuity-history`;
+      const external = path.join(path.dirname(directory), "external-assets");
+      fs.mkdirSync(external);
+      fs.writeFileSync(path.join(external, "external-sentinel.txt"), "external sentinel\n");
+      fs.symlinkSync(external, path.join(directory, assetDirectory), "dir");
+      fs.writeFileSync(path.join(directory, ".git/info/exclude"), `${assetDirectory}\n`);
+      git.createFile("staged-sentinel.txt", "staged sentinel\n");
+      git.stageFile("staged-sentinel.txt");
+      git.modifyFile("tracked-sentinel.txt", "unstaged sentinel\n");
+      const snapshot = () => ({
+        head: git.getCurrentSha(),
+        index: git.exec("git write-tree").trim(),
+        status: git.exec("git status --porcelain --untracked-files=all --ignored"),
+        link: fs.readlinkSync(path.join(directory, assetDirectory)),
+        externalFiles: fs
+          .readdirSync(external)
+          .map((name) => [name, fs.readFileSync(path.join(external, name), "utf8")]),
+        files: [...OWNED_PATHS, "tracked-sentinel.txt", "staged-sentinel.txt", UNTRACKED_PATH].map(
+          (name) => {
+            const file = path.join(directory, name);
+            return [name, fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null];
+          },
+        ),
+      });
+      const before = snapshot();
+      const writes = vi.spyOn(git, "createFile");
+      let caught: unknown;
+      try {
+        seedContinuityPreviewHistory(git);
+      } catch (error) {
+        caught = error;
+      }
+      expect.soft(caught).toBeInstanceOf(Error);
+      expect.soft((caught as Error | undefined)?.message).toContain(assetDirectory);
+      expect.soft(writes).not.toHaveBeenCalled();
+      expect(snapshot()).toEqual(before);
+    });
+  });
+
   it.each([
     { position: "early", state: "tracked", collisionPath: OWNED_PATHS[0] },
     { position: "later", state: "untracked", collisionPath: OWNED_PATHS[11] },
@@ -165,6 +206,11 @@ describe("seedContinuityPreviewHistory real Git rollback", () => {
 
   it("keeps the successful three-commit history and restores without capturing unrelated files", () => {
     withRepository((git, directory, initialHead) => {
+      for (const number of [1, 2, 3]) {
+        fs.mkdirSync(path.join(directory, `preview-assets-0${number}-continuity-history`), {
+          recursive: true,
+        });
+      }
       const restore = seedContinuityPreviewHistory(git);
       expect(git.exec(`git rev-list --count ${initialHead}..HEAD`).trim()).toBe("3");
       expect(fs.readFileSync(path.join(directory, OWNED_PATHS[0]), "utf8")).toBe(
