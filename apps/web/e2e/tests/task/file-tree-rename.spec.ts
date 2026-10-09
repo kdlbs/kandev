@@ -5,7 +5,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
-import { watchWs } from "../../helpers/causal-waits";
+import { dwell, watchWs } from "../../helpers/causal-waits";
 
 // Inline rename lives in file-context-menu.tsx (useFileRename + TreeNodeName).
 // Entry points (today, in product code):
@@ -168,8 +168,8 @@ test.describe("File tree inline rename", () => {
     git.exec("git checkout main");
     git.createFile("blur-original.ts", "blur");
     git.createFile("blur-other.ts", "other");
-    for (let index = 0; index < 60; index++) {
-      git.createFile(`middle-${String(index).padStart(3, "0")}.ts`, "filler");
+    for (let i = 0; i < 60; i++) {
+      git.createFile(`m-filler-${String(i).padStart(2, "0")}.ts`, "filler");
     }
     git.stageAll();
     git.commit("seed blur file");
@@ -186,21 +186,28 @@ test.describe("File tree inline rename", () => {
 
     const node = await session.fileTree.waitForFileTreeNode("blur-original.ts");
 
+    const otherNode = session.fileTreeNode("blur-other.ts");
+    await expect(otherNode).toBeVisible();
     const input = await startRenameViaContextMenu(testPage, node);
     await input.press("ControlOrMeta+A");
     await input.fill("blur-final.ts");
-    // Click another file to blur the input. The other node also belongs to
-    // the tree, so we don't lose tree-container focus state.
+    await dwell(
+      testPage,
+      500,
+      "product-timer",
+      "the product gates blur-commit on a ~400ms timer after isRenaming flips; that timer publishes nothing to observe, so the wait has to outlast it",
+    );
+    // The adjacent blur target stays mounted while the rename input owns focus.
+    // Scrolling to a distant virtualized row can remove the input before blur.
     await expect(input).toBeFocused();
-    const companion = session.fileTreeNode("blur-other.ts");
-    await expect(companion).toBeVisible();
-    await companion.click();
+    await otherNode.click();
 
-    await session.fileTree.waitForFileTreeNode("blur-final.ts");
-    await expect(session.fileTreeNode("blur-original.ts")).toHaveCount(0);
     await expect
       .poll(() => fs.existsSync(path.join(repoDir, "blur-final.ts")), { timeout: 10_000 })
       .toBe(true);
+    expect(fs.existsSync(path.join(repoDir, "blur-original.ts"))).toBe(false);
+    await session.fileTree.waitForFileTreeNode("blur-final.ts");
+    await expect(session.fileTreeNode("blur-original.ts")).toHaveCount(0);
   });
 
   test("rename is a no-op when the name is unchanged", async ({

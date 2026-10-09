@@ -1,5 +1,5 @@
 /* eslint-disable max-lines -- related prompt-target lifecycle regressions share one focused harness. */
-import { StrictMode } from "react";
+import { StrictMode, useLayoutEffect } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageListHandle } from "./chat/message-list-shared";
@@ -30,12 +30,17 @@ const { mockDockviewState, mockAppStoreState, mockAppStoreApi } = vi.hoisted(() 
   };
   const appStoreState = {
     messages: { bySession: { "session-1": [{ id: "message-1" }] } },
+    messagePrompts: { generationBySession: { "session-1": 0 } },
   };
   return {
     mockDockviewState: state,
     mockAppStoreState: appStoreState,
     mockAppStoreApi: {
-      getState: () => ({ messages: appStoreState.messages, mergeMessages: vi.fn() }),
+      getState: () => ({
+        messages: appStoreState.messages,
+        messagePrompts: appStoreState.messagePrompts,
+        mergeMessages: vi.fn(),
+      }),
     },
   };
 });
@@ -760,6 +765,38 @@ describe("usePendingMessageScroll — non-Dockview target loading", () => {
       behavior: "auto",
     });
   });
+  it("settles a local deleted target while the panel is hidden", async () => {
+    const pending = Promise.withResolvers<LoadMessageWindowResult>();
+    vi.mocked(loadMessageWindowAround).mockReturnValueOnce(pending.promise);
+    mockAppStoreState.messages.bySession["session-1"] = [];
+    const messageListRef = { current: scrollHandle(false) };
+    const onConsumed = vi.fn();
+    const localTarget: PendingMessageScrollTarget = {
+      sessionId: "session-1",
+      messageId: "missing",
+      token: 12,
+      hostPanelId: "pending",
+    };
+    const { rerender } = renderHook(
+      ({ isVisible }) =>
+        usePendingMessageScroll({
+          messageListRef,
+          sessionId: "session-1",
+          messageId: null,
+          target: localTarget,
+          onConsumed,
+          readinessKey: "0",
+          isInitialMessagesLoading: false,
+          isVisible,
+          settlementMode: "identity",
+        }),
+      { initialProps: { isVisible: true } },
+    );
+    await flushFrames();
+    rerender({ isVisible: false });
+    await act(async () => pending.resolve(DELETED_TARGET_RESULT));
+    expect(onConsumed).toHaveBeenCalledExactlyOnceWith("missing");
+  });
   it("defers a pending around request until initial transcript loading settles", async () => {
     mockAppStoreState.messages.bySession["session-1"] = [];
     vi.mocked(loadMessageWindowAround).mockReturnValue(new Promise(() => {}));
@@ -830,6 +867,113 @@ describe("usePendingMessageScroll — non-Dockview target loading", () => {
     await flushFrames();
     await waitFor(() => expect(onConsumed).toHaveBeenCalledWith("target"));
     expect(loadMessageWindowAround).toHaveBeenCalledTimes(1);
+  });
+  it("invalidates an around request synchronously when its host session changes", async () => {
+    const pending = Promise.withResolvers<LoadMessageWindowResult>();
+    let requestGuard: (() => boolean) | undefined;
+    vi.mocked(loadMessageWindowAround).mockImplementationOnce((_sessionId, _messageId, guard) => {
+      requestGuard = guard;
+      return pending.promise;
+    });
+    mockAppStoreState.messages.bySession["session-1"] = [];
+    const scrollToMessage = vi.fn(() => false);
+    const messageListRef = {
+      current: { scrollToMessage, scrollToLatest: vi.fn(() => true) },
+    };
+    const onConsumed = vi.fn();
+    const guardedAtHostChange: boolean[] = [];
+    const localTarget: PendingMessageScrollTarget = {
+      sessionId: "session-1",
+      messageId: "target",
+      token: 9,
+      hostPanelId: "pending",
+      generation: 0,
+    };
+    const { rerender } = renderHook(
+      ({ sessionId }) => {
+        usePendingMessageScroll({
+          messageListRef,
+          sessionId,
+          messageId: null,
+          target: localTarget,
+          onConsumed,
+          readinessKey: "0",
+          isInitialMessagesLoading: false,
+        });
+        useLayoutEffect(() => {
+          if (sessionId === "session-2") guardedAtHostChange.push(requestGuard?.() ?? true);
+        }, [sessionId]);
+      },
+      { initialProps: { sessionId: "session-1" } },
+    );
+
+    await flushFrames();
+    expect(loadMessageWindowAround).toHaveBeenCalledTimes(1);
+
+    rerender({ sessionId: "session-2" });
+    expect(guardedAtHostChange).toEqual([false]);
+    const scrollCountAfterSwitch = scrollToMessage.mock.calls.length;
+    const consumptionCountAfterSwitch = onConsumed.mock.calls.length;
+    pending.resolve({ kind: "merged", merged: true, current: true, targetFound: true });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(onConsumed).toHaveBeenCalledTimes(consumptionCountAfterSwitch);
+    expect(scrollToMessage).toHaveBeenCalledTimes(scrollCountAfterSwitch);
+  });
+  it("invalidates an around request when the same session id has a new generation", async () => {
+    const pending = Promise.withResolvers<LoadMessageWindowResult>();
+    let requestGuard: (() => boolean) | undefined;
+    vi.mocked(loadMessageWindowAround).mockImplementationOnce((_sessionId, _messageId, guard) => {
+      requestGuard = guard;
+      return pending.promise;
+    });
+    mockAppStoreState.messages.bySession["session-1"] = [];
+    const scrollToMessage = vi.fn(() => false);
+    const messageListRef = {
+      current: { scrollToMessage, scrollToLatest: vi.fn(() => true) },
+    };
+    const onConsumed = vi.fn();
+    const guardedAtGenerationChange: boolean[] = [];
+    const localTarget: PendingMessageScrollTarget = {
+      sessionId: "session-1",
+      messageId: "target",
+      token: 10,
+      hostPanelId: "pending",
+      generation: 0,
+    };
+    const { rerender } = renderHook(
+      ({ generation }) => {
+        usePendingMessageScroll({
+          messageListRef,
+          sessionId: "session-1",
+          messageId: null,
+          target: localTarget,
+          onConsumed,
+          readinessKey: "0",
+          isInitialMessagesLoading: false,
+        });
+        useLayoutEffect(() => {
+          if (generation === 1) guardedAtGenerationChange.push(requestGuard?.() ?? true);
+        }, [generation]);
+      },
+      { initialProps: { generation: 0 } },
+    );
+
+    await flushFrames();
+    expect(loadMessageWindowAround).toHaveBeenCalledTimes(1);
+
+    mockAppStoreState.messagePrompts.generationBySession["session-1"] = 1;
+    rerender({ generation: 1 });
+    expect(guardedAtGenerationChange).toEqual([false]);
+    const scrollCountAfterGenerationChange = scrollToMessage.mock.calls.length;
+    const consumptionCountAfterGenerationChange = onConsumed.mock.calls.length;
+    pending.resolve({ kind: "merged", merged: true, current: true, targetFound: true });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(onConsumed).toHaveBeenCalledTimes(consumptionCountAfterGenerationChange);
+    expect(scrollToMessage).toHaveBeenCalledTimes(scrollCountAfterGenerationChange);
   });
 
   it("keeps the request guard valid when transcript readiness changes mid-request", async () => {

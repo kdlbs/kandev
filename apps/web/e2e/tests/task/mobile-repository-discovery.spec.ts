@@ -1,6 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { openAddLocalRepositoryDialog } from "../../helpers/add-repository-menu";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import {
   DISCOVERY_FAILURE_ROOT,
@@ -120,9 +121,7 @@ test.describe("Mobile repository discovery consent", () => {
       await backend.restart({ KANDEV_DESKTOP_RUNTIME: "true" });
       await testPage.setViewportSize({ width: 390, height: 844 });
       await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
-      await testPage.getByRole("button", { name: "Add Local Repository" }).click();
-
-      const dialog = testPage.getByRole("dialog", { name: "Add Local Repository" });
+      const dialog = await openAddLocalRepositoryDialog(testPage);
       const controls = dialog.getByTestId("discovery-root-controls");
       await expect(controls).toBeVisible();
 

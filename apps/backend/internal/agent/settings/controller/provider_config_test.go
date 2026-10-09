@@ -8,6 +8,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/kandev/kandev/internal/agent/hostcli"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
@@ -38,6 +39,7 @@ func newProviderTestController(t *testing.T) (*Controller, store.Repository, con
 	reg := registry.NewRegistry(log)
 	reg.LoadDefaults()
 	ctrl := NewController(repo, nil, reg, nil, log)
+	ctrl.SetHostCLIRunner(&stubCLIRunner{startErr: hostcli.ErrNotInstalled})
 
 	ctx := context.Background()
 	codex := &models.Agent{Name: "codex-acp"}

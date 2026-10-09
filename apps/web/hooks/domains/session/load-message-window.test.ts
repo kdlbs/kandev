@@ -15,23 +15,24 @@ const NEWER_UPDATED_TIME = "2026-08-22T00:00:00.123500000Z";
 const OLDER_UPDATED_TIME = "2026-08-22T00:00:00.123400000Z";
 
 function message(id: string, created_at: string): Message {
-  return { id, created_at } as Message;
+  return { id, created_at, session_id: SESSION } as Message;
 }
 
-describe("loadMessageWindowAround", () => {
-  const mergeMessages = vi.fn();
-  let existingMessages = [message("new", NEW_TIME)];
-  const store = {
-    getState: () => ({
-      messages: { bySession: { [SESSION]: existingMessages } },
-      mergeMessages,
-    }),
-  } as unknown as StoreApi<AppState>;
+const mergeMessages = vi.fn();
+let existingMessages = [message("new", NEW_TIME)];
+const store = {
+  getState: () => ({
+    messages: { bySession: { [SESSION]: existingMessages } },
+    mergeMessages,
+  }),
+} as unknown as StoreApi<AppState>;
 
-  beforeEach(() => {
-    existingMessages = [message("new", NEW_TIME)];
-  });
+beforeEach(() => {
+  existingMessages = [message("new", NEW_TIME)];
+  vi.clearAllMocks();
+});
 
+describe("loadMessageWindowAround merging", () => {
   it("requests and merges the target-containing around window", async () => {
     listTaskSessionMessages.mockResolvedValue({
       messages: [message("target", TARGET_TIME), message("middle", MIDDLE_TIME)],
@@ -110,5 +111,60 @@ describe("loadMessageWindowAround", () => {
       message("later", NEWER_UPDATED_TIME),
       message("new", NEW_TIME),
     ]);
+  });
+});
+
+describe("loadMessageWindowAround stale boundaries", () => {
+  it("does not merge a target returned for a foreign session", async () => {
+    listTaskSessionMessages.mockResolvedValue({
+      messages: [{ ...message("target", TARGET_TIME), session_id: "foreign" }],
+    });
+
+    const result = await loadMessageWindowAround(SESSION, "target", () => true, store);
+    expect(result.kind).toBe("deleted-target");
+    expect(mergeMessages).not.toHaveBeenCalled();
+  });
+
+  it("discards a response whose target changed before it settled", async () => {
+    const pending = Promise.withResolvers<{ messages: Message[] }>();
+    listTaskSessionMessages.mockReturnValueOnce(pending.promise);
+    let current = true;
+    const result = loadMessageWindowAround(SESSION, "target", () => current, store);
+    current = false;
+    pending.resolve({ messages: [message("target", TARGET_TIME)] });
+    expect((await result).kind).toBe("stale");
+    expect(mergeMessages).not.toHaveBeenCalled();
+  });
+  it("keeps cached content on equal version while adopting the incoming ordinal", async () => {
+    existingMessages = [
+      { ...message("target", TARGET_TIME), content: "current", updated_at: NEWER_UPDATED_TIME },
+    ];
+    listTaskSessionMessages.mockResolvedValue({
+      messages: [
+        {
+          ...message("target", TARGET_TIME),
+          content: "stale",
+          updated_at: NEWER_UPDATED_TIME,
+          prompt_index: 7,
+        },
+      ],
+    });
+
+    await loadMessageWindowAround(SESSION, "target", () => true, store);
+    expect(mergeMessages).toHaveBeenCalledWith(SESSION, [
+      { ...existingMessages[0], prompt_index: 7 },
+    ]);
+  });
+
+  it("unions a disjoint around window without synthesizing intermediate rows or changing metadata", async () => {
+    existingMessages = [message("new", NEW_TIME)];
+    listTaskSessionMessages.mockResolvedValue({ messages: [message("target", TARGET_TIME)] });
+    await loadMessageWindowAround(SESSION, "target", () => true, store);
+
+    expect(mergeMessages).toHaveBeenCalledWith(SESSION, [
+      message("target", TARGET_TIME),
+      message("new", NEW_TIME),
+    ]);
+    expect(mergeMessages.mock.calls[0]).toHaveLength(2);
   });
 });

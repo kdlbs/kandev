@@ -184,8 +184,6 @@ type ProfileEditorActionsOptions = {
   setSaveStatus: (s: SaveStatus) => void;
   markProfileSubmitted: (profile: AgentProfile | null) => void;
   acceptProfileSaveResponse: (response: AgentProfile, submitted: AgentProfile) => boolean;
-  settingsAgents: Agent[];
-  syncAgentsToStore: (agents: Agent[]) => void;
   toast: ReturnType<typeof useToast>["toast"];
   onUtilityConflict?: (agents: Array<{ id: string; name: string }>) => void;
 };
@@ -243,11 +241,10 @@ export function useProfileSave({
   setSaveStatus,
   markProfileSubmitted,
   acceptProfileSaveResponse,
-  settingsAgents,
-  syncAgentsToStore,
   toast,
   onUtilityConflict,
 }: ProfileEditorActionsOptions) {
+  const storeApi = useAppStoreApi();
   // eslint-disable-next-line complexity
   return async (force = false) => {
     if (!draft.name.trim()) {
@@ -278,17 +275,7 @@ export function useProfileSave({
         force,
       );
       if (acceptProfileSaveResponse(updated, submitted)) {
-        const nextAgents = settingsAgents.map((agentItem: Agent) =>
-          agentItem.id === agent.id
-            ? {
-                ...agentItem,
-                profiles: agentItem.profiles.map((p: AgentProfile) =>
-                  p.id === updated.id ? updated : p,
-                ),
-              }
-            : agentItem,
-        );
-        syncAgentsToStore(nextAgents);
+        publishProfileSaveResponse(storeApi, agent.id, updated);
       }
       setSaveStatus("success");
     } catch (error) {
@@ -313,6 +300,27 @@ export function useProfileSave({
       throw error;
     }
   };
+}
+
+function publishProfileSaveResponse(
+  storeApi: ReturnType<typeof useAppStoreApi>,
+  agentId: string,
+  updated: AgentProfile,
+) {
+  const state = storeApi.getState();
+  const owner = state.settingsAgents.items.find((item) => item.id === agentId);
+  if (!owner?.profiles.some((profile) => profile.id === updated.id)) return;
+
+  const nextOwner = {
+    ...owner,
+    profiles: owner.profiles.map((profile) => (profile.id === updated.id ? updated : profile)),
+  };
+  state.setSettingsAgents(
+    state.settingsAgents.items.map((item) => (item.id === agentId ? nextOwner : item)),
+  );
+  state.setAgentProfiles(
+    reconcileAgentProfileOptions(state.agentProfiles.items, [{ ...owner, profiles: [updated] }]),
+  );
 }
 
 export function preserveNewerProfileDraft(

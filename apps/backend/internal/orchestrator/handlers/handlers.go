@@ -156,6 +156,9 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		if archivedResponse, responseErr := taskArchivedConflictResponse(msg, err); archivedResponse != nil || responseErr != nil {
 			return archivedResponse, responseErr
 		}
+		if recoveryResponse, responseErr := restoreRequiredRecoveryResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
 		intent := orchestrator.ResolveIntent(&req)
 		// A launch failing because the root context was cancelled or the
 		// session is already terminal is an expected shutdown teardown race,
@@ -384,9 +387,9 @@ func sessionRecoveryGuardConflictResponse(msg *ws.Message, err error) (*ws.Messa
 	return ws.NewError(msg.ID, msg.Action, code, err.Error(), guardErr.Details())
 }
 
-// restoreRequiredRecoveryResponse exposes only the bounded restore policy
-// needed by the shared recovery UI. Provider errors and internal recovery
-// blocks must remain server-side because neither is a safe browser contract.
+// restoreRequiredRecoveryResponse exposes the bounded continuity policy
+// needed by the shared recovery UI. Provider errors, journal contents and
+// internal recovery blocks remain server-side.
 func restoreRequiredRecoveryResponse(msg *ws.Message, err error, sessionID string) (*ws.Message, error) {
 	var reasoner interface{ RecoveryReason() string }
 	if !errors.As(err, &reasoner) {
@@ -394,7 +397,7 @@ func restoreRequiredRecoveryResponse(msg *ws.Message, err error, sessionID strin
 	}
 	reason := reasoner.RecoveryReason()
 	switch reason {
-	case "native_state_missing", "native_resume_unsupported", "workspace_incompatible":
+	case "native_state_missing", "native_resume_unsupported", "workspace_incompatible", "unresolved_durable_work":
 	default:
 		return nil, nil
 	}
@@ -413,7 +416,7 @@ func restoreRequiredRecoveryResponse(msg *ws.Message, err error, sessionID strin
 		msg.ID,
 		msg.Action,
 		ws.ErrorCodeConflict,
-		"Native session state requires explicit history continuation.",
+		"Session continuity requires explicit history continuation.",
 		details,
 	)
 }

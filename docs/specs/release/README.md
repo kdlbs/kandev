@@ -18,7 +18,9 @@ artifact verification across Kandev distributions.
 
 This system owns stable and nightly channel semantics, npm, Homebrew, Scoop,
 container, and desktop release publication contracts. It also owns contributor
-notifications tied to published releases.
+notifications tied to published releases. Optional Windows runtime signing is
+defined by its [requirements](requirements/windows-runtime-signing.md) and
+[system design](system-design/windows-runtime-signing.md).
 
 ## Exclusions
 

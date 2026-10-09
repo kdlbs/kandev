@@ -34,6 +34,12 @@ import { newerAgentRuntimeSnapshot } from "@/lib/types/agent-runtime";
 import { sessionStateConfirmsAgentctlExecutionReady } from "@/lib/session-state";
 import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
+import {
+  acceptAgentOrdersFromSnapshot,
+  acceptServerOrder,
+  reconcileAgentOrders,
+} from "@/lib/settings/agent-profile-order";
+import { hydrateSelectorProfileOptions } from "@/lib/settings/agent-profile-selector-order";
 
 /**
  * Hydration options for controlling merge behavior
@@ -168,6 +174,58 @@ function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState
   if (state.repositoryBranches) deepMerge(draft.repositoryBranches, state.repositoryBranches);
 }
 
+function hydrateAgentProfileOrderState(
+  draft: Draft<AppState>,
+  state: HydrationState,
+  preserveLiveAgentProfiles: boolean,
+): void {
+  if (!state.agentProfiles || preserveLiveAgentProfiles) return;
+  for (const [agentId, incoming] of Object.entries(state.agentProfiles.orderByAgent ?? {})) {
+    if (!incoming.order) continue;
+    draft.agentProfiles.orderByAgent = acceptServerOrder(
+      draft.agentProfiles.orderByAgent,
+      agentId,
+      incoming.order,
+      incoming.revision,
+    );
+  }
+  draft.agentProfiles.orderByAgent = acceptAgentOrdersFromSnapshot(
+    draft.agentProfiles.orderByAgent,
+    state.settingsAgents?.items ?? [],
+  );
+  const orderByAgent = { ...draft.agentProfiles.orderByAgent };
+  deepMerge(draft.agentProfiles, state.agentProfiles);
+  draft.agentProfiles.orderByAgent = orderByAgent;
+}
+
+function hydrateAgentProfileOrder(
+  draft: Draft<AppState>,
+  state: HydrationState,
+  preserveLiveAgentProfiles: boolean,
+): void {
+  hydrateAgentProfileOrderState(draft, state, preserveLiveAgentProfiles);
+  if (state.settingsAgents && !preserveLiveAgentProfiles) {
+    deepMerge(draft.settingsAgents, {
+      ...state.settingsAgents,
+      items: reconcileAgentOrders(
+        state.settingsAgents.items.map(normalizeAgentProfiles),
+        draft.agentProfiles.orderByAgent,
+      ),
+    });
+  } else if (state.settingsAgents && preserveLiveAgentProfiles) {
+    draft.settingsAgents.items = reconcileAgentOrders(
+      draft.settingsAgents.items,
+      draft.agentProfiles.orderByAgent,
+    );
+  }
+  if (state.agentProfiles && !preserveLiveAgentProfiles) {
+    draft.agentProfiles.items = hydrateSelectorProfileOptions(
+      draft.agentProfiles.items,
+      draft.settingsAgents.items,
+    );
+  }
+}
+
 /** Hydrate settings slices, preserving loading states. */
 function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   if (state.executors) deepMerge(draft.executors, state.executors);
@@ -175,19 +233,7 @@ function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   mergeWithLoading(draft.availableAgents, state.availableAgents);
   const preserveLiveAgentProfiles =
     (state.agentProfiles?.version ?? 0) < draft.agentProfiles.version;
-  if (state.settingsAgents && !preserveLiveAgentProfiles) {
-    deepMerge(draft.settingsAgents, {
-      ...state.settingsAgents,
-      items: state.settingsAgents.items.map(normalizeAgentProfiles),
-    });
-  }
-  if (state.agentProfiles) {
-    // Preserve a newer profile mutation delivered over WebSocket while this
-    // snapshot was in flight; otherwise the stale response can erase it.
-    if (!preserveLiveAgentProfiles) {
-      deepMerge(draft.agentProfiles, state.agentProfiles);
-    }
-  }
+  hydrateAgentProfileOrder(draft, state, preserveLiveAgentProfiles);
   mergeWithLoading(draft.editors, state.editors);
   mergeWithLoading(draft.prompts, state.prompts);
   mergeWithLoading(draft.notificationProviders, state.notificationProviders);

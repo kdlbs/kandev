@@ -11,7 +11,10 @@ import {
   type RemoteRepoChipProps,
 } from "@/components/task-create-dialog-remote-repo-chip";
 import { useRemoteRepositories } from "@/hooks/domains/integrations/use-remote-repositories";
-import type { RepositoryInspection } from "@/lib/plugins/types";
+import {
+  inspectedRemoteRepositoryUpdate,
+  remoteRepositoryUpdateNeeded,
+} from "@/components/task-create-dialog-remote-repo-identity";
 import { useTranslation } from "react-i18next";
 
 /**
@@ -106,37 +109,6 @@ export function RemoteRepoChipsRow({
       })}
       <AddRowButton onAddRow={onAddRow} />
     </div>
-  );
-}
-
-function inspectedRemoteRepositoryUpdate(
-  inspection: RepositoryInspection,
-  row: TaskRemoteRepoRow,
-): Partial<TaskRemoteRepoRow> {
-  return {
-    remoteUrl: inspection.cloneUrl,
-    provider: inspection.providerId,
-    providerHost: inspection.providerHost,
-    providerScope: inspection.providerScope,
-    providerRepoId: inspection.repositoryId,
-    providerOwner: inspection.ownerOrProject,
-    providerName: inspection.repositoryName,
-    fullName: `${inspection.ownerOrProject}/${inspection.repositoryName}`,
-    prNumber: inspection.pullRequest?.number,
-    prBaseBranch: inspection.baseBranch,
-    prHeadBranch: inspection.headBranch,
-    ...(!row.branch && (inspection.headBranch || inspection.defaultBranch)
-      ? { branch: inspection.headBranch || inspection.defaultBranch }
-      : {}),
-  };
-}
-
-function remoteRepositoryUpdateNeeded(
-  row: TaskRemoteRepoRow,
-  update: Partial<TaskRemoteRepoRow>,
-): boolean {
-  return Object.entries(update).some(
-    ([key, value]) => row[key as keyof TaskRemoteRepoRow] !== value,
   );
 }
 

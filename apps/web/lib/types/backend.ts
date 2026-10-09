@@ -22,6 +22,7 @@ import type { CoordinatorUpdatedPayload } from "@/lib/api/domains/coordinator-ap
 
 import type {
   Agent,
+  AgentProfilesReorderedPayload as ProfileOrderPayload,
   AvailableAgent,
   ForegroundActivity,
   ReorderBand,
@@ -611,6 +612,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "agent.profile.deleted": BackendMessage<"agent.profile.deleted", AgentProfileDeletedPayload>;
     "agent.profile.created": BackendMessage<"agent.profile.created", AgentProfileChangedPayload>;
     "agent.profile.updated": BackendMessage<"agent.profile.updated", AgentProfileChangedPayload>;
+    "agent.profiles.reordered": BackendMessage<"agent.profiles.reordered", ProfileOrderPayload>;
     "user.settings.updated": BackendMessage<"user.settings.updated", UserSettingsUpdatedPayload>;
     "user.agent_profile_recent_use.updated": BackendMessage<
       "user.agent_profile_recent_use.updated",
@@ -669,3 +671,5 @@ export type {
   ProcessStatusPayload,
   QueueStatusChangedPayload,
 } from "./session-events";
+
+export type { AgentProfilesReorderedPayload } from "./http-agents";

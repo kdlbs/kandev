@@ -131,6 +131,7 @@ export type AppState = KanbanSlice & {
 
   // Session slice
   messages: (typeof defaultSessionState)["messages"];
+  messagePrompts: (typeof defaultSessionState)["messagePrompts"];
   turns: (typeof defaultSessionState)["turns"];
   taskSessions: (typeof defaultSessionState)["taskSessions"];
   taskSessionsByTask: (typeof defaultSessionState)["taskSessionsByTask"];
@@ -291,8 +292,12 @@ export type AppState = KanbanSlice & {
     tools?: AvailableAgentsState["tools"],
   ) => void;
   setAvailableAgentsLoading: (loading: boolean) => void;
+  applyAgentListSnapshot: SettingsSliceTypes.SettingsSliceActions["applyAgentListSnapshot"];
+  acceptAgentProfileOrder: SettingsSliceTypes.SettingsSliceActions["acceptAgentProfileOrder"];
+  setAgentProfileOrder: SettingsSliceTypes.SettingsSliceActions["setAgentProfileOrder"];
+  setAgentProfileOrderIntent: SettingsSliceTypes.SettingsSliceActions["setAgentProfileOrderIntent"];
   setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;
-  setInstallJobs: (jobs: InstallJob[]) => void;
+  setInstallJobs: SettingsSliceTypes.SettingsSliceActions["setInstallJobs"];
   upsertInstallJob: (job: InstallJob) => void;
   appendInstallOutput: (agentName: string, chunk: string) => void;
   clearInstallJob: (agentName: string) => void;
@@ -493,6 +498,23 @@ export type AppState = KanbanSlice & {
     },
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
+  replacePromptMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta?: { hasMore?: boolean; oldestCursor?: string | null },
+  ) => void;
+  prependPromptMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta?: { hasMore?: boolean; oldestCursor?: string | null },
+  ) => void;
+  installAuthoritativePromptMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta: { hasMore: boolean; oldestCursor: string | null },
+  ) => void;
+  setPromptMessagesLoading: (sessionId: string, loading: boolean) => void;
+  setPromptMessagesLoadingMore: (sessionId: string, loading: boolean) => void;
   setTaskSession: (
     session: TaskSession,
     hydrationEpochAtRequestStart?: TaskSessionHydrationEpoch,

@@ -45,6 +45,20 @@ const appStoreState = {
   agentProfiles: { items: [] },
   messages: { bySession: { [SESSION_ID]: [priorTranscriptMessage] } },
   launchWarning: { bySessionId: {} },
+  messagePrompts: {
+    bySession: { [SESSION_ID]: [] as Message[] },
+    metaBySession: {},
+    generationBySession: {},
+    refreshGenerationBySession: {},
+    authoritativeBySession: {},
+    observedBySession: {} as Record<
+      string,
+      { ids: Record<string, true>; newestKey: { id: string; created_at: string } | null }
+    >,
+    deletedIdsBySession: {},
+  },
+  installAuthoritativePromptMessages: vi.fn(),
+  setPromptMessagesLoading: vi.fn(),
 };
 
 const panelState = {

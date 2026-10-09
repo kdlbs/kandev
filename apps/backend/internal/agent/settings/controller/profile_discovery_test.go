@@ -6,8 +6,10 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/hostcli"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
@@ -69,6 +71,10 @@ func TestFetchProfileDynamicModelsPreservesRuntimeInfo(t *testing.T) {
 		},
 	}
 	ctrl.hostUtility = utility
+	ctrl.hostCLIModels = map[string]hostCLIModelEntry{"codex-acp": {
+		status: hostCLIModelStatusOK, checkedAt: time.Now(),
+		models: []hostcli.Model{{ID: "cli-only", Name: "CLI Only"}},
+	}}
 	envVars := []dto.ProfileEnvVarDTO{}
 	cliFlags := []dto.CLIFlagDTO{}
 	commandPrefix := ""
@@ -85,6 +91,12 @@ func TestFetchProfileDynamicModelsPreservesRuntimeInfo(t *testing.T) {
 		t.Fatalf("FetchProfileDynamicModels: %v", err)
 	}
 
+	if response.ContextRevision != "revision-1" || response.Discovery == nil || response.Discovery.Status != hostCLIModelStatusOK {
+		t.Fatalf("profile discovery metadata = %+v", response)
+	}
+	if len(response.Models) != 2 || response.Models[0].ID != "cli-only" || response.Models[1].ID != "model-a" {
+		t.Fatalf("merged profile models = %+v", response.Models)
+	}
 	payload, err := json.Marshal(response)
 	if err != nil {
 		t.Fatalf("marshal response: %v", err)

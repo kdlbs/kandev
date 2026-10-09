@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CoordinatorIcon } from "@/lib/coordinator/icon";
 import { defaultSidebarLayout, type SidebarLayout } from "./layout-types";
 import { materializeSidebarPluginNodes, projectSidebarLayout } from "./layout-projection";
 
@@ -21,6 +22,7 @@ const EXPECTED_NODE_IDS = [
   "home",
   "inbox",
   "needs-you-inbox",
+  "coordinators",
   "automations",
   "canvases",
   "integrations",
@@ -31,6 +33,7 @@ const EXPECTED_NODE_LABELS = [
   "Home",
   "Office Inbox",
   "Inbox",
+  "Coordinators",
   "Automations",
   "Canvases",
   "Integrations",
@@ -44,6 +47,7 @@ describe("sidebar layout projection", () => {
         home: "Home",
         inbox: "Office Inbox",
         needs_you_inbox: "Inbox",
+        coordinators: "Coordinators",
         new_task: "New Task",
         automations: "Automations",
         canvases: "Canvases",
@@ -114,7 +118,9 @@ describe("sidebar layout projection", () => {
       available: true,
     });
   });
+});
 
+describe("sidebar layout eligibility", () => {
   it("marks a saved plugin destination unavailable while retaining its placement", () => {
     const layout: SidebarLayout = {
       ...defaultSidebarLayout(),
@@ -134,6 +140,41 @@ describe("sidebar layout projection", () => {
       id: "plugin:removed:home",
       label: "Unavailable",
       available: false,
+    });
+  });
+
+  it("projects Coordinator metadata while keeping its saved choice unavailable when flagged off", () => {
+    const projected = projectSidebarLayout(
+      {
+        ...defaultSidebarLayout(),
+        nodes: [
+          {
+            id: "coordinators",
+            kind: "builtin",
+            visible: false,
+            destinationId: "coordinators",
+          },
+        ],
+      },
+      [],
+      {
+        unavailableLabel: "Unavailable",
+        builtinLabels: { coordinators: "Coordinators" },
+        builtinContext: {
+          hasWorkspace: true,
+          inOffice: false,
+          features: { coordinator: false, canvases: false, needsYouInbox: false },
+        },
+      },
+    );
+
+    expect(projected.nodes).toHaveLength(1);
+    expect(projected.nodes[0]).toMatchObject({
+      id: "coordinators",
+      label: "Coordinators",
+      icon: CoordinatorIcon,
+      available: false,
+      visible: false,
     });
   });
 });

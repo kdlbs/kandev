@@ -70,13 +70,14 @@ single-consumer feature state.
   picker offers no Prompt history option, no dockview component or panel
   identity named `prompt-history` is registered or renderable, and the core
   panel components, row components, panel host, and their tests are gone.
-- **AC-PLUGINS-PROMPT-HISTORY-EXTRACTION-001.2:** Core contains no
-  prompt-history-only client state or derivation. The web store has no
-  user-message prompt projection with its own pagination cursor, loading
-  metadata, generations, or live-event fan-out; no prompt-page hook, no prompt
-  pagination sentinel consumer, and no prompt-entry builder for that panel
-  remains. Shared transcript machinery (message list, transcript pagination,
-  turn state, scroll targeting) is unchanged in behavior.
+- **AC-PLUGINS-PROMPT-HISTORY-EXTRACTION-001.2:** Core exposes no built-in
+  Prompt history surface or independent prompt-history pagination flow. It
+  retains only the session-scoped latest-user-prompt projection required by
+  [pinned prompt availability](../../ui/requirements/pinned-prompt-availability.md);
+  that projection does not widen or paginate the transcript window. No
+  prompt-history page hook, prompt-pagination sentinel consumer, or prompt-entry
+  builder remains. Shared transcript machinery (message list, transcript
+  pagination, turn state, scroll targeting) is unchanged in behavior.
 - **AC-PLUGINS-PROMPT-HISTORY-EXTRACTION-001.3:** The task locale catalogs
   (`en`, `ja`, `pt-pt`, `pseudo`, `zh-cn`, `zh-hk`, `zh-tw`) drop the panel's
   copy keys (`task:promptHistory`, `task:promptHistoryPromptLabel`,

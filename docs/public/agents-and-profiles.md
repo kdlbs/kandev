@@ -120,6 +120,34 @@ that environment. Kandev does not copy host OAuth tokens: native credential
 records include the absolute auth-directory identity and cannot be treated as
 portable credentials. No provider or account fallback is injected on failure.
 
+### Claude Code and Codex CLI version and model discovery
+
+For Claude and Codex, the agent card shows the installed vendor CLI's version
+next to the detected path (for example "Claude Code 2.1.220" or "Codex CLI
+0.155.1"), or a muted "version unknown" line with a short reason when the
+version command fails or times out. Reinstalling or upgrading through the
+card's install action re-detects the version automatically, without a
+backend restart.
+
+The profile editor's Start model dropdown includes suggestions from the host CLI. The Codex
+CLI publishes a model list (`codex app-server`), so its dropdown shows that
+list merged with the models the running session already advertises, and a
+note under the selector states the source and CLI version. The Claude Code
+CLI does not publish a model list, so the dropdown keeps the session's list
+and the note says so. For both agent types you can type any model ID as a
+free-text entry, useful the day a vendor ships a model (for example a new
+Opus release) before Kandev's own build catches up. A profile's saved model
+that is missing from every list still shows up as a selectable entry with
+its exact identifier, and saving without changing it leaves it unchanged.
+Whether the running session actually accepts a typed identifier is up to
+that session; an identifier it does not recognize fails with its own error
+at the start of the next turn, the same as for a listed model.
+
+The Codex catalogue can be bundled or cached by the CLI. Listing a model does
+not confirm account entitlement or availability in a profile that uses a
+different command, configuration, or executor. The profile's capability probe
+and the selected executor still determine whether that model can run.
+
 ### Muse command surfaces
 
 Muse Code has no native ACP server, so Kandev runs it through the community
@@ -414,6 +442,10 @@ An **ACP** agent is driven over the Agent Client Protocol instead, so it does ge
 ## Create and configure a profile
 
 Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Profile_**. The page shows the resolved command preview and only the settings supported by that agent.
+
+On **Settings > Agents**, administrators can reorder an agent's profiles using its drag handle with a pointer or touch. For keyboard control, focus the handle, press **Space** to pick up the profile, use the arrow keys to move it, and press **Space** again to save (or **Escape** to cancel). The order is saved for that agent, shared with other open Settings pages, and used in the Settings navigation tree. Creating or duplicating a profile places it first in that agent's Settings list.
+
+This order applies only to Settings. Task creation, in-task agents, handoff, and other profile selectors keep their existing option order, contextual recency, and default selection.
 
 | Setting                                | Runtime behavior                                                                                                                                                                                                                                                                                                                                   |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

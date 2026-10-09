@@ -31,6 +31,7 @@ import { migrateSidebarViewDraft, migrateView } from "./slices/ui/ui-slice";
 import { mergeAgentProfileRecentUseState } from "@/lib/agent-profile-recent-use";
 import { normalizeThreadViews } from "./slices/ui/thread-view-builtins";
 import { normalizeAgentProfiles } from "@/lib/api/domains/agent-profile-normalize";
+import { hydrateSelectorProfileOptions } from "@/lib/settings/agent-profile-selector-order";
 
 function mergeHydratedSettingsAgents(
   incoming: HydrationState["settingsAgents"],
@@ -40,6 +41,15 @@ function mergeHydratedSettingsAgents(
     ...defaultState.settingsAgents,
     ...incoming,
     items: incoming.items.map(normalizeAgentProfiles),
+  };
+}
+
+function mergeHydratedAgentProfiles(initialState: HydrationState): DefaultState["agentProfiles"] {
+  const incoming = { ...defaultState.agentProfiles, ...initialState.agentProfiles };
+  const agents = initialState.settingsAgents?.items ?? [];
+  return {
+    ...incoming,
+    items: hydrateSelectorProfileOptions(incoming.items, agents),
   };
 }
 
@@ -73,6 +83,7 @@ export const defaultState = {
   userSettings: defaultSettingsState.userSettings,
   agentProfileRecentUse: defaultSettingsState.agentProfileRecentUse,
   messages: defaultSessionState.messages,
+  messagePrompts: defaultSessionState.messagePrompts,
   turns: defaultSessionState.turns,
   taskSessions: defaultSessionState.taskSessions,
   taskSessionsByTask: defaultSessionState.taskSessionsByTask,
@@ -327,6 +338,26 @@ function mergeAgentReviewArtifacts(initialState: HydrationState) {
   };
 }
 
+/** Merges the latest-prompt projection and resets its client-only authority. */
+function mergePromptHistoryState(initialState: HydrationState) {
+  return {
+    ...defaultState.messagePrompts,
+    bySession: initialState.messagePrompts?.bySession ?? defaultState.messagePrompts.bySession,
+    metaBySession:
+      initialState.messagePrompts?.metaBySession ?? defaultState.messagePrompts.metaBySession,
+    generationBySession: {
+      ...defaultState.messagePrompts.generationBySession,
+      ...initialState.messagePrompts?.generationBySession,
+    },
+    refreshGenerationBySession: {
+      ...defaultState.messagePrompts.refreshGenerationBySession,
+      ...initialState.messagePrompts?.refreshGenerationBySession,
+    },
+    authoritativeBySession: {},
+    observedBySession: {},
+    deletedIdsBySession: {},
+  };
+}
 /** Merges the GitHub slices for initial (SSR/boot) hydration. */
 /** Merges the GitHub slices for initial (SSR/boot) hydration. */
 function mergeGitHubState(initialState: HydrationState) {
@@ -468,7 +499,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     settingsAgents: mergeHydratedSettingsAgents(initialState.settingsAgents),
     agentDiscovery: { ...defaultState.agentDiscovery, ...initialState.agentDiscovery },
     availableAgents: { ...defaultState.availableAgents, ...initialState.availableAgents },
-    agentProfiles: { ...defaultState.agentProfiles, ...initialState.agentProfiles },
+    agentProfiles: mergeHydratedAgentProfiles(initialState),
     editors: { ...defaultState.editors, ...initialState.editors },
     prompts: { ...defaultState.prompts, ...initialState.prompts },
     secrets: { ...defaultState.secrets, ...initialState.secrets },
@@ -484,6 +515,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
       initialState.agentProfileRecentUse ?? {},
     ),
     messages: { ...defaultState.messages, ...initialState.messages },
+    messagePrompts: mergePromptHistoryState(initialState),
     turns: mergeTurnsState(defaultState.turns, initialState.turns, initialState.taskSessions),
     ...mergeTaskSessionState(initialState),
     sessionAgentctl: { ...defaultState.sessionAgentctl, ...initialState.sessionAgentctl },

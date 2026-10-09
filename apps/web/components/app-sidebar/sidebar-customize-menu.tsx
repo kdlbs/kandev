@@ -53,7 +53,7 @@ export function SidebarCustomizeMenu({
     <ContextMenu>
       <ContextMenuTrigger asChild disabled={!enabled}>
         <div
-          className="min-h-6 min-w-0"
+          className="min-h-6 min-w-0 shrink-0"
           aria-label={t("settings:sidebarCustomize")}
           tabIndex={nodes.every((node) => !node.visible) ? 0 : undefined}
           data-testid="sidebar-customize-region"

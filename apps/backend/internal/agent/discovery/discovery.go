@@ -32,6 +32,11 @@ type Availability struct {
 	Available         bool         `json:"available"`
 	MatchedPath       string       `json:"matched_path,omitempty"`
 	Capabilities      Capabilities `json:"capabilities"`
+
+	// Host CLI state, populated only for agent types that declare a vendor
+	// CLI (agents.HostCLIAgent). Every other agent leaves these empty.
+	CLIVersion      string `json:"cli_version,omitempty"`
+	CLIVersionError string `json:"cli_version_error,omitempty"`
 }
 
 // Registry manages agent discovery using the agents.Agent interface.
@@ -44,6 +49,7 @@ type Availability struct {
 type Registry struct {
 	registry *registry.Registry
 	logger   *logger.Logger
+	hostCLI  *hostCLIResolver
 
 	mu            sync.RWMutex
 	cachedResults []Availability
@@ -63,6 +69,7 @@ func LoadRegistry(_ context.Context, reg *registry.Registry, log *logger.Logger)
 	return &Registry{
 		registry: reg,
 		logger:   log,
+		hostCLI:  newHostCLIResolver(log.Zap()),
 		cacheTTL: defaultCacheTTL,
 	}, nil
 }
@@ -112,6 +119,7 @@ func (r *Registry) InvalidateCache() {
 	r.cachedAt = time.Time{}
 	r.generation++
 	r.mu.Unlock()
+	r.InvalidateHostCLICache()
 }
 
 func (r *Registry) getCached() []Availability {
@@ -207,5 +215,6 @@ collect:
 			results = append(results, slots[i])
 		}
 	}
+	r.ApplyHostCLI(ctx, r.registry.Get, results)
 	return results
 }

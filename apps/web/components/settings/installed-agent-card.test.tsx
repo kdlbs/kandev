@@ -217,6 +217,56 @@ describe("InstalledAgentCard collapse", () => {
   });
 });
 
+describe("InstalledAgentCard host CLI version", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("shows the detected version under the path for a host-CLI agent", () => {
+    render(
+      <InstalledAgentCard
+        agent={{ ...makeDiscovery("claude"), cli_version: "2.1.220" }}
+        savedAgent={undefined}
+        displayName={DISPLAY_NAME}
+      >
+        <div />
+      </InstalledAgentCard>,
+    );
+
+    expect(screen.getByTestId("cli-version-claude").textContent).toBe("Claude Code 2.1.220");
+  });
+
+  it("shows an unknown-version reason when detection failed", () => {
+    render(
+      <InstalledAgentCard
+        agent={{ ...makeDiscovery("claude"), cli_version_error: "command timed out after 5s" }}
+        savedAgent={undefined}
+        displayName={DISPLAY_NAME}
+      >
+        <div />
+      </InstalledAgentCard>,
+    );
+
+    expect(screen.getByTestId("cli-version-claude").textContent).toBe(
+      "Claude Code version unknown: command timed out after 5s",
+    );
+  });
+
+  it("renders no version line for an agent type without a host CLI", () => {
+    render(
+      <InstalledAgentCard
+        agent={makeDiscovery("gemini")}
+        savedAgent={undefined}
+        displayName="Gemini"
+      >
+        <div />
+      </InstalledAgentCard>,
+    );
+
+    expect(screen.queryByTestId("cli-version-gemini")).toBeNull();
+  });
+});
+
 describe("InstalledAgentCard setup links", () => {
   afterEach(() => {
     cleanup();

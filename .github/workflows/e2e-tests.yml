@@ -4,7 +4,7 @@ name: E2E Tests
 # reports no conclusion at all, and a required check that never reports leaves
 # a pull request unable to enter a merge queue and a merge group unable to
 # leave it. `merge_group` cannot carry a `paths:` filter in the first place.
-# The filter lives in the `changes` job below instead, and `e2e-gate` reports
+# The filter lives in the `changes` job below instead, and `e2e-report` reports
 # the single conclusion the queue waits on. See docs/ci-merge-queue.md.
 on:
   push:
@@ -38,16 +38,24 @@ env:
   COREPACK_HOME: /root/.cache/node/corepack
 
 jobs:
-  runner_plan:
-    name: Plan external runner allocation
+  # The former trigger-level `paths:` list, applied one level down so a skip
+  # still produces a conclusion. `.github/scripts/changed-paths.py` implements
+  # the same last-match-wins semantics GitHub applies to `paths:`.
+  changes:
+    name: Detect relevant changes
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       plan: ${{ steps.plan.outputs.plan }}
+      run: ${{ steps.test-only.outputs.run || steps.detect.outputs.run }}
+      reason: ${{ steps.test-only.outputs.reason }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          # The base commit has to be present locally for the diff below.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Plan runner allocation
@@ -58,38 +66,17 @@ jobs:
           run-id: ${{ github.run_id }}
           families: >-
             [
-              {"name":"changes","tier":"light"},
               {"name":"e2e","tier":"standard","instances":[
                 {"shard":1},{"shard":2},{"shard":3},{"shard":4},
                 {"shard":5},{"shard":6},{"shard":7},{"shard":8},
                 {"shard":9},{"shard":10},{"shard":11},{"shard":12},
                 {"shard":13},{"shard":14}
-              ]},
-              {"name":"e2e_gate","tier":"light"}
+              ]}
             ]
           burst: ${{ vars.KANDEV_CI_EXTERNAL_ENABLED }}
           percent: ${{ vars.KANDEV_CI_EXTERNAL_PERCENT }}
           light-label: ${{ vars.KANDEV_CI_RUNNER_LIGHT }}
           standard-label: ${{ vars.KANDEV_CI_RUNNER_STANDARD }}
-
-  # The former trigger-level `paths:` list, applied one level down so a skip
-  # still produces a conclusion. `.github/scripts/changed-paths.py` implements
-  # the same last-match-wins semantics GitHub applies to `paths:`.
-  changes:
-    name: Detect relevant changes
-    needs: runner_plan
-    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).changes_runner }}
-    timeout-minutes: 10
-    outputs:
-      run: ${{ steps.detect.outputs.run }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          # The base commit has to be present locally for the diff below.
-          fetch-depth: 0
-          persist-credentials: false
 
       - name: Detect relevant changes
         id: detect
@@ -106,7 +93,10 @@ jobs:
             .github/workflows/ci-base-image.yml
             .github/workflows/e2e-tests.yml
             .github/actions/download-artifact-retry/**
+            .github/scripts/ci-test-only-changes.py
             .github/scripts/changed-paths.py
+            .github/scripts/runner-plan.py
+            .github/actions/plan-external-runners/**
             !**/*.md
           EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
@@ -120,7 +110,7 @@ jobs:
             # branch tip. Diffing against that tip directly collapses to a
             # two-dot diff over everything main landed since the PR opened, so
             # take the fork point instead.
-            pull_request) BASE="$(git merge-base HEAD "origin/${BASE_REF}")" ;;
+            pull_request) BASE="$(git merge-base HEAD "origin/${BASE_REF}" 2>/dev/null || true)" ;;
             # The queue branch is cut from this commit, so it is a true ancestor.
             merge_group) BASE="${MERGE_GROUP_BASE_SHA}" ;;
             push) BASE="${PUSH_BEFORE}" ;;
@@ -141,8 +131,16 @@ jobs:
           # `-z`, not plain --name-only: git quotes non-ASCII paths under its
           # default core.quotePath, and a quoted path matches no pattern, so a
           # change to one would skip every job and still report success.
+          echo "base=${BASE}" >> "$GITHUB_OUTPUT"
           git diff --name-only -z "${BASE}" HEAD \
             | python3 .github/scripts/changed-paths.py
+
+      - name: Check independent Go test changes
+        id: test-only
+        if: github.event_name == 'pull_request' && steps.detect.outputs.run == 'true' && steps.detect.outputs.base != ''
+        env:
+          BASE_SHA: ${{ steps.detect.outputs.base }}
+        run: python3 .github/scripts/ci-test-only-changes.py --base "$BASE_SHA" --event pull_request
 
   build:
     name: Build
@@ -410,7 +408,7 @@ jobs:
 
   e2e:
     name: E2E Shard ${{ matrix.shard }}/14
-    needs: [changes, build, runner_plan]
+    needs: [changes, build]
     if: needs.changes.outputs.run == 'true'
     runs-on: ${{ matrix.runner }}
     # Pre-baked image bundles Node 24, pnpm 9.15.9, and the Playwright browser
@@ -439,10 +437,9 @@ jobs:
     # Playwright fixtures and backend readiness polling.
     env:
       NODE_OPTIONS: --dns-result-order=ipv4first
-      E2E_FAIL_ON_FLAKY: "1"
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.runner_plan.outputs.plan).e2e_matrix }}
+      matrix: ${{ fromJSON(needs.changes.outputs.plan).e2e_matrix }}
 
     steps:
       - name: Checkout code
@@ -520,6 +517,7 @@ jobs:
         with:
           name: blob-report-${{ matrix.shard }}
           path: apps/web/e2e/blob-report/
+          if-no-files-found: error
           retention-days: 3
 
       - name: Upload test results
@@ -897,7 +895,6 @@ jobs:
         working-directory: apps/web
         env:
           KANDEV_E2E_CONTAINERS: "1"
-          E2E_FAIL_ON_FLAKY: "1"
           E2E_SHARD: ${{ matrix.shard }}
           KANDEV_E2E_BUILD_IDENTITY: ${{ github.workspace }}/apps/backend/bin/e2e-build-identity.json
           KANDEV_E2E_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
@@ -943,6 +940,7 @@ jobs:
         with:
           name: blob-report-containers-${{ matrix.shard }}
           path: apps/web/e2e/blob-report/
+          if-no-files-found: error
           retention-days: 3
 
       - name: Upload containers E2E results
@@ -1066,7 +1064,6 @@ jobs:
           KANDEV_E2E_CONTAINERS: "1"
           KANDEV_E2E_BUILD_IDENTITY: ${{ github.workspace }}/apps/backend/bin/e2e-build-identity.json
           KANDEV_E2E_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
-          E2E_FAIL_ON_FLAKY: "1"
         run: >-
           pnpm exec playwright test --config e2e/playwright.config.ts
           --project=kubernetes-compat --reporter=list tests/kubernetes-compat
@@ -1165,13 +1162,9 @@ jobs:
         run: pnpm --filter @kandev/desktop e2e
 
   e2e-report:
-    name: Merge E2E Reports
-    needs: [changes, e2e, e2e-containers, desktop-e2e]
-    # `always()` so a failed shard still gets its report merged, but not when
-    # change detection skipped the shards outright: there would be no blob
-    # reports to download, and the artifact step would fail on an empty run.
-    # `e2e-gate` below, not this job, is what the merge queue waits on.
-    if: always() && needs.changes.outputs.run == 'true'
+    name: E2E Tests Passed
+    needs: [changes, build, playwright_image, e2e, e2e-containers, e2e-kubernetes-compatibility, desktop-e2e]
+    if: always()
     # Report aggregation queries GitHub history and downloads artifacts with the
     # job token, so it remains on a GitHub-hosted runner during the pilot.
     runs-on: ubuntu-latest
@@ -1189,14 +1182,17 @@ jobs:
 
     steps:
       - name: Checkout code
+        if: needs.changes.outputs.run == 'true'
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
 
       - name: Mark workspace safe for git
+        if: needs.changes.outputs.run == 'true'
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Cache pnpm store
+        if: needs.changes.outputs.run == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.local/share/pnpm/store
@@ -1204,12 +1200,14 @@ jobs:
           restore-keys: pnpm-${{ runner.os }}-
 
       - name: Install dependencies
+        if: needs.changes.outputs.run == 'true'
         working-directory: apps
         run: pnpm install --frozen-lockfile
 
       # The published runtime image may predate the report-tool dependency;
       # keep older images usable while the image rebuild adds unzip permanently.
       - name: Ensure timing report tools are installed
+        if: needs.changes.outputs.run == 'true'
         run: |
           if ! command -v unzip >/dev/null 2>&1; then
             apt-get update
@@ -1218,6 +1216,7 @@ jobs:
           fi
 
       - name: Download blob reports
+        if: needs.changes.outputs.run == 'true'
         uses: ./.github/actions/download-artifact-retry
         with:
           path: apps/web/e2e/blob-reports
@@ -1225,6 +1224,7 @@ jobs:
           merge-multiple: true
 
       - name: Download E2E shard manifests
+        if: needs.changes.outputs.run == 'true'
         uses: ./.github/actions/download-artifact-retry
         continue-on-error: true
         with:
@@ -1232,6 +1232,7 @@ jobs:
           path: e2e-manifests
 
       - name: Download selected main timing profile
+        if: needs.changes.outputs.run == 'true'
         uses: ./.github/actions/download-artifact-retry
         continue-on-error: true
         with:
@@ -1239,7 +1240,7 @@ jobs:
           path: e2e/previous-profile
 
       - name: Collect timing and retry diagnostics
-        if: always()
+        if: always() && needs.changes.outputs.run == 'true'
         working-directory: apps/web
         run: |
           set -euo pipefail
@@ -1270,7 +1271,7 @@ jobs:
             --artifact-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID#artifacts"
 
       - name: Write E2E timing summary
-        if: always()
+        if: always() && needs.changes.outputs.run == 'true'
         working-directory: apps/web
         run: |
           node <<'NODE'
@@ -1351,7 +1352,7 @@ jobs:
           NODE
 
       - name: Upload timing profile candidate
-        if: always()
+        if: always() && needs.changes.outputs.run == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-timing-profile
@@ -1360,7 +1361,7 @@ jobs:
           retention-days: 30
 
       - name: Upload retry and shard timing summary
-        if: always()
+        if: always() && needs.changes.outputs.run == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-retry-summary
@@ -1369,7 +1370,7 @@ jobs:
           retention-days: 14
 
       - name: Upload timing diagnostics bundle
-        if: always()
+        if: always() && needs.changes.outputs.run == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-timing-diagnostics
@@ -1382,7 +1383,7 @@ jobs:
           retention-days: 14
 
       - name: Merge reports
-        if: hashFiles('apps/web/e2e/blob-reports/**/*.zip') != ''
+        if: needs.changes.outputs.run == 'true' && hashFiles('apps/web/e2e/blob-reports/**/*.zip') != ''
         working-directory: apps/web
         # `-c e2e/playwright.config.ts` is required because the blobs come from
         # two different absolute checkout paths: the containerized `e2e` shards
@@ -1414,7 +1415,7 @@ jobs:
       # to match the other lookup.
       - name: Locate latest main flake history
         id: flake-history-run
-        if: always()
+        if: always() && needs.changes.outputs.run == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_API_URL: ${{ github.api_url }}
@@ -1459,7 +1460,7 @@ jobs:
           NODE
 
       - name: Download previous flake history
-        if: always() && steps.flake-history-run.outputs.run_id != ''
+        if: always() && needs.changes.outputs.run == 'true' && steps.flake-history-run.outputs.run_id != ''
         continue-on-error: true
         uses: ./.github/actions/download-artifact-retry
         with:
@@ -1470,7 +1471,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Write E2E flake report
-        if: always()
+        if: always() && needs.changes.outputs.run == 'true'
         working-directory: apps/web
         run: |
           set -euo pipefail
@@ -1497,7 +1498,7 @@ jobs:
             --sha "$GITHUB_SHA"
 
       - name: Upload flake history
-        if: always()
+        if: always() && needs.changes.outputs.run == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-flake-history
@@ -1506,117 +1507,65 @@ jobs:
           retention-days: 90
 
       - name: Upload merged report
+        if: needs.changes.outputs.run == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-report
           path: apps/web/playwright-report/
           retention-days: 14
 
-      - name: Verify required E2E jobs passed
+      - name: Verify required jobs and evidence
         if: always()
         env:
-          E2E_RESULT: ${{ needs.e2e.result }}
-          E2E_CONTAINERS_RESULT: ${{ needs['e2e-containers'].result }}
-          DESKTOP_E2E_RESULT: ${{ needs['desktop-e2e'].result }}
-        run: |
-          set -euo pipefail
-          if [ "$E2E_RESULT" != "success" ]; then
-            echo "e2e finished with result: $E2E_RESULT" >&2
-            exit 1
-          fi
-          if [ "$E2E_CONTAINERS_RESULT" != "success" ]; then
-            echo "e2e-containers finished with result: $E2E_CONTAINERS_RESULT" >&2
-            exit 1
-          fi
-          if [ "$DESKTOP_E2E_RESULT" != "success" ]; then
-            echo "desktop-e2e finished with result: $DESKTOP_E2E_RESULT" >&2
-            exit 1
-          fi
-
-  # The required check. Runs on every event, including the ones where every job
-  # above is correctly skipped, so the merge queue always has a conclusion to
-  # read instead of a check that stays pending forever.
-  #
-  # A single gate is what makes this workflow usable from a ruleset at all: the
-  # alternative is naming all 14 E2E shards, all 6 container shards, and the
-  # desktop smoke individually, and renumbering the ruleset every time a shard
-  # count changes.
-  e2e-gate:
-    name: E2E Tests Passed
-    runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).e2e_gate_runner }}
-    needs:
-      [
-        changes,
-        runner_plan,
-        build,
-        playwright_image,
-        e2e,
-        e2e-containers,
-        e2e-kubernetes-compatibility,
-        desktop-e2e,
-        e2e-report,
-      ]
-    if: always()
-
-    steps:
-      - name: Require the E2E jobs to have passed or been skipped
-        env:
-          RUNNER_PLAN_RESULT: ${{ needs.runner_plan.result }}
           CHANGES_RESULT: ${{ needs.changes.result }}
+          RUNNER_PLAN: ${{ needs.changes.outputs.plan }}
+          RUN_REQUIRED: ${{ needs.changes.outputs.run }}
+          REPORT_RESULT: ${{ job.status }}
+          SKIP_REASON: ${{ needs.changes.outputs.reason }}
           BUILD_RESULT: ${{ needs.build.result }}
           PLAYWRIGHT_IMAGE_RESULT: ${{ needs.playwright_image.result }}
           E2E_RESULT: ${{ needs.e2e.result }}
           E2E_CONTAINERS_RESULT: ${{ needs['e2e-containers'].result }}
           E2E_KUBERNETES_COMPATIBILITY_RESULT: ${{ needs['e2e-kubernetes-compatibility'].result }}
           DESKTOP_E2E_RESULT: ${{ needs['desktop-e2e'].result }}
-          E2E_REPORT_RESULT: ${{ needs['e2e-report'].result }}
         run: |
           set -euo pipefail
-
-          echo "Change detection: ${CHANGES_RESULT}"
-          echo "Runner plan: ${RUNNER_PLAN_RESULT}"
-          echo "Build: ${BUILD_RESULT}"
-          echo "Playwright image: ${PLAYWRIGHT_IMAGE_RESULT}"
-          echo "E2E shards: ${E2E_RESULT}"
-          echo "E2E container shards: ${E2E_CONTAINERS_RESULT}"
-          echo "Kubernetes compatibility: ${E2E_KUBERNETES_COMPATIBILITY_RESULT}"
-          echo "Desktop smoke: ${DESKTOP_E2E_RESULT}"
-          echo "Report merge: ${E2E_REPORT_RESULT}"
-
-          # Runner planning must succeed because its outputs select the runner
-          # fleet. A planner error cannot silently become a hosted fallback.
-          if [[ "${RUNNER_PLAN_RESULT}" != "success" ]]; then
-            echo "Runner planning did not succeed; refusing to report a pass." >&2
+          if [[ "${CHANGES_RESULT}" != "success" || -z "${RUNNER_PLAN}" ]]; then
+            echo "Change detection or runner planning failed or produced no plan: ${CHANGES_RESULT}" >&2
             exit 1
           fi
-
-          # Change detection itself must succeed: if it errored we do not know
-          # whether the skips below were deliberate.
-          if [[ "${CHANGES_RESULT}" != "success" ]]; then
-            echo "Change detection did not succeed; refusing to report a pass." >&2
+          if [[ "${RUN_REQUIRED}" != "true" && "${RUN_REQUIRED}" != "false" ]]; then
+            echo "Missing change-selection verdict." >&2
             exit 1
           fi
-
-          # `skipped` is a pass — the change-detection job decided nothing this
-          # workflow covers was touched. `cancelled` is not: a cancelled job
-          # never reached a verdict, and treating that as a pass would let an
-          # untested merge group through.
-          #
-          # This gate is the one check a human opens when a merge is blocked, so
-          # name the job that failed here rather than making them correlate the
-          # list above against twenty shard names.
+          expected=skipped
+          if [[ "${RUN_REQUIRED}" == "true" ]]; then expected=success; fi
           for entry in \
             "build:${BUILD_RESULT}" \
             "playwright-image:${PLAYWRIGHT_IMAGE_RESULT}" \
             "e2e:${E2E_RESULT}" \
             "e2e-containers:${E2E_CONTAINERS_RESULT}" \
             "e2e-kubernetes-compatibility:${E2E_KUBERNETES_COMPATIBILITY_RESULT}" \
-            "desktop-e2e:${DESKTOP_E2E_RESULT}" \
-            "e2e-report:${E2E_REPORT_RESULT}"; do
+            "desktop-e2e:${DESKTOP_E2E_RESULT}"; do
             name="${entry%%:*}"
             result="${entry#*:}"
-            if [[ "${result}" != "success" && "${result}" != "skipped" ]]; then
-              echo "${name} finished with result: ${result}" >&2
+            required="${expected}"
+            if [[ "${result}" != "${required}" ]]; then
+              echo "${name}: expected ${required}, got ${result}" >&2
+              exit 1
+            fi
+          done
+          if [[ "${REPORT_RESULT}" != "success" ]]; then
+            echo "Report processing failed: ${REPORT_RESULT}" >&2
+            exit 1
+          fi
+          if [[ "${RUN_REQUIRED}" == "false" ]]; then
+            echo "Application E2E skipped: ${SKIP_REASON:-irrelevant-paths}" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          for report in retry-summary timing-profile merged-report; do
+            if [[ ! -s "apps/web/e2e/${report}.json" ]]; then
+              echo "Missing required E2E evidence: ${report}.json" >&2
               exit 1
             fi
           done

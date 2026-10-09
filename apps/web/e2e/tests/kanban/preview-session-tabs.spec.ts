@@ -117,6 +117,23 @@ test.describe("Preview session tabs", () => {
     await expect(previewCard.getByRole("button", { name: "Open full page" })).toBeVisible({
       timeout: 10_000,
     });
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate((taskId) => {
+            type KandevStore = {
+              getState: () => {
+                kanban: { tasks: { id: string; primarySessionId?: string | null }[] };
+              };
+            };
+            const store = (window as unknown as { __KANDEV_E2E_STORE__?: KandevStore })
+              .__KANDEV_E2E_STORE__;
+            return store?.getState().kanban.tasks.find((task) => task.id === taskId)
+              ?.primarySessionId;
+          }, task.id),
+        { timeout: 15_000, message: "Waiting for the board task's primary session projection" },
+      )
+      .toBe(primaryId);
     await previewCard.click();
 
     // 6. Preview panel + both tabs are visible.

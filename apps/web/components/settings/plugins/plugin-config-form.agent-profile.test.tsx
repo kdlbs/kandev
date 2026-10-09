@@ -41,7 +41,9 @@ function renderField(
 ) {
   const onChange = vi.fn<(name: string, value: string | boolean) => void>();
   render(
-    <StateProvider initialState={{ agentProfiles: { items: profiles, version: 0 } }}>
+    <StateProvider
+      initialState={{ agentProfiles: { items: profiles, version: 0, orderByAgent: {} } }}
+    >
       <PluginConfigForm
         fields={[{ ...field, ...fieldOverride }]}
         values={{ [AGENT_PROFILE_FIELD]: value }}

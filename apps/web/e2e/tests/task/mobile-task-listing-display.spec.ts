@@ -19,6 +19,7 @@ test.describe("Mobile task listing display preferences", () => {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
+      priority: "critical",
     });
     await expect
       .poll(
@@ -116,6 +117,7 @@ test.describe("Mobile task listing display preferences", () => {
     await expect(row).toContainText(SEEDED_REPOSITORY_LABEL);
     await expect(row).toContainText(TASK_DESCRIPTION);
     await expect(row.getByTestId(`pr-task-icon-${task.id}`)).toBeVisible();
+    await expect(row.getByTestId("tasks-list-row-priority")).toBeVisible();
     await expect(
       testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).resolves.toBe(true);

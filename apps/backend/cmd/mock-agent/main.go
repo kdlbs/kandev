@@ -71,6 +71,10 @@ func main() {
 		os.Exit(runProfileProbeWrapper(os.Args[2:], os.Getenv(profileProbeEvidenceEnv)))
 	}
 	recordProfileProbeChildEvidence(os.Args, os.Getenv(profileProbeEvidenceEnv))
+	// Vendor-CLI shaped entry points (`--version`, `app-server`) that the hostcli package drives in E2E.
+	if runHostCLICommand(os.Args[1:], os.Stdin, os.Stdout) {
+		return
+	}
 	model := parseModelFlag()
 
 	// TUI mode: simple terminal UI for passthrough/PTY testing

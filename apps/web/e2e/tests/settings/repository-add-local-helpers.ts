@@ -6,6 +6,7 @@ import type { BackendContext } from "../../fixtures/backend";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { openAddLocalRepositoryDialog } from "../../helpers/add-repository-menu";
 import type { ListRepositoriesResponse, Repository } from "../../../lib/types/http";
 
 export async function addExplicitLocalRepository(options: {
@@ -38,9 +39,7 @@ export async function addExplicitLocalRepository(options: {
     expect(relativeToBackendHome.startsWith(`..${path.sep}`)).toBe(true);
 
     await page.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
-    await page.getByRole("button", { name: "Add Local Repository" }).click();
-
-    const dialog = page.getByRole("dialog", { name: "Add Local Repository" });
+    const dialog = await openAddLocalRepositoryDialog(page);
     await expect(dialog).toBeVisible();
     const manualPath = dialog.getByPlaceholder("/absolute/path/to/repository");
     await manualPath.fill(repoPath);

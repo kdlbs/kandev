@@ -28,6 +28,8 @@ Commit and cumulative comparisons must also retain actual file bytes when
 repository attributes select a text converter, even if its output hides changes.
 Submodule display preferences must not hide or replace a parent repository's
 gitlink change in these comparisons.
+Submodule ignore preferences must also retain a recorded parent gitlink change,
+including when the child is unavailable and the parent is the only review evidence.
 The [workspace status contract](workspace-git-status.md) separately owns live
 porcelain membership, staged/unstaged facets, and detail enrichment.
 
@@ -53,6 +55,7 @@ of arbitrary path and content bytes.
 - **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.11:** Commit and cumulative comparison reads shall not execute selected text converters and shall not change repository configuration or attributes, HEAD, refs, index, or worktree content/state. Configured converters remain available to other Git operations under their existing contracts.
 - **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.12:** With default, short, log, or inline-diff submodule display preferences, commit and cumulative comparisons shall retain each changed parent gitlink's exact path, short gitlink patch with the old/new commit identities, status, and line counts. Forward and backward pointer updates, additions, and deletions shall remain inspectable; a gitlink-only commit shall not appear to have no changed files because of a display preference. Ordinary file changes, genuinely empty comparisons, and existing metadata and budgets shall retain their behavior.
 - **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.13:** Normalizing parent gitlink display shall preserve repository-selected isolation, aggregate repository-qualified identities, and separate initialized child comparisons against their parent-recorded anchors. It shall not mutate configuration, HEAD, refs, index, or worktree state, change comparison bases or API shapes, or alter existing Review suppression of a parent gitlink row when child file diffs are available.
+- **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.14:** With default, none, untracked, dirty, or all submodule ignore preferences, commit and cumulative comparisons shall retain an actual recorded parent gitlink pointer change with its exact path, old/new commit identities, status, patch and line counts. An unavailable or deinitialized child shall not cause that change to become a successful empty comparison; the parent evidence shall remain available to the existing Review fallback. Cumulative parent gitlink evidence shall represent an actual pointer change, without a `-dirty` decoration from child-only tracked or untracked content when the child HEAD is unchanged. Actual initialized child file changes shall remain visible in their existing separate scopes against parent-recorded anchors. Ordinary files and genuinely unchanged parent comparisons shall retain their behavior.
 
 ## Cross-surface outcome
 
@@ -62,7 +65,7 @@ required. Provider-only history remains governed by its existing source contract
 
 ## Out of scope
 
-- Git invocation or flag-validation changes beyond per-comparison display-color suppression, built-in cumulative patch selection, text-conversion suppression, and short parent gitlink display for commit and cumulative patches; shared environment policy, history-provider, rename-detection, other readers' display or text conversion, or comparison-base changes.
+- Git invocation or flag-validation changes beyond per-comparison display-color suppression, built-in cumulative patch selection, text-conversion suppression, short parent gitlink display and parent gitlink visibility for commit and cumulative patches; shared environment policy, history-provider, rename-detection, other readers' display or text conversion, or comparison-base changes.
 - Live workspace porcelain parsing, NUL numstat parsing, literal path selection, and worktree mutations.
 - Frontend layout, file-navigation changes, new status enums, or transport schemas.
 
@@ -74,3 +77,4 @@ required. Provider-only history remains governed by its existing source contract
 - [Built-in cumulative patch repair package](../../../plans/git-cumulative-built-in-patch/plan.md)
 - [Actual-byte comparison patch repair package](../../../plans/git-comparison-textconv/plan.md)
 - [Submodule comparison format repair package](../../../plans/git-submodule-comparison-format/plan.md)
+- [Ignored submodule review evidence repair package](../../../plans/git-submodule-ignore-review-evidence/plan.md)

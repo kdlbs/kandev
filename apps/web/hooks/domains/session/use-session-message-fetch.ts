@@ -212,7 +212,7 @@ export async function doFetchMessages({
     lastFetchedSessionIdRef,
     background,
   });
-  if (initialFetchStartRef.current === null) {
+  if (!silent && initialFetchStartRef.current === null) {
     initialFetchStartRef.current = Date.now();
     setIsWaitingForInitialMessages(true);
   }

@@ -16,7 +16,10 @@ import {
   matchingAutomaticRecovery,
   type SessionRecoveryOwner,
 } from "@/lib/session-recovery-presentation";
-import { sessionRecoveryAction } from "./messages/action-message-recovery";
+import {
+  addHistoryContinuationChoice,
+  sessionRecoveryAction,
+} from "./messages/action-message-recovery";
 import { interruptionRecoveryKey } from "./messages/interruption-recovery-feedback";
 import { managedRuntimeStartupCopy } from "./managed-runtime-startup-copy";
 import { useOptionalAppStore } from "@/components/state-provider";
@@ -198,7 +201,20 @@ export function useRecoveryChoices({
       testId: "recovery-new-branch-button",
       onClick: () => void actions.handleNewBranch(),
     });
+  addHistoryContinuationChoice(
+    choices,
+    historyContinuationAvailable(actions, managedCloneRelocation),
+    () => void actions.handleContinueFromHistory(),
+    t("task:continueFromHistory"),
+  );
   return actions.guardDetails ? choices.filter((choice) => choice.kind !== "restore") : choices;
+}
+
+function historyContinuationAvailable(
+  actions: SessionRecoveryActions,
+  managedCloneRelocation: boolean,
+) {
+  return !managedCloneRelocation && Boolean(actions.continuationDetails);
 }
 
 function recoveryActionKinds(

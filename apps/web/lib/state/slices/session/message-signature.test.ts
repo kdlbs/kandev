@@ -61,6 +61,23 @@ describe("signatureOf", () => {
     expect(signatureOf(a)).toBe(signatureOf(b));
   });
 
+  it("adopts a running notice resolution without a timestamp change", () => {
+    const unresolved = makeMessage({
+      content: "waiting",
+      updated_at: TS,
+      metadata: { action_visibility: "running" },
+    });
+    const resolved = makeMessage({
+      content: "waiting",
+      updated_at: TS,
+      metadata: { action_visibility: "running", running_notice_resolved: true },
+    });
+
+    expect(reconcileMessages([unresolved], [resolved])[0].metadata?.running_notice_resolved).toBe(
+      true,
+    );
+  });
+
   it("differs when updated_at advances", () => {
     const a = makeMessage({ content: "x", updated_at: TS });
     const b = makeMessage({ content: "x", updated_at: "2024-01-01T00:00:01Z" });
@@ -71,6 +88,12 @@ describe("signatureOf", () => {
     expect(signatureOf(makeMessage({ content: "one" }))).not.toBe(
       signatureOf(makeMessage({ content: "two" })),
     );
+  });
+
+  it("retains changed content when updated_at is malformed", () => {
+    const previous = makeMessage({ content: "before", updated_at: "malformed" });
+    const incoming = makeMessage({ content: "after", updated_at: "malformed" });
+    expect(reconcileMessages([previous], [incoming])[0].content).toBe("after");
   });
 });
 

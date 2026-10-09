@@ -2,6 +2,7 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { watchWs } from "../../helpers/causal-waits";
 import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 import { routePortForwarding } from "./port-forwarding-helpers";
@@ -22,35 +23,37 @@ async function seedRemoteSession(
     default_executor_id: executor.id,
   });
 
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
+  const task = await (async () => {
+    try {
+      return await apiClient.createTask(seedData.workspaceId, title, {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        agent_profile_id: seedData.agentProfileId,
+        repository_ids: [seedData.repositoryId],
+        prepare_session: true,
+      });
+    } finally {
+      await apiClient.updateWorkspace(seedData.workspaceId, {
+        default_executor_id: "",
+      });
+    }
+  })();
 
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+  if (!task.session_id) throw new Error("prepared remote task did not return a session_id");
 
+  const gateway = watchWs(testPage);
+  const subscribed = gateway.waitForResponse("session.subscribe");
   await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  // waitForChatIdle (not a raw idleInput wait) rides out the WS-subscribe race:
-  // the auto-started mock agent can complete before the client's WS subscription
-  // registers, leaving isAgentBusy=true and the idle input never rendering. The
-  // helper reloads once to re-derive state from SSR. The plain wait flaked here.
-  await session.waitForChatIdle({ timeout: 30_000 });
+  await subscribed;
+  const startAgentButton = testPage.getByTestId("task-description-start-button");
+  await expect(startAgentButton).toBeEnabled({ timeout: 15_000 });
+  await startAgentButton.click();
   await waitForSessionAgentctlReady(testPage, task.session_id);
-
-  // Reset workspace default executor so other tests aren't affected
-  await apiClient.updateWorkspace(seedData.workspaceId, {
-    default_executor_id: "",
-  });
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   return { session, sessionId: task.session_id };
 }
@@ -64,28 +67,30 @@ async function seedLocalSession(
   seedData: SeedData,
   title: string,
 ): Promise<{ session: SessionPage; sessionId: string }> {
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
+  const task = await apiClient.createTask(seedData.workspaceId, title, {
+    description: "/e2e:simple-message",
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    agent_profile_id: seedData.agentProfileId,
+    executor_profile_id: seedData.worktreeExecutorProfileId,
+    repository_ids: [seedData.repositoryId],
+    prepare_session: true,
+  });
 
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+  if (!task.session_id) throw new Error("prepared local task did not return a session_id");
 
+  const gateway = watchWs(testPage);
+  const subscribed = gateway.waitForResponse("session.subscribe");
   await testPage.goto(`/t/${task.id}`);
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  // See seedRemoteSession: waitForChatIdle handles the WS-subscribe race that
-  // makes a raw idleInput wait flake when the auto-started agent finishes early.
-  await session.waitForChatIdle({ timeout: 30_000 });
+  await subscribed;
+  const startAgentButton = testPage.getByTestId("task-description-start-button");
+  await expect(startAgentButton).toBeEnabled({ timeout: 15_000 });
+  await startAgentButton.click();
   await waitForSessionAgentctlReady(testPage, task.session_id);
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   return { session, sessionId: task.session_id };
 }

@@ -97,7 +97,9 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	if execution.SessionID == "" {
 		return m.startAgentProcess(ctx, executionID)
 	}
-	_, err := m.doCoalescedExecution(ctx, execution.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+	// Workspace preparation and subprocess startup have different results.
+	// Share a startup only with callers starting this exact execution.
+	_, err := m.doCoalescedExecution(ctx, "agent-start:"+executionID, func(sharedCtx context.Context) (interface{}, error) {
 		return nil, m.startAgentProcess(sharedCtx, executionID)
 	})
 	return err

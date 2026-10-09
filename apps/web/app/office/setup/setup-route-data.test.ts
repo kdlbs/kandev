@@ -23,6 +23,7 @@ const mockGetOnboardingState = vi.mocked(getOnboardingState);
 const mockFetchUserSettings = vi.mocked(fetchUserSettings);
 const mockListAgents = vi.mocked(listAgents);
 const mockListWorkspaces = vi.mocked(listWorkspaces);
+const FIXTURE_TIMESTAMP = "2026-01-01T00:00:00Z";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -39,6 +40,19 @@ beforeEach(() => {
 });
 
 describe("loadSetupRouteData", () => {
+  it("keeps the newest-first selector default after a saved Settings reorder", async () => {
+    const savedAgent = agent("a", "A", ["old", "new"]);
+    savedAgent.profiles[0].createdAt = FIXTURE_TIMESTAMP;
+    savedAgent.profiles[1].createdAt = "2026-02-01T00:00:00Z";
+    savedAgent.profile_order_revision = 4;
+    mockListAgents.mockResolvedValueOnce({ agents: [savedAgent], total: 1 });
+    const data = await loadSetupRouteData("new");
+    expect(data.kind).toBe("wizard");
+    if (data.kind !== "wizard") throw new Error("Expected setup wizard");
+    expect(data.props.agentProfiles.map((profile) => profile.id)).toEqual(["new", "old"]);
+    expect(data.props.defaultAgentProfileId).toBe("new");
+  });
+
   it("returns redirect when onboarding completed and mode is not new", async () => {
     mockGetOnboardingState.mockResolvedValueOnce({
       completed: true,
@@ -137,8 +151,8 @@ function agent(id: string, name: string, profileIds: string[]): Agent {
     id,
     name,
     supports_mcp: false,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
+    created_at: FIXTURE_TIMESTAMP,
+    updated_at: FIXTURE_TIMESTAMP,
     profiles: profileIds.map((profileId) => ({
       id: profileId,
       name: `${name} Profile`,
@@ -158,7 +172,7 @@ function userSettings(settings: Partial<UserSettingsResponse["settings"]>): User
       workspace_id: "" as unknown as UserSettingsResponse["settings"]["workspace_id"],
       workflow_filter_id: "",
       repository_ids: [],
-      updated_at: "2026-01-01T00:00:00Z",
+      updated_at: FIXTURE_TIMESTAMP,
       ...settings,
     },
   };

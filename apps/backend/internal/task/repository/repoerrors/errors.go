@@ -134,6 +134,10 @@ var ErrArchiveCleanupInProgress = errors.New("archive cleanup in progress")
 // contract.
 var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")
 
+// ErrTaskTransferConflict is the stable, non-leaking result for a stale,
+// ambiguous, incompatible, or idempotency-mismatched transfer request.
+var ErrTaskTransferConflict = errors.New("task transfer conflict")
+
 // ErrWorkflowChangeConflict reports that an explicit change-workflow request
 // no longer matches the task source or task version it was opened against.
 var ErrWorkflowChangeConflict = errors.New("task changed since workflow change was opened")

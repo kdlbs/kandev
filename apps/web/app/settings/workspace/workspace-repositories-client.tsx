@@ -4,13 +4,10 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useRouter } from "@/lib/routing/client-router";
-import { IconGitBranch } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
-import { SettingsSection } from "@/components/settings/settings-section";
-import { RepositoryCard } from "@/components/settings/repository-card";
-import { settingsActionClassName } from "@/components/settings/settings-control";
+import { WorkspaceRepositoriesSection } from "./workspace-repositories-section";
 import { WorkspaceRepositorySetsSection } from "./workspace-repository-sets-section";
 import { AddLocalRepositoryDialog } from "./workspace-add-local-repository-dialog";
+import { AddRemoteRepositoryDialog } from "./workspace-add-remote-repository-dialog";
 import { generateUUID } from "@/lib/utils";
 import {
   createRepositoryAction,
@@ -33,9 +30,7 @@ import { useAppStore } from "@/components/state-provider";
 import type { ManualValidation } from "@/app/settings/workspace/workspace-repositories-dialog";
 import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
 import {
-  areRepositoryScriptsDirty,
   cloneRepository,
-  isRepositoryDirty,
   mergeSavedRepositoryDraft,
   persistedRepositoryItems,
   type RepositoryWithScripts,
@@ -531,7 +526,25 @@ export function useWorkspaceRepositoriesPage(
     discover.setLocalRepoDialogOpen(false);
   };
 
+  const [remoteRepoDialogOpen, setRemoteRepoDialogOpen] = useState(false);
+  // A remote repository is saved by the backend before it reaches the page, so
+  // it joins the saved baseline directly instead of becoming an unsaved draft.
+  // A repository the page already lists keeps its loaded baseline and scripts;
+  // the registration response never carries scripts.
+  const handleRemoteRepositoryRegistered = (repository: Repository) => {
+    const saved: RepositoryWithScripts = { ...repository, scripts: [] };
+    setSavedRepositoryItems((prev) =>
+      prev.some((item) => item.id === saved.id) ? prev : [cloneRepository(saved), ...prev],
+    );
+    setRepositoryItems((prev) =>
+      prev.some((item) => item.id === saved.id) ? prev : [{ ...saved, __autoOpen: true }, ...prev],
+    );
+  };
+
   return {
+    remoteRepoDialogOpen,
+    setRemoteRepoDialogOpen,
+    handleRemoteRepositoryRegistered,
     router,
     repositoryItems,
     savedRepositoriesById,
@@ -551,21 +564,15 @@ export function WorkspaceRepositoriesClient({
   repositories,
   isImproveWorkspace = false,
 }: WorkspaceRepositoriesClientProps) {
-  const { t } = useTranslation();
   const state = useWorkspaceRepositoriesPage(workspace, repositories);
   // The add-local-repository dialog reads the rest of `state` directly, so only
   // what this component renders is destructured here.
   const {
     router,
     repositoryItems,
-    savedRepositoriesById,
-    handleUpdateRepository,
-    handleAddRepositoryScript,
-    handleUpdateRepositoryScript,
-    handleDeleteRepositoryScript,
-    handleSaveRepository,
-    handleDeleteRepository,
-    openDialog,
+    remoteRepoDialogOpen,
+    setRemoteRepoDialogOpen,
+    handleRemoteRepositoryRegistered,
   } = state;
 
   if (!workspace)
@@ -576,45 +583,11 @@ export function WorkspaceRepositoriesClient({
       {/* No section header: the Repositories section below already carries the
           name, mark and description, and the tab strip above says which tab you
           are on. A second copy of all three read as the page repeating itself. */}
-      <SettingsSection
-        divided
-        framed={false}
-        icon={<IconGitBranch className="h-5 w-5" />}
-        title={t("workspaces:repositories")}
-        description={
-          isImproveWorkspace
-            ? t("workspaces:repositoriesReadOnlyImprove")
-            : t("workspaces:repositoriesInThisWorkspace")
-        }
-        action={
-          isImproveWorkspace ? undefined : (
-            <Button className={settingsActionClassName("cursor-pointer")} onClick={openDialog}>
-              {t("workspaces:addLocalRepository")}
-            </Button>
-          )
-        }
-      >
-        <div className="grid gap-3">
-          {repositoryItems.map((repo) => (
-            <RepositoryCard
-              key={repo.id}
-              repository={repo}
-              workspaceId={workspace.id}
-              savedRepository={savedRepositoriesById.get(repo.id)}
-              isRepositoryDirty={isRepositoryDirty(repo, savedRepositoriesById.get(repo.id))}
-              areScriptsDirty={areRepositoryScriptsDirty(repo, savedRepositoriesById.get(repo.id))}
-              autoOpen={Boolean(repo.__autoOpen)}
-              readOnly={isImproveWorkspace}
-              onUpdate={handleUpdateRepository}
-              onAddScript={handleAddRepositoryScript}
-              onUpdateScript={handleUpdateRepositoryScript}
-              onDeleteScript={handleDeleteRepositoryScript}
-              onSave={handleSaveRepository}
-              onDelete={handleDeleteRepository}
-            />
-          ))}
-        </div>
-      </SettingsSection>
+      <WorkspaceRepositoriesSection
+        workspaceId={workspace.id}
+        readOnly={isImproveWorkspace}
+        state={state}
+      />
       {/* Sets group the repositories listed above, so they belong on this page
           rather than on a tab of their own. */}
       <WorkspaceRepositorySetsSection
@@ -625,6 +598,14 @@ export function WorkspaceRepositoriesClient({
         readOnly={isImproveWorkspace}
       />
       {!isImproveWorkspace && <AddLocalRepositoryDialog state={state} />}
+      {!isImproveWorkspace && (
+        <AddRemoteRepositoryDialog
+          open={remoteRepoDialogOpen}
+          onOpenChange={setRemoteRepoDialogOpen}
+          workspaceId={workspace.id}
+          onRegistered={handleRemoteRepositoryRegistered}
+        />
+      )}
     </div>
   );
 }

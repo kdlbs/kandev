@@ -46,6 +46,7 @@ const agentInstanceColumns = `
 	COALESCE(agent_id, '')                  AS agent_id,
 	COALESCE(workspace_id, '')              AS workspace_id,
 	name,
+	COALESCE(enabled, 0)                    AS enabled,
 	COALESCE(agent_display_name, '')        AS agent_display_name,
 	COALESCE(model, '')                     AS model,
 	COALESCE(auto_approve, 0)               AS auto_approve,

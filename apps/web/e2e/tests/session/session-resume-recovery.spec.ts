@@ -16,14 +16,23 @@ import {
   readManagedCloneRecoveryConsumers,
   readPrivateManagedCloneRecoveryArtifacts,
   removeRecoveryBranch,
+  waitForStoppedRecoveryRuntime,
   seedManagedCloneRelocationFixture,
   seedWorktreeRecoveryFixture,
   taskEnvironmentRepository,
   taskEnvironmentRepositoryWorktreePath,
 } from "../../helpers/session-resume-recovery";
 
+test.afterEach(async ({ backend }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus) return;
+  await testInfo.attach("session-recovery-backend.log", {
+    path: backend.logPath,
+    contentType: "text/plain",
+  });
+});
+
 test.describe("worktree branch resume recovery", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test("keeps normal resume unchanged and explicitly replaces a lost branch", async ({
     testPage,
@@ -34,6 +43,7 @@ test.describe("worktree branch resume recovery", () => {
   }, testInfo) => {
     test.setTimeout(180_000);
 
+    const recoveryWire = captureSessionRecoveryMessages(testPage);
     const fixture = await seedWorktreeRecoveryFixture(
       testPage,
       apiClient,
@@ -65,6 +75,8 @@ test.describe("worktree branch resume recovery", () => {
     });
     await expect(fixture.session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
 
+    await waitForStoppedRecoveryRuntime(apiClient, backend.tmpDir, fixture);
+
     removeRecoveryBranch(seedData.repositoryPath, backend.tmpDir, fixture.repository);
 
     // A normal Resume must report the lost branch and leave the environment
@@ -79,8 +91,20 @@ test.describe("worktree branch resume recovery", () => {
 
     // A second ordinary attempt remains retryable and must not silently switch
     // the branch or consume the explicit replacement decision.
+    const resumeRequestsBefore = recoveryWire.requestCounts.resume ?? 0;
     await testPage.getByTestId("recovery-resume-button").click();
+    await expect.poll(() => recoveryWire.requestCounts.resume ?? 0).toBe(resumeRequestsBefore + 1);
+    await expect
+      .poll(() =>
+        capturedSessionRecoveryResponseType(
+          recoveryWire.requestIds,
+          recoveryWire.responses,
+          "resume",
+        ),
+      )
+      .toBe("error");
     await expect(fixture.session.recoveryError()).toBeVisible({ timeout: 30_000 });
+    await expect(fixture.session.recoveryNewBranchButton()).toBeEnabled();
     await expect
       .poll(
         async () =>

@@ -14,11 +14,12 @@ Kanban tasks use four priority tokens: `critical`, `high`, `medium`, and `low`.
 People can see non-medium priorities on task cards and can set the priority when
 they create or triage a task. Existing task storage, APIs, and events already
 carry the value. This capability makes that value visible and usable on the
-kanban board without changing the task model or priority vocabulary.
+kanban board, task switcher, and `/tasks` list without changing the task model
+or priority vocabulary.
 
 The `tasks` system owns this capability because priority is part of the durable
-task record. The board and task switcher are presentation and interaction
-surfaces for that record.
+task record. The board, task switcher and task list view are presentation and
+interaction surfaces for that record.
 
 ## Terminology
 
@@ -33,6 +34,8 @@ surfaces for that record.
   dots-button dropdown available at every breakpoint.
 - **Task switcher:** the shared task tree rendered in the desktop sidebar and in
   the phone or tablet task-navigation surface.
+- **Task list view:** the workspace task list at `/tasks`, which renders tasks as
+  rows in a compact or detailed display.
 - **Board order:** the order cards appear within a workflow step, driven by the
   task's `position` and controlled by drag and drop.
 
@@ -260,6 +263,37 @@ leaving my current task.
   available for an archived row or a multi-task selection. Showing or changing
   priority shall not reorder, regroup, select or navigate any task.
 
+### REQ-TASKS-PRIORITY-VISIBILITY-006: Priority is visible in the task list view
+
+**Intent:** Let a person scanning the workspace task list see which tasks are
+elevated or deprioritized with the same quiet signal the board and task switcher
+use, without opening each task.
+
+**User story:** As someone reviewing every task in a workspace from the task
+list, I want to see each task's priority on its row, so that I can spot urgent
+work without switching to the board.
+
+#### Acceptance criteria
+
+- **AC-TASKS-PRIORITY-VISIBILITY-006.1:** When a task row in the task list view
+  has priority `critical`, `high` or `low`, the system shall show the priority
+  indicator on the row's title line, after the task title. This shall hold in
+  both the compact and the detailed row display, for archived rows, and for
+  nested subtask rows.
+- **AC-TASKS-PRIORITY-VISIBILITY-006.2:** When the task priority is `medium`,
+  absent, empty or not one of the four priority tokens, the task list row shall
+  show no priority indicator and shall not show the raw value.
+- **AC-TASKS-PRIORITY-VISIBILITY-006.3:** The task list indicator shall use the
+  same shape, color and localized accessible name as the card and task-switcher
+  indicators. Priority shall remain distinguishable by more than color alone.
+- **AC-TASKS-PRIORITY-VISIBILITY-006.4:** The indicator shall reflect the
+  priority carried by the task list's first render and by every later task list
+  load, without any additional request. It shall be shown at every breakpoint at
+  which the task list is rendered.
+- **AC-TASKS-PRIORITY-VISIBILITY-006.5:** Showing priority shall not change the
+  task list's sort, grouping, pagination, row selection or row navigation, and
+  shall not make the page overflow horizontally on a phone.
+
 ## Out of scope
 
 Each exclusion below is a decision, not an omission.
@@ -287,8 +321,11 @@ Each exclusion below is a decision, not an omission.
 - **Labels and tags.** Priority remains a task field. It is not modelled as a
   label or tag.
 - **Changing priority from other surfaces.** A control on the task detail page
-  outside the task switcher, or in a command palette, is additive and is not
-  required by this capability.
+  outside the task switcher, in the task list view, or in a command palette, is
+  additive and is not required by this capability.
+- **Sorting, grouping or filtering the task list view by priority.** The task
+  list keeps its existing sort and group options. Adding priority to them is a
+  separate product decision.
 - **Bulk priority changes.** Setting priority across a multi-selection is a
   separate interaction with its own partial-failure semantics.
 - **Priority on ephemeral tasks.** Quick-chat and other ephemeral tasks are

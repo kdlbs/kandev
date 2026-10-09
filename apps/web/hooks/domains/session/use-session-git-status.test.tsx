@@ -127,3 +127,48 @@ describe("useSessionGitStatusSnapshots", () => {
     });
   });
 });
+
+describe("useSessionGitStatusSnapshots display scope", () => {
+  afterEach(cleanup);
+
+  it("keeps the display scope when an absent comparison target arrives as an empty string", () => {
+    mocks.state.environmentIdBySessionId = { "session-1": "environment-1" };
+    mocks.state.connection = { status: "disconnected" } as AppState["connection"];
+    mocks.state.gitStatus = {
+      byEnvironmentId: {},
+      byEnvironmentRepo: {},
+    } as AppState["gitStatus"];
+    mocks.state.gitCheckoutGeneration = {
+      byEnvironmentId: {},
+    } as AppState["gitCheckoutGeneration"];
+    const display = {
+      checkoutGeneration: 0,
+      branch: "main",
+      headCommit: "head-a",
+      baseCommit: "base-a",
+      comparisonTarget: null,
+      files: {},
+    };
+    mocks.state.gitStatusDisplay = {
+      byEnvironmentRepo: { "environment-1": { "": display } },
+    };
+    const hook = renderHook(() => useSessionGitStatusSnapshots("session-1"));
+    const initialScope = hook.result.current.displayScopeByRepo[""];
+
+    mocks.state.gitStatusDisplay = {
+      byEnvironmentRepo: {
+        "environment-1": { "": { ...display, comparisonTarget: "" } },
+      },
+    };
+    hook.rerender();
+    expect(hook.result.current.displayScopeByRepo[""]).toBe(initialScope);
+
+    mocks.state.gitStatusDisplay = {
+      byEnvironmentRepo: {
+        "environment-1": { "": { ...display, comparisonTarget: "origin/main" } },
+      },
+    };
+    hook.rerender();
+    expect(hook.result.current.displayScopeByRepo[""]).not.toBe(initialScope);
+  });
+});

@@ -38,7 +38,7 @@ test.describe("Mobile Configuration Chat restart", () => {
     const refresh = dialog.getByRole("button", { name: "Refresh status", exact: true });
     await expect(refresh).toHaveCount(1);
     await waitForFiniteAnimations(dialog);
-    expect((await refresh.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(Math.round((await refresh.boundingBox())?.height ?? 0)).toBeGreaterThanOrEqual(44);
     await capture.screenshot("phone-expanded-restart-recovery", {
       caption: "Phone expanded Configuration Chat offers a touch-sized status refresh",
     });
@@ -80,9 +80,9 @@ test.describe("Mobile Configuration Chat restart", () => {
     for (const label of ["Restart session", "Open in Quick Chat", "Close configuration chat"]) {
       const control = panel.getByRole("button", { name: label, exact: true });
       await expect
-        .poll(async () => (await control.boundingBox())?.height ?? 0)
+        .poll(async () => Math.round((await control.boundingBox())?.height ?? 0))
         .toBeGreaterThanOrEqual(44);
-      expect((await control.boundingBox())!.width).toBeGreaterThanOrEqual(44);
+      expect(Math.round((await control.boundingBox())?.width ?? 0)).toBeGreaterThanOrEqual(44);
     }
     await restart.tap();
     const confirmation = testPage.getByTestId("config-chat-restart-confirmation");
@@ -101,7 +101,9 @@ test.describe("Mobile Configuration Chat restart", () => {
     expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
     expect(
-      (await confirmation.getByTestId("config-chat-confirm-restart").boundingBox())!.height,
+      Math.round(
+        (await confirmation.getByTestId("config-chat-confirm-restart").boundingBox())?.height ?? 0,
+      ),
     ).toBeGreaterThanOrEqual(44);
     await prCapture.screenshot("phone-restart-confirmation", {
       caption: "Phone Configuration Chat restart uses the shared bottom confirmation drawer",

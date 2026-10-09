@@ -14,6 +14,15 @@ import {
 } from "@/lib/state/slices/settings/types";
 import type { AppState } from "@/lib/state/store";
 import type { Agent, AgentProfile } from "@/lib/types/http";
+import {
+  acceptAgentOrdersFromSnapshot,
+  reconcileAgentOrders,
+  insertFirstInAgentGroup,
+} from "@/lib/settings/agent-profile-order";
+import {
+  orderProfileOptionsForSelection,
+  toSelectorProfileOptions,
+} from "@/lib/settings/agent-profile-selector-order";
 
 type ProfileState = Pick<AppState, "settingsAgents" | "agentProfiles">;
 
@@ -48,15 +57,13 @@ export function applyProfileDuplicated(
               : created;
           return {
             ...item,
-            profiles: [...item.profiles.filter((p) => p.id !== created.id), latest],
+            profiles: [latest, ...item.profiles.filter((p) => p.id !== created.id)],
           };
         })()
       : item,
   );
 
-  const rebuiltOptions = nextAgents.flatMap((item) =>
-    item.profiles.map((profile) => toAgentProfileOption(item, profile)),
-  );
+  const rebuiltOptions = toSelectorProfileOptions(nextAgents);
   const merged = mergeOptionsByNewest(state.agentProfiles.items, rebuiltOptions);
   // The copy must appear exactly once with the known agent metadata: append
   // it when absent, replace an OLDER existing option (e.g. a WS stub) with
@@ -79,10 +86,27 @@ export function applyProfileDuplicated(
   } else {
     agentProfilesItems = merged.map((option) => (option.id === created.id ? copyOption : option));
   }
+  const latestCopy = agentProfilesItems.find((option) => option.id === created.id);
 
+  if (latestCopy) {
+    agentProfilesItems = insertFirstInAgentGroup(agentProfilesItems, agent.id, {
+      ...latestCopy,
+      agent_id: agent.id,
+    });
+  }
+
+  const orderByAgent = acceptAgentOrdersFromSnapshot(state.agentProfiles.orderByAgent, nextAgents);
   return {
-    settingsAgents: { ...state.settingsAgents, items: nextAgents },
-    agentProfiles: { ...state.agentProfiles, items: agentProfilesItems },
+    settingsAgents: {
+      ...state.settingsAgents,
+      items: reconcileAgentOrders(nextAgents, orderByAgent),
+    },
+    agentProfiles: {
+      ...state.agentProfiles,
+      items: orderProfileOptionsForSelection(agentProfilesItems),
+      version: state.agentProfiles.version + 1,
+      orderByAgent,
+    },
   };
 }
 

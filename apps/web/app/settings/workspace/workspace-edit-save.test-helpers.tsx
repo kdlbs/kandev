@@ -167,6 +167,7 @@ export async function mountWorkspace(overrides: Partial<Workspace> = {}): Promis
           ],
         },
         agentProfiles: {
+          orderByAgent: {},
           version: 0,
           items: [
             {

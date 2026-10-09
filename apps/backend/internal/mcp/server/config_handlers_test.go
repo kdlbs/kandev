@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -12,17 +13,37 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type retryingTransferAuditBackend struct {
+	payloads []map[string]any
+	calls    int
+}
+
+func (b *retryingTransferAuditBackend) RequestPayload(_ context.Context, _ string, payload, _ interface{}) error {
+	copyPayload := make(map[string]any)
+	for key, value := range payload.(map[string]any) {
+		copyPayload[key] = value
+	}
+	b.payloads = append(b.payloads, copyPayload)
+	b.calls++
+	if b.calls == 1 {
+		return errors.New("lost audit response")
+	}
+	return nil
+}
+
 // testBackend implements BackendClient for testing handlers.
 type testBackend struct {
 	lastAction  string
 	lastPayload interface{}
 	response    map[string]interface{}
 	err         error
+	contextErr  error
 }
 
-func (tb *testBackend) RequestPayload(_ context.Context, action string, payload, result interface{}) error {
+func (tb *testBackend) RequestPayload(ctx context.Context, action string, payload, result interface{}) error {
 	tb.lastAction = action
 	tb.lastPayload = payload
+	tb.contextErr = ctx.Err()
 	if tb.err != nil {
 		return tb.err
 	}
@@ -40,6 +61,16 @@ func newTestServer(t *testing.T, backend BackendClient) *Server {
 }
 
 func callTool(t *testing.T, s *Server, toolName string, args map[string]interface{}) *mcplib.CallToolResult {
+	return callToolContext(t, context.Background(), s, toolName, args)
+}
+
+func callToolContext(
+	t *testing.T,
+	ctx context.Context,
+	s *Server,
+	toolName string,
+	args map[string]interface{},
+) *mcplib.CallToolResult {
 	t.Helper()
 	toolsMap := s.mcpServer.ListTools()
 	st, ok := toolsMap[toolName]
@@ -56,7 +87,7 @@ func callTool(t *testing.T, s *Server, toolName string, args map[string]interfac
 		t.Fatal(err)
 	}
 
-	result, err := st.Handler(context.Background(), req)
+	result, err := st.Handler(ctx, req)
 	require.NoError(t, err)
 	return result
 }
@@ -75,6 +106,57 @@ func toolInputProperties(t *testing.T, s *Server, toolName string) map[string]in
 	props, ok := parsed["properties"].(map[string]interface{})
 	require.True(t, ok, "schema should have properties")
 	return props
+}
+
+func TestTransferTaskSchemaRejectionIsForwardedForAudit(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+	result := callTool(t, s, "transfer_task_kandev", map[string]interface{}{"task_id": "task-1"})
+	require.True(t, result.IsError)
+	require.Equal(t, ws.ActionMCPAuditTaskTransferAttempt, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "task-1", payload["task_id"])
+	require.NotContains(t, payload, "_audit_only")
+}
+
+func TestTransferTaskSchemaTypeRejectionIsForwardedForAudit(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+	result := callTool(t, s, "transfer_task_kandev", map[string]interface{}{
+		"task_id":                      42,
+		"expected_source_workspace_id": "ws-source",
+	})
+	require.True(t, result.IsError)
+	require.Equal(t, ws.ActionMCPAuditTaskTransferAttempt, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	require.EqualValues(t, 42, payload["task_id"])
+	require.Equal(t, "ws-source", payload["expected_source_workspace_id"])
+}
+
+func TestTransferTaskSchemaRejectionAuditsAfterRequestCancellation(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result := callToolContext(t, ctx, s, "transfer_task_kandev", map[string]interface{}{"task_id": "task-1"})
+	require.True(t, result.IsError)
+	require.Equal(t, ws.ActionMCPAuditTaskTransferAttempt, backend.lastAction)
+	require.NoError(t, backend.contextErr)
+}
+
+func TestTransferTaskSchemaRejectionReusesAuditAttemptIDAcrossRetries(t *testing.T) {
+	backend := &retryingTransferAuditBackend{}
+	s := newTestServer(t, backend)
+
+	s.auditRejectedTransferTool(context.Background(), map[string]any{"task_id": "task-1"})
+
+	require.Len(t, backend.payloads, 2)
+	first, ok := backend.payloads[0]["audit_attempt_id"].(string)
+	require.True(t, ok)
+	require.NotEmpty(t, first)
+	require.Equal(t, first, backend.payloads[1]["audit_attempt_id"])
 }
 
 func TestMoveTaskToolSchemasExposeEntryOptions(t *testing.T) {

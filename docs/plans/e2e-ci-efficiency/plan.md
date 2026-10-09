@@ -145,6 +145,10 @@ measurements.
 
 ## Risks
 
+The [October CI performance continuation](../ci-performance/plan.md) owns shared scheduling consolidation and further fixture-cost attribution.
+Its [new evidence](../ci-performance/evidence-2026-10-08.md) does not close this package's three-main-run or forced-miss rollout requirements.
+This package retains the implementation and pending rollout status recorded above.
+
 - GitHub Actions cache transfer can cost enough time to erase the browser-copy
   saving. Step summaries must report restore and verification duration before
   declaring success.

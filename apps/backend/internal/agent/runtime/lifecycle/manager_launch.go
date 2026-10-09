@@ -1859,7 +1859,15 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 	// Promote it in place so the agent subprocess can start against the
 	// existing agentctl instance.
 	if execution.AgentCommand == "" {
-		if err := m.promoteWorkspaceExecution(ctx, execution, req); err != nil {
+		if req.ForceContextContinuation {
+			value, err = m.doCoalescedExecution(ctx, req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+				return m.launchInternal(sharedCtx, req)
+			})
+			if err != nil {
+				return nil, err
+			}
+			execution = value.(*AgentExecution)
+		} else if err := m.promoteWorkspaceExecution(ctx, execution, req); err != nil {
 			return nil, err
 		}
 	}
@@ -2042,6 +2050,12 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if req.SessionID != "" {
 		if existingExecution, exists := m.executionStore.GetBySessionID(req.SessionID); exists {
 			switch {
+			case req.ForceContextContinuation && existingExecution.DeliveryHarnessGeneration < req.DeliveryHarnessGeneration:
+				// The retained agentctl instance owns the old generation. Replace it
+				// before explicit continuation so journal retirement uses the new one.
+				if err := m.cleanupStaleExecution(ctx, existingExecution); err != nil {
+					return nil, err
+				}
 			case m.isRetiredLocalExecution(existingExecution):
 				if existingExecution.AgentCommand != "" && req.RecoveryAction == "" &&
 					!m.isIdleSettledRetiredLocalExecution(existingExecution) {

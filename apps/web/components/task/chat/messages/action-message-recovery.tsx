@@ -61,7 +61,7 @@ function recoveryActionTooltip(action: MessageAction, t: ReturnType<typeof useTr
   }
 }
 
-function addHistoryContinuationChoice(
+export function addHistoryContinuationChoice(
   choices: RecoveryChoice[],
   enabled: boolean,
   onContinueFromHistory: () => void,
