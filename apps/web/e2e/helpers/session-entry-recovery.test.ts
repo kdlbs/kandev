@@ -5,7 +5,7 @@ import { routeSessionEntryRecovery } from "./session-entry-recovery";
 vi.mock("./causal-waits", () => ({ injectLatency: vi.fn() }));
 
 function createGateway() {
-  let fromClient!: (message: string) => void;
+  let fromClient!: (message: string) => void | Promise<void>;
   let fromServer!: (message: string) => void;
   const server = {
     send: vi.fn(),
@@ -21,6 +21,7 @@ function createGateway() {
     },
   };
   const page = {
+    evaluate: async <Arg, Result>(fn: (arg: Arg) => Result, arg: Arg) => fn(arg),
     routeWebSocket: async (_pattern: RegExp, handler: (socket: typeof route) => void) =>
       handler(route),
   } as unknown as Page;
@@ -76,5 +77,35 @@ describe("session entry rejection lifetime", () => {
     ]);
     expect(proxy.rejectedResponseCount("session.ensure")).toBe(1);
     expect(gateway.server.send).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps background and pending reads rejected until the Retry click", async () => {
+    const gateway = createGateway();
+    const proxy = await routeSessionEntryRecovery(gateway.page);
+    proxy.rejectResponsesUntilReleased("session.ensure", "simulated failure", {
+      sessionId: "target",
+    });
+    gateway.request("pending", "target");
+    const retry = document.createElement("button");
+    retry.dataset.testid = "history-retry-fixture";
+    document.body.append(retry);
+    try {
+      await proxy.releaseRejectedResponsesOnClick("session.ensure", "history-retry-fixture");
+      await gateway.request("background", "target");
+      retry.click();
+      await gateway.request("retry", "target");
+      gateway.response("pending");
+      gateway.response("background");
+      gateway.response("retry");
+      expect(gateway.route.send.mock.calls.map(([frame]) => JSON.parse(frame))).toEqual([
+        expect.objectContaining({ id: "pending", type: "error" }),
+        expect.objectContaining({ id: "background", type: "error" }),
+        expect.objectContaining({ id: "retry", type: "response" }),
+      ]);
+      expect(proxy.rejectedResponseCount("session.ensure")).toBe(2);
+      expect(gateway.server.send).toHaveBeenCalledTimes(3);
+    } finally {
+      retry.remove();
+    }
   });
 });

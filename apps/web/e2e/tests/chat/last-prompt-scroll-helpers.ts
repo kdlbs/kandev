@@ -83,5 +83,22 @@ export async function seedScrolledPastLastPrompt(
     session.activeChat().getByText(`filler message ${trailingFillerCount}`, { exact: false }),
   ).toBeVisible({ timeout: 15_000 });
 
+  // Seeded filler can arrive after the transcript's auto-scroll event. Set
+  // the intended starting position explicitly so navigation tests begin
+  // below both prompts on desktop and mobile.
+  const transcript = session.activeChat().locator(".chat-message-list");
+  await transcript.evaluate((element: HTMLElement) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect
+    .poll(
+      () =>
+        transcript.evaluate(
+          (element: HTMLElement) => element.scrollHeight - element.scrollTop - element.clientHeight,
+        ),
+      { message: "Waiting for the transcript to reach its newest message" },
+    )
+    .toBeLessThanOrEqual(1);
+
   return session;
 }

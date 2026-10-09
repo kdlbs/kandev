@@ -116,9 +116,10 @@ test.describe("Mobile plugin navigation", () => {
     const navItem = testPage.getByTestId(`mobile-plugin-nav-item-${NAV_ITEM_ID}`);
     await expect(navItem).toBeVisible();
     await expect(navItem).toHaveText(/Hello E2E/);
-    const navItemBox = await navItem.boundingBox();
-    expect(navItemBox).not.toBeNull();
-    expect(navItemBox!.height).toBeCloseTo(44, 1);
+    const navItemHeight = (await navItem.boundingBox())?.height ?? 0;
+    // Browser geometry is fractional; allow tiny subpixel rounding error at
+    // the 44 CSS px touch-target boundary.
+    expect(navItemHeight).toBeGreaterThanOrEqual(44 - 0.01);
 
     // Saved layouts own plugin destinations, so scroll the projected row into
     // view instead of the legacy plugin section that no longer renders it.

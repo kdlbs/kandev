@@ -1,10 +1,13 @@
 import { expect, type Page } from "@playwright/test";
+import type { CommitSpacingSource } from "./commit-spacing-source";
 import type { AppState } from "../../../lib/state/store";
 import { expectBoundedTimeline, seedLargeWorkingTree } from "./large-changes-helpers";
 
-export async function seedCommitSpacingHistory(page: Page): Promise<void> {
-  await seedLargeWorkingTree(page, "flat", 0);
-  await page.evaluate(() => {
+export async function seedCommitSpacingHistory(
+  page: Page,
+  source: CommitSpacingSource,
+): Promise<void> {
+  const fixture = await page.evaluate(() => {
     const store = (window as Window & { __KANDEV_E2E_STORE__?: { getState: () => AppState } })
       .__KANDEV_E2E_STORE__;
     if (!store) throw new Error("E2E store bridge missing");
@@ -13,9 +16,9 @@ export async function seedCommitSpacingHistory(page: Page): Promise<void> {
     if (!sessionId || !state.environmentIdBySessionId[sessionId]) {
       throw new Error("Active environment is unavailable");
     }
-    state.setSessionCommits(
+    return {
       sessionId,
-      Array.from({ length: 160 }, (_, index) => ({
+      commits: Array.from({ length: 160 }, (_, index) => ({
         id: `spacing-${index}`,
         session_id: sessionId,
         commit_sha: `${index.toString(16).padStart(7, "0")}${"0".repeat(33)}`,
@@ -30,8 +33,34 @@ export async function seedCommitSpacingHistory(page: Page): Promise<void> {
         deletions: index % 3,
         pushed: true,
       })),
-    );
+    };
   });
+  source.use(fixture.sessionId, fixture.commits);
+  const priorResponses = source.responseCount();
+  await seedLargeWorkingTree(page, "flat", 0);
+  await page.evaluate(({ sessionId, commits }) => {
+    const state = (
+      window as Window & { __KANDEV_E2E_STORE__: { getState: () => AppState } }
+    ).__KANDEV_E2E_STORE__.getState();
+    state.setSessionCommits(sessionId, commits);
+    // Exercise the real read path so a late backend refresh cannot replace the fixture.
+    state.bumpSessionCommitsRefetch(sessionId);
+  }, fixture);
+  await expect.poll(() => source.responseCount()).toBeGreaterThan(priorResponses);
+  await expect
+    .poll(() =>
+      page.evaluate((sessionId) => {
+        const state = (
+          window as Window & { __KANDEV_E2E_STORE__: { getState: () => AppState } }
+        ).__KANDEV_E2E_STORE__.getState();
+        const env = state.environmentIdBySessionId[sessionId] ?? sessionId;
+        return {
+          count: state.sessionCommits.byEnvironmentId[env]?.length,
+          loading: state.sessionCommits.loading[env] === true,
+        };
+      }, fixture.sessionId),
+    )
+    .toEqual({ count: 160, loading: false });
   const toggle = page.getByTestId("commits-section-collapse-toggle");
   await expect(toggle).toBeVisible();
   if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();

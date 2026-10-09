@@ -1,5 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { expectTouchControl, expectTouchSquareControl } from "../../helpers/control-sizing";
 import { SessionPage } from "../../pages/session-page";
 
 type SessionModeStoreWindow = Window & {
@@ -65,7 +67,8 @@ test.describe("session mode mismatch on mobile", () => {
     await expect(picker).toContainText("Default");
 
     const close = picker.getByRole("button", { name: "Close" });
-    expect((await close.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await waitForFiniteAnimations(picker);
+    await expectTouchSquareControl(close);
     await close.tap();
     await expect(picker).not.toBeVisible();
     await expect(trigger).toBeFocused();
@@ -90,7 +93,8 @@ test.describe("session mode mismatch on mobile", () => {
     expect(scrollStyle.paddingBottom).toBeGreaterThan(0);
 
     const alternateMode = picker.getByRole("button", { name: "Bypass Permissions" });
-    expect((await alternateMode.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await waitForFiniteAnimations(picker);
+    await expectTouchControl(alternateMode);
     await alternateMode.tap();
     await expect(picker).not.toBeVisible();
     await expect(trigger).toBeFocused();

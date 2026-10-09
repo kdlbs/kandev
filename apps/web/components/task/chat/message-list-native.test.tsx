@@ -765,6 +765,74 @@ describe("useNativeScrollManagement transcript pagination", () => {
     expect(latestRef.current).not.toBeNull();
   });
 
+  it("keeps a reader jump owned when an earlier motion emits scrollend before streaming", () => {
+    const frames: Array<FrameRequestCallback> = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const scrollIntoView = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => {});
+    const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+    const scrollToMessageRef: {
+      current: ((messageId: string, options?: { align?: "start" | "center" }) => boolean) | null;
+    } = { current: null };
+    const programmaticLockRef: { current: (() => boolean) | null } = { current: null };
+    try {
+      const { rerender, container } = render(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage(LATEST_MESSAGE_ID)]}
+          messages={TEST_MESSAGES}
+          metrics={metrics}
+          sessionId="session-reader-jump"
+          enabled
+          scrollToMessageRef={scrollToMessageRef}
+          programmaticLockRef={programmaticLockRef}
+        />,
+      );
+      const scroller = screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID);
+      metrics.scrollTop = 600;
+      act(() => {
+        scroller.dispatchEvent(new Event("scroll"));
+        expect(scrollToMessageRef.current?.("navigation-target", { align: "start" })).toBe(true);
+        // The cancelled follow-bottom motion can finish before the new jump's frames.
+        scroller.dispatchEvent(new Event("scrollend"));
+      });
+      metrics.scrollHeight = 1100;
+      rerender(
+        <NativeScrollManagementHarness
+          items={[transcriptMessage(LATEST_MESSAGE_ID)]}
+          messages={[...TEST_MESSAGES, {} as Message]}
+          metrics={metrics}
+          sessionId="session-reader-jump"
+          enabled
+          scrollToMessageRef={scrollToMessageRef}
+          programmaticLockRef={programmaticLockRef}
+        />,
+      );
+      expect(metrics.scrollTop).toBe(600);
+      expect(programmaticLockRef.current?.()).toBe(true);
+      const target = container.querySelector<HTMLElement>("#msg-navigation-target");
+      if (!target) throw new Error(HARNESS_RENDER_ERROR);
+      Object.defineProperty(scroller, "getBoundingClientRect", {
+        configurable: true,
+        value: () => createRect(0, 400),
+      });
+      Object.defineProperty(target, "getBoundingClientRect", {
+        configurable: true,
+        value: () => createRect(0, 20),
+      });
+      act(() => {
+        for (let frame = frames.shift(); frame; frame = frames.shift()) frame(0);
+      });
+      expect(programmaticLockRef.current?.()).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+      scrollIntoView.mockRestore();
+    }
+  });
+
   it("supersedes an in-flight prompt verifier and keeps latest follow ownership", () => {
     const frames: Array<FrameRequestCallback> = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {

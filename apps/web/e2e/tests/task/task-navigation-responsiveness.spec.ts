@@ -40,7 +40,11 @@ test("navigation branch setup leaves a dirty shared checkout untouched", async (
   };
   const repositoryPath = path.join(fixtureBackend.tmpDir, "repos", "e2e-repo");
   mkdirSync(path.dirname(repositoryPath), { recursive: true });
-  execFileSync("git", ["clone", seedData.repositoryRemoteURL, repositoryPath], {
+  const fixtureRemote = path.join(fixtureBackend.tmpDir, "isolated-remote.git");
+  execFileSync("git", ["clone", "--bare", seedData.repositoryRemoteURL, fixtureRemote], {
+    env: makeGitEnv(fixtureBackend.tmpDir),
+  });
+  execFileSync("git", ["clone", fixtureRemote, repositoryPath], {
     env: makeGitEnv(fixtureBackend.tmpDir),
   });
   const git = new GitHelper(repositoryPath, makeGitEnv(fixtureBackend.tmpDir));
@@ -52,18 +56,24 @@ test("navigation branch setup leaves a dirty shared checkout untouched", async (
   git.modifyFile("walkthrough_base.txt", committedBranchFile);
   git.stageFile("walkthrough_base.txt");
   git.commit("seed divergent navigation checkout");
+  const remoteNoise = "A-archive-noise-navigation.kt";
+  git.createFile(remoteNoise, "noise from an earlier test\n");
+  git.stageFile(remoteNoise);
+  git.commit("seed unrelated remote main files");
+  git.exec(`git push origin ${dirtyBranch}:main`);
   git.modifyFile(
     "walkthrough_base.txt",
     `${committedBranchFile}navigation fixture dirty-checkout sentinel\n`,
   );
   let seededBranch: string | undefined;
   try {
-    seededBranch = seedNavigationBranch(fixtureBackend);
+    seededBranch = seedNavigationBranch(fixtureBackend, seedData.repositoryBaselineOID);
     expect(git.exec("git branch --show-current").trim()).toBe(dirtyBranch);
     expect(git.exec("git diff -- walkthrough_base.txt")).toContain(
       "navigation fixture dirty-checkout sentinel",
     );
     expect(git.exec(`git ls-remote --heads origin ${seededBranch}`)).toContain(seededBranch);
+    expect(git.exec(`git ls-tree -r --name-only ${seededBranch}`)).not.toContain(remoteNoise);
     expect({
       branch: sharedGit.exec("git branch --show-current"),
       status: sharedGit.exec("git status --porcelain"),
@@ -123,7 +133,7 @@ test("mounted task panels share pending shell, commit, and diff requests", async
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle();
-  await showNavigationFiles(testPage, false);
+  await showNavigationFiles(testPage, false, a.session_id!);
   await session.clickTab("Changes");
   await expect
     .poll(
@@ -142,7 +152,21 @@ test("mounted task panels share pending shell, commit, and diff requests", async
     const key = JSON.stringify([request.action, request.payload]);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  expect([...counts.values()]).toEqual([...counts.values()].map(() => 1));
+  const expectedDiffKey = JSON.stringify(["session.cumulative_diff", { session_id: a.session_id }]);
+  // A restoration/environment rebind retires an obsolete in-flight diff read.
+  // That startup transition may issue one replacement; panels must still share
+  // the current read, and shell/commit requests must never be duplicated.
+  const diffReads = [...counts.entries()].filter(([key]) => {
+    const [action] = JSON.parse(key) as [string, Record<string, unknown>];
+    return action === "session.cumulative_diff";
+  });
+  const diffReadCount = counts.get(expectedDiffKey) ?? 0;
+  expect(diffReads.map(([key]) => key)).toEqual([expectedDiffKey]);
+  expect(diffReadCount).toBeGreaterThanOrEqual(1);
+  expect(diffReadCount).toBeLessThanOrEqual(2);
+  expect(
+    [...counts.entries()].filter(([key, count]) => key !== expectedDiffKey && count !== 1),
+  ).toEqual([]);
   gate.release();
 });
 

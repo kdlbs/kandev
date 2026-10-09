@@ -1,10 +1,10 @@
 import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
+import { openCreateTaskDialog } from "../../helpers/create-task-dialog";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { expectTaskDescription } from "../../pages/task-description-editor";
 import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
-import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { seedIncompatibleAgentScenario, seedLockedWorkflow } from "./agent-compatibility-helpers";
 
 // Exercises the regular task-create dialog (New Task in the sidebar), so run
@@ -66,9 +66,8 @@ test.describe("Task creation", () => {
       await testPage.goto(`/t/${sourceTask.id}`);
       const navigationExpand = testPage.getByTestId("sidebar-navigation-expand");
       await expect(navigationExpand).toHaveAttribute("aria-expanded", "false");
-      await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
+      await openCreateTaskDialog(testPage);
       await expect(navigationExpand).toHaveAttribute("aria-expanded", "true");
-      await testPage.getByTestId("create-task-button").first().click();
 
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
@@ -104,7 +103,7 @@ test.describe("Task creation", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await kanban.createTaskButton.first().click();
+    await openCreateTaskDialog(testPage);
 
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();

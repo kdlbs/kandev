@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
 
 /**
  * Covers the Reset action on a GitHub review watch. The flow:
@@ -11,6 +12,28 @@ import { test, expect } from "../../fixtures/test-base";
  * Store-level reset coverage for the shared `watchreset.Run` flow lives in
  * Go unit tests.
  */
+async function waitForImportedWatchTask(
+  apiClient: ApiClient,
+  watchId: string,
+  workspaceId: string,
+) {
+  // Task creation precedes assignment of its ID to the watch reservation.
+  // Reset counts only that committed association, not merely a visible task.
+  await expect
+    .poll(
+      async () => {
+        const preview = await apiClient.rawRequest(
+          "GET",
+          `/api/v1/github/watches/review/${watchId}/reset/preview?workspace_id=${workspaceId}`,
+        );
+        expect(preview.status).toBe(200);
+        return ((await preview.json()) as { taskCount: number }).taskCount;
+      },
+      { timeout: 15_000, message: "Watch import did not commit its task association" },
+    )
+    .toBe(1);
+}
+
 test.describe("GitHub review watch reset", () => {
   test("preview + reset endpoints delete tasks and clear polling cursor", async ({
     apiClient,
@@ -57,12 +80,7 @@ test.describe("GitHub review watch reset", () => {
     // Preview reports the count the dialog will surface. workspace_id is
     // required — the reset endpoints reject cross-workspace IDs with 404.
     const wsQuery = `workspace_id=${seedData.workspaceId}`;
-    const preview = await apiClient.rawRequest(
-      "GET",
-      `/api/v1/github/watches/review/${watch.id}/reset/preview?${wsQuery}`,
-    );
-    expect(preview.status).toBe(200);
-    expect(await preview.json()).toMatchObject({ taskCount: 1 });
+    await waitForImportedWatchTask(apiClient, watch.id, seedData.workspaceId);
 
     // Reset cascades the delete and returns the count it actually removed.
     const reset = await apiClient.rawRequest(
@@ -83,6 +101,8 @@ test.describe("GitHub review watch reset", () => {
         { timeout: 15_000 },
       )
       .toBe(1);
+
+    await waitForImportedWatchTask(apiClient, watch.id, seedData.workspaceId);
 
     // Watch's polling cursor reflects the re-check that reset scheduled.
     // last_polled_at sits on the watch row exposed by the list endpoint.
@@ -147,6 +167,8 @@ test.describe("GitHub review watch reset", () => {
       )
       .toBeTruthy();
 
+    await waitForImportedWatchTask(apiClient, watch.id, seedData.workspaceId);
+
     // The watch table is scoped to the routed workspace, and the install-level
     // path redirects to whichever workspace is active — pin the seed workspace
     // that owns the watch.
@@ -185,5 +207,6 @@ test.describe("GitHub review watch reset", () => {
         { timeout: 15_000 },
       )
       .toBe(1);
+    await waitForImportedWatchTask(apiClient, watch.id, seedData.workspaceId);
   });
 });

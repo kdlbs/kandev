@@ -473,15 +473,9 @@ test.describe("New session dialog", () => {
       )
       .toBe(true);
 
-    // 3. Navigate to the task
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("Cancel Dialog Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+    // 3. Open the task directly. Board card visibility is unrelated to
+    // verifying that cancelling the new-session dialog creates no session.
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
@@ -537,9 +531,9 @@ test.describe("New session dialog", () => {
       )
       .toBe(true);
 
-    // 3. Navigate to the task
+    // 3. Navigate to the task's workflow, independent of saved board selection.
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    await kanban.goto(seedData.workflowId);
 
     const card = kanban.taskCardByTitle("Session List Task");
     await expect(card).toBeVisible({ timeout: 10_000 });

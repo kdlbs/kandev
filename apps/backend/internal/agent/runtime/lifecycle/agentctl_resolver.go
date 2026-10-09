@@ -346,7 +346,14 @@ func (r *AgentctlResolver) joinRemoteHelperDownload(key string) (*remoteHelperDo
 }
 
 func (r *AgentctlResolver) runRemoteHelperDownload(key string, flight *remoteHelperDownload, manifest *RemoteHelperManifest, record RemoteHelperRecord) {
-	err := r.downloadRemoteHelper(flight.ctx, manifest, record, key)
+	// A caller can pass the initial cache check before another flight publishes
+	// the helper, then reach this new flight after that earlier flight exits.
+	// Recheck after claiming the flight so that stale cache misses do not fetch
+	// the same verified helper twice.
+	valid, err := validateCachedRemoteHelper(key, record)
+	if err == nil && !valid {
+		err = r.downloadRemoteHelper(flight.ctx, manifest, record, key)
+	}
 	flight.cancel()
 	r.downloadMu.Lock()
 	flight.err = err

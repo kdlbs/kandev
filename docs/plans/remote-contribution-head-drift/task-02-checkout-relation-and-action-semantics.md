@@ -5,7 +5,13 @@ status: done
 wave: 2
 depends_on: ["01-upstream-status-contract"]
 plan: "plan.md"
-spec: "../../specs/tasks/system-design/remote-contribution-tasks.md"
+requirements:
+  - REQ-TASKS-REMOTE-CONTRIBUTION-TASKS-001
+acceptance_criteria:
+  - AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.4
+  - AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.7
+system_design:
+  - ../../specs/tasks/system-design/remote-contribution-relation.md
 ---
 
 # Task 02: Classify Checkout Drift and Git Actions
@@ -108,3 +114,38 @@ any compatibility choices. Update this task and the plan checkbox when complete.
   existing base-relative divergence fields. Fan-out Push gating uses the upstream count when one is
   configured.
 - Focused relation, summary, and session Git tests passed. Web typecheck and lint passed.
+
+## CI correction: connection readiness
+
+The provider-history hook waits for the WebSocket client and connection readiness.
+Connection startup preserves the provider retry budget. Reconnection reloads unresolved history.
+The source key, cached successful history, and one shared request remain unchanged.
+
+A new startup regression failed before the correction. After the correction,
+59 focused hook, workspace-scope, and relation tests passed. Six mobile PR-only
+commit-detail repetitions passed with browser retries disabled. The E2E frontend
+build, strict ESLint, and TypeScript checks passed.
+
+```bash
+cd apps/web
+pnpm exec vitest run hooks/domains/github/use-pr-commits.test.ts hooks/domains/github/use-pr-workspace-scope.test.ts hooks/domains/session/use-remote-contribution-relation.test.tsx hooks/domains/session/remote-contribution-relation.test.ts
+pnpm build:e2e
+E2E_PORT_OFFSET=18 pnpm e2e:raw --project=mobile-chrome e2e/tests/task/mobile-changes-panel.spec.ts --grep 'PR-only commit opens' --workers=1 --retries=0 --repeat-each=6
+pnpm exec eslint hooks/domains/github/use-pr-commits.ts hooks/domains/github/use-pr-commits.test.ts hooks/domains/github/use-pr-workspace-scope.test.ts --max-warnings=0
+pnpm typecheck
+```
+
+The full hosted CI run and browser artifact audit remain pending for delivery.
+
+## CI correction: Git subscription readiness
+
+A connected status can arrive before the WebSocket client registers.
+The Git-status hook now subscribes after client registration, even when the
+connection status does not change again. This provides the repository status
+that branch-scoped PR selection needs after a page reload.
+
+The late-client subscription regression failed before the correction.
+Thirty-three focused unit tests and the production build passed.
+Ten mobile PR-only browser repetitions passed with retries disabled.
+Strict lint, typecheck, specification lint, and trusted delivery coverage passed.
+Hosted validation remains pending for the next delivery.

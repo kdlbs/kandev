@@ -652,9 +652,11 @@ func initPluginsWiring(
 		// caller; without it the check stays a no-op. An un-stamped local
 		// build passes "dev", which the service treats as "don't enforce".
 		pluginsSvc.SetKandevVersion(version)
+		analyticsSvc := analyticsservice.New(repos.Analytics)
 		taskSvc.SetExecutorProviderCatalog(pluginsSvc)
-		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
+		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsSvc, taskSvc, taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
 		pluginsSvc.SetWorkspaceAdminWriter(pluginsWorkspaceAdminAdapter{tasks: taskSvc, workflows: workflowSvc, agents: agentSettingsController})
+		pluginsSvc.SetUsageSource(analyticsSvc)
 		// Wire the managed agent conversation service for the agent_conversation
 		// Host capability. Wired here (not at boot time in main.go) because the
 		// task service, shared repository, agent settings repository, and

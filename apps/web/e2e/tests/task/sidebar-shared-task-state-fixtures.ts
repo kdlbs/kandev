@@ -184,26 +184,52 @@ export async function exerciseSharedFirstResponse(
     tasks.map((task) => task.id),
   );
   const anchor = await anchorTask(api, seed);
-  await page.goto(`/t/${anchor.id}`);
-  const { rows } = await surface(page, mobile);
-  await waitForCoverage(page, seed.workspaceId);
   const captured = gate(),
     first = gate(),
     trailing = gate();
   let requests = 0;
-  await page.route("**/sidebar/query", async (route) => {
-    requests++;
-    if (requests === 1) {
-      const response = await route.fetch();
-      captured.release();
-      await first.promise;
-      await route.fulfill({ response });
-    } else {
-      await trailing.promise;
-      await route.continue();
-    }
-  });
   try {
+    // Finish workspace bootstrap before gating the archived-view read under test.
+    await page.goto("/");
+    await waitForCoverage(page, seed.workspaceId);
+    if (mobile) {
+      const home = new MobileKanbanPage(page);
+      await home.openSearch();
+      await home.searchInput().fill(anchor.title);
+      await home.taskCard(anchor.id).tap();
+    } else {
+      await page
+        .getByTestId("kanban-header-search")
+        .getByPlaceholder("Search tasks...", { exact: true })
+        .fill(anchor.title);
+      await page.getByTestId(`task-card-${anchor.id}`).click();
+    }
+    const { rows } = await surface(page, mobile);
+
+    await page.route("**/sidebar/query", async (route) => {
+      const query = route.request().postDataJSON() as {
+        filters: Array<{ dimension: string; value: unknown }>;
+      };
+      if (
+        !query.filters.some((filter) => filter.dimension === "archived" && filter.value === true) ||
+        !query.filters.some(
+          (filter) => filter.dimension === "titleMatch" && filter.value === "Shared fixture",
+        )
+      ) {
+        await route.continue();
+        return;
+      }
+      requests++;
+      if (requests === 1) {
+        const response = await route.fetch();
+        captured.release();
+        await first.promise;
+        await route.fulfill({ response });
+      } else {
+        await trailing.promise;
+        await route.continue();
+      }
+    });
     await selectView(page, rows, mobile, ARCHIVES);
     await captured.promise;
     await api.updateTaskTitle(tasks[0].id, "Shared fixture kept live");

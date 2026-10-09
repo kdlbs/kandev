@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { expect } from "@playwright/test";
+import { expect, type TestInfo } from "@playwright/test";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
@@ -8,6 +8,21 @@ import type { SessionPage } from "../pages/session-page";
 import { pollUntil } from "./poll-until";
 
 type SessionMessage = Awaited<ReturnType<ApiClient["listSessionMessages"]>>["messages"][number];
+
+export async function expectCapacityContinuationProgress(session: SessionPage) {
+  const completed = session
+    .activeChat()
+    .getByText("Mock provider continued the unfinished request without repeating completed work.", {
+      exact: true,
+    });
+  // Reloading or opening another viewer can outlast the initial five-second
+  // backoff. Either phase is valid; an empty conversation is not.
+  await expect
+    .poll(
+      async () => (await session.transientRetryCard().isVisible()) || (await completed.isVisible()),
+    )
+    .toBe(true);
+}
 
 export type MockACPTrace = {
   event: string;
@@ -28,6 +43,8 @@ export async function createRetainedCapacityFixture(
   options: { initialPrompt?: string } = {},
 ) {
   const tracePath = path.join(backend.tmpDir, `retained-capacity-${Date.now()}.jsonl`);
+  const gatePath = `${tracePath}.gate`;
+  fs.writeFileSync(gatePath, "");
   let profileId = "";
   let taskId = "";
   const dispose = async () => {
@@ -36,6 +53,7 @@ export async function createRetainedCapacityFixture(
       if (profileId) await apiClient.deleteAgentProfile(profileId, true);
     } finally {
       fs.rmSync(tracePath, { force: true });
+      fs.rmSync(gatePath, { force: true });
       await backend.restart();
     }
   };
@@ -47,7 +65,10 @@ export async function createRetainedCapacityFixture(
     const profile = await apiClient.createAgentProfile(agent.id, `Capacity ${Date.now()}`, {
       model: "mock-fast",
       auto_fallback: false,
-      env_vars: [{ key: "E2E_MOCK_AGENT_ACP_TRACE_FILE", value: tracePath }],
+      env_vars: [
+        { key: "E2E_MOCK_AGENT_ACP_TRACE_FILE", value: tracePath },
+        { key: "E2E_MOCK_AGENT_CAPACITY_GATE_FILE", value: gatePath },
+      ],
     });
     profileId = profile.id;
     const task = await apiClient.createTaskWithAgent(
@@ -63,7 +84,46 @@ export async function createRetainedCapacityFixture(
     );
     taskId = task.id;
     if (!task.session_id) throw new Error("created task has no session ID");
-    return { taskId, sessionId: task.session_id, tracePath, dispose };
+    const captureDiagnostics = async (testInfo: TestInfo) => {
+      const [sessions, messages] = await Promise.all([
+        apiClient.listTaskSessions(taskId),
+        apiClient.listSessionMessages(task.session_id!),
+      ]);
+      await testInfo.attach("retained-capacity-state", {
+        body: JSON.stringify({ sessions, messages }, null, 2),
+        contentType: "application/json",
+      });
+      for (const [name, filename] of [
+        ["retained-capacity-acp", tracePath],
+        [
+          "retained-capacity-backend",
+          path.join(backend.tmpDir, ".kandev", "logs", "backend-logs.log"),
+        ],
+      ]) {
+        if (fs.existsSync(filename)) {
+          await testInfo.attach(name, {
+            body: fs.readFileSync(filename),
+            contentType: "text/plain",
+          });
+        }
+      }
+    };
+    const release = async () => {
+      await expect
+        .poll(
+          () =>
+            fs.existsSync(tracePath)
+              ? readMockACPTrace(tracePath).filter((record) => record.event === "prompt").length
+              : 0,
+          {
+            timeout: 30_000,
+            message: "the initial provider prompt must be admitted before release",
+          },
+        )
+        .toBe(1);
+      fs.rmSync(gatePath, { force: true });
+    };
+    return { taskId, sessionId: task.session_id, tracePath, dispose, captureDiagnostics, release };
   } catch (error) {
     try {
       await dispose();

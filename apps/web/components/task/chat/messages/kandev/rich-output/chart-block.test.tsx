@@ -143,6 +143,23 @@ describe("ChartBlock plot scheduling", () => {
     expect(screen.getByTestId(MOCK_LINE_CHART)).not.toBeNull();
   });
 
+  it("mounts when an observer batch includes a later visible entry", () => {
+    render(<ChartBlock block={BLOCK} />);
+    const record = observerRecords[0];
+
+    act(() => {
+      record.callback(
+        [
+          { isIntersecting: false, target: record.target } as IntersectionObserverEntry,
+          { isIntersecting: true, target: record.target } as IntersectionObserverEntry,
+        ],
+        record.instance,
+      );
+    });
+
+    expect(screen.queryByTestId(MOCK_LINE_CHART)).not.toBeNull();
+  });
+
   it("waits for a background tab to become visible after intersection", () => {
     setDocumentVisibility("hidden");
     render(<ChartBlock block={BLOCK} />);

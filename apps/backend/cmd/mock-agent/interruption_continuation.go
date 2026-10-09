@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -138,5 +139,30 @@ func (a *mockAgent) emitMockInterruption(ctx context.Context, sid acp.SessionId,
 			e.completeTool(completedID, "fixture read result")
 		}
 	}
+	if err := waitMockInterruptionRelease(ctx); err != nil {
+		return acp.PromptResponse{}, err, true
+	}
 	return acp.PromptResponse{}, &acp.RequestError{Code: -32603, Message: "peer disconnected before response", Data: map[string]any{"kandevMock": map[string]any{"continuationInterruption": true}}}, true
+}
+
+// Keep the initial prompt live until the browser can observe the interruption.
+func waitMockInterruptionRelease(ctx context.Context) error {
+	filename := os.Getenv("E2E_MOCK_AGENT_CONTINUATION_GATE_FILE")
+	if filename == "" {
+		return nil
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(filename); os.IsNotExist(err) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }

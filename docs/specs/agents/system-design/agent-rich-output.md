@@ -14,18 +14,18 @@ arguments across ACP dialects so a completed `show_rich_output_kandev` call
 replays as one standalone presentation. It covers Cursor and Grok provider
 envelopes, provider-neutral persistence, and historic title compatibility.
 It also defines the local lifetime of workspace file previews in the shared
-rich-output renderer.
+rich-output renderer. It also defines deferred chart eligibility.
 
 The
 [UI MCP tool-results design](../../ui/system-design/kandev-mcp-tool-results.md)
 owns shared transcript result selection and renderer dispatch. This design does
-not change the version 1 rich-output schema, chart rendering, or settings.
+not change the version 1 rich-output schema, chart geometry, or settings.
 
 ## Requirement mapping
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-AGENTS-AGENT-RICH-OUTPUT-001` | [ACP identity normalization](#acp-identity-normalization), [Historic replay](#historic-replay), [Failure behavior](#failure-behavior), [File-preview lifetime](#file-preview-lifetime) |
+| `REQ-AGENTS-AGENT-RICH-OUTPUT-001` | [ACP identity normalization](#acp-identity-normalization), [Historic replay](#historic-replay), [Failure behavior](#failure-behavior), [File-preview lifetime](#file-preview-lifetime), [Chart eligibility](#chart-eligibility) |
 
 ## ACP identity normalization
 
@@ -106,3 +106,12 @@ and separate-card controls. The original renderer memoization test remains
 separate because it mocks parsing for its own contract.
 
 Implementation record: [File-preview target reset](../../../plans/rich-file-preview-targets/plan.md).
+
+## Chart eligibility
+
+`useChartPlotVisibility` inspects every entry in each intersection observer batch.
+Any intersecting entry makes the plot eligible for its first mount in a visible tab.
+The callback cannot discard a later intersecting entry after an earlier offscreen entry.
+Eligibility stays true after the first intersection, and a mounted plot stays mounted.
+Background tabs defer the first mount until the document becomes visible.
+This behavior implements AC-AGENTS-AGENT-RICH-OUTPUT-001.7.

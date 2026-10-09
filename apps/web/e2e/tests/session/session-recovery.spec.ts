@@ -125,6 +125,12 @@ test.describe("Session recovery", () => {
         // the delayed mock agent. This is the browser path that used to leave a
         // resume continuation alive after cancellation.
         await expect(fixture.session.cancelAgentButton()).toBeVisible({ timeout: 15_000 });
+        await expect(
+          fixture.session.activeChat().getByText(/delaying resume for session .* by 15s/),
+        ).toBeVisible({ timeout: 15_000 });
+        // The running subprocess already captured its delayed-load environment.
+        // Remove the delay before cancellation so the retry uses the normal path.
+        await apiClient.updateAgentProfile(fixture.delayedProfileId, { env_vars: [] });
         await fixture.session.cancelAgentButton().click();
         await waitForSessionState(apiClient, {
           taskId: fixture.task.id,
@@ -143,8 +149,6 @@ test.describe("Session recovery", () => {
           fixture.identity.sessionId,
           90_000,
         );
-        // Delay only the cancelled process; the new process uses the normal resume path.
-        await apiClient.updateAgentProfile(fixture.delayedProfileId, { env_vars: [] });
         await fixture.session.composerReady();
         await fixture.session.sendMessage("/e2e:simple-message");
         await fixture.session.expectChatResponseVisible("simple mock response", 1, {

@@ -47,6 +47,12 @@ test.describe("Changes panel Git refresh recovery", () => {
       await expect(session.changes).toBeVisible();
       await bridge.waitForHeldFreshGitRefreshRequests(1, task.session_id);
 
+      // A real tracker update must not finish the still-held foreground request.
+      git.createFile("initial-loading-notification.txt", "foreground refresh is still pending\n");
+      await expect
+        .poll(() => bridge.notificationHasReadyFile("initial-loading-notification.txt"))
+        .toBe(true);
+
       const status = session.changes.getByTestId("changes-refresh-status");
       await expect(status).toContainText("Loading changes...");
       const emptyState = session.changes.getByText("Your changed files will appear here");
@@ -89,6 +95,7 @@ test.describe("Changes panel Git refresh recovery", () => {
     } finally {
       bridge.releaseReadyGitStatusNotifications();
       bridge.releaseFreshGitRefreshRequests();
+      git.deleteFile("initial-loading-notification.txt");
     }
   });
 

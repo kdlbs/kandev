@@ -1,30 +1,33 @@
-import type { Page } from "@playwright/test";
-
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { dwell } from "../../helpers/causal-waits";
+import type { Page } from "@playwright/test";
 
 const OVERLAY_SCROLLBAR_SELECTOR =
   "[data-slot='scroll-area-scrollbar'][data-orientation='vertical']";
 
-async function captureTaskRowReveal(page: Page, taskId: string) {
-  return page.evaluateHandle((taskId) => {
-    const state = { observed: false };
+async function observeTaskReveal(page: Page, taskId: string) {
+  return page.evaluateHandle((id) => {
+    const observation = { seen: false };
     const observer = new MutationObserver((records) => {
-      state.observed ||= records.some(
-        ({ target }) =>
-          target instanceof Element &&
-          target.getAttribute("data-task-row-id") === taskId &&
-          target.classList.contains("task-sidebar-row-reveal"),
-      );
-      if (state.observed) observer.disconnect();
+      observation.seen ||= records.some((record) => {
+        const row = record.target;
+        return (
+          row instanceof HTMLElement &&
+          row.dataset.taskRowId === id &&
+          (row.classList.contains("task-sidebar-row-reveal") ||
+            record.oldValue?.split(" ").includes("task-sidebar-row-reveal"))
+        );
+      });
+      if (observation.seen) observer.disconnect();
     });
-    observer.observe(document.body, {
+    observer.observe(document.documentElement, {
+      subtree: true,
       attributes: true,
       attributeFilter: ["class"],
-      subtree: true,
+      attributeOldValue: true,
     });
-    return { state, observer };
+    return { observation, disconnect: () => observer.disconnect() };
   }, taskId);
 }
 
@@ -374,8 +377,7 @@ test.describe("sidebar scrolling", () => {
     await dialog.getByRole("combobox").fill(targetTask.title);
     const option = dialog.getByRole("option").filter({ hasText: targetTask.title });
     await expect(option).toBeVisible({ timeout: 10_000 });
-    // Capture the real cue across route hydration and row replacement.
-    const reveal = await captureTaskRowReveal(testPage, targetTask.id);
+    const reveal = await observeTaskReveal(testPage, targetTask.id);
     try {
       await option.click();
       await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.id}$`));
@@ -383,6 +385,12 @@ test.describe("sidebar scrolling", () => {
         "aria-current",
         "true",
       );
+      await expect
+        .poll(() => reveal.evaluate(({ observation }) => observation.seen), {
+          timeout: 10_000,
+          message: "command selection should reveal its task row",
+        })
+        .toBe(true);
       await expect
         .poll(
           async () => {
@@ -401,14 +409,10 @@ test.describe("sidebar scrolling", () => {
         .toBe(true);
 
       await expect
-        .poll(() => reveal.evaluate(({ state }) => state.observed), { timeout: 1_000 })
-        .toBe(true);
-
-      await expect
         .poll(() => testPage.evaluate(() => ({ scrollX, scrollY })))
         .toEqual(documentScrollBefore);
     } finally {
-      await reveal.evaluate(({ observer }) => observer.disconnect());
+      await reveal.evaluate(({ disconnect }) => disconnect());
       await reveal.dispose();
     }
   });
@@ -576,8 +580,7 @@ test.describe("sidebar scrolling", () => {
     await dialog.getByRole("combobox").fill(targetTask.title);
     const option = dialog.getByRole("option").filter({ hasText: targetTask.title });
     await expect(option).toBeVisible({ timeout: 10_000 });
-    // Capture the real cue across route hydration and row replacement.
-    const reveal = await captureTaskRowReveal(testPage, targetTask.id);
+    const reveal = await observeTaskReveal(testPage, targetTask.id);
     try {
       await option.click();
       await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.id}$`));
@@ -585,6 +588,12 @@ test.describe("sidebar scrolling", () => {
         "aria-current",
         "true",
       );
+      await expect
+        .poll(() => reveal.evaluate(({ observation }) => observation.seen), {
+          timeout: 10_000,
+          message: "command selection should reveal its task row",
+        })
+        .toBe(true);
       await expect
         .poll(
           () =>
@@ -602,14 +611,10 @@ test.describe("sidebar scrolling", () => {
         .toBe(true);
 
       await expect
-        .poll(() => reveal.evaluate(({ state }) => state.observed), { timeout: 1_000 })
-        .toBe(true);
-
-      await expect
         .poll(() => testPage.evaluate(() => ({ scrollX, scrollY })))
         .toEqual(documentScrollBefore);
     } finally {
-      await reveal.evaluate(({ observer }) => observer.disconnect());
+      await reveal.evaluate(({ disconnect }) => disconnect());
       await reveal.dispose();
     }
   });

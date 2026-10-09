@@ -96,6 +96,9 @@ jobs:
       - name: Test backend tests workflow contract
         run: python3 .github/scripts/backend-tests-workflow-contract_test.py
 
+      - name: Test Go test shard discovery and execution
+        run: python3 scripts/ci-go-test-shard.test.py
+
       - name: Test stale merge approval revocation workflow contract
         run: python3 .github/scripts/revoke-ready-to-merge-workflow-contract_test.py
 

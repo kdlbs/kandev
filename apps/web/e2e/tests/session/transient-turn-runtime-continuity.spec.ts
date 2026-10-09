@@ -5,7 +5,7 @@ import {
   assertRetainedACPTrace,
   assertRetainedFailureMessage,
   createRetainedCapacityFixture,
-  expectCompletedCapacityProgress,
+  expectCapacityContinuationProgress,
   readMockACPTrace,
   waitForRetainedTurnFailure,
 } from "../../helpers/transient-turn-runtime-continuity";
@@ -63,6 +63,7 @@ test("desktop: capacity after tools keeps one error and the same runtime for mod
     const session = new SessionPage(testPage);
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
+    await fixture.release();
     const failure = await waitForRetainedTurnFailure(apiClient, fixture.sessionId, "refused");
     assertRetainedFailureMessage(failure);
     const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
@@ -167,6 +168,7 @@ test("desktop: eligible retry stays on the live ACP runtime and does not duplica
     const session = new SessionPage(testPage);
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
+    await fixture.release();
     const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
     await expect
       .poll(
@@ -210,18 +212,20 @@ test("desktop: completed tools continue once on the same runtime across reload a
     const session = new SessionPage(testPage);
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
-    await expectCompletedCapacityProgress(session);
+    await fixture.release();
+    await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
+    await expect(session.transientRetryCard()).toContainText("Continuing in");
     const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
 
     await testPage.reload();
     await session.waitForLoad();
-    await expectCompletedCapacityProgress(session);
+    await expectCapacityContinuationProgress(session);
     const viewer = await testPage.context().newPage();
     try {
       await viewer.goto(`/t/${fixture.taskId}`);
       const otherViewer = new SessionPage(viewer);
       await otherViewer.waitForLoad();
-      await expectCompletedCapacityProgress(otherViewer);
+      await expectCapacityContinuationProgress(otherViewer);
     } finally {
       await viewer.close();
     }
@@ -282,6 +286,7 @@ test("desktop: idle cancellation and retry exhaustion preserve the live runtime 
       const session = new SessionPage(testPage);
       await testPage.goto(`/t/${fixture.taskId}`);
       await session.waitForLoad();
+      await fixture.release();
       const executionId = await waitForExecutionId(apiClient, fixture.taskId, fixture.sessionId);
       if (scenario === "cancel") {
         await session.sendMessage("/capacity-cancel");

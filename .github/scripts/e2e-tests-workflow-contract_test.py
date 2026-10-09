@@ -205,11 +205,11 @@ cat "${FAKE_DOCKER_MANIFEST}"
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")
         normal_job = job_block(workflow, "e2e", "playwright_image")
 
-        self.assertIn(
-            "# 45 min covers the serial count-fallback tail and setup overhead",
-            normal_job,
+        self.assertIn("hosted-runner variance", normal_job)
+        timeout_line = next(
+            line.strip() for line in normal_job.splitlines() if "timeout-minutes:" in line
         )
-        self.assertIn("timeout-minutes: 45", normal_job)
+        self.assertGreaterEqual(int(timeout_line.split(":", maxsplit=1)[1]), 60)
         self.assertNotIn("timeout-minutes: 25", normal_job)
 
     # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.1

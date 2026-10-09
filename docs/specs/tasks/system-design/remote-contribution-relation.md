@@ -19,6 +19,13 @@ owns row geometry independently of the comparison result.
 
 The classifier implements this evidence gate for both desktop and phone.
 
+## Git subscription readiness
+
+`useSessionGitStatus` reacts to both connection status and client registration.
+A connected status without a registered client does not finish subscription setup.
+After the client registers, the hook subscribes to the selected session.
+Repository status then supplies the branch evidence for PR selection.
+
 ## Evidence and classification
 
 `useRemoteContributionRelation` selects repository/branch-scoped provider
@@ -26,6 +33,12 @@ evidence and ready Git status. `classifyRemoteContribution` consumes the
 current provider head, complete authoritative provider commits, local head,
 upstream head, and upstream-relative counts. Display-only retained provider
 commits remain excluded from authorization.
+
+The provider-history hook waits for a registered WebSocket client and a connected
+transport before it starts a request. Connection startup does not consume the
+provider retry budget. After reconnection, the hook loads unresolved history for
+the selected source. Successful cached history keeps its existing source identity.
+
 
 The provider API and local remote-tracking ref are independent snapshots.
 Counts against one upstream head cannot establish ancestry against a different

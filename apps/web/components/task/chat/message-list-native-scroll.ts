@@ -1198,13 +1198,12 @@ function useCatchUpOnReEnable(
  * prompt) against `useAutoScroll`'s follow-bottom behavior firing mid-flight
  * — e.g. the agent streams a new message while the scroll is still animating,
  * which would otherwise snap the transcript back to the bottom and silently
- * cancel the user's action. Held until the scroll settles (native `scrollend`
- * where supported, a bounded timeout fallback otherwise), then resyncs the
+ * cancel the user's action. Held until the requested alignment is verified,
+ * with a bounded timeout fallback, then resyncs the
  * near-bottom state from the ACTUAL scroll position — never assumed — before
  * releasing.
  */
 function useProgrammaticScrollGuard(
-  scrollRef: React.RefObject<HTMLDivElement | null>,
   lockedRef: React.RefObject<boolean>,
   resyncIsNearBottom: () => void,
   onRelease: () => void,
@@ -1225,17 +1224,16 @@ function useProgrammaticScrollGuard(
     (performScroll: () => void) => {
       cleanupRef.current?.();
       lockedRef.current = true;
-      performScroll();
-
-      const timeoutId = window.setTimeout(release, PROGRAMMATIC_SCROLL_GUARD_MS);
-      const el = scrollRef.current;
-      el?.addEventListener("scrollend", release, { once: true });
-      cleanupRef.current = () => {
-        window.clearTimeout(timeoutId);
-        el?.removeEventListener("scrollend", release);
+      const finish = () => {
+        if (cleanupRef.current === cleanup) release();
       };
+      const timeoutId = window.setTimeout(finish, PROGRAMMATIC_SCROLL_GUARD_MS);
+      const cleanup = () => window.clearTimeout(timeoutId);
+      cleanupRef.current = cleanup;
+      performScroll();
+      return finish;
     },
-    [scrollRef, lockedRef, release],
+    [lockedRef, release],
   );
 
   useEffect(() => () => cleanupRef.current?.(), []);
@@ -1254,7 +1252,7 @@ function useProgrammaticScrollGuard(
  */
 export function useScrollToMessage(
   scrollRef: React.RefObject<HTMLDivElement | null>,
-  runGuardedScroll: (performScroll: () => void) => void,
+  runGuardedScroll: (performScroll: () => void) => (() => void) | void,
   motionEnabled = true,
   onPositionClaim?: () => void,
 ) {
@@ -1288,7 +1286,8 @@ export function useScrollToMessage(
       onPositionClaim?.();
       const alignStart = options?.align === "start";
       if (scrollRef.current) cancelChatScrollMotion(scrollRef.current);
-      runGuardedScroll(() => {
+      let finishScroll: (() => void) | undefined;
+      const finishGuard = runGuardedScroll(() => {
         el.scrollIntoView({
           block: alignStart ? "start" : "center",
           behavior: motionEnabled ? (options?.behavior ?? "smooth") : "auto",
@@ -1322,7 +1321,10 @@ export function useScrollToMessage(
               (containerRect.top + containerRect.height / 2) -
               margin / 2;
           const absDelta = Math.abs(delta);
-          if (absDelta <= 2) return; // aligned
+          if (absDelta <= 2) {
+            finishScroll?.();
+            return;
+          }
           if (absDelta < lastAbsDelta) {
             // Animation still moving toward the target — keep watching.
             lastAbsDelta = absDelta;
@@ -1338,13 +1340,17 @@ export function useScrollToMessage(
           const nextScrollTop = hasScrollMetrics
             ? Math.min(maxScrollTop, Math.max(0, desiredScrollTop))
             : desiredScrollTop;
-          if (hasScrollMetrics && nextScrollTop === container.scrollTop) return;
+          if (hasScrollMetrics && nextScrollTop === container.scrollTop) {
+            finishScroll?.();
+            return;
+          }
           container.scrollTop = nextScrollTop;
           lastAbsDelta = Infinity;
           requestAnimationFrame(verify);
         };
         requestAnimationFrame(verify);
       });
+      if (typeof finishGuard === "function") finishScroll = finishGuard;
       return true;
     },
     [onPositionClaim, runGuardedScroll, scrollRef, motionEnabled],
@@ -1996,14 +2002,12 @@ function useNativePagination(
 }
 
 function useNativeProgrammaticScrollOwnership(params: {
-  scrollRef: React.RefObject<HTMLDivElement | null>;
   programmaticScrollLockRef: React.RefObject<boolean>;
   resyncIsNearBottom: () => void;
   onPlacementReleased: () => void;
 }) {
-  const { scrollRef, programmaticScrollLockRef, resyncIsNearBottom, onPlacementReleased } = params;
+  const { programmaticScrollLockRef, resyncIsNearBottom, onPlacementReleased } = params;
   const { runGuardedScroll, releaseProgrammaticScroll } = useProgrammaticScrollGuard(
-    scrollRef,
     programmaticScrollLockRef,
     resyncIsNearBottom,
     onPlacementReleased,
@@ -2163,7 +2167,6 @@ export function useNativeScrollManagement(params: NativeScrollManagementParams) 
       onUserScrollIntent: claimReaderPosition,
     });
   const { runGuardedScroll, releaseProgrammaticScroll } = useNativeProgrammaticScrollOwnership({
-    scrollRef,
     programmaticScrollLockRef,
     resyncIsNearBottom,
     onPlacementReleased,

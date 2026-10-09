@@ -65,7 +65,16 @@ test.describe("Completed workspace restoration", () => {
     expect(retryBox, "workspace retry has no rendered hitbox").not.toBeNull();
     expect(retryBox?.height ?? 0).toBeGreaterThanOrEqual(28);
     failure.allowNextRestores();
-    await retry.click();
+    await testPage.mouse.click(
+      retryBox!.x + retryBox!.width / 2,
+      retryBox!.y + retryBox!.height / 2,
+    );
+    await expect
+      .poll(() => failure.retryWasRequested(), {
+        timeout: 15_000,
+        message: "the workspace retry button sends a restore request",
+      })
+      .toBe(true);
 
     const fileNode = await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 60_000);
     await fileNode.click();
