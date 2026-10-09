@@ -350,3 +350,24 @@ Three phone repetitions also passed: touch the card menu, reject a stale
 confirmation, keep both tasks, reopen, and delete both with fresh consent.
 Typecheck, focused lint/format checks, catalog validation, and specification
 lint passed. Hosted verification remains pending the next remediation push.
+
+The next hosted run passed frontend and backend checks but failed the managed
+PVC Kubernetes case during task archival with a closed HTTP socket. Its earlier
+retention and resume assertions passed. The walkthrough generator separately
+reached its deadline while repairing an invalid draft. Both findings remain
+under investigation; the failed head is historical evidence after rebasing.
+
+The authorized rebase onto current main retained the immutable seed reset and
+main's explicit twelve-file preview history, fourteen-file membership assertion,
+and cleanup in the desktop diff-continuity test. The previous two-file assertion
+was removed because the upstream fixture deliberately adds twelve files.
+The mobile continuity fixture still owns its two-file assertion. Public behavior
+is unchanged. The first rebase passed five desktop and five phone cases without retries.
+Workflow contracts, Actionlint, typecheck, eight focused frontend tests, journal
+and Git-status fixture race tests, harness checks, and documentation checks passed.
+Main then advanced again. The second rebase retains main's direct task navigation
+in the cancel-dialog test, plus the conflicting remembered-workflow precondition
+and cleanup. After a fresh build, both desktop continuity cases and both dialog cancel/session-list
+cases passed without retries. All 82 workflow, gate, path-selection, and runner-plan
+contract tests passed, as did Actionlint, focused ESLint/Prettier, catalog/specification
+checks, and harness lint. Hosted verification remains pending the rebased push.
