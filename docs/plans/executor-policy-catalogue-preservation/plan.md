@@ -370,3 +370,46 @@ No passing product/type/i18n/backend suites replayed. Historical failed checks
 and earlier barriers remain retained; same work order, no new plan. The task is
 not complete merely because this local remediation is implemented: later ROOT
 hosted and serial merge grants remain mandatory after explicit heavy return.
+
+## Shared symlink fixture correction (2026-10-09, implemented)
+
+ROOT qualified the shared asset-directory symlink finding and source97's two
+real-Git causal RED cases in
+`/tmp/kandev-root-child97-symlink-return-qualified-20261009.json`.
+The exact reviewed two-file patch SHA256 is
+`a907b2544beec7b921dccfc871010da41df507ab2ad11c3892720fe932306b54`.
+Before writing, the helper checks its three fixed asset directories with lstat
+and rejects symlinks. Ordinary directories remain supported; existing leaf
+collision checks, attempted-path rollback and original error reporting remain
+intact. This prevents fixture writes or cleanup from following an existing link
+into an unrelated directory. No GitHelper API or product behavior changes.
+
+On this candidate, the exact transfer produced helper blob
+`6189bb415d67d52bf1536baefa62cf663159e841` and test blob
+`a6b3613d40c4b5687bec39e6fb8e841464a316d7`. Source causal RED is reused
+without replay. Own original helper GREEN35679 joined exit0: all eleven real-Git
+cases passed. ONE fresh guarded Pierre GREEN80369 joined exit0: one Chromium
+case passed in17.3s, zero retries/flaky/failed/skipped, with fresh own backend,
+Vite and fixture-plugin builds. Affected helper/test ESLint and format passed.
+Receipts are retained under `/tmp/kandev-child98-symlink-fixup-20261009/`.
+A copied temporary receipt guard initially expected the wrong prior head and
+failed before mutation; its exit1 is retained alongside the corrected exact-head
+transfer. This was a known receipt-authoring error, not a product test failure.
+
+Original observer71809 was identity-guard stopped and actually joined exit143;
+last23passed/0failed/24pending is not a terminal CI verdict. Original executor
+page/test files, requirement/design, owning Pierre spec and readiness helper
+remain unchanged. Historical unrelated E2E failures remain causal UNKNOWN.
+Mobile instrumentation remains unapplied/unrun. Private E2E setup has no public
+documentation, copy, configuration or API impact.
+
+Latest user priority supersedes earlier mandatory END/WFI and extra receipt-audit
+barriers: after scoped checks, normal hooks and publication, actually join current
+commands, record concise current process absence and aligned local/remote/PR
+head, explicitly return the heavy lease, then continue directly into hosted CI
+and current full review in the same primary turn. Preserve prior receipts without
+replaying them. Six required contexts and Backend/Frontend/E2E parents must pass;
+current substantive App347564 FULL review must cover all eleven paths, with zero
+actionable findings. Only a proved completed review gap permits one necessary
+new-head request with sufficient actual quota. No blind CI retry, optional polish,
+rebase, source expansion or merge is authorized. User priority: no merges today.
