@@ -333,6 +333,7 @@ func TestRunAgentProcessAsync_ObservesStartingSiblingsBeforeProcessStart(t *test
 		},
 	}
 	exec.agentManager = manager
+	before := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch)
 
 	exec.runAgentProcessAsyncWithObservation(
 		context.Background(), "task-123", "session-a", "exec-a",
