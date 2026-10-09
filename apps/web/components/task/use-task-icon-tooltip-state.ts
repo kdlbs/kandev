@@ -1,10 +1,11 @@
 "use client";
 
-import { useRef, useState, type FocusEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type FocusEvent, type PointerEvent } from "react";
 import { useHoverPopover } from "@/components/integrations/use-hover-popover";
 
 type TaskIconTooltipStateOptions = {
   hoverable?: boolean;
+  openDelayMs?: number;
 };
 
 const HOVER_CLOSE_DELAY_MS = 150;
@@ -20,12 +21,32 @@ function isFocusVisibleTarget(target: EventTarget | null): target is HTMLElement
   return target instanceof HTMLElement && target.matches(":focus-visible");
 }
 
+function useOnOpenTransition(open: boolean, onOpen?: () => void) {
+  const previousOpen = useRef(false);
+  const onOpenRef = useRef(onOpen);
+
+  useEffect(() => {
+    onOpenRef.current = onOpen;
+  }, [onOpen]);
+
+  useEffect(() => {
+    if (!open) {
+      previousOpen.current = false;
+      return;
+    }
+    if (previousOpen.current) return;
+    previousOpen.current = true;
+    onOpenRef.current?.();
+  }, [open]);
+}
+
 /** Shared fine-pointer and keyboard disclosure behavior for compact task indicators. */
 export function useTaskIconTooltipState(
   onOpen?: () => void,
   options: TaskIconTooltipStateOptions = {},
 ) {
   const hoverable = options.hoverable ?? false;
+  const openDelayMs = options.openDelayMs ?? 0;
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [dismissed, setDismissed] = useState(false);
@@ -34,30 +55,32 @@ export function useTaskIconTooltipState(
   const contentFocusVisible = useRef(false);
   const suppressFocusOpen = useRef(false);
   const hoverPopover = useHoverPopover({
-    openDelayMs: 0,
+    openDelayMs,
     closeDelayMs: HOVER_CLOSE_DELAY_MS,
     disabled: !hoverable,
   });
+  const open = !dismissed && (hoverable ? hoverPopover.open : hovered || focused);
+  useOnOpenTransition(open, onOpen);
 
-  const openHoverable = (event: { type?: string }) => {
+  const openImmediately = (event: { type?: string }) => {
     suppressFocusOpen.current = false;
     setDismissed(false);
     hoverPopover.onTriggerEnter(event);
     hoverPopover.onOpenChange(true);
-    onOpen?.();
   };
 
   return {
-    open: !dismissed && (hoverable ? hoverPopover.open : hovered || focused),
+    open,
     onPointerEnter(event: PointerEvent<HTMLSpanElement>) {
       if (event.pointerType !== "mouse") return;
       if (hoverable) {
-        openHoverable(event);
+        suppressFocusOpen.current = false;
+        setDismissed(false);
+        hoverPopover.onTriggerEnter(event);
         return;
       }
       setHovered(true);
       setDismissed(false);
-      onOpen?.();
     },
     onPointerLeave(event: PointerEvent<HTMLSpanElement>) {
       if (event.pointerType !== "mouse") return;
@@ -74,12 +97,11 @@ export function useTaskIconTooltipState(
           suppressFocusOpen.current = false;
           return;
         }
-        openHoverable(event);
+        openImmediately(event);
         return;
       }
       setFocused(true);
       setDismissed(false);
-      onOpen?.();
     },
     onBlur(event: FocusEvent<HTMLSpanElement>) {
       triggerFocused.current = false;

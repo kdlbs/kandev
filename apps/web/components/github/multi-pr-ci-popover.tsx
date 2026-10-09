@@ -57,7 +57,14 @@ function PRTab({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex shrink-0 items-center rounded-md border border-transparent">
+    <div
+      className={cn(
+        "group flex shrink-0 items-center rounded-md border transition-colors [@media(pointer:coarse)]:min-h-12 [@media(max-width:767px)]:min-h-12",
+        active
+          ? "border-primary/50 bg-card text-foreground"
+          : "border-transparent text-muted-foreground hover:border-border/70 hover:bg-muted focus-within:border-border/70 focus-within:bg-muted",
+      )}
+    >
       <button
         type="button"
         role="tab"
@@ -71,10 +78,8 @@ function PRTab({
         data-active={active ? "true" : "false"}
         onClick={() => onSelect(pr)}
         className={cn(
-          "flex min-h-6 cursor-pointer items-center gap-1 rounded-md border border-transparent px-2 py-1 text-xs whitespace-nowrap transition-colors [@media(pointer:coarse)]:min-h-11",
-          active
-            ? "border-primary/50 bg-card text-foreground"
-            : "text-muted-foreground hover:bg-muted",
+          "flex min-h-6 cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset [@media(pointer:coarse)]:min-h-12 [@media(max-width:767px)]:min-h-12",
+          active ? "text-foreground" : "text-muted-foreground",
         )}
       >
         <IconGitPullRequest className={cn("h-3.5 w-3.5", getPRStatusColor(pr))} />
@@ -93,7 +98,12 @@ function PRTab({
             event.stopPropagation();
             onRemove?.(pr);
           }}
-          className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-wait disabled:opacity-60 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+          className={cn(
+            "flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-opacity hover:bg-muted hover:text-foreground disabled:cursor-wait [@media(pointer:coarse)]:h-12 [@media(pointer:coarse)]:w-12 [@media(max-width:767px)]:h-12 [@media(max-width:767px)]:w-12",
+            removing
+              ? "pointer-events-auto opacity-60"
+              : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 [@media(pointer:coarse)]:pointer-events-auto [@media(pointer:coarse)]:opacity-100 [@media(max-width:767px)]:pointer-events-auto [@media(max-width:767px)]:opacity-100",
+          )}
         >
           {removing ? (
             <IconLoader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />

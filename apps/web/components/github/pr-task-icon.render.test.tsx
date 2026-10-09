@@ -100,7 +100,10 @@ beforeEach(() => {
   getTaskCIAutomationOptionsMock.mockReset().mockResolvedValue(undefined);
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("PRTaskIcon corrupted store entry", () => {
   it("reuses one empty list for missing or malformed PR data", () => {
@@ -154,7 +157,7 @@ describe("PRTaskIcon corrupted store entry", () => {
     expect(icon?.getAttribute("data-pr-ready-to-merge")).toBe("false");
   });
 
-  it("opens a loading disclosure for a compact PR projection", () => {
+  it("opens a loading disclosure for a compact PR projection after deliberate hover", async () => {
     renderWithStore(
       { workspaces: { items: [], activeId: WORKSPACE_ID } },
       <TaskContributionIcons
@@ -167,7 +170,9 @@ describe("PRTaskIcon corrupted store entry", () => {
     expect(icon.getAttribute("role")).toBe("img");
     fireEvent.pointerEnter(icon, { pointerType: "mouse" });
 
-    expect(screen.getAllByTestId(TOOLTIP_LOADING_TEST_ID).length).toBeGreaterThan(0);
+    await waitFor(() =>
+      expect(screen.getAllByTestId(TOOLTIP_LOADING_TEST_ID).length).toBeGreaterThan(0),
+    );
   });
 
   it("opens a loading disclosure when a compact PR projection receives keyboard focus", () => {
@@ -224,6 +229,43 @@ describe("PRTaskIcon tooltip accessibility", () => {
     expect(scrollRegion.getAttribute("role")).toBe("region");
     expect(scrollRegion.textContent).toContain("Test PR");
     expect(screen.getAllByTestId("pr-task-summary-scroll-body")).toHaveLength(1);
+  });
+});
+
+describe("PRTaskIcon hover delay", () => {
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.26
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.28
+  it("does not hydrate during a brief hover and hydrates once after deliberate disclosure", async () => {
+    vi.useFakeTimers();
+    const response = new Promise<{ task_prs: Record<string, TaskPR[]> }>(() => {});
+    listTaskPRsMock.mockReturnValue(response);
+    renderWithStore(
+      { workspaces: { items: [], activeId: WORKSPACE_ID } },
+      <TaskContributionIcons
+        taskId={TASK_ID}
+        prInfo={{ number: 7, state: "open", aggregateState: "pending" }}
+      />,
+    );
+
+    const icon = screen.getByTestId(`pr-task-icon-${TASK_ID}`);
+    act(() => fireEvent.pointerEnter(icon, { pointerType: "mouse" }));
+    expect(listTaskPRsMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(499);
+    });
+    expect(listTaskPRsMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId(TOOLTIP_LOADING_TEST_ID)).toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+    });
+    expect(listTaskPRsMock).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByTestId(TOOLTIP_LOADING_TEST_ID)).not.toHaveLength(0);
+
+    act(() => fireEvent.pointerEnter(icon, { pointerType: "mouse" }));
+    expect(listTaskPRsMock).toHaveBeenCalledTimes(1);
   });
 });
 

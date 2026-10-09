@@ -2,8 +2,8 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useTaskIconTooltipState } from "./use-task-icon-tooltip-state";
 
-function useHoverableTooltipState(onOpen?: () => void) {
-  return useTaskIconTooltipState(onOpen, { hoverable: true });
+function useHoverableTooltipState(onOpen?: () => void, openDelayMs = 0) {
+  return useTaskIconTooltipState(onOpen, { hoverable: true, openDelayMs });
 }
 
 function mouseEvent() {
@@ -11,6 +11,98 @@ function mouseEvent() {
 }
 
 afterEach(() => vi.useRealTimers());
+
+describe("delayed useTaskIconTooltipState disclosure", () => {
+  it("waits for the full configured delay before opening on pointer entry", () => {
+    vi.useFakeTimers();
+    const onOpen = vi.fn();
+    const { result } = renderHook(() => useHoverableTooltipState(onOpen, 500));
+
+    act(() => result.current.onPointerEnter(mouseEvent()));
+    expect(result.current.open).toBe(false);
+    expect(onOpen).not.toHaveBeenCalled();
+
+    act(() => vi.advanceTimersByTime(499));
+    expect(result.current.open).toBe(false);
+    expect(onOpen).not.toHaveBeenCalled();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(result.current.open).toBe(true);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels early exits and requires a full delay after re-entry", () => {
+    vi.useFakeTimers();
+    const onOpen = vi.fn();
+    const { result } = renderHook(() => useHoverableTooltipState(onOpen, 500));
+
+    act(() => result.current.onPointerEnter(mouseEvent()));
+    act(() => vi.advanceTimersByTime(250));
+    act(() => result.current.onPointerLeave(mouseEvent()));
+    act(() => vi.advanceTimersByTime(500));
+    expect(result.current.open).toBe(false);
+    expect(onOpen).not.toHaveBeenCalled();
+
+    act(() => result.current.onPointerEnter(mouseEvent()));
+    act(() => vi.advanceTimersByTime(499));
+    expect(result.current.open).toBe(false);
+    act(() => vi.advanceTimersByTime(1));
+    expect(result.current.open).toBe(true);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens immediately for visible keyboard focus during a pending hover", () => {
+    vi.useFakeTimers();
+    const onOpen = vi.fn();
+    const { result } = renderHook(() => useHoverableTooltipState(onOpen, 500));
+    const trigger = document.createElement("span");
+    vi.spyOn(trigger, "matches").mockImplementation((selector) => selector === ":focus-visible");
+
+    act(() => result.current.onPointerEnter(mouseEvent()));
+    act(() => result.current.onFocus({ type: "focus", currentTarget: trigger } as never));
+
+    expect(result.current.open).toBe(true);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("uses the latest hydration callback once per actual opening", () => {
+    vi.useFakeTimers();
+    const staleCallback = vi.fn();
+    const latestCallback = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ callback }: { callback: () => void }) => useHoverableTooltipState(callback, 500),
+      { initialProps: { callback: staleCallback } },
+    );
+
+    act(() => result.current.onPointerEnter(mouseEvent()));
+    rerender({ callback: latestCallback });
+    act(() => vi.advanceTimersByTime(500));
+    expect(result.current.open).toBe(true);
+    expect(staleCallback).not.toHaveBeenCalled();
+    expect(latestCallback).toHaveBeenCalledTimes(1);
+
+    rerender({ callback: vi.fn() });
+    expect(latestCallback).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps independent delays for separate indicators", () => {
+    vi.useFakeTimers();
+    const first = renderHook(() => useHoverableTooltipState(undefined, 500));
+    const second = renderHook(() => useHoverableTooltipState(undefined, 500));
+
+    act(() => {
+      first.result.current.onPointerEnter(mouseEvent());
+      second.result.current.onPointerEnter(mouseEvent());
+    });
+    act(() => vi.advanceTimersByTime(250));
+    act(() => first.result.current.onPointerLeave(mouseEvent()));
+    act(() => vi.advanceTimersByTime(250));
+
+    expect(first.result.current.open).toBe(false);
+    expect(second.result.current.open).toBe(true);
+  });
+});
 
 describe("useTaskIconTooltipState", () => {
   it("leaves Escape available to an editable target", () => {
@@ -40,6 +132,7 @@ describe("useTaskIconTooltipState", () => {
     const { result } = renderHook(() => useHoverableTooltipState(onOpen));
 
     act(() => result.current.onPointerEnter(mouseEvent()));
+    act(() => vi.advanceTimersByTime(0));
     expect(result.current.open).toBe(true);
     expect(onOpen).toHaveBeenCalledTimes(1);
 

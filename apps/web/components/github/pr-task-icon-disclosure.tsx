@@ -135,7 +135,7 @@ function getTaskPRIconDisclosureContent({
     return (
       <>
         <PRTaskStatusSummary summaries={summaries} staleWorkflowPRs={staleWorkflowPRs} />
-        <TaskPRAutomationDetails summary={automation} />
+        <TaskPRAutomationDetails summary={automation} status={hydrationStatus} />
       </>
     );
   }

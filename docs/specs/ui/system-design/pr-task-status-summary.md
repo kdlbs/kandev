@@ -89,7 +89,8 @@ sets this value from `TaskPR.author_login`. Other providers can omit it.
 
 1. The task row renders the compact PR indicator from `prInfo`.
 2. A mouse pointer enters the indicator, or keyboard focus becomes visible.
-3. The tooltip opens immediately and shows the PR identity with a loading state.
+3. Mouse entry starts the delay described in [Disclosure timing](#disclosure-timing).
+   Visible keyboard focus opens immediately. Opening shows the PR identity with a loading state.
 4. The hydration hook checks the current workspace-scoped
    `taskPRs.byTaskId` entry again. It stops if full data is available.
 5. The hook acquires one in-flight request for the active store, workspace,
@@ -113,6 +114,46 @@ does not depend on color or an icon.
 
 The GitHub CI popover header receives the same optional author. This header is
 shared by the desktop status popover and the coarse-pointer PR-status drawer.
+
+## Disclosure timing
+
+The [hover-delay plan](../../../plans/pr-task-hover-delay/plan.md) implements
+AC-UI-PR-TASK-STATUS-SUMMARY-001.26 through 001.28.
+`PRTaskIconView` opts into a 500 ms mouse delay through
+`useChangeRequestTaskTooltipState`, the alias of `useTaskIconTooltipState`.
+The shared hook gains an optional `openDelayMs`, with zero as its default.
+Other task indicators keep their existing behavior.
+
+In hoverable mode, mouse entry uses the existing `useHoverPopover` timer.
+It must not also force `onOpenChange(true)`.
+Visible keyboard focus still records focus presence and opens immediately.
+The `onOpen` callback runs once per actual closed-to-open transition.
+It uses the current callback and cannot repeat merely because hydration rerenders the component.
+Pointer entry into content does not start hydration again.
+
+Pointer leave cancels pending opening through the existing helper.
+Each icon owns its timer, with no shared fast-reopen window.
+Unmount and Escape clear pending timers.
+The existing 150 ms close delay permits pointer transfer into open content.
+Keyboard focus in either region continues to hold the summary open.
+
+The delay measures continuous presence inside the icon, not literal pointer immobility.
+Small movements inside the icon do not restart it.
+This keeps the interaction predictable without movement thresholds or extra listeners.
+The coarse-pointer drawer retains its explicit tap and direct hydration callback.
+This change adds no setting, persistent state, provider refresh, or global Tooltip delay.
+
+The Automation section includes only open PRs with auto-fix or auto-merge enabled.
+When no open PR has either option enabled, omit the section. Keep the loading
+message while automation settings load. On disclosure, fetch settings when they
+are not cached even if the full PR records are already available.
+
+Fake-timer tests cover the 499/500 ms boundary, cancelled and repeated entries,
+independent icons, focus during a pending delay, Escape, and unmount.
+Rendered tests cover compact-data hydration, pointer transfer, and omission of the
+Automation section when no open PR has an enabled option.
+Desktop E2E crosses multiple icons before deliberately opening one.
+Existing mobile drawer E2E protects immediate touch access and internal scrolling.
 
 ## Disclosure scrolling
 
