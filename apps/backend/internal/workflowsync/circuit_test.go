@@ -67,16 +67,18 @@ func TestSyncDueConfigs_RepeatedFailuresOpenCircuit(t *testing.T) {
 
 	// First attempt: due (never synced), fails, opens the circuit.
 	svc.SyncDueConfigs(context.Background())
+	require.Eventually(t, func() bool {
+		cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+		return err == nil && cfg != nil && cfg.PollSuspended
+	}, time.Second, time.Millisecond)
 	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
 	assert.Equal(t, authcircuit.FailureClassConfig, cfg.FailureClass)
-	require.NotNil(t, cfg.NextRetryAt)
-	assert.True(t, cfg.NextRetryAt.After(time.Now().UTC()), "backoff should schedule a future retry")
+	assert.True(t, cfg.PollSuspended)
+	assert.Nil(t, cfg.NextRetryAt)
 
-	// A config-class failure uses the long "permanent" backoff schedule
-	// (minutes, not the config's own 5-minute poll interval alone) — so a
-	// tick that would otherwise be "due" per the plain interval must still
-	// be skipped while the circuit is open.
+	// A missing GitHub target suspends automatic polling until configuration
+	// or credentials change or an operator explicitly retries.
 	svc.SyncDueConfigs(context.Background())
 	assert.Empty(t, applier.calls, "no successful apply ever happened, but no second GitHub call either")
 }
@@ -111,7 +113,8 @@ func TestSyncDueConfigs_CredentialFingerprintChangeResetsCircuitAndForcesSync(t 
 	svc.githubClients = clients
 
 	svc.SyncDueConfigs(context.Background())
-	assert.Len(t, applier.calls, 1, "a changed fingerprint must reset the circuit and sync immediately")
+	require.Eventually(t, func() bool { return applier.callCount() == 1 }, time.Second, time.Millisecond,
+		"a changed fingerprint must reset the circuit and sync immediately")
 
 	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
@@ -138,6 +141,30 @@ func TestSyncDueConfigs_EmptyFingerprintNeverResets(t *testing.T) {
 
 	svc.SyncDueConfigs(context.Background())
 	assert.Empty(t, applier.calls, "an empty fingerprint must never reset an open circuit")
+}
+
+func TestSyncDueConfigs_FirstKnownFingerprintRearmsSuspendedConfig(t *testing.T) {
+	clients := fakeFingerprintGitHubClients{
+		fakeGitHubClients: fakeGitHubClients{client: github.NewMockClient()},
+	}
+	svc, applier := setupCircuitTestService(t, clients)
+	configureWorkspace(t, svc, "ws-1")
+
+	svc.SyncDueConfigs(context.Background())
+	require.Eventually(t, func() bool {
+		cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+		return err == nil && cfg != nil && cfg.PollSuspended
+	}, time.Second, time.Millisecond)
+
+	clients.fingerprint = "active:2"
+	clients.client = seededMockClient()
+	svc.githubClients = clients
+	svc.SyncDueConfigs(context.Background())
+	require.Eventually(t, func() bool { return applier.callCount() == 1 }, time.Second, time.Millisecond)
+	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+	require.NoError(t, err)
+	assert.False(t, cfg.PollSuspended)
+	assert.Equal(t, "active:2", cfg.CredentialFingerprint)
 }
 
 func TestSyncDueConfigs_CredentialChangeRespectsPollingDisabled(t *testing.T) {

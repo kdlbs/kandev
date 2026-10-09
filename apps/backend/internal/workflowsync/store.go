@@ -44,6 +44,10 @@ const createTablesSQL = `
 		last_error TEXT NOT NULL DEFAULT '',
 		last_warnings TEXT NOT NULL DEFAULT '[]',
 		last_hash TEXT NOT NULL DEFAULT '',
+		consecutive_failures INTEGER NOT NULL DEFAULT 0,
+		last_error_class TEXT NOT NULL DEFAULT '',
+		poll_suspended {{boolean}} NOT NULL DEFAULT FALSE,
+		poll_suspension_reason TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
 		provider TEXT NOT NULL DEFAULT 'github',
@@ -61,7 +65,24 @@ func (s *Store) initSchema() error {
 	if err := s.addProviderColumns(); err != nil {
 		return err
 	}
-	return s.addCircuitColumns()
+	if err := s.addCircuitColumns(); err != nil {
+		return err
+	}
+	return s.addRecoveryColumns()
+}
+
+func (s *Store) addRecoveryColumns() error {
+	statements := []string{
+		`ALTER TABLE workflow_sync_configs ADD COLUMN last_error_class TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workflow_sync_configs ADD COLUMN poll_suspended {{boolean}} NOT NULL DEFAULT FALSE`,
+		`ALTER TABLE workflow_sync_configs ADD COLUMN poll_suspension_reason TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range statements {
+		if _, err := s.db.Exec(schemaSQLForDriver(stmt, s.db.DriverName())); err != nil && !db.IsDuplicateColumnError(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 // addCircuitColumns brings databases created before the auth/config
@@ -115,7 +136,8 @@ func (s *Store) addPollEnabledColumn() error {
 const configSelectColumns = `workspace_id, provider, repo_owner, repo_name, project_path, branch, path,
 	interval_seconds, poll_enabled, last_synced_at, last_ok, last_error, last_warnings, last_hash,
 	created_at, updated_at, failure_class, consecutive_failures, next_retry_at,
-	config_fingerprint, credential_fingerprint`
+	config_fingerprint, credential_fingerprint, last_error_class, poll_suspended,
+	poll_suspension_reason`
 
 type configScanner interface {
 	Scan(dest ...interface{}) error
@@ -124,6 +146,7 @@ type configScanner interface {
 func scanConfig(row configScanner) (*Config, error) {
 	cfg := &Config{}
 	var lastOk, pollEnabled, consecutiveFailures int
+	var pollSuspended bool
 	var lastSyncedAt, nextRetryAt sql.NullTime
 	var warningsJSON, failureClass string
 	if err := row.Scan(
@@ -148,16 +171,21 @@ func scanConfig(row configScanner) (*Config, error) {
 		&nextRetryAt,
 		&cfg.ConfigFingerprint,
 		&cfg.CredentialFingerprint,
+		&cfg.LastErrorClass,
+		&pollSuspended,
+		&cfg.PollSuspensionReason,
 	); err != nil {
 		return nil, err
 	}
 	cfg.LastOk = lastOk != 0
 	cfg.PollEnabled = pollEnabled != 0
+	cfg.PollSuspended = pollSuspended
 	cfg.FailureClass = authcircuit.FailureClass(failureClass)
 	cfg.ConsecutiveFailures = consecutiveFailures
 	if nextRetryAt.Valid {
 		t := nextRetryAt.Time
 		cfg.NextRetryAt = &t
+		cfg.NextAttemptAt = &t
 	}
 	// A row written before the provider column existed carries the implicit
 	// GitHub meaning. The migration default covers the normal path; this
@@ -245,7 +273,10 @@ func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string
 			failure_class = '',
 			consecutive_failures = 0,
 			next_retry_at = NULL,
-			config_fingerprint = excluded.config_fingerprint
+			config_fingerprint = excluded.config_fingerprint,
+			last_error_class = '',
+			poll_suspended = FALSE,
+			poll_suspension_reason = ''
 	`), workspaceID, req.Provider, req.RepoOwner, req.RepoName, req.ProjectPath, req.Branch, req.Path,
 		req.IntervalSeconds, boolToInt(req.PollEnabled != nil && *req.PollEnabled), now, now, req.fingerprint())
 	if err != nil {
@@ -273,10 +304,39 @@ func (s *Store) RecordSyncStatus(
 	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE workflow_sync_configs
 		SET last_synced_at = ?, last_ok = ?, last_error = ?, last_warnings = ?, last_hash = ?, updated_at = ?,
-			failure_class = ?, consecutive_failures = ?, next_retry_at = ?
+			failure_class = ?, consecutive_failures = ?, next_retry_at = ?,
+			last_error_class = CASE WHEN ? = 1 THEN '' ELSE last_error_class END,
+			poll_suspended = CASE WHEN ? THEN FALSE ELSE poll_suspended END,
+			poll_suspension_reason = CASE WHEN ? = 1 THEN '' ELSE poll_suspension_reason END
 		WHERE workspace_id = ?
 	`), at, okInt, errMsg, string(warningsJSON), hash, at,
-		string(circuit.FailureClass), circuit.ConsecutiveFailures, circuit.NextRetryAt, workspaceID)
+		string(circuit.FailureClass), circuit.ConsecutiveFailures, circuit.NextRetryAt,
+		okInt, ok, okInt, workspaceID)
+	return err
+}
+
+func (s *Store) RecordSyncFailure(
+	ctx context.Context, workspaceID, errMsg string, directive failureDirective, at time.Time,
+) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE workflow_sync_configs
+		SET last_synced_at = ?, last_ok = 0, last_error = ?, last_warnings = '[]', last_hash = '',
+			failure_class = ?, consecutive_failures = ?, next_retry_at = ?, last_error_class = ?,
+			poll_suspended = ?, poll_suspension_reason = ?, updated_at = ?
+		WHERE workspace_id = ?
+	`), at, errMsg, string(directive.circuitClass), directive.consecutive,
+		directive.nextAttemptAt, directive.class, directive.suspended,
+		directive.suspensionReason, at, workspaceID)
+	return err
+}
+
+func (s *Store) ResetRecoveryState(ctx context.Context, workspaceID string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE workflow_sync_configs
+		SET failure_class = '', consecutive_failures = 0, next_retry_at = NULL,
+			last_error_class = '', poll_suspended = FALSE, poll_suspension_reason = '', updated_at = ?
+		WHERE workspace_id = ?
+	`), at, workspaceID)
 	return err
 }
 
@@ -287,9 +347,14 @@ func (s *Store) RecordSyncStatus(
 func (s *Store) RecordCircuitState(ctx context.Context, workspaceID string, circuit authcircuit.State) error {
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE workflow_sync_configs
-		SET failure_class = ?, consecutive_failures = ?, next_retry_at = ?, credential_fingerprint = ?, updated_at = ?
+		SET failure_class = ?, consecutive_failures = ?, next_retry_at = ?, credential_fingerprint = ?,
+			last_error_class = CASE WHEN ? = '' THEN '' ELSE last_error_class END,
+			poll_suspended = CASE WHEN ? = '' THEN FALSE ELSE poll_suspended END,
+			poll_suspension_reason = CASE WHEN ? = '' THEN '' ELSE poll_suspension_reason END,
+			updated_at = ?
 		WHERE workspace_id = ?
 	`), string(circuit.FailureClass), circuit.ConsecutiveFailures, circuit.NextRetryAt, circuit.Fingerprint,
+		string(circuit.FailureClass), string(circuit.FailureClass), string(circuit.FailureClass),
 		time.Now().UTC(), workspaceID)
 	return err
 }

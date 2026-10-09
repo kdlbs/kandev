@@ -70,6 +70,12 @@ type Config struct {
 	FailureClass        authcircuit.FailureClass `json:"failure_class,omitempty"`
 	ConsecutiveFailures int                      `json:"consecutive_failures,omitempty"`
 	NextRetryAt         *time.Time               `json:"next_retry_at,omitempty"`
+	// The rate-specific class and suspension reason complement the shared
+	// circuit state. NextAttemptAt mirrors NextRetryAt for sync clients.
+	NextAttemptAt        *time.Time `json:"next_attempt_at,omitempty"`
+	LastErrorClass       string     `json:"last_error_class,omitempty"`
+	PollSuspended        bool       `json:"poll_suspended"`
+	PollSuspensionReason string     `json:"poll_suspension_reason,omitempty"`
 	// ConfigFingerprint and CredentialFingerprint are internal-only circuit
 	// identity keys (never secrets — see authcircuit.State.Fingerprint) and
 	// are not surfaced over the API.
@@ -94,6 +100,7 @@ func (c *Config) applyCircuitState(state authcircuit.State) {
 	c.FailureClass = state.FailureClass
 	c.ConsecutiveFailures = state.ConsecutiveFailures
 	c.NextRetryAt = state.NextRetryAt
+	c.NextAttemptAt = state.NextRetryAt
 	c.CredentialFingerprint = state.Fingerprint
 }
 

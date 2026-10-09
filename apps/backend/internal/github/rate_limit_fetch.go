@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const rateLimitEndpoint = "/rate_limit"
+
 // rateLimitResponse mirrors the GitHub GET /rate_limit JSON shape. The
 // endpoint includes additional resource buckets, but these are the buckets
 // Kandev tracks and displays.
@@ -35,12 +37,17 @@ func recordRateLimitResources(tracker *RateTracker, resources rateLimitResources
 		if bucket.Limit == 0 && bucket.Remaining == 0 && bucket.Reset == 0 {
 			return
 		}
+		var resetAt time.Time
+		if bucket.Reset > 0 {
+			resetAt = time.Unix(bucket.Reset, 0).UTC()
+		}
 		tracker.Record(RateSnapshot{
-			Resource:  resource,
-			Limit:     bucket.Limit,
-			Remaining: bucket.Remaining,
-			ResetAt:   time.Unix(bucket.Reset, 0).UTC(),
-			UpdatedAt: now,
+			Resource:          resource,
+			Limit:             bucket.Limit,
+			Remaining:         bucket.Remaining,
+			RemainingObserved: true,
+			ResetAt:           resetAt,
+			UpdatedAt:         now,
 		})
 	}
 	record(ResourceCore, resources.Core)
@@ -55,7 +62,7 @@ func (c *TokenClient) FetchRateLimit(ctx context.Context) error {
 		return nil
 	}
 	var raw rateLimitResponse
-	if err := c.get(ctx, "/rate_limit", &raw); err != nil {
+	if err := c.get(ctx, rateLimitEndpoint, &raw); err != nil {
 		return fmt.Errorf("fetch rate limit: %w", err)
 	}
 	recordRateLimitResources(c.rateTracker, raw.Resources)

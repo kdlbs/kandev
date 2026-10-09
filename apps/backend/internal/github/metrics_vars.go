@@ -6,8 +6,9 @@ import (
 )
 
 const (
-	reviewCleanupMetricClassAuth  = "auth"
-	reviewCleanupMetricClassOther = "other"
+	reviewCleanupMetricClassAuth      = "auth"
+	reviewCleanupMetricClassOther     = "other"
+	reviewCleanupMetricClassRateLimit = "rate_limit"
 )
 
 // expvar maps published at package init, exposed via stdlib's /debug/vars
@@ -16,7 +17,10 @@ const (
 // AC-36/AC-37, not these counters. Mirrors the label idiom in
 // internal/office/scheduler/metrics_vars.go.
 var (
-	taskPROutcomeSyncsTotal = expvar.NewMap("github_task_pr_outcome_syncs_total")
+	taskPROutcomeSyncsTotal            = expvar.NewMap("github_task_pr_outcome_syncs_total")
+	githubResponseClassificationsTotal = expvar.NewMap("github_provider_response_classifications_total")
+	githubBackgroundDeferralsTotal     = expvar.NewMap("github_rate_limit_background_deferrals_total")
+	githubSecondaryRecoveriesTotal     = expvar.NewMap("github_rate_limit_secondary_recoveries_total")
 	// authCircuitSkipsTotal and authCircuitResetsTotal are unlabeled counts
 	// (no per-workspace label — workspace IDs must never be metric labels).
 	// They bound the PR-monitor loop's auth/config circuit-breaker activity
@@ -54,6 +58,28 @@ func outcomeMetricLabel(pairs ...string) string {
 // material; AC-36/AC-37 remain the durable signal.
 func incTaskPROutcomeSync(populated bool) {
 	taskPROutcomeSyncsTotal.Add(outcomeMetricLabel("populated", boolLabel(populated)), 1)
+}
+
+func incGitHubResponseClassification(kind FailureKind, resource Resource, retrySource RetrySource) {
+	githubResponseClassificationsTotal.Add(outcomeMetricLabel(
+		"kind", string(kind),
+		"resource", string(resource),
+		"retry_source", string(retrySource),
+	), 1)
+}
+
+func incGitHubBackgroundDeferral(resource Resource, reason string) {
+	githubBackgroundDeferralsTotal.Add(outcomeMetricLabel(
+		"resource", string(resource), "reason", reason,
+	), 1)
+}
+
+func incGitHubSecondaryRecovery(resource Resource, retrySource RetrySource, early bool) {
+	githubSecondaryRecoveriesTotal.Add(outcomeMetricLabel(
+		"resource", string(resource),
+		"retry_source", string(retrySource),
+		"early", boolLabel(early),
+	), 1)
 }
 
 func boolLabel(b bool) string {
@@ -105,7 +131,7 @@ func validReviewCleanupMetricScope(scope string) bool {
 
 func boundedReviewCleanupMetricClass(class string) string {
 	switch class {
-	case reviewCleanupMetricClassAuth, "config", "transient", "rate_limit":
+	case reviewCleanupMetricClassAuth, "config", "transient", reviewCleanupMetricClassRateLimit:
 		return class
 	default:
 		return reviewCleanupMetricClassOther

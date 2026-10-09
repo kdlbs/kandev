@@ -549,10 +549,14 @@ func (s *Service) fetchBatchedWatchStatuses(
 			byKey:               make(map[string]*PRStatus, len(numbered)+len(searching)),
 			branchResolvedEmpty: make(map[string]struct{}, len(searching)),
 		}
-		if err := s.fetchBatchedPRStatuses(fetchCtx, exec, cacheScope, numbered, combined.byKey, repoErrGen); err != nil {
+		if err := s.fetchBatchedPRStatuses(
+			fetchCtx, exec, cacheScope, key, numbered, combined.byKey, repoErrGen,
+		); err != nil {
 			return nil, err
 		}
-		if err := s.fetchBatchedBranchStatuses(fetchCtx, exec, cacheScope, searching, combined, repoErrGen); err != nil {
+		if err := s.fetchBatchedBranchStatuses(
+			fetchCtx, exec, cacheScope, key, searching, combined, repoErrGen,
+		); err != nil {
 			return nil, err
 		}
 		s.enrichBatchedWorkflowAttention(fetchCtx, client, cacheScope, combined.byKey)
@@ -596,7 +600,8 @@ func batchedFetchSingleflightKey(numbered, searching []*PRWatch) string {
 // 10 minutes; partial results for the repos that did resolve are merged
 // into `combined`.
 func (s *Service) fetchBatchedPRStatuses(
-	ctx context.Context, exec GraphQLExecutor, cacheScope string, numbered []*PRWatch, combined map[string]*PRStatus,
+	ctx context.Context, exec GraphQLExecutor, cacheScope, progressKey string,
+	numbered []*PRWatch, combined map[string]*PRStatus,
 	repoErrGen uint64,
 ) error {
 	refs := make([]graphQLPRRef, 0, len(numbered))
@@ -609,7 +614,9 @@ func (s *Service) fetchBatchedPRStatuses(
 	if len(refs) == 0 {
 		return nil
 	}
-	out, err := runBatchedPRQuery(ctx, exec, refs)
+	progress := s.batchedPRQueryProgress(progressKey)
+	out, err := runBatchedPRQueryWithProgress(ctx, exec, refs, progress)
+	s.finishBatchedPRQueryProgress(progressKey, progress, keepBatchedPRProgress(err))
 	out, err = s.absorbMissingReposErr(out, err, cacheScope, repoErrGen)
 	if err != nil {
 		return fmt.Errorf("batched PR query: %w", err)
@@ -623,7 +630,8 @@ func (s *Service) fetchBatchedPRStatuses(
 // fetchBatchedBranchStatuses runs the branch-keyed batch with the same
 // negative-cache filter and missing-repo absorption as the numbered path.
 func (s *Service) fetchBatchedBranchStatuses(
-	ctx context.Context, exec GraphQLExecutor, cacheScope string, searching []*PRWatch, combined *batchedWatchStatuses,
+	ctx context.Context, exec GraphQLExecutor, cacheScope, progressKey string,
+	searching []*PRWatch, combined *batchedWatchStatuses,
 	repoErrGen uint64,
 ) error {
 	refs := make([]graphQLBranchRef, 0, len(searching))
@@ -636,7 +644,9 @@ func (s *Service) fetchBatchedBranchStatuses(
 	if len(refs) == 0 {
 		return nil
 	}
-	out, err := runBatchedBranchQuery(ctx, exec, refs)
+	progress := s.batchedBranchQueryProgress(progressKey)
+	out, err := runBatchedBranchQueryWithProgress(ctx, exec, refs, progress)
+	s.finishBatchedBranchQueryProgress(progressKey, progress, keepBatchedPRProgress(err))
 	statuses, err := s.absorbMissingReposErr(out.Statuses, err, cacheScope, repoErrGen)
 	if err != nil {
 		return fmt.Errorf("batched branch query: %w", err)

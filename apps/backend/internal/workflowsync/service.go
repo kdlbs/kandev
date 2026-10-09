@@ -56,8 +56,9 @@ type GitLabClientProvider interface {
 // interfaces above, so drift in either package's workspace-routed methods
 // breaks the build rather than surfacing only at DI-wiring time.
 var (
-	_ GitHubClientProvider = (*github.Service)(nil)
-	_ GitLabClientProvider = (*gitlab.Service)(nil)
+	_                      GitHubClientProvider = (*github.Service)(nil)
+	_                      GitLabClientProvider = (*gitlab.Service)(nil)
+	errAutomaticSyncNotDue                      = errors.New("automatic workflow sync is no longer due")
 )
 
 // CredentialFingerprintProvider optionally exposes a non-secret fingerprint
@@ -82,8 +83,10 @@ var _ CredentialFingerprintProvider = (*github.Service)(nil)
 // from other fetch failures so classifySyncErr can recognize "not
 // configured" as a config-class failure independent of error string text.
 var (
-	errGitHubClientNotConfigured = errors.New("GitHub is not authenticated; configure a GitHub token to sync workflows")
-	errGitLabClientNotConfigured = errors.New("GitLab is not authenticated; configure a GitLab connection to sync workflows")
+	errGitHubClientNotConfigured  = errors.New("GitHub is not authenticated; configure a GitHub token to sync workflows")
+	errGitLabClientNotConfigured  = errors.New("GitLab is not authenticated; configure a GitLab connection to sync workflows")
+	errAutomaticJobInvalidated    = errors.New("automatic workflow sync was invalidated")
+	errAutomaticCredentialChanged = errors.New("automatic workflow sync credential changed")
 )
 
 // dirEntry is a provider-neutral directory listing entry. It exists only to
@@ -110,12 +113,31 @@ type Service struct {
 	// than racing an in-flight apply.
 	locks sync.Map // workspaceID → *sync.Mutex
 
+	// automaticMu guards the bounded periodic execution pool and coalesces
+	// queued/active work by workspace. Provider admission can wait for a long
+	// retry window, so pending work must remain in the scheduler queue rather
+	// than becoming one goroutine per workspace.
+	automaticMu       sync.Mutex
+	automaticInFlight map[string]*automaticJobState
+	automaticPool     *automaticScheduler
+	automaticCancel   context.CancelFunc
+	automaticWorkers  int
+
 	// workspaceAuthorizer enforces per-user workspace scoping. Nil (unit
 	// tests, or a caller with no identity in context — internal callers like
 	// the periodic poller) means unscoped, matching every other integration
 	// service's default before auth is wired up.
 	workspaceAuthorizer func(context.Context, string) error
+	now                 func() time.Time
+	jitter              func(time.Duration) time.Duration
 }
+
+type syncMode uint8
+
+const (
+	syncManual syncMode = iota
+	syncAutomatic
+)
 
 // SetWorkspaceAuthorizer installs the per-user workspace access boundary
 // applied before every user-facing config read/write and force sync.
@@ -146,11 +168,15 @@ func NewService(
 	applier Applier, log *logger.Logger,
 ) *Service {
 	return &Service{
-		store:         store,
-		githubClients: githubClients,
-		gitlabClients: gitlabClients,
-		applier:       applier,
-		logger:        log.WithFields(zap.String("component", "workflowsync-service")),
+		store:             store,
+		githubClients:     githubClients,
+		gitlabClients:     gitlabClients,
+		applier:           applier,
+		logger:            log.WithFields(zap.String("component", "workflowsync-service")),
+		now:               time.Now,
+		jitter:            defaultJitter,
+		automaticInFlight: make(map[string]*automaticJobState),
+		automaticWorkers:  automaticSyncWorkerLimit,
 	}
 }
 
@@ -164,7 +190,13 @@ func (s *Service) GetConfigForWorkspace(ctx context.Context, workspaceID string)
 	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
 		return nil, err
 	}
-	return s.store.GetConfigForWorkspace(ctx, workspaceID)
+	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
+	if err != nil || cfg == nil {
+		return cfg, err
+	}
+	cfg.LastError = safeStoredSyncErrorMessage(cfg.LastError)
+	cfg.PollSuspensionReason = safeStoredSyncErrorMessage(cfg.PollSuspensionReason)
+	return cfg, nil
 }
 
 // SetConfigForWorkspace validates and stores the workspace's config.
@@ -178,7 +210,11 @@ func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string,
 	lock := s.workspaceLock(workspaceID)
 	lock.Lock()
 	defer lock.Unlock()
-	return s.store.UpsertConfigForWorkspace(ctx, workspaceID, req)
+	cfg, err := s.store.UpsertConfigForWorkspace(ctx, workspaceID, req)
+	if err == nil {
+		s.invalidateAutomaticJob(workspaceID)
+	}
+	return cfg, err
 }
 
 // DeleteConfigForWorkspace removes the workspace's config. Previously-synced
@@ -199,7 +235,11 @@ func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID stri
 		s.logger.Info("released synced workflows",
 			zap.String("workspace_id", workspaceID), zap.Int("count", len(released)))
 	}
-	return s.store.DeleteConfigForWorkspace(ctx, workspaceID)
+	if err := s.store.DeleteConfigForWorkspace(ctx, workspaceID); err != nil {
+		return err
+	}
+	s.invalidateAutomaticJob(workspaceID)
+	return nil
 }
 
 // syncableExtensions are the file extensions read from the sync directory.
@@ -228,16 +268,41 @@ type fetchedFile struct {
 // silent. The outcome (including failures) is recorded on the config row so
 // the UI can surface it.
 func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string) (*SyncResult, error) {
+	return s.syncWorkspace(ctx, workspaceID, syncManual)
+}
+
+func (s *Service) syncWorkspace(
+	ctx context.Context,
+	workspaceID string,
+	mode syncMode,
+) (*SyncResult, error) {
+	return s.syncWorkspaceWithForce(ctx, workspaceID, mode, false)
+}
+
+func (s *Service) syncWorkspaceWithForce(
+	ctx context.Context, workspaceID string, mode syncMode, force bool,
+) (*SyncResult, error) {
+	return s.syncWorkspaceWithAutomaticState(ctx, workspaceID, mode, force, nil)
+}
+
+func (s *Service) syncWorkspaceWithAutomaticState(
+	ctx context.Context, workspaceID string, mode syncMode, force bool, state *automaticJobState,
+) (*SyncResult, error) {
 	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
 		return nil, err
 	}
 	lock := s.workspaceLock(workspaceID)
 	lock.Lock()
 	defer lock.Unlock()
-	return s.syncWorkspaceLocked(ctx, workspaceID)
+	if mode == syncManual {
+		s.invalidateAutomaticJob(workspaceID)
+	}
+	return s.syncWorkspaceLocked(ctx, workspaceID, mode, force, state)
 }
 
-func (s *Service) syncWorkspaceLocked(ctx context.Context, workspaceID string) (*SyncResult, error) {
+func (s *Service) syncWorkspaceLocked(
+	ctx context.Context, workspaceID string, mode syncMode, force bool, state *automaticJobState,
+) (*SyncResult, error) {
 	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -245,26 +310,43 @@ func (s *Service) syncWorkspaceLocked(ctx context.Context, workspaceID string) (
 	if cfg == nil {
 		return nil, ErrNotConfigured
 	}
-
-	files, err := s.fetchFiles(ctx, cfg)
-	if err != nil {
-		s.recordFailure(ctx, workspaceID, cfg, err)
+	if err := s.prepareSyncAttempt(ctx, cfg, mode, force, state); err != nil {
 		return nil, err
 	}
+	wasRecovering := cfg.ConsecutiveFailures > 0 || cfg.PollSuspended
+	previousFailureClass := cfg.LastErrorClass
+	ctx = syncContext(ctx, cfg, mode)
 
+	files, err := s.fetchSyncFiles(ctx, cfg, state)
+	if err != nil {
+		return nil, s.handleSyncFetchFailure(ctx, workspaceID, cfg, mode, state, err)
+	}
+	files, err = s.refreshAutomaticFilesAfterCredentialChange(ctx, cfg, mode, state, files)
+	if err != nil {
+		return nil, err
+	}
 	parsed, warnings := parseFiles(files)
 	applied, err := s.applier.ApplySyncedWorkflows(ctx, workspaceID, parsed)
 	if err != nil {
-		s.recordFailure(ctx, workspaceID, cfg, err)
+		s.recordFailure(ctx, workspaceID, cfg, err, mode)
 		return nil, err
 	}
 	warnings = append(warnings, applied.Warnings...)
 	successState := cfg.circuitState()
 	successState.RecordSuccess()
+	persistCtx, cancel := terminalSyncPersistenceContext(ctx, mode)
+	defer cancel()
 	if err := s.store.RecordSyncStatus(
-		ctx, workspaceID, true, "", warnings, contentHash(files), time.Now().UTC(), successState,
+		persistCtx, workspaceID, true, "", warnings, contentHash(files), s.now().UTC(), successState,
 	); err != nil {
 		return nil, err
+	}
+	if wasRecovering {
+		incWorkflowSyncTransition("recovered", cfg.Provider, previousFailureClass, "")
+		s.logger.Info("workflow sync polling recovered",
+			zap.String("workspace_id", workspaceID),
+			zap.String("provider", cfg.Provider),
+			zap.String("previous_failure_class", previousFailureClass))
 	}
 	return &SyncResult{
 		Created:   applied.Created,
@@ -275,18 +357,101 @@ func (s *Service) syncWorkspaceLocked(ctx context.Context, workspaceID string) (
 	}, nil
 }
 
-func (s *Service) recordFailure(ctx context.Context, workspaceID string, cfg *Config, syncErr error) {
-	class := classifySyncErr(syncErr)
-	state := cfg.circuitState()
-	state.RecordFailure(time.Now().UTC(), class, nil)
-	incSyncFailure(cfg.Provider, class)
-	// Clear the hash so the next successful fetch re-applies from scratch.
-	if err := s.store.RecordSyncStatus(
-		ctx, workspaceID, false, syncErr.Error(), nil, "", time.Now().UTC(), state,
-	); err != nil {
-		s.logger.Warn("failed to record sync failure",
-			zap.String("workspace_id", workspaceID), zap.Error(err))
+func (s *Service) prepareSyncAttempt(
+	ctx context.Context, cfg *Config, mode syncMode, force bool, state *automaticJobState,
+) error {
+	if state != nil {
+		if state.isCancelled() {
+			return errAutomaticJobInvalidated
+		}
+		s.refreshCredentialFingerprint(ctx, cfg, s.now().UTC())
+		force = state.forceRequested()
 	}
+	if !s.shouldRunAutomaticSync(cfg, mode, force) {
+		return errAutomaticSyncNotDue
+	}
+	return nil
+}
+
+func (s *Service) fetchSyncFiles(ctx context.Context, cfg *Config, state *automaticJobState) ([]fetchedFile, error) {
+	if state == nil {
+		return s.fetchFiles(ctx, cfg)
+	}
+	return s.fetchStableAutomaticFiles(ctx, cfg, state)
+}
+
+func (s *Service) handleSyncFetchFailure(
+	ctx context.Context,
+	workspaceID string,
+	cfg *Config,
+	mode syncMode,
+	state *automaticJobState,
+	syncErr error,
+) error {
+	var deferred *github.AdmissionDeferredError
+	if errors.As(syncErr, &deferred) {
+		return syncErr
+	}
+	if state != nil && state.isCancelled() {
+		return errAutomaticJobInvalidated
+	}
+	if errors.Is(syncErr, errAutomaticJobInvalidated) {
+		return syncErr
+	}
+	s.recordFailure(ctx, workspaceID, cfg, syncErr, mode)
+	return syncErr
+}
+
+func (s *Service) refreshAutomaticFilesAfterCredentialChange(
+	ctx context.Context, cfg *Config, mode syncMode, state *automaticJobState, files []fetchedFile,
+) ([]fetchedFile, error) {
+	if state == nil {
+		return files, nil
+	}
+	validationErr := s.validateAutomaticContinuation(ctx, cfg, state)
+	if validationErr == nil {
+		return files, nil
+	}
+	if !errors.Is(validationErr, errAutomaticCredentialChanged) {
+		return nil, validationErr
+	}
+	files, err := s.fetchStableAutomaticFiles(ctx, cfg, state)
+	if err != nil {
+		return nil, s.handleSyncFetchFailure(ctx, cfg.WorkspaceID, cfg, mode, state, err)
+	}
+	return files, nil
+}
+
+func (s *Service) recordFailure(ctx context.Context, workspaceID string, cfg *Config, syncErr error, mode syncMode) {
+	now := s.now().UTC()
+	directive := buildFailureDirective(cfg, syncErr, now, s.jitter)
+	incSyncFailure(cfg.Provider, directive.circuitClass)
+	persistCtx, cancel := terminalSyncPersistenceContext(ctx, mode)
+	defer cancel()
+	if err := s.store.RecordSyncFailure(persistCtx, workspaceID, safeSyncErrorMessage(syncErr), directive, now); err != nil {
+		s.logger.Warn("failed to record sync failure",
+			zap.String("workspace_id", cfg.WorkspaceID), zap.Error(err))
+		return
+	}
+	fields := []zap.Field{
+		zap.String("workspace_id", cfg.WorkspaceID),
+		zap.String("provider", cfg.Provider),
+		zap.String("failure_class", directive.class),
+		zap.Bool("poll_suspended", directive.suspended),
+		zap.String("retry_source", string(directive.retrySource)),
+		zap.String("error", safeSyncErrorMessage(syncErr)),
+	}
+	if directive.nextAttemptAt != nil {
+		fields = append(fields, zap.Time("next_attempt_at", *directive.nextAttemptAt))
+	}
+	if directive.suspended && !cfg.PollSuspended {
+		incWorkflowSyncTransition(
+			"suspended", cfg.Provider, directive.class, string(directive.retrySource),
+		)
+		s.logger.Warn("workflow sync polling suspended", fields...)
+		return
+	}
+	s.logger.Warn("workflow sync attempt failed", fields...)
 }
 
 // fetchFiles lists the configured directory and downloads every workflow
@@ -311,6 +476,193 @@ func (s *Service) fetchFiles(ctx context.Context, cfg *Config) ([]fetchedFile, e
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
 	return files, nil
+}
+
+type fetchContinuation struct {
+	configFingerprint     string
+	credentialFingerprint string
+	generation            uint64
+	entries               []dirEntry
+	files                 []fetchedFile
+	nextEntry             int
+	directoryLoaded       bool
+}
+
+func (s *Service) fetchStableAutomaticFiles(
+	ctx context.Context, cfg *Config, state *automaticJobState,
+) ([]fetchedFile, error) {
+	for {
+		files, err := s.fetchAutomaticFiles(ctx, cfg, state)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.validateAutomaticContinuation(ctx, cfg, state); err != nil {
+			if errors.Is(err, errAutomaticCredentialChanged) {
+				continue
+			}
+			return nil, err
+		}
+		return files, nil
+	}
+}
+
+func (s *Service) fetchAutomaticFiles(
+	ctx context.Context, cfg *Config, state *automaticJobState,
+) ([]fetchedFile, error) {
+	for {
+		continuation, err := s.automaticFetchContinuation(ctx, cfg, state)
+		if errors.Is(err, errAutomaticCredentialChanged) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := s.loadAutomaticContinuationDirectory(ctx, cfg, state, continuation); errors.Is(err, errAutomaticCredentialChanged) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		if err := s.fetchAutomaticContinuationEntries(ctx, cfg, state, continuation); errors.Is(err, errAutomaticCredentialChanged) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		if err := s.validateAutomaticContinuation(ctx, cfg, state); errors.Is(err, errAutomaticCredentialChanged) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		files := append([]fetchedFile(nil), continuation.files...)
+		sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
+		return files, nil
+	}
+}
+
+func (s *Service) automaticFetchContinuation(
+	ctx context.Context, cfg *Config, state *automaticJobState,
+) (*fetchContinuation, error) {
+	if state.isCancelled() {
+		return nil, errAutomaticJobInvalidated
+	}
+	credentialFingerprint, err := s.currentCredentialFingerprint(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	continuation := state.getContinuation()
+	if continuation == nil {
+		continuation = &fetchContinuation{
+			configFingerprint:     cfg.ConfigFingerprint,
+			credentialFingerprint: credentialFingerprint,
+			generation:            state.currentGeneration(),
+		}
+		if !state.setContinuation(continuation) {
+			return nil, errAutomaticJobInvalidated
+		}
+	}
+	if continuation.configFingerprint != cfg.ConfigFingerprint ||
+		continuation.generation != state.currentGeneration() {
+		return nil, errAutomaticJobInvalidated
+	}
+	if continuation.credentialFingerprint != credentialFingerprint {
+		s.refreshCredentialFingerprint(ctx, cfg, s.now().UTC())
+		state.restartContinuation()
+		return nil, errAutomaticCredentialChanged
+	}
+	if err := s.validateAutomaticContinuation(ctx, cfg, state); err != nil {
+		return nil, err
+	}
+	return continuation, nil
+}
+
+func (s *Service) loadAutomaticContinuationDirectory(
+	ctx context.Context, cfg *Config, state *automaticJobState, continuation *fetchContinuation,
+) error {
+	if continuation.directoryLoaded {
+		return nil
+	}
+	entries, _, err := s.listProviderEntries(ctx, cfg)
+	if err != nil {
+		if validationErr := s.validateAutomaticContinuation(ctx, cfg, state); validationErr != nil {
+			return validationErr
+		}
+		return err
+	}
+	if err := s.validateAutomaticContinuation(ctx, cfg, state); err != nil {
+		return err
+	}
+	continuation.entries = entries
+	continuation.directoryLoaded = true
+	return nil
+}
+
+func (s *Service) fetchAutomaticContinuationEntries(
+	ctx context.Context, cfg *Config, state *automaticJobState, continuation *fetchContinuation,
+) error {
+	get, err := s.fileGetterForConfig(cfg)
+	if err != nil {
+		return err
+	}
+	for continuation.nextEntry < len(continuation.entries) {
+		if err := s.validateAutomaticContinuation(ctx, cfg, state); err != nil {
+			return err
+		}
+		entry := continuation.entries[continuation.nextEntry]
+		if !entry.isFile || !isSyncableFile(entry.name) {
+			continuation.nextEntry++
+			continue
+		}
+		content, err := get(ctx, entry.path)
+		if err != nil {
+			if validationErr := s.validateAutomaticContinuation(ctx, cfg, state); validationErr != nil {
+				return validationErr
+			}
+			return fmt.Errorf("failed to fetch %s: %w", entry.path, err)
+		}
+		continuation.files = append(continuation.files, fetchedFile{path: entry.path, content: content})
+		continuation.nextEntry++
+	}
+	return nil
+}
+
+func (s *Service) validateAutomaticContinuation(
+	ctx context.Context, cfg *Config, state *automaticJobState,
+) error {
+	if state.isCancelled() {
+		return errAutomaticJobInvalidated
+	}
+	continuation := state.getContinuation()
+	if continuation == nil {
+		return nil
+	}
+	if continuation.configFingerprint != cfg.ConfigFingerprint ||
+		continuation.generation != state.currentGeneration() {
+		return errAutomaticJobInvalidated
+	}
+	credentialFingerprint, err := s.currentCredentialFingerprint(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	if credentialFingerprint != continuation.credentialFingerprint {
+		s.refreshCredentialFingerprint(ctx, cfg, s.now().UTC())
+		state.restartContinuation()
+		return errAutomaticCredentialChanged
+	}
+	return nil
+}
+
+func (s *Service) currentCredentialFingerprint(ctx context.Context, cfg *Config) (string, error) {
+	provider := s.credentialFingerprintProvider(cfg.Provider)
+	if provider == nil {
+		return cfg.CredentialFingerprint, nil
+	}
+	fingerprint, err := provider.WorkspaceConnectionFingerprint(ctx, cfg.WorkspaceID)
+	if err != nil {
+		return "", err
+	}
+	if fingerprint == "" {
+		return cfg.CredentialFingerprint, nil
+	}
+	return fingerprint, nil
 }
 
 // fileGetter fetches one file's content once the provider and workspace are
@@ -340,8 +692,9 @@ func (s *Service) listGitHubEntries(ctx context.Context, cfg *Config) ([]dirEntr
 	for i, e := range raw {
 		entries[i] = dirEntry{name: e.Name, path: e.Path, isFile: e.Type == "file"}
 	}
-	get := func(ctx context.Context, path string) ([]byte, error) {
-		return s.githubClients.GetRepoFileContentForWorkspace(ctx, cfg.WorkspaceID, cfg.RepoOwner, cfg.RepoName, path, cfg.Branch)
+	get, err := s.fileGetterForConfig(cfg)
+	if err != nil {
+		return nil, nil, err
 	}
 	return entries, get, nil
 }
@@ -358,10 +711,32 @@ func (s *Service) listGitLabEntries(ctx context.Context, cfg *Config) ([]dirEntr
 	for i, e := range raw {
 		entries[i] = dirEntry{name: e.Name, path: e.Path, isFile: e.Type == gitlab.TreeEntryTypeBlob}
 	}
-	get := func(ctx context.Context, path string) ([]byte, error) {
-		return s.gitlabClients.GetRepoFileContentForWorkspace(ctx, cfg.WorkspaceID, cfg.ProjectPath, path, cfg.Branch)
+	get, err := s.fileGetterForConfig(cfg)
+	if err != nil {
+		return nil, nil, err
 	}
 	return entries, get, nil
+}
+
+func (s *Service) fileGetterForConfig(cfg *Config) (fileGetter, error) {
+	if cfg.Provider == ProviderGitLab {
+		if s.gitlabClients == nil {
+			return nil, errGitLabClientNotConfigured
+		}
+		return func(ctx context.Context, path string) ([]byte, error) {
+			return s.gitlabClients.GetRepoFileContentForWorkspace(
+				ctx, cfg.WorkspaceID, cfg.ProjectPath, path, cfg.Branch,
+			)
+		}, nil
+	}
+	if s.githubClients == nil {
+		return nil, errGitHubClientNotConfigured
+	}
+	return func(ctx context.Context, path string) ([]byte, error) {
+		return s.githubClients.GetRepoFileContentForWorkspace(
+			ctx, cfg.WorkspaceID, cfg.RepoOwner, cfg.RepoName, path, cfg.Branch,
+		)
+	}, nil
 }
 
 // contentHash is a stable digest of the fetched file set. It is recorded on
@@ -427,15 +802,17 @@ func (s *Service) SyncDueConfigs(ctx context.Context) {
 		s.logger.Warn("failed to list workflow sync configs", zap.Error(err))
 		return
 	}
-	now := time.Now().UTC()
+	now := s.now().UTC()
 	for _, cfg := range configs {
 		if ctx.Err() != nil {
 			return
 		}
 		lock := s.workspaceLock(cfg.WorkspaceID)
-		lock.Lock()
+		if !lock.TryLock() {
+			continue
+		}
 		forceSync := s.refreshCredentialFingerprint(ctx, cfg, now)
-		if cfg.circuitOpen(now) {
+		if cfg.circuitOpen(now) || cfg.PollSuspended {
 			incCircuitSkip(cfg.Provider)
 			lock.Unlock()
 			continue
@@ -448,12 +825,179 @@ func (s *Service) SyncDueConfigs(ctx context.Context) {
 			lock.Unlock()
 			continue
 		}
-		if _, err := s.syncWorkspaceLocked(ctx, cfg.WorkspaceID); err != nil {
-			s.logger.Warn("periodic workflow sync failed",
-				zap.String("workspace_id", cfg.WorkspaceID), zap.Error(err))
-		}
 		lock.Unlock()
+		s.dispatchAutomaticSync(cfg.WorkspaceID, forceSync)
 	}
+}
+
+func (s *Service) dispatchAutomaticSync(workspaceID string, force bool) {
+	s.automaticMu.Lock()
+	if state := s.automaticInFlight[workspaceID]; state != nil {
+		if force {
+			state.requestForceAndRestart()
+		}
+		s.automaticMu.Unlock()
+		return
+	}
+	state := newAutomaticJobState(force)
+	s.automaticInFlight[workspaceID] = state
+	var pool *automaticScheduler
+	if s.automaticPool == nil {
+		poolCtx, cancel := context.WithCancel(context.Background())
+		s.automaticCancel = cancel
+		pool = newAutomaticScheduler(poolCtx, s.automaticWorkers, s.runAutomaticJob, func() {
+			s.automaticPoolIdle(pool)
+		})
+		s.automaticPool = pool
+	} else {
+		pool = s.automaticPool
+	}
+	s.automaticMu.Unlock()
+	if !pool.enqueue(automaticJob{workspaceID: workspaceID, force: force, state: state}) {
+		s.finishAutomaticJob(workspaceID, state)
+	}
+}
+
+func (s *Service) automaticPoolIdle(pool *automaticScheduler) {
+	s.automaticMu.Lock()
+	if s.automaticPool != pool || len(s.automaticInFlight) != 0 {
+		s.automaticMu.Unlock()
+		return
+	}
+	s.automaticPool = nil
+	cancel := s.automaticCancel
+	s.automaticCancel = nil
+	pool.close()
+	s.automaticMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (s *Service) runAutomaticJob(ctx context.Context, job automaticJob) automaticJobResult {
+	if job.state == nil || job.state.isCancelled() {
+		s.finishAutomaticJob(job.workspaceID, job.state)
+		return automaticJobResult{}
+	}
+	jobCtx := github.WithNonBlockingGitHubAdmission(
+		github.WithGitHubWorkClass(ctx, github.WorkClassBackground),
+	)
+	jobGeneration := job.state.currentGeneration()
+	_, err := s.syncWorkspaceWithAutomaticState(jobCtx, job.workspaceID, syncAutomatic, job.force, job.state)
+	if errors.Is(err, errAutomaticSyncNotDue) || errors.Is(err, errAutomaticJobInvalidated) {
+		s.finishAutomaticJob(job.workspaceID, job.state)
+		return automaticJobResult{}
+	}
+	var deferred *github.AdmissionDeferredError
+	if errors.As(err, &deferred) {
+		return automaticJobResult{
+			wait: func(ctx context.Context) error {
+				return waitAutomaticJobAdmission(ctx, deferred, job.state, jobGeneration)
+			},
+			discard: func() { s.finishAutomaticJob(job.workspaceID, job.state) },
+		}
+	}
+	s.finishAutomaticJob(job.workspaceID, job.state)
+	return automaticJobResult{}
+}
+
+func (s *Service) finishAutomaticJob(workspaceID string, state *automaticJobState) {
+	s.automaticMu.Lock()
+	if s.automaticInFlight[workspaceID] == state {
+		delete(s.automaticInFlight, workspaceID)
+	}
+	s.automaticMu.Unlock()
+	if state != nil {
+		state.finish()
+	}
+}
+
+func (s *Service) waitAutomaticSyncs() {
+	s.automaticMu.Lock()
+	pool := s.automaticPool
+	cancel := s.automaticCancel
+	states := make([]*automaticJobState, 0, len(s.automaticInFlight))
+	for _, state := range s.automaticInFlight {
+		states = append(states, state)
+	}
+	s.automaticPool = nil
+	s.automaticCancel = nil
+	s.automaticInFlight = make(map[string]*automaticJobState)
+	s.automaticMu.Unlock()
+	for _, state := range states {
+		state.invalidate(true)
+	}
+	if cancel != nil {
+		cancel()
+	}
+	if pool != nil {
+		pool.stop()
+	}
+}
+
+func (s *Service) invalidateAutomaticJob(workspaceID string) {
+	s.automaticMu.Lock()
+	state := s.automaticInFlight[workspaceID]
+	s.automaticMu.Unlock()
+	if state != nil {
+		state.invalidate(true)
+	}
+}
+
+func waitAutomaticJobAdmission(
+	ctx context.Context, deferred *github.AdmissionDeferredError, state *automaticJobState,
+	expectedGeneration uint64,
+) error {
+	changed, ready, err := state.admissionWaitSnapshot(expectedGeneration)
+	if err != nil || ready {
+		return err
+	}
+	var timer *time.Timer
+	var timerC <-chan time.Time
+	if deferred.Delay > 0 {
+		timer = time.NewTimer(deferred.Delay)
+		timerC = timer.C
+		defer timer.Stop()
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-changed:
+		if state.isCancelled() {
+			return errAutomaticJobInvalidated
+		}
+		return nil
+	case <-deferred.TrackerChanged:
+		return nil
+	case <-deferred.Changed:
+		return nil
+	case <-timerC:
+		return nil
+	}
+}
+
+func terminalSyncPersistenceContext(ctx context.Context, mode syncMode) (context.Context, context.CancelFunc) {
+	if mode != syncManual {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+}
+
+func syncContext(ctx context.Context, cfg *Config, mode syncMode) context.Context {
+	if mode == syncAutomatic && cfg.Provider == ProviderGitHub {
+		return github.WithGitHubWorkClass(ctx, github.WorkClassBackground)
+	}
+	return ctx
+}
+
+func (s *Service) shouldRunAutomaticSync(cfg *Config, mode syncMode, force bool) bool {
+	if mode != syncAutomatic {
+		return true
+	}
+	if cfg.circuitOpen(s.now().UTC()) || cfg.PollSuspended || !cfg.PollEnabled {
+		return false
+	}
+	return force || isSyncDue(cfg, s.now().UTC())
 }
 
 // refreshCredentialFingerprint re-derives the workspace's current credential
@@ -473,7 +1017,14 @@ func (s *Service) refreshCredentialFingerprint(ctx context.Context, cfg *Config,
 	}
 	state := cfg.circuitState()
 	previousFingerprint := state.Fingerprint
-	if !state.ResetIfFingerprintChanged(fingerprint) {
+	changed := state.ResetIfFingerprintChanged(fingerprint)
+	if !changed && previousFingerprint == "" && cfg.PollSuspended {
+		// A suspended config may have failed before its first fingerprint was
+		// available. Probe once when a credential identity becomes visible.
+		state.RecordSuccess()
+		changed = true
+	}
+	if !changed {
 		cfg.applyCircuitState(state) // still record the first-observed fingerprint
 		if previousFingerprint == "" && state.Fingerprint == fingerprint {
 			if err := s.store.RecordCircuitState(ctx, cfg.WorkspaceID, state); err != nil {
@@ -484,6 +1035,9 @@ func (s *Service) refreshCredentialFingerprint(ctx context.Context, cfg *Config,
 		return false
 	}
 	cfg.applyCircuitState(state)
+	cfg.LastErrorClass = ""
+	cfg.PollSuspended = false
+	cfg.PollSuspensionReason = ""
 	incCircuitReset(cfg.Provider, "credential")
 	if err := s.store.RecordCircuitState(ctx, cfg.WorkspaceID, state); err != nil {
 		s.logger.Warn("failed to persist credential-triggered circuit reset",
@@ -518,7 +1072,7 @@ func (s *Service) WorkflowSyncCircuitSummary(ctx context.Context) (workflowSyncC
 	now := time.Now().UTC()
 	summary := workflowSyncCircuitSummary{Total: len(configs)}
 	for _, cfg := range configs {
-		if !cfg.circuitOpen(now) {
+		if !cfg.circuitOpen(now) && !cfg.PollSuspended {
 			continue
 		}
 		switch cfg.FailureClass {
@@ -547,8 +1101,11 @@ type workflowSyncCircuitSummary struct {
 }
 
 func isSyncDue(cfg *Config, now time.Time) bool {
-	if !cfg.PollEnabled {
+	if !cfg.PollEnabled || cfg.PollSuspended {
 		return false
+	}
+	if cfg.NextAttemptAt != nil {
+		return !now.Before(*cfg.NextAttemptAt)
 	}
 	if cfg.LastSyncedAt == nil {
 		return true

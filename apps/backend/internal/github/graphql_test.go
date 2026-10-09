@@ -40,6 +40,106 @@ func resolvedReviewThreadNodes(count int) []map[string]bool {
 	return nodes
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-RATE-003.5
+// TestBatchedPRQueryResumesChunkAfterAdmissionPacing keeps the successful
+// production fetch chunk when real nonblocking admission defers the next one.
+func TestBatchedPRQueryResumesChunkAfterAdmissionPacing(t *testing.T) {
+	client, requests := newRecordingPATServer(t, map[string]string{
+		"/graphql": `{"data":{}}`,
+	})
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "batch-progress-test",
+	}, nil)
+	client.WithRateTracker(tracker).withRateAdmission(admission)
+
+	refs := make([]graphQLPRRef, graphQLBatchChunkSize+1)
+	for i := range refs {
+		refs[i] = graphQLPRRef{Owner: "owner", Repo: fmt.Sprintf("repo-%02d", i), Number: i + 1}
+	}
+	ctx := pollerContext(context.Background())
+	watches := make([]*PRWatch, len(refs))
+	for i, ref := range refs {
+		watches[i] = &PRWatch{Owner: ref.Owner, Repo: ref.Repo, PRNumber: ref.Number}
+	}
+	service := &Service{}
+	combined := make(map[string]*PRStatus)
+	const progressKey = "workspace:test:batched-fetch"
+	if err := service.fetchBatchedPRStatuses(ctx, client, "test-scope", progressKey, watches, combined, 0); err == nil {
+		t.Fatal("first invocation succeeded, want admission to defer chunk two")
+	} else {
+		var deferred *AdmissionDeferredError
+		if !errors.As(err, &deferred) {
+			t.Fatalf("first invocation error = %v, want admission deferral", err)
+		}
+		if got := len(*requests); got != 1 {
+			t.Fatalf("HTTP requests before pacing wait = %d, want one successful chunk", got)
+		}
+		if err := deferred.Wait(ctx); err != nil {
+			t.Fatalf("wait for real admission pacing: %v", err)
+		}
+	}
+
+	if err := service.fetchBatchedPRStatuses(ctx, client, "test-scope", progressKey, watches, combined, 0); err != nil {
+		t.Fatalf("resume batched GraphQL query: %v", err)
+	}
+	if got := len(*requests); got != 2 {
+		t.Fatalf("total HTTP requests = %d, want one per chunk without refetching chunk one", got)
+	}
+	service.batchedProgressMu.Lock()
+	defer service.batchedProgressMu.Unlock()
+	if got := len(service.batchedPRProgress); got != 0 {
+		t.Fatalf("completed query left %d saved continuations, want none", got)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-RATE-003.5
+func TestBatchedBranchQueryResumesChunkAfterAdmissionPacing(t *testing.T) {
+	client, requests := newRecordingPATServer(t, map[string]string{
+		"/graphql": `{"data":{}}`,
+	})
+	coordinator := NewRateCoordinator(nil, nil)
+	tracker, admission := coordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Login: "branch-progress-test",
+	}, nil)
+	client.WithRateTracker(tracker).withRateAdmission(admission)
+
+	watches := make([]*PRWatch, graphQLBatchChunkSize+1)
+	for i := range watches {
+		watches[i] = &PRWatch{
+			Owner: "owner", Repo: fmt.Sprintf("repo-%02d", i), Branch: fmt.Sprintf("branch-%02d", i),
+		}
+	}
+	service := &Service{}
+	combined := &batchedWatchStatuses{
+		byKey:               make(map[string]*PRStatus),
+		branchResolvedEmpty: make(map[string]struct{}),
+	}
+	const progressKey = "workspace:test:branch-batched-fetch"
+	ctx := pollerContext(context.Background())
+	if err := service.fetchBatchedBranchStatuses(ctx, client, "test-scope", progressKey, watches, combined, 0); err == nil {
+		t.Fatal("first invocation succeeded, want admission to defer chunk two")
+	} else {
+		var deferred *AdmissionDeferredError
+		if !errors.As(err, &deferred) {
+			t.Fatalf("first invocation error = %v, want admission deferral", err)
+		}
+		if got := len(*requests); got != 1 {
+			t.Fatalf("HTTP requests before pacing wait = %d, want one successful chunk", got)
+		}
+		if err := deferred.Wait(ctx); err != nil {
+			t.Fatalf("wait for real admission pacing: %v", err)
+		}
+	}
+
+	if err := service.fetchBatchedBranchStatuses(ctx, client, "test-scope", progressKey, watches, combined, 0); err != nil {
+		t.Fatalf("resume batched branch query: %v", err)
+	}
+	if got := len(*requests); got != 2 {
+		t.Fatalf("total HTTP requests = %d, want one per chunk without refetching chunk one", got)
+	}
+}
+
 func mustJSON(t *testing.T, value any) string {
 	t.Helper()
 	data, err := json.Marshal(value)
