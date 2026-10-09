@@ -274,6 +274,16 @@ test input used to verify trimming; its value and behavior remain unchanged.
 The original hook failure is retained, and the affected guard plus normal
 hooks are required to pass before publication.
 
+Hosted review identified stale design wording that called the diagnostic
+captured-array callback current and the implementation release pending. The
+docs-only correction labels that callback as the historical baseline and
+describes the implemented current-provider publication. Production and test
+bytes remain identical to the locally validated publication. Only affected
+documentation checks and normal active hooks apply to this correction;
+passing product checks are not replayed. Exact fixup, review disposition,
+resource-return, and subsequent hosted evidence are recorded in the own task
+plan. Hosted and merge gates remain separate and pending until qualified.
+
 Each original process is retained separately with native chunks/session,
 actual subprocess join, cwd/argv/environment, PID/PGID, UTC interval, exit,
 raw logs, and fresh own wrapper/group absence under `/tmp/kandev-child96-runs/`.

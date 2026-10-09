@@ -233,6 +233,14 @@ not reopened. Ready publication, hosted qualification, and verified merge are
 separate lifecycle gates; the plan remains in progress until verified merge
 and owned cleanup.
 
+Hosted review identified obsolete current-behavior and implementation-release
+wording in the owning design. A docs-only correction labels the captured-array
+callback as the diagnostic baseline and describes the implemented publication.
+The work order records that correction; production/test bytes and existing
+validation remain unchanged. Only affected documentation checks and normal
+active hooks are used for the fixup. Exact-head hosted evidence and resource
+receipts remain in the own Kandev plan until the separate merge gate is met.
+
 ## Documentation assessment
 
 No public docs change needed: Add Workspace naming/creation in

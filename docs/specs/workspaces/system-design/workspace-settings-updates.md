@@ -330,25 +330,27 @@ Requirement 003 extends the same current-catalogue boundary to the explicit
 Settings Add Workspace action. The backend field-presence contract, merged
 Save implementation, and their existing delivery records remain unchanged.
 The [creation work order](../../../plans/workspace-create-catalogue-preservation/task-01-preserve-create-catalogue.md)
-is pending a later implementation release.
+records the completed local implementation and validation. Hosted review and
+verified merge remain separate delivery gates.
 
 `WorkspacesPage` in `app/settings/workspace/page.tsx` is mounted at
 `/settings/workspaces` by `src/settings-routes.tsx`. It renders
 `WorkspacesPageClient`, whose `handleAddWorkspace` trims the name and awaits
 real `useRequest(createWorkspaceAction)`. That action uses its existing
 `fetchJson` boundary to POST `/api/v1/workspaces` and propagate backend errors.
-The current callback then calls `setWorkspaces` with `mapWorkspaceItem(created)`
-followed by the `items` captured before the await. Registered workspace
-notifications may already have changed the owning store. Replacing it with the
-captured array loses those current choices; it does not delete a backend row.
+At the diagnostic baseline, the callback called `setWorkspaces` with
+`mapWorkspaceItem(created)` followed by the `items` captured before the await.
+Registered workspace notifications could already have changed the owning store.
+Replacing it with the captured array lost those current choices; it did not
+delete a backend row.
 
-Use the existing `useAppStoreApi` in this component to read the initiating
-provider's current items and setter only after successful acknowledgement.
-Keep that read, mapping, identity filtering, and publication synchronous,
-without an intervening await or scheduled callback. Reuse the existing
-`mapWorkspaceItem` unchanged for the accepted response. Prepend that mapped
-item to current rows whose ID differs from the accepted ID. This is a local
-same-identity upsert: it accepts one canonical response descriptor, removes any
+The implemented handler uses the existing `useAppStoreApi` in this component
+to read the initiating provider's current items and setter only after successful
+acknowledgement. It keeps that read, mapping, identity filtering, and publication
+synchronous, without an intervening await or scheduled callback. It reuses the
+existing `mapWorkspaceItem` unchanged for the accepted response and prepends
+that mapped item to current rows whose ID differs from the accepted ID. This is
+a local same-identity upsert: it accepts one canonical response descriptor, removes any
 already-notified occurrence of that identity, and keeps every nonmatching row
 and its relative order. Do not reconstruct existing descriptors, spread the
 response across unrelated rows, or read another provider/global store.
