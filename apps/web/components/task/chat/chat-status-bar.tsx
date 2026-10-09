@@ -234,6 +234,7 @@ function ChatStatusBarRightControls({
   );
 }
 
+/** Wrapped action lines share the toolbar's right content edge. */
 function ChatStatusBarActions({
   rightControlProps,
   showRightControls,

@@ -8,6 +8,7 @@ export const COMPOSER_HISTORY_PROMPT = Array.from(
     `e2e:message(${JSON.stringify(`Transcript entry ${index + 1}: ${"Review the implementation and record the result. ".repeat(4)}`)})`,
 ).join("\n");
 
+/** Keeps the transcript near its end while exposing every navigation control. */
 export async function revealTranscriptControls(chat: Locator): Promise<void> {
   const list = chat.locator(".chat-message-list");
   await expect
@@ -22,7 +23,10 @@ export async function revealTranscriptControls(chat: Locator): Promise<void> {
   await expect(chat.getByTestId("scroll-to-last-prompt-button")).toBeVisible();
 }
 
-/** @covers AC-UI-COMPOSER-ACTION-WRAP-001.1, .2, .3, .5 */
+/**
+ * Checks rendered line placement, containment, touch targets, and page overflow.
+ * @covers AC-UI-COMPOSER-ACTION-WRAP-001.1, .2, .3, .5
+ */
 export async function expectComposerActionLayout(
   chat: Locator,
   { wrapped, touch }: { wrapped?: boolean; touch: boolean },

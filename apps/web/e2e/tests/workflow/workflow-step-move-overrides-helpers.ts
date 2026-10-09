@@ -21,6 +21,7 @@ export type MoveOverrideFixture = {
   session: SessionPage;
 };
 
+/** Creates an idle task with an isolated workflow and one primary session for in-place moves. */
 export async function seedMoveOverrideFixture(
   page: Page,
   apiClient: ApiClient,

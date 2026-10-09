@@ -139,3 +139,10 @@ assets and ran sequentially with one worker.
 The 768px workbench can have a narrow chat pane; its test uses a shorter fitting
 label and allows wrapping while requiring right alignment. Phone wrap cases use
 the longer label. No workflow logic or persisted production state changed.
+
+Review follow-up: documented the wrapped-line invariant and browser-helper
+contracts in response to CodeRabbit's docstring-coverage warning. This changes
+comments only; the rendered layout and test behavior retain the results above.
+ESLint and Prettier passed for the three affected TypeScript files, and spec
+validation and diff checks passed. Remote CI and reviewer verification remain
+pending for the follow-up commit.
