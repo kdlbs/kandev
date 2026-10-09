@@ -727,6 +727,10 @@ jobs:
             -v /tmp/ms-playwright:/dest \
             "$PLAYWRIGHT_RUNTIME_REF" \
             cp -a /ms-playwright/. /dest/
+          # The browsers are now on disk; the host-side E2E tests do not use
+          # this multi-gigabyte image, so release its layers before building
+          # their Docker fixtures.
+          docker image rm "$PLAYWRIGHT_RUNTIME_REF"
 
       # Browser binaries come from the verified cache or the image above.
       # GitHub's Ubuntu runners usually already have the shared libs Chromium
