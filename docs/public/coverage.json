@@ -18,11 +18,13 @@
       "sources": [
         "apps/cli/bin/native-shim.js",
         "apps/backend/internal/launcher/launcher.go",
-        "apps/desktop/src-tauri/src/lib.rs"
+        "apps/desktop/src-tauri/src/lib.rs",
+        "apps/desktop/src-tauri/src/main.rs"
       ],
       "tests": [
         "apps/cli/bin/native-shim.test.mjs",
-        "apps/desktop/e2e/desktop-launch-smoke.test.mjs"
+        "apps/desktop/e2e/desktop-launch-smoke.test.mjs",
+        "apps/desktop/src-tauri/src/shell.rs"
       ]
     },
     {
@@ -192,6 +194,7 @@
         "set_task_title_kandev",
         "step_complete_kandev",
         "stop_task_kandev",
+        "transfer_task_kandev",
         "update_repository_base_branch_kandev",
         "update_task_kandev",
         "update_task_state_kandev"
@@ -317,6 +320,12 @@
         "apps/web/components/task/editors-menu.tsx",
         "apps/backend/internal/agentctl/server/process/workspace_git_status.go",
         "apps/backend/internal/task/service/workspace_recovery_projection.go",
+        "apps/backend/internal/worktree/managed_clone_relocation_archive.go",
+        "apps/backend/internal/worktree/recovery_admission.go",
+        "apps/backend/internal/orchestrator/executor/executor_resume.go",
+        "apps/backend/internal/orchestrator/executor/executor_worktree_recovery.go",
+        "apps/backend/internal/orchestrator/session_launch.go",
+        "apps/backend/internal/orchestrator/task_operations.go",
         "apps/web/hooks/domains/session/use-session-recovery-actions.ts"
       ],
       "tests": [
@@ -328,6 +337,10 @@
         "apps/backend/internal/task/repository/sqlite/workspace_recovery_error_cas_test.go",
         "apps/backend/internal/task/service/workspace_recovery_projection_test.go",
         "apps/backend/internal/orchestrator/handlers/workspace_recovery_projection_test.go",
+        "apps/backend/internal/worktree/managed_clone_completed_reuse_test.go",
+        "apps/backend/internal/worktree/managed_clone_completed_bookkeeping_test.go",
+        "apps/backend/internal/orchestrator/executor/executor_completed_relocation_integration_test.go",
+        "apps/backend/internal/orchestrator/session_completed_relocation_integration_test.go",
         "apps/web/hooks/domains/session/use-session-recovery-actions.test.ts",
         "apps/web/e2e/tests/session/multi-repo-session-resume-recovery.spec.ts",
         "apps/web/e2e/tests/session/mobile-multi-repo-session-resume-recovery.spec.ts"
@@ -377,6 +390,11 @@
         "apps/backend/internal/settingscatalog/catalog.go",
         "apps/backend/internal/mcp/handlers/settings_handlers.go",
         "apps/backend/internal/mcp/server/settings_tools.go",
+        "apps/backend/internal/agent/settings/controller/agent_update.go",
+        "apps/backend/internal/agent/settings/controller/agent_update_job.go",
+        "apps/backend/internal/agent/managedruntime/opencode_selection.go",
+        "apps/backend/internal/agent/runtime/lifecycle/session.go",
+        "apps/web/components/settings/agent-runtime-update-control.tsx",
         "apps/web/app/settings/agents/page.tsx",
         "apps/web/hooks/domains/settings/use-dynamic-models.ts",
         "apps/backend/internal/agent/agents/codex_app_server.go",
@@ -396,6 +414,11 @@
         "apps/backend/internal/mcp/handlers/settings_handlers_test.go",
         "apps/backend/internal/mcp/server/settings_tools_test.go",
         "apps/web/components/settings/agent-profile-page.test.tsx",
+        "apps/backend/internal/agent/settings/controller/opencode_migration_test.go",
+        "apps/backend/internal/agent/runtime/lifecycle/session_load_failure_test.go",
+        "apps/backend/internal/agentctl/server/adapter/e2e/opencode_v2_migration_test.go",
+        "apps/web/e2e/tests/settings/agent-runtime-update.spec.ts",
+        "apps/web/e2e/tests/settings/mobile-agent-runtime-update.spec.ts",
         "apps/web/lib/settings-discovery/coverage-inventory.test.ts",
         "apps/web/hooks/domains/settings/use-dynamic-models.test.ts",
         "apps/backend/internal/agent/agents/codex_app_server_test.go",
@@ -1013,6 +1036,31 @@
         "reason": "Legacy redirect to General Message Queue."
       }
     ],
-    "mcpTools": []
+    "mcpTools": [
+      {
+        "tool": "propose_resume_kandev",
+        "reason": "Workspace coordinator phase-2 tool behind features.coordinatorPhase2, off in prod and dev; documented when the feature is promoted."
+      },
+      {
+        "tool": "propose_message_kandev",
+        "reason": "Workspace coordinator phase-2 tool behind features.coordinatorPhase2, off in prod and dev; documented when the feature is promoted."
+      },
+      {
+        "tool": "propose_move_kandev",
+        "reason": "Workspace coordinator phase-2 tool behind features.coordinatorPhase2, off in prod and dev; documented when the feature is promoted."
+      },
+      {
+        "tool": "list_coordinator_activity_kandev",
+        "reason": "Workspace coordinator phase-2 tool behind features.coordinatorPhase2, off in prod and dev; documented when the feature is promoted."
+      },
+      {
+        "tool": "get_coordinator_item_kandev",
+        "reason": "Workspace coordinator tool behind features.coordinator, off in prod and dev; documented when the feature is promoted."
+      },
+      {
+        "tool": "propose_task_kandev",
+        "reason": "Workspace coordinator tool behind features.coordinator, off in prod and dev; documented when the feature is promoted."
+      }
+    ]
   }
 }

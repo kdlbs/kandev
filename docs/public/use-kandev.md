@@ -94,9 +94,13 @@ Kandev creates these records when no prior workspace or executor configuration e
 - A Local Docker executor configured with the platform's default Docker host. The record is created even when no usable Docker daemon is available; task launch still requires one.
 - A disabled Sprites executor entry.
 
-When its browser-local completion marker is unset, the first-run dialog opens on screens 768 CSS pixels wide or larger. A phone visit opens the normal page and leaves the marker untouched, so the tour can appear on a later larger-screen visit. The dialog scans supported agent CLIs, lets you inspect detected profiles, and introduces executors, workflows, and the command panel. Its Executors step presents informational cards for Local, Worktree, Local Docker, Sprites.dev, SSH, and Kubernetes. It recommends Worktree for existing Git repositories and summarizes each option's setup needs. Configure profiles in **Settings > Executors**, then choose one when starting a task. See [Executors](executors.md) for setup and trust-boundary details. **Skip** stores only a browser-local onboarding marker. Advancing/completing also saves any dirty agent-profile edits made in the dialog. Neither path creates another workspace. The dialog warns that default agent profiles can have **Auto Approve** enabled. Inspect every profile before assigning trusted code or credentials.
+When its browser-local completion marker is unset, the first-run dialog opens on screens 768 CSS pixels wide or larger. A phone visit opens the normal page and leaves the marker untouched, so the tour can appear on a later larger-screen visit. The dialog scans supported agent CLIs, lets you choose a starting model, its supported options inside the shared picker, and optional CLI passthrough for detected profiles, and introduces executors, workflows, and the command panel. Its Executors step presents informational cards for Local, Worktree, Local Docker, Sprites.dev, SSH, and Kubernetes. It recommends Worktree for existing Git repositories and summarizes each option's setup needs. Configure full profiles in **Settings > Agents** and **Settings > Executors**, then choose one when starting a task. See [Executors](executors.md) for setup and trust-boundary details. **Skip** stores only a browser-local onboarding marker. Advancing/completing saves only edited model, model-option, and passthrough choices made in the dialog. Neither path creates another workspace. The dialog warns that default agent profiles can have **Auto Approve** enabled. Inspect every profile before assigning trusted code or credentials.
 
 </details>
+
+If model discovery requires authentication, the tour's **Settings** link opens the
+saved agent profile without saving the tour draft or marking it complete. Use the
+profile's authentication controls, then return to the tour.
 
 ## Find a setting
 
@@ -120,23 +124,61 @@ not apply to passthrough terminal sessions or manually stopped sessions.
 
 ## Customize the sidebar
 
-Open **Settings > Preferences > Sidebar** to customize the optional navigation for the active
-workspace. You can hide or reorder Home, New Task, Automations, Canvases, Integrations, and
-available plugin links. The setting belongs to your account and workspace, so it follows you
-across clients without changing another user's layout.
+Open **Settings > Layout > Sidebar** to customize the optional navigation for the active
+workspace. You can hide or reorder Home, New Task, Inbox, Coordinators, Automations, Canvases,
+Integrations, and available plugin links. Coordinators appears when its workspace feature is
+enabled. Its visibility and position are independent of Automations. Settings retains your saved
+choice while a feature is unavailable and restores it when the feature is enabled again. The
+setting belongs to your account and workspace, so it follows you across clients without changing
+another user's layout.
 
 Create named shortcut sections for destinations, canvases, automations, and plugin links. Fold a
 section to keep its header icons visible, or open the labelled list to use a shortcut. Automation
-icons show running, idle, or paused activity. Tasks and required inbox entries remain available in
-their fixed navigation area, and hiding a shortcut does not disable the underlying feature.
+icons show running, idle, or paused activity. Tasks stays in its fixed navigation area, and hiding a shortcut does not disable the underlying feature.
 
-On a phone, open the menu and choose **Sidebar** to edit the same layout. Use the move controls to
-reorder entries or move a shortcut to another section. Home and quick actions stay above Tasks;
-customized workspace tools and shortcut sections follow the task list. Expand **Integrations** to
+On a phone, open the menu and choose **Customize sidebar** to edit the same layout. Use the move controls to
+reorder entries or move a shortcut to another section. The workspace picker stays at the top.
+**New Task**, Home, quick actions, workspace tools, and shortcut sections appear before the task
+list. Coordinators follows its saved position among the workspace tools. If you hide New Task, the
+Tasks heading keeps its create button. Expand **Integrations** to
 see named provider links and integration settings, including when no provider is configured.
+Choose **GitHub**, then **Issues** in its view menu to browse issues.
 **Restore defaults** resets the draft for the
 active workspace; the shared **Save changes** action persists it. If another client saves first, the
 editor keeps your draft and reports the conflict so you can reconcile it.
+
+Tasks is a contextual panel with its own view picker and filters. A primary-color dot marks an
+applied filter, including filters saved in a view. An amber dot marks unsaved view changes.
+Group headings have a leading collapse control, label, and count. Tasks sit
+indented below each heading, with space between groups; subtasks remain nested one
+level deeper. Grouping by state also shows the group's status icon. Plain task rows keep your
+selected metadata and trailing details, with highlights for hover, selection, and keyboard focus.
+New users get a small, centered **New Task** button, with **Quick Chat** and **Terminal** below it.
+Existing users keep the compact New Task row with fast action icons. Choose **New Task button style**
+and **Show fast action icons** in Sidebar settings to change these independently.
+With fast icons enabled, Terminal and Quick Chat sit beside New Task, and the Coordinator list
+action sits in its section header. When fast icons are hidden, the Coordinator list link stays in
+the section body. Canvas settings and eligible integration shortcuts sit before their section
+chevrons. Named settings and provider links remain available when fast icons are hidden.
+
+Right-click a navigation entry or empty navigation space to open **Sidebar settings**.
+Use this menu to show or hide entries, change the button style, or open Sidebar layout settings. Drag entries directly to reorder them. No drag handles appear.
+You can also focus an entry and press **Alt + Up** or **Alt + Down**. These sidebar edits save immediately.
+The settings editor keeps its shared Save and Discard controls.
+
+Drag the divider above Tasks upwards to reduce navigation space. You can hide all navigation
+buttons and leave only the small expansion chevron. Partially hidden entries fade at the bottom.
+Click the small chevron to expand navigation; click it again to restore the compressed height.
+Both the height and expansion state follow your saved workspace layout across reloads and clients.
+On phones, use the Customize drawer's move buttons; it preserves the desktop divider position.
+
+Settings, direct **Stats** access, theme switching, and the three-dot menu share the
+single-row desktop footer, in that order. The three-dot menu contains plugin utilities,
+Improve Kandev, and release notes.
+
+Expand **Automations** and choose **Open automations** below its entries to see the
+full list. This labelled link sits inside the group on desktop and phones, like
+**Integration settings** inside Integrations.
 
 ## Switch workspace
 
@@ -155,7 +197,7 @@ workspace there from the menu sheet instead.
 ## Add a local repository
 
 1. Open **Settings > Workspaces > Default Workspace > Repositories**. If you created or renamed the workspace, choose that workspace instead.
-2. Select **Add Local Repository**.
+2. Select **Add repository > Local repository**.
 3. Choose a discovered repository, or enter an absolute path and select **Validate**. The backend accepts any existing Git repository the Kandev process can access. Configured discovery roots bound automatic scans; they do not restrict an explicit path.
 4. Select **Use Repository**. This opens an unsaved repository card.
 5. Review the repository name, worktree branch template, pull behavior, setup/cleanup/dev scripts, copied files, and custom commands. Then select **Save changes**.
@@ -180,7 +222,7 @@ Scripts execute in agent workspaces and therefore belong to the trust boundary. 
 
 Repositories saved by an older Kandev version may still contain a path spelling with symbolic-link components. If branch operations report that such a saved path resolves to a different location after upgrading, edit and save the repository path again to record its current canonical location. Kandev does not silently accept the new resolution because that would also accept a saved path whose symbolic-link target was changed after registration.
 
-Remote repository and issue/PR URLs are not added from this settings page. Use the **Remote** tab in **New Task** to search configured GitHub, GitLab, and Azure DevOps repositories, or paste a supported provider URL. See [Integrations](integrations.md) and [Tasks and workflows](tasks-and-workflows.md).
+**Add repository > Remote repository** registers a provider-hosted repository without creating a task. The picker is the same one the **Remote** tab in **New Task** uses: search configured GitHub, GitLab, and Azure DevOps repositories, repositories from a connected plugin provider, or paste a supported provider URL, then choose the default base branch. Kandev validates built-in provider URLs and resolves plugin repositories through the connected provider before saving. A self-managed GitLab picker selection must match the origin configured for that workspace. Optional branch-list lookups do not block a picked repository; pasted plugin URLs must finish provider inspection before registration. A repository the workspace already has is reused rather than duplicated. Issue and PR URLs are still added from **New Task**. See [Integrations](integrations.md) and [Tasks and workflows](tasks-and-workflows.md).
 
 ## Configure an agent profile
 

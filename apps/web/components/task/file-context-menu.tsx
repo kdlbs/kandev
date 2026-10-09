@@ -529,36 +529,28 @@ export function useFileRename(
 /** Inline rename input or static file name */
 export function TreeNodeName({
   node,
+  displayName,
   isActive,
   gitStatus,
   rename,
 }: {
   node: FileTreeNode;
+  displayName?: string;
   isActive: boolean;
   gitStatus: GitFileStatus;
   rename: ReturnType<typeof useFileRename>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const blurEnabledRef = useRef(false);
 
   useEffect(() => {
     if (rename.isRenaming) {
-      blurEnabledRef.current = false;
       inputRef.current?.focus();
       inputRef.current?.select();
-      const blurTimer = setTimeout(() => {
-        blurEnabledRef.current = true;
-      }, 400);
-      return () => {
-        clearTimeout(blurTimer);
-      };
     }
   }, [rename.isRenaming]);
 
   const handleBlur = useCallback(() => {
-    if (blurEnabledRef.current) {
-      rename.handleConfirmRename();
-    }
+    rename.handleConfirmRename();
   }, [rename]);
 
   if (rename.isRenaming) {
@@ -583,7 +575,7 @@ export function TreeNodeName({
         node.is_dir ? "font-medium" : getGitStatusTextClass(gitStatus),
       )}
     >
-      {node.name}
+      {displayName ?? node.name}
     </span>
   );
 }

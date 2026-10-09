@@ -47,6 +47,7 @@ describe("DiffViewerResolved Monaco context", () => {
 
     const props = JSON.parse(screen.getByTestId("monaco-diff-props").dataset.props ?? "{}");
     expect(props).toMatchObject({
+      enableComments: true,
       repo: "frontend",
       taskId: "task-1",
       sessionId: "session-1",
@@ -56,8 +57,26 @@ describe("DiffViewerResolved Monaco context", () => {
       publishedBranch: "feature/external-links",
       externalBaseBranch: "main",
     });
-    expect(props).not.toHaveProperty("enableComments");
     expect(props).not.toHaveProperty("enableExpansion");
     expect(props).not.toHaveProperty("baseRef");
+  });
+
+  it("forwards disabled comment readiness to Monaco", () => {
+    render(
+      <DiffViewerResolved
+        data={{
+          filePath: "src/app.ts",
+          oldContent: "old",
+          newContent: "new",
+          additions: 1,
+          deletions: 1,
+        }}
+        enableComments={false}
+        sessionId="session-1"
+      />,
+    );
+
+    const props = JSON.parse(screen.getByTestId("monaco-diff-props").dataset.props ?? "{}");
+    expect(props).toMatchObject({ enableComments: false, sessionId: "session-1" });
   });
 });

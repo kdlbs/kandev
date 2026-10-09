@@ -3,13 +3,14 @@ import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { expect, type Page } from "@playwright/test";
+import { expect, type ConsoleMessage, type Page } from "@playwright/test";
 import type { SeedData } from "../fixtures/test-base";
 import type { CreateTaskResponse } from "../../lib/types/http";
 import type { Repository } from "../../lib/types/http";
 import type { ApiClient } from "./api-client";
 import { GitHelper, makeGitEnv } from "./git-helper";
 import { SessionPage } from "../pages/session-page";
+import { readManagedCloneRecoveryConsumers } from "./session-resume-recovery";
 import { waitForSessionState } from "./session";
 
 type SqliteTestDatabase = {
@@ -23,6 +24,28 @@ type SqliteTestDatabase = {
 
 const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
 const ACTIVE_EXECUTOR_STATUSES = new Set(["starting", "prepared", "ready", "running"]);
+
+async function openRecoverySession(page: Page, taskId: string): Promise<SessionPage> {
+  const browserErrors: string[] = [];
+  const captureConsoleError = (message: ConsoleMessage) => {
+    if (message.type() === "error") browserErrors.push(message.text());
+  };
+  const capturePageError = (error: Error) => browserErrors.push(error.message);
+  page.on("console", captureConsoleError);
+  page.on("pageerror", capturePageError);
+  try {
+    await page.goto(`/t/${taskId}`);
+    const session = new SessionPage(page);
+    await session.waitForLoad();
+    return session;
+  } catch (cause) {
+    const details = browserErrors.length ? ` Browser errors: ${browserErrors.join(" | ")}` : "";
+    throw new Error(`Failed to load managed-clone recovery task.${details}`, { cause });
+  } finally {
+    page.off("console", captureConsoleError);
+    page.off("pageerror", capturePageError);
+  }
+}
 
 export type MultiRepoRelocationSlot = {
   repositoryId: string;
@@ -44,6 +67,165 @@ export type MultiRepoRelocationFixture = {
   originalSeedRepository: Repository;
   slots: [MultiRepoRelocationSlot, MultiRepoRelocationSlot];
 };
+
+export type ManagedCloneRecoveryGitOperationGate = {
+  configPath: string;
+  directory: string;
+  startedFile: string;
+  releaseFile: string;
+};
+
+/** Read the hydrated session projection exposed by the E2E store bridge. */
+export async function readWorkspaceRecoveryProjectionFromStore(page: Page, sessionId: string) {
+  return page.evaluate((id) => {
+    type RecoveryProjection = {
+      state: string;
+      phase: string;
+      workspace_complete: boolean;
+      agent_ready: boolean;
+      runner_live: boolean;
+    } | null;
+    type RecoverySession = {
+      id: string;
+      task_id: string;
+      task_environment_id?: string;
+      workspace_recovery?: RecoveryProjection;
+    };
+    type RecoveryStoreWindow = Window & {
+      __KANDEV_E2E_STORE__?: {
+        getState(): { taskSessions: { items: Record<string, RecoverySession> } };
+      };
+    };
+    const session = (window as RecoveryStoreWindow).__KANDEV_E2E_STORE__?.getState().taskSessions
+      .items[id];
+    return session ?? null;
+  }, sessionId);
+}
+
+/** Holds original-checkout retention until the test releases real recovery. */
+export function installManagedCloneRecoveryGitOperationGate(
+  tmpDir: string,
+): ManagedCloneRecoveryGitOperationGate {
+  const directory = path.join(tmpDir, `managed-clone-recovery-gate-${randomUUID()}`);
+  fs.mkdirSync(directory, { recursive: true });
+  const gate = {
+    configPath: path.join(tmpDir, "git-delay-ms"),
+    directory,
+    startedFile: path.join(directory, "started"),
+    releaseFile: path.join(directory, "release"),
+  };
+  fs.writeFileSync(
+    gate.configPath,
+    JSON.stringify({
+      subcommand: "worktree",
+      requiredArgs: ["move"],
+      startedFile: gate.startedFile,
+      releaseFile: gate.releaseFile,
+    }),
+  );
+  return gate;
+}
+
+export function releaseManagedCloneRecoveryGitOperationGate(
+  gate: ManagedCloneRecoveryGitOperationGate,
+) {
+  fs.writeFileSync(gate.releaseFile, "released");
+  try {
+    const config = JSON.parse(fs.readFileSync(gate.configPath, "utf8")) as {
+      startedFile?: string;
+    };
+    if (config.startedFile === gate.startedFile) fs.rmSync(gate.configPath, { force: true });
+  } catch {
+    // The test may release the gate after the runner already passed it.
+  }
+}
+
+export function cleanupManagedCloneRecoveryGitOperationGate(
+  gate: ManagedCloneRecoveryGitOperationGate,
+) {
+  releaseManagedCloneRecoveryGitOperationGate(gate);
+  fs.rmSync(gate.directory, { recursive: true, force: true });
+}
+
+export function readWorkspaceRecoveryOperation(
+  tmpDir: string,
+  environmentId: string,
+): {
+  state: string;
+  phase: string;
+  repository_position: number;
+  repository_total: number;
+  completed_slots: number;
+  workspace_complete: boolean;
+  agent_ready: boolean;
+  reason_code: string;
+} | null {
+  const { DatabaseSync } = nodeRequire("node:sqlite") as {
+    DatabaseSync: new (databasePath: string) => SqliteTestDatabase;
+  };
+  const db = new DatabaseSync(path.join(tmpDir, "kandev.db"));
+  try {
+    const row = db
+      .prepare(
+        `SELECT state, phase, repository_position, repository_total, completed_slots,
+                workspace_complete, agent_ready, reason_code
+         FROM task_environment_recovery_operations WHERE task_environment_id = ?`,
+      )
+      .get(environmentId) as
+      | {
+          state: string;
+          phase: string;
+          repository_position: number;
+          repository_total: number;
+          completed_slots: number;
+          workspace_complete: number;
+          agent_ready: number;
+          reason_code: string;
+        }
+      | undefined;
+    if (!row) return null;
+    return {
+      ...row,
+      workspace_complete: Boolean(row.workspace_complete),
+      agent_ready: Boolean(row.agent_ready),
+    };
+  } finally {
+    db.close();
+  }
+}
+
+export async function waitForMultiRepoRecoveryReady(
+  apiClient: ApiClient,
+  tmpDir: string,
+  taskId: string,
+  sessionId: string,
+  environmentId: string,
+) {
+  try {
+    await waitForSessionState(apiClient, {
+      taskId,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Waiting for the recovered multi-repository session to become ready",
+      timeout: 120_000,
+    });
+  } catch (cause) {
+    const { sessions } = await apiClient.listTaskSessions(taskId);
+    const session = sessions.find((candidate) => candidate.id === sessionId);
+    const recovery = readWorkspaceRecoveryOperation(tmpDir, environmentId);
+    const consumers = readManagedCloneRecoveryConsumers(tmpDir, environmentId);
+    throw new Error(
+      `Recovered session did not become ready: session=${JSON.stringify({
+        state: session?.state,
+        error_message: session?.error_message,
+      })}; recovery=${JSON.stringify(recovery)}; consumers=${JSON.stringify(consumers)}`,
+      { cause },
+    );
+  }
+  await expect
+    .poll(() => readWorkspaceRecoveryOperation(tmpDir, environmentId))
+    .toMatchObject({ state: "completed", workspace_complete: true, agent_ready: true });
+}
 
 /** Seed two linked worktrees on legacy clones with tracked and ignored local changes. */
 export async function seedMultiRepoManagedCloneRelocationFixture(
@@ -131,15 +313,13 @@ export async function seedMultiRepoManagedCloneRelocationFixture(
       },
     );
     if (!task.session_id) throw new Error("multi-repository relocation task has no session_id");
-    await page.goto(`/t/${task.id}`);
-    const session = new SessionPage(page);
-    await session.waitForLoad();
+    const session = await openRecoverySession(page, task.id);
     await waitForSessionState(apiClient, {
       taskId: task.id,
       sessionId: task.session_id,
       expectedState: "WAITING_FOR_INPUT",
       message: "Waiting for the initial multi-repository session turn to finish",
-      timeout: 60_000,
+      timeout: 120_000,
     });
     const environment = await apiClient.getTaskEnvironment(task.id);
     if (!environment || environment.repos?.length !== 2) {
@@ -522,14 +702,59 @@ export async function cleanupMultiRepoManagedCloneRelocationFixture(
   ]);
 }
 
-export function assertSnapshotContent(slot: MultiRepoRelocationSlot) {
-  const record = JSON.parse(
-    fs.readFileSync(`${slot.originalPath}.kandev-clone-relocation.json`, "utf8"),
-  ) as {
-    original: string;
+export function assertPrivateRecoveryArtifactContent(
+  slot: MultiRepoRelocationSlot,
+  tmpDir: string,
+  environmentId: string,
+) {
+  const { DatabaseSync } = nodeRequire("node:sqlite") as {
+    DatabaseSync: new (databasePath: string) => SqliteTestDatabase;
   };
+  const db = new DatabaseSync(path.join(tmpDir, "kandev.db"));
+  let artifactPaths: string[];
+  try {
+    const row = db
+      .prepare(
+        `SELECT artifact_paths_json AS artifactPaths
+         FROM task_environment_recovery_artifacts
+         WHERE task_environment_id = ? AND repository_id = ?
+         ORDER BY updated_at DESC LIMIT 1`,
+      )
+      .get(environmentId, slot.repositoryId) as { artifactPaths?: unknown } | undefined;
+    if (typeof row?.artifactPaths !== "string") {
+      throw new Error(`Recovery artifacts are not registered for repository ${slot.repositoryId}`);
+    }
+    const parsed = JSON.parse(row.artifactPaths) as unknown;
+    if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== "string")) {
+      throw new Error(`Recovery artifact paths are invalid for repository ${slot.repositoryId}`);
+    }
+    artifactPaths = parsed;
+  } finally {
+    db.close();
+  }
+
+  const relocationPath = artifactPaths.find(
+    (artifactPath) => path.basename(artifactPath) === "relocation.json",
+  );
+  const recoveryPath = artifactPaths.find(
+    (artifactPath) => path.basename(artifactPath) === "recovery.json",
+  );
+  if (!relocationPath || !recoveryPath) {
+    throw new Error(`Private relocation records are missing for repository ${slot.repositoryId}`);
+  }
+  expect(relocationPath).toContain(`${path.sep}.kandev-recovery${path.sep}`);
+  const record = JSON.parse(fs.readFileSync(relocationPath, "utf8")) as { original?: unknown };
+  const recovery = JSON.parse(fs.readFileSync(recoveryPath, "utf8")) as { snapshot?: unknown };
+  if (typeof record.original !== "string" || typeof recovery.snapshot !== "string") {
+    throw new Error(`Private recovery record is incomplete for repository ${slot.repositoryId}`);
+  }
   expect(record.original).toContain(`${path.sep}.kandev-recovery${path.sep}`);
+  expect(recovery.snapshot).toContain(`${path.sep}.kandev-recovery${path.sep}`);
+  expect(fs.existsSync(`${slot.originalPath}.kandev-clone-relocation.json`)).toBe(false);
   expect(fs.readFileSync(path.join(record.original, slot.dirtyFileName), "utf8")).toBe(
+    slot.dirtyFileContent,
+  );
+  expect(fs.readFileSync(path.join(recovery.snapshot, slot.dirtyFileName), "utf8")).toBe(
     slot.dirtyFileContent,
   );
   return record.original;

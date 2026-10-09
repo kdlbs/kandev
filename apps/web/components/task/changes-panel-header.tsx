@@ -160,19 +160,8 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
   const showDiffReview = hasChanges || hasCommits || !!hasPRFiles;
   return (
     <PanelHeaderBarSplit
+      leftClassName="shrink-0"
       left={
-        <ChangesPanelHeaderLeft
-          refreshStatus={props.refreshStatus}
-          hasPriorData={props.hasPriorData}
-          failedRepositories={props.failedRepositories}
-          showDiffReview={showDiffReview}
-          onOpenDiffAll={onOpenDiffAll}
-          onOpenReview={onOpenReview}
-          onRequestWalkthrough={onRequestWalkthrough}
-          requestWalkthroughDisabled={requestWalkthroughDisabled}
-        />
-      }
-      leftWhenOverflow={
         <ChangesPanelHeaderLeft
           refreshStatus={props.refreshStatus}
           hasPriorData={props.hasPriorData}
@@ -187,16 +176,15 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
       }
       right={<ChangesPanelHeaderRight props={props} branchRows={branchRows} />}
       overflow={
-        <ChangesPanelHeaderOverflowActions
-          showDiffReview={showDiffReview}
-          onOpenDiffAll={onOpenDiffAll}
-          onOpenReview={onOpenReview}
-          onRequestWalkthrough={onRequestWalkthrough}
-          requestWalkthroughDisabled={requestWalkthroughDisabled}
-        />
+        showDiffReview ? (
+          <ChangesPanelHeaderOverflowActions
+            onOpenDiffAll={onOpenDiffAll}
+            onRequestWalkthrough={onRequestWalkthrough}
+            requestWalkthroughDisabled={requestWalkthroughDisabled}
+          />
+        ) : null
       }
-      overflowAt={520}
-      hideLeftWhenOverflow
+      overflowAt={350}
       hideRightWhenOverflow={false}
     />
   );

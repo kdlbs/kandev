@@ -111,6 +111,20 @@ func (a *Adapter) waitForSessionCleanup() {
 	a.sessionCleanupWg.Wait()
 }
 
+// GetSessionRestoreCapabilities exposes the negotiated ACP load capability.
+// ACP session/load is the supported native restore operation today; resume
+// remains an optional protocol extension and is not assumed here.
+func (a *Adapter) GetSessionRestoreCapabilities() shared.SessionRestoreCapabilities {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return shared.SessionRestoreCapabilities{
+		SupportsNativeLoad:    a.capabilities.LoadSession,
+		SupportsNativeResume:  false,
+		SupportsDirectoryMove: true,
+		RequiresNativeState:   true,
+	}
+}
+
 // NewSession creates a new agent session.
 func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
 	if err := a.lockSessionTransition(ctx); err != nil {
@@ -375,14 +389,12 @@ func filterMcpServersWithDecisions(
 		switch s.Type {
 		case "sse":
 			if !caps.Sse {
-				logger.Warn("filtering out SSE MCP server (agent does not support SSE)", zap.String("name", s.Name))
 				decision.ReasonCode = mcpFilterReasonSSEUnsupported
 				decisions = append(decisions, decision)
 				continue
 			}
 		case "http", "streamable_http":
 			if !caps.Http {
-				logger.Warn("filtering out HTTP MCP server (agent does not support HTTP)", zap.String("name", s.Name), zap.String("type", s.Type))
 				decision.ReasonCode = mcpFilterReasonHTTPUnsupported
 				decisions = append(decisions, decision)
 				continue
@@ -399,6 +411,25 @@ func filterMcpServersWithDecisions(
 		filtered = append(filtered, s)
 		decision.Included = true
 		decisions = append(decisions, decision)
+	}
+	for _, decision := range decisions {
+		supportedAlternativeSurvives := seenNames[decision.Server.Name]
+		fields := []zap.Field{zap.String("name", decision.Server.Name)}
+		switch decision.ReasonCode {
+		case mcpFilterReasonSSEUnsupported:
+			if supportedAlternativeSurvives {
+				logger.Debug("filtering out SSE MCP server (agent does not support SSE)", fields...)
+			} else {
+				logger.Warn("filtering out SSE MCP server (agent does not support SSE)", fields...)
+			}
+		case mcpFilterReasonHTTPUnsupported:
+			fields = append(fields, zap.String("type", decision.Server.Type))
+			if supportedAlternativeSurvives {
+				logger.Debug("filtering out HTTP MCP server (agent does not support HTTP)", fields...)
+			} else {
+				logger.Warn("filtering out HTTP MCP server (agent does not support HTTP)", fields...)
+			}
+		}
 	}
 	return filtered, decisions
 }
@@ -543,7 +574,10 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	if !capabilities.LoadSession && capabilities.SessionCapabilities.Resume == nil {
 		a.logger.Debug("session/load rejected: agent does not advertise LoadSession capability",
 			zap.String("session_id", sessionID))
-		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
+		return &SessionRestoreError{
+			Reason: SessionRestoreReasonNativeResumeUnsupported,
+			Cause:  fmt.Errorf("agent does not support session loading (LoadSession capability is false)"),
+		}
 	}
 	priorPromptTurn := a.currentPromptTurn()
 
@@ -613,7 +647,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 			clearFailedLoad()
 		}
 		span.RecordError(err)
-		return fmt.Errorf("failed to load session: %w", err)
+		return &SessionRestoreError{Reason: sessionRestoreReason(err), Cause: err}
 	}
 	for _, server := range filteredServers {
 		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")

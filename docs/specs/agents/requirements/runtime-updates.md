@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-07-26
-updated: 2026-09-26
+updated: 2026-10-05
 owners:
   - Kandev
 ---
@@ -35,7 +35,7 @@ CLI installs updates and cannot install an arbitrary version.
 - **AC-AGENTS-RUNTIME-UPDATES-001.3:** The backend classifies the selected action as `update`, `rollback`, `repair`, or `up_to_date`. The UI uses this structural state for copy and approval; it never compares translated labels or version strings itself.
 - **AC-AGENTS-RUNTIME-UPDATES-001.4:** Kandev stages the exact trusted `package@version`, ACP-probes that candidate, and activates it only after a successful probe. Candidate failure preserves the prior active version and capability catalogue.
 - **AC-AGENTS-RUNTIME-UPDATES-001.5:** Every managed npm runtime has an exact Kandev default version. A successful activation persists an exact operator selection for the current default generation. The effective version is that selection when present and the Kandev default otherwise.
-- **AC-AGENTS-RUNTIME-UPDATES-001.6:** Kandev does not persist the default as an operator selection. A change to the shipped package or default starts a new default generation.
+- **AC-AGENTS-RUNTIME-UPDATES-001.6:** Kandev does not persist the default as an operator selection. A change to the shipped package or default starts a new default generation. OpenCode adoption follows the family boundary in [OpenCode v2 adoption](opencode-v2-adoption.md); a default change cannot migrate an existing v1 user.
 - **AC-AGENTS-RUNTIME-UPDATES-001.7:** Every Kandev-built ACP command for the managed package uses the effective exact version, including probes, utility calls, standalone sessions, containers, and SSH executors. Active sessions continue unchanged.
 - **AC-AGENTS-RUNTIME-UPDATES-001.8:** Settings lets the operator clear the selected version and return to the Kandev default after that default passes the normal candidate validation.
 - **AC-AGENTS-RUNTIME-UPDATES-001.9:** When the weekly or manually started pin-maintenance run finds a changed stable default, it validates the catalogue and opens or refreshes one grouped review pull request without activating a runtime or merging the pull request. When no default changes, it creates no branch or pull request.
@@ -49,13 +49,13 @@ CLI installs updates and cannot install an arbitrary version.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-RUNTIME-UPDATES-002.1:** When startup detects a changed managed package or Kandev default, Kandev shall remove the prior selection for that agent before it becomes ready.
-- **AC-AGENTS-RUNTIME-UPDATES-002.2:** When the shipped package and default remain unchanged, Kandev shall preserve a current-generation operator selection across restarts and unrelated Kandev upgrades. An unmarked legacy selection is reset during the first reconciliation.
+- **AC-AGENTS-RUNTIME-UPDATES-002.1:** When startup detects a changed managed package or Kandev default, Kandev shall remove the prior selection for that agent before it becomes ready. For OpenCode, this reset applies only within the adopted family and shall not change its runtime source or perform a v1-to-v2 migration.
+- **AC-AGENTS-RUNTIME-UPDATES-002.2:** When the shipped package and default remain unchanged, Kandev shall preserve a current-generation operator selection across restarts and unrelated Kandev upgrades. An unmarked legacy selection is reset during the first reconciliation, except for OpenCode legacy import defined in [OpenCode v2 adoption](opencode-v2-adoption.md).
 - **AC-AGENTS-RUNTIME-UPDATES-002.3:** After Kandev activates a new default, Settings shall let the operator select any validated stable version, including an older version.
 - **AC-AGENTS-RUNTIME-UPDATES-002.4:** A selection made after default activation shall remain effective until the operator changes it or a later shipped default changes.
 - **AC-AGENTS-RUNTIME-UPDATES-002.5:** Default activation shall affect future probes and launches only. Kandev shall not replace an agent process that remains active during backend recovery.
 - **AC-AGENTS-RUNTIME-UPDATES-002.6:** If Kandev cannot complete default activation, startup shall stop before readiness and retry the activation during the next start.
-- **AC-AGENTS-RUNTIME-UPDATES-002.7:** On the first release with this behavior, Kandev shall treat an unmarked legacy selection as part of an earlier default generation.
+- **AC-AGENTS-RUNTIME-UPDATES-002.7:** On the first release with this behavior, Kandev shall treat an unmarked legacy selection as part of an earlier default generation. The later OpenCode adoption migration imports its legacy choice before reconciliation instead of discarding it.
 
 ### REQ-AGENTS-RUNTIME-UPDATES-003: Harness-Owned Runtime Updates
 
@@ -81,6 +81,28 @@ CLI installs updates and cannot install an arbitrary version.
 - **AC-AGENTS-RUNTIME-UPDATES-003.16:** A failed status refresh shall preserve the last successful status, and an older response shall not replace a newer status result.
 - **AC-AGENTS-RUNTIME-UPDATES-003.17:** When an update job reaches a terminal state, Settings shall refresh the runtime status so the displayed version reflects the completed operation. Concurrent refresh requests shall not leave the displayed status stale.
 
+### REQ-AGENTS-RUNTIME-UPDATES-004: Runtime evidence and model discovery refresh
+
+**Intent:** Runtime evidence stays tied to the model catalog, and open profiles refresh after runtime activation.
+Runtime information and update controls belong in Settings > Agents > Agent runtime updates.
+Profile model settings remain focused on model selection and discovery.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-RUNTIME-UPDATES-004.1:** Discovery responses shall distinguish the observed bridge version from the effective managed package version. Missing observations shall remain unknown.
+- **AC-AGENTS-RUNTIME-UPDATES-004.2:** Discovery responses shall identify the underlying provider runtime as bundled, external, or unknown. Verified bundled dependency and external executable versions shall remain distinct from bridge versions and separately installed login or passthrough CLIs.
+- **AC-AGENTS-RUNTIME-UPDATES-004.3:** Runtime observations shall describe the same host launch context as the displayed model list. Draft edits, refresh, navigation, and runtime activation shall not mix observations from different contexts.
+- **AC-AGENTS-RUNTIME-UPDATES-004.4:** Runtime information, release status, and update actions shall remain in the existing Agents runtime settings. Profile model settings shall not show a runtime details panel or runtime recovery actions. A bridge update shall not claim to update an external provider executable.
+- **AC-AGENTS-RUNTIME-UPDATES-004.5:** After a successful managed activation, an open affected profile shall refresh discovery with its current complete draft. Failed updates shall preserve the prior model list and runtime observation. Neither outcome shall change saved or draft model selections.
+- **AC-AGENTS-RUNTIME-UPDATES-004.6:** Discovery success shall mean that the provider returned a catalog. It shall not imply catalog completeness or account access to a missing model. Failed release checks shall remain unknown.
+- **AC-AGENTS-RUNTIME-UPDATES-004.7:** Desktop and phone profile pages shall preserve model selection, discovery status, and refresh controls without runtime details. Runtime management shall retain its existing localized desktop and phone controls.
+- **AC-AGENTS-RUNTIME-UPDATES-004.8:** Runtime inspection shall be bounded and read-only. It shall not install packages, activate versions, change profiles, expose raw launch settings, or alter running sessions.
+
+#### Exclusions
+
+Automatic updates, model availability inference, bundled dependency replacement, and remote executor inspection are outside this extension.
+Existing automatic update policies retain their separate contract.
+
 ## Out of scope
 
 - Selecting an arbitrary published version, rolling back to an older version, or recovering a partly published release for a harness that only installs the release its own updater selects.
@@ -88,8 +110,13 @@ CLI installs updates and cannot install an arbitrary version.
 - Taking ownership of installations that a harness updater declines to manage, such as an installation owned by a system package manager.
 - Container and remote-executor package caches for a harness the Settings action does not prepare.
 
+## Implementation plans
+
+- [Model discovery runtime visibility](../../../plans/model-discovery-runtime-visibility/plan.md)
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/runtime-updates-01.md), [part 2](../system-design/runtime-updates-02.md).
 Upgrade-time default activation is defined in [runtime default activation](../system-design/runtime-default-activation.md).
 Harness-owned updaters are defined in [harness self-update](../system-design/harness-self-update.md).
+Profile discovery observations and refresh are defined in [runtime model discovery](../system-design/runtime-model-discovery.md).

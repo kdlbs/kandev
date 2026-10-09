@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryartifact"
+	"github.com/kandev/kandev/internal/task/recoveryoperation"
 )
 
 type managedCloneRelocationStore struct {
@@ -18,6 +20,85 @@ type managedCloneRelocationStore struct {
 	claimRequest models.TaskEnvironmentRecoveryClaimRequest
 	acquireErr   error
 	stalePublish bool
+	artifacts    map[string]recoveryartifact.Registered
+}
+
+func (s *managedCloneRelocationStore) RegisterTaskEnvironmentRecoveryArtifacts(
+	_ context.Context,
+	registration recoveryartifact.Registration,
+) error {
+	if s.claim == nil || s.claim.TaskEnvironmentID != registration.TaskEnvironmentID ||
+		s.claim.OwnerTaskID != registration.OwnerTaskID || s.claim.OwnershipGeneration != registration.OwnershipGeneration ||
+		s.claim.SessionID != registration.SessionID || s.claim.OperationID != registration.OperationID ||
+		s.claim.ExecutorType != registration.ExecutorType {
+		return recoveryartifact.ErrIdentityMismatch
+	}
+	current := s.worktrees[registration.WorktreeID]
+	if current == nil {
+		current = s.worktrees[registration.ReplacementID]
+	}
+	if current == nil || current.TaskEnvironmentID != registration.TaskEnvironmentID ||
+		current.RepositoryID != registration.RepositoryID ||
+		(current.ID != registration.WorktreeID && current.ID != registration.ReplacementID) ||
+		(current.Path != registration.OriginalPath && current.Path != registration.ReplacementPath) {
+		return recoveryartifact.ErrIdentityMismatch
+	}
+	if s.artifacts == nil {
+		s.artifacts = make(map[string]recoveryartifact.Registered)
+	}
+	key := registration.TaskEnvironmentID + "\x00" + registration.OperationID + "\x00" + registration.WorktreeID
+	item := s.artifacts[key]
+	if item.OperationID != "" {
+		if item.OwnerTaskID != registration.OwnerTaskID || item.OwnershipGeneration != registration.OwnershipGeneration ||
+			item.ReplacementID != registration.ReplacementID || item.ReplacementPath != registration.ReplacementPath {
+			return recoveryartifact.ErrIdentityMismatch
+		}
+	}
+	registration.ArtifactIdentities = make(map[string]string, len(registration.ArtifactPaths))
+	for _, path := range registration.ArtifactPaths {
+		if identity, ok := recoveryartifact.FilesystemIdentity(path); ok {
+			registration.ArtifactIdentities[path] = identity
+		}
+	}
+	item.Registration = registration
+	paths := append(append([]string(nil), item.ArtifactPaths...), registration.ArtifactPaths...)
+	item.ArtifactPaths = uniqueSortedPaths(paths)
+	s.artifacts[key] = item
+	return nil
+}
+
+func (s *managedCloneRelocationStore) ListTaskEnvironmentRecoveryArtifacts(
+	_ context.Context,
+	environmentID string,
+) ([]recoveryartifact.Registered, error) {
+	var result []recoveryartifact.Registered
+	for _, item := range s.artifacts {
+		if item.TaskEnvironmentID != environmentID {
+			continue
+		}
+		current := s.worktrees[item.WorktreeID]
+		if current == nil {
+			current = s.worktrees[item.ReplacementID]
+		}
+		if current == nil || current.Path != item.OriginalPath && current.Path != item.ReplacementPath {
+			continue
+		}
+		result = append(result, item)
+	}
+	return result, nil
+}
+
+func uniqueSortedPaths(paths []string) []string {
+	seen := make(map[string]struct{}, len(paths))
+	result := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if _, exists := seen[path]; exists {
+			continue
+		}
+		seen[path] = struct{}{}
+		result = append(result, path)
+	}
+	return result
 }
 
 func (s *managedCloneRelocationStore) AcquireTaskEnvironmentRecoveryClaim(
@@ -134,6 +215,8 @@ func TestManagerAdmitRecoveryRelocatesCleanManagedCloneWorktreeAndPreservesCommi
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
+	progressReporter := &recordingRecoveryProgressReporter{}
+	mgr.SetRecoveryProgressReporter(progressReporter)
 
 	recoveryRequest := RecoveryAdmissionRequest{
 		TaskID: "task-1", SessionID: "session-1", TaskEnvironmentID: "env-1", OwnerTaskID: "task-1",
@@ -197,7 +280,25 @@ func TestManagerAdmitRecoveryRelocatesCleanManagedCloneWorktreeAndPreservesCommi
 	if got := strings.TrimSpace(runGit(t, replacement.Path, "branch", "--show-current")); got != branch {
 		t.Fatalf("replacement branch = %q, want %q", got, branch)
 	}
-	relocationRecord, err := readManagedCloneRelocationRecord(originalPath + ".kandev-clone-relocation.json")
+	var relocationRecordPath string
+	for _, artifact := range store.artifacts {
+		if artifact.LayoutVersion != 2 || artifact.ReplacementID != replacement.ID || artifact.ReplacementPath != replacement.Path {
+			continue
+		}
+		for _, path := range artifact.ArtifactPaths {
+			if filepath.Base(path) == "relocation.json" && filepath.Base(filepath.Dir(path)) == "records" {
+				relocationRecordPath = path
+				break
+			}
+		}
+	}
+	if relocationRecordPath == "" {
+		t.Fatal("private relocation journal was not registered")
+	}
+	if _, err := os.Lstat(originalPath + ".kandev-clone-relocation.json"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("relocation journal remains beside working files: %v", err)
+	}
+	relocationRecord, err := readManagedCloneRelocationRecord(relocationRecordPath)
 	if err != nil {
 		t.Fatalf("read relocation record: %v", err)
 	}
@@ -215,6 +316,9 @@ func TestManagerAdmitRecoveryRelocatesCleanManagedCloneWorktreeAndPreservesCommi
 	}
 	if err := admission.Release(context.Background()); err != nil {
 		t.Fatalf("release initial admission: %v", err)
+	}
+	if progressReporter.start.OperationID != "" || len(progressReporter.updates) != 0 {
+		t.Fatalf("automatic clean relocation emitted explicit repair progress: start=%+v updates=%+v", progressReporter.start, progressReporter.updates)
 	}
 	if err := os.RemoveAll(sourceClone); err != nil {
 		t.Fatalf("remove obsolete source clone: %v", err)
@@ -316,7 +420,7 @@ func TestManagerAdmitRecoveryRefusesDirtyManagedCloneWorktree(t *testing.T) {
 	}
 }
 
-func TestManagerAdmitRecoveryRelocatesDirtyManagedCloneOnlyWithExplicitAuthorization(t *testing.T) {
+func TestManagedCloneRecoveryPrivateArtifactsPreserveContent(t *testing.T) {
 	managedRoot := filepath.Join(t.TempDir(), "repos")
 	sourceClone := filepath.Join(managedRoot, "acme", "widget")
 	providerSourceClone := filepath.Join(managedRoot, "_providers", "github", "github.com", "acme", "widget")
@@ -479,9 +583,18 @@ func TestManagerAdmitRecoveryRelocatesDirtyManagedCloneOnlyWithExplicitAuthoriza
 	if got := strings.TrimSpace(runGit(t, replacement.Path, "diff", "--", "committed.txt")); got == "" {
 		t.Fatal("staged content was not retained as an unstaged modification")
 	}
-	recoveryRecord, err := readRecoveryRecord(originalPath + ".kandev-recovery.json")
+	artifactRecord := managedCloneRelocationRecord{
+		OperationID: store.claim.OperationID, TaskID: wt.TaskID, EnvironmentID: wt.TaskEnvironmentID,
+		WorktreeID: wt.ID, OriginalWorkspacePath: originalPath,
+	}
+	archivePath, err := mgr.managedCloneRelocationArchivePath(&artifactRecord)
 	if err != nil {
-		t.Fatalf("read recovery snapshot record: %v", err)
+		t.Fatalf("resolve private recovery bucket: %v", err)
+	}
+	privateBucket := filepath.Dir(archivePath)
+	recoveryRecord, err := readRecoveryRecord(filepath.Join(privateBucket, "records", "recovery.json"))
+	if err != nil {
+		t.Fatalf("read private recovery snapshot record: %v", err)
 	}
 	if _, err := os.Stat(recoveryRecord.Snapshot); err != nil {
 		t.Fatalf("retained snapshot missing: %v", err)
@@ -497,6 +610,183 @@ func TestManagerAdmitRecoveryRelocatesDirtyManagedCloneOnlyWithExplicitAuthoriza
 	}
 	if target, err := os.Readlink(filepath.Join(recoveryRecord.Original, "dirty-link")); err != nil || target != "dirty-untracked.txt" {
 		t.Fatalf("original dirty symlink target = %q, %v", target, err)
+	}
+	for _, adjacent := range []string{
+		originalPath + ".kandev-clone-relocation.json",
+		originalPath + ".kandev-clone-relocation.claim",
+		originalPath + ".kandev-recovery.json",
+		originalPath + ".kandev-recovery.claim",
+	} {
+		if _, err := os.Lstat(adjacent); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("recovery artifact remains beside working files at %q: %v", adjacent, err)
+		}
+	}
+	privateRelocation, err := readManagedCloneRelocationRecord(filepath.Join(privateBucket, "records", "relocation.json"))
+	if err != nil || privateRelocation.State != string(RecoveryStateComplete) {
+		t.Fatalf("private relocation record = %+v, %v", privateRelocation, err)
+	}
+	privateRecovery, err := readRecoveryRecord(filepath.Join(privateBucket, "records", "recovery.json"))
+	if err != nil {
+		t.Fatalf("read private recovery record: %v", err)
+	}
+	if !pathWithin(privateBucket, privateRecovery.Snapshot) {
+		t.Fatalf("snapshot path %q is outside private bucket %q", privateRecovery.Snapshot, privateBucket)
+	}
+}
+
+type recordingRecoveryProgressReporter struct {
+	start   RecoveryProgressStart
+	updates []RecoveryProgressUpdate
+	binding RecoveryProgressBinding
+	ended   bool
+}
+
+func (r *recordingRecoveryProgressReporter) BeginWorkspaceRecovery(
+	_ context.Context,
+	start RecoveryProgressStart,
+) (RecoveryProgressBinding, error) {
+	r.start = start
+	r.binding = RecoveryProgressBinding{
+		TaskEnvironmentID: start.TaskEnvironmentID, OwnerTaskID: start.OwnerTaskID,
+		OwnershipGeneration: start.OwnershipGeneration, SessionID: start.SessionID,
+		OperationID: start.OperationID, AttemptID: "attempt-progress", RunnerInstanceID: "runner-progress",
+		Revision: 1,
+	}
+	return r.binding, nil
+}
+
+func (r *recordingRecoveryProgressReporter) UpdateWorkspaceRecovery(
+	_ context.Context,
+	binding RecoveryProgressBinding,
+	update RecoveryProgressUpdate,
+) (RecoveryProgressBinding, error) {
+	if binding.Revision != r.binding.Revision || binding.AttemptID != r.binding.AttemptID {
+		return RecoveryProgressBinding{}, recoveryoperation.ErrStaleWriter
+	}
+	r.updates = append(r.updates, update)
+	r.binding.Revision++
+	return r.binding, nil
+}
+
+func (r *recordingRecoveryProgressReporter) HeartbeatWorkspaceRecovery(
+	_ context.Context,
+	binding RecoveryProgressBinding,
+) (RecoveryProgressBinding, error) {
+	if binding.Revision != r.binding.Revision {
+		return RecoveryProgressBinding{}, recoveryoperation.ErrStaleWriter
+	}
+	r.binding.Revision++
+	return r.binding, nil
+}
+
+func (r *recordingRecoveryProgressReporter) EndWorkspaceRecoveryRunner(context.Context, RecoveryProgressBinding) {
+	r.ended = true
+}
+
+func TestManagedCloneRecoveryProgressCoversEverySelectedRepositoryAndAgentOutcome(t *testing.T) {
+	managedRoot := filepath.Join(t.TempDir(), "repos")
+	config := newTestConfig(t)
+	seed := initGitRepoForWorktreeTest(t)
+	store := &managedCloneRelocationStore{recoveryCASStore: &recoveryCASStore{mockStore: newMockStore()}}
+	reporter := &recordingRecoveryProgressReporter{}
+	slots := make([]RecoverySlot, 0, 2)
+	for index := 0; index < 2; index++ {
+		name := fmt.Sprintf("progress-repo-%d", index)
+		source := filepath.Join(managedRoot, "_providers", "github", "github.com", "acme", name)
+		destination := filepath.Join(managedRoot, "workspaces", "workspace-1", "github", "acme", name)
+		for _, path := range []string{source, destination} {
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		runGit(t, seed, "clone", "--no-hardlinks", seed, source)
+		runGit(t, seed, "clone", "--no-hardlinks", seed, destination)
+		origin := "https://github.com/acme/" + name + ".git"
+		runGit(t, source, "remote", "set-url", "origin", origin)
+		runGit(t, destination, "remote", "set-url", "origin", origin)
+		branch := fmt.Sprintf("feature/progress-%d", index)
+		runGit(t, source, "checkout", "-b", branch)
+		runGit(t, source, "checkout", "main")
+		original := filepath.Join(config.TasksBasePath, "task-recovery-progress", name)
+		if err := os.MkdirAll(filepath.Dir(original), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, source, "worktree", "add", original, branch)
+		if err := os.WriteFile(filepath.Join(original, "dirty-progress.txt"), []byte("retain me\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		wt := &Worktree{
+			ID: fmt.Sprintf("wt-progress-%d", index), TaskID: "task-recovery-progress",
+			TaskEnvironmentID: "env-recovery-progress", RepositoryID: name,
+			Path: original, RepositoryPath: destination, Branch: branch, BranchSlug: name, Status: StatusActive,
+		}
+		store.worktrees[wt.ID] = wt
+		slots = append(slots, RecoverySlot{
+			WorktreeID: wt.ID, RepositoryID: name, BranchSlug: name, RepositoryPath: destination,
+			CloneRelocation: &ManagedCloneRelocationProof{
+				ManagedRoot: managedRoot, ExpectedSourcePath: source, ExpectedDestinationPath: destination,
+				Identity: ManagedRepositoryIdentity{Provider: "github", Host: "github.com", Owner: "acme", Name: name},
+			},
+		})
+	}
+	manager, err := NewManager(config, store, newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.SetRecoveryProgressReporter(reporter)
+	ctx := WithDirtyCloneRelocation(context.Background())
+	ctx = WithManagedCloneRelocationErrorStamp(ctx, "error-progress")
+	ctx = WithManagedCloneRelocationAuthorization(ctx, func(context.Context) error { return nil })
+	admission, err := manager.AdmitRecovery(ctx, RecoveryAdmissionRequest{
+		TaskID: "task-recovery-progress", SessionID: "session-recovery-progress",
+		TaskEnvironmentID: "env-recovery-progress", OwnerTaskID: "task-recovery-progress",
+		OwnershipGeneration: 8, ExecutorType: string(models.ExecutorTypeWorktree),
+		ErrorStamp: "error-progress", RelocateDirty: true, Slots: slots,
+	})
+	if err != nil {
+		t.Fatalf("AdmitRecovery: %v", err)
+	}
+	if admission == nil {
+		t.Fatal("AdmitRecovery returned no admission for dirty managed clones")
+	}
+	if len(reporter.start.SelectedRepositoryIDs) != 2 ||
+		reporter.start.SelectedRepositoryIDs[0] != "progress-repo-0" ||
+		reporter.start.SelectedRepositoryIDs[1] != "progress-repo-1" {
+		t.Fatalf("selected inventory = %+v", reporter.start.SelectedRepositoryIDs)
+	}
+	if err := admission.CompleteRecoveryResume(context.Background(), true, ""); err != nil {
+		t.Fatalf("CompleteRecoveryResume: %v", err)
+	}
+	if err := admission.Release(context.Background()); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if !reporter.ended {
+		t.Fatal("recovery runner was not unregistered")
+	}
+	phasesByRepository := make(map[string]map[string]bool)
+	var final RecoveryProgressUpdate
+	for _, update := range reporter.updates {
+		if update.RepositoryID != "" {
+			if phasesByRepository[update.RepositoryID] == nil {
+				phasesByRepository[update.RepositoryID] = make(map[string]bool)
+			}
+			phasesByRepository[update.RepositoryID][update.Phase] = true
+		}
+		final = update
+	}
+	for _, repositoryID := range reporter.start.SelectedRepositoryIDs {
+		for _, phase := range []string{
+			recoveryoperation.PhaseSnapshotting, recoveryoperation.PhaseVerifyingSnapshot,
+			recoveryoperation.PhaseVerifyingReplacement, recoveryoperation.PhasePublishing,
+		} {
+			if !phasesByRepository[repositoryID][phase] {
+				t.Fatalf("repository %s omitted phase %s: %+v", repositoryID, phase, phasesByRepository[repositoryID])
+			}
+		}
+	}
+	if final.State != recoveryoperation.StateCompleted || final.Phase != recoveryoperation.PhaseResuming ||
+		!final.WorkspaceComplete || !final.AgentReady || final.CompletedSlots != 2 {
+		t.Fatalf("terminal recovery outcome = %+v", final)
 	}
 }
 

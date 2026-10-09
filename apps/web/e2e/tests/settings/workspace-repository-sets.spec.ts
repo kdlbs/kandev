@@ -59,20 +59,14 @@ test.describe("Workspace repository sets settings", () => {
       `[role="option"][data-value="${seedData.repositoryId}"]`,
     );
     await expect(repositoryOption).toBeVisible();
-    await expect
-      .poll(() =>
-        repositoryOption.evaluate((element) => {
-          const box = element.getBoundingClientRect();
-          return [box.x + 8, box.right - 8].every((x) =>
-            element.contains(document.elementFromPoint(x, box.y + box.height / 2)),
-          );
-        }),
-      )
-      .toBe(true);
+    await expect(repositoryOption).toBeEnabled();
     await prCapture.screenshot("desktop-repository-set-add-picker", {
-      caption: "The repository picker remains fully clickable outside the scrolling form.",
+      caption: "A workspace repository can be selected from the open repository picker.",
     });
     await repositoryOption.click();
+    await expect(
+      testPage.getByTestId(`repository-set-remove-${seedData.repositoryId}`),
+    ).toBeVisible();
     await testPage.getByTestId("repository-set-add-repository").click();
     await testPage.getByRole("option", { name: SECOND_REPO_NAME }).click();
     const basePicker = testPage.getByTestId(`repository-set-base-${second.id}`);

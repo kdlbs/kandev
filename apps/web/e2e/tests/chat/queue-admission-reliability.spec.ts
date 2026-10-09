@@ -15,6 +15,8 @@ import {
   openQuickChatSetup,
   sendQuickChatMessage,
   startQuickChatFromSetup,
+  waitForQuickChatDirectInput,
+  waitForSessionSettledBaseline,
 } from "./quick-chat-helpers";
 import { SessionPage } from "../../pages/session-page";
 
@@ -54,6 +56,14 @@ async function queueFromTaskComposer(
 
 test.describe("queue admission reliability", () => {
   test.describe.configure({ retries: 1 });
+
+  test.afterEach(async ({ backend }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    await testInfo.attach("queue-admission-backend.log", {
+      path: backend.logPath,
+      contentType: "text/plain",
+    });
+  });
 
   test("clears an attached Task draft after a six second admission response", async ({
     testPage,
@@ -110,6 +120,8 @@ test.describe("queue admission reliability", () => {
       const dialog = await openQuickChatSetup(testPage);
       const started = await startQuickChatFromSetup(dialog, testPage);
       const identity = await apiClient.getQueueSessionIdentity(started.task_id, started.session_id);
+      await waitForSessionSettledBaseline(apiClient, started.task_id, started.session_id);
+      await waitForQuickChatDirectInput(dialog);
       await sendQuickChatMessage(dialog, testPage, "/sleep 30");
       await expect(
         testPage.getByRole("status", { name: /Agent is (starting|running)/ }),
@@ -151,7 +163,7 @@ test.describe("queue admission reliability", () => {
       apiClient,
       seedData,
       "Queue admission final uncertainty",
-      { sleepSeconds: 60 },
+      { sleepSeconds: 60, startWithGeneratingTurn: true },
     );
     await waitForComposerQueueMode(session.activeChat());
 

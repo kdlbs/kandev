@@ -92,6 +92,29 @@ func TestRetainedOutcomePreservesPromptFailureDisposition(t *testing.T) {
 	}
 }
 
+func TestRetainedOutcomeCopiesCapacityContinuationSnapshot(t *testing.T) {
+	mgr := newTurnOutcomeTestManager(t)
+	addTestInstance(t, mgr, "inst-1")
+	snapshot := &streams.CapacityContinuationSnapshot{
+		Support: streams.CapacityContinuationCodexLiveSessionV1, PromptGeneration: 7,
+		EvidenceComplete: true, CompletedTools: 2,
+	}
+	_, ok := mgr.RetainTurnOutcome("inst-1", streams.AgentEvent{
+		Type: streams.EventTypeError, PromptGeneration: 7, CapacityContinuation: snapshot,
+	})
+	if !ok {
+		t.Fatal("RetainTurnOutcome() ok = false, want true")
+	}
+	snapshot.CompletedTools = 99
+	outcome, hasOutcome, _ := mgr.PeekTurnOutcome("inst-1")
+	if !hasOutcome || outcome.Event.CapacityContinuation == nil {
+		t.Fatal("capacity continuation snapshot was not retained")
+	}
+	if got := outcome.Event.CapacityContinuation.CompletedTools; got != 2 {
+		t.Fatalf("retained completed tool count = %d, want immutable value 2", got)
+	}
+}
+
 // TestPeekTurnOutcomeDistinguishesUnknownInstanceFromNothingRetained pins
 // that a 404-worthy "no such instance" is distinguishable from the normal
 // "instance exists, nothing retained yet" answer.

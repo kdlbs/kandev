@@ -14,6 +14,7 @@ interface CommentFormProps {
   onSubmitAndRun?: (content: string) => void;
   isEditing?: boolean;
   autoFocus?: boolean;
+  submitDisabled?: boolean;
 }
 
 function ActionButtons({
@@ -97,6 +98,7 @@ export function CommentForm({
   onSubmitAndRun,
   isEditing = false,
   autoFocus = true,
+  submitDisabled = false,
 }: CommentFormProps) {
   const { t } = useTranslation();
   const [content, setContent] = useState(initialContent);
@@ -108,7 +110,7 @@ export function CommentForm({
 
   const handleSubmit = () => {
     const trimmed = content.trim();
-    if (trimmed) {
+    if (trimmed && !submitDisabled) {
       onSubmit(trimmed);
       setContent("");
     }
@@ -116,7 +118,7 @@ export function CommentForm({
 
   const handleSubmitAndRun = () => {
     const trimmed = content.trim();
-    if (trimmed && onSubmitAndRun) {
+    if (trimmed && onSubmitAndRun && !submitDisabled) {
       onSubmitAndRun(trimmed);
       setContent("");
     }
@@ -136,7 +138,7 @@ export function CommentForm({
     }
   };
 
-  const disabled = !content.trim();
+  const disabled = !content.trim() || submitDisabled;
   const showRunButton = !!onSubmitAndRun && !isEditing;
 
   return (

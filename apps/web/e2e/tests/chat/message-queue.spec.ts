@@ -6,6 +6,7 @@ import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-whil
 import { SessionPage } from "../../pages/session-page";
 import { seedRunningGeneratingSession } from "../../helpers/generating-session";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
+import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 import { startQuickChatFromSetup } from "./quick-chat-helpers";
 import {
@@ -16,7 +17,7 @@ import {
   registerSeparateQueueRows,
   requestMessageQueueSettings,
 } from "../../helpers/message-queue-settings";
-import { watchWs } from "../../helpers/causal-waits";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
 
 registerSeparateQueueRows(test);
 
@@ -73,7 +74,12 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
     await agentSelector.click();
     await page.getByRole("option").first().click();
   }
-  await startQuickChatFromSetup(dialog, page);
+  const quickChatStarted = waitForHttp(page, "POST", /^\/api\/v1\/workspaces\/[^/]+\/quick-chat$/, {
+    timeout: 30_000,
+  });
+  await startQuickChatFromSetup(dialog, page, undefined, quickChatStarted);
+  const startResponse = await quickChatStarted;
+  expect(startResponse.ok(), "Quick Chat startup request should succeed").toBe(true);
   return dialog;
 }
 
@@ -249,8 +255,6 @@ async function expectSeparateTurnsInOrder(scope: Locator, markers: string[]): Pr
 }
 
 test.describe("Task session queue", () => {
-  test.describe.configure({ retries: 1 });
-
   test("full queue scrolls internally without hiding the composer", async ({
     testPage,
     apiClient,
@@ -387,70 +391,90 @@ test.describe("Task session queue", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(120_000);
-
-    const session = await seedTaskAndWaitForIdle(
-      testPage,
-      apiClient,
-      seedData,
-      "Queue Send Now row test",
-    );
-    await session.sendMessage("/slow 30s");
-    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await expect(session.chat.getByText("Running slow response (30s total)...")).toBeVisible({
-      timeout: 15_000,
+    const gateway = watchWs(testPage);
+    const releaseEnv = await backend.useEnv({
+      KANDEV_E2E_CANCEL_HOLD_DURATION: "8s",
+      KANDEV_E2E_PROMPT_CANCEL_JOIN_TIMEOUT: "12s",
     });
-    const taskID = new URL(testPage.url()).pathname.split("/").pop();
-    if (!taskID) throw new Error("task URL did not contain a task ID");
-    const workflowStepBefore = (await apiClient.getTask(taskID)).workflow_step_id;
+    try {
+      const session = await seedTaskAndWaitForIdle(
+        testPage,
+        apiClient,
+        seedData,
+        "Queue Send Now row test",
+      );
+      await session.sendMessage("/e2e:cancel-hold send-now-held-provider");
+      await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+      await expect(session.chat.getByText("send-now-held-provider", { exact: true })).toBeVisible({
+        timeout: 15_000,
+      });
+      const taskID = new URL(testPage.url()).pathname.split("/").pop();
+      if (!taskID) throw new Error("task URL did not contain a task ID");
+      const workflowStepBefore = (await apiClient.getTask(taskID)).workflow_step_id;
 
-    const markerA = "targeted A response";
-    const markerB = "targeted B response";
-    const markerC = "targeted C response";
-    const task = await apiClient.getTask(taskID);
-    const sessionID = task.primary_session_id;
-    if (!sessionID) throw new Error("task did not have a primary session");
-    await queueMessages(apiClient, taskID, sessionID, [
-      scriptedQueueMessage(markerA),
-      scriptedQueueMessage(markerB, 5_000),
-      scriptedQueueMessage(markerC),
-    ]);
+      const markerA = "targeted A response";
+      const markerB = "targeted B response";
+      const markerC = "targeted C response";
+      const task = await apiClient.getTask(taskID);
+      const sessionID = task.primary_session_id;
+      if (!sessionID) throw new Error("task did not have a primary session");
+      await queueMessages(apiClient, taskID, sessionID, [
+        scriptedQueueMessage(markerA),
+        scriptedQueueMessage(markerB, 5_000),
+        scriptedQueueMessage(markerC),
+      ]);
 
-    await openQueuePanel(testPage);
-    const panel = testPage.getByTestId("queued-ghost-list");
-    await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
-    const autoRun = panel.getByTestId("queue-auto-run");
-    await expect(autoRun).toHaveAttribute("data-state", "checked");
-    await autoRun.click();
-    await expect(autoRun).toHaveAttribute("data-state", "unchecked");
+      await openQueuePanel(testPage);
+      const panel = testPage.getByTestId("queued-ghost-list");
+      await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
+      const autoRun = panel.getByTestId("queue-auto-run");
+      await expect(autoRun).toHaveAttribute("data-state", "checked");
+      await autoRun.click();
+      await expect(autoRun).toHaveAttribute("data-state", "unchecked");
 
-    const target = panel.getByTestId("queue-entry").filter({ hasText: markerB });
-    await expect(target).toBeVisible();
-    await target.hover();
-    const sendNow = target.getByTestId("queue-entry-send-now");
-    await expect(sendNow).toBeVisible({ timeout: 10_000 });
-    await expect(sendNow).toBeEnabled({ timeout: 10_000 });
-    await sendNow.click();
+      const target = panel.getByTestId("queue-entry").filter({ hasText: markerB });
+      await expect(target).toBeVisible();
+      await target.hover();
+      const sendNow = target.getByTestId("queue-entry-send-now");
+      await expect(sendNow).toBeVisible({ timeout: 10_000 });
+      await expect(sendNow).toBeEnabled({ timeout: 10_000 });
+      const sendErrors: string[] = [];
+      testPage.on("console", (message) => {
+        if (message.text().includes("Failed to send queued message now:")) {
+          sendErrors.push(message.text());
+        }
+      });
+      const sendNowResponse = gateway.waitForResponse("message.queue.send_now");
+      await sendNow.click();
+      await sendNowResponse;
 
-    await expect(panel.getByTestId("queue-entry-text")).toHaveCount(2, { timeout: 10_000 });
-    await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText(markerA);
-    await expect(panel.getByTestId("queue-entry-text").nth(1)).toContainText(markerC);
-    await expect(autoRun).toHaveAttribute("data-state", "checked", { timeout: 10_000 });
+      // The selected replacement message proves cancellation and admission settled.
+      await expect(
+        session.chat.getByTestId("user-message-bubble").filter({ hasText: markerB }),
+      ).toHaveCount(1, { timeout: 20_000 });
 
-    // Send Now's internal interruption must not behave like an explicit user
-    // cancellation. Check while the selected replacement turn is still active;
-    // successful turn completion may legitimately advance the workflow later.
-    await expect(
-      session.chat.getByTestId("user-message-bubble").filter({ hasText: markerB }),
-    ).toHaveCount(1, { timeout: 20_000 });
-    await expect(session.agentStatus()).toBeVisible({ timeout: 20_000 });
-    expect((await apiClient.getTask(taskID)).workflow_step_id).toBe(workflowStepBefore);
+      expect(sendErrors).toEqual([]);
+      await expect(panel.getByTestId("queue-entry-text")).toHaveCount(2, { timeout: 10_000 });
+      await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText(markerA);
+      await expect(panel.getByTestId("queue-entry-text").nth(1)).toContainText(markerC);
+      await expect(autoRun).toHaveAttribute("data-state", "checked", { timeout: 10_000 });
 
-    await expectSeparateTurnsInOrder(session.chat, [markerB, markerA, markerC]);
-    await session.waitForChatIdle({ timeout: 45_000 });
-    await expect(panel).not.toBeVisible({ timeout: 15_000 });
-    await expect(session.chat).not.toContainText("Turn cancelled by user");
+      // Send Now's internal interruption must not behave like an explicit user
+      // cancellation. Check while the selected replacement turn is still active;
+      // successful turn completion may legitimately advance the workflow later.
+      await expect(session.agentStatus()).toBeVisible({ timeout: 20_000 });
+      expect((await apiClient.getTask(taskID)).workflow_step_id).toBe(workflowStepBefore);
+
+      await expectSeparateTurnsInOrder(session.chat, [markerB, markerA, markerC]);
+      await session.waitForChatIdle({ timeout: 45_000 });
+      await expect(panel).not.toBeVisible({ timeout: 15_000 });
+      await expect(session.chat).not.toContainText("Turn cancelled by user");
+    } finally {
+      await releaseEnv();
+    }
   });
 
   test("Auto-run OFF finishes the current turn, survives reload, then resumes FIFO", async ({
@@ -582,7 +606,7 @@ test.describe("Task session queue", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(120_000);
     const gateway = watchWs(testPage);
 
     const session = await seedTaskAndWaitForIdle(
@@ -591,6 +615,7 @@ test.describe("Task session queue", () => {
       seedData,
       "Queue edit lease ordering test",
     );
+    await waitForSessionAgentctlReady(testPage, session.sessionId);
     await session.sendMessage("/slow 10s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
     await waitForComposerQueueMode(testPage);

@@ -3,6 +3,7 @@ import type {
   WorkspaceRestorationAttempt,
   WorkspaceRestorationState,
 } from "./workspace-restoration";
+import type { NativeMCPDiagnostic } from "@/lib/prepare/native-mcp-diagnostic";
 
 export type TerminalState = {
   terminals: Array<{ id: string; output: string[] }>;
@@ -57,6 +58,8 @@ export type FileChangeFacet = {
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
   diff_state?: "pending" | "ready" | "unavailable";
+  /** True only on display projections that borrow details from a prior snapshot. */
+  display_stale?: boolean;
 };
 
 export type FileInfo = {
@@ -70,6 +73,8 @@ export type FileInfo = {
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
   diff_state?: "pending" | "ready" | "unavailable";
+  /** True only on display projections that borrow details from a prior snapshot. */
+  display_stale?: boolean;
   staged_change?: FileChangeFacet;
   unstaged_change?: FileChangeFacet;
   /** Frontend-only projection used when one raw path appears in both change sections. */
@@ -141,6 +146,31 @@ export type GitStatusState = {
   refreshByEnvironmentId?: Record<string, GitStatusRefreshState>;
   /** Foreground status recovery keyed by environment and repository scope. */
   refreshByEnvironmentRepo?: Record<string, Record<string, GitStatusRefreshState>>;
+};
+
+export type GitStatusDisplayRepresentation = Pick<
+  FileInfo,
+  "is_symlink" | "additions" | "deletions" | "old_path" | "diff" | "diff_skip_reason"
+>;
+
+export type GitStatusDisplayFile = {
+  flat?: GitStatusDisplayRepresentation;
+  flatLayer?: "faceted" | "staged" | "unstaged";
+  staged?: GitStatusDisplayRepresentation;
+  unstaged?: GitStatusDisplayRepresentation;
+};
+
+export type GitStatusDisplayEntry = {
+  checkoutGeneration: number;
+  branch: string | null;
+  headCommit: string | null;
+  baseCommit: string | null;
+  comparisonTarget: string | null;
+  files: Record<string, GitStatusDisplayFile>;
+};
+
+export type GitStatusDisplayState = {
+  byEnvironmentRepo: Record<string, Record<string, GitStatusDisplayEntry>>;
 };
 
 export type GitStatusRefreshState = {
@@ -236,6 +266,13 @@ export type AvailableCommand = {
   name: string;
   description?: string;
   input_hint?: string;
+  kind?: string;
+  action?: {
+    kind: string;
+    config_id: string;
+    value: string;
+    reset_value: string;
+  };
 };
 
 export type AvailableCommandsState = {
@@ -318,6 +355,13 @@ export type SessionModelsState = {
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
       configOptionsSettled?: boolean;
+      /** Provider-reported config values from the last settled snapshot. */
+      confirmedConfigOptions?: Record<string, string>;
+      confirmedConfigOptionsExecutionId?: string;
+      pendingConfirmedConfigOptions?: {
+        executionId: string;
+        values: Record<string, string>;
+      };
       configBaseline?: Record<string, string>;
       /** Marks the effective selector snapshot restored after explicit recovery. */
       settingsPolicy?: "provider_restored";
@@ -441,6 +485,7 @@ export type PrepareStepInfo = {
   error?: string;
   warning?: string;
   warningDetail?: string;
+  mcpDiagnostic?: NativeMCPDiagnostic;
   startedAt?: string;
   endedAt?: string;
 };
@@ -512,6 +557,8 @@ export type SessionRuntimeSliceState = {
   shell: ShellState;
   processes: ProcessState;
   gitStatus: GitStatusState;
+  /** One runtime-only ready display companion per live environment/repository. */
+  gitStatusDisplay: GitStatusDisplayState;
   /** Maps sessionId → environmentId for workspace state sharing. */
   environmentIdBySessionId: Record<string, string>;
   sessionCommits: SessionCommitsState;
@@ -600,6 +647,14 @@ export type SessionRuntimeSliceActions = {
       currentModelId: string;
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
+      configOptionsSettled?: boolean;
+      /** Provider-reported config values from the last settled snapshot. */
+      confirmedConfigOptions?: Record<string, string>;
+      confirmedConfigOptionsExecutionId?: string;
+      pendingConfirmedConfigOptions?: {
+        executionId: string;
+        values: Record<string, string>;
+      };
       configBaseline?: Record<string, string>;
       settingsPolicy?: "provider_restored";
       /** Set when the session started on the profile's fallback model
@@ -607,6 +662,8 @@ export type SessionRuntimeSliceActions = {
       fallbackModel?: string;
     },
   ) => void;
+  /** Hide a previous execution's provider configuration while startup identity settles. */
+  invalidateConfirmedConfigOptions: (sessionId: string, executionId?: string) => void;
   setSessionMCPStatus: (sessionId: string, history: MCPAttachmentHistory) => void;
   // Prompt usage actions
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;

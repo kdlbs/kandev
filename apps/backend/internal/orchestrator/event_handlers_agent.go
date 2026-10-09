@@ -633,6 +633,17 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	if s.isQueuedDispatchInFlight(data.SessionID) {
 		s.markQueuedDispatchDrainPending(data.SessionID)
 	}
+	if s.resumeAttemptStore().holdsInitialPrompt(data.SessionID, data.AttemptID) {
+		// The owned fresh-start replay has not reached provider acceptance.
+		// Leave orphaned queue entries behind it so they cannot become the first
+		// turn in the replacement conversation.
+		s.logger.Debug("deferring queued-message drain until initial recovery prompt is accepted",
+			zap.String("session_id", data.SessionID),
+			zap.String("attempt_id", data.AttemptID))
+		lock.Unlock()
+		guardLocked = false
+		return
+	}
 	lock.Unlock()
 	guardLocked = false
 	s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)
@@ -836,11 +847,14 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			zap.String("session_state", string(session.State)))
 		return
 	}
-
 	// Snapshot which turn this event reports the completion of *before*
 	// contending for the guard — re-checked below once it's held. See the
 	// function doc comment for the race this closes.
 	turnAtEventFire, turnSnapshotErr := s.peekActiveTurnID(ctx, data.SessionID)
+	if data.TurnID != "" {
+		turnAtEventFire = data.TurnID
+		turnSnapshotErr = nil
+	}
 
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
 	defer release()
@@ -943,7 +957,9 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 				zap.String("session_id", data.SessionID))
 			return
 		}
-		turnAtEventFire, turnSnapshotErr = s.peekActiveTurnID(ctx, data.SessionID)
+		if data.TurnID == "" {
+			turnAtEventFire, turnSnapshotErr = s.peekActiveTurnID(ctx, data.SessionID)
+		}
 	}
 
 	// Re-validate now that the guard is held: a concurrent interrupt (or
@@ -1031,8 +1047,22 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	// Complete the current turn
 	s.reconcileCompletedCIAutoFixTurn(ctx, data.TaskID, data.SessionID, turnAtEventFire)
-	s.completeTurnForSession(ctx, data.SessionID)
-
+	completionCtx := withWorkflowEffect(ctx, workflowEffectForTurn(turnAtEventFire))
+	if turnAtEventFire != "" {
+		if err := s.completeTurnForTaskSessionCheckedOwned(
+			completionCtx, data.TaskID, data.SessionID, turnAtEventFire,
+		); err != nil {
+			s.logger.Warn("failed to complete agent.ready turn",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.String("turn_id", turnAtEventFire),
+				zap.Error(err))
+			return
+		}
+		s.clearAcceptedQueuedDispatch(data.SessionID)
+	} else {
+		s.completeTurnForSession(completionCtx, data.SessionID)
+	}
 	// A move_task_kandev call during this turn deferred the actual move to
 	// avoid racing on_enter against the running turn. Apply it now: the move
 	// is the explicit transition the agent requested, so skip the regular
@@ -1075,7 +1105,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		// Check for workflow transition based on session's current step.
 		// Uses the engine when available; falls back to legacy evaluation.
 		// The ViaEngine method handles setSessionWaitingForInput internally when no transition occurs.
-		transitioned := s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
+		transitioned := s.processOnTurnCompleteViaEngine(completionCtx, data.TaskID, session)
 
 		// When a workflow transition occurred (e.g. Work → Review), the new step's
 		// on_enter actions handle the next prompt (auto_start_agent launches a goroutine).
@@ -1815,6 +1845,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 			promptCtx, dispatchIdentity, queuedMsg, &deliveryAttempted,
 		)
 	}
+	deliveryProtocol, deliverySubmissionID, deliveryPayloadHash := queuedMsg.DeliverySubmission()
 	options := promptTaskOptions{
 		claimEntryID:         claimEntryID,
 		lifecyclePrompt:      lifecyclePrompt,
@@ -1841,6 +1872,14 @@ func (s *Service) executeQueuedMessageWithReservation(
 			} else if managedInputRecorded {
 				s.publishQueueStatusEventForIdentity(promptCtx, identity)
 			}
+		},
+		deliveryProtocol:     deliveryProtocol,
+		deliverySubmissionID: deliverySubmissionID,
+		deliveryPayloadHash:  deliveryPayloadHash,
+		deliveryClaimUpdater: func(updateCtx context.Context, protocol, submissionID, payloadHash string) error {
+			return s.messageQueue.SetPendingQueueDispatchDelivery(
+				updateCtx, queuedMsg, protocol, submissionID, payloadHash,
+			)
 		},
 	}
 	if preparedPromptContent != nil {
@@ -2095,6 +2134,21 @@ func (s *Service) finishQueuedMessageExecution(
 		}
 		return
 	}
+	if isSessionRecoveryRequiredError(err) {
+		if userMessageRecorded {
+			markQueuedUserMessageRecorded(queuedMsg)
+		}
+		s.logger.Info("queued message retained for explicit session recovery",
+			zap.String("session_id", callerSessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID))
+		if reservation != nil && reservation.identity.SessionIncarnationID != "" {
+			s.restoreQueuedMessageForSession(ctx, reservation.identity, queuedMsg)
+		} else {
+			s.restoreQueuedMessage(ctx, queuedMsg)
+		}
+		return
+	}
 	if err != nil {
 		s.handleQueuedMessageExecutionError(
 			ctx, callerSessionID, queuedMsg, reservation, lifecyclePrompt, userMessageRecorded, err,
@@ -2132,7 +2186,10 @@ func (s *Service) handleQueuedMessageExecutionError(
 		len(queuedMsg.Attachments) > 0 &&
 		s.agentManager != nil &&
 		s.agentManager.IsPassthroughSession(ctx, queuedMsg.SessionID)
-	if passthroughAttachmentRecovery || lifecyclePrompt || queuedMsg.IsDurablePlanComment() || errors.Is(err, errLifecyclePromptClaim) ||
+	uncertainDelivery := errors.Is(err, lifecycle.ErrUncertainPromptDelivery)
+	if passthroughAttachmentRecovery ||
+		(!uncertainDelivery && (lifecyclePrompt || queuedMsg.IsDurablePlanComment())) ||
+		errors.Is(err, errLifecyclePromptClaim) ||
 		errors.Is(err, errLifecyclePromptMessagePersistence) ||
 		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery || seam3Refusal ||
 		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) ||
@@ -2577,7 +2634,7 @@ func (s *Service) finishAgentCompleted(
 	guard *lockedCancelInFlightGuard,
 ) {
 	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
-	s.clearDynamicUnclassifiedStreakForEvent(ctx, data, false)
+	s.clearDynamicUnclassifiedStreakForCompletion(ctx, data)
 	// A successful, still-live completion clears retry state and scheduler
 	// ownership only after the guarded terminal/rotation checks above.
 	s.resetTransientRetry(data.SessionID)
@@ -2593,7 +2650,24 @@ func (s *Service) finishAgentCompleted(
 	if !completionFollowUp {
 		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
 	}
-	s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
+	completionCtx := withWorkflowEffect(
+		context.WithoutCancel(ctx), workflowEffectForTurn(data.TurnID),
+	)
+	if data.TurnID != "" {
+		if err := s.completeTurnForTaskSessionCheckedOwned(
+			completionCtx, data.TaskID, data.SessionID, data.TurnID,
+		); err != nil {
+			s.logger.Warn("ignoring agent.completed for superseded turn",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.String("turn_id", data.TurnID),
+				zap.Error(err))
+			go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
+			return
+		}
+	} else {
+		s.completeTurnForSession(completionCtx, data.SessionID)
+	}
 
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
 		s.logger.Info("deferring on_turn_complete on agent.completed while clarification is pending",
@@ -2609,7 +2683,7 @@ func (s *Service) finishAgentCompleted(
 
 	transitioned := !completionFollowUp &&
 		!s.drainQueuedBeforeWorkflowTransition(ctx, data.TaskID, data.SessionID, session) &&
-		s.processOnTurnCompleteViaEngine(ctx, data.TaskID, session)
+		s.processOnTurnCompleteViaEngine(completionCtx, data.TaskID, session)
 	s.finishAgentCompletedTurn(ctx, data, session, transitioned, completionFollowUp, guard)
 }
 
@@ -2737,6 +2811,20 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 // handleAgentFailedLocked reconciles a failure under the session guard and returns
 // recovery work that must run after that guard is released.
 func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.AgentEventData) func(context.Context) {
+	if s.consumeParkedProfileSwitchStopIntent(ctx, data, nil) ||
+		s.hasExecutionTeardownOwner(data.SessionID, data.AgentExecutionID) {
+		// A claimed teardown owns this execution; its stream closure cannot
+		// create a session failure.
+		s.markExecutionFailed(data.SessionID, data.AgentExecutionID)
+		s.retireExecutionActivityAndPublish(
+			context.WithoutCancel(ctx), data.TaskID, data.SessionID, data.AgentExecutionID,
+		)
+		s.logger.Debug("ignoring agent.failed for explicitly owned teardown",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID))
+		return nil
+	}
 	data = s.withPromptAttemptEvidence(data)
 	defer s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
 	s.logger.Warn("handling agent failed",
@@ -2881,8 +2969,16 @@ func (s *Service) claimExecutionTeardown(
 	sessionID, executionID string,
 	intent executionTeardownIntent,
 ) bool {
+	_, claimed := s.claimExecutionTeardownWithToken(sessionID, executionID, intent)
+	return claimed
+}
+
+func (s *Service) claimExecutionTeardownWithToken(
+	sessionID, executionID string,
+	intent executionTeardownIntent,
+) (executionTeardownClaim, bool) {
 	if sessionID == "" || executionID == "" {
-		return false
+		return executionTeardownClaim{}, false
 	}
 	key := terminalExecutionKey(sessionID, executionID)
 	for {
@@ -2896,7 +2992,7 @@ func (s *Service) claimExecutionTeardown(
 			time.AfterFunc(completedExecutionRetention, func() {
 				s.deleteExecutionTeardownClaimIfExpired(key, claim.expiresAt)
 			})
-			return true
+			return claim, true
 		}
 		current, ok := value.(executionTeardownClaim)
 		if !ok {
@@ -2904,7 +3000,7 @@ func (s *Service) claimExecutionTeardown(
 			continue
 		}
 		if now.Before(current.expiresAt) {
-			return false
+			return executionTeardownClaim{}, false
 		}
 		if s.executionTeardownClaims.CompareAndDelete(key, current) {
 			continue
@@ -2937,11 +3033,33 @@ func (s *Service) releaseExecutionTeardownClaim(sessionID, executionID string) {
 // with coordinator cancellation. The caller performs blocking cleanup only
 // after this method releases the per-session guard.
 func (s *Service) claimForcedExecutionCleanup(sessionID, executionID string) bool {
+	_, claimed := s.claimForcedExecutionCleanupWithToken(sessionID, executionID)
+	return claimed
+}
+
+func (s *Service) claimForcedExecutionCleanupWithToken(
+	sessionID, executionID string,
+) (executionTeardownClaim, bool) {
+	return s.claimForcedExecutionCleanupWithValidation(sessionID, executionID, nil)
+}
+
+func (s *Service) claimForcedExecutionCleanupWithValidation(
+	sessionID, executionID string,
+	validate func() bool,
+) (executionTeardownClaim, bool) {
+	return s.claimForcedExecutionCleanupWithValidationAndClaimed(sessionID, executionID, validate, nil)
+}
+
+func (s *Service) claimForcedExecutionCleanupWithValidationAndClaimed(
+	sessionID, executionID string,
+	validate func() bool,
+	onClaimed func(),
+) (executionTeardownClaim, bool) {
 	if executionID == "" {
-		return false
+		return executionTeardownClaim{}, false
 	}
 	if sessionID == "" {
-		return true
+		return executionTeardownClaim{}, true
 	}
 	for {
 		if s.isCancelInFlight(sessionID) {
@@ -2949,7 +3067,7 @@ func (s *Service) claimForcedExecutionCleanup(sessionID, executionID string) boo
 			// the cancellation owner has completed its lifecycle and reconciliation
 			// so a cancellation cannot strand the execution teardown.
 			if err := s.waitForCancelInFlight(context.Background(), sessionID); err != nil {
-				return false
+				return executionTeardownClaim{}, false
 			}
 			continue
 		}
@@ -2960,14 +3078,22 @@ func (s *Service) claimForcedExecutionCleanup(sessionID, executionID string) boo
 			release()
 			continue
 		}
-		claimed := s.claimExecutionTeardown(
+		if validate != nil && !validate() {
+			lock.Unlock()
+			release()
+			return executionTeardownClaim{}, false
+		}
+		claim, claimed := s.claimExecutionTeardownWithToken(
 			sessionID,
 			executionID,
 			executionTeardownIntentForce,
 		)
+		if claimed && onClaimed != nil {
+			onClaimed()
+		}
 		lock.Unlock()
 		release()
-		return claimed
+		return claim, claimed
 	}
 }
 
@@ -3759,7 +3885,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	}
 	if meta["failure_kind"] == failureKindProviderInterrupted &&
 		(data.RecoveryDisposition == "" || data.RecoveryDisposition == recoveryDispositionManual) &&
-		(data.RecoveryMode == recoveryModeContinue || (classified.Code == routingerr.CodeAgentTransportLost &&
+		(data.RecoveryMode == recoveryModeContinue || (routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) == routingerr.DecisionShortRetry &&
 			(data.OutputObserved || data.EffectObserved || !data.EvidenceKnown))) {
 		meta["recovery_reason"] = s.continuationRefusalReason(ctx, data)
 	}

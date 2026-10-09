@@ -140,6 +140,20 @@ available. The Stats page retries failed sections and keeps successful sections
 visible. If `persistence_unavailable` appears instead, inspect the persistence
 diagnostic because a required store failed its health check.
 
+## Local agent runtime recovery
+
+Kandev can replace a failed local agent runtime without restarting the backend.
+Keep the page open during recovery. Existing route data stays available in the
+browser. If automatic recovery stops, an administrator can select **Retry agent
+runtime** in the alert. This action does not restart Kandev.
+
+A session with an uncertain prompt outcome stays blocked after runtime recovery.
+Use that session's recovery card to reconnect or stop the original work. **Retry
+connection** checks the existing delivery and does not send the prompt again.
+Kandev keeps the composer blocked until it can confirm the delivery outcome. A
+Stop request does not prove cancellation; if Kandev cannot reach the original
+process, the card reports that the outcome is still unknown.
+
 ![Settings > System > Status showing health checks, the running version, and disk usage.](../screenshots/system-status.png)
 
 For a managed service, also check its process manager:

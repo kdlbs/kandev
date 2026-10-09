@@ -2,6 +2,7 @@
 status: active
 system: ui
 created: 2026-07-27
+updated: 2026-10-05
 owners:
   - kandev
 ---
@@ -27,6 +28,7 @@ People working inside a task need to find code by what it says, not only by its 
 - **AC-UI-TASK-WORKSPACE-CONTENT-SEARCH-001.6:** File-name and path search covers every repository materialized for the active task. Multi-repository results use task-root-relative, repository-prefixed paths so same-named files remain distinguishable and open in the correct repository. The palette groups those matches by repository and shows paths relative to each group.
 - **AC-UI-TASK-WORKSPACE-CONTENT-SEARCH-001.7:** For both **Files** and **Contents**, a Git workspace root remains searchable when initialized submodules add named repository scopes. Root matches retain the empty repository identity while child matches retain their task-root-relative scope names. A bare task directory containing sibling repositories is not treated as an additional repository.
 - **AC-UI-TASK-WORKSPACE-CONTENT-SEARCH-001.8:** Search covers every repository materialized for the active task session. Tracked files and untracked, non-ignored files are eligible; ignored files, directories, and workspace metadata are not.
+- **AC-UI-TASK-WORKSPACE-CONTENT-SEARCH-001.9:** For every eligible file whose name is supported by the task filesystem and is valid UTF-8, Files and Contents shall preserve its exact repository-relative identity, including Unicode, leading or trailing whitespace, literal quotes, tabs, and newlines. Filename presentation or encoding shall not turn the result into a different path or hide an otherwise matching file. Aggregate results shall retain the existing repository identity and path-prefix conventions, so selecting a result reads that repository's exact file even when another repository contains the same relative path. Git's filename-quoting preference shall not affect eligibility or identity.
 
 ## Migrated source detail
 
@@ -234,3 +236,8 @@ repositories without parsing path strings.
 - Persistent editor markers or highlighting every fuzzy-match character in the
   source line.
 - A persistent full-text index or external search service.
+
+## Related design and delivery
+
+- [Task workspace content search design](../system-design/task-workspace-content-search.md)
+- [Exact workspace search filenames plan](../../../plans/exact-workspace-search-filenames/plan.md)

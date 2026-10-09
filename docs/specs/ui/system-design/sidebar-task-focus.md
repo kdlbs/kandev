@@ -33,19 +33,19 @@ identity and never creates a second selection model.
 
 `TaskItem` in `apps/web/components/task/task-item.tsx` owns the row classes and
 the leading `SelectionBar`. An active row uses a stronger primary-tinted
-surface with a 1px primary-accent border on the top and bottom edges only,
-equivalent to:
+surface without a border, equivalent to:
 
 ```text
-border-y border-primary/50 bg-primary/15 hover:bg-primary/20
+bg-primary/15 hover:bg-primary/20
 ```
 
 When `useTaskColor` returns a supported color, `SelectionBar` renders that task
 color as the leading marker and preserves its existing active and inactive
 opacity. When no supported task color is assigned, `SelectionBar` renders
-nothing. The primary-tinted surface and horizontal borders keep the active state
-legible without adding a default left status marker or side borders. Inactive
-rows retain their current hover treatment and marker opacity.
+nothing. The primary-tinted surface keeps the active state legible without adding
+a default left status marker or border. Inactive rows have a transparent base,
+preserving their hover treatment and marker opacity. Plain rows follow the
+[navigation hierarchy design](navigation-hierarchy.md).
 
 The existing `data-active="true"` and `aria-current` attributes remain on the
 active row. Multi-selection continues to use its existing background and ring
@@ -60,9 +60,8 @@ The desktop path is `AppSidebar` → `TasksSection` → `TaskSessionSidebar` →
 The mobile path is `SessionTaskSwitcherSheet` → `MobileTaskList` → the same
 `TaskSwitcher` and `TaskItem`. No mobile-only markup, state, scroll owner, or
 touch target is needed for this styling-only change. The mobile row remains an
-existing primary tap target inside the sheet, and the background and horizontal
-borders stay inside the row bounds so they cannot create document-level
-horizontal overflow.
+existing primary tap target inside the sheet, and the background stays inside
+the row bounds so it cannot create document-level horizontal overflow.
 
 ## Data and persistence
 
@@ -74,14 +73,14 @@ the only inputs to the treatment.
 
 If no task is active, rows retain their current inactive appearance. If a task
 color is missing or invalid, no leading marker is rendered and the active row
-uses only its background and horizontal border treatment. Theme tokens are used
+uses only its background treatment. Theme tokens are used
 for the active surface, so light and dark themes do not require separate row
 state.
 
 ## Verification
 
 The existing desktop sidebar-open flow shall verify the active row's
-`data-active` state, background, top-and-bottom-only border treatment, and
+`data-active` state, background, absence of row borders, and
 absence of a leading marker when no task color is assigned. The mobile sidebar
 task-action flow shall verify the same treatment inside the task-switcher sheet,
 including the no-color marker rule, and retain its viewport-overflow assertion.

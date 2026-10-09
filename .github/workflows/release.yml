@@ -22,6 +22,7 @@ name: release
 #  11. publish-npm       — publish kandev@X.Y.Z + @kdlbs/runtime-*@X.Y.Z to npmjs
 #  12. update-homebrew-tap — push updated Formula/kandev.rb to kdlbs/homebrew-kandev
 #  13. update-scoop-bucket — push updated bucket/kandev.json to kdlbs/scoop-kandev
+#  14. notify-contributors — optional notices after every Stable channel succeeds
 #
 # npm publishing uses Trusted Publishers (OIDC) — no NPM_TOKEN required.
 # Each package (kandev + 5 @kdlbs/runtime-* packages) must have this workflow
@@ -41,6 +42,13 @@ name: release
 #   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID or APPLE_API_KEY / APPLE_API_ISSUER / APPLE_API_KEY_P8 — macOS notarization
 #   WINDOWS_CERTIFICATE / WINDOWS_CERTIFICATE_PASSWORD — Windows installer signing
 #   TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD — updater artifact signing
+# Optional configuration for a signed Windows runtime bundle. Incomplete
+# inputs publish an unsigned bundle instead of failing the release.
+# A test-signing policy is honoured only on desktop_validation_only runs, and
+# the nightly channel is never signed: release signing needs a manual approval
+# per request (a SignPath Foundation requirement).
+#   SIGNPATH_API_TOKEN — secret holding the SignPath CI user token
+#   SIGNPATH_ORGANIZATION_ID / SIGNPATH_PROJECT_SLUG / SIGNPATH_SIGNING_POLICY_SLUG — variables identifying the signing policy
 
 on:
   schedule:
@@ -77,6 +85,10 @@ on:
         required: false
         default: ""
         type: string
+      notify_contributors:
+        description: "Notify external contributors after every Stable channel succeeds"
+        type: boolean
+        default: false
 
 # A Stable tag is pushed before its npm job is ready. Serializing whole runs
 # prevents a Nightly from using the previous npm baseline during that window.
@@ -1061,6 +1073,100 @@ jobs:
           LDFLAGS="-s -w -X main.Version=${KANDEV_VERSION} -X main.Commit=${COMMIT} -X main.BuildTime=${BUILD_TIME}"
           go build -trimpath -buildvcs=false -tags fts5 -ldflags "${LDFLAGS}" -o bin/kandev${EXT} ./cmd/kandev
           go build -trimpath -buildvcs=false -ldflags "${LDFLAGS}" -o bin/agentctl${EXT} ./cmd/agentctl
+
+      # Signing runs here, before packaging, so the published archives contain
+      # signed binaries. SignPath signs remotely, so Windows keeps
+      # cross-compiling on Linux; the binaries are uploaded as a workflow
+      # artifact so SignPath can verify the build's origin.
+      - name: Detect SignPath signing inputs
+        if: matrix.goos == 'windows'
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+        run: |
+          set -euo pipefail
+          # A token without the variables would hand the signing action empty
+          # inputs and fail the release rather than fall back to an unsigned
+          # build, so the guard requires all four together. A test-signing
+          # policy is only honoured when nothing is published: its certificate
+          # is not trusted by Windows, so a published bundle stays unsigned
+          # rather than carrying an untrusted signature. Nightlies are never
+          # signed: every release signing request needs a manual approval.
+          purpose="${{ needs.nightly-prepare.result == 'success' && 'nightly' || inputs.desktop_validation_only && 'validate' || 'publish' }}"
+          status=0
+          reason="$(bash scripts/release/signpath-signing-ready.sh "$purpose" 2>&1 >/dev/null)" || status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "SIGNPATH_SIGNING_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "SIGNPATH_SIGNING_ENABLED=false" >> "$GITHUB_ENV"
+            if [ "$status" -eq 2 ]; then
+              echo "::warning::${reason} Publishing an unsigned Windows runtime bundle."
+            else
+              echo "::notice::${reason} Publishing an unsigned Windows runtime bundle."
+            fi
+          fi
+
+      # upload-artifact reduces multiple paths to their least common ancestor,
+      # so the stored ZIP holds kandev.exe and agentctl.exe at its root, not
+      # under apps/backend/bin. The SignPath artifact configuration has to
+      # match that shape: <zip-file> containing the two <pe-file> entries by
+      # bare name. The bundle has no other PE files: the remote agentctl
+      # helpers are built for linux and darwin only.
+      #
+      # SignPath reads the workflow run and downloads this artifact with the
+      # job's GITHUB_TOKEN. That needs no `actions: read` grant while the
+      # repository is public; a private fork would have to add one.
+      - name: Upload unsigned Windows binaries
+        id: unsigned-windows-binaries
+        if: matrix.goos == 'windows' && env.SIGNPATH_SIGNING_ENABLED == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned-windows-binaries
+          path: |
+            apps/backend/bin/kandev.exe
+            apps/backend/bin/agentctl.exe
+
+      - name: Sign Windows runtime binaries
+        id: signpath
+        if: matrix.goos == 'windows' && env.SIGNPATH_SIGNING_ENABLED == 'true' && steps.unsigned-windows-binaries.outcome == 'success'
+        # Best effort: the Foundation approves every release signing request by
+        # hand, so a request can outlive any timeout. A failure here must not
+        # fail the job; the tag is already pushed and unsigned is the fallback.
+        continue-on-error: true
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned-windows-binaries.outputs.artifact-id }}
+          wait-for-completion: true
+          # An hour covers a maintainer approving during working hours; the
+          # action's default of 600 s does not.
+          wait-for-completion-timeout-in-seconds: 3600
+          # Failed extraction must leave the unsigned build intact.
+          output-artifact-directory: ${{ runner.temp }}/signpath-signed
+
+      - name: Report incomplete signing
+        if: matrix.goos == 'windows' && env.SIGNPATH_SIGNING_ENABLED == 'true' && steps.signpath.outcome != 'success'
+        run: echo "::warning::SignPath signing did not complete (approval still pending, or the upload or signing step failed); publishing the Windows runtime bundle unsigned."
+
+      # Adopt only a complete signed pair, with executable modes restored.
+      - name: Restore execute bits on signed binaries
+        if: matrix.goos == 'windows' && steps.signpath.outcome == 'success'
+        run: |
+          set -euo pipefail
+          signed_dir="$RUNNER_TEMP/signpath-signed"
+          if [ -f "$signed_dir/kandev.exe" ] && [ -s "$signed_dir/kandev.exe" ] &&
+             [ -f "$signed_dir/agentctl.exe" ] && [ -s "$signed_dir/agentctl.exe" ]; then
+            install -m 0755 "$signed_dir/kandev.exe" apps/backend/bin/kandev.exe
+            install -m 0755 "$signed_dir/agentctl.exe" apps/backend/bin/agentctl.exe
+          else
+            echo "::warning::SignPath returned an incomplete binary pair; publishing the original unsigned Windows runtime bundle."
+          fi
 
       - name: Package bundle
         env:
@@ -2993,3 +3099,27 @@ jobs:
           bash scripts/release/update-scoop-bucket.sh \
             "${{ needs.prepare.outputs.version }}" \
             "${{ needs.prepare.outputs.tag }}"
+
+  notify-contributors:
+    name: Notify release contributors
+    needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket]
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        inputs.notify_contributors &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.publish-release.result == 'success' &&
+        needs.publish-npm.result == 'success' &&
+        needs.update-homebrew-tap.result == 'success' &&
+        needs.update-scoop-bucket.result == 'success'
+      }}
+    uses: ./.github/workflows/notify-release-contributors.yml
+    with:
+      release_tag: ${{ needs.prepare.outputs.tag }}
+      dry_run: false
+    permissions:
+      contents: read
+      pull-requests: write

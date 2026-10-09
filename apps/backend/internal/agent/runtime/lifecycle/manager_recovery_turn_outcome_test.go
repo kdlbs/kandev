@@ -7,9 +7,11 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // fakeTurnOutcomeBackend embeds *MockExecutor so it satisfies ExecutorBackend
@@ -34,12 +36,12 @@ type fakeTurnOutcomeBackend struct {
 	publishedCountsAtAck []int
 }
 
-func (f *fakeTurnOutcomeBackend) fetchTurnOutcomeWithRetry(_ context.Context, instanceID string) (*agentctl.TurnOutcome, error) {
+func (f *fakeTurnOutcomeBackend) fetchTurnOutcomeForEpoch(_ context.Context, instanceID string, _ uint64) (*agentctl.TurnOutcome, error) {
 	f.fetchCalls = append(f.fetchCalls, instanceID)
 	return f.outcome, f.fetchErr
 }
 
-func (f *fakeTurnOutcomeBackend) ackTurnOutcome(_ context.Context, instanceID string, turnID int64) error {
+func (f *fakeTurnOutcomeBackend) ackTurnOutcomeForEpoch(_ context.Context, instanceID string, turnID int64, _ uint64) error {
 	f.ackedCalls = append(f.ackedCalls, ackedTurnOutcome{instanceID: instanceID, turnID: turnID})
 	if f.eventBus != nil {
 		f.publishedCountsAtAck = append(f.publishedCountsAtAck, len(f.eventBus.PublishedEvents))
@@ -227,6 +229,73 @@ func TestApplyRecoveredTurnOutcomeDedupesLiveRedelivery(t *testing.T) {
 	}
 }
 
+func TestRuntimeReplacementReplaysTerminalOnce(t *testing.T) {
+	owner := agentctl.NewRuntimeOwner(nil, newTestLogger(), "replacement-boot")
+	t.Cleanup(owner.Stop)
+	prior, err := owner.PrepareBinding()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := prior.Configure("127.0.0.1", 41001, "prior-secret", 1, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := prior.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if !owner.MarkUnavailableEpoch(prior.Epoch(), agentctl.AvailabilityReasonAgentctlExited) {
+		t.Fatal("retire prior runtime")
+	}
+	successor, err := owner.PrepareBinding()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := successor.Configure("127.0.0.1", 41002, "successor-secret", 2, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := successor.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := owner.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := lease.NewBoundInstanceClient(41003, newTestLogger())
+	lease.Close()
+
+	outcome := &agentctl.TurnOutcome{
+		TurnID: 21,
+		Event:  streams.AgentEvent{Type: streams.EventTypeComplete, PromptGeneration: 8},
+	}
+	backend := &fakeTurnOutcomeBackend{MockExecutor: &MockExecutor{name: executor.NameStandalone}, outcome: outcome}
+	manager, eventBus := newTurnOutcomeTestManager(t, backend)
+	manager.SetRuntimeOwner(owner)
+	execution := createTestExecution("replacement-execution", "task-1", "session-1")
+	execution.runtimeEpoch = successor.Epoch()
+	if err := manager.executionStore.Add(execution); err != nil {
+		t.Fatalf("add recovered execution: %v", err)
+	}
+	backend.eventBus = eventBus
+	ri := &ExecutorInstance{RuntimeName: executor.NameStandalone, StandaloneInstanceID: "instance-1", Client: client}
+	recovered, disposition := manager.retrieveRecoveredTurnOutcome(context.Background(), ri)
+	if disposition != recoveredTurnOutcomeApplied || recovered != outcome {
+		t.Fatalf("recovered outcome = %p, disposition=%v; want retained terminal", recovered, disposition)
+	}
+	manager.applyRecoveredTurnOutcome(context.Background(), execution, ri, recovered)
+	readyAfterReplay := countEventType(eventBus.PublishedEvents, events.AgentReady)
+	if readyAfterReplay != 1 {
+		t.Fatalf("agent.ready count after retained terminal replay = %d, want 1", readyAfterReplay)
+	}
+	redelivered := outcome.Event
+	redelivered.ControlTurnID = outcome.TurnID
+	manager.handleAgentEvent(execution, redelivered)
+	if got := countEventType(eventBus.PublishedEvents, events.AgentReady); got != readyAfterReplay {
+		t.Fatalf("agent.ready count after live terminal redelivery = %d, want %d", got, readyAfterReplay)
+	}
+	if len(backend.ackedCalls) != 1 {
+		t.Fatalf("terminal acknowledgement count = %d, want 1", len(backend.ackedCalls))
+	}
+}
+
 func countEventType(published []*bus.Event, eventType string) int {
 	count := 0
 	for _, evt := range published {
@@ -247,6 +316,66 @@ func TestPublishRecoveredExecutionRunningPublishesAgentRunning(t *testing.T) {
 
 	if !hasEventType(eventBus.PublishedEvents, events.AgentRunning) {
 		t.Fatal("expected agent.running to be published")
+	}
+}
+
+func TestPublishRecoveredExecutionReadySettlesIdleDurableRecovery(t *testing.T) {
+	mgr, eventBus := newTurnOutcomeTestManagerPlain(t)
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.recoveredPromptGenerationPending.Store(true)
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.publishRecoveredExecutionReady(context.Background(), execution)
+
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("status = %q, want ready", execution.Status)
+	}
+	if execution.recoveredPromptGenerationPending.Load() {
+		t.Fatal("idle recovered execution retained pending prompt-generation state")
+	}
+	if !hasEventType(eventBus.PublishedEvents, events.AgentReady) {
+		t.Fatal("expected agent.ready to be published")
+	}
+}
+
+func TestDurableRecoveryHasPendingWork(t *testing.T) {
+	tests := []struct {
+		name      string
+		execution *AgentExecution
+		want      bool
+	}{
+		{name: "nil", execution: nil, want: false},
+		{name: "empty descriptor", execution: &AgentExecution{}, want: false},
+		{
+			name: "replay suffix",
+			execution: &AgentExecution{
+				DeliveryDescriptor:   &agentctl.DeliveryStatus{Stream: &journal.Stream{HighWater: 3}},
+				DeliveryReplayCursor: 2,
+			},
+			want: true,
+		},
+		{
+			name: "projected idle",
+			execution: &AgentExecution{
+				DeliveryDescriptor:   &agentctl.DeliveryStatus{Stream: &journal.Stream{HighWater: 3}},
+				DeliveryReplayCursor: 3,
+			},
+			want: false,
+		},
+		{
+			name:      "active submission",
+			execution: &AgentExecution{deliverySubmissionID: "prompt:active"},
+			want:      true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := durableRecoveryHasPendingWork(test.execution); got != test.want {
+				t.Fatalf("durableRecoveryHasPendingWork = %t, want %t", got, test.want)
+			}
+		})
 	}
 }
 

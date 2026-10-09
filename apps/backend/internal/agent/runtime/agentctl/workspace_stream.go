@@ -54,10 +54,15 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 		return nil, fmt.Errorf("workspace stream already connected")
 	}
 	c.mu.Unlock()
+	streamCtx, cancel, err := c.RuntimeBoundContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	const wsRoute = "/api/v1/workspace/stream"
-	conn, _, err := c.dialWebSocket(ctx, wsRoute, c.wsAuthHeaders())
+	conn, _, err := c.dialWebSocket(streamCtx, wsRoute, c.wsAuthHeaders())
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to connect to workspace stream: %w", err)
 	}
 
@@ -75,6 +80,7 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 	if c.closed {
 		c.mu.Unlock()
 		_ = conn.Close()
+		cancel()
 		return nil, fmt.Errorf("agentctl client closed during workspace stream dial")
 	}
 	// Re-check after dial: two concurrent StreamWorkspace callers can both pass
@@ -83,6 +89,7 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 	if c.workspaceStreamConn != nil {
 		c.mu.Unlock()
 		_ = conn.Close()
+		cancel()
 		return nil, fmt.Errorf("workspace stream already connected")
 	}
 	// Track both goroutines on the per-stream wg so WorkspaceStream.Wait can
@@ -101,6 +108,7 @@ func (c *Client) StreamWorkspace(ctx context.Context, callbacks WorkspaceStreamC
 
 	go func() {
 		defer stream.wg.Done()
+		defer cancel()
 		c.readWorkspaceStream(conn, stream, callbacks)
 	}()
 	go func() {

@@ -1,7 +1,6 @@
 import type { StoreApi } from "zustand";
 import { listAgents } from "@/lib/api";
 import { getBackendConfig } from "@/lib/config";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { AppState } from "@/lib/state/store";
 
 const AGENT_LIST_RETRY_DELAYS_MS = [100, 250, 500, 1_000] as const;
@@ -144,14 +143,8 @@ export class AgentListResourceScope {
     this.listeners.forEach((listener) => listener());
   }
 
-  private apply(response: AgentListResponse): void {
-    const state = this.store.getState();
-    state.setSettingsAgents(response.agents);
-    state.setAgentProfiles(
-      response.agents.flatMap((agent) =>
-        agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-      ),
-    );
+  private apply(response: AgentListResponse, profileVersion: number): boolean {
+    return this.store.getState().applyAgentListSnapshot(response.agents, profileVersion);
   }
 
   private startRead(): Promise<AgentListResponse> {
@@ -169,7 +162,10 @@ export class AgentListResourceScope {
           if (this.flight === flight) this.flight = null;
           return this.startRead();
         }
-        this.apply(response);
+        if (!this.apply(response, profileVersion)) {
+          if (this.flight === flight) this.flight = null;
+          return this.startRead();
+        }
         this.publish({ response, profileVersion, loading: false, loaded: true, error: null });
         return response;
       })

@@ -280,6 +280,12 @@ them first leaves an uncompilable tree.
 
 Done. Commands run from the repository root.
 
+Subsequent pinned-prompt integration supersedes Acceptance 1's zero-projection
+outcome: the core latest-prompt projection remains for
+[REQ-UI-PINNED-PROMPT-AVAILABILITY-001](../../specs/ui/requirements/pinned-prompt-availability.md),
+while this work order's built-in Prompt History surface and older-page loader
+remain removed. The verification below records Task 02 before that integration.
+
 ```bash
 (cd apps/web && pnpm exec vitest run \
   lib/turn-duration.test.ts \

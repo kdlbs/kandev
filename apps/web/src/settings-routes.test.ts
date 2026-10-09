@@ -113,7 +113,8 @@ describe("buildSettingsInitialStateForRoute", () => {
 
       expect(state.workspaces).toEqual({ items: [], activeId: null });
       expect(state.executors).toEqual({ items: [] });
-      expect(state.agentProfiles).toEqual({ items: [], version: 0 });
+      expect(state.agentProfiles?.items).toEqual([]);
+      expect(state.agentProfiles?.version).toBe(0);
       expect(state.settingsAgents).toEqual({ items: [] });
       expect(state.agentDiscovery).toEqual({ items: [], loading: false, loaded: true });
       expect(state.availableAgents).toEqual({

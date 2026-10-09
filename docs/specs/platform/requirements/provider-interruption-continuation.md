@@ -2,6 +2,7 @@
 status: active
 system: platform
 created: 2026-10-02
+updated: 2026-10-08
 owners:
   - Kandev
 ---
@@ -18,12 +19,18 @@ transitions.
 
 This extends [Provider Error Recovery](provider-error-recovery.md) with a
 separate continuation contract. Its original-prompt replay fence remains in
-criteria `.8` and `.15`; eligible post-output recovery uses the experimental,
-default-off continuation path described here.
+criteria `.8` and `.15`; eligible post-output recovery uses the normal
+continuation path described here, without an installation opt-in.
 
-Continuation permits output or confirmed read-only work. Writes and uncertain
-tool outcomes require manual recovery. The user requires the current Cursor ACP
-session ID; accepting recovery does not authorize repeated side effects.
+Continuation permits output and successfully completed foreground tools,
+including shell, write, and MCP tools. Pending or uncertain tool outcomes require
+manual recovery. The same Cursor conversation receives the internal prompt
+`continue`; that prompt does not appear in Kandev chat history. Continuation does
+not authorize original-prompt replay or promise exactly-once agent actions.
+
+These restrictions govern transport-loss continuation and native restoration.
+The separate [capacity contract](transient-turn-runtime-continuity.md#req-platform-turn-continuity-003-continue-after-model-capacity-errors) permits completed effects on the same usable runtime.
+It does not authorize restoration or original-prompt replay after those effects.
 
 ## Terminology
 
@@ -33,41 +40,41 @@ session ID; accepting recovery does not authorize repeated side effects.
 - **Recovery episode:** The original interruption and its automatic recovery
   attempts, ending on successful turn completion, cancellation, supersession,
   exhaustion, or a refusal to proceed.
-- **Confirmed read-only work:** A supported provider positively identifies a
-  tool as read-only and records its completed outcome. A display title or
-  a command that appears harmless does not establish this property.
+- **Completed foreground work:** Every observed foreground tool has an
+  unambiguous provider-reported successful completion. Completion says that
+  the tool finished; it does not say that the action is safe to repeat.
 
 ## Requirements
 
 ### REQ-PLATFORM-INTERRUPTION-CONTINUATION-001: Safe conversation continuation
 
-**Intent:** Temporary provider disconnections should not require intervention
+**Intent:** Temporary provider failures should not require intervention
 when conversation restoration and the interrupted work are unambiguous.
 
 #### Acceptance criteria
 
-- **AC-PLATFORM-INTERRUPTION-CONTINUATION-001.1:** On an enabled installation,
-  a current, high-confidence transient connection failure in a supported
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-001.1:** A current,
+  high-confidence short-retryable provider failure in a supported
   concrete-profile task session shall permit continuation after assistant or
-  thought output when the provider conversation is restorable and no tool has
-  unknown or state-changing effects. Unsupported providers, passthrough,
+  thought output when the provider conversation is restorable and all foreground
+  tool outcomes are known and successful. Unsupported providers, passthrough,
   dynamic routing, Office, and utility invocations shall retain their existing
   policies.
 - **AC-PLATFORM-INTERRUPTION-CONTINUATION-001.2:** A turn containing only
-  confirmed, completed read-only tools shall be eligible. Pending, failed,
-  cancelled, unknown, malformed, or conflicting tool outcomes, any write,
-  shell command, MCP invocation, background work, subagent, or unresolved
-  permission shall require manual recovery. Missing or stale evidence shall
-  never authorize continuation.
+  successfully completed foreground tools shall be eligible regardless of
+  tool category, including writes, shell commands, and MCP invocations.
+  Pending, failed, cancelled, unknown, malformed, or conflicting outcomes,
+  active background work, subagents, and unresolved permissions shall require
+  manual recovery. A turn with both a completed tool and an unresolved tool
+  shall be refused. Missing or stale evidence shall never authorize continuation.
 - **AC-PLATFORM-INTERRUPTION-CONTINUATION-001.3:** Automatic continuation shall
   preserve the task session, workspace, provider conversation, selected
   execution profile, model, mode, and permission settings. It shall retain
   the transcript and tool results already persisted by Kandev. The
   [runtime continuity contract](transient-turn-runtime-continuity.md) preserves
   a proven usable runtime; otherwise, restore the provider's saved history
-  under the same native session ID. Permit confirmed
-  read-only inspection when interrupted read results are absent. It shall send
-  a continuation instruction instead
+  under the same native session ID. It shall send
+  the exact context-independent prompt `continue` instead
   of the original prompt or its attachments, and never silently create a fresh
   conversation or switch providers. Failed restoration shall preserve the
   saved conversation identity.
@@ -80,6 +87,18 @@ when conversation restoration and the interrupted work are unambiguous.
   that resumes output before settlement shall not start a second recovery
   loop. Ambiguous continuation-prompt acceptance shall require manual recovery
   rather than resending the continuation.
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-001.6:** Automatic `continue`
+  shall be an internal dispatch, absent from user-message rows, live chat,
+  paginated history, reload, other viewers, and desktop or phone prompt history.
+  An explicit user-authored message containing `continue` shall remain visible.
+  Recovery status, accepted-turn identity, attempts, and agent output shall
+  remain observable.
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-001.7:** Supported short-retryable
+  resource exhaustion and provider availability failures shall use the same
+  continuation admission and episode owner as transport interruptions. Their
+  presentation shall retain the actual condition and shall not claim that a
+  connection dropped without transport evidence. Hard quota/authentication
+  errors and unknown diagnostics shall not enter this path.
 
 ### REQ-PLATFORM-INTERRUPTION-CONTINUATION-002: Bounded recovery ownership
 
@@ -112,12 +131,19 @@ bounded and subordinate to user actions.
   successful task completion, advance a workflow, drain queued work ahead of
   recovery, or complete a CI-fix outcome. Normal successful continuation shall
   return to existing completion processing exactly once.
-- **AC-PLATFORM-INTERRUPTION-CONTINUATION-002.5:** The release toggle shall be
-  off in all shipped profiles initially. Disabled installations shall retain
-  existing replay and manual-recovery behavior without collecting new
-  continuation evidence, dispatching continuation, or advertising it as an
-  available automatic operation. Operators shall enable it on a selected
-  installation with the existing runtime-toggle precedence and restart rules.
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-002.5:** Supported interruption
+  continuation shall be available in every shipped profile without enabling a
+  feature toggle or setting an environment variable. Former configuration
+  values and stored overrides, including false values, shall not disable it.
+  Continuation shall still require the safety and ownership evidence in
+  criteria `001.1` through `001.5`.
+- **AC-PLATFORM-INTERRUPTION-CONTINUATION-002.6:** Feature Toggles and the
+  public feature-state response shall omit
+  `features.providerInterruptionContinuation`. Its former key and environment
+  variable shall remain permanently reserved against reuse. Upgrade shall
+  preserve existing conversations and stored overrides without rewriting
+  history or redispatching an interrupted turn solely because recovery is now
+  available by default.
 
 ### REQ-PLATFORM-INTERRUPTION-CONTINUATION-003: Accurate recovery feedback
 
@@ -136,8 +162,8 @@ continuing, exhausted, or deliberately unavailable.
   Manual recovery shall distinguish unsafe or unknown work, unsupported
   restoration, missing evidence, cancellation, and exhaustion. Only a genuinely
   exhausted episode shall claim exhaustion; its displayed count shall reflect
-  attempts actually started. This correction shall also apply with the toggle
-  disabled.
+  attempts actually started. Historical failure records shall remain readable
+  after the former release toggle is removed.
 - **AC-PLATFORM-INTERRUPTION-CONTINUATION-003.3:** Success, cancellation,
   exhaustion, supersession, or shutdown shall retire actionable retry notices.
   Reload and another viewer shall not resurrect a resolved countdown after
@@ -151,14 +177,18 @@ continuing, exhausted, or deliberately unavailable.
 
 ## Out of scope
 
-- Automatic continuation after state-changing or uncertain tool work.
+- Original-prompt replay after completed tools, and automatic continuation
+  after uncertain tool work.
 - Exactly-once execution guarantees for arbitrary agent actions.
 - Detecting Wi-Fi changes, altering host networking, HTTP compatibility modes,
   provider purchase/authentication, or interpreting inactivity as a failure.
 - New provider switching, dynamic candidate policies, persistent retry jobs,
-  response-attempt transcript retraction, or automatic flag promotion.
+  response-attempt transcript retraction, or unverified provider support.
 
 ## System design and delivery
 
 - [System design](../system-design/provider-interruption-continuation.md)
-- [Implementation package](../../../plans/provider-interruption-continuation/plan.md)
+- [Hidden continuation and truthful Cursor errors plan](../../../plans/cursor-hidden-continuation/plan.md)
+
+- [Original implementation package](../../../plans/provider-interruption-continuation/plan.md)
+- [Continuation graduation package](../../../plans/provider-interruption-continuation-graduation/plan.md)

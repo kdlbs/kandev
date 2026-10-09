@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/hostcli"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
@@ -112,6 +113,17 @@ func (a *CodexACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
 	return newManagedNPMRuntimeSpec(codexACPPackage)
 }
 
+func (a *CodexACP) RuntimeProviderObservation() RuntimeComponentDescriptor {
+	return RuntimeComponentDescriptor{
+		Name:               "Codex CLI",
+		Package:            "@openai/codex",
+		Source:             RuntimeComponentBundled,
+		Owner:              RuntimeComponentOwnerKandev,
+		ExternalVersionEnv: "CODEX_PATH",
+		GuidanceURL:        "https://github.com/openai/codex",
+	}
+}
+
 func (a *CodexACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
@@ -216,5 +228,17 @@ func (a *CodexACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
 		Command:   a.ManagedNPMRuntime().CachedACPCommand(),
+	}
+}
+
+// HostCLI describes the Codex CLI on the Kandev host. `codex app-server`
+// exposes the documented `model/list` request, so the CLI is a programmatic
+// model source. InstallScript installs and updates this CLI.
+func (a *CodexACP) HostCLI() hostcli.Spec {
+	return hostcli.Spec{
+		DisplayName: "Codex CLI",
+		Executable:  "codex",
+		VersionArgs: []string{"--version"},
+		ModelSource: hostcli.ModelSourceCodexAppServer,
 	}
 }

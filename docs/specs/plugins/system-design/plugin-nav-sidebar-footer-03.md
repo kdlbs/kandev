@@ -19,6 +19,16 @@ This design preserves the technical source detail for `REQ-PLUGINS-PLUGIN-NAV-SI
 | --- | --- |
 | `REQ-PLUGINS-PLUGIN-NAV-SIDEBAR-FOOTER-001` | [Migrated source detail](#migrated-source-detail) |
 
+## Current presentation amendment (2026-09-28)
+
+The [navigation hierarchy footer](../../ui/system-design/navigation-hierarchy.md#footer)
+supersedes this migrated source's desktop inline budget, wrapping icon row,
+Stats-inline exception, overflow trigger identity, and associated geometry tests.
+Every desktop insight destination now appears in the shared utilities menu;
+`sidebar-footer-more-button` opens it. Destination identity, registration order,
+visibility, routing, ownership, and uncapped labelled phone placement remain
+unchanged. The migrated detail below records the earlier presentation.
+
 ## Migrated source detail
 
 ## Capacity and overflow

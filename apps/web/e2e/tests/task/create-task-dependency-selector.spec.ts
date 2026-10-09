@@ -1,10 +1,13 @@
 import type { Locator } from "@playwright/test";
+import type { SidebarLayoutApi } from "../../../lib/types/http-user-settings";
 import { expect, test } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { expectControlHeight } from "../../helpers/control-sizing";
 import { GITLAB_HOST, GITLAB_PROJECT, gitLabMR } from "../../helpers/gitlab";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
+import { AppSidebarPage } from "../../pages/app-sidebar-page";
+import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
 
 useRegularMode();
 
@@ -29,6 +32,18 @@ async function openDependencyPicker(
 }
 
 test.describe("Task-create dependency selector", () => {
+  let originalLayout: SidebarLayoutApi | undefined;
+
+  test.beforeEach(async ({ apiClient, seedData }) => {
+    originalLayout = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+      seedData.workspaceId
+    ];
+  });
+
+  test.afterEach(async ({ apiClient, seedData }) => {
+    await restoreSidebarLayout(apiClient, seedData.workspaceId, originalLayout);
+  });
+
   test("selects, clears, and persists multiple predecessor tasks", async ({
     testPage,
     apiClient,
@@ -56,6 +71,7 @@ test.describe("Task-create dependency selector", () => {
     try {
       const kanban = new KanbanPage(testPage);
       await kanban.goto();
+      await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
       await kanban.createTaskButton.first().click();
 
       const dialog = testPage.getByTestId("create-task-dialog");
@@ -298,6 +314,7 @@ test.describe("Task-create dependency selector", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
+    await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
     await kanban.createTaskButton.first().click();
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
@@ -357,6 +374,7 @@ test.describe("Task-create dependency selector", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
+    await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
     await kanban.createTaskButton.first().click();
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();

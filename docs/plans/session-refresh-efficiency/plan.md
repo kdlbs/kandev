@@ -121,6 +121,11 @@ remain usable on desktop and phone. The mobile scenario uses the existing
 
 ## Work orders
 
+The separate [composer draft settlement package](../composer-draft-settlement-ownership/plan.md)
+owns `AC-UI-SESSION-REFRESH-EFFICIENCY-004.4`–`.6` and focused `.3` draft
+preservation. It repairs accepted-send data loss without closing Task 05's
+performance attribution or modifying this package's recorded verification.
+
 - [x] [Task 01: Conditional session response](task-01-conditional-session-response.md)
 - [x] [Task 02: Skip unchanged session publication](task-02-session-reconciliation-client.md)
 - [x] [Task 03: Share environment status polling](task-03-shared-environment-status.md)

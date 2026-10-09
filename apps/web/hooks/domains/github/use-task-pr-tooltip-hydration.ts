@@ -82,6 +82,15 @@ function mergeMissingTaskPRs(
   prs: TaskPR[],
   scope: TaskPRScope,
 ): void {
+  const currentState = store.getState().taskPRs;
+  if (
+    currentState.workspaceId !== scope.workspaceId ||
+    currentState.workspaceContextGeneration !== scope.workspaceContextGeneration
+  ) {
+    store.getState().setTaskPRs({ [taskId]: prs }, scope);
+    return;
+  }
+
   for (const pr of prs) {
     const taskPRs = store.getState().taskPRs;
     if (taskPRs.deletedAssociationIdsByTaskId?.[taskId]?.[pr.id]) continue;

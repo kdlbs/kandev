@@ -28,6 +28,12 @@ func (c *cache) get(agentType string) (AgentCapabilities, bool) {
 	return caps, ok
 }
 
+func (c *cache) delete(agentType string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.byType, agentType)
+}
+
 func (c *cache) all() []AgentCapabilities {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -37,4 +43,10 @@ func (c *cache) all() []AgentCapabilities {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].AgentType < out[j].AgentType })
 	return out
+}
+
+func (c *cache) clear() {
+	c.mu.Lock()
+	c.byType = make(map[string]AgentCapabilities)
+	c.mu.Unlock()
 }

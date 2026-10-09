@@ -47,9 +47,17 @@ type UserInputRequestHandlerSetter interface {
 
 // Re-export stream types for convenience.
 type (
-	AgentEvent = streams.AgentEvent
-	PlanEntry  = streams.PlanEntry
+	AgentEvent                 = streams.AgentEvent
+	PlanEntry                  = streams.PlanEntry
+	SessionRestoreCapabilities = shared.SessionRestoreCapabilities
 )
+
+// SessionRestoreCapabilitiesProvider is optional so older adapters and test
+// doubles remain source-compatible while lifecycle can use negotiated native
+// restore evidence when it is available.
+type SessionRestoreCapabilitiesProvider interface {
+	GetSessionRestoreCapabilities() SessionRestoreCapabilities
+}
 
 // Re-export agent event type constants from streams package.
 const (
@@ -347,8 +355,7 @@ type Config struct {
 	NotificationQueueCapacity int
 
 	// PromptCancelJoinTimeout is an optional per-adapter ACP cancellation join bound.
-	PromptCancelJoinTimeout          time.Duration
-	ProviderInterruptionContinuation bool
+	PromptCancelJoinTimeout time.Duration
 
 	// ProviderGatewayAuth authenticates the ACP agent against an
 	// OpenAI-compatible gateway right after initialize.
@@ -370,23 +377,22 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		}
 	}
 	return &shared.Config{
-		WorkDir:                          c.WorkDir,
-		AutoApprove:                      c.AutoApprove,
-		McpServers:                       mcpServers,
-		AgentID:                          c.AgentID,
-		AgentName:                        c.AgentName,
-		BaseURL:                          c.BaseURL,
-		AuthHeader:                       c.AuthHeader,
-		AuthValue:                        c.AuthValue,
-		Headers:                          c.Headers,
-		Extra:                            c.Extra,
-		AssumeMcpSse:                     c.AssumeMcpSse,
-		AssumeMcpHttp:                    c.AssumeMcpHttp,
-		RequiresProcessKill:              c.RequiresProcessKill,
-		NotificationQueueCapacity:        c.NotificationQueueCapacity,
-		PromptCancelJoinTimeout:          c.PromptCancelJoinTimeout,
-		ProviderInterruptionContinuation: c.ProviderInterruptionContinuation,
-		ProviderGatewayAuth:              c.ProviderGatewayAuth,
+		WorkDir:                   c.WorkDir,
+		AutoApprove:               c.AutoApprove,
+		McpServers:                mcpServers,
+		AgentID:                   c.AgentID,
+		AgentName:                 c.AgentName,
+		BaseURL:                   c.BaseURL,
+		AuthHeader:                c.AuthHeader,
+		AuthValue:                 c.AuthValue,
+		Headers:                   c.Headers,
+		Extra:                     c.Extra,
+		AssumeMcpSse:              c.AssumeMcpSse,
+		AssumeMcpHttp:             c.AssumeMcpHttp,
+		RequiresProcessKill:       c.RequiresProcessKill,
+		NotificationQueueCapacity: c.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:   c.PromptCancelJoinTimeout,
+		ProviderGatewayAuth:       c.ProviderGatewayAuth,
 	}
 }
 

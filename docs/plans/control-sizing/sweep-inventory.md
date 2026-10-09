@@ -462,3 +462,14 @@ The re-audit found the following missed size overrides. The follow-up corrected 
 - [x] `apps/web/components/integrations/integration-change-request-status-content.tsx` — reviewed and retained; the 44px Open review action exists only in the mobile Drawer branch.
 
 Search results that are drawer-only, coarse-pointer-only, menu rows, navigation rows, or content-sized selections remain outside this follow-up and keep their existing dispositions.
+
+
+## Navigation hierarchy refinement (2026-09-28)
+
+`components/app-sidebar/new-task-button.tsx` intentionally renders the expanded
+New Task action at 44px on desktop after explicit user feedback that 28px was too
+small. This dedicated creation affordance is governed by
+[AC-UI-NAV-HIERARCHY-001.1](../../specs/ui/requirements/navigation-hierarchy.md).
+Quick Chat, Terminal, and footer controls retain 28px fine-pointer desktop sizing
+and at least 44px touch targets. `layout/navigation-hierarchy.spec.ts` measures
+these rendered sizes and verifies the single-row footer.

@@ -63,13 +63,13 @@ test.describe("Quick Chat entry points on mobile", () => {
     expect(layout.dialogBottom - layout.contentBottom).toBeLessThanOrEqual(2);
     expect(layout.dialogScrollHeight).toBeLessThanOrEqual(layout.dialogClientHeight + 1);
 
-    // Submit once: replaying a successful send while awaiting editor clearing
+    // Submit once: replaying a successful send while awaiting completion
     // creates duplicate bulk turns and changes the layout under measurement.
     const editor = await waitForQuickChatComposerReady(dialog);
     await editor.fill("/e2e:bulk:20");
     await dialog.getByTestId("submit-message-button").tap();
-    await expect(editor).toHaveText("");
     await expect(dialog.getByText(/Done\. Emitted 20 messages/)).toBeVisible({ timeout: 30_000 });
+    await expect(editor).toHaveText("", { timeout: 15_000 });
 
     const longChatLayout = await readQuickChatViewportLayout(dialog);
     expect(longChatLayout.messageScrollerScrollHeight).toBeGreaterThan(

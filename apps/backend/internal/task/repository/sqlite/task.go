@@ -1519,8 +1519,30 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmission(
 	targetStepID string,
 	limit int,
 ) (bool, error) {
-	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil)
+	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, nil)
 	return admitted, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionAndEffect atomically moves a task into a
+// workflow step and records the durable delivery effect key. A repeated effect
+// returns admitted=false, applied=false without rewriting the task row.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndEffect(
+	ctx context.Context,
+	task *models.Task,
+	sourceStepID string,
+	targetStepID string,
+	limit int,
+	effect *models.AgentDeliveryEffect,
+) (admitted, applied bool, err error) {
+	if effect == nil || effect.EffectKey == "" {
+		return false, false, fmt.Errorf("effect key is required")
+	}
+	if effect.CreatedAt.IsZero() {
+		effect.CreatedAt = r.nowUTC()
+	}
+	return r.updateTaskWithWorkflowStepAdmission(
+		ctx, task, sourceStepID, targetStepID, limit, nil, false, "", "", nil, nil, effect,
+	)
 }
 
 // UpdateTaskWithWorkflowStepAdmissionAndState is the manual-move variant of
@@ -1544,7 +1566,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionAndState(
 	expectedWorkflowID string,
 ) (bool, error) {
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil, nil,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", expectedWorkflowID, nil, nil, nil,
 	)
 	return admitted, err
 }
@@ -1590,6 +1612,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionExact(
 			queueExitPending, "", expectedWorkflowID, nil, nil,
 			&exactTaskMoveOperation{workspaceID: workspaceID, expectedVersion: expectedResourceVersion, operationID: operationID, payloadDigest: payloadDigest, claimFence: fence},
 			&alreadyApplied,
+			nil,
 		)
 		unlock()
 		var changed *admissionSourceChangedError
@@ -1617,7 +1640,7 @@ func (r *Repository) UpdateTaskWithWorkflowChangeAdmissionAndState(
 		return false, fmt.Errorf("workflow change source guard is required")
 	}
 	admitted, _, err := r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", "", nil, source,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, "", "", nil, source, nil,
 	)
 	return admitted, err
 }
@@ -1640,7 +1663,29 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 ) (applied bool, err error) {
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
-	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil)
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, nil)
+	return applied, err
+}
+
+// UpdateTaskWithWorkflowStepAdmissionIfAtStepAndEffect is the guarded
+// transition variant that records a durable delivery effect in the same
+// transaction as the compare-and-swap task move.
+func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStepAndEffect(
+	ctx context.Context,
+	task *models.Task,
+	expectedStepID, targetStepID string,
+	limit int,
+	effect *models.AgentDeliveryEffect,
+) (applied bool, err error) {
+	if effect == nil || effect.EffectKey == "" {
+		return false, fmt.Errorf("effect key is required")
+	}
+	if effect.CreatedAt.IsZero() {
+		effect.CreatedAt = r.nowUTC()
+	}
+	_, applied, err = r.updateTaskWithWorkflowStepAdmission(
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, effect,
+	)
 	return applied, err
 }
 
@@ -1654,7 +1699,7 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionForDeferredMove(
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
 	return r.updateTaskWithWorkflowStepAdmission(
-		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record, nil,
+		ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", &record, nil, nil,
 	)
 }
 
@@ -1901,9 +1946,10 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	expectedWorkflowID string,
 	deferredMove *messagequeue.PendingMoveRecord,
 	workflowChangeSource *models.WorkflowChangeSource,
+	effect *models.AgentDeliveryEffect,
 ) (admitted bool, applied bool, err error) {
 	return r.updateTaskWithWorkflowStepAdmissionExactInner(ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending,
-		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil)
+		expectedStepID, expectedWorkflowID, deferredMove, workflowChangeSource, nil, nil, effect)
 }
 
 type exactTaskMoveOperation struct {
@@ -1928,6 +1974,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 	workflowChangeSource *models.WorkflowChangeSource,
 	exactOperation *exactTaskMoveOperation,
 	alreadyApplied *bool,
+	effect *models.AgentDeliveryEffect,
 ) (admitted bool, applied bool, err error) {
 	currentSourceStepID := sourceStepID
 	for attempt := 0; attempt < admissionSourceRetryLimit; attempt++ {
@@ -1946,6 +1993,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionExactInner(
 			workflowChangeSource,
 			exactOperation,
 			alreadyApplied,
+			effect,
 		)
 		unlock()
 
@@ -1982,6 +2030,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	workflowChangeSource *models.WorkflowChangeSource,
 	exactOperation *exactTaskMoveOperation,
 	alreadyApplied *bool,
+	effect *models.AgentDeliveryEffect,
 ) (admitted bool, applied bool, err error) {
 	now := time.Now().UTC()
 	task.UpdatedAt = now
@@ -2117,6 +2166,15 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 			return false, false, err
 		}
 		if !casApplied {
+			return false, false, nil
+		}
+	}
+	if effect != nil {
+		inserted, err := insertDeliveryEffectTx(ctx, tx, r.db.Rebind, effect)
+		if err != nil {
+			return false, false, err
+		}
+		if !inserted {
 			return false, false, nil
 		}
 	}
@@ -5280,7 +5338,7 @@ func (r *Repository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.
 			LEFT JOIN task_sessions ts ON ts.task_id = t.id
 			WHERE t.is_ephemeral = 1
 				AND COALESCE(t.workflow_id, '') = ''
-				AND COALESCE(t.origin, '') != ?
+				AND COALESCE(t.origin, '') NOT IN (?, ?)
 				AND %s
 				AND t.archived_at IS NULL
 				AND NOT EXISTS (
@@ -5303,6 +5361,7 @@ func (r *Repository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.
 	)
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
 		models.TaskOriginAutomationRun,
+		models.TaskOriginCoordinator,
 		models.TaskSessionStateRunning,
 		models.TaskSessionStateIdle,
 		cutoff,
@@ -5342,7 +5401,7 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 		WHERE t.id = ?
 			AND t.is_ephemeral = 1
 			AND COALESCE(t.workflow_id, '') = ''
-			AND COALESCE(t.origin, '') != ?
+			AND COALESCE(t.origin, '') NOT IN (?, ?)
 			AND %s
 			AND t.archived_at IS NULL
 			AND NOT EXISTS (
@@ -5360,6 +5419,7 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 	candidateArgs := []any{
 		id,
 		models.TaskOriginAutomationRun,
+		models.TaskOriginCoordinator,
 		models.TaskSessionStateRunning,
 		models.TaskSessionStateIdle,
 		cutoff,
@@ -5403,6 +5463,29 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 		return false, err
 	}
 	return rows > 0, nil
+}
+
+// ListCoordinatorOriginTasks returns every task with origin "coordinator"
+// (all workspaces when workspaceID is empty), ordered by id
+// (docs/specs/coordinator/system-design/copilot.md#conversation-cleanup).
+// Archived and unarchived tasks are both included: the coordinator deletion
+// and startup cleanup callers both need to see and act on archived rows too.
+// coordinator_id is read from the returned Metadata in Go, so this query has
+// no dialect-specific JSON extraction.
+func (r *Repository) ListCoordinatorOriginTasks(ctx context.Context, workspaceID string) ([]*models.Task, error) {
+	query := fmt.Sprintf(`SELECT %s FROM tasks t WHERE t.origin = ?`, taskSelectColumns("t"))
+	args := []interface{}{models.TaskOriginCoordinator}
+	if workspaceID != "" {
+		query += " AND t.workspace_id = ?"
+		args = append(args, workspaceID)
+	}
+	query += " ORDER BY t.id"
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
 }
 
 // isSafeMetadataKey reports whether s is a safe JSON metadata key to splice

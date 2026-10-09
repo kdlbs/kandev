@@ -46,14 +46,14 @@ The repository stores these Actions variables:
 | --- | --- | --- |
 | `KANDEV_CI_EXTERNAL_ENABLED` | Activates configured external tiers only when its value is `true`. | Unset or `false` |
 | `KANDEV_CI_EXTERNAL_PERCENT` | Selects the percentage of eligible job instances assigned to external capacity when burst mode is active. | Unset or `0` |
-| `KANDEV_CI_RUNNER_LIGHT` | Selects capacity for change detection and required gates. | `ubicloud-standard-2-ubuntu-2404` |
+| `KANDEV_CI_RUNNER_LIGHT` | Selects capacity for eligible backend and frontend required gates. | `ubicloud-standard-2-ubuntu-2404` |
 | `KANDEV_CI_RUNNER_STANDARD` | Selects capacity for eligible browser and frontend test jobs. | `ubicloud-standard-4-ubuntu-2404` |
 
 The workflow consumes the planner's resolved light-tier value with this
 `runs-on` expression:
 
 ```yaml
-runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).changes_runner }}
+runs-on: ${{ fromJSON(needs.changes.outputs.plan).test_runner }}
 ```
 
 The planner returns the configured external label or `ubuntu-latest`, never an
@@ -63,7 +63,7 @@ dispatches the job.
 
 Percentage rollout cannot be implemented safely with a direct `runs-on`
 expression. GitHub expressions provide comparisons and boolean operators but no
-random or modulo operator. A planner job therefore computes assignments before
+random or modulo operator. The hosted `changes` job therefore computes assignments before
 eligible jobs start and exposes one JSON plan through a job output. Downstream
 jobs consume that plan with `needs` and `fromJSON`.
 
@@ -131,16 +131,22 @@ the workflow. Protected jobs keep explicit `runs-on: ubuntu-latest` and do not
 consume planner output. Contract tests assert the output wiring and the
 protected-job boundary.
 
+The E2E report job also owns `E2E Tests Passed`; there is no separate E2E gate
+allocation. Backend and frontend gates use a hosted fallback only if allocation
+produced no output, then fail on the unsuccessful bootstrap result. An invalid
+non-empty configured runner label still remains visible.
+
 ## Job placement
 
 | Job | Initial runner selection | Rationale |
 | --- | --- | --- |
-| `E2E changes`, `e2e-gate` | Light tier with GitHub fallback | Control jobs are short but can wait many minutes for capacity. |
+| `E2E changes` | `ubuntu-latest` | Change detection and allocation share one hosted checkout. |
 | `E2E build`, `e2e-report` | `ubuntu-latest` | They query GitHub history or download artifacts with the job token. |
 | `e2e` | Standard tier with GitHub fallback | The fourteen normal shards need comparable CPU and memory and do not use explicit repository-token inputs. |
 | `Backend changes`, `static_checks`, `test_shards`, `test_ambient_env` | `ubuntu-latest` | Their checkout action receives the short-lived job token. |
 | `Backend test` gate | Light tier with GitHub fallback | The aggregate gate is short and has no checkout or service dependency. |
-| `Frontend changes`, `frontend-gate` | Light tier with GitHub fallback | Control jobs are short and queue-sensitive. |
+| `Frontend changes` | `ubuntu-latest` | Change detection and allocation share one hosted checkout. |
+| `frontend-gate` | Light tier with GitHub fallback | The aggregate gate remains short and queue-sensitive. |
 | `Frontend frontend` | Standard tier with GitHub fallback | The single frontend test job is a recurring queue bottleneck. |
 | `Architecture lint`, action-pinning, harness-lint | `ubuntu-latest` | Their checkout action receives the short-lived job token. |
 | `playwright_image` | `ubuntu-latest` | Retains the reviewed host-Docker and GHCR metadata path during the pilot. |

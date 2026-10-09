@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -37,6 +38,50 @@ func isConfigModeSession(session *models.TaskSession) bool {
 	}
 	cm, ok := session.Metadata["config_mode"].(bool)
 	return ok && cm
+}
+
+// resolveCoordinatorSessionStart runs the fail-closed checks for a
+// coordinator-origin task: the executor must have a CoordinatorLookup wired,
+// the task must resolve to a live coordinator, and that coordinator's agent
+// and executor profiles must both be ready
+// (docs/specs/coordinator/system-design/copilot.md#fail-closed). Returns the
+// coordinator id on success; any failure here stops the session start.
+func (e *Executor) resolveCoordinatorSessionStart(ctx context.Context, taskID string) (string, error) {
+	if e.coordinators == nil {
+		return "", fmt.Errorf("coordinator task %s: coordinator lookup is not configured", taskID)
+	}
+	coordinatorID, ok, err := e.coordinators.CoordinatorForConversationTask(ctx, taskID)
+	if err != nil {
+		return "", fmt.Errorf("resolve coordinator for task %s: %w", taskID, err)
+	}
+	if !ok {
+		return "", fmt.Errorf("task %s is not a live coordinator conversation task", taskID)
+	}
+	ready, err := e.coordinators.CoordinatorProfilesReady(ctx, coordinatorID)
+	if err != nil {
+		return "", fmt.Errorf("check coordinator %s profile readiness: %w", coordinatorID, err)
+	}
+	if !ready {
+		return "", fmt.Errorf("coordinator %s agent or executor profile is not ready", coordinatorID)
+	}
+	return coordinatorID, nil
+}
+
+// coordinatorMatchesAbsentTask reports whether taskID (whose task row cannot
+// be read — deleted or never existed) is nonetheless some coordinator's
+// current conversation task. A match or a lookup error fails the caller's
+// session start; only "no lookup wired" (feature off) or "no match" lets the
+// caller fall through to the ordinary no-row behavior
+// (docs/specs/coordinator/system-design/copilot.md#fail-closed).
+func (e *Executor) coordinatorMatchesAbsentTask(ctx context.Context, taskID string) (bool, error) {
+	if e.coordinators == nil {
+		return false, nil
+	}
+	_, ok, err := e.coordinators.CoordinatorForConversationTask(ctx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("resolve coordinator for task %s: %w", taskID, err)
+	}
+	return ok, nil
 }
 
 func (e *Executor) resolveTaskLaunchScope(ctx context.Context, taskID string) (lifecycle.TaskLaunchScope, error) {
@@ -60,13 +105,34 @@ func (e *Executor) resolveTaskLaunchScope(ctx context.Context, taskID string) (l
 }
 
 // resolveTaskSessionMCPMode derives restricted MCP access from canonical task
-// ownership and session purpose. Config mode wins because those sessions need
-// config tools even if their backing task is Office-owned.
+// ownership and session purpose
+// (docs/specs/coordinator/system-design/copilot.md#principal-and-mode). The
+// task is loaded first so a read error fails every session, config-mode
+// included; a coordinator-origin task then wins regardless of config_mode.
 func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (string, error) {
 	task, err := e.repo.GetTask(ctx, taskID)
-	if err != nil {
+	notFound := errors.Is(err, repoerrors.ErrTaskNotFound)
+	if err != nil && !notFound {
 		return "", fmt.Errorf("load task for MCP mode: %w", err)
 	}
+	noRow := task == nil
+
+	if task != nil && task.Origin == models.TaskOriginCoordinator {
+		if _, cErr := e.resolveCoordinatorSessionStart(ctx, taskID); cErr != nil {
+			return "", cErr
+		}
+		return McpModeCoordinator, nil
+	}
+	if noRow {
+		matched, cErr := e.coordinatorMatchesAbsentTask(ctx, taskID)
+		if cErr != nil {
+			return "", cErr
+		}
+		if matched {
+			return "", fmt.Errorf("task %s resolves to a coordinator but has no task row", taskID)
+		}
+	}
+
 	if task != nil {
 		_, managed, policyErr := models.ManagedToolPolicyFromTask(task)
 		if policyErr != nil {
@@ -76,16 +142,24 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 			return McpModeManagedConversation, nil
 		}
 	}
+
 	if isConfigModeSession(session) {
 		return McpModeConfig, nil
 	}
-	if task != nil && task.Origin == models.TaskOriginAutomationRun {
+
+	if noRow {
+		if notFound {
+			return "", fmt.Errorf("load task for MCP mode: %w", err)
+		}
+		return "", nil
+	}
+	if task.Origin == models.TaskOriginAutomationRun {
 		return McpModeAutomation, nil
 	}
-	if task != nil && task.IsFromOffice {
+	if task.IsFromOffice {
 		return McpModeOffice, nil
 	}
-	if allowTitleTool && task != nil && models.IsAgentTitleOwner(task.Metadata, session.ID) {
+	if allowTitleTool && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		return McpModeTaskTitlePending, nil
 	}
 	return "", nil
@@ -93,8 +167,30 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 
 func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (mcpprofile.Context, error) {
 	task, err := e.repo.GetTask(ctx, taskID)
-	if err != nil {
+	notFound := errors.Is(err, repoerrors.ErrTaskNotFound)
+	if err != nil && !notFound {
 		return mcpprofile.Context{}, fmt.Errorf("load task for MCP profile: %w", err)
+	}
+	noRow := task == nil
+
+	if task != nil && task.Origin == models.TaskOriginCoordinator {
+		if _, cErr := e.resolveCoordinatorSessionStart(ctx, taskID); cErr != nil {
+			return mcpprofile.Context{}, cErr
+		}
+		profile := mcpprofile.NewCoordinator()
+		if err := bindCoordinatorToolPolicy(&profile, task, e.coordinators.Phase2Enabled()); err != nil {
+			return mcpprofile.Context{}, err
+		}
+		return e.withCanvasCapability(profile), nil
+	}
+	if noRow {
+		matched, cErr := e.coordinatorMatchesAbsentTask(ctx, taskID)
+		if cErr != nil {
+			return mcpprofile.Context{}, cErr
+		}
+		if matched {
+			return mcpprofile.Context{}, fmt.Errorf("task %s resolves to a coordinator but has no task row", taskID)
+		}
 	}
 	if task != nil {
 		policy, managed, policyErr := models.ManagedToolPolicyFromTask(task)
@@ -112,7 +208,11 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 		}
 		return e.withCanvasCapability(mcpprofile.New(mcpprofile.SurfaceConfiguration, capabilities, nil)), nil
 	}
-	if task == nil {
+
+	if noRow {
+		if notFound {
+			return mcpprofile.Context{}, fmt.Errorf("load task for MCP profile: %w", err)
+		}
 		// A few lifecycle paths can prepare a request from a session snapshot
 		// before the task row is visible (and older executor fakes model that
 		// state). Keep the legacy kanban profile in that narrow case; production
@@ -253,6 +353,32 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 
 		if err := e.agentManager.StartAgentProcess(startCtx, agentExecutionID); err != nil {
 			startupErr = err
+			if errors.Is(err, lifecycle.ErrAgentReattachment) {
+				cleanupCtx := context.WithoutCancel(updateCtx)
+				owned, _, ownershipErr := e.bootstrapFailureOwnsSession(
+					cleanupCtx, sessionID, agentExecutionID, startAttemptID,
+				)
+				if ownershipErr != nil {
+					e.logger.Warn("failed to verify ownership after agent reattachment failure",
+						zap.String("task_id", taskID),
+						zap.String("session_id", sessionID),
+						zap.String("agent_execution_id", agentExecutionID),
+						zap.Error(ownershipErr))
+					return
+				}
+				if !owned {
+					return
+				}
+				e.logger.Warn("existing agent reattachment failed; preserving the live peer",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.String("agent_execution_id", agentExecutionID),
+					zap.Error(err))
+				if e.onAgentProcessStartFailed != nil {
+					e.onAgentProcessStartFailed(cleanupCtx, taskID, sessionID, agentExecutionID, err)
+				}
+				return
+			}
 			if isNativeRestoreStartupContext(ctx) {
 				// Native restore has a caller waiting for this result. That owner
 				// classifies the actual error and tears down this exact execution.
@@ -265,7 +391,7 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 				// release any launch-side claim without publishing FAILED.
 				cleanupCtx := context.WithoutCancel(ctx)
 				attemptOwned := e.stopFailedStartExecutionIfCurrentAttempt(
-					cleanupCtx, sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
+					cleanupCtx, taskID, sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
 				)
 				if attemptOwned && e.onAgentProcessStartFailed != nil {
 					e.onAgentProcessStartFailed(cleanupCtx, taskID, sessionID, agentExecutionID, err)
@@ -293,6 +419,12 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 		}
 		if isCancellableResumeContext(ctx) && ctx.Err() != nil {
 			startupErr = ctx.Err()
+			if e.isReattachedExistingStartup(agentExecutionID) {
+				if e.onAgentProcessStartFailed != nil {
+					e.onAgentProcessStartFailed(context.WithoutCancel(ctx), taskID, sessionID, agentExecutionID, context.Canceled)
+				}
+				return
+			}
 			if isNativeRestoreStartupContext(ctx) {
 				return
 			}
@@ -300,7 +432,7 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 			// not run the resume success callback or restore task/session state.
 			// Teardown is exact-execution scoped so a retry cannot be stopped.
 			attemptOwned := e.stopFailedStartExecutionIfCurrentAttempt(
-				context.WithoutCancel(ctx), sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
+				context.WithoutCancel(ctx), taskID, sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
 			)
 			if attemptOwned && e.onAgentProcessStartFailed != nil {
 				e.onAgentProcessStartFailed(context.WithoutCancel(ctx), taskID, sessionID, agentExecutionID, context.Canceled)
@@ -314,6 +446,15 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 		}
 	}()
 	return result
+}
+
+type startupDispositionProvider interface {
+	StartupDisposition(string) lifecycle.AgentStartupDisposition
+}
+
+func (e *Executor) isReattachedExistingStartup(agentExecutionID string) bool {
+	provider, ok := e.agentManager.(startupDispositionProvider)
+	return ok && provider.StartupDisposition(agentExecutionID) == lifecycle.AgentStartupReattachedExisting
 }
 
 func (e *Executor) handleAgentProcessStartFailure(
@@ -463,7 +604,7 @@ func (e *Executor) stopFailedStartExecution(ctx context.Context, agentExecutionI
 
 func (e *Executor) stopFailedStartExecutionIfCurrentAttempt(
 	ctx context.Context,
-	sessionID, agentExecutionID string,
+	taskID, sessionID, agentExecutionID string,
 	expectedStartAttemptID string,
 	phase string,
 ) bool {
@@ -480,7 +621,11 @@ func (e *Executor) stopFailedStartExecutionIfCurrentAttempt(
 		return false
 	}
 	if owned || cleanupSafe {
-		e.stopFailedStartExecution(ctx, agentExecutionID, phase)
+		if e.onCancelledResumeExecutionCleanup != nil {
+			e.onCancelledResumeExecutionCleanup(ctx, taskID, sessionID, agentExecutionID, expectedStartAttemptID)
+		} else {
+			e.stopFailedStartExecution(ctx, agentExecutionID, phase)
+		}
 	}
 	return owned
 }
@@ -1844,6 +1989,8 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 	req.OfficeAgentProfileID = opts.OfficeAgentProfileID
 	req.TurnID = opts.TurnID
+	req.InitialDeliverySubmissionID = opts.DeliverySubmissionID
+	req.BeforeAgentStart = opts.BeforeAgentStart
 	if req.OfficeAgentProfileID == "" && session.AgentProfileID != "" {
 		req.OfficeAgentProfileID = session.AgentProfileID
 	}
@@ -1946,7 +2093,8 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if hasRunning {
 		result, existingErr := e.startAgentOnExistingWorkspaceWithRequest(
 			launchCtx, task, session, prompt, startAgent, opts.McpMode, req,
-			opts.OnExecutionAdmitted, opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
+			opts.OnExecutionAdmitted, opts.BeforeInitialPromptDispatch,
+			opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
 			opts.RefuseIfAgentRunning, opts.TurnID,
 		)
 		if !errors.Is(existingErr, ErrStaleExecution) && !errors.Is(existingErr, ErrAgentCommandMissing) {
@@ -1989,9 +2137,16 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
 		return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
 	}
+	if startAgent && req.BeforeAgentStart != nil {
+		if err := req.BeforeAgentStart(launchCtx, resp.AgentExecutionID); err != nil {
+			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
+			return nil, fmt.Errorf("admit initial prompt delivery: %w", err)
+		}
+	}
 	if startAgent && (prompt != "" || len(opts.Attachments) > 0) {
-		if err := e.registerInitialPromptDispatchCallbacks(
-			resp.AgentExecutionID, opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
+		if err := e.registerInitialPromptCallbacks(
+			resp.AgentExecutionID, opts.BeforeInitialPromptDispatch,
+			opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
 		); err != nil {
 			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
 			return nil, fmt.Errorf("register initial prompt dispatch callbacks: %w", err)
@@ -2393,6 +2548,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		WorkspaceReuseRequired: workspaceReuseRequired,
 		McpProviders:           deriveMCPProviders(allRepos),
 	}
+	if err := e.applyDeliveryIdentity(ctx, req, session); err != nil {
+		return nil, executorConfig{}, err
+	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
 	if execConfig.ExecutorID != "" {
@@ -2703,7 +2861,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		Env:         cloneStringMap(env),
 	}
 	return e.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, prompt, startAgent, mcpMode, request, nil, nil, nil, false, turnIDs...,
+		ctx, task, session, prompt, startAgent, mcpMode, request, nil, nil, nil, nil, false, turnIDs...,
 	)
 }
 
@@ -2716,6 +2874,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	mcpMode string,
 	request *LaunchAgentRequest,
 	onExecutionAdmitted func(string),
+	beforeInitialPromptDispatch func(string) error,
 	onInitialPromptAccepted func(string),
 	onInitialPromptFailed func(),
 	refuseIfAgentRunning bool,
@@ -2768,9 +2927,25 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 			// Non-fatal: agent may start without description
 		}
 	}
+	if request.InitialDeliverySubmissionID != "" {
+		setter, ok := e.agentManager.(InitialDeliverySubmissionIDSetter)
+		if !ok {
+			return nil, errors.New("agent manager cannot bind the initial delivery submission")
+		}
+		if err := setter.SetInitialDeliverySubmissionID(
+			ctx, executionID, request.InitialDeliverySubmissionID,
+		); err != nil {
+			return nil, fmt.Errorf("bind initial delivery submission: %w", err)
+		}
+	}
 	e.bindPromptTurnID(ctx, session.ID, executionID, turnIDs)
 	if err := e.configureExistingWorkspace(ctx, task, session, executionID, mcpMode, request); err != nil {
 		return nil, err
+	}
+	if request.BeforeAgentStart != nil {
+		if err := request.BeforeAgentStart(ctx, executionID); err != nil {
+			return nil, fmt.Errorf("admit initial prompt delivery: %w", err)
+		}
 	}
 
 	// Lazy workspace restoration creates an execution without an agent command.
@@ -2799,8 +2974,9 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 		return nil, err
 	}
 	if prompt != "" || len(request.Attachments) > 0 {
-		if err := e.registerInitialPromptDispatchCallbacks(
-			executionID, onInitialPromptAccepted, onInitialPromptFailed,
+		if err := e.registerInitialPromptCallbacks(
+			executionID, beforeInitialPromptDispatch,
+			onInitialPromptAccepted, onInitialPromptFailed,
 		); err != nil {
 			return nil, fmt.Errorf("register initial prompt dispatch callbacks: %w", err)
 		}
@@ -2986,6 +3162,15 @@ func (e *Executor) captureBaseCommit(ctx context.Context, sessionID string) {
 	// has been torn down (e.g. the task was deleted between LaunchAgent and
 	// this async capture). Skip silently — there's nothing to record.
 	if status == nil {
+		return
+	}
+	legacySuccessfulStatus := status.StatusState == "" && !status.FilesComplete && status.DetailState == ""
+	completeStatus := status.StatusState == "ready" && status.FilesComplete && status.DetailState == "ready"
+	if !status.Success || (!legacySuccessfulStatus && !completeStatus) {
+		e.logger.Debug("incomplete Git status cannot establish a session base commit",
+			zap.String("session_id", sessionID),
+			zap.String("status_state", status.StatusState),
+			zap.String("detail_state", status.DetailState))
 		return
 	}
 

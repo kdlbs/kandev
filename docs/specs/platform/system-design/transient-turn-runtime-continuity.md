@@ -5,6 +5,7 @@ created: 2026-10-03
 requirements:
   - REQ-PLATFORM-TURN-CONTINUITY-001
   - REQ-PLATFORM-TURN-CONTINUITY-002
+  - REQ-PLATFORM-TURN-CONTINUITY-003
 owners:
   - Kandev
 ---
@@ -21,7 +22,8 @@ Task Chat consumes the resulting failure record without owning retry or teardown
 
 The [decision](../../../decisions/2026-10-03-transient-turn-runtime-lifetime.md) records the lifetime boundary.
 This design extends [provider error recovery](provider-error-recovery.md) and [interruption continuation](provider-interruption-continuation.md).
-It does not change their replay fence or rollout defaults.
+The capacity amendment preserves the replay fence and transport-loss rollout defaults.
+Its [decision](../../../decisions/2026-10-05-capacity-continuation-after-completed-tools.md) permits a separate live-runtime continuation contract.
 
 ## Requirement mapping
 
@@ -29,6 +31,7 @@ It does not change their replay fence or rollout defaults.
 | --- | --- |
 | REQ-PLATFORM-TURN-CONTINUITY-001 | Evidence contract; Runtime settlement; Recovery admission; Ownership and failure |
 | REQ-PLATFORM-TURN-CONTINUITY-002 | Durable projection; Desktop and phone; Verification |
+| REQ-PLATFORM-TURN-CONTINUITY-003 | Capacity continuation evidence; Capacity recovery admission; Capacity episode verification |
 
 ## Evidence and current implementation
 
@@ -123,11 +126,94 @@ Add a live-runtime branch before predecessor teardown in `retryInterruptedContin
 It submits the existing internal continuation instruction through ordinary prompt admission on the same native identity.
 It retains the current episode budget, permission settings, queue priority, and generation checks.
 When the runtime is actually unusable, the existing teardown/restore branch remains authoritative.
-Do not broaden continuation to Codex or allow write recovery.
+The transport-loss branch retains its provider and read-only restrictions.
+The capacity branch below permits completed effects only on the same proven usable runtime.
 
 Cancellation or exhaustion of an idle retained retry retires the notice and returns to the usable composer.
 Cancellation after dispatch uses ordinary turn cancellation.
 It does not imply whole-runtime stop unless existing bounded cancellation escalation requires that stop.
+
+## Capacity continuation evidence
+
+Add an optional typed `CapacityContinuationSnapshot` in `internal/agentctl/types/streams`.
+It carries a versioned live-conversation support value, nonzero prompt generation, evidence completeness, and unresolved-work indicators.
+It carries no tool payloads, paths, prompts, results, or credentials.
+Omission and unknown versions never authorize this branch.
+Keep `ContinuationSafetySnapshot.SafeFor` unchanged for the existing read-only restore contract.
+
+The Codex dialect owns support for its tested initialized live-conversation shape.
+Orchestration consumes the typed support value without a provider-name branch.
+The isolated mock dialect supplies test-only support through construction provenance.
+Other dialects cannot inherit support from a generic ACP adapter.
+
+The ordered ACP worker tracks all tool IDs for the active prompt in a bounded ledger.
+Every observed tool must have a provider-confirmed completed status before the terminal snapshot permits recovery.
+Successful shell, write, and MCP calls can qualify. Their semantic kinds do not establish completion.
+Failed, cancelled, pending, unknown, malformed, conflicting, unmatched, or overflowing tool evidence blocks admission.
+Background or subagent activity without authoritative completion blocks admission, including Codex start-only collaboration evidence.
+Unresolved permission activity also blocks admission.
+One completed tool plus one pending or failed tool must block the entire attempt.
+
+Capture the snapshot after ordered notifications drain and before synthetic prompt-end cancellation sweeps.
+Synthetic terminal statuses cannot establish completed work.
+Response-attempt resets cannot erase unresolved tool evidence.
+Native load history cannot populate this active-prompt ledger.
+Publish the snapshot only with the same settled prompt and usable-runtime attestation.
+
+Carry it unchanged through stream events, process outcomes, remote JSON, lifecycle prompt evidence, and watcher failure payloads.
+Lifecycle copies immutable evidence at the terminal boundary and verifies the same execution and generation.
+Never reconstruct eligibility from persisted transcript titles or provider prose.
+Older agentctl components keep the current conservative behavior.
+
+## Capacity recovery admission
+
+Keep `handleTransientFailure` as the single scheduler owner.
+Original-prompt replay retains `promptAttemptPreResultSafe`.
+When replay is unavailable, capacity continuation requires `CodeModelCapacity`, the existing high-confidence short-retry decision, and the new snapshot.
+Require retained task ownership, current execution and generation, initialized native identity, and the same configuration fingerprint.
+Reject Office, dynamic, automation, passthrough, archived tasks, cancellation, and queued user work.
+No requirement to enable `ProviderInterruptionContinuation` applies to this narrower capacity path.
+
+Retain an explicit internal continuation policy in the existing binding and retry entry.
+Distinguish live capacity continuation from transport-loss restoration without changing UI recovery mode `continue`.
+Shared validation checks policy-specific support and uses the same owner, identity, queue, and cancellation guards.
+Do not weaken the transport-loss policy when extracting shared validation.
+
+Settle the failed turn as interrupted before arming the timer.
+Reuse the existing 5/10/20/40/60-second ladder and validated short reset hints.
+At timer fire, revalidate native identity, execution, generation, runtime readiness, configuration, retry ownership, and queue priority.
+Submit one internal instruction through the ordinary prompt seam on the retained runtime.
+Use capacity-specific wording: continue unfinished work from existing history, preserve completed actions, and ask the user about uncertain outcomes.
+Do not attach the original request or resend attachments.
+
+Reuse `retryRetainedRuntimeContinuation` dispatch and acceptance accounting.
+Adapt its policy-specific instruction and validation instead of introducing another timer or prompt loop.
+For this policy, runtime loss or an inconclusive probe stops recovery without predecessor teardown or native restoration.
+Do not enter the transport-loss restore branch after writes.
+Ambiguous dispatch stops without another automatic send.
+
+Every additional capacity failure belongs to the same episode until successful completion or supersession.
+Preserve the initial interruption and all completed tool rows.
+Do not reset the episode on assistant output, tool completion, or prompt acceptance.
+Increment started attempts only at actual dispatch, with at most five additional attempts.
+Preserve the existing success and cancellation cleanup owners.
+Refusal and exhaustion on a usable runtime retain historical errors and the normal composer.
+
+## Capacity episode verification
+
+Protocol tests prove current-generation snapshots, mixed completed/pending tools, permissions, unknown outcomes, and remote omission.
+Service tests prove same-process continuation after completed effects and preservation of the original-prompt replay fence.
+Barrier tests cover cancellation, successor generations, queue priority, configuration changes, and runtime loss.
+Exhaustion tests prove the five delays, five dispatches, and no sixth attempt after progress.
+Desktop and phone E2E tests use the real ACP mock process and assert unchanged native identities and initialization count.
+The implementation package must also capture an isolated Codex compatibility trace before enabling its dialect support.
+Mock evidence alone does not establish the production Codex capability.
+Record the installed CLI version and sanitized frame evidence in the work order.
+Use a disposable conversation, never the reported user's task.
+
+The [capacity plan](../../../plans/model-capacity-continuation/plan.md) owns exact tests and commands.
+Public guidance changes with implementation in `docs/public/tasks-and-workflows.md`.
+The design turn changes internal artifacts only.
 
 ## Ownership and failure
 

@@ -132,7 +132,7 @@ func (p *cursorNativeSmokeACPProcess) promptAndDisconnectOnUpdate(
 			}
 			p.client.handleServerRequest(t, frame)
 		} else if cursorNativeSmokeJSONIDMatches(frame.ID, requestID) {
-			t.Fatal("Cursor completed the prompt before the interruption boundary")
+			t.Fatalf("Cursor completed the prompt before the interruption boundary; tools=%v", cursorNativeSmokeToolEvidenceSummary(p.client.toolEvidence))
 		}
 	}
 }
@@ -228,13 +228,13 @@ func probeCursorNativeRestoredOutput(t *testing.T, binary string, smoke *cursorN
 	restored.client.request(t, 2, "session/load", map[string]any{
 		"sessionId": sessionID, "cwd": smoke.workspace, "mcpServers": []any{},
 	})
-	requireRestoredCursorSessionID(t, restored.client.sessionIDs, sessionID)
 	restored.client.output.Reset()
 	toolStart := len(restored.client.toolEvidence)
 	restored.client.request(t, 3, "session/prompt", map[string]any{
 		"sessionId": sessionID,
 		"prompt":    []map[string]string{{"type": "text", "text": "Reply with the unique marker at the start of your immediately preceding interrupted response. Do not use tools."}},
 	})
+	requireRestoredCursorSessionID(t, restored.client.sessionIDs, sessionID)
 	recalled := strings.Contains(restored.client.output.String(), marker) && len(restored.client.toolEvidence[toolStart:]) == 0
 	t.Logf("native output-only restore: same_session=true interrupted_assistant_output_replayed=%t interrupted_assistant_output_recalled=%t",
 		strings.Contains(restored.client.assistantOutput.String(), marker), recalled)
@@ -254,6 +254,81 @@ func requireRestoredCursorSessionID(t *testing.T, sessionIDs []string, expected 
 	require.NotEmpty(t, sessionIDs, "native restoration must provide observed session identity")
 	for _, sessionID := range sessionIDs {
 		require.Equal(t, expected, sessionID, "session/load must retain provider identity")
+	}
+}
+
+func TestCursorNativeCompletedToolContinue(t *testing.T) {
+	binary, accountToken := requireCursorNativeContinuationGate(t)
+	version, err := exec.Command(binary, "--version").Output()
+	require.NoError(t, err)
+	versionText := strings.TrimSpace(string(version))
+	require.NotEmpty(t, versionText)
+
+	for _, kind := range []string{"edit", "execute"} {
+		t.Run(kind, func(t *testing.T) {
+			smoke := newCursorNativeSmokeContext(t, binary, accountToken)
+			writeTarget := filepath.Join(smoke.workspace, "tool-continue-target.txt")
+			const fileContent = "completed-tool-content-98a4"
+			const finalMarker = "COMPLETED_TOOL_FOLLOWUP_9B72"
+			instruction := "Use the file editing tool to create tool-continue-target.txt with exactly completed-tool-content-98a4."
+			if kind == "execute" {
+				instruction = "Use the shell tool with exactly this command: printf 'completed-tool-content-98a4'. Do not add command prefixes, suffixes, or extra shell commands."
+			}
+			prompt := instruction + " Then finish by replying with only " + finalMarker + "."
+			first := startCursorNativeSmokeACP(t, binary, smoke.workspace, smoke.env)
+			if kind == "execute" {
+				first.client.fixtureShellCommand = "printf 'completed-tool-content-98a4'"
+			}
+			first.primeSession(t)
+			first.client.assistantOutput.Reset()
+			toolStart := len(first.client.toolEvidence)
+			first.promptAndDisconnectOnUpdate(t, 4, prompt, func() bool {
+				evidence := first.client.toolEvidence[toolStart:]
+				matched := false
+				for _, tool := range evidence {
+					if tool.Status != "completed" {
+						return false
+					}
+					matched = matched || tool.Kind == kind
+				}
+				if kind == "execute" {
+					return matched && strings.Contains(first.client.output.String(), fileContent)
+				}
+				data, readErr := os.ReadFile(writeTarget)
+				return matched && readErr == nil && string(data) == fileContent
+			})
+			require.NotContains(t, first.client.assistantOutput.String(), finalMarker,
+				"interrupt after completed tools and before the requested final answer")
+			evidence := first.client.toolEvidence[toolStart:]
+			require.NotEmpty(t, evidence)
+			for _, tool := range evidence {
+				require.Equal(t, "completed", tool.Status)
+			}
+
+			replacement := startCursorNativeSmokeACPWithoutSession(t, binary, smoke.workspace, smoke.env)
+			replacement.client.fixtureShellCommand = first.client.fixtureShellCommand
+			replacement.client.request(t, 2, "session/load", map[string]any{
+				"sessionId": first.sessionID, "cwd": smoke.workspace, "mcpServers": []any{},
+			})
+			require.Contains(t, replacement.client.output.String(), prompt,
+				"native history must contain the unfinished request")
+			replacement.client.output.Reset()
+			replacement.client.assistantOutput.Reset()
+			replacement.client.request(t, 3, "session/prompt", map[string]any{
+				"sessionId": first.sessionID,
+				"prompt":    []map[string]string{{"type": "text", "text": "continue"}},
+			})
+			requireRestoredCursorSessionID(t, replacement.client.sessionIDs, first.sessionID)
+			require.Contains(t, replacement.client.assistantOutput.String(), finalMarker,
+				"literal continue must finish the original request using native history")
+			if kind == "edit" {
+				data, readErr := os.ReadFile(writeTarget)
+				require.NoError(t, readErr)
+				require.Equal(t, fileContent, string(data))
+			}
+			t.Logf("native completed-tool continuation: cli=%s initialize=%s tools=%v same_session=true unfinished_request_completed=true",
+				versionText, replacement.client.initializeSummary(), cursorNativeSmokeToolEvidenceSummary(evidence))
+		})
 	}
 }
 

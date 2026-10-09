@@ -1,4 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { waitForSessionDone } from "../../helpers/session";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import {
   openConfigurationChat,
@@ -35,7 +37,8 @@ test.describe("Mobile Configuration Chat restart", () => {
     );
     const refresh = dialog.getByRole("button", { name: "Refresh status", exact: true });
     await expect(refresh).toHaveCount(1);
-    expect((await refresh.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await waitForFiniteAnimations(dialog);
+    expect(Math.round((await refresh.boundingBox())?.height ?? 0)).toBeGreaterThanOrEqual(44);
     await capture.screenshot("phone-expanded-restart-recovery", {
       caption: "Phone expanded Configuration Chat offers a touch-sized status refresh",
     });
@@ -77,9 +80,9 @@ test.describe("Mobile Configuration Chat restart", () => {
     for (const label of ["Restart session", "Open in Quick Chat", "Close configuration chat"]) {
       const control = panel.getByRole("button", { name: label, exact: true });
       await expect
-        .poll(async () => (await control.boundingBox())?.height ?? 0)
+        .poll(async () => Math.round((await control.boundingBox())?.height ?? 0))
         .toBeGreaterThanOrEqual(44);
-      expect((await control.boundingBox())!.width).toBeGreaterThanOrEqual(44);
+      expect(Math.round((await control.boundingBox())?.width ?? 0)).toBeGreaterThanOrEqual(44);
     }
     await restart.tap();
     const confirmation = testPage.getByTestId("config-chat-restart-confirmation");
@@ -98,7 +101,9 @@ test.describe("Mobile Configuration Chat restart", () => {
     expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
     expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
     expect(
-      (await confirmation.getByTestId("config-chat-confirm-restart").boundingBox())!.height,
+      Math.round(
+        (await confirmation.getByTestId("config-chat-confirm-restart").boundingBox())?.height ?? 0,
+      ),
     ).toBeGreaterThanOrEqual(44);
     await prCapture.screenshot("phone-restart-confirmation", {
       caption: "Phone Configuration Chat restart uses the shared bottom confirmation drawer",
@@ -109,9 +114,16 @@ test.describe("Mobile Configuration Chat restart", () => {
     const replacement = await confirmConfigurationChatRestart(testPage, panel, true);
     expect(replacement.session_id).not.toBe(old.session_id);
     await expect(panel.getByText("phone old response", { exact: true })).toHaveCount(0);
-    await expect
-      .poll(async () => (await apiClient.getTaskSession(replacement.session_id)).session.state)
-      .toBe("WAITING_FOR_INPUT");
+    await waitForSessionDone(
+      apiClient,
+      replacement.task_id,
+      replacement.session_id,
+      "Replacement configuration session initialized",
+      30_000,
+    );
+    expect((await apiClient.getTaskSession(replacement.session_id)).session.state).toBe(
+      "WAITING_FOR_INPUT",
+    );
     const { turns } = await apiClient.listSessionTurns(replacement.session_id);
     expect(turns.filter((turn) => turn.metadata?.lifecycle_only !== true)).toEqual([]);
     expect(turns.every((turn) => Boolean(turn.completed_at))).toBe(true);

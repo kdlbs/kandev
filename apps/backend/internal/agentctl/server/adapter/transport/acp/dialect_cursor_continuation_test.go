@@ -11,13 +11,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-001.2
+func TestCursorContinuationEvidenceWithoutOptIn(t *testing.T) {
+	t.Setenv("KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION", "false")
+	a, turn := newCursorPromptTurn(t, 7)
+	a.capabilities.LoadSession = true
+	a.sessionID = "session-1"
+	var notification acpsdk.SessionNotification
+	require.NoError(t, json.Unmarshal([]byte(`{"sessionId":"session-1","update":{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed","rawInput":{"path":"fixture.txt"}}}`), &notification))
+	a.handleACPUpdate(notification, 7)
+
+	snapshot := a.continuationSafetySnapshot(turn)
+	require.NotNil(t, snapshot, "supported prompts collect evidence without an installation opt-in")
+	require.True(t, snapshot.SafeFor(7))
+	require.Equal(t, uint16(1), snapshot.CompletedTools)
+}
+
 // @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-001.1
 func TestCursorContinuationEvidenceTerminalOutput(t *testing.T) {
 	a, fake, conn := setupHandoffFakeAgent(t)
 	a.agentID = cursorAgentID
 	a.normalizer = NewNormalizer(cursorAgentID)
 	a.dialect = newACPDialect(cursorAgentID)
-	a.cfg.ProviderInterruptionContinuation = true
 	require.NoError(t, a.Initialize(t.Context()))
 	a.capabilities.LoadSession = true
 	_, err := a.NewSession(t.Context(), nil)
@@ -60,7 +75,6 @@ func TestCursorContinuationEvidenceRPCFailureRetiresAsyncCompletion(t *testing.T
 	a, fake, _ := setupHandoffFakeAgent(t)
 	a.agentID = mockAgentID
 	a.dialect = newACPDialect(mockAgentID)
-	a.cfg.ProviderInterruptionContinuation = true
 	fake.promptFailure = &acpsdk.RequestError{Code: -32603, Message: "peer disconnected before response", Data: map[string]any{"kandevMock": map[string]any{"continuationInterruption": true}}}
 	require.NoError(t, a.Initialize(t.Context()))
 	a.capabilities.LoadSession = true
@@ -95,26 +109,61 @@ func TestCursorContinuationEvidenceToolOutcomes(t *testing.T) {
 		name   string
 		frames []string
 		safe   bool
-		reads  uint16
+		tools  uint16
 	}{
 		{name: "output only", safe: true},
-		{name: "completed read", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"in_progress","rawInput":{"path":"fixture.txt"}}`, `{"sessionUpdate":"tool_call_update","toolCallId":"read-1","status":"completed"}`}, safe: true, reads: 1},
+		{name: "completed read", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"in_progress","rawInput":{"path":"fixture.txt"}}`, `{"sessionUpdate":"tool_call_update","toolCallId":"read-1","status":"completed"}`}, safe: true, tools: 1},
 		{name: "pending read", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"in_progress"}`}},
-		{name: "write", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"write-1","title":"Read","kind":"edit","status":"completed"}`}},
-		{name: "execute", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"cmd-1","title":"Read","kind":"execute","status":"completed"}`}},
-		{name: "missing kind", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"unknown-1","title":"Read","status":"completed"}`}},
+		{name: "write", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"write-1","title":"Edit","kind":"edit","status":"completed"}`}, safe: true, tools: 1},
+		{name: "execute", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"cmd-1","title":"Execute","kind":"execute","status":"completed"}`}, safe: true, tools: 1},
+		{name: "missing kind", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"unknown-1","title":"Tool","status":"completed"}`}, safe: true, tools: 1},
 		{name: "orphan update", frames: []string{`{"sessionUpdate":"tool_call_update","toolCallId":"unknown-1","status":"completed"}`}},
 		{name: "failed read", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"failed"}`}},
-		{name: "MCP disguised as read", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed","rawInput":{"providerIdentifier":"server","toolName":"read","args":{}}}`}},
+		{name: "MCP tool", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"mcp-1","title":"MCP Read","kind":"read","status":"completed","rawInput":{"providerIdentifier":"server","toolName":"read","args":{}}}`}, safe: true, tools: 1},
 		{name: "background", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed","_meta":{"isBackground":true}}`}},
+		{name: "Cursor subagent title alone", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"task-1","title":"Task: Subagent task","kind":"other","status":"completed"}`}},
+		{name: "Cursor subagent", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"task-1","title":"Task: Subagent task","kind":"other","status":"completed","rawInput":{"_toolName":"task","prompt":"inspect fixture"}}`}},
+		{name: "Cursor background result", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"task-1","title":"Task: Subagent task","kind":"other","status":"in_progress"}`, `{"sessionUpdate":"tool_call_update","toolCallId":"task-1","status":"completed","rawOutput":{"durationMs":10,"isBackground":true}}`}},
+		{name: "late Cursor subagent input", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"task-1","title":"Task: Subagent task","kind":"other","status":"in_progress"}`, `{"sessionUpdate":"tool_call_update","toolCallId":"task-1","status":"completed","rawInput":{"_toolName":"task"}}`}},
+		{name: "background shell", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"cmd-1","title":"Execute","kind":"execute","status":"completed","rawInput":{"command":"fixture","wait":false}}`}},
 		{name: "nested", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed","_meta":{"parentToolCallId":"parent"}}`}},
-		{name: "conflicting kind", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed"}`, `{"sessionUpdate":"tool_call_update","toolCallId":"read-1","kind":"execute","status":"completed"}`}},
+		{name: "mixed completed and pending", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed"}`, `{"sessionUpdate":"tool_call","toolCallId":"cmd-1","title":"Execute","kind":"execute","status":"in_progress"}`}},
 		{name: "reused id", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed"}`, `{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed"}`}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			a, turn := newCursorPromptTurn(t, 7)
-			a.cfg.ProviderInterruptionContinuation = true
+			a.capabilities.LoadSession = true
+			a.sessionID = "session-1"
+			for _, frame := range tc.frames {
+				var n acpsdk.SessionNotification
+				require.NoError(t, json.Unmarshal([]byte(`{"sessionId":"session-1","update":`+frame+`}`), &n))
+				a.handleACPUpdate(n, 7)
+			}
+			snapshot := a.continuationSafetySnapshot(turn)
+			require.Equal(t, tc.safe, snapshot.SafeFor(7))
+			if tc.safe {
+				require.Equal(t, tc.tools, snapshot.CompletedTools)
+			}
+		})
+	}
+}
+
+func TestCursorContinuationEvidenceV1ReadOnlyWireSkew(t *testing.T) {
+	cases := []struct {
+		name   string
+		frames []string
+		safe   bool
+		reads  uint16
+	}{
+		{name: "completed read", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"in_progress","rawInput":{"path":"fixture.txt"}}`, `{"sessionUpdate":"tool_call_update","toolCallId":"read-1","status":"completed"}`}, safe: true, reads: 1},
+		{name: "write fails under v1", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"write-1","title":"Edit","kind":"edit","status":"completed"}`}, safe: false},
+		{name: "execute fails under v1", frames: []string{`{"sessionUpdate":"tool_call","toolCallId":"cmd-1","title":"Execute","kind":"execute","status":"completed"}`}, safe: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, turn := newCursorPromptTurn(t, 7)
+			a.dialect.continuationSupport = streams.ContinuationNativeSavedHistoryV1
 			a.capabilities.LoadSession = true
 			a.sessionID = "session-1"
 			for _, frame := range tc.frames {
@@ -134,7 +183,6 @@ func TestCursorContinuationEvidenceToolOutcomes(t *testing.T) {
 // @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-001.2
 func TestCursorContinuationEvidenceBoundsAndFences(t *testing.T) {
 	a, turn := newCursorPromptTurn(t, 7)
-	a.cfg.ProviderInterruptionContinuation = true
 	a.capabilities.LoadSession = true
 	a.sessionID = "session-1"
 	require.True(t, a.continuationSafetySnapshot(turn).SafeFor(7))
@@ -150,16 +198,12 @@ func TestCursorContinuationEvidenceBoundsAndFences(t *testing.T) {
 	a.poisonContinuationSafety()
 	require.False(t, a.continuationSafetySnapshot(turn).SafeFor(7), "permission/background uncertainty stays unsafe")
 	require.True(t, snapshot.SafeFor(7), "published snapshot is immutable")
-	a.cfg.ProviderInterruptionContinuation = false
-	require.Nil(t, a.continuationSafetySnapshot(turn))
-	a.cfg.ProviderInterruptionContinuation = true
 	a.dialect = newACPDialect("other")
 	require.Nil(t, a.continuationSafetySnapshot(turn))
 }
 
 func TestCursorContinuationEvidenceOverflow(t *testing.T) {
 	a, turn := newCursorPromptTurn(t, 7)
-	a.cfg.ProviderInterruptionContinuation = true
 	a.capabilities.LoadSession = true
 	a.sessionID = "session-1"
 	for i := 0; i < 257; i++ {
@@ -172,7 +216,6 @@ func TestCursorContinuationEvidenceOverflow(t *testing.T) {
 
 func TestCursorContinuationEvidencePermissionSessionFence(t *testing.T) {
 	a, turn := newCursorPromptTurn(t, 7)
-	a.cfg.ProviderInterruptionContinuation = true
 	a.capabilities.LoadSession = true
 	a.sessionID = "current-session"
 	_, err := a.handlePermissionRequest(t.Context(), &PermissionRequest{SessionID: "predecessor-session", ToolCallID: "old-tool"})

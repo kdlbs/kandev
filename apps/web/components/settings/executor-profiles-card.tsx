@@ -6,11 +6,12 @@ import { IconTrash, IconPlus, IconChevronRight } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
-import { deleteExecutorProfile, listExecutorProfiles } from "@/lib/api/domains/settings-api";
+import { deleteExecutorProfile } from "@/lib/api/domains/settings-api";
 import { ExecutorProfileDialog } from "@/components/settings/executor-profile-dialog";
 import { PluginExecutorProfileDialog } from "@/components/settings/plugin-executor-profile-dialog";
 import { useAppStore } from "@/components/state-provider";
 import type { ExecutorProfile } from "@/lib/types/http";
+import { useRefreshProfiles } from "@/hooks/domains/settings/use-refresh-executor-profiles";
 import { useTranslation } from "react-i18next";
 import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
@@ -124,7 +125,7 @@ export function ExecutorProfilesCard({
   const router = useRouter();
   const [dialogOpen, setDialogOpen] = useState(false);
   const executors = useAppStore((state) => state.executors.items);
-  const setExecutors = useAppStore((state) => state.setExecutors);
+  const refreshProfiles = useRefreshProfiles(executorId);
   const executor = executors.find((item) => item.id === executorId);
   const isPluginExecutor = executor?.type === "plugin_remote";
   const provider = executor?.provider;
@@ -141,17 +142,6 @@ export function ExecutorProfilesCard({
     provider?.description ?? t("executors:differentConfigurationsForThisExecutorEach"),
     t,
   );
-
-  const refreshProfiles = useCallback(async () => {
-    try {
-      const resp = await listExecutorProfiles(executorId, { cache: "no-store" });
-      setExecutors(
-        executors.map((e) => (e.id === executorId ? { ...e, profiles: resp.profiles } : e)),
-      );
-    } catch {
-      // ignore refresh failure
-    }
-  }, [executorId, executors, setExecutors]);
 
   const handleProfileCreated = useCallback(
     async (profile: ExecutorProfile) => {

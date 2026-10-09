@@ -23,13 +23,13 @@ import { generateUUID } from "@/lib/utils";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import type { AgentProfileKind } from "@/lib/types/agent-profile";
 import { useAppStore } from "@/components/state-provider";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { useAgentCreationStoreSync } from "@/hooks/domains/settings/use-agent-creation-store-sync";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import { deleteAgentAction } from "@/app/actions/agents";
 import { SettingsRedirect } from "@/src/settings-route-helpers";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
-import type { DraftProfile, DraftAgent } from "./agent-save-helpers";
+import type { DraftProfile, DraftAgent, SaveAgentCallbacks } from "./agent-save-helpers";
 import { AgentHeader, ProfilesCard } from "./agent-setup-parts";
 import { isHandledApiError } from "@/lib/api/client";
 
@@ -166,32 +166,6 @@ function useAgentFormState(
   };
 }
 
-function useAgentStoreSync() {
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
-  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
-  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
-
-  const syncAgentsToStore = (nextAgents: Agent[]) => {
-    setSettingsAgents(nextAgents);
-    setAgentProfiles(
-      nextAgents.flatMap((agent) =>
-        agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-      ),
-    );
-  };
-
-  const upsertAgent = (agent: Agent) => {
-    const exists = settingsAgents.some((item: Agent) => item.id === agent.id);
-    syncAgentsToStore(
-      exists
-        ? settingsAgents.map((item: Agent) => (item.id === agent.id ? agent : item))
-        : [...settingsAgents, agent],
-    );
-  };
-
-  return { upsertAgent };
-}
-
 type AgentSaveHandlersProps = {
   draftAgent: DraftAgent;
   savedAgent: Agent | null;
@@ -202,7 +176,8 @@ type AgentSaveHandlersProps = {
   resolveDisplayName: (name: string) => string;
   setDraftAgent: (agent: DraftAgent | ((current: DraftAgent) => DraftAgent)) => void;
   setSaveStatus: (status: "idle" | "loading" | "success" | "error") => void;
-  upsertAgent: (agent: Agent) => void;
+  upsertAgent: ReturnType<typeof useAgentCreationStoreSync>["upsertAgent"];
+  getAgentProfilesVersion: () => number;
   onToastError: (error: unknown) => void;
   replaceRoute: (path: string) => void;
 };
@@ -218,6 +193,7 @@ function useAgentSaveHandlers({
   setDraftAgent,
   setSaveStatus,
   upsertAgent,
+  getAgentProfilesVersion,
   onToastError,
   replaceRoute,
 }: AgentSaveHandlersProps) {
@@ -235,13 +211,19 @@ function useAgentSaveHandlers({
       onToastError(new Error(t("agents:fixInvalidMcpJson")));
       return;
     }
+    const profileVersionAtSaveStart = getAgentProfilesVersion();
     setSaveStatus("loading");
     const callbacks = {
       onToastError,
       currentAgentModelConfig,
       permissionSettings,
       resolveDisplayName,
-      upsertAgent,
+      upsertAgent: ((agent, creation) =>
+        upsertAgent(
+          agent,
+          creation,
+          profileVersionAtSaveStart,
+        )) satisfies SaveAgentCallbacks["upsertAgent"],
       setDraftAgent,
       ensureProfiles,
       cloneAgent,
@@ -377,7 +359,7 @@ function AgentSetupForm({
   const router = useRouter();
   const availableAgents = useAvailableAgents().items;
   const { items: secrets } = useSecrets();
-  const { upsertAgent } = useAgentStoreSync();
+  const { getAgentProfilesVersion, upsertAgent } = useAgentCreationStoreSync();
 
   const {
     draftAgent,
@@ -415,6 +397,7 @@ function AgentSetupForm({
     setDraftAgent,
     setSaveStatus,
     upsertAgent,
+    getAgentProfilesVersion,
     onToastError,
     replaceRoute: (path: string) => router.replace(path),
   });

@@ -1,7 +1,8 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Task } from "@/lib/types/http";
-import { useChangeWorkflowTask } from "./use-change-workflow-data";
+import type { Agent, Task } from "@/lib/types/http";
+import { listAgents, listExecutors } from "@/lib/api";
+import { useChangeWorkflowTask, useChangeWorkflowProfiles } from "./use-change-workflow-data";
 
 const apiMocks = vi.hoisted(() => ({ fetchTask: vi.fn() }));
 const TASK_ID = "task-1";
@@ -103,5 +104,28 @@ describe("useChangeWorkflowTask", () => {
     await expect(firstResult!).resolves.toBeNull();
     expect(result.current.task?.title).not.toBe("stale");
     expect(result.current.status).toBe("success");
+  });
+});
+
+describe("useChangeWorkflowProfiles", () => {
+  it("ignores saved Settings order when loading execution profile choices", async () => {
+    vi.mocked(listAgents).mockResolvedValueOnce({
+      agents: [
+        {
+          id: "a",
+          name: "A",
+          profile_order_revision: 5,
+          profiles: [
+            { id: "old", name: "Old", createdAt: "2026-01-01T00:00:00Z" },
+            { id: "new", name: "New", createdAt: "2026-02-01T00:00:00Z" },
+          ],
+        } as Agent,
+      ],
+      total: 1,
+    });
+    vi.mocked(listExecutors).mockResolvedValueOnce({ executors: [], total: 0 });
+    const { result } = renderHook(() => useChangeWorkflowProfiles(true, WORKSPACE_ID));
+    await waitFor(() => expect(result.current.status).toBe("success"));
+    expect(result.current.profiles.map((profile) => profile.id)).toEqual(["new", "old"]);
   });
 });

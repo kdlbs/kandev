@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/authz"
@@ -23,6 +24,10 @@ import (
 const queryTrue = "true"
 
 var availableAgentsBroadcastTimeout = 10 * time.Second
+
+// hostCLIWarmupTimeout bounds the background vendor CLI model refresh started
+// by a discovery request.
+var hostCLIWarmupTimeout = 30 * time.Second
 
 type Handlers struct {
 	controller *controller.Controller
@@ -72,6 +77,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.PATCH("/agents/:id", cfg, h.interlock, h.httpUpdateAgent)
 	api.DELETE("/agents/:id", cfg, h.interlock, h.httpDeleteAgent)
 	api.POST("/agents/:id/profiles", cfg, h.interlock, h.httpCreateProfile)
+	api.PUT("/agents/:id/profiles/order", cfg, h.interlock, h.httpReorderAgentProfiles)
 	api.GET("/agents/:id/logo", h.httpGetAgentLogo)
 	api.GET("/agent-models/:agentName", h.httpGetAgentModels)
 	api.POST("/agent-models/:agentName/probe", cfg, h.httpProbeAgentProfile)
@@ -103,6 +109,20 @@ func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, resp)
 	h.broadcastAvailableAgentsAsync()
+	// An Agents settings page load and a Rescan both land here. Re-read any
+	// stale vendor CLI catalogue off the response path so the model selector
+	// reflects the CLI currently on disk.
+	h.warmHostCLIModelsAsync()
+}
+
+// warmHostCLIModelsAsync refreshes stale vendor CLI model catalogues without
+// delaying the discovery response.
+func (h *Handlers) warmHostCLIModelsAsync() {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), hostCLIWarmupTimeout)
+		defer cancel()
+		h.controller.WarmHostCLIModels(ctx)
+	}()
 }
 
 func (h *Handlers) httpListAvailableAgents(c *gin.Context) {
@@ -142,8 +162,13 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 		return
 	}
 	request.TargetVersion = strings.TrimSpace(request.TargetVersion)
-	if request.UseDefault && request.TargetVersion != "" {
+	request.TargetFamily = strings.TrimSpace(request.TargetFamily)
+	if request.UseDefault && (request.TargetVersion != "" || request.TargetFamily != "" || request.ExpectedRuntimeRevision != 0) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
+		return
+	}
+	if request.TargetFamily != "" && request.TargetFamily != "v2" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "target family is invalid"})
 		return
 	}
 	if h.controller.IsHarnessUpdate(name) && (request.TargetVersion != "" || request.UseDefault) {
@@ -158,6 +183,17 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 		if request.UseDefault {
 			return h.controller.EnqueueAgentUpdateUseDefault(c.Request.Context(), name)
 		}
+		if request.TargetFamily == "v2" {
+			if request.ExpectedRuntimeRevision == 0 {
+				return nil, controller.ErrRuntimeMigrationUnsupported
+			}
+			return h.controller.EnqueueOpenCodeMigration(
+				c.Request.Context(), name, request.TargetVersion, request.ExpectedRuntimeRevision,
+			)
+		}
+		if request.ExpectedRuntimeRevision != 0 {
+			return nil, controller.ErrRuntimeMigrationUnsupported
+		}
 		return h.controller.EnqueueAgentUpdate(c.Request.Context(), name, request.TargetVersion)
 	}, classifyUpdateError)
 }
@@ -168,6 +204,7 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 		return
 	}
 	targetVersion := strings.TrimSpace(c.Query("target_version"))
+	targetFamily := strings.TrimSpace(c.Query("target_family"))
 	useDefault := false
 	if raw := strings.TrimSpace(c.Query("use_default")); raw != "" {
 		parsed, err := strconv.ParseBool(raw)
@@ -177,15 +214,22 @@ func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
 		}
 		useDefault = parsed
 	}
-	if useDefault && targetVersion != "" {
+	if useDefault && (targetVersion != "" || targetFamily != "") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
 		return
 	}
 	var preview *dto.AgentUpdatePreviewDTO
 	var err error
-	if useDefault {
+	switch {
+	case targetFamily != "":
+		if useDefault {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "target family cannot be combined with use_default"})
+			return
+		}
+		preview, err = h.controller.PreviewAgentUpdateFamily(c.Request.Context(), name, targetVersion, targetFamily)
+	case useDefault:
 		preview, err = h.controller.PreviewAgentUpdateUseDefault(c.Request.Context(), name)
-	} else {
+	default:
 		preview, err = h.controller.PreviewAgentUpdate(c.Request.Context(), name, targetVersion)
 	}
 	if err == nil {
@@ -309,6 +353,12 @@ func classifyUpdateError(err error) (int, string, bool) {
 		return http.StatusBadRequest, "target version is invalid", true
 	case errors.Is(err, controller.ErrRuntimeUpdateTargetMissing):
 		return http.StatusBadRequest, "target version is not published", true
+	case errors.Is(err, controller.ErrRuntimeMigrationUnsupported):
+		return http.StatusBadRequest, "OpenCode runtime migration is unavailable", true
+	case errors.Is(err, controller.ErrRuntimeMigrationBlocked):
+		return http.StatusConflict, "OpenCode runtime migration is blocked by active work", true
+	case errors.Is(err, managedruntime.ErrOpenCodeSelectionRevisionConflict):
+		return http.StatusConflict, "OpenCode runtime changed; refresh the preview", true
 	default:
 		return 0, "", false
 	}
@@ -326,6 +376,9 @@ func classifyUpdatePreviewError(err error) (int, string, bool) {
 	}
 	if errors.Is(err, controller.ErrRuntimeUpdateTargetMissing) {
 		return http.StatusBadRequest, "target version is not published", true
+	}
+	if errors.Is(err, controller.ErrRuntimeMigrationUnsupported) {
+		return http.StatusBadRequest, "OpenCode runtime migration is unavailable", true
 	}
 	return 0, "", false
 }

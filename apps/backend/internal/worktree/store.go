@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryartifact"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
 )
 
@@ -58,6 +59,24 @@ func (s *SQLiteStore) ReleaseTaskEnvironmentRecoveryClaim(
 	claim *models.TaskEnvironmentRecoveryClaim,
 ) error {
 	return recoveryclaim.Release(ctx, s.db, claim)
+}
+
+// RegisterTaskEnvironmentRecoveryArtifacts publishes exact operation-owned
+// paths while the recovery claim and selected inventory slot remain current.
+func (s *SQLiteStore) RegisterTaskEnvironmentRecoveryArtifacts(
+	ctx context.Context,
+	registration recoveryartifact.Registration,
+) error {
+	return recoveryartifact.Register(ctx, s.db, registration)
+}
+
+// ListTaskEnvironmentRecoveryArtifacts reads only artifact rows whose owner
+// generation and selected inventory identity remain current.
+func (s *SQLiteStore) ListTaskEnvironmentRecoveryArtifacts(
+	ctx context.Context,
+	environmentID string,
+) ([]recoveryartifact.Registered, error) {
+	return recoveryartifact.ListForEnvironment(ctx, s.db, environmentID)
 }
 
 // worktreeSelectCols is the SELECT projection shared by every worktree query.

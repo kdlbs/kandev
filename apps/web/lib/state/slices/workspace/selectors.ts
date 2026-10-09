@@ -36,3 +36,18 @@ export function isOfficeWorkspace(workspace: ModeWorkspace | null | undefined): 
 export function selectActiveWorkspace(state: AppState): WorkspaceItem | undefined {
   return state.workspaces.items.find((workspace) => workspace.id === state.workspaces.activeId);
 }
+
+/**
+ * The workspace record matching `workspaceId`, independent of which
+ * workspace is globally active.
+ *
+ * A route that carries its own workspace id in its URL (like the coordinator
+ * screens) must derive workspace-scoped data from that id, not from
+ * `activeId` — the two can disagree, e.g. a background WS event switching
+ * the active workspace while the user still has an old workspace's route open.
+ */
+export function selectWorkspaceById(
+  workspaceId: string,
+): (state: AppState) => WorkspaceItem | undefined {
+  return (state) => state.workspaces.items.find((workspace) => workspace.id === workspaceId);
+}

@@ -90,6 +90,11 @@ cancellation and follows the existing runtime contract for the replacement.
 
 ## Presentation and compatibility
 
+The Send Now transport request has a 35-second deadline: the existing
+30-second backend cancellation budget plus the ordinary five-second transport
+allowance. Pending cancellation must not produce a premature client timeout
+or error toast. A lost acknowledgement still terminates at that deadline.
+
 The queue hook, existing row control, cancellation projection, and queue refetch
 remain shared across desktop and phone. Reuse the inline queue panel and its
 single scroll region. Desktop retains hover/focus actions; coarse pointers

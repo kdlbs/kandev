@@ -166,6 +166,8 @@ interface PluginHostApi {
   // (mounted once at the app root with its own tooltip provider and isolated
   // behind its own error boundary).
   // Independent of keybindings — any plugin code path may call it.
+  // Closing restores focus to an available opener; nested modals keep focus
+  // inside the surviving surface.
   openModal(options: PluginModalOptions): PluginModalHandle;
   // Opens Kandev's native one-field task change-request linking workflow.
   // Provider code supplies copy, parsing, and mutation only; the host owns
@@ -323,7 +325,7 @@ interface PluginModalOptions {
 }
 
 interface PluginModalHandle {
-  close(): void; // closes this modal instance; no-op if already closed
+  close(): void; // closes this instance and restores focus when its opener remains available
 }
 
 interface PluginTaskLinkDialogOptions {
@@ -971,9 +973,8 @@ store or writes conversation history.
 // section: "main" (default) renders as a top-level sidebar entry;
 // "integrations" renders inside the sidebar's Integrations section alongside
 // the first-party integration links (GitHub, Jira, ...); "sidebar-footer"
-// renders as an icon button in the sidebar footer's icon row and as a
-// labelled row in the phone menu's Utilities group, subject to the footer's
-// inline budget — an over-budget item is reached through the footer's
+// renders as a labelled item in the desktop footer's utilities menu and as a
+// labelled row in the phone menu's Utilities group. All desktop items use the
 // overflow menu instead of an inline button; "settings" is accepted but
 // renders on no surface. Hosts predating a section value, or seeing an
 // unrecognised one, simply degrade to "main"'s placement — nothing is ever

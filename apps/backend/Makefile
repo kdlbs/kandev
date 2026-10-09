@@ -385,6 +385,8 @@ test-windows:
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
 	@echo "Running Windows helper console-behavior tests..."
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/common/subproc ./internal/agent/mcpconfig ./internal/agentctl/server/utility ./internal/agent/acpdbg ./internal/agent/codexdbg -run "^(TestWindowsPrepareGitLifecycleCommandHidesConsoleWindow|TestWindowsDetachedParentKeepsConsoleHiddenForDescendants|TestPrepareNativeMCPProcessHidesConsoleWindow|TestWindowsACPCommandProcAttrHidesConsoleWindow|TestConfigureProcessTreeHidesConsoleWindow)$$"
+	@echo "Running Windows runtime observation command-shim tests..."
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/agentctl/server/utility -run "^TestRuntimeObservationRunsWindowsCommandShimWithSpaces$$"
 	@echo "Running Windows managed runtime cache tests..."
 	# Scoped to the Windows-tagged test only: untagged tests in this package use os.Symlink
 	# which requires Developer Mode on Windows. Add new //go:build windows tests here.

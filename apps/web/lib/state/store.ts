@@ -5,8 +5,10 @@ import type { AppState, HydrationState } from "./app-state-types";
 import { mergeInitialState } from "./default-state";
 import { buildStateOverrides } from "./store-overrides";
 import { getQuickChatSelectionIdentity } from "@/lib/quick-chat/selection-storage";
+import { newerAgentRuntimeSnapshot } from "@/lib/types/agent-runtime";
 import { createTaskOverviewSlice } from "./slices/task-overview";
 import { withTaskOverviewNormalization } from "./slices/task-overview-normalize";
+import { observeSettingsAgentRemovals } from "./settings-agent-removals";
 
 import {
   createKanbanSlice,
@@ -24,6 +26,7 @@ import {
   createFeaturesSlice,
   createAuthSlice,
   createAutomationsSlice,
+  createCoordinatorsSlice,
   createSystemSlice,
   createPluginsSlice,
   createReviewSlice,
@@ -75,12 +78,13 @@ export function createAppStore(initialState?: HydrationState) {
         ...createSystemSlice(set as any, get as any, api as any),
         setAgentRuntime: (snapshot) =>
           set((draft) => {
-            draft.agentRuntime = snapshot;
+            draft.agentRuntime = newerAgentRuntimeSnapshot(draft.agentRuntime, snapshot);
           }),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...createUISlice(set as any, get as any, api as any),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...createAutomationsSlice(set as any, get as any, api as any),
+        ...createCoordinatorsSlice(set),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...createPluginsSlice(set as any, get as any, api as any),
         // createReviewSlice only needs `set`; passing get/api would be superfluous
@@ -98,6 +102,7 @@ export function createAppStore(initialState?: HydrationState) {
       })),
     ),
   );
+  observeSettingsAgentRemovals(store);
   let previousAuth = store.getState().auth;
   const syncQuickChatSelectionIdentity = (auth: AppState["auth"]) => {
     const identity = getQuickChatSelectionIdentity(auth);

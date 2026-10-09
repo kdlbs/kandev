@@ -11,7 +11,7 @@ import (
 // to cover the goroutine-scheduling gap between the SDK delivering a
 // SessionUpdate.ToolCall and a request_permission for the same toolCallID,
 // without adding noticeable latency to permission prompts.
-const syntheticToolCallRaceWindow = 100 * time.Millisecond
+var syntheticToolCallRaceWindow = 100 * time.Millisecond
 
 // waitForActiveToolCall polls activeToolCalls for the given id, sleeping in
 // small increments, and returns true if the entry appears within timeout.

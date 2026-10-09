@@ -70,6 +70,7 @@ test.describe("System Database page", () => {
     await expect(testPage.getByTestId("system-factory-reset-dialog")).toBeVisible();
   });
 
+  // @covers AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001.3 AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001.5 AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-002.3
   test("keeps metadata through reloads and recovers a stale logical snapshot", async ({
     testPage,
   }) => {

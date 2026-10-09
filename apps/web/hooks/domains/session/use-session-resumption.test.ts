@@ -654,7 +654,7 @@ describe("useSessionResumption", () => {
     });
   });
 
-  it("keeps a workspace restore failure as launch feedback with a launch retry", async () => {
+  it("keeps a workspace restore failure as launch feedback with a recovery retry", async () => {
     mockWorkspaceRestorationEnabled = true;
     mockRequest
       .mockResolvedValueOnce({
@@ -694,8 +694,8 @@ describe("useSessionResumption", () => {
 
     expect(mockRequest).toHaveBeenNthCalledWith(
       3,
-      LAUNCH_ACTION,
-      expect.objectContaining({ intent: "resume" }),
+      "session.recover",
+      expect.objectContaining({ action: "resume" }),
       expect.any(Number),
     );
   });
@@ -921,6 +921,78 @@ describe("useSessionResumption prevent-auto-start gate", () => {
     // The skip branch must consult the live row (RUNNING) and refuse.
     expect(mockSetResumeSkipped).not.toHaveBeenCalled();
     expect(mockSetTaskSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("useSessionResumption skipAutomaticRecovery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConnectionStatus = "connected";
+    mockPreventAutoStart = false;
+    mockSessionItems = {
+      s1: {
+        started_at: STARTED_AT,
+      },
+    };
+  });
+
+  // @covers task-05-popover-shell.md#build-decisions "automaticRecovery"
+  it("skips the automatic check-and-resume request when skipAutomaticRecovery is set", async () => {
+    renderHook(() =>
+      useSessionResumption(TASK_ID, SESSION_ID, false, { skipAutomaticRecovery: true }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+
+  it("skips the remote-status retry effect when skipAutomaticRecovery is set", async () => {
+    vi.useFakeTimers();
+    mockSessionItems = {
+      s1: {
+        started_at: STARTED_AT,
+        state: "RUNNING",
+      },
+    };
+
+    renderHook(() =>
+      useSessionResumption(TASK_ID, SESSION_ID, false, { skipAutomaticRecovery: true }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+
+  it("still allows a manual status retry while automatic recovery is skipped", async () => {
+    mockRequest.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: false,
+      is_resumable: false,
+      needs_resume: false,
+    });
+
+    const { result } = renderHook(() =>
+      useSessionResumption(TASK_ID, SESSION_ID, false, { skipAutomaticRecovery: true }),
+    );
+    expect(mockRequest).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.retrySessionStatus();
+    });
+
+    expect(mockRequest).toHaveBeenCalledWith(
+      STATUS_ACTION,
+      { task_id: TASK_ID, session_id: SESSION_ID },
+      10000,
+    );
   });
 });
 

@@ -43,7 +43,13 @@ test.describe("Mobile plugin modal content", () => {
     );
     await testPage.goto("/plugins/e2e-hello");
     await expect(testPage.locator("#hello-plugin-page")).toBeVisible({ timeout: 15_000 });
-    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+    await testPage.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+        }),
+    );
+    await testPage.keyboard.press("ControlOrMeta+Alt+Shift+J");
 
     const dialog = testPage.getByRole("dialog", { name: "Demo Modal" });
     const body = dialog.locator('[data-testid^="plugin-modal-body-"]');

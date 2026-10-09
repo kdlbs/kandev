@@ -57,7 +57,6 @@ export const DiffViewerResolved = memo(function DiffViewerResolved(props: DiffVi
     // Strip pierre-diffs-only props
     /* eslint-disable @typescript-eslint/no-unused-vars */
     const {
-      enableComments,
       baseRef,
       enableExpansion,
       enableWalkthroughAnnotations,

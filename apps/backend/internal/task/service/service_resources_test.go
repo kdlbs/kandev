@@ -804,6 +804,9 @@ func (WorkspaceRepositoryStub) CreateWorkspace(_ context.Context, _ *models.Work
 func (WorkspaceRepositoryStub) GetWorkspace(_ context.Context, _ string) (*models.Workspace, error) {
 	panic("not implemented")
 }
+func (WorkspaceRepositoryStub) UpdateWorkspaceFields(_ context.Context, _ string, _ models.WorkspaceFieldUpdate, _ *time.Time) (*models.Workspace, error) {
+	panic("not implemented")
+}
 func (WorkspaceRepositoryStub) UpdateWorkspace(_ context.Context, _ *models.Workspace) error {
 	panic("not implemented")
 }

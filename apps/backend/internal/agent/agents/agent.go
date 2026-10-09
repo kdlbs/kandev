@@ -7,8 +7,10 @@ package agents
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/agent/hostcli"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -101,11 +103,28 @@ type HostUtilityInferenceAgent interface {
 	HostUtilityInferenceConfig() *InferenceConfig
 }
 
+// HostCLIAgent is an optional capability for agent types whose vendor ships a
+// command-line tool that Kandev detects on the host (for example `claude` or
+// `codex`). The spec is compiled metadata used to show the installed version
+// and discover models where the vendor documents a listing. Sessions keep
+// using BuildCommand; installing or updating the CLI stays the existing
+// agent install action.
+type HostCLIAgent interface {
+	HostCLI() hostcli.Spec
+}
+
 // ManagedNPMRuntimeAgent is an optional capability for built-in agents whose
 // ACP runtime is resolved through npm. Package names and ACP arguments are
 // defined by the agent implementation rather than caller-provided input.
 type ManagedNPMRuntimeAgent interface {
 	ManagedNPMRuntime() ManagedNPMRuntimeSpec
+}
+
+// SelectedRuntimeInstallCommandProvider builds the Settings install command
+// for an install-wide runtime selection. Managed installs should prepare the
+// selected cache entry; native installs may update their standalone package.
+type SelectedRuntimeInstallCommandProvider interface {
+	SettingsInstallCommand(managedruntime.OpenCodeSelection) (Command, error)
 }
 
 // PassthroughAgent is an optional capability for agents that support CLI passthrough mode.
@@ -233,6 +252,12 @@ type CommandOptions struct {
 	// ManagedRuntimeVersion is an internal exact version override for trusted
 	// managed npm ACP runtimes. Empty uses the built-in exact version pin.
 	ManagedRuntimeVersion string
+	// ManagedRuntimeFamily and ManagedRuntimeSource carry the validated
+	// install-wide OpenCode choice into command construction.
+	ManagedRuntimeFamily managedruntime.OpenCodeFamily
+	ManagedRuntimeSource managedruntime.OpenCodeSource
+	// NativeRuntimeVersion is the observed version of a native OpenCode binary.
+	NativeRuntimeVersion string
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.
@@ -252,6 +277,9 @@ type PassthroughOptions struct {
 	// commands, which lifecycle.CommandBuilder appends centrally, passthrough
 	// agents opt in by appending these tokens in BuildPassthroughCommand.
 	CLIFlagTokens []string
+	// BaseCommand overrides the agent's default interactive CLI when the
+	// install-wide runtime selection resolves to a managed distribution.
+	BaseCommand Command
 }
 
 // RuntimeConfig holds Docker / standalone runtime settings.

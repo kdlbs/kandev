@@ -54,6 +54,9 @@ func TestWorkflowStore_LoadState(t *testing.T) {
 	if state.CurrentStepID != "step1" {
 		t.Errorf("expected CurrentStepID %q, got %q", "step1", state.CurrentStepID)
 	}
+	if state.WorkflowStepTransitionID == 0 {
+		t.Error("expected workflow step transition ID to identify this step entry")
+	}
 	if state.TaskDescription != "Test" {
 		t.Errorf("expected TaskDescription %q, got %q", "Test", state.TaskDescription)
 	}

@@ -2957,6 +2957,72 @@ func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key s
 	return nil
 }
 
+// SetSessionMetadataKeyIfJSONValue replaces one metadata value only when its
+// complete JSON value still equals expectedValue. The update keeps unrelated
+// session metadata and is atomic across concurrent writers.
+func (r *Repository) SetSessionMetadataKeyIfJSONValue(
+	ctx context.Context,
+	sessionID, key string,
+	expectedValue, value interface{},
+) (bool, error) {
+	expectedJSON, err := json.Marshal(expectedValue)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize expected session metadata: %w", err)
+	}
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize session metadata value: %w", err)
+	}
+	now := r.nowUTC()
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE task_sessions
+			SET metadata = jsonb_set(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
+				ARRAY[?]::text[], ?::jsonb, true
+			)::text, updated_at = ?
+			WHERE id = ?
+			  AND (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END -> ?) = ?::jsonb
+		`
+		args = []interface{}{key, string(valueJSON), now, sessionID, key, string(expectedJSON)}
+	} else {
+		path := jsonPath(key)
+		query = `
+			UPDATE task_sessions
+			SET metadata = json_set(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
+				?, json(?)
+			), updated_at = ?
+			WHERE id = ?
+			  AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = json_type(?)
+			  AND NOT EXISTS (
+				SELECT fullkey, type, atom FROM json_tree(json_extract(
+					CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?
+				))
+				EXCEPT SELECT fullkey, type, atom FROM json_tree(json(?))
+			  )
+			  AND NOT EXISTS (
+				SELECT fullkey, type, atom FROM json_tree(json(?))
+				EXCEPT SELECT fullkey, type, atom FROM json_tree(json_extract(
+					CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?
+				))
+			  )
+		`
+		args = []interface{}{
+			path, string(valueJSON), now, sessionID,
+			path, string(expectedJSON), path, string(expectedJSON), string(expectedJSON), path,
+		}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
 // SetSessionMetadataKeyIfState atomically sets one metadata key only while the
 // session remains in expectedState. Runtime recovery uses this to keep a
 // follow-up marker from being attached to a session that was stopped between
@@ -3867,6 +3933,21 @@ func (r *Repository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, ag
 		           AND ts.state = 'WAITING_FOR_INPUT')
 		LIMIT 1
 	`), agentProfileID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// HasTaskSessionsByAgentProfile reports whether a profile has any persisted
+// session, including completed sessions used as evidence of prior agent use.
+func (r *Repository) HasTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
+	var exists int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT 1 FROM task_sessions
+		WHERE agent_profile_id = ? OR execution_profile_id = ?
+		LIMIT 1
+	`), agentProfileID, agentProfileID).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}

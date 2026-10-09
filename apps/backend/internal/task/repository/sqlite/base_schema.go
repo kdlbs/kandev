@@ -31,6 +31,8 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
+		r.initSessionContinuitySchema,
+		r.initAgentDeliverySchema,
 		r.initDynamicRoutingSchema,
 		r.initStepTransitionsSchema,
 		r.initStepEntriesSchema,
@@ -38,6 +40,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initAttachmentsSchema,
 		r.initPreviewFeedbackSchema,
 		r.initTaskResourceCleanupSchema,
+		r.initTaskTransferSchema,
 		r.initControlServerRecordSchema,
 		r.initGitSchema,
 		r.initReviewSchema,
@@ -53,8 +56,11 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.healBuiltinWorkflowStepFlags,
 		r.healBuiltinWorkflowStepParticipantSeats,
 		r.healBuiltinWorkflowStepOnAgentError,
+		r.healBuiltinWorkflowStepOnCommentFanOut,
 		r.normalizeTaskWorktreeOwnership,
 		r.ensureTaskEnvironmentRecoveryClaimsSchema,
+		r.ensureTaskEnvironmentRecoveryArtifactsSchema,
+		r.ensureTaskEnvironmentRecoveryOperationsSchema,
 		r.ensureArchivedBranchCandidatesIndex,
 		r.healDuplicateTaskEnvironments,
 		r.ensureTaskEnvironmentTaskUniqueIndex,
@@ -87,6 +93,87 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 	return nil
 }
 
+func (r *Repository) ensureTaskEnvironmentRecoveryArtifactsSchema() error {
+	if err := r.migrate.Apply("task_environment_recovery_artifacts.table", `
+		CREATE TABLE IF NOT EXISTS task_environment_recovery_artifacts (
+			task_environment_id TEXT NOT NULL,
+			operation_id TEXT NOT NULL,
+			worktree_id TEXT NOT NULL,
+			owner_task_id TEXT NOT NULL,
+			ownership_generation BIGINT NOT NULL,
+			session_id TEXT NOT NULL,
+			executor_type TEXT NOT NULL,
+			repository_id TEXT NOT NULL,
+			original_path TEXT NOT NULL,
+			replacement_id TEXT NOT NULL,
+			replacement_path TEXT NOT NULL,
+			layout_version INTEGER NOT NULL,
+			provenance TEXT NOT NULL,
+			artifact_paths_json TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			PRIMARY KEY (task_environment_id, operation_id, worktree_id),
+			FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE
+		)`); err != nil {
+		return fmt.Errorf("create task environment recovery artifact registry: %w", err)
+	}
+	if err := r.migrate.Apply("task_environment_recovery_artifacts.owner_index", `
+		CREATE INDEX IF NOT EXISTS idx_task_environment_recovery_artifacts_owner
+			ON task_environment_recovery_artifacts(owner_task_id, ownership_generation, task_environment_id)`); err != nil {
+		return fmt.Errorf("create task environment recovery artifact index: %w", err)
+	}
+	if err := r.migrate.Apply("task_environment_recovery_artifacts.identities", `
+		ALTER TABLE task_environment_recovery_artifacts
+			ADD COLUMN artifact_identities_json TEXT NOT NULL DEFAULT '{}'`); err != nil {
+		return fmt.Errorf("add task environment recovery artifact identities: %w", err)
+	}
+	if err := r.migrate.Err(); err != nil {
+		return fmt.Errorf("required task recovery artifact migration: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) ensureTaskEnvironmentRecoveryOperationsSchema() error {
+	if err := r.migrate.Apply("task_environment_recovery_operations.table", `
+		CREATE TABLE IF NOT EXISTS task_environment_recovery_operations (
+			task_environment_id TEXT PRIMARY KEY,
+			owner_task_id TEXT NOT NULL,
+			ownership_generation BIGINT NOT NULL,
+			session_id TEXT NOT NULL,
+			operation_id TEXT NOT NULL,
+			attempt_id TEXT NOT NULL,
+			error_stamp TEXT NOT NULL DEFAULT '',
+			kind TEXT NOT NULL,
+			revision BIGINT NOT NULL,
+			runner_instance_id TEXT NOT NULL,
+			state TEXT NOT NULL,
+			phase TEXT NOT NULL,
+			repository_id TEXT NOT NULL DEFAULT '',
+			repository_position INTEGER NOT NULL DEFAULT 0,
+			repository_total INTEGER NOT NULL DEFAULT 0,
+			completed_slots INTEGER NOT NULL DEFAULT 0,
+			workspace_complete BOOLEAN NOT NULL DEFAULT FALSE,
+			agent_ready BOOLEAN NOT NULL DEFAULT FALSE,
+			selected_repository_ids_json TEXT NOT NULL,
+			started_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			ended_at TIMESTAMP,
+			reason_code TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE
+		)`); err != nil {
+		return fmt.Errorf("create task environment recovery operation table: %w", err)
+	}
+	if err := r.migrate.Apply("task_environment_recovery_operations_runner_index", `
+		CREATE INDEX IF NOT EXISTS idx_task_environment_recovery_operations_runner
+			ON task_environment_recovery_operations(state, runner_instance_id, task_environment_id)`); err != nil {
+		return fmt.Errorf("create task environment recovery operation index: %w", err)
+	}
+	if err := r.migrate.Err(); err != nil {
+		return fmt.Errorf("required task recovery operation migration: %w", err)
+	}
+	return nil
+}
+
 // ensureTaskEnvironmentRecoveryClaimsSchema creates the durable authority used
 // by automatic worktree recovery. It runs after the legacy worktree ownership
 // cutover because that cutover replaces task_environments on PostgreSQL.
@@ -114,6 +201,66 @@ func (r *Repository) ensureTaskEnvironmentRecoveryClaimsSchema() error {
 		return fmt.Errorf("required task recovery claim migration: %w", err)
 	}
 	return nil
+}
+
+// The transfer ledger is additive. A binary rollback ignores these tables;
+// operators retain them so idempotency receipts and the audit trail survive.
+const taskTransferSchemaDDL = `
+	CREATE TABLE IF NOT EXISTS task_transfer_serialization (
+		id INTEGER PRIMARY KEY,
+		version INTEGER NOT NULL DEFAULT 0
+	);
+	INSERT INTO task_transfer_serialization (id, version) VALUES (1, 0)
+		ON CONFLICT(id) DO NOTHING;
+
+	CREATE TABLE IF NOT EXISTS task_transfer_operations (
+		id TEXT PRIMARY KEY,
+		source_workspace_id TEXT NOT NULL,
+		idempotency_key TEXT NOT NULL,
+		request_digest TEXT NOT NULL,
+		actor_kind TEXT NOT NULL,
+		actor_id TEXT NOT NULL,
+		actor_session_id TEXT NOT NULL DEFAULT '',
+		task_id TEXT NOT NULL,
+		receipt_json TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL
+	);
+
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_task_transfer_operations_idempotency
+		ON task_transfer_operations(source_workspace_id, idempotency_key);
+
+	CREATE INDEX IF NOT EXISTS idx_task_transfer_operations_task
+		ON task_transfer_operations(task_id, created_at);
+
+	CREATE TABLE IF NOT EXISTS task_transfer_audit (
+		id TEXT PRIMARY KEY,
+		operation_id TEXT NOT NULL,
+		actor_kind TEXT NOT NULL,
+		actor_id TEXT NOT NULL DEFAULT '',
+		actor_session_id TEXT NOT NULL DEFAULT '',
+		task_id TEXT NOT NULL,
+		source_workspace_id TEXT NOT NULL,
+		source_workflow_id TEXT NOT NULL,
+		source_step_id TEXT NOT NULL,
+		destination_workspace_id TEXT NOT NULL,
+		destination_workflow_id TEXT NOT NULL,
+		destination_step_id TEXT NOT NULL,
+		task_generation TIMESTAMP NOT NULL,
+		session_census_json TEXT NOT NULL,
+		preservation_digest TEXT NOT NULL,
+		idempotency_key TEXT NOT NULL,
+		preservation_policy TEXT NOT NULL,
+		result TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_task_transfer_audit_task
+		ON task_transfer_audit(task_id, created_at);
+`
+
+func (r *Repository) initTaskTransferSchema() error {
+	_, err := r.db.Exec(taskTransferSchemaDDL)
+	return err
 }
 
 const workspaceInventoryRecoverySchemaDDL = `
@@ -255,6 +402,10 @@ const controlServerRecordSchemaDDL = `
 		credential_secret_id TEXT NOT NULL,
 		capabilities TEXT NOT NULL DEFAULT '[]',
 		diagnostic_log_path TEXT NOT NULL,
+		process_id INTEGER NOT NULL DEFAULT 0,
+		process_group_id INTEGER NOT NULL DEFAULT 0,
+		process_session_id INTEGER NOT NULL DEFAULT 0,
+		process_birth_token TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
@@ -315,6 +466,16 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 	if _, err := r.db.ExecContext(r.migrationContext(), lookupIndex); err != nil {
 		return err
 	}
+	// Keep inbox scans proportional to clarification history, not every message.
+	clarificationBundlesIndex := fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS idx_messages_clarification_bundle
+		ON task_session_messages((%s), task_session_id)
+		WHERE type = 'clarification_request'`,
+		dialect.JSONExtract(driver, "metadata", "pending_id"),
+	)
+	if _, err := r.db.ExecContext(r.migrationContext(), clarificationBundlesIndex); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -370,6 +531,8 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 		session_target TEXT,
 		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
 			cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,
+			wip_limit INTEGER NOT NULL DEFAULT 0,
+			pull_from_step_id TEXT NOT NULL DEFAULT '',
 			complete_task_on_enter INTEGER NOT NULL DEFAULT 0,
 			order_revision INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -386,7 +549,8 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 			decision_required INTEGER NOT NULL DEFAULT 0,
 			position INTEGER NOT NULL DEFAULT 0,
-			created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00'
+			created_at TIMESTAMP NOT NULL DEFAULT '1970-01-01 00:00:00',
+			provenance TEXT NOT NULL DEFAULT 'manual'
 		)`); err != nil {
 		return fmt.Errorf("create workflow_step_participants projection table: %w", err)
 	}
@@ -886,7 +1050,7 @@ func (r *Repository) backfillInitialPlanRevisions() error {
 	for _, x := range pending {
 		authorKind := x.createdBy
 		// Match CreateTaskPlan (plan.go) and the task_plan_revisions column DEFAULT 'agent'.
-		if authorKind != "user" && authorKind != authorKindAgent {
+		if authorKind != authorKindUser && authorKind != authorKindAgent {
 			authorKind = authorKindAgent
 		}
 		_, err := r.db.ExecContext(r.migrationContext(), r.db.Rebind(`

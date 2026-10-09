@@ -144,7 +144,19 @@ test.describe("Oversized user-message previews", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
 
     await session.sendMessage(source);
-    await waitForStoredUserMessage(apiClient, task.session_id, source);
+    // The durable transcript confirms acceptance even if the large WS reply is
+    // delayed after the user message has already rendered.
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(task.session_id!);
+          return messages.some(
+            (message) => message.author_type === "user" && message.content === source,
+          );
+        },
+        { timeout: 30_000, message: "the complete oversized prompt should be stored" },
+      )
+      .toBe(true);
     await session.waitForChatIdle({ timeout: 60_000 });
 
     const chat = session.activeChat();

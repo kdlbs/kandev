@@ -30,10 +30,10 @@ export function PortUrlActions({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            size="sm"
+            size="icon"
             variant="ghost"
             aria-label={t("task:copyUrl")}
-            className="cursor-pointer min-h-11 min-w-11 p-0 sm:h-7 sm:w-7 sm:min-h-0 sm:min-w-0"
+            className="cursor-pointer"
             onClick={handleCopy}
           >
             {copied ? (
@@ -48,10 +48,10 @@ export function PortUrlActions({
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            size="sm"
+            size="icon"
             variant="ghost"
             aria-label={t("task:openInNewTab")}
-            className="cursor-pointer min-h-11 min-w-11 p-0 sm:h-7 sm:w-7 sm:min-h-0 sm:min-w-0"
+            className="cursor-pointer"
             asChild
           >
             <a href={url} target="_blank" rel="noopener noreferrer">
@@ -65,11 +65,11 @@ export function PortUrlActions({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              size="sm"
+              size="icon"
               variant="ghost"
               aria-label={t("task:openInBrowserPanel")}
               data-testid={browserActionTestId}
-              className="cursor-pointer min-h-11 min-w-11 p-0 sm:h-7 sm:w-7 sm:min-h-0 sm:min-w-0"
+              className="cursor-pointer"
               onClick={() => onOpenBrowserPanel(url)}
             >
               <IconBrowser className="h-3.5 w-3.5" />

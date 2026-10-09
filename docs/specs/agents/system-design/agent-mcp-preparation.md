@@ -5,6 +5,7 @@ requirements:
   - REQ-AGENTS-MCP-PREP-001
   - REQ-AGENTS-MCP-PREP-002
   - REQ-AGENTS-MCP-PREP-003
+  - REQ-AGENTS-MCP-PREP-004
 ---
 
 # Agent MCP preparation system design
@@ -23,6 +24,7 @@ of automatic approval only for final eligible profile-authorized imports.
 | REQ-AGENTS-MCP-PREP-001 | Profile and discovery contract; settings UI |
 | REQ-AGENTS-MCP-PREP-002 | Adapter; lifecycle and progress; concurrency |
 | REQ-AGENTS-MCP-PREP-003 | Recovery; credential continuity |
+| REQ-AGENTS-MCP-PREP-004 | Retained native command diagnostics |
 
 See [the approval boundary decision](../../../decisions/2026-09-28-profile-authorized-mcp-preparation.md).
 
@@ -70,8 +72,9 @@ The Cursor adapter invokes the installed CLI directly with argv, never a shell:
 runtime HOME and workspace as the conversational process. Resolve the approved
 agent binary using existing runtime executable resolution where applicable.
 No model prompt, account login, blanket approval flag or business tool call is
-part of automatic preparation. Command output is bounded, classified and
+part of automatic preparation. Command stdout/stderr is bounded, classified and
 otherwise discarded; raw output never reaches generic logs/session metadata.
+Sanitized runner failures use the separate diagnostic contract below.
 Use context deadlines and process cleanup, an injected runner for tests and
 allowlisted reason codes. Bound the complete preparation, not only each command.
 
@@ -207,9 +210,97 @@ Traditional Chinese/pseudo through existing scripts.
 
 Extend the existing task preparation surface rather than chat. Typed per-server
 rows show failures and Authenticate/Retry actions; expanded details contain
-sanitized status only. Use the existing mobile terminal navigation, not a new
+sanitized status and the typed diagnostic causes defined below. Use the existing mobile terminal navigation, not a new
 nested drawer or desktop-only tab. Guard async discovery by profile/agent and
 request generation so stale responses never reset current choices.
+
+## Retained native command diagnostics (2026-10-07, draft)
+
+For REQ-AGENTS-MCP-PREP-004, retain errors at the native command boundary instead
+of flattening them to readiness alone. Existing readiness and `failure_code`
+values remain compatible. A diagnostic describes the command failure, not an
+inferred provider outage. This amendment preserves the prohibition on raw
+native output; it follows the existing runtime diagnostic sanitization contract.
+
+`ExecNativeMCPCommandRunner` preserves the original Go cause through typed
+wrapping, including executable-resolution/start errors currently replaced by
+`ErrNativeMCPExecutableUnavailable`. Record stage separately: `resolve`, `start`,
+`wait`, `cleanup` or `output`. Inspect `errors.Is`/`errors.As` before sanitizing
+to distinguish `exec.ErrWaitDelay`, deadlines, cancellation, exit errors and
+other wait failures. Keep an observed process exit code even if waiting for
+output or cleanup fails. When both wait and cleanup fail, keep wait as the
+primary cause and cleanup as secondary; cleanup must still run. Do not relax
+timeouts, process-group cleanup or existing admission/ownership guards.
+
+Add optional safe `NativeMCPDiagnostic` metadata to `NativeMCPCommandResult`
+and `NativeMCPReadiness`. Its wire shape, published as `mcp_diagnostic`, is:
+
+```text
+operation: enable | list_tools
+stage: resolve | start | wait | cleanup | output
+kind: executable_unavailable | start_failed | wait_failed |
+      output_wait_timeout | timeout | canceled | cleanup_failed |
+      exit_status | output_truncated | unrecognized_output
+message: sanitized underlying error, or a fixed explanation when no error exists
+exit_code?: actual observed process exit code (including zero)
+cleanup_message?: sanitized secondary cleanup error
+```
+
+Sanitize at the runner boundary with `routingerr.Sanitize`, replace remaining
+URL-shaped spans with `[url-redacted]`, strip terminal escape/control sequences,
+normalize invalid UTF-8, and cap each message to
+1024 UTF-8 bytes after redaction. The existing sanitizer is a pure dependency;
+do not copy its credential patterns or broaden this work into sanitizer
+relocation. Never populate a message from stdout/stderr. Nonzero commands and
+unrecognized/truncated verification output get a fixed technical explanation
+plus the exit status, not a raw excerpt. Injected runners must also pass through
+the adapter's final sanitization/validation before any diagnostic leaves it.
+Successful readiness has no diagnostic. Authentication-required remains a
+warning according to the existing severity predicate.
+
+Carry the optional object through `PrepareStep`, `PrepareProgressEventPayload`,
+the launch progress publisher, `SerializePrepareResult` and same-session retry
+results/HTTP DTOs. The failed command's row owns the diagnostic; skipped
+verification must not claim that it ran or repeat the approval error. Persist
+within existing session `metadata.prepare_result`, without a database migration.
+Emit one structured `native MCP preparation failed` log per failed command,
+with existing task/session/preparation/server correlation, operation, stage,
+kind, safe messages and exit code. Do not log argv, environment or raw streams.
+
+The frontend explicitly drops existing MCP `error`/`output` fields in
+`executor-prepare.ts` and `prepare-result.ts`. Continue dropping those legacy
+fields; accept only the new bounded typed diagnostic. Extend
+`executor-payloads.ts` and `PrepareStepInfo`, with the same normalization for
+progress, completed results and reload hydration. Unknown/invalid diagnostics
+fall back to the old generic presentation. Preparation generation fences remain
+authoritative, so older failure events cannot overwrite current diagnostics.
+
+`AgentMcpPrepareActions` renders a localized approval/verification explanation
+and the safe diagnostic as selectable plain text within the existing expanded
+preparation row, ahead of recovery controls. Runner approval failures use an
+approval-command explanation rather than a provider connection claim. Technical
+error text remains runtime diagnostic data; labels and explanations use `t()`.
+Phone entry remains the task conversation's preparation details, using inline
+wrapping text and vertically stacked actions with at least 44px targets,
+including narrow fine-pointer viewports. Desktop retains ordinary 28px actions.
+Reuse the nearest shipped surface, `AgentMcpPrepareActions` and task mobile
+conversation; add no overlay or nested scroll owner.
+
+Recovery errors currently use `{error, reason_code}`, while `ApiError.errorCode`
+reads `error_code`. Add `error_code` to the Cursor recovery error envelope and
+retain `error` for compatibility. The existing busy-error predicate then shows
+the localized session-busy explanation. Retry command failures return the same
+safe diagnostic shape and also persist it through the preparation recorder;
+busy guards leave the original failure untouched. No automatic retry, process
+restart or prompt replay is added.
+
+Regression evidence includes injected runner failures, an owned Unix child
+inheriting stdout after its successful parent exits (`exec.ErrWaitDelay`),
+primary wait plus secondary cleanup failure, and secret-bearing error strings.
+These are diagnostic regressions, not proof of the original incident's cause.
+Desktop/phone tests cover live updates, reload, legacy unsafe fields, busy retry
+feedback, successful recovery and stale-attempt rejection. See the
+[delivery package](../../../plans/native-mcp-failure-diagnostics/plan.md).
 
 ## Verification
 

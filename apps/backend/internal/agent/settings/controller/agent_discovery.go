@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/pkg/agent"
@@ -37,6 +38,8 @@ func (c *Controller) ListDiscovery(ctx context.Context) (*dto.ListDiscoveryRespo
 			Available:         result.Available,
 			MatchedPath:       result.MatchedPath,
 			LoginCommand:      loginCmd,
+			CLIVersion:        result.CLIVersion,
+			CLIVersionError:   result.CLIVersionError,
 		})
 	}
 	return &dto.ListDiscoveryResponse{Agents: payload, Total: len(payload)}, nil
@@ -47,6 +50,7 @@ func (c *Controller) ListAvailableAgents(ctx context.Context) (*dto.ListAvailabl
 	if err != nil {
 		return nil, err
 	}
+	ctx = context.WithValue(ctx, hostCLIAvailabilityKey{}, results)
 	availabilityByName := make(map[string]discovery.Availability, len(results))
 	for _, result := range results {
 		availabilityByName[result.Name] = result
@@ -92,7 +96,7 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 		displayName = ag.Name()
 	}
 
-	modelConfig := c.buildModelConfigFromHostUtility(ag.ID())
+	modelConfig := c.buildModelConfigFromHostUtility(ctx, ag.ID())
 
 	capabilities := dto.AgentCapabilitiesDTO{
 		SupportsSessionResume: availability.Capabilities.SupportsSessionResume,
@@ -133,12 +137,16 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 
 	loginCommand := buildLoginCommandDTO(ag)
 	runtimeUpdate := c.buildRuntimeUpdateDTO(ctx, ag, availability.Available)
+	installScript, installErr := c.installScriptForSettings(ctx, ag)
+	if installErr != nil {
+		installScript = ""
+	}
 
 	return dto.AvailableAgentDTO{
 		Name:               ag.ID(),
 		DisplayName:        displayName,
 		Description:        ag.Description(),
-		InstallScript:      ag.InstallScript(),
+		InstallScript:      installScript,
 		SupportsMCP:        availability.SupportsMCP,
 		MCPConfigPath:      availability.MCPConfigPath,
 		InstallationPaths:  availability.InstallationPaths,
@@ -173,6 +181,13 @@ func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent,
 		return item
 	}
 	spec, fallback, err := c.managedRuntimeUpdateSpec(ag)
+	var openCodeSelection *managedruntime.OpenCodeSelection
+	if openCode, ok := ag.(*agents.OpenCodeACP); ok && err == nil {
+		spec, openCodeSelection = c.selectedOpenCodeRuntime(ctx, openCode, spec)
+		if openCodeSelection != nil {
+			fallback = false
+		}
+	}
 	if err != nil {
 		return nil
 	}
@@ -185,7 +200,12 @@ func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent,
 		DefaultVersion:   defaultVersion,
 		EffectiveVersion: defaultVersion,
 	}
-	if c.managedRuntimeSelections != nil {
+	if openCodeSelection != nil {
+		item.ActiveVersion = openCodeSelection.SelectedVersion
+		if item.ActiveVersion != "" {
+			item.EffectiveVersion = item.ActiveVersion
+		}
+	} else if c.managedRuntimeSelections != nil {
 		if selection, found, err := c.managedRuntimeSelections.Get(ctx, ag.ID(), spec.Package); err == nil && found &&
 			selection.Package == spec.Package {
 			item.ActiveVersion = selection.Version
@@ -198,6 +218,10 @@ func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent,
 	if c.runtimeUpdater != nil {
 		if caps, found := c.runtimeUpdater.CurrentCapabilities(ag.ID()); found {
 			item.CurrentVersion = caps.AgentVersion
+			if openCodeSelection != nil && openCodeSelection.Source == managedruntime.OpenCodeSourceNative {
+				item.ActiveVersion = caps.AgentVersion
+				item.EffectiveVersion = caps.AgentVersion
+			}
 		}
 		return item
 	}
@@ -207,6 +231,26 @@ func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent,
 		}
 	}
 	return item
+}
+
+func (c *Controller) selectedOpenCodeRuntime(
+	ctx context.Context,
+	agent *agents.OpenCodeACP,
+	fallback agents.ManagedNPMRuntimeSpec,
+) (agents.ManagedNPMRuntimeSpec, *managedruntime.OpenCodeSelection) {
+	reader, ok := c.managedRuntimeSelections.(managedruntime.OpenCodeSelectionReader)
+	if !ok {
+		return fallback, nil
+	}
+	selection, found, err := reader.GetOpenCodeSelection(ctx)
+	if err != nil || !found {
+		return fallback, nil
+	}
+	selected, err := agent.ManagedNPMRuntimeForFamily(selection.Family)
+	if err != nil {
+		return fallback, nil
+	}
+	return selected, &selection
 }
 
 func (c *Controller) harnessCurrentVersion(agentName string) string {
@@ -247,7 +291,7 @@ func buildLoginCommandDTO(ag agents.Agent) *dto.LoginCommandDTO {
 // capability cache can be empty while the asynchronous host-utility probe
 // is still starting, so the dynamic-support flag comes from the registered
 // agent capability rather than from cache presence.
-func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelConfigDTO {
+func (c *Controller) buildModelConfigFromHostUtility(ctx context.Context, agentID string) dto.ModelConfigDTO {
 	// Always initialize slices so JSON marshals as [] not null — the
 	// frontend uses .some()/.find() on these without null checks.
 	cfg := dto.ModelConfigDTO{
@@ -257,11 +301,13 @@ func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelCo
 	}
 	if c.hostUtility == nil {
 		cfg.Status = "not_configured"
+		cfg.AvailableModels, cfg.Discovery = c.hostCLIModelProjection(ctx, agentID, cfg.AvailableModels, false)
 		return cfg
 	}
 	caps, ok := c.hostUtility.Get(agentID)
 	if !ok {
 		cfg.Status = "not_configured"
+		cfg.AvailableModels, cfg.Discovery = c.hostCLIModelProjection(ctx, agentID, cfg.AvailableModels, false)
 		return cfg
 	}
 	cfg.SupportsDynamicModels = true
@@ -294,6 +340,7 @@ func (c *Controller) buildModelConfigFromHostUtility(agentID string) dto.ModelCo
 			Description: c.Description,
 		})
 	}
+	cfg.AvailableModels, cfg.Discovery = c.hostCLIModelProjection(ctx, agentID, cfg.AvailableModels, false)
 	return cfg
 }
 
@@ -596,7 +643,7 @@ func (c *Controller) detectTools() []dto.ToolStatusDTO {
 // the "seedData fixture timeout: listAgents returned 0 agents" flake.
 func (c *Controller) detectAgents(ctx context.Context) ([]discovery.Availability, error) {
 	if os.Getenv("KANDEV_E2E_MOCK") == "true" {
-		return c.synthAvailabilityFromRegistry(), nil
+		return c.synthAvailabilityFromRegistry(ctx), ctx.Err()
 	}
 	results, err := c.discovery.Detect(ctx)
 	if err != nil {
@@ -625,10 +672,13 @@ func (c *Controller) detectAgents(ctx context.Context) ([]discovery.Availability
 // code sees SupportsMCP=false for every mock agent — which silently disables
 // plan mode in the chat UI (planModeAvailable is false → the toggle only
 // flips the layout, not the chat input state).
-func (c *Controller) synthAvailabilityFromRegistry() []discovery.Availability {
+func (c *Controller) synthAvailabilityFromRegistry(ctx context.Context) []discovery.Availability {
 	enabled := c.agentRegistry.ListEnabled()
 	results := make([]discovery.Availability, 0, len(enabled))
 	for _, ag := range enabled {
+		if ctx.Err() != nil {
+			break
+		}
 		if agents.IsVirtualAgent(ag) {
 			continue
 		}
@@ -639,16 +689,42 @@ func (c *Controller) synthAvailabilityFromRegistry() []discovery.Availability {
 				SupportsSessionResume: true,
 			},
 		}
-		// IsInstalled is a pure local check on mock-agent (no filesystem walk),
-		// so it's safe to call here without contention. Pull the static
-		// SupportsMCP flag so the UI can offer plan mode in E2E runs.
-		if probe, err := ag.IsInstalled(context.Background()); err == nil && probe != nil {
+		// Capability probes share the settings request's cancellation.
+		if probe, err := ag.IsInstalled(ctx); err == nil && probe != nil {
 			av.SupportsMCP = probe.SupportsMCP
+			av.MatchedPath = probe.MatchedPath
 			if len(probe.MCPConfigPaths) > 0 {
 				av.MCPConfigPath = probe.MCPConfigPaths[0]
 			}
 		}
 		results = append(results, av)
 	}
+	// Mock agents declare a host CLI so E2E exercises version detection;
+	// this path bypasses the discovery sweep that fills it.
+	c.discovery.ApplyHostCLI(ctx, c.agentRegistry.Get, results)
 	return results
+}
+
+func (c *Controller) runtimeUpdateCapabilities(ag agents.Agent) agents.RuntimeUpdateCapability {
+	cap := agents.RuntimeUpdateCapabilities(ag)
+	openCode, ok := ag.(*agents.OpenCodeACP)
+	if !ok {
+		return cap
+	}
+	spec, selection := c.selectedOpenCodeRuntime(context.Background(), openCode, openCode.ManagedNPMRuntime())
+	if selection == nil {
+		return cap
+	}
+	cap.Source.NPM = spec.Package
+	cap.Source.GuidanceURL = "https://www.npmjs.com/package/" + spec.Package
+	cap.ManagedFallback = nil
+	if selection.Source == managedruntime.OpenCodeSourceNative {
+		cap.RuntimeID, cap.Owner, cap.Mechanism, cap.Management = "native:opencode", "external", "native", "manual"
+		cap.Managed = nil
+		return cap
+	}
+	spec.NativeBinary = ""
+	cap.RuntimeID, cap.Owner, cap.Mechanism, cap.Management = "npm:"+spec.Package, "kandev", "npm_candidate", "managed"
+	cap.Managed = &spec
+	return cap
 }

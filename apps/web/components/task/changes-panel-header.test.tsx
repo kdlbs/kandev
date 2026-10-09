@@ -88,29 +88,18 @@ describe("PullDropdown remote safety", () => {
 
 describe("ChangesPanelHeaderOverflowActions", () => {
   it("does not expose Diff or Review when the Changes panel has no reviewable content", () => {
-    render(
-      <ChangesPanelHeaderOverflowActions
-        showDiffReview={false}
-        onOpenDiffAll={vi.fn()}
-        onOpenReview={vi.fn()}
-      />,
-    );
+    render(<ChangesPanelHeaderOverflowActions showDiffReview={false} onOpenDiffAll={vi.fn()} />);
 
     expect(screen.queryByText("Diff")).toBeNull();
     expect(screen.queryByText("Review")).toBeNull();
   });
 
-  it("keeps Diff and Review available when reviewable content exists", () => {
-    render(
-      <ChangesPanelHeaderOverflowActions
-        showDiffReview
-        onOpenDiffAll={vi.fn()}
-        onOpenReview={vi.fn()}
-      />,
-    );
+  it("offers only the hidden Diff action, without duplicating visible toolbar actions", () => {
+    render(<ChangesPanelHeaderOverflowActions showDiffReview onOpenDiffAll={vi.fn()} />);
 
     expect(screen.getByText("Diff")).toBeTruthy();
-    expect(screen.getByText("Review")).toBeTruthy();
+    expect(screen.queryByText("Review")).toBeNull();
+    expect(screen.queryByText("Walk me through these changes")).toBeNull();
   });
 });
 

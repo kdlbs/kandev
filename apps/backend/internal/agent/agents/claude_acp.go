@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/hostcli"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
@@ -117,6 +118,15 @@ func (a *ClaudeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
 	return newManagedNPMRuntimeSpec(claudeACPPackage)
 }
 
+func (a *ClaudeACP) RuntimeProviderObservation() RuntimeComponentDescriptor {
+	return RuntimeComponentDescriptor{
+		Name:    "Claude Agent SDK",
+		Package: "@anthropic-ai/claude-agent-sdk",
+		Source:  RuntimeComponentBundled,
+		Owner:   RuntimeComponentOwnerKandev,
+	}
+}
+
 func (a *ClaudeACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
@@ -222,5 +232,19 @@ func (a *ClaudeACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
 		Command:   a.ManagedNPMRuntime().CachedACPCommand(),
+	}
+}
+
+// HostCLI describes the Claude Code CLI on the Kandev host. Claude Code has
+// no documented model listing on the CLI itself (the Agent SDK's
+// supportedModels() is a Node API), so ModelSource stays empty: the bridge
+// list remains the catalogue and operators may type any model identifier.
+// InstallScript installs and updates this CLI.
+func (a *ClaudeACP) HostCLI() hostcli.Spec {
+	return hostcli.Spec{
+		DisplayName: "Claude Code",
+		Executable:  "claude",
+		VersionArgs: []string{"--version"},
+		ModelSource: hostcli.ModelSourceNone,
 	}
 }

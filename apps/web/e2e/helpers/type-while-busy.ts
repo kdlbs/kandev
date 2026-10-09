@@ -29,6 +29,7 @@ export async function waitForComposerQueueMode(
  */
 export async function typeWhileBusy(page: Page, editor: Locator, text: string): Promise<void> {
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
+  const coarsePointer = await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
   await editor.scrollIntoViewIfNeeded();
   // The busy state can arrive before the queue/steering input mode enables the
   // editor. A click sent during that transition is discarded and cannot focus
@@ -41,8 +42,18 @@ export async function typeWhileBusy(page: Page, editor: Locator, text: string): 
     // The composer can replace or re-enable the editor during queue-mode
     // transitions. A locator click re-resolves the live editor before focusing
     // it; a coordinate click can land on the previous, non-editable element.
-    await editor.click();
-    await expect(editor).toBeFocused({ timeout: 5_000 });
+    if (coarsePointer) {
+      const box = await editor.boundingBox();
+      if (!box) throw new Error("Editor bounding box not found");
+      await editor.tap({ position: { x: 20, y: box.height / 2 } });
+    } else {
+      await editor.click();
+    }
+    const focused = await expect(editor)
+      .toBeFocused({ timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!focused) continue;
     await page.keyboard.type(text);
     // Auto-retrying, so it returns as soon as ProseMirror renders the text
     // rather than after a fixed settle. A miss here is the retry's cue, not a

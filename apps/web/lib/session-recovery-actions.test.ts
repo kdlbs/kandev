@@ -4,18 +4,22 @@ import { sessionRecoveryAction } from "@/components/task/chat/messages/action-me
 // @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.12
 // The projection must keep the existing transport actions distinct.
 describe("recovery operation identity", () => {
-  it.each(["resume", "fresh_start", "runtime_retry", "resume_new_branch"])(
-    "preserves %s",
-    (action) => {
-      expect(
-        sessionRecoveryAction({
-          type: "ws_request",
-          label: action,
-          params: { method: "session.recover", payload: { action } },
-        }),
-      ).toBe(action);
-    },
-  );
+  it.each([
+    "resume",
+    "fresh_start",
+    "runtime_retry",
+    "resume_new_branch",
+    "continue_from_history",
+    "retry_connection",
+  ])("preserves %s", (action) => {
+    expect(
+      sessionRecoveryAction({
+        type: "ws_request",
+        label: action,
+        params: { method: "session.recover", payload: { action } },
+      }),
+    ).toBe(action);
+  });
   it("does not treat arbitrary websocket actions as recovery", () => {
     expect(
       sessionRecoveryAction({
@@ -45,5 +49,8 @@ describe("primary recovery selection", () => {
   });
   it("offers no bypass for a non-retryable guard", () => {
     expect(selectPrimaryRecoveryAction(["resume", "restore", "fresh_start"], true)).toBeNull();
+  });
+  it("prefers connection recovery before actions that submit another prompt", () => {
+    expect(selectPrimaryRecoveryAction(["resume", "retry_connection"])).toBe("retry_connection");
   });
 });

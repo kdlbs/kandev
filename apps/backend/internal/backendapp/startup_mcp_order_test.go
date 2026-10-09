@@ -200,7 +200,7 @@ func TestStartupMCPReadyBeforeRecoveryAndLaunch(t *testing.T) {
 
 	// 2. Build HTTP server and register routes BEFORE recovery
 	server, err := buildHTTPServer(
-		cfg, log, gateway, repos,
+		context.Background(), cfg, log, gateway, repos,
 		services, agentSettingsCtrl, lifecycleMgr, eventBus, orchestratorSvc,
 		nil, nil, nil, nil, nil,
 		func(fn func() error) { t.Cleanup(func() { _ = fn() }) },
@@ -309,7 +309,7 @@ func TestStartupOfficeDisabled_MountsStorageAndRetention(t *testing.T) {
 	agentSettingsCtrl := agentsettingscontroller.NewController(repos.AgentSettings, nil, nil, nil, log)
 
 	server, err := buildHTTPServer(
-		cfg, log, gateway, repos,
+		context.Background(), cfg, log, gateway, repos,
 		services, agentSettingsCtrl, lifecycleMgr, eventBus, orchestratorSvc,
 		nil, nil, nil, nil, nil,
 		func(fn func() error) { t.Cleanup(func() { _ = fn() }) },

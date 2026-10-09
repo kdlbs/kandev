@@ -271,9 +271,8 @@ The multi-repository envelope still permits healthy repositories alongside faile
 A whole transport error emits an environment-scoped unavailable result for the known repository inventory.
 If inventory is unknown, use an environment-level state. Do not create a fake root repository.
 
-New producers always set `files_complete` explicitly.
-Legacy detailed completed snapshots remain readable. A known compact `live_monitor` row is always summary-only.
-An empty array of filenames from a compact row is insufficient to claim clean status.
+New producers set `files_complete` explicitly. Legacy detailed snapshots remain readable.
+A compact `live_monitor` row is summary-only; empty filenames cannot certify clean status.
 Persist snapshot quality in compact metadata if needed, but do not add full live diff persistence or a schema migration.
 Runtime ordering tokens are not durable ordering tokens across restarts.
 The database keeps its existing environment/repository selection and timestamp authority.
@@ -335,7 +334,7 @@ Enrichment-only arrival must not steal focus through an empty intermediate state
 | No complete snapshot, request active | Loading status without the clean empty message. |
 | No complete snapshot, request failed | Toolbar warning and delayed automatic recovery. |
 | Complete clean snapshot, no other Changes content | Existing clean empty message. |
-| Dirty basic snapshot | File rows immediately, with pending line totals and diffs. |
+| Dirty basic snapshot | File rows immediately; retain eligible prior displayed counts and diffs during enrichment. |
 | Valid prior snapshot during refresh/failure | Keep rows; show toolbar loading or warning status. |
 | Partial multi-repository failure | Keep healthy rows; identify failures in the warning tooltip and recover automatically. |
 
@@ -349,7 +348,7 @@ Review hashes and editor diff models cannot treat a pending empty string as fres
 
 Desktop and phone use the shared [toolbar loading/warning presentation](../../ui/system-design/changes-loading-feedback.md).
 Git read failures recover automatically without a body banner or manual Retry control.
-Diff viewers retain localized pending placeholders and their existing recovery behavior.
+Diff viewers follow [refresh continuity](git-refresh-continuity.md); initial loads retain localized placeholders.
 The full-height phone drawer retains Back/dismiss, focus return, dynamic viewport, and safe-area behavior.
 Changes keeps one vertical scroller. Existing actions retain their desktop and touch geometry.
 Status uses restrained, localized accessible announcements.

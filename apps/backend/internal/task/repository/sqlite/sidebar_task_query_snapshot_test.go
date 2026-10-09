@@ -30,7 +30,7 @@ func newSidebarReaderPool(t testing.TB) *Repository {
 }
 
 func TestSidebarQueryScratchLifecycle(t *testing.T) {
-	for _, stage := range []string{"created", "indexed", "preferences", "page", "empty_count", "headers", "hydrated", "commit", "success"} {
+	for _, stage := range []string{"created", "indexed", "preferences", "page", "queue", "empty_count", "headers", "hydrated", "commit", "success"} {
 		t.Run(stage, func(t *testing.T) {
 			repo := newSidebarReaderPool(t)
 			repo.ro.SetMaxOpenConns(1)
@@ -46,8 +46,11 @@ func TestSidebarQueryScratchLifecycle(t *testing.T) {
 				return nil
 			}
 			query := sidebarTaskQuery(1)
+			query.Sort = models.SidebarTaskViewSort{Key: "color", Color: "red", Direction: "desc"}
 			query.CollapsedGroupKeys = []string{"nonmatching-group"}
-			_, err := repo.QuerySidebarTaskPage(t.Context(), "scratch", query, models.SidebarTaskViewPreferences{PinnedTaskIDs: []string{"kept"}})
+			prefs := sidebarColorPreferencesForTest()
+			prefs.PinnedTaskIDs = []string{"kept"}
+			_, err := repo.QuerySidebarTaskPage(t.Context(), "scratch", query, prefs)
 			if stage == "success" {
 				require.NoError(t, err)
 			} else {
@@ -55,14 +58,14 @@ func TestSidebarQueryScratchLifecycle(t *testing.T) {
 			}
 			assertSidebarScratchAbsent(t, repo)
 			repo.sidebarQueryStage = nil
-			_, err = repo.QuerySidebarTaskPage(t.Context(), "scratch", query, models.SidebarTaskViewPreferences{PinnedTaskIDs: []string{"kept"}})
+			_, err = repo.QuerySidebarTaskPage(t.Context(), "scratch", query, prefs)
 			require.NoError(t, err, "next borrower must start with a clean temporary schema")
 		})
 	}
 }
 
 func TestSidebarQueryScratchCancellation(t *testing.T) {
-	for _, stage := range []string{"before_start", "created", "indexed", "preferences", "page", "headers", "hydrated"} {
+	for _, stage := range []string{"before_start", "created", "indexed", "preferences", "page", "queue", "headers", "hydrated"} {
 		t.Run(stage, func(t *testing.T) {
 			repo := newSidebarReaderPool(t)
 			repo.ro.SetMaxOpenConns(1)
@@ -79,7 +82,11 @@ func TestSidebarQueryScratchCancellation(t *testing.T) {
 				}
 				return nil
 			}
-			_, err := repo.QuerySidebarTaskPage(ctx, "cancelled", sidebarTaskQuery(1), models.SidebarTaskViewPreferences{PinnedTaskIDs: []string{"kept"}})
+			query := sidebarTaskQuery(1)
+			query.Sort = models.SidebarTaskViewSort{Key: "color", Color: "red", Direction: "desc"}
+			prefs := sidebarColorPreferencesForTest()
+			prefs.PinnedTaskIDs = []string{"kept"}
+			_, err := repo.QuerySidebarTaskPage(ctx, "cancelled", query, prefs)
 			require.ErrorIs(t, err, context.Canceled)
 			assertSidebarScratchAbsent(t, repo)
 		})
@@ -186,11 +193,46 @@ func assertSidebarScratchAbsent(t *testing.T, repo *Repository) {
 	require.NoError(t, err)
 	defer func() { _ = conn.Close() }()
 	var count int
-	require.NoError(t, conn.GetContext(t.Context(), &count, "SELECT COUNT(*) FROM sqlite_temp_master WHERE name IN ('kandev_sidebar_filtered', 'kandev_sidebar_preferences')"))
+	require.NoError(t, conn.GetContext(t.Context(), &count, "SELECT COUNT(*) FROM sqlite_temp_master WHERE name IN ('kandev_sidebar_filtered', 'kandev_sidebar_preferences', 'kandev_sidebar_task_colors')"))
 	require.Zero(t, count)
 	require.NoError(t, conn.GetContext(t.Context(), &count, "SELECT COUNT(*) FROM sqlite_temp_master WHERE name = 'sqlite_stat1'"))
 	if count > 0 {
-		require.NoError(t, conn.GetContext(t.Context(), &count, "SELECT COUNT(*) FROM temp.sqlite_stat1 WHERE tbl IN ('kandev_sidebar_filtered', 'kandev_sidebar_preferences')"))
+		require.NoError(t, conn.GetContext(t.Context(), &count, "SELECT COUNT(*) FROM temp.sqlite_stat1 WHERE tbl IN ('kandev_sidebar_filtered', 'kandev_sidebar_preferences', 'kandev_sidebar_task_colors')"))
 		require.Zero(t, count, "scratch statistics must not retain workspace data for the next borrower")
 	}
+}
+
+func TestSidebarQueryQueueHydrationKeepsPageSnapshot(t *testing.T) {
+	repo := newSidebarReaderPool(t)
+	seedWorkspace(t, repo, "queue-snapshot")
+	for index, id := range []string{"first", "second", "visible"} {
+		require.NoError(t, repo.CreateTask(t.Context(), &models.Task{
+			ID: id, WorkspaceID: "queue-snapshot", Title: id,
+		}))
+		_, err := repo.db.ExecContext(t.Context(), `UPDATE tasks SET workflow_step_id = 'destination',
+			queued_for_step_id = 'destination', wip_admitted = 0, position = ? WHERE id = ?`, index, id)
+		require.NoError(t, err)
+	}
+	repo.sidebarQueryStage = func(stage string, _ *sqlx.Tx) error {
+		if stage != "page" {
+			return nil
+		}
+		_, err := repo.db.ExecContext(t.Context(), "UPDATE tasks SET wip_admitted = 1 WHERE id = 'first'")
+		return err
+	}
+	query := sidebarTaskQuery(1)
+	query.Filters = []models.SidebarTaskViewClause{{Dimension: "titleMatch", Op: "matches", Value: []byte(`"visible"`)}}
+	page, err := repo.QuerySidebarTaskPage(t.Context(), "queue-snapshot", query, models.SidebarTaskViewPreferences{})
+	require.NoError(t, err)
+	require.Len(t, page.Tasks, 1)
+	var queue [2]int
+	for _, entry := range page.Entries {
+		if entry.TaskID == "visible" {
+			queue = [2]int{entry.WIPQueuePosition, entry.WIPQueueTotal}
+		}
+	}
+	require.Equal(t, [2]int{3, 3}, queue, "queue hydration retains the page snapshot despite concurrent admission")
+	var admitted int
+	require.NoError(t, repo.db.GetContext(t.Context(), &admitted, "SELECT wip_admitted FROM tasks WHERE id = 'first'"))
+	require.Equal(t, 1, admitted, "the writer advances independently of the read snapshot")
 }

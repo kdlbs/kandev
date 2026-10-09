@@ -18,9 +18,11 @@ export type { SessionBackendMessageMap } from "./session-events";
 export type { OfficeEventType, OfficeEventPayload } from "./office-events";
 import type { RunEventAppendedPayload } from "./run-events";
 export type { RunEventAppendedPayload } from "./run-events";
+import type { CoordinatorUpdatedPayload } from "@/lib/api/domains/coordinator-api";
 
 import type {
   Agent,
+  AgentProfilesReorderedPayload as ProfileOrderPayload,
   AvailableAgent,
   ForegroundActivity,
   ReorderBand,
@@ -548,6 +550,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "workspace.created": BackendMessage<"workspace.created", WorkspacePayload>;
     "workspace.updated": BackendMessage<"workspace.updated", WorkspacePayload>;
     "workspace.deleted": BackendMessage<"workspace.deleted", WorkspacePayload>;
+    "coordinator.updated": BackendMessage<"coordinator.updated", CoordinatorUpdatedPayload>;
     "repository_set.created": BackendMessage<"repository_set.created", RepositorySetPayload>;
     "repository_set.updated": BackendMessage<"repository_set.updated", RepositorySetPayload>;
     "repository_set.deleted": BackendMessage<"repository_set.deleted", RepositorySetPayload>;
@@ -609,6 +612,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "agent.profile.deleted": BackendMessage<"agent.profile.deleted", AgentProfileDeletedPayload>;
     "agent.profile.created": BackendMessage<"agent.profile.created", AgentProfileChangedPayload>;
     "agent.profile.updated": BackendMessage<"agent.profile.updated", AgentProfileChangedPayload>;
+    "agent.profiles.reordered": BackendMessage<"agent.profiles.reordered", ProfileOrderPayload>;
     "user.settings.updated": BackendMessage<"user.settings.updated", UserSettingsUpdatedPayload>;
     "user.agent_profile_recent_use.updated": BackendMessage<
       "user.agent_profile_recent_use.updated",
@@ -667,3 +671,5 @@ export type {
   ProcessStatusPayload,
   QueueStatusChangedPayload,
 } from "./session-events";
+
+export type { AgentProfilesReorderedPayload } from "./http-agents";

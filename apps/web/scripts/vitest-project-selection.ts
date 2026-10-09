@@ -1,5 +1,6 @@
 import { readdirSync } from "node:fs";
 import path from "node:path";
+import reviewedProjects from "./vitest-reviewed-projects.json";
 
 export const PROJECT_NAMES = ["node", "browser", "browser-locales"] as const;
 export type ProjectName = (typeof PROJECT_NAMES)[number];
@@ -24,37 +25,10 @@ const SKIPPED_DIRECTORIES = new Set([".git", "dist", "node_modules"]);
  * on the full browser and locale setup until their imports are reviewed and
  * they are added here explicitly.
  */
-export const REVIEWED_NODE_TEST_FILES: readonly string[] = [
-  "lib/github/ci-automation.test.ts",
-  "lib/gitlab/mr-automation.test.ts",
-  "scripts/check-i18n-keys.test.ts",
-  "scripts/check-no-em-dash-ui.test.ts",
-  "scripts/convert-zh-cn-to-zh-hant.test.mjs",
-  "scripts/fix-trans-indices.test.ts",
-  "scripts/generate-licenses-fallback.test.ts",
-  "scripts/generate-licenses.test.ts",
-  "scripts/i18n-parity.test.ts",
-  "scripts/i18n-sweep.test.ts",
-  "scripts/lib/changed-files.test.ts",
-  "scripts/lib/diff-ranges.test.ts",
-  "scripts/lib/e2e-sleep-ratchet.test.ts",
-  "scripts/lib/e2e-sleep-wiring.test.ts",
-  "scripts/lib/e2e-wait-inventory.test.ts",
-  "scripts/lib/eslint-i18n-config.test.ts",
-  "scripts/lib/git-base.test.ts",
-  "scripts/lib/guard-allowlist.test.ts",
-  "scripts/lib/nonjsx-copy.test.ts",
-  "scripts/lib/nonjsx-scope.test.ts",
-  "scripts/lib/removed-literals.test.ts",
-  "scripts/vitest-project-selection.test.ts",
-  "scripts/vitest-worker-budget.test.ts",
-];
+export const REVIEWED_NODE_TEST_FILES: readonly string[] = reviewedProjects.node;
 
 /** These browser tests were reviewed as not requiring the locale catalogs. */
-export const REVIEWED_BROWSER_TEST_FILES: readonly string[] = [
-  "lib/test-support/happy-dom-network.test.ts",
-  "vitest-environment.test.tsx",
-];
+export const REVIEWED_BROWSER_TEST_FILES: readonly string[] = reviewedProjects.browser;
 
 export interface ProjectFiles {
   node: string[];

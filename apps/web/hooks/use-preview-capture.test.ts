@@ -132,6 +132,56 @@ beforeEach(() => {
 });
 
 describe("usePreviewCapture text", () => {
+  it("keeps the inspector message listener stable across preview route changes", () => {
+    const addListener = vi.spyOn(window, "addEventListener");
+    const removeListener = vi.spyOn(window, "removeEventListener");
+    const { iframe, result } = setup();
+    const messageAddsBeforeRoute = addListener.mock.calls.filter(([type]) => type === "message");
+
+    act(() =>
+      dispatch(iframe.contentWindow, {
+        source: INSPECTOR_SOURCE,
+        version: INSPECTOR_PROTOCOL_VERSION,
+        type: "route-changed",
+        payload: { page_route: "/details", page_title: "Details" },
+      }),
+    );
+
+    expect(result.current.pageRoute).toBe("/details");
+    expect(addListener.mock.calls.filter(([type]) => type === "message")).toHaveLength(
+      messageAddsBeforeRoute.length,
+    );
+    expect(removeListener.mock.calls.filter(([type]) => type === "message")).toHaveLength(0);
+
+    act(() =>
+      dispatch(iframe.contentWindow, {
+        source: INSPECTOR_SOURCE,
+        version: INSPECTOR_PROTOCOL_VERSION,
+        type: "capture-mode-changed",
+        payload: { mode: "text" },
+      }),
+    );
+    expect(result.current.mode).toBe("text");
+  });
+
+  it("reports capture mode only after the preview inspector confirms it", () => {
+    const { iframe, result } = setup();
+
+    act(() => result.current.startCapture("text"));
+    expect(result.current.mode).toBeNull();
+    expect(bridge.sendSetPreviewCaptureMode).toHaveBeenCalledWith(iframe, "text");
+
+    act(() =>
+      dispatch(iframe.contentWindow, {
+        source: INSPECTOR_SOURCE,
+        version: INSPECTOR_PROTOCOL_VERSION,
+        type: "capture-mode-changed",
+        payload: { mode: "text" },
+      }),
+    );
+    expect(result.current.mode).toBe("text");
+  });
+
   it("keeps exact generated text evidence in a recoverable draft and persists it with a comment", async () => {
     const { iframe, result } = setup();
 

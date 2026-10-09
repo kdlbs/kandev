@@ -30,7 +30,7 @@ type DocumentHandler struct {
 
 // NewDocumentHandler creates a new DocumentHandler.
 // basePath is the root storage directory (e.g. KANDEV_HOME); attachments are
-// stored under <basePath>/data/attachments/<taskID>/<key>.<ext>.
+// stored under <basePath>/attachments/<taskID> with an opaque internal filename.
 func NewDocumentHandler(svc *taskservice.DocumentService, basePath string, log *logger.Logger) *DocumentHandler {
 	return &DocumentHandler{
 		svc:      svc,

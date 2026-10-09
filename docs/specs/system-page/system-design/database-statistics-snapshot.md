@@ -5,6 +5,7 @@ requirements:
   - REQ-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001
   - REQ-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-002
 created: 2026-09-27
+updated: 2026-09-28
 owners:
   - kandev
 ---
@@ -19,9 +20,9 @@ Tool-payload savings analysis already runs as a background operation and persist
 
 ## Requirement mapping
 
-| Requirement | Design sections |
-| --- | --- |
-| `REQ-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001` | API and cache, Presentation |
+| Requirement                                   | Design sections                                 |
+| --------------------------------------------- | ----------------------------------------------- |
+| `REQ-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001` | API and cache, Presentation                     |
 | `REQ-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-002` | Scanner, Invalidation and failure, Verification |
 
 ## API and cache
@@ -44,9 +45,63 @@ The current retention status hook already keeps its last status through GET fail
 
 ## Presentation
 
-`useDatabaseStats` receives the live metadata and logical snapshot state. Its store preserves last good values across route changes within the SPA; server cache supplies them after a full page refresh. Revalidate when the hook mounts even if the browser store already has a response. Poll every two seconds while the logical state is pending or refreshing. Poll stale or unavailable states every 30 seconds so a retry can start after backend backoff without a page reload. The explicit retry action uses the refresh endpoint to bypass remaining backoff and then reads the current status. For a ready response, schedule a revalidation at its 15-minute expiry using `logical_stats_measured_at`; if the old snapshot remains visible after that check, retry every 30 seconds. Clear scheduled polls on unmount. `DatabaseStatsCard` shows metadata as soon as it arrives. Add one compact, localized measurement-status line with measured time where available; an unavailable first scan shows a retryable status. The four logical values currently have no row in this card, so do not introduce a new table. Backups continue to read `backup_directory` from the same response.
+The Data & Logs page has two consumers of the database-statistics response:
+DatabaseStatsCard renders database details, and the Backups section uses
+`backup_directory` in its resolved-directory description. `DatabasePanel`
+calls `useDatabaseStats` once and passes the same result to both consumers;
+DatabaseStatsCard does not create an independent observer. TanStack Query owns
+the `DatabaseStats` snapshot and GET request state. Zustand does not mirror
+this response or expose a setter for it; other System resources remain in
+Zustand. The query is lazy and starts when the Data & Logs database panel
+mounts. The boot payload and hydration remain unchanged and contain no database
+statistics. The backend process-local snapshot supplies the previous logical
+measurement after a full document reload.
 
-The same card and hook serve desktop and phone. The shipped Data & Logs settings surface is the mobile exemplar: one document scroll owner and compact cards. The status line wraps, has text beyond color, and its retry control uses the existing responsive settings action sizing. No new overlay or navigation is needed.
+The database query key contains the canonical full API base URL, page boot ID,
+auth mode, authenticated state, and user ID. The resource is installation-wide
+and has no workspace key. The authenticated application branch keeps the
+existing stable QueryClient. Identity-change cleanup targets only obsolete
+SystemInfo and database-statistics queries, cancels them, and immediately
+removes them with the same filter. It does not wait for cancellation before
+removal or clear unrelated Query entries. Leaving the authenticated app branch
+unmounts the provider. The database query passes TanStack's observer
+AbortSignal through fetchDatabaseStats to the existing fetchJson transport;
+the transport continues to send session cookies and use the existing endpoint.
+
+Database statistics are mutable, so SystemInfo's process-lifetime freshness
+does not apply. The query revalidates on every mount, even when it has cached
+data. It polls every two seconds while logical statistics are pending or
+refreshing, every 30 seconds while they are stale or unavailable, and at the
+15-minute snapshot expiry calculated from logical_stats_measured_at while
+they are ready. Read errors with cached data use the 30-second recovery delay.
+The interval stops when the last observer unmounts. The query does not retry
+automatically or refetch on browser focus or reconnect. It attempts requests
+while the browser reports offline so the current immediate error and bounded
+recovery behavior remain visible. Keep the cache entry for the authenticated
+app branch lifetime to preserve the last good response across SPA navigation;
+identity cleanup removes obsolete entries, and no browser cache is persisted
+across a full document reload.
+
+reload explicitly refetches the same Query entry and resolves without throwing
+on a read error, preserving the current caller contract. The retry action calls
+the existing refresh endpoint first to bypass server backoff, then refetches
+the status query. A failed status read keeps the previous successful Query
+data while exposing the error in the card. A failed refresh command is also
+shown as an error and does not escape the button handler. DatabaseStatsCard
+receives the shared hook result as props and keeps its current presentation and
+behavior: metadata appears as soon as it arrives, the localized
+measurement-status line includes its measured time when available, and stale or
+unavailable totals remain retryable. Direct card tests provide that result
+through the component props. The four logical values have no row in this card,
+so the migration does not add a new table. The Backups description uses
+`backup_directory` from the same result, preserving the resolved location
+without a Zustand mirror or second Query observer.
+
+The same card and hook serve desktop and phone. The shipped Data & Logs settings
+surface is the mobile exemplar: one document scroll owner and compact cards.
+The status line wraps, has text beyond color, and its retry control uses the
+existing responsive settings action sizing. No new overlay or navigation is
+needed.
 
 ## Observability and security
 
@@ -54,10 +109,28 @@ Log scan start, completion, duration, and failure class without row content or d
 
 ## Verification
 
-Backend tests cover cold reads, concurrent readers, expiry, failure with and without a snapshot, retry backoff, cancellation, batch yielding, maintenance deferral, and generation invalidation. Use SQLite fixtures and an environment-gated PostgreSQL behavior test for changed dialect-sensitive queries. Frontend tests cover nullable totals and independent metadata/error states. Desktop and mobile Playwright cover a pending scan, page reload with one flight, stale result, transient 503 recovery, and available backup/maintenance controls.
+Backend tests cover cold reads, concurrent readers, expiry, failure with and
+without a snapshot, retry backoff, cancellation, batch yielding, maintenance
+deferral, and generation invalidation. Use SQLite fixtures and an
+environment-gated PostgreSQL behavior test for changed dialect-sensitive
+queries.
+
+Frontend tests cover nullable totals and independent metadata/error states,
+plus shared query ownership, mount revalidation, state-based freshness,
+explicit retry, error recovery, cancellation, and identity cleanup. The
+database-card test preserves its prop contract. `system-route-copy.test.ts`
+verifies the Backups description uses the shared `backup_directory` and is
+omitted when unavailable.
+
+Desktop and mobile Playwright cover a pending scan, page reload with one flight,
+stale result, transient 503 recovery, and available backup/maintenance
+controls. `backups-page.spec.ts` verifies the resolved directory remains
+visible.
 
 ## Related documents
 
 - [Requirement](../requirements/database-statistics-snapshot.md)
 - [Existing storage snapshot pattern](storage-database-footprint.md)
 - [Implementation plan](../../../plans/database-statistics-resilience/plan.md)
+- [Query ownership implementation plan](../../../plans/database-statistics-query-migration/plan.md)
+- [Database Statistics Query Ownership](../../../decisions/2026-09-27-database-stats-query-cache-ownership.md)

@@ -102,6 +102,22 @@ func TestRecordTerminalOutcomePreservesRetainedPromptFailureDisposition(t *testi
 	}
 }
 
+func TestRecordTerminalOutcomeCopiesCapacityContinuationSnapshot(t *testing.T) {
+	recorder := &fakeTurnOutcomeRecorder{}
+	m := &Manager{}
+	m.SetTurnOutcomeRecorder("instance-1", recorder)
+	snapshot := &streams.CapacityContinuationSnapshot{
+		Support: streams.CapacityContinuationCodexLiveSessionV1, PromptGeneration: 7,
+		EvidenceComplete: true, CompletedTools: 2,
+	}
+	event := adapter.AgentEvent{Type: adapter.EventTypeError, CapacityContinuation: snapshot}
+	m.recordTerminalOutcome(&event)
+	snapshot.CompletedTools = 99
+	if got := recorder.calls[0].event.CapacityContinuation.CompletedTools; got != 2 {
+		t.Fatalf("retained completed tool count = %d, want immutable value 2", got)
+	}
+}
+
 // TestRecordTerminalOutcomeIgnoresNonTerminalEvents pins that every other
 // event type -- including the two excluded MCP-attachment sites' type and
 // the permission lifecycle types -- must never reach the recorder. AC-004 is
@@ -284,5 +300,83 @@ func TestForwardUpdatesStampsControlTurnIDOnDeliveredCopy(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for the complete event to be forwarded")
+	}
+}
+
+func TestTerminalOutcomeRecordingDoesNotWaitForLifecycleTeardownLock(t *testing.T) {
+	m := &Manager{}
+	recorder := &fakeTurnOutcomeRecorder{}
+	m.SetTurnOutcomeRecorder("instance-1", recorder)
+	m.mu.Lock()
+	done := make(chan struct{})
+	go func() {
+		event := adapter.AgentEvent{Type: adapter.EventTypeError}
+		m.recordTerminalOutcome(&event)
+		close(done)
+	}()
+	select {
+	case <-done:
+		m.mu.Unlock()
+	case <-time.After(time.Second):
+		m.mu.Unlock()
+		<-done
+		t.Fatal("terminal outcome recording blocked behind lifecycle teardown")
+	}
+	if len(recorder.calls) != 1 {
+		t.Fatalf("recorder calls = %d, want 1", len(recorder.calls))
+	}
+}
+
+// Terminal publication must finish while shutdown owns the lifecycle lock.
+// @covers AC-EXECUTORS-SURVIVAL-001.10, AC-EXECUTORS-SURVIVAL-004.1, AC-EXECUTORS-SURVIVAL-004.4
+func TestSendUpdateBlockingDoesNotWaitForLifecycleLock(t *testing.T) {
+	for _, name := range []string{"no_recorder", "with_recorder"} {
+		t.Run(name, func(t *testing.T) {
+			m := &Manager{updatesCh: make(chan adapter.AgentEvent, 1)}
+			recorder := &fakeTurnOutcomeRecorder{}
+			var wantTurnID int64
+			if name == "with_recorder" {
+				m.SetTurnOutcomeRecorder("instance-1", recorder)
+				wantTurnID = 1
+			}
+
+			m.mu.Lock()
+			done := make(chan struct{})
+			var sent bool
+			m.wg.Add(1)
+			t.Cleanup(func() {
+				m.mu.Unlock()
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Error("terminal publisher did not join after lifecycle lock release")
+				}
+			})
+			go func() {
+				defer close(done)
+				defer m.wg.Done()
+				sent = m.sendUpdateBlocking(adapter.AgentEvent{
+					Type: adapter.EventTypeError, Error: "Agent process exited with code 1",
+				})
+			}()
+
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("terminal publication blocked behind lifecycle lock")
+			}
+			if !sent {
+				t.Fatal("terminal publication did not deliver its event")
+			}
+			delivered := <-m.updatesCh
+			if delivered.Type != adapter.EventTypeError || delivered.Error != "Agent process exited with code 1" || delivered.ControlTurnID != wantTurnID {
+				t.Fatalf("delivered event = %+v, want exit error and turn ID %d", delivered, wantTurnID)
+			}
+			if wantTurnID != 0 {
+				if len(recorder.calls) != 1 || recorder.calls[0].instanceID != "instance-1" || recorder.calls[0].event.ControlTurnID != 0 {
+					t.Fatalf("retained calls = %+v, want instance-1 with an unstamped event", recorder.calls)
+				}
+			}
+		})
 	}
 }

@@ -30,8 +30,16 @@ import {
 } from "@/lib/state/slices/session-runtime/mcp-attachment-reconciliation";
 import { normalizeAgentProfiles } from "@/lib/api/domains/agent-profile-normalize";
 import { preserveOmittedExecutorFields } from "@/lib/kanban/map-task";
+import { newerAgentRuntimeSnapshot } from "@/lib/types/agent-runtime";
+import { sessionStateConfirmsAgentctlExecutionReady } from "@/lib/session-state";
 import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
+import {
+  acceptAgentOrdersFromSnapshot,
+  acceptServerOrder,
+  reconcileAgentOrders,
+} from "@/lib/settings/agent-profile-order";
+import { hydrateSelectorProfileOptions } from "@/lib/settings/agent-profile-selector-order";
 
 /**
  * Hydration options for controlling merge behavior
@@ -166,6 +174,58 @@ function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState
   if (state.repositoryBranches) deepMerge(draft.repositoryBranches, state.repositoryBranches);
 }
 
+function hydrateAgentProfileOrderState(
+  draft: Draft<AppState>,
+  state: HydrationState,
+  preserveLiveAgentProfiles: boolean,
+): void {
+  if (!state.agentProfiles || preserveLiveAgentProfiles) return;
+  for (const [agentId, incoming] of Object.entries(state.agentProfiles.orderByAgent ?? {})) {
+    if (!incoming.order) continue;
+    draft.agentProfiles.orderByAgent = acceptServerOrder(
+      draft.agentProfiles.orderByAgent,
+      agentId,
+      incoming.order,
+      incoming.revision,
+    );
+  }
+  draft.agentProfiles.orderByAgent = acceptAgentOrdersFromSnapshot(
+    draft.agentProfiles.orderByAgent,
+    state.settingsAgents?.items ?? [],
+  );
+  const orderByAgent = { ...draft.agentProfiles.orderByAgent };
+  deepMerge(draft.agentProfiles, state.agentProfiles);
+  draft.agentProfiles.orderByAgent = orderByAgent;
+}
+
+function hydrateAgentProfileOrder(
+  draft: Draft<AppState>,
+  state: HydrationState,
+  preserveLiveAgentProfiles: boolean,
+): void {
+  hydrateAgentProfileOrderState(draft, state, preserveLiveAgentProfiles);
+  if (state.settingsAgents && !preserveLiveAgentProfiles) {
+    deepMerge(draft.settingsAgents, {
+      ...state.settingsAgents,
+      items: reconcileAgentOrders(
+        state.settingsAgents.items.map(normalizeAgentProfiles),
+        draft.agentProfiles.orderByAgent,
+      ),
+    });
+  } else if (state.settingsAgents && preserveLiveAgentProfiles) {
+    draft.settingsAgents.items = reconcileAgentOrders(
+      draft.settingsAgents.items,
+      draft.agentProfiles.orderByAgent,
+    );
+  }
+  if (state.agentProfiles && !preserveLiveAgentProfiles) {
+    draft.agentProfiles.items = hydrateSelectorProfileOptions(
+      draft.agentProfiles.items,
+      draft.settingsAgents.items,
+    );
+  }
+}
+
 /** Hydrate settings slices, preserving loading states. */
 function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   if (state.executors) deepMerge(draft.executors, state.executors);
@@ -173,19 +233,7 @@ function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   mergeWithLoading(draft.availableAgents, state.availableAgents);
   const preserveLiveAgentProfiles =
     (state.agentProfiles?.version ?? 0) < draft.agentProfiles.version;
-  if (state.settingsAgents && !preserveLiveAgentProfiles) {
-    deepMerge(draft.settingsAgents, {
-      ...state.settingsAgents,
-      items: state.settingsAgents.items.map(normalizeAgentProfiles),
-    });
-  }
-  if (state.agentProfiles) {
-    // Preserve a newer profile mutation delivered over WebSocket while this
-    // snapshot was in flight; otherwise the stale response can erase it.
-    if (!preserveLiveAgentProfiles) {
-      deepMerge(draft.agentProfiles, state.agentProfiles);
-    }
-  }
+  hydrateAgentProfileOrder(draft, state, preserveLiveAgentProfiles);
   mergeWithLoading(draft.editors, state.editors);
   mergeWithLoading(draft.prompts, state.prompts);
   mergeWithLoading(draft.notificationProviders, state.notificationProviders);
@@ -516,6 +564,36 @@ function hydrateTaskSessionsByTask(
   deepMerge(draft.taskSessionsByTask, { ...incoming, itemsByTaskId });
 }
 
+function hydrateSessionAgentctlStatuses(
+  draft: Draft<AppState>,
+  incoming: NonNullable<HydrationState["sessionAgentctl"]>,
+  activeSessionId: string | null,
+  forceMergeSessionId: string | null,
+): void {
+  mergeSessionMap(
+    draft.sessionAgentctl.itemsBySessionId,
+    incoming.itemsBySessionId,
+    activeSessionId,
+    forceMergeSessionId,
+  );
+}
+
+function reconcileSessionAgentctlStatusesWithLiveSessions(draft: Draft<AppState>): void {
+  for (const [sessionId, status] of Object.entries(draft.sessionAgentctl.itemsBySessionId)) {
+    if (status.status !== "starting") continue;
+    const session = draft.taskSessions.items[sessionId];
+    if (
+      sessionStateConfirmsAgentctlExecutionReady(
+        session?.state,
+        session?.agent_execution_id,
+        status.agentExecutionId,
+      )
+    ) {
+      status.status = "ready";
+    }
+  }
+}
+
 /** Hydrate session slices, protecting active sessions. */
 function hydrateSession(
   draft: Draft<AppState>,
@@ -560,14 +638,14 @@ function hydrateSession(
       new Set(Object.keys(state.taskSessions?.items ?? {})),
     );
   }
-  if (state.sessionAgentctl) {
-    mergeSessionMap(
-      draft.sessionAgentctl.itemsBySessionId,
-      state.sessionAgentctl?.itemsBySessionId,
+  if (state.sessionAgentctl)
+    hydrateSessionAgentctlStatuses(
+      draft,
+      state.sessionAgentctl,
       activeSessionId,
       forceMergeSessionId,
     );
-  }
+  reconcileSessionAgentctlStatusesWithLiveSessions(draft);
   if (state.worktrees) deepMerge(draft.worktrees, state.worktrees);
   if (state.sessionWorktreesBySessionId)
     deepMerge(draft.sessionWorktreesBySessionId, state.sessionWorktreesBySessionId);
@@ -927,12 +1005,14 @@ export function hydrateState(
   }
 
   // System slice - shallow-merge whichever fields the caller supplied.
-  // `system` aggregates many independently-fetched fields (info, diskUsage,
-  // updates, jobs, metrics, ...); callers only ever provide the
+  // `system` aggregates many independently-fetched fields (info, updates,
+  // jobs, metrics, ...); callers only ever provide the
   // subset they fetched, so use the same leaf-level deepMerge as the other
   // multi-field slices above rather than overwriting the whole object.
   if (state.system) deepMerge(draft.system, state.system);
-  if (state.agentRuntime !== undefined) draft.agentRuntime = state.agentRuntime;
+  if (state.agentRuntime !== undefined) {
+    draft.agentRuntime = newerAgentRuntimeSnapshot(draft.agentRuntime, state.agentRuntime);
+  }
 }
 
 /** Hydrate GitHub slices, preserving loading states. */

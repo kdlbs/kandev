@@ -80,6 +80,18 @@ Adoption is optional. Compatibility does not imply automatic visual migration.
   Plugins section and task-over-workspace selection. Composer actions shall remain near their composer.
 - **AC-PLUGINS-ACTION-UX-003.5:** Presentation changes shall preserve mounted
   action state when the host keeps the contribution mounted. Actions shall not gain access to another composer.
+- **AC-PLUGINS-ACTION-UX-003.6:** When a focused plugin control opens a host
+  modal, closing that modal shall return focus to the same available control.
+  This applies to Escape, the close control, and programmatic closure in dialog
+  and drawer presentations. Standard Actions and legacy controls shall share this behavior.
+- **AC-PLUGINS-ACTION-UX-003.7:** When the opener is removed, disabled, hidden,
+  or inert, modal closure shall preserve focus in a remaining active surface.
+  Without an available opener or active surface, closure shall not choose an
+  unrelated control or reopen a dismissed surface.
+- **AC-PLUGINS-ACTION-UX-003.8:** Closing one plugin modal shall not move focus
+  behind another active modal. Closing a nested modal shall return focus to its
+  available opener within the parent. A nondismissible modal shall retain its
+  existing Escape and outside-interaction behavior.
 
 ## Compatibility and exclusions
 
@@ -97,3 +109,4 @@ sidebar-footer navigation registrations keep their existing renderers.
 
 - [System design](../system-design/plugin-action-ux.md)
 - [Implementation plan](../../../plans/plugin-action-ux/plan.md)
+- [Modal focus repair plan](../../../plans/plugin-modal-focus-restoration/plan.md)

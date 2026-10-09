@@ -105,6 +105,7 @@ type capturedPrompt struct {
 type transientRetryEntry struct {
 	attempt            int
 	mode               string
+	continuationPolicy continuationPolicy
 	continuation       *continuationBinding
 	providerID         string
 	modelID            string
@@ -276,6 +277,9 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 	entry := s.reserveTransientRetryWithMetadataLocked(noticeState, data.SessionID, attempt, func(entry *transientRetryEntry) {
 		entry.mode = mode
 		entry.continuation = binding
+		if binding != nil {
+			entry.continuationPolicy = binding.policy
+		}
 		entry.providerID = data.AgentID
 		if data.ProviderError != nil {
 			if data.ProviderError.ProviderID != "" {
@@ -401,7 +405,7 @@ func (s *Service) reserveTransientRetryWithMetadataLocked(
 		if previous, ok := previous.(*transientRetryEntry); ok {
 			previous.mu.Lock()
 			entry.started = previous.started
-			entry.mode, entry.continuation = previous.mode, previous.continuation
+			entry.mode, entry.continuationPolicy, entry.continuation = previous.mode, previous.continuationPolicy, previous.continuation
 			entry.providerID, entry.modelID = previous.providerID, previous.modelID
 			previous.mu.Unlock()
 		}

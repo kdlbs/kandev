@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-GIT-DIFF-FILE-METADATA-001
 created: 2026-10-02
-updated: 2026-10-03
+updated: 2026-10-09
 owners:
   - kandev
 ---
@@ -35,6 +35,108 @@ literal selection, and porcelain-owned workspace classification.
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.4, .5 | Preserved contracts |
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.6, .7 | Plain comparison output; Callers and transport |
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.8, .9 | Built-in cumulative patches; Callers and transport |
+| AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.10, .11 | Actual-byte comparison patches; Callers and transport |
+| AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.12, .13 | Short parent gitlink patches; Callers and transport |
+| AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.14 | Visible parent gitlink comparisons; Callers and transport |
+
+## Visible parent gitlink comparisons
+
+Short output selects a format; it does not override `diff.ignoreSubmodules`.
+At the qualified repair baseline, an `all` preference removed a real committed
+pointer update from both patch producers before the existing parser saw a
+section. With the child unavailable, this removed the only evidence needed by
+[AC-UI-SUBMODULE-REVIEW-001.5](../../ui/requirements/submodule-review.md).
+
+At initial published repair `15e0e6a30605da37f8e3d20da15d3d63d90d3e54`, both
+patch producers passed exact `--ignore-submodules=none`. This restored recorded
+pointer changes but allowed the cumulative working-tree comparison to decorate
+an unchanged child HEAD with `-dirty` for child-only tracked or untracked files.
+That decoration is not recorded parent pointer evidence.
+
+The bounded corrective policy keeps `ShowCommit` on exact
+`--ignore-submodules=none` and uses exact `--ignore-submodules=dirty` for
+`GetCumulativeDiff`. Git's dirty mode retains real pointer changes, including a
+changed child HEAD, while excluding child-only worktree dirt from the parent
+patch. The exact argument list in `securityutil.IsKnownSafeGitFlag` admits only
+these two values; bare/abbreviated/empty names, unsupported values, suffixes,
+whitespace and control-character variants remain rejected. No prefix admission
+or validation bypass is needed. Exact dirty admission precedes the cumulative
+argv correction; none admission remains required for commit detail.
+
+Retain `--submodule=short`, first-parent semantics, color/textconv suppression,
+cumulative external-diff suppression, fixed prefixes, captured environment,
+managed execution, admission and cancellation. The no-patch commit metadata
+query, parser, counts, budgets, status/tracker, history and other Git operations
+keep their existing contracts. No config write, retry, new subprocess, API or
+frontend change is required.
+
+The parent map supplies the gitlink fallback through the existing registered
+HTTP and WebSocket projections. Initialized children remain distinct scopes
+with parent-recorded anchors. Review's existing
+`suppressAvailableGitlinkFiles` in `apps/web/components/review/types.ts` retains
+the parent when no child contributes files and suppresses it when child files
+are available. This repair does not redefine discovery, source precedence,
+child file collection or presentation. Parent cumulative patches exclude child-only dirt; initialized child patches retain their existing worktree behavior. A missing parent map does not establish
+that initialized-child aggregate data is empty.
+
+Independent permanent regressions use real Git operators and their own registered
+selected/aggregate HTTP fixture. A real declared submodule is deinitialized after
+committing its pointer advance, so the child cannot supply alternate evidence.
+Use explicit positive old/new commit IDs and raw built-in short patch
+oracles with explicit ignore-none for commit and ignore-dirty for cumulative with color, external diff and textconv disabled, never the production
+parser or equality of empty results. Focused tracked/untracked child-dirt cases assert an unchanged parent produces no
+section, while changed-pointer-plus-dirt retains exact old/new IDs without
+`-dirty`. A registered aggregate case proves dirty child files remain in their
+own scopes and parent-recorded anchors with parent entries absent. Bound ignore-mode controls rather than
+crossing every child state, operation and setting. Independent HTTP repositories
+share a gitlink path but have distinct child IDs and parent bases; initialized
+child evidence separately verifies existing anchors and metadata. Snapshot owned
+config, HEAD, refs, index entries and worktree status/content around reads,
+resolving linked child Git paths. Isolate HOME/USERPROFILE/XDG and Git environment
+before fixture creation and operator/manager capture. Native Git and portable
+paths provide native Windows coverage without shell helper fixtures or shared
+fixture edits.
+
+The pure-data mobile exception applies: composition, copy, touch, scrolling,
+navigation and breakpoints are unchanged. Registered HTTP and operator evidence
+prove the repaired data seam; no browser fixture or preview is required. Public
+Git operations, sessions/Review, feature-status and WebSocket guidance, README
+and screenshots already describe faithful metadata, nested anchors and unavailable
+child fallback; they need no edit. This remains within accepted nested-scope and
+shared comparison boundaries, so no new ADR is needed. Delivery is in the
+[one sequential work-order package](../../../plans/git-submodule-ignore-review-evidence/plan.md).
+
+## Short parent gitlink patches
+
+The prerequisite is exact safe-flag admission: add only `--submodule=short`
+to the exact argument list in `securityutil.IsKnownSafeGitFlag`
+(`apps/backend/internal/common/securityutil/git.go`). It was absent at the format repair
+baseline `993f60ce889b6dcca1ca19fe98703a9159ab28c3` and is now admitted. Reject abbreviated names, other values, extra suffixes,
+empty values and whitespace variants. Do not admit a `--submodule` prefix,
+bypass validation, or change global Git configuration/environment policy.
+
+Pass the exact flag after the subcommand and before the ref in ONLY the two
+existing patch argument lists in `git_log.go`: `GitOperator.ShowCommit` and
+`GitOperator.GetCumulativeDiff`. The no-patch commit metadata query, history
+queries and all other Git producers retain their current arguments. Preserve
+`--first-parent`, `--no-color`, `--no-textconv`, cumulative `--no-ext-diff`,
+fixed `a/` and `b/` prefixes, managed execution, captured environment,
+admission, cancellation and budgets.
+
+With `diff.submodule=log`, Git emits a submodule log instead of the parent
+gitlink's unified patch section. `splitDiffSections` therefore supplies no
+parent file to the existing parser. Inline child diff display is likewise
+unsuitable for a parent file identity. Select short gitlink patches at these
+producers rather than parsing additional formats or treating child file
+patches as parent files. The existing parser already handles the short
+`Subproject commit` patch, mode 160000, and added/deleted/modified statuses.
+
+Initialized child repositories still use their own operators and parent-recorded
+comparison anchors under the [nested scope decision](../../../decisions/2026-08-05-nested-submodules-as-repository-scopes.md).
+The [submodule Review contract](../../ui/requirements/submodule-review.md)
+continues to own discovery, repository routing, and suppression of the parent
+gitlink row when child file diffs are available. Parent and child API data remain
+distinct. A missing parent patch does not imply the entire aggregate is empty.
 
 ## Plain comparison output
 
@@ -75,13 +177,41 @@ without column-zero `diff --git ` sections reaches the existing parser as a
 successful empty comparison. Select built-in output at the producer rather
 than teaching the parser arbitrary helper formats. `ShowCommit`'s existing
 `git show` uses built-in output by default and remains a positive control;
-this defect does not justify adding a flag there.
+this external-helper defect does not justify adding an external-diff flag there.
 
 Keep `--no-color`, fixed prefixes, base-to-worktree semantics and captured
 environment handling. Do not clear helper variables, rewrite configuration,
 add subprocesses, or change shared execution policy. Other Git producers,
-text conversion, rename detection and comparison-base selection retain their
-existing contracts.
+rename detection and comparison-base selection retain their existing contracts.
+Text conversion in these two comparison producers is handled separately below.
+
+## Actual-byte comparison patches
+
+The exact safe-flag dependency is part of this repair: add only `--no-textconv`
+to `securityutil.IsKnownSafeGitFlag`'s exact argument list in
+`apps/backend/internal/common/securityutil/git.go`.
+Reject abbreviated, value, suffixed and whitespace variants; no prefix widening
+or validation bypass is needed.
+
+Pass that exact flag after the subcommand and before the ref in the two existing
+patch-producing argument lists in `git_log.go`: `ShowCommit`'s
+`show --first-parent --no-color --format= --stat --numstat -p` and
+`GetCumulativeDiff`'s `diff --no-color --no-ext-diff`. The separate no-patch
+metadata query remains unchanged. Retain fixed prefixes and every existing
+comparison argument. Keep `runGitCommand`, its captured operator environment,
+admission, cancellation and managed process lifetime unchanged.
+
+`--no-ext-diff` does not disable a text converter selected through attributes
+and `diff.<driver>.textconv`. Both patch producers otherwise use conversion.
+Equal converted outputs can erase a real change's patch section while commit
+stat/numstat still advertise the change. The parser then reports a successful
+empty file map and derives zero commit totals. Other converters can replace
+actual file content with a different patch. Disable conversion at these two
+producers so their existing parser receives built-in patches from actual bytes.
+
+This per-invocation selection neither edits driver configuration/attributes nor
+forbids converters globally. No parser, count, budget, ref, shared command
+framework, environment or other Git reader/write changes belong to the repair.
 
 ## Raw extended-header classification
 
@@ -134,7 +264,7 @@ application instance, browser, database, or external service is needed.
 
 ## Preserved contracts
 
-Apart from the plain-output flags and cumulative external-diff suppression, keep Git argv/environments, first-parent and root behavior, genuinely empty
+Apart from the plain-output flags, cumulative external-diff suppression, these two producers' text-conversion suppression, short gitlink display and explicit gitlink visibility, keep Git argv/environments, first-parent and root behavior, genuinely empty
 results, fixed prefixes, exact paths and patch bytes, line counts and aggregates,
 per-file/total/file-count limits, skip reasons, and all response shapes.
 Workspace mutation and history-provider code are outside this helper's boundary.
@@ -210,3 +340,65 @@ The mobile and public-docs assessment remains data-only: the existing Git
 operations guide's comparison metadata and read-only guidance is accurate;
 there is no UI, copy, schema, user setting or workflow change. Delivery is in the
 [built-in cumulative package](../../../plans/git-cumulative-built-in-patch/plan.md).
+
+Text-converter regressions use actual Git through both public operator methods
+and registered selected/aggregate HTTP routes. A guarded native test-binary
+helper follows the portable pattern in `git_log_external_diff_test.go`, without
+rewriting shared fixtures or requiring a Windows shell script. No-driver
+controls assert positive membership and old/new bytes. Configured helper modes
+alter output or emit identical constant text, and deliberate raw Git controls
+prove both modes execute before clearing only their owned sentinels. Production
+reads must return actual bytes and leave the sentinels absent. Raw patch oracles
+and snapshot diffs explicitly disable textconv, external diff and color; they
+never use the production parser as their oracle.
+
+Keep the matrix targeted: committed and dirty text changes, selected converted
+binary content, an empty-file change and genuinely empty comparison. Preserve
+first-parent/root semantics with the existing focused controls and cumulative
+budgets with existing limit controls. Independent HTTP repositories share a
+path but contain distinct old/new bytes, bases and driver settings. Assert
+selected isolation, aggregate NUL-qualified keys, `repository_name`, `base_ref`
+and ordinary-repository `is_submodule` omission, plus commit metadata and totals.
+Snapshot config/attribute bytes, HEAD, refs, index entries and dirty content
+after fixture setup and around reads. Install any helper environment guard
+before operator/manager capture. Only the necessary caller seam uses HTTP;
+there is no browser, database, application launch or new transport contract.
+
+The source-data-only mobile exception applies. The existing Git operations
+how-to/reference guidance remains accurate; no public guide edit is required.
+Delivery is in the [one-work-order text-converter package](../../../plans/git-comparison-textconv/plan.md).
+
+Submodule regressions are independently authored in new process and registered
+HTTP test files; reuse accepted discovery receipts without importing or replaying
+the discovery source. Native Git fixtures use disposable parent/child repositories,
+actual gitlink commits and no shell helper. Compare explicit file identities,
+statuses, counts and old/new commit IDs with raw Git short-patch oracles that
+also disable color, external diff and text conversion. Do not use the production
+parser as the oracle or accept equality of two empty results.
+
+Keep the matrix bounded: forward updates under unset/short/log/diff preferences;
+backward updates, additions and deletions under log with short controls; an
+ordinary file under log; a dirty tracked gitlink; a root gitlink addition and a
+genuinely empty comparison. Existing focused first-parent, prefixes, uncapped
+commit and cumulative-budget tests retain their owners and provide compatibility
+evidence once, rather than replaying sibling packages in full.
+
+Registered selected commit/cumulative reads and aggregate cumulative reads use
+independent repositories with the same gitlink path but different child commit
+IDs and parent bases. Aggregate requests include the required `base` query
+parameter while each scope resolves its own stored base. Assert selected
+isolation, NUL-qualified aggregate keys, exact `repository_name`/`path`/`base_ref`,
+and `is_submodule` only on child-scope files. An initialized child's actual file
+patch remains separate and anchored to its parent's original gitlink. Snapshot
+configuration bytes, HEAD, refs, index entries, and worktree status/content in
+all owned scopes around production reads; resolve linked child Git paths rather
+than assuming `.git` is a directory. Install fixture environment isolation before
+operator/manager capture. No server port, browser, database or application launch
+is required.
+
+The pure-data mobile exception applies: existing desktop/phone composition,
+copy, navigation, touch behavior and scrolling are unchanged. Public audit of
+Git operations, sessions/Review, feature status, WebSocket guidance, README and
+screenshots found the existing metadata, nested-scope and read-only descriptions
+remain accurate. No public guide edit or new ADR is needed. Delivery is in the
+[submodule comparison format package](../../../plans/git-submodule-comparison-format/plan.md).

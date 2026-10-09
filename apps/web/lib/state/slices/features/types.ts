@@ -17,9 +17,10 @@ export const defaultFeatureFlags = {
   claudeMidTurnSteering: false,
   needsYouInbox: false,
   agentSurvival: false,
+  coordinator: false,
+  coordinatorPhase2: false,
   codexAppServer: false,
   agentBackgroundWork: false,
-  providerInterruptionContinuation: false,
 } as const;
 
 export type FeatureName = keyof typeof defaultFeatureFlags;

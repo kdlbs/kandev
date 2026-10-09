@@ -4,6 +4,7 @@ import { expect } from "@playwright/test";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
+import type { SessionPage } from "../pages/session-page";
 import { pollUntil } from "./poll-until";
 
 type SessionMessage = Awaited<ReturnType<ApiClient["listSessionMessages"]>>["messages"][number];
@@ -15,6 +16,8 @@ export type MockACPTrace = {
   connection_id: string;
   prompt?: string;
   value?: string;
+  scenario?: string;
+  effect?: string;
 };
 
 export async function createRetainedCapacityFixture(
@@ -22,6 +25,7 @@ export async function createRetainedCapacityFixture(
   apiClient: ApiClient,
   seedData: SeedData,
   scenario: string,
+  options: { initialPrompt?: string } = {},
 ) {
   const tracePath = path.join(backend.tmpDir, `retained-capacity-${Date.now()}.jsonl`);
   let profileId = "";
@@ -51,7 +55,7 @@ export async function createRetainedCapacityFixture(
       `Retained capacity ${scenario}`,
       profile.id,
       {
-        description: `/capacity-${scenario}`,
+        description: options.initialPrompt ?? `/capacity-${scenario}`,
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
@@ -112,6 +116,34 @@ export function assertRetainedACPTrace(tracePath: string, expectedPrompts: numbe
   expect(records.filter((record) => record.event === "session_load")).toHaveLength(0);
   expect(records.filter((record) => record.event === "resume")).toHaveLength(0);
   expect(records.filter((record) => record.event === "prompt")).toHaveLength(expectedPrompts);
+}
+
+export function assertCompletedCapacityACPTrace(tracePath: string, originalCommand: string) {
+  const records = readMockACPTrace(tracePath);
+  const prompts = records.filter((record) => record.event === "prompt");
+  assertRetainedACPTrace(tracePath, 2);
+  expect(prompts.filter((record) => record.prompt?.includes(originalCommand))).toHaveLength(1);
+  const effects = records.filter((record) => record.event === "completed_side_effect");
+  expect(effects).toHaveLength(1);
+  expect(effects[0]).toMatchObject({ scenario: "completed-tools", effect: "fixture.txt" });
+}
+
+export async function expectCompletedCapacityProgress(session: SessionPage) {
+  const retryNotice = session.transientRetryCard();
+  const completedContinuation = session
+    .activeChat()
+    .getByText("Mock provider continued the unfinished request without repeating completed work.", {
+      exact: true,
+    });
+  await expect
+    .poll(
+      async () => (await retryNotice.isVisible()) || (await completedContinuation.isVisible()),
+      {
+        timeout: 30_000,
+        message: "the chat should show the pending retry or its completed continuation",
+      },
+    )
+    .toBe(true);
 }
 
 export function assertRetainedFailureMessage(message: SessionMessage) {

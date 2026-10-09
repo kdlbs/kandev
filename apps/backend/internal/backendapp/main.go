@@ -113,7 +113,6 @@ import (
 	officeskills "github.com/kandev/kandev/internal/office/skills"
 	officewakeup "github.com/kandev/kandev/internal/office/wakeup"
 	orchexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	// Runs queue (Phase 3 of task-model-unification)
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
@@ -128,6 +127,7 @@ import (
 	workflowengine "github.com/kandev/kandev/internal/workflow/engine"
 
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	repoerrors "github.com/kandev/kandev/internal/task/repository/repoerrors"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -142,6 +142,7 @@ import (
 
 	// System pages (status / database / backups / logs / updates / about)
 	systemsvc "github.com/kandev/kandev/internal/system"
+	systeminfo "github.com/kandev/kandev/internal/system/info"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
@@ -151,6 +152,7 @@ import (
 	"github.com/kandev/kandev/internal/delivery"
 
 	"github.com/kandev/kandev/internal/common/ports"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // Build-time variables are set by cmd/kandev before Run is called. Defaults
@@ -547,8 +549,43 @@ func startServices( //nolint:cyclop
 	// ============================================
 	// AGENTCTL LAUNCHER (for standalone mode)
 	// ============================================
-	agentRuntimeAvailability := agentctlclient.NewAvailability(eventBus, log)
-	agentctlResult, err := provideAgentctlLauncher(ctx, cfg, log, agentRuntimeAvailability, repos.Task, repos.Secrets)
+	agentRuntimeAvailability := agentctlclient.NewRuntimeOwner(eventBus, log, systeminfo.NewBootID())
+	addCleanup(func() error {
+		agentRuntimeAvailability.Stop()
+		return nil
+	})
+	agentRuntimeRecovery := agentctlclient.NewRecoveryCoordinator(
+		agentRuntimeAvailability,
+		func(attemptCtx context.Context, onRuntimeLoss agentctlclient.RuntimeLossHandler) error {
+			replacementConfig := *cfg
+			replacementConfig.Agent = cfg.Agent
+			result, err := provideAgentctlLauncher(attemptCtx, &replacementConfig, log,
+				agentRuntimeAvailability, repos.Task, repos.Secrets, agentctlProvisionOptions{
+					onRuntimeLoss:        onRuntimeLoss,
+					requireControlRecord: true,
+				})
+			if err != nil {
+				return err
+			}
+			if result == nil {
+				return errors.New("runtime replacement did not return an adopted or launched server")
+			}
+			return nil
+		},
+		agentctlclient.RecoveryCoordinatorOptions{Logger: log},
+	)
+	addCleanup(func() error {
+		agentRuntimeRecovery.Stop()
+		return nil
+	})
+	onRuntimeLoss := func(epoch uint64, reason string, safeToReplace bool) {
+		if !agentRuntimeRecovery.NotifyRuntimeLoss(epoch, reason, safeToReplace) {
+			log.Debug("ignored agent runtime loss from a retired or stopping epoch",
+				zap.Uint64("runtime_epoch", epoch), zap.String("reason", reason))
+		}
+	}
+	agentctlResult, err := provideAgentctlLauncher(ctx, cfg, log, agentRuntimeAvailability, repos.Task, repos.Secrets,
+		agentctlProvisionOptions{onRuntimeLoss: onRuntimeLoss})
 	if err != nil {
 		log.Error("Failed to start agentctl subprocess", zap.Error(err))
 		return false
@@ -556,8 +593,8 @@ func startServices( //nolint:cyclop
 	var agentctlBinaryPath string
 	var recoveryDeadlineStart time.Time
 	var inheritedRecordScope lifecycle.InheritedRecordScope
+	var peerCapabilities []string
 	if agentctlResult != nil {
-		addCleanup(agentctlResult.cleanup)
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error("panic recovered, stopping agentctl", zap.Any("panic", r))
@@ -573,10 +610,11 @@ func startServices( //nolint:cyclop
 		agentctlBinaryPath = agentctlResult.binaryPath
 		recoveryDeadlineStart = agentctlResult.recoveryDeadlineStart
 		inheritedRecordScope = agentctlResult.inheritedRecordScope
+		peerCapabilities = append([]string(nil), agentctlResult.peerCapabilities...)
 	}
 
-	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, agentRuntimeAvailability,
-		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, recoveryDeadlineStart, inheritedRecordScope,
+	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, agentRuntimeAvailability, agentRuntimeRecovery,
+		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, recoveryDeadlineStart, inheritedRecordScope, peerCapabilities,
 		startupRecoveryGuard, runCleanups, cancelWorkers)
 }
 
@@ -591,6 +629,7 @@ func startAgentInfrastructure(
 	addCleanup func(func() error),
 	eventBus bus.EventBus,
 	agentRuntimeAvailability *agentctlclient.Availability,
+	agentRuntimeRecovery *agentctlclient.RecoveryCoordinator,
 	dbPool *db.Pool,
 	repos *Repositories,
 	services *Services,
@@ -599,6 +638,7 @@ func startAgentInfrastructure(
 	agentctlBinaryPath string,
 	recoveryDeadlineStart time.Time,
 	inheritedRecordScope lifecycle.InheritedRecordScope,
+	peerCapabilities []string,
 	startupRecoveryGuard *lifecycle.RecoveryGuard,
 	runCleanups func(),
 	cancelWorkers context.CancelFunc,
@@ -626,11 +666,15 @@ func startAgentInfrastructure(
 		func() bool { return services.Auth != nil && services.Auth.Mode() != auth.ModeDisabled },
 		log,
 	)
+	if services.Coordinator != nil {
+		mcpScopeResolver.SetCoordinatorLookup(services.Coordinator)
+	}
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
 	lifecycleMgr, err := provideLifecycleManager(
 		cfg,
+		agentRuntimeAvailability,
 		log,
 		eventBus,
 		repos.AgentSettings,
@@ -643,6 +687,7 @@ func startAgentInfrastructure(
 		mcpScopeResolver.ScopePrincipal,
 		recoveryDeadlineStart,
 		inheritedRecordScope,
+		peerCapabilities,
 		services.Task,
 		services.Task,
 		services.Task,
@@ -653,6 +698,7 @@ func startAgentInfrastructure(
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false
 	}
+	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
 
 	// ============================================
 	// WORKTREE MANAGER
@@ -773,6 +819,10 @@ func startAgentInfrastructure(
 	// Watcher dispatch self-heals a binding whose repository was soft-deleted
 	// after the watch was configured, instead of creating an orphan task row.
 	orchestratorSvc.SetRepositoryChecker(&repositoryLookupAdapter{svc: services.Task})
+	if services.Coordinator != nil {
+		orchestratorSvc.SetCoordinatorLookup(services.Coordinator)
+		orchestratorSvc.SetCoordinatorStandingInstructionsReader(coordinatorStandingInstructionsReader(services.Coordinator, log))
+	}
 
 	// Wire the watcher-dependency enumerator into the agent settings
 	// controller so the profile-delete UI can surface "this will also
@@ -994,7 +1044,7 @@ func startAgentInfrastructure(
 		return false
 	}
 
-	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
+	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, agentRuntimeRecovery, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath,
 		sessionCapacityEnvironment, storageStore, func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers,
 		restoreCleanups, databaseQuiesce, sshReachabilityPoller)
@@ -1050,6 +1100,7 @@ func startGatewayAndServe(
 	log *logger.Logger,
 	eventBus bus.EventBus,
 	agentRuntimeAvailability *agentctlclient.Availability,
+	agentRuntimeRecovery *agentctlclient.RecoveryCoordinator,
 	dbPool *db.Pool,
 	repos *Repositories,
 	services *Services,
@@ -1123,12 +1174,8 @@ func startGatewayAndServe(
 	// Long-lived per-agent-type agentctl instances for boot-time capability
 	// probes, on-demand refresh via settings, and sessionless utility prompts
 	// (e.g. "enhance prompt" before a task/session exists).
-	hostControlClient := agentctlclient.NewControlClient(cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, log,
-		agentctlclient.WithControlAuthToken(cfg.Agent.StandaloneAuthToken))
-	hostUtilityMgr := hostutility.NewManager(agentRegistry, cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, hostControlClient, log)
-	// Per-instance servers enforce the same single rotating credential as
-	// the control server -- see config.AgentConfig's field doc.
-	hostUtilityMgr.SetAuthToken(cfg.Agent.StandaloneAuthToken)
+	hostUtilityMgr := hostutility.NewManager(agentRegistry, "", 0, nil, log)
+	hostUtilityMgr.SetRuntimeOwner(agentRuntimeAvailability)
 	pluginProfileResolver := profilebinding.New(repos.AgentSettings, func(agentID string) bool {
 		_, ok := agentRegistry.GetInferenceAgent(agentID)
 		return ok
@@ -1139,6 +1186,24 @@ func startGatewayAndServe(
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
+	agentSettingsController.SetOpenCodeMigrationGuard(func(ctx context.Context) (context.Context, func(), error) {
+		activationCtx, releaseLifecycle, err := lifecycleMgr.AcquireOpenCodeMigration(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		releaseUtility, err := hostUtilityMgr.AcquireRuntimeMaintenance(activationCtx, "opencode-acp")
+		if err != nil {
+			releaseLifecycle()
+			return nil, nil, err
+		}
+		return activationCtx, func() {
+			releaseUtility()
+			releaseLifecycle()
+		}, nil
+	})
+	// Read each installed vendor CLI's model catalogue once, off the request
+	// path, so the first settings page load serves a discovered list.
+	go agentSettingsController.WarmHostCLIModels(ctx)
 	profileReconciler := agentsettingscontroller.NewProfileReconciler(hostUtilityMgr, agentRegistry, repos.AgentSettings, log)
 
 	// Wire Host.InvokeUtilityAgent at the first point where the sessionless
@@ -1177,6 +1242,7 @@ func startGatewayAndServe(
 		Version:   Version,
 		Commit:    Commit,
 		BuildTime: BuildTime,
+		BootID:    agentRuntimeAvailability.BootID(),
 	}, systemsvc.Wiring{
 		OrchestratorShutdown:       func() { _ = orchestratorSvc.Stop() },
 		DatabaseQuiesce:            databaseQuiesce,
@@ -1189,6 +1255,7 @@ func startGatewayAndServe(
 		SessionCapacity:            orchestratorSvc,
 		SessionCapacityEnvironment: sessionCapacityEnvironment,
 		TaskSessions:               repos.Task,
+		AgentRuntimeRecovery:       agentRuntimeRecovery,
 		ToolPayloadChanged: func(eventCtx context.Context, ids []string) {
 			for _, id := range ids {
 				message, err := services.Task.GetMessage(eventCtx, id)
@@ -1253,7 +1320,7 @@ func startGatewayAndServe(
 	// Build the real router and register all handlers, which wires the real
 	// dispatcher into lifecycleMgr.SetMCPHandler and installs MCP scope handlers
 	// BEFORE lifecycleMgr.Start recovers sessions.
-	builtServer, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
+	builtServer, err := buildHTTPServer(ctx, cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, notificationSvc, msgCreator, agentRegistry, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
 		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, e2eRuntimeUpdateHooks, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
@@ -1521,6 +1588,9 @@ func startGatewayAndServe(
 			bootstrap.ready.Store(true)
 		}, func() { handler.Store(builtServer.Handler) })
 	})
+	if agentRuntimeRecovery != nil {
+		agentRuntimeRecovery.Start(ctx)
+	}
 
 	awaitShutdown(ctx, server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
 	return true
@@ -2616,6 +2686,18 @@ func (a *officeOrchestratorTaskStarter) startTaskWithEnvAndSkills(
 		workflowStepID, planMode, false, attachments, env, additionalSkillSlugs)
 }
 
+func (a *officeOrchestratorTaskStarter) GetOpenSessionRecoveryBlock(
+	ctx context.Context, sessionID string,
+) (*taskmodels.SessionRecoveryBlock, error) {
+	return a.orch.GetOpenSessionRecoveryBlock(ctx, sessionID)
+}
+
+func (a *officeOrchestratorTaskStarter) GetSessionRecoveryBlock(
+	ctx context.Context, blockID string,
+) (*taskmodels.SessionRecoveryBlock, error) {
+	return a.orch.GetSessionRecoveryBlock(ctx, blockID)
+}
+
 // newAgentAuth wraps officeagents.NewAgentAuth with a dev-mode warning when
 // no signing key is configured, so the empty-key fallback can't silently
 // invalidate agent tokens on every restart in production.
@@ -2832,6 +2914,7 @@ func resolvedHTTPPort(cfg *config.Config) int {
 // buildHTTPServer creates the HTTP server with all middleware and routes
 // registered against the gateway and service layer.
 func buildHTTPServer(
+	ctx context.Context,
 	cfg *config.Config,
 	log *logger.Logger,
 	gateway *gateways.Gateway,
@@ -2940,6 +3023,7 @@ func buildHTTPServer(
 		return err
 	})
 	registerRoutes(routeParams{
+		ctx:                           ctx,
 		router:                        router,
 		gateway:                       gateway,
 		taskSvc:                       services.Task,

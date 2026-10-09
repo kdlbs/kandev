@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: ui
 requirements:
   - REQ-UI-WORKSPACE-FILE-TRANSFER-001
@@ -34,19 +34,19 @@ Adjacent contracts this design consumes but does not own:
 | `REQ-UI-WORKSPACE-FILE-TRANSFER-001` | [Components and responsibilities](#components-and-responsibilities), [Control flow](#control-flow) |
 | `REQ-UI-WORKSPACE-FILE-TRANSFER-002` | [Components and responsibilities](#components-and-responsibilities), [Control flow](#control-flow) |
 | `REQ-UI-WORKSPACE-FILE-TRANSFER-003` | [Upload owner lifetime](#upload-owner-lifetime), [Security](#security), [Failure and recovery](#failure-and-recovery), [Persistence](#persistence) |
-| `REQ-UI-WORKSPACE-FILE-TRANSFER-004` | [Data and contracts](#data-and-contracts), [Control flow](#control-flow) |
+| `REQ-UI-WORKSPACE-FILE-TRANSFER-004` | [Data and contracts](#data-and-contracts), [Control flow](#control-flow), [Replacement permissions](#replacement-permissions) |
 
 ## Components and responsibilities
 
 ### Backend
 
-- **`WorkspaceTracker.WriteFileStream`** (new, in `server/process/workspace_files.go`) is the single
+- **`WorkspaceTracker.WriteFileStream`** (in `server/process/workspace_upload.go`) is the single
   write-bytes primitive. It resolves the destination through the existing `resolveMutationPath`,
   takes the existing `runWorkspaceMutationBarrier`, applies the caller's resolution, creates missing
   intermediate directories under the same rooted handle, writes to a temporary file in the
   destination directory, fsyncs, renames into place, and emits the standard change notification
   through `mutationNotificationPath`. It returns the final path and byte count.
-- **`WorkspaceTracker.CheckUploadConflicts`** (new, same file) resolves a list of candidate
+- **`WorkspaceTracker.CheckUploadConflicts`** (same upload file) resolves a list of candidate
   destination paths and reports which already exist. It performs the same containment resolution as
   the write, so an unwritable path is rejected at preflight rather than after the person has chosen a
   resolution.
@@ -175,6 +175,75 @@ Download needs no new transport. The viewer already holds the content that
 viewer renders and `resolveFileCategory` only chooses a viewer after that fetch resolves, so any
 file that can display a download button is already loaded and already under the read cap.
 
+## Replacement permissions
+
+`AC-UI-WORKSPACE-FILE-TRANSFER-004.7` through `004.9` extend the existing upload contract.
+The correction belongs in `server/process/workspace_upload.go`; it changes neither the public
+`WriteFileStream` signature nor multipart fields, response shape, conflict choices, or UI.
+`createUploadTemp` currently requests `0644`, subject to umask, and rename publishes that new
+inode over the destination. Destination permissions therefore need explicit preservation for
+regular-file replacement. New files must not receive an unconditional chmod to that default.
+
+Keep the existing rooted staging handle open after `io.Copy`. Source reads remain outside
+`mutationMu`. Inside the final publication lock, `resolveUploadTarget` rechecks existence and
+resolution as it does today; carry its existing `FileInfo` into permission selection without a
+second destination stat. Only an existing regular file selected by `UploadResolutionReplace`
+supplies `info.Mode().Perm()`. Represent absence separately from a valid zero permission mode.
+Missing targets and all `UploadResolutionKeepBoth` results supply no inherited mode, retaining
+the creation-time umask result. Directories keep their existing rejection; other entry types
+retain existing resolution behavior without becoming metadata donors.
+
+Apply the selected ordinary bits with `tmp.Chmod` on the already-open staging descriptor,
+then sync and close successfully before `path.root.Rename`. Never chmod the destination or
+reopen an unrooted path for metadata. Holding the descriptor avoids introducing the documented
+path-based `os.Root.Chmod` symlink race. Keep the final check, metadata preparation, sync/close,
+and rename serialized against other uploads through this tracker; no network/source read enters
+that lock. A small private upload publication helper is sufficient if needed for code limits
+and filesystem failure tests. Any failure before rename follows the existing close/remove path,
+returns no success, and emits no notification. A published write survives later response loss.
+
+Path authority stays with `resolveMutationPath` in `workspace_files.go`, including registered
+durable-source roots. Stable in-root symlinks are canonicalized by that resolver before staging;
+the canonical destination supplies the mode, while request-shaped reporting keeps existing
+behavior. Out-of-root links and subsequent escape attempts remain subject to rooted operations.
+Do not copy a link's own mode or mutate its referent's metadata. The tracker lock does not
+serialize arbitrary external processes: metadata is a snapshot at final target resolution,
+not an inode/version transaction through rename. Preserve current symlink and conflict semantics
+without introducing a general no-clobber primitive or modifying the shared resolver.
+
+The only direct production caller is `Server.writeWorkspaceUploadPart` in
+`server/api/workspace_upload.go`, reached through the registered authenticated
+`POST /api/v1/workspace/file/upload` route. `boundedWorkspaceUploadReader` validates declared
+size before publication. The session route in `internal/task/handlers/workspace_file_http_handlers.go`
+and `Client.UploadWorkspaceFile` in `internal/agent/runtime/agentctl/client_workspace_upload.go`
+forward bytes and resolution; neither provides mode metadata. Other direct callers are process
+tests. None of these transports or producers needs modification for this correction.
+
+| Native environment | Applicable evidence and limits |
+| --- | --- |
+| POSIX mode-supporting filesystem | Real destination modes, direct script launch before/after Replace, restricted and zero-mode controls, new/Keep-Both under `0022` and `0077`, cleanup and rooted containment |
+| Windows | Common content/path/status tests remain enabled. Go chmod supports only owner-write/read-only; native replace may fail for read-only or open destinations. Verify supported attribute outcomes or preserved failure and cleanup on a native runner; no ACL, owner, executable-bit, or atomic-rename equivalence claim |
+
+Never copy ownership, ACLs, xattrs, setuid, setgid, or sticky flags. Use only `Perm()`;
+Go/native filesystem behavior bounds what can be preserved. No rollback, destination deletion,
+or clearing a destination's read-only attribute is added to force Windows replacement success.
+The existing same-directory rename path remains the publication boundary; Go does not promise
+Unix atomic-rename semantics on every OS.
+
+Permanent tests are independently authored later, using real filesystem bytes, modes, native
+launches and the registered route with the actual tracker. Test a mode changed during streaming
+and a destination removed during streaming, so preflight/start-time metadata cannot substitute
+for the final check. Preserve existing stream-error, conflict, naming, containment and notification
+controls. Umask tests run in isolated test subprocesses rather than changing the test runner's
+process-wide mask. Native permission-denial assertions require an enforcement probe.
+
+Desktop and phone both send the same resolution to this backend path. This is a data/filesystem
+correction with no rendered, touch, navigation, scrolling or breakpoint change; the mobile-parity
+data-only exception needs no new browser geometry test. The filesystem and registered-route tests
+are the causal evidence. Delivery is recorded in the
+[replacement permissions plan](../../../plans/upload-replacement-permissions/plan.md).
+This local regular-file rule fits the existing pair; no new architecture boundary or ADR is needed.
+
 ## Upload owner lifetime
 
 `useFileUpload` owns at most one unfinished batch per hook instance and active session. The
@@ -237,8 +306,9 @@ Delivery is recorded in the [upload owner lifetime plan](../../../plans/upload-o
   touched. Reported against the individual file.
 - **Containment rejection.** `resolveMutationPath` refuses; nothing is written; the response
   distinguishes this from an IO error.
-- **Transport failure mid-stream.** The temporary file is removed on any error path, so the
-  destination is never left holding a truncated file.
+- **Failure before publication.** Stream, target-check, permission, sync, close, or rename failure
+  cleans up the staged upload without changing the old destination's bytes or permissions. A
+  transport failure after successful publication does not roll that write back.
 - **Conflict.** Not a failure, and not resolved by the server on its own. Preflight reports it, the
   person decides, and the write refuses with `409` if it arrives without a decision.
 - **Conflict appearing after preflight.** The `409` catches it. The UI re-runs the preflight for the

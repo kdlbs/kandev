@@ -3,6 +3,7 @@ import type {
   TaskPendingAction,
   TaskPendingActionRevision,
   TaskSession,
+  WorkspaceRecoveryProjection,
   Turn,
   TaskPlan,
   TaskPlanCommentSnapshot,
@@ -10,6 +11,7 @@ import type {
   TaskWalkthrough,
 } from "@/lib/types/http";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import type { ObservedPrompts } from "@/lib/session-last-prompt";
 
 export type MessagesState = {
   bySession: Record<string, Message[]>;
@@ -28,6 +30,17 @@ export type MessagesState = {
   >;
 };
 
+/** Prompts are fetched independently from the transcript with their own page metadata. */
+export type PromptsState = MessagesState & {
+  /** Incremented when a session is removed to reject stale prompt requests. */
+  generationBySession: Record<string, number>;
+  /** Incremented whenever an authoritative prompt refresh begins. */
+  refreshGenerationBySession: Record<string, number>;
+  /** Only the transcript's own completed projection read establishes authority. */
+  authoritativeBySession: Record<string, true>;
+  observedBySession: Record<string, ObservedPrompts>;
+  deletedIdsBySession: Record<string, Record<string, true>>;
+};
 export type TurnsState = {
   bySession: Record<string, Turn[]>;
   activeBySession: Record<string, string | null>; // sessionId -> active turnId
@@ -63,11 +76,16 @@ export type TaskSessionsState = {
   activityEpochBySession?: Record<string, number>;
   /** Monotonic cursor generation used to keep older REST snapshots from regressing read state. */
   readCursorEpochBySession?: Record<string, number>;
+  /** Per-session generation used to keep recovery notifications ahead of stale hydration. */
+  workspaceRecoveryEpochBySession?: Record<string, number>;
+  /** Latest event projection for sessions that have not hydrated yet. */
+  workspaceRecoveryByEnvironment?: Record<string, WorkspaceRecoveryProjection>;
 };
 
 export type TaskSessionHydrationEpoch = {
   activity: number;
   readCursor: number;
+  workspaceRecovery?: number;
 };
 
 export type TaskSessionsByTaskState = {
@@ -90,6 +108,8 @@ export type SessionAgentctlStatus = {
   status: "starting" | "ready" | "error";
   errorMessage?: string;
   agentExecutionId?: string;
+  /** Startup identity retained when live session state implies readiness. */
+  startingExecutionId?: string;
   updatedAt?: string;
 };
 
@@ -261,6 +281,7 @@ export type QueueState = {
 
 export type SessionSliceState = {
   messages: MessagesState;
+  messagePrompts: PromptsState;
   turns: TurnsState;
   taskSessions: TaskSessionsState;
   taskSessionsByTask: TaskSessionsByTaskState;
@@ -325,6 +346,23 @@ export type SessionSliceActions = {
   ) => void;
   /** Sets the session's message-loading flag. */
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
+  replacePromptMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta?: { hasMore?: boolean; oldestCursor?: string | null },
+  ) => void;
+  prependPromptMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta?: { hasMore?: boolean; oldestCursor?: string | null },
+  ) => void;
+  installAuthoritativePromptMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta: { hasMore: boolean; oldestCursor: string | null },
+  ) => void;
+  setPromptMessagesLoading: (sessionId: string, loading: boolean) => void;
+  setPromptMessagesLoadingMore: (sessionId: string, loading: boolean) => void;
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
   /** Merges a complete REST snapshot and reconciles its marker atomically. */
@@ -381,6 +419,10 @@ export type SessionSliceActions = {
     pendingAction: TaskPendingAction | null,
     revision?: TaskPendingActionRevision,
     taskId?: string,
+  ) => void;
+  setWorkspaceRecoveryProjection: (
+    sessionIds: string[],
+    projection: WorkspaceRecoveryProjection,
   ) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (

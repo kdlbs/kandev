@@ -127,13 +127,13 @@ export async function seedDelayedResumeFixture(
   apiClient: ApiClient,
   seedData: SeedData,
   backend: BackendContext,
-  title: string,
+  options: { title: string; resumeDelay?: string },
 ): Promise<DelayedResumeFixture> {
-  const delayedProfileId = await createDelayedResumeProfile(apiClient);
+  const delayedProfileId = await createDelayedResumeProfile(apiClient, options.resumeDelay);
   try {
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
-      title,
+      options.title,
       delayedProfileId,
       {
         description: "/e2e:simple-message",
@@ -226,11 +226,13 @@ export async function readSessionMessageIdsContaining(
 ): Promise<Set<string>> {
   const { messages } = await apiClient.listSessionMessages(sessionId);
   return new Set(
-    messages.filter((message) => message.content.includes(marker)).map((message) => message.id),
+    messages
+      .filter((message) => message.author_type === "agent" && message.content.includes(marker))
+      .map((message) => message.id),
   );
 }
 
-/** Wait until a new persisted message contains the marker. */
+/** Wait until a new persisted agent message contains the marker. */
 export async function waitForNewSessionMessage(
   apiClient: ApiClient,
   sessionId: string,
@@ -243,7 +245,10 @@ export async function waitForNewSessionMessage(
       async () => {
         const { messages } = await apiClient.listSessionMessages(sessionId);
         return messages.some(
-          (message) => !previousMessageIds.has(message.id) && message.content.includes(marker),
+          (message) =>
+            message.author_type === "agent" &&
+            !previousMessageIds.has(message.id) &&
+            message.content.includes(marker),
         );
       },
       {

@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -100,6 +101,107 @@ func TestMissingCheckoutRecoveryLaunchAndResume(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-WORKTREE-METADATA-RECOVERY-004.6
+func TestTerminalResumeCleansStaleExecutionBeforeRecoveryAdmission(t *testing.T) {
+	for _, liveSibling := range []bool{false, true} {
+		name := "stale_execution_removed"
+		if liveSibling {
+			name = "live_sibling_remains_protected"
+		}
+		t.Run(name, func(t *testing.T) {
+			fixture := newExecutorMissingCheckoutRecoveryFixture(t, "resume")
+			ctx := context.Background()
+			if liveSibling {
+				const siblingSessionID = "session-missing-checkout-live-sibling"
+				if err := fixture.taskRepo.CreateTaskSession(ctx, &models.TaskSession{
+					ID: siblingSessionID, TaskID: fixture.taskID, TaskEnvironmentID: fixture.environmentID,
+					State: models.TaskSessionStateRunning, ExecutorID: models.ExecutorIDWorktree,
+				}); err != nil {
+					t.Fatalf("create live sibling session: %v", err)
+				}
+				if err := fixture.taskRepo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+					ID: "execution-live-sibling", SessionID: siblingSessionID, TaskID: fixture.taskID,
+					ExecutorID: models.ExecutorIDWorktree, AgentExecutionID: "live-sibling-agent",
+					Status: models.ExecutorRunningStatusReady, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+				}); err != nil {
+					t.Fatalf("persist live sibling execution: %v", err)
+				}
+			}
+
+			staleExecution := &models.ExecutorRunning{
+				ID: "execution-terminal-stale", SessionID: fixture.sessionID, TaskID: fixture.taskID,
+				ExecutorID: models.ExecutorIDWorktree, AgentExecutionID: "terminal-stale-agent",
+				Status: models.ExecutorRunningStatusReady, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+			}
+			if err := fixture.taskRepo.UpsertExecutorRunning(ctx, staleExecution); err != nil {
+				t.Fatalf("persist terminal session's stale execution: %v", err)
+			}
+
+			repo := newMockRepository()
+			seedSelectedWorktreeRecoveryEnvironment(repo, fixture.taskID, fixture.sessionID, fixture.sessionState)
+			configureExecutorMissingCheckoutEnvironment(repo, fixture)
+			repo.tasks[fixture.taskID] = &models.Task{ID: fixture.taskID, WorkspaceID: fixture.workspaceID, Title: "Missing checkout recovery"}
+			repo.sessions[fixture.sessionID].AgentProfileID = "profile-recovery"
+			repo.sessions[fixture.sessionID].ExecutorID = models.ExecutorIDWorktree
+			repo.sessions[fixture.sessionID].RepositoryID = fixture.repositoryID
+			repo.sessions[fixture.sessionID].BaseBranch = "main"
+
+			cleanupCalls := 0
+			launchCalls := 0
+			agentManager := &mockAgentManager{
+				cleanupStaleExecutionFunc: func(cleanupCtx context.Context, sessionID string) error {
+					cleanupCalls++
+					return fixture.taskRepo.DeleteExecutorRunningBySessionID(cleanupCtx, sessionID)
+				},
+				launchAgentFunc: func(launchCtx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+					launchCalls++
+					if err := fixture.observeRuntimeStart(launchCtx, req); err != nil {
+						return nil, err
+					}
+					return &LaunchAgentResponse{
+						AgentExecutionID: "execution-terminal-recovery", Status: v1.AgentStatusStarting,
+					}, nil
+				},
+			}
+			exec := newTestExecutor(t, agentManager, repo)
+			exec.SetSelectedWorktreeRecoveryAdmission(fixture.manager.AdmitRecovery)
+
+			_, resumeErr := exec.ResumeSession(ctx, repo.sessions[fixture.sessionID], true)
+			if cleanupCalls != 1 {
+				t.Fatalf("stale execution cleanup calls = %d, want 1", cleanupCalls)
+			}
+			if _, err := fixture.taskRepo.GetExecutorRunningBySessionID(ctx, fixture.sessionID); !errors.Is(err, models.ErrExecutorRunningNotFound) {
+				t.Fatalf("terminal session's stale executor-running row lookup error = %v, want %v", err, models.ErrExecutorRunningNotFound)
+			}
+			if liveSibling {
+				if resumeErr == nil {
+					t.Fatal("resume succeeded while a live sibling still consumed the selected environment")
+				}
+				if launchCalls != 0 {
+					t.Fatalf("provider launch calls = %d, want 0 while sibling is live", launchCalls)
+				}
+				sibling, err := fixture.taskRepo.GetExecutorRunningBySessionID(ctx, "session-missing-checkout-live-sibling")
+				if err != nil || sibling == nil || sibling.AgentExecutionID != "live-sibling-agent" {
+					t.Fatalf("live sibling execution after refused recovery = %+v, error %v", sibling, err)
+				}
+				if _, err := os.Lstat(fixture.worktreePath); !os.IsNotExist(err) {
+					t.Fatalf("recovery mutated checkout despite live sibling: %v", err)
+				}
+				return
+			}
+			if resumeErr != nil {
+				t.Fatalf("ResumeSession after stale terminal cleanup: %v", resumeErr)
+			}
+			if launchCalls != 1 {
+				t.Fatalf("provider launch calls = %d, want 1", launchCalls)
+			}
+			if err := fixture.assertRestoredCheckout(); err != nil {
+				t.Fatalf("restored checkout after terminal resume: %v", err)
+			}
+		})
+	}
+}
+
 // @covers AC-TASKS-WORKTREE-METADATA-RECOVERY-004.9
 func TestMissingCheckoutRecoveryPreflightCarriesExplicitBranchReplacement(t *testing.T) {
 	fixture := newExecutorMissingCheckoutRecoveryFixture(t, "resume")
@@ -167,6 +269,7 @@ type executorMissingCheckoutRecoveryFixture struct {
 	worktreePath      string
 	branchHead        string
 	sessionState      models.TaskSessionState
+	taskRepo          *tasksqlite.Repository
 	store             *worktree.SQLiteStore
 	manager           *worktree.Manager
 	config            worktree.Config
@@ -197,6 +300,7 @@ func newExecutorMissingCheckoutRecoveryFixture(t *testing.T, route string) *exec
 	if err != nil {
 		t.Fatalf("initialize task repository: %v", err)
 	}
+	fixture.taskRepo = taskRepo
 	if err := taskRepo.CreateWorkspace(ctx, &models.Workspace{ID: fixture.workspaceID, Name: fixture.workspaceID}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}

@@ -119,7 +119,22 @@ export async function managedFallbackAwareness(
   await expect(surface).toContainText("Unknown → 9.0.0");
   await expect(surface).toContainText("Active version: 8.0.0");
   await expect(surface).toContainText("Effective version: 8.0.0");
-  await expect(surface).toContainText("The native host installation stays unchanged");
+  const info = surface.getByTestId("agent-update-info-opencode-acp");
+  if (mobile) {
+    await info.tap();
+    const information = page.getByRole("dialog", { name: "Update runtime", exact: true });
+    await expect(information).toContainText("The native host installation stays unchanged");
+    await information.getByRole("button", { name: "Close", exact: true }).tap();
+    await expect(information).toBeHidden();
+    await expect(surface).toBeVisible();
+  } else {
+    await info.hover();
+    await expect(page.getByRole("tooltip")).toContainText(
+      "The native host installation stays unchanged",
+    );
+    await page.keyboard.press("Escape");
+    await expect(surface).toBeVisible();
+  }
   await expect(surface).toContainText("--package=opencode-ai@9.0.0");
   await waitForFiniteAnimations(surface);
   await capture?.screenshot("runtime-native-fallback", {

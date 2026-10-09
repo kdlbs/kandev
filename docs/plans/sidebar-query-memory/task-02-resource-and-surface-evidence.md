@@ -200,3 +200,26 @@ EPYC 7763 with GOMAXPROCS=4. SQLite warm ranges were 1.177–1.199s (None),
 waived. Final browser counts and merged delivery evidence remain external
 completion gates; a cold-archive phone fixture required its request wait to follow
 the drawer-opening action. No product logic or timeout is changed by that correction.
+
+
+PR #3598 follow-up, 2026-10-06: hosted run `37450559071`, memory job
+`112227789958`, failed the unchanged 512 MiB RSS budget at 541,376,512 bytes
+for Last activity / State / descending. The concurrent native peak was
+255,760,696 bytes, close to its 256 MiB budget. Queue ranking now executes as
+a bounded page-ID hydration statement in the same pinned read transaction,
+instead of expanding the recursive page statement's preparation graph. It
+still ranks each page task against its full destination queue, including
+filtered tasks. Cancellation and cleanup cover the new `queue` checkpoint.
+
+Validation from the repository root:
+
+- `cd apps/backend && KANDEV_SIDEBAR_MEMORY_MATRIX=1 go test -tags sqlite_fts5 -p 1 ./internal/task/repository/sqlite -run '^TestSidebarQuery(PreparationMemory|PoolMemoryPlateau|MaximumInputMemory)$' -timeout 45m -count=1 -v`: passed in 599.698 seconds. All 144 preparation, five maximum-input, and 73 pooled cases passed. Across 1,974 native/retained samples and 1,828 RSS samples, maxima were 183,248,808 native peak bytes, 658,600 retained bytes, and 357,224,448 RSS delta bytes. No forced GC, allocator trimming, or budget increase.
+- `cd apps/backend && go test -race -tags sqlite_fts5 ./internal/task/repository/sqlite -run '^(TestQuerySidebarTaskPage|TestSidebarQueryScratch|TestSidebarTaskViewConformance|TestSidebarLocalViewSQLiteConformance|TestSidebarLocalViewPostgresConformance|TestSidebarTree|TestSidebarUniformAndMixedTreeStates|TestSidebarRepositoryProjection|TestSidebarPostgresJITSetting)' -timeout 15m -count=1`: passed with a disposable PostgreSQL 16 database; 57.481 seconds.
+- `TestSidebarQueryQueueHydrationKeepsPageSnapshot`: passed with the race detector. Admitting another queued task on the writer after page selection preserves the page snapshot's original queue rank. An isolated mutation using an independent reader failed with rank 2/2 instead of 3/3. New queue-checkpoint cancellation/cleanup cases failed before the checkpoint was implemented and passed afterward.
+- `BenchmarkSidebarTaskPage100K`, 18 populated first/middle/final None/State/Repository cases across SQLite and PostgreSQL: passed in 95.251 seconds. Warm times were 0.823–1.724 seconds on SQLite and 2.156–3.411 seconds on PostgreSQL. The existing timing waiver remains; these are informational measurements on a contended host. Stage reporting now includes queue hydration.
+- `make -C apps/backend build e2e-plugin-package`, changed-package Go lint (zero issues), catalog validation, full specification lint, and whitespace: passed.
+- Managed `sidebar-task-tree-activity-sort.spec.ts` (chromium) and `mobile-sidebar-task-tree-activity-sort.spec.ts` (mobile-chrome), one test each, passed with retries disabled against freshly built backend binaries.
+
+Exact pushed-head CI remains pending for this increment. These isolated
+sidebar PostgreSQL checks do not complete the durable delivery feature's
+separate PostgreSQL release gate or native Windows/macOS/live-harness gates.

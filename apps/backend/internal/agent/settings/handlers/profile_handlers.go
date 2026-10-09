@@ -15,6 +15,56 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	errorResponseKey             = "error"
+	reorderProfilesBadRequest    = "profile_ids must be a non-empty array"
+	reorderProfilesAgentNotFound = "agent not found"
+)
+
+type reorderAgentProfilesRequest struct {
+	ProfileIDs []string `json:"profile_ids"`
+}
+
+func (h *Handlers) httpReorderAgentProfiles(c *gin.Context) {
+	var body reorderAgentProfilesRequest
+	if err := c.ShouldBindJSON(&body); err != nil || len(body.ProfileIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: reorderProfilesBadRequest})
+		return
+	}
+	for _, id := range body.ProfileIDs {
+		if len(id) == 0 || len(id) > 255 {
+			c.JSON(http.StatusBadRequest, gin.H{errorResponseKey: "invalid profile id"})
+			return
+		}
+	}
+	result, err := h.controller.ReorderAgentProfiles(c.Request.Context(), c.Param("id"), body.ProfileIDs)
+	switch {
+	case errors.Is(err, controller.ErrAgentNotFound):
+		c.JSON(http.StatusNotFound, gin.H{errorResponseKey: reorderProfilesAgentNotFound})
+		return
+	case errors.Is(err, controller.ErrProfileOrderStale):
+		c.JSON(http.StatusConflict, gin.H{"code": "profile_order_stale"})
+		return
+	case errors.Is(err, controller.ErrProfileOrderUnsupported):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "profile_order_unsupported"})
+		return
+	case err != nil:
+		h.logger.Error("failed to reorder agent profiles", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{errorResponseKey: "failed to reorder agent profiles"})
+		return
+	}
+	if result.Changed {
+		notification, _ := ws.NewNotification(ws.ActionAgentProfilesReordered, gin.H{
+			"agent_id": result.AgentID, "profile_ids": result.ProfileIDs, "revision": result.Revision,
+		})
+		//ws:global profile order is install-wide and contains only global profiles.
+		if h.hub != nil {
+			h.hub.Broadcast(notification)
+		}
+	}
+	c.JSON(http.StatusOK, result)
+}
+
 type updateProfileMcpConfigRequest struct {
 	Enabled    *bool                          `json:"enabled"`
 	Servers    map[string]mcpconfig.ServerDef `json:"servers"`

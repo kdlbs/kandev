@@ -154,6 +154,10 @@ func (s *Server) handleFileTree(c *gin.Context) {
 
 	tree, err := s.procMgr.GetWorkspaceTracker().GetFileTree(path, depth)
 	if err != nil {
+		if errors.Is(err, process.ErrWorkspaceExclusionsChanged) {
+			c.JSON(http.StatusConflict, types.FileTreeResponse{Error: err.Error()})
+			return
+		}
 		c.JSON(400, types.FileTreeResponse{Error: err.Error()})
 		return
 	}
@@ -258,7 +262,7 @@ func (s *Server) handleFileUpdate(c *gin.Context) {
 	}
 
 	// Apply the diff
-	newHash, resolution, err := s.procMgr.GetWorkspaceTracker().ApplyFileDiff(c.Request.Context(), scopedPath, req.Diff, req.OriginalHash, req.DesiredContent)
+	newHash, resolution, err := s.procMgr.GetWorkspaceTracker().ApplyFileDiff(c.Request.Context(), scopedPath, req.Path, req.Diff, req.OriginalHash, req.DesiredContent)
 	if err != nil {
 		c.JSON(400, streams.FileUpdateResponse{
 			Path:    req.Path,
@@ -286,7 +290,11 @@ func (s *Server) handleFileSearch(c *gin.Context) {
 		}
 	}
 
-	results := s.procMgr.SearchWorkspaceFileResults(query, limit)
+	results, err := s.procMgr.SearchWorkspaceFileResultsWithError(query, limit)
+	if err != nil {
+		c.JSON(http.StatusConflict, types.FileSearchResponse{Error: err.Error()})
+		return
+	}
 	files := make([]string, 0, len(results))
 	for _, result := range results {
 		files = append(files, result.Path)
@@ -312,6 +320,10 @@ func (s *Server) handleWorkspaceContentSearch(c *gin.Context) {
 	}
 	if errors.Is(err, process.ErrContentSearchQueryTooLong) {
 		c.JSON(http.StatusBadRequest, types.WorkspaceContentSearchResponse{Error: err.Error()})
+		return
+	}
+	if errors.Is(err, process.ErrWorkspaceExclusionsChanged) {
+		c.JSON(http.StatusConflict, types.WorkspaceContentSearchResponse{Error: err.Error()})
 		return
 	}
 	c.JSON(http.StatusInternalServerError, types.WorkspaceContentSearchResponse{Error: err.Error()})

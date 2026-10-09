@@ -44,8 +44,8 @@ func benchmarkSidebarColdRead(b *testing.B, repo *Repository, workspaceID string
 	ctx, cancel := context.WithTimeout(b.Context(), 30*time.Second)
 	defer cancel()
 	result, err := repo.QuerySidebarTaskPage(ctx, workspaceID, query, models.SidebarTaskViewPreferences{})
-	b.Logf("cold_preparation_and_candidates=%s cold_page_execution=%s cold_headers=%s cold_hydration=%s dialect=%s",
-		stages["created"]+stages["indexed"]+stages["preferences"], stages["page"], stages["headers"], stages["hydrated"], repo.ro.DriverName())
+	b.Logf("cold_preparation_and_candidates=%s cold_page_execution=%s cold_queue_hydration=%s cold_headers=%s cold_hydration=%s dialect=%s",
+		stages["created"]+stages["indexed"]+stages["preferences"], stages["page"], stages["queue"], stages["headers"], stages["hydrated"], repo.ro.DriverName())
 	return result, err
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/steptelemetry"
@@ -901,6 +902,13 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		RuntimeConfigOptions:    runtimeConfig.ConfigOptions,
 		RuntimeConfigOptionsSet: runtimeConfigOptionsSet,
 	}
+	incarnationID, generation, err := s.workspaceDeliveryIdentity(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	info.DeliveryIncarnationID = incarnationID
+	info.DeliveryHarnessGeneration = generation
+	info.DeliveryStreamID = fmt.Sprintf("%s:g%d", incarnationID, generation)
 	// Durable folder attachments are replayed by lifecycle for both fresh
 	// launch and workspace-only session recovery.
 	if s.workspaceFolders != nil {
@@ -1006,7 +1014,42 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		}
 	}
 
+	mcpMode, err := s.resolveWorkspaceInfoMcpMode(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	info.McpMode = mcpMode
+
 	return info, nil
+}
+
+// resolveWorkspaceInfoMcpMode derives WorkspaceInfo.McpMode from taskID alone
+// (BUILD DECISION F14 / docs/specs/coordinator/system-design/copilot.md#fail-closed):
+// mcpmode.Coordinator for a coordinator-origin task, empty otherwise. A read
+// error other than "not found" fails the call; a missing task (ErrTaskNotFound
+// or a nil task) leaves the mode empty without error — such an instance starts
+// no agent, and the agent-starting call goes through the executor's own
+// fail-closed resolvers instead. Deliberately independent of
+// populateWorkspaceRepositorySpecs's own gated task lookup, which must keep
+// failing on ErrTaskNotFound.
+func (s *Service) resolveWorkspaceInfoMcpMode(ctx context.Context, taskID string) (string, error) {
+	if taskID == "" {
+		return "", nil
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
+			return "", nil
+		}
+		return "", fmt.Errorf("get workspace task for mcp mode: %w", err)
+	}
+	if task == nil {
+		return "", nil
+	}
+	if task.Origin == models.TaskOriginCoordinator {
+		return mcpmode.Coordinator, nil
+	}
+	return "", nil
 }
 
 func (s *Service) applyWorkspaceExecutorRecord(

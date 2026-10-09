@@ -3,6 +3,10 @@ import type { ApiClient } from "./api-client";
 import type { SeedData } from "../fixtures/test-base";
 
 export const E2E_MCP_SERVER_ID = "plugin-atlassian-jira";
+export const E2E_MCP_SECOND_SERVER_ID = "plugin-atlassian-confluence";
+export const E2E_MCP_LEGACY_ERROR = "Raw error must stay hidden";
+export const E2E_MCP_LEGACY_OUTPUT = "Raw output must stay hidden";
+export const E2E_MCP_LONG_DIAGNOSTIC = `Native MCP command failed: ${"x".repeat(930)}`;
 
 export async function createMcpRecoveryFixture(
   apiClient: ApiClient,
@@ -107,6 +111,65 @@ export async function createMcpRecoveryFixture(
   };
 }
 
+export async function seedMcpDiagnosticPreparation(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  fixture: { taskId: string; sessionId: string },
+  options: { longMessage?: boolean } = {},
+) {
+  const primaryMessage = options.longMessage
+    ? E2E_MCP_LONG_DIAGNOSTIC
+    : "exec: WaitDelay expired before I/O complete";
+  await apiClient.seedTaskSession(fixture.taskId, {
+    state: "WAITING_FOR_INPUT",
+    sessionId: fixture.sessionId,
+    agentProfileId: seedData.agentProfileId,
+    metadata: {
+      prepare_result: {
+        status: "failed",
+        preparation_id: "e2e-mcp-diagnostic-attempt",
+        preparation_started_at: "2099-01-01T00:00:00.000000001Z",
+        steps: [
+          {
+            name: "",
+            kind: "agent_mcp_approval",
+            mcp_provider: "cursor",
+            mcp_server_id: E2E_MCP_SERVER_ID,
+            failure_code: "connection_failed",
+            status: "failed",
+            error: E2E_MCP_LEGACY_ERROR,
+            output: E2E_MCP_LEGACY_OUTPUT,
+            mcp_diagnostic: {
+              operation: "enable",
+              stage: "wait",
+              kind: "output_wait_timeout",
+              message: primaryMessage,
+              exit_code: 0,
+              cleanup_message: "process cleanup failed",
+            },
+          },
+          {
+            name: "",
+            kind: "agent_mcp_verification",
+            mcp_provider: "cursor",
+            mcp_server_id: E2E_MCP_SECOND_SERVER_ID,
+            failure_code: "connection_failed",
+            status: "failed",
+            error: E2E_MCP_LEGACY_ERROR,
+            output: E2E_MCP_LEGACY_OUTPUT,
+            mcp_diagnostic: {
+              operation: "list_tools",
+              stage: "wait",
+              kind: "wait_failed",
+              message: "Native MCP connection verification command failed",
+            },
+          },
+        ],
+      },
+    },
+  });
+}
+
 export async function destroyMcpRecoveryTerminals(
   apiClient: ApiClient,
   fixture: {
@@ -138,9 +201,11 @@ export async function installAgentMcpRecoveryRoutes(
     sessionId: string;
     taskEnvironmentId: string;
     terminalId: string;
+    retryResponses?: Array<{ status: number; body: Record<string, unknown> }>;
   },
 ): Promise<McpRecoveryRequests> {
   const requests: McpRecoveryRequests = { authenticate: [], retry: [] };
+  let retryCount = 0;
   await page.route(`**/api/v1/task-sessions/${args.sessionId}/mcp/authenticate`, async (route) => {
     requests.authenticate.push(route.request().postDataJSON() as { server_id?: string });
     await route.fulfill({
@@ -156,15 +221,19 @@ export async function installAgentMcpRecoveryRoutes(
   });
   await page.route(`**/api/v1/task-sessions/${args.sessionId}/mcp/retry`, async (route) => {
     requests.retry.push(route.request().postDataJSON() as { server_id?: string });
+    const retryResponse =
+      args.retryResponses?.[Math.min(retryCount++, (args.retryResponses?.length ?? 1) - 1)];
     await route.fulfill({
-      status: 200,
       contentType: "application/json",
-      body: JSON.stringify({
-        provider_id: "cursor",
-        server_id: E2E_MCP_SERVER_ID,
-        status: "ready",
-        tool_count: 3,
-      }),
+      status: retryResponse?.status ?? 200,
+      body: JSON.stringify(
+        retryResponse?.body ?? {
+          provider_id: "cursor",
+          server_id: E2E_MCP_SERVER_ID,
+          status: "ready",
+          tool_count: 3,
+        },
+      ),
     });
   });
   return requests;

@@ -44,7 +44,7 @@ test.describe("Sidebar — nest / un-nest a task", () => {
 
     // Open the dots menu on the child and nest it under the parent.
     const childActions = childRow.getByRole("button", { name: "Task actions" });
-    await childRow.hover({ position: { x: 1, y: 1 } });
+    await childRow.getByText("Nest Child Beta", { exact: true }).hover();
     await expect(childActions.locator("..")).toHaveCSS("opacity", "1");
     await childActions.click();
     await testPage.getByRole("menuitem", { name: "Nest under" }).hover();
@@ -55,7 +55,7 @@ test.describe("Sidebar — nest / un-nest a task", () => {
     await expect(parentToggle).toHaveAttribute("aria-expanded", "true");
 
     // Un-nest: reopen the child's dots menu and remove its parent.
-    await childRow.hover({ position: { x: 1, y: 1 } });
+    await childRow.getByText("Nest Child Beta", { exact: true }).hover();
     await expect(childActions.locator("..")).toHaveCSS("opacity", "1");
     await childActions.click();
     await testPage.getByRole("menuitem", { name: "Nest under" }).hover();

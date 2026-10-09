@@ -93,6 +93,19 @@ func (m *MockRepository) UpdateAgentProfileEnabled(_ context.Context, _ string, 
 	return time.Time{}, nil
 }
 
+func (m *MockRepository) UpdateAgentProfileWithEnabledIntent(ctx context.Context, profile *models.AgentProfile, enabled *bool) error {
+	if enabled == nil {
+		current, err := m.GetAgentProfile(ctx, profile.ID)
+		if err != nil {
+			return err
+		}
+		profile.Enabled = current.Enabled
+	} else {
+		profile.Enabled = *enabled
+	}
+	return m.UpdateAgentProfile(ctx, profile)
+}
+
 func (m *MockRepository) DeleteAgentProfile(ctx context.Context, id string) error {
 	return nil
 }
@@ -122,6 +135,17 @@ func (m *MockRepository) ListAgentProfiles(ctx context.Context, agentID string) 
 		return m.ListAgentProfilesFn(ctx, agentID)
 	}
 	return []*models.AgentProfile{}, nil
+}
+func (m *MockRepository) ReorderAgentProfiles(context.Context, string, []string) (int64, bool, error) {
+	return 0, false, nil
+}
+
+func (m *MockRepository) GetAgentProfileOrderSnapshots(_ context.Context, agentIDs []string) (map[string]store.AgentProfileOrderSnapshot, error) {
+	result := make(map[string]store.AgentProfileOrderSnapshot, len(agentIDs))
+	for _, id := range agentIDs {
+		result[id] = store.AgentProfileOrderSnapshot{Profiles: []*models.AgentProfile{}, Revision: 0}
+	}
+	return result, nil
 }
 
 func (m *MockRepository) HasDeletedAgentProfiles(ctx context.Context, agentID string) (bool, error) {

@@ -111,7 +111,10 @@ type GitRefreshBridgeState = {
   requests: string[];
   responses: GitRefreshTrace[];
   pendingEventsDropped: GitStatusSnapshot[];
+  pendingNotifications: GitStatusSnapshot[];
   readyNotifications: GitStatusSnapshot[];
+  holdReadyNotifications: boolean;
+  heldReadyNotifications: Array<{ frame: string; socket: BridgeSocket }>;
   forcedFailureModes: Set<string>;
   failureEnvironmentId: string;
   holdFreshGitRefreshRequests: boolean;
@@ -120,6 +123,7 @@ type GitRefreshBridgeState = {
   commitDiffRequestCount: number;
   commitDiffResponseCount: number;
   heldCommitDiffRequests: Array<{ frame: string; server: BridgeSocket }>;
+  dropPendingStatusEvents: boolean;
 };
 
 function holdCommitDiffRequest(
@@ -232,8 +236,11 @@ function consumeServerFrame(part: string, state: GitRefreshBridgeState): boolean
   const event = frame ? statusEvent(frame) : null;
   const detailState = event?.payload?.status?.detail_state;
   if (detailState === "pending" && event) {
-    state.pendingEventsDropped.push(event);
-    return false;
+    state.pendingNotifications.push(event);
+    if (state.dropPendingStatusEvents) {
+      state.pendingEventsDropped.push(event);
+      return false;
+    }
   }
   if (detailState === "ready" && event) state.readyNotifications.push(event);
   return true;
@@ -265,7 +272,19 @@ function forwardServerMessage(
     socket.send(message);
     return;
   }
-  const forwarded = message.split("\n").filter((part) => consumeServerFrame(part, state));
+  const forwarded = message.split("\n").filter((part) => {
+    const forward = consumeServerFrame(part, state);
+    const event = statusEvent(parseFrame(part.trim()) ?? {});
+    if (
+      forward &&
+      state.holdReadyNotifications &&
+      event?.payload?.status?.detail_state === "ready"
+    ) {
+      state.heldReadyNotifications.push({ frame: part, socket });
+      return false;
+    }
+    return forward;
+  });
   const output = forwarded.join("\n");
   if (output.trim()) socket.send(output);
 }
@@ -276,12 +295,21 @@ function connectGitRefreshBridge(socket: ClientBridgeSocket, state: GitRefreshBr
   server.onMessage((message) => forwardServerMessage(message, socket, state));
 }
 
-export async function routeGitStatusRefresh(page: Page) {
+export async function routeGitStatusRefresh(
+  page: Page,
+  {
+    holdReadyNotifications = false,
+    dropPendingStatusEvents = true,
+  }: { holdReadyNotifications?: boolean; dropPendingStatusEvents?: boolean } = {},
+) {
   const state: GitRefreshBridgeState = {
     requests: [],
     responses: [],
     pendingEventsDropped: [],
+    pendingNotifications: [],
     readyNotifications: [],
+    holdReadyNotifications,
+    heldReadyNotifications: [],
     forcedFailureModes: new Set(),
     failureEnvironmentId: "",
     holdFreshGitRefreshRequests: false,
@@ -290,11 +318,18 @@ export async function routeGitStatusRefresh(page: Page) {
     commitDiffRequestCount: 0,
     commitDiffResponseCount: 0,
     heldCommitDiffRequests: [],
+    dropPendingStatusEvents,
   };
 
   await page.routeWebSocket(/\/ws$/, (socket) => connectGitRefreshBridge(socket, state));
 
   return {
+    releaseReadyGitStatusNotifications() {
+      state.holdReadyNotifications = false;
+      for (const { frame, socket } of state.heldReadyNotifications.splice(0)) {
+        socket.send(frame);
+      }
+    },
     setFailureEnvironmentId(environmentId: string) {
       state.failureEnvironmentId = environmentId;
     },
@@ -307,12 +342,22 @@ export async function routeGitStatusRefresh(page: Page) {
     holdFreshGitRefreshRequests() {
       state.holdFreshGitRefreshRequests = true;
     },
-    async waitForHeldFreshGitRefreshRequests(count: number) {
+    async waitForHeldFreshGitRefreshRequests(count: number, sessionId?: string) {
       await expect
-        .poll(() => state.heldFreshGitRefreshRequests.length, {
-          timeout: 30_000,
-          message: "the expected fresh Git refresh request should be held",
-        })
+        .poll(
+          () =>
+            state.heldFreshGitRefreshRequests.filter(({ frame }) => {
+              if (!sessionId) return true;
+              const payload = recordValue(parseFrame(frame)?.payload);
+              return payload?.session_id === sessionId;
+            }).length,
+          {
+            timeout: 30_000,
+            message: sessionId
+              ? `a fresh Git refresh request for session ${sessionId} should be held`
+              : "the expected fresh Git refresh request should be held",
+          },
+        )
         .toBeGreaterThanOrEqual(count);
     },
     releaseFreshGitRefreshRequests() {
@@ -360,8 +405,13 @@ export async function routeGitStatusRefresh(page: Page) {
     droppedPendingCount() {
       return state.pendingEventsDropped.length;
     },
-    readyNotificationCount() {
-      return state.readyNotifications.length;
+    pendingNotificationCount() {
+      return state.pendingNotifications.length;
+    },
+    readyNotificationCount(sessionId?: string) {
+      return state.readyNotifications.filter(
+        ({ payload }) => !sessionId || payload?.session_id === sessionId,
+      ).length;
     },
     async waitForResponse(mode: string, afterCount = 0) {
       await expect
@@ -379,6 +429,15 @@ export async function routeGitStatusRefresh(page: Page) {
           message: "the pending Git status notification should be deliberately dropped",
         })
         .toBeGreaterThan(0);
+    },
+    async waitForPendingStatus(afterCount = 0) {
+      await expect
+        .poll(() => state.pendingNotifications.length, {
+          timeout: 30_000,
+          message: "the tracker should publish its pending Git status without bridge suppression",
+        })
+        .toBeGreaterThan(afterCount);
+      return state.pendingNotifications.at(-1)!;
     },
     async waitForReadyNotification() {
       await expect

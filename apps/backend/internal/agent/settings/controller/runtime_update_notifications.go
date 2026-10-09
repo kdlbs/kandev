@@ -172,7 +172,7 @@ func (c *Controller) trustedRuntimeUpdateIdentity(agentID, runtimeID string) boo
 	if !found || runtimeID == "" {
 		return false
 	}
-	return agents.RuntimeUpdateCapabilities(agent).RuntimeID == runtimeID
+	return c.runtimeUpdateCapabilities(agent).RuntimeID == runtimeID
 }
 
 func (c *Controller) observeRuntimeAvailability(ctx context.Context, agentID, runtimeID string, notice *agents.RuntimeUpdateNotice) {

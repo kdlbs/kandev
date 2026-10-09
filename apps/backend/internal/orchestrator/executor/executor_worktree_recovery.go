@@ -33,19 +33,15 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 	if env.TaskID == "" || env.OwnershipGeneration <= 0 {
 		return nil, fmt.Errorf("worktree recovery admission: selected environment identity is incomplete")
 	}
+	var inspectionDeadline time.Time
+	if inspectionWait > 0 {
+		ctx, inspectionDeadline = worktree.WithRecoveryInspectionWait(ctx, inspectionWait)
+	}
 
-	selectedRepositories := make(map[string]*models.Repository, len(env.Repos))
-	selectionSnapshot, err := models.CaptureWorkspaceRecoverySelectionSnapshot(session, env, func(repositoryID string) (*models.Repository, error) {
-		repository, err := e.repo.GetRepository(ctx, repositoryID)
-		if repository != nil {
-			selectedRepositories[repositoryID] = repository
-		}
-		return repository, err
-	})
+	selectionSnapshot, selectedRepositories, err := e.captureSelectedWorkspaceRecoverySnapshot(ctx, session, env, sessionPersisted)
 	if err != nil {
 		return nil, err
 	}
-	selectionSnapshot.SessionPersisted = sessionPersisted
 	activeRows := models.SelectedWorkspaceRecoveryRows(env)
 	slots := make([]worktree.RecoverySlot, 0, len(activeRows))
 	for _, row := range activeRows {
@@ -95,6 +91,7 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 		SelectionSnapshot:      selectionSnapshot,
 		AllowBranchReplacement: allowBranchReplacement,
 		InspectionWait:         inspectionWait,
+		InspectionDeadline:     inspectionDeadline,
 		Slots:                  slots,
 	})
 	if err != nil {
@@ -125,6 +122,30 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 	return admission, nil
 }
 
+func (e *Executor) captureSelectedWorkspaceRecoverySnapshot(
+	ctx context.Context,
+	session *models.TaskSession,
+	env *models.TaskEnvironment,
+	sessionPersisted bool,
+) (models.WorkspaceRecoverySelectionSnapshot, map[string]*models.Repository, error) {
+	if session == nil || env == nil {
+		return models.WorkspaceRecoverySelectionSnapshot{}, nil, nil
+	}
+	selectedRepositories := make(map[string]*models.Repository, len(env.Repos))
+	selectionSnapshot, err := models.CaptureWorkspaceRecoverySelectionSnapshot(session, env, func(repositoryID string) (*models.Repository, error) {
+		repository, err := e.repo.GetRepository(ctx, repositoryID)
+		if repository != nil {
+			selectedRepositories[repositoryID] = repository
+		}
+		return repository, err
+	})
+	if err != nil {
+		return models.WorkspaceRecoverySelectionSnapshot{}, nil, err
+	}
+	selectionSnapshot.SessionPersisted = sessionPersisted
+	return selectionSnapshot, selectedRepositories, nil
+}
+
 // PreflightSessionWorktreeRecovery performs selected-environment recovery
 // before a recovery action mutates provider state such as its resume token.
 // The returned admission must remain held through LaunchSession.
@@ -141,7 +162,7 @@ func (e *Executor) PreflightSessionWorktreeRecovery(
 	if err != nil || env == nil {
 		return nil, err
 	}
-	return e.admitSelectedWorktreeRecovery(ctx, taskID, session, env, env.ExecutorType, allowBranchReplacement, worktree.ManualRecoveryInspectionWait, true)
+	return e.admitSelectedWorktreeRecovery(ctx, taskID, session, env, env.ExecutorType, allowBranchReplacement, worktree.RecoveryInspectionWaitBudget, true)
 }
 
 type managedClonePathResolver interface {

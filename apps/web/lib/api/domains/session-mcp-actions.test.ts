@@ -46,11 +46,23 @@ describe("task MCP recovery API", () => {
       server_id: SERVER_ID,
       status: "ready",
       tool_count: 3,
+      mcp_diagnostic: {
+        operation: "list_tools",
+        stage: "wait",
+        kind: "wait_failed",
+        message: "list-tools command failed",
+      },
     });
 
     await expect(retryAgentMcpConnection("session-1", SERVER_ID)).resolves.toMatchObject({
       status: "ready",
       tool_count: 3,
+      mcp_diagnostic: {
+        operation: "list_tools",
+        stage: "wait",
+        kind: "wait_failed",
+        message: "list-tools command failed",
+      },
     });
     expect(fetchJson).toHaveBeenCalledWith(
       "/api/v1/task-sessions/session-1/mcp/retry",
@@ -66,7 +78,10 @@ describe("task MCP recovery API", () => {
   it("recognizes only the session-busy recovery conflict", () => {
     expect(
       isAgentMcpRecoveryBusyError(
-        new ApiError("session is busy", 409, { error_code: "mcp_recovery_session_busy" }),
+        new ApiError("The agent is using this session.", 409, {
+          error: "The agent is using this session.",
+          error_code: "mcp_recovery_session_busy",
+        }),
       ),
     ).toBe(true);
     expect(

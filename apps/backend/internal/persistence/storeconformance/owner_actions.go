@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/authcircuit"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/delivery"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
@@ -191,6 +192,7 @@ func buildOwnerBehaviors() map[string]ownerBehavior {
 	behaviors["workflow-sync"] = ownerBehavior{actions: []apiAction{workflowSyncAction()}}
 	behaviors["office-config-sync"] = ownerBehavior{actions: []apiAction{officeConfigSyncAction()}}
 	behaviors["automation"] = ownerBehavior{actions: []apiAction{automationAction()}}
+	behaviors["coordinator"] = ownerBehavior{actions: []apiAction{coordinatorAction()}}
 
 	analytics := standardAction(reflectedSpec{
 		name: "analytics-task-view", factory: taskFactory,
@@ -370,6 +372,10 @@ func officeConfigSyncFactory(s testconformance.ScenarioContext) (any, error) {
 
 func automationFactory(s testconformance.ScenarioContext) (any, error) {
 	return automation.NewStore(s.DB, s.DB)
+}
+
+func coordinatorFactory(s testconformance.ScenarioContext) (any, error) {
+	return coordinator.NewStore(s.DB, s.DB)
 }
 
 func userAction() apiAction {
@@ -3188,6 +3194,76 @@ func automationRead(s testconformance.ScenarioContext, store *automation.Store, 
 		return nil, err
 	}
 	return requireProviderConfig(value, "automation")
+}
+
+// coordinatorAction covers coordinator.Store, whose Get/Patch/Delete methods
+// are workspace-scoped (unlike automation's bare-ID lookups), so every
+// closure resolves the conformance workspace itself.
+func coordinatorAction() apiAction {
+	action := apiAction{name: "coordinators", key: func(record any, fallback string) string {
+		if value, ok := record.(*coordinator.Coordinator); ok && value.ID != "" {
+			return value.ID
+		}
+		return fallback
+	}}
+	action.create = func(s testconformance.ScenarioContext, id string) (any, error) {
+		store, err := coordinatorFactory(s)
+		if err != nil {
+			return nil, err
+		}
+		workspaceID, err := conformanceWorkspaceID(s)
+		if err != nil {
+			return nil, err
+		}
+		record := &coordinator.Coordinator{
+			ID: id, WorkspaceID: workspaceID, Name: "Conformance " + id,
+			AgentProfileID: "conformance-agent-profile", ExecutorProfileID: "conformance-executor-profile",
+			Context: "conformance context",
+		}
+		if err := store.(*coordinator.Store).CreateCoordinator(s.Context, record); err != nil {
+			return nil, err
+		}
+		return store.(*coordinator.Store).GetCoordinator(s.Context, workspaceID, id)
+	}
+	action.read = func(s testconformance.ScenarioContext, id string) (any, error) {
+		store, err := coordinatorFactory(s)
+		if err != nil {
+			return nil, err
+		}
+		workspaceID, err := conformanceWorkspaceID(s)
+		if err != nil {
+			return nil, err
+		}
+		return store.(*coordinator.Store).GetCoordinator(s.Context, workspaceID, id)
+	}
+	action.update = func(s testconformance.ScenarioContext, id string, _ any) error {
+		store, err := coordinatorFactory(s)
+		if err != nil {
+			return err
+		}
+		workspaceID, err := conformanceWorkspaceID(s)
+		if err != nil {
+			return err
+		}
+		name := "Updated " + id
+		_, _, err = store.(*coordinator.Store).PatchCoordinator(s.Context, workspaceID, id, coordinator.CoordinatorPatch{Name: &name}, nil)
+		return err
+	}
+	action.delete = func(s testconformance.ScenarioContext, id string) error {
+		store, err := coordinatorFactory(s)
+		if err != nil {
+			return err
+		}
+		workspaceID, err := conformanceWorkspaceID(s)
+		if err != nil {
+			return err
+		}
+		return store.(*coordinator.Store).DeleteCoordinator(s.Context, workspaceID, id)
+	}
+	action.transaction = func(s testconformance.ScenarioContext, id string) error {
+		return transactionAPICheck(action, s, id)
+	}
+	return action
 }
 
 func reflectValue(record any) reflect.Value {

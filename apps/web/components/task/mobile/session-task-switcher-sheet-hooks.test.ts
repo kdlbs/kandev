@@ -39,6 +39,16 @@ function task(overrides: Partial<SheetTask> = {}): SheetTask {
   } as SheetTask;
 }
 
+function taskWithRunningSummary(hasRunningSession: boolean): SheetTask {
+  return task({
+    statusSummary: {
+      revision: 4,
+      updated_at: UPDATED_AT,
+      has_running_session: hasRunningSession,
+    },
+  });
+}
+
 describe("toSheetItem", () => {
   it("carries the autopilot marker onto the mobile sheet row", () => {
     expect(toSheetItem(task({ autopilot: true }), emptyCtx()).autopilot).toBe(true);
@@ -121,11 +131,23 @@ describe("toSheetItem status", () => {
 
     expect(item.hasPendingPermission).toBe(false);
     expect(item.sessionState).toBeUndefined();
+    expect(item.hasRunningSession).toBeUndefined();
     expect(item.primarySessionId).toBeNull();
     expect(item.foregroundActivity).toBeUndefined();
     expect(item.updatedAt).toBe(UPDATED_AT);
   });
+});
 
+describe("toSheetItem task running summary", () => {
+  it("preserves task-wide running evidence on the phone task row", () => {
+    const running = toSheetItem(taskWithRunningSummary(true), emptyCtx());
+    const settled = toSheetItem(taskWithRunningSummary(false), emptyCtx());
+    expect(running.hasRunningSession).toBe(true);
+    expect(settled.hasRunningSession).toBe(false);
+  });
+});
+
+describe("toSheetItem error acknowledgements", () => {
   it("hides only the acknowledged error stamp and shows a newer one", () => {
     const base = task({
       statusSummary: {

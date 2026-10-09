@@ -55,18 +55,27 @@ async function closeSurvivingQuickTerminals(page: Page, launcherTestId: string) 
 test.describe("quick terminal tabs", () => {
   test("creates, detaches, reuses, switches, and closes independent terminals", async ({
     testPage,
+    apiClient,
   }) => {
+    await apiClient.saveUserSettings({
+      sidebar_fast_actions_enabled: true,
+      sidebar_new_task_style: "compact",
+    });
     await testPage.goto("/");
     try {
       const terminalButton = testPage.getByTestId("sidebar-quick-terminal-shortcut");
       const quickChatButton = testPage.getByTestId("sidebar-quick-chat-shortcut");
       await expect(terminalButton).toBeVisible();
       await expect(quickChatButton).toBeVisible();
-      expect(
-        await terminalButton.evaluate((element) =>
-          element.nextElementSibling?.getAttribute("data-testid"),
-        ),
-      ).toBe("sidebar-quick-chat-shortcut");
+      const utilities = testPage.getByTestId("sidebar-quick-actions");
+      await expect(utilities.getByRole("button").first()).toHaveAttribute(
+        "data-testid",
+        "sidebar-quick-terminal-shortcut",
+      );
+      await expect(utilities.getByRole("button").last()).toHaveAttribute(
+        "data-testid",
+        "sidebar-quick-chat-shortcut",
+      );
 
       await terminalButton.click();
       const dialog = testPage.getByRole("dialog", { name: QUICK_CHAT_TITLE });
@@ -110,7 +119,7 @@ test.describe("quick terminal tabs", () => {
       await testPage.keyboard.press("Escape");
       await expect(dialog).toBeHidden();
       await expect(terminalButton).toBeFocused();
-      await expect(testPage.getByRole("tooltip", { name: "Quick terminal" })).toHaveCount(0);
+      await expect(testPage.getByRole("tooltip", { name: "Quick terminal" })).toBeVisible();
 
       await terminalButton.click();
       await expect(dialog).toBeVisible();

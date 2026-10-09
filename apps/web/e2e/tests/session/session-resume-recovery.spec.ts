@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import fs from "node:fs";
 import path from "node:path";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { waitForSessionState } from "../../helpers/session";
 import {
@@ -13,15 +14,25 @@ import {
   countSimpleMockResponses,
   expectMinimumElementHeight,
   readManagedCloneRecoveryConsumers,
+  readPrivateManagedCloneRecoveryArtifacts,
   removeRecoveryBranch,
+  waitForStoppedRecoveryRuntime,
   seedManagedCloneRelocationFixture,
   seedWorktreeRecoveryFixture,
   taskEnvironmentRepository,
   taskEnvironmentRepositoryWorktreePath,
 } from "../../helpers/session-resume-recovery";
 
+test.afterEach(async ({ backend }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus) return;
+  await testInfo.attach("session-recovery-backend.log", {
+    path: backend.logPath,
+    contentType: "text/plain",
+  });
+});
+
 test.describe("worktree branch resume recovery", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test("keeps normal resume unchanged and explicitly replaces a lost branch", async ({
     testPage,
@@ -32,6 +43,7 @@ test.describe("worktree branch resume recovery", () => {
   }, testInfo) => {
     test.setTimeout(180_000);
 
+    const recoveryWire = captureSessionRecoveryMessages(testPage);
     const fixture = await seedWorktreeRecoveryFixture(
       testPage,
       apiClient,
@@ -63,6 +75,8 @@ test.describe("worktree branch resume recovery", () => {
     });
     await expect(fixture.session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
 
+    await waitForStoppedRecoveryRuntime(apiClient, backend.tmpDir, fixture);
+
     removeRecoveryBranch(seedData.repositoryPath, backend.tmpDir, fixture.repository);
 
     // A normal Resume must report the lost branch and leave the environment
@@ -77,8 +91,20 @@ test.describe("worktree branch resume recovery", () => {
 
     // A second ordinary attempt remains retryable and must not silently switch
     // the branch or consume the explicit replacement decision.
+    const resumeRequestsBefore = recoveryWire.requestCounts.resume ?? 0;
     await testPage.getByTestId("recovery-resume-button").click();
+    await expect.poll(() => recoveryWire.requestCounts.resume ?? 0).toBe(resumeRequestsBefore + 1);
+    await expect
+      .poll(() =>
+        capturedSessionRecoveryResponseType(
+          recoveryWire.requestIds,
+          recoveryWire.responses,
+          "resume",
+        ),
+      )
+      .toBe("error");
     await expect(fixture.session.recoveryError()).toBeVisible({ timeout: 30_000 });
+    await expect(fixture.session.recoveryNewBranchButton()).toBeEnabled();
     await expect
       .poll(
         async () =>
@@ -261,6 +287,7 @@ test.describe("worktree branch resume recovery", () => {
       await expect(testPage.getByTestId("recovery-fresh-button")).toHaveCount(0);
       await expect(testPage.getByTestId("recovery-restore-workspace-button")).toHaveCount(0);
       if (prCapture.capturing) {
+        await waitForFiniteAnimations(testPage.locator("body"));
         await prCapture.screenshot("managed-clone-relocation-card-desktop", {
           caption: "The task card explains why the managed clone needs repair.",
         });
@@ -271,6 +298,7 @@ test.describe("worktree branch resume recovery", () => {
       await expect(confirmation).toContainText("snapshot");
       await expect(confirmation).toContainText("staging choices");
       if (prCapture.capturing) {
+        await waitForFiniteAnimations(confirmation);
         await prCapture.screenshot("managed-clone-relocation-confirm-desktop", {
           caption: "The confirmation states what moves and what remains in the original checkout.",
         });
@@ -280,6 +308,13 @@ test.describe("worktree branch resume recovery", () => {
       await expectMinimumElementHeight(cancel, 26);
       await expectMinimumElementHeight(confirm, 26);
       await testPage.getByTestId("managed-clone-relocation-confirm").click();
+      await waitForSessionState(apiClient, {
+        taskId: fixture.task.id,
+        sessionId,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for managed clone relocation to resume the session",
+        timeout: 120_000,
+      });
       await expect
         .poll(
           () =>
@@ -288,9 +323,12 @@ test.describe("worktree branch resume recovery", () => {
               recoveryResponses,
               "relocate_and_resume",
             ),
-          { timeout: 30_000, message: "Waiting for managed clone relocation response" },
+          {
+            timeout: 30_000,
+            message: "Waiting for managed clone relocation response after the session resumed",
+          },
         )
-        .toBeTruthy();
+        .toBe("response");
       const relocationResponse = capturedSessionRecoveryResponse(
         recoveryRequestIds,
         recoveryResponses,
@@ -323,16 +361,25 @@ test.describe("worktree branch resume recovery", () => {
       expect(afterRepository!.branch_slug).toBe(beforeRepository!.branch_slug);
       expect(afterRepository!.worktree_branch).toBe(fixture.originalBranch);
       expect(relocatedPath).toContain(".relocated-");
-      const relocationRecord = JSON.parse(
-        fs.readFileSync(`${originalPath}.kandev-clone-relocation.json`, "utf8"),
-      ) as { original: string };
-      const retainedOriginal = relocationRecord.original;
+      const recoveryArtifacts = readPrivateManagedCloneRecoveryArtifacts(
+        backend.tmpDir,
+        beforeEnvironment!.id,
+        seedData.repositoryId,
+      );
+      expect(recoveryArtifacts.relocationPath).toContain(`${path.sep}.kandev-recovery${path.sep}`);
+      expect(recoveryArtifacts.recoveryPath).toContain(`${path.sep}.kandev-recovery${path.sep}`);
+      expect(fs.existsSync(`${originalPath}.kandev-clone-relocation.json`)).toBe(false);
+      const retainedOriginal = recoveryArtifacts.original;
       expect(retainedOriginal).not.toBe(originalPath);
       expect(retainedOriginal).toContain(`${path.sep}.kandev-recovery${path.sep}`);
+      expect(recoveryArtifacts.snapshot).toContain(`${path.sep}.kandev-recovery${path.sep}`);
       expect(fs.existsSync(originalPath)).toBe(false);
       expect(fs.readFileSync(path.join(retainedOriginal, fixture.dirtyFileName), "utf8")).toBe(
         fixture.dirtyFileContent,
       );
+      expect(
+        fs.readFileSync(path.join(recoveryArtifacts.snapshot, fixture.dirtyFileName), "utf8"),
+      ).toBe(fixture.dirtyFileContent);
       expect(fs.readFileSync(path.join(relocatedPath!, fixture.dirtyFileName), "utf8")).toBe(
         fixture.dirtyFileContent,
       );

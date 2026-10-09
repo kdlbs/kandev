@@ -25,6 +25,7 @@ test.describe("System Backups page", () => {
     await deleteAllManualBackups(apiClient);
   });
 
+  // @covers AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001.5
   test("shows the resolved backup directory from database stats", async ({
     testPage,
     apiClient,
@@ -95,5 +96,60 @@ test.describe("System Backups page", () => {
     // Delete the new row → empty state returns.
     await rows.first().getByTestId("system-backups-delete").click();
     await expect(testPage.getByTestId("system-backups-empty")).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("revalidates an inactive backup list after returning from another settings route", async ({
+    testPage,
+    apiClient,
+  }) => {
+    test.setTimeout(60_000);
+
+    await testPage.goto("/settings/system/data-storage?tab=database");
+    await expect(testPage.getByTestId("system-backups-card")).toBeVisible();
+    await expect
+      .poll(
+        async () =>
+          (await testPage.getByTestId("system-backups-empty").isVisible()) ||
+          (await testPage.getByTestId("system-backups-row").first().isVisible()),
+        { timeout: 10_000 },
+      )
+      .toBe(true);
+
+    await testPage.locator('a[href="/settings/system/status"]:visible').click();
+    await expect(testPage).toHaveURL(/\/settings\/system\/status(?:\?|$)/);
+    await expect(testPage.getByTestId("system-backups-card")).toHaveCount(0);
+
+    const createResponse = await apiClient.rawRequest("POST", "/api/v1/system/backups");
+    expect(createResponse.status).toBe(202);
+    const { job_id: jobId } = (await createResponse.json()) as { job_id: string };
+    let createdName: string | undefined;
+    await expect
+      .poll(
+        async () => {
+          const response = await apiClient.rawRequest("GET", `/api/v1/system/jobs/${jobId}`);
+          expect(response.ok, response.statusText).toBe(true);
+          const job = (await response.json()) as {
+            state: string;
+            result?: { name?: string };
+          };
+          createdName = job.result?.name;
+          return job.state;
+        },
+        { timeout: 20_000, intervals: [250] },
+      )
+      .toBe("succeeded");
+    expect(createdName).toMatch(/^manual-/);
+
+    const revalidated = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname.endsWith("/api/v1/system/backups"),
+    );
+    await testPage.locator('a[href^="/settings/system/data-storage"]:visible').click();
+    await revalidated;
+    await expect(testPage).toHaveURL(/\/settings\/system\/data-storage/);
+    await expect(
+      testPage.locator('[data-testid="system-backups-row"]').filter({ hasText: createdName! }),
+    ).toBeVisible();
   });
 });

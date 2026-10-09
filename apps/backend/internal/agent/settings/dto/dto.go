@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"time"
 
@@ -163,13 +164,14 @@ type TUIConfigDTO struct {
 }
 
 type AgentDTO struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	WorkspaceID   *string           `json:"workspace_id,omitempty"`
-	SupportsMCP   bool              `json:"supports_mcp"`
-	MCPConfigPath string            `json:"mcp_config_path,omitempty"`
-	TUIConfig     *TUIConfigDTO     `json:"tui_config,omitempty"`
-	Profiles      []AgentProfileDTO `json:"profiles"`
+	ID                   string            `json:"id"`
+	Name                 string            `json:"name"`
+	WorkspaceID          *string           `json:"workspace_id,omitempty"`
+	SupportsMCP          bool              `json:"supports_mcp"`
+	MCPConfigPath        string            `json:"mcp_config_path,omitempty"`
+	TUIConfig            *TUIConfigDTO     `json:"tui_config,omitempty"`
+	Profiles             []AgentProfileDTO `json:"profiles"`
+	ProfileOrderRevision int64             `json:"profile_order_revision"`
 	// CapabilityStatus mirrors the host utility probe status so clients can
 	// flag agents that need login or reinstallation without fetching the
 	// full model config separately. "" for agents that aren't probed
@@ -214,6 +216,11 @@ type AgentDiscoveryDTO struct {
 	Available         bool             `json:"available"`
 	MatchedPath       string           `json:"matched_path,omitempty"`
 	LoginCommand      *LoginCommandDTO `json:"login_command,omitempty"`
+
+	// Vendor CLI state. Present only for agent types that declare a host CLI;
+	// every other agent omits both fields.
+	CLIVersion      string `json:"cli_version,omitempty"`
+	CLIVersionError string `json:"cli_version_error,omitempty"`
 }
 
 // LoginCommandDTO describes an interactive login command surfaced to the UI.
@@ -263,6 +270,27 @@ type ModelConfigDTO struct {
 	// "probing" | "ok" | "auth_required" | "not_installed" | "failed".
 	Status string `json:"status,omitempty"`
 	Error  string `json:"error,omitempty"`
+	// Discovery describes where the model list came from. Absent for agent
+	// types without a vendor CLI.
+	Discovery *ModelDiscoveryDTO `json:"discovery,omitempty"`
+}
+
+// ModelDiscoveryDTO reports how Kandev assembled an agent type's model list
+// and whether the operator may type a model identifier that is not in it.
+type ModelDiscoveryDTO struct {
+	// Source is "cli_command" when the vendor CLI supplied models and
+	// "acp_probe" when only the managed runtime did.
+	Source string `json:"source"`
+	// Executable and CLIVersion identify the vendor CLI that was consulted.
+	Executable string `json:"executable,omitempty"`
+	CLIVersion string `json:"cli_version,omitempty"`
+	// Status is "ok", "skipped" (the CLI publishes no list), or a failure:
+	// "not_installed", "not_logged_in", "timeout", "failed".
+	Status    string     `json:"status"`
+	Error     string     `json:"error,omitempty"`
+	CheckedAt *time.Time `json:"checked_at,omitempty"`
+	// AllowsCustomModel permits a typed model identifier in the selector.
+	AllowsCustomModel bool `json:"allows_custom_model"`
 }
 
 type ConfigOptionDTO struct {
@@ -392,6 +420,9 @@ type AgentUpdateStatusDTO struct {
 	LatestVersion       string                        `json:"latest_version,omitempty"`
 	CheckedAt           *time.Time                    `json:"checked_at,omitempty"`
 	CheckState          AgentUpdateCheckState         `json:"check_state"`
+	Family              string                        `json:"family,omitempty"`
+	RuntimeRevision     uint64                        `json:"runtime_revision,omitempty"`
+	MigrationAvailable  bool                          `json:"migration_available,omitempty"`
 }
 
 type ListAgentUpdateStatusResponse struct {
@@ -446,6 +477,8 @@ const (
 	AgentUpdateJobStatusQueued     AgentUpdateJobStatus = "queued"
 	AgentUpdateJobStatusResolving  AgentUpdateJobStatus = "resolving"
 	AgentUpdateJobStatusUpdating   AgentUpdateJobStatus = "updating"
+	AgentUpdateJobStatusProbing    AgentUpdateJobStatus = "probing"
+	AgentUpdateJobStatusSaving     AgentUpdateJobStatus = "saving"
 	AgentUpdateJobStatusRefreshing AgentUpdateJobStatus = "refreshing"
 	AgentUpdateJobStatusSucceeded  AgentUpdateJobStatus = "succeeded"
 	AgentUpdateJobStatusFailed     AgentUpdateJobStatus = "failed"
@@ -466,6 +499,9 @@ type AgentUpdateJobDTO struct {
 	ActiveVersion    string               `json:"active_version,omitempty"`
 	EffectiveVersion string               `json:"effective_version"`
 	TargetVersion    string               `json:"target_version,omitempty"`
+	TargetFamily     string               `json:"target_family,omitempty"`
+	RuntimeRevision  uint64               `json:"runtime_revision,omitempty"`
+	Migration        bool                 `json:"migration,omitempty"`
 	Output           string               `json:"output,omitempty"`
 	Error            string               `json:"error,omitempty"`
 	RefreshError     string               `json:"refresh_error,omitempty"`
@@ -490,6 +526,11 @@ type AgentUpdatePreviewDTO struct {
 	AvailableVersions   []AgentUpdateVersionDTO `json:"available_versions"`
 	Command             []string                `json:"command"`
 	CommandString       string                  `json:"command_string"`
+	Family              string                  `json:"family,omitempty"`
+	Source              string                  `json:"source,omitempty"`
+	TargetFamily        string                  `json:"target_family,omitempty"`
+	RuntimeRevision     uint64                  `json:"runtime_revision,omitempty"`
+	MigrationAvailable  bool                    `json:"migration_available,omitempty"`
 }
 
 // AgentUpdateVersionDTO is one stable, selectable package version.
@@ -502,8 +543,10 @@ type AgentUpdateVersionDTO struct {
 // managed-runtime update endpoint. Package identity and command arguments are
 // always resolved from trusted built-in agent metadata.
 type AgentUpdateRequest struct {
-	TargetVersion string `json:"target_version"`
-	UseDefault    bool   `json:"use_default"`
+	TargetVersion           string `json:"target_version"`
+	UseDefault              bool   `json:"use_default"`
+	TargetFamily            string `json:"target_family,omitempty"`
+	ExpectedRuntimeRevision uint64 `json:"expected_runtime_revision,omitempty"`
 }
 
 type ListAgentUpdateJobsResponse struct {
@@ -550,15 +593,17 @@ type CommandPreviewResponse struct {
 // DynamicModelsResponse is the response for the /agent-models/:agentName endpoint.
 // Data now comes from the host utility capability cache populated by ACP probes.
 type DynamicModelsResponse struct {
-	AgentName       string            `json:"agent_name"`
-	Status          string            `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
-	Models          []ModelEntryDTO   `json:"models"`
-	CurrentModelID  string            `json:"current_model_id,omitempty"`
-	Modes           []ModeEntryDTO    `json:"modes,omitempty"`
-	CurrentModeID   string            `json:"current_mode_id,omitempty"`
-	Commands        []CommandEntryDTO `json:"commands,omitempty"`
-	Error           *string           `json:"error"`
-	ContextRevision string            `json:"context_revision,omitempty"`
+	AgentName       string              `json:"agent_name"`
+	Status          string              `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
+	Models          []ModelEntryDTO     `json:"models"`
+	CurrentModelID  string              `json:"current_model_id,omitempty"`
+	Modes           []ModeEntryDTO      `json:"modes,omitempty"`
+	CurrentModeID   string              `json:"current_mode_id,omitempty"`
+	Commands        []CommandEntryDTO   `json:"commands,omitempty"`
+	Error           *string             `json:"error"`
+	Discovery       *ModelDiscoveryDTO  `json:"discovery,omitempty"`
+	ContextRevision string              `json:"context_revision,omitempty"`
+	RuntimeInfo     *agents.RuntimeInfo `json:"runtime_info,omitempty"`
 }
 
 // ProfileLaunchSettingsRequest is a complete, request-only profile snapshot.
