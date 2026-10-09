@@ -22,6 +22,7 @@ func TestOrchestratorWrapperExposesAtomicPlanCommentQueue(t *testing.T) {
 }
 
 type initialTaskBriefAdapterContract interface {
+	orchestrator.DeliverySubmissionPromptStarter
 	WithInitialTaskBriefAdmission(context.Context, string, func(context.Context) error) error
 	MarkInitialTaskBriefDispatchPending(string)
 	InitialTaskBriefDispatchPending(string) bool
@@ -36,7 +37,7 @@ type initialTaskBriefAdapterContract interface {
 	) (*orchestrator.PromptResult, error)
 	ResumeTaskSessionAndPromptWithPromptContext(
 		context.Context, string, string, string, string, bool, []v1.MessageAttachment,
-		string, bool, []v1.EntityReference, bool,
+		string, bool, []v1.EntityReference, bool, ...string,
 	) (*orchestrator.PromptResult, error)
 }
 

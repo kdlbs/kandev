@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   entries: undefined as unknown as UseCoordinatorSidebarEntriesResult,
   featureOn: true,
   activeWorkspaceId: null as string | null,
+  fastActionsEnabled: true,
   sectionExpanded: {} as Record<string, boolean>,
   toggleSection: vi.fn(),
 }));
@@ -24,6 +25,7 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       workspaces: { activeId: mocks.activeWorkspaceId },
       appSidebar: { sectionExpanded: mocks.sectionExpanded },
+      userSettings: { sidebarFastActionsEnabled: mocks.fastActionsEnabled },
       toggleAppSidebarSection: mocks.toggleSection,
     }),
 }));
@@ -50,6 +52,7 @@ const onNavigate = vi.fn();
 beforeEach(() => {
   mocks.featureOn = true;
   mocks.activeWorkspaceId = "ws-1";
+  mocks.fastActionsEnabled = true;
   mocks.sectionExpanded = {};
   mocks.toggleSection.mockReset();
   onNavigate.mockReset();
@@ -145,6 +148,16 @@ describe("MobileCoordinatorsSection", () => {
     const shortcut = screen.getByTestId("mobile-coordinators-open-list");
     expect(shortcut.getAttribute("href")).toBe("/workspaces/ws-1/coordinator");
     expect(shortcut.getAttribute("aria-label")).toBe("Open coordinators");
+  });
+
+  it("keeps the list destination in the expanded body when fast actions are off", () => {
+    mocks.fastActionsEnabled = false;
+    render(<MobileCoordinatorsSection onNavigate={onNavigate} />);
+
+    expect(screen.queryByTestId("mobile-coordinators-open-list")).toBeNull();
+    expect(screen.getByTestId("mobile-coordinators-open-list-body").getAttribute("href")).toBe(
+      "/workspaces/ws-1/coordinator",
+    );
   });
 
   it("calls onNavigate when a row is tapped", () => {

@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
@@ -43,10 +44,19 @@ test.describe("Sidebar status with secondary session", () => {
       )
       .toBe(true);
 
-    // 3. Navigate to the task. A completed task can remain in the sidebar
-    // while its board column omits the card, so the direct task route is the
-    // stable entry point for this sidebar-status regression.
-    await testPage.goto(`/t/${task.id}`);
+    // 3. Prefer the board route when it has a card. A completed task can remain
+    // in the sidebar while its board column omits the card, so keep the direct
+    // task route as a stable fallback for this sidebar-status regression.
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCard(task.id);
+    if (await card.isVisible().catch(() => false)) {
+      await card.click();
+    } else {
+      await testPage.goto(`/t/${task.id}`);
+    }
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();

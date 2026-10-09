@@ -8,7 +8,7 @@ function eventWithTarget(target: { closest: ReturnType<typeof vi.fn> }) {
 
 function panelRef() {
   const focus = vi.fn();
-  const element = { focus } as unknown as HTMLDivElement;
+  const element = { focus, contains: vi.fn().mockReturnValue(true) } as unknown as HTMLDivElement;
   return {
     element,
     focus,
@@ -19,6 +19,24 @@ function panelRef() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Quick Chat route panel focus", () => {
+  it("preserves focus for portal events that bubble through the React panel", () => {
+    const panel = document.createElement("div");
+    const portal = document.createElement("div");
+    const optionLabel = document.createElement("span");
+    portal.append(optionLabel);
+    const focus = vi.spyOn(panel, "focus");
+    const frame = vi.fn();
+    vi.stubGlobal("requestAnimationFrame", frame);
+    const event = { target: optionLabel } as unknown as MouseEvent<HTMLDivElement>;
+    const ref = { current: panel };
+
+    routePanelMouseDown(event, ref);
+    routePanelClick(event, ref);
+
+    expect(focus).not.toHaveBeenCalled();
+    expect(frame).not.toHaveBeenCalled();
+  });
+
   it("focuses immediately on a non-interactive mouse down and preserves controls", () => {
     const { focus, ref } = panelRef();
     const content = eventWithTarget({ closest: vi.fn().mockReturnValue(null) });

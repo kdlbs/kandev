@@ -332,6 +332,20 @@ type DirectPromptPreparer interface {
 	PrepareDirectPrompt(ctx context.Context, prompt string, isPassthrough bool) (string, string)
 }
 
+// DeliverySubmissionPromptStarter binds a saved direct-message prompt to its
+// durable delivery record before the agent runtime receives it.
+type DeliverySubmissionPromptStarter interface {
+	PromptTaskWithDeliverySubmissionID(
+		context.Context,
+		string, string, string, string,
+		bool,
+		[]v1.MessageAttachment,
+		bool,
+		string,
+		...DirectPromptStartOptions,
+	) (*PromptResult, error)
+}
+
 // DirectPromptStarter starts a prepared direct-message session while retaining
 // the trusted saved-prompt context prepared before message persistence.
 type DirectPromptStarter interface {
@@ -377,6 +391,33 @@ type DirectPromptStarterWithCanvasGuidanceAndPreservedPrompt interface {
 		promptReferenceContext string,
 		promptReferencesPrepared bool,
 		canvasGuidanceResolved, includeCanvasGuidance bool,
+	) (*executor.TaskExecution, error)
+}
+
+// DirectPromptStartOptions carries accepted direct-message identity and
+// server-owned composition through session start or prompt dispatch.
+type DirectPromptStartOptions struct {
+	SkipMessageRecord             bool
+	PlanMode                      bool
+	AutoStart                     bool
+	Attachments                   []v1.MessageAttachment
+	References                    []v1.EntityReference
+	PromptReferenceContext        string
+	PromptReferencesPrepared      bool
+	CanvasGuidanceResolved        bool
+	IncludeCanvasGuidance         bool
+	PreserveDirectPrompt          bool
+	DeliverySubmissionID          string
+	InitialTaskBriefDispatchOwner bool
+}
+
+// DirectPromptStarterWithDeliverySubmission preserves the accepted message
+// identity when a direct first message starts a prepared session.
+type DirectPromptStarterWithDeliverySubmission interface {
+	StartCreatedSessionWithDeliverySubmission(
+		context.Context,
+		string, string, string, string,
+		DirectPromptStartOptions,
 	) (*executor.TaskExecution, error)
 }
 
@@ -1913,6 +1954,7 @@ func NewService(
 		OnAgentTurnFailed:      s.handleAgentTurnFailed,
 		OnAgentStalled:         s.handleAgentStalled,
 		OnAgentStopped:         s.handleAgentStopped,
+		OnAgentctlError:        s.handleAgentctlDeliveryRecovery,
 		OnAgentStreamEvent:     s.handleAgentStreamEvent,
 		OnACPSessionCreated:    s.handleACPSessionCreated,
 		OnPermissionRequest:    s.handlePermissionRequest,
@@ -3203,6 +3245,9 @@ func (s *Service) reconcileDurableQueueStateOnStartup(ctx context.Context) error
 			return ctx.Err()
 		case <-timer.C:
 		}
+	}
+	if err := s.reconcileAgentDeliverySettlements(ctx, ""); err != nil {
+		return fmt.Errorf("reconcile durable delivery terminal settlements: %w", err)
 	}
 	if err := s.reconcilePendingQueueDispatchesOnStartup(ctx); err != nil {
 		return fmt.Errorf("reconcile pending queue dispatches: %w", err)

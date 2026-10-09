@@ -30,7 +30,7 @@ import { useWorkspaceIdlePolicyDraft } from "./workspace-edit-idle-policy-draft"
 type Workspace = WorkspaceState["items"][number];
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { SettingsGroup } from "@/components/settings/settings-group";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
@@ -360,6 +360,7 @@ function useWorkspaceDeleteDraft(
 }
 
 function useWorkspaceEditForm(workspace: Workspace) {
+  const storeApi = useAppStoreApi();
   const { toast } = useToast();
   const { t } = useTranslation();
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace>(workspace);
@@ -411,8 +412,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     isDirty: isWorkspaceDirty,
     setSavedState,
     setCurrentWorkspace,
-    workspaces,
-    setWorkspaces,
+    storeApi,
     saveWorkspaceRequest,
     toast,
     t,

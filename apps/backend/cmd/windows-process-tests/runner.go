@@ -294,5 +294,5 @@ func commandArgs(selector string) []string {
 	if selector == "" {
 		return []string{"test", "-race", "-json", "-timeout", "25m", "-list", "^(Test|Fuzz|Example)", packagePattern}
 	}
-	return []string{"test", "-race", "-v", "-json", "-timeout", "25m", "-run", selector, packagePattern}
+	return []string{"test", "-race", "-count=1", "-v", "-json", "-timeout", "25m", "-run", selector, packagePattern}
 }

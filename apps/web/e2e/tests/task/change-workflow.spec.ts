@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
+import { watchWs } from "../../helpers/causal-waits";
 import { waitForSessionDone } from "../../helpers/session";
 import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
 import { KanbanPage } from "../../pages/kanban-page";
@@ -96,11 +97,19 @@ test.describe("Change workflow", () => {
       workflow_step_id: seedData.startStepId,
     });
 
+    const ws = watchWs(testPage);
     await testPage.goto(`/t/${task.id}`);
     await expect(testPage.getByTestId("task-topbar")).toBeVisible();
     const taskUrl = testPage.url();
 
+    const moved = ws.waitForEvent("task.updated", {
+      where: (payload) =>
+        payload.task_id === task.id &&
+        payload.workflow_id === destination.id &&
+        payload.workflow_step_id === analysis.id,
+    });
     await apiClient.moveTask(task.id, destination.id, analysis.id);
+    await moved;
 
     await expect(testPage).toHaveURL(taskUrl);
     const stepper = testPage.getByTestId("workflow-stepper");
@@ -127,7 +136,7 @@ test.describe("Change workflow", () => {
       await expect(disclosure).toBeVisible();
       await expect(
         disclosure.getByTestId(`workflow-step-disclosure-row-${implement.id}`),
-      ).toBeVisible();
+      ).toContainText("Implement");
     }
   });
 

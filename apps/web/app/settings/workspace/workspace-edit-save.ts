@@ -1,6 +1,6 @@
 import type { TFunction } from "i18next";
 import type { useToast } from "@/components/toast-provider";
-import type { WorkspaceState } from "@/lib/state/slices";
+import type { AppState, WorkspaceState } from "@/lib/state/store";
 
 type Workspace = WorkspaceState["items"][number];
 
@@ -39,8 +39,7 @@ type WorkspaceSaveHandlerOptions = {
   isDirty: boolean;
   setSavedState: (state: SavedState) => void;
   setCurrentWorkspace: (update: (previous: Workspace) => Workspace) => void;
-  workspaces: Workspace[];
-  setWorkspaces: (items: Workspace[]) => void;
+  storeApi: { getState: () => Pick<AppState, "workspaces" | "setWorkspaces"> };
   saveWorkspaceRequest: SaveRequestLike;
   toast: ReturnType<typeof useToast>["toast"];
   t: TFunction;
@@ -73,8 +72,7 @@ export function buildWorkspaceSaveHandler({
   isDirty,
   setSavedState,
   setCurrentWorkspace,
-  workspaces,
-  setWorkspaces,
+  storeApi,
   saveWorkspaceRequest,
   toast,
   t,
@@ -92,8 +90,9 @@ export function buildWorkspaceSaveHandler({
         idleSuspensionEnabled: updated.acp_idle_suspension_enabled ?? draft.idleSuspensionEnabled,
         idleTimeoutMinutes: updated.acp_idle_timeout_minutes ?? Number(draft.idleTimeoutMinutes),
       });
+      const { workspaces, setWorkspaces } = storeApi.getState();
       setWorkspaces(
-        workspaces.map((workspace) =>
+        workspaces.items.map((workspace) =>
           workspace.id === updated.id
             ? {
                 ...workspace,

@@ -4,6 +4,8 @@ package launcher
 
 import (
 	"syscall"
+
+	"golang.org/x/sys/windows"
 )
 
 // buildSysProcAttr configures the child's process attributes. survivalEnabled
@@ -15,6 +17,6 @@ func buildSysProcAttr(_ bool) *syscall.SysProcAttr {
 	// hides a newly created console without detaching agentctl from that console.
 	return &syscall.SysProcAttr{
 		HideWindow:    true,
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED,
 	}
 }

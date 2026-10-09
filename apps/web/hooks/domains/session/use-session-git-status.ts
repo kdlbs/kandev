@@ -137,7 +137,7 @@ export function useSessionGitStatusSnapshots(sessionId: string | null) {
             display.branch,
             display.headCommit,
             display.baseCommit,
-            display.comparisonTarget,
+            display.comparisonTarget ?? "",
           ]),
         ]),
       ),

@@ -84,6 +84,9 @@ test.describe("Configuration Chat restart", () => {
     );
     const panel = await openConfigurationChat(testPage);
     await waitForConfigurationResponse(apiClient, old.session_id, "old configuration response");
+    await expect
+      .poll(async () => (await apiClient.getTaskSession(old.session_id)).session.state)
+      .toBe("WAITING_FOR_INPUT");
     await expect(panel.getByText("old configuration response", { exact: true })).toBeVisible();
     const editor = panel.getByTestId("chat-input-editor");
     await editor.fill("unsent configuration prompt");

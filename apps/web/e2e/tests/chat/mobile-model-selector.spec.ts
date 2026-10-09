@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
+import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 type E2EModelStoreWindow = Window & {
@@ -38,6 +39,21 @@ async function seedAndOpenTask(testPage: Page, apiClient: ApiClient, seedData: S
       repository_ids: [seedData.repositoryId],
     },
   );
+
+  if (!task.session_id) throw new Error("expected an auto-started model-selector session");
+  await waitForAgentMessage(
+    apiClient,
+    task.session_id,
+    "This is a simple mock response for e2e testing.",
+    30_000,
+  );
+  await waitForSessionState(apiClient, {
+    taskId: task.id,
+    sessionId: task.session_id,
+    expectedState: "WAITING_FOR_INPUT",
+    timeout: 30_000,
+    message: "initial phone model-selector turn must settle before interaction",
+  });
 
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
@@ -89,7 +105,35 @@ async function seedLongReasoningMenu(testPage: Page, sessionId: string) {
 }
 
 test.describe("Mobile chat model selector", () => {
-  test.describe.configure({ retries: 1, timeout: 60_000 });
+  test.describe.configure({ timeout: 60_000 });
+
+  test("keeps model settings open after a persisted touch selection", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { task } = await seedAndOpenTask(testPage, apiClient, seedData);
+    const trigger = testPage
+      .getByTestId("mobile-chat-toolbar-left-actions")
+      .getByRole("button", { name: "Session model settings" });
+    await expect(trigger).toContainText("Mock Fast");
+    await trigger.tap();
+    const effort = testPage.getByTestId("config-option-trigger-effort");
+    await expect(effort).toBeVisible();
+    await testPage.getByRole("option", { name: /Mock Smart/ }).tap();
+    await expect(trigger).toContainText("Mock Smart");
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const runtime = sessions.find((item) => item.id === task.session_id)?.metadata
+          ?.runtime_config as { model?: string } | undefined;
+        return runtime?.model;
+      })
+      .toBe("mock-smart");
+    await expect(effort).toBeVisible();
+    await effort.tap();
+    await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible();
+  });
 
   test("shows compact changes and provider descriptions by touch", async ({
     testPage,

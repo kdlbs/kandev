@@ -483,12 +483,7 @@ test.describe("New session dialog", () => {
       await apiClient.saveUserSettings({ workflow_filter_id: otherWorkflow.id });
 
       // 3. Navigate to the task
-      const kanban = new KanbanPage(testPage);
-      await kanban.goto(seedData.workflowId);
-
-      const card = kanban.taskCardByTitle("Cancel Dialog Task");
-      await expect(card).toBeVisible({ timeout: 10_000 });
-      await card.click();
+      await testPage.goto(`/t/${task.id}`);
       await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
       const session = new SessionPage(testPage);

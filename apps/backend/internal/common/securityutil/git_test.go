@@ -2,6 +2,56 @@ package securityutil
 
 import "testing"
 
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.14
+func TestIsKnownSafeGitFlagAllowsIgnoreSubmodulesNone(t *testing.T) {
+	if !IsKnownSafeGitFlag("--ignore-submodules=none") {
+		t.Fatal("the gitlink visibility comparison flag must be allowed")
+	}
+}
+
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.14
+func TestIsKnownSafeGitFlagAllowsIgnoreSubmodulesDirty(t *testing.T) {
+	if !IsKnownSafeGitFlag("--ignore-submodules=dirty") {
+		t.Fatal("the pointer-only cumulative comparison flag must be allowed")
+	}
+}
+
+func TestIsKnownSafeGitFlagRejectsIgnoreSubmodulesVariants(t *testing.T) {
+	for _, flag := range []string{
+		"--ignore-submodules", "--ignore-submodule", "--ignore-submod", "--ignore-submodules=",
+		"--ignore-submodules=all", "--ignore-submodules=untracked",
+		"--ignore-submodules=other", "--ignore-submodules=none-extra", "--ignore-submodules=none=all",
+		" --ignore-submodules=none", "--ignore-submodules=none ", "--ignore-submodules=none\t",
+		"--ignore-submodules=none\n", "--ignore-submodules=none\x00",
+		"--ignore-submodules=dirty-extra", "--ignore-submodules=dirty=none",
+		" --ignore-submodules=dirty", "--ignore-submodules=dirty ", "--ignore-submodules=dirty\t",
+		"--ignore-submodules=dirty\n", "--ignore-submodules=dirty\x00",
+	} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Errorf("unsupported gitlink visibility flag %q admitted", flag)
+		}
+	}
+}
+
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.12
+func TestIsKnownSafeGitFlagAllowsSubmoduleShort(t *testing.T) {
+	if !IsKnownSafeGitFlag("--submodule=short") {
+		t.Fatal("the short gitlink comparison flag must be allowed")
+	}
+}
+
+func TestIsKnownSafeGitFlagRejectsSubmoduleVariants(t *testing.T) {
+	for _, flag := range []string{
+		"--submodule", "--submod", "--submodule=", "--submodule=log", "--submodule=diff",
+		"--submodule=other", "--submodule=short-extra", "--submodules=short",
+		" --submodule=short", "--submodule=short ", "--submodule=short\t", "--submodule=short\n",
+	} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Errorf("unsupported submodule flag %q admitted", flag)
+		}
+	}
+}
+
 // @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.47
 func TestIsKnownSafeGitFlagDiscardStatus(t *testing.T) {
 	for _, flag := range []string{"-z", "--untracked-files=no"} {

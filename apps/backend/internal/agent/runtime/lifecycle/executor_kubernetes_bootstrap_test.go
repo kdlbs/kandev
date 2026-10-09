@@ -211,13 +211,24 @@ func TestKubernetesBootstrapOwnsControlEnvironmentAndPreservesOfficeEnvironment(
 	require.Contains(t, authData, "KANDEV_API_KEY='office-api-key'")
 	require.Contains(t, authData, "KANDEV_CLI='/opt/kandev/bin/kandev'")
 	require.Contains(t, authData, "KANDEV_RUN_ID='run-office-1'")
+	require.NotContains(t, authData, "AGENTCTL_PORT=", "the caller-supplied control port must not be forwarded")
 	for _, hostile := range []string{
-		"attacker-token", "attacker-nonce", "0.0.0.0", "9999", "attacker-control",
+		"attacker-token", "attacker-nonce", "0.0.0.0", "attacker-control",
 		"attacker-instance", "attacker-execution", "attacker-task", "attacker-session",
 		"attacker-environment", "attacker-agent-profile", "attacker-execution-profile",
 	} {
 		require.NotContains(t, authData, hostile)
 	}
+}
+
+func TestKubernetesAuthEnvironmentOmitsCallerPortWhenNonceContainsPort(t *testing.T) {
+	authData, err := kubernetesSerializeEnvironment(kubernetesAuthEnvironment(map[string]string{
+		"AGENTCTL_PORT": "9999",
+	}, "nonce-containing-9999"))
+
+	require.NoError(t, err)
+	require.Contains(t, string(authData), "AGENTCTL_BOOTSTRAP_NONCE='nonce-containing-9999'")
+	require.NotContains(t, string(authData), "AGENTCTL_PORT=")
 }
 
 func TestKubernetesBootstrapPublishesManagedCredentialHelperPath(t *testing.T) {

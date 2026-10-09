@@ -74,6 +74,8 @@ type resumeAndPromptOrchestrator interface {
 	) (*orchestrator.PromptResult, error)
 }
 
+type deliverySubmissionPromptOrchestrator = orchestrator.DeliverySubmissionPromptStarter
+
 type resumeAndPromptWithPromptContextOrchestrator interface {
 	ResumeTaskSessionAndPromptWithPromptContext(
 		ctx context.Context,
@@ -84,6 +86,7 @@ type resumeAndPromptWithPromptContextOrchestrator interface {
 		promptReferencesPrepared bool,
 		references []v1.EntityReference,
 		initialTaskBriefDispatchOwner bool,
+		submissionIDs ...string,
 	) (*orchestrator.PromptResult, error)
 }
 
@@ -141,6 +144,7 @@ type canvasGuidanceProjection struct {
 	preserveDirectPrompt          bool
 	promptReferencesPrepared      bool
 	initialTaskBriefDispatchOwner bool
+	deliverySubmissionID          string
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -384,6 +388,7 @@ func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
 
 func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionMessageAdd, h.wsAddMessage)
+	dispatcher.RegisterFunc(ws.ActionMessageDismissGitPushError, h.wsDismissGitPushErrorMessage)
 	dispatcher.RegisterFunc(ws.ActionMessageList, h.wsListMessages)
 	dispatcher.RegisterFunc(ws.ActionMessageSearch, h.wsSearchMessages)
 }
@@ -564,6 +569,7 @@ type wsAddMessageRequest struct {
 	initialTaskBriefSelected        bool
 	promptReferencesPrepared        bool
 	initialTaskBriefDispatchPending bool
+	deliverySubmissionID            string
 }
 
 type addMessageReplayIdentity struct {
@@ -1022,6 +1028,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
 	}
 	req.Content = message.Content
+	req.deliverySubmissionID = message.ID
 	initialTaskBriefQueued := (initialTaskBrief != nil && !initialTaskBrief.Selected) || queueBehindInitialBriefDispatch
 	// An idempotent create can return a row committed by another process, so
 	// the candidate pointer is not necessarily the object that selected the
@@ -1615,6 +1622,7 @@ func (h *MessageHandlers) dispatchPromptAsync(
 				preserveDirectPrompt:          req.initialTaskBriefSelected,
 				promptReferencesPrepared:      req.promptReferencesPrepared,
 				initialTaskBriefDispatchOwner: req.initialTaskBriefDispatchPending,
+				deliverySubmissionID:          req.deliverySubmissionID,
 			},
 		)
 	}()
@@ -1699,7 +1707,28 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		if len(canvasGuidance) > 0 {
 			projection = canvasGuidance[0]
 		}
-		if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithCanvasGuidanceAndPreservedPrompt); ok &&
+		if projection.deliverySubmissionID != "" {
+			starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithDeliverySubmission)
+			if !ok {
+				err = errors.New("orchestrator cannot preserve the direct prompt delivery identity")
+			} else {
+				_, err = starter.StartCreatedSessionWithDeliverySubmission(
+					ctx, taskID, sessionID, agentProfileID, content,
+					orchestrator.DirectPromptStartOptions{
+						SkipMessageRecord:        true,
+						PlanMode:                 planMode,
+						Attachments:              attachments,
+						References:               references,
+						PromptReferenceContext:   trustedPromptContext,
+						PromptReferencesPrepared: projection.promptReferencesPrepared,
+						CanvasGuidanceResolved:   projection.resolved,
+						IncludeCanvasGuidance:    projection.include,
+						PreserveDirectPrompt:     projection.preserveDirectPrompt,
+						DeliverySubmissionID:     projection.deliverySubmissionID,
+					},
+				)
+			}
+		} else if starter, ok := h.orchestrator.(orchestrator.DirectPromptStarterWithCanvasGuidanceAndPreservedPrompt); ok &&
 			projection.preserveDirectPrompt && len(canvasGuidance) > 0 {
 			_, err = starter.StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
 				ctx, taskID, sessionID, agentProfileID,
@@ -1727,6 +1756,9 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 			)
 		}
 		if err != nil {
+			if isPromptErrorOwnedByRecovery(err) || errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
+				return
+			}
 			h.logger.Warn("failed to start created session from message",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -1755,11 +1787,24 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 	var err error
 	promptReferencesPrepared := false
 	initialTaskBriefDispatchOwner := false
+	deliverySubmissionID := ""
 	if len(canvasGuidance) > 0 {
 		promptReferencesPrepared = canvasGuidance[0].promptReferencesPrepared
 		initialTaskBriefDispatchOwner = canvasGuidance[0].initialTaskBriefDispatchOwner
+		deliverySubmissionID = canvasGuidance[0].deliverySubmissionID
 	}
-	if promptWithContext, ok := h.orchestrator.(promptTaskWithPromptContext); ok {
+	if deliveryPrompt, ok := h.orchestrator.(deliverySubmissionPromptOrchestrator); ok && len(canvasGuidance) > 0 && canvasGuidance[0].deliverySubmissionID != "" {
+		_, err = deliveryPrompt.PromptTaskWithDeliverySubmissionID(
+			ctx, taskID, sessionID, content, model, planMode, attachments, false,
+			canvasGuidance[0].deliverySubmissionID,
+			orchestrator.DirectPromptStartOptions{
+				PromptReferenceContext:        trustedPromptContext,
+				PromptReferencesPrepared:      promptReferencesPrepared,
+				References:                    references,
+				InitialTaskBriefDispatchOwner: initialTaskBriefDispatchOwner,
+			},
+		)
+	} else if promptWithContext, ok := h.orchestrator.(promptTaskWithPromptContext); ok {
 		if promptWithOwnership, hasOwnership := h.orchestrator.(promptTaskWithPromptContextAndDispatchOwnership); hasOwnership {
 			_, err = promptWithOwnership.PromptTaskWithPromptContextAndDispatchOwnership(
 				ctx, taskID, sessionID, content, model, planMode, attachments,
@@ -1777,7 +1822,7 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 	if err != nil {
 		err = h.handlePromptWithResume(
 			ctx, taskID, sessionID, content, model, planMode, attachments,
-			trustedPromptContext, promptReferencesPrepared, references, initialTaskBriefDispatchOwner, err,
+			trustedPromptContext, promptReferencesPrepared, references, initialTaskBriefDispatchOwner, deliverySubmissionID, err,
 		)
 	}
 	if err != nil {
@@ -1855,7 +1900,9 @@ func isAgentReportedError(err error) bool {
 var errPromptRecoveryCardOwnsFailure = errors.New("session recovery owns prompt failure")
 
 func isPromptErrorOwnedByRecovery(err error) bool {
-	return errors.Is(err, orchestrator.ErrResumeAttemptCancelled) || errors.Is(err, errPromptRecoveryCardOwnsFailure)
+	return errors.Is(err, orchestrator.ErrResumeAttemptCancelled) ||
+		errors.Is(err, orchestrator.ErrSessionRecoveryRequired) ||
+		errors.Is(err, errPromptRecoveryCardOwnsFailure)
 }
 
 func (h *MessageHandlers) hasActiveSessionRecovery(ctx context.Context, taskID, sessionID string, failure error) bool {
@@ -1920,6 +1967,7 @@ func (h *MessageHandlers) handlePromptWithResume(
 	promptReferencesPrepared bool,
 	references []v1.EntityReference,
 	initialTaskBriefDispatchOwner bool,
+	deliverySubmissionID string,
 	origErr error,
 ) error {
 	if !errors.Is(origErr, executor.ErrExecutionNotFound) &&
@@ -1929,7 +1977,7 @@ func (h *MessageHandlers) handlePromptWithResume(
 	if runner, ok := h.orchestrator.(resumeAndPromptWithPromptContextOrchestrator); ok {
 		if _, retryErr := runner.ResumeTaskSessionAndPromptWithPromptContext(
 			ctx, taskID, sessionID, content, model, planMode, attachments,
-			promptReferenceContext, promptReferencesPrepared, references, initialTaskBriefDispatchOwner,
+			promptReferenceContext, promptReferencesPrepared, references, initialTaskBriefDispatchOwner, deliverySubmissionID,
 		); retryErr != nil {
 			h.logger.Warn("resume and prompt retry failed",
 				zap.String("task_id", taskID),
@@ -1943,7 +1991,7 @@ func (h *MessageHandlers) handlePromptWithResume(
 		}
 		return nil
 	}
-	if promptReferencesPrepared || promptReferenceContext != "" || len(references) > 0 || initialTaskBriefDispatchOwner {
+	if deliverySubmissionID != "" || promptReferencesPrepared || promptReferenceContext != "" || len(references) > 0 || initialTaskBriefDispatchOwner {
 		h.logger.Warn("prompt context cannot be preserved by the available recovery adapter",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID))
 		return origErr
@@ -2033,6 +2081,46 @@ type wsSearchMessagesRequest struct {
 	TaskSessionID string `json:"session_id"`
 	Query         string `json:"query"`
 	Limit         int    `json:"limit"`
+}
+
+type wsDismissGitPushErrorMessageRequest struct {
+	MessageID string `json:"message_id"`
+}
+
+type wsDismissGitPushErrorMessageResponse struct {
+	MessageID   string `json:"message_id"`
+	DismissedAt string `json:"dismissed_at"`
+}
+
+func (h *MessageHandlers) wsDismissGitPushErrorMessage(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsDismissGitPushErrorMessageRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload", nil)
+	}
+	messageID := strings.TrimSpace(req.MessageID)
+	if messageID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "message_id is required", nil)
+	}
+
+	dismissedAt, err := h.service.DismissGitPushErrorMessage(ctx, messageID)
+	if err != nil {
+		code := ws.ErrorCodeInternalError
+		publicMessage := "Failed to dismiss Git push error message"
+		switch {
+		case errors.Is(err, repoerrors.ErrTaskNotFound), errors.Is(err, sql.ErrNoRows):
+			code = ws.ErrorCodeNotFound
+			publicMessage = "Message not found"
+		case errors.Is(err, service.ErrNotGitPushErrorMessage):
+			code = ws.ErrorCodeValidation
+			publicMessage = "Message is not a Git push error"
+		}
+		h.logger.Warn("failed to dismiss Git push error message", zap.String("message_id", messageID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, code, publicMessage, nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, wsDismissGitPushErrorMessageResponse{
+		MessageID: messageID, DismissedAt: dismissedAt,
+	})
 }
 
 const messageSnippetRadius = 60

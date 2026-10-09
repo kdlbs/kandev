@@ -9,7 +9,7 @@ import type { CreateTaskResponse } from "../../lib/types/http";
 import type { ApiClient } from "./api-client";
 import { GitHelper, makeGitEnv } from "./git-helper";
 import { SessionPage } from "../pages/session-page";
-import { waitForSessionState } from "./session";
+import { waitForAgentMessage, waitForSessionDone } from "./session";
 
 type SqliteTestDatabase = {
   exec(sql: string): void;
@@ -73,6 +73,33 @@ export function captureSessionRecoveryMessages(page: Page) {
     });
   });
   return { requestIds, requestCounts, requests, responses };
+}
+
+/** Wait for both the live runtime and its durable inventory to settle after Stop. */
+export async function waitForStoppedRecoveryRuntime(
+  apiClient: ApiClient,
+  tmpDir: string,
+  fixture: WorktreeRecoveryFixture,
+) {
+  const sessionId = fixture.task.session_id!;
+  await expect
+    .poll(
+      async () => {
+        const status = await apiClient.wsRequest<{ is_agent_running: boolean }>(
+          "task.session.status",
+          { task_id: fixture.task.id, session_id: sessionId },
+        );
+        return status.is_agent_running;
+      },
+      { timeout: 30_000, message: "Waiting for the stopped recovery runtime to exit" },
+    )
+    .toBe(false);
+  await expect
+    .poll(() => readManagedCloneRecoveryConsumers(tmpDir, fixture.environment.id), {
+      timeout: 30_000,
+      message: "Waiting for the stopped recovery runtime inventory to settle",
+    })
+    .toEqual([{ sessionId, state: "CANCELLED", runtimeStatus: "stopped" }]);
 }
 
 export function capturedSessionRecoveryRequest(requests: Map<string, unknown>, action: string) {
@@ -459,13 +486,14 @@ export async function prepareArchiveRecoverySession(
 ): Promise<string> {
   const sessionId = fixture.task.session_id;
   if (!sessionId) throw new Error("worktree recovery fixture has no primary session");
-  await waitForSessionState(apiClient, {
-    taskId: fixture.task.id,
+  await waitForSessionDone(
+    apiClient,
+    fixture.task.id,
     sessionId,
-    expectedState: "WAITING_FOR_INPUT",
-    message: "Waiting for the archive recovery session to become active",
-    timeout: 60_000,
-  });
+    "Waiting for the archive recovery session to settle",
+    60_000,
+  );
+  await waitForAgentMessage(apiClient, sessionId, "simple mock response", 60_000);
   return sessionId;
 }
 

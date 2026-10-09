@@ -6,6 +6,7 @@ import { test, expect, type Locator, type Page } from "../../fixtures/test-base"
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SEEDED_MESSAGE, largeTurnMetadata } from "../../helpers/message-metadata-fixtures";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
 
 /** Seeds the overflow fixture and opens the metadata dialog on this page. */
@@ -53,6 +54,8 @@ async function openMetadataDialog(
   // child and carries data-slot="dialog-header").
   const entries = dialog.locator("> div.grid");
   await expect(entries).toBeVisible();
+  // Geometry assertions compare the dialog and its children after the opening animation.
+  await waitForFiniteAnimations(dialog);
   return { dialog, entries, turnLabel: dialog.getByText("turn_metadata", { exact: true }) };
 }
 

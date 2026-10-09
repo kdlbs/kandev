@@ -268,6 +268,12 @@ func TestAttachSignalsSecondSignalForceKillsChildren(t *testing.T) {
 
 	exitCh, output := captureLauncherExit(t)
 	supervisor := newSupervisor()
+	t.Cleanup(func() {
+		// The second signal can report exit before graceful shutdown finishes its
+		// final log writes. Join the sync.Once shutdown before captureLauncherExit
+		// restores the process-wide output target.
+		_ = supervisor.shutdown("test cleanup")
+	})
 	supervisor.add(proc)
 	supervisor.attachSignals()
 

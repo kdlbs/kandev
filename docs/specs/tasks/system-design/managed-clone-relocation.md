@@ -6,7 +6,7 @@ requirements:
   - REQ-TASKS-MANAGED-CLONE-RELOCATION-002
   - REQ-TASKS-MANAGED-CLONE-RELOCATION-003
 created: 2026-09-27
-updated: 2026-10-08
+updated: 2026-10-09
 owners:
   - kandev
 ---
@@ -220,6 +220,13 @@ A stale or failed request leaves the current actionable error visible.
 Record reason categories through the existing sanitized failure and relocation
 outcome paths. Never log file bytes, UID/GID details, or absolute paths in public
 errors. No install-wide startup scan or claim expiry is added.
+
+Workspace preparation and agent launch share the existing session-keyed
+lifecycle singleflight. `StartAgentProcess` coalesces subprocess startup
+separately by execution ID. A workspace result cannot satisfy subprocess
+startup or report its success; concurrent callers starting the same execution
+share only that startup result. Recovery admission and claim ownership remain
+unchanged.
 
 ## Inspection contention and explicit preflight
 

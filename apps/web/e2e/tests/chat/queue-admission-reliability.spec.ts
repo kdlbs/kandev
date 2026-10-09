@@ -57,6 +57,14 @@ async function queueFromTaskComposer(
 test.describe("queue admission reliability", () => {
   test.describe.configure({ retries: 1 });
 
+  test.afterEach(async ({ backend }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    await testInfo.attach("queue-admission-backend.log", {
+      path: backend.logPath,
+      contentType: "text/plain",
+    });
+  });
+
   test("clears an attached Task draft after a six second admission response", async ({
     testPage,
     apiClient,
@@ -155,7 +163,7 @@ test.describe("queue admission reliability", () => {
       apiClient,
       seedData,
       "Queue admission final uncertainty",
-      { sleepSeconds: 60 },
+      { sleepSeconds: 60, startWithGeneratingTurn: true },
     );
     await waitForComposerQueueMode(session.activeChat());
 

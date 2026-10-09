@@ -1,3 +1,4 @@
+import { seedContinuityPreviewHistory } from "./git-continuity-preview-history";
 import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import {
   createStandardProfile,
@@ -110,6 +111,8 @@ test.describe("desktop Git diff refresh continuity", () => {
       const repositoryPath = path.join(backend.tmpDir, "repos", "e2e-repo");
       const git = new GitHelper(repositoryPath, makeGitEnv(backend.tmpDir));
       resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+      const initialHead = git.getCurrentSha();
+      const restorePreviewHistory = seedContinuityPreviewHistory(git);
       git.createFile(PREFIX_PATH, prefixContent(16, "prefix-before"));
       git.createFile(TARGET_PATH, targetContent(INITIAL_MARKER));
 
@@ -142,11 +145,11 @@ test.describe("desktop Git diff refresh continuity", () => {
         await openAllChangesDiff(changes, testPage);
 
         const diffRoot = testPage.getByTestId("review-diff-scroll");
+        await expect(diffRoot.locator("[data-review-file-key]")).toHaveCount(14);
         const targetSection = diffRoot.locator(
           `[data-review-file-key="${encodeURIComponent(TARGET_PATH)}"]`,
         );
         await expect(targetSection).toBeVisible({ timeout: 30_000 });
-        await expect(diffRoot.locator("[data-review-file-key]")).toHaveCount(2);
         await scrollDiffIntoReadingPosition(testPage, renderer, TARGET_PATH);
         const anchorBefore = await visibleDiffAnchor(testPage, renderer, TARGET_PATH);
         expect(anchorBefore?.line).toBeGreaterThan(30);
@@ -248,7 +251,18 @@ test.describe("desktop Git diff refresh continuity", () => {
         });
       } finally {
         gate.dispose();
+        try {
+          restorePreviewHistory();
+        } finally {
+          git.deleteFile(PREFIX_PATH);
+          git.deleteFile(TARGET_PATH);
+          git.deleteFile(UNRELATED_PATH);
+        }
       }
+      expect(git.getCurrentSha()).toBe(initialHead);
+      expect(
+        git.exec(`git status --porcelain -- ${PREFIX_PATH} ${TARGET_PATH} ${UNRELATED_PATH}`),
+      ).toBe("");
     });
   }
 });

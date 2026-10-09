@@ -37,8 +37,11 @@ test.describe("Office run observation", () => {
     await expect(testPage.getByTestId("run-agent-name")).toHaveText(agentName);
 
     await testPage.goto("/office/workspace/activity");
-    const activityRow = testPage.getByText(/KAN-14/).locator("xpath=../..");
-    await expect(activityRow.getByText(agentName, { exact: true })).toBeVisible();
+    const taskActivity = testPage.getByText(/KAN-14/);
+    await expect(taskActivity).toBeVisible();
+    await expect(
+      taskActivity.locator("xpath=../..").getByText(agentName, { exact: true }),
+    ).toBeVisible();
 
     const activity = await officeApi.listActivity(officeSeed.workspaceId);
     expect(activity).toBeDefined();
