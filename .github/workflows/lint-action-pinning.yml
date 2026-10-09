@@ -77,6 +77,7 @@ jobs:
           python3 .github/scripts/ci-efficiency_test.py
           python3 .github/scripts/ci-gates_test.py
           python3 .github/scripts/ci-test-only-changes_test.py
+          python3 docs/plans/ci-performance/experiments/measurement-scripts_test.py
 
       - name: Test release contributor notification helper
         run: python3 .github/scripts/notify-release-contributors_test.py

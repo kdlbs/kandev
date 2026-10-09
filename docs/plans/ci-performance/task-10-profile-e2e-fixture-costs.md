@@ -91,3 +91,12 @@ proposed temporary-instrumentation pass. Per-operation attribution and opt-in
 full-worker execution remain explicitly unmeasured; no fixture rewrite is adopted.
 Shared fixture sources match the measured run. The report names exact follow-up
 owners, preservation requirements, and adoption gates.
+
+
+PR remediation adds input-provenance checks to the analysis script. Run
+`python3 docs/plans/ci-performance/experiments/measurement-scripts_test.py` for
+seven benchmark/comparison/artifact regressions. All pass. Reprocessing the
+original 20 blobs reproduces the committed aggregate exactly; attempt
+attribution remains unknown because the blobs identify a run, not an attempt.
+The plan records the separately reproduced preview-to-diff isolation failure
+and its focused test-only remediation.

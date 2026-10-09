@@ -3,6 +3,8 @@
     "https://github.com/kdlbs/kandev/actions/runs/37826061394"
   ],
   "artifacts": 20,
+  "run_attempt": null,
+  "attempt_attribution": "unknown",
   "aggregate": [
     {
       "fixture": "Fixture \"_sshRuntimeReset\"",

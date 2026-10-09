@@ -14,6 +14,7 @@ import time
 root = Path.cwd()
 web = root / "apps/web"
 out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(tempfile.mkdtemp(prefix="kandev-ci-setup-"))
+out = out.resolve()
 out.mkdir(parents=True, exist_ok=True)
 selection_path = (Path(sys.argv[2]) if len(sys.argv) > 2
                   else Path(__file__).parent / "setup-selection.json")

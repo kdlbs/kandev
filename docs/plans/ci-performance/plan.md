@@ -232,7 +232,8 @@ Design validation completed on 2026-09-12:
 Production application behavior is unchanged. CI workflows, workflow contracts,
 test configuration, and investigation-plan evidence changed as scoped.
 Implementation checks pass locally. Hosted cache reuse and hosted performance
-acceptance remain pending because no changed workflow was dispatched.
+acceptance remain pending. PR checks now exercise the changed workflows;
+a repeated hosted performance comparison has not been completed.
 
 Implementation validation on 2026-09-12:
 
@@ -256,3 +257,35 @@ Implementation validation on 2026-09-12:
 
 Internal CI procedures change in `docs/ci-merge-queue.md` during implementation.
 Public application behavior and `docs/public/**` remain unchanged.
+
+
+## PR remediation
+
+PR 4368's first E2E run failed the strict flake gate in shard 11. The desktop
+Pierre diff continuity test inherited three HTML-preview commits in its shared
+worker checkout. Resetting to `HEAD` retained those files. The exact
+HTML-preview-to-diff sequence reproduced the same visible-line timeout locally
+with retries disabled.
+
+The desktop and mobile HTML-preview suites now restore the immutable seed
+checkout before and after each test. Both diff continuity suites restore that
+same baseline and assert that the viewer contains exactly their two seeded
+files. Preview suites use zero retries. Product code, timeouts, and existing
+continuity assertions remain unchanged.
+
+The measurement tools also reject skipped-only comparisons and empty, mixed-run,
+or unidentified artifact inputs. Relative benchmark output paths are resolved
+before changing working directories. Blob attempt attribution is explicitly
+unknown. The entry-point regression suite failed on the prior scripts; all
+seven tests pass after the fixes; the existing 20-blob report reproduces exactly and the
+recorded full-suite reports still match. These checks run in the existing
+workflow job without adding runner slots.
+
+Local validation:
+
+- `pnpm --dir apps/web e2e:run --host --no-build --project chromium tests/chat/html-preview.spec.ts tests/git/diff-refresh-continuity.spec.ts --retries=0 --repeat-each=3`: 15 passed, no retries, after a fresh managed build reproduced the original failure.
+- `pnpm --dir apps/web run typecheck`: passed.
+- Focused ESLint/Prettier, Actionlint, documentation coverage, catalog/spec lint,
+  and 113 CI helper/measurement tests: passed.
+- `pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome tests/git/mobile-diff-refresh-continuity.spec.ts tests/task/mobile-html-preview.spec.ts --retries=0`: five passed, no retries.
+- Final hosted CI is pending the remediation push.

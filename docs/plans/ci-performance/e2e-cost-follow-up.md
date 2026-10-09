@@ -4,7 +4,8 @@
 
 Source: [PR 4352 E2E attempt 1](https://github.com/kdlbs/kandev/actions/runs/37826061394).
 Downloaded its 20 existing `blob-report-*` artifacts through read-only API calls.
-All embedded build URLs identify that run. The shared fixture sources match
+All embedded build URLs identify that run. Blob metadata does not verify the
+run attempt, so the aggregate records attempt attribution as unknown. The shared fixture sources match
 this checkout; `git diff 730abee48936b7b3c804a8f365526e27a36302ca HEAD` is empty
 for `test-base.ts`, `backend.ts`, and `docker-test-base.ts`.
 

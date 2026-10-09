@@ -9,6 +9,7 @@ import io
 import json
 import math
 import pathlib
+import re
 import statistics
 import sys
 import zipfile
@@ -17,7 +18,11 @@ artifacts = pathlib.Path(sys.argv[1])
 rows = []
 tests = {}
 provenance = set()
-for artifact in sorted(artifacts.glob("blob-report-*.zip")):
+artifact_paths = sorted(artifacts.glob("blob-report-*.zip"))
+if not artifact_paths:
+    raise SystemExit("No blob artifacts found")
+for artifact in artifact_paths:
+    artifact_provenance = set()
     with zipfile.ZipFile(artifact) as outer:
         for name in outer.namelist():
             if not name.endswith(".zip"):
@@ -29,7 +34,10 @@ for artifact in sorted(artifacts.glob("blob-report-*.zip")):
                     params = event.get("params", {})
                     if event["method"] == "onProject":
                         project = params["project"]
-                        provenance.add(project.get("metadata", {}).get("ci", {}).get("buildHref", "unknown"))
+                        workflow_url = project.get("metadata", {}).get("ci", {}).get("buildHref", "")
+                        if not re.fullmatch(r"https://github\.com/[^/]+/[^/]+/actions/runs/[1-9][0-9]*", workflow_url):
+                            raise SystemExit(f"Unverified workflow identity in {artifact.name}")
+                        artifact_provenance.add(workflow_url)
                         def visit(entries):
                             for entry in entries:
                                 if "testId" in entry:
@@ -53,6 +61,11 @@ for artifact in sorted(artifacts.glob("blob-report-*.zip")):
                         rows.append({"artifact": artifact.name, "testId": params["testId"],
                                      "fixture": step["title"], "phase": phase,
                                      "milliseconds": params["step"]["duration"]})
+    if len(artifact_provenance) != 1:
+        raise SystemExit(f"Expected one workflow identity in {artifact.name}")
+    provenance.update(artifact_provenance)
+    if len(provenance) != 1:
+        raise SystemExit("Artifacts span multiple workflow runs")
 for row in rows:
     row.update(tests.get(row["testId"], {}))
 
@@ -69,7 +82,8 @@ def aggregate(items):
 focused = ("chat/message-queue.spec.ts", "session/session-idle-parking.spec.ts",
            "session/mobile-transient-turn-runtime-continuity.spec.ts",
            "docker/docker-launch.spec.ts", "kubernetes/kubernetes-docker-workloads.spec.ts")
-result = {"workflow_urls": sorted(provenance), "artifacts": len(list(artifacts.glob("blob-report-*.zip"))),
+result = {"workflow_urls": sorted(provenance), "artifacts": len(artifact_paths),
+          "run_attempt": None, "attempt_attribution": "unknown",
           "aggregate": aggregate(rows),
           "slow_test_page_setup": sorted([r for r in rows if r["fixture"] == 'Fixture "testPage"' and r["phase"] == "Before Hooks" and r["milliseconds"] >= 10000], key=lambda r: r["milliseconds"], reverse=True),
           "focused": {file: aggregate([row for row in rows if row.get("file") == file]) for file in focused}}
