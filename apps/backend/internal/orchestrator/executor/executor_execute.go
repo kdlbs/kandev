@@ -3672,7 +3672,7 @@ func environmentReposForLaunch(req *LaunchAgentRequest, resp *LaunchAgentRespons
 		WorktreeSourceClonePath: worktreeSourceClonePath,
 		WorktreeSourceCommonDir: worktreeSourceCommonDir,
 		Position:                0,
-		WorkspaceRelativePath: req.WorkspaceRelativePath,
+		WorkspaceRelativePath:   req.WorkspaceRelativePath,
 	}}
 }
 
@@ -3697,7 +3697,7 @@ func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnv
 			WorktreeSourceCommonDir: w.MainRepoGitDir,
 			Position:                i,
 			ErrorMessage:            w.ErrorMessage,
-		WorkspaceRelativePath: w.WorkspaceRelativePath,
+			WorkspaceRelativePath:   w.WorkspaceRelativePath,
 		})
 	}
 	return out
@@ -3791,7 +3791,7 @@ func (e *Executor) persistOneTaskEnvironmentRepoTransition(
 		WorktreeSourceCommonDir: w.WorktreeSourceCommonDir,
 		Position:                position,
 		ErrorMessage:            w.ErrorMessage,
-		WorkspaceRelativePath: w.WorkspaceRelativePath,
+		WorkspaceRelativePath:   w.WorkspaceRelativePath,
 	}
 	if createErr := e.repo.CreateTaskEnvironmentRepo(ctx, row); createErr != nil {
 		e.logger.Warn("failed to persist task environment repo",

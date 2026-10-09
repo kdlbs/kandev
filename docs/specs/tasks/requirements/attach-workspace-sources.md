@@ -95,18 +95,18 @@ worktrees and launch-time inventory retain their own lifecycles. The focused tec
 [Complete repository association replacement](../system-design/attach-workspace-source-replacement.md).
 The existing source-attachment requirement and its materialization guarantees remain unchanged.
 
-### REQ-TASKS-ATTACH-WORKSPACE-SOURCES-005: Initial workspace layout
+### REQ-TASKS-ATTACH-WORKSPACE-SOURCES-007: Initial workspace layout
 
 **Intent:** Let a Worktree task reserve a parent workspace before its first launch.
 
 #### Acceptance criteria
 
-- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-005.1:** For a new single-repository Worktree task, Advanced shall offer “Start in a parent workspace folder”, disabled by default.
-- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-005.2:** With that option enabled, the agent shall start in the task folder with the repository beneath it. With it disabled, single-repository startup shall retain the repository root.
-- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-005.3:** The creation option shall survive queued launch, resume, backend restart, and additional sessions. Repository count changes alone shall not move an established workspace.
-- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-005.4:** A task created with multiple repositories shall retain its parent-root layout. The dialog shall explain that this layout already applies.
-- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-005.5:** Unsupported executors and repositoryless tasks shall not offer the option. Explicit unsupported values shall fail before task creation.
-- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-005.6:** Existing tasks shall retain their recorded workspace and repository locations. Invalid or ambiguous workspace identity shall produce an actionable error without moving or recreating checkouts.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-007.1:** For a new single-repository Worktree task, Advanced shall offer “Start in a parent workspace folder”, disabled by default.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-007.2:** With that option enabled, the agent shall start in the task folder with the repository beneath it. With it disabled, single-repository startup shall retain the repository root.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-007.3:** The creation option shall survive queued launch, resume, backend restart, and additional sessions. Repository count changes alone shall not move an established workspace.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-007.4:** A task created with multiple repositories shall retain its parent-root layout. The dialog shall explain that this layout already applies.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-007.5:** Unsupported executors and repositoryless tasks shall not offer the option. Explicit unsupported values shall fail before task creation.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-007.6:** Existing tasks shall retain their recorded workspace and repository locations. Invalid or ambiguous workspace identity shall produce an actionable error without moving or recreating checkouts.
 
 ### REQ-TASKS-ATTACH-WORKSPACE-SOURCES-003: Repository placement
 

@@ -576,7 +576,7 @@ type LaunchAgentRequest struct {
 	IsEphemeral           bool                // Ephemeral task (quick chat) — enables fallback workspace creation
 	WorkspacePath         string              // Optional host folder for repo-less tasks (overrides scratch fallback)
 	OriginalWorkspacePath string              // First agent-visible path used for native restore policy
-	WorkspaceLayout string // Persisted Worktree agent-root layout
+	WorkspaceLayout       string              // Persisted Worktree agent-root layout
 
 	// IsPassthrough is the session's mode snapshot (TaskSession.IsPassthrough)
 	// at session-creation time. Forwarded to the lifecycle manager so

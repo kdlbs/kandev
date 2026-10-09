@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -471,10 +472,10 @@ func executionWorkspaceRepositoryCandidate(
 	repository WorkspaceRepositorySpec,
 ) string {
 	switch {
-	case repository.WorkspaceRelativePath != "" || info.WorkspaceLayout == workspaceLayoutTaskRoot:
-		return workspaceRepositoryCandidate(info.WorkspacePath, info.WorkspaceLayout, repository.RepoName, repository.WorkspaceRelativePath)
 	case info.ExecutorType == string(models.ExecutorTypeWorktree) && repository.WorktreePath != "":
 		return repository.WorktreePath
+	case repository.WorkspaceRelativePath != "" || info.WorkspaceLayout == workspaceLayoutTaskRoot || info.WorkspaceLayout == workspaceLayoutKandevDirectory:
+		return workspaceRepositoryCandidate(info.WorkspacePath, info.WorkspaceLayout, repository.RepoName, repository.WorkspaceRelativePath)
 	case index > 0:
 		if info.ExecutorType != string(models.ExecutorTypeWorktree) {
 			if _, err := localGitTopLevel(ctx, info.WorkspacePath); err == nil {
@@ -484,7 +485,7 @@ func executionWorkspaceRepositoryCandidate(
 			}
 		}
 		return filepath.Join(info.WorkspacePath, repository.RepoName)
-	case len(info.WorkspaceRepositories) > 1:
+	case len(info.WorkspaceRepositories) > 1 || info.WorkspaceLayout == workspaceLayoutCurrentRoot:
 		// Multi-repository worktree layouts use a task root. Local layouts
 		// may use the primary repository as the root, so try its child only
 		// when the root does not validate.

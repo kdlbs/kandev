@@ -500,7 +500,7 @@ func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 		RemoteRefState:             req.RemoteRefState,
 		CopyFiles:                  req.CopyFiles,
 		BranchIdentitySlug:         branchIdentity,
-		WorkspaceRelativePath: req.WorkspaceRelativePath,
+		WorkspaceRelativePath:      req.WorkspaceRelativePath,
 	}, true
 }
 

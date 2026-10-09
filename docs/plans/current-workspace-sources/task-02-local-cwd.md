@@ -173,7 +173,7 @@ Desktop uses a viewport-constrained 960px dialog and full-width stacked placemen
 
 ## Browser QA repair checklist (2026-10-09)
 
-Status: implemented and locally verified; rebased verification pending. The user authorized remediation of the [QA findings](qa-2026-10-09.md).
+Status: implemented and verified after rebase onto main `3fed5570ce`. The user authorized remediation of the [QA findings](qa-2026-10-09.md).
 These repairs implement the existing acceptance criteria and UI-02/UI-04 previews.
 
 - F1: Materialize ready Local and scratch environments without a managed task directory.
@@ -186,3 +186,7 @@ These repairs implement the existing acceptance criteria and UI-02/UI-04 preview
 Validation: reproduce runtime defects with focused Go regressions, then exercise desktop and phone
 attachment in a browser. Run affected backend packages, frontend checks, localization, and docs checks.
 Preserve the separate root-expansion recovery gate on PR #3598.
+
+Results: all six QA findings resolved. Eight browser tests and 98 focused frontend tests passed after
+rebase. Affected backend tests, Go lint, ESLint, typecheck, localization, builds, and documentation
+checks passed. See the QA report for screenshots, the phone test timing repair, and coverage limits.

@@ -1209,14 +1209,16 @@ func (s *Service) workspaceRepositorySpec(
 	cloneRelocation := s.managedCloneRelocationProof(repository)
 	spec := lifecycle.WorkspaceRepositorySpec{
 		RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: projection.repoName,
-		CloneRelocation: cloneRelocation,
+		CloneRelocation:       cloneRelocation,
 		WorkspaceRelativePath: taskRepository.WorkspaceRelativePath,
-		BaseBranch:      taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
+		BaseBranch:            taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
 		CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
 	}
 	if selected := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchIdentitySlug}]; selected != nil {
-		if spec.WorkspaceRelativePath == "" { spec.WorkspaceRelativePath = selected.WorkspaceRelativePath }
+		if spec.WorkspaceRelativePath == "" {
+			spec.WorkspaceRelativePath = selected.WorkspaceRelativePath
+		}
 		spec.WorktreeID = selected.WorktreeID
 		spec.WorktreePath = selected.WorktreePath
 		spec.WorktreeBranch = selected.WorktreeBranch

@@ -4,6 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
@@ -285,7 +286,14 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   expect(submitBox!.y + submitBox!.height).toBeLessThanOrEqual(drawerBox!.y + drawerBox!.height);
   await drawer.getByRole("radio", { name: /Inside the current/ }).tap();
   await expect(submit).toBeEnabled();
+  const attachmentResponse = waitForHttp(
+    testPage,
+    "POST",
+    /^\/api\/v1\/tasks\/[^/]+\/workspace-sources$/,
+    { timeout: 60_000 },
+  );
   await submit.tap();
+  expect((await attachmentResponse).ok()).toBe(true);
   await expect(drawer).not.toBeVisible();
   await expect(entryPoint).toBeEnabled();
   await expect(entryPoint).toBeFocused();

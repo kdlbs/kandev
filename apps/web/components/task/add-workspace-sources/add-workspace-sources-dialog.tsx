@@ -2,7 +2,6 @@
 
 import { useCallback, useState, type RefObject, type ReactNode } from "react";
 import { Button } from "@kandev/ui/button";
-import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import {
   Dialog,
   DialogContent,

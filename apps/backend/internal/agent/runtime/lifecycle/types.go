@@ -1459,7 +1459,7 @@ type WorkspaceRepositorySpec struct {
 	RemoteSyncHandled       bool
 	BranchSlug              string
 	BranchIdentitySlug      string
-	WorkspaceRelativePath string
+	WorkspaceRelativePath   string
 }
 
 // RouteOverride carries a fully resolved provider profile for one
@@ -1510,7 +1510,7 @@ type LaunchRequest struct {
 	TaskDescription       string              // Task description to send via ACP prompt
 	Attachments           []MessageAttachment // Attachments (images/files) for the initial prompt
 	Env                   map[string]string   // Additional env vars
-	WorkspaceLayout string
+	WorkspaceLayout       string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string
