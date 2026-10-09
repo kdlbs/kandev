@@ -12,10 +12,13 @@ owners:
 
 Overlapping workspace renames, default selections, and idle-policy saves must
 retain each successful disjoint edit. The workspace system owns this contract
-because it owns persisted workspace values. Settings presentation, executor
+because it owns persisted workspace values and the current workspace catalogue
+consumed by settings and navigation. Settings presentation, executor
 suspension, and organization reach consume those values and keep their own
 contracts. The existing workspace catalog has no capability that owns partial
-settings persistence; this pair supplies that narrow missing contract.
+settings persistence; this pair supplies that narrow contract. The client
+publication boundary below preserves catalogue choices during a settings save
+without changing that persistence contract.
 
 ## Terms and boundary
 
@@ -82,14 +85,61 @@ earlier observation of the workspace.
   Intentional complete-write callers and exact administration consumers shall
   retain their established behavior and error contracts.
 
+### REQ-WORKSPACES-SETTINGS-UPDATES-002: Preserve current catalogue during settings save
+
+**Intent:** A successful settings save shall preserve independent workspace
+choices already visible when the save is acknowledged.
+
+The linked catalogue-preservation work order implements this client boundary.
+Requirement 001 and all its backend presence, admission, exact-update, response,
+and event contracts remain active and unchanged.
+
+#### Acceptance criteria
+
+- **AC-WORKSPACES-SETTINGS-UPDATES-002.1:** When another workspace is added,
+  updated, or removed while a workspace settings save is pending, successful
+  acknowledgement shall preserve that current membership, order, and other
+  workspace's current values. It shall neither remove an added choice, restore
+  an earlier value, nor resurrect a removed choice.
+- **AC-WORKSPACES-SETTINGS-UPDATES-002.2:** The real workspace switcher shall
+  expose those current choices and names after acknowledgement while showing
+  the accepted target settings. Selecting a retained choice after an ordinary
+  successful save shall keep the existing workspace selection and navigation
+  behavior. This outcome shall apply to desktop and phone users through their
+  existing shared state and controls.
+- **AC-WORKSPACES-SETTINGS-UPDATES-002.3:** A successful settings acknowledgement
+  shall preserve the target's current metadata outside the existing accepted
+  settings projection, including description, ownership, caller scopes,
+  placement, configuration-agent default, and creation/update timestamps. It
+  shall preserve the current active workspace identity and its selection
+  revision. It shall retain the accepted name, executor/environment/agent
+  defaults, and idle-policy projection with existing absence/default behavior.
+- **AC-WORKSPACES-SETTINGS-UPDATES-002.4:** Ordinary successful saves without an
+  intervening catalogue change shall keep existing accepted values, saved
+  baseline, contributor completion, and dirty-state behavior. A pristine form
+  shall issue no save. Newer unsaved edits made during an accepted save shall
+  remain unsaved and shall retain the existing protection against leaving.
+- **AC-WORKSPACES-SETTINGS-UPDATES-002.5:** A rejected save shall publish no
+  accepted settings or baseline from that request. Current catalogue changes
+  and a newer unsaved draft shall remain available; the failed contributor,
+  existing error feedback, and dirty-route protection shall remain effective.
+- **AC-WORKSPACES-SETTINGS-UPDATES-002.6:** Settings saves shall retain existing
+  changed-field request presence, trimmed name, default clearing, explicit
+  false, numeric idle timeout, validation, and manage-scope behavior. Omitted
+  settings shall not become supplied values because the catalogue changed.
+  Backend partial-field intent guarantees in requirement 001 remain intact.
+
 ## Out of scope
 
 - New fields, transport capabilities, revision tokens, schema changes, settings
-  controls, client stores, or hierarchy/runtime behavior.
+  controls, or hierarchy/runtime behavior. Client-store changes beyond the
+  settings acknowledgement publication in requirement 002 are excluded.
 - Changes to reach policy, authentication, legacy visibility, or task numbering.
 - Universal serialization with unrelated workspace writers.
-- Global event order, guaranteed freshness when a response is received, or a
-  new guarantee that clients reject stale projections.
+- Global event order, target-settings revision arbitration, guaranteed response
+  freshness, or a new guarantee that clients reject stale target projections.
+- Changes to delete/create/placement routes or other save callers; catalogue
+  loss is not backend workspace deletion.
 - Suspension/recovery behavior owned by the executor system.
 
 ## References
@@ -98,4 +148,5 @@ earlier observation of the workspace.
 - [Organization units](org-units.md).
 - [Idle runtime parking](../../executors/requirements/idle-runtime-parking.md).
 - [Settings manual save](../../ui/requirements/settings-manual-save.md).
-- [Implementation plan](../../../plans/preserve-workspace-settings-updates/plan.md).
+- [Backend implementation plan](../../../plans/preserve-workspace-settings-updates/plan.md).
+- [Catalogue preservation plan](../../../plans/workspace-save-catalogue-preservation/plan.md).
