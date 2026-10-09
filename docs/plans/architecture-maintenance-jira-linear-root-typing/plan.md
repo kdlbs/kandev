@@ -77,9 +77,9 @@ Update only `docs/architecture-maintenance/README.md`,
 `historical-audit.md` for verified current-status corrections and this finite
 increment. Record current main separately from the 2026-09-27 snapshot. Keep
 unresolved candidates proposed/deferred with their existing design or evidence
-gaps. After the PR opens, add its live URL to the Jira/Linear
-implementation-complete, delivery-pending record. Do not describe either slice
-as merged until merge evidence exists.
+gaps. The live [PR #4375](https://github.com/kdlbs/kandev/pull/4375) now records
+the Jira/Linear implementation as complete with delivery pending. Do not
+describe either slice as merged until merge evidence exists.
 
 ### Jira slice
 
@@ -148,8 +148,9 @@ architecture tests, the architecture scan, docs catalog/spec lint, and
 disjoint and the exact baseline remains 45 to 39. Trusted-main PR-docs
 preflight over all 19 actual changed paths returned `ok: true`, status
 `covered`, and no errors. The latest docs catalog validated 368 decisions
-and 1,498 specifications. The three scoped work orders are complete; hosted
-delivery evidence remains pending until the combined PR is open and reviewed.
+and 1,498 specifications. The three scoped work orders are complete. [PR
+#4375](https://github.com/kdlbs/kandev/pull/4375) is open; hosted checks,
+review, and merge evidence remain pending there.
 
 ## Risks
 

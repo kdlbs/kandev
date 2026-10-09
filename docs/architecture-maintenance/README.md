@@ -62,7 +62,7 @@ on 2026-10-09. The dated 2026-09-27 inventory remains historical.
 
 | Item | Status | Next action or reason |
 | --- | --- | --- |
-| Jira and Linear issue-watch slice typing | Planned in the reviewed [delivery package](../plans/architecture-maintenance-jira-linear-root-typing/plan.md) | Preserve existing state behavior and remove only the six matching root-state-cast entries. Record the live PR and delivery-pending status after it opens. |
+| Jira and Linear issue-watch slice typing | Implementation complete, delivery pending in [PR #4375](https://github.com/kdlbs/kandev/pull/4375) | Wait for merge evidence before marking the item done. The reviewed [delivery package](../plans/architecture-maintenance-jira-linear-root-typing/plan.md) records its scope and local results. |
 | Further Office run-alias retirement | Proposed | Keep the 27 remaining registrations until each ledger removal condition and its consumers are verified. |
 | Other System resources | Deferred | Inventory each resource and its owner, identity, freshness, and event boundary before choosing another migration. |
 | Tasks, sessions, integrations, and workspaces | Deferred | Their ownership and event/data contracts need separate inventories and designs. |

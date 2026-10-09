@@ -32,9 +32,9 @@ and source commit, and show the fresh current-main measurement separately.
 - Preserve remaining proposals/deferred candidates with honest reasons.
 - Correct the outdated SystemInfo-only migration summary after checking the
   current provider and hook owners.
-- After the combined PR opens, add its live URL to the Jira/Linear
-  implementation-complete, delivery-pending roadmap entry; keep it pending
-  until merge evidence exists.
+- The combined [PR #4375](https://github.com/kdlbs/kandev/pull/4375) is open.
+  The roadmap records the Jira/Linear implementation as complete with delivery
+  pending until merge evidence exists.
 - Update only the five roadmap files named below.
 
 ## Out of scope
@@ -146,3 +146,6 @@ count remains 45, and the compatibility ledger remains at 29 registrations
 including 27 Office aliases. The roadmap snapshot links were refreshed to this
 commit. Revalidation passed: the docs catalog reports 368 decisions and 1,498
 specifications, all-spec lint passed, and `git diff --check` passed.
+
+The Jira and Linear implementation is complete, with delivery pending under
+[PR #4375](https://github.com/kdlbs/kandev/pull/4375).
