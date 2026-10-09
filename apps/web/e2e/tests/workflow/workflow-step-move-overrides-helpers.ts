@@ -26,16 +26,22 @@ export async function seedMoveOverrideFixture(
   apiClient: ApiClient,
   seedData: SeedData,
   name: string,
+  options: { targetStepName?: string; sourcePrompt?: string } = {},
 ): Promise<MoveOverrideFixture> {
   const workflow = await apiClient.createWorkflow(seedData.workspaceId, `${name} Workflow`);
   const sourceStep = await apiClient.createWorkflowStep(workflow.id, "Spec", 0, {
     is_start_step: true,
   });
-  const targetStep = await apiClient.createWorkflowStep(workflow.id, "Verify", 1, {
-    auto_advance_requires_signal: true,
-  });
+  const targetStep = await apiClient.createWorkflowStep(
+    workflow.id,
+    options.targetStepName ?? "Verify",
+    1,
+    {
+      auto_advance_requires_signal: true,
+    },
+  );
   await apiClient.updateWorkflowStep(sourceStep.id, {
-    prompt: 'e2e:message("spec ready")\n{{task_prompt}}',
+    prompt: options.sourcePrompt ?? 'e2e:message("spec ready")\n{{task_prompt}}',
     events: { on_enter: [{ type: "auto_start_agent" }] },
   });
   await apiClient.updateWorkflowStep(targetStep.id, {
