@@ -5,7 +5,7 @@ requirements:
   - REQ-AGENTS-CUSTOM-ACP-001
   - REQ-AGENTS-CUSTOM-ACP-002
 created: 2026-09-22
-updated: 2026-09-28
+updated: 2026-10-09
 owners:
   - jnmanso
 ---
@@ -30,6 +30,9 @@ It does not change how built-in agents are declared, detected, or launched.
 | AC-AGENTS-CUSTOM-ACP-001.5 | `internal/agent/settings/controller` |
 | AC-AGENTS-CUSTOM-ACP-001.6 | `internal/agent/registry`, `internal/agent/settings/handlers` |
 | AC-AGENTS-CUSTOM-ACP-001.7 | `internal/agentctl/server/utility` |
+| AC-AGENTS-CUSTOM-ACP-001.8 | [Terminal MCP save acknowledgement](#terminal-mcp-save-acknowledgement) |
+| AC-AGENTS-CUSTOM-ACP-001.9 | [Terminal MCP save acknowledgement](#terminal-mcp-save-acknowledgement) |
+| AC-AGENTS-CUSTOM-ACP-001.10 | [Terminal MCP save acknowledgement](#terminal-mcp-save-acknowledgement) |
 | AC-AGENTS-CUSTOM-ACP-002.1 | `internal/agent/agents` (declares restore); `internal/agent/runtime/lifecycle` and the ACP adapter (unchanged) |
 | AC-AGENTS-CUSTOM-ACP-002.2 | ACP adapter capability gate (unchanged) |
 | AC-AGENTS-CUSTOM-ACP-002.3 | `internal/agent/runtime/lifecycle` failure classification (unchanged) |
@@ -63,6 +66,80 @@ no migration runs. `CustomAgentProtocolACP` is the only other accepted value.
 
 `controller.CustomAgentSpecFromStored` is the single spec builder shared by the MCP-strategy change and
 the boot replay, so a field added to the stored config cannot reach one path and miss the other.
+
+## Terminal MCP save acknowledgement
+
+The agent system owns this boundary because it owns the configured custom definition and its
+profile membership. The Agents settings page mounts `CustomTUIMcpCard` next to
+`AgentProfilesSubList`, supplying both from current `settingsAgents.items`. The strategy control
+saves immediately and independently of profile drafts. Built-in and ACP definitions remain ineligible.
+
+### Endpoint field ownership
+
+`PATCH /api/v1/agents/tui/:id/mcp` calls `SetCustomTUIAgentMCPStrategy`, which changes
+`TUIConfig.MCPStrategy` and coupled `SupportsMCP`, persists the definition, replaces the registry
+entry, and invalidates discovery. `customTUIAgentDTO` returns a full `AgentDTO`, including separately
+read profiles and capability metadata. `updateCustomTUIAgentMCPStrategy` normalizes those profiles
+before returning the response. A full response shape does not give this save ownership of those fields.
+
+The card obtains its owning store through the existing `useAppStoreApi`. After transport acceptance,
+it reads current `settingsAgents.items` and synchronously uses the existing `setSettingsAgents`
+action to publish a narrowly changed list. No await separates that read from publication.
+
+- Match the requested agent identity against the accepted response and the current existing row.
+- Patch only accepted `supports_mcp` and `tui_config.mcp_strategy`, merging the latter into the
+  current row's TUI config. Preserve its command, display name, protocol, and other config fields.
+- An omitted or empty accepted strategy represents Off. Use the accepted value rather than
+  re-deriving it from the user's requested key.
+- Preserve all current profiles, all other rows, current list membership/order, and all unrelated
+  target metadata, including timestamps and capability information. Do not spread the response.
+- If the current target is absent or no longer an eligible custom terminal definition, publish no
+  replacement for it. Do not insert an agent from the ACK or restore a prior profile list.
+- Do not write the separate `agentProfiles`, `availableAgents`, or discovery slices.
+
+Existing `agent.profile.created/updated/deleted` handlers remain authoritative for profile events;
+their normalized state and flattened profile options must survive this ACK. The existing
+`agent.settings.updated` broadcast remains unchanged. Cross-client competing writes to the same
+strategy are outside this local publication repair; no timestamp, revision, or request framework is added.
+
+### Visible behavior, failures, and mobile
+
+Current strategy values are read from subscribed current agent props. Only the saving card's control
+is disabled while pending; sibling cards can save independently. A rejection keeps current store data
+and uses the existing handled-error suppression or ordinary error toast, with `saving` cleared by the
+existing settle path. No new copy, layout, navigation, touch target, or scroll owner is introduced.
+
+Desktop and phone reuse the current Agents card and `MCPStrategySelect`, whose coarse-pointer
+trigger/options already have a 44px minimum. This is state normalization within an existing component;
+the mobile-parity exception permits focused rendered component integration coverage without new
+Playwright cases. Existing desktop/mobile strategy-selector specs cover selector geometry rather than
+this ACK race and must not be cited as race evidence.
+
+### Regression boundary
+
+Render the actual card and selector under the actual `StateProvider` (which creates `createAppStore`).
+A subscribed test consumer supplies current agent props and captures `useAppStoreApi`; use real
+`AgentProfilesSubList` for profile-row consequences. Only defer the external `fetchJson` transport;
+leave the settings API, store, provider, actions, normalization, and registered WS handlers real.
+
+While the PATCH is pending, deliver actual profile events through `registerAgentsHandlers` and
+publish membership/settings changes through existing store actions. Prove before ACK that those
+changes reached the store/render, then release the response and assert preserved rows and strategy.
+Exercise two actual cards with both PATCH requests admitted before either ACK, resolving in both
+orders. Include target deletion, ordinary on/off success, and failures with current changes.
+Use distinct profile IDs per test to avoid unrelated module-level profile tombstones. Settle all
+deferred requests before cleanup. Do not mock publication or test an isolated merge helper.
+
+Task-start profile choices consume separate `agentProfiles` options. The card currently replaces only
+`settingsAgents`; source evidence therefore proves profile settings disappearance and disagreement
+between projections, not loss of the task-start option. Assert that the live flattened projection is
+unchanged by this ACK without inventing a task-launch or catalogue-fetching repair.
+
+## Related implementation plans
+
+- [MCP acknowledgement publication repair](../../../plans/custom-tui-mcp-ack-publication/plan.md).
+- [Operator-registered ACP agents](../../../plans/custom-acp-agents/plan.md) retains its original scope.
+- [Live registry discovery](../../../plans/agent-discovery-live-registry/plan.md) retains its completed scope.
 
 ## CustomACPAgent is deliberately not a TUIAgent
 
