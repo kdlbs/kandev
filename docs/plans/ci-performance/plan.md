@@ -9,9 +9,11 @@ requirements:
   - REQ-PLATFORM-CI-PERFORMANCE-005
   - REQ-PLATFORM-CI-PERFORMANCE-006
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001
+  - REQ-TASKS-TASK-ACTIONS-MENU-004
 system_design:
   - ../../specs/platform/system-design/ci-performance.md
   - ../../specs/platform/system-design/durable-agent-delivery.md
+  - ../../specs/tasks/system-design/task-actions-menu.md
 legacy_specs: []
 ---
 
@@ -164,6 +166,7 @@ No browser E2E is needed for CI-only behavior. Existing application E2E coverage
 - [x] [Task 09: Avoid application E2E for independent Go test changes](task-09-skip-go-test-only-e2e.md)
 - [x] [Task 10: Attribute E2E fixture and planner costs](task-10-profile-e2e-fixture-costs.md)
 - [x] [Task 11: Reject journal operations after shutdown](task-11-journal-shutdown.md)
+- [x] [Task 12: Keep closed task menus closed during processing](task-12-task-menu-recovery.md)
 
 ## Execution and evidence
 
@@ -330,3 +333,20 @@ invalid-repository sibling now stop their manager before temporary-directory
 cleanup. All 300 focused executions pass under the race detector. The complete
 API package also passes with race detection and atomic coverage, and Go lint is
 clean. This remediation changes tests only; hosted CI awaits the next push.
+
+The following run passed frontend and all backend test jobs but failed the
+managed-task command test. The stale deletion confirmation closed while the
+page retained `pointer-events: none`; its retry passed and the flake gate failed.
+The card forcibly reopened its dropdown when delete/archive processing began,
+even after the menu had closed to enter the confirmation dialog.
+[Task 12](task-12-task-menu-recovery.md) keeps menu open state independent of
+mutation progress and preserves guards for an already open busy menu.
+The exact pointer lock recurred in six local baseline repetitions; two passes
+and two distinct backend/fixture startup failures are recorded separately.
+Two closed-menu component regressions failed before the change.
+All four new cases and 39 existing menu/dialog cases pass after it.
+A fresh managed build passed ten original desktop scenarios without retries.
+Three phone repetitions also passed: touch the card menu, reject a stale
+confirmation, keep both tasks, reopen, and delete both with fresh consent.
+Typecheck, focused lint/format checks, catalog validation, and specification
+lint passed. Hosted verification remains pending the next remediation push.
