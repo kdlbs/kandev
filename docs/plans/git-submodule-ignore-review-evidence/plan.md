@@ -452,3 +452,31 @@ RED remains accepted without replay; no unrelated passing checks were repeated.
 Normal active-hook publication evidence belongs in the own task plan.
 New-head hosted delivery remains pending a later ROOT release after explicit
 local-heavy return and END/WFI; prior-head CI/review evidence is historical.
+
+### Preview-history setup failure correction
+
+ROOT reviewed current grouped review 5470668211 and released a bounded
+helper-only correction. A failure after an earlier preview commit or partial
+file creation must reset the captured initial HEAD, remove only the fixed
+preview file paths and rethrow the original setup error. Cleanup failures must
+remain failed fixtures with the setup error retained. Preserve successful
+history, restoration callback, preview contents and all product/geometry/test
+assertions and timeouts. Exact owned-path staging is allowed if the real-Git
+untracked sentinel control proves that broad staging captures unrelated files.
+
+Validation is limited to independently authored real-Git failure/success and
+cleanup-error controls, one fresh managed Chromium/Pierre desktop success case
+with one worker, no retries and one repetition, affected helper/test lint and
+formatting, document/reference/actual-scope checks and normal active hooks.
+No shared GitHelper, runner configuration, product, mobile, backend or API
+change applies. Five permanent real-Git cases first fail against the baseline
+helper, then pass after the correction. They cover early partial creation,
+failure after an earlier commit, successful restoration, reset failure and
+owned-file deletion failure, including original error identity and unrelated
+tracked/untracked sentinel controls. Broad staging captured the untracked
+sentinel in the causal RED, so staging now names only the fixed owned paths.
+Cleanup errors retain the original setup error and do not claim restored HEAD.
+One fresh managed Pierre desktop success case passes in 15.2 seconds, with one
+worker, no retries and one repetition. Scoped checks and active-hook publication
+receipts are recorded in the own task plan. New-head hosted review and CI remain
+pending a later ROOT release after explicit local-heavy return and END/WFI.
