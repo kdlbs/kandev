@@ -10,7 +10,7 @@ export async function assertComposerFocusAfterSend(
 
   await session.sendMessageViaButton("first message after send");
   await expect(
-    session.activeChat().getByText("first message after send", { exact: false }),
+    session.activeChat().getByText("first message after send", { exact: true }),
   ).toBeVisible({ timeout: 15_000 });
   await session.waitForChatIdle({ timeout: 30_000, requireEditable: true });
   await expect(editor).toBeFocused({ timeout: 10_000 });
@@ -19,7 +19,7 @@ export async function assertComposerFocusAfterSend(
   await page.keyboard.type("second message after send");
   await submitFollowUp();
   await expect(
-    session.activeChat().getByText("second message after send", { exact: false }),
+    session.activeChat().getByText("second message after send", { exact: true }),
   ).toBeVisible({ timeout: 15_000 });
   await session.waitForChatIdle({ timeout: 30_000, requireEditable: true });
   await expect(editor).toBeFocused({ timeout: 10_000 });

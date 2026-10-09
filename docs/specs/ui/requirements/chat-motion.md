@@ -70,8 +70,11 @@ content, delivery order, and session lifecycle remain owned by their systems.
 
 - **AC-UI-CHAT-MOTION-003.1:** When motion is effective and existing auto-scroll
   policy permits following, content growth shall move continuously toward the
-  latest bottom and settle within 300 ms after growth stops, within 2 px of the
-  target. Repeated updates shall not queue separate scroll animations.
+  latest bottom. When the browser can place the scroll position within 2 px of
+  that target, following shall settle within 300 ms after growth stops. If the
+  browser clamps the target beyond that tolerance, follow work shall still stop
+  by the interpolation deadline and accept the returned position. Repeated
+  updates shall not queue separate scroll animations.
 - **AC-UI-CHAT-MOTION-003.2:** Scrolling up by wheel, touch, keyboard, or scrollbar
   during motion shall stop following. Existing auto-scroll-off, unread-divider,
   history-anchor, navigation, session-placement, and panel-restoration behavior

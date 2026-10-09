@@ -255,7 +255,7 @@ type failedReader struct{}
 func (failedReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
 
 func TestCohortRunnerCommand(t *testing.T) {
-	want := []string{"test", "-race", "-v", "-json", "-timeout", "25m", "-run", "^(TestAlpha)$", packagePattern}
+	want := []string{"test", "-race", "-count=1", "-v", "-json", "-timeout", "25m", "-run", "^(TestAlpha)$", packagePattern}
 	if got := commandArgs("^(TestAlpha)$"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("race/timeout/selection contract changed: %v", got)
 	}

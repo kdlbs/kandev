@@ -1,4 +1,5 @@
 import { useCallback, useRef } from "react";
+import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
 
 export type RecoveryOperation = { requestKey: string; sessionKey: string; operationId: number };
 
@@ -47,4 +48,46 @@ export function useRecoveryOperationFence(
   );
 
   return { beginOperation, isCurrentOperation, isCurrentSession, matchesLatestErrorStamp };
+}
+
+function compareDecimalIdentity(left: string, right: string): number | null {
+  if (!/^\d+$/.test(left) || !/^\d+$/.test(right)) return left === right ? 0 : null;
+  const normalizedLeft = left.replace(/^0+(?=\d)/, "");
+  const normalizedRight = right.replace(/^0+(?=\d)/, "");
+  if (normalizedLeft.length !== normalizedRight.length)
+    return normalizedLeft.length < normalizedRight.length ? -1 : 1;
+  if (normalizedLeft === normalizedRight) return 0;
+  return normalizedLeft < normalizedRight ? -1 : 1;
+}
+
+export function isOlderWorkspaceRecoveryProjection(
+  incoming: WorkspaceRecoveryProjection,
+  current: WorkspaceRecoveryProjection | null,
+): boolean {
+  if (!current || incoming.environment_id !== current.environment_id) return false;
+  const generationOrder = compareDecimalIdentity(
+    incoming.ownership_generation,
+    current.ownership_generation,
+  );
+  if (generationOrder !== null && generationOrder !== 0) return generationOrder < 0;
+  if (incoming.ownership_generation !== current.ownership_generation) return true;
+  const revisionOrder = compareDecimalIdentity(incoming.revision, current.revision);
+  const sameAttempt =
+    incoming.operation_id === current.operation_id && incoming.attempt_id === current.attempt_id;
+  if (!sameAttempt) return revisionOrder === null || revisionOrder <= 0;
+  return revisionOrder !== null && revisionOrder < 0;
+}
+
+export function workspaceRecoveryMatchesFailure(
+  recovery: WorkspaceRecoveryProjection | null | undefined,
+  sessionId: string,
+  errorStamp: string | null | undefined,
+): boolean {
+  return Boolean(
+    recovery?.session_id === sessionId &&
+    errorStamp &&
+    recovery.error_stamp === errorStamp &&
+    !recovery.workspace_complete &&
+    !recovery.agent_ready,
+  );
 }

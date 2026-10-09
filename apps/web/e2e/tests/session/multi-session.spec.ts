@@ -89,10 +89,11 @@ test.describe("Multi-session", () => {
     const env = await apiClient.getTaskEnvironment(task.id);
     expect(env).not.toBeNull();
 
-    // 4. Navigate to the task and verify first session is visible. The task
-    // can be absent from a board column while its session remains valid.
+    // 4. Open the task directly. Its completed state can move it out of the
+    // default Kanban lanes before the board query observes it, while its
+    // session remains valid.
     await testPage.goto(`/t/${task.id}`);
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}(?:[?]|$)`), { timeout: 15_000 });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();

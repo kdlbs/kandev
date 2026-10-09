@@ -1,10 +1,12 @@
 import { test, expect, type Page } from "../../fixtures/test-base";
+import { createHandoffProfiles } from "../../helpers/session-handoff-profile-fixtures";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
 type AgentProfileOption = {
   id: string;
+  agent_id: string;
   capability_status?: string;
   [key: string]: unknown;
 };
@@ -29,86 +31,42 @@ type E2EStoreWindow = Window & {
  * `capability_status` is always undefined for it in this suite — this is the
  * only way to exercise the "not ready" branch end to end.
  */
-async function markProfileCapabilityNotInstalled(testPage: Page, profileId: string) {
-  await testPage.evaluate((id) => {
+async function markAgentCapabilityNotInstalled(testPage: Page, agentId: string) {
+  return testPage.evaluate((id) => {
     const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
     if (!store) {
       throw new Error("E2E store bridge missing — is __KANDEV_E2E_EXPOSE_STORE__ set?");
     }
     store.setState((state) => {
-      const index = state.agentProfiles.items.findIndex((p) => p.id === id);
-      if (index === -1) {
-        throw new Error(`agent profile ${id} not found in store`);
+      for (const profile of state.agentProfiles.items) {
+        if (profile.agent_id === id) profile.capability_status = "not_installed";
       }
-      state.agentProfiles.items[index] = {
-        ...state.agentProfiles.items[index],
-        capability_status: "not_installed",
-      };
     });
-    const updated = store.getState().agentProfiles.items.find((p) => p.id === id);
-    if (updated?.capability_status !== "not_installed") {
-      throw new Error("Failed to set capability_status on agent profile in store");
+    const ownedProfiles = store.getState().agentProfiles.items.filter((p) => p.agent_id === id);
+    if (
+      ownedProfiles.length === 0 ||
+      ownedProfiles.some((p) => p.capability_status !== "not_installed")
+    ) {
+      throw new Error("Failed to set capability_status on the agent's profiles in store");
     }
-  }, profileId);
-}
-
-async function addHealthyHandoffProfile(testPage: Page, sourceProfileId: string) {
-  const profileId = "e2e-handoff-profile-b";
-  const name = "Handoff Filter Profile B";
-
-  await testPage.waitForFunction(
-    (id) => {
-      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
-      return store?.getState().agentProfiles.items.some((profile) => profile.id === id) ?? false;
-    },
-    sourceProfileId,
-    { timeout: 10_000 },
-  );
-
-  return testPage.evaluate(
-    ({ sourceProfileId: sourceId, profileId: id, name: profileName }) => {
-      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
-      if (!store) {
-        throw new Error("E2E store bridge missing — is __KANDEV_E2E_EXPOSE_STORE__ set?");
-      }
-      const source = store
-        .getState()
-        .agentProfiles.items.find((profile) => profile.id === sourceId);
-      if (!source) throw new Error(`agent profile ${sourceId} not found in store`);
-
-      const profile = {
-        ...source,
-        id,
-        name: profileName,
-        model: "mock-slow",
-        capability_status: undefined,
-      };
-      store.setState((state) => {
-        const index = state.agentProfiles.items.findIndex((item) => item.id === id);
-        if (index === -1) state.agentProfiles.items.push(profile);
-        else state.agentProfiles.items[index] = profile;
-      });
-
-      return profile.id;
-    },
-    { sourceProfileId, profileId, name },
-  );
+    return store.getState().agentProfiles.items.every((profile) => profile.agent_id === id);
+  }, agentId);
 }
 
 test.describe("Session handoff filters unhealthy profiles", () => {
-  test("hides a profile once its agent capability is not ready, keeps healthy profiles visible", async ({
+  test("hides every mock profile after its agent capability becomes unavailable", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     test.setTimeout(90_000);
 
-    const profileAId = seedData.agentProfileId;
+    const { profileA, profileB } = await createHandoffProfiles(apiClient);
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Handoff Filter Task",
-      profileAId,
+      profileA.id,
       {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
@@ -139,21 +97,29 @@ test.describe("Session handoff filters unhealthy profiles", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    const profileBId = await addHealthyHandoffProfile(testPage, profileAId);
 
     await session.sessionTabBySessionId(session1Id).click({ button: "right" });
     await session.handoffSubmenu().hover();
-    await expect(session.handoffProfileItem(profileBId)).toBeVisible({ timeout: 5_000 });
+    await expect(session.handoffProfileItem(profileB.id)).toBeVisible({ timeout: 5_000 });
     await testPage.keyboard.press("Escape");
 
-    // A real agent.available.updated event changes every profile for the
-    // agent. Both options share the seeded profile's agent, so update both.
-    await markProfileCapabilityNotInstalled(testPage, profileAId);
-    await markProfileCapabilityNotInstalled(testPage, profileBId);
+    // Capability loss belongs to the agent, including profiles retained from
+    // earlier tests in the worker. Both fixture profiles use the mock adapter.
+    const allProfilesUnavailable = await markAgentCapabilityNotInstalled(
+      testPage,
+      profileA.agentId,
+    );
 
     await session.sessionTabBySessionId(session1Id).click({ button: "right" });
     await session.handoffSubmenu().hover();
-    await expect(session.handoffProfileItem(profileAId)).not.toBeVisible();
-    await expect(session.handoffProfileItem(profileBId)).not.toBeVisible();
+    await expect(session.handoffProfileItem(profileA.id)).not.toBeVisible();
+    await expect(session.handoffProfileItem(profileB.id)).not.toBeVisible();
+    if (allProfilesUnavailable) {
+      await expect(
+        testPage.getByText(
+          "No agent profiles are ready. Install or reconnect an agent CLI in Settings → Agents.",
+        ),
+      ).toBeVisible();
+    }
   });
 });

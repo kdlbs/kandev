@@ -129,16 +129,6 @@ function useChartPresentation(block: RichOutputChartBlock) {
     });
   }, []);
 
-  return { formatXAxisTick, formatYAxisValue, hiddenSeries, toggleSeries };
-}
-
-export const ChartBlock = memo(function ChartBlock({ block }: { block: RichOutputChartBlock }) {
-  const { formatXAxisTick, formatYAxisValue, hiddenSeries, toggleSeries } =
-    useChartPresentation(block);
-  const { plotRef, shouldMountPlot } = useChartPlotVisibility();
-  const shouldAnimate = useRichOutputChartAnimations();
-  const data = useMemo(() => chartData(block), [block.labels, block.series]);
-  const config = useMemo(() => chartConfig(block), [block.series]);
   const legend = useMemo(
     () => (
       <ChartLegend
@@ -147,6 +137,16 @@ export const ChartBlock = memo(function ChartBlock({ block }: { block: RichOutpu
     ),
     [block, hiddenSeries, toggleSeries],
   );
+
+  return { formatXAxisTick, formatYAxisValue, hiddenSeries, legend };
+}
+
+export const ChartBlock = memo(function ChartBlock({ block }: { block: RichOutputChartBlock }) {
+  const { formatXAxisTick, formatYAxisValue, hiddenSeries, legend } = useChartPresentation(block);
+  const { plotRef, shouldMountPlot } = useChartPlotVisibility();
+  const shouldAnimate = useRichOutputChartAnimations();
+  const data = useMemo(() => chartData(block), [block.labels, block.series]);
+  const config = useMemo(() => chartConfig(block), [block.series]);
 
   return (
     <figure className="min-w-0 space-y-3" data-testid={`rich-output-chart-${block.chart_type}`}>

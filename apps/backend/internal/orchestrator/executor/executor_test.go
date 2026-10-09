@@ -2592,6 +2592,105 @@ func TestStartAgentProcessAsyncNotifiesAfterProcessStartFailure(t *testing.T) {
 	}
 }
 
+func TestRunAgentProcessAsync_ReattachmentFailurePreservesPeerAndSession(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateScheduling}
+	var stopCalls atomic.Int32
+	startErr := &lifecycle.AgentReattachmentFailure{
+		ExecutionID: "exec-456", SessionID: "session-123", Cause: errors.New("peer identity unavailable"),
+	}
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(context.Context, string) error { return startErr },
+		stopAgentFunc: func(context.Context, string, bool) error {
+			stopCalls.Add(1)
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	failed := make(chan error, 1)
+	exec.SetOnAgentProcessStartFailed(func(_ context.Context, _, _, _ string, err error) {
+		failed <- err
+	})
+	exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
+		func(context.Context) { t.Error("onSuccess ran after reattachment failure") }, false, true)
+	select {
+	case err := <-failed:
+		if !errors.Is(err, lifecycle.ErrAgentReattachment) {
+			t.Fatalf("failure callback error = %v, want ErrAgentReattachment", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for reattachment failure callback")
+	}
+	if got := stopCalls.Load(); got != 0 {
+		t.Fatalf("StopAgent calls = %d, want 0 for a pre-existing peer", got)
+	}
+	session, err := repo.GetTaskSession(context.Background(), "session-123")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.State != models.TaskSessionStateStarting {
+		t.Fatalf("session state = %q, want STARTING", session.State)
+	}
+	repo.mu.Lock()
+	taskState := repo.tasks["task-123"].State
+	repo.mu.Unlock()
+	if taskState != v1.TaskStateScheduling {
+		t.Fatalf("task state = %q, want SCHEDULING", taskState)
+	}
+}
+
+func TestRunAgentProcessAsync_LateReattachCancellationPreservesPeer(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	startEntered := make(chan struct{})
+	releaseStart := make(chan struct{})
+	var stopCalls atomic.Int32
+	agentManager := &mockAgentManager{
+		startupDisposition: lifecycle.AgentStartupReattachedExisting,
+		startAgentProcessFunc: func(context.Context, string) error {
+			close(startEntered)
+			<-releaseStart
+			return nil
+		},
+		stopAgentFunc: func(context.Context, string, bool) error {
+			stopCalls.Add(1)
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	failed := make(chan error, 1)
+	exec.SetOnAgentProcessStartFailed(func(_ context.Context, _, _, _ string, err error) {
+		failed <- err
+	})
+	ctx, cancel := context.WithCancel(WithCancellableResumeContext(context.Background()))
+	defer cancel()
+	exec.runAgentProcessAsync(ctx, "task-123", "session-123", "exec-456",
+		func(context.Context) { t.Error("onSuccess ran after cancelled reattachment") }, false, true)
+	select {
+	case <-startEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for reattachment startup")
+	}
+	cancel()
+	close(releaseStart)
+	select {
+	case err := <-failed:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("failure callback error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for cancelled reattachment callback")
+	}
+	if got := stopCalls.Load(); got != 0 {
+		t.Fatalf("StopAgent calls = %d, want 0 for reattached existing peer", got)
+	}
+}
+
 func TestStartAgentProcessAsync_StopWinningStartRacePreservesReview(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["session-123"] = &models.TaskSession{

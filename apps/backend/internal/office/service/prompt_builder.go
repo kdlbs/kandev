@@ -116,7 +116,11 @@ func BuildPrompt(pc *PromptContext) string {
 	case RunReasonTaskChangesRequested:
 		prompt = buildReworkPrompt(pc)
 	case RunReasonTaskComment:
-		prompt = buildTaskCommentPrompt(pc)
+		if isReviewOrApprovalStage(pc.StageType) {
+			prompt = buildGateCommentPrompt(pc)
+		} else {
+			prompt = buildTaskCommentPrompt(pc)
+		}
 	case RunReasonTaskBlockersResolved:
 		prompt = buildBlockersResolvedPrompt(pc)
 	case legacyRunReasonBlockersResolved:
@@ -405,6 +409,37 @@ func buildTaskCommentPrompt(pc *PromptContext) string {
 	}
 	fmt.Fprintf(&b, "Comment: %s\n", pc.CommentBody)
 	b.WriteString("Address this comment.")
+	return b.String()
+}
+
+// buildGateCommentPrompt frames a task_comment run at a review or approval
+// gate as a verdict request rather than the generic "address this comment"
+// prompt: it quotes the triggering comment (or notes it is gone) and asks
+// the seat to re-examine the work and record a verdict, ending with the
+// decision contract when the seat holds a decision action.
+func buildGateCommentPrompt(pc *PromptContext) string {
+	verb := "reviewing"
+	if pc.StageType == stageTypeApproval {
+		verb = "approving"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are %s task %s: %s.\n", verb, taskRef(pc), pc.TaskTitle)
+	if pc.CommentAuthor != "" {
+		authorDesc := pc.CommentAuthor
+		if pc.CommentAuthorType != "" {
+			authorDesc += " (" + pc.CommentAuthorType + ")"
+		}
+		fmt.Fprintf(&b, "From: %s\n", authorDesc)
+	}
+	if pc.CommentBody != "" {
+		fmt.Fprintf(&b, "Comment: %s\n", pc.CommentBody)
+	} else {
+		b.WriteString("The triggering comment is no longer available.\n")
+	}
+	b.WriteString("Re-examine the work in light of this comment and record your verdict.")
+	if hasDecisionAction(pc.AllowedActions) {
+		writeDecisionContract(&b)
+	}
 	return b.String()
 }
 

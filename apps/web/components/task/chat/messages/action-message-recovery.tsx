@@ -4,7 +4,10 @@ import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SessionRecoveryNotice } from "@/components/task/ensure-session-error";
 import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
-import type { SessionRecoveryAction } from "@/lib/services/session-recovery-service";
+import type {
+  ContextContinuationDetails,
+  SessionRecoveryAction,
+} from "@/lib/services/session-recovery-service";
 import type { MessageAction } from "@/components/task/chat/types";
 import { RecoveryActions, type RecoveryChoice } from "@/components/task/recovery-actions";
 import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
@@ -21,6 +24,8 @@ export function sessionRecoveryAction(action: MessageAction): SessionRecoveryAct
   switch (recoveryAction) {
     case "resume":
     case "resume_new_branch":
+    case "continue_from_history":
+    case "retry_connection":
     case "fresh_start":
     case "runtime_retry":
     case "relocate_and_resume":
@@ -38,6 +43,8 @@ function recoveryActionLabel(
   if (action === "fresh_start") return t("task:startFreshSession");
   if (action === "resume_new_branch") return t("task:continueOnNewBranch");
   if (action === "relocate_and_resume") return t("task:managedCloneRelocateResume");
+  if (action === "continue_from_history") return t("task:continueFromHistory");
+  if (action === "retry_connection") return t("task:retryConnection");
   return t("chat:managedRuntimeRetry");
 }
 
@@ -54,6 +61,47 @@ function recoveryActionTooltip(action: MessageAction, t: ReturnType<typeof useTr
   }
 }
 
+function addHistoryContinuationChoice(
+  choices: RecoveryChoice[],
+  enabled: boolean,
+  onContinueFromHistory: () => void,
+  label: string,
+) {
+  if (!enabled || choices.some((choice) => choice.kind === "continue_from_history")) return;
+  choices.push({
+    kind: "continue_from_history",
+    label,
+    testId: "recovery-continue-from-history-button",
+    onClick: onContinueFromHistory,
+  });
+}
+
+function choicesFromMessageActions(
+  actions: MessageAction[],
+  t: ReturnType<typeof useTranslation>["t"],
+  providerRestoredResumeEligible: boolean,
+  onRecoveryAction: (action: SessionRecoveryAction) => void | Promise<void>,
+): RecoveryChoice[] {
+  return actions.flatMap((action) => {
+    const kind = sessionRecoveryAction(action);
+    return kind
+      ? [
+          {
+            kind,
+            label: recoveryActionLabel(kind, t),
+            disclosure:
+              kind === "resume" && providerRestoredResumeEligible
+                ? t("task:providerRestoredResumeDisclosure")
+                : undefined,
+            testId: action.test_id,
+            tooltip: recoveryActionTooltip(action, t),
+            onClick: () => void onRecoveryAction(kind),
+          },
+        ]
+      : [];
+  });
+}
+
 function buildRecoveryChoices({
   actions,
   t,
@@ -61,9 +109,11 @@ function buildRecoveryChoices({
   providerRestoredResumeEligible,
   recoveryError,
   branchDetails,
+  continuationDetails,
   onRecoveryAction,
   onRestore,
   onNewBranch,
+  onContinueFromHistory,
   onRelocationConfirm,
 }: {
   actions: MessageAction[];
@@ -72,9 +122,11 @@ function buildRecoveryChoices({
   providerRestoredResumeEligible: boolean;
   recoveryError: Error | null;
   branchDetails: unknown;
+  continuationDetails: ContextContinuationDetails | null;
   onRecoveryAction: (action: SessionRecoveryAction) => void;
   onRestore: () => void;
   onNewBranch: () => void;
+  onContinueFromHistory: () => void;
   onRelocationConfirm: () => void;
 }): RecoveryChoice[] {
   const choices: RecoveryChoice[] = managedCloneRecoveryStamp
@@ -86,24 +138,7 @@ function buildRecoveryChoices({
           onClick: onRelocationConfirm,
         },
       ]
-    : actions.flatMap((action) => {
-        const kind = sessionRecoveryAction(action);
-        return kind
-          ? [
-              {
-                kind,
-                label: recoveryActionLabel(kind, t),
-                disclosure:
-                  kind === "resume" && providerRestoredResumeEligible
-                    ? t("task:providerRestoredResumeDisclosure")
-                    : undefined,
-                testId: action.test_id,
-                tooltip: recoveryActionTooltip(action, t),
-                onClick: () => onRecoveryAction(kind),
-              },
-            ]
-          : [];
-      });
+    : choicesFromMessageActions(actions, t, providerRestoredResumeEligible, onRecoveryAction);
   if (recoveryError && !managedCloneRecoveryStamp)
     choices.push({
       kind: "restore",
@@ -122,7 +157,27 @@ function buildRecoveryChoices({
       testId: "recovery-new-branch-button",
       onClick: onNewBranch,
     });
+  addHistoryContinuationChoice(
+    choices,
+    !managedCloneRecoveryStamp && Boolean(continuationDetails),
+    onContinueFromHistory,
+    t("task:continueFromHistory"),
+  );
   return choices;
+}
+
+function SessionRecoveryFailure({ error, guarded }: { error: Error; guarded: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div data-testid="session-recovery-error" className="mt-2 min-w-0 text-xs">
+      <p role="status">
+        {guarded
+          ? sanitizeSessionErrorDetails(error.message, 240)
+          : t("task:failedToResumeSession")}
+      </p>
+      <SessionErrorDetails>{error.message}</SessionErrorDetails>
+    </div>
+  );
 }
 
 export function SessionRecoveryActionButtons({
@@ -144,6 +199,7 @@ export function SessionRecoveryActionButtons({
     recoveryError,
     branchDetails,
     guardDetails,
+    continuationDetails,
     recoveryNotice,
     managedCloneRecoveryStamp,
     workspaceRecovery,
@@ -154,6 +210,7 @@ export function SessionRecoveryActionButtons({
     handleRecover,
     handleRestore,
     handleNewBranch,
+    handleContinueFromHistory,
     handleManagedCloneRelocation,
   } = useSessionRecoveryActions({ taskId, sessionId, errorStamp });
   const [relocationConfirmationOpen, setRelocationConfirmationOpen] = useState(false);
@@ -171,10 +228,15 @@ export function SessionRecoveryActionButtons({
     providerRestoredResumeEligible,
     recoveryError,
     branchDetails,
+    continuationDetails,
     onRecoveryAction: (action) => void onRecoveryAction(action),
     onRestore: () => void handleRestore(),
     onNewBranch: () =>
       void handleNewBranch().then((success) => {
+        if (success) onRecoveryRequested();
+      }),
+    onContinueFromHistory: () =>
+      void handleContinueFromHistory().then((success) => {
         if (success) onRecoveryRequested();
       }),
     onRelocationConfirm: () => setRelocationConfirmationOpen(true),
@@ -182,14 +244,7 @@ export function SessionRecoveryActionButtons({
   return (
     <>
       {recoveryError && (
-        <div data-testid="session-recovery-error" className="mt-2 min-w-0 text-xs">
-          <p role="status">
-            {guardDetails
-              ? sanitizeSessionErrorDetails(recoveryError.message, 240)
-              : t("task:failedToResumeSession")}
-          </p>
-          <SessionErrorDetails>{recoveryError.message}</SessionErrorDetails>
-        </div>
+        <SessionRecoveryFailure error={recoveryError} guarded={Boolean(guardDetails)} />
       )}
       {recoveryNotice && <SessionRecoveryNotice message={recoveryNotice} />}
       <RecoveryActions

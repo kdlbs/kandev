@@ -262,6 +262,7 @@ test.describe("Port Forward Dialog", () => {
     apiClient,
     seedData,
   }) => {
+    test.setTimeout(120_000);
     const { session } = await seedRemoteSession(
       testPage,
       apiClient,

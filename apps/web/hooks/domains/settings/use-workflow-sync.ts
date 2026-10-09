@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
 import { useWorkflowSyncLifetime, type WorkflowSyncLifetime } from "./use-workflow-sync-lifetime";
 import { useToast } from "@/components/toast-provider";
@@ -114,45 +114,67 @@ function useWorkflowSyncConfigRefresh(
 // interval remain individually editable via `update`. Branch and directory
 // are only overwritten when the link actually carried them (/tree/... or
 // /blob/... forms), so a bare repo reference keeps the current values.
+type WorkflowSyncDraft = { form: WorkflowSyncFormState; url: string };
+
+function draftsEqual(left: WorkflowSyncDraft, right: WorkflowSyncDraft): boolean {
+  const fields = Object.keys(DEFAULT_FORM) as (keyof WorkflowSyncFormState)[];
+  return (
+    left.url === right.url && fields.every((key) => Object.is(left.form[key], right.form[key]))
+  );
+}
+
+function draftFromConfig(cfg: WorkflowSyncConfig | null): WorkflowSyncDraft {
+  const form = configToForm(cfg);
+  return { form, url: displayUrl(form) };
+}
+
+function formFromUrl(form: WorkflowSyncFormState, url: string): WorkflowSyncFormState {
+  const parsed = parseRepoUrl(form.provider, url);
+  if (!parsed) return form;
+  if (form.provider === "gitlab" && "projectPath" in parsed) {
+    return {
+      ...form,
+      project_path: parsed.projectPath,
+      branch: parsed.branch ?? form.branch,
+      path: parsed.path ?? form.path,
+    };
+  }
+  if (form.provider === "github" && "owner" in parsed) {
+    return {
+      ...form,
+      repo_owner: parsed.owner,
+      repo_name: parsed.repo,
+      branch: parsed.branch ?? form.branch,
+      path: parsed.path ?? form.path,
+    };
+  }
+  return form;
+}
+
 function useWorkflowSyncForm(lifetime: WorkflowSyncLifetime) {
-  const [form, setForm] = useState<WorkflowSyncFormState>(DEFAULT_FORM);
-  const [url, setUrl] = useState("");
+  const [draft, setDraft] = useState<WorkflowSyncDraft>(() => draftFromConfig(null));
+  const latest = useRef(draft);
+  // Admitted edits and resets publish atomically, including before a batched render.
+  const publish = useCallback((next: WorkflowSyncDraft) => {
+    latest.current = next;
+    setDraft(next);
+  }, []);
 
   const update = useCallback(
     <K extends keyof WorkflowSyncFormState>(key: K, value: WorkflowSyncFormState[K]) => {
-      if (lifetime.active) setForm((prev) => ({ ...prev, [key]: value }));
+      if (!lifetime.active) return;
+      const current = latest.current;
+      publish({ ...current, form: { ...current.form, [key]: value } });
     },
-    [lifetime],
+    [lifetime, publish],
   );
 
   const setUrlInput = useCallback(
     (value: string) => {
       if (!lifetime.active) return;
-      setUrl(value);
-      setForm((prev) => {
-        const parsed = parseRepoUrl(prev.provider, value);
-        if (!parsed) return prev;
-        if (prev.provider === "gitlab" && "projectPath" in parsed) {
-          return {
-            ...prev,
-            project_path: parsed.projectPath,
-            branch: parsed.branch ?? prev.branch,
-            path: parsed.path ?? prev.path,
-          };
-        }
-        if (prev.provider === "github" && "owner" in parsed) {
-          return {
-            ...prev,
-            repo_owner: parsed.owner,
-            repo_name: parsed.repo,
-            branch: parsed.branch ?? prev.branch,
-            path: parsed.path ?? prev.path,
-          };
-        }
-        return prev;
-      });
+      publish({ form: formFromUrl(latest.current.form, value), url: value });
     },
-    [lifetime],
+    [lifetime, publish],
   );
 
   // Switching providers changes what the link/project-path field means, so
@@ -162,28 +184,38 @@ function useWorkflowSyncForm(lifetime: WorkflowSyncLifetime) {
   const setProvider = useCallback(
     (provider: WorkflowSyncProvider) => {
       if (!lifetime.active) return;
-      setUrl("");
-      setForm((prev) => ({
-        ...prev,
-        provider,
-        repo_owner: "",
-        repo_name: "",
-        project_path: "",
-      }));
+      publish({
+        url: "",
+        form: { ...latest.current.form, provider, repo_owner: "", repo_name: "", project_path: "" },
+      });
     },
-    [lifetime],
+    [lifetime, publish],
   );
 
   // reset re-derives both the structured form and the displayed link from a
   // loaded/saved config (or clears them when the config was removed).
-  const reset = useCallback((cfg: WorkflowSyncConfig | null) => {
-    const next = configToForm(cfg);
-    setForm(next);
-    setUrl(displayUrl(next));
-  }, []);
+  const reset = useCallback(
+    (cfg: WorkflowSyncConfig | null) => publish(draftFromConfig(cfg)),
+    [publish],
+  );
 
+  const acknowledgeSave = useCallback(
+    (submitted: WorkflowSyncDraft, saved: WorkflowSyncConfig, onDraftAccepted?: () => void) => {
+      if (!draftsEqual(latest.current, submitted)) return false;
+      try {
+        onDraftAccepted?.();
+      } catch {
+        // Presentation notification cannot change an accepted write's outcome.
+      }
+      reset(saved);
+      return true;
+    },
+    [reset],
+  );
+
+  const { form, url } = draft;
   const urlInvalid = !!url.trim() && !parseRepoUrl(form.provider, url);
-  return { form, url, urlInvalid, update, setUrlInput, setProvider, reset };
+  return { draft, form, url, urlInvalid, update, setUrlInput, setProvider, reset, acknowledgeSave };
 }
 
 type SyncToast = { description: string; variant?: "success" | "error" | "default" };
@@ -247,7 +279,7 @@ export function useWorkflowSync(workspaceId: string) {
   const { toast } = useToast();
   const router = useRouter();
   const [config, setConfig] = useState<WorkflowSyncConfig | null>(null);
-  const { form, url, urlInvalid, update, setUrlInput, setProvider, reset } =
+  const { draft, form, url, urlInvalid, update, setUrlInput, setProvider, reset, acknowledgeSave } =
     useWorkflowSyncForm(lifetime);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -268,10 +300,11 @@ export function useWorkflowSync(workspaceId: string) {
 
   const actions = useWorkflowSyncActions({
     workspaceId,
-    form,
+    draft,
     lifetime,
     setConfig,
     reset,
+    acknowledgeSave,
     toast,
     router,
     setSaving,
@@ -319,7 +352,12 @@ function savePayload(form: WorkflowSyncFormState): WorkflowSyncSetConfigRequest 
 
 type WorkflowSyncActionDeps = Omit<InitialLoadDeps, "setLoading"> & {
   workspaceId: string;
-  form: WorkflowSyncFormState;
+  draft: WorkflowSyncDraft;
+  acknowledgeSave: (
+    submitted: WorkflowSyncDraft,
+    saved: WorkflowSyncConfig,
+    onDraftAccepted?: () => void,
+  ) => boolean;
   lifetime: WorkflowSyncLifetime;
   router: ReturnType<typeof useRouter>;
   setSaving: (value: boolean) => void;
@@ -328,37 +366,44 @@ type WorkflowSyncActionDeps = Omit<InitialLoadDeps, "setLoading"> & {
 
 function useWorkflowSyncActions({
   workspaceId,
-  form,
+  draft,
   lifetime,
   setConfig,
   reset,
+  acknowledgeSave,
   toast,
   router,
   setSaving,
   setSyncing,
 }: WorkflowSyncActionDeps) {
-  const handleSave = useCallback(async () => {
-    if (!lifetime.active) return false;
-    const ticket = Symbol();
-    lifetime.saving = ticket;
-    setSaving(true);
-    try {
-      const payload = savePayload(form);
-      const saved = await setWorkflowSyncConfig(payload, { workspaceId });
-      if (lifetime.active) {
-        setConfig(saved);
-        reset(saved);
-        toast({ description: t("workflows:syncConfigSaved"), variant: "success" });
+  const handleSave = useCallback(
+    async (onDraftAccepted?: () => void) => {
+      if (!lifetime.active) return false;
+      const ticket = Symbol();
+      lifetime.saving = ticket;
+      setSaving(true);
+      try {
+        const payload = savePayload(draft.form);
+        const saved = await setWorkflowSyncConfig(payload, { workspaceId });
+        if (lifetime.active) {
+          setConfig(saved);
+          acknowledgeSave(draft, saved, onDraftAccepted);
+          toast({ description: t("workflows:syncConfigSaved"), variant: "success" });
+        }
+        return true;
+      } catch (err) {
+        if (lifetime.active)
+          toast({
+            description: t("workflows:saveFailed", { error: String(err) }),
+            variant: "error",
+          });
+        return false;
+      } finally {
+        if (lifetime.active && lifetime.saving === ticket) setSaving(false);
       }
-      return true;
-    } catch (err) {
-      if (lifetime.active)
-        toast({ description: t("workflows:saveFailed", { error: String(err) }), variant: "error" });
-      return false;
-    } finally {
-      if (lifetime.active && lifetime.saving === ticket) setSaving(false);
-    }
-  }, [workspaceId, form, toast, reset, lifetime]);
+    },
+    [workspaceId, draft, toast, acknowledgeSave, lifetime],
+  );
 
   const handleDelete = useCallback(
     async (beforeReset?: () => void) => {

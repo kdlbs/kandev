@@ -1,9 +1,8 @@
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { watchWs } from "../../helpers/causal-waits";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import path from "node:path";
 
 async function scrollChangesPanel(session: SessionPage, position: "top" | "bottom"): Promise<void> {
   // PR files precede commits in the virtualized timeline.
@@ -56,10 +55,8 @@ test.describe("PR switcher changes panel", () => {
     // --- Seed mock GitHub data ---
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");
-    const git = new GitHelper(
-      path.join(backend.tmpDir, "repos", "e2e-repo"),
-      makeGitEnv(backend.tmpDir),
-    );
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+    const git = new GitHelper(seedData.repositoryPath, makeGitEnv(backend.tmpDir));
     for (let index = 0; index < 20; index += 1) {
       git.createFile("pr-switcher-prefix.txt", `prefix ${index}\n`);
       git.stageFile("pr-switcher-prefix.txt");

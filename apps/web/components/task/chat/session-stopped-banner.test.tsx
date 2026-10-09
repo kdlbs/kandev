@@ -10,9 +10,12 @@ import { WebSocketRequestError } from "@/lib/ws/client";
 const MORE_OPTIONS = "More options";
 const FAILED_TO_RESUME_MESSAGE = "Failed to resume session";
 const MANAGED_CLONE_RELOCATE_BUTTON = "managed-clone-relocate-button";
+const RETRY_CONNECTION_BUTTON = "recovery-retry-connection-button";
+const STOP_BUTTON = "recovery-stop-button";
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
+  stop: vi.fn(),
   agentProfiles: [{ id: "profile-1" }],
 }));
 
@@ -30,6 +33,10 @@ vi.mock("@/components/state-provider", () => ({
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: mocks.request }),
+}));
+
+vi.mock("@/hooks/domains/session/use-session-actions", () => ({
+  useSessionActions: () => ({ stop: mocks.stop }),
 }));
 
 vi.mock("@/components/task/new-session-dialog", () => ({
@@ -50,6 +57,12 @@ vi.mock("react-i18next", () => ({
         "task:sessionCompleted": "This session is complete.",
         "task:newAgent": "New Agent",
         "task:agentHasStopped": "This agent has stopped.",
+        "task:durableDeliveryUncertain":
+          "Delivery was interrupted. The prompt outcome is uncertain.",
+        "task:durableDeliveryReconnecting":
+          "Reconnecting to the agent. Your prompt will not be sent again.",
+        "task:deliveryStopOutcomeUnconfirmed":
+          "Stop was requested. The prompt outcome is still unknown.",
         "task:resume": "Resume",
         "task:resuming": "Resuming...",
         "task:starting": "Starting...",
@@ -58,6 +71,10 @@ vi.mock("react-i18next", () => ({
         "task:continueOnNewBranch": "Continue on a new branch",
         "task:restoreReadOnlyWorkspace": "Restore read-only workspace",
         "task:retry": "Retry",
+        "task:retryConnection": "Retry connection",
+        "task:retryingConnection": "Retrying connection...",
+        "task:stop": "Stop",
+        "task:stopping": "Stopping...",
         "task:recoveryMoreOptions": MORE_OPTIONS,
         "task:couldnTStartASession": "Session recovery failed",
         "task:failedToResumeSession": FAILED_TO_RESUME_MESSAGE,
@@ -107,6 +124,7 @@ function BannerHarness({
 
 beforeEach(() => {
   mocks.request.mockReset().mockResolvedValue(undefined);
+  mocks.stop.mockReset().mockResolvedValue(true);
   mocks.agentProfiles.splice(0, mocks.agentProfiles.length, { id: "profile-1" });
 });
 
@@ -188,7 +206,9 @@ describe("SessionStoppedBanner basics", () => {
     expect(await screen.findByTestId("new-session-dialog")).toBeTruthy();
     expect(mocks.request).not.toHaveBeenCalled();
   });
+});
 
+describe("SessionStoppedBanner delivery recovery", () => {
   it("preserves executor-unavailable recovery copy and controls", () => {
     render(
       <BannerHarness
@@ -205,6 +225,86 @@ describe("SessionStoppedBanner basics", () => {
     expect(screen.getByRole("button", { name: "Restart" })).toBeTruthy();
 
     expect(screen.getByTestId(FRESH_BUTTON_TEST_ID)).toBeTruthy();
+  });
+
+  it("offers connection retry and Stop for an uncertain prompt outcome", async () => {
+    render(<BannerHarness mode="recoverable" uncertainDelivery />);
+
+    expect(
+      screen.getByText("Delivery was interrupted. The prompt outcome is uncertain."),
+    ).toBeTruthy();
+    expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.getByTestId(RETRY_CONNECTION_BUTTON)).toBeTruthy();
+    expect(screen.getByTestId(STOP_BUTTON)).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId(RETRY_CONNECTION_BUTTON));
+    await waitFor(() =>
+      expect(mocks.request).toHaveBeenCalledWith(
+        SESSION_RECOVER_ACTION,
+        { task_id: TASK_ID, session_id: SESSION_ID, action: "retry_connection" },
+        30000,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId(STOP_BUTTON));
+    await waitFor(() => expect(mocks.stop).toHaveBeenCalledTimes(1));
+    expect((await screen.findByTestId("delivery-stop-outcome-unconfirmed")).textContent).toBe(
+      "Stop was requested. The prompt outcome is still unknown.",
+    );
+  });
+
+  it.each([null, "older-workspace-error"])(
+    "keeps uncertain delivery fenced during inspection contention (workspace stamp: %s)",
+    (managedCloneRecoveryStamp) => {
+      const actions: SessionRecoveryActions = {
+        ...guardRecoveryActions("", "resume"),
+        recoveryError: null,
+        guardDetails: null,
+        manualRecoveryFailure: null,
+        recoveryNoticeKind: "inspection_busy",
+        managedCloneRecoveryStamp,
+      };
+      render(<BannerHarness mode="recoverable" uncertainDelivery recoveryActions={actions} />);
+
+      expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+      expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();
+      expect(screen.queryByTestId(MANAGED_CLONE_RELOCATE_BUTTON)).toBeNull();
+      expect(screen.getByTestId(STOP_BUTTON)).toBeTruthy();
+      fireEvent.click(screen.getByTestId(RETRY_CONNECTION_BUTTON));
+      expect(actions.handleRecover).toHaveBeenCalledWith("retry_connection");
+      expect(actions.handleRetry).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps inspection retry ahead of an older workspace relocation action", () => {
+    const actions: SessionRecoveryActions = {
+      ...guardRecoveryActions("", "resume"),
+      recoveryError: null,
+      guardDetails: null,
+      manualRecoveryFailure: null,
+      recoveryNoticeKind: "inspection_busy",
+      managedCloneRecoveryStamp: "older-workspace-error",
+    };
+    render(<BannerHarness mode="recoverable" recoveryActions={actions} />);
+
+    expect(screen.queryByTestId(MANAGED_CLONE_RELOCATE_BUTTON)).toBeNull();
+    expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();
+    fireEvent.click(screen.getByTestId(RESUME_BUTTON_TEST_ID));
+    expect(actions.handleRetry).toHaveBeenCalledTimes(1);
+    expect(actions.handleManagedCloneRelocation).not.toHaveBeenCalled();
+  });
+
+  it("keeps reconnecting distinct from an uncertain outcome", () => {
+    render(
+      <BannerHarness mode="recoverable" uncertainDelivery deliveryRecoveryPhase="reconnecting" />,
+    );
+
+    expect(
+      screen.getByText("Reconnecting to the agent. Your prompt will not be sent again."),
+    ).toBeTruthy();
+    expect(screen.getByTestId(RETRY_CONNECTION_BUTTON)).toBeTruthy();
+    expect(screen.getByTestId(STOP_BUTTON)).toBeTruthy();
   });
 });
 
@@ -319,6 +419,7 @@ describe("SessionStoppedBanner provider-restored Resume", () => {
       recoveryError: null,
       branchDetails: null,
       guardDetails: null,
+      continuationDetails: null,
       managedCloneRecoveryStamp: null,
       lastFailedAction: null,
       recoveryNotice: null,
@@ -327,6 +428,7 @@ describe("SessionStoppedBanner provider-restored Resume", () => {
       handleRetry: vi.fn().mockResolvedValue(true),
       handleRestore: vi.fn().mockResolvedValue(undefined),
       handleNewBranch: vi.fn().mockResolvedValue(true),
+      handleContinueFromHistory: vi.fn().mockResolvedValue(true),
       handleManagedCloneRelocation: vi.fn().mockResolvedValue(true),
     };
 
@@ -351,6 +453,7 @@ describe("SessionStoppedBanner provider-restored Resume", () => {
       checkWorkspaceRecoveryStatus: vi.fn().mockResolvedValue({ resolved: true, projection: null }),
       recoveryError: null,
       branchDetails: null,
+      continuationDetails: null,
       guardDetails: null,
       managedCloneRecoveryStamp: null,
       lastFailedAction: null,
@@ -361,6 +464,7 @@ describe("SessionStoppedBanner provider-restored Resume", () => {
       handleRestore: vi.fn().mockResolvedValue(undefined),
       handleNewBranch: vi.fn().mockResolvedValue(true),
       handleManagedCloneRelocation: vi.fn().mockResolvedValue(true),
+      handleContinueFromHistory: vi.fn().mockResolvedValue(true),
     };
     render(<BannerHarness mode="recoverable" recoveryActions={recoveryActions} />);
 
@@ -533,6 +637,7 @@ function guardRecoveryActions(
     recoveryError: new Error(message),
     branchDetails: null,
     providerRestoredResumeEligible: false,
+    continuationDetails: null,
     guardDetails: { kind: "session_recovery_in_progress", retryable: true },
     recoveryNotice: null,
     managedCloneRecoveryStamp: null,
@@ -549,5 +654,6 @@ function guardRecoveryActions(
     handleRetry: vi.fn().mockResolvedValue(false),
     handleNewBranch: vi.fn().mockResolvedValue(false),
     handleManagedCloneRelocation: vi.fn().mockResolvedValue(false),
+    handleContinueFromHistory: vi.fn().mockResolvedValue(false),
   };
 }

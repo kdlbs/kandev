@@ -65,8 +65,8 @@ function scopedCommit(
   previous: string | null | undefined,
   preserveEmpty: boolean,
 ): string | null {
-  if (value == null || (preserveEmpty && value === "")) return previous ?? null;
-  return value;
+  if (value == null || (preserveEmpty && value === "")) return previous || null;
+  return value || null;
 }
 
 function nextScope(

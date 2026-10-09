@@ -132,6 +132,88 @@ describe("continuous growth and content interactions", () => {
     expect(interrupt).toHaveBeenCalledTimes(2);
   });
 });
+// @covers AC-UI-CHAT-MOTION-003.1
+describe("bounded scroll settlement", () => {
+  it.each([-0.75, 0.75])(
+    "settles when the browser returns a fractional position %s px from the target",
+    (offset) => {
+      const { el } = fixture();
+      let top = 0;
+      Object.defineProperty(el, "scrollTop", {
+        configurable: true,
+        get: () => top,
+        set: (value: number) => {
+          top = value >= 800 ? 800 + offset : value;
+        },
+      });
+      const read = vi.spyOn(el, "scrollHeight", "get");
+      const motion = createChatScrollMotion(el, () => true, vi.fn());
+      motion.request();
+      for (let i = 0; i < 20; i++) advance();
+
+      expect(Math.abs(el.scrollTop - 800)).toBeLessThan(1);
+      expect(frames.size).toBe(0);
+      expect(motion.isRunning()).toBe(false);
+      const readsAfterSettlement = read.mock.calls.length;
+      for (let i = 0; i < 10; i++) advance();
+      expect(read).toHaveBeenCalledTimes(readsAfterSettlement);
+      motion.dispose();
+    },
+  );
+
+  it("stops after the interpolation deadline when the browser clamps the target", () => {
+    const { el } = fixture();
+    let top = 0;
+    Object.defineProperty(el, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (value: number) => {
+        top = Math.min(value, 650);
+      },
+    });
+    const read = vi.spyOn(el, "scrollHeight", "get");
+    const motion = createChatScrollMotion(el, () => true, vi.fn());
+    motion.request();
+    advance();
+    advance(180);
+
+    expect(el.scrollTop).toBe(650);
+    expect(frames.size).toBe(0);
+    expect(motion.isRunning()).toBe(false);
+    const readsAfterSettlement = read.mock.calls.length;
+    for (let i = 0; i < 10; i++) advance();
+    expect(read).toHaveBeenCalledTimes(readsAfterSettlement);
+    motion.dispose();
+  });
+
+  it("restarts following after rounded settlement when content grows", () => {
+    const { el, grow } = fixture();
+    let top = 0;
+    Object.defineProperty(el, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (value: number) => {
+        top = value === 800 ? 800.75 : value;
+      },
+    });
+    const motion = createChatScrollMotion(el, () => true, vi.fn());
+    motion.request();
+    advance();
+    advance(180);
+
+    expect(el.scrollTop).toBe(800.75);
+    expect(frames.size).toBe(0);
+    grow(1200);
+    motion.request();
+    expect(frames.size).toBe(1);
+    advance();
+    advance(180);
+
+    expect(el.scrollTop).toBe(1000);
+    expect(frames.size).toBe(0);
+    motion.dispose();
+  });
+});
 describe("scroll ownership", () => {
   it.each(["wheel", "keydown"])("yields to %s and removes listeners on disposal", (type) => {
     const { el } = fixture();

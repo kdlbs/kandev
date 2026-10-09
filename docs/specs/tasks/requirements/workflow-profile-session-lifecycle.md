@@ -66,7 +66,8 @@ starts and ends, so repeated stages use the intended context.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.4:** When a source step selects
   **Park the session**, Kandev shall stop its runtime and keep the session
   nonterminal. The conversation shall remain available for reuse or manual
-  follow-up.
+  follow-up. If the deliberate stop closes the agent stream, Kandev shall not
+  present the parked session as a failed recovery.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.5:** For existing profile-only steps,
   consecutive steps with the active session's profile shall keep that session
   when the destination uses the default or **Reuse an available session** start

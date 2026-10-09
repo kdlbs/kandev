@@ -10,11 +10,10 @@ import { watchWs } from "../../helpers/causal-waits";
 // Inline rename lives in file-context-menu.tsx and file-tree-node-name.tsx.
 // Entry points (today, in product code):
 //   - Right-click -> "Rename" menu item
-//   - The input is focused immediately after isRenaming=true, while blur-commit is
-//     gated by a 400ms ref so the initial focus handoff does not fire onBlur.
+//   - The input is focused after rename mode mounts. A blur handoff gate keeps
+//     the context menu's initial focus restoration from committing the rename.
 // Commit on Enter, cancel on Escape, commit on blur.
-// We test the user-visible flow only (no direct DOM hacks), so the 400ms
-// blur gate is exercised implicitly.
+// We test the user-visible flow only (no direct DOM hacks).
 
 async function setupTask(args: {
   testPage: Page;
@@ -100,6 +99,8 @@ test.describe("File tree inline rename", () => {
       requiredPath: "rename-me.ts",
     });
 
+    // Root rows are virtualized. Reveal this file through the tree's bounded
+    // scroll helper before opening its context menu.
     const node = await session.fileTree.waitForFileTreeNode("rename-me.ts");
 
     const input = await startRenameViaContextMenu(testPage, node);
@@ -167,7 +168,10 @@ test.describe("File tree inline rename", () => {
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
     git.exec("git checkout main");
     git.createFile("blur-original.ts", "blur");
-    git.createFile("other.ts", "other");
+    git.createFile("blur-other.ts", "other");
+    for (let index = 0; index < 60; index++) {
+      git.createFile(`middle-${String(index).padStart(3, "0")}.ts`, "filler");
+    }
     git.stageAll();
     git.commit("seed blur file");
     git.pushMainWithRetry();
@@ -189,7 +193,10 @@ test.describe("File tree inline rename", () => {
     await expect(input).toHaveAttribute("data-blur-commit-ready", "true");
     // Click another file to blur the input. The other node also belongs to
     // the tree, so we don't lose tree-container focus state.
-    await (await session.fileTree.waitForFileTreeNode("other.ts")).click();
+    await expect(input).toBeFocused();
+    const companion = session.fileTreeNode("blur-other.ts");
+    await expect(companion).toBeVisible();
+    await companion.click();
 
     await session.fileTree.waitForFileTreeNode("blur-final.ts");
     await expect(session.fileTreeNode("blur-original.ts")).toHaveCount(0);

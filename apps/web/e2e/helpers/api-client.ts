@@ -1660,16 +1660,23 @@ export class ApiClient {
       const transientTaskHierarchyConflict =
         response.status === 500 &&
         body.includes("task has children at final deletion; retry the task deletion");
-      if ((!transientWorktreeInspection && !transientTaskHierarchyConflict) || attempt === 3) {
+      const sessionTransferInProgress =
+        response.status === 500 && body.trim() === '{"error":"session transfer in progress"}';
+      if (
+        (!transientWorktreeInspection &&
+          !transientTaskHierarchyConflict &&
+          !sessionTransferInProgress) ||
+        attempt === 3
+      ) {
         throw new Error(`API DELETE ${path} failed (${response.status}): ${body}`);
       }
 
-      // Re-run the complete reset so it rebuilds its task inventory after a
-      // concurrent cleanup or child-task mutation.
+      // Rebuild the reset inventory after cleanup, child-task mutations, or
+      // session transfer ownership settles.
       await dwell(
         250 * (attempt + 1),
         "poll-interval",
-        "retry interval for the E2E reset after a transient cleanup race",
+        "retry interval for E2E reset after transient cleanup or session transfer ownership",
       );
     }
   }
@@ -1691,8 +1698,26 @@ export class ApiClient {
 
   // --- E2E Mock Harness (KANDEV_E2E_MOCK=true) ---
   // These routes are mounted only when the backend was started with the
-  // env var set. They write directly to task_sessions / messages so the
-  // live-presence UI can be exercised without launching a real executor.
+  // environment selector set. They expose test-only state setup and controls.
+
+  async getBackendBootID(): Promise<string> {
+    const info = await this.request<{ boot_id: string }>("GET", "/api/v1/system/info");
+    return info.boot_id;
+  }
+
+  async killLocalAgentRuntimeChild(): Promise<{
+    killed: boolean;
+    process_id: number;
+    runtime_epoch: number;
+  }> {
+    return this.request("POST", "/api/v1/e2e/agent-runtime/kill-child", {});
+  }
+
+  async disconnectSessionAgentUpdatesStream(sessionId: string): Promise<{ disconnected: boolean }> {
+    return this.request("POST", "/api/v1/e2e/agent-runtime/disconnect-session-stream", {
+      session_id: sessionId,
+    });
+  }
 
   async seedTaskSession(
     taskId: string,

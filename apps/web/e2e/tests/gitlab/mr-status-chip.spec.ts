@@ -5,6 +5,38 @@ import { GITLAB_HOST, GITLAB_PROJECT } from "../../helpers/gitlab";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 
+type E2EGitLabMRStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      taskMRs: {
+        byWorkspaceId: Record<string, Record<string, Array<{ state: string }>>>;
+      };
+    };
+  };
+};
+
+async function waitForTaskMRHydration(
+  page: import("@playwright/test").Page,
+  taskId: string,
+  expectedMrCount: number,
+) {
+  await page.waitForFunction(
+    ({ taskId, expectedMrCount }) => {
+      const workspaces = (window as E2EGitLabMRStoreWindow).__KANDEV_E2E_STORE__?.getState().taskMRs
+        .byWorkspaceId;
+      return Object.values(workspaces ?? {}).some((byTask) => {
+        const openMRs = byTask[taskId]?.filter((mr) => mr.state === "open");
+        return (openMRs?.length ?? 0) >= expectedMrCount;
+      });
+    },
+    { taskId, expectedMrCount },
+    {
+      timeout: 30_000,
+      message: `linked GitLab MRs did not hydrate for task ${taskId}`,
+    },
+  );
+}
+
 /**
  * Seeds one open MR with a successful pipeline and 0/1 approvals
  * (-> awaiting_approval per the chip's state machine). Deliberately does NOT
@@ -78,9 +110,12 @@ async function openTask(
   // the task details already show the association. Re-drive document
   // hydration until the linked-MR chip observes the persisted map; one fixed
   // reload can race the same snapshot again under CI load.
+
+  const expectedMrCount = options.expectedMrCount ?? 1;
   await expect(async () => {
     await testPage.reload();
     await session.waitForLoad();
+    await waitForTaskMRHydration(testPage, taskId, expectedMrCount);
     const chip = session.mrStatusChip();
     await expect(chip).toBeVisible({ timeout: 5_000 });
     if (options.expectedMrCount !== undefined) {
@@ -88,7 +123,7 @@ async function openTask(
         timeout: 5_000,
       });
     }
-  }).toPass({ timeout: 60_000 });
+  }).toPass({ timeout: 60_000, intervals: [250, 500, 1_000] });
 }
 
 test.describe("GitLab MR status chip", () => {

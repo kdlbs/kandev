@@ -142,25 +142,46 @@ test.describe("Agent profile — ACP-first", () => {
   }) => {
     test.setTimeout(60_000);
 
-    await expect
-      .poll(
-        async () => {
-          const resp = await testPage.request.get(`${backend.baseUrl}/api/v1/agents/available`);
-          if (!resp.ok()) return false;
-          const data = (await resp.json()) as {
-            agents?: {
-              name: string;
-              model_config?: { config_options?: { id: string }[] };
-            }[];
-          };
-          const mock = data.agents?.find((a) => a.name === "mock-agent");
-          return Boolean(
-            mock?.model_config?.config_options?.some((option) => option.id === "effort"),
-          );
-        },
-        { timeout: 20_000, intervals: [250, 500, 1000] },
-      )
-      .toBe(true);
+    let lastAvailability: unknown;
+    try {
+      await expect
+        .poll(
+          async () => {
+            const resp = await testPage.request.get(`${backend.baseUrl}/api/v1/agents/available`);
+            if (!resp.ok()) {
+              lastAvailability = { status: resp.status(), body: await resp.text() };
+              return false;
+            }
+            const data = (await resp.json()) as {
+              agents?: {
+                name: string;
+                model_config?: {
+                  status?: string;
+                  error?: string;
+                  config_options?: { id: string }[];
+                };
+              }[];
+            };
+            const mock = data.agents?.find((a) => a.name === "mock-agent");
+            lastAvailability = {
+              status: resp.status(),
+              agentFound: Boolean(mock),
+              modelStatus: mock?.model_config?.status,
+              modelError: mock?.model_config?.error,
+              configOptionIds: mock?.model_config?.config_options?.map((option) => option.id),
+            };
+            return Boolean(
+              mock?.model_config?.config_options?.some((option) => option.id === "effort"),
+            );
+          },
+          { timeout: 20_000, intervals: [250, 500, 1000] },
+        )
+        .toBe(true);
+    } catch (error) {
+      throw new Error(`mock-agent availability snapshot: ${JSON.stringify(lastAvailability)}`, {
+        cause: error,
+      });
+    }
 
     const { agents } = await apiClient.listAgents();
     const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];

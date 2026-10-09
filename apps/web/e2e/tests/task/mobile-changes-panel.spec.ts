@@ -2,6 +2,7 @@ import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-b
 import { SessionPage } from "../../pages/session-page";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { waitForLatestSessionDone } from "../../helpers/session";
 import type { Page } from "@playwright/test";
 import path from "node:path";
 
@@ -15,7 +16,19 @@ async function openMobileChangesPanel(testPage: Page) {
 
 async function expandSection(testPage: Page, sectionTestId: string, timeout = 10_000) {
   const toggle = testPage.getByTestId(`${sectionTestId}-collapse-toggle`);
-  await expect(toggle).toBeVisible({ timeout });
+  await expect
+    .poll(
+      async () => {
+        if (!(await toggle.isVisible())) {
+          await testPage.getByTestId("changes-panel-scroll-owner").evaluate((element) => {
+            element.scrollTop = 0;
+          });
+        }
+        return toggle.isVisible();
+      },
+      { timeout },
+    )
+    .toBe(true);
   // Mirror session-page expandChangesSection: late defaultCollapsed resyncs
   // can re-collapse after the first tap, so retry until expanded sticks.
   await expect
@@ -30,6 +43,30 @@ async function expandSection(testPage: Page, sectionTestId: string, timeout = 10
       { timeout: 15_000 },
     )
     .toBe(true);
+}
+
+async function revealCommitRow(page: Page, sha: string) {
+  const row = page.getByTestId(`commit-row-${sha.slice(0, 7)}`);
+  let scanning = false;
+  await expect
+    .poll(
+      async () => {
+        if (await row.isVisible()) return true;
+        await page.getByTestId("changes-panel-scroll-owner").evaluate(async (element, started) => {
+          const atBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 1;
+          element.scrollTop =
+            !started || atBottom ? 0 : element.scrollTop + element.clientHeight * 0.7;
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+        }, scanning);
+        scanning = true;
+        return row.isVisible();
+      },
+      { timeout: 20_000 },
+    )
+    .toBe(true);
+  return row;
 }
 
 async function expectDiffText(testPage: Page, text: string, timeout = 45_000) {
@@ -74,6 +111,14 @@ async function expectDiffTextAbsent(testPage: Page, text: string, timeout = 10_0
 
 test.describe("Mobile changes panel", () => {
   test.describe.configure({ retries: 0, timeout: 120_000 });
+
+  test.afterEach(async ({ backend }, testInfo) => {
+    if (testInfo.status === testInfo.expectedStatus) return;
+    await testInfo.attach("mobile-changes-backend.log", {
+      path: backend.logPath,
+      contentType: "text/plain",
+    });
+  });
 
   test.beforeEach(({ backend, seedData }) => {
     // Restore the shared worker checkout to its immutable fixture baseline.
@@ -291,8 +336,16 @@ test.describe("Mobile changes panel", () => {
       await session.waitForLoad();
       await session.waitForChatIdle();
       await openMobileChangesPanel(testPage);
-      await expandSection(testPage, "unstaged-files-section", 20_000);
       const scrollOwner = testPage.getByTestId("changes-panel-scroll-owner");
+      // A hydrated timeline can preserve a viewport below its virtualized heading.
+      await expect
+        .poll(() => scrollOwner.evaluate((element) => element.scrollHeight > element.clientHeight))
+        .toBe(true);
+      await scrollOwner.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      await expect(testPage.getByTestId("unstaged-files-section-collapse-toggle")).toHaveCount(0);
+      await expandSection(testPage, "unstaged-files-section", 20_000);
       await expect
         .poll(() => scrollOwner.evaluate((element) => element.scrollHeight > element.clientHeight))
         .toBe(true);
@@ -619,15 +672,28 @@ test.describe("Mobile changes panel", () => {
       },
     );
 
+    await waitForLatestSessionDone(apiClient, task.id, 1, "quiet PR-only commit fixture");
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    // Keep the pushed fixture outside the initial virtual range after PR
+    // hydration, even when this case runs without earlier worker tests.
+    for (let index = 0; index < 16; index++) {
+      git.createFile("mobile-pr-old-history.ts", `older unpushed fixture ${index}`);
+      git.stageFile("mobile-pr-old-history.ts");
+      git.commit(`Older unpushed mobile fixture ${index}`);
+    }
     git.createFile("mobile-pr-shared-marker.ts", "shared provider checkout commit");
     git.stageFile("mobile-pr-shared-marker.ts");
     const sharedSha = git.commit("Shared provider checkout commit");
+
+    // Establish the local snapshot before overlaying a provider-only remote commit.
+    await openMobileChangesPanel(testPage);
+    await expandSection(testPage, "commits-section");
+    await revealCommitRow(testPage, sharedSha);
 
     const remoteSha = "e".repeat(40);
     const remoteMessage = "Mobile force-pushed commit";
@@ -698,15 +764,14 @@ test.describe("Mobile changes panel", () => {
     await openMobileChangesPanel(testPage);
     await expandSection(testPage, "commits-section");
 
-    const row = testPage.getByTestId(`commit-row-${remoteSha.slice(0, 7)}`);
-    await expect(row).toBeVisible({ timeout: 20_000 });
-    const sharedRow = testPage.getByTestId(`commit-row-${sharedSha.slice(0, 7)}`);
-    await expect(sharedRow).toBeVisible({ timeout: 20_000 });
+    const row = await revealCommitRow(testPage, remoteSha);
+    const sharedRow = await revealCommitRow(testPage, sharedSha);
     await expect(sharedRow.getByTestId("commit-provenance")).toHaveAttribute(
       "data-commit-provenance",
       "pushed",
     );
     await expect(testPage.getByTestId("header-remote-contribution-warning")).toHaveCount(0);
+    await revealCommitRow(testPage, remoteSha);
     await expect(row.getByText("+0", { exact: true })).toHaveCount(0);
     await expect(row.getByText("-0", { exact: true })).toHaveCount(0);
     await row.getByTestId(`commit-open-${remoteSha.slice(0, 7)}`).tap();

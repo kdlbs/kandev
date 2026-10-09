@@ -165,3 +165,23 @@ Review follow-up: a controlled-RAF test joins
 same-session restore that completes before hidden-panel activation keeps its
 non-bottom offset. Different-session and unapplied restores still allow normal
 initial placement.
+
+
+### Hosted live-follow observation follow-up, 2026-10-06
+
+Run `37460626206`, shard 11 job `112264886425`, observed a 27-pixel downward
+layout change while measuring a 30-pixel upward wheel. Moving the baseline after
+hover alone still failed a local zero-retry repetition. The fixture now holds
+real incoming notifications after the agent's START marker, keeps request
+responses live, and confirms the real tail was held before the wheel action.
+It releases every retained frame after observing upward movement, and in cleanup.
+The later tail must preserve the reader position within three pixels. This
+separates layout changes caused by new output from the actual wheel movement
+without editing client state, changing production scroll behavior, increasing
+deadlines, or loosening either scroll assertion.
+
+- Initial combined targeted run: the hover-only repair failed one of three scroll cases, confirming it was insufficient.
+- Targeted run with notification ordering: all six scroll/continuation cases passed in 1.1 minutes with retries disabled.
+- Final full-suite and hosted receipts are recorded below when complete.
+
+- Final exact-source desktop check: `cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project chromium tests/session/transient-turn-runtime-continuity.spec.ts tests/chat/auto-scroll-toggle.spec.ts -- --retries 0 --trace=retain-on-failure`: all sixteen cases passed in 5.4 minutes, including native retry exhaustion and the positive held-tail observation. No retry was exercised. Full web ESLint, focused ESLint, and the web typecheck passed.

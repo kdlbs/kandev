@@ -247,6 +247,7 @@ function WorkflowStepItem({
             type="button"
             ref={triggerRef}
             data-testid={`workflow-step-${step.name}`}
+            data-workflow-step-id={step.id}
             aria-current={isCurrent ? "step" : undefined}
             className={cn(
               "m-0 flex items-center gap-1.5 rounded-md border-0 bg-transparent p-0 px-2 py-0.5 text-left text-xs whitespace-nowrap transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",

@@ -74,6 +74,14 @@ async function setupTask(
   return session;
 }
 
+function gitForTaskWorkspace(repoDir: string, tmpDir: string): GitHelper {
+  const git = new GitHelper(repoDir, makeGitEnv(tmpDir));
+  // Task workspaces check out main. A preceding Git E2E can leave this shared
+  // worker repository on another branch, which would hide these seed files.
+  git.exec("git checkout -f main");
+  return git;
+}
+
 async function startCreateAtRoot(testPage: Page) {
   const btn = testPage.getByRole("button", { name: "New file" });
   if (await btn.isVisible().catch(() => false)) {
@@ -103,7 +111,7 @@ test.describe("File tree create file", () => {
     backend,
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    const git = gitForTaskWorkspace(repoDir, backend.tmpDir);
     // Seed at least one file so the tree loads. Without any files the tree
     // shows "No files found" instead of the toolbar.
     git.createFile("seed.ts", "seed");
@@ -136,7 +144,7 @@ test.describe("File tree create file", () => {
     // @covers AC-UI-FILE-TREE-KEYBOARD-SCOPE-001.1
     // @covers AC-UI-FILE-TREE-KEYBOARD-SCOPE-001.2
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    const git = gitForTaskWorkspace(repoDir, backend.tmpDir);
     git.createFile("select-all-alpha.ts", "alpha");
     git.createFile("select-all-beta.ts", "beta");
     git.stageAll();
@@ -174,7 +182,7 @@ test.describe("File tree create file", () => {
     backend,
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    const git = gitForTaskWorkspace(repoDir, backend.tmpDir);
     git.createFile("scope/existing.ts", "x");
     git.stageAll();
     git.commit("seed scope");
@@ -206,7 +214,7 @@ test.describe("File tree create file", () => {
     backend,
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    const git = gitForTaskWorkspace(repoDir, backend.tmpDir);
     git.createFile("seed.ts", "seed");
     git.stageAll();
     git.commit("seed");
@@ -235,7 +243,7 @@ test.describe("File tree create file", () => {
     backend,
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    const git = gitForTaskWorkspace(repoDir, backend.tmpDir);
     git.createFile("seed.ts", "seed");
     git.stageAll();
     git.commit("seed");

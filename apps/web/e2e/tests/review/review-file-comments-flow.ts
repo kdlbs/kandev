@@ -6,20 +6,34 @@ export async function openFileComment(page: Page, dialog: Locator, mobile: boole
     `[data-testid="review-file-header"][data-file-path="${DIFF_FILE}"]`,
   );
   if (mobile) {
-    await header.getByRole("button", { name: `More actions for ${DIFF_FILE}` }).tap();
-    const actionsMenu = page.getByTestId("review-file-actions-menu");
-    await expect(actionsMenu).toBeVisible();
-    await actionsMenu.evaluate((element) =>
-      Promise.all(
-        element
-          .getAnimations({ subtree: true })
-          .map((animation) => animation.finished.catch(() => undefined)),
-      ),
-    );
-    const commentAction = actionsMenu.getByRole("menuitem", { name: "Comment on file" });
-    await expect(commentAction).toBeVisible();
-    await commentAction.scrollIntoViewIfNeeded();
-    await commentAction.tap();
+    const trigger = header.getByRole("button", { name: `More actions for ${DIFF_FILE}` });
+    await trigger.tap();
+    const menu = page.getByTestId("review-file-actions-menu");
+    await expect(menu).toBeVisible();
+    const menuItem = menu.getByRole("menuitem", { name: "Comment on file" });
+    await expect(menuItem).toBeVisible();
+    const viewport = page.viewportSize();
+    if (!viewport) throw new Error("the mobile review flow requires a fixed viewport");
+    await expect
+      .poll(
+        async () => {
+          const box = await menuItem.boundingBox();
+          return Boolean(
+            box &&
+            box.x >= 0 &&
+            box.y >= 0 &&
+            box.x + box.width <= viewport.width &&
+            box.y + box.height <= viewport.height &&
+            box.height >= 44,
+          );
+        },
+        {
+          timeout: 5_000,
+          message: "the mobile file action must fit the viewport and touch target",
+        },
+      )
+      .toBe(true);
+    await menuItem.tap();
   } else {
     await header.getByRole("button", { name: "Comment on file", exact: true }).click();
   }

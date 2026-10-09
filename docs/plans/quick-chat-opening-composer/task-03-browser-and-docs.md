@@ -181,3 +181,16 @@ Merged-base PR fixup verification also passed:
   Specification catalog validation and full specification lint passed.
 - All 15 changed frontend test files passed (225 tests); focused Quick Chat tests
   passed all 151 tests. `git diff --check` passed.
+
+
+PR #3598 CI follow-up (2026-10-06): the delayed-acknowledgement mobile goal
+test failed on the exact hosted head and locally because the opening user
+message was visible before the opening turn had necessarily settled. The test
+now reads the persisted session state through `waitForSessionSettledBaseline`
+before recording the request baseline and arming the next `message.add` delay.
+The original local test failed with zero delayed responses; the corrected whole
+file passed both tests with retries disabled:
+
+- `(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome -- tests/chat/mobile-agent-goal.spec.ts --retries=0)`: 2 passed (47.8s).
+- The existing fresh production build was reused; product source did not change.
+- The one additional request and one delayed acknowledgement assertions remain.

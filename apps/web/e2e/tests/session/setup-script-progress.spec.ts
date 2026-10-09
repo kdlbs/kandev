@@ -37,10 +37,10 @@ test.describe("Setup script progress UX", () => {
   }) => {
     test.setTimeout(240_000);
 
-    // Hold repository preparation until the browser subscribes so its
-    // preparing state and streamed output stay observable. This test opts the
-    // shared fixture repository into the sync path, which guarantees that the
-    // cross-platform git shim can provide the gate before setup starts.
+    // Hold worktree creation until the browser subscribes so its preparing
+    // state and streamed output stay observable. This test opts the shared
+    // fixture repository into the sync path, where the cross-platform git shim
+    // gates preparation before the setup script starts.
     const gateID = Date.now();
     const gitGateFile = path.join(backend.tmpDir, "git-delay-ms");
     const gitStartedFile = path.join(backend.tmpDir, `git-started-${gateID}`);
@@ -89,9 +89,12 @@ test.describe("Setup script progress UX", () => {
       const session = new SessionPage(testPage);
       await session.waitForLoad();
 
-      // Release the optional fetch gate after the browser has subscribed. A
-      // cached repository may skip fetch entirely, so the setup-script gate
-      // is the authoritative synchronization point for this test.
+      await expect
+        .poll(() => fs.existsSync(gitStartedFile), {
+          message: "repository preparation should reach its deterministic worktree gate",
+          timeout: 90_000,
+        })
+        .toBe(true);
       fs.writeFileSync(gitReleaseFile, "release");
 
       await expect
@@ -108,8 +111,8 @@ test.describe("Setup script progress UX", () => {
       await expect(panel).toHaveAttribute("data-expanded", "true");
       await expect(panel.getByTestId("prepare-progress-header-spinner")).toBeVisible();
 
-      // Setup script output reaches the expanded step list — either streamed
-      // in real time or captured from the final `prepare.completed` payload.
+      // Output is emitted before the setup gate, so the UI must render it
+      // while the preparation-completed event is still blocked.
       await expect(panel).toContainText("[setup] installing deps", { timeout: 30_000 });
       fs.writeFileSync(releaseFile, "release");
 

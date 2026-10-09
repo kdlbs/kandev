@@ -5,7 +5,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import type { FileTreePage } from "../../pages/file-tree-page";
-import { createStandardProfile } from "../../helpers/git-helper";
+import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 
 // DnD in file-browser.tsx uses native HTML5 drag events (dragstart, dragover,
 // drop) keyed off React's onDragStart/Over/Drop. Playwright's locator.dragTo()
@@ -13,7 +13,7 @@ import { createStandardProfile } from "../../helpers/git-helper";
 // must see dragover with preventDefault() and a drop event with the same
 // DataTransfer that was set in dragstart.
 //
-// We dispatch the events manually via page.evaluate(), constructing a shared
+// We dispatch the events manually through locators, constructing a shared
 // DataTransfer for the dragstart -> drop sequence. This is the established
 // workaround for testing HTML5 DnD in Playwright and mirrors what the user
 // would do.
@@ -134,14 +134,7 @@ async function dispatchHtmlDnd(
   const source = await fileTree.waitForFileTreeNode(sourcePath, 45_000);
   await expect(source).toBeVisible({ timeout: 45_000 });
   await source.scrollIntoViewIfNeeded();
-  await testPage.evaluate((nodePath) => {
-    const row = Array.from(document.querySelectorAll('[data-testid="file-tree-node"]')).find(
-      (element) =>
-        element.getAttribute("data-path") === nodePath &&
-        element.getBoundingClientRect().width > 0 &&
-        element.getBoundingClientRect().height > 0,
-    );
-    if (!row) throw new Error(`DnD source is not mounted: ${nodePath}`);
+  await source.evaluate((row) => {
     const dataTransfer = new DataTransfer();
     const event = new DragEvent("dragstart", {
       bubbles: true,
@@ -154,44 +147,42 @@ async function dispatchHtmlDnd(
       configurable: true,
       value: dataTransfer,
     });
-  }, sourcePath);
+  });
 
   const target = await fileTree.waitForFileTreeNode(targetPath, 45_000);
   await expect(target).toBeVisible({ timeout: 45_000 });
   await target.scrollIntoViewIfNeeded();
-  await testPage.evaluate(
-    ({ sourcePath, targetPath: nodePath }) => {
-      const row = Array.from(document.querySelectorAll('[data-testid="file-tree-node"]')).find(
-        (element) =>
-          element.getAttribute("data-path") === nodePath &&
-          element.getBoundingClientRect().width > 0 &&
-          element.getBoundingClientRect().height > 0,
+  await target.evaluate((row, sourcePath) => {
+    const dataTransfer = (window as Window & { __kandevE2eDataTransfer?: DataTransfer })
+      .__kandevE2eDataTransfer;
+    if (!dataTransfer) throw new Error("DnD source did not establish a DataTransfer");
+    const fireOn = (element: Element, type: string) => {
+      element.dispatchEvent(
+        new DragEvent(type, { bubbles: true, cancelable: true, composed: true, dataTransfer }),
       );
-      const dataTransfer = (window as Window & { __kandevE2eDataTransfer?: DataTransfer })
-        .__kandevE2eDataTransfer;
-      if (!row || !dataTransfer) throw new Error(`DnD target is not mounted: ${nodePath}`);
-      const fireOn = (element: Element, type: string) => {
-        element.dispatchEvent(
-          new DragEvent(type, { bubbles: true, cancelable: true, composed: true, dataTransfer }),
-        );
-      };
-      fireOn(row, "dragenter");
-      fireOn(row, "dragover");
-      fireOn(row, "drop");
-      const source = Array.from(document.querySelectorAll('[data-testid="file-tree-node"]')).find(
-        (element) => element.getAttribute("data-path") === sourcePath,
-      );
-      if (source) fireOn(source, "dragend");
-      document.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer }));
-      delete (window as Window & { __kandevE2eDataTransfer?: DataTransfer })
-        .__kandevE2eDataTransfer;
-    },
-    { sourcePath, targetPath },
-  );
+    };
+    fireOn(row, "dragenter");
+    fireOn(row, "dragover");
+    fireOn(row, "drop");
+    const source = Array.from(document.querySelectorAll('[data-testid="file-tree-node"]')).find(
+      (element) => element.getAttribute("data-path") === sourcePath,
+    );
+    if (source) fireOn(source, "dragend");
+    document.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer }));
+    delete (window as Window & { __kandevE2eDataTransfer?: DataTransfer }).__kandevE2eDataTransfer;
+  }, sourcePath);
 }
 
 test.describe("File tree drag and drop", () => {
   test.describe.configure({ timeout: 180_000 });
+
+  test.beforeEach(async ({ backend, testPage }) => {
+    void testPage;
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
+    git.exec("git checkout -f main");
+    git.exec("git clean -fd");
+  });
 
   test("drag a file into a folder moves it on disk and in the tree", async ({
     testPage,
