@@ -157,3 +157,5 @@ PR #4404 fixup reran shared-read and task-session regressions on current main. U
 ## PR #4404 browser CI remediation
 
 Route, detail, filter, and destination-menu step reads share the existing resource owner. Offscreen workflow choices use metadata without acquiring board task snapshots. Regressions cover overlapping controls, workspace authorization, delayed destination responses, and explicit menu demand. Final CI-head verification remains pending until the remediation push passes checks.
+
+Shared metadata revisions now request one trailing read when another consumer retains an older attempt. Deferred explicit-refresh and WebSocket-producer regressions fail before correction; the final six-file selection passes 33 tests. Unchanged consumers retain their original observation. See the shared step revision repair in implementation evidence.

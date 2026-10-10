@@ -48,7 +48,7 @@
   "superseded_source_sha256": "84c5ef0f4c863eb4feb447dc0063dcc6f183c95f9f6d7f43d0d6565e723003d5",
   "superseded_source_files": 198,
   "latest_remediation": {
-    "base_sha": "8d2246e323eef5764e428b73b948818d5437e1cc",
+    "base_sha": "3fb026365239bbc893fa4a5272d926640c7ef1f9",
     "scope": "Bounded navigation and action authority, nested boot normalization, narrow model identity, shared step metadata, direct sibling hydration, and full-detail E2E inspection. No live data or configuration changes.",
     "postgres_parity": "Three exact race-enabled regressions passed with PostgreSQL 18; the owned fixture was removed.",
     "superseded_full_frontend_run": "Stopped after a known corrected fixture failure to rebase; not counted as passing.",
@@ -64,7 +64,7 @@
       "base_sha": "43f55a6aad38c7f53c4b7eb56682016639f74405"
     },
     "historical_limits": "Eight of ten write-loaded persistence probes exceeded two seconds; historical writer ownership and separate agentctl filesystem failures remain unresolved. No universal health recovery is claimed.",
-    "source_sha256": "45bdb85fe0655b43d44182dbc84c73d9d6e4e3a4028f3ebef79166c873f43cde",
+    "source_sha256": "334e9ed422c1839852da6d937d3d90191dd2104f3ac77778367289206281e335",
     "source_files": 251,
     "touch_target": {
       "red": "Real tooltip readiness transition replaced the mobile submit button.",
@@ -89,7 +89,15 @@
       "cause": "Optional store exports absent from task-list step and automation-selector mocks; destination-menu expectation omitted abortable shared-read options. Existing assertions retained, with request cancellation additionally verified.",
       "eslint": "passed"
     },
-    "final_rebase": {
+    "metadata_extraction": "Behavior-preserving extraction after normal-hook function-size rejection; SQLite summary race regressions passed.",
+    "metadata_revision_repair": {
+      "red_producers": 2,
+      "green_tests": 33,
+      "green_files": 6,
+      "original_binding_preserved": true,
+      "requests_overlap": false
+    },
+    "browser_demo_rebase": {
       "base_sha": "8d2246e323eef5764e428b73b948818d5437e1cc",
       "conflicts": 0,
       "preserved_tracked_fixups": 78,
@@ -99,6 +107,12 @@
       "typecheck": "passed",
       "production_build": "passed"
     },
-    "metadata_extraction": "Behavior-preserving extraction after normal-hook function-size rejection; SQLite summary race regressions passed."
+    "final_rebase": {
+      "base_sha": "3fb026365239bbc893fa4a5272d926640c7ef1f9",
+      "conflicts": 0,
+      "metadata_tests": 33,
+      "metadata_files": 6,
+      "runtime_ownership_race": "passed"
+    }
   }
 }

@@ -35,6 +35,7 @@ type StoredPreview =
 type PreviewState = { scopeKey: string | null; entries: Record<string, StoredPreview> };
 type RequestCycle = {
   scopeKey: string;
+  refresh: boolean;
   workflowIds: Set<string>;
   active: boolean;
   pending: Set<string>;
@@ -91,7 +92,10 @@ function requestPreview(
     };
   });
 
-  void readJourneyWorkflowSteps(store, workflowId, { signal: cycle.controller.signal })
+  void readJourneyWorkflowSteps(store, workflowId, {
+    signal: cycle.controller.signal,
+    refresh: cycle.refresh,
+  })
     .then((response) => {
       const steps = [...response.steps]
         .sort((left, right) => left.position - right.position)
@@ -138,6 +142,7 @@ export function useWorkflowOptionPreviews(
   const scopeKey = scopeIdentity ? `${scopeIdentity}:${currentGeneration}` : null;
   const requestSequence = useRef(0);
   const cycleRef = useRef<RequestCycle | null>(null);
+  const previousRefresh = useRef({ workspaceId, readScope, refreshKey });
   const [state, setState] = useState<PreviewState>({ scopeKey: null, entries: {} });
 
   if (state.scopeKey !== scopeKey) {
@@ -146,8 +151,15 @@ export function useWorkflowOptionPreviews(
 
   useEffect(() => {
     if (!scopeKey || !workspaceId) return;
+    const previous = previousRefresh.current;
+    const refresh =
+      previous.workspaceId === workspaceId &&
+      previous.readScope === readScope &&
+      previous.refreshKey !== refreshKey;
+    previousRefresh.current = { workspaceId, readScope, refreshKey };
     const cycle: RequestCycle = {
       scopeKey,
+      refresh,
       workflowIds: new Set(JSON.parse(workflowIdsKey) as string[]),
       active: true,
       pending: new Set(),
@@ -164,7 +176,7 @@ export function useWorkflowOptionPreviews(
       if (cycleRef.current === cycle) cycleRef.current = null;
     };
     // workflowIdsKey provides stable membership while callers rebuild arrays.
-  }, [scopeKey, workspaceId, workflowIdsKey, store]);
+  }, [scopeKey, workspaceId, workflowIdsKey, store, readScope, refreshKey]);
 
   const previews: Record<string, WorkflowOptionPreview> = {};
   if (scopeKey) {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { readJourneyWorkflowSteps } from "@/hooks/journey-metadata-resources";
 import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
@@ -27,6 +27,7 @@ export function useWorkflowStepMetadata(workflowId: string | null) {
   const key =
     allowed && workflowId ? JSON.stringify([scope, workflowId, connection, revision]) : null;
   const [result, setResult] = useState<{ key: string; steps: Steps } | null>(null);
+  const previousRequest = useRef<{ identity: string; revision: string } | null>(null);
   useEffect(() => {
     if (!client || !workflowId) return;
     const subscriptions = (
@@ -41,13 +42,18 @@ export function useWorkflowStepMetadata(workflowId: string | null) {
   useEffect(() => {
     if (!key || !workflowId) return;
     const controller = new AbortController();
-    void readJourneyWorkflowSteps(store, workflowId, { signal: controller.signal })
+    const identity = JSON.stringify([scope, workflowId]);
+    const revisionKey = JSON.stringify([connection, revision]);
+    const previous = previousRequest.current;
+    const refresh = previous?.identity === identity && previous.revision !== revisionKey;
+    previousRequest.current = { identity, revision: revisionKey };
+    void readJourneyWorkflowSteps(store, workflowId, { signal: controller.signal, refresh })
       .then((response) => {
         if (!controller.signal.aborted)
           setResult({ key, steps: response.steps.map(workflowStepToState) });
       })
       .catch(() => {});
     return () => controller.abort();
-  }, [key, workflowId, store]);
+  }, [key, workflowId, store, scope, connection, revision]);
   return key && result?.key === key ? result.steps : EMPTY_STEPS;
 }

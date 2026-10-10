@@ -182,7 +182,7 @@ Keep rich-session polling under its existing shared reconciler. This package doe
 Use existing owners where present, including agent list and integration health. Avoid a broad data-library migration.
 
 Each owner exposes current value, error, freshness, subscribers, and one in-flight attempt.
-Concurrent ensures reuse the promise. A refresh during execution marks one trailing request. Repeated invalidation cannot reset a failure cooldown.
+Concurrent ensures reuse the promise. A refresh during execution marks one trailing request. Repeated invalidation cannot reset a failure cooldown. Preview refresh keys and workflow-step notification revisions forward this refresh demand to the shared owner, including when another consumer retains the earlier attempt.
 Retain the existing endpoint-specific retry rules. Task navigation still follows the interactive-read recovery budget.
 A final release cancels unneeded work, while scope invalidation cancels all obsolete work. Late responses must pass generation and authorization checks.
 

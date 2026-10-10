@@ -128,3 +128,5 @@ PR #4404 fixup keeps response publication and loading settlement under the retai
 A sibling added during an older membership request triggers a direct compact follow-up before settlement. The regression omits any extra test render and covers the repository-label repair observed on phone.
 
 Task detail and cached route projection consume canonical task records. A live move retains the selected detail after its source board releases the row. Sidebar edit, link, detach, and reparent actions use bounded page records. Task mentions search one authorized page of up to 50 tasks and reject obsolete responses.
+
+Shared metadata revisions now request one trailing read when another consumer retains an older attempt. Deferred explicit-refresh and WebSocket-producer regressions fail before correction; the final six-file selection passes 33 tests. Unchanged consumers retain their original observation. See the shared step revision repair in implementation evidence.

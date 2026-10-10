@@ -4,6 +4,7 @@ import { createElement, type ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import { useFilterValueOptions } from "./use-filter-value-options";
+import { useWorkflowOptionPreviews } from "@/hooks/use-workflow-option-previews";
 
 const reads = vi.hoisted(() => ({ steps: vi.fn() }));
 vi.mock("@/lib/api/domains/workflow-api", () => ({ listWorkflowSteps: reads.steps }));
@@ -71,4 +72,42 @@ it("shares overlapping step option reads for the same workspace generation", asy
   );
   await waitFor(() => expect(result.current.first.length + result.current.second.length).toBe(2));
   expect(count).toBe(1);
+});
+
+it("refreshes shared step metadata after a revision while an older consumer remains mounted", async () => {
+  let resolveOld!: (value: unknown) => void;
+  reads.steps.mockReturnValueOnce(new Promise((done) => (resolveOld = done)));
+  reads.steps.mockResolvedValue({
+    steps: [{ id: "done", name: "Updated", position: 0, color: "blue" }],
+  });
+  const state = {
+    workspaces: { activeId: "workspace", items: [] },
+    workflows: { items: [{ id: "alpha", name: "Alpha", workspaceId: "workspace" }] },
+  } as unknown as Partial<AppState>;
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(StateProvider, { initialState: state, children });
+  const { result, rerender } = renderHook(
+    ({ revision }) => ({
+      existing: useWorkflowOptionPreviews("workspace", true, ["alpha"]),
+      refreshing: useWorkflowOptionPreviews("workspace", true, ["alpha"], revision),
+    }),
+    { initialProps: { revision: 0 }, wrapper },
+  );
+  expect(reads.steps).toHaveBeenCalledTimes(1);
+  rerender({ revision: 1 });
+  expect(reads.steps).toHaveBeenCalledTimes(1);
+  await act(async () =>
+    resolveOld({ steps: [{ id: "done", name: "Old", position: 0, color: "blue" }] }),
+  );
+  await waitFor(() => expect(reads.steps).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(result.current.refreshing.previews.alpha).toMatchObject({
+      status: "success",
+      steps: [{ title: "Updated" }],
+    }),
+  );
+  expect(result.current.existing.previews.alpha).toMatchObject({
+    status: "success",
+    steps: [{ title: "Old" }],
+  });
 });

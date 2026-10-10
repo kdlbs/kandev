@@ -1,9 +1,9 @@
 {
-  "recorded_at_utc": "2026-10-10T16:38:04.700801+00:00",
-  "head": "cb614e70528ecd88b7d7a5b05bfb4abb2f708e93",
+  "recorded_at_utc": "2026-10-10T17:04:38.732383+00:00",
+  "head": "88c0c0a2c18949ff8e01071c94f67a3abdefecf6",
   "branch": "feature/investigate-sidebar-8ce",
   "working_tree": "PR #4404 browser and CI remediation after integration with current main",
-  "changed_code_sha256": "45bdb85fe0655b43d44182dbc84c73d9d6e4e3a4028f3ebef79166c873f43cde",
+  "changed_code_sha256": "334e9ed422c1839852da6d937d3d90191dd2104f3ac77778367289206281e335",
   "digest_method": "sorted UTF-8 path + NUL + file bytes + NUL for each changed/untracked Go, TS, or TSX file under apps/",
   "changed_code_files": [
     "apps/backend/internal/backendapp/boot_board_demand_test.go",
@@ -362,7 +362,7 @@
     "apps/web/components/task/mobile/session-task-switcher-sheet.tsx": "b662045e4ad78ea4c9d7495f999eb92ff8787d06c033638f0305c7ed49df9f38",
     "apps/web/components/task/preview-session-tabs.test.tsx": "bb703cea9d4b406d5d75d88e05455e6c228271600f95ef583d478523b3b23e48",
     "apps/web/components/task/preview-session-tabs.tsx": "4850e622e6c5e037caa6bada7d59dae75362bf0f169348cdb14ee1e34becf9cf",
-    "apps/web/components/task/sidebar-filter/use-filter-value-options-demand.test.tsx": "d8f89f7700becb2d45eb591c6c8c74a6c9b5954bf8306b7a78bf5a003ec5148b",
+    "apps/web/components/task/sidebar-filter/use-filter-value-options-demand.test.tsx": "b5a7a5e58c47f1a2b1a4c89f8ba773feba0f7bf54b689b2ae274238a5f130c32",
     "apps/web/components/task/sidebar-filter/use-filter-value-options.ts": "d58c4bea6168f2518fb8b14a8e19df02efa030faf3b09031d5801def6a78b3df",
     "apps/web/components/task/sidebar-page-actions.test.tsx": "358ac482781bfbe871ebd1c5a260f534286b6b5038890f5d0d30eb680e8e8e55",
     "apps/web/components/task/task-chat-panel.tsx": "6a38570fd676d47fa345231681bec040f924e8314fd931aec9fedc73f3268fe7",
@@ -413,8 +413,8 @@
     "apps/web/hooks/domains/kanban/use-swimlane-render-data.ts": "d2f8c512e25f99139ad8886cb30c84fabd326a24f333ab24789ff3bdc24cfbd7",
     "apps/web/hooks/domains/kanban/use-workflow-board-demand.test.tsx": "84c2b6b66a1eb4fd9c69101707d3439ff93e47969194ac1fffd2d96de0464cb3",
     "apps/web/hooks/domains/kanban/use-workflow-board-demand.ts": "7b58873a8205d7b31208a8db1a8d70e748ec64da9a8f6ae17bd3abbcf515f98b",
-    "apps/web/hooks/domains/kanban/use-workflow-step-metadata-demand.test.tsx": "185bc2ca8661544bc227b7e3f4ad5602e32cb39f7c2cdd96da79f1f1b14dbb70",
-    "apps/web/hooks/domains/kanban/use-workflow-step-metadata.ts": "f535f9e13f942f55e31041a77e927e7d633d1e167526d968fe92ddbbc3eebab7",
+    "apps/web/hooks/domains/kanban/use-workflow-step-metadata-demand.test.tsx": "e406ff9b65c9081d03fd90856e41fdbb20651b53d923e07d68cac3b62eef03b2",
+    "apps/web/hooks/domains/kanban/use-workflow-step-metadata.ts": "2f1d9657cbf2220d357437381f7d1c758b9526c8172931664636e2f65af4c1be",
     "apps/web/hooks/domains/kanban/use-workflow-steps-by-id.test.ts": "05d625fc4f6c94a73605d59116ed0a14a06a6e00b850ca07d1d46b11e68d3921",
     "apps/web/hooks/domains/kanban/use-workflow-steps-by-id.ts": "4ab5509f0640ba5824a9f74aeda37498099d3c74d558baab65a74d152345858e",
     "apps/web/hooks/domains/session/load-message-window.test.ts": "a34ba2294b85ec4129688631b8d4de03a64551644acaf66fcc74b3187e9cebe9",
@@ -465,7 +465,7 @@
     "apps/web/hooks/use-utility-agent-generator.test.tsx": "9497c225a7fb511e243c4db95c718c1abb3413651a96dd75bdf638c5f1f9ee6b",
     "apps/web/hooks/use-utility-agent-generator.ts": "af1004c8569375667be5205c24d1982989bed76e8ca039dd426a7aa44856ffe1",
     "apps/web/hooks/use-workflow-option-previews.test.ts": "118c9755b716cf2e6d253b57ba0d323a37164fdac93c1e9075244421f44f2725",
-    "apps/web/hooks/use-workflow-option-previews.ts": "f4db32ad1bff914cfd80c8a9a0b19d70ab76e95d27e578f3e892fd3470f4bcfb",
+    "apps/web/hooks/use-workflow-option-previews.ts": "2f3a9e90ebd1ae4ca153adc6a25632ea26ed96c1d22ed8aa49f06b23cd7e0726",
     "apps/web/hooks/use-workflow-snapshot.test.ts": "3e85fb7872c9a128d065f195fcc54159ef2cb733bc541db934fa1c160dca1bd3",
     "apps/web/hooks/use-workflow-snapshot.ts": "1ffb04378b0271fb8df784aee06766e0df113b724fad08916fd693a189d2c9da",
     "apps/web/hooks/use-workflow-steps.ts": "b8f87a38e93ffd3da3a406ba57621062e65195e17f19a7b6c03d7e131414c324",
@@ -623,7 +623,16 @@
       "scope": "Owned regressions plus boot, task status, Quick Terminal, and browser-demo mode"
     },
     "frontend_build": "Production Vite build passed on final rebased source",
-    "metadata_extraction": "Race-enabled SQLite summary projection regressions passed after normal-hook function-size extraction"
+    "metadata_extraction": "Race-enabled SQLite summary projection regressions passed after normal-hook function-size extraction",
+    "metadata_revision_repair": {
+      "red_producers": 2,
+      "green_tests": 33,
+      "green_files": 6,
+      "eslint": "passed",
+      "typecheck": "passed",
+      "scope": "Explicit preview revision and actual WebSocket step-notification producer with another retained read"
+    },
+    "runtime_ownership_integration": "Incoming project MCP ownership and restored execution race checks passed on latest base"
   },
   "delivery_formatting": "Prettier normalized ten files before the delivery commit; emitted JavaScript syntax is unchanged.",
   "delivery_refactor": "Removed redundant aliases in chat input/panel state and extracted unchanged TipTap editor/context markup to satisfy function size limits. Seven affected test files passed 141 tests. TypeScript, architecture lint, and fresh desktop/phone visible-chat browser cases passed.",
@@ -670,7 +679,7 @@
   "pr_fixup_review_source_sha256": "b6d635ffdf3763734c0173ae50981a0eca9011859d1288271c2058759f6246f1",
   "pr_fixup_ci_fixture_source_sha256": "84c5ef0f4c863eb4feb447dc0063dcc6f183c95f9f6d7f43d0d6565e723003d5",
   "head_role": "Rebased committed baseline; final source bytes below include owned uncommitted browser/CI remediation.",
-  "base_sha": "8d2246e323eef5764e428b73b948818d5437e1cc",
+  "base_sha": "3fb026365239bbc893fa4a5272d926640c7ef1f9",
   "implementation_handoff_verification": {
     "frontend_tests": 728,
     "frontend_test_files": 52,
