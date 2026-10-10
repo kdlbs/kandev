@@ -1,5 +1,8 @@
 ---
-spec: docs/specs/platform/requirements/workspace-git-status.md
+requirements:
+  - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
+system_design:
+  - ../../specs/platform/system-design/workspace-git-status.md
 created: 2026-08-31
 status: implemented
 ---
@@ -104,3 +107,9 @@ git diff --check
 
 The [noninteractive Git execution package](../noninteractive-git-execution/plan.md) owns final runner enforcement, helper cleanup, and authentication-failure recovery coverage.
 That package is complete. Existing results above remain historical evidence for this package's original implementation; its follow-up validation is recorded in the linked package.
+
+
+The PR follow-up also restores the existing manager-shutdown contract for
+cached lazy trackers. Root and discovered trackers were stopped, but detached
+lazy-tracker status work could survive teardown. Task 02 records the failing
+blocked-observation regression and the shared Stop-path correction.

@@ -1,5 +1,8 @@
 ---
-spec: docs/specs/workspaces/requirements/local-repositories.md
+requirements:
+  - REQ-WORKSPACES-LOCAL-REPOSITORIES-001
+system_design:
+  - ../../specs/workspaces/system-design/local-repositories.md
 created: 2026-08-22
 status: implemented
 ---

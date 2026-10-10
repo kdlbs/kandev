@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -136,15 +137,15 @@ func TestRetryUnavailableComparisonTargetsReplacesStaleMatchingOperation(t *test
 	repoDir, cleanup := setupTestRepo(t)
 	t.Cleanup(cleanup)
 	target := comparisonTargetProcessTestTarget()
-	mgr, markers := newComparisonTargetTestManager(t, repoDir, target, nil)
+	remotePath := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin"))
+	runGit(t, repoDir, "config", "url."+remotePath+".insteadOf", target.TargetRepository.RemoteURL)
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir:           repoDir,
+		ComparisonTargets: map[string]models.ComparisonTarget{"": target},
+	}, newTestLogger(t))
+	t.Cleanup(func() { _ = mgr.StopForTeardown(context.Background()) })
 	tracker := mgr.GetWorkspaceTracker()
 	tracker.SetComparisonTargetUnavailable(&target, comparisonTargetErrorFetch)
-	tracker.SetGitEnvironment([]string{
-		comparisonTargetGitShimModeEnv + "=comparison",
-		"KANDEV_TEST_GIT_LOG=" + markers.commandLog,
-		"KANDEV_TEST_FETCH_STARTED=" + markers.fetchStarted,
-		"KANDEV_TEST_STATUS_STARTED=" + markers.statusStarted,
-	})
 
 	// A failed operation publishes unavailable before its deferred cleanup
 	// removes the operation from the manager. A fresh request in that window
@@ -170,6 +171,9 @@ func TestRetryUnavailableComparisonTargetsReplacesStaleMatchingOperation(t *test
 	resolution := waitForComparisonResolution(t, tracker, comparisonTargetStatusReady, "")
 	if resolution.Ref != target.ComparisonRef() {
 		t.Fatalf("recovered comparison ref = %q, want %q", resolution.Ref, target.ComparisonRef())
+	}
+	if got, want := runGit(t, repoDir, "rev-parse", resolution.Ref), runGit(t, repoDir, "rev-parse", "main"); got != want {
+		t.Fatalf("recovered comparison commit = %q, want %q", got, want)
 	}
 	select {
 	case <-oldCanceled:
@@ -277,6 +281,38 @@ func TestUpdateComparisonTargetsDoesNotWaitForMaterialization(t *testing.T) {
 	if err := os.WriteFile(gate, nil, 0o600); err != nil {
 		t.Fatalf("release comparison fetch: %v", err)
 	}
+}
+
+func TestComparisonTargetLazyTrackerCancellationOnShutdown(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+	initGitRepoAt(t, filepath.Join(repoDir, "lazy"))
+	mgr := NewManager(&config.InstanceConfig{WorkDir: repoDir}, newTestLogger(t))
+	t.Cleanup(func() { _ = mgr.StopForTeardown(context.Background()) })
+	tracker, err := mgr.GetWorkspaceTrackerFor("lazy")
+	if err != nil {
+		t.Fatalf("GetWorkspaceTrackerFor: %v", err)
+	}
+	t.Cleanup(tracker.Stop)
+	started := make(chan struct{})
+	done := make(chan struct{})
+	tracker.gitStatusBasicObserver = func(ctx context.Context) (types.GitStatusUpdate, error) {
+		close(started)
+		<-ctx.Done()
+		return types.GitStatusUpdate{}, ctx.Err()
+	}
+	go func() {
+		tracker.RefreshGitStatus(tracker.cancelCtx)
+		close(done)
+	}()
+	waitForComparisonCall(t, started, "lazy status observation")
+	if err := mgr.StopForTeardown(context.Background()); err != nil {
+		t.Fatalf("StopForTeardown: %v", err)
+	}
+	if err := tracker.cancelCtx.Err(); err != context.Canceled {
+		t.Fatalf("lazy tracker lifetime error = %v, want context.Canceled", err)
+	}
+	waitForComparisonCall(t, done, "lazy status shutdown")
 }
 
 func TestGetWorkspaceTrackerForDoesNotWaitForMaterialization(t *testing.T) {
