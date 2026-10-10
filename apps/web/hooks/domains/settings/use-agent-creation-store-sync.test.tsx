@@ -50,6 +50,24 @@ function setup(current = owner) {
 }
 
 describe("accepted creation publication guards", () => {
+  it("publishes an accepted new owner while retaining independent catalogue and selector entries", () => {
+    const { result } = setup();
+    const createdProfile = {
+      ...profile,
+      id: agentProfileId("new-owner-profile"),
+      agentId: "new-owner",
+    };
+    const created = { ...owner, id: "new-owner", profiles: [createdProfile] };
+    act(() => result.current.upsertAgent(created, { profiles: created.profiles, newAgent: true }));
+    const state = result.current.store.getState();
+    expect(state.settingsAgents.items).toEqual([owner, created]);
+    expect(state.agentProfiles.items.map((item) => item.id)).toEqual([
+      profile.id,
+      createdProfile.id,
+    ]);
+    expect(state.agentProfiles.version).toBe(2);
+  });
+
   // @covers AC-AGENTS-TARGET-CREATION-CATALOGUE-001.3
   it("deduplicates a matching event copy and publishes the accepted normalized fields", () => {
     const { result } = setup();

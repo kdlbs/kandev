@@ -648,8 +648,9 @@ func TestHandleAskUserQuestion_RetryIgnoresBundleOwnedByAnotherSession(t *testin
 		_, err := h.handleAskUserQuestion(ctx, makeWSMessage(t, ws.ActionMCPAskUserQuestion, retryAskPayload(sessionID, taskID)))
 		require.NoError(t, err)
 	}()
-	require.Eventually(t, func() bool { return len(store.ListPending()) == 1 }, time.Second, 5*time.Millisecond)
-	assert.Equal(t, int32(1), creator.calls.Load(), "the foreign bundle must not suppress this session's own question")
+	require.Eventually(t, func() bool {
+		return len(store.ListPending()) == 1 && creator.calls.Load() == 1
+	}, time.Second, 5*time.Millisecond, "the foreign bundle must not suppress this session's own question")
 	store.CancelSession(sessionID)
 	wg.Wait()
 }
