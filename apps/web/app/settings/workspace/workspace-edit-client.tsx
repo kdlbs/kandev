@@ -319,8 +319,7 @@ function DeleteWorkspaceCard({
 
 function useWorkspaceDeleteDraft(
   workspace: Workspace,
-  workspaces: Workspace[],
-  setWorkspaces: (items: Workspace[]) => void,
+  storeApi: ReturnType<typeof useAppStoreApi>,
 ) {
   const router = useRouter();
   const { toast } = useToast();
@@ -334,7 +333,8 @@ function useWorkspaceDeleteDraft(
     if (confirmText !== workspace.name) return;
     try {
       await deleteRequest.run(workspace.id, workspace.name, officeEnabled);
-      setWorkspaces(workspaces.filter((item) => item.id !== workspace.id));
+      const { workspaces, setWorkspaces } = storeApi.getState();
+      setWorkspaces(workspaces.items.filter((item) => item.id !== workspace.id));
       runWithNavigationBlockerBypassed(() => router.push("/settings/workspaces"));
     } catch (error) {
       toast({
@@ -386,9 +386,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
   } = useWorkspaceIdlePolicyDraft(workspace, savedState);
   const executors = useAppStore((state) => state.executors.items);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
-  const workspaces = useAppStore((state) => state.workspaces.items);
-  const setWorkspaces = useAppStore((state) => state.setWorkspaces);
-  const deleteDraft = useWorkspaceDeleteDraft(currentWorkspace, workspaces, setWorkspaces);
+  const deleteDraft = useWorkspaceDeleteDraft(currentWorkspace, storeApi);
 
   const saveWorkspaceRequest = useRequest(updateWorkspaceAction);
 
