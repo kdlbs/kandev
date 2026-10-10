@@ -196,6 +196,24 @@ export async function requestSessionRecover(options: SessionRecoveryRequest): Pr
   if (failure) throw failure;
 }
 
+/** Resume through recovery and retain the workspace projection for the caller. */
+export async function resumeSession(
+  taskId: string,
+  sessionId: string,
+  failureMessage: string,
+): Promise<LaunchSessionResponse> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error(failureMessage);
+  const response = await client.request<LaunchSessionResponse>(
+    "session.recover",
+    { task_id: taskId, session_id: sessionId, action: "resume" },
+    60_000,
+  );
+  const failure = responseFailure(response, failureMessage);
+  if (failure) throw failure;
+  return response;
+}
+
 /** Read current recovery state without reconstructing or inspecting the workspace. */
 export async function getWorkspaceRecoveryStatus(
   taskId: string,

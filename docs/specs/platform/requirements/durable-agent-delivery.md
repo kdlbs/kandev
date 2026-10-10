@@ -98,6 +98,11 @@ This draft defines proposed behavior. It does not claim that the current impleme
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5:** When retained evidence settles an uncertain submission, Kandev shall resolve only its matching delivery block after projection and authoritative outcome settlement. Other recovery blocks shall remain effective.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.6:** Reconnecting and uncertain session state shall survive browser reload and backend restart. It shall not appear idle and ready for new work while delivery remains unresolved.
 
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.7:** When a session has an uncertain prompt, workspace-only restoration shall remain available for inspection without starting an agent, resending a prompt, or resolving its uncertainty.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8:** When a user clicks the existing Resume action in Quick Chat or task chat, Kandev shall use explicit session recovery rather than an ordinary launch blocked by an interrupted prompt. Automatic opening and focus shall remain subject to recovery admission.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.9:** A successful explicit native resume shall preserve the native conversation and record its recovery action without resending the interrupted instruction or declaring its historical unknown outcome terminal. Failed recovery shall retain the recovery block.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.10:** Workspace-only restoration shall never resolve a prompt recovery block, including when a request carries a recovery action. Native-state loss and unresolved live durable work shall retain their existing distinct recovery rules.
+
 ### REQ-PLATFORM-DURABLE-AGENT-DELIVERY-007: Compatible rollout
 
 **Intent:** Compatible installations must receive durable delivery without an operator toggle or misleading fallback.

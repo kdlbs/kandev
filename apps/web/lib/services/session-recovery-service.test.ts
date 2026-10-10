@@ -5,12 +5,15 @@ import {
   managedCloneRelocationRecoveryDetails,
   contextContinuationDetails,
   requestSessionRecover,
+  resumeSession,
   recoveryInspectionBusyDetails,
   recoveryInspectionBusyMessage,
   resolveRequestErrorMessage,
   sessionRecoveryGuardDetails,
 } from "./session-recovery-service";
 import { WebSocketRequestError } from "@/lib/ws/client";
+
+const RECOVER_ACTION = "session.recover";
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("@/lib/ws/connection", () => ({
@@ -47,6 +50,33 @@ describe("recoveryInspectionBusyDetails", () => {
     expect(resolveRequestErrorMessage(busy, t)).toBe("localized busy");
     expect(resolveRequestErrorMessage(new Error("raw transport failure"), t)).toBe(
       "raw transport failure",
+    );
+  });
+});
+
+describe("native session resume", () => {
+  it("returns the native resume response and allows a full launch timeout", async () => {
+    const response = {
+      success: true,
+      task_id: "task-1",
+      session_id: "session-1",
+      state: "WAITING_FOR_INPUT",
+      worktree_path: "/workspace",
+      worktree_branch: "main",
+    };
+    mocks.request.mockResolvedValueOnce(response);
+    await expect(resumeSession("task-1", "session-1", "failed")).resolves.toBe(response);
+    expect(mocks.request).toHaveBeenCalledWith(
+      RECOVER_ACTION,
+      { task_id: "task-1", session_id: "session-1", action: "resume" },
+      60_000,
+    );
+  });
+
+  it("surfaces a refused resume instead of hydrating a successful session", async () => {
+    mocks.request.mockResolvedValueOnce({ success: false, error: "runtime unavailable" });
+    await expect(resumeSession("task-1", "session-1", "failed")).rejects.toThrow(
+      "runtime unavailable",
     );
   });
 });
@@ -136,7 +166,7 @@ describe("session recovery service", () => {
       }),
     ).resolves.toBeUndefined();
     expect(mocks.request).toHaveBeenCalledWith(
-      "session.recover",
+      RECOVER_ACTION,
       { task_id: "task-1", session_id: "session-1", action: "continue_from_history" },
       30_000,
     );
@@ -153,7 +183,7 @@ it("sends the current stamp with an explicit managed clone relocation", async ()
     errorStamp: "stamp-1",
   });
   expect(mocks.request).toHaveBeenCalledWith(
-    "session.recover",
+    RECOVER_ACTION,
     {
       task_id: "task-1",
       session_id: "session-1",
@@ -207,7 +237,7 @@ it("sends provider-restored settings policy only with an explicit resume", async
     settingsPolicy: "provider_restored",
   });
   expect(mocks.request).toHaveBeenCalledWith(
-    "session.recover",
+    RECOVER_ACTION,
     {
       task_id: "task-1",
       session_id: "session-1",

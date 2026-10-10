@@ -16,7 +16,7 @@ requirements:
 ## Purpose and boundaries
 
 The backend owns canonical messages, turns, and workflow authority.
-Agentctl owns a bounded delivery journal close to the harness process.
+Agentctl owns a bounded delivery journal.
 The journal is not another product transcript or a native harness checkpoint.
 
 This contract covers authenticated backend-to-agentctl traffic.
@@ -352,9 +352,9 @@ Stop remains available during reconciliation.
 Retry reconnect queries state only.
 It does not resend the prompt.
 
-A user can inspect the workspace and submit an explicit next instruction.
-That action retains the prior uncertainty notice and creates a new submission.
-A replacement conversation additionally requires the explicit context-continuation action.
+[Interrupted prompt recovery](interrupted-prompt-recovery.md) defines workspace inspection and
+the existing explicit Resume path. It preserves historical uncertainty and native resume.
+A replacement conversation still requires explicit context continuation.
 
 This package does not change executor parent-death behavior.
 If the executor terminates the harness, recovery retains journal evidence and uses native restore or explicit context continuation.
