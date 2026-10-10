@@ -1,9 +1,13 @@
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { expectTaskDescription } from "../../pages/task-description-editor";
 import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { seedIncompatibleAgentScenario, seedLockedWorkflow } from "./agent-compatibility-helpers";
 
@@ -451,6 +455,7 @@ test.describe("Task creation", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -459,7 +464,7 @@ test.describe("Task creation", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
     await dialog.getByTestId("task-title-input").fill("Parent workspace task");
-    await dialog.getByTestId("task-description-input").fill("Create beside the repository");
+    await dialog.getByTestId("task-description-input").fill("/e2e:simple-message");
     await expect(dialog.getByTestId(START_AGENT_TEST_ID)).toBeEnabled({
       timeout: START_ENABLED_TIMEOUT,
     });
@@ -480,6 +485,33 @@ test.describe("Task creation", () => {
       .poll(() => apiClient.getTask(createdTaskId), { timeout: 15_000 })
       .toMatchObject({ initial_workspace_layout: "task_root" });
     expect(createdTaskId).not.toBe(seedData.repositoryId);
+
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(createdTaskId))?.status, {
+        timeout: 30_000,
+      })
+      .toBe("ready");
+    const environment = await apiClient.getTaskEnvironment(createdTaskId);
+    expect(environment?.repos).toHaveLength(1);
+    const checkout = environment!.repos![0].worktree_path!;
+    expect(path.dirname(checkout)).toBe(environment?.workspace_path);
+    expect(
+      execFileSync("git", ["-C", checkout, "rev-parse", "--show-toplevel"], {
+        encoding: "utf8",
+        env: makeGitEnv(backend.tmpDir),
+      }).trim(),
+    ).toBe(checkout);
+    await expect
+      .poll(
+        async () => (await apiClient.listTaskSessions(createdTaskId)).sessions[0]?.workspace_path,
+        {
+          timeout: 30_000,
+        },
+      )
+      .toBe(environment?.workspace_path);
+
+    await apiClient.deleteTask(createdTaskId, { discardWorktreeChanges: true });
+    await expect.poll(() => fs.existsSync(checkout), { timeout: 30_000 }).toBe(false);
   });
 
   test("explains when a Docker executor has no compatible agent credentials", async ({

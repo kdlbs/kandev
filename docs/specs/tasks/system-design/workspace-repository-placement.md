@@ -49,8 +49,11 @@ A same-workspace subtask reuses the parent's environment. A new-workspace subtas
 
 ## Launch and reuse
 
-`WorktreePreparer.Prepare` currently branches by source count. Both its initial and `WorkspaceReuseRequired` returns use `wt.Path` for a single repository.
-Resolve agent workspace independently from repository preparation. Parent-root startup uses the owned task folder even with one worktree.
+`WorktreePreparer.Prepare` branches by source count. Resolve the agent workspace independently from repository preparation.
+Parent-root startup uses the owned task folder even with one worktree.
+Both initial and `WorkspaceReuseRequired` results retain the checkout in `EnvPrepareResult.WorktreePath`.
+`WorkspacePath` carries the effective agent root. Runtime metadata and environment inventory must preserve this distinction.
+Git inspection and deletion use the physical checkout path, including for a single repository under a parent root.
 Retain repository-specific setup execution at the repository path. Executor setup receives the effective workspace root. Do not run either script twice.
 
 Propagate layout through `CreateTaskRequest`, launch requests, `EnvPrepareRequest`, and the environment projection.

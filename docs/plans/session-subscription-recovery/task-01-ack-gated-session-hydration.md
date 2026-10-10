@@ -98,3 +98,13 @@ Verification:
 - Desktop Chromium session E2E: 5 passed.
 - Mobile Chrome recovery E2E: 2 passed.
 - `git diff --check` passed.
+
+## PR fixup results (2026-10-10)
+
+The gateway preserves socket order for legacy session membership changes.
+Initial snapshot loading remains asynchronous, and independent request handlers remain concurrent.
+This repairs the existing shared membership contract during session promotion.
+The live authorization barrier test failed before the repair and passed afterward.
+The complete gateway package passed `go test -trimpath -race ./internal/gateway/websocket -count=1`.
+The changed-scope gateway Go lint reported zero issues.
+Browser verification: `cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/chat/quick-chat-cancel-palette.spec.ts -- --retries=0` passed all three tests after a fresh runtime and web build.

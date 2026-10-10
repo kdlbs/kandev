@@ -43,6 +43,13 @@ func TestHandleCreateTask_InitialPromptUsesRequestedWorkflowStepMode(t *testing.
 			ctx := context.Background()
 			taskSvc, repo, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
 			workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, taskSvc)
+			require.NoError(t, repo.CreateExecutor(ctx, &models.Executor{
+				ID: "source-executor", Name: "Source executor", Type: models.ExecutorTypeLocal,
+				Status: models.ExecutorStatusActive, Resumable: true,
+			}))
+			require.NoError(t, repo.CreateExecutorProfile(ctx, &models.ExecutorProfile{
+				ID: "executor-source", ExecutorID: "source-executor", Name: "Source profile",
+			}))
 			seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
 				ID:             "step-backlog-" + tc.name,
 				WorkflowID:     workflow.ID,

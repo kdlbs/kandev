@@ -101,6 +101,7 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 			WorkspacePath:          workspacePath,
 			Duration:               time.Since(start),
 			WorktreeID:             wt.ID,
+			WorktreePath:           wt.Path,
 			WorktreeBranch:         wt.Branch,
 			WorktreeBranchOwner:    wt.BranchOwner,
 			WorktreeIntegrationRef: wt.IntegrationRef,
@@ -165,6 +166,7 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 		WorkspacePath:             workspacePath,
 		Duration:                  time.Since(start),
 		WorktreeID:                wt.ID,
+		WorktreePath:              wt.Path,
 		WorktreeBranch:            wt.Branch,
 		WorktreeBranchOwner:       wt.BranchOwner,
 		WorktreeIntegrationRef:    wt.IntegrationRef,
@@ -550,6 +552,7 @@ func (p *WorktreePreparer) prepareMultiRepo(
 	// haven't been migrated yet.
 	if len(worktrees) > 0 {
 		res.WorktreeID = worktrees[0].WorktreeID
+		res.WorktreePath = worktrees[0].WorktreePath
 		res.WorktreeBranch = worktrees[0].WorktreeBranch
 		res.WorktreeBranchOwner = worktrees[0].WorktreeBranchOwner
 		res.WorktreeIntegrationRef = worktrees[0].WorktreeIntegrationRef

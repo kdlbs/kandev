@@ -280,6 +280,7 @@ Worktree tasks normally start inside their first repository. In **Advanced setti
 initial repository can opt into a parent workspace folder so later repositories are siblings and the
 agent starts above the repositories. Multiple initial repositories select this layout
 automatically. The initial layout is stored with the task and reused after relaunch or reset.
+Git actions and worktree cleanup use each repository checkout inside that parent folder.
 
 Normal stop keeps the task environment available. Task deletion or **Reset Environment** removes the tracked worktree when configured to clean worktrees. Preserve or push valuable changes first; see [Git Operations](git-operations.md).
 

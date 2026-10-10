@@ -190,3 +190,13 @@ Preserve the separate root-expansion recovery gate on PR #3598.
 Results: all six QA findings resolved. Eight browser tests and 98 focused frontend tests passed after
 rebase. Affected backend tests, Go lint, ESLint, typecheck, localization, builds, and documentation
 checks passed. See the QA report for screenshots, the phone test timing repair, and coverage limits.
+
+## PR fixup (2026-10-10)
+
+The parent-workspace launch must retain the repository checkout path independently from the agent CWD.
+The full task-creation sequence exposed a saved parent directory in the physical worktree inventory.
+Preparation, runtime metadata, and the launch adapter now preserve the checkout path.
+Regression coverage checks creation, reuse, runtime metadata, and browser deletion.
+Focused lifecycle and launch-adapter tests passed on the rebased code.
+The complete task-creation sequence (18 tests) and desktop attachment suite (4 tests) passed without retries.
+See the [QA report](qa-2026-10-09.md) for the CI findings and verification commands.

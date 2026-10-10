@@ -294,6 +294,7 @@ type EnvPrepareResult struct {
 	// Worktree fields (populated when worktree preparer runs).
 	// Legacy single-worktree fields; for multi-repo results they mirror Worktrees[0].
 	WorktreeID                string `json:"worktree_id,omitempty"`
+	WorktreePath              string `json:"worktree_path,omitempty"`
 	WorktreeBranch            string `json:"worktree_branch,omitempty"`
 	WorktreeBranchOwner       string `json:"-"`
 	WorktreeIntegrationRef    string `json:"-"`

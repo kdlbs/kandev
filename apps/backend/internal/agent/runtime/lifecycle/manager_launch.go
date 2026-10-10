@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2136,6 +2137,12 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		// state; otherwise standalone receives the repository path (or an empty
 		// path) that was present before preparation completed.
 		reqWithWorktree.WorkspacePath = workspacePath
+		if prepResult.WorktreePath != "" {
+			metadata := make(map[string]interface{}, len(reqWithWorktree.Metadata)+1)
+			maps.Copy(metadata, reqWithWorktree.Metadata)
+			metadata[MetadataKeyWorktreePath] = prepResult.WorktreePath
+			reqWithWorktree.Metadata = metadata
+		}
 	}
 
 	// 6b. Deploy per-profile skills + custom prompt (ADR 0005 Wave A).

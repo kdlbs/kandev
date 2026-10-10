@@ -141,3 +141,19 @@ contract, so they are intentionally one sequential task.
 
 The [delayed-entry package](../session-entry-recovery/plan.md) extends recovery after a registration timeout.
 The completed ordering work and its recorded results remain unchanged.
+
+## PR fixup (2026-10-10)
+
+Quick Chat cancellation exposed another membership race during session promotion.
+The gateway dispatched a new subscribe and an older unsubscribe concurrently.
+The unsubscribe could complete last, leaving live cancellation notifications without recipients.
+
+The read pump now applies legacy session membership changes in socket order.
+Registration still precedes acknowledgement, and snapshot loading remains asynchronous.
+Other requests retain concurrent dispatch.
+A live WebSocket regression failed before the repair because unsubscribe overtook blocked authorization.
+A second regression verifies that a blocked snapshot does not delay unsubscribe.
+
+Verification: `cd apps/backend && go test -trimpath -race ./internal/gateway/websocket -count=1` passed.
+`golangci-lint run ./internal/gateway/websocket --new-from-rev=02ff0578357040b0546ea17cd9a00dff9ca9ee3b --allow-serial-runners --timeout=5m` reported zero issues.
+Browser verification: `cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/chat/quick-chat-cancel-palette.spec.ts -- --retries=0` passed all three tests after a fresh runtime and web build.
