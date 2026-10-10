@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-10-10T15:04:57.930Z",
+  "assets": [
+    {
+      "name": "queued-session-status-desktop",
+      "type": "screenshot",
+      "format": "png",
+      "file": "queued-session-ownership--queued-session-status-desktop.png",
+      "test": "queued-session-ownership.spec.ts",
+      "caption": "The queued destination stays visible above the desktop conversation."
+    },
+    {
+      "name": "queued-session-status-mobile",
+      "type": "screenshot",
+      "format": "png",
+      "file": "mobile-queued-session-ownership--queued-session-status-mobile.png",
+      "test": "mobile-queued-session-ownership.spec.ts",
+      "caption": "The queued destination stays visible above the mobile conversation."
+    }
+  ]
+}
