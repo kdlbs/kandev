@@ -1,14 +1,16 @@
-package testutil
+package store
 
 import (
 	"context"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/testutil"
 )
 
-func TestIsolatedPostgresSchemaSurvivesPoolExpansion(t *testing.T) {
-	database := OpenIsolatedPostgres(t, PostgresDSNFromEnv(t))
+func TestPostgresIsolatedSchemaSurvivesPoolExpansion(t *testing.T) {
+	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	database.SetMaxOpenConns(8)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

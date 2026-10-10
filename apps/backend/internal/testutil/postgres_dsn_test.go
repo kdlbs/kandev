@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -33,10 +34,18 @@ func TestIsolatedPostgresDSNScopesEveryConnection(t *testing.T) {
 	}
 }
 
-func TestIsolatedPostgresDSNRejectsInvalidURL(t *testing.T) {
-	for _, dsn := range []string{"postgres://localhost/%zz", "postgres://localhost/fixture?sslmode=%zz"} {
-		if _, err := isolatedPostgresDSN(dsn, "kandev_test_owned"); err == nil {
+func TestIsolatedPostgresDSNRejectsInvalidURLWithoutCredentials(t *testing.T) {
+	const password = "fake-test-password"
+	for _, dsn := range []string{
+		"postgres://fixture:" + password + "@localhost/%zz",
+		"postgres://fixture:" + password + "@localhost/fixture?sslmode=%zz",
+	} {
+		_, err := isolatedPostgresDSN(dsn, "kandev_test_owned")
+		if err == nil {
 			t.Fatal("invalid connection URL was accepted")
+		}
+		if strings.Contains(err.Error(), password) || strings.Contains(err.Error(), dsn) {
+			t.Fatal("parse error exposes connection credentials")
 		}
 	}
 }
