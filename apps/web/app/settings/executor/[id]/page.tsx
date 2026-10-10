@@ -206,7 +206,7 @@ function validateMcpPolicy(value: string | undefined): string | null {
 function DeleteExecutorSection({ executor }: { executor: Executor }) {
   const { t } = useTranslation();
   const router = useRouter();
-  const executors = useAppStore((state) => state.executors.items);
+  const appStore = useAppStoreApi();
   const setExecutors = useAppStore((state) => state.setExecutors);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -222,7 +222,9 @@ function DeleteExecutorSection({ executor }: { executor: Executor }) {
       } else {
         await deleteExecutorAction(executor.id);
       }
-      setExecutors(executors.filter((item: Executor) => item.id !== executor.id));
+      setExecutors(
+        appStore.getState().executors.items.filter((item: Executor) => item.id !== executor.id),
+      );
       router.push(EXECUTORS_ROUTE);
     } finally {
       setIsDeleting(false);
