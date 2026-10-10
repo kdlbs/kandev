@@ -135,3 +135,12 @@ Verification passed:
 - Focused toolbar and placement tests passed, including 13 tests in the final toolbar and placement run.
 - Desktop and mobile attachment E2E flows passed.
 - Changed attachment E2E files passed ESLint and the source localization checks passed.
+
+
+### Hidden-folder fixture follow-up (2026-10-10)
+
+Retained CI failure traces exposed hidden-directory picker tests still opening
+attachment from Files overflow. Both desktop and phone specs now use Files +
+and its localized attachment item. The existing hidden-folder assertions and
+source-placement contract remain intact. The owning hidden-folder work order
+records the focused validation; the QA report records combined delivery checks.
