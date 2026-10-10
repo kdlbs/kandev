@@ -48,7 +48,7 @@ Not every piece of agent work is tied to a codebase. Users want to brainstorm a 
 
 ## Out of scope
 
-- Attaching a repo to a repo-less task after creation (no "promote to repo task" flow in v1).
+- The original v1 excluded later repository attachment. REQ-TASKS-ATTACH-WORKSPACE-SOURCES-006 in [Attach Workspace Sources](attach-workspace-sources.md) now defines this extension without changing the established workspace.
 - Detaching repos from existing repo-bound tasks.
 - Cross-task scratch workspaces or shared scratch dirs — each repo-less task without a picked folder gets its own isolated scratch workspace, wiped when the task is deleted.
 - Sandboxing or write-protection of a user-picked folder. The agent has full read/write access to whatever the user picks — same trust model as running an editor against the folder.

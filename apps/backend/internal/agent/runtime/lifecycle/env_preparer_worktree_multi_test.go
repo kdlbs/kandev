@@ -279,6 +279,45 @@ func TestWorktreePreparer_SingleRepoProjectsBranchMetadata(t *testing.T) {
 	}
 }
 
+func TestWorktreePreparer_MultiRepo_UsesTaskRootForParentLayoutAndPreservesDestinations(t *testing.T) {
+	repoA := initBareGitRepo(t, "nested-frontend")
+	repoB := initBareGitRepo(t, "nested-backend")
+
+	preparer, _ := newPreparerForTest(t)
+	req := &EnvPrepareRequest{
+		TaskID:          "task-multi-parent",
+		SessionID:       "sess-multi-parent",
+		TaskTitle:       "Parent Layout Task",
+		ExecutorType:    executor.NameStandalone,
+		TaskDirName:     "parent-layout-task_aaa",
+		WorkspaceLayout: "task_root",
+		Repositories: []RepoPrepareSpec{
+			{RepositoryID: "repo-front", RepositoryPath: repoA, RepoName: "frontend", BaseBranch: "main", WorkspaceRelativePath: "frontend"},
+			{RepositoryID: "repo-back", RepositoryPath: repoB, RepoName: "backend", BaseBranch: "main", WorkspaceRelativePath: "frontend/kandev/backend"},
+		},
+	}
+
+	res, err := preparer.Prepare(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("prepare failed: %s", res.ErrorMessage)
+	}
+	if len(res.Worktrees) != 2 {
+		t.Fatalf("worktrees = %d, want two", len(res.Worktrees))
+	}
+	if res.WorkspacePath != filepath.Dir(res.Worktrees[0].WorktreePath) {
+		t.Fatalf("workspace path = %q, want task root %q", res.WorkspacePath, filepath.Dir(res.Worktrees[0].WorktreePath))
+	}
+	if res.Worktrees[0].WorkspaceRelativePath != "frontend" || res.Worktrees[1].WorkspaceRelativePath != "frontend/kandev/backend" {
+		t.Fatalf("worktree destinations = %+v", res.Worktrees)
+	}
+	if res.Worktrees[1].WorktreePath != filepath.Join(res.WorkspacePath, "frontend", "kandev", "backend") {
+		t.Fatalf("nested worktree path = %q, want under task root %q", res.Worktrees[1].WorktreePath, res.WorkspacePath)
+	}
+}
+
 func TestWorktreePreparer_MultiRepo_RollbackOnPartialFailure(t *testing.T) {
 	repoA := initBareGitRepo(t, "good")
 	// repoB is intentionally a non-git directory to force the second create to fail.

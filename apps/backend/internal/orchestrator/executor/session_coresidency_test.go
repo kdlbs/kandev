@@ -210,7 +210,7 @@ func TestLaunchPreparedSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) 
 	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteLaunch); after != before+1 {
 		t.Fatalf("admitted[launch] counter = %d, want %d", after, before+1)
 	}
-	warnings := logs.FilterLevelExact(zapcore.WarnLevel).All()
+	warnings := logs.FilterMessageSnippet("starting an agent while another session").All()
 	if len(warnings) != 1 {
 		t.Fatalf("warning entries = %d, want 1; all=%v", len(warnings), logs.All())
 	}
@@ -269,7 +269,7 @@ func TestResumeSession_ObservesWorkingSiblingOnAgentStart(t *testing.T) {
 	if after := counterValue(sessionCoresidencyAdmittedTotalVar, sessionCoresidencySiteResume); after != before+1 {
 		t.Fatalf("admitted[resume] counter = %d, want %d", after, before+1)
 	}
-	warnings := logs.FilterLevelExact(zapcore.WarnLevel).All()
+	warnings := logs.FilterMessageSnippet("starting an agent while another session").All()
 	if len(warnings) != 1 {
 		t.Fatalf("warning entries = %d, want 1; all=%v", len(warnings), logs.All())
 	}

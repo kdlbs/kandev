@@ -56,12 +56,13 @@ type branchMaterializer struct {
 }
 
 type branchMaterialization struct {
-	environment  *models.TaskEnvironment
-	session      *models.TaskSession
-	worktree     *worktree.Worktree
-	repositoryID string
-	slug         string
-	taskID       string
+	environment      *models.TaskEnvironment
+	session          *models.TaskSession
+	worktree         *worktree.Worktree
+	taskRepositoryID string
+	repositoryID     string
+	slug             string
+	taskID           string
 }
 
 func newBranchMaterializer(repo branchMaterializerRepo, mgr *worktree.Manager, lc *lifecycle.Manager, log *logger.Logger) *branchMaterializer {
@@ -131,7 +132,7 @@ func (b *branchMaterializer) materializeUnfinalized(
 		zap.String("worktree_id", wt.ID),
 		zap.String("path", wt.Path),
 		zap.String(branchFieldKey, wt.Branch))
-	return &branchMaterialization{environment: env, session: session, worktree: wt, repositoryID: req.RepositoryID, slug: slug, taskID: taskID}, nil
+	return &branchMaterialization{environment: env, session: session, worktree: wt, taskRepositoryID: taskRepositoryID, repositoryID: req.RepositoryID, slug: slug, taskID: taskID}, nil
 }
 
 func (b *branchMaterializer) finalize(materialization *branchMaterialization, ctx context.Context) string {
@@ -189,6 +190,7 @@ func (b *branchMaterializer) prepareMaterializeRequest(
 		WorktreeBranchTicket:   worktree.TicketForBranchName(task.Identifier, task.Metadata),
 		PullBeforeWorktree:     repo.PullBeforeWorktree,
 		TaskDirName:            env.TaskDirName,
+		WorkspaceRelativePath:  tr.WorkspaceRelativePath,
 		RepoName:               repo.Name,
 		BranchSlug:             slug,
 	}
@@ -204,7 +206,7 @@ func (b *branchMaterializer) resolveMaterializationEnvironment(
 	if err != nil || env == nil {
 		return env, err
 	}
-	if session == nil || session.TaskEnvironmentID != env.ID {
+	if session == nil || (session.TaskEnvironmentID != "" && session.TaskEnvironmentID != env.ID) {
 		return nil, fmt.Errorf("%w: selected session is not bound to task environment %s", models.ErrWorkspaceReuseUnsafe, env.ID)
 	}
 	if err := b.validateMaterializationEnvironmentOwner(ctx, taskID, env); err != nil {
@@ -274,7 +276,7 @@ func (b *branchMaterializer) verifyMaterializationTarget(
 	if err != nil {
 		return err
 	}
-	if current == nil || current.ID != sessionID || current.TaskEnvironmentID != environmentID {
+	if current == nil || current.ID != sessionID || (current.TaskEnvironmentID != "" && current.TaskEnvironmentID != environmentID) {
 		return fmt.Errorf("%w: branch materialization session binding changed", models.ErrWorkspaceReuseUnsafe)
 	}
 	return nil
@@ -313,19 +315,24 @@ func (b *branchMaterializer) finalizeMaterialize(
 ) string {
 	taskRoot := b.promoteWorkspacePathIfNeeded(ctx, env, wt.Path)
 	b.notifyAgentctlRescan(ctx, session, taskRoot)
-	if b.rescanner != nil {
-		b.rescanner.NotifyWorktreeMaterialized(ctx, lifecycle.MaterializedWorktree{
-			TaskID:            taskID,
-			SessionID:         session.ID,
-			WorktreeID:        wt.ID,
-			WorktreePath:      wt.Path,
-			WorktreeBranch:    wt.Branch,
-			RepositoryID:      repositoryID,
-			BranchSlug:        slug,
-			TaskWorkspacePath: taskRoot,
-		})
-	}
+	b.notifyMaterialized(&branchMaterialization{environment: env, session: session, worktree: wt, repositoryID: repositoryID, slug: slug, taskID: taskID}, taskRoot, ctx)
 	return taskRoot
+}
+
+func (b *branchMaterializer) notifyMaterialized(materialization *branchMaterialization, taskRoot string, ctx context.Context) {
+	if b.rescanner == nil || materialization == nil || materialization.session == nil || materialization.worktree == nil {
+		return
+	}
+	b.rescanner.NotifyWorktreeMaterialized(ctx, lifecycle.MaterializedWorktree{
+		TaskID:            materialization.taskID,
+		SessionID:         materialization.session.ID,
+		WorktreeID:        materialization.worktree.ID,
+		WorktreePath:      materialization.worktree.Path,
+		WorktreeBranch:    materialization.worktree.Branch,
+		RepositoryID:      materialization.repositoryID,
+		BranchSlug:        materialization.slug,
+		TaskWorkspacePath: taskRoot,
+	})
 }
 
 // promoteWorkspacePathIfNeeded switches task_environments.workspace_path

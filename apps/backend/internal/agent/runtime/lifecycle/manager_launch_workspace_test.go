@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -162,6 +163,33 @@ func TestValidateLaunchWorkspaceAdmissionUsesSanitizedRepositoryDirectory(t *tes
 
 	if err := validateLaunchWorkspaceAdmission(context.Background(), req, root); err != nil {
 		t.Fatalf("validateLaunchWorkspaceAdmission() rejected a sanitized repository directory: %v", err)
+	}
+}
+
+func TestValidateLaunchWorkspaceAdmissionUsesNestedRepositoryRelativePaths(t *testing.T) {
+	root := t.TempDir()
+	first := initGitRepo(t)
+	second := initGitRepo(t)
+	firstPath := filepath.Join(root, "first")
+	secondPath := filepath.Join(firstPath, "kandev", "second")
+	addLinkedWorktree(t, first, firstPath)
+	if err := os.MkdirAll(filepath.Dir(secondPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	addLinkedWorktree(t, second, secondPath)
+
+	req := &LaunchRequest{
+		ExecutorType:    string(models.ExecutorTypeWorktree),
+		ACPSessionID:    "acp-session-1",
+		WorkspaceLayout: "task_root",
+		Repositories: []RepoLaunchSpec{
+			{RepositoryID: "repository-1", RepositoryPath: first, RepoName: "first", WorkspaceRelativePath: "first"},
+			{RepositoryID: "repository-2", RepositoryPath: second, RepoName: "second", WorkspaceRelativePath: "first/kandev/second"},
+		},
+	}
+
+	if err := validateLaunchWorkspaceAdmission(context.Background(), req, root); err != nil {
+		t.Fatalf("validateLaunchWorkspaceAdmission() rejected nested repository paths: %v", err)
 	}
 }
 

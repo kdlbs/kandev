@@ -32,13 +32,7 @@ func TestSQLiteProfileUpdateRetriesAfterOwnerChangesDuringRead(t *testing.T) {
 }
 
 func TestPostgresProfileUpdateRetriesAfterOwnerChangesDuringRead(t *testing.T) {
-	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
-	db.SetMaxOpenConns(8)
-	repo, err := newSQLiteRepositoryWithDB(db, db, nil)
-	if err != nil {
-		t.Fatalf("initialize profile order schema: %v", err)
-	}
-	runProfileOwnerChangedDuringRead(t, repo)
+	runProfileOwnerChangedDuringRead(t, openPostgresProfileOrderRaceRepo(t))
 }
 
 func runProfileOwnerChangedDuringRead(t *testing.T, repo *sqliteRepository) {
@@ -134,17 +128,10 @@ func runProfileOwnerChangedDuringRead(t *testing.T, repo *sqliteRepository) {
 }
 
 func TestPostgresProfileMembershipMutationsSerializeWithReorder(t *testing.T) {
-	dsn := testutil.PostgresDSNFromEnv(t)
 	for _, scenario := range profileOrderMutationScenarios() {
 		for _, winner := range []string{"mutation-first", "reorder-first"} {
 			t.Run(scenario.name+"/"+winner, func(t *testing.T) {
-				db := testutil.OpenIsolatedPostgres(t, dsn)
-				db.SetMaxOpenConns(8)
-				repo, err := newSQLiteRepositoryWithDB(db, db, nil)
-				if err != nil {
-					t.Fatalf("initialize profile order schema: %v", err)
-				}
-				runProfileOrderMutationRace(t, repo, scenario, winner)
+				runProfileOrderMutationRace(t, openPostgresProfileOrderRaceRepo(t), scenario, winner)
 			})
 		}
 	}
@@ -217,6 +204,17 @@ func profileOrderMutationScenarios() []profileOrderMutationScenario {
 			},
 		},
 	}
+}
+
+func openPostgresProfileOrderRaceRepo(t *testing.T) *sqliteRepository {
+	t.Helper()
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	db.SetMaxOpenConns(8)
+	repo, err := newSQLiteRepositoryWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("initialize profile order schema: %v", err)
+	}
+	return repo
 }
 
 func openSQLiteProfileOrderRaceRepo(t *testing.T) *sqliteRepository {
@@ -461,13 +459,7 @@ func TestSQLiteWorkspaceProfileDeleteRetriesAfterPromotionAndReorder(t *testing.
 }
 
 func TestPostgresWorkspaceProfileDeleteRetriesAfterPromotionAndReorder(t *testing.T) {
-	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
-	db.SetMaxOpenConns(8)
-	repo, err := newSQLiteRepositoryWithDB(db, db, nil)
-	if err != nil {
-		t.Fatalf("initialize profile order schema: %v", err)
-	}
-	runWorkspaceProfileDeletePromotionRace(t, repo)
+	runWorkspaceProfileDeletePromotionRace(t, openPostgresProfileOrderRaceRepo(t))
 }
 
 func runWorkspaceProfileDeletePromotionRace(t *testing.T, repo *sqliteRepository) {

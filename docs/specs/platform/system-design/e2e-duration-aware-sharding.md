@@ -194,6 +194,13 @@ that the workflow does not measure.
 
 ## Observability
 
+Normal, container and Kubernetes compatibility jobs upload test-result
+artifacts after failure or cancellation. Their diagnostic upload conditions
+include `cancelled()` so a job timeout cannot suppress traces and screenshots,
+even if the blob reporter has not written its final archive. A missing blob
+report still fails the report contract; diagnostic retention does not turn a
+cancelled or failed test job into success.
+
 The workflow retains the existing `e2e-timing-diagnostics`,
 `e2e-retry-summary`, `e2e-flake-history`, timing-profile, manifest, blob, and
 merged-report artifacts. The container jobs add a short step summary with

@@ -133,6 +133,46 @@ func TestLocalPreparer_AcceptsMatchingRepoBackedGitWorkspace(t *testing.T) {
 	}
 }
 
+func TestLocalPreparer_AllowsRepositoryInEstablishedFolderRoot(t *testing.T) {
+	workspacePath := t.TempDir()
+	repositoryPath := initGitRepo(t)
+	preparer := NewLocalPreparer(newTestLocalLogger())
+
+	result, err := preparer.Prepare(context.Background(), &EnvPrepareRequest{
+		WorkspacePath:          workspacePath,
+		RepositoryPath:         repositoryPath,
+		RepositoryID:           "repository-1",
+		WorkspaceLayout:        workspaceLayoutCurrentRoot,
+		WorkspaceReuseRequired: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("Prepare() result = %#v, want success", result)
+	}
+}
+
+func TestLocalPreparer_SkipsOuterRootCheckoutForEstablishedFolderRoot(t *testing.T) {
+	workspacePath := t.TempDir()
+	repositoryPath := initGitRepo(t)
+	preparer := NewLocalPreparer(newTestLocalLogger())
+
+	result, err := preparer.Prepare(context.Background(), &EnvPrepareRequest{
+		WorkspacePath:   workspacePath,
+		RepositoryPath:  repositoryPath,
+		RepositoryID:    "repository-1",
+		BaseBranch:      "main",
+		WorkspaceLayout: workspaceLayoutCurrentRoot,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("Prepare() result = %#v, want success", result)
+	}
+}
+
 // initGitRepo creates a minimal git repo with an initial commit and returns the path.
 func initGitRepo(t *testing.T) string {
 	t.Helper()

@@ -1137,9 +1137,14 @@ func (m *Manager) StartAllWorkspaceTrackers(ctx context.Context) {
 	}
 }
 
-// stopWorkspaceTrackers stops root + per-repo trackers (idempotent via sync.Once).
+// stopWorkspaceTrackers stops root, per-repo, and lazy trackers idempotently.
 func (m *Manager) stopWorkspaceTrackers() {
 	root, trackers := m.snapshotTrackers()
+	m.workspaceTrackersMu.Lock()
+	for _, tracker := range m.workspaceTrackersBySubpath {
+		trackers = append(trackers, tracker)
+	}
+	m.workspaceTrackersMu.Unlock()
 	if root != nil {
 		root.Stop()
 	}

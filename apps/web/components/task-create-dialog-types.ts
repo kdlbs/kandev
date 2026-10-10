@@ -9,6 +9,7 @@ import type {
   Executor,
   Task,
   TaskPriority,
+  InitialWorkspaceLayout,
   CreateTaskResponse,
 } from "@/lib/types/http";
 import type { createTask } from "@/lib/api";
@@ -220,6 +221,11 @@ export type TaskCreateDialogInitialValues = {
   prNumber?: number;
   prBaseBranch?: string;
 };
+
+export type InitialWorkspaceLayoutMode =
+  | "unavailable"
+  | "single-repository"
+  | "multiple-repositories";
 
 export type StoreSelections = {
   agentProfiles: AgentProfileOption[];
@@ -518,6 +524,9 @@ export type DialogFormState = {
   /** Priority to submit with the created task. Defaults to `medium`. */
   priority: TaskPriority;
   setPriority: (v: TaskPriority) => void;
+  /** Initial working-directory layout for a newly created task. */
+  initialWorkspaceLayout?: InitialWorkspaceLayout;
+  setInitialWorkspaceLayout?: (v: InitialWorkspaceLayout) => void;
 };
 
 export type SubmitHandlersDeps = {
@@ -589,6 +598,7 @@ export type SubmitHandlersDeps = {
   setExecutorId: (v: string) => void;
   setSelectedWorkflowId: (v: string | null) => void;
   setFetchedSteps: (v: null) => void;
+  setInitialWorkspaceLayout: (v: InitialWorkspaceLayout) => void;
   clearDraft: () => void;
   freshBranchEnabled: boolean;
   isLocalExecutor: boolean;
@@ -608,6 +618,8 @@ export type SubmitHandlersDeps = {
   workflowAgentOverrides: Record<string, string>;
   /** Create-mode validation shared by the footer and every submit entry point. */
   workflowAgentOverridesBlockedReason?: string;
+  /** Initial working-directory layout after capability validation. */
+  initialWorkspaceLayout?: InitialWorkspaceLayout;
   /**
    * Optional async transform applied to the trimmed description before the
    * API payload is built. Used by feature wrappers (e.g. Improve Kandev) to
@@ -739,4 +751,6 @@ export type DialogFormBodyProps = {
   runnerEditable: boolean;
   /** From computeRunnerIneligibleReason: presented when runnerEditable is false. */
   runnerIneligibleReason: string;
+  /** Whether the parent workspace layout control is available for this form. */
+  initialWorkspaceLayoutMode: InitialWorkspaceLayoutMode;
 };

@@ -70,7 +70,6 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
   onOpenFile,
   activeFilePath,
 }: TaskFilesPanelProps) {
-  const { t } = useTranslation();
   const [addSourcesOpen, setAddSourcesOpen] = useState(false);
   const [addSourcesOpener, setAddSourcesOpener] = useState<HTMLElement | null>(null);
   const addSourcesButtonRef = useRef<HTMLButtonElement>(null);
@@ -99,10 +98,6 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
     isLoading: sourceStateLoading,
     hasActiveTurn: hasActiveTaskSourceWork,
   });
-  const hasRepository = Boolean(activeTask?.repositoryId || activeTask?.repositories?.length);
-  const resolvedAddSourcesDisabledReason = hasRepository
-    ? addSourcesDisabledReason
-    : t("task:taskNeedsRepositoryForSources");
   if (isArchived) return <ArchivedPanelPlaceholder />;
   return (
     <SessionPanel borderSide="left">
@@ -115,19 +110,15 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
           hookRenameFile={hookRenameFile}
           hookDownloadFile={hookDownloadFile}
           activeFilePath={activeFilePath}
-          onAddSources={
-            hasRepository
-              ? (opener) => {
-                  setAddSourcesOpener(opener);
-                  setAddSourcesOpen(true);
-                }
-              : undefined
-          }
+          onAddSources={(opener) => {
+            setAddSourcesOpener(opener);
+            setAddSourcesOpen(true);
+          }}
           addSourcesButtonRef={addSourcesButtonRef}
-          addSourcesDisabledReason={resolvedAddSourcesDisabledReason}
+          addSourcesDisabledReason={addSourcesDisabledReason}
         />
       </SessionPanelContent>
-      {activeTask && hasRepository ? (
+      {activeTask ? (
         <AddWorkspaceSourcesDialog
           open={addSourcesOpen}
           onOpenChange={setAddSourcesOpen}

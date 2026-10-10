@@ -1,11 +1,20 @@
 import type { useRouter } from "@/lib/routing/client-router";
-import type { Task, Branch, LocalRepository, Repository, TaskPriority } from "@/lib/types/http";
+import type {
+  Task,
+  Branch,
+  Executor,
+  LocalRepository,
+  Repository,
+  TaskPriority,
+  InitialWorkspaceLayout,
+} from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { AppState } from "@/lib/state/store";
 import type {
   StepType,
   TaskRemoteRepoRow,
   TaskRepoRow,
+  InitialWorkspaceLayoutMode,
 } from "@/components/task-create-dialog-types";
 import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
@@ -215,6 +224,7 @@ export type BuildCreatePayloadArgs = {
   priority?: TaskPriority;
   /** Task-only replacements for fixed workflow step agent profiles. */
   workflowAgentOverrides?: Record<string, string>;
+  initialWorkspaceLayout?: InitialWorkspaceLayout;
 };
 
 function optionalString(value?: string): string | undefined {
@@ -284,11 +294,64 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     ...buildOptionalCreateTaskFields(args),
     priority: args.priority ?? "medium",
     workflow_agent_overrides: nonEmptyRecord(args.workflowAgentOverrides),
+    initial_workspace_layout: args.initialWorkspaceLayout,
     // Dependencies declared at creation time. With edges present the backend
     // records the requested agent start as a start-when-unblocked intent rather
     // than launching now, so a chain runs in order instead of all at once.
     blocked_by: nonEmptyArray(args.blockedBy),
   };
+}
+
+const PARENT_WORKSPACE_EXECUTOR_TYPES: ReadonlySet<Executor["type"]> = new Set(["worktree"]);
+
+export function resolveSelectedExecutorType(
+  executors: Executor[],
+  selectedProfileId: string,
+): Executor["type"] | null {
+  for (const executor of executors) {
+    const profile = executor.profiles?.find((candidate) => candidate.id === selectedProfileId);
+    if (profile) return profile.executor_type ?? executor.type;
+  }
+  return null;
+}
+
+export function resolveInitialWorkspaceLayoutMode({
+  isCreateMode,
+  isTaskStarted,
+  noRepository,
+  repositoryCount,
+  executorType,
+}: {
+  isCreateMode: boolean;
+  isTaskStarted: boolean;
+  noRepository: boolean;
+  repositoryCount: number;
+  executorType: Executor["type"] | null;
+}): InitialWorkspaceLayoutMode {
+  if (
+    !isCreateMode ||
+    isTaskStarted ||
+    noRepository ||
+    repositoryCount === 0 ||
+    !executorType ||
+    !PARENT_WORKSPACE_EXECUTOR_TYPES.has(executorType)
+  ) {
+    return "unavailable";
+  }
+  if (repositoryCount > 1) return "multiple-repositories";
+  return executorType === "worktree" ? "single-repository" : "unavailable";
+}
+
+export function resolveInitialWorkspaceLayout({
+  requested,
+  mode,
+}: {
+  requested: InitialWorkspaceLayout;
+  mode: InitialWorkspaceLayoutMode;
+}): InitialWorkspaceLayout | undefined {
+  if (mode === "multiple-repositories") return "task_root";
+  if (mode === "single-repository") return requested;
+  return undefined;
 }
 
 export function validateCreateInputs(inputs: {
