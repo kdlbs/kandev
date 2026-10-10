@@ -13,6 +13,7 @@ import {
   profileModelIsDirty,
 } from "@/components/settings/profile-capability-helpers";
 import { ModelPicker, ModePicker } from "@/components/settings/profile-model-fields";
+import { ModelDiscoveryNote } from "@/components/settings/model-discovery-note";
 import type { ProfileDiscoveryStatus } from "@/hooks/domains/settings/use-profile-model-capabilities";
 import type {
   CommandEntry,
@@ -244,6 +245,7 @@ function CapabilitiesRowContent({
         labelCls={labelCls}
         gapCls={gapCls}
       />
+      <ModelDiscoveryNote discovery={discovery} />
       <ModelConfigResolutionStatus
         status={configStatus}
         error={configError}

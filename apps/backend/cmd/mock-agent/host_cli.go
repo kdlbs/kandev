@@ -60,7 +60,7 @@ func runMockAppServer(stdin io.Reader, stdout io.Writer) {
 				"data": []map[string]any{
 					{
 						"id": modelFast, "model": modelFast, "displayName": "Mock Fast",
-						"description": "Fast mock model listed by the mock CLI", "hidden": false, "isDefault": true,
+						"description": "Fast mock model for testing", "hidden": false, "isDefault": true,
 						"defaultReasoningEffort": reasoningEffortMed,
 						"supportedReasoningEfforts": []map[string]string{
 							{"reasoningEffort": reasoningEffortLow, "description": "Fast responses"},
@@ -70,7 +70,7 @@ func runMockAppServer(stdin io.Reader, stdout io.Writer) {
 					},
 					{
 						"id": modelSmart, "model": modelSmart, "displayName": "Mock Smart",
-						"description": "Smart mock model listed by the mock CLI", "hidden": false, "isDefault": false,
+						"description": "Smart mock model for testing", "hidden": false, "isDefault": false,
 					},
 					{
 						"id": "mock-hidden", "model": "mock-hidden", "displayName": "Hidden", "hidden": true,

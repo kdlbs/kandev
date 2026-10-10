@@ -32,6 +32,9 @@ test.describe("Agent host CLI model discovery on mobile", () => {
       await testPage.getByPlaceholder("Filter models...").fill(customModelId);
       const customRow = testPage.getByTestId("model-config-custom-row");
       await expect(customRow).toBeVisible();
+      await expect
+        .poll(async () => (await customRow.boundingBox())?.height ?? 0)
+        .toBeGreaterThanOrEqual(44);
       const bounds = await customRow.boundingBox();
       expect(bounds).not.toBeNull();
       expect(bounds!.height).toBeGreaterThanOrEqual(44);

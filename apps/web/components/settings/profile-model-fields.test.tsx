@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ModelPicker, type ProfileFormData } from "./profile-model-fields";
+import { ModelDiscoveryNote } from "./model-discovery-note";
 import type { ModelDiscovery, ModelEntry } from "@/lib/types/http";
 
 afterEach(cleanup);
@@ -93,32 +94,40 @@ describe("ModelPicker with host CLI discovery", () => {
   });
 
   it("renders the discovery note with the CLI source and version", () => {
-    renderPicker(formData(), cliDiscovery);
+    render(<ModelDiscoveryNote discovery={cliDiscovery} />);
     expect(screen.getByTestId(discoveryNoteTestId).textContent).toBe("Models from codex 0.155.1");
   });
 
   it("renders the no-listing note when the CLI publishes no model list", () => {
-    renderPicker(formData(), {
-      source: "acp_probe",
-      executable: "claude",
-      status: "skipped",
-      allows_custom_model: true,
-    });
+    render(
+      <ModelDiscoveryNote
+        discovery={{
+          source: "acp_probe",
+          executable: "claude",
+          status: "skipped",
+          allows_custom_model: true,
+        }}
+      />,
+    );
     expect(screen.getByTestId(discoveryNoteTestId).textContent).toBe(
       "claude does not publish a model list. Type a model ID to use another model.",
     );
   });
 
-  it("renders the failure note with the reported reason", () => {
-    renderPicker(formData(), {
-      source: "acp_probe",
-      executable: "codex",
-      status: "not_logged_in",
-      error: "the command-line tool is not signed in",
-      allows_custom_model: true,
-    });
+  it("localizes the failure note for a known discovery status", () => {
+    render(
+      <ModelDiscoveryNote
+        discovery={{
+          source: "acp_probe",
+          executable: "codex",
+          status: "not_logged_in",
+          error: "raw vendor login diagnostic",
+          allows_custom_model: true,
+        }}
+      />,
+    );
     expect(screen.getByTestId(discoveryNoteTestId).textContent).toBe(
-      "Model discovery failed: the command-line tool is not signed in",
+      "Model discovery failed: The command-line tool is not signed in.",
     );
   });
 

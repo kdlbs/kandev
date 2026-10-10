@@ -22,7 +22,6 @@ import {
   FallbackOptionHelp,
   ModelFallbackSettingsShell,
 } from "@/components/settings/model-fallback-settings-shell";
-import { ModelDiscoveryNote } from "@/components/settings/model-discovery-note";
 import type { ModelConfig, ModeEntry, ModelEntry, ModelDiscovery } from "@/lib/types/http";
 import type { PermissionKey } from "@/lib/agent-permissions";
 import type { CLIFlag } from "@/lib/types/http";
@@ -189,7 +188,6 @@ export function ModelPicker({
         triggerClassName={modelIsUnavailable ? "text-destructive" : undefined}
         allowCustomModel={allowCustomModel}
       />
-      <ModelDiscoveryNote discovery={discovery} />
     </div>
   );
 }
