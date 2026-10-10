@@ -27,6 +27,7 @@ func (m *reconstructedContinuationManager) PromptAgentWithAdmissionCallbackAndSu
 	return m.PromptAgentWithAdmissionCallback(ctx, executionID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched)
 }
 
+// A dispatched prompt can lose its canonical record before emitting any output.
 func TestReconstructedDeliveryContinuesOnlyExplicitly(t *testing.T) {
 	ctx := context.Background()
 	const submissionID = "prompt:original-message"
@@ -52,11 +53,6 @@ func TestReconstructedDeliveryContinuesOnlyExplicitly(t *testing.T) {
 		ID: submissionID, SessionID: "s1", IncarnationID: session.QueueIncarnationID, HarnessGeneration: 1,
 		StreamID: "stream", Hash: journal.SubmissionHash(payload), Payload: payload,
 		State: journal.SubmissionDispatching, CreatedAt: now, UpdatedAt: now,
-	})
-	require.NoError(t, err)
-	_, err = retained.Append(ctx, journal.Event{
-		SessionID: "s1", IncarnationID: session.QueueIncarnationID, HarnessGeneration: 1,
-		StreamID: "stream", SubmissionID: submissionID, Type: "message", Payload: []byte(`{"text":"retained output"}`),
 	})
 	require.NoError(t, err)
 	require.NoError(t, retained.Close())

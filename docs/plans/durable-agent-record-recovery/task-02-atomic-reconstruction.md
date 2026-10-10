@@ -209,3 +209,20 @@ and interrupted-continuation checks passed with the real disposable PostgreSQL
 18 database. PostgreSQL store conformance passed. The SQL guard passed.
 Integrated Go lint reported zero issues. The final browser and frontend results
 are recorded in Task 03; real-provider compatibility remains unverified.
+
+### PR review remediation
+
+The zero-output continuation regression failed when the retained prompt had no
+stream record. Reconstruction now accepts that verified empty stream with a
+zero watermark and replay starting at one; nonempty SQL cursor conflicts still
+fail closed. Reconciliation uses one captured identity and a client lease per
+network request. A queued replacement cannot deadlock a nested read lease.
+The replacement regression failed before the fix and passed afterward under race.
+
+The final targeted race command passed for orchestrator, lifecycle, and
+backendapp with `-run 'Test(ReconstructedDeliveryContinuesOnlyExplicitly|DeliveryReconcil|BootStateQuickChat|RetrySessionDelivery|DeliveryRecord)' -count=1`.
+The full `go test -trimpath -p 2 -race ./internal/backendapp -count=1` run passed
+following the Quick Chat nil-repository fix. Repository-wide lint identified
+two helper size/complexity findings; both were extracted and the final affected
+package lint passed with zero issues. The shared SQL row-lock constant also
+replaced the literal flagged by CI. Remote revalidation remains pending push.

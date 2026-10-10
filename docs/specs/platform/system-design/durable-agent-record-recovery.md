@@ -97,6 +97,9 @@ A cursor alone proves a stream association, not the selected prompt or process.
 An absent cursor is valid only when replay can start at sequence one. An expired
 cursor or a database read error remains blocked. A fully acknowledged stream
 can still contain an unresolved prompt and must remain eligible for inspection.
+A uniquely verified submission can precede its first output event. A matching
+descriptor with no stream is then a zero-output stream: high-water and ACK are
+zero, and replay starts at one. A nonempty SQL cursor still rejects this evidence.
 
 Do not infer prompt generation from harness generation. Do not invent an
 execution ID from the current resumed instance or treat a missing process as dead.

@@ -243,7 +243,10 @@ race, PostgreSQL concurrent reconstruction/enrichment and continuation checks,
 SQLite/PostgreSQL store conformance, SQL guard, Go lint, 132 frontend tests,
 typecheck, focused ESLint, and six desktop/phone browser checks. Eight fresh
 captures were inspected and compressed. Local implementation is complete;
-publication, remote CI, and review disposition remain delivery work.
+PR #4403 is published. Review remediation adds zero-output reconstruction,
+non-nested client leases, and lost-reply checkpoint recovery. Focused backend,
+frontend, and all six browser checks passed again. Remote CI and review
+thread disposition remain delivery work.
 
 ## Risks
 

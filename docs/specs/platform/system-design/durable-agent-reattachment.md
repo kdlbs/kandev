@@ -81,6 +81,9 @@ A late old result cannot clear state belonging to a successor.
 Reuse RecoverAgentPromptStream and RetrySessionDelivery as entry points where practical.
 Both disconnect-triggered and user-triggered paths must use the same reconciler.
 Re-read status and durable evidence through the current authenticated client; do not trust cached transient state.
+Pin the exact client for each bounded network request, then release its lease.
+Do not hold a client read lease across identity capture, callbacks, or asynchronous stream attachment.
+Check that the client still owns the execution before and after each reconciliation attempt.
 A running peer permits reattachment while existing turn admission continues to block a second prompt.
 A complete peer record still requires ordered canonical replay and terminal effect settlement.
 
@@ -153,7 +156,9 @@ The batch delegates to the same generation-fenced per-session recovery operation
 Each item carries its own observed identity, recovery revision, continuation instruction, and idempotency key.
 One blocked session does not prevent other eligible sessions from recovering. Refresh preserves progress and completed item results.
 Browser requests, in-flight operations, and results are scoped to the task, session, and full recovery identity. A later interruption starts with a blank instruction and unchecked acknowledgment.
-A completed result stays visible when the same identity advances its recovery revision. Late replies cannot overwrite a different interruption's checkpoint or current batch result.
+A saved request remains available when the same identity advances its recovery revision, even if the acceptance reply was lost.
+Retry sends that original idempotency key and immutable instruction to recover the accepted result without a fresh preflight or redispatch.
+A completed result stays visible across the revision change. Late replies cannot overwrite a different interruption's checkpoint or current batch result.
 The Resume button keeps its accessible name while a translated status region announces progress.
 Preserve queued user instructions and their order without redispatching an uncertain claim.
 The operation never uses fresh-start, a new Kandev session, or history replacement as an implicit fallback.

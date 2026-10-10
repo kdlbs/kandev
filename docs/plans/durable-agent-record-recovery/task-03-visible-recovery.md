@@ -220,3 +220,17 @@ pnpm --dir apps/web e2e:run --host --project chromium
  e2e/tests/layout/agent-runtime-replacement.spec.ts`, then the equivalent
 `mobile-chrome` command with both `mobile-` specs. Each managed command rebuilt
 the backend and frontend. No real-provider compatibility claim is made.
+
+### PR review remediation
+
+A lost continuation reply no longer discards the original request when the
+same interruption advances its revision. The browser retains its instruction
+and idempotency key for server-side lookup; another interruption cannot reuse
+it. The regression failed before the fix and passed afterward.
+
+The final service, batch-hook, and continuation-component run passed ten tests
+in three files with `pnpm exec vitest run lib/services/interrupted-session-recovery.test.ts hooks/domains/session/use-interrupted-recovery-batch.test.ts components/task/chat/interrupted-session-continuation.test.tsx`.
+Typecheck and focused ESLint passed. Both managed browser commands recorded
+above were rerun and passed all six tests. The remediation changes recovery
+behavior, not rendered markup, so the published viewport captures remain valid.
+Remote CI and review disposition remain delivery work.

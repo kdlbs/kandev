@@ -219,7 +219,7 @@ func validateReconstructionGenerationTx(
 		FROM harness_session_generations WHERE session_id = ? AND incarnation_id = ?
 		ORDER BY generation DESC LIMIT 1`
 	if dialect.IsPostgres(db.DriverName()) {
-		query += ` FOR UPDATE`
+		query += forUpdateClause
 	}
 	var generation int64
 	var nativeSessionID, workspace string
@@ -273,7 +273,7 @@ func (r *Repository) loadReconstructionBlockTx(
 		delivery_turn_id, delivery_outcome, authorized_action, created_at, updated_at, resolved_at
 		FROM session_recovery_blocks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
-		query += ` FOR UPDATE`
+		query += forUpdateClause
 	}
 	block := new(models.SessionRecoveryBlock)
 	if err := tx.QueryRowxContext(ctx, r.db.Rebind(query), request.ExpectedBlock.ID).Scan(
@@ -336,7 +336,7 @@ func (r *Repository) validateReconstructionCursorTx(
 	query := `SELECT session_id, incarnation_id, harness_generation, received_sequence,
 		projected_sequence, remote_high_water, updated_at FROM agent_delivery_cursors WHERE stream_id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
-		query += ` FOR UPDATE`
+		query += forUpdateClause
 	}
 	var current models.AgentDeliveryCursor
 	current.StreamID = request.Recovery.StreamID
@@ -375,7 +375,7 @@ func (r *Repository) lockReconstructionSubmissionsTx(
 		dispatch_attempt_id, payload_hash, payload, state, outcome, created_at, updated_at
 		FROM agent_delivery_submissions WHERE session_id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
-		query += ` FOR UPDATE`
+		query += forUpdateClause
 	}
 	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), sessionID)
 	if err != nil {

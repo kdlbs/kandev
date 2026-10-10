@@ -176,3 +176,41 @@ it("does not dispatch or save a stale preflight after a newer interruption compl
   );
   expect(mocks.request.mock.calls.filter(([action]) => action !== SESSION_RECOVER)).toHaveLength(1);
 });
+
+it("recovers a lost reply after the same interruption advances its revision", async () => {
+  mocks.request.mockImplementation(async (action) => {
+    if (action === SESSION_RECOVER) return observed;
+    throw new Error("lost accepted response");
+  });
+  await expect(continueInterruptedSession(options)).rejects.toThrow("lost accepted response");
+  const committed = { ...observed, recovery_revision: 5 };
+  expect(readInterruptedCheckpoint("task", "session", committed)?.request.idempotency_key).toBe(
+    "interrupted:old:4",
+  );
+  mocks.request.mockClear();
+  mocks.request.mockResolvedValue({
+    completed: 1,
+    results: [{ ...committed, outcome: "continued" }],
+  });
+  const result = await continueInterruptedSession({ ...options, observed: committed });
+  expect(result.result?.outcome).toBe("continued");
+  expect(mocks.request).toHaveBeenCalledTimes(1);
+  expect(mocks.request).toHaveBeenCalledWith(
+    "session.recover_batch",
+    {
+      items: [
+        expect.objectContaining({ idempotency_key: "interrupted:old:4", recovery_revision: 4 }),
+      ],
+    },
+    150_000,
+  );
+  expect(
+    readInterruptedCheckpoint("task", "session", {
+      ...committed,
+      recovery_identity: {
+        ...committed.recovery_identity,
+        submission_id: "different",
+      },
+    }),
+  ).toBeNull();
+});

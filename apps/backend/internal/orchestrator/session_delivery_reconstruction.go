@@ -154,11 +154,20 @@ func selectReconstructionEvidence(
 		(block.DeliveryStreamID != "" && block.DeliveryStreamID != candidate.StreamID) {
 		return journal.SubmissionSummary{}, nil, deliveryIdentityMismatchReason
 	}
-	stream := descriptor.Stream
+	stream := reconstructionEvidenceStream(descriptor, candidate)
 	if !reconstructionStreamMatches(stream, session.ID, incarnationID, generation, candidate.StreamID) {
 		return journal.SubmissionSummary{}, nil, deliveryIdentityMismatchReason
 	}
 	return candidate, stream, ""
+}
+
+func reconstructionEvidenceStream(descriptor journal.RecoveryDescriptor, candidate journal.SubmissionSummary) *journal.Stream {
+	stream := descriptor.Stream
+	if stream == nil && descriptor.StreamID == candidate.StreamID {
+		stream = &journal.Stream{SessionID: candidate.SessionID, IncarnationID: candidate.IncarnationID,
+			HarnessGeneration: candidate.HarnessGeneration, StreamID: candidate.StreamID, FirstRetained: 1}
+	}
+	return stream
 }
 
 func reconstructionStreamMatches(stream *journal.Stream, sessionID, incarnationID string, generation int64, streamID string) bool {

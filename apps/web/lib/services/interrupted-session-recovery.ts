@@ -45,7 +45,9 @@ function checkpointMatches(
   return (
     interruptedRecoveryKey({ ...observed, recovery_identity: value.request.recovery_identity }) ===
       interruptedRecoveryKey(observed) &&
-    (value.request.recovery_revision === observed.recovery_revision ||
+    // A committed continuation advances the revision before its reply arrives.
+    // The same immutable request must remain available for idempotent lookup.
+    (value.request.recovery_revision <= observed.recovery_revision ||
       value.result?.outcome === "continued")
   );
 }
