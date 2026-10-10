@@ -21,6 +21,7 @@ import { areConfigOptionsEqual } from "@/lib/config-options";
 import { t } from "@/lib/i18n";
 import { toAgentProfilePayload } from "@/lib/api/domains/agent-profile-normalize";
 import type { ProfileFormData } from "@/components/settings/profile-form-fields";
+import type { AgentCreationPublication } from "@/hooks/domains/settings/use-agent-creation-store-sync";
 
 // The JSON key the MCP editor validates against — an identifier, interpolated
 // into the parse error rather than written into the catalog.
@@ -233,7 +234,7 @@ export type SaveAgentCallbacks = {
   currentAgentModelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
   resolveDisplayName: (name: string) => string;
-  upsertAgent: (agent: Agent) => void;
+  upsertAgent: (agent: Agent, creation?: AgentCreationPublication) => void;
   setDraftAgent: (agent: DraftAgent | ((current: DraftAgent) => DraftAgent)) => void;
   ensureProfiles: EnsureProfilesFn;
   cloneAgent: CloneAgentFn;
@@ -374,6 +375,7 @@ async function saveExistingAgentPatch(draftAgent: DraftAgent, savedAgent: Agent)
   if (Object.keys(agentPatch).length > 0) {
     await updateAgentAction(savedAgent.id, agentPatch);
   }
+  return agentPatch;
 }
 
 async function savePersistedProfile(
@@ -398,7 +400,11 @@ async function saveExistingProfiles(
   savedAgent: Agent,
   isCreateMode: boolean,
   onToastError: (error: unknown) => void,
-): Promise<{ profiles: AgentProfile[]; profileIds: Map<string, string> }> {
+): Promise<{
+  profiles: AgentProfile[];
+  persistedProfiles: DraftProfile[];
+  profileIds: Map<string, string>;
+}> {
   const savedProfilesById = new Map(savedAgent.profiles.map((p) => [p.id, p]));
   const nextProfiles: AgentProfile[] = isCreateMode ? [...savedAgent.profiles] : [];
   const profileIds = new Map<string, string>();
@@ -433,7 +439,12 @@ async function saveExistingProfiles(
       const persistedProfile = await savePersistedProfile(profile, savedProfile, onToastError);
       persistedSubmittedIds.add(profile.id);
       persistedProfiles.push(persistedProfile);
-      nextProfiles.push(persistedProfile);
+      if (isCreateMode) {
+        const index = nextProfiles.findIndex((item) => item.id === savedProfile.id);
+        nextProfiles[index] = persistedProfile;
+      } else {
+        nextProfiles.push(persistedProfile);
+      }
     }
   } catch (error) {
     if (persistedProfiles.length > 0) {
@@ -446,7 +457,7 @@ async function saveExistingProfiles(
     }
     throw error;
   }
-  return { profiles: nextProfiles, profileIds };
+  return { profiles: nextProfiles, persistedProfiles, profileIds };
 }
 
 class PartialProfileSaveError extends Error {
@@ -465,6 +476,7 @@ function reconcilePartialProfileSave(
   savedAgent: Agent,
   partial: PartialProfileSaveError,
   callbacks: SaveAgentCallbacks,
+  isCreateMode: boolean,
 ) {
   const profilesById = new Map(savedAgent.profiles.map((profile) => [profile.id, profile]));
   for (const profile of partial.persistedProfiles) profilesById.set(profile.id, profile);
@@ -472,7 +484,10 @@ function reconcilePartialProfileSave(
     ...savedAgent,
     profiles: [...profilesById.values()],
   };
-  callbacks.upsertAgent(reconciled);
+  callbacks.upsertAgent(
+    reconciled,
+    isCreateMode ? { profiles: partial.persistedProfiles } : undefined,
+  );
   const submitted = {
     ...draftAgent,
     profiles: draftAgent.profiles.filter((profile) =>
@@ -509,7 +524,7 @@ export async function saveExistingAgent(
   isCreateMode: boolean,
   callbacks: SaveAgentCallbacks,
 ) {
-  await saveExistingAgentPatch(draftAgent, savedAgent);
+  const agentPatch = await saveExistingAgentPatch(draftAgent, savedAgent);
 
   let savedProfiles: Awaited<ReturnType<typeof saveExistingProfiles>>;
   try {
@@ -521,7 +536,7 @@ export async function saveExistingAgent(
     );
   } catch (error) {
     if (error instanceof PartialProfileSaveError) {
-      reconcilePartialProfileSave(draftAgent, savedAgent, error, callbacks);
+      reconcilePartialProfileSave(draftAgent, savedAgent, error, callbacks, isCreateMode);
       throw error.original;
     }
     throw error;
@@ -537,7 +552,10 @@ export async function saveExistingAgent(
     mcp_config_path: draftAgent.mcp_config_path ?? "",
     profiles: savedProfiles.profiles,
   };
-  callbacks.upsertAgent(nextAgent);
+  callbacks.upsertAgent(
+    nextAgent,
+    isCreateMode ? { profiles: savedProfiles.persistedProfiles, agentPatch } : undefined,
+  );
   const savedDraft = callbacks.ensureProfiles(
     callbacks.cloneAgent(nextAgent),
     callbacks.resolveDisplayName(nextAgent.name),
