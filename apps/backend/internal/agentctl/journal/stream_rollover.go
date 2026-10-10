@@ -21,7 +21,7 @@ func (j *Journal) RolloverStream(ctx context.Context, oldStreamID string, replac
 	}
 	j.mu.RLock()
 	defer j.mu.RUnlock()
-	err := j.db.Update(func(tx *bolt.Tx) error {
+	err := j.updateLocked(func(tx *bolt.Tx) error {
 		old, err := validateRolloverStreamTx(ctx, tx, oldStreamID, replacement)
 		if err != nil {
 			return err

@@ -123,6 +123,9 @@
   "duplicate": "复制",
   "duplicateProfileNamed": "复制 {{name}}",
   "duplicateProfileSuccess": "智能体配置已复制",
+  "dragProfile": "调整 {{name}} 的顺序",
+  "profileSortable": "可排序的配置",
+  "profileOrderSaveFailed": "无法保存配置顺序",
   "duplicateSaveBlocked": "设置仍在保存，请稍后重试。",
   "dynamicAgents": "动态代理",
   "dynamicAgentsDescription": "通过有序的具体智能体配置列表路由一个逻辑配置。",
@@ -428,5 +431,10 @@
   "modelDiscoveryNotLoggedIn": "该命令行工具尚未登录。",
   "modelDiscoveryTimeout": "模型列表请求超时。",
   "modelSourceCli": "CLI",
-  "modelSourceAcp": "ACP"
+  "modelSourceAcp": "ACP",
+  "profileDragInstructions": "按空格键选取配置档。使用方向键移动，再按空格键放下，或按 Escape 取消。",
+  "profileDragStart": "已选取配置档 {{name}}。第 {{position}} 个，共 {{total}} 个。",
+  "profileDragOver": "配置档 {{name}} 已移动到第 {{position}} 个位置，共 {{total}} 个。",
+  "profileDragEnd": "配置档 {{name}} 已放到第 {{position}} 个位置，共 {{total}} 个。",
+  "profileDragCancel": "已取消配置档 {{name}} 的重新排序。"
 }

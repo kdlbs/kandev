@@ -626,11 +626,72 @@ describe("hydrateState — user settings revisions", () => {
   });
 });
 
+describe("hydrateState — selector ordering", () => {
+  it("normalizes creation timestamps from raw task boot rows for unstamped selector options", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      hydrateState(draft, {
+        agentProfiles: {
+          version: 0,
+          items: [
+            { id: "old", agent_id: "a" },
+            { id: "new", agent_id: "a" },
+          ],
+          orderByAgent: {},
+        },
+        settingsAgents: {
+          items: [
+            {
+              id: "a",
+              name: "A",
+              profiles: [
+                { id: "old", created_at: "2026-01-01T00:00:00Z" },
+                { id: "new", created_at: "2026-02-01T00:00:00Z" },
+              ],
+            },
+          ],
+        },
+      } as unknown as Partial<AppState>);
+    });
+    expect(result.agentProfiles.items.map((profile) => profile.id)).toEqual(["new", "old"]);
+  });
+
+  it("hydrates saved Settings order without changing selector baseline", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      hydrateState(draft, {
+        agentProfiles: {
+          version: 0,
+          items: [
+            { id: "old", agent_id: "a", createdAt: "2026-01-01T00:00:00Z" },
+            { id: "new", agent_id: "a", createdAt: "2026-02-01T00:00:00Z" },
+          ],
+          orderByAgent: {},
+        },
+        settingsAgents: {
+          items: [
+            {
+              id: "a",
+              name: "A",
+              profile_order_revision: 3,
+              profiles: [{ id: "old" }, { id: "new" }],
+            },
+          ],
+        },
+      } as unknown as Partial<AppState>);
+    });
+    expect(result.agentProfiles.items.map((profile) => profile.id)).toEqual(["new", "old"]);
+    expect(result.settingsAgents.items[0].profiles.map((profile) => profile.id)).toEqual([
+      "old",
+      "new",
+    ]);
+  });
+});
+
 describe("hydrateState — agent profile revisions", () => {
   it("keeps a newer websocket profile snapshot over route bootstrap", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
       draft.agentProfiles = {
         version: 1,
+        orderByAgent: {},
         items: [
           {
             id: "live-profile",
@@ -653,6 +714,7 @@ describe("hydrateState — agent profile revisions", () => {
         settingsAgents: { items: [] },
         agentProfiles: {
           version: 0,
+          orderByAgent: {},
           items: [],
         },
         settingsData: { agentsLoaded: true },
@@ -671,6 +733,7 @@ describe("hydrateState — agent profile revisions", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
       draft.agentProfiles = {
         version: 1,
+        orderByAgent: {},
         items: [
           {
             id: "stale-profile",
@@ -693,13 +756,14 @@ describe("hydrateState — agent profile revisions", () => {
         settingsAgents: { items: [] },
         agentProfiles: {
           version: 1,
+          orderByAgent: {},
           items: [],
         },
         settingsData: { agentsLoaded: true },
       } as unknown as Partial<AppState>);
     });
 
-    expect(result.agentProfiles).toEqual({ version: 1, items: [] });
+    expect(result.agentProfiles).toEqual({ version: 1, items: [], orderByAgent: {} });
     expect(result.settingsAgents.items).toEqual([]);
     expect(result.settingsData.agentsLoaded).toBe(true);
   });

@@ -1,5 +1,5 @@
 import { seedContinuityPreviewHistory } from "./git-continuity-preview-history";
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import {
   createStandardProfile,
   GitHelper,
@@ -110,8 +110,7 @@ test.describe("desktop Git diff refresh continuity", () => {
     }) => {
       const repositoryPath = path.join(backend.tmpDir, "repos", "e2e-repo");
       const git = new GitHelper(repositoryPath, makeGitEnv(backend.tmpDir));
-      git.exec("git reset --hard HEAD");
-      git.exec("git clean -fd");
+      resetSeedRepositoryCheckout(seedData, backend.tmpDir);
       const initialHead = git.getCurrentSha();
       const restorePreviewHistory = seedContinuityPreviewHistory(git);
       git.createFile(PREFIX_PATH, prefixContent(16, "prefix-before"));

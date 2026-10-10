@@ -295,6 +295,9 @@
   "duplicateSaveBlocked": "As definições ainda estão a ser guardadas. Tente novamente daqui a pouco.",
   "everythingInstalled": "Todos os agentes e ferramentas disponíveis já estão instalados.",
   "failedToDuplicateProfile": "Falha ao duplicar o perfil",
+  "dragProfile": "Reordenar {{name}}",
+  "profileSortable": "perfil ordenável",
+  "profileOrderSaveFailed": "Não foi possível guardar a ordem dos perfis",
   "installAgents": "Instalar agentes",
   "newProfile": "Novo perfil",
   "profileActions": "Ações do perfil",
@@ -428,5 +431,10 @@
   "modelDiscoveryNotLoggedIn": "A ferramenta de linha de comandos não tem sessão iniciada.",
   "modelDiscoveryTimeout": "O pedido da lista de modelos excedeu o tempo limite.",
   "modelSourceCli": "CLI",
-  "modelSourceAcp": "ACP"
+  "modelSourceAcp": "ACP",
+  "profileDragInstructions": "Para selecionar um perfil, prima a barra de espaços. Use as teclas de seta para o mover e prima a barra de espaços para o colocar ou Escape para cancelar.",
+  "profileDragStart": "Perfil {{name}} selecionado. Posição {{position}} de {{total}}.",
+  "profileDragOver": "Perfil {{name}} movido para a posição {{position}} de {{total}}.",
+  "profileDragEnd": "Perfil {{name}} colocado na posição {{position}} de {{total}}.",
+  "profileDragCancel": "Reordenação do perfil {{name}} cancelada."
 }

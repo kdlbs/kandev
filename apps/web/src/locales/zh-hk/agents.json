@@ -123,6 +123,9 @@
   "duplicate": "複製",
   "duplicateProfileNamed": "複製 {{name}}",
   "duplicateProfileSuccess": "代理程式設定檔已複製",
+  "dragProfile": "調整 {{name}} 的順序",
+  "profileSortable": "可排序的設定",
+  "profileOrderSaveFailed": "無法儲存設定順序",
   "duplicateSaveBlocked": "設定仍在儲存，請稍後重試。",
   "dynamicAgents": "動態代理",
   "dynamicAgentsDescription": "通過有序的具體代理程式設定檔列表路由一個邏輯設定。",
@@ -428,5 +431,10 @@
   "modelDiscoveryNotLoggedIn": "該命令列工具尚未登入。",
   "modelDiscoveryTimeout": "模型清單請求逾時。",
   "modelSourceCli": "CLI",
-  "modelSourceAcp": "ACP"
+  "modelSourceAcp": "ACP",
+  "profileDragInstructions": "按空格鍵選取設定檔。使用方向鍵移動，再按空格鍵放下，或按 Escape 取消。",
+  "profileDragStart": "已選取設定檔 {{name}}。第 {{position}} 個，共 {{total}} 個。",
+  "profileDragOver": "設定檔 {{name}} 已移動到第 {{position}} 個位置，共 {{total}} 個。",
+  "profileDragEnd": "設定檔 {{name}} 已放到第 {{position}} 個位置，共 {{total}} 個。",
+  "profileDragCancel": "已取消設定檔 {{name}} 的重新排序。"
 }

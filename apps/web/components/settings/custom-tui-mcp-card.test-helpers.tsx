@@ -119,7 +119,12 @@ export async function mountCards(): Promise<Fixture> {
     const agents = useAppStore((state) => state.settingsAgents.items);
     return agents.map((agent) => (
       <section key={agent.id} data-testid={`owner-${agent.id}`}>
-        <AgentProfilesSubList savedAgent={agent} agentName={agent.name} />
+        <AgentProfilesSubList
+          savedAgent={agent}
+          agentName={agent.name}
+          canManage
+          onReorder={vi.fn()}
+        />
         <CustomTUIMcpCard agent={agent} />
       </section>
     ));
@@ -129,6 +134,7 @@ export async function mountCards(): Promise<Fixture> {
       initialState={{
         settingsAgents: { items: initial },
         agentProfiles: {
+          orderByAgent: {},
           items: initial.flatMap((agent) =>
             agent.profiles.map((p) => toAgentProfileOption(agent, p)),
           ),

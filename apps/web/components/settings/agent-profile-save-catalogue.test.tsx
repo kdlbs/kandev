@@ -256,6 +256,7 @@ function renderEditor(fixture: ReturnType<typeof editorFixture>) {
         },
         settingsAgents: { items: [owner] },
         agentProfiles: {
+          orderByAgent: {},
           items: owner.profiles.map((profile) => toAgentProfileOption(owner, profile)),
           version: 13,
         },

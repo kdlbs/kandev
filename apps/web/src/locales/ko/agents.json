@@ -288,6 +288,9 @@
   "duplicate": "복제",
   "duplicateProfileNamed": "{{name}} 복제",
   "duplicateProfileSuccess": "프로필을 복제했습니다",
+  "dragProfile": "{{name}} 순서 변경",
+  "profileSortable": "정렬 가능한 프로필",
+  "profileOrderSaveFailed": "프로필 순서를 저장하지 못했습니다",
   "duplicateSaveBlocked": "설정이 아직 저장 중입니다. 잠시 후 다시 시도하세요.",
   "failedToDuplicateProfile": "프로필을 복제하지 못했습니다",
   "dynamicAgents": "동적 에이전트",
@@ -428,5 +431,10 @@
   "modelDiscoveryFromCliNoVersion": "{{executable}}의 모델",
   "modelDiscoveryNoListing": "{{executable}}은 모델 목록을 제공하지 않습니다. 다른 모델을 사용하려면 모델 ID를 입력하세요.",
   "modelDiscoveryFailed": "모델 검색 실패: {{reason}}",
-  "useCustomModelId": "\"{{model}}\"을(를) 모델 ID로 사용"
+  "useCustomModelId": "\"{{model}}\"을(를) 모델 ID로 사용",
+  "profileDragInstructions": "프로필을 선택하려면 스페이스 키를 누르세요. 방향 키로 이동한 뒤 스페이스 키로 놓거나 Escape 키로 취소하세요.",
+  "profileDragStart": "프로필 {{name}}을 선택했습니다. {{total}}개 중 {{position}}번째입니다.",
+  "profileDragOver": "프로필 {{name}}을 {{total}}개 중 {{position}}번째 위치로 이동했습니다.",
+  "profileDragEnd": "프로필 {{name}}을 {{total}}개 중 {{position}}번째 위치에 놓았습니다.",
+  "profileDragCancel": "프로필 {{name}}의 순서 변경을 취소했습니다."
 }

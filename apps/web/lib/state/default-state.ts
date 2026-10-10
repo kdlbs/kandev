@@ -31,6 +31,7 @@ import { migrateSidebarViewDraft, migrateView } from "./slices/ui/ui-slice";
 import { mergeAgentProfileRecentUseState } from "@/lib/agent-profile-recent-use";
 import { normalizeThreadViews } from "./slices/ui/thread-view-builtins";
 import { normalizeAgentProfiles } from "@/lib/api/domains/agent-profile-normalize";
+import { hydrateSelectorProfileOptions } from "@/lib/settings/agent-profile-selector-order";
 
 function mergeHydratedSettingsAgents(
   incoming: HydrationState["settingsAgents"],
@@ -40,6 +41,15 @@ function mergeHydratedSettingsAgents(
     ...defaultState.settingsAgents,
     ...incoming,
     items: incoming.items.map(normalizeAgentProfiles),
+  };
+}
+
+function mergeHydratedAgentProfiles(initialState: HydrationState): DefaultState["agentProfiles"] {
+  const incoming = { ...defaultState.agentProfiles, ...initialState.agentProfiles };
+  const agents = initialState.settingsAgents?.items ?? [];
+  return {
+    ...incoming,
+    items: hydrateSelectorProfileOptions(incoming.items, agents),
   };
 }
 
@@ -489,7 +499,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     settingsAgents: mergeHydratedSettingsAgents(initialState.settingsAgents),
     agentDiscovery: { ...defaultState.agentDiscovery, ...initialState.agentDiscovery },
     availableAgents: { ...defaultState.availableAgents, ...initialState.availableAgents },
-    agentProfiles: { ...defaultState.agentProfiles, ...initialState.agentProfiles },
+    agentProfiles: mergeHydratedAgentProfiles(initialState),
     editors: { ...defaultState.editors, ...initialState.editors },
     prompts: { ...defaultState.prompts, ...initialState.prompts },
     secrets: { ...defaultState.secrets, ...initialState.secrets },

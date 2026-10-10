@@ -292,8 +292,12 @@ export type AppState = KanbanSlice & {
     tools?: AvailableAgentsState["tools"],
   ) => void;
   setAvailableAgentsLoading: (loading: boolean) => void;
+  applyAgentListSnapshot: SettingsSliceTypes.SettingsSliceActions["applyAgentListSnapshot"];
+  acceptAgentProfileOrder: SettingsSliceTypes.SettingsSliceActions["acceptAgentProfileOrder"];
+  setAgentProfileOrder: SettingsSliceTypes.SettingsSliceActions["setAgentProfileOrder"];
+  setAgentProfileOrderIntent: SettingsSliceTypes.SettingsSliceActions["setAgentProfileOrderIntent"];
   setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;
-  setInstallJobs: (jobs: InstallJob[]) => void;
+  setInstallJobs: SettingsSliceTypes.SettingsSliceActions["setInstallJobs"];
   upsertInstallJob: (job: InstallJob) => void;
   appendInstallOutput: (agentName: string, chunk: string) => void;
   clearInstallJob: (agentName: string) => void;

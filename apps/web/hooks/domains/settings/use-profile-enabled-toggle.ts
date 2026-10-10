@@ -6,7 +6,11 @@ import { isHandledApiError } from "@/lib/api/client";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { t as translate } from "@/lib/i18n";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { mergeOptionsByNewest } from "@/lib/state/slices/settings/types";
+import {
+  orderProfileOptionsForSelection,
+  toSelectorProfileOptions,
+} from "@/lib/settings/agent-profile-selector-order";
 import type { AppState } from "@/lib/state/store";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 
@@ -37,8 +41,8 @@ export function applyEnabledProfileUpdate(
     settingsAgents: { ...state.settingsAgents, items: nextAgents },
     agentProfiles: {
       ...state.agentProfiles,
-      items: nextAgents.flatMap((agentItem) =>
-        agentItem.profiles.map((agentProfile) => toAgentProfileOption(agentItem, agentProfile)),
+      items: orderProfileOptionsForSelection(
+        mergeOptionsByNewest(state.agentProfiles.items, toSelectorProfileOptions(nextAgents)),
       ),
     },
   };

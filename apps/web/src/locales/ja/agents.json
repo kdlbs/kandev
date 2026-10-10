@@ -303,6 +303,9 @@
   "duplicate": "複製",
   "duplicateProfileNamed": "{{name}} を複製",
   "duplicateProfileSuccess": "プロファイル複製完了",
+  "dragProfile": "{{name}} の順序を変更",
+  "profileSortable": "並べ替え可能なプロファイル",
+  "profileOrderSaveFailed": "プロファイルの順序を保存できません",
   "duplicateSaveBlocked": "設定まだ保存中。少し待って再試行。",
   "failedToDuplicateProfile": "プロファイル複製失敗",
   "dynamicAgents": "動的エージェント",
@@ -428,5 +431,10 @@
   "modelDiscoveryNotLoggedIn": "コマンドラインツールにサインインしていません。",
   "modelDiscoveryTimeout": "モデル一覧のリクエストがタイムアウトしました。",
   "modelSourceCli": "CLI",
-  "modelSourceAcp": "ACP"
+  "modelSourceAcp": "ACP",
+  "profileDragInstructions": "プロフィールを選ぶにはスペースキーを押します。矢印キーで移動し、スペースキーで配置するか、Escape キーでキャンセルします。",
+  "profileDragStart": "プロフィール {{name}} を選びました。{{total}} 件中 {{position}} 番目です。",
+  "profileDragOver": "プロフィール {{name}} を {{total}} 件中 {{position}} 番目に移動しました。",
+  "profileDragEnd": "プロフィール {{name}} を {{total}} 件中 {{position}} 番目に配置しました。",
+  "profileDragCancel": "プロフィール {{name}} の並べ替えをキャンセルしました。"
 }

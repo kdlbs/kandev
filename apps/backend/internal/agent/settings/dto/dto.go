@@ -164,13 +164,14 @@ type TUIConfigDTO struct {
 }
 
 type AgentDTO struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	WorkspaceID   *string           `json:"workspace_id,omitempty"`
-	SupportsMCP   bool              `json:"supports_mcp"`
-	MCPConfigPath string            `json:"mcp_config_path,omitempty"`
-	TUIConfig     *TUIConfigDTO     `json:"tui_config,omitempty"`
-	Profiles      []AgentProfileDTO `json:"profiles"`
+	ID                   string            `json:"id"`
+	Name                 string            `json:"name"`
+	WorkspaceID          *string           `json:"workspace_id,omitempty"`
+	SupportsMCP          bool              `json:"supports_mcp"`
+	MCPConfigPath        string            `json:"mcp_config_path,omitempty"`
+	TUIConfig            *TUIConfigDTO     `json:"tui_config,omitempty"`
+	Profiles             []AgentProfileDTO `json:"profiles"`
+	ProfileOrderRevision int64             `json:"profile_order_revision"`
 	// CapabilityStatus mirrors the host utility probe status so clients can
 	// flag agents that need login or reinstallation without fetching the
 	// full model config separately. "" for agents that aren't probed

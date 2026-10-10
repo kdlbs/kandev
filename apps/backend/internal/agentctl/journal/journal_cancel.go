@@ -19,7 +19,7 @@ func (j *Journal) CancelSubmission(ctx context.Context, id string, event Event) 
 		return err
 	}
 	event = events[0]
-	err := j.db.Update(func(tx *bolt.Tx) error {
+	err := j.updateLocked(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

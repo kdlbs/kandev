@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { listAgents } from "@/lib/api";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { getAgentListResourceScope } from "@/hooks/domains/settings/agent-list-resource";
 import type {
   Agent,
   AgentProfile,
@@ -49,8 +49,7 @@ export function useAgentProfileSettings(
   profileId: string,
 ): AgentProfileSettingsResult {
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
-  const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
-  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+  const storeApi = useAppStoreApi();
   const availableAgents = useAvailableAgents().items;
   const refreshKeyRef = useRef<string | null>(null);
 
@@ -73,15 +72,13 @@ export function useAgentProfileSettings(
     refreshKeyRef.current = refreshKey;
 
     let cancelled = false;
+    const profileVersion = storeApi.getState().agentProfiles.version;
     listAgents({ cache: "no-store" })
-      .then((response) => {
+      .then(async (response) => {
         if (cancelled) return;
-        setSettingsAgents(response.agents);
-        setAgentProfiles(
-          response.agents.flatMap((item) =>
-            item.profiles.map((itemProfile) => toAgentProfileOption(item, itemProfile)),
-          ),
-        );
+        if (!storeApi.getState().applyAgentListSnapshot(response.agents, profileVersion)) {
+          await getAgentListResourceScope(storeApi).ensure();
+        }
       })
       .catch(() => {
         refreshKeyRef.current = null;
@@ -90,7 +87,7 @@ export function useAgentProfileSettings(
     return () => {
       cancelled = true;
     };
-  }, [agentKey, profile, profileId, setAgentProfiles, setSettingsAgents]);
+  }, [agentKey, profile, profileId, storeApi]);
 
   const availableAgent = useMemo(() => {
     return availableAgents.find((item: AvailableAgent) => item.name === agent?.name) ?? null;

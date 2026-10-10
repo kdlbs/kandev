@@ -443,6 +443,10 @@ An **ACP** agent is driven over the Agent Client Protocol instead, so it does ge
 
 Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Profile_**. The page shows the resolved command preview and only the settings supported by that agent.
 
+On **Settings > Agents**, administrators can reorder an agent's profiles using its drag handle with a pointer or touch. For keyboard control, focus the handle, press **Space** to pick up the profile, use the arrow keys to move it, and press **Space** again to save (or **Escape** to cancel). The order is saved for that agent, shared with other open Settings pages, and used in the Settings navigation tree. Creating or duplicating a profile places it first in that agent's Settings list.
+
+This order applies only to Settings. Task creation, in-task agents, handoff, and other profile selectors keep their existing option order, contextual recency, and default selection.
+
 | Setting                                | Runtime behavior                                                                                                                                                                                                                                                                                                                                   |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name                                   | Label shown in workflow, session, and automation selectors.                                                                                                                                                                                                                                                                                        |

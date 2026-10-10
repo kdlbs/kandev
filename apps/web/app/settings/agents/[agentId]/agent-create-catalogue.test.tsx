@@ -190,6 +190,7 @@ function mountCreation(newOwner = false, failMcp = false) {
         },
         settingsAgents: { items: agents },
         agentProfiles: {
+          orderByAgent: {},
           items: agents.flatMap((agent) =>
             agent.profiles.map((p) => toAgentProfileOption(agent, p)),
           ),

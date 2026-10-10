@@ -176,7 +176,8 @@ type AgentSaveHandlersProps = {
   resolveDisplayName: (name: string) => string;
   setDraftAgent: (agent: DraftAgent | ((current: DraftAgent) => DraftAgent)) => void;
   setSaveStatus: (status: "idle" | "loading" | "success" | "error") => void;
-  upsertAgent: SaveAgentCallbacks["upsertAgent"];
+  upsertAgent: ReturnType<typeof useAgentCreationStoreSync>["upsertAgent"];
+  getAgentProfilesVersion: () => number;
   onToastError: (error: unknown) => void;
   replaceRoute: (path: string) => void;
 };
@@ -192,6 +193,7 @@ function useAgentSaveHandlers({
   setDraftAgent,
   setSaveStatus,
   upsertAgent,
+  getAgentProfilesVersion,
   onToastError,
   replaceRoute,
 }: AgentSaveHandlersProps) {
@@ -209,13 +211,19 @@ function useAgentSaveHandlers({
       onToastError(new Error(t("agents:fixInvalidMcpJson")));
       return;
     }
+    const profileVersionAtSaveStart = getAgentProfilesVersion();
     setSaveStatus("loading");
     const callbacks = {
       onToastError,
       currentAgentModelConfig,
       permissionSettings,
       resolveDisplayName,
-      upsertAgent,
+      upsertAgent: ((agent, creation) =>
+        upsertAgent(
+          agent,
+          creation,
+          profileVersionAtSaveStart,
+        )) satisfies SaveAgentCallbacks["upsertAgent"],
       setDraftAgent,
       ensureProfiles,
       cloneAgent,
@@ -351,7 +359,7 @@ function AgentSetupForm({
   const router = useRouter();
   const availableAgents = useAvailableAgents().items;
   const { items: secrets } = useSecrets();
-  const { upsertAgent } = useAgentCreationStoreSync();
+  const { getAgentProfilesVersion, upsertAgent } = useAgentCreationStoreSync();
 
   const {
     draftAgent,
@@ -389,6 +397,7 @@ function AgentSetupForm({
     setDraftAgent,
     setSaveStatus,
     upsertAgent,
+    getAgentProfilesVersion,
     onToastError,
     replaceRoute: (path: string) => router.replace(path),
   });

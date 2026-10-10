@@ -148,6 +148,7 @@ export async function mountDelete({
           ],
         },
         agentProfiles: {
+          orderByAgent: {},
           version: 0,
           items: [
             {

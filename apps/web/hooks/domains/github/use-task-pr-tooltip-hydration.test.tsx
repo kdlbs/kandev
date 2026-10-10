@@ -14,7 +14,10 @@ vi.mock("@/lib/api/domains/github-api", () => ({
   getTaskCIAutomationOptions: getTaskCIAutomationOptionsMock,
 }));
 
-import { useTaskPRTooltipHydration } from "./use-task-pr-tooltip-hydration";
+import {
+  getTaskPRsForCurrentWorkspace,
+  useTaskPRTooltipHydration,
+} from "./use-task-pr-tooltip-hydration";
 
 const WORKSPACE_A = "workspace-a";
 
@@ -320,6 +323,32 @@ describe("useTaskPRTooltipHydration context guards", () => {
     });
 
     expect(listTaskPRsMock).toHaveBeenCalledWith(["task-1"], { cache: "no-store" });
+  });
+});
+
+describe("useTaskPRTooltipHydration context generation", () => {
+  it("replaces stale cached PRs when disclosure hydration crosses a context generation", async () => {
+    const stalePR = makePR({ pr_title: "Stale cached title" });
+    const currentPR = makePR({ pr_title: "Current server title" });
+    listTaskPRsMock.mockResolvedValue({ task_prs: { "task-1": [currentPR] } });
+    const { result } = renderHook(() => useHydrationWithStore("task-1"), {
+      wrapper: createStateWrapper({
+        workspaceContextGeneration: 1,
+        taskPRs: {
+          byTaskId: { "task-1": [stalePR] },
+          workspaceId: WORKSPACE_A,
+          workspaceContextGeneration: 0,
+        },
+      }),
+    });
+
+    await act(async () => {
+      await result.current.hydration.hydrate();
+    });
+
+    const state = result.current.store.getState();
+    expect(state.taskPRs.workspaceContextGeneration).toBe(state.workspaceContextGeneration);
+    expect(getTaskPRsForCurrentWorkspace(state, "task-1")).toEqual([currentPR]);
   });
 });
 

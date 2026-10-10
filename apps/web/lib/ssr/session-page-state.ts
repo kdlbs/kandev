@@ -11,7 +11,7 @@ import {
   listTaskSessions,
   listWorkspaces,
 } from "@/lib/api";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { toSelectorProfileOptions } from "@/lib/settings/agent-profile-selector-order";
 import { listSessionTurns } from "@/lib/api/domains/session-api";
 import { fetchTerminals } from "@/lib/api/domains/user-shell-api";
 import type {
@@ -242,10 +242,9 @@ function buildResourceState(p: BuildSessionPageStateParams) {
       : {}),
     ...optionalState(agents, (value) => ({
       agentProfiles: {
-        items: value.agents.flatMap((agent) =>
-          agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
-        ),
+        items: toSelectorProfileOptions(value.agents),
         version: 0,
+        orderByAgent: {},
       },
     })),
   };

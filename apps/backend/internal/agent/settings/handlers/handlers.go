@@ -77,6 +77,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.PATCH("/agents/:id", cfg, h.interlock, h.httpUpdateAgent)
 	api.DELETE("/agents/:id", cfg, h.interlock, h.httpDeleteAgent)
 	api.POST("/agents/:id/profiles", cfg, h.interlock, h.httpCreateProfile)
+	api.PUT("/agents/:id/profiles/order", cfg, h.interlock, h.httpReorderAgentProfiles)
 	api.GET("/agents/:id/logo", h.httpGetAgentLogo)
 	api.GET("/agent-models/:agentName", h.httpGetAgentModels)
 	api.POST("/agent-models/:agentName/probe", cfg, h.httpProbeAgentProfile)

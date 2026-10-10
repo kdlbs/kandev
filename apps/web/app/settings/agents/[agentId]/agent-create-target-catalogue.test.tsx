@@ -179,6 +179,7 @@ function mount() {
         },
         settingsAgents: { items: [owner] },
         agentProfiles: {
+          orderByAgent: {},
           items: owner.profiles.map((profile) => toAgentProfileOption(owner, profile)),
           version: 1,
         },

@@ -303,6 +303,9 @@
   "duplicate": "Duplicate",
   "duplicateProfileNamed": "Duplicate {{name}}",
   "duplicateProfileSuccess": "Profile duplicated",
+  "dragProfile": "Reorder {{name}}",
+  "profileSortable": "sortable profile",
+  "profileOrderSaveFailed": "Could not save profile order",
   "duplicateSaveBlocked": "Settings are still saving. Try again in a moment.",
   "failedToDuplicateProfile": "Failed to duplicate profile",
   "dynamicAgents": "Dynamic agents",
@@ -428,5 +431,10 @@
   "modelDiscoveryNotLoggedIn": "The command-line tool is not signed in.",
   "modelDiscoveryTimeout": "The model list request timed out.",
   "modelSourceCli": "CLI",
-  "modelSourceAcp": "ACP"
+  "modelSourceAcp": "ACP",
+  "profileDragInstructions": "To pick up a profile, press Space. Use the arrow keys to move it, then press Space to drop it or Escape to cancel.",
+  "profileDragStart": "Profile {{name}} picked up. Position {{position}} of {{total}}.",
+  "profileDragOver": "Profile {{name}} moved to position {{position}} of {{total}}.",
+  "profileDragEnd": "Profile {{name}} dropped at position {{position}} of {{total}}.",
+  "profileDragCancel": "Reordering profile {{name}} cancelled."
 }

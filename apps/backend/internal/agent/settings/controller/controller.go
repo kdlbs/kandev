@@ -47,6 +47,8 @@ var (
 	ErrAgentProfileNotFound                 = errors.New("agent profile not found")
 	ErrAgentMcpUnsupported                  = errors.New("mcp not supported by agent")
 	ErrModelRequired                        = errors.New("model is required for agent profiles")
+	ErrProfileOrderStale                    = errors.New("profile order is stale")
+	ErrProfileOrderUnsupported              = errors.New("profile order unsupported")
 	ErrLogoNotAvailable                     = errors.New("logo not available for agent")
 	ErrInvalidSlug                          = errors.New("display name must produce a valid slug")
 	ErrCommandRequired                      = errors.New("command is required")

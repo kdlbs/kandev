@@ -394,7 +394,7 @@ func (j *Journal) AppendBatch(ctx context.Context, events []Event) ([]Event, err
 	if err := prepareAppendEvents(events, j.config.MaxEventBytes); err != nil {
 		return nil, err
 	}
-	err := j.db.Update(func(tx *bolt.Tx) error {
+	err := j.updateLocked(func(tx *bolt.Tx) error {
 		for i := range events {
 			if err := j.appendEventTx(ctx, tx, &events[i]); err != nil {
 				return err
@@ -546,7 +546,7 @@ func (j *Journal) Replay(ctx context.Context, streamID string, after uint64, lim
 	}
 	var out []Event
 	var stream Stream
-	err := j.db.View(func(tx *bolt.Tx) error {
+	err := j.viewLocked(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -599,7 +599,7 @@ func replayEvents(tx *bolt.Tx, streamID string, after uint64, limit int) ([]Even
 
 func (j *Journal) Acknowledge(ctx context.Context, streamID string, sequence uint64) error {
 	j.mu.RLock()
-	err := j.db.Update(func(tx *bolt.Tx) error {
+	err := j.updateLocked(func(tx *bolt.Tx) error {
 		return acknowledgeStreamTx(ctx, tx, streamID, sequence)
 	})
 	j.mu.RUnlock()
@@ -756,7 +756,7 @@ func (j *Journal) GetStream(ctx context.Context, streamID string) (Stream, error
 	j.mu.RLock()
 	defer j.mu.RUnlock()
 	var stream Stream
-	err := j.db.View(func(tx *bolt.Tx) error {
+	err := j.viewLocked(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

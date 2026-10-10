@@ -212,6 +212,7 @@ function mountInventory() {
         },
         settingsAgents: { items: [agent] },
         agentProfiles: {
+          orderByAgent: {},
           items: agent.profiles.map((profile) => toAgentProfileOption(agent, profile)),
           version: VERSION,
         },

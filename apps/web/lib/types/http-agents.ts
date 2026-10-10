@@ -59,6 +59,12 @@ export type MCPStrategyOption = {
   description: string;
 };
 
+export type AgentProfilesReorderedPayload = {
+  agent_id: string;
+  profile_ids: string[];
+  revision: number;
+};
+
 export type Agent = {
   id: string;
   name: string;
@@ -67,6 +73,7 @@ export type Agent = {
   mcp_config_path?: string | null;
   tui_config?: TUIConfig | null;
   profiles: AgentProfile[];
+  profile_order_revision?: number;
   /**
    * Host utility probe status for this agent type — mirrors
    * `ModelConfig.status`. Populated by the backend from the host utility

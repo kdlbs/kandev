@@ -13,7 +13,7 @@ vi.mock("@/lib/platform/backend-reload-coordinator", () => ({
     reloadMocks.signalBackendReloadRequired(...args),
 }));
 
-import { deleteAgentProfileAction } from "./agents";
+import { deleteAgentProfileAction, reorderAgentProfilesAction } from "./agents";
 
 const bootWindow = window as unknown as { __KANDEV_BOOT_PAYLOAD__?: unknown };
 
@@ -77,5 +77,25 @@ describe("deleteAgentProfileAction", () => {
       activeSessions: [{ id: "session-1" }],
     });
     expect(reloadMocks.signalBackendReloadRequired).not.toHaveBeenCalled();
+  });
+});
+
+describe("reorderAgentProfilesAction", () => {
+  it("bounds the real fetch request with a fifteen-second abort signal", async () => {
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ agent_id: "agent", profile_ids: ["b", "a"], revision: 2 }), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      await reorderAgentProfilesAction("agent", ["b", "a"]);
+      expect(timeout).toHaveBeenCalledWith(15_000);
+      expect(fetcher.mock.calls[0][1].signal).toBe(controller.signal);
+    } finally {
+      timeout.mockRestore();
+    }
   });
 });

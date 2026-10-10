@@ -67,6 +67,19 @@ export async function listAgentsAction(): Promise<ListAgentsResponse> {
   const res = await agentSettingsRequest<ListAgentsResponse>(`${apiBaseUrl}/api/v1/agents`);
   return { ...res, agents: (res.agents ?? []).map(normalizeAgentInPlace) };
 }
+export async function reorderAgentProfilesAction(
+  agentId: string,
+  profileIds: string[],
+): Promise<{ agent_id: string; profile_ids: string[]; revision: number }> {
+  return agentSettingsRequest<{ agent_id: string; profile_ids: string[]; revision: number }>(
+    `${apiBaseUrl}/api/v1/agents/${encodeURIComponent(agentId)}/profiles/order`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ profile_ids: profileIds }),
+      signal: AbortSignal.timeout(15_000),
+    },
+  );
+}
 
 export async function createAgentAction(payload: {
   name: string;

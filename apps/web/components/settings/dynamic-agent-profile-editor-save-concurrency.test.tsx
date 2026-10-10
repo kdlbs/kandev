@@ -139,6 +139,7 @@ function renderEditorProviders(dynamic: Agent, other: Agent, consumer: ReactNode
         features: { ...defaultFeatureFlags, dynamicAgentRouting: true },
         settingsAgents: { items: [dynamic, other] },
         agentProfiles: {
+          orderByAgent: {},
           items: [
             toAgentProfileOption(dynamic, dynamic.profiles[0]),
             toAgentProfileOption(other, other.profiles[0]),

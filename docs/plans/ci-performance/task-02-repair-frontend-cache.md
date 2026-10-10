@@ -107,3 +107,10 @@ Hosted cold-install, cache-save, and compatible cache-restore evidence remains
 open because the changed workflow was not dispatched or pushed in this task.
 The previous hosted baseline recorded a path-validation warning and no cache
 save; it is recorded in [CI performance evidence](evidence.md).
+
+## October evidence update
+
+The current source has one frontend verification job; the matrix mentioned in the historical results is not active.
+Jobs `113481422287` and `113399109446` restored approximately 205 MB from the compatible primary pnpm key.
+Both skipped saving because of a primary-key hit. See [October evidence](evidence-2026-10-08.md).
+Cold-install/save and cache-failure fallback evidence remain pending. Do not repeat the implemented cache-path repair.

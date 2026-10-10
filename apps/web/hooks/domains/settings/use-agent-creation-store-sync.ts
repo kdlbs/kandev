@@ -1,5 +1,10 @@
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { insertFirstInAgentGroup } from "@/lib/settings/agent-profile-order";
+import {
+  orderProfilesForSelection,
+  toSelectorProfileOptions,
+} from "@/lib/settings/agent-profile-selector-order";
+import { syncSavedAgentToStore } from "@/app/settings/agents/[agentId]/agent-save-store-sync";
 import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 
@@ -18,10 +23,22 @@ function acceptedProfile(current: AgentProfile | undefined, accepted: AgentProfi
 
 function publishCreatedProfiles(current: Agent, publication: AgentCreationPublication): Agent {
   const profiles = new Map(current.profiles.map((profile) => [profile.id, profile]));
+  const newProfiles = orderProfilesForSelection(
+    publication.profiles.filter((profile) => !profiles.has(profile.id)),
+  );
   for (const profile of publication.profiles) {
     profiles.set(profile.id, acceptedProfile(profiles.get(profile.id), profile));
   }
-  return { ...current, ...publication.agentPatch, profiles: [...profiles.values()] };
+  return {
+    ...current,
+    ...publication.agentPatch,
+    profiles: [
+      ...newProfiles,
+      ...[...profiles.values()].filter(
+        (profile) => !newProfiles.some((created) => created.id === profile.id),
+      ),
+    ],
+  };
 }
 
 export function useAgentCreationStoreSync() {
@@ -29,7 +46,13 @@ export function useAgentCreationStoreSync() {
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
 
-  const upsertAgent = (agent: Agent, creation?: AgentCreationPublication) => {
+  const getAgentProfilesVersion = () => storeApi.getState().agentProfiles.version;
+  const upsertAgent = (
+    agent: Agent,
+    creation?: AgentCreationPublication,
+    profileVersionAtSaveStart = getAgentProfilesVersion(),
+  ) => {
+    if (!creation) return syncSavedAgentToStore(storeApi, agent, profileVersionAtSaveStart);
     const agents = storeApi.getState().settingsAgents.items;
     const current = agents.find((item) => item.id === agent.id);
     if (creation && !current) return;
@@ -38,11 +61,16 @@ export function useAgentCreationStoreSync() {
       ? agents.map((item) => (item.id === agent.id ? target : item))
       : [...agents, target];
     setSettingsAgents(next);
-    setAgentProfiles(
-      next.flatMap((item) => item.profiles.map((profile) => toAgentProfileOption(item, profile))),
-    );
+    let options = storeApi.getState().agentProfiles.items;
+    for (const accepted of toSelectorProfileOptions([target]).toReversed()) {
+      options = options.some((option) => option.id === accepted.id)
+        ? options.map((option) => (option.id === accepted.id ? accepted : option))
+        : insertFirstInAgentGroup(options, target.id, accepted);
+    }
+    setAgentProfiles(options);
+    storeApi.getState().bumpAgentProfilesVersion();
     return target;
   };
 
-  return { upsertAgent };
+  return { getAgentProfilesVersion, upsertAgent };
 }

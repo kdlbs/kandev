@@ -66,6 +66,30 @@ describe("failed Inbox hydration state", () => {
 });
 
 describe("settings agent hydration", () => {
+  it("restores selector creation order from boot Settings rows while preserving option metadata", () => {
+    const state = mergeInitialState({
+      settingsAgents: {
+        items: [
+          {
+            id: "a",
+            profiles: [
+              { id: "old", created_at: "2026-01-01T00:00:00Z" },
+              { id: "new", created_at: "2026-02-01T00:00:00Z" },
+            ],
+          },
+        ],
+      },
+      agentProfiles: {
+        items: [
+          { id: "old", agent_id: "a", label: "Old", model: "old-model" },
+          { id: "new", agent_id: "a", label: "New", model: "new-model" },
+        ],
+      },
+    } as unknown as HydrationState);
+    expect(state.agentProfiles.items.map((profile) => profile.id)).toEqual(["new", "old"]);
+    expect(state.agentProfiles.items[0].model).toBe("new-model");
+  });
+
   it("normalizes fallback fields from boot-hydrated profiles", () => {
     const state = mergeInitialState({
       settingsAgents: {
