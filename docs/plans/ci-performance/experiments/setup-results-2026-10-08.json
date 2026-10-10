@@ -1,0 +1,48 @@
+{
+  "source_sha": "5aa06bcefe02b6ce7b7c321f7092efe89f0c8992",
+  "node": "24.16.0",
+  "pnpm": "9.15.9",
+  "workers": 2,
+  "runner": "local task VM; 11 available CPUs; not GitHub hosted",
+  "files": 32,
+  "tests": 236,
+  "all_six_identity_multisets_equal": true,
+  "results": [
+    {
+      "mode": "baseline",
+      "sample": 1,
+      "seconds": 27.145,
+      "exit": 0
+    },
+    {
+      "mode": "candidate",
+      "sample": 1,
+      "seconds": 9.383,
+      "exit": 0
+    },
+    {
+      "mode": "candidate",
+      "sample": 2,
+      "seconds": 8.611,
+      "exit": 0
+    },
+    {
+      "mode": "baseline",
+      "sample": 2,
+      "seconds": 27.004,
+      "exit": 0
+    },
+    {
+      "mode": "baseline",
+      "sample": 3,
+      "seconds": 25.425,
+      "exit": 0
+    },
+    {
+      "mode": "candidate",
+      "sample": 3,
+      "seconds": 8.186,
+      "exit": 0
+    }
+  ]
+}

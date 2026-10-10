@@ -56,6 +56,9 @@ task menu, so that a task no longer points to the wrong PR.
   localized, association-specific accessible name and be operable by keyboard.
   Phone menu entries shall have touch targets of at least 44 pixels and remain
   within the viewport without horizontal page overflow.
+- **AC-INTEGRATIONS-GITHUB-PR-UNLINK-MENUS-001.8:** In the multi-PR information surface, each unlink control shall appear inside its PR tab's visual boundary. Revealing the control shall not shift the label or adjacent tabs.
+- **AC-INTEGRATIONS-GITHUB-PR-UNLINK-MENUS-001.9:** On a desktop with a fine pointer, the unlink control shall appear on tab hover or keyboard focus within that tab. Otherwise it shall stay hidden, including on the selected tab. Pending unlink feedback shall remain visible until the request settles.
+- **AC-INTEGRATIONS-GITHUB-PR-UNLINK-MENUS-001.10:** On phones or coarse pointers, the control shall remain visible with a hit area of at least 44 by 44 pixels. Activating it shall unlink only its PR without activating another tab. Existing failure recovery, adjacent-tab focus, and two-to-one collapse shall remain available.
 
 ## Out of scope
 
@@ -76,3 +79,5 @@ task menu, so that a task no longer points to the wrong PR.
 ## Implementation plan
 
 [Implementation plan](../../../plans/github-pr-unlink-menus/plan.md)
+
+[PR popover refinements](../../../plans/pr-task-hover-delay/plan.md) covers the inline tab controls in criteria 001.8 through 001.10.

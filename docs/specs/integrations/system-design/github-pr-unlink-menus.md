@@ -60,6 +60,38 @@ popover so two overlays do not compete. The menu closes when its action is
 selected; it must tolerate the trigger unmounting after the final unlink.
 Keyboard context-menu activation follows the existing Radix primitive.
 
+## Multi-PR information tabs
+
+The [popover refinement plan](../../../plans/pr-task-hover-delay/plan.md) covers
+AC-INTEGRATIONS-GITHUB-PR-UNLINK-MENUS-001.8 through 001.10.
+`PRTab` in `apps/web/components/github/multi-pr-ci-popover.tsx` currently
+places the selected outline on the selection button only.
+The adjacent unlink button consequently appears outside that outline.
+
+Move the common border, background, and hover grouping to the outer tab wrapper.
+Keep the selection button and unlink button as semantic siblings inside it.
+Do not nest a button inside another button or place the unlink control inside `role="tab"`.
+Retain tab IDs, roving selection, accessible names, and panel relationships.
+Reserve the close-control width so disclosure does not shift tab geometry.
+Long tab lists retain their own horizontal scroll region.
+
+Use local hover and focus-within styles to reveal the desktop unlink control.
+The hidden control must not intercept pointer input, but remains reachable by keyboard.
+Pending removal keeps its existing spinner visible and disables repeated activation.
+Keep the existing event boundary so unlink does not also select the PR.
+The session-tab close control supplies the visual precedent, not shared domain logic.
+Unlike its active-tab exception, PR controls follow the requested hover/focus-only rule.
+
+Phone widths below 768px and coarse pointers retain a visible 44 by 44 pixel control.
+The existing `PRStatusChipDrawer` remains the phone entry point.
+It retains its fixed header, internal body scroll, safe-area handling, and focus return.
+No drawer or provider operation is added.
+
+Rendered browser tests measure close-control containment within the shared tab outline,
+computed visibility, stable tab width, keyboard reachability, and phone/coarse hit areas.
+Existing component and E2E coverage protects failure recovery and removal focus.
+This presentation change retains the existing association mutation and single-PR eligibility rules.
+
 ## Task cards
 
 `apps/web/components/kanban-card-menu.tsx` builds both the desktop context

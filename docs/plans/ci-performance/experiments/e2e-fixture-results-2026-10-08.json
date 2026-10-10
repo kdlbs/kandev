@@ -1,0 +1,703 @@
+{
+  "workflow_urls": [
+    "https://github.com/kdlbs/kandev/actions/runs/37826061394"
+  ],
+  "artifacts": 20,
+  "run_attempt": null,
+  "attempt_attribution": "unknown",
+  "aggregate": [
+    {
+      "fixture": "Fixture \"_sshRuntimeReset\"",
+      "phase": "After Hooks",
+      "calls": 96,
+      "total_seconds": 201.58,
+      "median_ms": 1874.0,
+      "p95_ms": 2912,
+      "p99_ms": 4853,
+      "max_ms": 4853
+    },
+    {
+      "fixture": "Fixture \"_sshRuntimeReset\"",
+      "phase": "Before Hooks",
+      "calls": 96,
+      "total_seconds": 179.44,
+      "median_ms": 1868.0,
+      "p95_ms": 1881,
+      "p99_ms": 1886,
+      "max_ms": 1886
+    },
+    {
+      "fixture": "Fixture \"advancedSeed\"",
+      "phase": "After Hooks",
+      "calls": 5,
+      "total_seconds": 9.083,
+      "median_ms": 2561,
+      "p95_ms": 2573,
+      "p99_ms": 2573,
+      "max_ms": 2573
+    },
+    {
+      "fixture": "Fixture \"advancedSeed\"",
+      "phase": "Before Hooks",
+      "calls": 5,
+      "total_seconds": 14.931,
+      "median_ms": 2773,
+      "p95_ms": 3828,
+      "p99_ms": 3828,
+      "max_ms": 3828
+    },
+    {
+      "fixture": "Fixture \"advancedWorkspace\"",
+      "phase": "Before Hooks",
+      "calls": 1,
+      "total_seconds": 0.02,
+      "median_ms": 20,
+      "p95_ms": 20,
+      "p99_ms": 20,
+      "max_ms": 20
+    },
+    {
+      "fixture": "Fixture \"apiClient\"",
+      "phase": "Before Hooks",
+      "calls": 76,
+      "total_seconds": 20.098,
+      "median_ms": 5.0,
+      "p95_ms": 4074,
+      "p99_ms": 5999,
+      "max_ms": 5999
+    },
+    {
+      "fixture": "Fixture \"apiClient\"",
+      "phase": "Worker Cleanup",
+      "calls": 4,
+      "total_seconds": 0.0,
+      "median_ms": 0.0,
+      "p95_ms": 0,
+      "p99_ms": 0,
+      "max_ms": 0
+    },
+    {
+      "fixture": "Fixture \"backend\"",
+      "phase": "Before Hooks",
+      "calls": 82,
+      "total_seconds": 459.28,
+      "median_ms": 790.5,
+      "p95_ms": 28992,
+      "p99_ms": 31116,
+      "max_ms": 31116
+    },
+    {
+      "fixture": "Fixture \"backend\"",
+      "phase": "Worker Cleanup",
+      "calls": 4,
+      "total_seconds": 0.535,
+      "median_ms": 94.5,
+      "p95_ms": 300,
+      "p99_ms": 300,
+      "max_ms": 300
+    },
+    {
+      "fixture": "Fixture \"browser\"",
+      "phase": "Before Hooks",
+      "calls": 76,
+      "total_seconds": 8.208,
+      "median_ms": 76.5,
+      "p95_ms": 154,
+      "p99_ms": 1589,
+      "max_ms": 1589
+    },
+    {
+      "fixture": "Fixture \"browser\"",
+      "phase": "Worker Cleanup",
+      "calls": 4,
+      "total_seconds": 0.12,
+      "median_ms": 28.5,
+      "p95_ms": 35,
+      "p99_ms": 35,
+      "max_ms": 35
+    },
+    {
+      "fixture": "Fixture \"chatSeed\"",
+      "phase": "Before Hooks",
+      "calls": 1,
+      "total_seconds": 1.917,
+      "median_ms": 1917,
+      "p95_ms": 1917,
+      "p99_ms": 1917,
+      "max_ms": 1917
+    },
+    {
+      "fixture": "Fixture \"cluster\"",
+      "phase": "Before Hooks",
+      "calls": 4,
+      "total_seconds": 585.839,
+      "median_ms": 138979.0,
+      "p95_ms": 174743,
+      "p99_ms": 174743,
+      "max_ms": 174743
+    },
+    {
+      "fixture": "Fixture \"coarseDesktopTestPage\"",
+      "phase": "After Hooks",
+      "calls": 4,
+      "total_seconds": 0.798,
+      "median_ms": 140.5,
+      "p95_ms": 452,
+      "p99_ms": 452,
+      "max_ms": 452
+    },
+    {
+      "fixture": "Fixture \"coarseDesktopTestPage\"",
+      "phase": "Before Hooks",
+      "calls": 4,
+      "total_seconds": 0.166,
+      "median_ms": 42.0,
+      "p95_ms": 44,
+      "p99_ms": 44,
+      "max_ms": 44
+    },
+    {
+      "fixture": "Fixture \"dockerCleanup\"",
+      "phase": "After Hooks",
+      "calls": 28,
+      "total_seconds": 147.93,
+      "median_ms": 5690.5,
+      "p95_ms": 12500,
+      "p99_ms": 12759,
+      "max_ms": 12759
+    },
+    {
+      "fixture": "Fixture \"dockerCleanup\"",
+      "phase": "Before Hooks",
+      "calls": 28,
+      "total_seconds": 57.877,
+      "median_ms": 2071.0,
+      "p95_ms": 2097,
+      "p99_ms": 2100,
+      "max_ms": 2100
+    },
+    {
+      "fixture": "Fixture \"hasTouch\"",
+      "phase": "After Hooks",
+      "calls": 2,
+      "total_seconds": 0.0,
+      "median_ms": 0.0,
+      "p95_ms": 0,
+      "p99_ms": 0,
+      "max_ms": 0
+    },
+    {
+      "fixture": "Fixture \"integrationCleanup\"",
+      "phase": "After Hooks",
+      "calls": 3779,
+      "total_seconds": 258.444,
+      "median_ms": 66,
+      "p95_ms": 92,
+      "p99_ms": 133,
+      "max_ms": 332
+    },
+    {
+      "fixture": "Fixture \"integrationCleanup\"",
+      "phase": "Before Hooks",
+      "calls": 3779,
+      "total_seconds": 389.322,
+      "median_ms": 102,
+      "p95_ms": 136,
+      "p99_ms": 187,
+      "max_ms": 400
+    },
+    {
+      "fixture": "Fixture \"kubernetesCleanup\"",
+      "phase": "After Hooks",
+      "calls": 17,
+      "total_seconds": 155.982,
+      "median_ms": 191,
+      "p95_ms": 60940,
+      "p99_ms": 60940,
+      "max_ms": 60940
+    },
+    {
+      "fixture": "Fixture \"kubernetesCleanup\"",
+      "phase": "Before Hooks",
+      "calls": 17,
+      "total_seconds": 1.595,
+      "median_ms": 85,
+      "p95_ms": 140,
+      "p99_ms": 140,
+      "max_ms": 140
+    },
+    {
+      "fixture": "Fixture \"locale\"",
+      "phase": "After Hooks",
+      "calls": 5,
+      "total_seconds": 0.0,
+      "median_ms": 0,
+      "p95_ms": 0,
+      "p99_ms": 0,
+      "max_ms": 0
+    },
+    {
+      "fixture": "Fixture \"officeApi\"",
+      "phase": "Before Hooks",
+      "calls": 28,
+      "total_seconds": 0.005,
+      "median_ms": 0.0,
+      "p95_ms": 1,
+      "p99_ms": 1,
+      "max_ms": 1
+    },
+    {
+      "fixture": "Fixture \"officeSeed\"",
+      "phase": "Before Hooks",
+      "calls": 25,
+      "total_seconds": 0.342,
+      "median_ms": 14,
+      "p95_ms": 17,
+      "p99_ms": 17,
+      "max_ms": 17
+    },
+    {
+      "fixture": "Fixture \"onboardingSeed\"",
+      "phase": "Before Hooks",
+      "calls": 1,
+      "total_seconds": 0.027,
+      "median_ms": 27,
+      "p95_ms": 27,
+      "p99_ms": 27,
+      "max_ms": 27
+    },
+    {
+      "fixture": "Fixture \"prCapture\"",
+      "phase": "After Hooks",
+      "calls": 373,
+      "total_seconds": 0.028,
+      "median_ms": 0,
+      "p95_ms": 1,
+      "p99_ms": 1,
+      "max_ms": 2
+    },
+    {
+      "fixture": "Fixture \"prCapture\"",
+      "phase": "Before Hooks",
+      "calls": 373,
+      "total_seconds": 0.064,
+      "median_ms": 0,
+      "p95_ms": 1,
+      "p99_ms": 1,
+      "max_ms": 1
+    },
+    {
+      "fixture": "Fixture \"remoteDockerCleanup\"",
+      "phase": "After Hooks",
+      "calls": 3,
+      "total_seconds": 10.129,
+      "median_ms": 2079,
+      "p95_ms": 5974,
+      "p99_ms": 5974,
+      "max_ms": 5974
+    },
+    {
+      "fixture": "Fixture \"remoteDockerCleanup\"",
+      "phase": "Before Hooks",
+      "calls": 3,
+      "total_seconds": 6.307,
+      "median_ms": 2104,
+      "p95_ms": 2109,
+      "p99_ms": 2109,
+      "max_ms": 2109
+    },
+    {
+      "fixture": "Fixture \"request\"",
+      "phase": "After Hooks",
+      "calls": 1,
+      "total_seconds": 0.001,
+      "median_ms": 1,
+      "p95_ms": 1,
+      "p99_ms": 1,
+      "max_ms": 1
+    },
+    {
+      "fixture": "Fixture \"request\"",
+      "phase": "Before Hooks",
+      "calls": 1,
+      "total_seconds": 0.002,
+      "median_ms": 2,
+      "p95_ms": 2,
+      "p99_ms": 2,
+      "max_ms": 2
+    },
+    {
+      "fixture": "Fixture \"seedData\"",
+      "phase": "Before Hooks",
+      "calls": 76,
+      "total_seconds": 75.903,
+      "median_ms": 94.0,
+      "p95_ms": 11564,
+      "p99_ms": 13221,
+      "max_ms": 13221
+    },
+    {
+      "fixture": "Fixture \"seedData\"",
+      "phase": "Worker Cleanup",
+      "calls": 4,
+      "total_seconds": 0.0,
+      "median_ms": 0.0,
+      "p95_ms": 0,
+      "p99_ms": 0,
+      "max_ms": 0
+    },
+    {
+      "fixture": "Fixture \"tabletTestPage\"",
+      "phase": "After Hooks",
+      "calls": 24,
+      "total_seconds": 4.327,
+      "median_ms": 173.0,
+      "p95_ms": 299,
+      "p99_ms": 557,
+      "max_ms": 557
+    },
+    {
+      "fixture": "Fixture \"tabletTestPage\"",
+      "phase": "Before Hooks",
+      "calls": 24,
+      "total_seconds": 0.899,
+      "median_ms": 38.0,
+      "p95_ms": 43,
+      "p99_ms": 43,
+      "max_ms": 43
+    },
+    {
+      "fixture": "Fixture \"testPage\"",
+      "phase": "After Hooks",
+      "calls": 3902,
+      "total_seconds": 494.006,
+      "median_ms": 93.0,
+      "p95_ms": 328,
+      "p99_ms": 793,
+      "max_ms": 3541
+    },
+    {
+      "fixture": "Fixture \"testPage\"",
+      "phase": "Before Hooks",
+      "calls": 3902,
+      "total_seconds": 3295.845,
+      "median_ms": 93.0,
+      "p95_ms": 2631,
+      "p99_ms": 4029,
+      "max_ms": 32371
+    },
+    {
+      "fixture": "Fixture \"timezoneId\"",
+      "phase": "After Hooks",
+      "calls": 5,
+      "total_seconds": 0.0,
+      "median_ms": 0,
+      "p95_ms": 0,
+      "p99_ms": 0,
+      "max_ms": 0
+    },
+    {
+      "fixture": "Fixture \"viewport\"",
+      "phase": "After Hooks",
+      "calls": 2,
+      "total_seconds": 0.0,
+      "median_ms": 0.0,
+      "p95_ms": 0,
+      "p99_ms": 0,
+      "max_ms": 0
+    },
+    {
+      "fixture": "Fixture \"workerImages\"",
+      "phase": "Before Hooks",
+      "calls": 1,
+      "total_seconds": 185.701,
+      "median_ms": 185701,
+      "p95_ms": 185701,
+      "p99_ms": 185701,
+      "max_ms": 185701
+    }
+  ],
+  "slow_test_page_setup": [
+    {
+      "artifact": "blob-report-13.zip",
+      "testId": "4074bcd8053772e1149e-abbac93e4ff4a7a5ff66",
+      "fixture": "Fixture \"testPage\"",
+      "phase": "Before Hooks",
+      "milliseconds": 32371,
+      "project": "chromium",
+      "file": "chat/inbox-failed-tab.spec.ts",
+      "title": "lists a failed task without inflating the sidebar count (AC .29)"
+    },
+    {
+      "artifact": "blob-report-3.zip",
+      "testId": "e35abd5d6d16c31fa5ba-c7da52f186abfb81573b",
+      "fixture": "Fixture \"testPage\"",
+      "phase": "Before Hooks",
+      "milliseconds": 32366,
+      "project": "chromium",
+      "file": "task/command-palette-archive.spec.ts",
+      "title": "an archived task offers no archive command"
+    },
+    {
+      "artifact": "blob-report-5.zip",
+      "testId": "f48e74a97a23885cc464-6427cd62c868e05666f3",
+      "fixture": "Fixture \"testPage\"",
+      "phase": "Before Hooks",
+      "milliseconds": 30624,
+      "project": "chromium",
+      "file": "chat/quick-chat.spec.ts",
+      "title": "opens quick chat, selects agent, sends message and receives response"
+    },
+    {
+      "artifact": "blob-report-11.zip",
+      "testId": "35bbbc96e009b6d479b7-21598b4e156f143edadf",
+      "fixture": "Fixture \"testPage\"",
+      "phase": "Before Hooks",
+      "milliseconds": 30617,
+      "project": "chromium",
+      "file": "coordinator/proposal-kinds.spec.ts",
+      "title": "a Ready to merge row opens the PR in a new tab and sends a note back to the task"
+    },
+    {
+      "artifact": "blob-report-14.zip",
+      "testId": "ed8b85123afbdbce94cd-71e1e3e7a8a9941480f0",
+      "fixture": "Fixture \"testPage\"",
+      "phase": "Before Hooks",
+      "milliseconds": 30415,
+      "project": "mobile-chrome",
+      "file": "task/mobile-create-task-branch-policy.spec.ts",
+      "title": "keeps the policy marker and fresh-branch state visible"
+    },
+    {
+      "artifact": "blob-report-7.zip",
+      "testId": "43263346ed7827a599d2-103da4cfecd88dfa38e0",
+      "fixture": "Fixture \"testPage\"",
+      "phase": "Before Hooks",
+      "milliseconds": 30341,
+      "project": "chromium",
+      "file": "coordinator/copilot.spec.ts",
+      "title": "a tool call requiring permission renders Approve/Deny in the popover and executes on approval (AC .003.9)"
+    },
+    {
+      "artifact": "blob-report-8.zip",
+      "testId": "d9464ad3df33211cc4cf-9599992dbc4a5f9c3626",
+      "fixture": "Fixture \"testPage\"",
+      "phase": "Before Hooks",
+      "milliseconds": 27968,
+      "project": "chromium",
+      "file": "session/session-resume-sidebar-order.spec.ts",
+      "title": "review (turn finished) tasks sort above in_progress (running) tasks"
+    }
+  ],
+  "focused": {
+    "chat/message-queue.spec.ts": [
+      {
+        "fixture": "Fixture \"integrationCleanup\"",
+        "phase": "After Hooks",
+        "calls": 20,
+        "total_seconds": 1.155,
+        "median_ms": 56.0,
+        "p95_ms": 66,
+        "p99_ms": 68,
+        "max_ms": 68
+      },
+      {
+        "fixture": "Fixture \"integrationCleanup\"",
+        "phase": "Before Hooks",
+        "calls": 20,
+        "total_seconds": 1.677,
+        "median_ms": 82.5,
+        "p95_ms": 92,
+        "p99_ms": 95,
+        "max_ms": 95
+      },
+      {
+        "fixture": "Fixture \"testPage\"",
+        "phase": "After Hooks",
+        "calls": 20,
+        "total_seconds": 1.442,
+        "median_ms": 66.0,
+        "p95_ms": 118,
+        "p99_ms": 138,
+        "max_ms": 138
+      },
+      {
+        "fixture": "Fixture \"testPage\"",
+        "phase": "Before Hooks",
+        "calls": 20,
+        "total_seconds": 34.669,
+        "median_ms": 2590.0,
+        "p95_ms": 2610,
+        "p99_ms": 3085,
+        "max_ms": 3085
+      }
+    ],
+    "session/session-idle-parking.spec.ts": [
+      {
+        "fixture": "Fixture \"integrationCleanup\"",
+        "phase": "After Hooks",
+        "calls": 1,
+        "total_seconds": 0.072,
+        "median_ms": 72,
+        "p95_ms": 72,
+        "p99_ms": 72,
+        "max_ms": 72
+      },
+      {
+        "fixture": "Fixture \"integrationCleanup\"",
+        "phase": "Before Hooks",
+        "calls": 1,
+        "total_seconds": 0.106,
+        "median_ms": 106,
+        "p95_ms": 106,
+        "p99_ms": 106,
+        "max_ms": 106
+      },
+      {
+        "fixture": "Fixture \"testPage\"",
+        "phase": "After Hooks",
+        "calls": 1,
+        "total_seconds": 0.105,
+        "median_ms": 105,
+        "p95_ms": 105,
+        "p99_ms": 105,
+        "max_ms": 105
+      },
+      {
+        "fixture": "Fixture \"testPage\"",
+        "phase": "Before Hooks",
+        "calls": 1,
+        "total_seconds": 0.095,
+        "median_ms": 95,
+        "p95_ms": 95,
+        "p99_ms": 95,
+        "max_ms": 95
+      }
+    ],
+    "session/mobile-transient-turn-runtime-continuity.spec.ts": [
+      {
+        "fixture": "Fixture \"integrationCleanup\"",
+        "phase": "After Hooks",
+        "calls": 4,
+        "total_seconds": 0.198,
+        "median_ms": 49.0,
+        "p95_ms": 54,
+        "p99_ms": 54,
+        "max_ms": 54
+      },
+      {
+        "fixture": "Fixture \"integrationCleanup\"",
+        "phase": "Before Hooks",
+        "calls": 4,
+        "total_seconds": 0.285,
+        "median_ms": 70.5,
+        "p95_ms": 75,
+        "p99_ms": 75,
+        "max_ms": 75
+      },
+      {
+        "fixture": "Fixture \"testPage\"",
+        "phase": "After Hooks",
+        "calls": 4,
+        "total_seconds": 0.22,
+        "median_ms": 54.5,
+        "p95_ms": 63,
+        "p99_ms": 63,
+        "max_ms": 63
+      },
+      {
+        "fixture": "Fixture \"testPage\"",
+        "phase": "Before Hooks",
+        "calls": 4,
+        "total_seconds": 0.191,
+        "median_ms": 48.5,
+        "p95_ms": 49,
+        "p99_ms": 49,
+        "max_ms": 49
+      }
+    ],
+    "docker/docker-launch.spec.ts": [
+      {
+        "fixture": "Fixture \"apiClient\"",
+        "phase": "Before Hooks",
+        "calls": 1,
+        "total_seconds": 0.0,
+        "median_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      },
+      {
+        "fixture": "Fixture \"backend\"",
+        "phase": "Before Hooks",
+        "calls": 1,
+        "total_seconds": 31.116,
+        "median_ms": 31116,
+        "p95_ms": 31116,
+        "p99_ms": 31116,
+        "max_ms": 31116
+      },
+      {
+        "fixture": "Fixture \"browser\"",
+        "phase": "Before Hooks",
+        "calls": 1,
+        "total_seconds": 0.07,
+        "median_ms": 70,
+        "p95_ms": 70,
+        "p99_ms": 70,
+        "max_ms": 70
+      },
+      {
+        "fixture": "Fixture \"dockerCleanup\"",
+        "phase": "After Hooks",
+        "calls": 12,
+        "total_seconds": 57.114,
+        "median_ms": 5650.0,
+        "p95_ms": 5713,
+        "p99_ms": 5713,
+        "max_ms": 5713
+      },
+      {
+        "fixture": "Fixture \"dockerCleanup\"",
+        "phase": "Before Hooks",
+        "calls": 12,
+        "total_seconds": 24.812,
+        "median_ms": 2070.0,
+        "p95_ms": 2075,
+        "p99_ms": 2075,
+        "max_ms": 2075
+      },
+      {
+        "fixture": "Fixture \"seedData\"",
+        "phase": "Before Hooks",
+        "calls": 1,
+        "total_seconds": 13.221,
+        "median_ms": 13221,
+        "p95_ms": 13221,
+        "p99_ms": 13221,
+        "max_ms": 13221
+      },
+      {
+        "fixture": "Fixture \"testPage\"",
+        "phase": "After Hooks",
+        "calls": 4,
+        "total_seconds": 0.413,
+        "median_ms": 100.0,
+        "p95_ms": 165,
+        "p99_ms": 165,
+        "max_ms": 165
+      },
+      {
+        "fixture": "Fixture \"testPage\"",
+        "phase": "Before Hooks",
+        "calls": 4,
+        "total_seconds": 0.208,
+        "median_ms": 50.0,
+        "p95_ms": 64,
+        "p99_ms": 64,
+        "max_ms": 64
+      }
+    ],
+    "kubernetes/kubernetes-docker-workloads.spec.ts": []
+  }
+}

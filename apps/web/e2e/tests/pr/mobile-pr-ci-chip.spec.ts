@@ -407,14 +407,29 @@ test.describe("mobile PR CI chip drawer", () => {
       timeout: 15_000,
     });
     await session.tapPRStatusChip();
-    await prCapture.screenshot("mobile-pr-unlink-drawer", {
-      caption: "Mobile multi-PR drawer with touch-sized unlink controls",
-    });
-
     const removeFirst = session.prMultiPopoverRemove(OWNER, REPO, PR_NUMBER);
     await expect(removeFirst).toBeVisible();
-    const box = await removeFirst.boundingBox();
-    expect(box?.height).toBeGreaterThanOrEqual(44);
+    await waitForFiniteAnimations(session.prStatusChipDrawer());
+    await prCapture.screenshot("mobile-pr-unlink-drawer", {
+      caption: "Mobile multi-PR drawer with visible unlink controls inside the tabs",
+    });
+    const { button, tab } = await removeFirst.evaluate((element) => {
+      const getBounds = (node: Element) => {
+        const { x, y, width, height } = node.getBoundingClientRect();
+        return { x, y, width, height };
+      };
+      return {
+        button: getBounds(element),
+        tab: element.parentElement ? getBounds(element.parentElement) : null,
+      };
+    });
+    expect(tab).not.toBeNull();
+    expect(button.height).toBeGreaterThanOrEqual(44);
+    expect(button.width).toBeGreaterThanOrEqual(44);
+    expect(button.x).toBeGreaterThanOrEqual(tab!.x);
+    expect(button.y).toBeGreaterThanOrEqual(tab!.y);
+    expect(button.x + button.width).toBeLessThanOrEqual(tab!.x + tab!.width);
+    expect(button.y + button.height).toBeLessThanOrEqual(tab!.y + tab!.height);
     await removeFirst.tap();
 
     await expect(session.prStatusChip()).toHaveAttribute("data-pr-number", "100");
