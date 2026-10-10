@@ -61,3 +61,18 @@ The fixup also restores queue status for tasks held only in the shared task stor
 Cancellation fixtures hold settlement from the action boundary, including messages that arrive before the pending notification.
 Continuation restart tests must observe the native prompt before the backend restarts.
 The work order records local verification. CI remains pending until checks pass on the pushed head.
+
+The pushed October 10 head exposed settings tests that predated profile ordering.
+The fixup updates newest-first assertions and accepted-deletion epoch checks.
+It also replaces the self-update page's incomplete store mock with its real provider.
+The latest main now includes these settings fixes and marks accepted first-agent publication.
+Independent profile events no longer prevent insertion of that accepted owner.
+The upstream removal ledger and missing-owner guard protect deleted agents.
+
+E2E shard 13 exposed a contradictory diff-fixture assertion left by the earlier rebase.
+The deliberate preview-history fixture contains 14 files, so the obsolete two-file assertion is removed.
+The upstream keyboard profile-order test polls geometry before asserting handle dimensions.
+The work order records the failed CI job and requires zero-retry browser verification.
+
+The upstream selector driver also uses Escape to dismiss desktop Quick Chat.
+A failing trace proved the old Cancel lookup could not complete; the repaired case passed without retries.

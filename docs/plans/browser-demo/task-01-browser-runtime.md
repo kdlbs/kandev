@@ -160,3 +160,73 @@ pnpm --dir apps/web e2e:sleep-ratchet
 TMPDIR=/root/.cache/kandev-demo-pr1785-e2e GOMAXPROCS=4 E2E_PORT_OFFSET=0 pnpm --dir apps/web e2e:run --host --no-build --project chromium e2e/tests/chat/quick-chat-cancel-palette.spec.ts -- --retries=0
 E2E_DEBUG=1 TMPDIR=/root/.cache/kandev-demo-pr1785-e2e GOMAXPROCS=4 E2E_PORT_OFFSET=0 MAKEFLAGS=GOFLAGS=-buildvcs=false pnpm --dir apps/web e2e:run --host --project mobile-chrome e2e/tests/workflow/mobile-queued-session-ownership.spec.ts -- --retries=0
 ```
+
+### October 10 settings CI remediation
+
+Frontend CI on `84448b0997aaa2c4a0fc0d1f84c0ddf857345ae4` failed 12 tests in five settings files.
+The same 12 failures reproduced locally, with 29 passing controls.
+Profile ordering requires new profiles first and an epoch increment after accepted deletion.
+Tests now assert that contract and locate retained profiles by identity.
+The self-update page uses the real store and toast providers instead of an incomplete store mock.
+
+An accepted first-agent create must publish after an independent profile event advances the epoch.
+Upstream now supplies `ownerCreated` for successful creation and partial MCP failure.
+Its removal ledger also prevents a deleted owner from returning after a late response.
+The existing missing-owner guard still protects additional-profile creation.
+The focused settings and ordering suite passes 134 tests across 12 files after this change.
+Full frontend verification passed 2,834 files and 25,335 tests, with four existing skips, on the `02ff057835` base.
+Typecheck and changed-file lint passed. Current-head CI remains required before delivery.
+
+### October 10 E2E shard 13 remediation
+
+CI run `38042169448`, attempt 1, failed both desktop diff renderer cases.
+The preview-history fixture creates 12 files before the two edited text files.
+An earlier rebase retained the correct 14-file check and an obsolete two-file check.
+The fix removes only the contradictory check. Repository reset, renderer identity,
+line anchors, refresh states, counts, content, and deletion checks remain active.
+
+The same shard reported a profile-ordering flake after a visible handle returned a null box.
+The upstream test now polls the handle geometry before checking its 28-pixel dimensions.
+Cursor, keyboard reorder, Escape cancellation, persistence, and reload checks remain active.
+Both renderer cases and the keyboard test require a managed browser run with zero retries.
+
+### October 10 E2E shard 9 remediation
+
+CI canceled shard 9 after 45 minutes. The compact reporter showed a repeated test timeout before cancellation.
+The saved manifest and Playwright worker groups identify the selector-order compatibility case.
+A managed run reproduced its 150-second timeout with zero retries.
+A second failing run captured the trace in an isolated output directory.
+The trace shows a click waiting for a nonexistent Cancel button in desktop Quick Chat.
+The driver now dismisses Quick Chat with Escape, which its modal supports.
+Selector order, defaults, handoff options, and unchanged recent-use records remain asserted.
+The identified archive-recovery flake passed in the same initial managed run without retries.
+
+The selector case passed in 23.6 seconds after the Escape correction, with zero retries.
+Rebase onto the profile-ordering repair retains its settings and selector fixes.
+The local copies were discarded in favor of the upstream removal-aware implementation.
+
+### Latest-base verification
+
+Rebase includes the profile-ordering repair and repository-free Quick Chat Resume support.
+The release contract conflict retains browser-demo dispatch and contributor notification checks.
+All 63 release contract tests pass. Harness checks pass for all 204 files.
+Specification lint and documentation validation pass for 370 decisions and 1,522 specifications.
+
+Focused unit verification passes 304 tests in 33 files, including settings, recovery, queue status, and demo runtime.
+Typecheck, changed-file ESLint, Prettier, and the E2E sleep ratchet pass.
+The rebuilt managed desktop run passes all nine selected cases with zero retries.
+Both diff renderers, keyboard ordering, selector compatibility, archive disclosure,
+Quick Chat cancellation and Resume, backend restart, and desktop queue ownership pass.
+
+```sh
+pnpm --dir apps/web exec vitest run components/settings/custom-tui-mcp-card.test.tsx app/settings/agents/page.test.tsx components/settings/agents/agent-profiles-section-delete-inventory.test.tsx 'app/settings/agents/[agentId]/agent-create-catalogue.test.tsx' 'app/settings/agents/[agentId]/agent-create-target-catalogue.test.tsx' hooks/domains/settings/use-agent-creation-store-sync.test.tsx 'app/settings/agents/[agentId]/agent-save-helpers.test.ts' 'app/settings/agents/[agentId]/agent-save-helpers-provider.test.ts' 'app/settings/agents/[agentId]/agent-save-store-sync.test.tsx' lib/state/slices/settings/settings-slice.test.ts lib/settings/agent-profile-order.test.ts lib/settings/profile-order-queue.test.ts hooks/domains/session/use-session-resumption.test.ts hooks/domains/session/use-session-resumption-manual-recovery.test.ts lib/services/session-recovery-service.test.ts hooks/domains/task/use-task-status-summary.test.ts lib/task-status-summary.test.ts lib/state/slices/task-overview.test.ts e2e/helpers/cancellation-observation.test.ts lib/browser-demo
+E2E_DEBUG=1 TMPDIR=/root/.cache/kandev-demo-pr1785-e2e GOMAXPROCS=4 E2E_PORT_OFFSET=0 MAKEFLAGS=GOFLAGS=-buildvcs=false pnpm --dir apps/web e2e:run --host --project chromium e2e/tests/git/diff-refresh-continuity.spec.ts e2e/tests/settings/agent-profile-order.spec.ts e2e/tests/settings/agent-profile-order-selectors.spec.ts e2e/tests/task/archived-session-recovery.spec.ts e2e/tests/chat/quick-chat-cancel-palette.spec.ts e2e/tests/session/provider-interruption-continuation.spec.ts e2e/tests/workflow/queued-session-ownership.spec.ts e2e/tests/chat/quick-chat-resume-recovery.spec.ts -- --grep 'retains counts and reading state|keyboard reorder saves|saved Settings order|keeps both automatic recovery|detached background work|backend restart, agent survival=false|keeps passive desktop inspection|existing Resume recovers' --retries=0
+```
+
+Mobile queue ownership and repository-free Quick Chat Resume both pass with zero retries:
+
+```sh
+TMPDIR=/root/.cache/kandev-demo-pr1785-e2e GOMAXPROCS=4 E2E_PORT_OFFSET=0 pnpm --dir apps/web e2e:run --host --no-build --project mobile-chrome e2e/tests/workflow/mobile-queued-session-ownership.spec.ts e2e/tests/chat/mobile-quick-chat-resume-recovery.spec.ts -- --retries=0
+```
+
+Current-head CI and review evidence remain pending until the rebased remediation is pushed and checked.
