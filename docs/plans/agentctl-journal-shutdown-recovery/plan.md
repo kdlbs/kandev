@@ -22,7 +22,7 @@ Prevent one instance shutdown from crashing the shared agentctl process.
 Recover retained delivery evidence after execution removal, then provide useful recovery controls on desktop and phone.
 Platform owns this repair because it owns the journal lifetime and session recovery contract.
 Work proceeds sequentially: journal safety, ACK/capacity repair, recovery authority, then UI and end-to-end evidence.
-Tasks 01 through 04 record the prior implementation. The user rejected its manual interruption form and revised retention and remote lifetime requirements. Tasks 05 and 08 are in progress; Task 07's retention implementation and checks are complete. Task 06 covers final integration and delivery and is in progress. Earlier validation does not cover the revised behavior.
+Tasks 01 through 04 record the prior implementation. The user rejected its manual interruption form and revised retention and remote lifetime requirements. Tasks 05 and 08 are complete; Task 07's retention implementation and checks are complete. Task 06 covers final integration and delivery and is in progress. Earlier validation does not cover the revised behavior.
 
 On 2026-10-10 the user clarified executor lifetime and extended disconnected operation.
 Local/worktree agents stop with Kandev by default; local survival remains an explicit opt-in.
@@ -316,9 +316,9 @@ This preview maps to AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.20 through 006.24.
 - [x] [Task 04: Recover acknowledgments and contain delivery pressure](task-04-acknowledgment-capacity.md)
 - [x] [Task 02: Recover interrupted sessions after execution removal](task-02-session-recovery.md)
 - [x] [Task 03: Complete recovery controls and browser coverage](task-03-recovery-ui.md) (prior behavior)
-- [ ] [Task 05: Restore interrupted sessions silently](task-05-silent-restart-recovery.md)
+- [x] [Task 05: Restore interrupted sessions silently](task-05-silent-restart-recovery.md)
 - [x] [Task 07: Retain output through extended backend outages](task-07-long-outage-retention.md)
-- [ ] [Task 08: Preserve remote agents across backend shutdown](task-08-remote-agent-lifetime.md)
+- [x] [Task 08: Preserve remote agents across backend shutdown](task-08-remote-agent-lifetime.md)
 - [ ] [Task 06: Deliver revised PR and clear CI](task-06-pr-delivery.md)
 
 ## Verification results
@@ -397,3 +397,7 @@ On 2026-10-09, the user authorized implementation and delivery through GPT-6 Lun
 Backend and web ownership are disjoint; cross-boundary contracts remain coordinated in the primary session.
 The primary coordinator reviews the combined implementation before delivery. Browser runs remain sequential after backend readiness.
 A later delivery agent owns rebase, push to PR 4380, and CI/review remediation. No merge is authorized.
+
+## Revised implementation validation
+
+Tasks 05, 07, and 08 are implemented and locally verified. On the final rebased source, four phone cases, three focused desktop recovery cases, and both real SSH scenarios passed with retries disabled. The merged native Resume/read-only recovery contract passed 358 focused frontend tests and type checking. Native startup failure preserves the recovery block and unknown payload without acknowledgment. The coordinator reviewed the new desktop and phone captures and the rebase composition. Earlier complete backend race, SQLite/PostgreSQL conformance, physical-capacity, lint, public docs, and build checks remain recorded in the owning work orders. Task 06 remains in progress until the pushed PR head has green CI and complete review dispositions.

@@ -1011,7 +1011,8 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		ContinuationPrompt:               req.ContinuationPrompt,
 		DeferInitialPrompt:               req.DeferRecoveryResolution,
 		RecoveryAction:                   req.RecoveryAction,
-		StartAgentSynchronously:          req.DeferRecoveryResolution && req.ForceContextContinuation,
+		StartAgentSynchronously: req.DeferRecoveryResolution &&
+			(req.ForceContextContinuation || req.RecoveryAction == recoveryActionResume),
 	}
 	var execution *executor.TaskExecution
 	var err error
