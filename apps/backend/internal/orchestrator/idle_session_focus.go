@@ -80,10 +80,13 @@ func (s *Service) resumeFocusedIdleSuspension(
 	taskID, sessionID string,
 	session *models.TaskSession,
 ) (focusTaskSessionResult, error) {
+	// Opening or refocusing a conversation is passive inspection, not an
+	// explicit execution request, so this resume must be admitted as an
+	// automatic launch.
 	execution, err := s.ResumeTaskSessionWithOptions(ctx, taskID, sessionID, executor.ResumeOptions{
 		AllowCompletedSessionResume:     session.State == models.TaskSessionStateCompleted,
 		RequireIdleSuspensionProvenance: true,
-		Origin:                          string(launchOriginManual),
+		Origin:                          string(launchOriginAutomatic),
 	})
 	if errors.Is(err, ErrIdleSuspensionProvenanceRequired) {
 		return focusTaskSessionResult{session: session}, nil

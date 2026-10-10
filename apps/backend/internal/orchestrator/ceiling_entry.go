@@ -810,7 +810,8 @@ func (s *Service) validateCeilingDestination(
 		}
 		return ceilingEntrySuperseded
 	}
-	if session.TaskID != task.ID || isTerminalSessionState(session.State) {
+	if session.TaskID != task.ID ||
+		(isTerminalSessionState(session.State) && !deferredIdleFocusResumeOfCompleted(deferral, session.State)) {
 		return ceilingEntrySuperseded
 	}
 	// A record waiting for capacity must never replay into a provider that has

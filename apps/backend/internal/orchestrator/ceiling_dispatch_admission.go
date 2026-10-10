@@ -14,6 +14,13 @@ func withCeilingDispatchClaim(ctx context.Context, claim *ceilingDeferredLaunchC
 	return context.WithValue(ctx, ceilingDispatchClaimContextKey{}, claim)
 }
 
+// ceilingDispatchClaimOwnsTask reports whether ctx is replaying taskID's
+// claimed deferred launch.
+func ceilingDispatchClaimOwnsTask(ctx context.Context, taskID string) bool {
+	claim, _ := ctx.Value(ceilingDispatchClaimContextKey{}).(*ceilingDeferredLaunchClaim)
+	return claim != nil && claim.taskID == taskID
+}
+
 // admitCeilingDispatch orders final route validation and renewal of the exact
 // dispatch claim with route mutation. The renewal is the local admission
 // boundary; later route changes use lifecycle cancellation. No admission lock
