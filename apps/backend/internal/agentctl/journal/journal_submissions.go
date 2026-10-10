@@ -16,8 +16,12 @@ import (
 func (j *Journal) HasUnresolvedSubmissions(ctx context.Context) (bool, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return false, err
+	}
 	var unresolved bool
-	err := j.viewLocked(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -45,8 +49,12 @@ func (j *Journal) HasUnresolvedSubmissions(ctx context.Context) (bool, error) {
 func (j *Journal) ListSubmissions(ctx context.Context, sessionID string) ([]Submission, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return nil, err
+	}
 	var submissions []Submission
-	err := j.viewLocked(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -70,9 +78,9 @@ func (j *Journal) ListSubmissions(ctx context.Context, sessionID string) ([]Subm
 	return submissions, err
 }
 
-// RetireSubmission seals explicitly recovered work. Native resume may
-// acknowledge an interrupted unknown outcome in the same generation; other
-// work requires a newer generation.
+// RetireSubmission seals an explicitly recovered submission. Native resume
+// may acknowledge an interrupted unknown outcome in the same generation;
+// retiring other work requires a newer generation.
 func (j *Journal) RetireSubmission(ctx context.Context, id string, recoveryGeneration uint64) (Submission, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
@@ -403,8 +411,12 @@ func submissionOwnsTerminal(submission Submission, event Event) bool {
 func (j *Journal) GetSubmission(ctx context.Context, id string) (Submission, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return Submission{}, err
+	}
 	var submission Submission
-	err := j.viewLocked(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -426,8 +438,12 @@ func (j *Journal) GetSubmission(ctx context.Context, id string) (Submission, err
 func (j *Journal) HasUnresolvedWork(ctx context.Context) (bool, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return false, err
+	}
 	var unresolved bool
-	err := j.viewLocked(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

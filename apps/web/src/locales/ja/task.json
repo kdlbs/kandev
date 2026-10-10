@@ -2727,5 +2727,8 @@
   "deliveryStopFailed": "停止を確認できませんでした。再試行してください。",
   "deliveryRecoveryOutputPaused": "保存された出力を同期している間、出力の配信は一時停止しています。",
   "deliveryRecoveryCancellationPending": "キャンセルは保留中です。プロンプトの結果はまだ不明です。",
-  "deliveryRecoveryStoragePressure": "保存された出力の同期が必要です。エージェントのプロセスが停止したことは確認されていません。"
+  "deliveryRecoveryStoragePressure": "保存された出力の同期が必要です。エージェントのプロセスが停止したことは確認されていません。",
+  "deliveryMessageBlocked": "セッションの復旧中はメッセージを配信できません。",
+  "deliveryRecoveryIdentityIncomplete": "記録は復元されましたが、元のプロセスを確認できません。続行はブロックされたままです。",
+  "deliveryRecoveryAmbiguousEvidence": "この配信に関連する保存済みプロンプトが複数あります。復旧は引き続きブロックされています。"
 }

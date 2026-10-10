@@ -81,6 +81,9 @@ A late old result cannot clear state belonging to a successor.
 Reuse RecoverAgentPromptStream and RetrySessionDelivery as entry points where practical.
 Both disconnect-triggered and user-triggered paths must use the same reconciler.
 Re-read status and durable evidence through the current authenticated client; do not trust cached transient state.
+Pin the exact client for each bounded network request, then release its lease.
+Do not hold a client read lease across identity capture, callbacks, or asynchronous stream attachment.
+Check that the client still owns the execution before and after each reconciliation attempt.
 A running peer permits reattachment while existing turn admission continues to block a second prompt.
 A complete peer record still requires ordered canonical replay and terminal effect settlement.
 
@@ -223,6 +226,10 @@ Remove the new batch continuation API if it has no remaining supported caller; d
 Existing generic recovery choices for unrelated failures remain governed by their own contracts.
 
 ## Submission-specific block settlement
+
+The [missing delivery record design](durable-agent-record-recovery.md) defines a
+bounded reconstruction path before this settlement flow. Verified reconstruction
+restores delivery associations only. Ambiguous records remain blocked.
 
 SessionRecoveryBlock currently identifies session/incarnation/generation but not the original submission.
 Add a durable binding between an agent_delivery block and submission ID plus stream/turn identity where needed.

@@ -546,6 +546,12 @@ func (h *TaskHandlers) taskSessionDTOWithPendingActions(
 	read pendingActionProjectionReader,
 ) dto.TaskSessionDTO {
 	result := dto.FromTaskSession(session)
+	if reader, ok := any(h.repo).(dto.SessionRecoveryBlockProjectionReader); ok {
+		if err := dto.EnrichSessionRecoveryBlocks(ctx, &result, session, reader); err != nil {
+			h.logger.Warn("get task session recovery blocks failed",
+				zap.String("session_id", session.ID), zap.Error(err))
+		}
+	}
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
 	dto.EnrichParkedProjection(&result, h.parkedProjection)
 	if session != nil && session.TaskEnvironmentID != "" {
@@ -2624,6 +2630,12 @@ func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 			AgentProfileID: item.AgentProfileID,
 		})
 		sessionDTO := dto.FromTaskSession(item.Session)
+		if reader, ok := any(h.repo).(dto.SessionRecoveryBlockProjectionReader); ok {
+			if err := dto.EnrichSessionRecoveryBlocks(c.Request.Context(), &sessionDTO, item.Session, reader); err != nil {
+				h.logger.Warn("get quick chat session recovery blocks failed",
+					zap.String("session_id", item.Session.ID), zap.Error(err))
+			}
+		}
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 		if item.Session != nil && item.Session.TaskEnvironmentID != "" {

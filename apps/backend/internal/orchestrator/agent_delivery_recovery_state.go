@@ -226,7 +226,7 @@ func (s *Service) clearAgentDeliveryRecoveryNotice(
 	if !ok {
 		return nil
 	}
-	cleared, err := recoveryStore.ClearAgentDeliveryRecovery(
+	_, err := recoveryStore.ClearAgentDeliveryRecovery(
 		ctx, sessionID, incarnationID, submissionID, harnessGeneration,
 	)
 	if err != nil {
@@ -234,9 +234,7 @@ func (s *Service) clearAgentDeliveryRecoveryNotice(
 			zap.String("session_id", sessionID), zap.String("submission_id", submissionID), zap.Error(err))
 		return err
 	}
-	if cleared {
-		s.publishAgentDeliveryRecoveryState(ctx, sessionID)
-	}
+	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
 	return nil
 }
 

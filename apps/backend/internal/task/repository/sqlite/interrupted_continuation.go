@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/task/models"
@@ -115,7 +116,7 @@ func (r *Repository) interruptedContinuationOwner(ctx context.Context, tx *sqlx.
 	if err != nil {
 		return nil, raw, false, err
 	}
-	if !exists || current != recovery || (current.Phase != models.AgentDeliveryRecoveryUncertain && current.Phase != models.AgentDeliveryRecoveryReconnecting) {
+	if !exists || !reflect.DeepEqual(current, recovery) || (current.Phase != models.AgentDeliveryRecoveryUncertain && current.Phase != models.AgentDeliveryRecoveryReconnecting) {
 		return nil, raw, false, nil
 	}
 	var generation int64

@@ -48,14 +48,16 @@ func TestRetainedRecoveryRejectsAckAheadOfProjection(t *testing.T) {
 
 func TestOpenExistingJournalDoesNotCreateMissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing")
-	j, err := Open(Config{Path: path, ExistingOnly: true})
-	if j != nil {
-		_ = j.Close()
-	}
-	if err == nil {
-		t.Fatal("created missing retained journal")
-	}
-	if _, err = os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("missing file recreated: %v", err)
+	for _, config := range []Config{{Path: path, ExistingOnly: true}, {Path: path, ReadOnly: true}} {
+		j, err := Open(config)
+		if j != nil {
+			_ = j.Close()
+		}
+		if err == nil {
+			t.Fatalf("opened missing retained journal with config %+v", config)
+		}
+		if _, err = os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("missing file recreated with config %+v: %v", config, err)
+		}
 	}
 }

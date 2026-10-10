@@ -182,6 +182,11 @@ Implemented and verified on October 10.
 - The combined hook exceeded the 600-line lint limit. Response association now
   lives beside the existing operation-fence helpers without changing behavior;
   zero-warning lint and all 41 affected hook/card/model cases passed afterward.
+- Integration with record reconstruction on main `dac20ecf4` preserves its
+  delivery-owner request identity and extracted eligibility helper. Two added
+  hook cases keep current-owner cleanup feedback and reject a delayed cleanup
+  response after delivery ownership changes. All 151 selected frontend cases
+  passed on this combined tree without weakening the operation fence.
 - Final guarded desktop and phone suites each passed all ten scenarios with
   zero retries. Cleanup coverage includes pending disablement, failed cleanup
   retry, a subsequent inspection-contention notice with retained cleanup details,

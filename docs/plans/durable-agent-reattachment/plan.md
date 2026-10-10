@@ -31,6 +31,11 @@ Keep this package and the existing dirty work uncommitted.
 
 ## Scope
 
+The later [missing delivery record package](../durable-agent-record-recovery/plan.md)
+adds verified reconstruction for older journal submissions without canonical
+backend records. Its work orders and results are separate from this completed
+package and depend on PR #4380's interrupted-session recovery flow.
+
 ### In scope
 
 - Repeatable state-only reconciliation with the documented initial recovery window.

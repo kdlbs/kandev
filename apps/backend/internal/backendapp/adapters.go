@@ -319,6 +319,10 @@ var _ interface {
 	RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error
 } = (*lifecycleAdapter)(nil)
 var _ runtimeapi.DurableDeliveryCapabilityReader = (*lifecycleAdapter)(nil)
+var _ interface {
+	InspectDeliveryRecordEvidence(context.Context, runtimeapi.DeliveryRecordEvidenceRequest) (*runtimeapi.DeliveryRecordEvidence, error)
+	ReadDeliveryRecordSubmission(context.Context, runtimeapi.DeliveryRecordSubmissionRequest) (*runtimeapi.DeliveryRecordSubmission, error)
+} = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
 func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *logger.Logger) *lifecycleAdapter {
@@ -1029,6 +1033,20 @@ func (a *lifecycleAdapter) RecoverAgentPromptStreamWithIdentity(
 	identity lifecycle.AgentDeliveryRecoveryIdentity,
 ) lifecycle.DeliveryReconciliationResult {
 	return a.mgr.RecoverAgentPromptStreamWithIdentity(ctx, identity)
+}
+
+func (a *lifecycleAdapter) InspectDeliveryRecordEvidence(
+	ctx context.Context,
+	request runtimeapi.DeliveryRecordEvidenceRequest,
+) (*runtimeapi.DeliveryRecordEvidence, error) {
+	return a.mgr.InspectDeliveryRecordEvidence(ctx, request)
+}
+
+func (a *lifecycleAdapter) ReadDeliveryRecordSubmission(
+	ctx context.Context,
+	request runtimeapi.DeliveryRecordSubmissionRequest,
+) (*runtimeapi.DeliveryRecordSubmission, error) {
+	return a.mgr.ReadDeliveryRecordSubmission(ctx, request)
 }
 
 func (a *lifecycleAdapter) BindResumeAttempt(ctx context.Context, sessionID, attemptID string) error {

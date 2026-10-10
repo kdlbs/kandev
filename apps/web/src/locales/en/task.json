@@ -2727,5 +2727,8 @@
   "deliveryStopFailed": "Stop could not be confirmed. Try again.",
   "deliveryRecoveryOutputPaused": "Output delivery is paused while saved output is synchronized.",
   "deliveryRecoveryCancellationPending": "Cancellation is pending. The prompt outcome is still uncertain.",
-  "deliveryRecoveryStoragePressure": "Saved output needs synchronization. The agent process has not been confirmed stopped."
+  "deliveryRecoveryStoragePressure": "Saved output needs synchronization. The agent process has not been confirmed stopped.",
+  "deliveryMessageBlocked": "Delivery is blocked while session recovery is pending.",
+  "deliveryRecoveryIdentityIncomplete": "The record was restored, but the original process identity is missing. Continuing stays blocked.",
+  "deliveryRecoveryAmbiguousEvidence": "More than one saved prompt could own this delivery. Recovery remains blocked."
 }

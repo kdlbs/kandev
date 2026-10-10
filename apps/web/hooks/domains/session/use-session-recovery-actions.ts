@@ -3,9 +3,13 @@ import { useCallback, useEffect, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
-import type { AppState } from "@/lib/state/store";
-import type { TaskSession } from "@/lib/types/http";
 import { readAgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery";
+import { isProviderRestoredResumeEligible } from "./session-recovery-eligibility";
+import {
+  deliveryRecoveryRequestIdentity,
+  isDeliveryRecoveryResultCurrent,
+  persistedDeliveryRecoveryNotice,
+} from "./session-delivery-recovery-view";
 import {
   asRecoveryError,
   runtimeCleanupFailureCauses,
@@ -85,49 +89,6 @@ type WorkspaceRecoveryStatusRead = {
   projection: import("@/lib/types/http").WorkspaceRecoveryProjection | null;
 };
 
-function hasNativeACPSessionToken(session: TaskSession): boolean {
-  if (
-    typeof session.downstream_acp_session_id === "string" &&
-    session.downstream_acp_session_id.trim()
-  ) {
-    return true;
-  }
-  const acp = session.metadata?.acp;
-  if (!acp || typeof acp !== "object" || Array.isArray(acp)) return false;
-  const nativeSessionId = (acp as Record<string, unknown>).session_id;
-  return typeof nativeSessionId === "string" && nativeSessionId.trim().length > 0;
-}
-
-function isProviderRestoredResumeEligible(
-  state: AppState,
-  taskId: string,
-  sessionId: string,
-): boolean {
-  const session = state.taskSessions.items[sessionId];
-  if (
-    !session ||
-    session.task_id !== taskId ||
-    session.state !== "FAILED" ||
-    session.is_passthrough ||
-    !hasNativeACPSessionToken(session)
-  ) {
-    return false;
-  }
-
-  const task = state.kanban.tasks.find((candidate) => candidate.id === taskId);
-  if (task?.isFromOffice) return false;
-  const quickChatOwnsTaskSession = state.quickChat.sessions.some(
-    (candidate) =>
-      candidate.kind === "chat" && candidate.sessionId === sessionId && candidate.taskId === taskId,
-  );
-  if (!task && !quickChatOwnsTaskSession) return false;
-
-  const profileId = session.execution_profile_id || session.agent_profile_id;
-  if (!profileId) return false;
-  const profile = state.agentProfiles.items.find((candidate) => candidate.id === profileId);
-  return !!profile && !profile.cli_passthrough && profile.agent_name.toLowerCase() === "auggie";
-}
-
 /** Owns shared manual recovery state while a failed session remains visible. */
 // eslint-disable-next-line max-lines-per-function -- the hook owns one coherent recovery state machine.
 export function useSessionRecoveryActions({
@@ -173,12 +134,19 @@ export function useSessionRecoveryActions({
     (state) => state.setWorkspaceRecoveryProjection,
   );
   const pendingKey = `${taskId}\u0000${sessionId}`;
-  const recoveryRevision = useAppStore(
-    (state) => readAgentDeliveryRecovery(state.taskSessions.items[sessionId]?.metadata)?.revision,
+  const selectedSession = useAppStore((state) => state.taskSessions.items[sessionId]);
+  const persistedDeliveryRecovery = readAgentDeliveryRecovery(selectedSession?.metadata);
+  const recoveryRevision = persistedDeliveryRecovery?.revision;
+  const deliveryRecoveryBlock = selectedSession?.session_recovery_blocks?.find(
+    (block) => block.consumer_reference === "agent_delivery",
   );
   const sharedBusyAction = usePendingSessionRecovery(pendingKey);
   const sessionKey = pendingKey;
-  const requestKey = `${taskId}\u0000${sessionId}\u0000${errorStamp ?? ""}`;
+  const deliveryRecoveryKey = deliveryRecoveryRequestIdentity(
+    persistedDeliveryRecovery,
+    deliveryRecoveryBlock,
+  );
+  const requestKey = `${taskId}\u0000${sessionId}\u0000${deliveryRecoveryKey ?? errorStamp ?? ""}`;
   const { beginOperation, isCurrentOperation, isCurrentSession, matchesLatestErrorStamp } =
     useRecoveryOperationFence(requestKey, sessionKey, errorStamp);
   const [busyAction, setBusyAction] = useState<SessionRecoveryBusyAction>(null);
@@ -223,14 +191,19 @@ export function useSessionRecoveryActions({
   }, [requestKey]);
 
   const localResultIsCurrent = localResultRequestKey === requestKey;
-  const deliveryResultIsCurrent =
-    localResultIsCurrent &&
-    (!deliveryRecoveryResult ||
-      recoveryRevision === undefined ||
-      deliveryRecoveryResult.recovery_revision === recoveryRevision);
+  const deliveryResultIsCurrent = isDeliveryRecoveryResultCurrent(
+    localResultIsCurrent,
+    deliveryRecoveryResult,
+    recoveryRevision,
+  );
   const recoveryError = localResultIsCurrent
     ? combineRecoveryErrors(resumeError, restoreError, t)
     : null;
+  const deliveryRecoveryPersistentNotice = persistedDeliveryRecoveryNotice(
+    persistedDeliveryRecovery,
+    deliveryRecoveryBlock,
+    t,
+  );
 
   const reconcileWorkspaceRecoveryStatus = useCallback(
     async (operation: RecoveryOperation): Promise<WorkspaceRecoveryStatusRead> => {
@@ -578,7 +551,9 @@ export function useSessionRecoveryActions({
     checkWorkspaceRecoveryStatus,
     lastFailedAction: currentRecoveryValue(localResultIsCurrent, lastFailedAction),
     recoveryNotice: currentRecoveryValue(localResultIsCurrent, recoveryNotice),
-    deliveryRecoveryNotice: currentRecoveryValue(deliveryResultIsCurrent, deliveryRecoveryNotice),
+    deliveryRecoveryNotice:
+      currentRecoveryValue(deliveryResultIsCurrent, deliveryRecoveryNotice) ??
+      deliveryRecoveryPersistentNotice,
     recoveryNoticeKind: currentRecoveryValue(localResultIsCurrent, recoveryNoticeKind),
     clearInspectionContentionNotice,
     manualRecoveryFailure: currentRecoveryValue(localResultIsCurrent, manualRecoveryFailure),

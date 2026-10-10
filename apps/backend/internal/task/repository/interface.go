@@ -43,6 +43,8 @@ var ErrAgentDeliverySubmissionNotFound = repoerrors.ErrAgentDeliverySubmissionNo
 var ErrAgentDeliveryEventConflict = repoerrors.ErrAgentDeliveryEventConflict
 var ErrAgentDeliveryEffectConflict = repoerrors.ErrAgentDeliveryEffectConflict
 var ErrAgentDeliveryEffectNotFound = repoerrors.ErrAgentDeliveryEffectNotFound
+var ErrAgentDeliveryReconstructionConflict = repoerrors.ErrAgentDeliveryReconstructionConflict
+var ErrAgentDeliveryReconstructionStale = repoerrors.ErrAgentDeliveryReconstructionStale
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {
@@ -683,12 +685,27 @@ type SessionContinuityRepository interface {
 	ResolveSessionRecoveryBlock(ctx context.Context, id, action string, resolvedAt time.Time) (bool, error)
 }
 
+// SessionRecoveryBlockListRepository reads every open cause for one session
+// so delivery recovery can bind its own block without hiding independent ones.
+type SessionRecoveryBlockListRepository interface {
+	ListOpenSessionRecoveryBlocks(ctx context.Context, sessionID, incarnationID string, expectedGeneration int64) ([]*models.SessionRecoveryBlock, error)
+}
+
 // AgentDeliveryRecoveryRepository persists the revisioned session notice for
 // an uncertain durable prompt outcome.
 type AgentDeliveryRecoveryRepository interface {
 	UpsertAgentDeliveryRecovery(ctx context.Context, recovery *models.AgentDeliveryRecovery, block *models.SessionRecoveryBlock) (bool, error)
 	ResolveAgentDeliveryRecovery(ctx context.Context, recovery *models.AgentDeliveryRecovery, action string) (bool, error)
 	ClearAgentDeliveryRecovery(ctx context.Context, sessionID, incarnationID, submissionID string, harnessGeneration int64) (bool, error)
+}
+
+// AgentDeliveryReconstructionRepository restores one verified journal-backed
+// submission, its recovery projection, and the exact admission block atomically.
+type AgentDeliveryReconstructionRepository interface {
+	ReconstructAgentDeliverySubmission(
+		ctx context.Context,
+		request *models.AgentDeliveryReconstructionRequest,
+	) (*models.AgentDeliveryReconstructionResult, error)
 }
 
 // AgentDeliveryRepository owns the backend side of the durable agentctl

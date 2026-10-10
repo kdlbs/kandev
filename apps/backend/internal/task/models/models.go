@@ -1923,6 +1923,11 @@ type WorkspaceSource struct {
 type MessageAuthorType string
 
 const (
+	MessageMetaKeyDeliveryStatus = "delivery_status"
+	MessageDeliveryStatusBlocked = "blocked"
+)
+
+const (
 	// MessageAuthorUser indicates a message from a human user
 	MessageAuthorUser MessageAuthorType = "user"
 	// MessageAuthorAgent indicates a message from an AI agent

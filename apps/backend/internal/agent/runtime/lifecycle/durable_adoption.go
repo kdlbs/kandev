@@ -372,7 +372,7 @@ func peerSubmissionBelongsToRecovery(
 func peerSubmissionSummary(peer *journal.Submission) journal.SubmissionSummary {
 	return journal.SubmissionSummary{
 		ID: peer.ID, SessionID: peer.SessionID, IncarnationID: peer.IncarnationID,
-		HarnessGeneration: peer.HarnessGeneration, Hash: peer.Hash, State: peer.State,
+		HarnessGeneration: peer.HarnessGeneration, StreamID: peer.StreamID, Hash: peer.Hash, State: peer.State,
 		TerminalEventRetained: peer.TerminalEventRetained, TerminalSequence: peer.TerminalSequence,
 		CreatedAt: peer.CreatedAt, UpdatedAt: peer.UpdatedAt,
 	}

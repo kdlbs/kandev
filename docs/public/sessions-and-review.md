@@ -149,6 +149,14 @@ a user message, or create a new turn. Send your next message when the composer
 is ready. If queued messages remain, restoration turns **Auto-run** off and
 keeps those messages. You can turn **Auto-run** on when you want them to run.
 
+If the saved prompt record is missing, **Retry connection** checks the retained
+delivery record. Kandev restores it only when one saved user message matches one
+retained record. The original message stays in the conversation with a blocked
+delivery label. Retry does not send that message again, and the prompt outcome
+stays unknown. If the original agent process cannot be verified, Kandev keeps
+the session blocked and shows the reason. Record repair alone does not allow
+continuation.
+
 Automatic restoration stays blocked when Kandev cannot verify the saved owner,
 native conversation, generation, or journal. A missing native conversation,
 unknown or changed owner, or locked or corrupt journal does not start a

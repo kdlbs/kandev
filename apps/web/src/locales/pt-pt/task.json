@@ -2727,5 +2727,8 @@
   "deliveryStopFailed": "Não foi possível confirmar a paragem. Tente novamente.",
   "deliveryRecoveryOutputPaused": "A entrega da saída está em pausa enquanto a saída guardada é sincronizada.",
   "deliveryRecoveryCancellationPending": "O cancelamento está pendente. O resultado do pedido continua incerto.",
-  "deliveryRecoveryStoragePressure": "A saída guardada precisa de sincronização. A paragem do processo do agente não foi confirmada."
+  "deliveryRecoveryStoragePressure": "A saída guardada precisa de sincronização. A paragem do processo do agente não foi confirmada.",
+  "deliveryMessageBlocked": "A entrega está bloqueada enquanto a sessão é recuperada.",
+  "deliveryRecoveryIdentityIncomplete": "O registo foi recuperado, mas não foi possível verificar o processo original. A continuação continua bloqueada.",
+  "deliveryRecoveryAmbiguousEvidence": "Mais do que uma instrução guardada pode estar associada a esta entrega. A recuperação continua bloqueada."
 }

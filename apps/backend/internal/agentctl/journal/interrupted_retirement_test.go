@@ -33,3 +33,23 @@ func TestInterruptedRetirementPreservesEvidenceAndReleasesAdmission(t *testing.T
 		t.Fatalf("retired descriptor = %+v, %v", descriptor, err)
 	}
 }
+
+func TestSuccessorRetirementPreservesUnfinishedEvidence(t *testing.T) {
+	for _, state := range []SubmissionState{SubmissionPrepared, SubmissionAccepted, SubmissionDispatching} {
+		t.Run(string(state), func(t *testing.T) {
+			ctx := context.Background()
+			j, event := terminalSubmissionFixture(t, state, false)
+			retired, err := j.RetireSubmission(ctx, event.SubmissionID, event.HarnessGeneration+1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !retired.Retired || retired.State != SubmissionInterruptedUnknown || string(retired.Payload) != "prompt" {
+				t.Fatalf("retirement discarded unfinished evidence: %+v", retired)
+			}
+			unresolved, err := j.HasUnresolvedWork(ctx)
+			if err != nil || unresolved {
+				t.Fatalf("retirement retained admission fence: %v, %v", unresolved, err)
+			}
+		})
+	}
+}

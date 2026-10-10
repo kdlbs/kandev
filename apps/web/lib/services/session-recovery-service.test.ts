@@ -426,3 +426,22 @@ it.each([
     ),
   ).toBe(key);
 });
+
+it.each([
+  ["unresolved_durable_work", "task:deliveryRecoveryMissingSubmission"],
+  ["recovery_identity_incomplete", "task:deliveryRecoveryIdentityIncomplete"],
+  ["retained_evidence_ambiguous", "task:deliveryRecoveryAmbiguousEvidence"],
+])("reports retained-record recovery cause %s", (reason, key) => {
+  expect(
+    sessionDeliveryRecoveryMessage(
+      {
+        task_id: "task",
+        session_id: "session",
+        outcome: "blocked",
+        recovery_revision: 1,
+        reason,
+      },
+      (translationKey) => translationKey,
+    ),
+  ).toBe(key);
+});

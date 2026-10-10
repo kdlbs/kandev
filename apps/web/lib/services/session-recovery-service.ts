@@ -130,17 +130,26 @@ export function sessionDeliveryRecoveryMessage(
     case "unavailable":
       return t("task:deliveryRecoveryUnavailable");
     case "blocked":
-      return blockedDeliveryRecoveryMessage(result.reason, t);
+      return sessionDeliveryRecoveryReasonMessage(result.reason, t);
   }
 }
 
-function blockedDeliveryRecoveryMessage(reason: string | undefined, t: Translator): string {
+export function sessionDeliveryRecoveryReasonMessage(
+  reason: string | undefined,
+  t: Translator,
+): string {
   if (reason === "delivery_output_paused") return t("task:deliveryRecoveryOutputPaused");
   if (reason === "delivery_cancellation_pending")
     return t("task:deliveryRecoveryCancellationPending");
   if (reason === "delivery_storage_pressure") return t("task:deliveryRecoveryStoragePressure");
-  if (reason === "missing_canonical_submission") {
+  if (reason === "missing_canonical_submission" || reason === "unresolved_durable_work") {
     return t("task:deliveryRecoveryMissingSubmission");
+  }
+  if (reason === "recovery_identity_incomplete") {
+    return t("task:deliveryRecoveryIdentityIncomplete");
+  }
+  if (reason === "retained_evidence_ambiguous") {
+    return t("task:deliveryRecoveryAmbiguousEvidence");
   }
   if (
     reason === "recovery_identity_mismatch" ||

@@ -9,6 +9,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -31,6 +32,24 @@ type fakeBackend struct {
 	stopErr      error
 	mcpCalls     []mcpCall
 	mcpErr       error
+}
+
+type evidenceBackend struct {
+	*fakeBackend
+	evidenceRequest   lifecycle.DeliveryRecordEvidenceRequest
+	submissionRequest lifecycle.DeliveryRecordSubmissionRequest
+	evidence          *lifecycle.DeliveryRecordEvidence
+	submission        *lifecycle.DeliveryRecordSubmission
+}
+
+func (f *evidenceBackend) InspectDeliveryRecordEvidence(_ context.Context, request lifecycle.DeliveryRecordEvidenceRequest) (*lifecycle.DeliveryRecordEvidence, error) {
+	f.evidenceRequest = request
+	return f.evidence, nil
+}
+
+func (f *evidenceBackend) ReadDeliveryRecordSubmission(_ context.Context, request lifecycle.DeliveryRecordSubmissionRequest) (*lifecycle.DeliveryRecordSubmission, error) {
+	f.submissionRequest = request
+	return f.submission, nil
 }
 
 type promptCall struct {
@@ -371,6 +390,48 @@ func TestRuntime_Resume_PropagatesError(t *testing.T) {
 	rt := agentruntime.New(backend)
 	if err := rt.Resume(context.Background(), "exec-1", "p"); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestRuntime_DeliveryRecordEvidenceAndPayloadUseTypedBackendSeam(t *testing.T) {
+	t.Parallel()
+	candidate := journal.SubmissionSummary{ID: "prompt:one", SessionID: "session", StreamID: "stream"}
+	request := agentruntime.DeliveryRecordEvidenceRequest{
+		TaskID: "task", SessionID: "session", ExecutionID: "execution",
+		IncarnationID: "incarnation", HarnessGeneration: 7,
+	}
+	evidence := &lifecycle.DeliveryRecordEvidence{
+		Descriptor:      journal.RecoveryDescriptor{SessionID: "session", Submissions: []journal.SubmissionSummary{candidate}, SubmissionCount: 1},
+		LiveExecutionID: "execution",
+	}
+	submissionRequest := agentruntime.DeliveryRecordSubmissionRequest{
+		TaskID: "task", SessionID: "session", IncarnationID: "incarnation",
+		HarnessGeneration: 7, Candidate: candidate,
+	}
+	submission := &journal.Submission{ID: candidate.ID, Payload: []byte(`{"text":"original"}`)}
+	backend := &evidenceBackend{
+		fakeBackend: newFakeBackend(), evidence: evidence, submission: submission,
+	}
+	runtime := agentruntime.New(backend)
+
+	gotEvidence, err := runtime.InspectDeliveryRecordEvidence(context.Background(), request)
+	if err != nil || gotEvidence != evidence || backend.evidenceRequest != request {
+		t.Fatalf("inspection = %+v, err %v, request %+v", gotEvidence, err, backend.evidenceRequest)
+	}
+	gotSubmission, err := runtime.ReadDeliveryRecordSubmission(context.Background(), submissionRequest)
+	if err != nil || gotSubmission != submission || backend.submissionRequest != submissionRequest {
+		t.Fatalf("submission = %+v, err %v, request %+v", gotSubmission, err, backend.submissionRequest)
+	}
+}
+
+func TestRuntime_DeliveryRecordEvidenceRequiresBackendCapability(t *testing.T) {
+	t.Parallel()
+	runtime := agentruntime.New(newFakeBackend())
+	if _, err := runtime.InspectDeliveryRecordEvidence(context.Background(), agentruntime.DeliveryRecordEvidenceRequest{}); !errors.Is(err, agentruntime.ErrUnsupported) {
+		t.Fatalf("inspection error = %v, want ErrUnsupported", err)
+	}
+	if _, err := runtime.ReadDeliveryRecordSubmission(context.Background(), agentruntime.DeliveryRecordSubmissionRequest{}); !errors.Is(err, agentruntime.ErrUnsupported) {
+		t.Fatalf("payload error = %v, want ErrUnsupported", err)
 	}
 }
 

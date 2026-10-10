@@ -2727,5 +2727,8 @@
   "deliveryStopFailed": "Śţōƥ ćōũĺď ńōţ ƀē ćōńƒĩŕḿēď. Ţŕŷ àĝàĩń.",
   "deliveryRecoveryOutputPaused": "Ōũţƥũţ ďēĺĩvēŕŷ ĩś ƥàũśēď ŵĥĩĺē śàvēď ōũţƥũţ ĩś śŷńćĥŕōńĩźēď.",
   "deliveryRecoveryCancellationPending": "Ćàńćēĺĺàţĩōń ĩś ƥēńďĩńĝ. Ţĥē ƥŕōḿƥţ ōũţćōḿē ĩś śţĩĺĺ ũńćēŕţàĩń.",
-  "deliveryRecoveryStoragePressure": "Śàvēď ōũţƥũţ ńēēďś śŷńćĥŕōńĩźàţĩōń. Ţĥē àĝēńţ ƥŕōćēśś ĥàś ńōţ ƀēēń ćōńƒĩŕḿēď śţōƥƥēď."
+  "deliveryRecoveryStoragePressure": "Śàvēď ōũţƥũţ ńēēďś śŷńćĥŕōńĩźàţĩōń. Ţĥē àĝēńţ ƥŕōćēśś ĥàś ńōţ ƀēēń ćōńƒĩŕḿēď śţōƥƥēď.",
+  "deliveryMessageBlocked": "Ďēĺĩvēŕŷ ĩś ƀĺōćķēď ŵĥĩĺē śēśśĩōń ŕēćōvēŕŷ ĩś ƥēńďĩńĝ.",
+  "deliveryRecoveryIdentityIncomplete": "Ţĥē ŕēćōŕď ŵàś ŕēśţōŕēď, ƀũţ ţĥē ōŕĩĝĩńàĺ ƥŕōćēśś ĩďēńţĩţŷ ĩś ḿĩśśĩńĝ. Ćōńţĩńũĩńĝ śţàŷś ƀĺōćķēď.",
+  "deliveryRecoveryAmbiguousEvidence": "Ḿōŕē ţĥàń ōńē śàvēď ƥŕōḿƥţ ćōũĺď ōŵń ţĥĩś ďēĺĩvēŕŷ. Ŕēćōvēŕŷ ŕēḿàĩńś ƀĺōćķēď."
 }

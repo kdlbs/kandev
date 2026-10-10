@@ -8,12 +8,13 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/task/models"
-	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository"
 )
 
 // RetrySessionDelivery reconciles one durable submission without dispatching a
 // prompt. A missing or ambiguous durable owner remains visible as blocked.
 const (
+	recoveryStateUnavailableReason      = "recovery_state_unavailable"
 	agentDeliveryConsumer               = "agent_delivery"
 	missingCanonicalSubmissionReason    = "missing_canonical_submission"
 	unknownPromptOutcome                = "unknown_prompt_outcome"
@@ -49,28 +50,51 @@ func (s *Service) RetrySessionDelivery(
 	blocks, hasBlocks := s.repo.(sessionRecoveryBlockStore)
 	if !hasBlocks {
 		return sessionDeliveryRecoveryResponse(taskID, sessionID, SessionDeliveryRecoveryBlocked,
-			"recovery_state_unavailable", 0, nil), nil
+			recoveryStateUnavailableReason, 0, nil), nil
 	}
 	block, err := blocks.GetOpenSessionRecoveryBlock(ctx, sessionID, incarnationID, currentGeneration)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 	recovery, hasRecovery := models.LoadAgentDeliveryRecovery(session.Metadata)
-	if !hasRecovery {
-		if block != nil {
-			reason := "independent_recovery_block"
-			if block.ConsumerReference == agentDeliveryConsumer {
-				reason = missingCanonicalSubmissionReason
-			}
-			return sessionDeliveryRecoveryResponse(taskID, sessionID, SessionDeliveryRecoveryBlocked,
-				reason, 0, nil), nil
-		}
-		return s.retryLegacySessionDelivery(ctx, taskID, sessionID)
+	if !hasRecovery || incompleteReconstructedRecovery(recovery) {
+		return s.retryIncompleteSessionDelivery(ctx, session, block, incarnationID, currentGeneration, hasRecovery)
 	}
 	if response, handled, terminalErr := s.retryRecoverySuccessor(ctx, session, recovery, currentGeneration, block); handled || terminalErr != nil {
 		return response, terminalErr
 	}
 	return s.retryKnownSessionDelivery(ctx, session, block, recovery, currentGeneration)
+}
+
+func (s *Service) retryIncompleteSessionDelivery(ctx context.Context, session *models.TaskSession, block *models.SessionRecoveryBlock, incarnationID string, currentGeneration int64, hasRecovery bool) (*SessionDeliveryRecoveryResponse, error) {
+	taskID, sessionID := session.TaskID, session.ID
+	reconstructionBlock, reason, err := s.deliveryReconstructionBlock(ctx, sessionID, incarnationID, currentGeneration, block)
+	if err != nil {
+		return nil, err
+	}
+	if reconstructionBlock != nil {
+		return s.retryMissingCanonicalDeliverySubmission(ctx, session, incarnationID, currentGeneration, reconstructionBlock)
+	}
+	if reason != "" {
+		return sessionDeliveryRecoveryResponse(taskID, sessionID, SessionDeliveryRecoveryBlocked, reason, 0, nil), nil
+	}
+	if hasRecovery {
+		return sessionDeliveryRecoveryResponse(taskID, sessionID, SessionDeliveryRecoveryBlocked, "delivery_recovery_block_missing", 0, nil), nil
+	}
+	return s.retryLegacySessionDelivery(ctx, taskID, sessionID)
+}
+
+func (s *Service) deliveryReconstructionBlock(ctx context.Context, sessionID, incarnationID string, generation int64, fallback *models.SessionRecoveryBlock) (*models.SessionRecoveryBlock, string, error) {
+	if list, supported := s.repo.(repository.SessionRecoveryBlockListRepository); supported {
+		blocks, err := list.ListOpenSessionRecoveryBlocks(ctx, sessionID, incarnationID, generation)
+		if err != nil {
+			return nil, "", err
+		}
+		selected, reason := selectDeliveryReconstructionBlock(blocks)
+		return selected, reason, nil
+	}
+	selected, reason := selectDeliveryReconstructionBlock([]*models.SessionRecoveryBlock{fallback})
+	return selected, reason, nil
 }
 
 func (s *Service) retryRecoverySuccessor(
@@ -94,7 +118,7 @@ func (s *Service) retryRecoverySuccessor(
 	}
 	if !available {
 		return sessionDeliveryRecoveryResponse(session.TaskID, session.ID, SessionDeliveryRecoveryBlocked,
-			"recovery_state_unavailable", recovery.Revision, identity), true, nil
+			recoveryStateUnavailableReason, recovery.Revision, identity), true, nil
 	}
 	creationReason, outcome := recoverySuccessorOutcome(recovery.Phase)
 	if !sameRecoverySuccessorGeneration(generation, recovery, creationReason) {
@@ -158,9 +182,9 @@ func (s *Service) verifyRecoverySuccessorSubmission(
 	session *models.TaskSession,
 	recovery models.AgentDeliveryRecovery,
 ) (string, error) {
-	submissions, ok := s.repo.(taskrepo.AgentDeliveryRepository)
+	submissions, ok := s.repo.(repository.AgentDeliveryRepository)
 	if !ok {
-		return "recovery_state_unavailable", nil
+		return recoveryStateUnavailableReason, nil
 	}
 	submission, err := submissions.GetAgentDeliverySubmission(ctx, recovery.SubmissionID)
 	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrTaskSessionNotFound) {
@@ -180,10 +204,10 @@ func (s *Service) retryKnownSessionDelivery(ctx context.Context, session *models
 		return sessionDeliveryRecoveryResponse(session.TaskID, session.ID, SessionDeliveryRecoveryBlocked,
 			"recovery_identity_mismatch", recovery.Revision, nil), nil
 	}
-	submissions, ok := s.repo.(taskrepo.AgentDeliveryRepository)
+	submissions, ok := s.repo.(repository.AgentDeliveryRepository)
 	if !ok {
 		return sessionDeliveryRecoveryResponse(session.TaskID, session.ID, SessionDeliveryRecoveryBlocked,
-			"recovery_state_unavailable", recovery.Revision, nil), nil
+			recoveryStateUnavailableReason, recovery.Revision, nil), nil
 	}
 	submission, err := submissions.GetAgentDeliverySubmission(ctx, recovery.SubmissionID)
 	if err != nil {
@@ -271,7 +295,7 @@ func (s *Service) runLegacySessionDeliveryRecovery(
 	if err := recoverer.RecoverAgentPromptStream(ctx, sessionID); err != nil {
 		if errors.Is(err, agentruntime.ErrDeliveryRecoveryBlocked) || errors.Is(err, agentruntime.ErrDeliveryOwnerMismatch) {
 			return sessionDeliveryRecoveryAttempt{
-				outcome: SessionDeliveryRecoveryBlocked, reason: "delivery_identity_mismatch",
+				outcome: SessionDeliveryRecoveryBlocked, reason: deliveryIdentityMismatchReason,
 			}
 		}
 		if errors.Is(err, agentruntime.ErrUncertainPromptDelivery) {
@@ -311,7 +335,7 @@ func (s *Service) runSessionDeliveryRecovery(
 	if err := recoverer.RecoverAgentPromptStream(ctx, identity.SessionID); err != nil {
 		if errors.Is(err, agentruntime.ErrDeliveryRecoveryBlocked) || errors.Is(err, agentruntime.ErrDeliveryOwnerMismatch) {
 			return sessionDeliveryRecoveryAttempt{
-				outcome: SessionDeliveryRecoveryBlocked, reason: "delivery_identity_mismatch",
+				outcome: SessionDeliveryRecoveryBlocked, reason: deliveryIdentityMismatchReason,
 			}
 		}
 		if errors.Is(err, agentruntime.ErrUncertainPromptDelivery) {
@@ -348,9 +372,9 @@ func publicDeliveryRecoveryReason(reason string) string {
 		return ""
 	}
 	switch reason {
-	case unknownPromptOutcome, "delivery_output_paused", "delivery_cancellation_pending", "delivery_storage_pressure", "invalid_continuation_request", "stale_recovery", "continuation_checkpoint_failed", "idempotency_conflict", "continuation_outcome_unknown", "recovery_state_unavailable", missingCanonicalSubmissionReason, "recovery_identity_incomplete", "recovery_identity_mismatch",
+	case unknownPromptOutcome, "delivery_output_paused", "delivery_cancellation_pending", "delivery_storage_pressure", "invalid_continuation_request", "stale_recovery", "continuation_checkpoint_failed", "idempotency_conflict", "continuation_outcome_unknown", recoveryStateUnavailableReason, missingCanonicalSubmissionReason, "recovery_identity_incomplete", "recovery_identity_mismatch", retainedEvidenceAmbiguousReason,
 		"execution_identity_changed", "instance_not_found", "instance_identity_mismatch",
-		"delivery_evidence_unavailable", "submission_evidence_unavailable", "delivery_identity_mismatch",
+		"delivery_evidence_unavailable", "submission_evidence_unavailable", deliveryIdentityMismatchReason,
 		"terminal_evidence_incomplete", "delivery_projection_unavailable", "retained_replay_failed",
 		"terminal_projection_incomplete", "terminal_settlement_unavailable", "terminal_settlement_failed",
 		"terminal_settlement_pending", "delivery_recovery_block_missing", "independent_recovery_block":

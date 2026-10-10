@@ -238,7 +238,9 @@ test.describe("worktree branch resume recovery", () => {
       });
       await fixture.session.recoveryResumeButton().click();
 
-      const relocate = testPage.getByTestId("managed-clone-relocate-button");
+      const recoveryCard = fixture.session.activeChat().getByTestId("session-recovery-card");
+      await expect(recoveryCard).toContainText("local changes", { timeout: 30_000 });
+      const relocate = recoveryCard.getByTestId("managed-clone-relocate-button");
       await expect(relocate).toBeVisible({ timeout: 30_000 });
       await expect
         .poll(() => {

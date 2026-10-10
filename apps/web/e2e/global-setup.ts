@@ -36,6 +36,10 @@ export function runGlobalSetup(options: GlobalSetupOptions = {}): void {
           BACKEND_DIR,
           "internal/agent/runtime/lifecycle/e2e_retained_capacity_fixture_test.go",
         ),
+        path.join(
+          BACKEND_DIR,
+          "internal/agent/runtime/lifecycle/e2e_delivery_record_fixture_test.go",
+        ),
       ],
     },
     {
