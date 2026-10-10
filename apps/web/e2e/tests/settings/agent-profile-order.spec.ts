@@ -116,9 +116,12 @@ test.describe("Agent profile ordering", () => {
       const row = profileRow(testPage, original, source.id);
       const handle = row.getByTestId("agent-profile-drag-handle");
       await expect(handle).toBeVisible();
-      const box = await handle.boundingBox();
-      expect(box?.height).toBeCloseTo(28, 0);
-      expect(box?.width).toBeCloseTo(28, 0);
+      await expect
+        .poll(async () => {
+          const box = await handle.boundingBox();
+          return box && [box.height, box.width];
+        })
+        .toEqual([expect.closeTo(28, 0), expect.closeTo(28, 0)]);
       await expect(handle).toHaveCSS("cursor", "pointer");
       await testInfo.attach("profile-order-desktop", {
         body: await testPage.screenshot({ fullPage: true }),

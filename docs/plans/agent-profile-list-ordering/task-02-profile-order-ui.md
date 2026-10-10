@@ -266,6 +266,13 @@ selector E2E checks remain required before this work order can be completed.
 Original-head desktop/mobile captures are historical evidence, not proof for
 corrective source. No copy, layout, touch or locale changes are introduced.
 
+The recovered desktop capture came from retry 1. Its first attempt received a
+null bounding box after visibility succeeded, before either 28 px dimension
+could be checked. The fixture now polls actual rendered height and width with
+the same 28 px values and precision. It retains the existing test timeout,
+retry policy, keyboard reorder, Escape cancellation, persistence, and cursor
+assertions. Fresh hosted geometry and interaction evidence remains required.
+
 Additional corrective files:
 
 - `apps/web/hooks/domains/settings/use-agent-creation-store-sync.test.tsx`
@@ -276,3 +283,4 @@ Additional corrective files:
 - `apps/web/components/settings/custom-tui-mcp-card.test.tsx`
 - `apps/web/components/settings/agents/agent-profiles-section-delete-inventory.test.tsx`
 - `apps/web/e2e/tests/settings/agent-profile-order-selectors.spec.ts`
+- `apps/web/e2e/tests/settings/agent-profile-order.spec.ts`
