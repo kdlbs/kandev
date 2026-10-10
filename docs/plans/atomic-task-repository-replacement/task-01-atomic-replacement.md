@@ -296,3 +296,17 @@ KANDEV_TEST_POSTGRES_DSN="$(cat /tmp/kandev-root23-pg-fixup-dsn)" GOMAXPROCS=2 G
 ```
 
 The private DSN file exists only while the proven-owned fixture is live and was removed on cleanup.
+
+CI cancellation remediation retained the AC `.5` contract: when an independent SQLite writer holds
+the task lock, a replacement canceled while waiting must return the context error and must not run
+its callback. The real-wait regression exposed `BeginTxx` returning SQLite `BUSY` after the context
+had already been canceled. `ReplaceTaskRepositories` now prefers `ctx.Err()` only on that failed
+begin path; uncanceled database errors are preserved. The SQLite fixture uses a separate
+zero-timeout observer to prove the holder owns the writer and verifies the replacement is inside
+SQLite's begin wait before cancellation. The focused SQLite race selection passed:
+`GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -v -trimpath -tags fts5 -race -p 1 ./internal/task/repository/sqlite -run '^(TestTaskRepositoryReplacementSQLiteSerialization|TestTaskRepositoryReplacementCancellation)$' -count=1 -timeout=5m`
+(exit 0, package 6.409s; `TestTaskRepositoryReplacementCancellation` 0.17s and
+`TestTaskRepositoryReplacementSQLiteSerialization` 5.18s). The actual PostgreSQL run passed rollback
+and serialization, including `committed_predecessor` and `cancel_waiter`, in 3.166s; the exact log is
+`/tmp/kandev-task05-replacement-postgres-actual.log`. This is focused local evidence, not a hosted
+current-head green result; this work order remains in progress.

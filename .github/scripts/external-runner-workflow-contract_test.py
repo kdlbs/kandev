@@ -25,7 +25,7 @@ class ExternalRunnerWorkflowContractTest(unittest.TestCase):
         self, workflow_name: str, workflow_key: str, families: tuple[str, ...]
     ) -> str:
         workflow = (WORKFLOW_ROOT / workflow_name).read_text(encoding="utf-8")
-        planner = job_block(workflow, "runner_plan", "changes")
+        planner = workflow.split("  changes:\n", 1)[1].split("      - name: Detect relevant changes", 1)[0]
         self.assertIn("runs-on: ubuntu-latest", planner)
         self.assertIn("plan: ${{ steps.plan.outputs.plan }}", planner)
         self.assertIn("uses: ./.github/actions/plan-external-runners", planner)
@@ -44,10 +44,10 @@ class ExternalRunnerWorkflowContractTest(unittest.TestCase):
         workflow = self.assert_planner(
             "e2e-tests.yml",
             "e2e",
-            ("changes", "e2e", "e2e_gate"),
+            ("e2e",),
         )
         self.assertIn(
-            "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).changes_runner }}",
+            "runs-on: ubuntu-latest",
             job_block(workflow, "changes", "build"),
         )
         build = job_block(workflow, "build", "e2e")
@@ -55,17 +55,14 @@ class ExternalRunnerWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("runner_plan", build)
         e2e = job_block(workflow, "e2e", "playwright_image")
         self.assertIn(
-            "matrix: ${{ fromJSON(needs.runner_plan.outputs.plan).e2e_matrix }}",
+            "matrix: ${{ fromJSON(needs.changes.outputs.plan).e2e_matrix }}",
             e2e,
         )
         self.assertIn("runs-on: ${{ matrix.runner }}", e2e)
         report = job_block(workflow, "e2e-report", "e2e-gate")
         self.assertIn("runs-on: ubuntu-latest", report)
         self.assertNotIn("runner_plan", report)
-        self.assertIn(
-            "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).e2e_gate_runner }}",
-            job_block(workflow, "e2e-gate", None),
-        )
+        self.assertNotIn("  e2e-gate:\n", workflow)
         for job, next_job in (
             ("playwright_image", "e2e-containers"),
             ("e2e-containers", "e2e-kubernetes-compatibility"),
@@ -99,7 +96,7 @@ class ExternalRunnerWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("matrix.runner", shards)
         test_gate = job_block(workflow, "test", "postgres-boot")
         self.assertIn(
-            "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).test_runner }}",
+            'runs-on: ${{ fromJSON(needs.changes.outputs.plan || \'{"test_runner":"ubuntu-latest"}\').test_runner }}' ,
             test_gate,
         )
         for job, next_job in (("postgres-boot", "test-windows"), ("test-windows", None)):
@@ -111,21 +108,21 @@ class ExternalRunnerWorkflowContractTest(unittest.TestCase):
         workflow = self.assert_planner(
             "frontend-tests.yml",
             "frontend",
-            ("changes", "frontend", "frontend_gate"),
+            ("frontend", "frontend_gate"),
         )
         self.assertIn(
-            "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).changes_runner }}",
+            "runs-on: ubuntu-latest",
             job_block(workflow, "changes", "frontend"),
         )
         self.assertIn(
-            "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_runner }}",
+            "runs-on: ${{ fromJSON(needs.changes.outputs.plan).frontend_runner }}",
             job_block(workflow, "frontend", "frontend-gate"),
         )
         frontend = job_block(workflow, "frontend", "frontend-gate")
         self.assertNotIn("matrix:", frontend)
         self.assertNotIn("frontend_tests", workflow)
         self.assertIn(
-            "runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_gate_runner }}",
+            'runs-on: ${{ fromJSON(needs.changes.outputs.plan || \'{"frontend_gate_runner":"ubuntu-latest"}\').frontend_gate_runner }}' ,
             job_block(workflow, "frontend-gate", None),
         )
 

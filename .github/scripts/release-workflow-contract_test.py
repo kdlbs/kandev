@@ -2,6 +2,7 @@
 """Contract tests for the maintainer release workflow."""
 
 import fnmatch
+import json
 import os
 import re
 import stat
@@ -97,6 +98,83 @@ def step_run_script(block: str) -> str:
 
 
 class ReleaseWorkflowContractTest(unittest.TestCase):
+    def test_browser_demo_is_optional_only_for_legacy_tags_and_absent_on_nightly(self):
+        job = job_block("build-web")
+        self.assertIn("browser_demo: ${{ steps.demo_support.outputs.available }}", job)
+        detect = job_step_block("build-web", "Detect browser demo support")
+        self.assertIn("inputs.channel == 'stable'", detect)
+        script = step_run_script(detect)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / "output"
+            env = {**os.environ, "GITHUB_OUTPUT": str(output), "BACKFILL_TAG": "v1.2.3"}
+            for available in (False, True):
+                if available:
+                    path = root / "scripts/browser-demo/build-web-demo.sh"
+                    path.parent.mkdir(parents=True)
+                    path.write_text("#!/bin/sh\n")
+                result = subprocess.run(["bash", "-c", script], cwd=root, env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(output.read_text().splitlines()[-1], f"available={str(available).lower()}")
+        for name in ("Build browser demo", "Package browser demo"):
+            self.assertIn("steps.demo_support.outputs.available == 'true'", job_step_block("build-web", name))
+        publish = job_block("publish-release")
+        download = re.search(r"(?ms)^      - name: Download browser demo.*?(?=^      - )", publish).group()
+        self.assertIn("needs.build-web.outputs.browser_demo == 'true'", download)
+        self.assertIn("needs.build-web.outputs.browser_demo == 'true'", job_step_block("publish-release", "Verify browser demo asset"))
+        self.assertIn("needs.build-web.outputs.browser_demo == 'true'", job_condition("notify-browser-demo"))
+
+    def test_fresh_stable_release_requires_browser_demo_support(self):
+        script = step_run_script(job_step_block("build-web", "Detect browser demo support"))
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "output"
+            env = {**os.environ, "GITHUB_OUTPUT": str(output), "BACKFILL_TAG": ""}
+            result = subprocess.run(["bash", "-c", script], cwd=temp, env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Browser demo build script is required", result.stderr)
+            self.assertFalse(output.exists())
+        for job in ("publish-npm", "update-homebrew-tap", "update-scoop-bucket"):
+            self.assertNotIn("browser_demo", job_condition(job))
+
+    def test_browser_demo_dispatch_follows_successful_stable_publication(self):
+        condition = job_condition("notify-browser-demo")
+        for guard in ("!cancelled()", "inputs.channel == 'stable'", "!inputs.dry_run",
+                      "!inputs.desktop_validation_only", "needs.publish-release.result == 'success'"):
+            self.assertIn(guard, condition)
+        job = job_block("notify-browser-demo")
+        self.assertIn("needs: [prepare, build-web, publish-release]", job)
+        self.assertIn("environment: release", job)
+        step = job_step_block("notify-browser-demo", "Dispatch landing browser demo")
+        self.assertIn("secrets.LANDING_REPOSITORY_DISPATCH_TOKEN", step)
+        self.assertIn("needs.prepare.outputs.tag", step)
+        script = step_run_script(step)
+        self.assertIn("repos/kdlbs/landing/dispatches", script)
+        self.assertIn("kandev_release", script)
+        self.assertIn("client_payload", script)
+        self.assertIn('"$KANDEV_DEMO_TAG"', script)
+
+    def test_browser_demo_dispatch_payload_and_missing_credentials(self):
+        script = step_run_script(job_step_block("notify-browser-demo", "Dispatch landing browser demo"))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            payload = root / "payload.json"
+            gh = root / "gh"
+            gh.write_text('#!/bin/sh\ncat > "$DISPATCH_PAYLOAD"\n')
+            gh.chmod(0o755)
+            env = {**os.environ, "PATH": f"{root}:{os.environ['PATH']}",
+                   "GH_TOKEN": "test-token", "KANDEV_DEMO_TAG": "v1.2.3",
+                   "DISPATCH_PAYLOAD": str(payload)}
+            result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(payload.read_text()), {
+                "event_type": "kandev_release", "client_payload": {"tag": "v1.2.3"},
+            })
+            payload.unlink()
+            env["GH_TOKEN"] = ""
+            result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("LANDING_REPOSITORY_DISPATCH_TOKEN", result.stderr)
+            self.assertFalse(payload.exists())
     def test_contributor_notifications_require_every_stable_publication_channel(self) -> None:
         self.assertRegex(
             WORKFLOW,
@@ -628,6 +706,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
     def test_required_artifact_uploads_retry_and_desktop_matrix_isolated(self) -> None:
         self.assert_required_artifact_upload_retries("build-web", "upload_web_bundle")
+        self.assert_required_artifact_upload_retries("build-web", "upload_browser_demo")
         self.assert_required_artifact_upload_retries(
             "build-bundles", "upload_runtime_bundle"
         )

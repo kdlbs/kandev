@@ -317,11 +317,13 @@ function useChatInputRecoveryActions(
   taskId: string | null,
   sessionId: string | null,
   errorStamp?: string,
+  onDeliveryReconciled?: () => void,
 ) {
   return useSessionRecoveryActions({
     taskId: taskId ?? "",
     sessionId: sessionId ?? "",
     errorStamp,
+    onDeliveryReconciled,
   });
 }
 
@@ -368,6 +370,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       taskId,
       sessionId,
       composerRecovery?.model?.stamp,
+      composerRecovery?.onDeliveryReconciled,
     );
 
     const promptEnhancement = useChatPromptEnhancement({

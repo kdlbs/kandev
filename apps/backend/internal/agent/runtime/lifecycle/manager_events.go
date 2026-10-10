@@ -603,6 +603,7 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 	}
 	if event.DeliverySubmissionID != "" {
 		execution.clearDeliverySubmissionID(event.DeliverySubmissionID)
+		clearInitialDeliverySubmissionID(execution, event.DeliverySubmissionID)
 	}
 	var failureEvidence *PromptAttemptEvidence
 	if isError {
@@ -951,8 +952,8 @@ func (m *Manager) handleStreamDisconnectWithAttempt(
 	} else {
 		m.logger.Warn("agent updates stream disconnected", disconnectFields...)
 	}
-	if promptGeneration == 0 && execution.deliverySubmissionIDSnapshot() != "" {
-		m.recordUncertainPromptFailure(execution, promptGeneration, execution.deliverySubmissionIDSnapshot())
+	if promptGeneration == 0 && currentDeliverySubmissionID(execution) != "" {
+		m.recordUncertainPromptFailure(execution, promptGeneration, currentDeliverySubmissionID(execution))
 		m.publishStreamDisconnectErrorWithAttempt(execution, errors.Join(ErrUncertainPromptDelivery, err), attemptID)
 		return
 	}
@@ -969,7 +970,7 @@ func (m *Manager) handleStreamDisconnectWithAttempt(
 
 		var claimed bool
 		var cancelEscalation bool
-		uncertainSubmissionID := execution.deliverySubmissionIDSnapshot()
+		uncertainSubmissionID := currentDeliverySubmissionID(execution)
 		uncertain := uncertainSubmissionID != "" || errors.Is(err, ErrUncertainPromptDelivery)
 		statusErr := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
 			if current != execution || current.promptGeneration != promptGeneration {
@@ -1077,7 +1078,7 @@ func (m *Manager) handleStreamDisconnectWithStartupGeneration(
 				zap.Uint64("startup_generation", startupGeneration))
 			return
 		}
-		uncertainSubmissionID := execution.deliverySubmissionIDSnapshot()
+		uncertainSubmissionID := currentDeliverySubmissionID(execution)
 		uncertain := uncertainSubmissionID != "" || errors.Is(err, ErrUncertainPromptDelivery)
 		if uncertain {
 			m.recordUncertainPromptFailure(execution, promptGeneration, uncertainSubmissionID)
@@ -1203,7 +1204,7 @@ func (m *Manager) recordDeliveryReconciliationPhaseWithRuntimeDisposition(
 	}
 	execution.startupCallbackMu.RLock()
 	execution.promptLifecycleMu.Lock()
-	submissionID := execution.deliverySubmissionIDSnapshot()
+	submissionID := currentDeliverySubmissionID(execution)
 	matched := false
 	err := m.executionStore.WithLock(identity.ExecutionID, func(current *AgentExecution) {
 		matched = applyDeliveryReconciliationPhase(current, execution, identity, submissionID, phase, code)
@@ -1302,7 +1303,7 @@ func (m *Manager) publishStreamDisconnectErrorWithAttempt(
 	attemptID string,
 ) {
 	message := "agent stream disconnected: " + err.Error()
-	if submissionID := execution.deliverySubmissionIDSnapshot(); submissionID != "" || errors.Is(err, ErrUncertainPromptDelivery) {
+	if submissionID := currentDeliverySubmissionID(execution); submissionID != "" || errors.Is(err, ErrUncertainPromptDelivery) {
 		message = fmt.Sprintf(
 			"%s: agent stream disconnected; reconcile submission %q before retrying",
 			ErrUncertainPromptDelivery,

@@ -7,6 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "prebuild": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
     "build": "vite build",
+    "build:browser-demo": "VITE_KANDEV_BROWSER_DEMO=true VITE_KANDEV_BASE_PATH=/browser-demo/app/ vite build --outDir dist-browser-demo",
     "build:vite": "vite build",
     "build:e2e": "cross-env KANDEV_I18N_BUNDLE_PSEUDO=1 KANDEV_VERSION=e2e pnpm run build",
     "build:e2e-plugin": "node scripts/build-e2e-plugin.mjs",

@@ -252,7 +252,7 @@ assert the unchanged toolbar test IDs:
 
 ## Work orders
 
-- [x] [Task 01: Profile order backend](task-01-profile-order-backend.md)
+- [ ] [Task 01: Profile order backend](task-01-profile-order-backend.md) (in progress: PostgreSQL fixture correction)
 - [ ] [Task 02: Profile reorder UI without sorting](task-02-profile-order-ui.md) (in progress)
 
 ## Verification results
@@ -326,3 +326,24 @@ desktop/mobile checks remain assigned to hosted CI. Host hooks and contributor
 tooling are not executed during this review. The historical broad-suite
 failures above remain visible; they are not attributed to unrelated tests
 without exact source and log evidence.
+
+## PostgreSQL validation recovery
+
+PR #4373 merged externally before exact-head CI was terminal. The final
+PostgreSQL job failed when expanded pools opened connections outside the owned
+schema and membership subcases reused unique agent names. Task 01 is reopened
+for the fixture correction and physical-connection regression in #4399. The
+existing profile-order requirements and design remain authoritative; no
+production behavior changes are part of that correction. Historical reports
+above remain historical, and hosted corrective-head results are required.
+
+
+## Corrective follow-up PR #4399
+
+The original PR merged while this session's hosted gates were pending. Its final
+head failed PostgreSQL race fixtures, frontend catalogue tests and selector E2E.
+Task 01 repairs per-connection schema selection and per-subcase isolation. Task
+02 repairs accepted new-owner publication after independent updates, guards
+observed owner removal during save, reconciles Settings-only test expectations
+and drives Quick Chat dismissal through its actual Escape interaction. Both
+work orders remain in progress until the corrective head passes hosted checks.

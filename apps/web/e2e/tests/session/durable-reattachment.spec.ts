@@ -28,6 +28,8 @@ test.describe("durable delivery reattachment", () => {
     await expect(banner).toContainText(
       "Delivery was interrupted. The prompt outcome is uncertain.",
     );
+    await expect(testPage.getByTestId("interrupted-sessions-notice")).toHaveCount(0);
+    await expect(testPage.getByTestId("interrupted-session-continuation")).toHaveCount(0);
     expect(recovery.phase).toBe("uncertain");
 
     const promptFramesBeforeRetry = traffic.frames.filter(
@@ -36,7 +38,11 @@ test.describe("durable delivery reattachment", () => {
         /prompt|message\.added|chat\.submit/i.test(frame.action ?? ""),
     ).length;
     await banner.getByTestId("recovery-retry-connection-button").click();
-    await expect(banner.getByTestId("session-recovery-error")).toBeVisible({ timeout: 30_000 });
+    await expect(banner.getByTestId("delivery-recovery-result")).toHaveText(
+      "Recovery is blocked. Resolve the recovery issue before retrying.",
+      { timeout: 30_000 },
+    );
+    await expect(banner.getByTestId("interrupted-session-continuation")).toHaveCount(0);
     await expect
       .poll(() =>
         traffic.frames.some(

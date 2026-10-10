@@ -326,10 +326,13 @@ describe("normal creation catalogue publication", () => {
     const state = context.getStore().getState();
     const target = state.settingsAgents.items.find((agent) => agent.id === TARGET_OWNER)!;
     expect(target.profiles.map((profile) => profile.id)).toEqual([
-      `${TARGET_OWNER}-existing`,
       ACCEPTED_ID,
+      `${TARGET_OWNER}-existing`,
     ]);
-    expect(target.profiles[1]).toMatchObject({ name: DRAFT_NAME, model: MODEL });
+    expect(target.profiles.find((profile) => profile.id === ACCEPTED_ID)).toMatchObject({
+      name: DRAFT_NAME,
+      model: MODEL,
+    });
     expect(state.agentProfiles.items.filter((profile) => profile.id === ACCEPTED_ID)).toHaveLength(
       1,
     );
@@ -392,7 +395,7 @@ describe("creation partial results and new owners", () => {
         .getState()
         .settingsAgents.items.find((agent) => agent.id === TARGET_OWNER)!
         .profiles.map((p) => p.id),
-    ).toEqual([`${TARGET_OWNER}-existing`, ACCEPTED_ID]);
+    ).toEqual([ACCEPTED_ID, `${TARGET_OWNER}-existing`]);
   });
 
   // @covers AC-AGENTS-CREATION-CATALOGUE-001.5

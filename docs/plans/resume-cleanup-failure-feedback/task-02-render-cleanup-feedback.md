@@ -85,7 +85,7 @@ Install workspace dependencies if absent before package commands. Add failing
 typed-cause/model regressions first. From repository root:
 
 ```bash
-(cd apps/web && pnpm exec vitest run lib/session-last-agent-error.test.ts components/task/chat/session-bootstrap-recovery-model.test.ts components/task/chat/session-recovery-model.test.ts components/task/chat/session-recovery-card-details.test.tsx)
+(cd apps/web && pnpm exec vitest run lib/session-last-agent-error.test.ts components/task/chat/session-bootstrap-recovery-model.test.ts components/task/chat/session-recovery-model.test.ts components/task/chat/session-recovery-card-details.test.tsx components/task/chat/session-recovery-card-inspection-retry.test.tsx)
 (cd apps/web && pnpm exec vitest run lib/active-session-recovery.test.ts lib/services/session-recovery-service.test.ts hooks/domains/session/use-session-recovery-actions-cleanup.test.ts hooks/domains/session/use-session-resumption.test.ts components/task/chat/messages/action-message-cleanup-history.test.ts components/task/workspace-unavailable.test.tsx)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run i18n:check)
@@ -111,6 +111,7 @@ Update this command list if implementation adds a distinct test boundary.
 - `apps/web/lib/services/session-recovery-service.ts` and its tests
 - `apps/web/lib/session-last-agent-error.ts` and its tests
 - `apps/web/hooks/domains/session/use-session-recovery-actions.ts` and existing related tests
+- `apps/web/hooks/domains/session/session-recovery-operation-fence.ts`
 - `apps/web/hooks/domains/session/use-session-resumption-operations.ts` and existing resumption tests
 - `apps/web/hooks/domains/session/use-session-recovery-actions-cleanup.test.ts` (new)
 - `apps/web/components/task/chat/session-bootstrap-recovery-model.ts` and its tests
@@ -174,6 +175,13 @@ Implemented and verified on October 10.
   new cleanup parser export. The three failures reproduced locally; changing
   that mock to preserve real service exports passed all four inspection-retry
   cases and eight presentation-model cases together.
+- Integration with main's silent restart recovery preserves its no-prompt
+  contract and canonical operation-fence types. Cleanup causes follow the moved
+  manual-failure type; the combined service, hook, model and card selection
+  passed all 170 cases after conflict resolution.
+- The combined hook exceeded the 600-line lint limit. Response association now
+  lives beside the existing operation-fence helpers without changing behavior;
+  zero-warning lint and all 41 affected hook/card/model cases passed afterward.
 - Final guarded desktop and phone suites each passed all ten scenarios with
   zero retries. Cleanup coverage includes pending disablement, failed cleanup
   retry, a subsequent inspection-contention notice with retained cleanup details,

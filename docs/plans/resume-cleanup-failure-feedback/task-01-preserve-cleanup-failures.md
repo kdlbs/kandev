@@ -132,3 +132,7 @@ Implemented and verified on October 10.
 - The complete orchestrator package then passed
   `go test -race -json ./internal/orchestrator -count=1` in an isolated process
   after the browser suites, with no failed tests.
+- After integrating main `135630f9b`, the combined cleanup, Resume, continuation
+  admission and native restart recovery selection passed under race in the
+  orchestrator, executor and handlers packages. The retired instruction/batch
+  handler regression also passed independently.

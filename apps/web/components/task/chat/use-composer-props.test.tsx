@@ -54,6 +54,15 @@ function composerArgs(): Parameters<typeof useComposerProps>[0] {
   };
 }
 
+const deliveryIdentity = {
+  session_id: "session-1",
+  agent_execution_id: "exec-1",
+  submission_id: "submission-1",
+  stream_id: "stream-1",
+  incarnation_id: "inc-1",
+  prompt_generation: 4,
+};
+
 describe("useComposerProps", () => {
   it("forwards working state independently of queue admission", () => {
     const { result } = renderHook(() => useComposerProps(composerArgs()));
@@ -66,15 +75,10 @@ describe("useComposerProps", () => {
     args.panelState.session = {
       metadata: {
         agent_delivery_recovery: {
+          ...deliveryIdentity,
           phase: "reconnecting",
           revision: 1,
-          session_id: "session-1",
-          agent_execution_id: "exec-1",
-          submission_id: "submission-1",
-          stream_id: "stream-1",
-          incarnation_id: "inc-1",
           harness_generation: 2,
-          prompt_generation: 4,
         },
       },
     } as never;
@@ -90,15 +94,10 @@ describe("useComposerProps", () => {
     args.panelState.session = {
       metadata: {
         agent_delivery_recovery: {
+          ...deliveryIdentity,
           phase: "settled",
           revision: 3,
-          session_id: "session-1",
-          agent_execution_id: "exec-1",
-          submission_id: "submission-1",
-          stream_id: "stream-1",
-          incarnation_id: "inc-1",
           harness_generation: 2,
-          prompt_generation: 4,
         },
       },
     } as never;
@@ -115,15 +114,30 @@ describe("useComposerProps", () => {
     args.panelState.session = {
       metadata: {
         agent_delivery_recovery: {
+          ...deliveryIdentity,
           phase: "recovered",
           revision: 2,
-          session_id: "session-1",
-          agent_execution_id: "exec-1",
-          submission_id: "submission-1",
-          stream_id: "stream-1",
-          incarnation_id: "inc-1",
           harness_generation: 2,
-          prompt_generation: 4,
+        },
+      },
+    } as never;
+    args.panelState.lastAgentError = { code: "DURABLE_DELIVERY_UNCERTAIN" } as never;
+
+    const { result } = renderHook(() => useComposerProps(args));
+
+    expect(result.current.uncertainDelivery).toBe(false);
+    expect(result.current.deliveryRecoveryPhase).toBeUndefined();
+  });
+
+  it("does not revive an uncertain recovery card after silent restoration", () => {
+    const args = composerArgs();
+    args.panelState.session = {
+      metadata: {
+        agent_delivery_recovery: {
+          ...deliveryIdentity,
+          phase: "restored",
+          revision: 4,
+          harness_generation: 2,
         },
       },
     } as never;

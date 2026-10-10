@@ -134,15 +134,16 @@ func runProfileOwnerChangedDuringRead(t *testing.T, repo *sqliteRepository) {
 }
 
 func TestPostgresProfileMembershipMutationsSerializeWithReorder(t *testing.T) {
-	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
-	db.SetMaxOpenConns(8)
-	repo, err := newSQLiteRepositoryWithDB(db, db, nil)
-	if err != nil {
-		t.Fatalf("initialize profile order schema: %v", err)
-	}
+	dsn := testutil.PostgresDSNFromEnv(t)
 	for _, scenario := range profileOrderMutationScenarios() {
 		for _, winner := range []string{"mutation-first", "reorder-first"} {
 			t.Run(scenario.name+"/"+winner, func(t *testing.T) {
+				db := testutil.OpenIsolatedPostgres(t, dsn)
+				db.SetMaxOpenConns(8)
+				repo, err := newSQLiteRepositoryWithDB(db, db, nil)
+				if err != nil {
+					t.Fatalf("initialize profile order schema: %v", err)
+				}
 				runProfileOrderMutationRace(t, repo, scenario, winner)
 			})
 		}

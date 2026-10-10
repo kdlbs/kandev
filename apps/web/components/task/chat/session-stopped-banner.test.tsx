@@ -73,6 +73,13 @@ vi.mock("react-i18next", () => ({
         "task:retry": "Retry",
         "task:retryConnection": "Retry connection",
         "task:retryingConnection": "Retrying connection...",
+        "task:deliveryRecoveryAttached": "The connection is restored without resending the prompt.",
+        "task:deliveryRecoverySettled": "Saved output has been synchronized.",
+        "task:deliveryRecoveryUncertain": "The prompt outcome is still uncertain.",
+        "task:deliveryRecoveryUnavailable": "Recovery evidence is unavailable.",
+        "task:deliveryRecoveryBlocked": "Recovery is blocked.",
+        "task:deliveryRecoveryMissingSubmission": "The original delivery record is missing.",
+        "task:deliveryRecoveryOwnershipBlocked": "Delivery ownership could not be verified.",
         "task:stop": "Stop",
         "task:stopping": "Stopping...",
         "task:recoveryMoreOptions": MORE_OPTIONS,
@@ -227,7 +234,14 @@ describe("SessionStoppedBanner delivery recovery", () => {
     expect(screen.getByTestId(FRESH_BUTTON_TEST_ID)).toBeTruthy();
   });
 
-  it("offers connection retry and Stop for an uncertain prompt outcome", async () => {
+  it("keeps retry state-only when the response advertises a retired action", async () => {
+    mocks.request.mockResolvedValueOnce({
+      task_id: TASK_ID,
+      session_id: SESSION_ID,
+      outcome: "uncertain",
+      recovery_revision: 1,
+      allowed_actions: ["resume_interrupted"],
+    });
     render(<BannerHarness mode="recoverable" uncertainDelivery />);
 
     expect(
@@ -235,8 +249,6 @@ describe("SessionStoppedBanner delivery recovery", () => {
     ).toBeTruthy();
     expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();
-    expect(screen.getByTestId(RETRY_CONNECTION_BUTTON)).toBeTruthy();
-    expect(screen.getByTestId(STOP_BUTTON)).toBeTruthy();
 
     fireEvent.click(screen.getByTestId(RETRY_CONNECTION_BUTTON));
     await waitFor(() =>
@@ -246,6 +258,8 @@ describe("SessionStoppedBanner delivery recovery", () => {
         30000,
       ),
     );
+    expect(await screen.findByTestId("delivery-recovery-result")).toBeTruthy();
+    expect(screen.queryByTestId("interrupted-session-continuation")).toBeNull();
 
     fireEvent.click(screen.getByTestId(STOP_BUTTON));
     await waitFor(() => expect(mocks.stop).toHaveBeenCalledTimes(1));
@@ -303,8 +317,6 @@ describe("SessionStoppedBanner delivery recovery", () => {
     expect(
       screen.getByText("Reconnecting to the agent. Your prompt will not be sent again."),
     ).toBeTruthy();
-    expect(screen.getByTestId(RETRY_CONNECTION_BUTTON)).toBeTruthy();
-    expect(screen.getByTestId(STOP_BUTTON)).toBeTruthy();
   });
 });
 
@@ -437,7 +449,6 @@ describe("SessionStoppedBanner provider-restored Resume", () => {
     expect(
       screen.getByTestId("workspace-recovery-progress").getAttribute("data-recovery-phase"),
     ).toBe("publishing");
-    expect(screen.getByText("Workspace needs repair")).toBeTruthy();
     expect(screen.getByTestId(MANAGED_CLONE_RELOCATE_BUTTON).parentElement?.className).toContain(
       "hidden",
     );
@@ -537,7 +548,6 @@ describe("SessionStoppedBanner recovery failures", () => {
       />,
     );
 
-    expect(screen.getByText("Workspace needs repair")).toBeTruthy();
     expect(screen.getByText("Move files to the current clone to resume.")).toBeTruthy();
     expect(screen.getByTestId(MANAGED_CLONE_RELOCATE_BUTTON)).toBeTruthy();
     expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();

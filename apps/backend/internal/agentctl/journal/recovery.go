@@ -67,7 +67,7 @@ func (j *Journal) RecoveryDescriptor(
 		StreamID:          streamID,
 		StorageCapability: StorageCapability{Version: CurrentVersion, Durable: true},
 	}
-	err := j.db.View(func(tx *bolt.Tx) error {
+	err := j.viewLocked(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -169,6 +169,9 @@ func submissionSummary(submission Submission) SubmissionSummary {
 }
 
 func submissionNeedsRecovery(submission Submission) bool {
+	if submission.Retired && submission.State == SubmissionInterruptedUnknown {
+		return false
+	}
 	switch submission.State {
 	case SubmissionPrepared, SubmissionAccepted, SubmissionDispatching, SubmissionInterruptedUnknown:
 		return true

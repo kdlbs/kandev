@@ -532,7 +532,8 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 			zap.String("session_id", data.SessionID))
 		return
 	}
-	if !s.resumeAttemptAllowsExecution(data.SessionID, data.AgentExecutionID, data.AttemptID) {
+	if (!data.RecoveredAvailabilityOnly || data.AttemptID != "") &&
+		!s.resumeAttemptAllowsExecution(data.SessionID, data.AgentExecutionID, data.AttemptID) {
 		s.logger.Debug("ignoring agent.boot_ready from a stale resume attempt",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
@@ -566,6 +567,23 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.String("session_state", string(session.State)))
+		return
+	}
+	if data.RecoveredAvailabilityOnly {
+		if !s.recoveredAvailabilityEventIsCurrent(ctx, data, session) {
+			s.logger.Debug("ignoring stale recovered availability event",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.String("agent_execution_id", data.AgentExecutionID),
+				zap.Uint64("prompt_generation", data.PromptGeneration))
+			return
+		}
+		if s.isQueuedDispatchInFlight(data.SessionID) {
+			s.markQueuedDispatchDrainPending(data.SessionID)
+		}
+		lock.Unlock()
+		guardLocked = false
+		s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)
 		return
 	}
 	s.clearDynamicStartupStreakForBootReady(ctx, data, session)
@@ -647,6 +665,33 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	lock.Unlock()
 	guardLocked = false
 	s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)
+}
+
+func (s *Service) recoveredAvailabilityEventIsCurrent(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+) bool {
+	if session == nil || session.State != models.TaskSessionStateWaitingForInput ||
+		(data.TaskID != "" && session.TaskID != data.TaskID) ||
+		data.AgentExecutionID == "" || data.Status != string(v1.AgentStatusReady) || s.agentManager == nil {
+		return false
+	}
+	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, data.SessionID)
+	if err != nil || executionID != data.AgentExecutionID {
+		return false
+	}
+	generationReader, ok := s.agentManager.(interface {
+		GetPromptGenerationForSession(context.Context, string) (uint64, error)
+	})
+	if !ok {
+		return false
+	}
+	generation, err := generationReader.GetPromptGenerationForSession(ctx, data.SessionID)
+	if err != nil || generation != data.PromptGeneration {
+		return false
+	}
+	return s.agentManager.IsAgentReadyForPrompt(ctx, data.SessionID)
 }
 
 func (s *Service) persistProviderRestoredResumeNotice(
@@ -3358,22 +3403,28 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentEventData) error {
 	errMsg := agentFailureMessage(data)
 	details := routingerr.Sanitize(data.FailureDetails)
+	deliverySubmissionID := ""
+	if data.FailureCode == "DURABLE_DELIVERY_UNCERTAIN" && data.DeliverySubmissionID != "" &&
+		data.DeliverySubmissionID == data.FailureDetails {
+		deliverySubmissionID = data.DeliverySubmissionID
+	}
 	lastErr := models.LastAgentError{
-		Message:          errMsg,
-		OccurredAt:       time.Now().UTC(),
-		Scope:            models.ErrorScopeSession,
-		AgentExecutionID: data.AgentExecutionID,
-		ExecutionID:      data.AgentExecutionID,
-		Phase:            data.Phase,
-		AttemptID:        data.AttemptID,
-		Causes:           models.NormalizeAgentErrorCauses(data.Causes),
-		RemediationURL:   providerRemediationURL(data),
-		Code:             data.FailureCode,
-		Details:          details,
-		StartupReason:    data.StartupFailureReason,
-		StartupAttempts:  data.StartupFailureAttempts,
-		StartupNPMCode:   data.StartupFailureNPMCode,
-		StampValue:       agentFailureStamp(data),
+		Message:              errMsg,
+		OccurredAt:           time.Now().UTC(),
+		Scope:                models.ErrorScopeSession,
+		AgentExecutionID:     data.AgentExecutionID,
+		ExecutionID:          data.AgentExecutionID,
+		Phase:                data.Phase,
+		AttemptID:            data.AttemptID,
+		Causes:               models.NormalizeAgentErrorCauses(data.Causes),
+		RemediationURL:       providerRemediationURL(data),
+		Code:                 data.FailureCode,
+		Details:              details,
+		DeliverySubmissionID: deliverySubmissionID,
+		StartupReason:        data.StartupFailureReason,
+		StartupAttempts:      data.StartupFailureAttempts,
+		StartupNPMCode:       data.StartupFailureNPMCode,
+		StampValue:           agentFailureStamp(data),
 	}
 	if err := s.repo.SetSessionMetadataKey(ctx, data.SessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
 		s.logger.Warn("failed to persist last agent error",
@@ -3411,6 +3462,9 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 		}
 		if lastErr.Details != "" {
 			eventData["details"] = lastErr.Details
+		}
+		if lastErr.DeliverySubmissionID != "" {
+			eventData["delivery_submission_id"] = lastErr.DeliverySubmissionID
 		}
 		if err := s.eventBus.Publish(ctx, events.TaskSessionErrorChanged, bus.NewEvent(
 			events.TaskSessionErrorChanged,
@@ -4419,6 +4473,16 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 	s.retireExecutionActivityAndPublish(
 		context.WithoutCancel(ctx), data.TaskID, data.SessionID, data.AgentExecutionID,
 	)
+	if data.AttemptID != "" && !s.resumeAttemptAllowsExecution(
+		data.SessionID, data.AgentExecutionID, data.AttemptID,
+	) {
+		s.logger.Debug("ignoring agent.stopped from a stale resume attempt",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID),
+			zap.String("attempt_id", data.AttemptID))
+		return
+	}
 	if s.consumeParkedProfileSwitchStopIntent(ctx, data, nil) {
 		s.logger.Debug("ignoring agent.stopped caused by parked workflow profile switch",
 			zap.String("task_id", data.TaskID),
@@ -4475,6 +4539,24 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 	// break the next office run because EnsureSessionForAgent then creates a
 	// fresh row instead of reusing the durable conversation.
 	if session, err := s.repo.GetTaskSession(ctx, data.SessionID); err == nil {
+		if session.State == models.TaskSessionStateFailed &&
+			s.resumeAttemptOwnsUnacceptedStartupStop(data.SessionID, data.AgentExecutionID, data.AttemptID) {
+			s.logger.Info("ignoring agent.stopped for failed unaccepted resume startup",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.String("agent_execution_id", data.AgentExecutionID),
+				zap.String("attempt_id", data.AttemptID))
+			return
+		}
+		if session.State == models.TaskSessionStateStarting &&
+			s.activeResumeAttemptOwnsStartup(data.SessionID, data.AgentExecutionID, data.AttemptID) {
+			s.logger.Info("deferring agent.stopped session projection to active resume startup",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.String("agent_execution_id", data.AgentExecutionID),
+				zap.String("attempt_id", data.AttemptID))
+			return
+		}
 		if session.State == models.TaskSessionStateCancelled {
 			s.logger.Info("closing turn for explicitly cancelled session",
 				zap.String("session_id", data.SessionID))

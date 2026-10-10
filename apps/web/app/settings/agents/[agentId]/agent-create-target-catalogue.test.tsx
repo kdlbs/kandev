@@ -300,10 +300,12 @@ describe("existing-owner creation publication", () => {
     expect((await acknowledge(context, save)).failedIds.size).toBe(0);
     const state = context.store().getState();
     expect(state.settingsAgents.items[0].profiles.map((profile) => profile.id)).toEqual([
-      EXISTING,
       ACCEPTED,
+      EXISTING,
     ]);
-    expect(state.settingsAgents.items[0].profiles[1]).toMatchObject({
+    expect(
+      state.settingsAgents.items[0].profiles.find((profile) => profile.id === ACCEPTED),
+    ).toMatchObject({
       id: ACCEPTED,
       agentId: OWNER,
       name: NAME,

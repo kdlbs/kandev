@@ -186,3 +186,61 @@ it("prepends accepted new profiles while preserving saved Settings order and orp
     "office",
   ]);
 });
+
+it("publishes an accepted new owner after an independent catalogue event", () => {
+  const { result } = setup({ ...owner, id: "independent", profiles: [] });
+  const startVersion = result.current.getAgentProfilesVersion();
+  act(() => result.current.store.getState().bumpAgentProfilesVersion());
+  act(() =>
+    result.current.upsertAgent(owner, { profiles: [profile], ownerCreated: true }, startVersion),
+  );
+  const state = result.current.store.getState();
+  expect(state.settingsAgents.items.map((agent) => agent.id)).toEqual(["independent", owner.id]);
+  expect(state.settingsAgents.items[1].profiles).toEqual([profile]);
+  expect(state.agentProfiles.items).toEqual([toAgentProfileOption(owner, profile)]);
+  expect(state.agentProfiles.version).toBeGreaterThan(startVersion);
+});
+
+it("keeps an observed owner removal when a late creation result publishes", () => {
+  const { result } = setup();
+  const startVersion = result.current.getAgentProfilesVersion();
+  act(() => {
+    result.current.store.getState().setSettingsAgents([]);
+    result.current.store.getState().setAgentProfiles([]);
+    result.current.store.getState().bumpAgentProfilesVersion();
+  });
+  const removed = result.current.store.getState();
+  act(() =>
+    result.current.upsertAgent(owner, { profiles: [profile], ownerCreated: true }, startVersion),
+  );
+  expect(result.current.store.getState().settingsAgents.items).toEqual([]);
+  expect(result.current.store.getState().agentProfiles).toBe(removed.agentProfiles);
+});
+
+it("keeps owner removal after the editor unmounts during pending creation", () => {
+  const { result, unmount } = setup();
+  const { store, upsertAgent, getAgentProfilesVersion } = result.current;
+  const startVersion = getAgentProfilesVersion();
+  unmount();
+  act(() => {
+    store.getState().setSettingsAgents([]);
+    store.getState().setAgentProfiles([]);
+    store.getState().bumpAgentProfilesVersion();
+  });
+  const removed = store.getState();
+  act(() => upsertAgent(owner, { profiles: [profile], ownerCreated: true }, startVersion));
+  expect(store.getState().settingsAgents.items).toEqual([]);
+  expect(store.getState().agentProfiles).toBe(removed.agentProfiles);
+});
+
+it("keeps observed removals scoped to their owning store", () => {
+  const removed = setup();
+  act(() => removed.result.current.store.getState().setSettingsAgents([]));
+  const independent = setup({ ...owner, id: "independent", profiles: [] });
+  act(() =>
+    independent.result.current.upsertAgent(owner, { profiles: [profile], ownerCreated: true }),
+  );
+  expect(
+    independent.result.current.store.getState().settingsAgents.items.map((agent) => agent.id),
+  ).toEqual(["independent", owner.id]);
+});

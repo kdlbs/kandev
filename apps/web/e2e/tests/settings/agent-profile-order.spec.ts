@@ -7,6 +7,8 @@ import {
   restoreProfileOrder,
 } from "./agent-profile-order-helpers";
 
+import { settledBoundingBox } from "../../helpers/settled-box";
+
 /** Fragment of the translated profile-position announcement. */
 const MOVED_OVER = "moved to position";
 
@@ -116,9 +118,12 @@ test.describe("Agent profile ordering", () => {
       const row = profileRow(testPage, original, source.id);
       const handle = row.getByTestId("agent-profile-drag-handle");
       await expect(handle).toBeVisible();
-      const box = await handle.boundingBox();
-      expect(box?.height).toBeCloseTo(28, 0);
-      expect(box?.width).toBeCloseTo(28, 0);
+      await expect
+        .poll(async () => {
+          const box = await handle.boundingBox();
+          return box && [box.height, box.width];
+        })
+        .toEqual([expect.closeTo(28, 0), expect.closeTo(28, 0)]);
       await expect(handle).toHaveCSS("cursor", "pointer");
       await testInfo.attach("profile-order-desktop", {
         body: await testPage.screenshot({ fullPage: true }),
@@ -141,8 +146,10 @@ test.describe("Agent profile ordering", () => {
       await expect
         .poll(() => visibleProfileNames(testPage.getByTestId(`agent-profiles-${original.name}`)))
         .toEqual(current.profiles.map((profile) => profile.name));
+      await settledBoundingBox(handle);
       await handle.press("Space");
       await expect(row.locator("xpath=..")).toHaveClass(/opacity-70/);
+      await expect.poll(announcedTarget).toBe(initialAnnouncement);
       await handle.press("ArrowDown");
       await expect.poll(announcedTarget).not.toBe(initialAnnouncement);
       await handle.press("Space");

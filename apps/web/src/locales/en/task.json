@@ -2716,5 +2716,16 @@
   "sortMatchingFirst": "Matching first",
   "sortRuleColor": "Color for sort field {{position}}",
   "sessionRuntimeCleanupFailedTitle": "Resume could not finish",
-  "sessionRuntimeCleanupFailedBody": "The previous runtime could not be stopped. Check executor connectivity, then retry Resume."
+  "sessionRuntimeCleanupFailedBody": "The previous runtime could not be stopped. Check executor connectivity, then retry Resume.",
+  "deliveryRecoveryAttached": "Connection restored. The previous prompt was not resent.",
+  "deliveryRecoverySettled": "Saved output was synchronized and the prompt outcome was recovered.",
+  "deliveryRecoveryUncertain": "The previous prompt outcome is still unknown. Review the retained changes before continuing.",
+  "deliveryRecoveryUnavailable": "Saved evidence is unavailable. Connection retry did not resume work.",
+  "deliveryRecoveryMissingSubmission": "The saved prompt record is missing. Recovery is blocked.",
+  "deliveryRecoveryOwnershipBlocked": "The saved session owner changed. Recovery is blocked.",
+  "deliveryRecoveryBlocked": "Recovery is blocked. Resolve the recovery issue before retrying.",
+  "deliveryStopFailed": "Stop could not be confirmed. Try again.",
+  "deliveryRecoveryOutputPaused": "Output delivery is paused while saved output is synchronized.",
+  "deliveryRecoveryCancellationPending": "Cancellation is pending. The prompt outcome is still uncertain.",
+  "deliveryRecoveryStoragePressure": "Saved output needs synchronization. The agent process has not been confirmed stopped."
 }

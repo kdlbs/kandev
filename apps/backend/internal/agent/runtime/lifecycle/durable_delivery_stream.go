@@ -64,6 +64,25 @@ const durableDeliveryReplayPageSize = 1000
 // completion boundary; a page of 1000 events is only one page and never means
 // that replay is complete.
 func (sm *StreamManager) ReplayRecoveredDelivery(ctx context.Context, execution *AgentExecution) error {
+	return sm.replayRecoveredDelivery(ctx, execution, false, nil)
+}
+
+// ReplayRecoveredDeliveryWithoutLifecycleCallbacks projects authenticated
+// retained evidence without applying in-memory execution state transitions.
+// It is used when recovery has a proven durable owner but no live execution.
+func (sm *StreamManager) ReplayRecoveredDeliveryWithoutLifecycleCallbacks(
+	ctx context.Context,
+	execution *AgentExecution,
+) error {
+	return sm.replayRecoveredDelivery(ctx, execution, true, nil)
+}
+
+func (sm *StreamManager) replayRecoveredDelivery(
+	ctx context.Context,
+	execution *AgentExecution,
+	suppressLifecycleCallbacks bool,
+	ownerCurrent func() error,
+) error {
 	if execution == nil || execution.DeliveryMode != DurableDeliveryV1 {
 		return nil
 	}
@@ -89,11 +108,15 @@ func (sm *StreamManager) ReplayRecoveredDelivery(ctx context.Context, execution 
 		return errors.New("durable recovery agentctl client is unavailable")
 	}
 	defer releaseClient()
+	if after > 0 && !suppressLifecycleCallbacks {
+		sm.scheduleDurableDeliveryAck(execution, client, agentctl.AgentEvent{DeliveryStreamID: streamID, DeliverySequence: after})
+	}
 
 	startupGeneration := execution.startupAttemptSnapshot()
 	for after < target {
 		next, err := sm.replayRecoveredDeliveryPage(
 			ctx, execution, client, delivery, streamID, after, target, startupGeneration,
+			suppressLifecycleCallbacks, ownerCurrent,
 		)
 		if err != nil {
 			return err
@@ -111,6 +134,8 @@ func (sm *StreamManager) replayRecoveredDeliveryPage(
 	delivery AgentDeliveryRepository,
 	streamID string,
 	after, target, startupGeneration uint64,
+	suppressLifecycleCallbacks bool,
+	ownerCurrent func() error,
 ) (uint64, error) {
 	remaining := target - after
 	limit := durableDeliveryReplayPageSize
@@ -120,6 +145,11 @@ func (sm *StreamManager) replayRecoveredDeliveryPage(
 	page, stream, err := client.ReplayDelivery(ctx, streamID, after, limit)
 	if err != nil {
 		return after, fmt.Errorf("replay durable delivery after sequence %d: %w", after, err)
+	}
+	if ownerCurrent != nil {
+		if err := ownerCurrent(); err != nil {
+			return after, err
+		}
 	}
 	if err := validateRecoveredReplayStream(stream, execution, streamID, target); err != nil {
 		return after, err
@@ -135,7 +165,14 @@ func (sm *StreamManager) replayRecoveredDeliveryPage(
 		if committed.Sequence != after+1 {
 			return after, fmt.Errorf("durable replay expected sequence %d, received %d", after+1, committed.Sequence)
 		}
-		if err := sm.processRecoveredDeliveryEvent(ctx, execution, client, delivery, committed, startupGeneration); err != nil {
+		if ownerCurrent != nil {
+			if err := ownerCurrent(); err != nil {
+				return after, err
+			}
+		}
+		if err := sm.processRecoveredDeliveryEvent(
+			ctx, execution, client, delivery, committed, startupGeneration, suppressLifecycleCallbacks,
+		); err != nil {
 			return after, err
 		}
 		after = committed.Sequence
@@ -168,6 +205,7 @@ func (sm *StreamManager) processRecoveredDeliveryEvent(
 	delivery AgentDeliveryRepository,
 	committed journal.Event,
 	startupGeneration uint64,
+	suppressLifecycleCallbacks bool,
 ) error {
 	var event agentctl.AgentEvent
 	if err := json.Unmarshal(committed.Payload, &event); err != nil {
@@ -181,7 +219,15 @@ func (sm *StreamManager) processRecoveredDeliveryEvent(
 	event.DeliveryHarnessGeneration = committed.HarnessGeneration
 	event.DeliverySequence = committed.Sequence
 	event.DeliverySubmissionID = committed.SubmissionID
-	if err := sm.processAgentEvent(ctx, execution, client, delivery, event, startupGeneration); err != nil {
+	prepared, err := sm.prepareAgentEvent(ctx, execution, client, delivery, event)
+	if err != nil {
+		return fmt.Errorf("durable replay event ownership check: %w", err)
+	}
+	if suppressLifecycleCallbacks {
+		prepared.skipCallback = true
+		prepared.skipAcknowledgement = true
+	}
+	if err := sm.processPreparedAgentEvent(ctx, execution, client, delivery, prepared, startupGeneration); err != nil {
 		return fmt.Errorf("process durable replay sequence %d: %w", committed.Sequence, err)
 	}
 	return nil

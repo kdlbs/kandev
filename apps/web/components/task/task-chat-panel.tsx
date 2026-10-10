@@ -1515,6 +1515,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   return (
     <SessionRecoveryProvider
       messagesLoading={messagesLoading}
+      onDeliveryReconciled={retryHistory}
       session={session}
       messages={[...allMessages, ...footerActionMessages]}
       taskId={taskId}

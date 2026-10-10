@@ -55,6 +55,7 @@ type StreamManager struct {
 	delivery                      AgentDeliveryRepository
 	ackMu                         sync.Mutex
 	ackWorkers                    map[string]*durableDeliveryAckWorker
+	ackStopped                    bool
 	ackWG                         sync.WaitGroup
 	mcpMu                         sync.RWMutex
 	mcpHandler                    agentctl.MCPHandler
@@ -194,6 +195,51 @@ func (sm *StreamManager) ConnectAll(execution *AgentExecution, ready chan<- stru
 	sm.ConnectWorkspaceStream(execution, nil)
 }
 
+// ConnectAllAndWait waits until the updates stream connection attempt has
+// finished and verifies the stream is attached before callers admit prompts.
+// The stream itself keeps the execution and manager lifetime, not this waiter's
+// shorter recovery-attempt context.
+func (sm *StreamManager) ConnectAllAndWait(ctx context.Context, execution *AgentExecution) error {
+	if sm == nil || execution == nil {
+		return errors.New("stream manager or execution is unavailable")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if client, releaseClient := execution.AcquireAgentCtlClient(); client != nil {
+		connected := client.HasAgentStream()
+		releaseClient()
+		if connected {
+			return nil
+		}
+	} else {
+		return errors.New("agentctl client is unavailable")
+	}
+
+	ready := make(chan struct{})
+	sm.ConnectAll(execution, ready)
+	select {
+	case <-ready:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-sm.waitCh:
+		return errors.New("stream manager stopped before updates stream connected")
+	case <-sm.stopCh:
+		return errors.New("stream manager stopped before updates stream connected")
+	}
+
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		return errors.New("agentctl client became unavailable before updates stream connected")
+	}
+	connected := client.HasAgentStream()
+	releaseClient()
+	if !connected {
+		return errors.New("agent updates stream did not connect")
+	}
+	return nil
+}
+
 func (sm *StreamManager) connectUpdatesStreamAsync(execution *AgentExecution, ready chan<- struct{}) {
 	if !sm.start(func() {
 		sm.connectUpdatesStream(execution, ready)
@@ -233,6 +279,7 @@ func (sm *StreamManager) Wait() {
 	sm.waitChOnce.Do(func() { close(sm.waitCh) })
 	sm.wg.Wait()
 	sm.ackMu.Lock()
+	sm.ackStopped = true
 	for _, worker := range sm.ackWorkers {
 		worker.cancel()
 	}
@@ -370,6 +417,10 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 		return
 	}
 
+	if execution.DeliveryMode == DurableDeliveryV1 && after > 0 {
+		sm.scheduleDurableDeliveryAck(execution, client, agentctl.AgentEvent{DeliveryStreamID: streamID, DeliverySequence: after})
+	}
+
 	processor := newStreamEventProcessor(sm, ctx, execution, client, delivery, startupGeneration)
 	err := client.StreamUpdatesFrom(ctx, func(event agentctl.AgentEvent) {
 		if !processor.enqueue(event) {
@@ -463,11 +514,12 @@ func (sm *StreamManager) shouldReconnectAfterStreamOverload(
 }
 
 type preparedAgentEvent struct {
-	event          agentctl.AgentEvent
-	durableEvent   *models.AgentDeliveryEvent
-	deliveryEffect *models.AgentDeliveryEffect
-	skipCallback   bool
-	duplicate      bool
+	event               agentctl.AgentEvent
+	durableEvent        *models.AgentDeliveryEvent
+	deliveryEffect      *models.AgentDeliveryEffect
+	skipCallback        bool
+	skipAcknowledgement bool
+	duplicate           bool
 }
 
 func (sm *StreamManager) processAgentEvent(
@@ -582,6 +634,7 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 	durableEvent *models.AgentDeliveryEvent,
 	delivery AgentDeliveryRepository,
 	client *agentctl.Client,
+	scheduleAcknowledgement bool,
 ) (agentctl.AgentEvent, bool, error) {
 	if delivery == nil || !canonicalAgentDeliveryEvent(event) {
 		return event, false, nil
@@ -614,7 +667,9 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 	event.CanonicalMessageAppend = isAppend
 	// Projection is the canonical commit boundary. ACK transport is scheduled
 	// independently so a lost ACK cannot hide output that is already durable.
-	sm.scheduleDurableDeliveryAck(client, event)
+	if scheduleAcknowledgement {
+		sm.scheduleDurableDeliveryAck(execution, client, event)
+	}
 	return event, true, nil
 }
 
@@ -664,7 +719,7 @@ func (sm *StreamManager) projectCanonicalAgentEventsIndividually(
 ) error {
 	for _, item := range prepared {
 		event, _, err := sm.projectCanonicalAgentEvent(
-			ctx, execution, item.event, item.durableEvent, delivery, client,
+			ctx, execution, item.event, item.durableEvent, delivery, client, true,
 		)
 		if err != nil {
 			return err
@@ -706,7 +761,7 @@ func (sm *StreamManager) notifyCanonicalAgentEventBatch(
 		event.CanonicalMessageID = canonicalAgentMessageID(execution, event)
 		event.CanonicalProjection = true
 		event.CanonicalMessageAppend = appendMessages[i]
-		sm.scheduleDurableDeliveryAck(client, event)
+		sm.scheduleDurableDeliveryAck(execution, client, event)
 		if item.skipCallback {
 			continue
 		}

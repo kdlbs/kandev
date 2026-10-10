@@ -36,7 +36,7 @@ async function openSettledQuickChat(page: Page, apiClient: ApiClient, navigateHo
     30_000,
   );
   await waitForQuickChatDirectInput(dialog);
-  return dialog;
+  return { dialog, sessionId: started.session_id };
 }
 
 function commandDialog(page: Page) {
@@ -68,10 +68,14 @@ test.describe.serial("Quick Chat cancellation palette and composer", () => {
     apiClient,
   }) => {
     test.setTimeout(120_000);
-    const quickChat = await openSettledQuickChat(testPage, apiClient);
-    await sendQuickChatMessage(quickChat, testPage, "/slow 30s");
-
-    const quickSessionId = await waitForActiveQuickChatSupportsSteering(testPage);
+    const { dialog: quickChat, sessionId: quickSessionId } = await openSettledQuickChat(
+      testPage,
+      apiClient,
+    );
+    const acceptanceMarker = "Quick Chat composer cancellation accepted";
+    await sendQuickChatMessage(quickChat, testPage, `/e2e:cancel-hold ${acceptanceMarker}`);
+    await waitForAgentMessage(apiClient, quickSessionId, acceptanceMarker, 30_000);
+    expect(await waitForActiveQuickChatSupportsSteering(testPage)).toBe(quickSessionId);
     await waitForActiveQuickChatForegroundActivity(testPage, "generating");
     const editor = quickChat.locator('.tiptap.ProseMirror[contenteditable="true"]:visible');
     await expect(editor).toHaveText("");
@@ -92,21 +96,17 @@ test.describe.serial("Quick Chat cancellation palette and composer", () => {
   }) => {
     test.setTimeout(120_000);
     const cancellation = await holdCancellationSettlement(testPage);
-    const quickChat = await openSettledQuickChat(testPage, apiClient);
+    const { dialog: quickChat, sessionId: quickSessionId } = await openSettledQuickChat(
+      testPage,
+      apiClient,
+    );
     await sendQuickChatMessage(quickChat, testPage, "/detached-background 60s");
-
-    const quickSessionId = await testPage.evaluate(() => {
-      const store = (
-        window as Window & {
-          __KANDEV_E2E_STORE__?: {
-            getState: () => { quickChat: { activeSessionId: string | null } };
-          };
-        }
-      ).__KANDEV_E2E_STORE__;
-      const sessionId = store?.getState().quickChat.activeSessionId;
-      if (!sessionId) throw new Error("Quick Chat has no active session");
-      return sessionId;
-    });
+    await waitForAgentMessage(
+      apiClient,
+      quickSessionId,
+      "Launching detached background work; this foreground turn is complete.",
+      30_000,
+    );
     await waitForActiveQuickChatForegroundActivity(testPage, "background");
     await expect(
       quickChat.locator('.tiptap.ProseMirror[contenteditable="true"]:visible'),
@@ -138,12 +138,19 @@ test.describe.serial("Quick Chat cancellation palette and composer", () => {
       apiClient,
       seedData,
       "Quick Chat palette cancellation target",
+      { predecessorPrompt: "/e2e:cancel-hold Underlying task cancellation fixture accepted" },
     );
     const underlyingCancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(underlyingCancel).toBeVisible();
 
-    const quickChat = await openSettledQuickChat(testPage, apiClient, false);
-    await sendQuickChatMessage(quickChat, testPage, "/slow 30s");
+    const { dialog: quickChat, sessionId: quickSessionId } = await openSettledQuickChat(
+      testPage,
+      apiClient,
+      false,
+    );
+    const acceptanceMarker = "Quick Chat palette cancellation accepted";
+    await sendQuickChatMessage(quickChat, testPage, `/e2e:cancel-hold ${acceptanceMarker}`);
+    await waitForAgentMessage(apiClient, quickSessionId, acceptanceMarker, 30_000);
     await expect(
       quickChat.getByRole("status", { name: /Agent is (starting|running)/ }),
     ).toBeVisible({ timeout: 15_000 });

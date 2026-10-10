@@ -58,8 +58,8 @@ Paths in this table are relative to `apps/web/`.
 
 | Component | Responsibility and current source anchor |
 | --- | --- |
-| `app/settings/agents/[agentId]/page.tsx` | `AgentSetupPage` resolves creation from discovery or configured name/id; saved ordinary routes redirect. `useAgentStoreSync` at line 169 publishes both catalogue and options. |
-| `app/settings/agents/[agentId]/agent-save-helpers.ts` | `saveNewAgent` line 320 and `saveExistingAgent` line 506 assemble accepted targets and invoke `upsertAgent`; partial reconciliation at lines 329 and 475 uses the same callback. |
+| `app/settings/agents/[agentId]/page.tsx` | `AgentSetupPage` resolves creation from discovery or configured name/id; saved ordinary routes redirect. `useAgentCreationStoreSync` publishes both catalogue and options. |
+| `app/settings/agents/[agentId]/agent-save-helpers.ts` | `saveNewAgent` and `saveExistingAgent` assemble accepted targets and invoke `upsertAgent`; partial reconciliation uses the same callback. |
 | `app/settings/agents/[agentId]/agent-save-contributor.ts` | `useAgentSaveContributor` registers the actual page draft with the shared settings coordinator. |
 | `app/actions/agents.ts` | `createAgentAction` line 71 and `createAgentProfileAction` line 118 call `fetchJson` via `agentSettingsRequest`, normalizing real responses. |
 | `lib/ws/handlers/agents.ts` | `registerAgentsHandlers` line 247 uses `applyProfileCreatedEvent` line 217 to update the owning store and flattened options. |
@@ -67,8 +67,8 @@ Paths in this table are relative to `apps/web/`.
 
 ## Current-store publication
 
-Only the creation page's `useAgentStoreSync` needs a production change. Bind
-`useAppStoreApi()` to this mounted provider's store. Inside `upsertAgent`, obtain
+Creation publication uses `useAgentCreationStoreSync`, bound through `useAppStoreApi()`
+to this provider's store. Inside `upsertAgent`, obtain
 `storeApi.getState().settingsAgents.items` immediately before deciding whether
 to replace the accepted target by ID or append it. Do not read the catalogue at
 render, save admission or before the awaited request. Remove the captured
@@ -79,6 +79,12 @@ Pass the resulting list to the existing synchronous `syncAgentsToStore` pair
 of setters. There is no asynchronous gap inside publication and no new global
 atomic-publication promise. Retain `setSettingsAgents` and `setAgentProfiles`
 action behavior; do not change slice metadata, versions or WS handling.
+
+The app-store factory observes Settings owner removals once for that store's
+lifetime. Pending new-owner callbacks consult this observation even after their
+editor unmounts. Store instances have independent observations; a never-observed
+absent identity remains eligible for accepted new-owner publication. This adds
+no persisted field or server catalogue contract.
 
 The narrow precedent is `ProfileRow.handleDelete` in
 `components/settings/agents/agent-profiles-section.tsx:374` and standalone
@@ -212,8 +218,10 @@ the request and do not flatten settings rows into picker options.
 All remaining options retain their values and relative order, including options
 whose owners are absent, and options newer than the settings representation of
 the same profile. Preserve current agent/profile metadata in the catalogue.
-Preserve slice metadata, including `agentProfiles.version`: the existing setters
-replace only items and do not bump it. No global atomic-publication or revision
+Preserve slice metadata other than the profile snapshot epoch. The setters
+replace only items; accepted deletion advances `agentProfiles.version` so an
+in-flight list read cannot reintroduce the deleted profile. This epoch fence is
+owned by [Settings profile ordering](profile-list-ordering.md). No global atomic-publication or revision
 contract is added. Reading current state for each accepted response preserves
 the existing overlapping-delete behavior in either completion order.
 

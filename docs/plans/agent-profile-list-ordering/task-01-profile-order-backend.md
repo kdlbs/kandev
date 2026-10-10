@@ -1,7 +1,7 @@
 ---
 id: "01-profile-order-backend"
 title: "Profile order backend"
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -148,6 +148,10 @@ prefix so `-run '^TestPostgres'` exercises schema and concurrency coverage.
 - `apps/backend/internal/persistence/storeconformance/adapters.go`
 - `apps/backend/internal/persistence/storeconformance/upgrade_test.go`
 - `apps/backend/internal/persistence/storeconformance/testdata/upgrades/v0.93.0/manifest.json`
+- `apps/backend/internal/testutil/postgres.go`
+- `apps/backend/internal/testutil/postgres_dsn.go`
+- `apps/backend/internal/testutil/postgres_dsn_test.go`
+- `apps/backend/internal/agent/settings/store/postgres_profile_order_fixture_test.go`
 - SQLite and Postgres tagged-upgrade/conformance fixture expectations
 
 ## Dependencies
@@ -221,3 +225,40 @@ desktop/mobile checks remain assigned to hosted CI. Host hooks and contributor
 tooling are not executed during this review. The historical broad-suite
 failures above remain visible; they are not attributed to unrelated tests
 without exact source and log evidence.
+
+## PostgreSQL fixture correction after integration
+
+The final #4373 head was merged externally while its hosted checks were still
+pending. Its PostgreSQL job subsequently failed: newly opened pool connections
+lacked the isolated schema, and the membership matrix reused one schema across
+subcases that seed the same unique agent names. These failures do not establish
+a production ordering failure; the concurrency proof remains incomplete.
+
+Set the owned schema in connection startup parameters so every physical
+connection uses it, retaining the production connector and schema cleanup. Open
+a new repository/schema inside each membership subcase, preserving both SQL
+dialects and all existing lock, revision, retry, and membership assertions.
+Add driver parsing coverage for URL and keyword DSNs, including existing
+parameters and invalid URLs. Add a PostgreSQL regression holding eight physical
+connections and checking their schema and distinct backend PIDs.
+
+Bounded isolated driver tests reproduced missing startup parameters and then
+passed after the correction. Private gofmt and static assertion-preservation
+checks passed. No local PostgreSQL server or broad package suite was run.
+Hosted PostgreSQL, store, race, lint, and full backend results must pass on the
+corrective head before this work order can return to done. Public behavior and
+documentation are unchanged by this fixture correction.
+
+## Corrective CI synchronization
+
+The corrective combined-head backend shard exposed a clarification retry test
+that asserted message creation as soon as the pending request was registered.
+Registration precedes durable reconciliation and message publication. The
+foreign-owner retry and different-question retry fixtures now await their
+creator count within the existing one-second deadline before retaining their
+exactly-one-bundle and identity assertions. Production registration ordering,
+timeouts, and assertion values are unchanged. The bounded local package proof
+could not execute because its dependencies were absent from the isolated cache;
+fresh hosted backend execution is required.
+
+Additional file: `apps/backend/internal/mcp/handlers/handlers_ask_retry_test.go`.

@@ -690,7 +690,7 @@ describe("useSessionResumption", () => {
     });
   });
 
-  it("keeps a workspace restore failure as launch feedback with a launch retry", async () => {
+  it("keeps a workspace restore failure as launch feedback with a recovery retry", async () => {
     mockWorkspaceRestorationEnabled = true;
     mockRequest
       .mockResolvedValueOnce({
@@ -730,8 +730,8 @@ describe("useSessionResumption", () => {
 
     expect(mockRequest).toHaveBeenNthCalledWith(
       3,
-      LAUNCH_ACTION,
-      expect.objectContaining({ intent: "resume" }),
+      "session.recover",
+      expect.objectContaining({ action: "resume" }),
       expect.any(Number),
     );
   });
