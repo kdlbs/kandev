@@ -1,11 +1,15 @@
 ---
-spec: docs/specs/platform/requirements/session-subscription-recovery.md
+requirements:
+  - REQ-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-001
+system_design:
+  - ../../specs/platform/system-design/session-subscription-recovery.md
 created: 2026-08-05
 status: implemented
-issue: https://github.com/kdlbs/kandev/issues/2287
 ---
 
 # Implementation Plan: Session subscription recovery
+
+Related issue: [#2287](https://github.com/kdlbs/kandev/issues/2287).
 
 ## Overview
 
@@ -157,3 +161,10 @@ A second regression verifies that a blocked snapshot does not delay unsubscribe.
 Verification: `cd apps/backend && go test -trimpath -race ./internal/gateway/websocket -count=1` passed.
 `golangci-lint run ./internal/gateway/websocket --new-from-rev=02ff0578357040b0546ea17cd9a00dff9ca9ee3b --allow-serial-runners --timeout=5m` reported zero issues.
 Browser verification: `cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/chat/quick-chat-cancel-palette.spec.ts -- --retries=0` passed all three tests after a fresh runtime and web build.
+
+The first fixup CI run rejected this legacy plan and work order metadata.
+The plan now declares its requirement and system design.
+The work order declares its existing acceptance criteria.
+Unsupported `spec` and `issue` fields were removed; the issue link remains in the plan body.
+The trusted coverage evaluator rejected the original metadata, then accepted all nine changed work orders after this repair.
+Documentation catalog, full specification lint, and whitespace checks passed.

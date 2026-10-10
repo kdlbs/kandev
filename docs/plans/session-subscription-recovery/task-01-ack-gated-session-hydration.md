@@ -5,7 +5,19 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/requirements/session-subscription-recovery.md"
+requirements:
+  - REQ-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-001
+acceptance_criteria:
+  - AC-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-001.1
+  - AC-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-001.2
+  - AC-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-001.3
+  - AC-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-001.4
+  - AC-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-001.5
+  - AC-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-001.6
+  - AC-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-001.7
+  - AC-PLATFORM-SESSION-SUBSCRIPTION-RECOVERY-001.8
+system_design:
+  - ../../specs/platform/system-design/session-subscription-recovery.md
 ---
 
 # Task 01: Gate session hydration on subscribe acknowledgement
@@ -108,3 +120,8 @@ The live authorization barrier test failed before the repair and passed afterwar
 The complete gateway package passed `go test -trimpath -race ./internal/gateway/websocket -count=1`.
 The changed-scope gateway Go lint reported zero issues.
 Browser verification: `cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/chat/quick-chat-cancel-palette.spec.ts -- --retries=0` passed all three tests after a fresh runtime and web build.
+
+CI documentation coverage required migration of the legacy frontmatter.
+The work order now declares its existing requirement, all eight acceptance criteria, and system design.
+The linked plan declares the same requirement and design.
+The trusted coverage evaluator passed the complete captured PR file set after this metadata repair.
