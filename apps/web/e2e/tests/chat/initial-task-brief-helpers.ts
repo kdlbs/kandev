@@ -223,6 +223,20 @@ async function assertInitialTaskBriefChatFlow({
   expect(renderedFirstPrompt.split(INITIAL_TASK_BRIEF)).toHaveLength(2);
   expect(renderedFirstPrompt.split(INITIAL_TASK_INSTRUCTION)).toHaveLength(2);
 
+  await expect
+    .poll(
+      async () => {
+        const [{ messages }, { turns }] = await Promise.all([
+          apiClient.listSessionMessages(sessionId),
+          apiClient.listSessionTurns(sessionId),
+        ]);
+        const turnId = messages.find((message) => message.id === firstStoredMessage?.id)?.turn_id;
+        return turnId ? turns.find((turn) => turn.id === turnId)?.completed_at : null;
+      },
+      { timeout: 60_000, message: "Waiting for the first prompt's own turn to complete" },
+    )
+    .toBeTruthy();
+
   await testPage.reload();
   await session.waitForLoad();
   await expect(userBubbles).toHaveCount(1, { timeout: 15_000 });

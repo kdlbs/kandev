@@ -64,8 +64,8 @@
       "base_sha": "43f55a6aad38c7f53c4b7eb56682016639f74405"
     },
     "historical_limits": "Eight of ten write-loaded persistence probes exceeded two seconds; historical writer ownership and separate agentctl filesystem failures remain unresolved. No universal health recovery is claimed.",
-    "source_sha256": "334e9ed422c1839852da6d937d3d90191dd2104f3ac77778367289206281e335",
-    "source_files": 251,
+    "source_sha256": "acf6cda377e70c883b53cb7ad15aa5b50a3e0db6ffd1396ab1acf1170b4d7408",
+    "source_files": 253,
     "touch_target": {
       "red": "Real tooltip readiness transition replaced the mobile submit button.",
       "focused_green_tests": 84,
@@ -113,6 +113,19 @@
       "metadata_tests": 33,
       "metadata_files": 6,
       "runtime_ownership_race": "passed"
+    },
+    "draft_submit_ordering": {
+      "baseline_head": "f0d03cc90bf19bb105a16010819dca4e48fdbe21",
+      "regression": "Passive draft synchronization overwrites an editor change before a layout submit; zero submit calls on original source, one exact payload after correction.",
+      "unit_tests": 57,
+      "unit_files": 4,
+      "phone": "First flow passed, then 1/3 passed before causal fixture completion correction; final 3/3 passed.",
+      "historical_phone_failure": "/tmp/kandev-run.e2e.MYI63uSC.log",
+      "causality_limit": "Does not identify the browser event path behind every historical missed tap.",
+      "fixture_gate": "The exact first message turn_id must refer to a turn with completed_at before reload and follow-up.",
+      "diagnostic_result": "Native click and correct draft reached backend, which rejected an active turn. No production admission bypass.",
+      "diagnostic_instrumentation": "Removed byte-for-byte before final ordinary samples.",
+      "desktop": "2/2 passed: recovered brief follow-up and read-only Resume, retries disabled."
     }
   }
 }
