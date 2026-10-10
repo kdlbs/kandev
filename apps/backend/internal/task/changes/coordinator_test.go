@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/turnchanges"
 	"github.com/kandev/kandev/internal/task/models"
@@ -87,6 +88,36 @@ func TestCoordinatorAcceptsTerminalEndpointsBeforeSummaryProcessing(t *testing.T
 	require.True(t, changeSet.Complete)
 	require.Equal(t, 1, client.compareCalls)
 	require.Equal(t, 1, client.exportCalls)
+}
+
+func TestCoordinatorFinalizesUnavailableWhenTerminalAgentctlClientIsMissing(t *testing.T) {
+	store := newCoordinatorStore()
+	policy := &coordinatorPolicy{result: turnchanges.CapturePolicy{
+		SettingsUserID: "user-initiator", Enabled: true, ResolutionKind: turnchanges.PolicyAuthenticatedUser,
+	}}
+	startClient := &coordinatorCheckpointClient{}
+	coordinator := NewCoordinator(store, coordinatorTurnReader{}, policy, NewContentService(store, nil), nil)
+	admission := coordinatorAdmission()
+	require.NoError(t, coordinator.Admit(context.Background(), admission, startClient))
+
+	var missingAgentctl *agentctlclient.Client
+	err := coordinator.Finish(context.Background(), Terminal{
+		Admission: admission, At: time.Now().UTC(), Outcome: "dispatch_error",
+	}, missingAgentctl)
+
+	require.NoError(t, err)
+	changeSet := store.changeSets[turnChangeSetID(admission.TurnID)]
+	require.NotNil(t, changeSet.TerminalAt)
+	require.Equal(t, models.TurnChangeAvailabilityUnavailable, changeSet.Availability)
+	require.Equal(t, models.TurnChangeReasonCheckoutUnavailable, changeSet.Reason)
+	require.False(t, changeSet.Complete)
+	require.Len(t, store.repositoryRows[changeSet.ID], 1)
+	repositoryChange := store.repositoryRows[changeSet.ID][0]
+	require.Equal(t, models.TurnChangeAvailabilityUnavailable, repositoryChange.Availability)
+	require.Equal(t, models.TurnChangeReasonCheckoutUnavailable, repositoryChange.Reason)
+	require.Empty(t, repositoryChange.EndCommitOID)
+	require.Zero(t, startClient.endCalls)
+	require.Zero(t, startClient.compareCalls)
 }
 
 func TestLoadUnfinishedRepositoryRowsUsesOneBatchQuery(t *testing.T) {

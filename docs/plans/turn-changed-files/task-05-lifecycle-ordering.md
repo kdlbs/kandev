@@ -87,3 +87,18 @@ Implemented generation-bound admission, terminal capture fences, checkout-manife
 The terminal assistant anchor now comes from durable per-generation assistant-message tracking and survives protocol correlation reset and no-newline flush; it is cleared only after durable finalization. Terminal ownership and accepted endpoints persist independently from compare/export, bounded failure settlement uses a fresh persistence context, and startup reconciliation settles unfinished rows without another capture. Automated task turns use policy/capture, while run-owned executions remain excluded. Overlap intervals are stored for both turns using checkout/worktree aliases. Focused lifecycle and coordinator tests passed for these cases; no new executor-matrix evidence was added.
 
 Terminal persistence retries now retain the same terminal identity and message anchor with capped exponential backoff until persistence succeeds or manager shutdown cancels the attempt. The generation fence remains closed during retries and opens after success. A focused race-enabled lifecycle test verifies retry, anchor removal, and successor admission.
+
+### PR CI fixup (2026-10-10)
+
+The terminal dispatch-failure path must tolerate an agentctl client that has disappeared. Persist the affected repository endpoints as unavailable and complete terminal settlement without panicking or blocking task cleanup.
+
+Regression: `TestCoordinatorFinalizesUnavailableWhenTerminalAgentctlClientIsMissing` passes a typed-nil agentctl client after start admission and verifies unavailable terminal state.
+
+```bash
+cd apps/backend
+go test -tags fts5 ./internal/task/changes -run TestCoordinatorFinalizesUnavailableWhenTerminalAgentctlClientIsMissing -count=1
+go test -trimpath -race -tags fts5 ./internal/task/changes -run TestCoordinatorFinalizesUnavailableWhenTerminalAgentctlClientIsMissing -count=1
+go test -tags fts5 ./internal/agent/runtime/agentctl -run TestTurnCheckpointClient -count=1
+```
+
+The typed-nil agentctl regression passed normally and under the race detector. Both affected Go packages passed, the lifecycle race suite passed, and the PR-watcher cleanup E2E passed against the rebuilt backend.

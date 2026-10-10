@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -63,6 +64,9 @@ func (c *Client) ExportTurnCheckpoint(ctx context.Context, request turnchanges.E
 }
 
 func (c *Client) TurnCheckpointRepositoryScopes(ctx context.Context) ([]string, error) {
+	if c == nil {
+		return nil, errors.New("agentctl client is unavailable")
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/git/turn-changes/scopes", nil)
 	if err != nil {
 		return nil, err
@@ -96,6 +100,9 @@ func (c *Client) TurnCheckpointRepositoryScopes(ctx context.Context) ([]string, 
 }
 
 func (c *Client) doTurnChangesJSON(ctx context.Context, path string, in, out any) error {
+	if c == nil {
+		return errors.New("agentctl client is unavailable")
+	}
 	body, err := json.Marshal(in)
 	if err != nil {
 		return fmt.Errorf("failed to marshal turn checkpoint request: %w", err)
