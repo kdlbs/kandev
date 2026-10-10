@@ -436,3 +436,36 @@ func TestHostCLIPathIgnoresBridgePath(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+type requestContextKey struct{}
+type requestContextAgent struct {
+	*testAgent
+	seen  any
+	calls int
+}
+
+func (a *requestContextAgent) IsInstalled(ctx context.Context) (*agents.DiscoveryResult, error) {
+	a.calls++
+	a.seen = ctx.Value(requestContextKey{})
+	return a.testAgent.IsInstalled(ctx)
+}
+func TestMockHostDiscoveryUsesRequestContext(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	ag := &requestContextAgent{testAgent: &testAgent{id: "context-agent", name: "Context Agent", enabled: true}}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctx := context.WithValue(context.Background(), requestContextKey{}, "request-owner")
+	if _, err := ctrl.detectAgents(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ag.seen != "request-owner" || ag.calls != 1 {
+		t.Fatalf("probe context=%v, calls=%d", ag.seen, ag.calls)
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := ctrl.detectAgents(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled discovery error=%v", err)
+	}
+	if ag.calls != 1 {
+		t.Fatal("cancelled discovery repeated installation probe")
+	}
+}

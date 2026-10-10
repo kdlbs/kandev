@@ -370,8 +370,7 @@ func (c *Controller) FetchDynamicModels(ctx context.Context, agentName string, r
 }
 
 // finishDynamicModels merges the vendor CLI catalogue into a models response.
-// A refresh re-reads the CLI; every other call serves the discovered cache, so
-// listing models never spawns a process on the request path.
+// A refresh re-reads the CLI; other catalogue lookups reuse cached models.
 func (c *Controller) finishDynamicModels(
 	ctx context.Context,
 	agentName string,

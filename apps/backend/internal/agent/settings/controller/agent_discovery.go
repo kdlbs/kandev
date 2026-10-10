@@ -643,7 +643,7 @@ func (c *Controller) detectTools() []dto.ToolStatusDTO {
 // the "seedData fixture timeout: listAgents returned 0 agents" flake.
 func (c *Controller) detectAgents(ctx context.Context) ([]discovery.Availability, error) {
 	if os.Getenv("KANDEV_E2E_MOCK") == "true" {
-		return c.synthAvailabilityFromRegistry(), nil
+		return c.synthAvailabilityFromRegistry(ctx), ctx.Err()
 	}
 	results, err := c.discovery.Detect(ctx)
 	if err != nil {
@@ -672,10 +672,13 @@ func (c *Controller) detectAgents(ctx context.Context) ([]discovery.Availability
 // code sees SupportsMCP=false for every mock agent — which silently disables
 // plan mode in the chat UI (planModeAvailable is false → the toggle only
 // flips the layout, not the chat input state).
-func (c *Controller) synthAvailabilityFromRegistry() []discovery.Availability {
+func (c *Controller) synthAvailabilityFromRegistry(ctx context.Context) []discovery.Availability {
 	enabled := c.agentRegistry.ListEnabled()
 	results := make([]discovery.Availability, 0, len(enabled))
 	for _, ag := range enabled {
+		if ctx.Err() != nil {
+			break
+		}
 		if agents.IsVirtualAgent(ag) {
 			continue
 		}
@@ -686,10 +689,8 @@ func (c *Controller) synthAvailabilityFromRegistry() []discovery.Availability {
 				SupportsSessionResume: true,
 			},
 		}
-		// IsInstalled is a pure local check on mock-agent (no filesystem walk),
-		// so it's safe to call here without contention. Pull the static
-		// SupportsMCP flag so the UI can offer plan mode in E2E runs.
-		if probe, err := ag.IsInstalled(context.Background()); err == nil && probe != nil {
+		// Capability probes share the settings request's cancellation.
+		if probe, err := ag.IsInstalled(ctx); err == nil && probe != nil {
 			av.SupportsMCP = probe.SupportsMCP
 			av.MatchedPath = probe.MatchedPath
 			if len(probe.MCPConfigPaths) > 0 {
@@ -700,7 +701,7 @@ func (c *Controller) synthAvailabilityFromRegistry() []discovery.Availability {
 	}
 	// Mock agents declare a host CLI so E2E exercises version detection;
 	// this path bypasses the discovery sweep that fills it.
-	c.discovery.ApplyHostCLI(context.Background(), c.agentRegistry.Get, results)
+	c.discovery.ApplyHostCLI(ctx, c.agentRegistry.Get, results)
 	return results
 }
 
