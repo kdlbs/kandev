@@ -135,6 +135,17 @@ function TaskReviewIcon({
   );
 }
 
+function TaskReadyIcon({ accessibleLabel }: Pick<TaskStateIconProps, "accessibleLabel">) {
+  return withAccessibleLabel(
+    <IconCircleCheck
+      aria-hidden="true"
+      data-testid="task-state-ready"
+      className="mt-[1px] h-3.5 w-3.5 shrink-0 text-green-500"
+    />,
+    accessibleLabel,
+  );
+}
+
 function PendingRemovalTaskIcon() {
   return (
     <CompositorSpin
@@ -214,6 +225,30 @@ function TaskStateIconContent({
       />,
       accessibleLabel,
     );
+  }
+  return (
+    <TaskSessionStateIcon
+      sessionState={sessionState}
+      state={state}
+      interrupted={interrupted}
+      isOnLastWorkflowStep={isOnLastWorkflowStep}
+      accessibleLabel={accessibleLabel}
+    />
+  );
+}
+
+function TaskSessionStateIcon({
+  sessionState,
+  state,
+  interrupted,
+  isOnLastWorkflowStep,
+  accessibleLabel,
+}: Pick<
+  TaskStateIconProps,
+  "sessionState" | "state" | "interrupted" | "isOnLastWorkflowStep" | "accessibleLabel"
+>) {
+  if (sessionState === "IDLE" && state !== "SCHEDULING") {
+    return <TaskReadyIcon accessibleLabel={accessibleLabel} />;
   }
   if (computeIsPreparing(state, sessionState)) {
     return withAccessibleLabel(

@@ -11,6 +11,7 @@ type StatusSummaryTask = {
 };
 
 export type TaskStatusSummaryState = {
+  taskOverview: { byId: Record<string, StatusSummaryTask> };
   kanban: { tasks: StatusSummaryTask[] };
   kanbanMulti: { snapshots: Record<string, { tasks: StatusSummaryTask[] }> };
   sidebarArchivedTasks: {
@@ -26,6 +27,8 @@ export function collectTaskStatusSummaryCandidates(
   const addCandidate = (candidate: StatusSummaryTask) => {
     if (candidate.id === taskId) candidates.push(candidate.statusSummary);
   };
+  const canonical = state.taskOverview.byId[taskId];
+  if (canonical) addCandidate(canonical);
   state.kanban.tasks.forEach(addCandidate);
   Object.values(state.kanbanMulti.snapshots).forEach((snapshot) =>
     snapshot.tasks.forEach(addCandidate),

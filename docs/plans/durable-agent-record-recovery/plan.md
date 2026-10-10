@@ -261,6 +261,12 @@ store conformance, SQL guard, changed-scope lint, frontend tests/typecheck/lint,
 and seven desktop/phone browser checks passed. Task 03 records the regressions
 and results. Remote delivery remains pending for the next pushed head.
 
+The relocation fixture follow-up waits for the saved recovery card before opening
+confirmation, preserving invalidation on origin changes. Both desktop and phone
+relocation checks passed without retries, along with focused ESLint. Task 03
+records the reproduction and projection evidence. Remote delivery remains pending
+for the next pushed head.
+
 ## Risks
 
 - PR #4380 can change before implementation. Refresh its source and contracts.

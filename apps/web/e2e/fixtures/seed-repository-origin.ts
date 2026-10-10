@@ -21,6 +21,9 @@ export function restoreSeedRepositoryOrigin(
     });
   }
   if (options.refreshTrackingRefs !== false) {
+    execFileSync("git", ["-C", seedData.repositoryPath, "worktree", "prune", "--expire", "now"], {
+      stdio: "pipe",
+    });
     execFileSync("git", ["-C", seedData.repositoryPath, "fetch", "--no-tags", "origin"], {
       stdio: "pipe",
     });

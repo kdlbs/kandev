@@ -16,6 +16,7 @@ test.describe("Queued session ownership", () => {
     apiClient,
     backend,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(240_000);
     const releaseCeiling = await backend.useEnv({ KANDEV_MAX_CONCURRENT_SESSIONS: "1" });
@@ -44,6 +45,12 @@ test.describe("Queued session ownership", () => {
       await expect(
         sessionPage.sidebarTaskItem(scenario.taskTitle).getByTestId("sidebar-task-launch-queue"),
       ).toBeVisible();
+
+      if (prCapture.capturing) {
+        await prCapture.screenshot("queued-session-status-desktop", {
+          caption: "The queued destination stays visible above the desktop conversation.",
+        });
+      }
 
       await sessionPage.sessionTabBySessionId(scenario.sourceSessionId).click();
       await expect(queueStatus).toBeVisible();

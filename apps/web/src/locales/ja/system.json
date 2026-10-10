@@ -130,6 +130,7 @@
   "featureToggleUnavailableGeneric": "このインストールでは、今はこの機能を有効化できない。",
   "featureToggleUnavailablePlatform": "このOSでは、この機能はサポートされていない。",
   "featureToggleUseDefault": "デフォルトを使う",
+  "browserDemoOpen": "ブラウザデモを開く",
   "healthAllPass": "すべてのシステムチェックが通過。",
   "healthHealthy": "正常",
   "healthIssue": "問題",

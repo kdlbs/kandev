@@ -6,29 +6,26 @@ export async function holdCancellationSettlement(page: Page) {
   const releases = new Set<() => void>();
   await page.routeWebSocket("**/ws", (client) => {
     const server = client.connectToServer();
-    let held = false;
     const frames: Array<string | Buffer> = [];
     releases.add(() => {
-      held = false;
       for (const frame of frames.splice(0)) client.send(frame);
     });
     server.onMessage((message) => {
-      if (held) {
-        frames.push(message);
-        return;
-      }
       const frame = JSON.parse(message.toString()) as {
         action?: string;
         payload?: { session_id?: string; cancellation_pending?: boolean };
       };
-      client.send(message);
-      if (
+      const pendingNotification =
         frame.action === "session.cancellation_changed" &&
         frame.payload?.session_id === sessionId &&
-        frame.payload.cancellation_pending === true
-      ) {
-        held = true;
+        frame.payload.cancellation_pending === true;
+      // Independent event streams can deliver settlement before pending.
+      // Freeze at the action boundary so both arrival orders remain observable.
+      if (sessionId && !pendingNotification) {
+        frames.push(message);
+        return;
       }
+      client.send(message);
     });
   });
   return {

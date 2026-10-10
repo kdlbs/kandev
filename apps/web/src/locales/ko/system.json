@@ -130,6 +130,7 @@
   "featureToggleUnavailableGeneric": "이 설치에서는 지금 이 기능을 활성화할 수 없습니다.",
   "featureToggleUnavailablePlatform": "이 운영 체제에서는 이 기능이 지원되지 않습니다.",
   "featureToggleUseDefault": "기본값 사용",
+  "browserDemoOpen": "브라우저 데모 열기",
   "healthAllPass": "모든 시스템 검사를 통과했습니다.",
   "healthHealthy": "정상",
   "healthIssue": "문제",

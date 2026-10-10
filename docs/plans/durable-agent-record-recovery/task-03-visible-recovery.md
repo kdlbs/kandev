@@ -292,3 +292,28 @@ Follow-up verification passed:
   followed by a new instruction, and durable reattachment.
 
 Remote checks remain pending for the next pushed head.
+
+### Relocation fixture follow-up
+
+Remote CI exposed desktop and phone relocation tests opening confirmation on the
+temporary Stop recovery view before the saved bootstrap error reached the browser.
+The saved error replaces that view, correctly invalidating its unsubmitted
+confirmation under the existing action-ownership contract. The phone failure
+reproduced without retries; a browser trace and recovery-frame capture confirmed
+the saved-error projection arriving after the temporary controls appeared.
+
+Both tests now wait for the authoritative recovery card before opening relocation
+confirmation. They retain the runtime inventory, dirty-file preservation, staging,
+conversation identity, and touch-target assertions. Both focused browser checks
+passed on their first attempts with retries disabled, and focused ESLint passed.
+Product behavior and the published screenshots are unchanged. Remote checks
+remain pending for the next pushed head.
+
+Main advanced again during remote verification. Its browser demo and shared
+Quick Chat cancellation fixture changes integrated without conflicts. The merged
+tree passed 82 frontend tests in five files, web typecheck, focused ESLint,
+documentation/specification validators, four rebuilt desktop browser checks,
+and five phone browser checks. Every browser check passed on its first attempt.
+The nine checks cover cancellation followed by new admission, native Resume,
+durable reattachment, and dirty-worktree relocation on both viewports. Remote
+checks remain pending for the next pushed head.

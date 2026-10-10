@@ -129,6 +129,7 @@
   "featureToggleUnavailableGeneric": "Esta funcionalidade não pode ser ativada nesta instalação neste momento.",
   "featureToggleUnavailablePlatform": "Esta funcionalidade não é suportada neste sistema operativo.",
   "featureToggleUseDefault": "Usar a pré-definição",
+  "browserDemoOpen": "Abrir demonstração do navegador",
   "healthAllPass": "Todas as verificações do sistema passam.",
   "healthHealthy": "Saudável",
   "healthIssue": "Problema",
