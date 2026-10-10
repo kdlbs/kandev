@@ -262,3 +262,22 @@ could not execute because its dependencies were absent from the isolated cache;
 fresh hosted backend execution is required.
 
 Additional file: `apps/backend/internal/mcp/handlers/handlers_ask_retry_test.go`.
+
+
+## PR #3680 CI fixup (2026-10-10)
+
+The hosted Postgres 16 job exposed two test-fixture defects in the ordering race suite.
+Additional pool connections used `public` instead of the isolated test schema.
+The membership race cases also shared one database and repeated unique agent names.
+
+The shared test helper now configures the schema in the connection DSN for every pool connection.
+Each membership scenario opens its own isolated repository.
+A live two-connection regression failed before the repair because the second connection used `public`.
+Existing membership and promotion races also failed before the repair.
+
+With a task-owned Postgres 16 instance, `cd apps/backend && go test -trimpath -race -timeout 10m ./internal/testutil ./internal/agent/settings/store -count=1` passed.
+The live pool regression also passed with a PostgreSQL URL DSN containing an existing `search_path`.
+Unit coverage verifies both DSN formats and preserves database credentials.
+Focused shared persistence checks passed:
+`go test -trimpath -race -timeout 10m ./internal/persistence/storeconformance ./internal/backendapp ./internal/db -run 'TestStoreCatalogCompleteness|TestStoreConformance|TestPostgresBootInitializesRepositories|Test.*Postgres' -count=1`.
+Changed-scope lint for `./internal/testutil ./internal/agent/settings/store` reported zero issues against main `02ff0578357040b0546ea17cd9a00dff9ca9ee3b`.
