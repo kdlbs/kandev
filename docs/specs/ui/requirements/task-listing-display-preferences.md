@@ -70,6 +70,21 @@ detail settings.
   a view change, the chosen view shall remain usable for the current document;
   reopening the app shall use the available saved preference or fallback.
 
+- **AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-001.13:** Desktop, tablet, and phone
+  List search shall display typed text immediately and admit the latest query
+  after one trailing 300 ms inactivity window, without a second serial debounce.
+  Each new edit shall replace queued input. Network and rendering time are
+  additional costs, rather than part of this debounce duration.
+- **AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-001.14:** Activating the List search clear action shall
+  clear the displayed text, cancel queued input, and admit the empty query
+  without another debounce wait. Hiding phone search shall clear its query and
+  cancel its queued input; cancelled text shall not reappear or issue a request.
+- **AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-001.15:** Search shall retain active
+  workflow, repository, archive, sort, and page-size choices and reset to the
+  first result page when its effective query changes. Once a newer request
+  starts, an older reply shall not replace its rows, total, loading state, or
+  error feedback; replies from a previous workspace shall remain excluded.
+
 ### REQ-UI-TASK-LISTING-DISPLAY-PREFERENCES-002: Startup compatibility
 
 **Intent:** Keep existing startup choices and workspace-local recent-task
@@ -203,3 +218,9 @@ Existing requirements 001 to 003 and their completed plans retain their scope.
 - Swipe-indicator timing or mobile topbar normalization from the parent task.
 - Parent worktree changes, parent demo data, or launching other task sessions.
 - Removing the legacy `kanban_view_mode` API field in this change.
+
+## Implementation plans
+
+- [Single List search debounce](../../../plans/task-search-debounce/plan.md)
+  owns the clarification and delivery of criteria 001.13 through 001.15.
+  Existing completed preference packages retain their original scope.

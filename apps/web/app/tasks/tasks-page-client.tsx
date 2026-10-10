@@ -11,7 +11,6 @@ import { useToast } from "@/components/toast-provider";
 import { t } from "@/lib/i18n";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
-import { useDebounce } from "@/hooks/use-debounce";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTaskListingView } from "@/hooks/use-task-listing-view";
 import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
@@ -52,7 +51,7 @@ type UseTaskOperationsParams = {
   activeWorkflowId: string | null;
   selectedRepositoryId: string | null;
   pagination: PaginationState;
-  debouncedQuery: string;
+  searchQuery: string;
   showArchived: boolean;
   tasksListSort: TasksListSort;
   setTasks: (tasks: Task[]) => void;
@@ -88,7 +87,7 @@ function useTaskOperations({
   activeWorkflowId,
   selectedRepositoryId,
   pagination,
-  debouncedQuery,
+  searchQuery,
   showArchived,
   tasksListSort,
   setTasks,
@@ -108,7 +107,7 @@ function useTaskOperations({
         const result = await listTasksByWorkspace(activeWorkspaceId, {
           page: pagination.pageIndex + 1,
           pageSize: pagination.pageSize,
-          query: debouncedQuery,
+          query: searchQuery,
           includeArchived: showArchived,
           workflowId: activeWorkflowId,
           repositoryId: selectedRepositoryId,
@@ -138,7 +137,7 @@ function useTaskOperations({
       selectedRepositoryId,
       pagination.pageIndex,
       pagination.pageSize,
-      debouncedQuery,
+      searchQuery,
       showArchived,
       tasksListSort,
       beginRequest,
@@ -269,7 +268,7 @@ function useTasksPageViewState({
 }
 
 function useTasksPageEffects({
-  debouncedQuery,
+  searchQuery,
   setPagination,
   activeWorkspaceId,
   fetchTasks,
@@ -279,7 +278,7 @@ function useTasksPageEffects({
   selectedRepositoryId,
   initialDataLoaded = false,
 }: {
-  debouncedQuery: string;
+  searchQuery: string;
   setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
   activeWorkspaceId: string | null;
   fetchTasks: () => void;
@@ -293,7 +292,7 @@ function useTasksPageEffects({
 
   useEffect(() => {
     void Promise.resolve().then(() => setPagination((prev) => ({ ...prev, pageIndex: 0 })));
-  }, [debouncedQuery, activeWorkflowId, selectedRepositoryId, setPagination]);
+  }, [searchQuery, activeWorkflowId, selectedRepositoryId, setPagination]);
 
   useEffect(() => {
     if (
@@ -301,7 +300,7 @@ function useTasksPageEffects({
         hasInitialData: initialDataLoaded,
         alreadySkipped: skippedInitialFetchRef.current,
         pageIndex: pagination.pageIndex,
-        debouncedQuery,
+        debouncedQuery: searchQuery,
         showArchived,
       })
     ) {
@@ -313,7 +312,7 @@ function useTasksPageEffects({
     activeWorkspaceId,
     pagination.pageIndex,
     pagination.pageSize,
-    debouncedQuery,
+    searchQuery,
     showArchived,
     fetchTasks,
     initialDataLoaded,
@@ -359,20 +358,20 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     initialGroup: props.initialGroup,
     storeRepositories,
   });
-  const debouncedQuery = useDebounce(viewState.searchQuery, 300);
+  const { searchQuery } = viewState;
   const ops = useTaskOperations({
     activeWorkspaceId,
     activeWorkflowId,
     selectedRepositoryId,
     pagination: viewState.pagination,
-    debouncedQuery,
+    searchQuery,
     showArchived: viewState.showArchived,
     tasksListSort: viewState.tasksListSort,
     setTasks: viewState.setTasks,
     setTotal: viewState.setTotal,
   });
   useTasksPageEffects({
-    debouncedQuery,
+    searchQuery,
     setPagination: viewState.setPagination,
     activeWorkspaceId,
     fetchTasks: ops.fetchTasks,
@@ -387,7 +386,7 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     pagination: viewState.pagination,
     router,
   });
-  return { ...viewState, ...ops, ...computed, activeWorkspaceId, activeWorkflowId, debouncedQuery };
+  return { ...viewState, ...ops, ...computed, activeWorkspaceId, activeWorkflowId, searchQuery };
 }
 
 function useTasksListPreferenceSync({
@@ -560,7 +559,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
         currentPage: "tasks",
         searchQuery: s.searchQuery,
         onSearchChange: s.setSearchQuery,
-        isSearchLoading: s.isLoading && !!s.debouncedQuery,
+        isSearchLoading: s.isLoading && !!s.searchQuery,
         tasksListOptions: {
           showArchived: s.showArchived,
           onShowArchivedChange: s.setShowArchived,
