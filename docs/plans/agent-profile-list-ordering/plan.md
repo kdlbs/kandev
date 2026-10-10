@@ -336,3 +336,14 @@ for the fixture correction and physical-connection regression in #4399. The
 existing profile-order requirements and design remain authoritative; no
 production behavior changes are part of that correction. Historical reports
 above remain historical, and hosted corrective-head results are required.
+
+
+## Corrective follow-up PR #4399
+
+The original PR merged while this session's hosted gates were pending. Its final
+head failed PostgreSQL race fixtures, frontend catalogue tests and selector E2E.
+Task 01 repairs per-connection schema selection and per-subcase isolation. Task
+02 repairs accepted new-owner publication after independent updates, guards
+observed owner removal during save, reconciles Settings-only test expectations
+and drives Quick Chat dismissal through its actual Escape interaction. Both
+work orders remain in progress until the corrective head passes hosted checks.

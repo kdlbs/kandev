@@ -212,8 +212,10 @@ the request and do not flatten settings rows into picker options.
 All remaining options retain their values and relative order, including options
 whose owners are absent, and options newer than the settings representation of
 the same profile. Preserve current agent/profile metadata in the catalogue.
-Preserve slice metadata, including `agentProfiles.version`: the existing setters
-replace only items and do not bump it. No global atomic-publication or revision
+Preserve slice metadata other than the profile snapshot epoch. The setters
+replace only items; accepted deletion advances `agentProfiles.version` so an
+in-flight list read cannot reintroduce the deleted profile. This epoch fence is
+owned by [Settings profile ordering](profile-list-ordering.md). No global atomic-publication or revision
 contract is added. Reading current state for each accepted response preserves
 the existing overlapping-delete behavior in either completion order.
 

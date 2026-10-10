@@ -27,7 +27,7 @@ func TestPostgresIsolatedSchemaSurvivesPoolExpansion(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer connection.Close()
+		defer func() { _ = connection.Close() }()
 		var actual string
 		var pid int
 		if err := connection.QueryRowContext(ctx, "SELECT current_schema(), pg_backend_pid()").Scan(&actual, &pid); err != nil {

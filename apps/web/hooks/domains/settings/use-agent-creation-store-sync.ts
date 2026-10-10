@@ -1,3 +1,4 @@
+import { useEffect, useMemo } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { insertFirstInAgentGroup } from "@/lib/settings/agent-profile-order";
 import {
@@ -10,6 +11,7 @@ import type { Agent, AgentProfile } from "@/lib/types/http";
 
 export type AgentCreationPublication = {
   profiles: AgentProfile[];
+  ownerCreated?: boolean;
   agentPatch?: Pick<Agent, "workspace_id" | "mcp_config_path">;
 };
 
@@ -43,6 +45,18 @@ function publishCreatedProfiles(current: Agent, publication: AgentCreationPublic
 
 export function useAgentCreationStoreSync() {
   const storeApi = useAppStoreApi();
+  const removedOwners = useMemo(() => new Set<string>(), [storeApi]);
+  useEffect(
+    () =>
+      storeApi.subscribe((state, previous) => {
+        if (state.settingsAgents.items === previous.settingsAgents.items) return;
+        const currentIds = new Set(state.settingsAgents.items.map((agent) => agent.id));
+        for (const agent of previous.settingsAgents.items) {
+          if (!currentIds.has(agent.id)) removedOwners.add(agent.id);
+        }
+      }),
+    [storeApi, removedOwners],
+  );
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
 
@@ -55,7 +69,7 @@ export function useAgentCreationStoreSync() {
     if (!creation) return syncSavedAgentToStore(storeApi, agent, profileVersionAtSaveStart);
     const agents = storeApi.getState().settingsAgents.items;
     const current = agents.find((item) => item.id === agent.id);
-    if (creation && !current) return;
+    if (!current && (!creation.ownerCreated || removedOwners.has(agent.id))) return;
     const target = creation && current ? publishCreatedProfiles(current, creation) : agent;
     const next = current
       ? agents.map((item) => (item.id === agent.id ? target : item))

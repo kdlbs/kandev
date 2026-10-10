@@ -329,7 +329,7 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
     await saveMcpForCreatedProfiles(draftAgent, created, callbacks.onToastError);
   } catch (error) {
     const reconciled = preservePendingMcpDrafts(draftAgent, created);
-    callbacks.upsertAgent(reconciled);
+    callbacks.upsertAgent(reconciled, { profiles: reconciled.profiles, ownerCreated: true });
     const savedDraft = callbacks.ensureProfiles(
       callbacks.cloneAgent(reconciled),
       callbacks.resolveDisplayName(reconciled.name),
@@ -349,7 +349,7 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
       mcp_config_path: draftAgent.mcp_config_path ?? "",
     });
   }
-  callbacks.upsertAgent(created);
+  callbacks.upsertAgent(created, { profiles: created.profiles, ownerCreated: true });
   const savedDraft = callbacks.ensureProfiles(
     callbacks.cloneAgent(created),
     callbacks.resolveDisplayName(created.name),
