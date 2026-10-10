@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
+	workflowengine "github.com/kandev/kandev/internal/workflow/engine"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -290,10 +292,6 @@ func (s *DashboardService) recordTaskDecision(
 	if !ok {
 		return nil, fmt.Errorf("%s", decisionStoreNotWiredErr)
 	}
-	role, err := s.resolveDeciderRole(ctx, in.callerType, in.callerID, in.taskID)
-	if err != nil {
-		return nil, err
-	}
 	stepID, err := s.repo.GetTaskWorkflowStepID(ctx, in.taskID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve task workflow_step_id: %w", err)
@@ -301,7 +299,10 @@ func (s *DashboardService) recordTaskDecision(
 	if stepID == "" {
 		return nil, fmt.Errorf("task %s has no workflow step bound", in.taskID)
 	}
-	participantID := s.resolveParticipantID(ctx, stepID, in.taskID, role, in.callerType, in.callerID)
+	role, participantID, err := s.resolveTaskDecisionSeat(ctx, stepID, in)
+	if err != nil {
+		return nil, err
+	}
 
 	result, err := dispatcher.RecordDecision(ctx, officeenginedispatcher.RecordDecisionInput{
 		TaskID:        in.taskID,
@@ -339,6 +340,37 @@ func (s *DashboardService) recordTaskDecision(
 	s.logDecisionActivity(ctx, rec)
 	s.runReactivityForDecision(ctx, rec)
 	return rec, nil
+}
+
+func (s *DashboardService) resolveTaskDecisionSeat(
+	ctx context.Context, stepID string, in decisionInput,
+) (role, participantID string, err error) {
+	if in.callerType == models.DeciderTypeAgent {
+		return s.resolveAgentDecisionSeat(ctx, stepID, in.taskID, in.callerID)
+	}
+	role, err = s.resolveDeciderRole(ctx, in.callerType, in.callerID, in.taskID)
+	if err != nil {
+		return "", "", err
+	}
+	participantID = s.resolveParticipantID(ctx, stepID, in.taskID, role, in.callerType, in.callerID)
+	return role, participantID, nil
+}
+
+func (s *DashboardService) resolveAgentDecisionSeat(
+	ctx context.Context, stepID, taskID, agentID string,
+) (role, participantID string, err error) {
+	roleDispatcher, ok := s.engineDispatcher.(roleResolvingDispatcher)
+	if !ok {
+		return "", "", fmt.Errorf("%s", decisionStoreNotWiredErr)
+	}
+	role, participantID, err = roleDispatcher.ResolveParticipantRole(ctx, taskID, stepID, agentID)
+	if errors.Is(err, workflowengine.ErrParticipantNotFound) {
+		return "", "", shared.ErrForbidden
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("resolve participant role: %w", err)
+	}
+	return role, participantID, nil
 }
 
 // resolveParticipantID looks up the workflow_step_participants row for

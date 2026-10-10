@@ -504,9 +504,11 @@ func (m *Manager) retryManagedRuntimeStartupWithProgress(
 			initErr,
 		)
 	}
-	recoveryCtx, cancelRecovery := managedRuntimeStartupRecoveryContext(ctx)
-	defer cancelRecovery()
-	retryGeneration, ok := execution.beginStartupRecovery()
+	recoveryParentCtx, cancelRecovery := context.WithCancelCause(ctx)
+	defer cancelRecovery(context.Canceled)
+	recoveryCtx, cancelRecoveryTimeout := managedRuntimeStartupRecoveryContext(recoveryParentCtx)
+	defer cancelRecoveryTimeout()
+	retryGeneration, ok := execution.beginStartupRecoveryWithCancel(cancelRecovery)
 	if !ok {
 		return false, initErr
 	}

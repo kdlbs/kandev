@@ -41,6 +41,14 @@ func TestStartupAttemptGenerationRejectsStaleEventsAfterRecovery(t *testing.T) {
 	execution.finishStartupRecovery()
 }
 
+func TestStartupRecoveryCannotBeginAfterExecutionStop(t *testing.T) {
+	execution := &AgentExecution{}
+	execution.cancelStartupRecovery()
+	if _, ok := execution.beginStartupRecovery(); ok {
+		t.Fatal("stopped execution started managed runtime recovery")
+	}
+}
+
 func TestOnlineManagedRuntimeArgsPreserveTrustedLaunchIdentity(t *testing.T) {
 	spec := agents.ManagedNPMRuntimeSpec{
 		Package: "@scope/managed-acp",
@@ -280,6 +288,47 @@ func TestManagedStartupRecoveryCancellationDuringCleanupPreventsReplacement(t *t
 	}
 	if got := mock.getHTTPActions(); !slices.Equal(got, []string{"stop"}) {
 		t.Fatalf("HTTP actions = %#v, want cleanup only", got)
+	}
+}
+
+func TestManagedStartupRecoveryCancellationByStopPreventsReplacement(t *testing.T) {
+	mgr, execution, mock, agentConfig := newManagedRuntimeRetryFixture(t, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	delaySelected := make(chan struct{})
+	mgr.startupRecoveryDelay = func() time.Duration {
+		close(delaySelected)
+		return time.Hour
+	}
+	type result struct {
+		attempted bool
+		err       error
+	}
+	done := make(chan result, 1)
+	go func() {
+		attempted, err := mgr.retryManagedRuntimeStartup(
+			ctx, execution, managedACPInitializeFailure("ACP initialize failed"), agentConfig, "", nil, nil,
+		)
+		done <- result{attempted: attempted, err: err}
+	}()
+	select {
+	case <-delaySelected:
+	case <-time.After(time.Second):
+		t.Fatal("recovery did not reach its backoff")
+	}
+	if err := mgr.StopAgentWithReason(context.Background(), execution.ID, "user stop", true); err != nil {
+		t.Fatalf("stop execution: %v", err)
+	}
+	select {
+	case got := <-done:
+		if got.attempted || !errors.Is(got.err, context.Canceled) {
+			t.Fatalf("recovery result = (%v, %v), want cancellation before replacement", got.attempted, got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("startup recovery did not stop after the execution was stopped")
+	}
+	if got := mock.getHTTPActions(); !slices.Equal(got, []string{"stop"}) {
+		t.Fatalf("HTTP actions = %#v, want confirmed stop only", got)
 	}
 }
 

@@ -8,6 +8,7 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 import { routeMainWebSocketWithPreviewFeedbackCreateFailure } from "../../helpers/ws-drop";
 import { SessionPage } from "../../pages/session-page";
+import { waitForScreenshotCaptureMode } from "../preview/preview-feedback-helpers";
 
 const SVG_ASSET =
   '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><rect width="24" height="24" fill="#60a5fa"/></svg>';
@@ -238,6 +239,7 @@ test.describe("Mobile HTML preview", () => {
     await expect(elementDraft).toBeHidden({ timeout: 15_000 });
 
     await drawer.getByRole("button", { name: "Select screenshot region", exact: true }).tap();
+    await waitForScreenshotCaptureMode(frame);
     const screenshotTarget = frame.locator("#capture-card");
     const region = await screenshotTarget.evaluate((element) => {
       const rect = element.getBoundingClientRect();

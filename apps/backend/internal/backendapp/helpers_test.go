@@ -24,6 +24,7 @@ import (
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/quickterminal"
+	quickterminalmodels "github.com/kandev/kandev/internal/quickterminal/models"
 	quickterminalrepo "github.com/kandev/kandev/internal/quickterminal/repository"
 	systemsvc "github.com/kandev/kandev/internal/system"
 	systeminfo "github.com/kandev/kandev/internal/system/info"
@@ -1624,8 +1625,14 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 		id: "task-workflow", title: "Workflow Ephemeral", updatedAt: base, sessionUpdatedAt: base,
 		agentProfileID: "agent-workflow", workflowID: "wf-qc",
 	})
-	if _, err := quickTerminalSvc.Create(ctx, "ws-qc", "11111111-1111-4111-8111-111111111111"); err != nil {
+	terminalTab, err := quickTerminalSvc.Create(ctx, "ws-qc", "11111111-1111-4111-8111-111111111111")
+	if err != nil {
 		t.Fatalf("create quick terminal descriptor: %v", err)
+	}
+	if err := quickTerminalRepo.UpdateLifecycle(
+		ctx, terminalTab.UserID, terminalTab.TabID, "missing-session", quickterminalmodels.StatusRunning, nil, "",
+	); err != nil {
+		t.Fatalf("seed stale quick terminal session: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/?workspaceId=ws-qc", nil)

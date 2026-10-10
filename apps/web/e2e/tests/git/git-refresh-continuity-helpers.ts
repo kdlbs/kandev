@@ -65,7 +65,8 @@ export async function scrollDiffIntoReadingPosition(
             `[data-review-file-key="${encodeURIComponent(path)}"]`,
           );
           if (!section) throw new Error(`Missing diff section for ${path}`);
-          root.scrollTop += section.getBoundingClientRect().top - root.getBoundingClientRect().top;
+          const rootRect = root.getBoundingClientRect();
+          root.scrollTop += section.getBoundingClientRect().top - rootRect.top;
         }, filePath);
         return visibleDiffAnchor(page, renderer, filePath);
       },
