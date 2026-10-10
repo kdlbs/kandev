@@ -104,6 +104,57 @@ func TestKubernetesRecoveryDoesNotRecreateMissingPod(t *testing.T) {
 	require.Empty(t, fixture.resources.deletedPods)
 }
 
+func TestKubernetesRecoveryRestoresPersistedExecutorIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		rowID   func(string) string
+		wantErr bool
+	}{
+		{name: "matching row identity", rowID: func(id string) string { return id }},
+		{name: "missing row identity", rowID: func(string) string { return "" }, wantErr: true},
+		{name: "mismatched row identity", rowID: func(string) string { return "another-executor" }, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newKubernetesRecoveryFixture(t, false)
+			persistedMetadata := FilterPersistentMetadata(fixture.row.Metadata)
+			require.NotNil(t, persistedMetadata)
+			require.NotContains(t, persistedMetadata, models.MetaKeyExecutorID)
+			originalMetadata := cloneKubernetesMetadata(persistedMetadata)
+			executorID := getMetadataString(persistedMetadata, MetadataKeyKubernetesResourceExecutorID)
+			fixture.row.Metadata = persistedMetadata
+			fixture.row.ExecutorID = tc.rowID(executorID)
+
+			req, ok := kubernetesRecoveryRequest(fixture.row)
+			require.True(t, ok)
+			require.Equal(t, fixture.row.ExecutorID, getMetadataString(req.Metadata, models.MetaKeyExecutorID))
+			require.Equal(t, originalMetadata, persistedMetadata, "request construction must not mutate persisted metadata")
+
+			_, _, err := kubernetesRecordedInventory(req, true)
+			if tc.wantErr {
+				require.ErrorContains(t, err, "recorded resource executor identity does not match request")
+			} else {
+				require.NoError(t, err)
+				instances, outcomes := recoverKubernetesCandidates(t, fixture.executor, context.Background(), fixture.row)
+				require.Len(t, instances, 1)
+				require.Empty(t, outcomes)
+				instances[0].DiscardRecovery()
+			}
+
+			if tc.wantErr {
+				instances, outcomes := recoverKubernetesCandidates(t, fixture.executor, context.Background(), fixture.row)
+				require.Empty(t, instances)
+				require.Equal(t, RecoveryOutcomeUnknown, outcomes[fixture.row.SessionID])
+				require.False(t, fixture.resources.getPodWasRequested(
+					"kandev-agents/"+getMetadataString(persistedMetadata, MetadataKeyKubernetesPodName),
+				), "invalid row identity must fail before resource access")
+				require.Empty(t, fixture.forwards.remotePorts())
+				require.Zero(t, fixture.servers.totalCalls())
+			}
+			require.Equal(t, originalMetadata, persistedMetadata, "recovery must not mutate the stored map")
+		})
+	}
+}
+
 func TestKubernetesRecoveryRejectsReplacementPodUIDOrOwnership(t *testing.T) {
 	for _, mutate := range []struct {
 		name string
@@ -278,7 +329,8 @@ func newKubernetesRecoveryFixture(t *testing.T, managedPVC bool) *kubernetesReco
 	initialExecs.requests = nil
 	initialExecs.mu.Unlock()
 	fixture.row = &models.ExecutorRunning{
-		ID: "inventory-row", AgentExecutionID: created.InstanceID, SessionID: created.SessionID, TaskID: created.TaskID,
+		ID: "inventory-row", AgentExecutionID: created.InstanceID, ExecutorID: getMetadataString(persistedMetadata, MetadataKeyKubernetesResourceExecutorID),
+		SessionID: created.SessionID, TaskID: created.TaskID,
 		Runtime: agentruntime.RuntimeKubernetes, TransientAuthToken: created.AuthToken,
 		TransientBootstrapNonce: created.BootstrapNonce,
 		Metadata:                persistedMetadata,

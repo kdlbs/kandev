@@ -90,11 +90,13 @@ Human approval or merge queue requirements remain separate from green CI.
 
 ## Results
 
-The latest local source is `3f35f29d377fd539945b061435c59baf605039ad`, rebased onto `main` at `3fb026365239bbc893fa4a5272d926640c7ef1f9`. The remote PR branch still points to `78065a90aa8f25aaaed4486225ee2b689b636d53`; this rebased source has not been pushed and has no current-head GitHub checks. The only rebase conflict was `lifecycle/manager.go`; its resolution preserves main's passthrough MCP ownership maps and the PR's remote-recovery and stop-context fields. The rebase range-diff confirmed all seven commits replayed, with only that constructor-field union changed.
+At the pre-push snapshot on 2026-10-10, the candidate was based on `main` at `3fb026365239bbc893fa4a5272d926640c7ef1f9`, with baseline `084901d76b2c0a7e5300230e9b5e11fb15e73e78` and reviewed changes in the worktree. The remote PR then pointed to `78065a90aa8f25aaaed4486225ee2b689b636d53`; those checks are historical and apply only to that head. A fresh pre-push snapshot confirmed that `main` was at `3fb026365239bbc893fa4a5272d926640c7ef1f9`, the PR was open and not queued, and the old head had 44 passing, 11 skipped, 1 neutral, 14 failing, and 0 pending checks with no unresolved review threads. The rebase's only source conflict was `lifecycle/manager.go`; its resolution preserves main's passthrough MCP ownership maps and the PR's remote-recovery and stop-context fields.
 
-Post-rebase local frontend checks passed: 11 affected recovery/service/store test files passed 179 tests, web TypeScript checking passed, and ESLint passed for all changed TypeScript files with zero warnings. The trusted documentation evaluator from base `3fb026365239bbc893fa4a5272d926640c7ef1f9` evaluated the actual 270-file local PR diff as `covered`, with nine work orders and 14 accepted references. Documentation catalog validation reports 371 decisions and 1,522 specifications; full specification lint and `git diff --check` pass.
+Local frontend recovery checks passed: 11 affected recovery/service/store test files passed 179 tests, web TypeScript checking passed, and ESLint passed for changed TypeScript files with zero warnings. Fresh desktop and phone read-only recovery selections passed. The focused frontend Quick Chat and Auggie recovery selections also passed. The trusted documentation evaluator reported `covered` for the actual local PR paths on base `3fb026365239bbc893fa4a5272d926640c7ef1f9`; catalog validation and full specification lint had passed before the latest result synchronization. These local gates do not change the old head's hosted result.
 
-The post-rebase rejected-replay regression exposed a real cleanup bug: failed replay deleted `.pi/mcp.json` while the exact remote owner remained live. Cleanup now removes tracking only for the exact still-pending candidate and cancels reconciliation only for that candidate, preserving the persisted remote MCP claims and file for a same-record retry. `TestRemoteRecoveryRetriesAfterPartialReplayTimeout` passes with race instrumentation, all `TestPiProjectMCP*` cleanup controls pass with race instrumentation, and full lifecycle lint reports zero issues. The full four-package lifecycle/orchestrator/executor/backend-app race gate and managed desktop, phone, and Kind checks remain pending after this fix. Task 06 remains in progress; no current-head CI result is claimed.
+The post-rebase rejected-replay regression exposed a cleanup bug: failed replay deleted `.pi/mcp.json` while the exact remote owner remained live. Cleanup now removes tracking only for the exact still-pending candidate and cancels reconciliation only for that candidate, preserving persisted remote MCP claims and the file for a same-record retry. `TestRemoteRecoveryRetriesAfterPartialReplayTimeout` and all `TestPiProjectMCP*` cleanup controls pass with race instrumentation, and full lifecycle lint reports zero issues. The Kubernetes inventory regression reproduced the missing trusted executor identity, then passed after request construction restored `executor_id` from the row's `ExecutorID` without changing the existing validator. The focused regression and `^TestKubernetesRecovery` race selection passed, as did lifecycle lint. A fresh managed HOST run of `tests/kubernetes/kubernetes-task-pod.spec.ts`, selecting `sessions share one task pod through stop and backend restart` with retries disabled, passed 1 test in 2.8 minutes; the test itself took 14 seconds. Its backend binary SHA-256 was `98f9cf51178d9e94fd329ca63a1e727a1d7b97c0853ea24a90d3c4306d5df0f9`.
+
+The four-package race gate passed on the earlier snapshot before the task-service handoff correction: lifecycle 107.979 seconds, orchestrator 176.826 seconds, executor 11.114 seconds, and backendapp 101.154 seconds. A later review found that task maintenance could read a pending remote owner immediately before it became live, then misclassify the session as abandoned. The task-service adapters and periodic reconcilers now order pending-owner checks before live-session reads and recheck liveness before writing or retrying settlement. Eleven focused handoff regressions cover the active-session sweep, orphan pre-write check, and partial-settlement retry; normal and race runs passed in 0.418 and 1.565 seconds, and scoped lint reported zero issues (`/tmp/pr4380-pending-session-handoff-green.log`, `/tmp/pr4380-pending-session-handoff-race.log`, `/tmp/pr4380-pending-session-handoff-lint.log`). The final full affected-package race gate passed task/service in 86.616 seconds and backendapp in 100.561 seconds; its log is `/tmp/pr4380-final-task-service-backendapp-race.log`. Catalog validation reported 371 decisions and 1,522 specifications, and full specification lint passed. After push, hosted CI and reviews will be monitored by the delegated PR-fixup owner. Task 06 remains in progress until those checks pass; no current-head GitHub result is claimed here.
 
 ### Historical terminal CI result for pushed head `78065a90aa8f25aaaed4486225ee2b689b636d53`
 
@@ -122,15 +124,19 @@ Containers Shards 4/6, 5/6, and 6/6 (`38066670301/114256734487`, `/114256734536`
 documentation coverage status (`38066667357/114255591383`). The two aggregate checks are not
 additional failing leaves. The documentation correction was committed locally as `d36222a8b3d00ee4d6c7d476c11742d25b5b94eb` after this snapshot and is included in the rebased local tree. Its earlier preflight used base `43f55a6aad38c7f53c4b7eb56682016639f74405`; the refreshed preflight on base `3fb026365239bbc893fa4a5272d926640c7ef1f9` is recorded above.
 
-The browser leaves currently classify as follows: Shards 2 and 6 timed out waiting for the read-only
-recovery notice; Shards 7 and 12 rejected Quick Chat `session.launch` with
+The browser leaves on the historical head failed as follows: Shards 2 and 6 timed out waiting for
+the read-only recovery notice; Shards 7 and 12 rejected Quick Chat `session.launch` with
 `unknown_prompt_outcome`; Shards 4 and 12 timed out waiting for the rejected Auggie provider load to
 settle before retry. Container Shard 5 timed out waiting for `Sibling survived restart` while the
-task pod remained Running and its PVC stayed Bound; artifact diagnostics contain no post-restart
-WS/API timeline. Container Shard 6 failed its next-test fixture check because prior SSH runtime rows
-remained after the dead-agentctl restart case. Container Shard 4 has a reproduced restart-then-delete
-cleanup failure with its remote process still live; the SSH owner is tracing the retained cleanup
-row. These leaf failures remain under investigation.
+task pod remained Running and its PVC stayed Bound. Container Shard 6 failed its next-test fixture
+check because prior SSH runtime rows remained after the dead-agentctl restart case. Container Shard 4
+failed restart-then-delete cleanup while its remote process remained live. These are historical
+failures, not the current hosted result. Local follow-up passed the corrected desktop/phone read-only
+recovery selections, Quick Chat and Auggie recovery selections, the SSH mock-agent restart/delete
+scenario, and the exact Kind task-pod restart case. The real OpenCode SSH case did not reach its test
+body because the fixture lacked `effective_version`, so that provider-backed path remains unverified
+locally. Focused PostgreSQL replacement/cancellation and backend-app recovery tests also pass locally.
+These scoped results do not establish hosted green CI for the candidate.
 
 The storage cancellation failure was reproduced with a real SQLite writer wait; the minimal fix
 returns the canceled context error when `BeginTxx` fails after cancellation, while preserving
@@ -148,7 +154,7 @@ These three focused executor regressions passed with race instrumentation, along
 `GOMAXPROCS=2 GOGC=50 GOCACHE=/tmp/kandev-task05-gocache go test -race -p=1 -trimpath ./internal/orchestrator/executor -run '^TestResumeSessionSynchronousStartFailure' -count=1`;
 the backend app command was
 `GOMAXPROCS=2 GOGC=50 GOCACHE=/tmp/kandev-task05-gocache go test -race -p=1 -trimpath ./internal/backendapp -run '^TestManagedGoCacheRecoveryFlows$' -count=1`.
-That terminal waiter and its leaf classifications apply only to the pushed head `78065a90aa8f25aaaed4486225ee2b689b636d53`. The current local head is `3f35f29d377fd539945b061435c59baf605039ad` on base `3fb026365239bbc893fa4a5272d926640c7ef1f9`; its remote checks and review state must be refreshed after the reviewed fixes are committed and pushed.
+That terminal waiter and its leaf classifications apply only to the pushed head `78065a90aa8f25aaaed4486225ee2b689b636d53`. At that snapshot, local work was at `3f35f29d377fd539945b061435c59baf605039ad` on base `3fb026365239bbc893fa4a5272d926640c7ef1f9`; later rebase and local fixes have superseded it. The candidate's remote checks and review state must be refreshed after the reviewed fixes are committed and pushed.
 
 ### Focused local recovery gates on the pre-rebase snapshot
 

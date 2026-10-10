@@ -176,13 +176,14 @@ func provideOrchestrator(
 	// Runtime-aware liveness lets durable cleanup treat a not-found stop for a
 	// confirmed-dead local runtime as already stopped instead of retrying forever.
 	taskSvc.SetRowLivenessProber(agentManagerClient)
-	// The orphan-session sweep preserves stale STARTING/RUNNING sessions when no
-	// live in-memory execution backs them, so the conversation can recover on
-	// task focus after a backend restart.
+	// The orphan-session sweep preserves stale sessions unless neither a live
+	// local execution nor an exact pending remote owner backs them, so a remote
+	// conversation remains available for authenticated recovery after restart.
 	taskSvc.SetExecutionLivenessChecker(agentManagerClient)
+	taskSvc.SetPendingRemoteRecoveryChecker(agentManagerClient.HasPendingRemoteRecovery)
 	// The session reconciliation sweep's active-task pass (stall detection and
-	// orphaned-session healing) verifies "no live execution" against the agent
-	// runtime's in-memory execution store through this registry.
+	// orphaned-session healing) checks local execution liveness through this
+	// registry and separately checks exact pending remote ownership above.
 	taskSvc.SetSessionExecutionRegistry(agentManagerClient)
 	taskSvc.SetContextWindowResetter(orchestratorSvc.ResetContextWindow)
 	taskSvc.SetGitArchiveCapture(orchestratorSvc)

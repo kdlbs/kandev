@@ -289,6 +289,7 @@ func kubernetesRecoveryRequest(record *models.ExecutorRunning) (*ExecutorCreateR
 		return nil, false
 	}
 	metadata := cloneKubernetesMetadata(record.Metadata)
+	metadata[models.MetaKeyExecutorID] = record.ExecutorID
 	return &ExecutorCreateRequest{
 		InstanceID: record.AgentExecutionID, TaskID: record.TaskID, SessionID: record.SessionID,
 		TaskEnvironmentID: getMetadataString(metadata, MetadataKeyKubernetesResourceEnvironmentID),

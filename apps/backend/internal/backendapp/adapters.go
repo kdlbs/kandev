@@ -1176,6 +1176,12 @@ func (a *lifecycleAdapter) HasLiveExecution(sessionID string) bool {
 	return a.mgr.HasLiveAgentExecution(sessionID)
 }
 
+// HasPendingRemoteRecovery reports whether the exact remote execution owner
+// still has retryable lifecycle recovery pending.
+func (a *lifecycleAdapter) HasPendingRemoteRecovery(sessionID, executionID string) bool {
+	return a.mgr.HasPendingRemoteRecovery(sessionID, executionID)
+}
+
 // GetGitLog retrieves the git log for a session from baseCommit to HEAD.
 // If targetBranch is provided, uses dynamic merge-base calculation for accurate filtering.
 func (a *lifecycleAdapter) GetGitLog(ctx context.Context, sessionID, baseCommit string, limit int, targetBranch string) (*client.GitLogResult, error) {

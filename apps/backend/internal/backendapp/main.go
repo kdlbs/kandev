@@ -800,9 +800,10 @@ func startAgentInfrastructure(
 	}
 	services.Task.SetWorkflowMovePreflight(orchestratorSvc)
 	orchestratorSvc.SetAgentctlBinaryPath(agentctlBinaryPath)
-	// The checker is populated by lifecycleMgr.Start below before the
-	// orchestrator's startup reconciliation runs.
+	// These queries distinguish successfully re-tracked executions from remote
+	// owners whose guarded retry is still pending during startup reconciliation.
 	orchestratorSvc.SetRetrackedSessionChecker(lifecycleMgr.WasSessionRetracked)
+	orchestratorSvc.SetPendingRemoteRecoveryChecker(lifecycleMgr.HasPendingRemoteRecovery)
 	orchestratorSvc.SetRouteActionHandler(dynamicRouteActionHandler(
 		repos.Task,
 		repos.AgentSettings,

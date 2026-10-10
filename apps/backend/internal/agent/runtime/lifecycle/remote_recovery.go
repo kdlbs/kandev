@@ -91,6 +91,24 @@ func (m *Manager) pendingRemoteRecoveryForSession(sessionID string) *remoteRecov
 	return m.remoteRecoveryPending[sessionID]
 }
 
+// HasPendingRemoteRecovery reports whether the current exact remote execution
+// remains behind its retryable recovery guard. A different execution for the
+// same session, an unguarded entry, and an unstoppable guard are not pending
+// retry candidates.
+func (m *Manager) HasPendingRemoteRecovery(sessionID, executionID string) bool {
+	if sessionID == "" || executionID == "" || m.recoveryGuard == nil {
+		return false
+	}
+	m.remoteRecoveryMu.Lock()
+	defer m.remoteRecoveryMu.Unlock()
+	entry := m.remoteRecoveryPending[sessionID]
+	if entry == nil || entry.record == nil || entry.record.SessionID != sessionID ||
+		entry.record.AgentExecutionID != executionID || !isRemoteRecoveryRuntime(entry.record.Runtime) {
+		return false
+	}
+	return errors.Is(m.recoveryGuard.CheckLaunchAllowed(sessionID), ErrSessionRecoveryGuarded)
+}
+
 func (m *Manager) remoteRecoveryForExecution(executionID string) *remoteRecoveryRetry {
 	if executionID == "" {
 		return nil

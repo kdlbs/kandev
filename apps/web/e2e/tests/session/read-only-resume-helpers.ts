@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type TestInfo } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
@@ -26,6 +26,15 @@ type LaunchOutcome = {
 
 type SessionLaunchObserver = {
   waitForIntent: (intent: string, timeoutMs?: number) => Promise<LaunchOutcome>;
+};
+
+type ReadOnlySessionStatus = {
+  state: string;
+  is_agent_running: boolean;
+  is_resumable: boolean;
+  needs_resume: boolean;
+  needs_workspace_restore: boolean;
+  acp_session_id?: string;
 };
 
 function parseGatewayFrame(payload: unknown): GatewayFrame | undefined {
@@ -133,6 +142,104 @@ function readPromptEvidence(tmpDir: string, sessionId: string) {
   });
 }
 
+async function attachReadOnlyRecoveryEvidence({
+  api,
+  page,
+  testInfo,
+  taskId,
+  sessionId,
+  originalAcpSessionId,
+  resumeOutcome,
+  restoreOutcome,
+  tmpDir,
+  expectedSubmissionCount,
+}: {
+  api: ApiClient;
+  page: Page;
+  testInfo: TestInfo;
+  taskId: string;
+  sessionId: string;
+  originalAcpSessionId: string;
+  resumeOutcome: LaunchOutcome;
+  restoreOutcome: LaunchOutcome;
+  tmpDir: string;
+  expectedSubmissionCount: number;
+}) {
+  const status = await api.wsRequest<ReadOnlySessionStatus>("task.session.status", {
+    task_id: taskId,
+    session_id: sessionId,
+  });
+  const promptEvidence = readPromptEvidence(tmpDir, sessionId);
+  const card = await page.evaluate(() => {
+    const element = document.querySelector<HTMLElement>('[data-testid="session-recovery-card"]');
+    if (!element) return null;
+    const heading = element.querySelector("h3");
+    return {
+      visible: element.getClientRects().length > 0,
+      rootRole: element.getAttribute("role"),
+      heading: {
+        text: heading?.textContent?.trim() ?? "",
+        ariaLive: heading?.getAttribute("aria-live"),
+        ariaAtomic: heading?.getAttribute("aria-atomic"),
+      },
+      statusCount: element.querySelectorAll('[role="status"]').length,
+      readOnlyStatus: element
+        .querySelector('[data-testid="session-recovery-workspace-status"]')
+        ?.textContent?.trim(),
+      details: Array.from(element.querySelectorAll("details"), (details) => ({
+        open: details.open,
+        summary: details.querySelector("summary")?.textContent?.trim() ?? "",
+      })),
+      actions: Array.from(element.querySelectorAll("button"), (button) => ({
+        testId: button.dataset.testid ?? "",
+        label: button.textContent?.trim().slice(0, 100) ?? "",
+        disabled: button.disabled,
+      })),
+    };
+  });
+  await testInfo.attach("read-only-recovery-before-cleanup.json", {
+    contentType: "application/json",
+    body: JSON.stringify(
+      {
+        wire: {
+          resume: {
+            responseType: resumeOutcome.responseType,
+            succeeded:
+              resumeOutcome.responseType === "response" &&
+              (resumeOutcome.payload as { success?: unknown } | undefined)?.success === true,
+          },
+          restoreWorkspace: {
+            responseType: restoreOutcome.responseType,
+            succeeded:
+              restoreOutcome.responseType === "response" &&
+              (restoreOutcome.payload as { success?: unknown } | undefined)?.success === true,
+          },
+        },
+        status: {
+          state: status.state,
+          is_agent_running: status.is_agent_running,
+          is_resumable: status.is_resumable,
+          needs_resume: status.needs_resume,
+          needs_workspace_restore: status.needs_workspace_restore,
+          acp_session_id_matches: status.acp_session_id === originalAcpSessionId,
+        },
+        promptEvidence: {
+          activeSubmissions: promptEvidence.activeSubmissions,
+          unknownPromptBlocks: promptEvidence.unknownPromptBlocks,
+          submissionCount: promptEvidence.submissionCount,
+          expectedSubmissionCount,
+          executionPresent: Boolean(promptEvidence.execution),
+          executionMatches: promptEvidence.execution?.resume_token === originalAcpSessionId,
+        },
+        card,
+      },
+      null,
+      2,
+    ),
+  });
+  return { status, promptEvidence };
+}
+
 async function createSettledHistoryTask(
   api: ApiClient,
   seed: SeedData,
@@ -157,6 +264,7 @@ async function createSettledHistoryTask(
 }
 
 async function runReadOnlyResumeScenario(input: {
+  testInfo: TestInfo;
   page: Page;
   api: ApiClient;
   seed: SeedData;
@@ -169,7 +277,7 @@ async function runReadOnlyResumeScenario(input: {
   failOnResumeProfileId: string;
   setSessionId: (sessionId: string) => void;
 }) {
-  const { page, api, seed, options, failOnResumeProfileId, setSessionId } = input;
+  const { testInfo, page, api, seed, options, failOnResumeProfileId, setSessionId } = input;
   const { tmpDir, capture, mobile } = options;
   const task = await createSettledHistoryTask(
     api,
@@ -267,21 +375,37 @@ async function runReadOnlyResumeScenario(input: {
   expect(restoreOutcome.responseType).toBe("response");
   expect((restoreOutcome.payload as { success?: unknown } | undefined)?.success).toBe(true);
 
-  const notice = page.getByTestId("session-recovery-notice");
-  await expect(notice).toBeVisible();
-  await expect(notice).toContainText("Workspace restored in read-only mode");
-  await expect(page.getByTestId("recovery-resume-button")).toHaveCount(0);
-  const resume = notice.getByTestId("session-recovery-notice-resume");
+  const recoverySnapshot = await attachReadOnlyRecoveryEvidence({
+    api,
+    page,
+    testInfo,
+    taskId: task.id,
+    sessionId,
+    originalAcpSessionId: originalIdentity.acpSessionId,
+    resumeOutcome,
+    restoreOutcome,
+    tmpDir,
+    expectedSubmissionCount: promptEvidence.submissionCount,
+  });
+  const restoredStatus = recoverySnapshot.status;
+  const restoredPromptEvidence = recoverySnapshot.promptEvidence;
+
+  const recoveryCard = page.getByTestId("session-recovery-card");
+  await expect(recoveryCard).toBeVisible();
+  const recoveryTitle = recoveryCard.getByRole("heading", {
+    name: "Workspace restored in read-only mode",
+  });
+  await expect(recoveryTitle).toBeVisible();
+  const details = recoveryCard.locator('details:has(> summary:text-is("Technical details"))');
+  await expect(details).toHaveCount(1);
+  await expect(details.locator("summary")).toContainText("Technical details");
+  await expect(details).not.toHaveAttribute("open", "");
+  const resume = recoveryCard.getByTestId("recovery-resume-button");
   await expect(resume).toBeEnabled();
-  await expect(page.getByTestId("session-recovery-details")).not.toHaveAttribute("open", "");
-  expect(readPromptEvidence(tmpDir, sessionId)).toMatchObject({
+  expect(restoredPromptEvidence).toMatchObject({
     activeSubmissions: 0,
     unknownPromptBlocks: 0,
     submissionCount: promptEvidence.submissionCount,
-  });
-  const restoredStatus = await api.wsRequest<{ is_agent_running: boolean }>("task.session.status", {
-    task_id: task.id,
-    session_id: sessionId,
   });
   expect(restoredStatus.is_agent_running).toBe(false);
   expect(
@@ -293,6 +417,15 @@ async function runReadOnlyResumeScenario(input: {
   if (mobile) {
     const bounds = await resume.boundingBox();
     expect(bounds?.height).toBeGreaterThanOrEqual(44);
+    const centerIsReachable = await resume.evaluate((button) => {
+      const bounds = button.getBoundingClientRect();
+      const target = document.elementFromPoint(
+        bounds.x + bounds.width / 2,
+        bounds.y + bounds.height / 2,
+      );
+      return target === button || button.contains(target);
+    });
+    expect(centerIsReachable).toBe(true);
   }
   await capture.screenshot("resume-action", {
     caption: "Resume remains available after workspace-only restoration.",
@@ -303,7 +436,7 @@ async function runReadOnlyResumeScenario(input: {
   if (mobile) await resume.tap();
   else await resume.click();
   await recovered;
-  await expect(notice).toHaveCount(0);
+  await expect(recoveryCard).toHaveCount(0);
   const resumed = (await api.listTaskSessions(task.id)).sessions.find((s) => s.id === sessionId)!;
   expect(resumed.metadata?.acp).toEqual(original.metadata?.acp);
   expect(await readSessionRuntimeIdentity(api, task.id, sessionId)).toMatchObject({
@@ -322,7 +455,7 @@ async function runReadOnlyResumeScenario(input: {
 
   await options.restart();
   await page.reload();
-  await expect(notice).toHaveCount(0);
+  await expect(recoveryCard).toHaveCount(0);
   const session = new SessionPage(page);
   await expect(
     session.activeChat().getByText("simple mock response", { exact: false }),
@@ -342,6 +475,7 @@ export async function verifyReadOnlyResume(
   page: Page,
   api: ApiClient,
   seed: SeedData,
+  testInfo: TestInfo,
   options: {
     tmpDir: string;
     capture: PrAssetCapture;
@@ -353,6 +487,7 @@ export async function verifyReadOnlyResume(
   let sessionId: string | undefined;
   try {
     await runReadOnlyResumeScenario({
+      testInfo,
       page,
       api,
       seed,

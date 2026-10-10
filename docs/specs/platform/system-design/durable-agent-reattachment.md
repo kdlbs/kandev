@@ -123,6 +123,9 @@ Audit proxy teardown and executor-specific stop paths, including Sprites, so pre
 Explicit Stop and authorized archive/reset/delete cleanup remain separate from backend shutdown.
 
 The lifecycle manager retains unresolved remote records behind a retryable recovery guard. The guard prevents a fresh launch while remote liveness or authenticated ownership is unknown.
+Startup and periodic reconciliation preserve the session state, open turn, task state, and interruption metadata of the exact pending remote execution. An incomplete attachment is not proof of process termination and does not create a manual recovery error.
+Pending ownership and successful reattachment remain distinct. Reconciliation observes pending ownership before successful reattachment so the transition between them cannot falsely abandon a surviving turn.
+An old activity timestamp and an absent local attachment do not prove that a remote agent stopped. Recovery and settlement recheck the exact pending owner at their mutation boundary; no elapsed outage duration permits abandoning its turn.
 The existing remote-status loop retries a bounded, rotating set of records on its normal tick, with a deadline for each attempt. Shutdown cancels and joins the loop.
 Each attempt validates the durable execution, task, session, and environment before attachment and again before tracking. Stop, archive, cleanup, and ownership changes fence a stale attempt.
 Successful attachment shares startup's authenticated evidence and replay path. It clears pending recovery only after tracking succeeds.
