@@ -494,3 +494,59 @@ test.describe("Port Forward Dialog", () => {
     await expect(session.portForwardRow(4000)).toBeVisible();
   });
 });
+
+// @covers AC-UI-PORT-FORWARDING-DISCOVERY-001.7, .13-.14
+test("preserves shortcut preference and manual draft across desktop and phone layouts", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const ports = await routePortForwarding(testPage);
+  const { session, sessionId } = await seedLocalSession(
+    testPage,
+    apiClient,
+    seedData,
+    "Responsive port visit",
+  );
+  ports.setSession(sessionId);
+  await session.enablePortForwarding();
+  await session.portForwardButton.click();
+  await session.portForwardInput.fill("5432");
+  await testPage.setViewportSize({ width: 767, height: 851 });
+  await expect(session.portForwardDialog).toHaveAttribute("data-presentation", "drawer");
+  await expect(session.portForwardInput).toHaveValue("5432");
+  await expect(session.portForwardHeaderShortcut).toBeChecked();
+  await testPage.setViewportSize({ width: 1280, height: 900 });
+  await expect(session.portForwardDialog).toHaveAttribute("data-presentation", "dialog");
+  await expect(session.portForwardInput).toHaveValue("5432");
+  await expect(session.portForwardButton).toBeVisible();
+  await session.portForwardAddButton.click();
+  await expect(session.portForwardRow(5432)).toBeVisible();
+});
+
+// @covers AC-UI-PORT-FORWARDING-DISCOVERY-001.11
+test("767px fine-pointer phone uses the drawer and touch-sized actions", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await testPage.setViewportSize({ width: 767, height: 851 });
+  expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+  const ports = await routePortForwarding(testPage);
+  const { session, sessionId } = await seedLocalSession(
+    testPage,
+    apiClient,
+    seedData,
+    "Fine-pointer phone",
+  );
+  ports.setSession(sessionId);
+  await session.mobilePanels.click();
+  await session.mobilePortForwardingOpen.click();
+  await expect(session.portForwardDialog).toHaveAttribute("data-presentation", "drawer");
+  const close = session.portForwardDialog.getByRole("button", { name: "Close", exact: true });
+  const box = await close.boundingBox();
+  expect(box!.width).toBeGreaterThanOrEqual(44);
+  expect(box!.height).toBeGreaterThanOrEqual(44);
+  await close.click();
+  await expect(session.mobilePanels).toBeFocused();
+});

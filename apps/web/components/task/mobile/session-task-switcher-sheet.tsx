@@ -28,6 +28,7 @@ import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useMobileTaskRename } from "./use-mobile-task-rename";
 import { useSidebarTaskEdit } from "../task-session-sidebar-edit";
 import { useOptionalPortForwardingVisibility } from "../port-forwarding-visibility-provider";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { TaskSwitcherDialogs } from "./session-task-switcher-sheet-dialogs";
 import { MobileTaskList, type MobileTaskListProps } from "./mobile-task-list";
 export { MobileTaskList, type MobileTaskListProps } from "./mobile-task-list";
@@ -355,7 +356,8 @@ function PortForwardingTaskAction({
 }) {
   const { t } = useTranslation();
   const visibility = useOptionalPortForwardingVisibility();
-  if (!visibility) return null;
+  const { isMobile } = useResponsiveBreakpoint();
+  if (!visibility || isMobile) return null;
   const { enabled, canToggle, isUpdating, togglePortForwarding } = visibility;
 
   return (

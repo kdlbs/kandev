@@ -253,15 +253,14 @@ test.describe("Mobile task topbar remote repository", () => {
     await expect(testPage.getByTestId("mr-topbar-button")).toBeVisible();
     await expect(testPage.getByTestId("remote-executor-status-trigger")).toBeVisible();
 
-    await taskPicker.tap();
-    await expect(session.mobilePortForwardingToggle).toBeVisible();
-    await expect(session.mobilePortForwardingToggle).toBeEnabled();
-    await session.mobilePortForwardingToggle.tap();
-    await expect(session.portForwardButton).toBeVisible();
+    await session.mobilePanels.tap();
+    await expect(session.mobilePortForwardingOpen).toBeEnabled();
+    await session.mobilePortForwardingOpen.tap();
+    await expect(session.portForwardButton).toBeHidden();
     await expect(session.portForwardDialog).toBeVisible();
     await session.portForwardDialog.getByRole("button", { name: "Close" }).tap();
     await expect(session.portForwardDialog).toBeHidden();
-    await expect(session.mobilePortForwardingToggle).toBeHidden();
+    await expect(session.mobilePortForwardingOpen).toBeHidden();
 
     await expect(repositoryLink).toBeVisible();
     await expect(taskPicker).toContainText("Narrow action-rich phone header");

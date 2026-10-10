@@ -2714,5 +2714,8 @@
   "sortOldestFirst": "오래된 순",
   "sortAscending": "오름차순",
   "sortMatchingFirst": "일치 항목 우선",
-  "sortRuleColor": "정렬 기준 {{position}}의 색상"
+  "sortRuleColor": "정렬 기준 {{position}}의 색상",
+  "portForwardingShowInHeader": "작업 헤더에 표시",
+  "portForwardingHeaderShortcutDescription": "이 작업을 보는 모든 사람에게 바로가기를 표시합니다. 터널은 변경하지 않습니다.",
+  "portForwardingUnavailable": "포트 포워딩에는 실행 환경이 준비된, 보관되지 않은 활성 작업 세션이 필요합니다."
 }
