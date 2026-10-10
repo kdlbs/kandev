@@ -234,7 +234,11 @@ export type SaveAgentCallbacks = {
   currentAgentModelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
   resolveDisplayName: (name: string) => string;
-  upsertAgent: (agent: Agent, creation?: AgentCreationPublication) => Agent | void;
+  upsertAgent: (
+    agent: Agent,
+    creation?: AgentCreationPublication,
+    allowMissingAgent?: boolean,
+  ) => Agent | void;
   setDraftAgent: (agent: DraftAgent | ((current: DraftAgent) => DraftAgent)) => void;
   ensureProfiles: EnsureProfilesFn;
   cloneAgent: CloneAgentFn;
@@ -329,7 +333,7 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
     await saveMcpForCreatedProfiles(draftAgent, created, callbacks.onToastError);
   } catch (error) {
     const reconciled = preservePendingMcpDrafts(draftAgent, created);
-    callbacks.upsertAgent(reconciled);
+    callbacks.upsertAgent(reconciled, undefined, true);
     const savedDraft = callbacks.ensureProfiles(
       callbacks.cloneAgent(reconciled),
       callbacks.resolveDisplayName(reconciled.name),
@@ -349,7 +353,7 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
       mcp_config_path: draftAgent.mcp_config_path ?? "",
     });
   }
-  callbacks.upsertAgent(created);
+  callbacks.upsertAgent(created, undefined, true);
   const savedDraft = callbacks.ensureProfiles(
     callbacks.cloneAgent(created),
     callbacks.resolveDisplayName(created.name),

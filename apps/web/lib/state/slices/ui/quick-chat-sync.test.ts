@@ -234,6 +234,26 @@ describe("reconcileQuickTerminalTabs", () => {
     expect(after.lastTerminalTabIdByWorkspace[OTHER_WS]).toBe(foreign.tabId);
   });
 
+  it("keeps a locally starting terminal when a resync reports it unavailable", () => {
+    const pending = terminal("pending", { sessionId: null, status: "connecting", sequence: 3 });
+    const before = state([], {
+      terminalTabs: [pending],
+      activeKind: "terminal",
+      activeTerminalTabId: pending.tabId,
+    });
+    const unavailable = terminal("pending", {
+      sessionId: null,
+      status: "exited",
+      error: "terminal session unavailable",
+      sequence: 3,
+    });
+
+    const after = reconcileQuickTerminalTabs(before, WS, [unavailable]);
+
+    expect(after.terminalTabs).toEqual([pending]);
+    expect(after.activeTerminalTabId).toBe(pending.tabId);
+  });
+
   it("uses a conversation or closes when the active workspace has no terminal left", () => {
     const before = state([chat("chat-a")], {
       activeKind: "terminal",

@@ -81,6 +81,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateAssignmentWakeRateIndexes(); err != nil {
 		return err
 	}
+	if err := r.migrateRunSessionClaimedIndex(); err != nil {
+		return err
+	}
 	if err := r.migrate.Err(); err != nil {
 		return err
 	}
@@ -342,6 +345,16 @@ func (r *Repository) migrateAssignmentWakeRateIndexes() error {
 		"idx_runs_assignment_rate_reason_requested",
 		`CREATE INDEX IF NOT EXISTS idx_runs_assignment_rate_reason_requested
 		ON runs(reason, requested_at)`,
+	)
+}
+
+// migrateRunSessionClaimedIndex supports the legacy GetRunBySessionAt lookup.
+// The partial predicate excludes rows without a session and matches the query.
+func (r *Repository) migrateRunSessionClaimedIndex() error {
+	return r.migrate.Apply(
+		"idx_runs_session_claimed",
+		`CREATE INDEX IF NOT EXISTS idx_runs_session_claimed
+			ON runs(session_id, claimed_at DESC) WHERE session_id != ''`,
 	)
 }
 

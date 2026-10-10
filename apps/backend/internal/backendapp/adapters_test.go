@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
 	githubsvc "github.com/kandev/kandev/internal/github"
+	officeservice "github.com/kandev/kandev/internal/office/service"
 	orchestratorexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/repoclone"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -44,6 +45,24 @@ func TestBuildLifecycleLaunchRequestForwardsRemoteContributions(t *testing.T) {
 	}
 	if len(launchReq.Repositories) != 1 || launchReq.Repositories[0].RemoteContribution != binding {
 		t.Fatalf("per-repository remote contribution was not forwarded: %#v", launchReq.Repositories)
+	}
+}
+
+func TestBuildLifecycleLaunchRequestForwardsCausingRunID(t *testing.T) {
+	got := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		CausingRunID: "office-run-1",
+	}, "/workspace", "office-profile")
+	if got.CausingRunID != "office-run-1" {
+		t.Fatalf("CausingRunID = %q, want office-run-1", got.CausingRunID)
+	}
+}
+
+func TestOrchestratorLaunchContextForwardsCausingRunID(t *testing.T) {
+	got := orchestratorLaunchContext(officeservice.LaunchContext{
+		CausingRunID: "office-run-1",
+	})
+	if got.CausingRunID != "office-run-1" {
+		t.Fatalf("CausingRunID = %q, want office-run-1", got.CausingRunID)
 	}
 }
 

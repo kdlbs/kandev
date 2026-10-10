@@ -47,6 +47,7 @@ type stepTransitionRow struct {
 	trigger            string
 	actorKind          string
 	actorID            *string
+	causingRunID       *string
 	contractVersion    int
 	occurredAt         time.Time
 }
@@ -54,7 +55,7 @@ type stepTransitionRow struct {
 func stepTransitionRowsForTask(t *testing.T, repo *Repository, taskID string) []stepTransitionRow {
 	t.Helper()
 	rows, err := repo.db.QueryContext(context.Background(), repo.db.Rebind(`
-		SELECT id, task_id, session_id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id, trigger, actor_kind, actor_id, contract_version, occurred_at
+		SELECT id, task_id, session_id, from_workflow_id, from_workflow_step_id, to_workflow_id, to_workflow_step_id, trigger, actor_kind, actor_id, causing_run_id, contract_version, occurred_at
 		FROM task_step_transitions WHERE task_id = ? ORDER BY occurred_at ASC, id ASC
 	`), taskID)
 	if err != nil {
@@ -65,7 +66,7 @@ func stepTransitionRowsForTask(t *testing.T, repo *Repository, taskID string) []
 	var out []stepTransitionRow
 	for rows.Next() {
 		var r stepTransitionRow
-		if err := rows.Scan(&r.id, &r.taskID, &r.sessionID, &r.fromWorkflowID, &r.fromWorkflowStepID, &r.toWorkflowID, &r.toWorkflowStepID, &r.trigger, &r.actorKind, &r.actorID, &r.contractVersion, &r.occurredAt); err != nil {
+		if err := rows.Scan(&r.id, &r.taskID, &r.sessionID, &r.fromWorkflowID, &r.fromWorkflowStepID, &r.toWorkflowID, &r.toWorkflowStepID, &r.trigger, &r.actorKind, &r.actorID, &r.causingRunID, &r.contractVersion, &r.occurredAt); err != nil {
 			t.Fatalf("scan row: %v", err)
 		}
 		out = append(out, r)
@@ -74,6 +75,35 @@ func stepTransitionRowsForTask(t *testing.T, repo *Repository, taskID string) []
 		t.Fatalf("rows.Err: %v", err)
 	}
 	return out
+}
+
+func TestWorkflowTransitionStoresCausingRunID(t *testing.T) {
+	repo := newStepTransitionsTestRepo(t)
+	task := createStepTransitionsTestTask(t, repo, "task-run-cause", "wf-1", "step-a")
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: "session-run-cause", TaskID: task.ID, State: models.TaskSessionStateRunning,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	task.WorkflowStepID = "step-b"
+	ctx := steptelemetry.WithAttribution(context.Background(), steptelemetry.Attribution{
+		Trigger:      steptelemetry.TriggerEngineTransition,
+		ActorKind:    steptelemetry.ActorAgent,
+		ActorID:      "session-run-cause",
+		SessionID:    "session-run-cause",
+		CausingRunID: "run-cause-123",
+	})
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+
+	rows := stepTransitionRowsForTask(t, repo, task.ID)
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want genesis and workflow transition", len(rows))
+	}
+	if rows[1].causingRunID == nil || *rows[1].causingRunID != "run-cause-123" {
+		t.Fatalf("causing_run_id = %v, want run-cause-123", rows[1].causingRunID)
+	}
 }
 
 func createStepTransitionsTestTask(t *testing.T, repo *Repository, taskID, workflowID, stepID string) *models.Task {

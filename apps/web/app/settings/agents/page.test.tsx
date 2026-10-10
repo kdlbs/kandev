@@ -1,6 +1,7 @@
 import { render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ToastProvider } from "@/components/toast-provider";
 import type { AgentUpdateJob } from "@/lib/api";
 
 const startUpdateMock = vi.fn();
@@ -16,6 +17,7 @@ let onUpdateCallback:
   | undefined;
 
 vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({ getState: () => ({}) }),
   useAppStore: (select: (state: unknown) => unknown) =>
     select({
       settingsAgents: { items: [] },
@@ -111,7 +113,11 @@ describe("Agents settings self-update approval", () => {
       started_at: "2026-09-26T12:00:00Z",
     };
     startUpdateMock.mockResolvedValue(terminal);
-    render(<AgentsSettingsPage />);
+    render(
+      <ToastProvider>
+        <AgentsSettingsPage />
+      </ToastProvider>,
+    );
 
     if (!onUpdateCallback) throw new Error("installed agent update callback was not rendered");
     updatePromise = onUpdateCallback("omp-acp", "", false, "self_update");
@@ -137,7 +143,11 @@ describe("Agents settings self-update approval", () => {
       status: "queued",
       started_at: "2026-09-26T12:00:00Z",
     } satisfies AgentUpdateJob);
-    render(<AgentsSettingsPage />);
+    render(
+      <ToastProvider>
+        <AgentsSettingsPage />
+      </ToastProvider>,
+    );
 
     if (!onUpdateCallback) throw new Error("installed agent update callback was not rendered");
     updatePromise = onUpdateCallback("omp-acp", "", false, "self_update");

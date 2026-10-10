@@ -446,6 +446,7 @@ func buildLifecycleLaunchRequest(
 ) *lifecycle.LaunchRequest {
 	launchReq := &lifecycle.LaunchRequest{
 		TaskID:                        req.TaskID,
+		CausingRunID:                  req.CausingRunID,
 		TaskScope:                     req.TaskScope,
 		SessionSettingsPolicy:         lifecycleSessionSettingsPolicy(req.SessionSettingsPolicy),
 		RequiredNativeConversationID:  req.RequiredNativeConversationID,

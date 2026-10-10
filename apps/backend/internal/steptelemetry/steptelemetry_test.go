@@ -23,10 +23,11 @@ func TestFromContextDefaultsToUnknownWhenNothingAttached(t *testing.T) {
 
 func TestWithAttributionRoundTrips(t *testing.T) {
 	want := Attribution{
-		Trigger:   TriggerMCPMove,
-		ActorKind: ActorAgent,
-		ActorID:   "session-1",
-		SessionID: "session-1",
+		Trigger:      TriggerMCPMove,
+		ActorKind:    ActorAgent,
+		ActorID:      "session-1",
+		SessionID:    "session-1",
+		CausingRunID: "run-1",
 	}
 	ctx := WithAttribution(context.Background(), want)
 	got := FromContext(ctx)

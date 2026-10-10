@@ -51,8 +51,10 @@ export function useAgentCreationStoreSync() {
     agent: Agent,
     creation?: AgentCreationPublication,
     profileVersionAtSaveStart = getAgentProfilesVersion(),
+    allowMissingAgent = false,
   ) => {
-    if (!creation) return syncSavedAgentToStore(storeApi, agent, profileVersionAtSaveStart);
+    if (!creation)
+      return syncSavedAgentToStore(storeApi, agent, profileVersionAtSaveStart, allowMissingAgent);
     const agents = storeApi.getState().settingsAgents.items;
     const current = agents.find((item) => item.id === agent.id);
     if (creation && !current) return;

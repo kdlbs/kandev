@@ -2006,16 +2006,7 @@ func (a *schedulerTaskStarterAdapter) startTaskWithRoute(
 	route officescheduler.RouteOverride,
 ) (*orchexecutor.TaskExecution, error) {
 	return a.orch.StartTaskWithRoute(ctx, taskID, agentProfileID,
-		orchexecutor.LaunchContext{
-			ExecutorID:        launch.ExecutorID,
-			ExecutorProfileID: launch.ExecutorProfileID,
-			Priority:          launch.Priority,
-			Prompt:            launch.Prompt,
-			WorkflowStepID:    launch.WorkflowStepID,
-			PlanMode:          launch.PlanMode,
-			Attachments:       launch.Attachments,
-			Env:               launch.Env,
-		},
+		orchestratorLaunchContext(launch),
 		orchexecutor.RouteOverride{
 			ExecutionProfileID: route.ExecutionProfileID,
 			ProviderID:         route.ProviderID,
@@ -2316,9 +2307,15 @@ type runsServiceEngineAdapter struct {
 	// officeSvc sources the actor and causation lineage for every
 	// request. The target task is req.TaskID; the source task is
 	// req.CausingTaskID when a queue_run action targets another task.
-	// The carrier is resolved from the source task, preferring the run
-	// currently claimed against that task by req.CausingAgentProfileID over
-	// the task's own already-resolved carrier — the same live-run preference
+	// When req.CausingStepTransitionID is set (a step-entry wake —
+	// DispatchStepEntry or the Office auto-start path), the carrier
+	// resolves from that task_step_transitions ledger row via
+	// TaskBoundaryCarrierForStepTransition instead, since a step-entry
+	// action has no claimed-run scope to key off
+	// (AC-OFFICE-RUN-CAUSATION-001.25). Otherwise the carrier is resolved
+	// from the source task, preferring the run currently claimed against
+	// that task by req.CausingAgentProfileID over the task's own
+	// already-resolved carrier — the same live-run preference
 	// office/service.TaskBoundaryCarrierMetadata applies for
 	// create_child_task, needed here so a chain of queue_run actions also
 	// advances the causation depth hop by hop. Nil only in tests that
@@ -2336,8 +2333,13 @@ func (a *runsServiceEngineAdapter) QueueRun(
 	if causingTaskID == "" {
 		causingTaskID = req.TaskID
 	}
+	causingStepTransitionID := strings.TrimSpace(req.CausingStepTransitionID)
 	if a.officeSvc != nil && causingTaskID != "" {
-		carrier = a.officeSvc.TaskBoundaryCarrierForRunQueue(ctx, causingTaskID, req.CausingAgentProfileID)
+		if causingStepTransitionID != "" {
+			carrier = a.officeSvc.TaskBoundaryCarrierForStepTransition(ctx, causingTaskID, causingStepTransitionID)
+		} else {
+			carrier = a.officeSvc.TaskBoundaryCarrierForRunQueue(ctx, causingTaskID, req.CausingAgentProfileID)
+		}
 	}
 	if carrier.ActorKind == "" {
 		carrier.ActorKind = officemodels.ActorKindSystem
@@ -2583,14 +2585,29 @@ func backfillAgentDefaultSkills(
 	}
 }
 
-// newOfficeTaskStarter wraps orchestratorSvc.StartTaskWithEnvAndSkills in an
-// adapter that also implements officeservice.TaskStarterWithLaunchContextSession,
-// so the direct (non-routed) launch path forwards per-run skill additions and
+// newOfficeTaskStarter adapts the orchestrator launch methods to the Office
+// task starter interfaces, including TaskStarterWithLaunchContextSession, so
+// the direct (non-routed) path forwards per-run skills and causation and
 // persists the session id the orchestrator's *executor.TaskExecution already
 // carries (AC-OFFICE-LOOP-LIVENESS-002.7) instead of discarding it. Extracted
 // from initOfficeServices to keep that function under the funlen cap.
 func newOfficeTaskStarter(orchestratorSvc *orchestrator.Service) officeservice.TaskStarter {
 	return &officeOrchestratorTaskStarter{orch: orchestratorSvc}
+}
+
+func orchestratorLaunchContext(launch officeservice.LaunchContext) orchexecutor.LaunchContext {
+	return orchexecutor.LaunchContext{
+		ExecutorID:           launch.ExecutorID,
+		ExecutorProfileID:    launch.ExecutorProfileID,
+		Priority:             launch.Priority,
+		CausingRunID:         launch.CausingRunID,
+		Prompt:               launch.Prompt,
+		WorkflowStepID:       launch.WorkflowStepID,
+		PlanMode:             launch.PlanMode,
+		Attachments:          launch.Attachments,
+		Env:                  launch.Env,
+		AdditionalSkillSlugs: append([]string(nil), launch.AdditionalSkillSlugs...),
+	}
 }
 
 // officeOrchestratorTaskStarter satisfies officeservice.TaskStarter,
@@ -2651,10 +2668,8 @@ func (a *officeOrchestratorTaskStarter) StartTaskWithEnvReturningSession(
 func (a *officeOrchestratorTaskStarter) StartTaskWithLaunchContext(
 	ctx context.Context, taskID, agentProfileID string, launch officeservice.LaunchContext,
 ) error {
-	_, err := a.startTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
-		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority, launch.Prompt,
-		launch.WorkflowStepID, launch.PlanMode, launch.Attachments, launch.Env,
-		launch.AdditionalSkillSlugs)
+	_, err := a.orch.StartTaskWithLaunchContext(ctx, taskID, agentProfileID,
+		orchestratorLaunchContext(launch))
 	return err
 }
 
@@ -2663,10 +2678,8 @@ func (a *officeOrchestratorTaskStarter) StartTaskWithLaunchContext(
 func (a *officeOrchestratorTaskStarter) StartTaskWithLaunchContextReturningSession(
 	ctx context.Context, taskID, agentProfileID string, launch officeservice.LaunchContext,
 ) (string, error) {
-	execution, err := a.startTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
-		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority, launch.Prompt,
-		launch.WorkflowStepID, launch.PlanMode, launch.Attachments, launch.Env,
-		launch.AdditionalSkillSlugs)
+	execution, err := a.orch.StartTaskWithLaunchContext(ctx, taskID, agentProfileID,
+		orchestratorLaunchContext(launch))
 	if errors.Is(err, orchestrator.ErrCeilingLaunchDeferred) {
 		return "", officeservice.ErrLaunchDeferredByCapacity
 	}

@@ -1414,10 +1414,8 @@ func (s *Service) StartTaskWithEnv(ctx context.Context, taskID string, agentProf
 // StartTaskWithEnvAndSkills starts a task with launch-scoped environment and
 // skills selected by the Office run rather than by the durable profile.
 //
-// Its only production caller is the Office scheduler's task starter
-// (backendapp's newOfficeTaskStarter), which always passes autoStart=false —
-// the user kicked off the task; Office only chose the agent and skills. AC-13d
-// requires that traffic be classified automatic regardless, so the origin is
+// The Office task starter uses this legacy interface when it cannot pass the
+// richer launch context. It always passes autoStart=false, so the origin is
 // forced here rather than trusted from autoStart.
 func (s *Service) StartTaskWithEnvAndSkills(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, env map[string]string, additionalSkillSlugs []string) (*executor.TaskExecution, error) {
 	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, startTaskOptions{
@@ -1425,6 +1423,14 @@ func (s *Service) StartTaskWithEnvAndSkills(ctx context.Context, taskID string, 
 		AdditionalSkillSlugs: append([]string(nil), additionalSkillSlugs...),
 		Origin:               launchOriginAutomatic,
 	})
+}
+
+// StartTaskWithLaunchContext starts an Office task with its complete launch
+// context, including the immutable run that caused this execution.
+func (s *Service) StartTaskWithLaunchContext(
+	ctx context.Context, taskID, agentProfileID string, launch executor.LaunchContext,
+) (*executor.TaskExecution, error) {
+	return s.startOfficeTaskWithLaunchContext(ctx, taskID, agentProfileID, launch, nil)
 }
 
 // startTaskOptions carries the optional, server-only launch inputs that only
@@ -1442,6 +1448,9 @@ type startTaskOptions struct {
 	AdditionalSkillSlugs []string
 	// Route pins a concrete execution profile chosen by Office provider routing.
 	Route *executor.RouteOverride
+	// CausingRunID is the trusted Office run that initiated this task-owned
+	// execution. It is kept separate from runtime ownership's RunID.
+	CausingRunID string
 	// SpawnOrigin is set when another agent session spawned this launch; it
 	// produces the spawner-attribution system block on the first turn.
 	SpawnOrigin *SpawnOrigin
@@ -1485,18 +1494,26 @@ func (s *Service) StartTaskWithRoute(
 	ctx context.Context, taskID, agentProfileID string,
 	launch executor.LaunchContext, route executor.RouteOverride,
 ) (*executor.TaskExecution, error) {
+	return s.startOfficeTaskWithLaunchContext(ctx, taskID, agentProfileID, launch, &route)
+}
+
+func (s *Service) startOfficeTaskWithLaunchContext(
+	ctx context.Context, taskID, agentProfileID string,
+	launch executor.LaunchContext, route *executor.RouteOverride,
+) (*executor.TaskExecution, error) {
+	options := startTaskOptions{
+		Env:                  launch.Env,
+		AdditionalSkillSlugs: append([]string(nil), launch.AdditionalSkillSlugs...),
+		CausingRunID:         launch.CausingRunID,
+		Route:                route,
+		// Office selected this execution. Keep it automatic for admission
+		// policy even though the outer start path uses autoStart=false.
+		Origin: launchOriginAutomatic,
+	}
 	return s.startTask(ctx, taskID, agentProfileID,
 		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority,
 		launch.Prompt, launch.WorkflowStepID, launch.PlanMode, false,
-		launch.Attachments, startTaskOptions{
-			Env:                  launch.Env,
-			AdditionalSkillSlugs: append([]string(nil), launch.AdditionalSkillSlugs...),
-			Route:                &route,
-			// AC-13d: a routed Office launch always passes autoStart=false
-			// (the user kicked off the task; Office only chose the provider),
-			// which is not the ceiling's manual/automatic question.
-			Origin: launchOriginAutomatic,
-		})
+		launch.Attachments, options)
 }
 
 func (s *Service) prepareExplicitWorkflowStartRoute(
@@ -2022,6 +2039,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID:       agentProfileID,
 		OfficeAgentProfileID: officeAgentProfileID,
+		CausingRunID:         opts.CausingRunID,
 		ExecutorID:           executorID,
 		TurnID:               initialTurnID,
 		Prompt:               effectivePrompt,

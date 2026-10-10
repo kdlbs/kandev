@@ -144,6 +144,7 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 		OwnerKind:              executionOwnerKind(execution),
 		WorkspaceID:            execution.WorkspaceID,
 		RunID:                  execution.RunID,
+		CausingRunID:           execution.CausingRunID,
 		RunSessionID:           execution.RunSessionID,
 		RunAttempt:             execution.RunAttempt,
 		TaskID:                 execution.TaskID,

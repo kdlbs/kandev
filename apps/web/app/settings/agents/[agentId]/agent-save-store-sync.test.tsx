@@ -15,6 +15,10 @@ const DELETED_PROFILE_ID = "deleted";
 const ORPHAN_AGENT_ID = "office-agent";
 const ORPHAN_PROFILE_ID = "office-profile";
 const SAVED_AGENT_NAME = "saved-agent-name";
+const UNRELATED_AGENT_ID = "unrelated-agent";
+const UNRELATED_PROFILE_ID = "unrelated-profile";
+const CREATED_AGENT_ID = "created-agent";
+const CREATED_AGENT_PROFILE_ID = "created-agent-profile";
 
 function Capture({ onStore }: { onStore: (store: StoreApi<AppState>) => void }) {
   onStore(useAppStoreApi());
@@ -35,7 +39,7 @@ function option(id: string, agentId = AGENT_ID) {
   };
 }
 
-function profileEvent(id: string, name: string, timestamp: string) {
+function profileEvent(id: string, name: string, timestamp: string, agentId = AGENT_ID) {
   return {
     id,
     type: "notification",
@@ -44,7 +48,7 @@ function profileEvent(id: string, name: string, timestamp: string) {
     payload: {
       profile: {
         id,
-        agent_id: AGENT_ID,
+        agent_id: agentId,
         name,
         model: "mock-fast",
         enabled: true,
@@ -54,6 +58,48 @@ function profileEvent(id: string, name: string, timestamp: string) {
     },
   };
 }
+
+describe("agent save response membership", () => {
+  it("keeps a created agent when another profile changes during creation", () => {
+    let store!: StoreApi<AppState>;
+    render(
+      <StateProvider>
+        <Capture onStore={(value) => (store = value)} />
+      </StateProvider>,
+    );
+    const versionAtSaveStart = store.getState().agentProfiles.version;
+    const handlers = registerAgentsHandlers(store);
+    const createdAgent = {
+      id: CREATED_AGENT_ID,
+      name: CREATED_AGENT_ID,
+      profiles: [profile(CREATED_AGENT_PROFILE_ID)],
+    } as Agent;
+
+    act(() => {
+      handlers["agent.profile.created"]!(
+        profileEvent(
+          UNRELATED_PROFILE_ID,
+          "Created while agent save was pending",
+          "2026-07-26T11:00:00Z",
+          UNRELATED_AGENT_ID,
+        ) as never,
+      );
+    });
+    expect(store.getState().agentProfiles.version).toBe(versionAtSaveStart + 1);
+
+    act(() => syncSavedAgentToStore(store, createdAgent, versionAtSaveStart));
+    expect(store.getState().settingsAgents.items.map((item) => item.id)).toEqual([]);
+
+    act(() => syncSavedAgentToStore(store, createdAgent, versionAtSaveStart, true));
+    expect(store.getState().settingsAgents.items.map((item) => item.id)).toEqual([
+      CREATED_AGENT_ID,
+    ]);
+    expect(store.getState().agentProfiles.items.map((item) => item.id)).toEqual([
+      UNRELATED_PROFILE_ID,
+      CREATED_AGENT_PROFILE_ID,
+    ]);
+  });
+});
 
 describe("agent save response membership", () => {
   it("keeps profile create/delete events that arrive while the save response is pending", async () => {

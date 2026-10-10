@@ -297,20 +297,23 @@ type fakeMarkerExecutor struct {
 		err     error
 	}
 	calls []struct {
-		Kind          ActionKind
-		Position      int
-		MarkerEntryID int64
+		Kind             ActionKind
+		Position         int
+		StepTransitionID string
+		MarkerEntryID    int64
 	}
 }
 
 func (f *fakeMarkerExecutor) ExecuteMarkerBearingStepEntryAction(
-	_ context.Context, _ string, _ StepSpec, action Action, position int, markerEntryID int64,
+	_ context.Context, _ string, _ StepSpec, action Action, position int,
+	stepTransitionID string, markerEntryID int64,
 ) (bool, error) {
 	f.calls = append(f.calls, struct {
-		Kind          ActionKind
-		Position      int
-		MarkerEntryID int64
-	}{action.Kind, position, markerEntryID})
+		Kind             ActionKind
+		Position         int
+		StepTransitionID string
+		MarkerEntryID    int64
+	}{action.Kind, position, stepTransitionID, markerEntryID})
 	outcome := f.outcomes[action.Kind]
 	return outcome.abandon, outcome.err
 }
@@ -353,6 +356,8 @@ func TestDispatchStepEntry_MarkerBearingFailureAbandonsRemainingSequence(t *test
 	require.Len(t, executor.calls, 1)
 	assert.Equal(t, 0, executor.calls[0].Position)
 	assert.Equal(t, int64(42), executor.calls[0].MarkerEntryID)
+	assert.Equal(t, "entry-1", executor.calls[0].StepTransitionID,
+		"the ledger entry id must reach the marker executor even though EntryID is never set on ActionInput for this path")
 }
 
 // TestDispatchStepEntry_MarkerPositionMatchesDeclaredPositionAcrossNonCompilingAction

@@ -342,6 +342,8 @@ func TestAgentEventHandling(t *testing.T) {
 			"task_id":            "task-123",
 			"agent_execution_id": "agent-456",
 			"agent_type":         "test-agent",
+			"owner_kind":         string(lifecycle.ExecutionOwnerTask),
+			"causing_run_id":     "run-cause-123",
 			"exit_code":          exitCode,
 		})
 
@@ -360,6 +362,12 @@ func TestAgentEventHandling(t *testing.T) {
 		}
 		if receivedData.AgentExecutionID != "agent-456" {
 			t.Errorf("expected agent_execution_id = 'agent-456', got %s", receivedData.AgentExecutionID)
+		}
+		if receivedData.OwnerKind != string(lifecycle.ExecutionOwnerTask) {
+			t.Errorf("owner_kind = %q, want %q", receivedData.OwnerKind, lifecycle.ExecutionOwnerTask)
+		}
+		if receivedData.CausingRunID != "run-cause-123" {
+			t.Errorf("causing_run_id = %q, want run-cause-123", receivedData.CausingRunID)
 		}
 	})
 }

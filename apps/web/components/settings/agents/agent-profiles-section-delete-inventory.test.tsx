@@ -344,7 +344,7 @@ describe("ProfileRow deletion inventory", () => {
       SIBLING,
       received.id,
     ]);
-    expect(fixture.store.getState().agentProfiles.version).toBe(version);
+    expect(fixture.store.getState().agentProfiles.version).toBe(version + 1);
     await assertChoices([RECEIVED_NAME, SIBLING_NAME], [TARGET_NAME]);
   });
 
@@ -363,7 +363,7 @@ describe("ProfileRow deletion inventory", () => {
       fixture.store.getState().settingsAgents.items[0].profiles.map((profile) => profile.id),
     ).toEqual([SIBLING]);
     for (const trigger of triggers) expect(trigger.textContent).toContain(SIBLING_NAME);
-    expect(fixture.store.getState().agentProfiles.version).toBe(VERSION);
+    expect(fixture.store.getState().agentProfiles.version).toBe(VERSION + 1);
   });
 
   // @covers AC-AGENTS-PROFILE-DELETION-CATALOGUE-001.4, .5
@@ -423,7 +423,7 @@ describe("ProfileRow deletion metadata and completion order", () => {
     await assertChoices([RECEIVED_NAME], ["Updated disabled sibling", "Office-only profile"]);
     await act(async () => pending.resolve());
     expect(fixture.store.getState().agentProfiles.items).toEqual(options);
-    expect(fixture.store.getState().agentProfiles.version).toBe(before.agentProfiles.version);
+    expect(fixture.store.getState().agentProfiles.version).toBe(before.agentProfiles.version + 1);
     expect(fixture.store.getState().settingsAgents.items[0]).toEqual({
       ...before.settingsAgents.items[0],
       profiles: before.settingsAgents.items[0].profiles.filter((profile) => profile.id !== TARGET),
