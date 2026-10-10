@@ -239,3 +239,57 @@ desktop/mobile checks remain assigned to hosted CI. Host hooks and contributor
 tooling are not executed during this review. The historical broad-suite
 failures above remain visible; they are not attributed to unrelated tests
 without exact source and log evidence.
+
+
+## Corrective validation after PR #4373
+
+Original-head hosted frontend tests found accepted new owners missing after an
+independent profile event, obsolete Settings row-index expectations, and a page
+fixture missing the actual store API. PR #4399 restores the new-owner create
+publication, including accepted partial MCP results, while retaining the
+missing-existing-owner guard. The owning app store observes owner removal during
+save and prevents a late response from reinserting that observed identity,
+including after the editor unmounts. Observations are scoped to each store.
+Accepted local deletion advances the snapshot epoch; a held pre-deletion GET
+must fail its epoch guard rather than reintroducing the deleted choice.
+
+Settings-only prepend expectations are updated by identity, retaining catalogue
+counts, capability metadata, independent options, rejection state and picker
+assertions. The selector E2E trace reached Quick Chat and waited for a Cancel
+button absent from that surface. It now dismisses the dialog with Escape;
+selector equality, defaults and recent-use assertions remain unchanged.
+
+Focused isolated hook regression: observed-removal RED (1 failed, 12 passed),
+then GREEN (13 passed), plus 17 real MCP component cases passed. The larger
+creation/deletion/page React suites are locally unavailable because the minimal
+private cache lacks terminal/floating-popup dependencies. Hosted frontend and
+selector E2E checks remain required before this work order can be completed.
+Original-head desktop/mobile captures are historical evidence, not proof for
+corrective source. No copy, layout, touch or locale changes are introduced.
+
+The recovered desktop capture came from retry 1. Its first attempt received a
+null bounding box after visibility succeeded, before either 28 px dimension
+could be checked. The fixture now polls actual rendered height and width with
+the same 28 px values and precision. It retains the existing test timeout,
+retry policy, keyboard reorder, Escape cancellation, persistence, and cursor
+assertions. Fresh hosted geometry and interaction evidence remains required.
+
+An additional real-provider lifecycle regression reproduced owner resurrection
+after editor unmount: RED (1 failed, 14 passed), then GREEN (15 passed). The
+removal observation now starts in `createAppStore`, uses store-lifetime weak
+keys, and retains the current setters, snapshot epochs, hydration payloads, and
+catalogue metadata. A separate store remains eligible to publish its new owner.
+
+Additional corrective files:
+
+- `apps/web/hooks/domains/settings/use-agent-creation-store-sync.test.tsx`
+- `apps/web/app/settings/agents/[agentId]/agent-save-helpers.ts`
+- `apps/web/app/settings/agents/[agentId]/agent-create-catalogue.test.tsx`
+- `apps/web/app/settings/agents/[agentId]/agent-create-target-catalogue.test.tsx`
+- `apps/web/app/settings/agents/page.test.tsx`
+- `apps/web/components/settings/custom-tui-mcp-card.test.tsx`
+- `apps/web/components/settings/agents/agent-profiles-section-delete-inventory.test.tsx`
+- `apps/web/e2e/tests/settings/agent-profile-order-selectors.spec.ts`
+- `apps/web/e2e/tests/settings/agent-profile-order.spec.ts`
+- `apps/web/lib/state/store.ts`
+- `apps/web/lib/state/settings-agent-removals.ts`

@@ -232,7 +232,7 @@ selector-specific recency and default-selection logic remains unchanged.
   protects order only and is unchanged by create/delete.
 - `agentProfiles.version` is the client-local profile snapshot epoch, distinct
   from the backend order revision. The profile created, updated, and deleted
-  WebSocket handlers advance it. Every browser `GET /agents` result written
+  WebSocket handlers and accepted local membership mutations advance it. Every browser `GET /agents` result written
   directly to the live store captures the epoch before the request and applies
   both `settingsAgents` and `agentProfiles` atomically through
   `applyAgentListSnapshot(agents, epoch)`. The action rejects the result if the
@@ -426,3 +426,18 @@ provider sorts its execution-profile catalog by name and ID and is unaffected.
 
 - [ADR 0005](../../../decisions/0005-agent-model-unification.md) introduced the
   `workspace_id`-scoped profile rows this design excludes. No new ADR is needed.
+
+
+### New-owner creation compatibility
+
+A successful new-agent POST identifies an accepted new owner independently of
+unrelated catalogue epoch changes. Both successful and partial MCP continuations
+publish through the creation boundary with that explicit new-owner intent; they
+retain current independent options and current target capability metadata.
+Existing-owner creation never recreates a missing owner. While the app store
+lives, its subscription records identities actually removed from the current
+catalogue, including after an editor unmounts while its save is pending. The
+observation belongs to that store instance and does not cross providers. A
+later new-owner callback cannot reinsert one of those observed removals. An
+identity never present in that catalogue is not
+classified as deleted merely because another profile advanced the epoch.
