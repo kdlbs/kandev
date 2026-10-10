@@ -1,18 +1,29 @@
 # Dependency cleanup
 
-[Roadmap](README.md) · Inventory at main `359b5ffdbb6`, 2026-09-27.
+[Roadmap](README.md) · Historical inventory at main `359b5ffdbb6`, 2026-09-27.
+Current root-cast and compatibility measurements are recorded separately below.
 
 The [baseline files](../../config/architecture-lint/) and compatibility ledger own current counts.
-Numbers here describe this dated inventory, not a second live database.
+Values labeled as dated inventory remain historical. Counts labeled current
+main are measurements of the named current snapshot below, not a second live
+database.
 
 | ID     | Boundary                       | Inventory                                              | Status              | Next bounded result                                                                |
 | ------ | ------------------------------ | ------------------------------------------------------ | ------------------- | ---------------------------------------------------------------------------------- |
-| DEP-01 | Typed root-store composition   | 45 unsafe-cast findings after Azure DevOps removal     | Complete            | Azure DevOps slice typed without a root-store cast ([PR #4009](https://github.com/kdlbs/kandev/pull/4009)) |
-| DEP-02 | Office run aliases             | 31 registered aliases after shared contract extraction | Proposed            | Migrate a coherent consumer group, then remove aliases with no remaining consumers |
-| DEP-03 | Runs importing Office          | Six exact edges remain                                 | Needs design        | Classify policy adapters before selecting an edge                                  |
-| DEP-04 | Runtime implementation imports | 61 exact findings                                      | Needs investigation | Select one caller group and identify missing facade capability                     |
-| DEP-05 | Task importing Office          | Seven exact findings                                   | Needs design        | Define the required domain contract without copying Office policy                  |
-| DEP-06 | Unregistered deprecations      | 15 exact declarations                                  | Proposed            | Triage each declaration for removal or justified registration                      |
+| DEP-01 | Typed root-store composition   | 45 findings on current main; the Jira/Linear increment removes six exact entries | Implementation complete, delivery pending in [#4375](https://github.com/kdlbs/kandev/pull/4375) | Wait for merge evidence; Azure DevOps is complete in [#4009](https://github.com/kdlbs/kandev/pull/4009). |
+| DEP-02 | Office run aliases             | 31 aliases in the dated inventory; 27 remain on current main | Proposed, first increment complete | Migrate a coherent consumer group, then remove aliases only when their ledger conditions pass ([#4010](https://github.com/kdlbs/kandev/pull/4010)). |
+| DEP-03 | Runs importing Office          | Six exact edges in the dated inventory                 | Needs design        | Classify policy adapters before selecting an edge                                  |
+| DEP-04 | Runtime implementation imports | 61 exact findings in the dated inventory              | Needs investigation | Select one caller group and identify missing facade capability                     |
+| DEP-05 | Task importing Office          | Seven exact findings in the dated inventory           | Needs design        | Define the required domain contract without copying Office policy                  |
+| DEP-06 | Unregistered deprecations      | 15 exact declarations in the dated inventory          | Proposed            | Triage each declaration for removal or justified registration                      |
+
+## Current snapshot
+
+At main `3fed5570cec533f468c25ed03c84967bdc972588` on 2026-10-09, the
+root-state-cast inventory contains 45 entries. The compatibility ledger has
+29 registrations, including 27 Office run aliases. The 2026-09-27 counts in
+the table remain historical measurements; other rule counts have not been
+remeasured here.
 
 ## DEP-01: type one slice
 
@@ -21,10 +32,24 @@ The Azure DevOps slice uses only an Immer recipe setter; other slices can need g
 Avoid a root-store redesign or new unsafe casts elsewhere.
 
 The Azure DevOps slice now accepts its recipe-only setter directly, and root composition passes `set` without an assertion.
-The change removes exactly one obsolete baseline entry, reducing the count from 46 to 45.
+The change removed exactly one obsolete baseline entry, reducing the count from 46 to 45.
 Focused Azure, root-store, and hydration tests passed (47 tests); web typecheck and lint, architecture lint, all 99 architecture-lint tests, and `git diff --check` passed.
 Unrelated task and workspace state references remain unchanged.
 Delivery: [PR #4009](https://github.com/kdlbs/kandev/pull/4009).
+
+The Jira and Linear issue-watch slices now accept only their Immer recipe
+setters, and root composition passes `set` directly. The focused regressions
+cover the existing initial-state merge, hydration behavior, separate-store
+isolation, and unrelated root references. The exact root-state-cast inventory
+fell from 45 to 39 by removing only the three Jira and three Linear entries.
+Provider, API, cache, and UI behavior remains unchanged. Local verification is
+recorded in the reviewed [delivery plan](../plans/architecture-maintenance-jira-linear-root-typing/plan.md).
+Delivery is pending under [PR #4375](https://github.com/kdlbs/kandev/pull/4375).
+
+The first Office alias-retirement increment removed four registrations in
+[PR #4010](https://github.com/kdlbs/kandev/pull/4010). The current ledger still
+contains 27 Office aliases; each remaining registration keeps its own removal
+condition.
 
 ## DEP-02: retire Office aliases
 
@@ -32,7 +57,7 @@ The [shared-run plan](../plans/shared-run-contract-ownership/plan.md) records th
 `internal/runs/models` owns generic run data. Office retains its launch and safety policies.
 Temporary aliases in `internal/office/models/run_compat.go` preserve existing callers.
 
-The ledger contains 31 declaration registrations for these aliases: eight types and 23 constants.
+The dated inventory contained 31 declaration registrations for these aliases: eight types and 23 constants.
 Each alias has its own removal condition.
 Consumer migration can span small PRs, but alias deletion and ledger deletion belong in the same PR.
 Do not replace these aliases with another compatibility barrel.
