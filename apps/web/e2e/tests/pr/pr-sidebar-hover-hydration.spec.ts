@@ -92,6 +92,7 @@ test.describe("inactive task PR summary hydration", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     const targetRow = session.sidebarTaskItem("Long PR summary target");
+    await expect(targetRow).toBeInViewport({ ratio: 0.5 });
     const icon = targetRow.getByTestId(`pr-task-icon-${targetTask.task_id}`);
     await icon.hover();
 

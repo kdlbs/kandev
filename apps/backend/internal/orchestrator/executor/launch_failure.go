@@ -15,6 +15,13 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+// RecordEarlyLaunchFailure preserves typed recovery details for a prepared
+// session whose launch failed before entering LaunchPreparedSession. The state
+// transition is conditional, so an already settled session keeps its history.
+func (e *Executor) RecordEarlyLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error) error {
+	return e.handleEarlyLaunchFailure(ctx, taskID, sessionID, "", launchErr)
+}
+
 type launchFailureClassification struct {
 	code    string
 	message string

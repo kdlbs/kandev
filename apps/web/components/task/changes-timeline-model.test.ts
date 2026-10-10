@@ -14,6 +14,8 @@ const MODIFIED_STATUS = "modified" as const;
 const BACKEND_REPOSITORY = "backend";
 const COMMITS_SECTION_TEST_ID = "commits-section";
 const HISTORY_SECTION_ROW_KIND = "history-section";
+const HISTORY_REPOSITORY_ROW_KIND = "history-repository";
+const COMMIT_FILE_ROW_KIND = "commit-file";
 
 function file(path: string, repositoryName?: string): ChangedFile {
   return {
@@ -133,16 +135,60 @@ describe("buildChangesHistoryTimelineRows", () => {
       new Set(),
     );
 
-    const fileRows = rows.filter((row) => row.kind === "commit-file");
+    const fileRows = rows.filter((row) => row.kind === COMMIT_FILE_ROW_KIND);
     expect(fileRows).toHaveLength(50_000);
-    expect(fileRows[0]).toMatchObject({ kind: "commit-file", file: files[0] });
-    expect(fileRows.at(-1)).toMatchObject({ kind: "commit-file", file: files.at(-1) });
+    expect(fileRows[0]).toMatchObject({ kind: COMMIT_FILE_ROW_KIND, file: files[0] });
+    expect(fileRows.at(-1)).toMatchObject({ kind: COMMIT_FILE_ROW_KIND, file: files.at(-1) });
     expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
     expect(fileRows[0]?.groups).toHaveLength(4);
   });
 });
 
 describe("buildChangesHistoryTimelineRows: provider files", () => {
+  it("allocates sibling spacing and content inset inside expanded provider row shells", () => {
+    const files = ["one.ts", "two.ts", "three.ts"].map((path) => ({
+      path,
+      status: MODIFIED_STATUS,
+    }));
+    const rows = buildChangesHistoryTimelineRows(
+      [
+        {
+          kind: "pr",
+          sectionKey: "current-pr",
+          label: "Pull request files",
+          testId: "pr-files-section",
+          collapsed: false,
+          files,
+          collapsedRepositories: new Set(),
+        },
+      ],
+      new Set(),
+    );
+    const fileRows = rows.filter((row) => row.kind === "pr-file");
+
+    expect(fileRows).toMatchObject([
+      { paddingInlineStartPx: 16, paddingBlockEndPx: 2 },
+      { paddingInlineStartPx: 16, paddingBlockEndPx: 2 },
+      { paddingInlineStartPx: 16, paddingBlockEndPx: 10 },
+    ]);
+
+    const collapsed = buildChangesHistoryTimelineRows(
+      [
+        {
+          kind: "pr",
+          sectionKey: "current-pr",
+          label: "Pull request files",
+          testId: "pr-files-section",
+          collapsed: true,
+          files,
+          collapsedRepositories: new Set(),
+        },
+      ],
+      new Set(),
+    );
+    expect(collapsed[0]).not.toHaveProperty("paddingBlockEndPx");
+  });
+
   it("preserves 50,000 provider files in one repository scope", () => {
     const files = Array.from({ length: 50_000 }, (_, index) => ({
       path: `src/provider-file-${String(index).padStart(5, "0")}.ts`,
@@ -188,6 +234,46 @@ describe("buildChangesHistoryTimelineRows: provider files", () => {
 });
 
 describe("buildChangesHistoryTimelineRows: commit headers", () => {
+  it("moves expanded commit footer space after its visible file rows", () => {
+    const commit = historyCommit("expanded-detail", "");
+    const rows = buildChangesHistoryTimelineRows(
+      [
+        {
+          kind: "commits",
+          sectionKey: "local",
+          label: "Commits",
+          testId: COMMITS_SECTION_TEST_ID,
+          collapsed: false,
+          commits: [
+            {
+              commit,
+              detail: {
+                expanded: true,
+                status: "loaded",
+                files: [
+                  { path: "one.ts", status: MODIFIED_STATUS, plus: 1, minus: 0 },
+                  { path: "two.ts", status: MODIFIED_STATUS, plus: 1, minus: 0 },
+                ],
+              },
+            },
+          ],
+          collapsedRepositories: new Set(),
+          collapsedDirectories: new Set(),
+          layout: "flat",
+        },
+      ],
+      new Set(),
+    );
+    const commitRow = rows.find((row) => row.kind === "commit");
+    const fileRows = rows.filter((row) => row.kind === COMMIT_FILE_ROW_KIND);
+
+    expect(commitRow).toMatchObject({ expanded: true });
+    expect(fileRows).toMatchObject([
+      { paddingInlineStartPx: 16, paddingBlockEndPx: 2 },
+      { paddingInlineStartPx: 16, paddingBlockEndPx: 10 },
+    ]);
+  });
+
   it("preserves 50,000 commit headers in their complete source scope", () => {
     const commits = Array.from({ length: 50_000 }, (_, index) => ({
       commit: historyCommit(`sha-${String(index).padStart(5, "0")}`, BACKEND_REPOSITORY),
@@ -220,6 +306,32 @@ describe("buildChangesHistoryTimelineRows: commit headers", () => {
     expect(commitRows.at(-1)).toMatchObject({ target: commits.at(-1)?.commit.detailTarget });
     expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
   });
+
+  it("keeps an expanded loading commit without adding a virtual status row", () => {
+    const commit = historyCommit("pending-commit", BACKEND_REPOSITORY);
+    const rows = buildChangesHistoryTimelineRows(
+      [
+        {
+          kind: "commits",
+          sectionKey: "local",
+          label: "Commits",
+          testId: COMMITS_SECTION_TEST_ID,
+          collapsed: false,
+          commits: [{ commit, detail: { expanded: true, status: "loading", files: [] } }],
+          collapsedRepositories: new Set(),
+          collapsedDirectories: new Set(),
+          layout: "flat",
+        },
+      ],
+      new Set(),
+    );
+
+    expect(rows.map((row) => row.kind)).toEqual([
+      HISTORY_SECTION_ROW_KIND,
+      HISTORY_REPOSITORY_ROW_KIND,
+      "commit",
+    ]);
+  });
 });
 
 describe("buildChangesHistoryTimelineRows: collapsed scopes", () => {
@@ -250,7 +362,7 @@ describe("buildChangesHistoryTimelineRows: collapsed scopes", () => {
         {
           ...commitSection,
           collapsedRepositories: new Set([
-            JSON.stringify(["changes", "history-repository", "local", BACKEND_REPOSITORY]),
+            JSON.stringify(["changes", HISTORY_REPOSITORY_ROW_KIND, "local", BACKEND_REPOSITORY]),
           ]),
         },
       ],
@@ -263,12 +375,12 @@ describe("buildChangesHistoryTimelineRows: collapsed scopes", () => {
 
     expect(collapsedCommit.map((row) => row.kind)).toEqual([
       HISTORY_SECTION_ROW_KIND,
-      "history-repository",
+      HISTORY_REPOSITORY_ROW_KIND,
       "commit",
     ]);
     expect(collapsedRepository.map((row) => row.kind)).toEqual([
       HISTORY_SECTION_ROW_KIND,
-      "history-repository",
+      HISTORY_REPOSITORY_ROW_KIND,
     ]);
     expect(collapsedSection.map((row) => row.kind)).toEqual([HISTORY_SECTION_ROW_KIND]);
   });

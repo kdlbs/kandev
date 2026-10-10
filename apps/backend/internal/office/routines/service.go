@@ -42,6 +42,11 @@ var ErrInvalidTrigger = errors.New("invalid routine trigger")
 // Repository is the persistence interface required by RoutineService.
 type Repository interface {
 	CreateRoutine(ctx context.Context, routine *Routine) error
+	// CreateRoutineWithTrigger inserts routine and, when trigger is
+	// non-nil, its trigger inside a single transaction: a failed trigger
+	// insert rolls the routine back rather than leaving an unscheduled
+	// routine behind.
+	CreateRoutineWithTrigger(ctx context.Context, routine *Routine, trigger *RoutineTrigger) error
 	GetRoutine(ctx context.Context, id string) (*Routine, error)
 	ListRoutines(ctx context.Context, workspaceID string) ([]*Routine, error)
 	UpdateRoutine(ctx context.Context, routine *Routine) error
@@ -524,6 +529,24 @@ func (s *RoutineService) CreateRoutine(ctx context.Context, routine *Routine) er
 	return nil
 }
 
+// CreateRoutineWithTrigger creates a routine and its trigger atomically:
+// validation runs first, so a rejected trigger (ErrInvalidTrigger) writes
+// nothing at all, and the repository commits both rows or neither. This is
+// what keeps a failed trigger from leaving a schedule-less routine behind.
+func (s *RoutineService) CreateRoutineWithTrigger(
+	ctx context.Context, routine *Routine, trigger *RoutineTrigger,
+) error {
+	if trigger != nil {
+		if err := prepareTrigger(trigger, time.Now().UTC()); err != nil {
+			return err
+		}
+	}
+	if err := s.repo.CreateRoutineWithTrigger(ctx, routine, trigger); err != nil {
+		return fmt.Errorf("create routine: %w", err)
+	}
+	return nil
+}
+
 // GetRoutine returns a routine by ID or name.
 func (s *RoutineService) GetRoutine(ctx context.Context, id string) (*Routine, error) {
 	return s.GetRoutineFromConfig(ctx, id)
@@ -609,6 +632,17 @@ func (s *RoutineService) AttachScheduleState(ctx context.Context, list []*Routin
 // one that can never fire, is rejected here rather than becoming a silent
 // no-op or a wrong daily fallback at tick time.
 func (s *RoutineService) CreateRoutineTrigger(ctx context.Context, t *RoutineTrigger) error {
+	if err := prepareTrigger(t, time.Now().UTC()); err != nil {
+		return err
+	}
+	return s.repo.CreateRoutineTrigger(ctx, t)
+}
+
+// prepareTrigger applies the timezone default and, for a cron trigger,
+// validates the expression and computes next_run_at. It mutates t on
+// success and writes nothing; callers run it before any store write so a
+// rejected trigger leaves no partial state.
+func prepareTrigger(t *RoutineTrigger, now time.Time) error {
 	if t.Timezone == "" {
 		t.Timezone = "UTC"
 	}
@@ -616,13 +650,13 @@ func (s *RoutineService) CreateRoutineTrigger(ctx context.Context, t *RoutineTri
 		if t.CronExpression == "" {
 			return fmt.Errorf("%w: cron trigger requires a cron_expression", ErrInvalidTrigger)
 		}
-		next, err := shared.NextCronTime(t.CronExpression, t.Timezone, time.Now().UTC())
+		next, err := shared.NextCronTime(t.CronExpression, t.Timezone, now)
 		if err != nil {
 			return fmt.Errorf("%w: invalid cron expression: %v", ErrInvalidTrigger, err)
 		}
 		t.NextRunAt = &next
 	}
-	return s.repo.CreateRoutineTrigger(ctx, t)
+	return nil
 }
 
 // ListRoutineTriggers returns triggers for a routine.

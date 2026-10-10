@@ -3,20 +3,23 @@ package providers
 import (
 	"context"
 	"errors"
+
+	"github.com/kandev/kandev/internal/notifications/models"
 )
 
 var ErrNoEligibleSubscriber = errors.New("no eligible notification subscriber")
 
 type Message struct {
-	EventType     string
-	Title         string
-	Body          string
-	TaskID        string
-	TaskSessionID string
-	OccurrenceID  string
-	UserID        string
-	Config        map[string]interface{}
-	Payload       map[string]string
+	EventType      string
+	Title          string
+	Body           string
+	TaskID         string
+	TaskSessionID  string
+	OccurrenceID   string
+	UserID         string
+	Config         map[string]interface{}
+	Payload        map[string]string
+	RuntimeUpdates []models.RuntimeUpdateMember
 }
 
 type Provider interface {

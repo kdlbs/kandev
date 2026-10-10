@@ -6,8 +6,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	orchestratorexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 type fixedLifecycleProfileResolver struct {
@@ -38,6 +40,13 @@ func TestLifecycleAdapter_ResolveAgentProfileForwardsNativeSessionResume(t *test
 		"the production lifecycle adapter must preserve the capability used by recovery admission")
 }
 
+type durableDeliveryCapabilityProvider interface {
+	DurableDeliveryCapabilityForExecution(
+		context.Context,
+		string,
+	) (runtimeapi.DurableDeliveryCapability, bool)
+}
+
 // acpSessionIDProvider mirrors the unexported interface
 // orchestrator.Service.currentACPSessionID asserts s.agentManager against.
 // Declaring it independently here — instead of importing an orchestrator
@@ -47,12 +56,41 @@ type acpSessionIDProvider interface {
 	GetACPSessionIDForSession(sessionID string) (string, bool)
 }
 
+type retainedPromptFailureAcknowledger interface {
+	AcknowledgeRetainedPromptFailure(executionID string, generation uint64) bool
+}
+
 type initialPromptAdmissionRegistrar interface {
 	RegisterInitialPromptAdmissionCallbacks(string, func() error, func(), func()) error
 }
 
 type initialPromptDispatchRegistrar interface {
 	RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
+}
+
+type submissionAwarePromptProvider interface {
+	PromptAgentWithDispatchCallbackAndSubmissionID(
+		context.Context,
+		string,
+		string,
+		[]v1.MessageAttachment,
+		bool,
+		func(),
+		string,
+	) (*orchestratorexecutor.PromptResult, error)
+}
+
+type admissionSubmissionAwarePromptProvider interface {
+	PromptAgentWithAdmissionCallbackAndSubmissionID(
+		context.Context,
+		string,
+		string,
+		[]v1.MessageAttachment,
+		bool,
+		func() error,
+		func(),
+		string,
+	) (*orchestratorexecutor.PromptResult, error)
 }
 
 // TestLifecycleAdapter_SatisfiesACPSessionIDSeam is the regression test for a
@@ -122,6 +160,21 @@ func TestLifecycleAdapter_GetACPSessionIDForSession_ForwardsLiveIdentity(t *test
 	}
 }
 
+func TestLifecycleAdapter_SatisfiesRetainedPromptFailureAcknowledgementSeam(t *testing.T) {
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
+	var client orchestratorexecutor.AgentManagerClient = newLifecycleAdapter(mgr, nil, newTestLogger())
+
+	acknowledger, ok := client.(retainedPromptFailureAcknowledger)
+	if !ok {
+		t.Fatal("production lifecycleAdapter, held as executor.AgentManagerClient, does not satisfy " +
+			"AcknowledgeRetainedPromptFailure(string, uint64) bool; the retained failure owner would leave " +
+			"successor prompt admission fenced after durable settlement")
+	}
+	if acknowledger.AcknowledgeRetainedPromptFailure("no-such-execution", 1) {
+		t.Fatal("expected stale or unknown retained prompt acknowledgement to return false")
+	}
+}
+
 func TestLifecycleAdapter_RegistersInitialPromptAdmissionOnRestart(t *testing.T) {
 	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
 	if err := mgr.ExecutionStoreForTesting().Add(&lifecycle.AgentExecution{
@@ -153,5 +206,46 @@ func TestLifecycleAdapter_RegistersInitialPromptAdmissionOnRestart(t *testing.T)
 		"exec-model-switch-restart", func() {}, func() {},
 	); err != nil {
 		t.Fatalf("register replacement startup dispatch callbacks: %v", err)
+	}
+}
+
+func TestLifecycleAdapter_SatisfiesDurableDeliveryCapabilitySeam(t *testing.T) {
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
+	var client orchestratorexecutor.AgentManagerClient = newLifecycleAdapter(mgr, nil, newTestLogger())
+
+	provider, ok := client.(durableDeliveryCapabilityProvider)
+	if !ok {
+		t.Fatal("production lifecycleAdapter, held as executor.AgentManagerClient, does not satisfy " +
+			"DurableDeliveryCapabilityForExecution(context.Context, string); orchestrator would treat " +
+			"a durable peer as legacy and omit its canonical SQL submission")
+	}
+	if _, advertised := provider.DurableDeliveryCapabilityForExecution(context.Background(), "missing-execution"); advertised {
+		t.Fatal("missing execution unexpectedly advertised durable delivery")
+	}
+}
+
+func TestLifecycleAdapter_SatisfiesSubmissionAwarePromptSeam(t *testing.T) {
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
+	var client orchestratorexecutor.AgentManagerClient = newLifecycleAdapter(mgr, nil, newTestLogger())
+
+	if _, ok := client.(submissionAwarePromptProvider); !ok {
+		t.Fatal("production lifecycleAdapter does not forward the submission-aware prompt capability; " +
+			"the executor would fall back to a prompt call that loses the canonical delivery identity")
+	}
+	if _, ok := client.(admissionSubmissionAwarePromptProvider); !ok {
+		t.Fatal("production lifecycleAdapter does not forward the combined admission and submission capability")
+	}
+}
+
+func TestBuildLifecycleLaunchRequestCarriesInitialDeliverySubmissionID(t *testing.T) {
+	request := &orchestratorexecutor.LaunchAgentRequest{
+		TaskID:                      "task-1",
+		SessionID:                   "session-1",
+		InitialDeliverySubmissionID: "message-1",
+	}
+
+	launch := buildLifecycleLaunchRequest(request, "/workspace", "profile-1")
+	if launch.InitialDeliverySubmissionID != "message-1" {
+		t.Fatalf("initial delivery submission ID = %q, want message-1", launch.InitialDeliverySubmissionID)
 	}
 }

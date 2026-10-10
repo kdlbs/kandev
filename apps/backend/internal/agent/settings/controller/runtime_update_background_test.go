@@ -19,16 +19,26 @@ func TestRuntimeBackgroundOwnsOneCadenceAndStops(t *testing.T) {
 		c.SetRuntimeUpdateNotifier(notices)
 		stop := c.StartRuntimeUpdateBackground(context.Background())
 		synctest.Wait()
-		if notices.count() != 1 {
-			t.Fatalf("startup pass notices=%d", notices.count())
+		if notices.count() != 0 {
+			t.Fatalf("startup availability batch members=%d", notices.count())
 		}
-		time.Sleep(15 * time.Minute)
+		if notices.batchCount() != 0 {
+			t.Fatal("startup availability bypassed its collection window")
+		}
+		time.Sleep(runtimeUpdateAvailabilityWindow)
 		synctest.Wait()
-		if notices.count() != 2 {
-			t.Fatalf("cadence notices=%d", notices.count())
+		if notices.batchCount() != 1 || notices.count() != 1 {
+			t.Fatalf("startup availability summary batches=%d members=%d", notices.batchCount(), notices.count())
+		}
+		time.Sleep(runtimeUpdateBackgroundInterval - runtimeUpdateAvailabilityWindow)
+		synctest.Wait()
+		time.Sleep(runtimeUpdateAvailabilityWindow)
+		synctest.Wait()
+		if notices.batchCount() != 2 || notices.count() != 2 {
+			t.Fatalf("cadence summary batches=%d members=%d", notices.batchCount(), notices.count())
 		}
 		stop()
-		time.Sleep(15 * time.Minute)
+		time.Sleep(runtimeUpdateBackgroundInterval)
 		synctest.Wait()
 		if notices.count() != 2 {
 			t.Fatal("disposed background loop published")
@@ -76,7 +86,7 @@ func TestRuntimeSubscriberReplayCannotStartAutomaticJobsAfterWorkerStops(t *test
 	if len(c.ListAgentUpdateJobs()) != 0 {
 		t.Fatal("subscriber replay restarted mutation after shutdown/restore quiesce")
 	}
-	if notices.count() != 1 {
-		t.Fatalf("replayed notices=%d, want available runtime", notices.count())
+	if notices.count() != 0 {
+		t.Fatalf("availability delivered after collector shutdown: %d", notices.count())
 	}
 }

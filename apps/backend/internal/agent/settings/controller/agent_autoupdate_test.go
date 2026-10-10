@@ -248,7 +248,7 @@ func TestAutomaticCatalogueValidationFailureIsRetainedWithoutMutation(t *testing
 	if err != nil || policy.Outcome == nil || policy.Outcome.Status != "failed" || policy.AttemptedVersion != "9.0.0" {
 		t.Fatalf("validation failure disappeared: %+v,%v", policy, err)
 	}
-	if notices.count() != 2 || notices.notices[1].Status != "failed" {
+	if notices.count() != 1 || notices.notices[0].Status != "failed" {
 		t.Fatalf("validation failure was not announced immediately: %+v", notices.notices)
 	}
 	if updater.runCalls != 0 {

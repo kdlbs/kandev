@@ -37,6 +37,25 @@ export function isLaunchStateRegression(
   return incoming < live;
 }
 
+/** True when a session state proves its agentctl has completed startup. */
+export function sessionStateImpliesAgentctlReady(state?: TaskSessionState): boolean {
+  return state === "RUNNING" || state === "WAITING_FOR_INPUT";
+}
+
+/** True when a live session identifies the same agent execution as ready. */
+export function sessionStateConfirmsAgentctlExecutionReady(
+  state: TaskSessionState | undefined,
+  sessionAgentExecutionId?: string,
+  observedAgentExecutionId?: string,
+): boolean {
+  return (
+    sessionStateImpliesAgentctlReady(state) &&
+    (!sessionAgentExecutionId ||
+      !observedAgentExecutionId ||
+      sessionAgentExecutionId === observedAgentExecutionId)
+  );
+}
+
 /**
  * Visibility rule for the composer's "a message will auto-start the agent"
  * hint (the recovered-idle / resume-skipped affordance that replaced the

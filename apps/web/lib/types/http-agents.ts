@@ -181,6 +181,23 @@ export type ProfileCapabilityRequest = {
   refresh?: boolean;
 };
 
+export type ProfileRuntimeComponent = {
+  role: "bridge" | "provider";
+  name: string;
+  package?: string;
+  source: "managed" | "bundled" | "external" | "unknown";
+  owner: "kandev" | "external" | "unknown";
+  effective_version?: string;
+  observed_version?: string;
+  guidance_url?: string;
+};
+
+export type ProfileRuntimeInfo = {
+  scope: "host";
+  observed_at: string;
+  components: ProfileRuntimeComponent[];
+};
+
 export type ModelConfig = {
   default_model: string;
   available_models: ModelEntry[];
@@ -204,6 +221,8 @@ export type DynamicModelsResponse = {
   commands?: CommandEntry[];
   error: string | null;
   context_revision?: string;
+  /** Ephemeral host-scoped runtime evidence for this exact profile probe. */
+  runtime_info?: ProfileRuntimeInfo;
 };
 
 export type ResolveAgentModelConfigRequest = {
@@ -267,6 +286,7 @@ export type LoginCommand = {
 export type RuntimeUpdate = {
   managed_fallback?: boolean;
   supported: boolean;
+  update_mode: "pinned" | "self_update";
   package: string;
   current_version?: string;
   default_version?: string;

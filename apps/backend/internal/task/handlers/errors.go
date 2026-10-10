@@ -45,6 +45,10 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(status, taskErrorBody(err))
 		return
 	}
+	if errors.Is(err, taskrepository.ErrTaskHierarchyConflict) {
+		c.JSON(http.StatusConflict, taskErrorBody(err))
+		return
+	}
 	if errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked) {
 		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_gate_blocked"})
 		return
@@ -197,6 +201,10 @@ func isClientDisconnect(err error) bool {
 	return err != nil && errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
+func isRequestCancellation(ctx context.Context, err error) bool {
+	return errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled)
+}
+
 func abortClientDisconnect(c *gin.Context) {
 	c.AbortWithStatus(statusClientClosedRequest)
 }
@@ -286,7 +294,7 @@ func isValidationError(err error) bool {
 	if errors.Is(err, service.ErrTaskTitleTooLong) {
 		return true
 	}
-	if errors.Is(err, service.ErrExternalIDInvalid) {
+	if errors.Is(err, service.ErrExternalIDInvalid) || errors.Is(err, service.ErrReservedMetadata) {
 		return true
 	}
 	if errors.Is(err, workflowmove.ErrConflictingInstructions) ||

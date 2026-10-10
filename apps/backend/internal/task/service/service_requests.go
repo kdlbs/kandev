@@ -73,17 +73,21 @@ type TaskRepositoryInput struct {
 
 // CreateTaskRequest contains the data for creating a new task
 type CreateTaskRequest struct {
-	WorkspaceID    string                 `json:"workspace_id"`
-	WorkflowID     string                 `json:"workflow_id"`
-	WorkflowStepID string                 `json:"workflow_step_id"`
-	Title          string                 `json:"title"`
-	Description    string                 `json:"description"`
-	AutoTitle      bool                   `json:"auto_title,omitempty"`
-	Priority       string                 `json:"priority"`
-	State          *v1.TaskState          `json:"state,omitempty"`
-	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
-	Position       int                    `json:"position"`
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	WorkspaceID    string                `json:"workspace_id"`
+	WorkflowID     string                `json:"workflow_id"`
+	WorkflowStepID string                `json:"workflow_step_id"`
+	Title          string                `json:"title"`
+	Description    string                `json:"description"`
+	AutoTitle      bool                  `json:"auto_title,omitempty"`
+	Priority       string                `json:"priority"`
+	State          *v1.TaskState         `json:"state,omitempty"`
+	Repositories   []TaskRepositoryInput `json:"repositories,omitempty"`
+	// projectRepositoryDefaults marks the source list read from a root task's
+	// Office project. Only these automatic selections deduplicate aliases after
+	// each source has passed normal repository resolution.
+	projectRepositoryDefaults bool
+	Position                  int                    `json:"position"`
+	Metadata                  map[string]interface{} `json:"metadata,omitempty"`
 	// TrustedHandoffMetadata allows the handoff application path to persist its
 	// server-authored provenance fields. It is internal-only and never decoded
 	// from a request body; ordinary task creation cannot forge those fields.
@@ -120,6 +124,17 @@ type CreateTaskRequest struct {
 	// (docs/specs/tasks/requirements/external-id-idempotency.md). Accepted on REST
 	// and MCP; empty means no idempotency key.
 	ExternalID string `json:"external_id,omitempty"`
+	// AllowReservedExternalID permits ExternalID to carry the
+	// ReservedExternalIDPrefixCoordinatorProposal prefix, which every other
+	// caller is refused (docs/specs/coordinator/system-design/proposals.md#reserved-prefix).
+	// Tagged json:"-" so no HTTP or MCP request body can set it; only the
+	// coordinator service sets it, when creating the task behind an approved
+	// proposal.
+	AllowReservedExternalID bool `json:"-"`
+	// AllowReservedMetadata permits Metadata keys with the
+	// ReservedMetadataKeyPrefixCoordinator prefix. Tagged json:"-" so no
+	// request body can set it; only the coordinator service does.
+	AllowReservedMetadata bool `json:"-"`
 
 	// Office extensions
 	AssigneeAgentProfileID string   `json:"assignee_agent_profile_id,omitempty"`
@@ -175,6 +190,10 @@ type UpdateTaskRequest struct {
 	// pointer to "" unassigns. It is independent of the agent assignee and
 	// never clears it.
 	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
+	// AllowReservedMetadata permits Metadata keys with the
+	// ReservedMetadataKeyPrefixCoordinator prefix; json:"-" as on
+	// CreateTaskRequest.
+	AllowReservedMetadata bool `json:"-"`
 }
 
 // CreateWorkflowRequest contains the data for creating a new workflow

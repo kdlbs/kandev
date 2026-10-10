@@ -8,6 +8,7 @@ import {
   expectDivergedHistory,
   expectHeaderGeometry,
   expectExpandedPRContiguous,
+  measurePRSectionGeometry,
 } from "./changes-history-regression-helpers";
 
 test.describe("Mobile Changes history regression", () => {
@@ -60,5 +61,35 @@ test.describe("Mobile Changes history regression", () => {
     await prCapture.screenshot("history-header-spacing-phone", {
       caption: "Touch-sized Changes history headers",
     });
+  });
+
+  test("preserves residual PR spacing on the phone Changes surface", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await openHistoryRegression(testPage, apiClient, seedData, true);
+    await seedHistoryRelation(testPage, "diverged");
+    await expectDivergedHistory(testPage);
+    for (const width of [393, 767]) {
+      await testPage.setViewportSize({ width, height: 851 });
+      const toggle = testPage.getByTestId("pr-changes-section-collapse-toggle");
+      if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.tap();
+      await expect(
+        testPage.locator('[data-testid="pr-files-section"] [data-changes-file]'),
+      ).toHaveCount(5);
+      await expect(
+        testPage.getByTestId("local-checkout-commits-section-collapse-toggle"),
+      ).toBeVisible();
+      await expect
+        .poll(() => measurePRSectionGeometry(testPage))
+        .toEqual({
+          siblingGaps: [2, 2, 2, 2],
+          sectionGap: expect.closeTo(10, 0),
+          contentOffset: expect.closeTo(-4, 0),
+        });
+      await expect(testPage.getByTestId("changes-panel-scroll-owner")).toHaveCount(1);
+      await expectNoPageHorizontalOverflow(testPage);
+    }
   });
 });

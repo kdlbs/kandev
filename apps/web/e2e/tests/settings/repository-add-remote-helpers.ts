@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { ListRepositoriesResponse, Repository } from "../../../lib/types/http";
@@ -19,10 +19,12 @@ export async function addRemoteRepositoryFromSettings(options: {
   apiClient: ApiClient;
   seedData: SeedData;
   mobile?: boolean;
+  paste?: boolean;
 }) {
-  const { page, apiClient, seedData, mobile = false } = options;
+  const { page, apiClient, seedData, mobile = false, paste = false } = options;
   if (mobile) await page.setViewportSize({ width: 390, height: 844 });
   let savedRepository: Repository | undefined;
+  const activate = (target: Locator) => (mobile ? target.tap() : target.click());
 
   await apiClient.mockGitHubReset();
   await apiClient.mockGitHubSetUser(REMOTE_OWNER);
@@ -34,7 +36,7 @@ export async function addRemoteRepositoryFromSettings(options: {
 
   try {
     await page.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
-    await page.getByRole("button", { name: "Add repository" }).click();
+    await activate(page.getByRole("button", { name: "Add repository" }));
     // Opening the dialog mounts the picker, which lists the connected
     // provider's repositories; the option can only render after that answer.
     const reposListed = page.waitForResponse(
@@ -43,7 +45,7 @@ export async function addRemoteRepositoryFromSettings(options: {
         response.request().method() === "GET" &&
         response.ok(),
     );
-    await page.getByRole("menuitem", { name: "Remote repository" }).click();
+    await activate(page.getByRole("menuitem", { name: "Remote repository" }));
 
     const dialog = page.getByRole("dialog", { name: "Add Remote Repository" });
     await expect(dialog).toBeVisible();
@@ -51,11 +53,24 @@ export async function addRemoteRepositoryFromSettings(options: {
     await expect(confirm).toBeDisabled();
 
     await reposListed;
-    await dialog.getByTestId("remote-repo-chip-trigger").click();
-    const option = page.getByTestId("remote-repo-option").filter({ hasText: REMOTE_FULL_NAME });
-    await expect(option).toBeVisible();
-    await option.first().click();
+    await activate(dialog.getByTestId("remote-repo-chip-trigger"));
+    if (paste) {
+      const input = page.getByTestId("remote-repo-input");
+      await input.fill(`https://github.com/${REMOTE_FULL_NAME}`);
+      await input.press("Enter");
+    } else {
+      const option = page.getByTestId("remote-repo-option").filter({ hasText: REMOTE_FULL_NAME });
+      await expect(option).toHaveCount(1);
+      await activate(option);
+    }
     await expect(confirm).toBeEnabled();
+    if (mobile) {
+      await expect(confirm).toHaveCSS("height", "44px");
+      await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toHaveCSS(
+        "height",
+        "44px",
+      );
+    }
 
     const registerResponse = page.waitForResponse(
       (response) =>
@@ -63,7 +78,7 @@ export async function addRemoteRepositoryFromSettings(options: {
         response.request().method() === "POST" &&
         response.ok(),
     );
-    await confirm.click();
+    await activate(confirm);
     const response = await registerResponse;
     expect(response.status()).toBe(201);
     savedRepository = (await response.json()) as Repository;

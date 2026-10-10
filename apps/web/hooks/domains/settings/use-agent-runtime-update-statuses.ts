@@ -13,8 +13,8 @@ export function useAgentRuntimeUpdateStatuses(
 ) {
   const store = useAppStoreApi();
   const statusByAgent = useAppStore((s) => s.agentRuntimeUpdates.byAgent);
-  const observedSuccessfulJobs = useRef(new Set<string>());
-  const pendingSuccessfulJobs = useRef(new Set<string>());
+  const observedTerminalJobs = useRef(new Set<string>());
+  const pendingTerminalJobs = useRef(new Set<string>());
 
   const refresh = useCallback(() => refreshRuntimeUpdateStatuses(store, true), [store]);
   useEffect(() => {
@@ -25,18 +25,18 @@ export function useAgentRuntimeUpdateStatuses(
     for (const job of Object.values(updateJobs)) {
       if (
         (job.status !== "succeeded" && job.status !== "failed") ||
-        observedSuccessfulJobs.current.has(job.job_id)
+        observedTerminalJobs.current.has(job.job_id)
       ) {
         continue;
       }
-      if (pendingSuccessfulJobs.current.has(job.job_id)) {
+      if (pendingTerminalJobs.current.has(job.job_id)) {
         continue;
       }
-      pendingSuccessfulJobs.current.add(job.job_id);
+      pendingTerminalJobs.current.add(job.job_id);
       void refresh().then((succeeded) => {
-        pendingSuccessfulJobs.current.delete(job.job_id);
+        pendingTerminalJobs.current.delete(job.job_id);
         if (succeeded) {
-          observedSuccessfulJobs.current.add(job.job_id);
+          observedTerminalJobs.current.add(job.job_id);
         }
       });
     }

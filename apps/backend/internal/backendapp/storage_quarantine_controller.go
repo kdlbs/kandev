@@ -17,13 +17,14 @@ import (
 )
 
 type workspaceQuarantineController struct {
-	settings  *storagepkg.SettingsStore
-	store     quarantineEntryStore
-	factory   workspaceFactory
-	homeDir   string
-	activity  *activity.Coordinator
-	temporary *tempartifacts.Provider
-	rename    func(string, string) error
+	settings         *storagepkg.SettingsStore
+	store            quarantineEntryStore
+	factory          workspaceFactory
+	homeDir          string
+	activity         *activity.Coordinator
+	temporary        *tempartifacts.Provider
+	goCacheMutations *storagepkg.MutationGate
+	rename           func(string, string) error
 }
 
 type quarantineEntryStore interface {
@@ -218,6 +219,11 @@ func (c *workspaceQuarantineController) restoreGoCache(
 	ctx context.Context,
 	entry storagepkg.QuarantineEntry,
 ) (storagepkg.QuarantineEntry, error) {
+	releaseMutation, err := c.goCacheMutations.Acquire(ctx)
+	if err != nil {
+		return storagepkg.QuarantineEntry{}, err
+	}
+	defer releaseMutation()
 	if err := c.validateGoCacheEntry(ctx, entry); err != nil {
 		return storagepkg.QuarantineEntry{}, err
 	}
@@ -324,6 +330,11 @@ func (c *workspaceQuarantineController) deleteGoCacheWithRetention(
 	} else if confirmation != storagepkg.QuarantineConfirmationDelete {
 		return storagepkg.QuarantineEntry{}, false, fmt.Errorf("%w: quarantine deletion requires DELETE confirmation", storagepkg.ErrValidation)
 	}
+	releaseMutation, err := c.goCacheMutations.Acquire(ctx)
+	if err != nil {
+		return storagepkg.QuarantineEntry{}, false, err
+	}
+	defer releaseMutation()
 	if err := c.validateGoCacheEntry(ctx, entry); err != nil {
 		return storagepkg.QuarantineEntry{}, false, err
 	}

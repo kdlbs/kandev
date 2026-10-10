@@ -111,6 +111,20 @@ func (a *Adapter) waitForSessionCleanup() {
 	a.sessionCleanupWg.Wait()
 }
 
+// GetSessionRestoreCapabilities exposes the negotiated ACP load capability.
+// ACP session/load is the supported native restore operation today; resume
+// remains an optional protocol extension and is not assumed here.
+func (a *Adapter) GetSessionRestoreCapabilities() shared.SessionRestoreCapabilities {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return shared.SessionRestoreCapabilities{
+		SupportsNativeLoad:    a.capabilities.LoadSession,
+		SupportsNativeResume:  false,
+		SupportsDirectoryMove: true,
+		RequiresNativeState:   true,
+	}
+}
+
 // NewSession creates a new agent session.
 func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
 	if err := a.lockSessionTransition(ctx); err != nil {
@@ -375,14 +389,12 @@ func filterMcpServersWithDecisions(
 		switch s.Type {
 		case "sse":
 			if !caps.Sse {
-				logger.Warn("filtering out SSE MCP server (agent does not support SSE)", zap.String("name", s.Name))
 				decision.ReasonCode = mcpFilterReasonSSEUnsupported
 				decisions = append(decisions, decision)
 				continue
 			}
 		case "http", "streamable_http":
 			if !caps.Http {
-				logger.Warn("filtering out HTTP MCP server (agent does not support HTTP)", zap.String("name", s.Name), zap.String("type", s.Type))
 				decision.ReasonCode = mcpFilterReasonHTTPUnsupported
 				decisions = append(decisions, decision)
 				continue
@@ -399,6 +411,25 @@ func filterMcpServersWithDecisions(
 		filtered = append(filtered, s)
 		decision.Included = true
 		decisions = append(decisions, decision)
+	}
+	for _, decision := range decisions {
+		supportedAlternativeSurvives := seenNames[decision.Server.Name]
+		fields := []zap.Field{zap.String("name", decision.Server.Name)}
+		switch decision.ReasonCode {
+		case mcpFilterReasonSSEUnsupported:
+			if supportedAlternativeSurvives {
+				logger.Debug("filtering out SSE MCP server (agent does not support SSE)", fields...)
+			} else {
+				logger.Warn("filtering out SSE MCP server (agent does not support SSE)", fields...)
+			}
+		case mcpFilterReasonHTTPUnsupported:
+			fields = append(fields, zap.String("type", decision.Server.Type))
+			if supportedAlternativeSurvives {
+				logger.Debug("filtering out HTTP MCP server (agent does not support HTTP)", fields...)
+			} else {
+				logger.Warn("filtering out HTTP MCP server (agent does not support HTTP)", fields...)
+			}
+		}
 	}
 	return filtered, decisions
 }
@@ -543,7 +574,10 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	if !capabilities.LoadSession && capabilities.SessionCapabilities.Resume == nil {
 		a.logger.Debug("session/load rejected: agent does not advertise LoadSession capability",
 			zap.String("session_id", sessionID))
-		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
+		return &SessionRestoreError{
+			Reason: SessionRestoreReasonNativeResumeUnsupported,
+			Cause:  fmt.Errorf("agent does not support session loading (LoadSession capability is false)"),
+		}
 	}
 	priorPromptTurn := a.currentPromptTurn()
 
@@ -613,7 +647,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 			clearFailedLoad()
 		}
 		span.RecordError(err)
-		return fmt.Errorf("failed to load session: %w", err)
+		return &SessionRestoreError{Reason: sessionRestoreReason(err), Cause: err}
 	}
 	for _, server := range filteredServers {
 		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
@@ -1097,6 +1131,7 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 	a.mu.RLock()
 	conn := a.acpConn
 	sessionID := a.sessionID
+	closed := a.closed
 	availableModes := append([]streams.SessionModeInfo(nil), a.availableModes...)
 	cachedModels := append([]modelInfo(nil), a.availableModels...)
 	cachedConfig := cloneConfigOptions(a.availableConfigOptions)
@@ -1105,17 +1140,35 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 	if conn == nil {
 		return streams.ModeResult{Requested: modeID}, fmt.Errorf("adapter not initialized")
 	}
+	if closed {
+		return streams.ModeResult{Requested: modeID}, errors.New("adapter is closed")
+	}
 	if sessionID == "" {
 		return streams.ModeResult{Requested: modeID}, fmt.Errorf("no active session: call NewSession before SetMode")
 	}
-	generation := a.beginConfigChange()
 	modeOption, hasModeOption, err := selectSessionModeOption(cachedConfig, availableModes, modeID, requestedConfigID)
 	if err != nil {
 		return streams.ModeResult{Requested: modeID}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return streams.ModeResult{Requested: modeID}, err
+	}
+	if !hasModeOption {
+		settingsGeneration, satisfied, err := a.alreadySatisfiedLegacyMode(ctx, conn, sessionID, modeID)
+		if err != nil {
+			return streams.ModeResult{Requested: modeID}, err
+		}
+		if satisfied {
+			result := streams.ModeResult{Requested: modeID, Effective: modeID, Confirmed: true}
+			a.emitSessionModeResult(sessionID, modeID, result, settingsGeneration)
+			return result, nil
+		}
+	}
+	generation := a.beginConfigChange()
 	baseline, uncertain := a.beginModeChange()
+	modeRPCAttempted := false
 	unconfirmed := true
-	defer func() { a.endModeChange(unconfirmed) }()
+	defer func() { a.endModeChange(unconfirmed && modeRPCAttempted) }()
 
 	request := sessionModeRequest{
 		conn: conn, sessionID: sessionID, modeID: modeID, option: modeOption,
@@ -1124,9 +1177,9 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 	}
 	var result streams.ModeResult
 	if hasModeOption {
-		result, err = a.setConfigSessionMode(ctx, request)
+		result, modeRPCAttempted, err = a.setConfigSessionMode(ctx, request)
 	} else {
-		result, err = a.setLegacySessionMode(ctx, conn, sessionID, modeID, baseline, uncertain)
+		result, modeRPCAttempted, err = a.setLegacySessionMode(ctx, conn, sessionID, modeID, baseline, uncertain)
 	}
 	if err != nil {
 		return result, err
@@ -1134,25 +1187,7 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 	if result.Confirmed {
 		unconfirmed = false
 	}
-
-	a.mu.RLock()
-	if a.sessionID != sessionID {
-		a.mu.RUnlock()
-		return result, nil
-	}
-	cachedModes := a.availableModes
-	a.mu.RUnlock()
-
-	reported, requested := sessionModeEventFields(modeID, result)
-	event := AgentEvent{
-		Type:                      streams.EventTypeSessionMode,
-		SessionID:                 sessionID,
-		CurrentModeID:             reported,
-		AvailableModes:            cachedModes,
-		SessionSettingsGeneration: a.nextSessionSettingsGeneration(sessionID),
-	}
-	event.RequestedModeID = requested
-	a.sendUpdate(event)
+	a.emitSessionModeResult(sessionID, modeID, result, 0)
 	return result, nil
 }
 
@@ -1168,22 +1203,22 @@ func (a *Adapter) setLegacySessionMode(
 	sessionID, modeID string,
 	afterGeneration uint64,
 	uncertain bool,
-) (streams.ModeResult, error) {
+) (streams.ModeResult, bool, error) {
 	if err := ctx.Err(); err != nil {
-		return streams.ModeResult{Requested: modeID}, err
+		return streams.ModeResult{Requested: modeID}, false, err
 	}
 	_, err := conn.SetSessionMode(ctx, acp.SetSessionModeRequest{
 		SessionId: acp.SessionId(sessionID),
 		ModeId:    acp.SessionModeId(modeID),
 	})
 	if err != nil {
-		return streams.ModeResult{Requested: modeID}, fmt.Errorf("set session mode failed: %w", err)
+		return streams.ModeResult{Requested: modeID}, true, fmt.Errorf("set session mode failed: %w", err)
 	}
 	result := a.awaitModeSettle(ctx, sessionID, modeID, afterGeneration)
 	if uncertain {
-		return streams.ModeResult{Requested: modeID}, nil
+		return streams.ModeResult{Requested: modeID}, true, nil
 	}
-	return result, nil
+	return result, true, nil
 }
 
 func isModeConfigOption(option streams.ConfigOption) bool {

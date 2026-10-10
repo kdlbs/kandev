@@ -3,6 +3,8 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -152,6 +154,88 @@ func TestListUnresolvedClarificationBundles_ReturnsPendingBundle(t *testing.T) {
 	}
 	if page.HasMore {
 		t.Fatalf("HasMore = true, want false")
+	}
+}
+
+func TestClarificationBundleQueryUsesPartialMessageIndex(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedBundleTask(t, repo, "task-index-plan", "workspace-index-plan")
+	seedBundleSession(t, repo, "session-index-plan", "task-index-plan")
+	seedBundleTurn(t, repo, "turn-index-plan", "session-index-plan", "task-index-plan")
+	insertClarificationMessage(
+		t, repo, "message-index-plan", "session-index-plan", "task-index-plan", "turn-index-plan",
+		"pending-index-plan", "question-index-plan", "pending", 0, time.Now().UTC(),
+	)
+	historyTx, err := repo.db.BeginTxx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin unrelated history insert: %v", err)
+	}
+	historyStmt, err := historyTx.Preparex(repo.db.Rebind(`
+		INSERT INTO task_session_messages
+			(id, task_session_id, task_id, turn_id, author_type, content, requests_input, type, metadata, created_at)
+		VALUES (?, 'session-index-plan', 'task-index-plan', 'turn-index-plan', 'user', 'history', 0, 'message', '{}', ?)
+	`))
+	if err != nil {
+		_ = historyTx.Rollback()
+		t.Fatalf("prepare unrelated history insert: %v", err)
+	}
+	for i := 0; i < 5000; i++ {
+		if _, err := historyStmt.Exec(fmt.Sprintf("message-history-index-plan-%04d", i), time.Now().UTC().Add(time.Duration(i)*time.Microsecond)); err != nil {
+			_ = historyStmt.Close()
+			_ = historyTx.Rollback()
+			t.Fatalf("insert unrelated history %d: %v", i, err)
+		}
+	}
+	if err := historyStmt.Close(); err != nil {
+		_ = historyTx.Rollback()
+		t.Fatalf("close unrelated history insert: %v", err)
+	}
+	if err := historyTx.Commit(); err != nil {
+		t.Fatalf("commit unrelated history: %v", err)
+	}
+	if _, err := repo.db.Exec(`ANALYZE task_session_messages`); err != nil {
+		t.Fatalf("analyze message history: %v", err)
+	}
+	assertSQLiteIndexExists(t, repo, "idx_messages_clarification_bundle")
+	if _, err := repo.db.Exec(`DROP INDEX idx_messages_clarification_bundle`); err != nil {
+		t.Fatalf("drop partial clarification index for replay: %v", err)
+	}
+	if err := repo.ensureMessageMetadataIndexes(); err != nil {
+		t.Fatalf("replay message metadata indexes: %v", err)
+	}
+	assertSQLiteIndexExists(t, repo, "idx_messages_clarification_bundle")
+
+	opts := models.ListClarificationBundlesOptions{
+		Unscoped: true, WorkspaceID: "workspace-index-plan", Limit: 10,
+		Sidecar: &models.ClarificationSidecarFilter{UserID: "operator", Now: time.Now().UTC()},
+	}
+	join, joinArgs := clarificationSidecarJoin(opts.Sidecar)
+	where, whereArgs := clarificationBundleWhereClause(opts)
+	args := append(append([]interface{}{}, joinArgs...), whereArgs...)
+	args = append(args, opts.Limit+1)
+	rows, err := repo.ro.QueryxContext(
+		context.Background(),
+		"EXPLAIN QUERY PLAN "+clarificationBundleQuery(repo.ro.DriverName(), join, where),
+		args...,
+	)
+	if err != nil {
+		t.Fatalf("explain clarification bundle query: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatalf("scan clarification query plan: %v", err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read clarification query plan: %v", err)
+	}
+	if !strings.Contains(strings.Join(details, "\n"), "idx_messages_clarification_bundle") {
+		t.Fatalf("clarification query plan = %v, want partial clarification index", details)
 	}
 }
 

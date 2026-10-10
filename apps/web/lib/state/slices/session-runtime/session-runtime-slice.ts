@@ -9,6 +9,7 @@ import {
   failWorkspaceRestoration,
 } from "./workspace-restoration";
 import { buildSessionViewActions } from "./session-runtime-view-actions";
+import { buildSessionGitCheckoutActions } from "./session-runtime-git-checkout-actions";
 
 const maxProcessOutputBytes = 2 * 1024 * 1024;
 // Shell + terminal streams are unbounded over a session's lifetime; cap them at
@@ -21,10 +22,6 @@ function trimTailBytes(value: string, maxBytes: number) {
     return value;
   }
   return value.slice(value.length - maxBytes);
-}
-
-function trimProcessOutput(value: string) {
-  return trimTailBytes(value, maxProcessOutputBytes);
 }
 
 /** Append a chunk to a terminal's output array, dropping the oldest chunks once
@@ -81,6 +78,7 @@ function purgeEnvScopedRuntime(state: SessionRuntimeSliceState, envKey: string) 
   delete state.shell.statuses[envKey];
   delete state.gitStatus.byEnvironmentId[envKey];
   delete state.gitStatus.byEnvironmentRepo[envKey];
+  delete state.gitStatusDisplay.byEnvironmentRepo[envKey];
   delete state.gitStatus.refreshByEnvironmentId?.[envKey];
   delete state.gitStatus.refreshByEnvironmentRepo?.[envKey];
   delete state.sessionCommits.byEnvironmentId[envKey];
@@ -120,6 +118,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
     refreshByEnvironmentId: {},
     refreshByEnvironmentRepo: {},
   },
+  gitStatusDisplay: { byEnvironmentRepo: {} },
   environmentIdBySessionId: {},
   sessionCommits: { byEnvironmentId: {}, loading: {}, refetchTrigger: {} },
   gitCheckoutGeneration: { byEnvironmentId: {} },
@@ -188,7 +187,7 @@ function buildTerminalShellProcessActions(set: ImmerSet) {
     appendProcessOutput: (processId: string, data: string) =>
       set((draft) => {
         const next = (draft.processes.outputsByProcessId[processId] || "") + data;
-        draft.processes.outputsByProcessId[processId] = trimProcessOutput(next);
+        draft.processes.outputsByProcessId[processId] = trimTailBytes(next, maxProcessOutputBytes);
       }),
     upsertProcessStatus: (status: Parameters<SessionRuntimeSlice["upsertProcessStatus"]>[0]) =>
       set((draft) => {
@@ -278,13 +277,6 @@ function buildSessionCommitActions(set: ImmerSet) {
         const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
         const prev = draft.sessionCommits.refetchTrigger[envKey] ?? 0;
         draft.sessionCommits.refetchTrigger[envKey] = prev + 1;
-      }),
-    bumpSessionGitCheckoutGeneration: (sessionId: string, repositoryName?: string) =>
-      set((draft) => {
-        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
-        const byRepository = (draft.gitCheckoutGeneration.byEnvironmentId[envKey] ??= {});
-        const scope = repositoryName ?? "";
-        byRepository[scope] = (byRepository[scope] ?? 0) + 1;
       }),
   };
 }
@@ -471,6 +463,7 @@ export function migrateEnvKeyedData(
   };
   migrate(draft.sessionCommits.byEnvironmentId);
   migrate(draft.gitStatus.byEnvironmentRepo);
+  migrate(draft.gitStatusDisplay.byEnvironmentRepo);
   migrate(draft.sessionCommits.loading);
   migrate(draft.sessionCommits.refetchTrigger);
   migrate(draft.gitCheckoutGeneration.byEnvironmentId);
@@ -598,6 +591,7 @@ export const createSessionRuntimeSlice: StateCreator<
       const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
       delete draft.gitStatus.byEnvironmentId[envKey];
       delete draft.gitStatus.byEnvironmentRepo[envKey];
+      delete draft.gitStatusDisplay.byEnvironmentRepo[envKey];
       delete draft.gitStatus.refreshByEnvironmentId?.[envKey];
       delete draft.gitStatus.refreshByEnvironmentRepo?.[envKey];
     }),
@@ -619,6 +613,7 @@ export const createSessionRuntimeSlice: StateCreator<
       if (repoMap && "" in repoMap) {
         delete repoMap[""];
       }
+      delete draft.gitStatusDisplay.byEnvironmentRepo[envKey]?.[""];
       delete draft.gitStatus.byEnvironmentId[envKey];
     }),
   registerSessionEnvironment: (sessionId, environmentId) =>
@@ -629,6 +624,7 @@ export const createSessionRuntimeSlice: StateCreator<
   ...buildWorkspaceRestorationActions(set),
   ...buildContextWindowActions(set),
   ...buildSessionCommitActions(set),
+  ...buildSessionGitCheckoutActions(set),
   setAvailableCommands: (sessionId, commands) =>
     set((draft) => {
       draft.availableCommands.bySessionId[sessionId] = commands;

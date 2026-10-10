@@ -577,17 +577,14 @@ func withCapability(rewritten, capability string) string {
 
 // rewriteAbsolutePath turns a path-absolute URL ("/foo") into a proxied path
 // ("<prefix>/foo"). Returns the input unchanged for non-rewritable cases:
-// empty strings, network-relative URLs (`//host`), schemes (`http:`, `data:`,
+// empty strings, network-relative URLs (`//host` or `/\host`), schemes (`http:`, `data:`,
 // `mailto:`, etc.), or relative paths (`foo`, `./foo`, `../foo`).
 // Dot segments in the path are normalized: a root path whose normalized form
 // escapes the subtree (/../x) is returned unchanged rather than emitting a
 // capability on a non-proxy path.
 func rewriteAbsolutePath(rawURL, prefix, capability string) string {
-	if len(rawURL) < 1 || rawURL[0] != '/' {
+	if len(rawURL) < 1 || rawURL[0] != '/' || len(rawURL) >= 2 && (rawURL[1] == '/' || rawURL[1] == '\\') {
 		return rawURL
-	}
-	if len(rawURL) >= 2 && rawURL[1] == '/' {
-		return rawURL // network-relative
 	}
 	if strings.Contains(rawURL, "/.") {
 		resolved := removeDotSegments(prefix + rawURL)
@@ -1070,7 +1067,7 @@ func rewriteURLReferenceBase(rawURL, prefix, capability, basePath string) string
 	if normalized == "" || normalized[0] == '#' || hasURLScheme(normalized) || strings.HasPrefix(normalized, "//") {
 		return rawURL
 	}
-	if normalized[0] == '/' {
+	if normalized[0] == '/' && (len(normalized) == 1 || normalized[1] != '/' && normalized[1] != '\\') {
 		return rewriteAbsolutePath(normalized, prefix, capability)
 	}
 	if capability == "" {

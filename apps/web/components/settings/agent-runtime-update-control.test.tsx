@@ -2,14 +2,17 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
+import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateStatus } from "@/lib/api";
 import { AgentRuntimeUpdateControl } from "./agent-runtime-update-control";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: false }),
 }));
 
+vi.mock("@/hooks/use-compact-task-chrome", () => ({ useTouchDrawer: () => false }));
+
 vi.mock("@kandev/ui/tooltip", () => ({
+  TooltipProvider: ({ children }: { children?: ReactNode }) => <>{children}</>,
   Tooltip: ({ children }: { children?: ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
   TooltipContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
@@ -40,6 +43,7 @@ vi.mock("@kandev/ui/drawer", () => ({
 const AGENT_NAME = "claude-acp";
 const PACKAGE_NAME = "@agentclientprotocol/claude-agent-acp";
 const ACTIVE_VERSION = "0.70.0";
+const OMP_PACKAGE = "@oh-my-pi/pi-coding-agent";
 const RUNTIME_STATUS_META = {
   display_name: "Claude",
   runtime_id: "npm:" + PACKAGE_NAME,
@@ -57,6 +61,7 @@ const RUNTIME_STATUS_META = {
 
 function preview(overrides: Partial<AgentUpdatePreview> = {}): AgentUpdatePreview {
   return {
+    update_mode: "pinned",
     agent_name: AGENT_NAME,
     package: PACKAGE_NAME,
     current_version: ACTIVE_VERSION,
@@ -75,8 +80,26 @@ function preview(overrides: Partial<AgentUpdatePreview> = {}): AgentUpdatePrevie
   };
 }
 
+function ompStatus(overrides: Partial<AgentUpdateStatus> = {}): AgentUpdateStatus {
+  return {
+    ...RUNTIME_STATUS_META,
+    display_name: "omp",
+    runtime_id: "omp-acp",
+    current_version: "1.0.0",
+    auto_update_supported: false,
+    update_mode: "self_update",
+    agent_name: "omp-acp",
+    package: OMP_PACKAGE,
+    default_version: "",
+    effective_version: "",
+    check_state: "unknown",
+    ...overrides,
+  };
+}
+
 function queuedJob(): AgentUpdateJob {
   return {
+    update_mode: "pinned",
     job_id: "job-1",
     agent_name: AGENT_NAME,
     status: "queued",
@@ -89,7 +112,74 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("AgentRuntimeUpdateControl", () => {
+describe("AgentRuntimeUpdateControl OpenCode migration", () => {
+  it("keeps OpenCode family migration explicit and discloses its scope", async () => {
+    const ordinary = preview({
+      agent_name: "opencode-acp",
+      package: "opencode-ai",
+      current_version: "1.18.32",
+      target_version: "1.18.32",
+      default_version: "1.18.32",
+      effective_version: "1.18.32",
+      active_version: "1.18.32",
+      migration_available: true,
+      family: "v1",
+      source: "managed",
+      runtime_revision: 9,
+    });
+    const migration = {
+      ...ordinary,
+      package: "@opencode/cli",
+      target_version: "2.0.18",
+      target_family: "v2" as const,
+      operation: "migrate" as const,
+    };
+    const onPreview = vi
+      .fn()
+      .mockImplementation((_agent, _target, _default, family) =>
+        Promise.resolve(family === "v2" ? migration : ordinary),
+      );
+    const onUpdate = vi.fn().mockResolvedValue(queuedJob());
+    render(
+      <AgentRuntimeUpdateControl
+        agentName="opencode-acp"
+        displayName="OpenCode"
+        runtimeUpdate={{
+          update_mode: "pinned",
+          supported: true,
+          package: "opencode-ai",
+          default_version: "1.18.32",
+          effective_version: "1.18.32",
+        }}
+        onPreview={onPreview}
+        onUpdate={onUpdate}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("agent-update-trigger-opencode-acp"));
+    await waitFor(() => expect(onPreview).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("agent-update-confirm-opencode-acp").textContent).toBe(
+      "Update runtime",
+    );
+    fireEvent.click(screen.getByTestId("agent-update-migrate-family-opencode-acp"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-update-migration-scope-opencode-acp")).toBeTruthy(),
+    );
+    expect(
+      screen.getByText(
+        "This selects managed OpenCode v2 for future launches across every OpenCode profile in this Kandev installation. The standalone CLI remains unchanged.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByTestId("agent-update-confirm-opencode-acp"));
+
+    await waitFor(() =>
+      expect(onUpdate).toHaveBeenCalledWith("opencode-acp", "2.0.18", false, "v2", 9),
+    );
+  });
+});
+
+describe("AgentRuntimeUpdateControl version browsing", () => {
   it("keeps a long version history behind the browse action", async () => {
     const onPreview = vi.fn().mockResolvedValue(
       preview({
@@ -107,6 +197,7 @@ describe("AgentRuntimeUpdateControl", () => {
         displayName="Claude Code"
         runtimeUpdate={{
           supported: true,
+          update_mode: "pinned",
           package: PACKAGE_NAME,
           default_version: ACTIVE_VERSION,
           effective_version: ACTIVE_VERSION,
@@ -140,6 +231,7 @@ describe("AgentRuntimeUpdateControl", () => {
         displayName="Claude Code"
         runtimeUpdate={{
           supported: true,
+          update_mode: "pinned",
           package: PACKAGE_NAME,
           default_version: ACTIVE_VERSION,
           effective_version: ACTIVE_VERSION,
@@ -173,6 +265,7 @@ describe("AgentRuntimeUpdateControl", () => {
         displayName="Claude Code"
         runtimeUpdate={{
           supported: true,
+          update_mode: "pinned",
           package: PACKAGE_NAME,
           default_version: ACTIVE_VERSION,
           effective_version: ACTIVE_VERSION,
@@ -180,6 +273,7 @@ describe("AgentRuntimeUpdateControl", () => {
         runtimeUpdateStatus={{
           ...RUNTIME_STATUS_META,
           agent_name: AGENT_NAME,
+          update_mode: "pinned",
           package: PACKAGE_NAME,
           default_version: ACTIVE_VERSION,
           effective_version: ACTIVE_VERSION,
@@ -206,6 +300,7 @@ describe("AgentRuntimeUpdateControl", () => {
         displayName="Claude Code"
         runtimeUpdate={{
           supported: true,
+          update_mode: "pinned",
           package: PACKAGE_NAME,
           default_version: ACTIVE_VERSION,
           effective_version: ACTIVE_VERSION,
@@ -213,6 +308,7 @@ describe("AgentRuntimeUpdateControl", () => {
         runtimeUpdateStatus={{
           ...RUNTIME_STATUS_META,
           agent_name: AGENT_NAME,
+          update_mode: "pinned",
           package: PACKAGE_NAME,
           default_version: ACTIVE_VERSION,
           effective_version: ACTIVE_VERSION,
@@ -235,7 +331,9 @@ describe("AgentRuntimeUpdateControl", () => {
       screen.getByRole("button", { name: `Use Kandev default (${ACTIVE_VERSION})` }),
     ).toBeTruthy();
   });
+});
 
+describe("AgentRuntimeUpdateControl unknown active version", () => {
   it("offers the default action when the active version is unknown", async () => {
     const onPreview = vi.fn().mockResolvedValue(preview({ active_version: undefined }));
     render(
@@ -244,6 +342,7 @@ describe("AgentRuntimeUpdateControl", () => {
         displayName="Claude Code"
         runtimeUpdate={{
           supported: true,
+          update_mode: "pinned",
           package: PACKAGE_NAME,
           default_version: ACTIVE_VERSION,
           effective_version: ACTIVE_VERSION,
@@ -251,6 +350,7 @@ describe("AgentRuntimeUpdateControl", () => {
         runtimeUpdateStatus={{
           ...RUNTIME_STATUS_META,
           agent_name: AGENT_NAME,
+          update_mode: "pinned",
           package: PACKAGE_NAME,
           default_version: ACTIVE_VERSION,
           effective_version: ACTIVE_VERSION,
@@ -281,6 +381,7 @@ describe("AgentRuntimeUpdateControl reset state", () => {
     );
     const resetJob: AgentUpdateJob = {
       job_id: "job-reset",
+      update_mode: "pinned",
       agent_name: AGENT_NAME,
       status: "succeeded",
       operation: "use_default",
@@ -303,6 +404,7 @@ describe("AgentRuntimeUpdateControl reset state", () => {
           displayName="Claude Code"
           runtimeUpdate={{
             supported: true,
+            update_mode: "pinned",
             package: PACKAGE_NAME,
             default_version: defaultVersion,
             active_version: ACTIVE_VERSION,
@@ -332,5 +434,153 @@ describe("AgentRuntimeUpdateControl reset state", () => {
       expect(text).toContain(`Effective version: ${defaultVersion}`);
       expect(text).not.toContain(`Active version: ${ACTIVE_VERSION}`);
     });
+  });
+});
+
+describe("AgentRuntimeUpdateControl self-update", () => {
+  it.each(["update", "repair"] as const)(
+    "shows reference and approves targetless %s from the control",
+    async (operation) => {
+      const agentName = "omp-acp";
+      const onUpdate = vi.fn().mockResolvedValue({
+        job_id: "omp-job",
+        agent_name: agentName,
+        update_mode: "self_update",
+        status: "queued",
+        started_at: "2026-09-26T12:00:00Z",
+      } satisfies AgentUpdateJob);
+      render(
+        <AgentRuntimeUpdateControl
+          agentName={agentName}
+          displayName="omp"
+          runtimeUpdate={{
+            supported: true,
+            update_mode: "self_update",
+            package: OMP_PACKAGE,
+          }}
+          runtimeUpdateStatus={ompStatus({ agent_name: agentName })}
+          onPreview={vi.fn().mockResolvedValue({
+            update_mode: "self_update",
+            agent_name: agentName,
+            package: OMP_PACKAGE,
+            current_version: operation === "repair" ? "" : "1.0.0",
+            target_version: "",
+            stable_latest_version: "1.1.0",
+            operation,
+            available_versions: [],
+            command: ["omp", "update"],
+            command_string: "omp update",
+          } satisfies AgentUpdatePreview)}
+          onUpdate={onUpdate}
+        />,
+      );
+      fireEvent.click(screen.getByTestId(`agent-update-trigger-${agentName}`));
+      const confirm = await screen.findByTestId(`agent-update-confirm-${agentName}`);
+      await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(false));
+      expect(screen.queryByTestId(`agent-update-version-picker-${agentName}`)).toBeNull();
+      expect(
+        screen.getByTestId(`agent-update-stable-reference-${agentName}`).textContent,
+      ).toContain("1.1.0");
+      expect(screen.getByText(/configured channel.*different version/i)).toBeTruthy();
+      fireEvent.click(confirm);
+      await waitFor(() =>
+        expect(onUpdate).toHaveBeenCalledWith(agentName, "", false, "self_update"),
+      );
+    },
+  );
+});
+
+describe("AgentRuntimeUpdateControl self-update trigger", () => {
+  it("does not describe the stable reference as the guaranteed update target", () => {
+    render(
+      <AgentRuntimeUpdateControl
+        agentName="omp-acp"
+        displayName="omp"
+        runtimeUpdate={{
+          supported: true,
+          update_mode: "self_update",
+          package: OMP_PACKAGE,
+        }}
+        runtimeUpdateStatus={ompStatus({
+          latest_version: "1.1.0",
+          check_state: "update_available",
+        })}
+        onPreview={vi.fn()}
+        onUpdate={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("agent-update-trigger-omp-acp").getAttribute("aria-label")).toBe(
+      "Update omp",
+    );
+  });
+});
+
+describe("AgentRuntimeUpdateControl self-update results", () => {
+  it("keeps a metadata-unknown trigger usable and shows a preview error without inventing a job", async () => {
+    const onPreview = vi.fn().mockRejectedValue(new Error("Registry unavailable"));
+    const onUpdate = vi.fn();
+    render(
+      <AgentRuntimeUpdateControl
+        agentName="omp-acp"
+        displayName="omp"
+        runtimeUpdate={{
+          supported: true,
+          update_mode: "self_update",
+          package: OMP_PACKAGE,
+        }}
+        runtimeUpdateStatus={ompStatus()}
+        onPreview={onPreview}
+        onUpdate={onUpdate}
+      />,
+    );
+    const trigger = screen.getByTestId("agent-update-trigger-omp-acp");
+    expect((trigger as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(trigger);
+    expect((await screen.findByRole("alert")).textContent).toContain("Registry unavailable");
+    expect(screen.queryByTestId("agent-update-result-omp-acp")).toBeNull();
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("shows an empty-ID up-to-date result locally even when status refresh is pending elsewhere", async () => {
+    const terminal: AgentUpdateJob = {
+      update_mode: "self_update",
+      agent_name: "omp-acp",
+      job_id: "",
+      operation: "up_to_date",
+      status: "succeeded",
+      started_at: "2026-09-26T12:00:00Z",
+    };
+    render(
+      <AgentRuntimeUpdateControl
+        agentName="omp-acp"
+        displayName="omp"
+        runtimeUpdate={{
+          supported: true,
+          update_mode: "self_update",
+          package: OMP_PACKAGE,
+        }}
+        onPreview={vi.fn().mockResolvedValue({
+          agent_name: "omp-acp",
+          update_mode: "self_update",
+          package: OMP_PACKAGE,
+          current_version: "1.1.0",
+          target_version: "",
+          stable_latest_version: "1.1.0",
+          operation: "repair",
+          available_versions: [],
+          command: ["omp", "update"],
+          command_string: "omp update",
+        } satisfies AgentUpdatePreview)}
+        onUpdate={vi.fn().mockResolvedValue(terminal)}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("agent-update-trigger-omp-acp"));
+    const confirm = await screen.findByTestId("agent-update-confirm-omp-acp");
+    await waitFor(() => expect((confirm as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(confirm);
+    expect((await screen.findByTestId("agent-update-result-omp-acp")).textContent).toContain(
+      "already up to date",
+    );
+    expect(screen.queryByTestId("agent-update-confirm-omp-acp")).toBeNull();
   });
 });

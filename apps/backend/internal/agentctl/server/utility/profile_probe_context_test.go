@@ -12,7 +12,7 @@ import (
 )
 
 func TestProfileProbeForwardsEnvironmentFlagsAndPrefixToChild(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == windowsGOOS {
 		t.Skip("fixture uses POSIX shell scripts")
 	}
 

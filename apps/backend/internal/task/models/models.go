@@ -134,6 +134,10 @@ const (
 	MetaKeyAutomationTaskMode       = "automation_task_mode"
 	MetaKeyAutomationRepositoryMode = "automation_repository_mode"
 	MetaKeyDeferredLaunch           = "deferred_launch"
+	// MetaKeyCoordinatorID records the coordinator that owns a conversation
+	// task, set at creation and read by the startup cleanup pass that
+	// archives/deletes conversation tasks whose coordinator no longer exists.
+	MetaKeyCoordinatorID = "coordinator_id"
 	// MetaKeyWorkflowInitialSession is a write-once task-local snapshot of
 	// the first session identity used by workflow session targeting.
 	MetaKeyWorkflowInitialSession = "workflow_initial_session"
@@ -1112,6 +1116,9 @@ type LastAgentError struct {
 	RemediationURL   string            `json:"remediation_url,omitempty"`
 	Code             string            `json:"code,omitempty"`
 	Details          string            `json:"details,omitempty"`
+	StartupReason    string            `json:"startup_reason,omitempty"`
+	StartupAttempts  int               `json:"startup_attempts,omitempty"`
+	StartupNPMCode   string            `json:"startup_npm_code,omitempty"`
 	RecoveryActions  []string          `json:"recovery_actions,omitempty"`
 	TaskRepositoryID string            `json:"task_repository_id,omitempty"`
 	StampValue       string            `json:"stamp,omitempty"`
@@ -1146,7 +1153,9 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 	// Optional bootstrap fields are deliberately decoded independently. A
 	// malformed optional field must not hide a valid legacy session error.
 	optional := map[string]json.RawMessage{}
-	for _, key := range []string{"execution_id", "phase", "attempt_id", "causes"} {
+	for _, key := range []string{
+		"execution_id", "phase", "attempt_id", "causes", "startup_reason", "startup_attempts", "startup_npm_code",
+	} {
 		if value, ok := fields[key]; ok {
 			optional[key] = value
 			delete(fields, key)
@@ -1179,6 +1188,24 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 	}
 	if value, ok := optional["causes"]; ok {
 		out.Causes = decodeAgentErrorCauses(value)
+	}
+	if value, ok := optional["startup_reason"]; ok {
+		var reason string
+		if json.Unmarshal(value, &reason) == nil {
+			out.StartupReason = reason
+		}
+	}
+	if value, ok := optional["startup_attempts"]; ok {
+		var attempts int
+		if json.Unmarshal(value, &attempts) == nil && attempts >= 0 {
+			out.StartupAttempts = attempts
+		}
+	}
+	if value, ok := optional["startup_npm_code"]; ok {
+		var npmCode string
+		if json.Unmarshal(value, &npmCode) == nil {
+			out.StartupNPMCode = npmCode
+		}
 	}
 	return nil
 }
@@ -1437,7 +1464,16 @@ const (
 	// TaskOriginAutomationTask is a normal, user-visible task created by an
 	// automation. Unlike automation_run, it remains in Kanban/sidebar flows.
 	TaskOriginAutomationTask = "automation_task"
+	// TaskOriginCoordinator marks a coordinator's conversation task, created
+	// on popover open and archived/deleted alongside the coordinator.
+	TaskOriginCoordinator = "coordinator"
 )
+
+// IsAutomationTaskOrigin reports whether origin identifies work whose turn
+// lifecycle is owned by the automation coordinator.
+func IsAutomationTaskOrigin(origin string) bool {
+	return origin == TaskOriginAutomationRun || origin == TaskOriginAutomationTask
+}
 
 // Task represents a task in the database
 type Task struct {
@@ -2345,6 +2381,21 @@ type TaskSession struct {
 	TokensOut      int64 `json:"tokens_out"`
 }
 
+// WorkspaceRecoveryErrorObservation is the session and environment identity
+// captured before selected-workspace inspection. Repository writers compare
+// every field in the same transaction that records the recovery error.
+type WorkspaceRecoveryErrorObservation struct {
+	TaskID                 string
+	SessionID              string
+	TaskEnvironmentID      string
+	EnvironmentOwnerTaskID string
+	OwnershipGeneration    int64
+	SelectionSnapshot      WorkspaceRecoverySelectionSnapshot
+	SessionState           TaskSessionState
+	AgentExecutionID       string
+	ExpectedErrorStamp     string
+}
+
 // ActiveSessionCancellationCandidate is the compare-and-set snapshot used by
 // the active-session stall healer. An empty ExpectedTurnID means that no turn
 // may be active when the cancellation is written.
@@ -2987,6 +3038,56 @@ type TaskEnvironmentRecoveryClaim struct {
 	ExecutorType        string    `json:"executor_type"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+// TaskEnvironmentRecoveryOperation is the latest path-free managed recovery
+// projection for one environment. Runner identity and selected repository
+// inventory stay internal and are never sent to clients.
+type TaskEnvironmentRecoveryOperation struct {
+	TaskEnvironmentID     string     `json:"task_environment_id" db:"task_environment_id"`
+	OwnerTaskID           string     `json:"owner_task_id" db:"owner_task_id"`
+	OwnershipGeneration   int64      `json:"ownership_generation" db:"ownership_generation"`
+	SessionID             string     `json:"session_id" db:"session_id"`
+	OperationID           string     `json:"operation_id" db:"operation_id"`
+	AttemptID             string     `json:"attempt_id" db:"attempt_id"`
+	ErrorStamp            string     `json:"-" db:"error_stamp"`
+	Kind                  string     `json:"kind" db:"kind"`
+	Revision              int64      `json:"revision" db:"revision"`
+	RunnerInstanceID      string     `json:"-" db:"runner_instance_id"`
+	State                 string     `json:"state" db:"state"`
+	Phase                 string     `json:"phase" db:"phase"`
+	RepositoryID          string     `json:"repository_id,omitempty" db:"repository_id"`
+	RepositoryPosition    int        `json:"repository_position" db:"repository_position"`
+	RepositoryTotal       int        `json:"repository_total" db:"repository_total"`
+	CompletedSlots        int        `json:"completed_slots" db:"completed_slots"`
+	WorkspaceComplete     bool       `json:"workspace_complete" db:"workspace_complete"`
+	AgentReady            bool       `json:"agent_ready" db:"agent_ready"`
+	StartedAt             time.Time  `json:"started_at" db:"started_at"`
+	UpdatedAt             time.Time  `json:"updated_at" db:"updated_at"`
+	EndedAt               *time.Time `json:"ended_at,omitempty" db:"ended_at"`
+	ReasonCode            string     `json:"reason_code,omitempty" db:"reason_code"`
+	SelectedRepositoryIDs []string   `json:"-" db:"-"`
+}
+
+// TaskEnvironmentRecoveryOperationUpdate is a revision-fenced full projection
+// update for the current operation attempt.
+type TaskEnvironmentRecoveryOperationUpdate struct {
+	TaskEnvironmentID   string
+	OperationID         string
+	AttemptID           string
+	OwnershipGeneration int64
+	RunnerInstanceID    string
+	ExpectedRevision    int64
+	State               string
+	Phase               string
+	RepositoryID        string
+	RepositoryPosition  int
+	RepositoryTotal     int
+	CompletedSlots      int
+	WorkspaceComplete   bool
+	AgentReady          bool
+	EndedAt             *time.Time
+	ReasonCode          string
 }
 
 // ToAPI converts internal TaskEnvironment to API map.

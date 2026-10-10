@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 func TestRegisterRemoteRepositoryPersistsPluginProviderIdentity(t *testing.T) {
@@ -18,7 +21,6 @@ func TestRegisterRemoteRepositoryPersistsPluginProviderIdentity(t *testing.T) {
 		RemoteURL:   "https://bitbucket.example.test/projects/TEAM/fixture",
 		Provider:    "fixture-source-control", ProviderHost: "https://attacker.example.test",
 		ProviderRepoID: "repo-42", ProviderOwner: "attacker", ProviderName: "wrong",
-		DefaultBranch: "browser-default",
 	})
 	if err != nil {
 		t.Fatalf("RegisterRemoteRepository: %v", err)
@@ -37,6 +39,44 @@ func TestRegisterRemoteRepositoryPersistsPluginProviderIdentity(t *testing.T) {
 		stored.ProviderRepoID != "repo-42" || stored.ProviderOwner != "TEAM" || stored.ProviderName != "fixture" ||
 		stored.RemoteURL != "https://bitbucket.example.test/scm/TEAM/fixture.git" || stored.DefaultBranch != "main" {
 		t.Fatalf("stored repository = %+v, want authoritative plugin identity", stored)
+	}
+}
+
+// Review-requested coverage of the existing registration authorization boundary.
+func TestRegisterRemoteRepositoryRequiresWorkspaceManagement(t *testing.T) {
+	for _, tc := range []struct {
+		user string
+		want error
+	}{
+		{user: "foreign", want: repoerrors.ErrWorkspaceNotFound},
+		{user: "viewer", want: ErrForbidden},
+	} {
+		t.Run(tc.user, func(t *testing.T) {
+			svc, _, repo := createTestService(t)
+			ctx := context.Background()
+			must(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Owned", OwnerID: "owner"}))
+			must(t, repo.UpsertWorkspaceMember(ctx, &models.WorkspaceMember{
+				WorkspaceID: "ws-1", UserID: "viewer", Role: "viewer",
+			}))
+			resolver := &repositorySelectionResolverStub{resolve: authoritativeRepositoryInput}
+			svc.SetRepositorySelectionResolver(resolver)
+			request := &RegisterRemoteRepositoryRequest{
+				WorkspaceID: "ws-1", RemoteURL: "https://bitbucket.example.test/projects/TEAM/fixture",
+				Provider: "fixture-source-control",
+			}
+			_, _, err := svc.RegisterRemoteRepository(ctxAs(tc.user), request)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("denied registration: err=%v, want %v", err, tc.want)
+			}
+			repositories, listErr := repo.ListRepositories(ctx, "ws-1")
+			if listErr != nil || len(repositories) != 0 || len(resolver.calls) != 0 {
+				t.Fatalf("denial reached provider or persistence: repositories=%+v err=%v calls=%+v", repositories, listErr, resolver.calls)
+			}
+			owned, created, err := svc.RegisterRemoteRepository(ctxAs("owner"), request)
+			if err != nil || !created || owned == nil {
+				t.Fatalf("owner registration: created=%v repository=%+v err=%v", created, owned, err)
+			}
+		})
 	}
 }
 

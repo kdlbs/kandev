@@ -337,12 +337,22 @@ func (m *pluginHostManagedConversationManager) Delete(ctx context.Context, input
 		admission.record.Intent.OperationID, digest,
 	)
 	if err != nil {
+		var outcome interface{ ManagedDeletionOutcome() string }
+		if errors.As(err, &outcome) {
+			switch outcome.ManagedDeletionOutcome() {
+			case "admitted_failed", "outcome_uncertain":
+				return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "managed_conversation_delete_" + outcome.ManagedDeletionOutcome()}, nil
+			case "committed":
+				completed, completeErr := admission.call.store.Complete(ctx, admission.record.Intent.OperationID, string(pluginsdk.CommandAlreadyApplied), "", admission.target, "")
+				if completeErr != nil {
+					return &pluginsdk.CommandResult{Status: pluginsdk.CommandUnavailable, Reason: "command_receipt_unavailable"}, nil
+				}
+				return commandResultFromRecord(completed), nil
+			}
+		}
 		result := managedConversationErrorStatus(err)
 		if result == pluginsdk.CommandUnavailable {
 			return &pluginsdk.CommandResult{Status: result, Reason: "managed_conversation_unavailable"}, nil
-		}
-		if result == pluginsdk.CommandNotFound && admission.replayed {
-			result = pluginsdk.CommandAlreadyApplied
 		}
 		completed, completeErr := admission.call.store.Complete(ctx, admission.record.Intent.OperationID, string(result), string(result), admission.target, "")
 		if completeErr != nil {

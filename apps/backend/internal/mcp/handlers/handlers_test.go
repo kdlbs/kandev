@@ -2970,17 +2970,19 @@ func TestResolveTaskRepositories_OfficeSubtaskParent_Allowed(t *testing.T) {
 	require.NoError(t, err)
 
 	rootResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
-		WorkspaceID: "ws-office",
-		Title:       "Root office task",
-		ProjectID:   "proj-1",
+		WorkspaceID:  "ws-office",
+		Title:        "Root office task",
+		ProjectID:    "proj-1",
+		Repositories: []service.TaskRepositoryInput{},
 	})
 	root := rootResult.Task
 	require.NoError(t, err)
 	childResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
-		WorkspaceID: "ws-office",
-		ParentID:    root.ID,
-		Title:       "Office subtask",
-		ProjectID:   "proj-1",
+		WorkspaceID:  "ws-office",
+		ParentID:     root.ID,
+		Title:        "Office subtask",
+		ProjectID:    "proj-1",
+		Repositories: []service.TaskRepositoryInput{},
 	})
 	child := childResult.Task
 	require.NoError(t, err)
@@ -3305,6 +3307,7 @@ func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {
 	payload := map[string]interface{}{
 		"session_id": sess.ID,
 		"task_id":    task.ID,
+		"retry_key":  "conn-dedup/int64:1",
 		"questions": []map[string]interface{}{
 			{"prompt": "What colour?", "options": []map[string]interface{}{
 				{"label": "Red", "description": "R"},
@@ -3333,6 +3336,15 @@ func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return len(store.ListPending()) == 1
 	}, time.Second, 5*time.Millisecond)
+	questions := []clarification.Question{{
+		ID: "q1", Prompt: "What colour?", Options: []clarification.Option{
+			{ID: "q1_opt1", Label: "Red", Description: "R"},
+			{ID: "q1_opt2", Label: "Blue", Description: "B"},
+		},
+	}}
+	if got, want := store.ListPending()[0].PendingID, clarification.PendingIDForRequest(sess.ID, "conn-dedup/int64:1", questions, ""); got != want {
+		t.Fatalf("pending ID = %q, want transport retry identity %q", got, want)
+	}
 	store.CancelSession(sess.ID)
 	wg.Wait()
 

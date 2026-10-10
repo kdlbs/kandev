@@ -484,14 +484,14 @@ describe("MobilePanelArea — plugin task panel (AC7)", () => {
 
 describe("terminalPaddingBottom", () => {
   it("pads by the keybar height alone when the keyboard is closed", () => {
-    expect(terminalPaddingBottom(false, 0, "3.25rem")).toBe("48px");
+    expect(terminalPaddingBottom(false, 0, "3.25rem")).toBe("58px");
     // bottomOffset is irrelevant while the keyboard is closed.
-    expect(terminalPaddingBottom(false, 300, "3.25rem")).toBe("48px");
+    expect(terminalPaddingBottom(false, 300, "3.25rem")).toBe("58px");
   });
 
   it("subtracts the bottom nav and adds the live keyboard offset when the keyboard is open", () => {
     expect(terminalPaddingBottom(true, 300, "3.25rem")).toBe(
-      "calc(348px - 3.25rem - env(safe-area-inset-bottom, 0px))",
+      "calc(358px - 3.25rem - env(safe-area-inset-bottom, 0px))",
     );
   });
 });

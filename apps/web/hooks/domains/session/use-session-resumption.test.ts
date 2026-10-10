@@ -924,6 +924,78 @@ describe("useSessionResumption prevent-auto-start gate", () => {
   });
 });
 
+describe("useSessionResumption skipAutomaticRecovery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConnectionStatus = "connected";
+    mockPreventAutoStart = false;
+    mockSessionItems = {
+      s1: {
+        started_at: STARTED_AT,
+      },
+    };
+  });
+
+  // @covers task-05-popover-shell.md#build-decisions "automaticRecovery"
+  it("skips the automatic check-and-resume request when skipAutomaticRecovery is set", async () => {
+    renderHook(() =>
+      useSessionResumption(TASK_ID, SESSION_ID, false, { skipAutomaticRecovery: true }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+
+  it("skips the remote-status retry effect when skipAutomaticRecovery is set", async () => {
+    vi.useFakeTimers();
+    mockSessionItems = {
+      s1: {
+        started_at: STARTED_AT,
+        state: "RUNNING",
+      },
+    };
+
+    renderHook(() =>
+      useSessionResumption(TASK_ID, SESSION_ID, false, { skipAutomaticRecovery: true }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+
+  it("still allows a manual status retry while automatic recovery is skipped", async () => {
+    mockRequest.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: false,
+      is_resumable: false,
+      needs_resume: false,
+    });
+
+    const { result } = renderHook(() =>
+      useSessionResumption(TASK_ID, SESSION_ID, false, { skipAutomaticRecovery: true }),
+    );
+    expect(mockRequest).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.retrySessionStatus();
+    });
+
+    expect(mockRequest).toHaveBeenCalledWith(
+      STATUS_ACTION,
+      { task_id: TASK_ID, session_id: SESSION_ID },
+      10000,
+    );
+  });
+});
+
 // eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
 describe("useSessionResumption monotonic terminal hydration", () => {
   beforeEach(() => {
@@ -1142,6 +1214,64 @@ describe("idle-suspended session focus recovery", () => {
         state: "WAITING_FOR_INPUT",
       },
     };
+  });
+
+  it("does not recover on focus while automatic recovery is blocked", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    mockRequest.mockResolvedValue({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: false,
+      is_resumable: true,
+      needs_resume: true,
+      is_idle_suspended: true,
+      auto_resume_allowed: true,
+      resume_reason: "idle_suspension",
+    });
+    try {
+      renderHook(() =>
+        useSessionResumption(TASK_ID, SESSION_ID, false, { preventAutoResume: true }),
+      );
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      expect(mockRequest).not.toHaveBeenCalled();
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  it("invalidates pending startup recovery when an error arrives", async () => {
+    const status = Promise.withResolvers<unknown>();
+    mockRequest.mockReturnValueOnce(status.promise);
+    const { rerender } = renderHook(
+      ({ blocked }) =>
+        useSessionResumption(TASK_ID, SESSION_ID, false, { preventAutoResume: blocked }),
+      { initialProps: { blocked: false } },
+    );
+    await waitFor(() =>
+      expect(mockRequest).toHaveBeenCalledWith(
+        STATUS_ACTION,
+        expect.anything(),
+        expect.any(Number),
+      ),
+    );
+    rerender({ blocked: true });
+    await act(async () => {
+      status.resolve({
+        session_id: SESSION_ID,
+        task_id: TASK_ID,
+        state: "WAITING_FOR_INPUT",
+        is_agent_running: false,
+        is_resumable: true,
+        needs_resume: true,
+        is_idle_suspended: true,
+        auto_resume_allowed: true,
+        resume_reason: "idle_suspension",
+      });
+    });
+    expect(mockRequest.mock.calls.some(([action]) => action === LAUNCH_ACTION)).toBe(false);
   });
 
   it("resumes the selected session without a prompt despite the preference", async () => {

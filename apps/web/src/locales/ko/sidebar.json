@@ -137,5 +137,6 @@
   "filterListLimit": "{{filter}} 필터에 선택 항목이 너무 많습니다. 최대 {{limit}}개까지 선택하세요.",
   "filterValueLimit": "{{filter}} 필터의 값이 너무 깁니다. 최대 {{limit}}바이트까지 사용하세요.",
   "filterInvalid": "{{filter}} 필터가 잘못되었습니다. 값과 연산자를 확인하세요.",
-  "filterCountLimit": "이 뷰에 필터가 너무 많습니다. 최대 {{limit}}개까지 사용하세요."
+  "filterCountLimit": "이 뷰에 필터가 너무 많습니다. 최대 {{limit}}개까지 사용하세요.",
+  "filtersActive": "필터 적용 중"
 }

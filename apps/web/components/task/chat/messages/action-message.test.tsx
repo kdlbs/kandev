@@ -1,7 +1,7 @@
 /* eslint-disable max-lines -- recovery action variants share one rendering harness. */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { StoreApi } from "zustand";
 import { ActionMessage } from "./action-message";
 
@@ -18,6 +18,12 @@ import {
   type TaskSessionState,
 } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
+import { t } from "@/lib/i18n";
+import { MessageRenderer } from "../message-renderer";
+
+const toastErrorMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/lib/toast/sonner", () => ({ toast: { error: toastErrorMock } }));
 import { SessionRecoveryProvider } from "../session-recovery-context";
 
 vi.mock("@/components/toast-provider", () => ({
@@ -39,15 +45,22 @@ afterEach(() => {
   getWebSocketClientMock.mockReturnValue({ request: requestMock });
 });
 
+const RETRY_CARD_TEST_ID = "transient-retry-card";
 const CANCEL_TEST_ID = "recovery-cancel-retry-button";
 const TECHNICAL_DETAILS = "Technical details";
+const GIT_PUSH_FIX_TEST_ID = "git-push-error-fix";
+const RECOVERY_HISTORY_TEST_ID = "session-recovery-history";
 const RECOVERY_MESSAGE = "Agent encountered an error";
+const CAPACITY_ERROR = "Selected model is at capacity. Please try a different model.";
 const RESUME_LABEL = "Resume session";
 const RESUME_TEST_ID = "recovery-resume-button";
 const STALL_CANCEL_TEST_ID = "stall-cancel-turn-button";
 const TEST_SESSION_ID = "sess-1";
 const TEST_TASK_ID = "task-1";
 const SESSION_RECOVER_METHOD = "session.recover";
+const LEGACY_PUSH_ERROR_ID = "legacy-push-error";
+const GIT_PUSH_DISMISS_TEST_ID = "git-push-error-dismiss-button";
+const OTHER_SESSION_FAILURE_CONTENT = "Another session Git push failed";
 
 /** Builds a system status Message describing a transient provider retry, with an optional Cancel action. */
 function retryMessage(overrides: Partial<Message> = {}): Message {
@@ -179,6 +192,206 @@ function renderAction(
   });
 }
 
+function legacyGitPushError(): Message {
+  return retryMessage({
+    id: LEGACY_PUSH_ERROR_ID,
+    type: "error",
+    content: "Git push failed: remote rejected the branch",
+    metadata: {
+      git_operation_error: true,
+      operation: "push",
+      error_output: "remote rejected the branch",
+      actions: [
+        {
+          type: "ws_request",
+          label: "Fix",
+          test_id: GIT_PUSH_FIX_TEST_ID,
+          params: { method: "agent.prompt", payload: { session_id: TEST_SESSION_ID } },
+        },
+      ],
+    },
+  } as Partial<Message>);
+}
+
+function StoredMessageRenderer({
+  messageId,
+  onStore,
+}: {
+  messageId: string;
+  onStore: (store: StoreApi<AppState>) => void;
+}) {
+  const store = useAppStoreApi();
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const message = useAppStore((state) =>
+    state.messages.bySession[activeSessionId ?? TEST_SESSION_ID]?.find(
+      (entry) => entry.id === messageId,
+    ),
+  );
+  onStore(store);
+  return message ? <MessageRenderer comment={message} isTaskDescription={false} /> : null;
+}
+
+function renderStoredMessage(message: Message, otherSessionMessage?: Message) {
+  let store!: StoreApi<AppState>;
+  const initialState: Partial<AppState> = {
+    taskSessions: {
+      items: {
+        [TEST_SESSION_ID]: { state: "WAITING_FOR_INPUT" } as TaskSession,
+      },
+    },
+    messages: {
+      bySession: {
+        [message.session_id]: [message],
+        ...(otherSessionMessage ? { [otherSessionMessage.session_id]: [otherSessionMessage] } : {}),
+      },
+      metaBySession: {},
+    },
+    turns: {
+      bySession: {},
+      activeBySession: {},
+      loadedBySession: {},
+      reconcileEpochBySession: {},
+      settledBoundaryBySession: {},
+    },
+  };
+  const view = render(
+    <StateProvider initialState={initialState}>
+      <StoredMessageRenderer messageId={message.id} onStore={(nextStore) => (store = nextStore)} />
+    </StateProvider>,
+  );
+  act(() => store.getState().setActiveSession(TEST_TASK_ID, message.session_id));
+  return { ...view, store };
+}
+
+describe("ActionMessage Git push failure dismissal", () => {
+  it("retries a failed save and hides from the persisted response when the update event is missed", async () => {
+    requestMock.mockRejectedValueOnce(new Error("write failed")).mockResolvedValueOnce({
+      message_id: LEGACY_PUSH_ERROR_ID,
+      dismissed_at: "2026-09-25T10:00:00Z",
+    });
+    const message = legacyGitPushError();
+    const { container } = renderStoredMessage(message);
+    const dismiss = screen.getByTestId(GIT_PUSH_DISMISS_TEST_ID);
+
+    expect(screen.getByTestId(GIT_PUSH_FIX_TEST_ID).hasAttribute("disabled")).toBe(false);
+    expect(dismiss.hasAttribute("disabled")).toBe(false);
+    await act(async () => fireEvent.click(dismiss));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith(t("common:requestFailed")));
+    expect(screen.getByTestId(GIT_PUSH_FIX_TEST_ID).hasAttribute("disabled")).toBe(false);
+    expect(dismiss.hasAttribute("disabled")).toBe(false);
+
+    await act(async () => fireEvent.click(dismiss));
+    await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(2));
+    expect(requestMock).toHaveBeenNthCalledWith(1, "message.dismiss_git_push_error", {
+      message_id: LEGACY_PUSH_ERROR_ID,
+    });
+    expect(requestMock).toHaveBeenNthCalledWith(2, "message.dismiss_git_push_error", {
+      message_id: LEGACY_PUSH_ERROR_ID,
+    });
+    await waitFor(() => expect(container.firstChild).toBeNull());
+  });
+
+  it("applies an in-flight dismissal to its original session after switching sessions", async () => {
+    const message = legacyGitPushError();
+    const otherSessionId = "sess-2";
+    const otherSessionMessage = {
+      ...message,
+      session_id: toSessionId(otherSessionId),
+      content: OTHER_SESSION_FAILURE_CONTENT,
+    };
+    let resolveDismissal!: (response: { message_id: string; dismissed_at: string }) => void;
+    requestMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveDismissal = resolve;
+        }),
+    );
+    const { container, store } = renderStoredMessage(message, otherSessionMessage);
+
+    await act(async () => fireEvent.click(screen.getByTestId(GIT_PUSH_DISMISS_TEST_ID)));
+    act(() => store.getState().setActiveSession(TEST_TASK_ID, otherSessionId));
+    expect(screen.getByText(OTHER_SESSION_FAILURE_CONTENT)).toBeTruthy();
+
+    await act(async () => {
+      resolveDismissal({
+        message_id: message.id,
+        dismissed_at: "2026-09-25T10:00:00Z",
+      });
+      await Promise.resolve();
+    });
+
+    expect(
+      store.getState().messages.bySession[TEST_SESSION_ID]?.find((entry) => entry.id === message.id)
+        ?.metadata?.git_operation_error_dismissed_at,
+    ).toBe("2026-09-25T10:00:00Z");
+    expect(
+      store.getState().messages.bySession[otherSessionId]?.find((entry) => entry.id === message.id)
+        ?.metadata?.git_operation_error_dismissed_at,
+    ).toBeUndefined();
+    expect(container.firstChild).not.toBeNull();
+    expect(screen.getByText(OTHER_SESSION_FAILURE_CONTENT)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage recovery and dismissal actions", () => {
+  it("keeps Dismiss alongside a session recovery action", () => {
+    const message = legacyGitPushError();
+    renderAction(
+      {
+        ...message,
+        metadata: {
+          ...message.metadata,
+          recovery_actions: true,
+          actions: [
+            {
+              type: "ws_request",
+              label: RESUME_LABEL,
+              test_id: RESUME_TEST_ID,
+              params: {
+                method: SESSION_RECOVER_METHOD,
+                payload: {
+                  task_id: TEST_TASK_ID,
+                  session_id: TEST_SESSION_ID,
+                  action: "resume",
+                },
+              },
+            },
+          ],
+        },
+      },
+      "WAITING_FOR_INPUT",
+    );
+
+    expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId(GIT_PUSH_DISMISS_TEST_ID)).toBeTruthy();
+  });
+
+  it.each([
+    ["other Git operation", { operation: "pull" }],
+    ["missing Git error marker", { git_operation_error: false }],
+  ])("does not add Dismiss to %s", (_name, metadata) => {
+    const message = legacyGitPushError();
+    renderAction(
+      {
+        ...message,
+        metadata: { ...message.metadata, ...metadata },
+      },
+      "WAITING_FOR_INPUT",
+    );
+
+    expect(screen.queryByTestId(GIT_PUSH_DISMISS_TEST_ID)).toBeNull();
+    expect(screen.getByTestId(GIT_PUSH_FIX_TEST_ID)).toBeTruthy();
+  });
+
+  it("does not add Dismiss to an error-shaped action with another message type", () => {
+    const message = legacyGitPushError();
+    renderAction({ ...message, type: "status" }, "WAITING_FOR_INPUT");
+
+    expect(screen.queryByTestId(GIT_PUSH_DISMISS_TEST_ID)).toBeNull();
+    expect(screen.getByTestId(GIT_PUSH_FIX_TEST_ID)).toBeTruthy();
+  });
+});
+
 /** Like renderAction, but captures the store so the test can drive live session
  *  state transitions (STARTING/RUNNING → WAITING_FOR_INPUT) the way a real
  *  resume does over the WebSocket. */
@@ -230,6 +443,27 @@ function renderActionWithStore(
 }
 
 describe("ActionMessage — transient retry (warning variant)", () => {
+  it("announces legacy retry status politely", () => {
+    renderAction(retryMessage(), "WAITING_FOR_INPUT");
+    const notice = screen.getByTestId(RETRY_CARD_TEST_ID);
+    expect(notice.getAttribute("role")).toBe("status");
+    expect(notice.getAttribute("aria-live")).toBe("polite");
+  });
+  it.each(["FAILED", "CANCELLED", "COMPLETED"] as const)(
+    "hides an orphaned continuation notice in %s after cleanup fails",
+    (state) => {
+      const message = retryMessage();
+      message.metadata = {
+        ...message.metadata,
+        recovery_mode: "continue",
+        recovery_phase: "continuing",
+      };
+      renderAction(message, state);
+      expect(screen.queryByTestId(RETRY_CARD_TEST_ID)).toBeNull();
+      expect(screen.queryByTestId(CANCEL_TEST_ID)).toBeNull();
+    },
+  );
+
   it("renders the retrying copy in amber, not red", () => {
     renderAction(retryMessage(), "WAITING_FOR_INPUT");
     const text = screen.getByLabelText("Retry countdown");
@@ -261,7 +495,7 @@ describe("ActionMessage — transient retry (warning variant)", () => {
         }),
         "WAITING_FOR_INPUT",
       );
-      expect(screen.getByTestId("transient-retry-card")).toBeTruthy();
+      expect(screen.getByTestId(RETRY_CARD_TEST_ID)).toBeTruthy();
       expect(screen.getByText(/retrying in 1:05/i)).toBeTruthy();
       expect(screen.getByText(/Codex · gpt-5/i)).toBeTruthy();
       expect(screen.getByText(/attempt 1 of 5/i)).toBeTruthy();
@@ -308,6 +542,29 @@ describe("ActionMessage — transient retry (warning variant)", () => {
 });
 
 describe("ActionMessage recovery ownership", () => {
+  it("keeps a retained provider turn error visible after a later session completion", () => {
+    const error = recoveryMessage(true);
+    error.content = CAPACITY_ERROR;
+    error.type = "error";
+    error.metadata = {
+      ...(error.metadata as Record<string, unknown>),
+      variant: "error",
+      failure_scope: "turn",
+      runtime_retained: true,
+      execution_id: "execution-1",
+      prompt_generation: 7,
+      recovery_actions: false,
+    };
+
+    renderAction(error, "COMPLETED");
+
+    expect(screen.getByTestId("session-recovery-action-message").textContent).toContain(
+      "Selected model is at capacity.",
+    );
+    expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("session-recovery-card")).toBeNull();
+  });
+
   it("keeps the recovery entry after its Resume request succeeds and removes controls", async () => {
     const errorMsg = recoveryMessage(true);
 
@@ -425,7 +682,7 @@ describe("ActionMessage recovery settlement", () => {
 
     expect(screen.getByTestId("session-recovery-resolved").textContent).toBe("Resolved");
     expect(screen.queryByTestId("session-recovery-dismissed")).toBeNull();
-    expect(screen.getByTestId("session-recovery-history").querySelector("p")?.textContent).toBe(
+    expect(screen.getByTestId(RECOVERY_HISTORY_TEST_ID).querySelector("p")?.textContent).toBe(
       "The requested model was not available to the agent.",
     );
   });
@@ -484,7 +741,7 @@ describe("ActionMessage active legacy recovery ownership", () => {
       </StateProvider>,
     );
 
-    expect(screen.getByTestId("session-recovery-history").textContent).toContain(
+    expect(screen.getByTestId(RECOVERY_HISTORY_TEST_ID).textContent).toContain(
       "This failure is explained in the recovery card above.",
     );
     expect(screen.queryByTestId("legacy-recovery-archive-button")).toBeNull();
@@ -492,6 +749,29 @@ describe("ActionMessage active legacy recovery ownership", () => {
 });
 
 describe("ActionMessage historical typed recovery evidence", () => {
+  it("keeps a legacy capacity failure out of the startup recovery model", () => {
+    const capacityFailure = recoveryHistoryMessage("failure-capacity");
+    capacityFailure.content = CAPACITY_ERROR;
+    capacityFailure.metadata = {
+      ...(capacityFailure.metadata as Record<string, unknown>),
+      causes: [],
+      phase: undefined,
+      attempt_id: "resume-3",
+      execution_id: "650e8400-e29b-41d4-a716-446655440000",
+    };
+
+    renderRecoveryHistory(capacityFailure, [capacityFailure]);
+
+    const history = screen.getByTestId(RECOVERY_HISTORY_TEST_ID);
+    expect(history.querySelector("p")?.textContent).toBe(capacityFailure.content);
+    expect(history.textContent).not.toContain("The agent could not start");
+    fireEvent.click(history.querySelector("summary")!);
+    expect(history.querySelector("pre")?.textContent).toContain("Attempt: resume-3");
+    expect(history.querySelector("pre")?.textContent).toContain(
+      "650e8400-e29b-41d4-a716-446655440000",
+    );
+  });
+
   it("renders same-text historical failures from their own evidence after a successor replaces the current error", async () => {
     const first = recoveryHistoryMessage("failure-first");
     first.created_at = "2026-09-29T09:00:00Z";
@@ -548,7 +828,7 @@ describe("ActionMessage historical typed recovery evidence", () => {
       ],
     });
 
-    const rows = screen.getAllByTestId("session-recovery-history");
+    const rows = screen.getAllByTestId(RECOVERY_HISTORY_TEST_ID);
     expect(rows).toHaveLength(2);
     expect(screen.getByTestId("session-recovery-resolved").textContent).toBe("Resolved");
     expect(rows[0].textContent).toContain("first-model");
@@ -565,6 +845,72 @@ describe("ActionMessage historical typed recovery evidence", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Copy details" })[0]);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(displayed));
   });
+});
+
+describe("ActionMessage retained provider turn recovery feedback", () => {
+  it("shows provider diagnostics in the existing technical details disclosure", () => {
+    const providerError = retryMessage({
+      content: CAPACITY_ERROR,
+      metadata: {
+        variant: "error",
+        runtime_retained: true,
+        provider_error: {
+          source: "acp_prompt",
+          provider_id: "mock-agent",
+          error_kind: "server_error",
+          rpc_code: -32603,
+        },
+      },
+    });
+
+    renderAction(providerError, "WAITING_FOR_INPUT");
+
+    const summary = screen.getByText(TECHNICAL_DETAILS);
+    const details = summary.closest("details");
+    expect(details?.open).toBe(false);
+    fireEvent.click(summary);
+    expect(details?.textContent).toContain("Source: acp_prompt");
+    expect(details?.textContent).toContain("Provider: mock-agent");
+    expect(details?.textContent).toContain("Error kind: server_error");
+    expect(details?.textContent).toContain("RPC code: -32603");
+  });
+
+  it.each([
+    {
+      disposition: "refused",
+      attempts: 0,
+      copy: "Automatic retry stopped. You can send another message.",
+    },
+    {
+      disposition: "cancelled",
+      attempts: 1,
+      copy: "Automatic retry was cancelled. You can send another message.",
+    },
+    {
+      disposition: "exhausted",
+      attempts: 5,
+      copy: "Automatic retry stopped after 5 attempts. You can send another message.",
+    },
+  ])(
+    "shows $disposition without replacing the provider error",
+    ({ disposition, attempts, copy }) => {
+      const providerError = retryMessage({
+        content: CAPACITY_ERROR,
+        metadata: {
+          variant: "error",
+          runtime_retained: true,
+          recovery_disposition: disposition,
+          attempts_started: attempts,
+          recovery_actions: false,
+        },
+      });
+
+      renderAction(providerError, "WAITING_FOR_INPUT");
+
+      expect(screen.getByText(providerError.content)).toBeTruthy();
+      expect(screen.getByTestId("retained-turn-recovery-feedback").textContent).toBe(copy);
+    },
+  );
 });
 
 function recoveryHistoryMessage(stamp: string): Message {
@@ -651,6 +997,25 @@ describe("ActionMessage — agent transport lost", () => {
       "WAITING_FOR_INPUT",
     );
     expect(screen.getByText(/Agent connection lost/i)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage resource exhaustion", () => {
+  it("shows the resource exhaustion category in the recovery notice", () => {
+    renderAction(
+      retryMessage({
+        metadata: {
+          ...transientRetryMetadata(1, 5),
+          failure_code: "provider_resource_exhausted",
+          recovery_mode: "continue",
+          recovery_phase: "waiting",
+        },
+      }),
+      "WAITING_FOR_INPUT",
+    );
+    expect(screen.getByTestId(RETRY_CARD_TEST_ID).textContent).toContain(
+      "Provider resources exhausted",
+    );
   });
 });
 
@@ -890,6 +1255,49 @@ describe("ActionMessage — provider quota recovery", () => {
 
     expect(screen.getByTestId("provider-quota-recovery")).toBeTruthy();
     expect(screen.getByText(/when the provider makes capacity available/i)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage — managed runtime startup recovery", () => {
+  it("shows typed early-exit cause and actual attempts in the startup recovery card", () => {
+    renderAction(
+      retryMessage({
+        type: "error",
+        content: "managed runtime startup failed",
+        metadata: {
+          variant: "error",
+          recovery_actions: true,
+          failure_kind: "managed_runtime_startup",
+          startup_reason: "early_exit",
+          startup_attempts: 2,
+          error_output: "reason=early_exit attempts=2",
+          actions: [
+            {
+              type: "ws_request",
+              label: "Retry runtime",
+              test_id: MANAGED_RUNTIME_RETRY_TEST_ID,
+              params: {
+                method: SESSION_RECOVER_METHOD,
+                payload: {
+                  task_id: TEST_TASK_ID,
+                  session_id: TEST_SESSION_ID,
+                  action: "runtime_retry",
+                },
+              },
+            },
+          ],
+        },
+      } as Partial<Message>),
+      "FAILED",
+    );
+
+    const card = screen.getByTestId("managed-runtime-startup-recovery");
+    expect(card.textContent).toContain("Agent stopped during startup");
+    expect(card.textContent).toContain(
+      "The agent process exited before initialization. Startup was attempted 2 times.",
+    );
+    expect(screen.getAllByTestId(MANAGED_RUNTIME_RETRY_TEST_ID)).toHaveLength(1);
+    expect(screen.getByText(TECHNICAL_DETAILS).closest("details")?.open).toBe(false);
   });
 });
 

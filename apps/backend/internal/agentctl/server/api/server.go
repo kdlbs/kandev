@@ -131,6 +131,15 @@ func (s *Server) setupRoutes() {
 		// Agent stream: bidirectional WebSocket for agent events, MCP, and agent operations
 		// (initialize, session/new, session/load, prompt, cancel, stderr, permissions/respond)
 		api.GET("/agent/stream", s.handleAgentStreamWS)
+		api.GET("/agent/session", s.handleAgentSessionAssociation)
+		api.GET("/agent/delivery", s.handleDeliveryStatus)
+		api.POST("/agent/submissions", s.handleDeliverySubmission)
+		api.GET("/agent/submissions", s.handleDeliverySubmissions)
+		api.GET("/agent/submissions/:id", s.handleDeliverySubmissionByID)
+		api.POST("/agent/submissions/:id/cancel", s.handleDeliverySubmissionCancel)
+		api.POST("/agent/submissions/:id/retire", s.handleDeliverySubmissionRetire)
+		api.GET("/agent/delivery/stream", s.handleDeliveryReplay)
+		api.POST("/agent/delivery/stream/ack", s.handleDeliveryAcknowledgement)
 		api.GET("/lsp/stream", s.handleLSPStreamWS)
 
 		// Unified workspace stream (git status, files, shell)
@@ -146,6 +155,7 @@ func (s *Server) setupRoutes() {
 		// events reach the UI without a session restart.
 		api.POST("/workspace/rescan", s.handleRescanWorkspace)
 		api.POST("/workspace/reconcile", s.handleReconcileWorkspace)
+		api.POST("/workspace/recovery-exclusions", s.handleSetWorkspaceRecoveryExclusions)
 		api.POST("/workspace/rebind", s.handleRebindWorkspace)
 
 		// Per-task base-branch map update: kandev backend hits this when
@@ -361,7 +371,7 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 	// ModeExternal stays rejected on purpose: it belongs to the backend's own
 	// MCP endpoint for external coding agents, and no launch path can emit it.
 	if !mcpmode.IsInstanceMode(req.Mode) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', or 'automation'"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', 'office', 'automation', or 'coordinator'"})
 		return
 	}
 	s.mcpServer.SetMode(req.Mode)
@@ -433,14 +443,16 @@ type StartRequest struct {
 }
 
 type StartResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message,omitempty"`
-	Command string `json:"command,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Success           bool   `json:"success"`
+	Message           string `json:"message,omitempty"`
+	Command           string `json:"command,omitempty"`
+	ProcessGeneration uint64 `json:"process_generation,omitempty"`
+	Error             string `json:"error,omitempty"`
 }
 
 func (s *Server) handleStart(c *gin.Context) {
-	if err := s.procMgr.Start(c.Request.Context()); err != nil {
+	processGeneration, err := s.procMgr.StartWithGeneration(c.Request.Context())
+	if err != nil {
 		s.logger.Error("failed to start agent", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, StartResponse{
 			Success: false,
@@ -450,9 +462,10 @@ func (s *Server) handleStart(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, StartResponse{
-		Success: true,
-		Message: "agent started",
-		Command: s.procMgr.GetFinalCommand(),
+		Success:           true,
+		Message:           "agent started",
+		Command:           s.procMgr.GetFinalCommand(),
+		ProcessGeneration: processGeneration,
 	})
 }
 

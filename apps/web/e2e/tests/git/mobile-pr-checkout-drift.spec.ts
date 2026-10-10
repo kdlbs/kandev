@@ -321,6 +321,9 @@ test.describe("Mobile rewritten contribution history", () => {
     await session.waitForChatIdle({ timeout: 45_000 });
     git.exec(`git checkout -B ${providerBranch} ${localHead}`);
     git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
     await testPage
       .getByRole("navigation")
       .getByRole("button", { name: /Changes$/ })

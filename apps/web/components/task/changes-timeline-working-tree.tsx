@@ -306,8 +306,18 @@ const TOUCH_ROW_SIZES: Record<ChangesTimelineRow["kind"], number> = {
 };
 
 function estimateChangesTimelineRowSize(row: ChangesTimelineRow, touchMode: boolean): number {
-  return (touchMode ? TOUCH_ROW_SIZES : DESKTOP_ROW_SIZES)[row.kind];
+  const baseSize = (touchMode ? TOUCH_ROW_SIZES : DESKTOP_ROW_SIZES)[row.kind];
+  if (!("groups" in row)) return baseSize;
+  const hasSeparateDetailRows =
+    row.kind === "commit" &&
+    row.expanded &&
+    (row.detail.status === "error" || row.detail.status === "loaded");
+  return (
+    baseSize + (row.paddingBlockEndPx ?? 0) - (hasSeparateDetailRows ? COMMIT_ROW_FOOTER_PX : 0)
+  );
 }
+
+const COMMIT_ROW_FOOTER_PX = 4;
 
 function toggleSetValue<T>(current: Set<T>, value: T): Set<T> {
   const next = new Set(current);

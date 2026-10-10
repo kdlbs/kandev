@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CoordinatorIcon } from "@/lib/coordinator/icon";
 import { defaultSidebarLayout, type SidebarLayout } from "./layout-types";
 import { materializeSidebarPluginNodes, projectSidebarLayout } from "./layout-projection";
 
@@ -9,10 +10,34 @@ const catalog = [
   {
     target: { kind: "destination" as const, id: SLACK_ID },
     label: "Slack",
+    pluginItemId: "slack",
     section: "integrations" as const,
     source: "plugin" as const,
     available: true,
   },
+];
+
+const EXPECTED_NODE_IDS = [
+  "new-task",
+  "home",
+  "inbox",
+  "needs-you-inbox",
+  "coordinators",
+  "automations",
+  "canvases",
+  "integrations",
+  SLACK_ID,
+];
+const EXPECTED_NODE_LABELS = [
+  "New Task",
+  "Home",
+  "Office Inbox",
+  "Inbox",
+  "Coordinators",
+  "Automations",
+  "Canvases",
+  "Integrations",
+  "Slack",
 ];
 
 describe("sidebar layout projection", () => {
@@ -20,6 +45,9 @@ describe("sidebar layout projection", () => {
     const projected = projectSidebarLayout(defaultSidebarLayout(), catalog, {
       builtinLabels: {
         home: "Home",
+        inbox: "Office Inbox",
+        needs_you_inbox: "Inbox",
+        coordinators: "Coordinators",
         new_task: "New Task",
         automations: "Automations",
         canvases: "Canvases",
@@ -27,22 +55,11 @@ describe("sidebar layout projection", () => {
       },
     });
 
-    expect(projected.nodes.map((node) => node.id)).toEqual([
-      "home",
-      "new-task",
-      "automations",
-      "canvases",
-      "integrations",
-      SLACK_ID,
-    ]);
-    expect(projected.nodes.map((node) => node.label)).toEqual([
-      "Home",
-      "New Task",
-      "Automations",
-      "Canvases",
-      "Integrations",
-      "Slack",
-    ]);
+    expect(projected.nodes.map((node) => node.id)).toEqual(EXPECTED_NODE_IDS);
+    expect(projected.nodes.map((node) => node.label)).toEqual(EXPECTED_NODE_LABELS);
+    expect(projected.nodes.find((node) => node.id === SLACK_ID)).toMatchObject({
+      pluginItemId: "slack",
+    });
     expect(projected.protectedNodeIds).toContain("tasks");
   });
 
@@ -101,7 +118,9 @@ describe("sidebar layout projection", () => {
       available: true,
     });
   });
+});
 
+describe("sidebar layout eligibility", () => {
   it("marks a saved plugin destination unavailable while retaining its placement", () => {
     const layout: SidebarLayout = {
       ...defaultSidebarLayout(),
@@ -121,6 +140,41 @@ describe("sidebar layout projection", () => {
       id: "plugin:removed:home",
       label: "Unavailable",
       available: false,
+    });
+  });
+
+  it("projects Coordinator metadata while keeping its saved choice unavailable when flagged off", () => {
+    const projected = projectSidebarLayout(
+      {
+        ...defaultSidebarLayout(),
+        nodes: [
+          {
+            id: "coordinators",
+            kind: "builtin",
+            visible: false,
+            destinationId: "coordinators",
+          },
+        ],
+      },
+      [],
+      {
+        unavailableLabel: "Unavailable",
+        builtinLabels: { coordinators: "Coordinators" },
+        builtinContext: {
+          hasWorkspace: true,
+          inOffice: false,
+          features: { coordinator: false, canvases: false, needsYouInbox: false },
+        },
+      },
+    );
+
+    expect(projected.nodes).toHaveLength(1);
+    expect(projected.nodes[0]).toMatchObject({
+      id: "coordinators",
+      label: "Coordinators",
+      icon: CoordinatorIcon,
+      available: false,
+      visible: false,
     });
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useRef, useState } from "react";
+import { useEffect, useCallback } from "react";
 import {
   listAutomations,
   createAutomation,
@@ -15,53 +15,35 @@ import type {
   CreateAutomationRequest,
   CreateAutomationResponse,
   UpdateAutomationRequest,
+  Automation,
 } from "@/lib/types/automation";
 
+const EMPTY_AUTOMATIONS: Automation[] = [];
+
 export function useAutomations(workspaceId: string | null) {
-  const items = useAppStore((state) => state.automations.items);
-  const loading = useAppStore((state) => state.automations.loading);
-  const setAutomations = useAppStore((state) => state.setAutomations);
-  const setLoading = useAppStore((state) => state.setAutomationsLoading);
+  const list = useAppStore((state) =>
+    workspaceId ? state.automations.byWorkspace?.[workspaceId] : undefined,
+  );
+  const beginList = useAppStore((state) => state.beginAutomationsList);
+  const finishList = useAppStore((state) => state.finishAutomationsList);
   const addToStore = useAppStore((state) => state.addAutomation);
   const updateInStore = useAppStore((state) => state.updateAutomation);
   const removeFromStore = useAppStore((state) => state.removeAutomation);
 
-  // Track which workspace the current store contents belong to so a
-  // workspace switch refetches instead of serving stale data from the
-  // previous workspace. Also gate the response apply behind the in-flight
-  // workspace id to drop late responses that arrive after a quick switch.
-  //
-  // loadedWorkspaceRef is a ref (not state) so the effect guard on line
-  // below does not create a stale-closure problem. loadedWorkspaceId is
-  // the parallel state copy used only for the render-time `loaded` flag.
-  const loadedWorkspaceRef = useRef<string | null>(null);
-  const inFlightWorkspaceRef = useRef<string | null>(null);
-  const [loadedWorkspaceId, setLoadedWorkspaceId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!workspaceId) return;
-    if (loadedWorkspaceRef.current === workspaceId) return;
-    inFlightWorkspaceRef.current = workspaceId;
-    setLoading(true);
-    listAutomations(workspaceId)
-      .then((result) => {
-        if (inFlightWorkspaceRef.current !== workspaceId) return; // stale
-        setAutomations(result ?? []);
-        loadedWorkspaceRef.current = workspaceId;
-        setLoadedWorkspaceId(workspaceId);
-      })
-      .catch(() => {
-        if (inFlightWorkspaceRef.current !== workspaceId) return;
-        setAutomations([]);
-        loadedWorkspaceRef.current = workspaceId;
-        setLoadedWorkspaceId(workspaceId);
-      })
-      .finally(() => {
-        if (inFlightWorkspaceRef.current === workspaceId) {
-          setLoading(false);
-        }
-      });
-  }, [workspaceId, setAutomations, setLoading]);
+  const load = useCallback(
+    (refresh = false) => {
+      if (!workspaceId) return;
+      const generation = beginList(workspaceId, refresh);
+      if (generation === null) return;
+      // The owning store keeps a shared read alive across consumer unmounts.
+      listAutomations(workspaceId).then(
+        (result) => finishList(workspaceId, generation, result ?? []),
+        () => finishList(workspaceId, generation),
+      );
+    },
+    [workspaceId, beginList, finishList],
+  );
+  useEffect(() => load(), [load]);
 
   const create = useCallback(
     async (req: CreateAutomationRequest): Promise<CreateAutomationResponse> => {
@@ -115,22 +97,9 @@ export function useAutomations(workspaceId: string | null) {
     return triggerAutomation(id);
   }, []);
 
-  const refresh = useCallback(() => {
-    if (!workspaceId) return;
-    inFlightWorkspaceRef.current = workspaceId;
-    setLoading(true);
-    listAutomations(workspaceId)
-      .then((result) => {
-        if (inFlightWorkspaceRef.current !== workspaceId) return;
-        setAutomations(result ?? []);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (inFlightWorkspaceRef.current === workspaceId) setLoading(false);
-      });
-  }, [workspaceId, setAutomations, setLoading]);
-
-  // loaded mirrors "are we on the workspace we've fetched at least once?"
-  const loaded = loadedWorkspaceId === workspaceId;
+  const refresh = useCallback(() => load(true), [load]);
+  const items = list?.items ?? EMPTY_AUTOMATIONS;
+  const loaded = Boolean(workspaceId && list?.loaded);
+  const loading = Boolean(workspaceId) && (list?.loading ?? true);
   return { items, loaded, loading, create, update, remove, enable, disable, trigger, refresh };
 }

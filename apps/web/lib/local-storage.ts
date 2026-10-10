@@ -1,6 +1,10 @@
 import { setWalkthroughLastSeen } from "@/lib/walkthrough-notification-storage";
 import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import type { LayoutProfileIdentity } from "@/lib/layout/layout-profiles";
+import {
+  toStoredChatDraftAttachments,
+  type StoredFileAttachment,
+} from "./stored-chat-draft-attachments";
 import { normalizeStoredFileTab } from "./local-storage-file-tabs";
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -628,18 +632,6 @@ const CHAT_DRAFT_ATTACHMENTS_KEY = "kandev.chatDraft.attachments";
 const CHAT_INPUT_HEIGHT_KEY = "kandev.chatInput.height";
 
 /** Stored attachment — same as FileAttachment but without `preview` (reconstructed on load) */
-type StoredFileAttachment = {
-  id: string;
-  attachmentId?: string;
-  /** Legacy inline data is read for backwards compatibility only. */
-  data?: string;
-  mimeType: string;
-  fileName: string;
-  size: number;
-  isImage: boolean;
-  deliveryMode?: "prompt" | "path";
-};
-
 /** Read the draft chat message text for a session, or `""` if none saved. */
 export function getChatDraftText(sessionId: string): string {
   return getSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`, "");
@@ -695,28 +687,7 @@ export function setChatDraftAttachments(
   if (attachments.length === 0) {
     removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);
   } else {
-    // Store descriptors only. File bytes remain in backend private storage;
-    // legacy inline data is retained only when no descriptor exists.
-    const stored: StoredFileAttachment[] = attachments.flatMap(
-      ({ id, file, attachmentId, data, mimeType, fileName, size, isImage, deliveryMode }) => {
-        // A File object cannot survive sessionStorage. Do not persist an
-        // attachment until upload finishes; the in-flight file remains visible
-        // in the current composer only.
-        if (file && !attachmentId) return [];
-        if (!attachmentId && !data) return [];
-        return [
-          {
-            id,
-            ...(attachmentId ? { attachmentId } : { data }),
-            mimeType,
-            fileName,
-            size,
-            isImage,
-            deliveryMode,
-          },
-        ];
-      },
-    );
+    const stored = toStoredChatDraftAttachments(attachments);
     if (stored.length === 0) {
       removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);
     } else {

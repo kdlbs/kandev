@@ -139,3 +139,31 @@ The full `zizmor .github/workflows` audit remains nonzero because of existing
 repository findings. The focused audit reports the unchanged
 `pull_request_target` trigger finding, which also appears on the workflow at
 `HEAD`; no new finding was introduced.
+
+
+### Shared-deadline CI test remediation, 2026-10-06
+
+Hosted action-pinning workflow run `37449612632`, attempt 1 on PR head
+`414143e509e759fb03fe08b8ad66a729009114ef`, failed in the walkthrough runner
+suite: its real-clock duration was 0.7406 seconds against a 0.7-second
+assertion. The workflow's action references passed local pinning validation;
+the leaf failure was the runner test, not the pinning contract.
+
+The shared-deadline test now uses a controlled monotonic clock, fake process
+outcomes, and the existing runner boundary. The first incomplete attempt
+consumes 0.28 seconds; the second receives only the remaining 0.22 seconds.
+It asserts both cleanup calls and persisted attempt outcomes. Actual process
+containment remains covered by the existing process-group tests.
+No production runner, workflow permission, deadline, or public behavior changed.
+
+Validation passed:
+
+- `python3 .github/scripts/pr-walkthrough-runner_test.py` (17 tests).
+- `python3 .github/scripts/pr-walkthrough-workflow-contract_test.py` (30 tests).
+- `python3 .github/scripts/lint-action-pinning_test.py` (9 tests).
+- `python3 .github/scripts/lint-action-pinning.py` (26 workflow files).
+- An in-memory mutation that resets the deadline at each attempt fails the
+  new regression at 0.78 seconds instead of 0.50 seconds. Production files
+  remained unchanged during this check.
+
+Hosted CI for the subsequently delivered head remains pending.

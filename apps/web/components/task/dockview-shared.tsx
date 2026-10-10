@@ -260,7 +260,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
  */
 function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
   const isVisible = usePanelActive(panelId);
-  return useSessionGitRefresh(sessionId, isVisible);
+  useSessionGitRefresh(sessionId, isVisible);
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or
@@ -322,7 +322,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
   // Dynamic title with file count — use environment-stable sessionId so the
   // tab title doesn't re-fetch on same-environment session tab switches.
   const activeSessionId = useEnvironmentSessionId();
-  const retryGitStatus = useResyncGitStatusOnTabActivate(panelId, activeSessionId);
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { commits } = useSessionCommits(activeSessionId);
   const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
@@ -360,7 +360,6 @@ function ChangesContent({ panelId }: { panelId: string }) {
 
   return (
     <ChangesPanel
-      onRetryGitStatus={retryGitStatus}
       onOpenDiffFile={handleOpenDiffFile}
       onEditFile={handleEditFile}
       onOpenCommitDetail={handleOpenCommitDetail}

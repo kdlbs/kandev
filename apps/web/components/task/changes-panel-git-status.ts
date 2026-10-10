@@ -6,10 +6,11 @@ import type {
   GitStatusEntry,
   GitStatusRefreshState,
 } from "@/lib/state/slices/session-runtime/types";
+import { hasRecoverableGitStatusDetailFailure } from "@/lib/state/slices/session-runtime/git-status-detail-failures";
 
 type GitStatusScope = Pick<
   GitStatusEntry,
-  "status_state" | "files_complete" | "detail_state" | "files"
+  "status_state" | "files_complete" | "detail_state" | "files" | "repository_name"
 >;
 
 type RepositoryStatus = { repository_name: string; status: GitStatusScope };
@@ -24,6 +25,7 @@ export type ChangesPanelGitStatusInput = {
 export type ChangesPanelGitStatus = {
   hasPriorData: boolean;
   membershipReady: boolean;
+  refreshPending: boolean;
   loading: boolean;
   unavailable: boolean;
   detailsPending: boolean;
@@ -47,13 +49,33 @@ function hasPendingDetails(status: GitStatusScope): boolean {
   );
 }
 
+function hasUnavailableDetails(statuses: GitStatusScope[]): boolean {
+  return statuses.some(hasRecoverableGitStatusDetailFailure);
+}
+
+function hasUnavailableMembership(statuses: GitStatusScope[]): boolean {
+  return statuses.some((status) => status.status_state === "unavailable");
+}
+
+function hasAnyUnavailableState(...states: boolean[]): boolean {
+  return states.some(Boolean);
+}
+
+function repositoryStatusesForFailure(input: ChangesPanelGitStatusInput): RepositoryStatus[] {
+  if (input.statusByRepo?.length) return input.statusByRepo;
+  if (!input.gitStatus?.repository_name) return [];
+  return [{ repository_name: input.gitStatus.repository_name, status: input.gitStatus }];
+}
+
 function failedRepositoryNames(input: ChangesPanelGitStatusInput): string[] {
   const names = new Set<string>();
   for (const [repositoryName, refresh] of Object.entries(input.repositoryRefresh ?? {})) {
     if (refresh.state === "unavailable") names.add(repositoryName);
   }
-  for (const { repository_name, status } of input.statusByRepo ?? []) {
-    if (status.status_state === "unavailable") names.add(repository_name);
+  for (const { repository_name, status } of repositoryStatusesForFailure(input)) {
+    if (status.status_state === "unavailable" || hasRecoverableGitStatusDetailFailure(status)) {
+      names.add(repository_name);
+    }
   }
   return Array.from(names).sort((a, b) => a.localeCompare(b));
 }
@@ -73,11 +95,18 @@ export function deriveChangesPanelGitStatus(
   const refreshUnavailable =
     input.environmentRefresh?.state === "unavailable" ||
     repositoryRefreshStates.some((refresh) => refresh.state === "unavailable");
-  const statusUnavailable = statuses.some((status) => status.status_state === "unavailable");
-  const unavailable = refreshUnavailable || statusUnavailable;
-  const loading =
+  const statusUnavailable = hasUnavailableMembership(statuses);
+  const detailUnavailable = hasUnavailableDetails(statuses);
+  const unavailable = hasAnyUnavailableState(
+    refreshUnavailable,
+    statusUnavailable,
+    detailUnavailable,
+  );
+  const refreshPending =
     input.environmentRefresh?.state === "pending" ||
-    repositoryRefreshStates.some((refresh) => refresh.state === "pending") ||
+    repositoryRefreshStates.some((refresh) => refresh.state === "pending");
+  const loading =
+    refreshPending ||
     statuses.some(
       (status) =>
         status.status_state === "loading" ||
@@ -85,12 +114,17 @@ export function deriveChangesPanelGitStatus(
     );
   const hasPriorData = completeStatuses.length > 0;
   const membershipReady =
-    hasPriorData && completeStatuses.length === statuses.length && !loading && !unavailable;
+    hasPriorData &&
+    completeStatuses.length === statuses.length &&
+    !loading &&
+    !refreshUnavailable &&
+    !statusUnavailable;
   const detailsPending = completeStatuses.some(hasPendingDetails);
 
   return {
     hasPriorData,
     membershipReady,
+    refreshPending,
     loading,
     unavailable,
     detailsPending,
@@ -115,4 +149,14 @@ export function useChangesPanelGitStatus(
       }),
     [gitStatus, statusByRepo, refresh.environment, refresh.repositories],
   );
+}
+
+export function deriveChangesPanelToolbarStatus(
+  gitStatus: ChangesPanelGitStatus,
+  commitDetailsPending: boolean,
+): "loading" | "unavailable" | null {
+  if (gitStatus.refreshPending) return "loading";
+  if (gitStatus.unavailable) return "unavailable";
+  if (gitStatus.loading || gitStatus.detailsPending || commitDetailsPending) return "loading";
+  return null;
 }

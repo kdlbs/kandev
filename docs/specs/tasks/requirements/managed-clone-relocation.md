@@ -2,6 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-27
+updated: 2026-10-06
 owners:
   - kandev
 ---
@@ -66,6 +67,15 @@ The workspace system still owns source-clone placement and credentials.
   relocation in .001.1. An unchanged slot shall not bypass validation of any
   other selected repository slot.
 
+- **AC-TASKS-MANAGED-CLONE-RELOCATION-001.7:** After relocation completes,
+  ordinary commits, amended commits, rebases, and file edits shall not prevent
+  reuse of an otherwise valid replacement checkout. Launch, resume, and
+  read-only workspace restoration shall preserve its current work and existing
+  provider conversation, including after a backend restart or upgrade. Every
+  selected repository shall pass the current identity and ownership checks.
+  An unfinished relocation shall retain its exact-commit and exclusive-authority
+  checks. Existing completed relocations shall require no manual record repair.
+
 ### REQ-TASKS-MANAGED-CLONE-RELOCATION-002: Recover work that cannot move silently
 
 **Intent:** Preserve user work and offer an honest recovery path for a dirty or
@@ -91,6 +101,15 @@ otherwise ineligible checkout.
   object transfer, or publication fails, the system shall keep the original
   checkout and current error visible. It shall not start an agent in a partial
   replacement or retry the explicit action without a new user request.
+
+- **AC-TASKS-MANAGED-CLONE-RELOCATION-002.5:** After a failed relocation snapshot,
+  a new explicit repair request shall permit continuation when permissions are
+  the only proven difference from the unchanged original content. All selected
+  slots shall pass identity and exclusive-authority checks. Recovery shall retain
+  the original checkout, the failed snapshot, and the same operation identity.
+  Content differences, uncertain ownership, active consumers, and later-stage
+  failures shall remain refusals. An upgrade or ordinary resume shall not grant
+  this retry authority.
 
 ### REQ-TASKS-MANAGED-CLONE-RELOCATION-003: Recovery presentation
 
@@ -121,3 +140,17 @@ desktop and phone.
 - [Worktree metadata recovery](worktree-metadata-recovery.md)
 - [Task launch failure recovery](task-launch-failure-recovery.md)
 - [System design](../system-design/managed-clone-relocation.md)
+- [Proposed progress and workspace presentation extension](managed-clone-relocation-experience.md)
+
+## Implementation plans
+
+- [Recovery progress and workspace presentation](../../../plans/managed-clone-recovery-experience/plan.md) (draft)
+- [Snapshot permissions and blocked retry](../../../plans/workspace-recovery-permissions/plan.md)
+
+- [Original relocation package](../../../plans/managed-clone-relocation/plan.md)
+- [Unchanged legacy clone admission](../../../plans/legacy-clone-resume/plan.md)
+- [Resume and workspace recovery convergence](../../../plans/managed-clone-recovery-convergence/plan.md)
+- [Completed relocation continuity](../../../plans/completed-relocation-continuity/plan.md)
+
+The convergence package repairs violations of the existing acceptance criteria.
+It does not authorize automatic relocation of dirty worktrees.

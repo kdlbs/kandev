@@ -238,6 +238,7 @@ export function RepoChipRepositoryPill({
   onRefreshRepositories,
   repositoriesRefreshing,
   popoverHeader,
+  ariaDescribedBy,
 }: {
   repoLabel: string;
   repoTooltip: string;
@@ -250,6 +251,7 @@ export function RepoChipRepositoryPill({
   onRefreshRepositories?: () => void;
   repositoriesRefreshing?: boolean;
   popoverHeader?: React.ReactNode;
+  ariaDescribedBy?: string;
 }) {
   const { t } = useTranslation();
   const createAction = buildCreateRepositoryAction(onCreateRepository);
@@ -296,6 +298,7 @@ export function RepoChipRepositoryPill({
       refreshing={repositoriesRefreshing}
       refreshLabel="repositories"
       popoverHeader={popoverHeader}
+      ariaDescribedBy={ariaDescribedBy}
       flat
     />
   );
@@ -307,12 +310,14 @@ export function RepoChipBranchPill({
   branchLocked,
   branchesLoading,
   refreshBranches,
+  ariaDescribedBy,
 }: {
   branchPicker: RepoChipBranchPicker;
   branchIntent?: BranchIntent;
   branchLocked?: boolean;
   branchesLoading: boolean;
   refreshBranches?: () => void;
+  ariaDescribedBy?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -343,6 +348,7 @@ export function RepoChipBranchPill({
       onRefresh={refreshBranches}
       refreshing={branchesLoading}
       filter={scoreBranch}
+      ariaDescribedBy={ariaDescribedBy}
       flat
     />
   );
@@ -356,6 +362,7 @@ export function RepoChipBaseBranchPill({
   branchesLoading,
   onSelect,
   refreshBranches,
+  ariaDescribedBy,
 }: {
   options: PillOption[];
   value: string;
@@ -364,6 +371,7 @@ export function RepoChipBaseBranchPill({
   branchesLoading: boolean;
   onSelect: (value: string) => void;
   refreshBranches?: () => void;
+  ariaDescribedBy?: string;
 }) {
   const { t } = useTranslation();
   const defaultLabel = defaultBranch || t("common:repositoryDefaultBranchOption");
@@ -386,6 +394,7 @@ export function RepoChipBaseBranchPill({
       onRefresh={refreshBranches}
       refreshing={branchesLoading}
       filter={scoreBranch}
+      ariaDescribedBy={ariaDescribedBy}
       flat
     />
   );

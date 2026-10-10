@@ -100,7 +100,21 @@ Low. See the plan.
 
 ## Results
 
-Implemented as designed. The endpoint reuses `preflightRepositoryInputs` and
-`ResolveRepositoryRef`; the dialog reuses `RemoteRepoChip` so plugin
-providers appear without plugin changes. Backend and web unit suites pass;
-the e2e specs were added for the chromium and mobile-chrome projects.
+The endpoint reuses `preflightRepositoryInputs` and `ResolveRepositoryRef`;
+the dialog reuses `RemoteRepoChip` so plugin providers appear without plugin
+changes. Review remediation makes plain built-in URLs reach a settled state
+and preserves a selected plugin branch after identity verification. Existing
+repositories retain their saved settings. Focused authorization coverage
+proves foreign and viewer requests stop before provider lookup or persistence.
+
+Focused checks in a disposable nonroot, network-disabled container:
+
+- `go test -mod=readonly -p=1 ./internal/task/service -run '^TestRegisterRemoteRepository' -count=1`: passed.
+- `node node_modules/vitest/vitest.mjs run hooks/domains/github/use-pr-info-by-url.test.ts`: 28 tests passed.
+- Prettier checks on the changed web files and `gofmt` on the changed Go files: passed.
+
+The URL and branch regressions failed on the pre-fix code before passing.
+Desktop and phone E2E cover picker and pasted URL registration, persistence,
+unchanged task counts, and phone action sizing. Broad lint, typecheck, unit,
+race, and E2E checks belong to hosted CI; they were not run locally during
+remediation. Contributor commit hooks were not run on the host.

@@ -164,6 +164,7 @@ function buildGroupSectionProps(
   const { group, rowProps, pinnedSet, collapsedSet, showHeader, getNestHierarchyTasks } = options;
   return {
     group,
+    grouping: grouped.groupKey,
     subTasksByParentId: grouped.subTasksByParentId,
     getNestHierarchyTasks,
     rowProps,
@@ -173,6 +174,7 @@ function buildGroupSectionProps(
     collapsedSubtaskParentIds: props.collapsedSubtaskParentIds,
     onToggleSubtasks: props.onToggleSubtasks,
     showHeader,
+    groupIndent: props.groupIndent,
     onReorderGroup: props.onReorderGroup,
     onReorderSubtasks: props.onReorderSubtasks,
     onNestTask: props.onNestTask,

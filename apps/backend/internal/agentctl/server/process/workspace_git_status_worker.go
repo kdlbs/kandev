@@ -271,6 +271,10 @@ func (wt *WorkspaceTracker) publishEnrichedGitStatus(job *gitStatusEnrichmentJob
 		return false
 	}
 	wt.gitStatusRevision++
+	wt.gitStatusDetailSourceRevision = 0
+	if status.DetailState == gitStatusDetailReady {
+		wt.gitStatusDetailSourceRevision = job.status.SnapshotRevision
+	}
 	status.TrackerID = wt.gitStatusTrackerID
 	status.TrackerEpoch = wt.gitStatusEpoch
 	status.SnapshotRevision = wt.gitStatusRevision

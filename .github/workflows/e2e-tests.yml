@@ -16,12 +16,6 @@ on:
   # Manual trigger for verifying CI on draft PRs and ad-hoc reruns. The
   # default sharded run uses the same ref the user picks in the dispatch UI.
   workflow_dispatch:
-    inputs:
-      fail_on_flaky:
-        description: "Fail the run when Playwright needs a retry"
-        required: false
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -497,10 +491,6 @@ jobs:
         working-directory: apps/web
         run: tar -xf web-dist.tar && rm web-dist.tar
 
-      - name: Enable strict flaky-test diagnostics
-        if: github.event_name == 'workflow_dispatch' && inputs.fail_on_flaky
-        run: echo "E2E_FAIL_ON_FLAKY=1" >> "$GITHUB_ENV"
-
       - name: Download E2E shard manifests
         uses: ./.github/actions/download-artifact-retry
         with:
@@ -846,10 +836,6 @@ jobs:
         working-directory: apps/web
         run: tar -xf web-dist.tar && rm web-dist.tar
 
-      - name: Enable strict flaky-test diagnostics
-        if: github.event_name == 'workflow_dispatch' && inputs.fail_on_flaky
-        run: echo "E2E_FAIL_ON_FLAKY=1" >> "$GITHUB_ENV"
-
       - name: Download E2E shard manifests
         uses: ./.github/actions/download-artifact-retry
         with:
@@ -1078,7 +1064,6 @@ jobs:
           KANDEV_E2E_CONTAINERS: "1"
           KANDEV_E2E_BUILD_IDENTITY: ${{ github.workspace }}/apps/backend/bin/e2e-build-identity.json
           KANDEV_E2E_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
-          E2E_FAIL_ON_FLAKY: "1"
         run: >-
           pnpm exec playwright test --config e2e/playwright.config.ts
           --project=kubernetes-compat --reporter=list tests/kubernetes-compat

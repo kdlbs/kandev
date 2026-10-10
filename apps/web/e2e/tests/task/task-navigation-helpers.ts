@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { expect, type Page } from "@playwright/test";
-import type { SeedData } from "../../fixtures/test-base";
+import { resetSeedRepositoryCheckout, type SeedData } from "../../fixtures/test-base";
 import type { BackendContext } from "../../fixtures/backend";
 import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
@@ -10,13 +10,19 @@ import {
   type NavigationResponseGate,
 } from "../../helpers/navigation-response-hold";
 import { SessionPage } from "../../pages/session-page";
-import { waitForSessionDone } from "../../helpers/session";
+import { waitForSessionDone, waitForSessionGitHydration } from "../../helpers/session";
+import { workspaceInventoryRevision } from "../../../components/task/file-browser-repository-labels";
 import type { AppState } from "../../../lib/state/store";
 import type { StoreApi } from "zustand";
 
 export const AVAILABLE = "navigation-available";
 export const HELD = "navigation-held";
 export const ROOT_FILE = "navigation-root.ts";
+
+type NavigationTaskOptions = {
+  executorProfileId?: string;
+  withRepository?: boolean;
+};
 
 async function waitForTreeResponse(
   gate: NavigationResponseGate,
@@ -68,23 +74,30 @@ export async function seedNavigationTasks(
   api: ApiClient,
   seed: SeedData,
   backend: BackendContext,
-  executorProfileId?: string,
+  { executorProfileId, withRepository = true }: NavigationTaskOptions = {},
 ) {
-  const branch = seedNavigationBranch(backend);
+  if (withRepository) resetSeedRepositoryCheckout(seed, backend.tmpDir);
+  const branch = withRepository ? seedNavigationBranch(backend) : undefined;
   const profile = await createStandardProfile(api, "navigation-responsiveness");
   const tasks = [];
   for (const suffix of ["A", "B"]) {
-    tasks.push(
-      await api.createTaskWithAgent(seed.workspaceId, `Navigation ${suffix}`, profile.id, {
+    const task = await api.createTaskWithAgent(
+      seed.workspaceId,
+      `Navigation ${suffix}`,
+      profile.id,
+      {
         description: "/e2e:simple-message",
         workflow_id: seed.workflowId,
         workflow_step_id: seed.startStepId,
-        repositories: [{ repository_id: seed.repositoryId, base_branch: branch }],
-        executor_profile_id: executorProfileId,
-      }),
+        ...(branch
+          ? { repositories: [{ repository_id: seed.repositoryId, base_branch: branch }] }
+          : {}),
+        executor_profile_id: executorProfileId ?? seed.worktreeExecutorProfileId,
+      },
     );
-  }
-  for (const task of tasks) {
+    tasks.push(task);
+    // Local executor sessions share the checkout's Git index, so finish each
+    // branch checkout before launching the next session.
     await waitForSessionDone(
       api,
       task.id,
@@ -109,20 +122,26 @@ export async function saveExpandedPaths(
   paths: string[],
   mobile = false,
 ) {
-  await page.evaluate(
-    ({ sessionId, paths, mobile }) => {
+  const browserState = await page.evaluate(
+    ({ sessionId, mobile }) => {
       const state = (
         window as Window & { __KANDEV_E2E_STORE__: StoreApi<AppState> }
       ).__KANDEV_E2E_STORE__.getState();
       const env = mobile ? sessionId : (state.environmentIdBySessionId[sessionId] ?? sessionId);
-      const count = state.sessionWorktreesBySessionId.itemsBySessionId[sessionId]?.length ?? 0;
+      const worktreeCount =
+        state.sessionWorktreesBySessionId.itemsBySessionId[sessionId]?.length ?? 0;
+      const worktrees = state.taskSessions.items[sessionId]?.worktrees ?? [];
       const refresh = state.workspaceFilesRefresh.bySessionId[sessionId] ?? 0;
-      sessionStorage.setItem(
-        `kandev.filesPanel.expanded.${env}:${count}:${refresh}`,
-        JSON.stringify(paths),
-      );
+      return { env, worktreeCount, worktrees, refresh };
     },
-    { sessionId, paths, mobile },
+    { sessionId, mobile },
+  );
+  const resetKey = `${browserState.env}:${browserState.worktreeCount}:${workspaceInventoryRevision(browserState.worktrees)}:${browserState.refresh}`;
+  await page.evaluate(
+    ({ resetKey, paths }) => {
+      sessionStorage.setItem(`kandev.filesPanel.expanded.${resetKey}`, JSON.stringify(paths));
+    },
+    { resetKey, paths },
   );
 }
 
@@ -135,25 +154,6 @@ export async function showNavigationFiles(page: Page, mobile: boolean) {
     await session.showSessionContext();
     await session.clickTab("Files");
   }
-}
-
-async function waitForNavigationGitHydration(page: Page, sessionId: string) {
-  // Initial commit discovery can activate Changes. Select Files after both Git reads settle.
-  await expect
-    .poll(() =>
-      page.evaluate((sessionId) => {
-        const state = (
-          window as Window & { __KANDEV_E2E_STORE__: StoreApi<AppState> }
-        ).__KANDEV_E2E_STORE__.getState();
-        const env = state.environmentIdBySessionId[sessionId] ?? sessionId;
-        return (
-          state.gitStatus.byEnvironmentRepo[env] !== undefined &&
-          state.sessionCommits.byEnvironmentId[env] !== undefined &&
-          state.sessionCommits.loading[env] !== true
-        );
-      }, sessionId),
-    )
-    .toBe(true);
 }
 
 export async function selectNavigationTask(page: Page, title: string, mobile = false) {
@@ -183,7 +183,7 @@ export async function assertProgressiveNavigation(
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.waitForChatIdle();
-  await waitForNavigationGitHydration(page, a.session_id!);
+  await waitForSessionGitHydration(page, a.session_id!);
   await showNavigationFiles(page, mobile);
   await waitForTreeResponse(gate, initialRequestOffset, a.session_id!, "");
   await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible();
@@ -191,7 +191,7 @@ export async function assertProgressiveNavigation(
   gate.hold((r) => r.action === "workspace.tree.get" && r.payload.path === HELD);
   const reloadRequestOffset = gate.requests.length;
   await page.reload();
-  await waitForNavigationGitHydration(page, a.session_id!);
+  await waitForSessionGitHydration(page, a.session_id!);
   await showNavigationFiles(page, mobile);
   await expect.poll(() => gate.heldCount()).toBeGreaterThan(0);
   await waitForTreeResponse(gate, reloadRequestOffset, a.session_id!, "");
@@ -220,20 +220,14 @@ export async function assertProgressiveNavigation(
   await selectNavigationTask(page, b.title, mobile);
   await expect(page).toHaveURL(new RegExp(`/t/${b.id}$`));
   await session.waitForChatIdle();
-  await waitForNavigationGitHydration(page, b.session_id!);
+  await waitForSessionGitHydration(page, b.session_id!);
   await showNavigationFiles(page, mobile);
   await waitForTreeResponse(gate, taskBRequestOffset, b.session_id!, "");
   await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible();
-  gate.hold(
-    (r) =>
-      r.action === "workspace.tree.get" &&
-      r.payload.session_id === a.session_id &&
-      r.payload.path === "",
-  );
+  // Task A's environment-scoped tree cache remains available while returning from B.
   await selectNavigationTask(page, a.title, mobile);
   await expect(page).toHaveURL(new RegExp(`/t/${a.id}$`));
   await showNavigationFiles(page, mobile);
-  await expect.poll(() => gate.heldCount()).toBeGreaterThan(0);
   await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible();
   if (mobile) {
     await session.fileTreeNodeActions(ROOT_FILE).tap();

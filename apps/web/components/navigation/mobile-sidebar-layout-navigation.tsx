@@ -2,16 +2,16 @@
 
 import { useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { IconInbox, IconSquarePlus } from "@tabler/icons-react";
+import { IconInbox } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import Link from "@/components/routing/app-link";
 import { useAppStore } from "@/components/state-provider";
-import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
 import { useStaticDestinations } from "@/hooks/use-app-destinations";
 import { useOfficeModeState } from "@/hooks/use-in-office";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useSidebarLayoutNavigation } from "@/hooks/domains/sidebar/use-sidebar-layout-navigation";
 import { requestNewTaskCreation } from "@/lib/desktop/new-task-request";
 import type { ProjectedSidebarNode, ProjectedShortcut } from "@/lib/sidebar/layout-projection";
@@ -30,15 +30,17 @@ import {
 } from "@/lib/state/slices/needs-you-inbox/selectors";
 import { selectOfficeInboxCount } from "@/lib/state/slices/office/selectors";
 import { NEEDS_YOU_INBOX_HREF } from "@/lib/navigation/needs-you-inbox-destination";
+import { MobileSidebarCustomization } from "./mobile-sidebar-customization";
+import { MobileNewTaskRow } from "./mobile-new-task-row";
 import { DestinationRows } from "./destination-rows";
 import { MobileAutomationsSection } from "./mobile-automations-section";
+import { MobileCoordinatorsSection } from "./mobile-coordinators-section";
 import { MobileCanvasesSection } from "./mobile-canvases-section";
 import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
 
 type MobileSidebarLayoutNavigationProps = {
   quickActions?: ReactNode;
   homeCoversListings?: boolean;
-  afterPrimary?: ReactNode;
   onNavigate: () => void;
   omitSections: Set<string>;
   omitDestinations: string[];
@@ -124,27 +126,13 @@ function MobilePluginRow({
       variant="outline"
       className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
     >
-      <Link href={href} onClick={onNavigate} data-testid={`mobile-sidebar-plugin-${node.id}`}>
+      <Link
+        href={href}
+        onClick={onNavigate}
+        data-testid={`mobile-plugin-nav-item-${node.pluginItemId ?? node.destinationId ?? node.id}`}
+      >
         {content}
       </Link>
-    </Button>
-  );
-}
-
-function MobileNewTaskRow({ onNavigate }: { onNavigate: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
-      onClick={() => {
-        onNavigate();
-        requestNewTaskCreation();
-      }}
-    >
-      <IconSquarePlus className="h-4 w-4 shrink-0" />
-      {t("sidebar:newTask")}
     </Button>
   );
 }
@@ -153,27 +141,22 @@ function MobileRequiredRows({
   onNavigate,
   omitSections,
   omitDestinations,
+  inboxKind = "none",
 }: {
   onNavigate: () => void;
   omitSections: Set<string>;
   omitDestinations: string[];
+  inboxKind?: "office" | "needs-you" | "none";
 }) {
-  const { t } = useTranslation();
   const primary = useStaticDestinations("mobileMenu", "primary");
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const mode = useOfficeModeState();
-  const needsYouEnabled = useFeature("needsYouInbox");
-  const needsYouCount = useAppStore(selectNeedsYouInboxCount);
-  const needsYouHasMore = useAppStore(selectNeedsYouInboxHasMore);
-  const officeInboxCount = useAppStore(selectOfficeInboxCount);
   if (omitSections.has("primary")) return null;
+  if (inboxKind !== "none") return <MobileInboxRow kind={inboxKind} onNavigate={onNavigate} />;
   const fixedDestinations = primary.filter(
     (destination) =>
       (destination.id === "tasks" || destination.id === "threads") &&
       !omitDestinations.includes(destination.id),
   );
-  if (fixedDestinations.length === 0 && mode !== "office" && !(needsYouEnabled && workspaceId))
-    return null;
+  if (!fixedDestinations.length) return null;
   return (
     <div className="flex flex-col gap-3" data-testid="mobile-sidebar-fixed-navigation">
       {fixedDestinations.length > 0 && (
@@ -183,35 +166,42 @@ function MobileRequiredRows({
           className="h-11 gap-3 px-3 text-sm aria-[current=page]:bg-primary/10"
         />
       )}
-      {mode === "office" && (
-        <Button
-          asChild
-          variant="outline"
-          className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
-        >
-          <Link href="/office/inbox" onClick={onNavigate}>
-            <IconInbox className="h-4 w-4 shrink-0" />
-            <span className="flex-1 text-left">{t("sidebar:inbox")}</span>
-            {officeInboxCount > 0 && <Badge>{officeInboxCount}</Badge>}
-          </Link>
-        </Button>
-      )}
-      {needsYouEnabled && workspaceId && (
-        <Button
-          asChild
-          variant="outline"
-          className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
-        >
-          <Link href={NEEDS_YOU_INBOX_HREF} onClick={onNavigate}>
-            <IconInbox className="h-4 w-4 shrink-0" />
-            <span className="flex-1 text-left">
-              {mode === "office" ? t("sidebar:needsYouInbox") : t("sidebar:inbox")}
-            </span>
-            {needsYouCount > 0 && <Badge>{`${needsYouCount}${needsYouHasMore ? "+" : ""}`}</Badge>}
-          </Link>
-        </Button>
-      )}
     </div>
+  );
+}
+
+function MobileInboxRow({
+  kind,
+  onNavigate,
+}: {
+  kind: "office" | "needs-you";
+  onNavigate: () => void;
+}) {
+  const { t } = useTranslation();
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const mode = useOfficeModeState();
+  const enabled = useFeature("needsYouInbox");
+  const count = useAppStore(selectNeedsYouInboxCount);
+  const hasMore = useAppStore(selectNeedsYouInboxHasMore);
+  const officeCount = useAppStore(selectOfficeInboxCount);
+  const office = kind === "office";
+  if (office && mode !== "office") return null;
+  if (!office && (!enabled || !workspaceId)) return null;
+  const label = !office && mode === "office" ? t("sidebar:needsYouInbox") : t("sidebar:inbox");
+  const badge = office ? officeCount : count;
+  const suffix = !office && hasMore ? "+" : "";
+  return (
+    <Button
+      asChild
+      variant="outline"
+      className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
+    >
+      <Link href={office ? "/office/inbox" : NEEDS_YOU_INBOX_HREF} onClick={onNavigate}>
+        <IconInbox className="h-4 w-4 shrink-0" />
+        <span className="flex-1 text-left">{label}</span>
+        {badge > 0 && <Badge>{`${badge}${suffix}`}</Badge>}
+      </Link>
+    </Button>
   );
 }
 
@@ -227,7 +217,7 @@ function SavedMobileAutomationRows({
   const entries = catalog.catalog.filter((entry) => entry.target.kind === "automation");
   const activityError = catalog.automations.some((item) => getActivity(item.id)?.error);
   return (
-    <div id="mobile-automations-body" className="space-y-2">
+    <div className="space-y-2">
       {catalog.loading && (
         <p role="status" className="text-sm text-muted-foreground">
           {t("common:loading")}
@@ -304,7 +294,7 @@ function MobilePhoneResource(props: MobileLayoutNodeProps) {
   }
 }
 
-function MobileBuiltinNode(props: MobileLayoutNodeProps) {
+function MobileBuiltinNodeContent(props: MobileLayoutNodeProps) {
   const {
     node,
     homeCoversListings,
@@ -317,6 +307,15 @@ function MobileBuiltinNode(props: MobileLayoutNodeProps) {
     onActivateShortcut,
     onNavigate,
   } = props;
+  if (node.destinationId === "inbox" || node.destinationId === "needs_you_inbox")
+    return (
+      <MobileRequiredRows
+        inboxKind={node.destinationId === "inbox" ? "office" : "needs-you"}
+        onNavigate={onNavigate}
+        omitSections={omitSections}
+        omitDestinations={omitDestinations}
+      />
+    );
   if (node.destinationId === "home") {
     if (omitSections.has("primary") || omitDestinations.includes("home")) return null;
     return homeDestination ? (
@@ -332,9 +331,11 @@ function MobileBuiltinNode(props: MobileLayoutNodeProps) {
     ) : null;
   }
   if (node.destinationId === "new_task")
-    return omitDestinations.includes("new_task") ? null : (
+    return omitSections.has("primary") || omitDestinations.includes("new_task") ? null : (
       <MobileNewTaskRow onNavigate={onNavigate} />
     );
+  if (node.destinationId === "coordinators")
+    return <MobileCoordinatorsSection onNavigate={onNavigate} />;
   if (node.destinationId === "integrations" && omitSections.has("integrations")) return null;
   if (homeCoversListings) return <MobilePhoneResource {...props} />;
 
@@ -356,6 +357,10 @@ function MobileBuiltinNode(props: MobileLayoutNodeProps) {
       onNavigate={onNavigate}
     />
   );
+}
+
+function MobileBuiltinNode(props: MobileLayoutNodeProps) {
+  return <MobileBuiltinNodeContent {...props} />;
 }
 
 function MobileLayoutNode(props: MobileLayoutNodeProps) {
@@ -387,7 +392,6 @@ function MobileLayoutNode(props: MobileLayoutNodeProps) {
 export function MobileSidebarLayoutNavigation({
   quickActions,
   homeCoversListings,
-  afterPrimary,
   onNavigate,
   omitSections,
   omitDestinations,
@@ -418,30 +422,24 @@ export function MobileSidebarLayoutNavigation({
     },
     [onNavigate, openQuickChat, openQuickTerminal],
   );
-  // Phone workspace tools follow task navigation in their saved relative order.
-  // This presentation never writes over the desktop layout preference.
-  const visibleNodes = projection.nodes.filter(
-    (node) =>
-      node.visible &&
-      !(
-        homeCoversListings &&
-        workspaceMode === "kanban" &&
-        node.kind === "builtin" &&
-        node.destinationId === "new_task"
-      ),
-  );
+  // The phone projection keeps saved tools in order without rewriting desktop preferences.
+  const visibleNodes = projection.nodes.filter((node) => node.visible);
   const hasVisibleHome =
     !omitSections.has("primary") &&
     !omitDestinations.includes("home") &&
     visibleNodes.some((node) => node.destinationId === "home");
   const homeDestination = primary.find((destination) => destination.id === "home");
   const canvasEntries = catalog.catalog.filter((entry) => entry.target.kind === "canvas");
-  const beforeTasks = homeCoversListings
-    ? visibleNodes.filter((node) => node.destinationId === "home")
+  const phoneMain = homeCoversListings && workspaceMode === "kanban";
+  const isPrimary = (node: ProjectedSidebarNode) =>
+    node.kind === "builtin" && (node.destinationId === "home" || node.destinationId === "new_task");
+  const primaryNodes = phoneMain
+    ? [
+        ...visibleNodes.filter((node) => isPrimary(node) && node.destinationId === "new_task"),
+        ...visibleNodes.filter((node) => isPrimary(node) && node.destinationId === "home"),
+      ]
     : visibleNodes;
-  const afterTasks = homeCoversListings
-    ? visibleNodes.filter((node) => node.destinationId !== "home")
-    : [];
+  const toolNodes = phoneMain ? visibleNodes.filter((node) => !isPrimary(node)) : [];
   const renderNode = (node: ProjectedSidebarNode) => (
     <MobileLayoutNode
       key={node.id}
@@ -469,17 +467,21 @@ export function MobileSidebarLayoutNavigation({
     >
       <div className="flex min-w-0 flex-col gap-2 md:gap-3">
         {!hasVisibleHome && quickActions}
-        {beforeTasks.map(renderNode)}
-        <MobileRequiredRows
-          onNavigate={onNavigate}
-          omitSections={omitSections}
-          omitDestinations={omitDestinations}
-        />
+        {primaryNodes.map(renderNode)}
       </div>
-      {afterPrimary}
-      {afterTasks.length > 0 && (
-        <div className="flex min-w-0 flex-col gap-3">{afterTasks.map(renderNode)}</div>
+      {toolNodes.length > 0 && (
+        <div className="flex min-w-0 flex-col gap-3">{toolNodes.map(renderNode)}</div>
       )}
+      <MobileSidebarCustomization
+        nodes={projection.nodes}
+        catalog={catalog.catalog}
+        onNavigate={onNavigate}
+      />
+      <MobileRequiredRows
+        onNavigate={onNavigate}
+        omitSections={omitSections}
+        omitDestinations={omitDestinations}
+      />
     </div>
   );
 }

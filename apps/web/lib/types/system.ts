@@ -316,6 +316,7 @@ export interface StorageGoCacheSettings {
   enabled: boolean;
   max_bytes: number;
   adopted_path: string;
+  allow_cleanup_while_busy: boolean;
 }
 
 export interface StorageDockerSettings {
@@ -361,6 +362,7 @@ export interface StorageWorkspaceSummary {
 export interface StorageGoCacheSummary {
   path?: string;
   size_bytes?: number;
+  cleanup_eligible_size_bytes?: number;
   owned?: boolean;
   enabled?: boolean;
   unmanaged_path?: string;

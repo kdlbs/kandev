@@ -10,6 +10,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -225,9 +226,10 @@ const (
 // reached (no record, or the client/transport itself could not be built),
 // since nothing recovery-relevant is running in that case.
 type AdoptionOutcome struct {
-	Adopted  bool
-	Reason   AdoptionReason
-	Endpoint string
+	Adopted        bool
+	Reason         AdoptionReason
+	Endpoint       string
+	ServerIdentity string
 	// Credential is the single credential that authenticates both
 	// control-plane and per-instance operations and streams (design 01
 	// "Single driver", AC-EXECUTORS-CONTROL-OWNERSHIP-002.6): use it for
@@ -244,6 +246,11 @@ type AdoptionOutcome struct {
 	// field at all (a legacy pre-upgrade server) -- callers apply their own
 	// floor in that case, never a locally-resolved value.
 	UnownedPeriod time.Duration
+	// Capabilities is the authenticated capability set of the adopted control
+	// server. It is carried to recovery so a new instance client can distinguish
+	// an old peer from a current peer whose durable status is unavailable.
+	Capabilities    []string
+	ProcessIdentity processidentity.Identity
 }
 
 // AttemptAdoptControlServer implements startup steps 4 through 6 of design
@@ -351,12 +358,24 @@ func finalizeControlServerAdoption(ctx context.Context, a finalizeAdoptionArgs) 
 		return AdoptionOutcome{Reason: AdoptionReasonCredentialRotationFailed, ContactedAt: a.contactedAt}
 	}
 
+	details := recordedServerDetails(ctx, a.client, a.recoveryReadTimeout, a.recoveryReadRetries)
+	diagnosticLogPath := a.record.DiagnosticLogPath
+	processIdentity := a.record.ProcessIdentity
+	if details != nil {
+		if details.DiagnosticLogPath != "" {
+			diagnosticLogPath = details.DiagnosticLogPath
+		}
+		if details.ProcessIdentity != nil {
+			processIdentity = *details.ProcessIdentity
+		}
+	}
 	updated := &models.ControlServerRecord{
 		Endpoint:           a.record.Endpoint,
 		ServerIdentity:     a.identity.ServerIdentity,
 		CredentialSecretID: secretID,
 		Capabilities:       a.identity.Capabilities,
-		DiagnosticLogPath:  recordedDiagnosticLogPath(ctx, a.client, a.recoveryReadTimeout, a.recoveryReadRetries),
+		DiagnosticLogPath:  diagnosticLogPath,
+		ProcessIdentity:    processIdentity,
 		CreatedAt:          a.record.CreatedAt,
 	}
 	if err := a.store.UpsertControlServerRecord(ctx, updated); err != nil {
@@ -378,11 +397,14 @@ func finalizeControlServerAdoption(ctx context.Context, a finalizeAdoptionArgs) 
 	}
 
 	return AdoptionOutcome{
-		Adopted:       true,
-		Endpoint:      a.record.Endpoint,
-		Credential:    a.rotated.Credential,
-		ContactedAt:   a.contactedAt,
-		UnownedPeriod: time.Duration(a.identity.UnownedPeriodMS) * time.Millisecond,
+		Adopted:         true,
+		Endpoint:        a.record.Endpoint,
+		ServerIdentity:  a.identity.ServerIdentity,
+		Credential:      a.rotated.Credential,
+		ContactedAt:     a.contactedAt,
+		UnownedPeriod:   time.Duration(a.identity.UnownedPeriodMS) * time.Millisecond,
+		Capabilities:    append([]string(nil), a.identity.Capabilities...),
+		ProcessIdentity: processIdentity,
 	}
 }
 
@@ -418,12 +440,22 @@ func RecordFreshControlServer(
 		return fmt.Errorf("store freshly spawned control server credential: %w", err)
 	}
 
+	details := recordedServerDetails(ctx, client, defaultRecoveryReadTimeout, defaultRecoveryReadRetries)
+	var diagnosticLogPath string
+	var processIdentity processidentity.Identity
+	if details != nil {
+		diagnosticLogPath = details.DiagnosticLogPath
+		if details.ProcessIdentity != nil {
+			processIdentity = *details.ProcessIdentity
+		}
+	}
 	record := &models.ControlServerRecord{
 		Endpoint:           endpoint,
 		ServerIdentity:     identity.ServerIdentity,
 		CredentialSecretID: secretID,
 		Capabilities:       identity.Capabilities,
-		DiagnosticLogPath:  recordedDiagnosticLogPath(ctx, client, defaultRecoveryReadTimeout, defaultRecoveryReadRetries),
+		DiagnosticLogPath:  diagnosticLogPath,
+		ProcessIdentity:    processIdentity,
 	}
 	return store.UpsertControlServerRecord(ctx, record)
 }

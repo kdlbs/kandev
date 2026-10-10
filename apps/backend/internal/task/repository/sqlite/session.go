@@ -1770,6 +1770,17 @@ func (r *Repository) UpdateTaskSessionResumeStateIfCurrentAttempt(
 		snapshotJSON = string(payload)
 	}
 
+	guardState := models.TaskSessionStateCreated
+	if updateState {
+		guardState = next
+	}
+	writer, runtimeTx, guardErr := r.managedSessionStateWriter(ctx, sessionID, guardState)
+	if guardErr != nil {
+		return false, time.Time{}, guardErr
+	}
+	if runtimeTx != nil {
+		defer func() { _ = runtimeTx.Rollback() }()
+	}
 	now := r.nowUTC()
 	updates := make([]string, 0, 5)
 	args := make([]interface{}, 0, 10)
@@ -1788,13 +1799,18 @@ func (r *Repository) UpdateTaskSessionResumeStateIfCurrentAttempt(
 	args = append(args, now, sessionID, taskID, string(expected), attemptID)
 	query := `UPDATE task_sessions SET ` + strings.Join(updates, `, `) +
 		` WHERE id = ? AND task_id = ? AND state = ? AND ` + startAttemptIDPredicate(r.db.DriverName())
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	result, err := writer.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, time.Time{}, err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
 		return false, time.Time{}, err
+	}
+	if runtimeTx != nil {
+		if err := runtimeTx.Commit(); err != nil {
+			return false, time.Time{}, err
+		}
 	}
 	return rows == 1, now, nil
 }
@@ -2136,6 +2152,9 @@ func (r *Repository) ensureTaskSessionEnvironmentAvailableTx(
 	tx *sqlx.Tx,
 	sessionID, nextEnvironmentID string,
 ) error {
+	if err := r.managedSessionDeletionBarrierTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
 	var current sql.NullString
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT task_environment_id FROM task_sessions WHERE id = ?
@@ -2204,10 +2223,17 @@ func (r *Repository) UpdateTaskSessionAgentProfileSnapshot(
 
 // UpdateTaskSessionState updates just the state and error message of an agent session
 func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, status models.TaskSessionState, errorMessage string) error {
+	writer, runtimeTx, guardErr := r.managedSessionStateWriter(ctx, id, status)
+	if guardErr != nil {
+		return guardErr
+	}
+	if runtimeTx != nil {
+		defer func() { _ = runtimeTx.Rollback() }()
+	}
 	now := time.Now().UTC()
 	completedAt := completedAtForTaskSessionState(status, now)
 
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := writer.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET state = ?, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?
 	`), string(status), errorMessage, completedAt, now, id)
 	if err != nil {
@@ -2217,6 +2243,9 @@ func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, stat
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, id)
+	}
+	if runtimeTx != nil {
+		return runtimeTx.Commit()
 	}
 	return nil
 }
@@ -2230,9 +2259,16 @@ func (r *Repository) UpdateTaskSessionStateIfCurrent(
 	expected, status models.TaskSessionState,
 	errorMessage string,
 ) (bool, time.Time, error) {
+	writer, runtimeTx, guardErr := r.managedSessionStateWriter(ctx, id, status)
+	if guardErr != nil {
+		return false, time.Time{}, guardErr
+	}
+	if runtimeTx != nil {
+		defer func() { _ = runtimeTx.Rollback() }()
+	}
 	now := time.Now().UTC()
 	completedAt := completedAtForTaskSessionState(status, now)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := writer.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions
 		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
 		WHERE id = ? AND state = ?
@@ -2244,6 +2280,11 @@ func (r *Repository) UpdateTaskSessionStateIfCurrent(
 	if err != nil {
 		return false, time.Time{}, err
 	}
+	if runtimeTx != nil {
+		if err := runtimeTx.Commit(); err != nil {
+			return false, time.Time{}, err
+		}
+	}
 	return rows > 0, now, nil
 }
 
@@ -2253,9 +2294,16 @@ func (r *Repository) UpdateTaskSessionStateIfCurrentIdentity(
 	expected, status models.TaskSessionState,
 	errorMessage string,
 ) (bool, time.Time, error) {
+	writer, runtimeTx, guardErr := r.managedSessionStateWriter(ctx, id, status)
+	if guardErr != nil {
+		return false, time.Time{}, guardErr
+	}
+	if runtimeTx != nil {
+		defer func() { _ = runtimeTx.Rollback() }()
+	}
 	now := time.Now().UTC()
 	completedAt := completedAtForTaskSessionState(status, now)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := writer.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions
 		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
 		WHERE id = ? AND task_id = ? AND queue_incarnation_id = ? AND state = ?
@@ -2267,6 +2315,11 @@ func (r *Repository) UpdateTaskSessionStateIfCurrentIdentity(
 	rows, err := result.RowsAffected()
 	if err != nil {
 		return false, time.Time{}, err
+	}
+	if runtimeTx != nil {
+		if err := runtimeTx.Commit(); err != nil {
+			return false, time.Time{}, err
+		}
 	}
 	return rows > 0, now, nil
 }
@@ -2902,6 +2955,72 @@ func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key s
 		return fmt.Errorf("agent session not found: %s", sessionID)
 	}
 	return nil
+}
+
+// SetSessionMetadataKeyIfJSONValue replaces one metadata value only when its
+// complete JSON value still equals expectedValue. The update keeps unrelated
+// session metadata and is atomic across concurrent writers.
+func (r *Repository) SetSessionMetadataKeyIfJSONValue(
+	ctx context.Context,
+	sessionID, key string,
+	expectedValue, value interface{},
+) (bool, error) {
+	expectedJSON, err := json.Marshal(expectedValue)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize expected session metadata: %w", err)
+	}
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize session metadata value: %w", err)
+	}
+	now := r.nowUTC()
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE task_sessions
+			SET metadata = jsonb_set(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
+				ARRAY[?]::text[], ?::jsonb, true
+			)::text, updated_at = ?
+			WHERE id = ?
+			  AND (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END -> ?) = ?::jsonb
+		`
+		args = []interface{}{key, string(valueJSON), now, sessionID, key, string(expectedJSON)}
+	} else {
+		path := jsonPath(key)
+		query = `
+			UPDATE task_sessions
+			SET metadata = json_set(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
+				?, json(?)
+			), updated_at = ?
+			WHERE id = ?
+			  AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = json_type(?)
+			  AND NOT EXISTS (
+				SELECT fullkey, type, atom FROM json_tree(json_extract(
+					CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?
+				))
+				EXCEPT SELECT fullkey, type, atom FROM json_tree(json(?))
+			  )
+			  AND NOT EXISTS (
+				SELECT fullkey, type, atom FROM json_tree(json(?))
+				EXCEPT SELECT fullkey, type, atom FROM json_tree(json_extract(
+					CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?
+				))
+			  )
+		`
+		args = []interface{}{
+			path, string(valueJSON), now, sessionID,
+			path, string(expectedJSON), path, string(expectedJSON), string(expectedJSON), path,
+		}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
 }
 
 // SetSessionMetadataKeyIfState atomically sets one metadata key only while the
@@ -3820,6 +3939,21 @@ func (r *Repository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, ag
 	return err == nil, err
 }
 
+// HasTaskSessionsByAgentProfile reports whether a profile has any persisted
+// session, including completed sessions used as evidence of prior agent use.
+func (r *Repository) HasTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
+	var exists int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT 1 FROM task_sessions
+		WHERE agent_profile_id = ? OR execution_profile_id = ?
+		LIMIT 1
+	`), agentProfileID, agentProfileID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentProfileID string) ([]agentdto.ActiveTaskInfo, error) {
 	// This list is "what is blocking this deletion", and automation runs sit on
 	// both sides of that question.
@@ -3970,6 +4104,9 @@ func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, age
 	}
 	candidates := make([]candidate, 0, len(taskIDs))
 	for _, taskID := range taskIDs {
+		if err := r.managedDeletionBarrierTx(ctx, tx, taskID); err != nil {
+			return 0, err
+		}
 		if err := r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
 			if errors.Is(err, ErrTaskNotFound) {
 				continue
@@ -4738,6 +4875,9 @@ func (r *Repository) setSessionPrimary(
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.managedSessionDeletionBarrierTx(ctx, tx, sessionID); err != nil {
+		return false, err
+	}
 
 	// First, get the task_id for this session. Do not lock the target row here:
 	// every primary promotion must take the owning task lock first so concurrent

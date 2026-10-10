@@ -86,6 +86,11 @@ layout is introduced.
 
 ## Verification
 
+Review remediation uses focused isolated regressions for URL settlement,
+selected plugin branches, duplicate settings preservation, and authorization.
+Broad verification commands below are hosted CI responsibilities. See the
+work order's Results for the actual focused outcomes.
+
 - Backend: `go test ./internal/task/service/ ./internal/task/handlers/`.
 - Web: `vitest run app/settings/workspace app/actions`, `eslint`, `tsc`,
   `pnpm run i18n:check`.

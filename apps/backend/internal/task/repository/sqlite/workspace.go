@@ -65,6 +65,20 @@ func (r *Repository) insertWorkspace(ctx context.Context, exec sqlx.ExtContext, 
 
 // GetWorkspace retrieves a workspace by ID
 func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
+	workspace, err := scanWorkspaceRow(r.ro.QueryRowContext(ctx, r.ro.Rebind("SELECT "+workspaceSelectColumns+" FROM workspaces WHERE id = ?"), id))
+	if err == sql.ErrNoRows {
+		return nil, workspaceNotFoundError(id)
+	}
+	return workspace, err
+}
+
+const workspaceSelectColumns = "id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, acp_idle_suspension_enabled, acp_idle_timeout_minutes, created_at, updated_at"
+
+type workspaceScanner interface {
+	Scan(...any) error
+}
+
+func scanWorkspaceRow(scanner workspaceScanner) (*models.Workspace, error) {
 	workspace := &models.Workspace{}
 	var defaultExecutorID sql.NullString
 	var defaultEnvironmentID sql.NullString
@@ -72,10 +86,7 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 	var defaultConfigAgentProfileID sql.NullString
 	var acpIdleSuspensionEnabled bool
 
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, acp_idle_suspension_enabled, acp_idle_timeout_minutes, created_at, updated_at
-		FROM workspaces WHERE id = ?
-	`), id).Scan(
+	err := scanner.Scan(
 		&workspace.ID,
 		&workspace.Name,
 		&workspace.Description,
@@ -108,10 +119,10 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 	}
 	workspace.ACPIdleSuspensionEnabled = acpIdleSuspensionEnabled
 
-	if err == sql.ErrNoRows {
-		return nil, workspaceNotFoundError(id)
+	if err != nil {
+		return nil, err
 	}
-	return workspace, err
+	return workspace, nil
 }
 
 // UpdateWorkspace updates an existing workspace
@@ -224,11 +235,14 @@ func (r *Repository) deleteWorkspaceCascade(
 	expectedName *string,
 	cleanup func(context.Context, *sqlx.Tx) error,
 ) ([]*models.Task, []*models.Workflow, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, []string{id}, nil); err != nil {
+		return nil, nil, err
+	}
 
 	// Lock the workspace row BEFORE inventorying its tasks: task creation
 	// takes the same lock, so a task created after this point either commits
@@ -275,6 +289,9 @@ func (r *Repository) deleteWorkspaceCascade(
 	}
 	sort.Strings(lockIDs)
 	for _, taskID := range lockIDs {
+		if err := r.managedDeletionBarrierTx(ctx, tx, taskID); err != nil {
+			return nil, nil, err
+		}
 		if err := r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
 			return nil, nil, fmt.Errorf("guard cascade task row %s: %w", taskID, err)
 		}

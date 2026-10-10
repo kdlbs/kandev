@@ -40,7 +40,11 @@ func (s *Service) CreateDirectory(
 	if err != nil {
 		return DirectoryListing{}, fmt.Errorf("create directory: %w", err)
 	}
-	return s.ListDirectory(ctx, createdPath)
+	// The created folder is always empty, and the browser navigates into it and
+	// re-lists through ListDirectory, which carries the caller's hidden-entry
+	// visibility. Returning a listing of the new folder therefore needs no
+	// visibility input of its own.
+	return s.ListDirectory(ctx, createdPath, false)
 }
 
 func ensureLocalRepositoryDirectory(path string) (string, error) {

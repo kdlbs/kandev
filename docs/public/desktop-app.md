@@ -134,7 +134,18 @@ KANDEV_HOME_DIR="$HOME/.kandev-desktop-dev" make desktop-dev
 
 This home persists between launches. It is separate from both your normal Kandev home and each disposable temporary test window.
 
-The application menu exposes New Task, Settings (`Cmd/Ctrl+,`), contextual Close (`Cmd/Ctrl+W`), zoom, full-screen, Help, update, and Quit actions. Contextual Close asks the web UI to close its top dialog or eligible file/diff/commit/preview tab; if nothing is closeable it does not shut down the window or backend. The desktop shell saves window geometry in its platform app-data directory and clamps restored geometry to an available display.
+The application menu exposes New Task, Settings (`Cmd/Ctrl+,`), contextual Close (`Cmd/Ctrl+W`), zoom, full-screen, Developer Tools, Help, update, and Quit actions. Contextual Close asks the web UI to close its top dialog or eligible file/diff/commit/preview tab; if nothing is closeable it does not shut down the window or backend. The desktop shell saves window geometry in its platform app-data directory and clamps restored geometry to an available display.
+
+### Inspect the desktop app
+
+Release builds include **Developer Tools**. The inspector stays closed until you open it.
+
+- On macOS, choose **View → Developer Tools** or press **Cmd+Option+I**.
+- On Windows or Linux, choose **View → Developer Tools** or press **Ctrl+Shift+I**.
+
+The inspector opens for the current Kandev page, including startup and error pages. Opening or reopening it does not reload the page or restart the backend. If it is already open, this action keeps it open.
+
+On macOS 13.3 or later, Safari can inspect the same WebView. Enable Safari's **Develop** menu in Safari settings. Open **Develop** and select this computer. Then select **Kandev**.
 
 Uninstalling the desktop application does not delete the Kandev home. Keep it to preserve workspaces and settings, or back it up and remove it separately only after all Kandev processes and executors are stopped. See [Operations](operations.md).
 
@@ -146,6 +157,11 @@ Repository**, then choose a folder. The selected folders are saved for the
 desktop installation and are available to its workspaces. A normal browser
 connected to the same backend uses the HTTP folder picker. The browser does
 not receive the desktop app's native picker authority.
+
+The in-app folder browser hides directories whose name starts with a dot. Use
+its **Hidden folders** switch to list them. The desktop app's own folder
+panel is the operating system's panel, where hidden files are shown with the
+platform's own control instead.
 
 After an upgrade, an existing installation can show **Continue Home
 Discovery**. This action saves the desktop backend's Home folder directly; it

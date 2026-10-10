@@ -32,6 +32,7 @@ import {
 } from "./task-row-presentation";
 import { TaskItemTrailing, type DiffStats } from "./task-item-trailing";
 import { TaskStateIcon } from "./task-state-icon";
+import { useIsTitleTruncated } from "@/hooks/use-is-title-truncated";
 
 type TaskItemProps = {
   title: string;
@@ -160,11 +161,11 @@ function taskItemRowClassName(
   hasDetails: boolean,
 ): string {
   const rowSurfaceClass = isSelected
-    ? "border-y border-primary/50 bg-primary/15 hover:bg-primary/20"
-    : "hover:bg-foreground/[0.05]";
+    ? "bg-primary/15 hover:bg-primary/20"
+    : "bg-transparent hover:bg-foreground/[0.05]";
 
   return cn(
-    "group relative flex w-full gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
+    "group relative mx-2 my-0.5 flex w-[calc(100%-1rem)] gap-2 rounded-md py-2 pr-2 text-left text-sm outline-none cursor-pointer focus-visible:ring-2 focus-visible:ring-ring",
     hasDetails ? "items-start" : "items-center",
     "transition-colors duration-75",
     rowSurfaceClass,
@@ -172,7 +173,7 @@ function taskItemRowClassName(
     // and add only the existing selection ring for the multi-selection state.
     isMultiSelected && !isSelected && "bg-primary/5",
     isMultiSelected && "ring-1 ring-inset ring-primary/40",
-    isRoot && "pl-3",
+    isRoot && "pl-2",
   );
 }
 
@@ -199,7 +200,17 @@ function pendingRemovalRowProps(isPendingRemoval?: boolean) {
 }
 
 function TaskItemTitle({ title }: { title: string }) {
-  return <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>;
+  const { ref, isTruncated } = useIsTitleTruncated<HTMLSpanElement>(title);
+  return (
+    <ScrollOnOverflow
+      ref={ref}
+      className="sidebar-task-title min-w-0"
+      data-testid="task-item-title"
+      data-truncated={isTruncated}
+    >
+      {title}
+    </ScrollOnOverflow>
+  );
 }
 
 type TaskItemContentProps = {
@@ -495,8 +506,9 @@ function RowConnector({ depth, leftPx }: { depth: number; leftPx: number }) {
   if (depth === 0) return null;
   return (
     <span
+      aria-hidden="true"
       style={{ left: leftPx }}
-      className="absolute top-[10px] select-none text-[11px] text-muted-foreground/30"
+      className="absolute top-[10px] select-none text-[11px] text-muted-foreground/60"
     >
       ↳
     </span>

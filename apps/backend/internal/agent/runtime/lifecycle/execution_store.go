@@ -17,6 +17,10 @@ var ErrExecutionNotFound = errors.New("execution not found")
 // to the execution and prompt that were captured.
 var ErrPromptActivityNotOwned = errors.New("prompt activity no longer owned")
 
+// ErrPromptSettlementPending means a retained turn failure is still being
+// delivered to its durable owner, so a successor prompt cannot be admitted.
+var ErrPromptSettlementPending = errors.New("prompt failure settlement pending")
+
 // ErrExecutionAlreadyExistsForSession is returned by Add when the session
 // already maps to a different execution. The previous behavior was to silently
 // overwrite the bySession index, which orphaned the prior execution: the
@@ -362,6 +366,9 @@ func (s *ExecutionStore) BeginPrompt(executionID string) (uint64, error) {
 	if !exists || current != execution {
 		return 0, ErrExecutionNotFound
 	}
+	if current.promptSettlementGeneration != 0 {
+		return 0, ErrPromptSettlementPending
+	}
 	return beginExecutionPromptLocked(current), nil
 }
 
@@ -376,6 +383,7 @@ func beginExecutionPromptLocked(execution *AgentExecution) uint64 {
 	// recovered-but-not-yet-adopted generation must not later clobber it with
 	// a stale pre-restart completion (see recoveredPromptGenerationPending).
 	execution.recoveredPromptGenerationPending.Store(false)
+	execution.cancelEscalatedPromptGeneration.Store(0)
 	execution.promptGeneration++
 	if execution.promptTurnID != "" {
 		if execution.promptTurnIDs == nil {

@@ -1587,6 +1587,7 @@ func (s *Server) collectStatusForRepo(ctx context.Context, sub string, fresh, de
 		status, err = wt.GetGitStatus(ctx, fresh)
 	}
 	if err != nil {
+		s.logGitStatusCaptureFailure(err)
 		result := unavailableGitStatusResult(err)
 		if status.StatusState == gitStatusReadyState && status.FilesComplete {
 			markGitStatusDetailsUnavailable(&status)
@@ -1612,6 +1613,13 @@ func unavailableGitStatusResult(err error) GitStatusResult {
 		message = "Git status request canceled."
 	}
 	return GitStatusResult{Success: false, StatusState: gitStatusUnavailableState, DetailState: gitStatusUnavailableState, ErrorCode: code, Error: message}
+}
+
+func (s *Server) logGitStatusCaptureFailure(err error) {
+	if process.IsGitStatusEvidenceChanged(err) {
+		s.logger.Warn("git status capture failed due to changing repository evidence",
+			zap.String("error_class", "evidence_changed"))
+	}
 }
 
 func gitStatusResult(status types.GitStatusUpdate, repositoryName string) GitStatusResult {
@@ -1712,7 +1720,11 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 		status, err = wt.GetGitStatus(c.Request.Context(), fresh)
 	}
 	if err != nil {
-		s.logger.Error("git status failed", zap.Error(err))
+		if process.IsGitStatusEvidenceChanged(err) {
+			s.logGitStatusCaptureFailure(err)
+		} else {
+			s.logger.Error("git status failed", zap.Error(err))
+		}
 		result := unavailableGitStatusResult(err)
 		if status.StatusState == gitStatusReadyState && status.FilesComplete {
 			markGitStatusDetailsUnavailable(&status)

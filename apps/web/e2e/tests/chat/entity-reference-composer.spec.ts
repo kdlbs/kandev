@@ -7,7 +7,7 @@ import type {
   EntityReference,
   EntityReferenceSearchResponse,
 } from "../../../lib/types/entity-reference";
-import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
+import { startQuickChatFromSetup } from "./quick-chat-helpers";
 
 const REFERENCE_QUERY = "E2E Reference";
 const LINEAR_SCOPE = "mock-org";
@@ -188,28 +188,8 @@ async function openQuickChatWithAgent(page: Page): Promise<{
   }
   await expect(setup).toBeVisible({ timeout: 5_000 });
 
-  const agentSelector = dialog.getByTestId("agent-profile-selector");
-  if (
-    await agentSelector
-      .getByText("Select agent", { exact: false })
-      .isVisible()
-      .catch(() => false)
-  ) {
-    await agentSelector.click();
-    await page.getByRole("option").first().click();
-  }
-
-  const started = page.waitForResponse(
-    (response) =>
-      response.request().method() === "POST" &&
-      new URL(response.url()).pathname.endsWith("/quick-chat"),
-  );
-  await dialog.getByTestId("quick-chat-start").click();
-  const payload = (await started).json() as Promise<{ session_id: string }>;
-  const { session_id: sessionId } = await payload;
-
-  await waitForQuickChatComposerReady(dialog);
-  return { dialog, sessionId };
+  const started = await startQuickChatFromSetup(dialog, page);
+  return { dialog, sessionId: started.session_id };
 }
 
 async function createPassthroughProfile(apiClient: ApiClient): Promise<string> {

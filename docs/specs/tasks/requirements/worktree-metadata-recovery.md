@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-10
-updated: 2026-09-29
+updated: 2026-10-08
 owners:
   - kandev
 ---
@@ -111,6 +111,32 @@ issue #4052. Implementation status is recorded in the linked plans.
 - **AC-TASKS-WORKTREE-METADATA-RECOVERY-003.5:** A refusal must reach the existing
   launch or resume error response before agent startup. It must not advertise
   Start fresh as a way to bypass unsafe metadata.
+
+#### Inspection-contention amendment
+
+Implementation and verification are recorded in the
+[task-opening contention package](../../../plans/task-open-inspection-contention/plan.md).
+
+- **AC-TASKS-WORKTREE-METADATA-RECOVERY-003.6:** When workspace inspection briefly
+  overlaps resume, resume shall wait up to 15 seconds across its inspection
+  admissions. An earlier cancellation or request deadline shall end the wait. After
+  inspection completes, resume shall revalidate the selected inventory and retain
+  the task, session, branch, provider conversation, and workflow state. Concurrent
+  callers shall not start duplicate agents.
+- **AC-TASKS-WORKTREE-METADATA-RECOVERY-003.7:** When inspection contention prevents
+  startup, the request shall return a retryable conflict. Contention alone shall
+  not mark the task or session failed, create durable failure history, or dispatch
+  a prompt. Any temporary startup state shall settle through the current attempt
+  without overwriting a concurrent stop, archive, or successor attempt.
+- **AC-TASKS-WORKTREE-METADATA-RECOVERY-003.8:** Desktop and phone shall retain
+  pending feedback during the bounded wait. After contention exhausts that wait,
+  both shall offer a localized same-session retry. Contention shall not trigger
+  workspace-only fallback or claim that agent startup failed. A matching success
+  shall retire this request-local notice without clearing another failure.
+- **AC-TASKS-WORKTREE-METADATA-RECOVERY-003.9:** Cancellation, archive, cleanup, or
+  changed environment ownership or membership during the wait shall prevent
+  stale startup. Contention shall grant no replacement authority and shall not
+  weaken a real metadata, branch, credential, or provider failure.
 
 ### REQ-TASKS-WORKTREE-METADATA-RECOVERY-004: Missing canonical checkout recovery
 

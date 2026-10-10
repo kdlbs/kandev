@@ -16,35 +16,70 @@ import {
   matchingAutomaticRecovery,
   type SessionRecoveryOwner,
 } from "@/lib/session-recovery-presentation";
-import { sessionRecoveryAction } from "./messages/action-message-recovery";
+import {
+  addHistoryContinuationChoice,
+  sessionRecoveryAction,
+} from "./messages/action-message-recovery";
+import { interruptionRecoveryKey } from "./messages/interruption-recovery-feedback";
+import { managedRuntimeStartupCopy } from "./managed-runtime-startup-copy";
 import { useOptionalAppStore } from "@/components/state-provider";
 
-function recoveryCopy(model: ActiveSessionRecovery, t: ReturnType<typeof useTranslation>["t"]) {
-  if (model.kind === "managed_runtime_npm_resolution")
-    return {
-      title: t("chat:managedRuntimeNpmTitle"),
-      summary: t("chat:managedRuntimeNpmBody"),
-      showSummary: true,
-    };
-  if (model.kind === "managed_runtime_npm_policy")
-    return {
-      title: t("chat:managedRuntimeNpmPolicyTitle"),
-      summary: t("chat:managedRuntimeNpmPolicyBody"),
-      showSummary: true,
-    };
-  if (model.kind === "provider_quota_limited") {
-    const reset = model.metadata?.reset_at ? new Date(model.metadata.reset_at) : null;
-    return {
-      title: t("chat:providerQuotaTitle", {
-        provider: model.metadata?.provider_name || t("chat:providerQuotaProviderFallback"),
-      }),
-      summary:
-        reset && !Number.isNaN(reset.getTime())
-          ? t("chat:providerQuotaReset", { resetAt: formatDateTime(reset) })
-          : t("chat:providerQuotaResetUnknown"),
-      showSummary: true,
-    };
+type RecoveryCopy = { title: string; summary: string; showSummary: boolean };
+
+function managedRuntimeFailureCopy(
+  model: ActiveSessionRecovery,
+  t: ReturnType<typeof useTranslation>["t"],
+): RecoveryCopy | null {
+  switch (model.kind) {
+    case "managed_runtime_npm_resolution":
+      return {
+        title: t("chat:managedRuntimeNpmTitle"),
+        summary: t("chat:managedRuntimeNpmBody"),
+        showSummary: true,
+      };
+    case "managed_runtime_npm_policy":
+      return {
+        title: t("chat:managedRuntimeNpmPolicyTitle"),
+        summary: t("chat:managedRuntimeNpmPolicyBody"),
+        showSummary: true,
+      };
+    case "managed_runtime_startup": {
+      const startupCopy = managedRuntimeStartupCopy(
+        {
+          startup_reason: model.metadata?.startup_reason ?? model.error?.startupReason,
+          startup_attempts: model.metadata?.startup_attempts ?? model.error?.startupAttempts,
+          startup_npm_code: model.metadata?.startup_npm_code ?? model.error?.startupNpmCode,
+        },
+        t,
+      );
+      return { ...startupCopy, showSummary: true };
+    }
+    default:
+      return null;
   }
+}
+
+export function recoveryCopy(
+  model: ActiveSessionRecovery,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (model.kind === "recovery_inspection_busy")
+    return {
+      title: t("task:launchNeedsAttention"),
+      summary: model.summary ?? t("task:workspaceRecoveryInspectionBusy"),
+      showSummary: true,
+    };
+  if (model.kind === "provider_interrupted")
+    return {
+      title: t("task:sessionRecoveryFailed"),
+      summary: t(interruptionRecoveryKey(model.metadata ?? {}), {
+        count: model.metadata?.attempts_started,
+      }),
+      showSummary: true,
+    };
+  const managedRuntimeCopy = managedRuntimeFailureCopy(model, t);
+  if (managedRuntimeCopy) return managedRuntimeCopy;
+  if (model.kind === "provider_quota_limited") return providerQuotaRecoveryCopy(model, t);
   if (model.kind === "managed_clone_relocation_required")
     return {
       title: t("task:managedCloneRelocationTitle"),
@@ -56,6 +91,23 @@ function recoveryCopy(model: ActiveSessionRecovery, t: ReturnType<typeof useTran
   return {
     title: t("task:sessionRecoveryFailed"),
     summary: safe ? summary : t("task:agentHasStopped"),
+    showSummary: true,
+  };
+}
+
+function providerQuotaRecoveryCopy(
+  model: ActiveSessionRecovery,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  const reset = model.metadata?.reset_at ? new Date(model.metadata.reset_at) : null;
+  return {
+    title: t("chat:providerQuotaTitle", {
+      provider: model.metadata?.provider_name || t("chat:providerQuotaProviderFallback"),
+    }),
+    summary:
+      reset && !Number.isNaN(reset.getTime())
+        ? t("chat:providerQuotaReset", { resetAt: formatDateTime(reset) })
+        : t("chat:providerQuotaResetUnknown"),
     showSummary: true,
   };
 }
@@ -75,20 +127,48 @@ function recoveryActionCopy(kind: string, t: ReturnType<typeof useTranslation>["
   return { label: t("task:resumeSession"), testId: "recovery-resume-button" };
 }
 
-export function useRecoveryChoices(
-  model: ActiveSessionRecovery,
-  actions: SessionRecoveryActions,
-  profileExists: boolean,
-  onNewSession: () => void,
-  onRelocateRequested: () => void,
-) {
+type RecoveryChoiceOptions = {
+  model: ActiveSessionRecovery;
+  actions: SessionRecoveryActions;
+  profileExists: boolean;
+  onNewSession: () => void;
+  onRelocateRequested: () => void;
+  onInspectionRetry?: () => Promise<boolean> | undefined;
+};
+
+export function useRecoveryChoices({
+  model,
+  actions,
+  profileExists,
+  onNewSession,
+  onRelocateRequested,
+  onInspectionRetry,
+}: RecoveryChoiceOptions) {
   const { t } = useTranslation();
+  const inspectionBusy =
+    model.kind === "recovery_inspection_busy" || actions.recoveryNoticeKind === "inspection_busy";
+  if (inspectionBusy) {
+    return [
+      createRecoveryChoice({
+        kind: "resume",
+        model,
+        actions,
+        profileExists,
+        onNewSession,
+        onRelocateRequested,
+        onInspectionRetry,
+        inspectionBusy,
+        t,
+      }),
+    ];
+  }
   const supplied = model.metadata?.actions
     ?.map(sessionRecoveryAction)
     .filter((kind) => kind !== null);
   const managedCloneRelocation =
     model.kind === "managed_clone_relocation_required" ||
-    Boolean(actions.managedCloneRecoveryStamp);
+    Boolean(actions.managedCloneRecoveryStamp) ||
+    actions.workspaceRecovery?.kind === "managed_clone_relocation";
   const kinds = recoveryActionKinds(model, supplied, managedCloneRelocation);
   const choices: RecoveryChoice[] = kinds.map((kind) =>
     createRecoveryChoice({
@@ -98,6 +178,8 @@ export function useRecoveryChoices(
       profileExists,
       onNewSession,
       onRelocateRequested,
+      onInspectionRetry,
+      inspectionBusy,
       t,
     }),
   );
@@ -119,7 +201,20 @@ export function useRecoveryChoices(
       testId: "recovery-new-branch-button",
       onClick: () => void actions.handleNewBranch(),
     });
+  addHistoryContinuationChoice(
+    choices,
+    historyContinuationAvailable(actions, managedCloneRelocation),
+    () => void actions.handleContinueFromHistory(),
+    t("task:continueFromHistory"),
+  );
   return actions.guardDetails ? choices.filter((choice) => choice.kind !== "restore") : choices;
+}
+
+function historyContinuationAvailable(
+  actions: SessionRecoveryActions,
+  managedCloneRelocation: boolean,
+) {
+  return !managedCloneRelocation && Boolean(actions.continuationDetails);
 }
 
 function recoveryActionKinds(
@@ -141,6 +236,8 @@ function createRecoveryChoice({
   profileExists,
   onNewSession,
   onRelocateRequested,
+  onInspectionRetry,
+  inspectionBusy,
   t,
 }: {
   kind: NonNullable<ReturnType<typeof sessionRecoveryAction>>;
@@ -149,6 +246,8 @@ function createRecoveryChoice({
   profileExists: boolean;
   onNewSession: () => void;
   onRelocateRequested: () => void;
+  onInspectionRetry?: () => Promise<boolean> | undefined;
+  inspectionBusy: boolean;
   t: ReturnType<typeof useTranslation>["t"];
 }): RecoveryChoice {
   const copy = recoveryActionCopy(kind, t);
@@ -164,6 +263,10 @@ function createRecoveryChoice({
     tooltip: model.metadata?.actions?.find((action) => sessionRecoveryAction(action) === kind)
       ?.tooltip,
     onClick: () => {
+      if (inspectionBusy && kind === "resume" && onInspectionRetry) {
+        void onInspectionRetry();
+        return;
+      }
       if (kind === "fresh_start" && !profileExists) {
         onNewSession();
         return;
@@ -183,34 +286,24 @@ export function useRecoveryPresentation(
   context: TaskLaunchErrorContextValue | null,
 ) {
   const { t } = useTranslation();
-  const agentDisplayName = useOptionalAppStore((state) => {
-    const session = state.taskSessions.items[model.sessionId];
-    const profileId = session?.execution_profile_id || session?.agent_profile_id;
-    const profile = profileId
-      ? state.agentProfiles.items.find((candidate) => candidate.id === profileId)
-      : undefined;
-    return profile
-      ? state.availableAgents.items.find((agent) => agent.name === profile.agent_name)?.display_name
-      : undefined;
-  }, undefined);
+  const agentDisplayName = useRecoveryAgentDisplayName(model.sessionId);
   const automatic = matchingAutomaticRecovery(
     context?.automaticRecovery,
     context?.taskId,
     model.sessionId,
   );
-  const managedCloneRelocation =
-    model.kind === "managed_clone_relocation_required" ||
-    Boolean(actions.managedCloneRecoveryStamp);
-  const bootstrap = managedCloneRelocation
-    ? null
-    : buildBootstrapRecoveryModel(model, actions, automatic, t, agentDisplayName);
+  const managedCloneRelocation = isManagedCloneRelocation(model, actions);
+  const bootstrap = buildRecoveryBootstrap({
+    model,
+    actions,
+    automatic,
+    t,
+    agentDisplayName,
+    managedCloneRelocation,
+  });
   const copy = recoveryPresentationCopy(model, bootstrap, managedCloneRelocation, t);
-  const busy =
-    Boolean(model.loading) ||
-    isSessionRecoveryBusy(automatic?.resumptionState ?? "idle") ||
-    actions.busyAction !== null;
-  const busyAction = automatic?.resumptionState === "resuming" ? "resume" : actions.busyAction;
-  const causes = bootstrap?.causes ?? automaticRecoveryCauses(automatic, t);
+  const { busy, busyAction } = recoveryPresentationBusy(model, automatic, actions);
+  const causes = recoveryPresentationCauses(model, bootstrap, automatic, t);
   const details = recoveryPresentationDetails(model, bootstrap, causes, actions, t);
   const detailFields = bootstrap?.detailFields ?? [];
   const failure = recoveryFailureCopy(actions, t);
@@ -224,13 +317,80 @@ export function useRecoveryPresentation(
   };
 }
 
+function useRecoveryAgentDisplayName(sessionId: string) {
+  return useOptionalAppStore((state) => {
+    const session = state.taskSessions.items[sessionId];
+    const profileId = session?.execution_profile_id || session?.agent_profile_id;
+    const profile = profileId
+      ? state.agentProfiles.items.find((candidate) => candidate.id === profileId)
+      : undefined;
+    return profile
+      ? state.availableAgents.items.find((agent) => agent.name === profile.agent_name)?.display_name
+      : undefined;
+  }, undefined);
+}
+
+function isManagedCloneRelocation(model: ActiveSessionRecovery, actions: SessionRecoveryActions) {
+  return (
+    model.kind === "managed_clone_relocation_required" ||
+    Boolean(actions.managedCloneRecoveryStamp) ||
+    actions.workspaceRecovery?.kind === "managed_clone_relocation"
+  );
+}
+
+function buildRecoveryBootstrap({
+  model,
+  actions,
+  automatic,
+  t,
+  agentDisplayName,
+  managedCloneRelocation,
+}: {
+  model: ActiveSessionRecovery;
+  actions: SessionRecoveryActions;
+  automatic: SessionRecoveryOwner | null;
+  t: ReturnType<typeof useTranslation>["t"];
+  agentDisplayName?: string;
+  managedCloneRelocation: boolean;
+}) {
+  return managedCloneRelocation
+    ? null
+    : buildBootstrapRecoveryModel(model, actions, automatic, t, agentDisplayName);
+}
+
+function recoveryPresentationBusy(
+  model: ActiveSessionRecovery,
+  automatic: SessionRecoveryOwner | null,
+  actions: SessionRecoveryActions,
+) {
+  return {
+    busy:
+      Boolean(model.loading) ||
+      isSessionRecoveryBusy(automatic?.resumptionState ?? "idle") ||
+      actions.busyAction !== null,
+    busyAction: automatic?.resumptionState === "resuming" ? "resume" : actions.busyAction,
+  };
+}
+
+function recoveryPresentationCauses(
+  model: ActiveSessionRecovery,
+  bootstrap: ReturnType<typeof buildRecoveryCardModel> | null,
+  automatic: SessionRecoveryOwner | null,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  return (
+    bootstrap?.causes ?? [...(model.error?.causes ?? []), ...automaticRecoveryCauses(automatic, t)]
+  );
+}
+
 function withAutomaticNotice(
   copy: ReturnType<typeof recoveryPresentationCopy>,
   automatic: SessionRecoveryOwner | null,
   actions: SessionRecoveryActions,
 ) {
-  return automatic?.notice && !actions.recoveryError
-    ? { ...copy, summary: automatic.notice }
+  const notice = actions.recoveryNotice ?? automatic?.notice;
+  return notice && !actions.recoveryError && !copy.hasTypedSelectionCause
+    ? { ...copy, summary: notice }
     : copy;
 }
 
@@ -258,6 +418,7 @@ function buildBootstrapRecoveryModel(
     manualFailure: actions.manualRecoveryFailure,
     manualError: actions.recoveryError,
     recoveryNotice: actions.recoveryNotice,
+    recoveryNoticeKind: actions.recoveryNoticeKind,
     translate: t,
     agentDisplayName,
   });
@@ -345,5 +506,9 @@ function isBootstrapRecovery(model: ActiveSessionRecovery) {
 }
 
 function isManagedRuntimeFailure(kind: string) {
-  return kind === "managed_runtime_npm_resolution" || kind === "managed_runtime_npm_policy";
+  return (
+    kind === "managed_runtime_npm_resolution" ||
+    kind === "managed_runtime_npm_policy" ||
+    kind === "managed_runtime_startup"
+  );
 }

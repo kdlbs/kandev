@@ -153,7 +153,7 @@ func TestWorkspaceScopingTasksAndWorkflows(t *testing.T) {
 	if _, err := svc.GetTask(ctxAs("user-b"), "task-b"); err != nil {
 		t.Fatalf("owner get task: %v", err)
 	}
-	if _, err := svc.ListTasks(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+	if _, err := svc.ListTasks(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
 		t.Fatalf("list foreign workflow tasks: %v", err)
 	}
 	if _, _, err := svc.ListTasksByWorkspace(ctxAs("user-a"), "ws-b", "", "", "", 1, 10, "", false, false, false, false); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
@@ -162,7 +162,7 @@ func TestWorkspaceScopingTasksAndWorkflows(t *testing.T) {
 	if _, err := svc.ListWorkflows(ctxAs("user-a"), "ws-b", false); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
 		t.Fatalf("list foreign workflows: %v", err)
 	}
-	if _, err := svc.GetWorkflow(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+	if _, err := svc.GetWorkflow(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
 		t.Fatalf("get foreign workflow: %v", err)
 	}
 	if err := svc.ArchiveTask(ctxAs("user-a"), "task-b"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
@@ -206,7 +206,7 @@ func TestAuthorizeWorkflowAccess(t *testing.T) {
 		t.Fatalf("create legacy workflow: %v", err)
 	}
 
-	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
 		t.Fatalf("foreign workflow access: %v", err)
 	}
 	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-b"), "wf-b"); err != nil {
@@ -246,12 +246,15 @@ func TestAuthorizeWorkflowAccess(t *testing.T) {
 	// A workspace row that is genuinely gone is a different answer from a
 	// failed lookup, and it is still not "authorized": the workflow names an
 	// owner that does not exist, so nobody sees it. (An unowned pre-auth row
-	// is the workspace_id == "" case below, not this one.)
+	// is the workspace_id == "" case below, not this one.) It collapses to
+	// the same ErrWorkflowNotFound as the reachable-but-denied branch above,
+	// not ErrWorkspaceNotFound: a caller distinguishing the two sentinels
+	// could tell an orphaned workflow id from a foreign-but-reachable one.
 	svc.workspaces = &brokenWorkspaceReader{WorkspaceRepository: repo, err: repoerrors.ErrWorkspaceNotFound}
-	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
 		t.Fatalf("orphaned workflow: %v, want the not-found denial", err)
 	}
-	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-b"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-b"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
 		t.Fatalf("orphaned workflow for its former owner: %v, want the not-found denial", err)
 	}
 	// Unscoped callers are unaffected: they never reach the lookup.
@@ -269,6 +272,24 @@ func TestAuthorizeWorkflowAccess(t *testing.T) {
 	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-missing"); err == nil {
 		t.Fatal("missing workflow access: want an error")
 	}
+
+	// A reader returning (nil, nil) for an unknown id (never true of the real
+	// repository, which always wraps ErrWorkflowNotFound, but must still be
+	// handled defensively) denies with the workflow's own sentinel, not the
+	// workspace one: a caller must not be able to tell this apart from any
+	// other not-found case above.
+	svc.workflows = &nilWorkflowReader{WorkflowRepository: repo}
+	if err := svc.AuthorizeWorkflowAccess(ctxAs("user-a"), "wf-anything"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
+		t.Fatalf("nil workflow row: %v, want ErrWorkflowNotFound", err)
+	}
+}
+
+type nilWorkflowReader struct {
+	repository.WorkflowRepository
+}
+
+func (r *nilWorkflowReader) GetWorkflow(context.Context, string) (*models.Workflow, error) {
+	return nil, nil
 }
 
 func TestAuthorizeSessionAccess(t *testing.T) {

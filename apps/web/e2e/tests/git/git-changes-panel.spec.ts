@@ -1314,7 +1314,8 @@ test.describe("Git Changes Panel", () => {
     // Verify the commit message is shown
     await expect(session.changes.getByText("Add file to revert")).toBeVisible({ timeout: 5_000 });
 
-    // Click the revert button (hover action on the commit row)
+    // Center the row before hover so click auto-scrolling cannot hide its actions.
+    await commitRow.evaluate((row) => row.scrollIntoView({ block: "center", inline: "nearest" }));
     await commitRow.hover();
     const revertButton = commitRow.getByRole("button", { name: "Revert commit" });
     await expect(revertButton).toBeVisible({ timeout: 5_000 });
@@ -1472,12 +1473,24 @@ test.describe("Git Changes Panel", () => {
   }) => {
     const profile = await createStandardProfile(apiClient, "Git Amend Profile");
 
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Amend Test", profile.id, {
-      description: "Testing amend commit",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Amend Test",
+      profile.id,
+      {
+        description: "Testing amend commit",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+        timeout: 60_000,
+        message: "Waiting for the Git amend task workspace",
+      })
+      .toBe("ready");
 
     const session = await openTaskSession(testPage, "Git Amend Test");
 
@@ -1512,6 +1525,7 @@ test.describe("Git Changes Panel", () => {
     await expect(session.changes.getByText("Original message")).toBeVisible({ timeout: 5_000 });
 
     // Click the amend button (hover action on commit row)
+    await commitRow.evaluate((row) => row.scrollIntoView({ block: "center", inline: "nearest" }));
     await commitRow.hover();
     const amendButton = commitRow.getByRole("button", { name: "Amend commit message" });
     await expect(amendButton).toBeVisible({ timeout: 5_000 });
@@ -2018,6 +2032,18 @@ test.describe("Git Changes Panel", () => {
           (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__?.getPanel("diff-viewer"),
         );
       });
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate(() => {
+            type Api = { getPanel: (id: string) => unknown };
+            return Boolean(
+              (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__?.getPanel("changes"),
+            );
+          }),
+        { timeout: 10_000, message: "the Changes panel is not registered in Dockview yet" },
+      )
+      .toBe(true);
     expect(await diffViewerOpen(), "no cumulative diff panel before clicking Diff").toBe(false);
 
     // Click the "Diff" button in the header to open the cumulative diff view
@@ -2473,6 +2499,9 @@ test.describe("Git Changes Panel", () => {
     await session.waitForChatIdle({ timeout: 45_000 });
     git.exec(`git checkout -B ${providerBranch} ${localHead}`);
     git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
     await session.clickTab("Changes");
 
     const changes = testPage.getByTestId("changes-panel");
@@ -2972,6 +3001,7 @@ test.describe("Git Changes Panel", () => {
         author_login: "local-ahead-author",
         repo_owner: "testorg",
         repo_name: "testrepo",
+        head_sha: providerHead,
       },
     ]);
     await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 903, [
@@ -2993,6 +3023,7 @@ test.describe("Git Changes Panel", () => {
       head_branch: "feature/local-ahead",
       base_branch: "main",
       author_login: "local-ahead-author",
+      head_sha: providerHead,
     });
 
     // Put the task worktree on the contribution branch before the first page

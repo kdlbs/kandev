@@ -82,6 +82,13 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
+	if eventType == agentEventComplete &&
+		payload.Data.PromptFailureDisposition == streams.PromptFailureDispositionRetainRuntime {
+		// The following AgentTurnFailed event owns this failed turn's durable
+		// settlement. A complete stream frame must not park the session or clear
+		// its prompt evidence before that synchronous owner callback can run.
+		return
+	}
 	terminalCompleteStream := false
 	var observedOutput, observedEffect bool
 
@@ -109,10 +116,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		}
 	}
 	switch eventType {
-	case "message_streaming":
-		// Claude ACP emits some provider failures as a diagnostic message chunk
-		// immediately before the session/prompt RPC error. Track those chunks
-		// separately so the matching typed failure can still be safely routed.
+	case streams.EventTypeMessageChunk:
+		if payload.Data.Role == "user" {
+			break
+		}
 		if payload.Data.ProviderDiagnosticCandidate {
 			s.observeProviderDiagnostic(
 				payload.SessionID,
@@ -127,17 +134,17 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 				payload.SessionID,
 				eventExecutionID,
 				payload.Data.PromptGeneration,
-				strings.TrimSpace(payload.Data.Text) != "",
+				observedOutput,
 				false,
 			)
 		}
-	case "thinking_streaming":
+	case streams.EventTypeReasoning:
 		observedOutput = strings.TrimSpace(payload.Data.Text) != ""
 		s.observePromptAttempt(
 			payload.SessionID,
 			eventExecutionID,
 			payload.Data.PromptGeneration,
-			strings.TrimSpace(payload.Data.Text) != "",
+			observedOutput,
 			false,
 		)
 	case agentEventToolCall, agentEventToolUpdate:
@@ -151,10 +158,17 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		)
 	}
 	if observedOutput || observedEffect {
-		s.clearDynamicUnclassifiedStreakForEvent(ctx, watcher.AgentEventData{
+		resetEvent := watcher.AgentEventData{
 			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
 			AgentExecutionID: eventExecutionID, PromptGeneration: payload.Data.PromptGeneration,
-		}, true)
+		}
+		s.markDynamicStreakResetPending(resetEvent)
+		if eventType == agentEventToolCall {
+			s.flushPendingDynamicStreakReset(ctx, sessionID, &resetEvent)
+		}
+	}
+	if observedOutput && s.markForegroundGenerating(sessionID, eventExecutionID) {
+		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 	}
 	if eventType == agentEventComplete {
 		defer s.clearPromptAttemptEvidence(
@@ -178,6 +192,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	// Handle different event types
 	switch eventType {
+	case streams.EventTypeMessageChunk, streams.EventTypeReasoning:
+		return
+
 	case "message_streaming":
 		s.handleMessageStreamingEvent(ctx, payload)
 
@@ -284,6 +301,16 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		// short-circuits on it), so this is also a safe no-op for an ordinary
 		// human-driven turn where the session already left WAITING_FOR_INPUT.
 		s.applyParkedTransition(ctx, taskID, sessionID, false, "", false, models.TaskSessionStateWaitingForInput)
+	}
+	if sessionID != "" && (eventType == agentEventComplete || eventType == agentEventError) {
+		settlementCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		if err := s.reconcileAgentDeliverySettlements(settlementCtx, sessionID); err != nil {
+			s.logger.Warn("failed to finish durable delivery terminal settlement",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		cancel()
 	}
 }
 
@@ -475,15 +502,16 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 	}
 	if sessionID != "" {
 		failure := watcher.AgentEventData{
-			TaskID:           taskID,
-			SessionID:        sessionID,
-			OwnerKind:        string(payload.OwnerKind),
-			AgentExecutionID: executionID,
-			AgentID:          payload.AgentID,
-			AgentProfileID:   payload.AgentProfileID,
-			PromptGeneration: payload.Data.PromptGeneration,
-			ErrorMessage:     payload.Data.Error,
-			ProviderError:    payload.Data.ProviderError,
+			TaskID:             taskID,
+			SessionID:          sessionID,
+			OwnerKind:          string(payload.OwnerKind),
+			AgentExecutionID:   executionID,
+			AgentID:            payload.AgentID,
+			AgentProfileID:     payload.AgentProfileID,
+			ExecutionProfileID: payload.ExecutionProfileID,
+			PromptGeneration:   payload.Data.PromptGeneration,
+			ErrorMessage:       payload.Data.Error,
+			ProviderError:      payload.Data.ProviderError,
 		}
 		if failure.ErrorMessage == "" {
 			failure.ErrorMessage = payload.Data.Text
@@ -788,6 +816,10 @@ func (s *Service) handleStreamingEventKind(
 	if payload.Data.Text == "" || payload.SessionID == "" {
 		return
 	}
+	if payload.Data.CanonicalProjection {
+		s.publishCanonicalMessageEvent(ctx, payload)
+		return
+	}
 	if s.messageCreator == nil {
 		return
 	}
@@ -806,17 +838,60 @@ func (s *Service) handleStreamingEventKind(
 	s.createStreamingChunk(ctx, kind, messageID, payload.TaskID, payload.Data.Text, payload.SessionID, turnID, createFn)
 }
 
+type canonicalMessageEventPublisher interface {
+	PublishMessageEvent(context.Context, string, *models.Message) error
+}
+
+type canonicalMessageReader interface {
+	GetMessage(context.Context, string) (*models.Message, error)
+}
+
+// publishCanonicalMessageEvent announces a message that was already persisted
+// by the durable delivery projector. The projector owns the canonical write;
+// this notification only keeps connected clients current without duplicating
+// that write through the legacy streaming-message path.
+func (s *Service) publishCanonicalMessageEvent(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) {
+	if payload == nil || payload.Data == nil || payload.Data.MessageID == "" || s.repo == nil {
+		return
+	}
+	publisher, ok := s.messageCreator.(canonicalMessageEventPublisher)
+	if !ok {
+		return
+	}
+	reader, ok := s.repo.(canonicalMessageReader)
+	if !ok {
+		s.logger.Debug("canonical message reader is unavailable",
+			zap.String("session_id", payload.SessionID),
+			zap.String("message_id", payload.Data.MessageID))
+		return
+	}
+	message, err := reader.GetMessage(ctx, payload.Data.MessageID)
+	if err != nil || message == nil {
+		s.logger.Warn("failed to load canonical message for notification",
+			zap.String("session_id", payload.SessionID),
+			zap.String("message_id", payload.Data.MessageID),
+			zap.Error(err))
+		return
+	}
+	eventType := events.MessageUpdated
+	if !payload.Data.IsAppend {
+		eventType = events.MessageAdded
+	}
+	if err := publisher.PublishMessageEvent(ctx, eventType, message); err != nil {
+		s.logger.Warn("failed to publish canonical message notification",
+			zap.String("session_id", payload.SessionID),
+			zap.String("message_id", payload.Data.MessageID),
+			zap.String("event_type", eventType),
+			zap.Error(err))
+	}
+}
+
 // handleMessageStreamingEvent handles streaming message events for real-time text updates.
 // It creates a new message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
 func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
-	// Keep the private ownership estimate current for accounting. Only genuine
-	// output flips it; empty/invalid frames and provider-diagnostic transport
-	// text are discarded below (mirroring the lifecycle-tier suppression in
-	// Manager.recordActivity).
-	if payload.Data.Text != "" && !payload.Data.ProviderDiagnosticCandidate &&
-		s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
-		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
-	}
 	s.handleStreamingEventKind(ctx, payload, "message",
 		s.messageCreator.AppendAgentMessage,
 		s.messageCreator.CreateAgentMessageStreaming)
@@ -825,11 +900,6 @@ func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *life
 // handleThinkingStreamingEvent handles streaming thinking events for real-time reasoning updates.
 // It creates a new thinking message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
 func (s *Service) handleThinkingStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
-	// Keep the private ownership estimate current for accounting. Empty/invalid
-	// frames are discarded downstream.
-	if payload.Data.Text != "" && s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
-		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
-	}
 	s.handleStreamingEventKind(ctx, payload, "thinking message",
 		s.messageCreator.AppendThinkingMessage,
 		s.messageCreator.CreateThinkingMessageStreaming)
@@ -1679,16 +1749,19 @@ func (s *Service) persistBootstrapFailureMessage(
 	// Bootstrap failures occur before any turn started, so there is no failed
 	// turn to attach to — resolve the turn lazily via the empty turn ID.
 	return s.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
-		TaskID:           taskID,
-		SessionID:        sessionID,
-		AgentExecutionID: agentExecutionID,
-		ErrorMessage:     errorValue.Message,
-		FailureCode:      errorValue.Code,
-		FailureDetails:   errorValue.Details,
-		Phase:            errorValue.Phase,
-		AttemptID:        errorValue.AttemptID,
-		ErrorStamp:       errorValue.Stamp(),
-		Causes:           errorValue.Causes,
+		TaskID:                 taskID,
+		SessionID:              sessionID,
+		AgentExecutionID:       agentExecutionID,
+		ErrorMessage:           errorValue.Message,
+		FailureCode:            errorValue.Code,
+		FailureDetails:         errorValue.Details,
+		StartupFailureReason:   errorValue.StartupReason,
+		StartupFailureAttempts: errorValue.StartupAttempts,
+		StartupFailureNPMCode:  errorValue.StartupNPMCode,
+		Phase:                  errorValue.Phase,
+		AttemptID:              errorValue.AttemptID,
+		ErrorStamp:             errorValue.Stamp(),
+		Causes:                 errorValue.Causes,
 	}, "")
 }
 
@@ -3231,14 +3304,18 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 	// After turn completion the poll mode can drop to slow (30s) if the user
 	// navigates away, so the cached value could stay stale for a long time.
 	//
-	// This runs BEFORE the RUNNING-state guard so it fires regardless of which
-	// event (READY vs COMPLETE) will drive the session state transition.
-	//
-	// Capture synchronously so the snapshot is persisted before the handler
-	// returns. Running async risks the backend being killed (e.g. E2E restart)
-	// before the snapshot is written. Retries handle transient git lock
-	// contention between concurrent worktrees.
-	s.captureCompleteEventGitStatus(ctx, payload.SessionID)
+	// Ordinary chats release prompt admission after guarded settlement, then
+	// capture synchronously before returning. Office and automation capture
+	// before settlement can tear down the runtime. Every path captures even
+	// when READY owns the state transition; retries cover transient Git locks.
+	if s.completeEventRetainsRuntime(ctx, payload.TaskID) {
+		defer func() {
+			streamGuard.unlock()
+			s.captureCompleteEventGitStatus(ctx, payload.SessionID)
+		}()
+	} else {
+		s.captureCompleteEventGitStatus(ctx, payload.SessionID)
+	}
 
 	// Office sessions park at IDLE between scheduler runs; cancelled turns skip that path so the session stays promptable.
 	if s.reconcileCompleteEventRuntime(ctx, payload, session, completionTurnID) {
@@ -3343,6 +3420,14 @@ func (s *Service) captureCompleteEventGitStatus(ctx context.Context, sessionID s
 	if sessionID != "" {
 		s.captureGitStatusSnapshotWithRetry(ctx, sessionID)
 	}
+}
+
+func (s *Service) completeEventRetainsRuntime(ctx context.Context, taskID string) bool {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return false
+	}
+	return !task.IsFromOffice && task.Origin != models.TaskOriginAutomationTask && task.Origin != models.TaskOriginAutomationRun
 }
 
 func (s *Service) reconcileCompleteEventRuntime(
@@ -4186,6 +4271,10 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 			return
 		}
 	}
+	configOptionsSource := ""
+	if data, ok := payload.Data.Data.(map[string]interface{}); ok {
+		configOptionsSource = stringFromMap(data, "config_options_source")
+	}
 	if providerRestored {
 		s.persistProviderRestoredSessionModelsSnapshot(
 			ctx, sessionID, identity,
@@ -4202,10 +4291,12 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 		TaskID:                payload.TaskID,
 		SessionID:             sessionID,
 		AgentID:               payload.AgentID,
+		AgentExecutionID:      payload.ExecutionID,
 		CurrentModelID:        payload.Data.CurrentModelID,
 		SessionSettingsPolicy: s.sessionSettingsProjectionPolicy(ctx, sessionID, identity, payload.Data.SessionSettingsPolicy),
 		Models:                payload.Data.SessionModels,
 		ConfigOptions:         payload.Data.ConfigOptions,
+		ConfigOptionsSource:   configOptionsSource,
 		ConfigOptionsSettled:  settled,
 		ConfigBaseline:        configBaseline,
 		Timestamp:             time.Now().UTC().Format(time.RFC3339),

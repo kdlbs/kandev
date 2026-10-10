@@ -18,6 +18,7 @@
     {"file": "internal/backendapp/e2e_reset.go", "symbol": "listE2ETaskIDs", "rule": "raw-placeholder", "reason": "The E2E reset endpoint operates on the SQLite task repository"},
     {"file": "internal/backendapp/e2e_reset.go", "symbol": "deleteGitHubAuthForReset", "rule": "raw-placeholder", "reason": "The E2E reset endpoint operates on the SQLite task repository"},
     {"file": "internal/backendapp/e2e_reset.go", "symbol": "handleE2ECreateAutomation", "rule": "raw-placeholder", "reason": "The E2E seed endpoint operates on the SQLite task repository"},
+    {"file": "internal/coordinator/store.go", "symbol": "createTablesSQL", "rule": "datetime-type", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
     {"file": "internal/db/schema.go", "symbol": "tableExistsQuery", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware schema inspection helper"},
     {"file": "internal/db/schema.go", "symbol": "TableColumns", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware schema inspection helper"},
     {"file": "internal/db/schema.go", "symbol": "ColumnExistsContext", "rule": "sqlite-catalog", "reason": "This is the central dialect-aware schema inspection helper"},

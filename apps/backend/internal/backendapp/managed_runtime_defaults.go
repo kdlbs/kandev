@@ -19,6 +19,9 @@ func managedRuntimeDefaultGenerations(agentRegistry *registry.Registry) []manage
 
 	generations := make([]managedruntime.DefaultGeneration, 0)
 	for _, agent := range agentRegistry.List() {
+		if agent.ID() == "opencode-acp" {
+			continue
+		}
 		managed, ok := agent.(agents.ManagedNPMRuntimeAgent)
 		if !ok {
 			continue

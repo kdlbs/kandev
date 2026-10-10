@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
 import { SettingsSaveProvider } from "./settings-save-provider";
-import { AppearanceSettings } from "./general-settings";
+import { AppearanceSettings, KeyboardShortcutsSettings } from "./general-settings";
 
 const apiMocks = vi.hoisted(() => ({ updateUserSettings: vi.fn() }));
 const SHOW_STATUS_BAR_LABEL = "Show status bar";
@@ -53,6 +53,7 @@ vi.mock("@/components/theme/app-theme", () => ({
 }));
 
 vi.mock("@/components/settings/language-settings", () => ({ LanguageSettings: () => null }));
+vi.mock("@/hooks/domains/plugins/use-plugins", () => ({ usePlugins: () => ({ items: [] }) }));
 vi.mock("@/components/settings/startup-page-settings-card", () => ({
   StartupPageSettingsCard: () => null,
 }));
@@ -459,4 +460,153 @@ it("validates hover drafts, preserves them after a failed save, and discards", a
   expect((delay as HTMLInputElement).value).toBe("750");
   fireEvent.click(screen.getByRole("button", { name: "Reset" }));
   expect((delay as HTMLInputElement).value).toBe("500");
+});
+
+function renderKeyboardSettings() {
+  return render(
+    <SettingsSaveProvider>
+      <KeyboardShortcutsSettings />
+    </SettingsSaveProvider>,
+  );
+}
+function keyboardStore(patch: Record<string, unknown> = {}) {
+  storeMocks.state = {
+    ...storeMocks.state,
+    userSettings: {
+      ...defaultSettingsState.userSettings,
+      loaded: true,
+      revision: 1,
+      keyboardShortcuts: {},
+      ...patch,
+    },
+  };
+}
+const GITHUB_INTEGRATION_SHORTCUT_ID = "integration:github";
+const GITHUB_INTEGRATION_RECORDER_ID = `shortcut-recorder-${GITHUB_INTEGRATION_SHORTCUT_ID}`;
+
+function recordIntegration(key: string) {
+  fireEvent.click(screen.getByTestId(GITHUB_INTEGRATION_RECORDER_ID));
+  fireEvent.keyDown(window, { key, ctrlKey: true, altKey: true });
+}
+
+describe("integration keyboard settings persistence", () => {
+  // @covers AC-UI-INTEGRATION-PAGE-SHORTCUTS-001.3
+  it("saves navigation edits over the latest unrelated shortcut map", async () => {
+    keyboardStore();
+    apiMocks.updateUserSettings.mockImplementation(async (patch) => ({
+      settings: { ...patch, revision: 3 },
+    }));
+    renderKeyboardSettings();
+    recordIntegration("g");
+    storeMocks.state.userSettings = {
+      ...(storeMocks.state.userSettings as object),
+      revision: 2,
+      keyboardShortcuts: { "plugin:other:keep": { key: "x" } },
+    };
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+    await waitFor(() => expect(apiMocks.updateUserSettings).toHaveBeenCalledOnce());
+    expect(apiMocks.updateUserSettings.mock.lastCall![0].keyboard_shortcuts).toEqual({
+      "plugin:other:keep": { key: "x" },
+      [GITHUB_INTEGRATION_SHORTCUT_ID]: { key: "g", modifiers: { ctrlOrCmd: true, alt: true } },
+    });
+  });
+
+  it("retains edits made during an in-flight navigation save", async () => {
+    keyboardStore();
+    let resolve!: (value: unknown) => void;
+    apiMocks.updateUserSettings.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      }),
+    );
+    renderKeyboardSettings();
+    recordIntegration("g");
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+    await waitFor(() => expect(apiMocks.updateUserSettings).toHaveBeenCalledOnce());
+    recordIntegration("h");
+    resolve({
+      settings: {
+        keyboard_shortcuts: {
+          [GITHUB_INTEGRATION_SHORTCUT_ID]: { key: "g", modifiers: { ctrlOrCmd: true, alt: true } },
+        },
+        revision: 2,
+      },
+    });
+    await waitFor(() => expect(storeMocks.setUserSettings).toHaveBeenCalled());
+    expect(
+      screen.getByTestId(GITHUB_INTEGRATION_RECORDER_ID).getAttribute("data-settings-dirty"),
+    ).toBe("true");
+    expect(screen.getByRole("button", { name: SAVE_CHANGES_LABEL })).toBeTruthy();
+  });
+
+  it("keeps a failed navigation save dirty and does not activate its binding", async () => {
+    keyboardStore();
+    apiMocks.updateUserSettings.mockRejectedValueOnce(new Error("save failed"));
+    renderKeyboardSettings();
+    recordIntegration("g");
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+    await waitFor(() => expect(apiMocks.updateUserSettings).toHaveBeenCalledOnce());
+    expect(storeMocks.setUserSettings).not.toHaveBeenCalled();
+    expect(await screen.findByRole("button", { name: "Retry save" })).toBeTruthy();
+    expect(
+      screen.getByTestId(GITHUB_INTEGRATION_RECORDER_ID).getAttribute("data-settings-dirty"),
+    ).toBe("true");
+  });
+});
+
+it("does not let an older navigation save replace newer synchronized shortcuts", async () => {
+  keyboardStore();
+  let resolve!: (value: unknown) => void;
+  apiMocks.updateUserSettings.mockReturnValue(
+    new Promise((r) => {
+      resolve = r;
+    }),
+  );
+  const view = renderKeyboardSettings();
+  recordIntegration("g");
+  fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+  await waitFor(() => expect(apiMocks.updateUserSettings).toHaveBeenCalledOnce());
+  keyboardStore({
+    revision: 3,
+    keyboardShortcuts: {
+      [GITHUB_INTEGRATION_SHORTCUT_ID]: { key: "h", modifiers: { ctrlOrCmd: true, alt: true } },
+    },
+  });
+  view.rerender(
+    <SettingsSaveProvider>
+      <KeyboardShortcutsSettings />
+    </SettingsSaveProvider>,
+  );
+  resolve({
+    settings: {
+      revision: 2,
+      keyboard_shortcuts: {
+        [GITHUB_INTEGRATION_SHORTCUT_ID]: { key: "g", modifiers: { ctrlOrCmd: true, alt: true } },
+      },
+    },
+  });
+  await waitFor(() =>
+    expect(screen.getByTestId(GITHUB_INTEGRATION_RECORDER_ID).textContent).toContain("H"),
+  );
+  expect(storeMocks.setUserSettings).not.toHaveBeenCalled();
+});
+
+it("clears the last saved navigation binding when the response omits the empty map", async () => {
+  keyboardStore({
+    keyboardShortcuts: {
+      [GITHUB_INTEGRATION_SHORTCUT_ID]: { key: "g", modifiers: { ctrlOrCmd: true, alt: true } },
+    },
+  });
+  apiMocks.updateUserSettings.mockResolvedValue({ settings: { revision: 2 } });
+  renderKeyboardSettings();
+  fireEvent.click(
+    screen
+      .getByTestId(GITHUB_INTEGRATION_RECORDER_ID)
+      .parentElement!.querySelector("button[aria-label='Reset (clear shortcut)']")!,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+  await waitFor(() => expect(storeMocks.setUserSettings).toHaveBeenCalledOnce());
+  expect(storeMocks.setUserSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ keyboardShortcuts: {} }),
+  );
 });

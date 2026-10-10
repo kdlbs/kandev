@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSessionRecoveryActions } from "./use-session-recovery-actions";
+import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
 
 type RecoveryEligibilityState = {
   taskSessions: {
@@ -14,6 +15,8 @@ type RecoveryEligibilityState = {
         downstream_acp_session_id?: string;
         is_passthrough?: boolean;
         metadata?: Record<string, unknown> | null;
+        task_environment_id?: string;
+        workspace_recovery?: WorkspaceRecoveryProjection | null;
       }
     >;
   };
@@ -29,11 +32,14 @@ type RecoveryEligibilityState = {
       cli_passthrough: boolean;
     }[];
   };
+  setWorkspaceRecoveryProjection: ReturnType<typeof vi.fn>;
 };
 
 const mocks = vi.hoisted(() => ({
   requestSessionRecover: vi.fn(),
   restoreSessionWorkspace: vi.fn(),
+  getWorkspaceRecoveryStatus: vi.fn(),
+  setWorkspaceRecoveryProjection: vi.fn(),
   managedCloneRelocationRecoveryDetails: vi.fn().mockReturnValue(null),
   appState: null as unknown as RecoveryEligibilityState,
 }));
@@ -43,10 +49,14 @@ vi.mock("@/lib/services/session-recovery-service", () => ({
     error instanceof Error ? error : new Error(fallback),
   branchRecoveryDetails: () => null,
   managedCloneRelocationRecoveryDetails: mocks.managedCloneRelocationRecoveryDetails,
+  recoveryInspectionBusyDetails: () => null,
+  recoveryInspectionBusyMessage: () => "",
   sessionRecoveryGuardDetails: () => null,
   sessionRecoveryGuardMessage: () => "",
+  contextContinuationDetails: () => null,
   requestSessionRecover: mocks.requestSessionRecover,
   restoreSessionWorkspace: mocks.restoreSessionWorkspace,
+  getWorkspaceRecoveryStatus: mocks.getWorkspaceRecoveryStatus,
 }));
 
 vi.mock("react-i18next", () => ({
@@ -63,6 +73,7 @@ vi.mock("@/components/state-provider", () => ({
 const TASK_ID = "task-1";
 const SESSION_ID = "session-1";
 const FAILED_TO_RESUME_MESSAGE_KEY = "task:failedToResumeSession";
+const LEGACY_ERROR_STAMP = "legacy-stamp";
 const PROVIDER_UNAVAILABLE = "provider unavailable";
 const MANAGED_CLONE_RECOVERY_STAMP = "managed-stamp-2";
 const MANAGED_CLONE_RELOCATION_ERROR = "workspace needs relocation";
@@ -78,6 +89,7 @@ function emptyRecoveryEligibilityState(): RecoveryEligibilityState {
     kanban: { tasks: [] },
     quickChat: { sessions: [] },
     agentProfiles: { items: [] },
+    setWorkspaceRecoveryProjection: mocks.setWorkspaceRecoveryProjection,
   };
 }
 
@@ -91,6 +103,7 @@ function eligibleRecoveryState(): RecoveryEligibilityState {
           execution_profile_id: "profile-1",
           agent_profile_id: "profile-other",
           downstream_acp_session_id: "native-session-1",
+          task_environment_id: "environment-1",
         },
       },
     },
@@ -112,6 +125,7 @@ function eligibleRecoveryState(): RecoveryEligibilityState {
         },
       ],
     },
+    setWorkspaceRecoveryProjection: mocks.setWorkspaceRecoveryProjection,
   };
 }
 
@@ -412,6 +426,98 @@ describe("useSessionRecoveryActions", () => {
     expect(result.current.recoveryError).toBeNull();
     expect(result.current.manualRecoveryFailure).toBeNull();
     await waitFor(() => expect(result.current.recoveryError).toBeNull());
+  });
+
+  it("uses restore relocation details without another resume", async () => {
+    mocks.restoreSessionWorkspace.mockRejectedValueOnce(new Error(MANAGED_CLONE_RELOCATION_ERROR));
+    mocks.managedCloneRelocationRecoveryDetails.mockReturnValueOnce({
+      kind: "managed_clone_relocation_required",
+      error_stamp: MANAGED_CLONE_RECOVERY_STAMP,
+      recovery_action: "relocate_and_resume",
+    });
+    const { result } = renderHook(() =>
+      useSessionRecoveryActions({
+        taskId: TASK_ID,
+        sessionId: SESSION_ID,
+        errorStamp: LEGACY_ERROR_STAMP,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleRestore();
+    });
+
+    expect(result.current.managedCloneRecoveryStamp).toBe(MANAGED_CLONE_RECOVERY_STAMP);
+    expect(result.current.manualRecoveryFailure).toMatchObject({ operation: "restore_workspace" });
+    expect(mocks.requestSessionRecover).not.toHaveBeenCalled();
+    await act(async () => {
+      await result.current.handleManagedCloneRelocation();
+    });
+    expect(mocks.requestSessionRecover).toHaveBeenCalledWith({
+      taskId: TASK_ID,
+      sessionId: SESSION_ID,
+      action: "relocate_and_resume",
+      failureMessage: FAILED_TO_RESUME_MESSAGE_KEY,
+      errorStamp: MANAGED_CLONE_RECOVERY_STAMP,
+    });
+  });
+
+  it("ignores a late restore relocation response after the session changes", async () => {
+    const pending = Promise.withResolvers<void>();
+    mocks.restoreSessionWorkspace.mockReturnValueOnce(pending.promise);
+    mocks.managedCloneRelocationRecoveryDetails.mockReturnValueOnce({
+      kind: "managed_clone_relocation_required",
+      error_stamp: LEGACY_ERROR_STAMP,
+      recovery_action: "relocate_and_resume",
+    });
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string }) =>
+        useSessionRecoveryActions({ taskId: TASK_ID, sessionId, errorStamp: LEGACY_ERROR_STAMP }),
+      { initialProps: { sessionId: SESSION_ID } },
+    );
+
+    let restore!: Promise<void>;
+    act(() => {
+      restore = result.current.handleRestore();
+    });
+    rerender({ sessionId: "successor-session" });
+    await act(async () => {
+      pending.reject(new Error(MANAGED_CLONE_RELOCATION_ERROR));
+      await restore;
+    });
+
+    expect(result.current.managedCloneRecoveryStamp).toBeNull();
+    expect(result.current.manualRecoveryFailure).toBeNull();
+  });
+
+  it("keeps a matching restore relocation response after the server advances the error stamp", async () => {
+    const deferred = Promise.withResolvers<void>();
+    mocks.restoreSessionWorkspace.mockReturnValueOnce(deferred.promise);
+    mocks.managedCloneRelocationRecoveryDetails.mockReturnValueOnce({
+      kind: "managed_clone_relocation_required",
+      error_stamp: MANAGED_CLONE_RECOVERY_STAMP,
+      recovery_action: "relocate_and_resume",
+    });
+    const { result, rerender } = renderHook(
+      ({ errorStamp }: { errorStamp: string }) =>
+        useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID, errorStamp }),
+      { initialProps: { errorStamp: "legacy-stamp" } },
+    );
+
+    let restore!: Promise<void>;
+    act(() => {
+      restore = result.current.handleRestore();
+    });
+    rerender({ errorStamp: MANAGED_CLONE_RECOVERY_STAMP });
+
+    await act(async () => {
+      deferred.reject(new Error(MANAGED_CLONE_RELOCATION_ERROR));
+      await restore;
+    });
+
+    expect(result.current.managedCloneRecoveryStamp).toBe(MANAGED_CLONE_RECOVERY_STAMP);
+    expect(result.current.manualRecoveryFailure).toMatchObject({ operation: "restore_workspace" });
+    expect(result.current.recoveryError?.message).toBe(MANAGED_CLONE_RELOCATION_ERROR);
   });
 
   it("surfaces a matching relocation requirement after the server advances the error stamp", async () => {

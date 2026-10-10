@@ -93,6 +93,54 @@ func TestSidebarTreeActivityKeepsNewerParentActivity(t *testing.T) {
 	}
 }
 
+func TestSidebarComposableRunningAndActivitySortsBeforePaging(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			repo := newRepoForSidebarConformance(t, backend)
+			const workspace = "sort-chain"
+			seedWorkspace(t, repo, workspace)
+			base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+			for _, row := range []struct {
+				id, parent, primary string
+				activity            time.Duration
+			}{
+				{"running-parent", "", "", 0},
+				{"running-child", "running-parent", "RUNNING", 20 * time.Minute},
+				{"running-root", "", "RUNNING", 10 * time.Minute},
+				{"recent-waiting", "", "WAITING_FOR_INPUT", 30 * time.Minute},
+			} {
+				require.NoError(t, repo.CreateTask(t.Context(), &models.Task{
+					ID: row.id, WorkspaceID: workspace, Title: row.id, ParentID: row.parent,
+					State: "TODO", CreatedAt: base, UpdatedAt: base,
+				}))
+				primary := ""
+				if row.primary != "" {
+					primary = fmt.Sprintf(`,"primary_session":{"state":%q}`, row.primary)
+				}
+				running := `,"has_running_session":false`
+				if row.id == "running-child" || row.id == "running-root" {
+					running = `,"has_running_session":true`
+				}
+				summary := fmt.Sprintf(`{"last_activity_at":%q%s%s}`,
+					base.Add(row.activity).Format(time.RFC3339Nano), primary, running)
+				_, err := repo.db.ExecContext(t.Context(), repo.db.Rebind(`INSERT INTO task_status_summaries
+					(task_id, workspace_id, revision, summary, updated_at) VALUES (?, ?, 1, ?, ?)`),
+					row.id, workspace, summary, base)
+				require.NoError(t, err)
+			}
+			query := sidebarTaskQuery(1)
+			query.Group = "none"
+			query.Sort = models.SidebarTaskViewSort{
+				Key: "running", Direction: "desc",
+				ThenBy: []models.SidebarTaskViewSortCriterion{{Key: "lastActivityAt", Direction: "desc"}},
+			}
+			page, err := repo.QuerySidebarTaskPage(t.Context(), workspace, query, models.SidebarTaskViewPreferences{})
+			require.NoError(t, err)
+			require.Equal(t, []string{"running-parent", "running-child", "running-root", "recent-waiting"}, sidebarTaskIDs(page.Tasks))
+		})
+	}
+}
+
 func TestSidebarTreeStateKeepsDescendantsWhenFilteringPromotesARoot(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

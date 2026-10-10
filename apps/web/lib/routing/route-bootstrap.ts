@@ -166,8 +166,13 @@ type SettingsWorkspaceItem = {
 };
 
 /**
- * The active workspace for a settings boot: whatever the user last had active,
- * then their stored preference, then the first workspace that exists.
+ * The active workspace for a settings boot: the one this tab already has, then
+ * whatever the user last had active (cookie), then their stored preference,
+ * then the first workspace that exists.
+ *
+ * The current workspace leads because the cookie and stored preference are
+ * shared by every tab on the origin: another tab switching workspaces rewrites
+ * both, and opening Settings must not pull this tab onto that workspace.
  *
  * Deliberately not filtered to kanban workspaces. It used to prefer them, which
  * was invisible while Office-vs-kanban chrome came from the pathname — Settings
@@ -183,8 +188,10 @@ export function resolveSettingsActiveWorkspaceId(
   workspaceItems: SettingsWorkspaceItem[],
   activeCookieWorkspaceId: string | null,
   settingsWorkspaceId: string | null,
+  currentWorkspaceId: string | null = null,
 ): string | null {
   return (
+    workspaceItems.find((workspace) => workspace.id === currentWorkspaceId)?.id ??
     workspaceItems.find((workspace) => workspace.id === activeCookieWorkspaceId)?.id ??
     workspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
     workspaceItems[0]?.id ??

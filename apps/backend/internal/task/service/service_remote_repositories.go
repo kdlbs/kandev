@@ -54,6 +54,11 @@ func (s *Service) RegisterRemoteRepository(
 	if err := validateBuiltInRemoteHints(inputs[0]); err != nil {
 		return nil, false, err
 	}
+	// The selected branch is a workspace setting; provider identity and clone
+	// URL remain owned by the verified descriptor.
+	if branch := strings.TrimSpace(req.DefaultBranch); branch != "" {
+		inputs[0].DefaultBranch = branch
+	}
 	repositoryID, _, created, err := s.ResolveRepositoryRef(ctx, req.WorkspaceID, inputs[0])
 	if err != nil {
 		return nil, false, err

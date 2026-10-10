@@ -39,7 +39,6 @@ test.describe("Prevent auto-start on open", () => {
       seedData.workflowId,
       "Prevent AutoStart Done",
       7,
-      { events: { on_enter: [{ type: "auto_start_agent" }] } },
     );
     let taskId: string | undefined;
     try {

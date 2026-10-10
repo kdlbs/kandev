@@ -63,13 +63,13 @@ test.describe("Quick Chat entry points on mobile", () => {
     expect(layout.dialogBottom - layout.contentBottom).toBeLessThanOrEqual(2);
     expect(layout.dialogScrollHeight).toBeLessThanOrEqual(layout.dialogClientHeight + 1);
 
-    // Submit once: replaying a successful send while awaiting editor clearing
+    // Submit once: replaying a successful send while awaiting completion
     // creates duplicate bulk turns and changes the layout under measurement.
     const editor = await waitForQuickChatComposerReady(dialog);
     await editor.fill("/e2e:bulk:20");
     await dialog.getByTestId("submit-message-button").tap();
-    await expect(editor).toHaveText("");
     await expect(dialog.getByText(/Done\. Emitted 20 messages/)).toBeVisible({ timeout: 30_000 });
+    await expect(editor).toHaveText("", { timeout: 15_000 });
 
     const longChatLayout = await readQuickChatViewportLayout(dialog);
     expect(longChatLayout.messageScrollerScrollHeight).toBeGreaterThan(
@@ -111,7 +111,7 @@ test.describe("Quick Chat entry points on mobile", () => {
     await expect(testPage.getByTestId("app-nav-trigger")).toBeFocused();
   });
 
-  test("chooses configuration mode from the setup panel", async ({ testPage }) => {
+  test("chooses configuration mode on the opening composer", async ({ testPage }) => {
     await testPage.goto("/");
     const context = testPage.getByTestId("app-nav-trigger");
     await context.tap();
@@ -119,10 +119,10 @@ test.describe("Quick Chat entry points on mobile", () => {
 
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     const setup = dialog.getByTestId("quick-chat-setup");
-    await expect(setup.getByText(/quick chats stay outside your task board/i)).toBeVisible();
-    await setup.getByRole("switch", { name: "Configuration chat" }).tap();
-
-    await expect(dialog.getByTestId("config-chat-setup")).toBeVisible();
+    const modeSwitch = setup.getByTestId("quick-chat-configuration-action");
+    await modeSwitch.tap();
+    await testPage.getByRole("switch", { name: "Configuration chat" }).tap();
+    await expect(setup.getByRole("status")).toHaveText("Configuration chat");
     await assertNoDocumentHorizontalOverflow(testPage);
     await dialog.getByTestId("quick-chat-close").tap();
     await expect(dialog).toBeHidden();

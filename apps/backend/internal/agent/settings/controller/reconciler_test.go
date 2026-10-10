@@ -301,6 +301,19 @@ func (f *fakeStore) UpdateAgentProfile(_ context.Context, p *models.AgentProfile
 	return nil
 }
 
+func (f *fakeStore) UpdateAgentProfileWithEnabledIntent(ctx context.Context, p *models.AgentProfile, enabled *bool) error {
+	if enabled == nil {
+		current, err := f.GetAgentProfile(ctx, p.ID)
+		if err != nil {
+			return err
+		}
+		p.Enabled = current.Enabled
+	} else {
+		p.Enabled = *enabled
+	}
+	return f.UpdateAgentProfile(ctx, p)
+}
+
 func (f *fakeStore) UpdateAgentProfileModelIfEmpty(
 	ctx context.Context,
 	profileID, model string,

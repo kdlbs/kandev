@@ -33,6 +33,35 @@ function runtimeNotification(): UpdateAvailableNotification {
   };
 }
 
+function summaryNotification(): UpdateAvailableNotification {
+  return {
+    occurrence_id: "summary-codex-gemini",
+    notification_kind: "agent_runtime_summary",
+    runtime_updates: [
+      {
+        occurrence_id: "codex-3",
+        agent_name: "codex-app-server",
+        runtime_id: "npm:@openai/codex",
+        display_name: "Codex",
+        previous_version: "1.0.0",
+        version: "3.0.0",
+      },
+      {
+        occurrence_id: "gemini-2",
+        agent_name: "gemini",
+        runtime_id: "npm:@google/gemini-cli",
+        display_name: "Gemini",
+        previous_version: "1.0.0",
+        version: "2.0.0",
+      },
+    ],
+    url: "/settings/agents#runtime-updates",
+    title: "2 agent runtime updates available",
+    body: "Review runtime versions in Settings > Agents.",
+    version: "",
+  };
+}
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
@@ -54,14 +83,16 @@ vi.mock("@/lib/desktop/native-notification-client", () => ({
 
 let useUpdateAvailableToast: typeof UseUpdateAvailableToastHook;
 
-describe("useUpdateAvailableToast", () => {
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    vi.resetModules();
-    mockNativeIsAvailable.mockReturnValue(false);
-    mockNotification = null;
-    ({ useUpdateAvailableToast } = await import("./use-update-available-toast"));
-  });
+async function resetUpdateToastHook() {
+  vi.clearAllMocks();
+  vi.resetModules();
+  mockNativeIsAvailable.mockReturnValue(false);
+  mockNotification = null;
+  ({ useUpdateAvailableToast } = await import("./use-update-available-toast"));
+}
+
+describe("useUpdateAvailableToast delivery", () => {
+  beforeEach(resetUpdateToastHook);
 
   it("does nothing when there is no notification", () => {
     renderHook(() => useUpdateAvailableToast());
@@ -97,6 +128,28 @@ describe("useUpdateAvailableToast", () => {
     );
   });
 
+  // @covers AC-AGENTS-RUNTIME-NOTIFY-003.3, AC-AGENTS-RUNTIME-NOTIFY-003.8
+  it("shows one localized summary with direct Settings navigation on browser and native paths", () => {
+    mockNotification = summaryNotification();
+    mockNativeIsAvailable.mockReturnValue(true);
+
+    renderHook(() => useUpdateAvailableToast());
+
+    const toast = mockToast.mock.calls[0]?.[0];
+    expect(mockToast).toHaveBeenCalledTimes(1);
+    expect(toast).toMatchObject({
+      title: "2 agent runtime updates available",
+      action: { href: "/settings/agents#runtime-updates", label: "Review updates" },
+    });
+    expect(mockNativeShow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: "system.update_available:summary-codex-gemini",
+        title: toast.title,
+        body: toast.description,
+      }),
+    );
+  });
+
   it("retains the toast when native delivery is denied", () => {
     mockNotification = updateNotification();
     mockNativeIsAvailable.mockReturnValue(true);
@@ -105,6 +158,10 @@ describe("useUpdateAvailableToast", () => {
     expect(mockToast).toHaveBeenCalledTimes(1);
     expect(mockNativeShow).toHaveBeenCalledTimes(1);
   });
+});
+
+describe("useUpdateAvailableToast occurrence behavior", () => {
+  beforeEach(resetUpdateToastHook);
 
   it("deduplicates repeated notifications for the same version", () => {
     mockNotification = updateNotification();

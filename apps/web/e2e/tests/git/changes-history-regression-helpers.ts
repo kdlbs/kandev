@@ -54,6 +54,10 @@ export async function openHistoryRegression(
   ]);
   await api.mockGitHubAddPRFiles("testorg", "testrepo", PR_NUMBER, [
     { filename: "published.ts", status: "modified", additions: 1, deletions: 0 },
+    { filename: "published-two.ts", status: "modified", additions: 1, deletions: 0 },
+    { filename: "published-three.ts", status: "modified", additions: 1, deletions: 0 },
+    { filename: "published-four.ts", status: "modified", additions: 1, deletions: 0 },
+    { filename: "published-five.ts", status: "modified", additions: 1, deletions: 0 },
   ]);
   const task = await api.createTaskWithAgent(
     seed.workspaceId,
@@ -221,6 +225,27 @@ export async function expectExpandedPRContiguous(page: Page) {
     )
     .toBe(0);
   await page.getByTestId("pr-changes-section-collapse-toggle").click();
+}
+
+export async function measurePRSectionGeometry(page: Page) {
+  return page.evaluate(() => {
+    const prHeader = document
+      .querySelector('[data-testid="pr-changes-section-collapse-toggle"]')!
+      .getBoundingClientRect();
+    const files = [
+      ...document.querySelectorAll<HTMLElement>(
+        '[data-testid="pr-files-section"] [data-changes-file]',
+      ),
+    ].map((file) => file.getBoundingClientRect());
+    const followingHeader = document
+      .querySelector('[data-testid="local-checkout-commits-section-collapse-toggle"]')!
+      .getBoundingClientRect();
+    return {
+      siblingGaps: files.slice(1).map((file, index) => file.top - files[index]!.bottom),
+      sectionGap: followingHeader.top - files.at(-1)!.bottom,
+      contentOffset: files[0]!.left - prHeader.left,
+    };
+  });
 }
 
 export async function expectRepositoryToggleTouchTarget(page: Page, repositoryName: string) {

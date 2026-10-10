@@ -51,6 +51,8 @@ export type ChatInputContainerHandle = {
   getValue: () => string;
   getSelectionStart: () => number;
   insertText: (text: string, from: number, to: number) => void;
+  clearAcceptedPayload?: (payload: Pick<ChatSubmitPayload, "message" | "attachments">) => boolean;
+  restoreStagedAttachments?: (attachments: MessageAttachment[]) => void;
   clear: () => void;
   getAttachments: () => MessageAttachment[];
 };
@@ -115,6 +117,8 @@ type ChatInputContainerProps = {
   isFailed?: boolean;
   isCompleted?: boolean;
   sessionErrorMessage?: string;
+  uncertainDelivery?: boolean;
+  deliveryRecoveryPhase?: "reconnecting" | "uncertain";
   needsRecovery?: boolean;
   /** The task-owned launch card renders the failed-start recovery. */
   launchErrorOwned?: boolean;
@@ -330,6 +334,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     const isMoving = props.isMoving ?? false;
     const executorUnavailable = props.executorUnavailable ?? false;
     const isBusyVisual = isStarting || isMoving;
+    const useUncertainDeliveryControls = props.uncertainDelivery && !p.isCompleted;
 
     const s = useChatInputContainer({
       ref,
@@ -377,12 +382,13 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       shouldHideChatInputForLaunchError({
         isFailed: p.isFailed,
         launchErrorOwned: p.launchErrorOwned,
+        uncertainDelivery: useUncertainDeliveryControls,
       })
     ) {
       return null;
     }
 
-    if (composerRecovery?.model && taskId) {
+    if (composerRecovery?.model && taskId && !useUncertainDeliveryControls) {
       return (
         <>
           <SessionRecoveryCard
@@ -409,6 +415,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
         isCompleted: p.isCompleted,
         executorUnavailable,
         launchErrorOwned: p.launchErrorOwned,
+        uncertainDelivery: useUncertainDeliveryControls,
       })
     ) {
       return (
@@ -419,6 +426,8 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
           taskId={taskId}
           sessionId={sessionId}
           workspaceId={props.workspaceId}
+          uncertainDelivery={props.uncertainDelivery}
+          deliveryRecoveryPhase={props.deliveryRecoveryPhase}
           recoveryActions={recoveryActions}
           {...buildStoppedBannerProps(props)}
         />

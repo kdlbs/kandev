@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/appctx"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -1052,11 +1053,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if !ok {
 		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
 	}
-	managedRuntimeVersion, err := m.resolveManagedRuntimeVersion(
-		ctx,
-		models.ExecutorType(info.ExecutorType).Runtime(),
-		agentConfig,
-	)
+	managedRuntimeOptions, err := m.resolveManagedRuntimeCommandOptions(ctx, models.ExecutorType(info.ExecutorType).Runtime(), agentConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -1103,6 +1100,14 @@ func (m *Manager) prepareExecutionCreateRequest(
 		autoApprove = profileInfo.AutoApprove
 		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
 	}
+	// A coordinator session ignores the profile's auto-approve flag and the
+	// agentctl auto-approve environment variable: only the exact six
+	// coordinator tool names are auto-approved, decided by agentctl's own
+	// mode check (docs/specs/coordinator/system-design/copilot.md#permission-policy).
+	if info.McpMode == mcpmode.Coordinator {
+		autoApprove = false
+		autoApproveOverride = boolPtr(false)
+	}
 	authToken := m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret)
 	if isDockerExecutorType(info.ExecutorType) {
 		controlToken, err := m.revealContainerControlAuthToken(ctx, info.Metadata, getMetadataString(info.Metadata, MetadataKeyContainerID) != "")
@@ -1115,6 +1120,10 @@ func (m *Manager) prepareExecutionCreateRequest(
 	}
 
 	officeAgentProfileID := workspaceOfficeAgentProfileID(info)
+	journalOwnerID := info.SessionID
+	if journalOwnerID == "" {
+		journalOwnerID = info.TaskEnvironmentID
+	}
 	preparation := &executionCreatePreparation{
 		request: &ExecutorCreateRequest{
 			InstanceID:                     executionID,
@@ -1122,6 +1131,11 @@ func (m *Manager) prepareExecutionCreateRequest(
 			TaskID:                         taskID,
 			SessionID:                      info.SessionID,
 			TaskEnvironmentID:              info.TaskEnvironmentID,
+			DurableJournalHostRoot:         m.dataDir,
+			DurableJournalOwnerID:          journalOwnerID,
+			DeliveryIncarnationID:          info.DeliveryIncarnationID,
+			DeliveryHarnessGeneration:      info.DeliveryHarnessGeneration,
+			DeliveryStreamID:               info.DeliveryStreamID,
 			WorkspaceReuseRequired:         info.TaskEnvironmentID != "",
 			AgentProfileID:                 executionProfileID,
 			OfficeAgentProfileID:           officeAgentProfileID,
@@ -1132,6 +1146,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			Env:                            envPreparation.env,
 			AutoApprovePermissions:         autoApprove,
 			AutoApprovePermissionsOverride: autoApproveOverride,
+			McpMode:                        info.McpMode,
 			AgentConfig:                    agentConfig,
 			Metadata:                       metadata,
 			ApprovedSecretEnvKeys:          append([]string(nil), envPreparation.approvedSecretEnvKeys...),
@@ -1141,7 +1156,10 @@ func (m *Manager) prepareExecutionCreateRequest(
 			AgentctlStartupConfig:          agentctlStartupConfigForExecutor(m.agentctlStartupConfig, info.ExecutorType),
 			RemoteContributions:            remoteContributions,
 			ContributionDestinations:       contributionDestinations,
-			ManagedRuntimeVersion:          managedRuntimeVersion,
+			ManagedRuntimeVersion:          managedRuntimeOptions.ManagedRuntimeVersion,
+			ManagedRuntimeFamily:           managedRuntimeOptions.ManagedRuntimeFamily,
+			ManagedRuntimeSource:           managedRuntimeOptions.ManagedRuntimeSource,
+			NativeRuntimeVersion:           managedRuntimeOptions.NativeRuntimeVersion,
 			ComparisonTargets:              comparisonTargets,
 		},
 		profileInfo: profileInfo,
@@ -1312,7 +1330,8 @@ func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string
 func (m *Manager) admitWorkspaceRecovery(ctx context.Context, info *WorkspaceInfo) (*worktree.RecoveryAdmission, error) {
 	if m == nil || m.worktreeMgr == nil || info == nil ||
 		info.ExecutorType != string(models.ExecutorTypeWorktree) ||
-		info.TaskEnvironmentID == "" || len(info.WorkspaceRepositories) == 0 {
+		info.TaskEnvironmentID == "" || (len(info.WorkspaceRepositories) == 0 &&
+		(info.RecoveryErrorObservation == nil || len(info.RecoveryErrorObservation.SelectionSnapshot.Slots) == 0)) {
 		return nil, nil
 	}
 	ownerTaskID := info.EnvironmentOwnerTaskID
@@ -1322,17 +1341,29 @@ func (m *Manager) admitWorkspaceRecovery(ctx context.Context, info *WorkspaceInf
 	if ownerTaskID == "" || info.SessionID == "" || info.OwnershipGeneration <= 0 {
 		return nil, fmt.Errorf("worktree recovery admission: workspace environment identity is incomplete")
 	}
-	slots := make([]worktree.RecoverySlot, 0, len(info.WorkspaceRepositories))
+	cloneRelocationByRepository := make(map[string]*worktree.ManagedCloneRelocationProof, len(info.WorkspaceRepositories))
 	for _, repository := range info.WorkspaceRepositories {
-		if repository.WorktreeID == "" {
+		cloneRelocationByRepository[repository.RepositoryID] = repository.CloneRelocation
+	}
+	var selectionSnapshot models.WorkspaceRecoverySelectionSnapshot
+	if info.RecoveryErrorObservation != nil {
+		selectionSnapshot = info.RecoveryErrorObservation.SelectionSnapshot
+	}
+	if !selectionSnapshot.Complete() {
+		return nil, fmt.Errorf("worktree recovery admission: selected repository inventory is unavailable")
+	}
+	slots := make([]worktree.RecoverySlot, 0, len(info.WorkspaceRepositories))
+	for _, selected := range selectionSnapshot.Canonical().Slots {
+		if selected.WorktreeID == "" {
 			continue
 		}
+		if !selected.RepositoryPresent || selected.RepositoryID == "" || selected.RepositoryLocalPath == "" {
+			return nil, fmt.Errorf("selected worktree recovery inventory is incomplete")
+		}
 		slots = append(slots, worktree.RecoverySlot{
-			WorktreeID:      repository.WorktreeID,
-			RepositoryID:    repository.RepositoryID,
-			BranchSlug:      repository.BranchSlug,
-			RepositoryPath:  repository.RepositoryPath,
-			CloneRelocation: repository.CloneRelocation,
+			WorktreeID: selected.WorktreeID, RepositoryID: selected.RepositoryID,
+			BranchSlug: selected.BranchSlug, RepositoryPath: selected.RepositoryLocalPath,
+			CloneRelocation: cloneRelocationByRepository[selected.RepositoryID],
 		})
 	}
 	if len(slots) == 0 {
@@ -1345,10 +1376,29 @@ func (m *Manager) admitWorkspaceRecovery(ctx context.Context, info *WorkspaceInf
 		OwnerTaskID:         ownerTaskID,
 		OwnershipGeneration: info.OwnershipGeneration,
 		ExecutorType:        info.ExecutorType,
+		SelectionSnapshot:   selectionSnapshot,
 		Slots:               slots,
 	}
 	admission, err := m.worktreeMgr.AdmitRecovery(ctx, request)
 	if err != nil {
+		var relocationRequired *worktree.ManagedCloneRelocationRequiredError
+		if errors.As(err, &relocationRequired) && m.workspaceRecoveryErrorReporter != nil {
+			if info.RecoveryErrorObservation == nil {
+				return nil, &WorkspaceRecoveryProjectionError{PersistFailed: true}
+			}
+			stamp, reportErr := m.workspaceRecoveryErrorReporter.ReportManagedCloneRelocationRequired(ctx, *info.RecoveryErrorObservation)
+			if reportErr != nil {
+				m.logger.Warn("failed to project workspace recovery refusal",
+					zap.String("task_id", info.TaskID),
+					zap.String("session_id", info.SessionID),
+					zap.Error(reportErr))
+				return nil, &WorkspaceRecoveryProjectionError{PersistFailed: true}
+			}
+			if stamp == "" {
+				return nil, &WorkspaceRecoveryProjectionError{Stale: true}
+			}
+			return nil, &WorkspaceRecoveryProjectionError{Stamp: stamp}
+		}
 		return nil, err
 	}
 	info.WorktreeRecoveryAdmitted = true

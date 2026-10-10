@@ -12,8 +12,25 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/mcp/plugintools"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 )
+
+// modeSurfaces pins each wire mode to the tool surface it must resolve to.
+// handleSetMcpMode echoes the request field regardless of what SetMode
+// actually resolved (docs/specs/coordinator/system-design/copilot.md
+// #attended-only): TestHandleSetMcpMode_AcceptsSupportedModes previously only
+// checked that echo, so a coordinator instance silently kept the full
+// task-mode catalog and the test stayed green. This map lets that test also
+// assert the live server's resolved surface.
+var modeSurfaces = map[string]mcpprofile.Surface{
+	mcpmode.Task:             mcpprofile.SurfaceKanbanTask,
+	mcpmode.TaskTitlePending: mcpprofile.SurfaceKanbanTask,
+	mcpmode.Config:           mcpprofile.SurfaceConfiguration,
+	mcpmode.Office:           mcpprofile.SurfaceOfficeTask,
+	mcpmode.Automation:       mcpprofile.SurfaceAutomation,
+	mcpmode.Coordinator:      mcpprofile.SurfaceCoordinator,
+}
 
 func newTestServerWithMCP(t *testing.T) *Server {
 	t.Helper()
@@ -73,6 +90,14 @@ func TestHandleSetMcpMode_AcceptsSupportedModes(t *testing.T) {
 			}
 			if body.Mode != mode {
 				t.Fatalf("mode = %q, want %q", body.Mode, mode)
+			}
+
+			wantSurface, ok := modeSurfaces[mode]
+			if !ok {
+				t.Fatalf("no expected surface registered for mode %q", mode)
+			}
+			if gotSurface := s.mcpServer.Profile().Surface; gotSurface != wantSurface {
+				t.Fatalf("resolved surface = %q, want %q", gotSurface, wantSurface)
 			}
 		})
 	}

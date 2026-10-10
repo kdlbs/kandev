@@ -77,7 +77,11 @@ Request:
 }
 ```
 
-Only `remote_url` is required. Every other field is a hint from the picker.
+Only `remote_url` is required. Provider fields are identity hints from the
+picker; `default_branch` is the user's workspace setting. A supplied branch
+is trimmed and validated through ordinary repository creation, while an
+omitted branch uses the verified provider default. Reusing an existing
+repository preserves its branch and other saved settings.
 
 Response: the existing `Repository` DTO. `201 Created` when this call
 inserted the record, `200 OK` when the verified provider identity matched an
@@ -108,7 +112,8 @@ URL, its inspection descriptor (clone URL, provider identity, default branch)
 replaces the bare URL on the row before submission is allowed. Branch loading
 uses `useBranchesByURL(workspaceId)`, which already routes plugin providers
 through their `repositories.branches` action. Confirmation is enabled only
-with a non-empty URL whose inspection has settled without error. On success
+with a non-empty URL whose inspection has settled without error. A plain
+built-in repository URL settles without fetching PR or issue metadata. On success
 the page inserts the returned repository into the saved baseline and the
 rendered list; a repository the page already lists keeps its loaded entry and
 scripts, since the registration response carries no scripts.

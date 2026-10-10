@@ -5,6 +5,8 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { createEmptyRemoteRepository } from "../../helpers/empty-remote-repository";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { configureGitHubOrigin } from "../../helpers/github-origin";
+import { makeGitEnv } from "../../helpers/git-helper";
 import {
   cleanupPRLinkForkLaunchFixture,
   createPRLinkForkLaunchFixture,
@@ -31,6 +33,10 @@ async function openRemoteAndPasteURL(testPage: Page, url: string): Promise<void>
 }
 
 test.describe("Task creation from GitHub URL", () => {
+  const restoreOrigins: Array<() => void> = [];
+  test.afterEach(() => {
+    for (const restore of restoreOrigins.splice(0).reverse()) restore();
+  });
   // Allow one retry for transient backend port-allocation issues on cold start.
   test.describe.configure({ retries: 1 });
 
@@ -46,6 +52,13 @@ test.describe("Task creation from GitHub URL", () => {
     // This lets FindOrCreateRepository find the repo (with its local_path) when the
     // GitHub URL is submitted, avoiding an actual clone.
     const repoDir = `${backend.tmpDir}/repos/e2e-repo`;
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDir,
+        "https://github.com/test-owner/test-repo.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "test-owner/test-repo",
       provider: "github",
@@ -119,6 +132,13 @@ test.describe("Task creation from GitHub URL", () => {
 
     // Pre-seed the GitHub-backed repository
     const repoDir = `${backend.tmpDir}/repos/e2e-repo`;
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDir,
+        "https://github.com/test-owner/test-repo.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "test-owner/test-repo",
       provider: "github",
@@ -269,6 +289,13 @@ test.describe("Task creation from GitHub URL", () => {
 
     // Seed two distinct GitHub-backed repositories
     const repoDirA = `${backend.tmpDir}/repos/e2e-repo`;
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDirA,
+        "https://github.com/owner-a/repo-a.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDirA, "main", {
       name: "owner-a/repo-a",
       provider: "github",
@@ -291,6 +318,10 @@ test.describe("Task creation from GitHub URL", () => {
     };
     execSync("git init -b main", { cwd: repoDirB, env: gitEnv });
     execSync('git commit --allow-empty -m "init"', { cwd: repoDirB, env: gitEnv });
+    execSync("git remote add origin https://github.com/owner-b/repo-b.git", {
+      cwd: repoDirB,
+      env: gitEnv,
+    });
     await apiClient.createRepository(seedData.workspaceId, repoDirB, "main", {
       name: "owner-b/repo-b",
       provider: "github",
@@ -345,6 +376,13 @@ test.describe("Task creation from GitHub URL", () => {
   }) => {
     // Pre-seed a GitHub-backed repository
     const repoDir = `${backend.tmpDir}/repos/e2e-repo`;
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDir,
+        "https://github.com/test-owner/test-repo.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "test-owner/test-repo",
       provider: "github",
@@ -426,6 +464,13 @@ test.describe("Task creation from GitHub URL", () => {
     execSync("git checkout main", { cwd: repoDir, env: gitEnv });
 
     // Pre-seed a GitHub-backed repository
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDir,
+        "https://github.com/test-owner/test-repo.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "test-owner/test-repo",
       provider: "github",
@@ -540,6 +585,13 @@ test.describe("Task creation from GitHub URL", () => {
 
     // Register the repo with a unique provider name to avoid collisions with
     // other tests that also register repos as test-owner/test-repo.
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDir,
+        "https://github.com/pr-owner/pr-wt-repo.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "pr-owner/pr-wt-repo",
       provider: "github",
@@ -633,7 +685,6 @@ test.describe("Task creation from GitHub URL", () => {
     test.setTimeout(90_000);
 
     const { execSync } = await import("child_process");
-    const fs = await import("fs");
     const gitEnv = {
       ...process.env,
       HOME: backend.tmpDir,
@@ -643,16 +694,22 @@ test.describe("Task creation from GitHub URL", () => {
       GIT_COMMITTER_EMAIL: "e2e@test.local",
     };
 
-    // Create a repo with the PR branch locally but NO remote. PR launches must
+    // Create a repo with the PR branch locally but no published PR snapshot. PR launches must
     // fail closed when the immutable pull-request snapshot cannot be fetched.
-    const repoDir = `${backend.tmpDir}/repos/e2e-warning-repo`;
-    fs.mkdirSync(repoDir, { recursive: true });
-    execSync("git init -b main", { cwd: repoDir, env: gitEnv });
+    const repository = createEmptyRemoteRepository(backend.tmpDir, "pr-missing-snapshot");
+    const repoDir = repository.localPath;
     execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
     execSync("git checkout -b feature/warn-branch", { cwd: repoDir, env: gitEnv });
     execSync('git commit --allow-empty -m "feature commit"', { cwd: repoDir, env: gitEnv });
     execSync("git checkout main", { cwd: repoDir, env: gitEnv });
 
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDir,
+        "https://github.com/warn-owner/warn-repo.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "warn-owner/warn-repo",
       provider: "github",
@@ -768,6 +825,13 @@ test.describe("Task creation from GitHub URL", () => {
     });
     execSync("git checkout main", { cwd: repoDir, env: gitEnv });
 
+    restoreOrigins.push(
+      configureGitHubOrigin(
+        repoDir,
+        "https://github.com/shared-owner/shared-repo.git",
+        makeGitEnv(backend.tmpDir),
+      ),
+    );
     await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "shared-owner/shared-repo",
       provider: "github",

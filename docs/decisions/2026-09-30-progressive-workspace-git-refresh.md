@@ -29,7 +29,8 @@ See the [workspace status design](../specs/platform/system-design/workspace-git-
 - Publication needs an epoch, revision, and validated observation fingerprint.
 - Consumers distinguish complete membership from pending details and compact summaries.
 - The earlier fresh-read non-publication contract changes explicitly. Existing isolation and resource limits remain required.
-- Background enrichment can be delayed under admission pressure. The UI must show that state and expose Retry after bounded failure.
+- Background enrichment can be delayed under admission pressure. The UI must identify that state and retain bounded recovery after failure.
+  The [follow-up recovery design](../specs/platform/system-design/changes-refresh-recovery.md) supplies delayed read retry without changing publication ownership.
 
 ## Alternatives Considered
 

@@ -16,8 +16,6 @@ import {
 } from "./completed-workspace-restoration-helpers";
 
 test.describe("Completed workspace restoration on mobile", () => {
-  test.describe.configure({ retries: 1 });
-
   test("restores Files, Changes, and Terminal after a cold restart", async ({
     testPage,
     apiClient,

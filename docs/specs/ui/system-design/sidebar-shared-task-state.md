@@ -146,6 +146,25 @@ Use existing task freshness and summary revision rules to reject older field upd
 Track per-entity changes since request start so a delayed HTTP response cannot replace a newer live value or known deletion.
 Do not infer task freshness from summary freshness or compare unrelated revision domains.
 
+`recordTaskOverviewChange` coalesces each read's repeated partial patches with the
+same merge rules as `mergeTaskOverview`, including when no `byId` record exists.
+Task fields compare strict RFC3339Nano instants through
+`parseStrictRfc3339Timestamp`, with the existing space-to-`T` normalization.
+Reject task fields only when both timestamps parse and the incoming instant is
+strictly older. Equal, missing, or malformed timestamps keep the existing
+fallback semantics. Independently use `pickFreshestStatusSummary`: omit/null
+preserves the accepted summary, lower revision loses, and equal revision accepts
+the incoming projection. A summary-only patch does not advance `updatedAt`.
+Keep journal entries typed as `TaskOverviewPatch`; share partial-safe merge logic
+inside the existing merge module without asserting that a journal patch is a
+complete resident overview or synthesizing missing task fields. HTTP settlement
+then compares the coalesced patch with the returned row using those same clocks.
+This protects the registered archived `task.updated` path before a bounded page
+introduces its task. Ordinary active updates already normalize board residents.
+Deletion remains a sticky `null` for each outstanding read; merging a patch
+must not resurrect it. Measure journal bytes from the resulting stored patch
+and preserve existing ID/byte limits, overflow generation, and read cleanup.
+
 A complete snapshot response can replace membership only after reconciling live membership events during its read.
 Use a bounded in-flight reconciliation journal, capped at 1,000 affected task IDs or 1 MiB per controller.
 Coalesce entries by ID and retain deletion/removal tombstones until older in-flight reads settle.
@@ -207,3 +226,13 @@ Hook tests defer responses across three soft invalidations and require safe rows
 Hard-barrier, deletion, overflow, and access-denial tests must still reject unsafe results.
 Desktop and phone E2E cover homepage-to-sidebar reuse without a duplicate query and cold archived paging with bounded retention.
 The server memory correction and its native benchmarks remain required for cold views.
+
+[Archived update freshness](../../../plans/archived-sidebar-update-freshness/plan.md)
+owns the narrow journal regression repair. Its permanent test dispatches through
+`registerTasksHandlers` into a real `createAppStore` and
+`SidebarTaskPageCache`, deferring only `querySidebarTasks`. It covers repeated
+archived updates and HTTP settlement in both freshness directions, resident and
+nonresident records, separate summary revisions, partial patches, tombstones,
+bounded journals, and read/context isolation. This data normalization introduces
+no layout, navigation, touch, scrolling, or breakpoint changes; focused transport
+integration and existing affected controls satisfy the data-only mobile exception.

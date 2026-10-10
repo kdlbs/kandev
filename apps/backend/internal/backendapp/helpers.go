@@ -41,6 +41,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
 	debughandlers "github.com/kandev/kandev/internal/debug"
 	dockerremote "github.com/kandev/kandev/internal/dockerremote"
@@ -886,7 +887,20 @@ func appendAvailableCommandsMessage(sessionID string, session *models.TaskSessio
 	if lifecycleMgr == nil {
 		return result
 	}
-	commands := lifecycleMgr.GetAvailableCommandsForSession(sessionID)
+	return appendAvailableCommandsMessageForCommands(
+		sessionID,
+		session,
+		lifecycleMgr.GetAvailableCommandsForSession(sessionID),
+		result,
+	)
+}
+
+func appendAvailableCommandsMessageForCommands(
+	sessionID string,
+	session *models.TaskSession,
+	commands []streams.AvailableCommand,
+	result []*ws.Message,
+) []*ws.Message {
 	if len(commands) == 0 {
 		return result
 	}
@@ -933,7 +947,7 @@ func appendSessionModeMessage(sessionID string, session *models.TaskSession, lif
 	return result
 }
 
-// appendSessionModelsMessage adds session models state notification to result if cached.
+// appendSessionModelsMessage adds the current or persisted session model state to result.
 func appendSessionModelsMessage(sessionID string, session *models.TaskSession, lifecycleMgr *lifecycle.Manager, result []*ws.Message) []*ws.Message {
 	var modelState *lifecycle.CachedModelState
 	if lifecycleMgr != nil {
@@ -975,6 +989,7 @@ func appendSessionModelsMessageFromState(sessionID string, session *models.TaskS
 			}
 		}
 	}
+	applyPersistedSessionRuntimeConfigOverrides(session, &replayState)
 	replayState.ConfigOptionsSettled = replayState.ConfigOptionsSettled || snapshot.ConfigOptionsSettled
 	if replayState.CurrentModelID == "" && len(replayState.Models) == 0 &&
 		len(replayState.ConfigOptions) == 0 && !replayState.ConfigOptionsSettled && !providerRestored && !hasAttemptSnapshot {
@@ -983,6 +998,7 @@ func appendSessionModelsMessageFromState(sessionID string, session *models.TaskS
 	notification, err := ws.NewNotification(ws.ActionSessionModelsUpdated, lifecycle.SessionModelsEventPayload{
 		TaskID:                session.TaskID,
 		SessionID:             sessionID,
+		AgentExecutionID:      snapshot.SettingsSourceExecutionID,
 		CurrentModelID:        replayState.CurrentModelID,
 		SessionSettingsPolicy: sessionSettingsProjectionPolicyFromSnapshot(snapshot, hasSnapshot),
 		Models:                replayState.Models,
@@ -994,6 +1010,74 @@ func appendSessionModelsMessageFromState(sessionID string, session *models.TaskS
 		result = append(result, notification)
 	}
 	return result
+}
+
+func applyPersistedSessionRuntimeConfigOverrides(session *models.TaskSession, state *lifecycle.CachedModelState) {
+	if session == nil || state == nil {
+		return
+	}
+	overrides, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata)
+	if !ok {
+		return
+	}
+
+	if overrides.Model != "" && sessionModelAvailable(state.Models, overrides.Model) {
+		state.CurrentModelID = overrides.Model
+	}
+	if len(state.ConfigOptions) == 0 {
+		return
+	}
+	state.ConfigOptions = append([]streams.ConfigOption(nil), state.ConfigOptions...)
+	for index := range state.ConfigOptions {
+		applyPersistedSessionConfigOption(state, &state.ConfigOptions[index], overrides)
+	}
+}
+
+func applyPersistedSessionConfigOption(
+	state *lifecycle.CachedModelState,
+	option *streams.ConfigOption,
+	overrides models.SessionRuntimeConfig,
+) {
+	if option.ID == "" || strings.EqualFold(option.ID, "mode") || strings.EqualFold(option.Category, "mode") {
+		return
+	}
+	value, exists := overrides.ConfigOptions[option.ID]
+	if isSessionModelOption(*option) && value == "" {
+		value = overrides.Model
+		exists = value != ""
+	}
+	if !exists || value == "" || !sessionConfigOptionSupportsValue(*option, value) {
+		return
+	}
+	option.CurrentValue = value
+	if isSessionModelOption(*option) {
+		state.CurrentModelID = value
+	}
+}
+
+func isSessionModelOption(option streams.ConfigOption) bool {
+	return strings.EqualFold(option.ID, "model") || strings.EqualFold(option.Category, "model")
+}
+
+func sessionModelAvailable(models []streams.SessionModelInfo, modelID string) bool {
+	for _, model := range models {
+		if model.ModelID == modelID {
+			return true
+		}
+	}
+	return false
+}
+
+func sessionConfigOptionSupportsValue(option streams.ConfigOption, value string) bool {
+	if len(option.Options) == 0 {
+		return true
+	}
+	for _, choice := range option.Options {
+		if choice.Value == value {
+			return true
+		}
+	}
+	return false
 }
 
 func sessionSettingsProjectionPolicyFromSnapshot(
@@ -1016,6 +1100,7 @@ func sessionACPConfigBaseline(session *models.TaskSession) map[string]string {
 
 // routeParams holds all dependencies needed for HTTP and WebSocket route registration.
 type routeParams struct {
+	ctx                           context.Context
 	router                        *gin.Engine
 	gateway                       *gateways.Gateway
 	taskSvc                       *taskservice.Service
@@ -1036,6 +1121,8 @@ type routeParams struct {
 	dbPool                        *db.Pool
 	persistenceHealth             *requiredstores.Health
 	agentSettingsController       *agentsettingscontroller.Controller
+	runtimeUpdateNotifier         e2eRuntimeUpdateNotifier
+	e2eRuntimeUpdateHooks         *e2eRuntimeUpdateHooks
 	agentSettingsRepo             settingsstore.Repository
 	agentList                     taskhandlers.AgentLister
 	agentRegistry                 *registry.Registry
@@ -1126,6 +1213,7 @@ func registerRoutes(p routeParams) {
 	p.taskSvc.SetWorkflowTaskArchiveCoordinator(handoffSvc)
 	p.taskSvc.SetTaskLifecycleCoordinator(handoffSvc)
 	p.taskSvc.SetWorkspacePolicyAttacher(handoffSvc)
+	wireOfficeProjectRepositorySources(p.taskSvc, p.officeRepo)
 	p.taskSvc.SetWorkspaceGroupMembershipReader(p.officeRepo)
 	handoffSvc.SetCommentReader(&officeCommentReaderAdapter{reader: p.officeRepo})
 	// Phase 6 wirings — materializer hook + disk cleaner. The
@@ -1774,6 +1862,11 @@ func registerSecondaryRoutes(
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
 
+	if p.features.Coordinator {
+		wireCoordinatorConversation(p)
+		registerCoordinatorRoutes(p)
+	}
+
 	failedinbox.RegisterRoutes(p.router, p.taskSvc, p.taskRepo, p.log, p.features.NeedsYouInbox)
 	p.log.Debug("Registered Failed Inbox handlers (HTTP)")
 
@@ -1961,7 +2054,11 @@ func registerSecondaryRoutes(
 		automationSvc = p.services.Automation.Service
 	}
 	registerE2EResetRoutes(
-		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.eventBus, p.log,
+		p.router, p.taskRepo, p.taskSvc, automationSvc, p.services.GitHub, p.services.GitLab, p.services.Coordinator, p.eventBus,
+		p.agentRuntimeAvailability, p.lifecycleMgr, p.log,
+	)
+	registerE2ERuntimeUpdateRoutes(
+		p.router, p.agentSettingsController, p.runtimeUpdateNotifier, p.e2eRuntimeUpdateHooks, p.log,
 	)
 	registerE2EStartupPageFixtureRoute(p.router, p.log)
 
@@ -2499,6 +2596,15 @@ func registerMCPAndDebugRoutes(
 	}
 	p.log.Debug("Registered native code review (WebSocket + MCP)")
 
+	if p.services.Coordinator != nil {
+		mcpHandlers.SetCoordinatorService(p.services.Coordinator)
+		p.services.Coordinator.SetKindDeps(coordinator.KindDeps{
+			Tasks:     &coordinatorKindReader{tasks: p.taskSvc, liveExec: p.lifecycleMgr.HasLiveAgentExecution},
+			Resumer:   &coordinatorResumer{resume: p.orchestratorSvc.ResumeTaskSession},
+			Messenger: mcpHandlers,
+		})
+	}
+
 	mcpHandlers.RegisterHandlers(p.gateway.Dispatcher)
 	p.log.Debug("Registered MCP handlers (WebSocket)")
 
@@ -2517,6 +2623,9 @@ func registerMCPAndDebugRoutes(
 		func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled },
 		p.log,
 	)
+	if p.services != nil && p.services.Coordinator != nil {
+		mcpScopeResolver.SetCoordinatorLookup(p.services.Coordinator)
+	}
 	p.lifecycleMgr.SetMCPPrincipalScoper(mcpScopeResolver.ScopePrincipal)
 	if p.authSvc != nil {
 		p.lifecycleMgr.SetMCPIdentityScoper(mcpScopeResolver.Scope)

@@ -1,6 +1,14 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
 import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
@@ -35,6 +43,11 @@ import {
 import { resetTaskCreateLastUsedSync } from "@/components/task-create-dialog-handlers";
 import { useAppStore } from "@/components/state-provider";
 import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-create-dialog-popover-container";
+import {
+  createTaskCreatedHandlerRegistry,
+  notifyTaskCreatedHandlers,
+  TaskCreateDialogTaskCreatedContext,
+} from "./task-create-dialog-task-created";
 import { shouldShowTaskTitleField } from "@/components/task-create-dialog-helpers";
 import { useTaskCreateDialogSetup } from "@/components/task-create-dialog-setup";
 
@@ -268,6 +281,47 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
   return <TaskCreateDialogContent {...props} />;
 }
 
+function useTaskCreateDialogTaskCreatedHandlers(
+  openCreateMode: boolean,
+  onSuccess: TaskCreateDialogProps["onSuccess"],
+) {
+  const registry = useMemo(createTaskCreatedHandlerRegistry, [openCreateMode]);
+  const activeRegistryRef = useRef(registry);
+  useLayoutEffect(() => {
+    activeRegistryRef.current = registry;
+  }, [registry]);
+  const notifyOnSuccess = useCallback<NonNullable<TaskCreateDialogProps["onSuccess"]>>(
+    (task, mode, meta) => {
+      if (openCreateMode && activeRegistryRef.current === registry) {
+        notifyTaskCreatedHandlers(registry, task, mode);
+      }
+      onSuccess?.(task, mode, meta);
+    },
+    [openCreateMode, onSuccess, registry],
+  );
+  return { registry, onSuccess: notifyOnSuccess };
+}
+
+function useTaskCreateDialogQueuedSettingsCloseReset(
+  open: boolean,
+  preserveRef: { current: { syncedSettings: TaskCreateLastUsedState | null | undefined } | null },
+  resetHandledRef: { current: boolean },
+  reset: () => void,
+) {
+  useEffect(() => {
+    if (open) {
+      preserveRef.current = null;
+      resetHandledRef.current = false;
+      return reset;
+    }
+    if (resetHandledRef.current) {
+      resetHandledRef.current = false;
+      return;
+    }
+    reset();
+  }, [open, preserveRef, resetHandledRef, reset]);
+}
+
 function TaskCreateDialogContent(props: TaskCreateDialogProps) {
   const { t } = useTranslation("chat");
   const syncedTaskCreateLastUsed = useAppStore((state) => state.userSettings.taskCreateLastUsed);
@@ -287,22 +341,23 @@ function TaskCreateDialogContent(props: TaskCreateDialogProps) {
     preserveQueuedLastUsedOnCloseRef.current = null;
     queuedLastUsedResetHandledRef.current = true;
   }, []);
-  const setup = useTaskCreateDialogSetup(props, { preserveQueuedLastUsedOnClose });
+  const { registry: taskCreatedHandlers, onSuccess } = useTaskCreateDialogTaskCreatedHandlers(
+    props.open && props.mode === "create",
+    props.onSuccess,
+  );
+  const setup = useTaskCreateDialogSetup(
+    { ...props, onSuccess },
+    { preserveQueuedLastUsedOnClose },
+  );
   const { guardedHandleSubmit } = setup;
   const focusReturn = useTaskCreateFocusReturn(props, setup.isCreateMode);
   const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (props.open) {
-      preserveQueuedLastUsedOnCloseRef.current = null;
-      queuedLastUsedResetHandledRef.current = false;
-      return resetQueuedLastUsedOnClose;
-    }
-    if (queuedLastUsedResetHandledRef.current) {
-      queuedLastUsedResetHandledRef.current = false;
-      return;
-    }
-    resetQueuedLastUsedOnClose();
-  }, [props.open, resetQueuedLastUsedOnClose]);
+  useTaskCreateDialogQueuedSettingsCloseReset(
+    props.open,
+    preserveQueuedLastUsedOnCloseRef,
+    queuedLastUsedResetHandledRef,
+    resetQueuedLastUsedOnClose,
+  );
   // Programmatic submissions use the native control's preflight before
   // entering the same guarded submit handler as the form button.
   const pendingAttachmentReason = setup.fs.hasPendingAttachmentUploads
@@ -331,32 +386,36 @@ function TaskCreateDialogContent(props: TaskCreateDialogProps) {
         className="w-full h-full min-w-0 max-w-full max-h-full overflow-visible rounded-none pt-0 sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
       >
         <TaskCreateDialogPopoverContainerProvider container={popoverContainer}>
-          <DialogHeader>
-            <DialogHeaderContent
-              isCreateMode={setup.isCreateMode}
-              isEditMode={setup.isEditMode}
-              sessionRepoName={setup.sessionRepoName}
-              initialTitle={props.initialValues?.title}
-            />
-          </DialogHeader>
-          <form
-            onSubmit={guardedHandleSubmit}
-            className="flex min-w-0 flex-col gap-4 overflow-hidden"
+          <TaskCreateDialogTaskCreatedContext.Provider
+            value={props.open && setup.isCreateMode ? taskCreatedHandlers.register : null}
           >
-            <DialogFormBody
-              {...buildDialogFormBodyProps(setup, props)}
-              onComposerSubmit={handleComposerSubmit}
-            />
-            <DialogFooter
-              className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2"
-              data-testid="task-create-dialog-footer"
-            >
-              <TaskCreateDialogFooter
-                {...buildDialogFooterProps(setup, props, pendingAttachmentReason)}
+            <DialogHeader>
+              <DialogHeaderContent
+                isCreateMode={setup.isCreateMode}
+                isEditMode={setup.isEditMode}
+                sessionRepoName={setup.sessionRepoName}
+                initialTitle={props.initialValues?.title}
               />
-            </DialogFooter>
-          </form>
-          <PendingDiscardModal pending={setup.submitHandlers.pendingDiscard} />
+            </DialogHeader>
+            <form
+              onSubmit={guardedHandleSubmit}
+              className="flex min-w-0 flex-col gap-4 overflow-hidden"
+            >
+              <DialogFormBody
+                {...buildDialogFormBodyProps(setup, props)}
+                onComposerSubmit={handleComposerSubmit}
+              />
+              <DialogFooter
+                className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2"
+                data-testid="task-create-dialog-footer"
+              >
+                <TaskCreateDialogFooter
+                  {...buildDialogFooterProps(setup, props, pendingAttachmentReason)}
+                />
+              </DialogFooter>
+            </form>
+            <PendingDiscardModal pending={setup.submitHandlers.pendingDiscard} />
+          </TaskCreateDialogTaskCreatedContext.Provider>
         </TaskCreateDialogPopoverContainerProvider>
       </DialogContent>
     </Dialog>

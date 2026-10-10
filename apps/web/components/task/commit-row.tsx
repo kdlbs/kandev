@@ -327,6 +327,10 @@ export function createCommitFileNavigationRequest(path: string): CommitFileNavig
   return { path, token: (nextCommitFileNavigationToken += 1) };
 }
 
+function commitRowVerticalPaddingClass(expanded?: boolean, separateInlineDetails?: boolean) {
+  return expanded && separateInlineDetails ? "pt-1 pb-0" : "py-1";
+}
+
 /** Individual commit row with hover actions */
 export function CommitRow({
   commit,
@@ -352,7 +356,11 @@ export function CommitRow({
   onAmendCommit?: (currentMessage: string, repo?: string) => void;
   onRevertCommit?: (sha: string, repo?: string) => void;
   onResetToCommit?: (sha: string, repo?: string) => void;
-  controlledExpansion?: { expanded: boolean; onToggle: () => void };
+  controlledExpansion?: {
+    expanded: boolean;
+    separateInlineDetails?: boolean;
+    onToggle: () => void;
+  };
 }) {
   const isLocalCommit = commit.detailTarget.source === "local";
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
@@ -385,7 +393,13 @@ export function CommitRow({
     >
       <RowElement
         data-testid={`commit-row-${commit.commit_sha.slice(0, 7)}`}
-        className="group relative -mx-1 rounded-md px-1 py-1 text-xs hover:bg-muted/60"
+        className={cn(
+          "group relative -mx-1 rounded-md px-1 text-xs hover:bg-muted/60",
+          commitRowVerticalPaddingClass(
+            controlledExpansion?.expanded,
+            controlledExpansion?.separateInlineDetails,
+          ),
+        )}
       >
         <div className="flex items-center gap-2">
           <CommitRowToggle

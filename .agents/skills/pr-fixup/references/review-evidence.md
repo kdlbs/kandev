@@ -1,15 +1,19 @@
 # PR Review-Evidence Mechanics
 
-Load this reference when `scripts/pr-state --summary` is incomplete or
+Load this reference when a `scripts/pr-state` snapshot is incomplete or
 contradictory, or when the primary conversation needs to interpret raw
 `scripts/pr-state` output while resolving a PR-state incident.
 
-Use `scripts/pr-state --summary <PR>` for CI/review state and
+Use `scripts/pr-state --compact <PR>` for routine CI/review state and
 `scripts/pr-resolve list <PR>` for review-thread state. `scripts/pr-state`
 accepts flags before or after the PR; when parsing with `jq`, save JSON to a
 temp file first so stderr does not corrupt the pipe. Default state is limited to
 items after the latest head commit; use `--summary --all` only for a deliberate
 historical audit.
+
+Compact output preserves failed/pending checks, review bodies, policy, errors,
+and evidence completeness. Passing, skipped, and neutral checks appear as
+counts. Keep `--summary` for the waiter and audits that need individual rows.
 
 The summary fields are:
 
@@ -22,7 +26,7 @@ The summary fields are:
   from timestamps.
 - `errors`: affected data is unknown; do not reconstruct it from memory.
 
-After every `scripts/pr-state --summary <PR>`, run
+After every `scripts/pr-state --compact <PR>` or `--summary <PR>`, run
 `scripts/pr-resolve list <PR>` before declaring review state clear. The summary
 can show no visible current-head threads while the resolver still reports a
 hidden or out-of-head unresolved thread; fetch each listed body before replying
@@ -75,6 +79,13 @@ discussion comments, and commit workflow/status evidence. Keep SSH Git
 operations available for fetch, rebase, and push; after a push, require the
 connector-reported PR head OID to equal local `HEAD`. If the fallback cannot
 provide CI or review evidence, report it as unknown or pending, never clean.
+
+Store complete connector responses before printing. Print head and base
+identities, completeness and errors, check verdicts, required policy results,
+and unresolved thread IDs. Read every required review body once per evidence
+snapshot. After a head or review change, refresh the affected evidence.
+Do not print both a raw response and its transformed representation.
+Keep parse errors and incomplete pagination explicit.
 
 If required-check policy is unavailable because REST is rate-limited or denied,
 use `github_fetch` to GET

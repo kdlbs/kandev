@@ -213,7 +213,25 @@ describe("active session recovery ownership", () => {
       ),
     ).toBeNull();
   });
-  it("keeps a canceled session actionable only for the typed managed clone repair", () => {
+  it("keeps a canceled legacy error hidden until the typed managed clone repair is projected", () => {
+    expect(
+      selectActiveSessionRecovery(
+        {
+          ...session,
+          state: "CANCELLED",
+          error_message: "The previous agent launch failed.",
+          metadata: {
+            last_agent_error: {
+              message: "The previous agent launch failed.",
+              occurred_at: FAILED_AT,
+              stamp: "legacy-generic-stamp",
+              scope: "session",
+            },
+          },
+        },
+        [],
+      ),
+    ).toBeNull();
     const managedError = {
       message: "Workspace needs repair",
       occurred_at: FAILED_AT,

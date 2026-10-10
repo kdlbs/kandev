@@ -1,5 +1,25 @@
+import type { Route } from "@playwright/test";
+import type { ApiClient } from "../../helpers/api-client";
+import { waitForHttp } from "../../helpers/causal-waits";
+import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+
+async function waitForOpeningModelTurn(apiClient: ApiClient, taskId: string, sessionId: string) {
+  await waitForAgentMessage(
+    apiClient,
+    sessionId,
+    "This is a simple mock response for e2e testing.",
+    30_000,
+  );
+  await waitForSessionState(apiClient, {
+    taskId,
+    sessionId,
+    expectedState: "WAITING_FOR_INPUT",
+    timeout: 30_000,
+    message: "initial model-selector turn must settle before interaction",
+  });
+}
 
 /**
  * Verifies the chat-input model selector's failure path:
@@ -27,6 +47,8 @@ test.describe("Chat model selector — RPC failure", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    if (!task.session_id) throw new Error("expected an auto-started session");
+    await waitForOpeningModelTurn(apiClient, task.id, task.session_id);
 
     await testPage.goto(`/t/${task.id}`);
 
@@ -35,13 +57,19 @@ test.describe("Chat model selector — RPC failure", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
 
     await expect
-      .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
-        const baseline = sessions[0]?.metadata?.acp_config_baseline as
-          | Record<string, string>
-          | undefined;
-        return baseline?.effort;
-      })
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          const baseline = sessions[0]?.metadata?.acp_config_baseline as
+            | Record<string, string>
+            | undefined;
+          return baseline?.effort;
+        },
+        {
+          timeout: 30_000,
+          message: "Waiting for the initial session's persisted ACP config baseline",
+        },
+      )
       .toBe("medium");
 
     const trigger = testPage.getByRole("button", { name: "Session model settings" });
@@ -103,6 +131,8 @@ test.describe("Chat model selector — RPC failure", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    if (!task.session_id) throw new Error("expected an auto-started session");
+    await waitForOpeningModelTurn(apiClient, task.id, task.session_id);
 
     await testPage.goto(`/t/${task.id}`);
 
@@ -129,16 +159,19 @@ test.describe("Chat model selector — RPC failure", () => {
       firstSettled = resolve;
     });
     let callCount = 0;
-    await testPage.route("**/set-config-option", async (route) => {
+    const configRoute = async (route: Route) => {
       callCount += 1;
       if (callCount === 1) {
         await firstHeld;
-        await route.fulfill({
-          status: 500,
-          contentType: "application/json",
-          body: JSON.stringify({ error: "stale failure" }),
-        });
-        firstSettled?.();
+        try {
+          await route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: "stale failure" }),
+          });
+        } finally {
+          firstSettled?.();
+        }
         return;
       }
       return route.fulfill({
@@ -146,22 +179,30 @@ test.describe("Chat model selector — RPC failure", () => {
         contentType: "application/json",
         body: JSON.stringify({ ok: true }),
       });
-    });
+    };
+    await testPage.route("**/set-config-option", configRoute);
 
-    await trigger.click();
-    await testPage.getByRole("option", { name: /Mock Smart/ }).click();
-    // Re-open and pick again — second request will succeed. mock-agent only
-    // ships two models (Mock Fast / Mock Smart), so we go back to Mock Fast.
-    await trigger.click();
-    await testPage.getByRole("option", { name: /Mock Fast/ }).click();
+    try {
+      await trigger.click();
+      await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+      await expect.poll(() => callCount).toBe(1);
+      // The picker stays open so the newer selection can succeed while the
+      // first request is held. The mock exposes only these two models.
+      const newerSaved = waitForHttp(testPage, "POST", /\/set-config-option$/, {
+        predicate: (response) => response.ok(),
+      });
+      await testPage.getByRole("option", { name: /Mock Fast/ }).click();
+      await newerSaved;
 
-    // Now release the first (stale) request — its 500 rejection should be
-    // swallowed (no toast).
-    releaseFirst?.();
-    await firstSettledPromise;
-    await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
-    // Trigger should still reflect the newer (successful) selection.
-    await expect(trigger).toContainText("Mock Fast", { timeout: 5_000 });
+      releaseFirst?.();
+      await firstSettledPromise;
+      await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
+      await expect(trigger).toContainText("Mock Fast", { timeout: 5_000 });
+    } finally {
+      releaseFirst?.();
+      if (callCount > 0) await firstSettledPromise;
+      await testPage.unroute("**/set-config-option", configRoute);
+    }
   });
 });
 
@@ -191,6 +232,8 @@ test.describe("Chat model selector — persistence", () => {
       },
     );
     if (!task.session_id) throw new Error("expected an auto-started session");
+
+    await waitForOpeningModelTurn(apiClient, task.id, task.session_id);
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
@@ -401,6 +444,9 @@ test.describe("Chat model selector — persistence", () => {
       },
     );
 
+    if (!task.session_id) throw new Error("expected an auto-started session");
+    await waitForOpeningModelTurn(apiClient, task.id, task.session_id);
+
     await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
@@ -525,6 +571,9 @@ test.describe("Chat model selector — popover open/close behavior", () => {
       },
     );
 
+    if (!task.session_id) throw new Error("model selector task has no session identity");
+    await waitForOpeningModelTurn(apiClient, task.id, task.session_id);
+
     await testPage.goto(`/t/${task.id}`);
 
     const session = new SessionPage(testPage);
@@ -542,9 +591,18 @@ test.describe("Chat model selector — popover open/close behavior", () => {
 
     await testPage.getByRole("option", { name: /Mock Smart/ }).click();
 
-    // The trigger label updates optimistically — wait for that so we know the
-    // selection round-tripped through the handler.
     await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          const runtime = sessions.find((candidate) => candidate.id === task.session_id)?.metadata
+            ?.runtime_config as { model?: string } | undefined;
+          return runtime?.model;
+        },
+        { timeout: 5_000 },
+      )
+      .toBe("mock-smart");
 
     // Popover must still be open so the user can also pick an effort level
     // without re-opening. The effort row is rendered only while PopoverContent

@@ -179,7 +179,7 @@ func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 	t.Run("opencode-native", func(t *testing.T) {
 		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, agents.NewOpenCodeACP(), true)
 		require.NoError(t, err)
-		require.Equal(t, "opencode acp --print-logs --log-level ERROR", cmds.initial)
+		require.Equal(t, "opencode acp --print-logs", cmds.initial)
 	})
 	t.Run("opencode-npx-fallback", func(t *testing.T) {
 		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, agents.NewOpenCodeACP(), false)
@@ -1710,6 +1710,37 @@ func TestLaunch_PromotesWorkspaceOnlyExecution(t *testing.T) {
 		"promotion must preserve the prefix argv token containing spaces")
 	require.Equal(t, "acp-session-abc", got.ACPSessionID, "ACPSessionID must be carried over from the request")
 	require.True(t, got.isResumedSession, "isResumedSession must be set when PreviousExecutionID is non-empty")
+}
+
+func TestLaunch_PromotesWorkspaceOnlyExecutionWithInitialPrompt(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "profile-prompt",
+		AgentName: "auggie",
+	}}
+
+	existing := &AgentExecution{
+		ID:             "exec-workspace-only-prompt",
+		SessionID:      "session-prompt",
+		TaskID:         "task-prompt",
+		AgentProfileID: "profile-prompt",
+	}
+	require.NoError(t, mgr.executionStore.Add(existing))
+
+	attachment := MessageAttachment{AttachmentID: "attachment-1", Type: "resource", Name: "brief.md"}
+	got, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:          existing.TaskID,
+		SessionID:       existing.SessionID,
+		AgentProfileID:  existing.AgentProfileID,
+		TaskDescription: "start the requested work",
+		TurnID:          "turn-initial",
+		Attachments:     []MessageAttachment{attachment},
+	})
+	require.NoError(t, err)
+	require.Same(t, existing, got)
+	require.Equal(t, "start the requested work", getTaskDescriptionFromMetadata(got))
+	require.Equal(t, []MessageAttachment{attachment}, getAttachmentsFromMetadata(got))
+	require.Equal(t, "turn-initial", got.promptTurnIDSnapshot())
 }
 
 func TestLaunch_DoesNotPromoteWorkspaceExecutionAfterSessionTerminalizes(t *testing.T) {

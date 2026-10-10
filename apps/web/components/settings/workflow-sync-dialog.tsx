@@ -27,6 +27,10 @@ import type {
   WorkflowSyncFormState,
 } from "@/hooks/domains/settings/use-workflow-sync";
 import type { WorkflowSyncProvider } from "@/lib/types/workflow-sync";
+import {
+  useWorkflowSyncLifetime,
+  type WorkflowSyncLifetime,
+} from "@/hooks/domains/settings/use-workflow-sync-lifetime";
 import { RemoteRepoProviderTabs } from "@/components/task-create-dialog-remote-repo-provider-tabs";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
@@ -387,9 +391,22 @@ function WorkflowSyncFields({ sync }: { sync: WorkflowSyncController }) {
   );
 }
 
+async function saveCurrentDraft(
+  sync: WorkflowSyncController,
+  completion: WorkflowSyncLifetime,
+  close: () => void,
+) {
+  if (!completion.active) return;
+  let draftAccepted = false;
+  const saved = await sync.handleSave(() => {
+    draftAccepted = true;
+  });
+  if (completion.active && saved && draftAccepted) close();
+}
+
 // WorkflowSyncDialog holds the workflow sync configuration form. It closes
-// itself after a successful save or removal; failures keep it open with the
-// error surfaced via toast.
+// itself after an adopted save or successful removal. Newer drafts and failures
+// keep it open, with request feedback surfaced via toast.
 export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDialogProps) {
   const { t } = useTranslation();
   const [removeConfirming, setRemoveConfirming] = useState(false);
@@ -399,6 +416,11 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
     (!Number.isInteger(sync.form.interval_seconds) || sync.form.interval_seconds < 60);
   const disableSave = isSaveDisabled(sync, intervalInvalid);
   const targetKey = workflowSyncConfirmationTarget(sync);
+  const completion = useWorkflowSyncLifetime(sync.lifetime, open);
+  const committedOpenChange = useRef(onOpenChange);
+  useLayoutEffect(() => {
+    committedOpenChange.current = onOpenChange;
+  }, [onOpenChange]);
   const generation = useRef(0);
   useLayoutEffect(() => {
     generation.current += 1;
@@ -409,17 +431,23 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
 
   useClearWorkflowSyncRemovalConfirmation(open, sync, setRemoveConfirming);
 
-  const handleSave = async () => {
-    if (await sync.handleSave()) onOpenChange(false);
-  };
+  const handleSave = () =>
+    saveCurrentDraft(sync, completion, () => committedOpenChange.current(false));
   const handleRemove = async () => {
+    if (!completion.active) return;
     const requestGeneration = generation.current;
-    const removed = await sync.handleDelete();
-    if (generation.current !== requestGeneration) return;
+    let successGeneration = requestGeneration;
+    const removed = await sync.handleDelete(() => {
+      // Read the target before removal's own config/reset changes it.
+      successGeneration = generation.current;
+    });
+    if (!completion.active) return;
     if (removed) {
-      onOpenChange(false);
+      if (successGeneration !== requestGeneration) return;
+      committedOpenChange.current(false);
       return;
     }
+    if (generation.current !== requestGeneration) return;
     // The confirmation owns retry state; the controller owns failure feedback.
     return Promise.reject();
   };

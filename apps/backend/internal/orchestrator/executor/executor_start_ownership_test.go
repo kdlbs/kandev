@@ -2,6 +2,8 @@ package executor
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -55,7 +57,7 @@ func TestExistingWorkspaceStart_ActiveAgent(t *testing.T) {
 	}
 
 	_, err := exec.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, "queued follow-up", true, "", request, nil, nil, nil, true,
+		ctx, task, session, "queued follow-up", true, "", request, nil, nil, nil, nil, true,
 	)
 	if err == nil {
 		<-started
@@ -99,7 +101,7 @@ func TestExistingWorkspaceStart_PreparedWorkspaceCanStart(t *testing.T) {
 	}
 
 	execution, err := exec.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, "initial brief", true, "", request, nil, nil, nil, true,
+		ctx, task, session, "initial brief", true, "", request, nil, nil, nil, nil, true,
 	)
 
 	require.NoError(t, err)
@@ -108,6 +110,177 @@ func TestExistingWorkspaceStart_PreparedWorkspaceCanStart(t *testing.T) {
 	case <-started:
 	case <-time.After(time.Second):
 		t.Fatal("prepared workspace did not start an agent process")
+	}
+}
+
+func TestExistingWorkspaceStart_BindsInitialDeliveryBeforeAdmission(t *testing.T) {
+	ctx := context.Background()
+	repo := newMockRepository()
+	task := &v1.Task{ID: "task-delivery", WorkspaceID: "workspace-delivery"}
+	session := &models.TaskSession{
+		ID: "session-delivery", TaskID: task.ID, State: models.TaskSessionStateCreated,
+		AgentProfileID: "profile-delivery",
+	}
+	repo.sessions[session.ID] = cloneMockTaskSession(session)
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+		ID: "runtime-delivery", TaskID: task.ID, SessionID: session.ID,
+		Status: models.ExecutorRunningStatusPrepared, AgentExecutionID: "execution-delivery",
+	}
+	var order atomic.Int32
+	var identityOrder, admissionOrder, startOrder atomic.Int32
+	started := make(chan struct{}, 1)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-delivery", nil
+		},
+		setInitialDeliverySubmissionIDFunc: func(_ context.Context, executionID, submissionID string) error {
+			if executionID != "execution-delivery" || submissionID != "message-delivery" {
+				t.Fatalf("initial delivery identity = %q/%q", executionID, submissionID)
+			}
+			identityOrder.Store(order.Add(1))
+			return nil
+		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			startOrder.Store(order.Add(1))
+			started <- struct{}{}
+			return nil
+		},
+	}
+	request := &LaunchAgentRequest{
+		TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,
+		InitialDeliverySubmissionID: "message-delivery",
+		BeforeAgentStart: func(context.Context, string) error {
+			admissionOrder.Store(order.Add(1))
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+	_, err := exec.startAgentOnExistingWorkspaceWithRequest(
+		ctx, task, session, "initial prompt", true, "", request, nil, nil, nil, nil, false,
+	)
+	require.NoError(t, err)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("existing workspace did not start the agent")
+	}
+	if identityOrder.Load() == 0 || admissionOrder.Load() <= identityOrder.Load() || startOrder.Load() <= admissionOrder.Load() {
+		t.Fatalf("initial identity/admission/start ordering = %d/%d/%d", identityOrder.Load(), admissionOrder.Load(), startOrder.Load())
+	}
+}
+
+type cancelledResumeStartupCase struct {
+	name             string
+	startErr         error
+	currentAttemptID string
+	wantCleanup      bool
+}
+
+type cancelledResumeStartupFixture struct {
+	startEntered  chan struct{}
+	releaseStart  chan struct{}
+	releaseOnce   sync.Once
+	cleanupCalled chan struct{}
+	cleanupCalls  int
+	processStops  int
+	result        <-chan error
+	cancel        context.CancelFunc
+}
+
+func TestCancelledResumeStartupDelegatesExactCleanup(t *testing.T) {
+	cases := []cancelledResumeStartupCase{
+		{name: "startup error after cancellation", startErr: errors.New("startup failed"), currentAttemptID: "attempt-current", wantCleanup: true},
+		{name: "late startup success", currentAttemptID: "attempt-current", wantCleanup: true},
+		{name: "stale attempt with reused execution", currentAttemptID: "attempt-successor"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) { assertCancelledResumeStartupCleanup(t, tc) })
+	}
+}
+
+func assertCancelledResumeStartupCleanup(t *testing.T, tc cancelledResumeStartupCase) {
+	f := newCancelledResumeStartupFixture(t, tc)
+	t.Cleanup(func() { f.cancelAndJoin(t) })
+	select {
+	case <-f.startEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("StartAgentProcess did not reach its barrier")
+	}
+	f.cancel()
+	f.releaseOnce.Do(func() { close(f.releaseStart) })
+	select {
+	case <-f.result:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled startup worker did not return")
+	}
+	assertCancelledResumeCleanupOwnership(t, f, tc.wantCleanup)
+}
+
+func newCancelledResumeStartupFixture(t *testing.T, tc cancelledResumeStartupCase) *cancelledResumeStartupFixture {
+	const taskID, sessionID, executionID, attemptID = "task-cancelled-start", "session-cancelled-start", "execution-reused", "attempt-current"
+	f := &cancelledResumeStartupFixture{
+		startEntered: make(chan struct{}), releaseStart: make(chan struct{}), cleanupCalled: make(chan struct{}, 1),
+	}
+	manager := &mockAgentManager{
+		startAgentProcessFunc: func(context.Context, string) error {
+			close(f.startEntered)
+			<-f.releaseStart
+			return tc.startErr
+		},
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) { return executionID, nil },
+		stopAgentWithReasonFunc:      func(context.Context, string, string, bool) error { f.processStops++; return nil },
+	}
+	repo := newMockRepository()
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateStarting, AgentExecutionID: executionID,
+		Metadata: map[string]interface{}{models.SessionMetaKeyAgentStartAttemptID: tc.currentAttemptID},
+	}
+	exec := newTestExecutor(t, manager, repo)
+	exec.SetOnCancelledResumeExecutionCleanup(func(
+		_ context.Context, gotTaskID, gotSessionID, gotExecutionID, gotAttemptID string,
+	) {
+		if gotTaskID != taskID || gotSessionID != sessionID || gotExecutionID != executionID || gotAttemptID != attemptID {
+			t.Errorf("cleanup identity = (%q, %q, %q, %q), want exact startup identity", gotTaskID, gotSessionID, gotExecutionID, gotAttemptID)
+		}
+		f.cleanupCalls++
+		f.cleanupCalled <- struct{}{}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	f.cancel = cancel
+	ctx = WithCancellableResumeContext(WithResumeAttemptID(ctx, attemptID))
+	f.result = exec.runAgentProcessAsyncWithObservation(
+		ctx, taskID, sessionID, executionID, "", func(context.Context) {}, false, true, attemptID,
+	)
+	return f
+}
+
+func (f *cancelledResumeStartupFixture) cancelAndJoin(t *testing.T) {
+	t.Helper()
+	f.cancel()
+	f.releaseOnce.Do(func() { close(f.releaseStart) })
+	select {
+	case <-f.result:
+	case <-time.After(5 * time.Second):
+		t.Error("cancelled startup worker did not finish")
+	}
+}
+
+func assertCancelledResumeCleanupOwnership(t *testing.T, f *cancelledResumeStartupFixture, wantCleanup bool) {
+	t.Helper()
+	if wantCleanup {
+		select {
+		case <-f.cleanupCalled:
+		default:
+			t.Fatal("current cancelled attempt did not delegate cleanup")
+		}
+		if f.cleanupCalls != 1 {
+			t.Fatalf("cleanup callback calls = %d, want 1", f.cleanupCalls)
+		}
+	} else if f.cleanupCalls != 0 {
+		t.Fatalf("stale attempt cleanup callback calls = %d, want 0", f.cleanupCalls)
+	}
+	if f.processStops != 0 {
+		t.Fatalf("executor raw stop calls = %d, want callback-owned cleanup only", f.processStops)
 	}
 }
 

@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { formatDateTime } from "@/lib/i18n/formats";
 import type { StorageMaintenanceRun } from "@/lib/types/system";
 import { formatGigabytes } from "./storage-units";
+import { StorageGoCacheResult } from "./storage-go-cache-result";
 
 function dateLabel(value: string): string {
   const parsed = new Date(value);
@@ -120,6 +121,11 @@ function StorageRunHistoryContent({
           </AccordionTrigger>
           <AccordionContent className="px-3">
             {run.message && <p className="mb-2 break-words text-amber-600">{run.message}</p>}
+            <StorageGoCacheResult
+              result={run.result}
+              busyPolicyEnabled={run.settings_snapshot.go_cache?.allow_cleanup_while_busy === true}
+              testId="storage-go-cache-result"
+            />
             <TemporaryArtifactRunResult result={run.result} />
             <pre className="max-w-full overflow-hidden whitespace-pre-wrap break-all rounded bg-muted p-3 text-[11px]">
               {JSON.stringify(run.result, null, 2)}

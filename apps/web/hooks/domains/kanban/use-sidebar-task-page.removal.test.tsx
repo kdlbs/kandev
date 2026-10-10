@@ -10,6 +10,8 @@ import { registerTasksHandlers } from "@/lib/ws/handlers/tasks";
 import { makeDeletedMessage } from "@/lib/ws/handlers/tasks.test-helpers";
 import { useWorkspaceSidebarTasks } from "./use-workspace-sidebar-tasks";
 
+const disclosure = vi.hoisted(() => ({ groups: [] as string[] }));
+
 vi.mock("@/lib/api/domains/kanban-api", () => ({ querySidebarTasks: vi.fn() }));
 vi.mock("@/hooks/domains/sidebar/use-effective-sidebar-view", () => ({
   useEffectiveSidebarView: () => ({
@@ -17,7 +19,7 @@ vi.mock("@/hooks/domains/sidebar/use-effective-sidebar-view", () => ({
     filters: [],
     sort: { key: "updatedAt", direction: "desc" },
     group: "none",
-    collapsedGroups: [],
+    collapsedGroups: disclosure.groups,
   }),
 }));
 vi.mock("@/hooks/domains/sidebar/use-sidebar-task-prefs", () => ({
@@ -32,6 +34,7 @@ vi.mock("@/hooks/use-foreground-refresh", () => ({ useForegroundRefresh: vi.fn()
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
+  disclosure.groups = [];
 });
 
 function Wrapper({ children }: { children: ReactNode }) {
@@ -169,4 +172,34 @@ describe("confirmed sidebar deletion", () => {
       refresh.resolve(response(["keep"]));
     });
   });
+});
+
+// @covers AC-UI-SIDEBAR-ARCHIVED-FILTER-002.25
+it("keeps confirmed deletions absent during a disclosure replacement and stale completion", async () => {
+  const pending = deferred<SidebarTaskPageResponse>();
+  const final = deferred<SidebarTaskPageResponse>();
+  vi.mocked(querySidebarTasks)
+    .mockResolvedValueOnce(response(["target", "keep"]))
+    .mockReturnValueOnce(pending.promise)
+    .mockReturnValue(final.promise);
+  const hook = renderHook(
+    () => ({ store: useAppStoreApi(), sidebar: useWorkspaceSidebarTasks("ws") }),
+    { wrapper: Wrapper },
+  );
+  await waitFor(() => expect(hook.result.current.sidebar.allTasks).toHaveLength(2));
+  disclosure.groups = ["repo-a"];
+  hook.rerender();
+  expect(hook.result.current.sidebar.allTasks.map((task) => task.id)).toEqual(["target", "keep"]);
+  expect(hook.result.current.sidebar.page.isDisclosureTransition).toBe(true);
+  act(() =>
+    registerTasksHandlers(hook.result.current.store)["task.deleted"]!(
+      makeDeletedMessage({ task_id: "target", workspace_id: "ws", workflow_id: "wf" }),
+    ),
+  );
+  expect(hook.result.current.sidebar.allTasks.map((task) => task.id)).toEqual(["keep"]);
+  await act(async () => pending.resolve(response(["target", "keep"])));
+  expect(hook.result.current.sidebar.allTasks.map((task) => task.id)).toEqual(["keep"]);
+  await waitFor(() => expect(querySidebarTasks).toHaveBeenCalledTimes(3));
+  await act(async () => final.resolve(response(["keep"])));
+  expect(hook.result.current.sidebar.allTasks.map((task) => task.id)).toEqual(["keep"]);
 });

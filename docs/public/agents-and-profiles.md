@@ -1,6 +1,6 @@
 ---
 title: "Agents and Profiles"
-description: "Install agent CLIs and create profiles for models, modes, flags, secrets, permissions, passthrough, and MCP."
+description: "Install agent CLIs, create profiles, manage runtime updates, and configure models, modes, flags, secrets, permissions, passthrough, and MCP."
 ---
 
 # Agents and Profiles
@@ -17,6 +17,14 @@ Agent authentication is separate from repository and integration credentials.
 2. Authenticate it as the same operating-system user.
 3. Create a profile and verify model, mode, permissions, environment, and executor compatibility.
 4. Use the advanced sections only when you need passthrough, MCP, or custom launch behavior.
+
+## Agent page options
+
+On **Settings > Agents**, select **Options** beside **Terminal** to open Agent
+options. Turn on **Hide disabled profiles from navigation** to remove disabled
+profiles from the Settings navigation tree. Disabled profiles remain available
+on the Agents page, and the preference applies immediately in this browser
+profile.
 
 ## Install or detect an agent
 
@@ -164,10 +172,37 @@ ACP runtime selection does not replace the passthrough command.
 
 The status shown on this page is authoritative for the current host. A CLI that works in your interactive shell can still be absent from Kandev when the service has a different `PATH`, home directory, or operating-system user.
 
+### Update Oh My Pi on the Kandev host
+
+On an installed `omp` card, select the update icon under **Settings > Agents**.
+Review the installed version, the **Stable latest (reference)** version, and
+the `omp update` command, then choose **Update runtime** or **Repair runtime**.
+Kandev runs OMP's own updater as the Kandev service user on the host, streams
+its output, and refreshes ACP capabilities only after a successful probe.
+Active sessions are not restarted.
+
+OMP detects whether its installation is managed by Homebrew, mise, Bun, npm,
+or a standalone binary and updates through that method. A Nix-managed
+installation cannot be updated by this action. OMP follows its already
+configured stable or canary channel; Kandev does not choose a channel or pass
+a version to `omp update`. The stable latest shown in Settings is a
+comparison reference, **not a promised install target**: the installed
+version reported by OMP after updating may differ. There is no version
+picker, Kandev pin, or rollback for OMP.
+
+The update affects only the host installation, not task containers or remote
+executors. If OMP's updater or the follow-up ACP probe fails, Settings reports
+the error and retains the previous capability catalogue; Kandev cannot
+restore an executable that OMP already changed. When metadata is unavailable,
+the update icon remains available, but a preview must resolve the stable
+reference before the update can start.
+
 ### Update a managed agent runtime
 
 The update icon is available on managed Claude, Codex, OpenCode, Copilot,
-Gemini, Pi, and Muse agent cards when Kandev owns their managed runtime. It prepares the runtime on the Kandev host.
+Gemini, Pi, and Muse agent cards when Kandev owns their managed runtime. It
+prepares their pinned npm runtime on the Kandev host. OMP uses the separate
+self-update flow above.
 
 Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
@@ -203,12 +238,41 @@ the control has no dot but remains usable.
 4. Select **Update runtime**, **Roll back runtime**, or **Repair runtime**.
 5. Wait for the exact version to prepare and pass its runtime capability probe.
 
-When the `opencode` executable is on the Kandev host `PATH`, Kandev treats it
-as externally managed. The runtime update section links to OpenCode's supported
-upgrade guidance instead of changing a global installation. Hosts without that
-executable use the managed `npx` runtime. Containers and SSH executors retain
-their existing executor-safe command and selected version; updating an external
-host CLI does not update those environments.
+OpenCode has two runtime families. Fresh Kandev installations use the managed
+v2 package `@opencode/cli`. Kandev keeps an existing v1 selection on
+`opencode-ai` until you choose the v2 migration action.
+
+#### Move OpenCode from v1 to v2
+
+Use this action only after you review the shared-data boundary. OpenCode v1 and
+v2 use the same configuration and session data paths.
+
+1. Stop standalone OpenCode v1 processes that use the same session data.
+2. Open the OpenCode update control in **Settings > Agents**.
+3. Select **Upgrade to managed OpenCode v2** and review the package, version, and scope.
+4. Select **Upgrade to managed OpenCode v2** again to start the upgrade.
+5. Keep Kandev open while it installs the package and checks ACP startup.
+
+The selection applies to future OpenCode launches across every OpenCode
+profile in this Kandev installation. This includes local, container, and SSH
+executors. The action installs the managed v2 package; it leaves a standalone
+`opencode` installation unchanged.
+
+Kandev saves v2 as the active runtime only after the exact package passes an
+isolated ACP probe. Kandev-owned active OpenCode work blocks activation. The
+upgrade does not stop that work. If the probe or database write fails, v1
+remains selected. If capability discovery fails after activation, v2 remains
+selected and Kandev reports the discovery error.
+
+Kandev keeps saved OpenCode session IDs when it restores a conversation. If
+OpenCode cannot restore a saved conversation, Kandev reports the error in that
+session. It does not create a replacement conversation. Kandev cannot reverse
+changes that OpenCode v2 makes to shared session data, so selecting v1 later
+does not guarantee a rollback.
+
+When an existing native OpenCode v1 installation remains selected, same-family
+updates can still update that native executable. A v2 migration always uses
+the managed `@opencode/cli` package and does not run a global npm install.
 
 Kandev enables the action only after the backend validates the selected version
 against the trusted package catalogue. It does not accept package names, npm
@@ -229,35 +293,32 @@ configuration options, commands, and runtime version without a page reload.
 
 When a native OpenCode installation is present on the host, its vendor update guidance stays separate from **Manage fallback versions**. That control selects the managed package used by remote and container launches; it does not update the native host or a remote native installation. Update, rollback and return to the Kandev default remain available for the managed fallback. A rejected or busy manual request leaves automatic-update consent unchanged; an accepted manual selection turns it off.
 
-#### Recover a stale npm runtime lookup
+#### Recover a managed runtime startup failure
 
-Host-local managed runtimes normally start with npm's offline-preferred lookup.
-If npm has stale package metadata and cannot resolve the selected
-`package@version`, the first ACP startup can fail even though the configured
-registry contains that exact version. Kandev recognizes this specific npm
-resolution error, removes only the deterministic `_npx` execution tree for the
-selected package and version, then retries the same command once with an
-online-preferred metadata lookup.
+Managed runtime startup can retry once when npm reports a strict `ETARGET` for
+the selected exact package or a recognized temporary network or cache error.
+The `ETARGET` retry prefers an online lookup. Kandev can also retry an ordinary
+process exit before ACP initialization when complete, generation-matched
+startup evidence confirms that stderr was empty. Incomplete evidence, other
+permanent or unrecognized npm errors, cancellation, signal termination, and
+failures after ACP initialization do not trigger this automatic retry. Kandev first confirms
+that the failed process has stopped, then waits two to three seconds before the
+replacement starts.
 
-Kandev also performs this recovery while it builds the host capability
-catalogue used by agent profiles. A successful retry publishes the recovered
-models and keeps the saved model, fallback model, mode, runtime version, and
-enabled state unchanged. The profile remains selectable and does not show a
-capability warning. Kandev reports a failed capability status if it cannot
-prepare the retry or repair the cache, or if the one online retry fails.
+The retry uses the same agent, package, exact version, environment, executor,
+session, and initial prompt. It does not delete the selected npm execution tree
+or a sibling tree. While it waits, the existing session status shows the second
+attempt. If that attempt succeeds, the conversation continues without a
+recovery card. If it fails, the card reports the cause and actual attempt count
+and shows one **Retry runtime** action with collapsed technical details.
 
-The same recovery applies to managed runtime startup on a local PC, in a local
-Docker executor, or in a remote SSH executor. Kandev sends the repair request
-to the agentctl process that owns the failed execution. That process resolves
-npm's cache with the agent environment and removes only the selected execution
-tree. It does not repair the Kandev host cache, delete sibling execution trees,
-change the registry, or clear the global npm cache.
-
-The retry keeps the selected package, exact version, command prefix, model,
-permissions, and session identity. It does not change the npm registry or
-silently select another version. When the retry succeeds, no recovery card is
-shown. When it fails again, Kandev and Office show one **Retry runtime** action
-with collapsed technical details.
+This startup recovery applies to managed npm runtimes on a local PC, in a local
+Docker executor, or in a remote SSH executor. It does not establish that an npm
+race caused any particular startup failure. Host capability discovery has a
+separate, narrower recovery: an exact-package `ETARGET` result can retry once
+with an online-preferred lookup. That probe retry also preserves npm execution
+trees and keeps the saved model, fallback model, mode, runtime version, and
+enabled state unchanged.
 
 Managed `npx` runtimes use a Kandev-owned npm project directory, so an `.npmrc`
 in the task repository does not change the managed runtime's package lookup.
@@ -272,19 +333,36 @@ unrelated npm data and does not target the stale execution tree. If the
 specialized retry cannot resolve the runtime, check that the Kandev service
 uses the expected npm installation and configured registry. Run `npm config get registry` as the Kandev service user to inspect the registry used by that process. Then use the runtime update controls to select and prepare another trusted stable version.
 
+### Refresh profile models after a runtime update
+
+Manage runtime versions in **Settings > Agents > Agent runtime updates**.
+Profile pages focus on model selection and launch settings.
+
+After a managed runtime update succeeds, an open profile refreshes its model
+catalog with the current draft settings. The selected model stays unchanged.
+Unsaved launch settings remain unsaved. A failed update keeps the previous catalog.
+
+After you edit launch settings, choose **Refresh models** to check the current draft.
+The provider returns the model catalog. Discovery success does not confirm
+catalog completeness or account access to every model.
+
 ### Runtime notifications and automatic updates
 
 Kandev checks enabled, available agent runtimes in the background, including
-native CLIs with a verified release source. Outside Settings, an **agent runtime
-updates** indicator remains visible while a known newer version is available.
-Notifications name the affected runtime and link directly to its row in
-**Settings > Agents > Agent runtime updates**. The existing update-available
-notification preferences apply; repeated notices for the same runtime and version
-are suppressed across reloads.
+native CLIs with a verified release source. Open **Settings > Agents** to review
+runtime versions and update policies. A notice for one runtime names it and links
+directly to its row in **Settings > Agents > Agent runtime updates**. The existing
+update-available notification preferences apply; repeated notices for the same
+runtime and version are suppressed across reloads.
+
+At startup or after reconnect, available runtime updates discovered within the
+same 30-second window appear in one summary. **Review updates** opens the expanded
+runtime section. A notice for one runtime keeps its name and direct link. Update
+success, failure, and interruption notices remain individual and immediate.
 
 The **Agent runtime updates** section is at the bottom of **Settings > Agents**,
 after your installed agents, and starts collapsed. Expand it to manage runtime
-policies. Notification and indicator links open the section automatically and
+policies. Notification links open the section automatically and
 reveal their destination. Collapsing the section preserves unsaved policy changes.
 
 The runtime section shows the selected or observed version, latest known version,
@@ -337,24 +415,24 @@ An **ACP** agent is driven over the Agent Client Protocol instead, so it does ge
 
 Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Profile_**. The page shows the resolved command preview and only the settings supported by that agent.
 
-| Setting                      | Runtime behavior                                                                                                                                                 |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Name                         | Label shown in workflow, session, and automation selectors.                                                                                                      |
-| Model                        | Requested through ACP when the agent supports model selection. Leaving it unset uses the agent's default where the form allows that.                             |
-| Require exact model          | Per-profile opt-in. When enabled, Kandev stops before inference unless the executor advertises and accepts the saved model. It disables fallback controls without erasing their saved values. |
-| Fallback settings            | Compatible profiles can use an advertised explicit fallback or automatic provider-default continuation. If the saved model is absent and exactly one bracketed variation is advertised, Kandev can use that variation with a warning. |
-| Mode                         | Requested through the installed agent's advertised ACP session control before the first prompt. Kandev prefers its mode config option and supports legacy `session/set_mode`. An explicit mode must be confirmed by the agent or startup holds the prompt. Applying a mode does not write Claude settings or redirect its configuration directory. |
-| Configuration options        | Dynamic ACP values requested with `session/set_config_option`.                                                                                                   |
-| CLI flags                    | Enabled entries are tokenized and appended to the ACP launch command.                                                                                            |
-| Command prefix               | Optional ACP-only launcher argv prepended to the command, for example `greywall --`.                                                                             |
-| Environment                  | Literal values or references to Kandev secrets, resolved when the process starts.                                                                                |
-| Provider                     | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                 |
-| CLI passthrough              | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                               |
-| Enabled                      | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                         |
-| Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
-| MCP servers                  | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                          |
-| Share local Cursor MCP credentials | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. It applies only to local executions that share the backend home directory. |
-| Import local Cursor plugin MCP servers | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. Imports supported local plugin and user MCP definitions into task worktrees. On supported macOS installations, enabled marketplace plugins are discovered from Cursor’s account service and matched to their exact cached revision. |
+| Setting                                | Runtime behavior                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name                                   | Label shown in workflow, session, and automation selectors.                                                                                                                                                                                                                                                                                        |
+| Model                                  | Requested through ACP when the agent supports model selection. Leaving it unset uses the agent's default where the form allows that.                                                                                                                                                                                                               |
+| Require exact model                    | Per-profile opt-in. When enabled, Kandev stops before inference unless the executor advertises and accepts the saved model. It disables fallback controls without erasing their saved values.                                                                                                                                                      |
+| Fallback settings                      | Compatible profiles can use an advertised explicit fallback or automatic provider-default continuation. If the saved model is absent and exactly one bracketed variation is advertised, Kandev can use that variation with a warning.                                                                                                              |
+| Mode                                   | Requested through the installed agent's advertised ACP session control before the first prompt. Kandev prefers its mode config option and supports legacy `session/set_mode`. An explicit mode must be confirmed by the agent or startup holds the prompt. Applying a mode does not write Claude settings or redirect its configuration directory. |
+| Configuration options                  | Dynamic ACP values requested with `session/set_config_option`.                                                                                                                                                                                                                                                                                     |
+| CLI flags                              | Enabled entries are tokenized and appended to the ACP launch command.                                                                                                                                                                                                                                                                              |
+| Command prefix                         | Optional ACP-only launcher argv prepended to the command, for example `greywall --`.                                                                                                                                                                                                                                                               |
+| Environment                            | Literal values or references to Kandev secrets, resolved when the process starts.                                                                                                                                                                                                                                                                  |
+| Provider                               | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                                                                                                                                                                                                   |
+| CLI passthrough                        | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                                                                                                                                                                                                                 |
+| Enabled                                | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                                                                                                                                                                                                           |
+| Auto-approve all permissions           | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default.                                                                                                                                                                                   |
+| MCP servers                            | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                                                                                                                                                                                                            |
+| Share local Cursor MCP credentials     | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. It applies only to local executions that share the backend home directory.                                                                                                                                                                                                |
+| Import local Cursor plugin MCP servers | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. Imports supported local plugin and user MCP definitions into task worktrees. On supported macOS installations, enabled marketplace plugins are discovered from Cursor’s account service and matched to their exact cached revision.                                       |
 
 Agents can inspect and update declared profile settings through the compact
 `search_settings_kandev`, `describe_setting_kandev`, `get_settings_kandev`,
@@ -634,7 +712,13 @@ environment values, headers, raw MCP arguments, or option metadata. See
 
 Auto approval can authorize shell commands, file changes, network calls, or any other capability exposed by that agent. Agent-specific flags that suppress permission prompts can be broader still. Use either only with a constrained executor, repository, environment, and credential set.
 
-Workspace automation selectors do not offer passthrough agent profiles. Local executor profiles are available for the repository-free target; Worktree requires a repository. Hidden automation sessions receive a fixed workspace-scoped coordinator MCP surface. Visible normal-task automations use the ordinary task profile and MCP surface. The trusted automation principal is resolved before hidden-run dispatch, and a hidden automation task and its sessions cannot be used as mutation, messaging, stopping, spawning, or blocker targets. Cross-task spawning uses the target task's normal profile. Native provider continuation and compaction remain authoritative for a healthy reusable session; Kandev's fallback resume prompt uses only the newest 50 non-empty user or assistant messages and excludes tool events. See [Automation and MCP](automation-and-mcp.md).
+Workspace automation selectors do not offer passthrough agent profiles. Local executor profiles are available for the repository-free target; Worktree requires a repository. Hidden automation sessions receive a fixed workspace-scoped coordinator MCP surface. Visible normal-task automations use the ordinary task profile and MCP surface. The trusted automation principal is resolved before hidden-run dispatch, and a hidden automation task and its sessions cannot be used as mutation, messaging, stopping, spawning, or blocker targets. Cross-task spawning uses the target task's normal profile. Native provider continuation and compaction remain authoritative for a healthy reusable session. When native continuation is unavailable, Kandev uses an explicit recovery action and bounded saved history. It does not restore private harness state or repeat an uncertain prompt. See [Automation and MCP](automation-and-mcp.md).
+
+When native continuation is unavailable, Kandev parks unattended work and
+shows a recovery action. A provider retry, status update, or dismissed notice
+does not clear this block. An operator must choose the recovery action before
+the original work can run again. A context continuation creates a new native
+conversation from saved history. It does not restore private harness state.
 
 ## Structured ACP and terminal passthrough
 
@@ -669,6 +753,15 @@ its native chat ID; Kandev never resumes an arbitrary latest chat. Preparation c
 turns, and automatic server approval does not bypass tool-call permissions.
 The login-terminal action currently requires a POSIX host shell; native Windows
 login recovery is unavailable.
+
+If native approval or verification fails, expand the preparation details to
+review the operation, failure stage, optional exit status and sanitized cause.
+These details do not include raw command output or credential values. If retry
+reports that the agent is using the session, wait for its current turn to finish
+before trying again. An early busy check runs no native command. A prompt can
+also start after retry begins, after approval or verification commands have run.
+In that case Kandev keeps the existing preparation details and rejects the
+session reload without stopping, reloading or replaying the active prompt.
 
 ### Share local Cursor MCP credentials
 
@@ -728,7 +821,7 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 - **Login required:** use the agent card's login terminal or sign in under Kandev's operating-system user; signing in as another user does not help the service.
 - **Model, mode, or command probe fails:** authenticate first, refresh discovery, and choose a value advertised by the installed version.
 - **Launch fails after editing flags:** inspect the command preview, remove stale arguments, and correct unmatched quotes or trailing escapes.
-- **Managed npm runtime cannot resolve its selected version:** Kandev checks the configured registry and retries the same version once after refreshing its exact `_npx` execution tree. If the retry fails, verify the service user's npm configuration and registry, then use **Settings > Agents** to prepare another trusted stable version. Do not start with `npm cache clean --force`.
+- **Managed npm runtime cannot start:** Retry is limited to strict exact-package `ETARGET`, recognized temporary npm errors, and an ordinary pre-ACP exit with complete generation-matched evidence of empty stderr. Other permanent or unclassified errors and incomplete evidence do not retry. Kandev confirms cleanup and keeps the selected package and npm trees. If startup still fails, review the card's technical details and verify the service user's npm configuration and registry. Use **Settings > Agents** to prepare another trusted stable version when needed. Do not start with `npm cache clean --force`.
 - **Environment value is absent:** confirm the secret still exists, the key is not reserved, and an executor/runtime variable is not already taking precedence.
 - **MCP server is absent:** confirm agent MCP support, valid JSON, transport mode, executor policy, and the session warning logs.
 - **MCP tools are missing from one agent session:** open **MCP servers** in that

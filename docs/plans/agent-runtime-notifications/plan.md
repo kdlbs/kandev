@@ -14,6 +14,10 @@ legacy_specs: []
 
 Extend the existing runtime status/activation boundaries, then integrate durable opt-in policy and notification delivery, and finally expose app-wide localized controls. The user authorized unattended implementation and normal-policy delivery through merge in this task; the usual design handoff pause is waived. Work stays sequential in this session.
 
+## Follow-up contract
+
+The [floating indicator removal package](../remove-agent-runtime-update-indicator/plan.md) implements AC-AGENTS-RUNTIME-NOTIFY-001.7 in place of retired 001.4. Indicator previews and positive indicator assertions below describe the earlier implementation, not the current result. The follow-up owns the shared desktop/phone helper changes; historical verification results and completed work-order statuses remain delivery evidence for this package.
+
 ## Scope
 
 All registered agents receive truthful capability/status coverage. Eligible managed packages receive opt-in automatic activation. Native/vendor mechanisms receive verified source checks where available and manual guidance where safe activation cannot be established. Existing sessions, remote ownership, exact manual selection, rollback, and defaults remain protected. Model discovery and vendor configuration migrations are excluded.

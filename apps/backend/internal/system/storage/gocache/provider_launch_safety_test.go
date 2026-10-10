@@ -86,10 +86,9 @@ func TestCleanupRejectsAdoptedRootSymlink(t *testing.T) {
 			settings.GoCache.Enabled = true
 			settings.GoCache.MaxBytes = 1
 			settings.GoCache.AdoptedPath = link
-			store := &recordingStore{}
 			provider := New(Config{
 				HomeDir: home, TrashDir: filepath.Join(home, "trash"),
-				Settings: staticSettings{settings: settings}, Store: store,
+				Settings: staticSettings{settings: settings},
 			})
 
 			var err error
@@ -100,9 +99,6 @@ func TestCleanupRejectsAdoptedRootSymlink(t *testing.T) {
 			}
 			if err == nil {
 				t.Fatal("cleanup succeeded through an adopted root symlink")
-			}
-			if store.created != nil || len(store.entries) != 0 {
-				t.Fatalf("cleanup persisted quarantine state: created=%#v entries=%#v", store.created, store.entries)
 			}
 			if data, readErr := os.ReadFile(artifact); readErr != nil || string(data) != "retain target" {
 				t.Fatalf("target data changed: data=%q err=%v", data, readErr)

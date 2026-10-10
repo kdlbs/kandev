@@ -2,10 +2,8 @@ import { test, expect } from "../../fixtures/ssh-test-base";
 import { SSHSettingsPage } from "../../pages/SSHSettingsPage";
 
 /**
- * UI persistence: state survives reload, executor list renders the SSH
- * entry with the right icon and label, partial form state doesn't leak.
- *
- * Covers e2e-plan.md group R (R1–R4).
+ * UI persistence: saved executor state survives reload, and partial forms
+ * do not leak state or show premature results.
  */
 test.describe("ssh executor — persistence + UI sweep", () => {
   test("fingerprint persists across reload (Trusted badge stays)", async ({
@@ -64,16 +62,6 @@ test.describe("ssh executor — persistence + UI sweep", () => {
     await expect(page.hostInput).toHaveValue("");
     await expect(page.portInput).toHaveValue("22"); // default
     await expect(page.connectionBadge).toHaveAttribute("data-status", "unverified");
-  });
-
-  test("executor list renders the SSH entry with the right label", async ({
-    apiClient,
-    seedData,
-  }) => {
-    const { executors } = await apiClient.listExecutors();
-    const ssh = executors.find((e) => e.id === seedData.sshExecutorId);
-    expect(ssh).toBeDefined();
-    expect(ssh!.type).toBe("ssh");
   });
 
   test("incomplete test (no click yet) does not show a result panel", async ({

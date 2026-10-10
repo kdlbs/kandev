@@ -15,8 +15,7 @@ import {
   IconGitFork,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime } from "@/lib/utils";
-import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
+import { formatMessageTime } from "@/lib/i18n/message-time";
 import { formatPromptDuration, messageTurnDurationSeconds } from "@/lib/turn-duration";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useAppStore } from "@/components/state-provider";
@@ -259,35 +258,40 @@ function MessageDebugDialog({
 
 function MessageTimestamp({ createdAt }: { createdAt: string }) {
   const { t } = useTranslation();
+  const messageTimeDisplay = useAppStore((state) => state.userSettings.messageTimeDisplay);
   const usesTouchDrawer = useTouchDrawer();
   const [open, setOpen] = useState(false);
-  if (parseStrictRfc3339Timestamp(createdAt) === null) return null;
-  const date = new Date(createdAt);
-  const absoluteTime = date.toLocaleString();
+  const formatted = formatMessageTime(createdAt, messageTimeDisplay);
+  if (!formatted) return null;
+
   const timeEl = (
     <time
       dateTime={createdAt}
-      title={absoluteTime}
-      className="text-[10px] text-muted-foreground/60 font-mono"
+      title={formatted.counterpart}
+      aria-label={t("task:messageTimestampAriaLabel", {
+        label: formatted.label,
+        counterpart: formatted.counterpart,
+      })}
+      className="min-w-0 text-[10px] text-muted-foreground/60 font-mono"
     >
-      {formatRelativeTime(createdAt)}
+      {formatted.label}
     </time>
   );
-
   if (!usesTouchDrawer) return timeEl;
 
-  // Native `title` tooltips never fire on touch (no hover event), so coarse
-  // pointers get a tap-to-open Drawer surfacing the same absolute time.
   return (
     <Drawer open={open} onOpenChange={setOpen}>
       <DrawerTrigger asChild>
         <button
           type="button"
           data-testid="message-timestamp-trigger"
-          className="cursor-pointer border-0 bg-transparent p-0 text-left"
+          className="min-w-0 cursor-pointer border-0 bg-transparent p-0 text-left max-md:min-h-11 max-md:min-w-11 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
           aria-haspopup="dialog"
           aria-expanded={open}
-          aria-label={t("task:showFullTimestamp", { absoluteTime })}
+          aria-label={t("task:messageTimestampAriaLabel", {
+            label: formatted.label,
+            counterpart: formatted.counterpart,
+          })}
         >
           {timeEl}
         </button>
@@ -295,7 +299,7 @@ function MessageTimestamp({ createdAt }: { createdAt: string }) {
       <DrawerContent data-testid="message-timestamp-drawer">
         <DrawerHeader>
           <DrawerTitle>{t("task:messageTime")}</DrawerTitle>
-          <DrawerDescription>{absoluteTime}</DrawerDescription>
+          <DrawerDescription>{formatted.counterpart}</DrawerDescription>
         </DrawerHeader>
       </DrawerContent>
     </Drawer>

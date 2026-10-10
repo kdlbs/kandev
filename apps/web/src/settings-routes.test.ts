@@ -25,11 +25,8 @@ import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import { DEFAULT_SETTINGS_PATH } from "@/lib/settings/last-settings-page";
 import { scopedCookieName } from "@/lib/routing/route-bootstrap";
-import {
-  buildSettingsInitialStateForRoute,
-  renderSettingsRoute,
-  SETTINGS_ROUTE_PATHS,
-} from "./settings-routes";
+import { buildSettingsInitialStateForRoute } from "./settings-routes.initial-state";
+import { renderSettingsRoute, SETTINGS_ROUTE_PATHS } from "./settings-routes";
 
 vi.mock("@/components/settings/system/updates-card", () => ({ UpdatesCard: () => null }));
 
@@ -154,6 +151,24 @@ describe("buildSettingsInitialStateForRoute", () => {
     const state = buildState({ agentProfilesVersion: 4 });
 
     expect(state.agentProfiles?.version).toBe(4);
+  });
+});
+
+describe("current tab workspace settings hydration", () => {
+  beforeEach(() => {
+    document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=; path=/; max-age=0`;
+    document.cookie = `${scopedCookieName(ACTIVE_WORKSPACE_COOKIE)}=; path=/; max-age=0`;
+  });
+
+  it("keeps the current tab workspace ahead of the shared cookie and saved setting", () => {
+    document.cookie = `${ACTIVE_WORKSPACE_COOKIE}=ws-2; path=/`;
+    const state = buildState({
+      workspaces: workspaceRows(["ws-1", "ws-2"]),
+      userSettingsResponse: userSettings({ workspace_id: workspaceId("ws-2") }),
+      currentWorkspaceId: "ws-1",
+    });
+    expect(state.workspaces?.activeId).toBe("ws-1");
+    expect(state.userSettings?.workspaceId).toBe("ws-1");
   });
 });
 
