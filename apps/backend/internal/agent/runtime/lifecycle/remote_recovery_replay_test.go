@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -165,8 +167,38 @@ func TestRemoteRecoveryRetriesAfterPartialReplayTimeout(t *testing.T) {
 		AgentExecutionID: "execution-replay-retry", Runtime: agentruntime.RuntimeSprites,
 		ExecutionProfileID: "profile-replay-retry", Status: models.ExecutorRunningStatusReady,
 	}
+	mcpPath := filepath.Join(t.TempDir(), ".pi", "mcp.json")
+	mcpContent := []byte(`{"mcpServers":{"kandev":{"url":"http://localhost:41006/mcp"}}}`)
+	require.NoError(t, os.MkdirAll(filepath.Dir(mcpPath), 0o700))
+	require.NoError(t, os.WriteFile(mcpPath, mcpContent, 0o600))
+	assertOwnedMCPConfigRetained := func(message string) {
+		t.Helper()
+		got, readErr := os.ReadFile(mcpPath)
+		require.NoError(t, readErr, message)
+		require.Equal(t, mcpContent, got, message)
+		require.Equal(t, passthroughMCPFingerprint(mcpContent), passthroughMCPFingerprint(got), message)
+	}
+	row.Metadata = map[string]interface{}{
+		MetadataKeyOriginalWorkspacePath: "/workspace",
+		metadataKeyPassthroughMCPClaims: []interface{}{map[string]interface{}{
+			"path": mcpPath, "fingerprint": passthroughMCPFingerprint(mcpContent), "owned": true,
+		}},
+	}
+	writer := &task08ExecutorInventoryWriter{
+		invariantWriter: invariantWriter{prior: row},
+		rows:            []*models.ExecutorRunning{row},
+	}
+	var attemptedOwnersMu sync.Mutex
+	var attemptedOwners []*models.ExecutorRunning
 	backend := &task08DetailedRecoveryBackend{MockExecutor: &MockExecutor{name: "sprites"}}
-	backend.recoveryResult = func([]*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error) {
+	backend.recoveryResult = func(records []*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error) {
+		if len(records) != 1 {
+			t.Errorf("recovery attempted with %d owner records, want one", len(records))
+		} else {
+			attemptedOwnersMu.Lock()
+			attemptedOwners = append(attemptedOwners, cloneRemoteRecoveryRecord(records[0]))
+			attemptedOwnersMu.Unlock()
+		}
 		client := agentctl.NewClient(host, port, newTestLogger())
 		if recoveryAttemptCount.Add(1) == 2 {
 			canceledCandidateClient.Store(client)
@@ -174,10 +206,11 @@ func TestRemoteRecoveryRetriesAfterPartialReplayTimeout(t *testing.T) {
 		return []*ExecutorInstance{{
 			InstanceID: row.AgentExecutionID, TaskID: row.TaskID, SessionID: row.SessionID,
 			RuntimeName: row.Runtime, WorkspacePath: "/workspace", AgentProfileID: row.ExecutionProfileID,
-			Client: client,
+			Client: client, Metadata: cloneRemoteRecoveryRecord(row).Metadata,
 		}}, nil, nil
 	}
 	mgr, eventBus := task08ManagerWithBackend(t, backend)
+	mgr.SetExecutorRunningWriter(writer)
 	provider := &task08RemoteSnapshotProvider{snapshots: map[string]*RemoteRecoverySnapshot{
 		sessionID: task08RemoteSnapshot(row),
 	}}
@@ -250,6 +283,9 @@ func TestRemoteRecoveryRetriesAfterPartialReplayTimeout(t *testing.T) {
 	require.Same(t, entry, mgr.pendingRemoteRecoveryForSession(sessionID),
 		"a partial replay timeout must preserve the retry owner and launch guard")
 	require.ErrorIs(t, mgr.recoveryGuard.CheckLaunchAllowed(sessionID), ErrSessionRecoveryGuarded)
+	assertOwnedMCPConfigRetained("a temporary replay failure must not revoke or replace the retained remote owner's MCP config")
+	require.Equal(t, row.Metadata, entry.record.Metadata, "the pending recovery record keeps its original MCP claim")
+	require.Equal(t, row.Metadata, writer.prior.Metadata, "failed adoption must preserve persisted owner metadata")
 	require.Equal(t, int64(1), repository.cursor.ProjectedSequence,
 		"the first event must remain committed so the next adoption can resume after it")
 
@@ -296,6 +332,8 @@ func TestRemoteRecoveryRetriesAfterPartialReplayTimeout(t *testing.T) {
 	require.False(t, tracked, "a canceled handshake must remove the temporary candidate")
 	require.Same(t, entry, mgr.pendingRemoteRecoveryForSession(sessionID),
 		"a canceled handshake must preserve the retry owner and launch guard")
+	assertOwnedMCPConfigRetained("canceling a temporary attachment must preserve the remote owner's MCP config bytes")
+	require.Equal(t, row.Metadata, writer.prior.Metadata, "canceled adoption must preserve persisted owner metadata")
 	require.ErrorIs(t, mgr.recoveryGuard.CheckLaunchAllowed(sessionID), ErrSessionRecoveryGuarded)
 	require.Nil(t, availabilityPayload.Load(), "a canceled handshake must not publish availability")
 	require.Zero(t, availabilityCount.Load(), "a canceled handshake must not publish availability")
@@ -324,9 +362,104 @@ func TestRemoteRecoveryRetriesAfterPartialReplayTimeout(t *testing.T) {
 	require.EqualValues(t, 2, updateDialCount.Load(),
 		"the canceled attempt must not register or publish a late socket before the successful retry")
 	require.EqualValues(t, 3, recoveryAttemptCount.Load(), "recovery retries exactly once after the canceled attempt")
+	attemptedOwnersMu.Lock()
+	owners := append([]*models.ExecutorRunning(nil), attemptedOwners...)
+	attemptedOwnersMu.Unlock()
+	require.Len(t, owners, 3, "the same persisted owner is retried after both temporary failures")
+	for _, attempted := range owners {
+		require.Equal(t, row.SessionID, attempted.SessionID)
+		require.Equal(t, row.TaskID, attempted.TaskID)
+		require.Equal(t, row.AgentExecutionID, attempted.AgentExecutionID)
+		require.Equal(t, row.Metadata, attempted.Metadata)
+	}
+	assertOwnedMCPConfigRetained("successful adoption leaves the live owner's MCP config bytes in place")
+	require.Equal(t, row.Metadata, writer.prior.Metadata, "successful retry persists the unchanged MCP claim")
 	for _, event := range eventBus.PublishedEvents {
 		require.NotEqual(t, lifecycleevents.AgentReady, event.Type,
 			"idle retained recovery must not publish a turn-completion event")
+	}
+
+	execution, exists := mgr.executionStore.Get(row.AgentExecutionID)
+	require.True(t, exists)
+	mgr.cleanupPassthroughMCPConfig(execution)
+	_, err = os.Stat(mcpPath)
+	require.ErrorIs(t, err, os.ErrNotExist, "ordinary owner cleanup can still revoke its owned project config")
+}
+
+func TestRemoveFailedRemoteReplayFencesStaleCandidates(t *testing.T) {
+	const (
+		sessionID   = "session-stale-replay-candidate"
+		taskID      = "task-stale-replay-candidate"
+		executionID = "execution-stale-replay-candidate"
+	)
+
+	for _, testCase := range []struct {
+		name              string
+		stalePendingEntry bool
+		staleCandidate    bool
+	}{
+		{name: "pending generation changed", stalePendingEntry: true},
+		{name: "tracked candidate replaced", staleCandidate: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			mgr, _ := task08ManagerWithBackend(t, &MockExecutor{name: "sprites"})
+			row := &models.ExecutorRunning{
+				SessionID: sessionID, TaskID: taskID, AgentExecutionID: executionID,
+			}
+			entry := &remoteRecoveryRetry{record: row}
+			currentEntry := entry
+			if testCase.stalePendingEntry {
+				currentEntry = &remoteRecoveryRetry{record: cloneRemoteRecoveryRecord(row)}
+			}
+			staleCandidate := &AgentExecution{ID: executionID, SessionID: sessionID, TaskID: taskID}
+			trackedCandidate := staleCandidate
+			if testCase.staleCandidate {
+				trackedCandidate = &AgentExecution{ID: executionID, SessionID: sessionID, TaskID: taskID}
+			}
+			require.NoError(t, mgr.executionStore.Add(trackedCandidate))
+			mgr.remoteRecoveryPending[sessionID] = currentEntry
+
+			streamCtx, cancelStream := context.WithCancel(context.Background())
+			defer cancelStream()
+			var cancelCalls atomic.Int32
+			cycle := &deliveryReconciliationCycle{
+				identity: DeliveryReconciliationIdentity{SessionID: sessionID, ExecutionID: executionID},
+				ctx:      streamCtx,
+				done:     make(chan struct{}),
+				cancel: func() {
+					cancelCalls.Add(1)
+					cancelStream()
+				},
+			}
+			mgr.streamManager.reconciliationMu.Lock()
+			mgr.streamManager.deliveryReconciliations[executionID] = cycle
+			mgr.streamManager.reconciliationMu.Unlock()
+			t.Cleanup(func() {
+				mgr.streamManager.reconciliationMu.Lock()
+				if mgr.streamManager.deliveryReconciliations[executionID] == cycle {
+					delete(mgr.streamManager.deliveryReconciliations, executionID)
+					close(cycle.done)
+				}
+				mgr.streamManager.reconciliationMu.Unlock()
+				cancelStream()
+			})
+
+			mgr.removeFailedRemoteReplay(entry, staleCandidate)
+
+			got, exists := mgr.executionStore.Get(executionID)
+			require.True(t, exists, "a stale replay failure must not untrack the current execution")
+			require.Same(t, trackedCandidate, got, "a stale replay failure must preserve the current candidate")
+			select {
+			case <-streamCtx.Done():
+				t.Fatal("a stale replay failure must not cancel successor reconciliation")
+			default:
+			}
+			require.Zero(t, cancelCalls.Load(), "a stale replay failure must not cancel successor reconciliation")
+			mgr.streamManager.reconciliationMu.Lock()
+			_, stopped := mgr.streamManager.stoppedReconciliations[executionID]
+			mgr.streamManager.reconciliationMu.Unlock()
+			require.False(t, stopped, "a stale replay failure must not fence successor reconciliation")
+		})
 	}
 }
 

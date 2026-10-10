@@ -561,16 +561,36 @@ func (m *Manager) replayRecoveredRemoteExecution(
 	return nil, nil
 }
 
+// A failed host attachment does not end ownership of the retained remote runtime.
 func (m *Manager) removeFailedRemoteReplay(entry *remoteRecoveryRetry, execution *AgentExecution) {
+	if entry == nil || entry.record == nil || execution == nil {
+		return
+	}
 	m.remoteRecoveryMu.Lock()
-	stopFenced := m.remoteRecoveryPending[entry.record.SessionID] != entry
-	if !stopFenced {
-		m.RemoveExecution(execution.ID)
+	if m.remoteRecoveryPending[entry.record.SessionID] != entry ||
+		execution.ID != entry.record.AgentExecutionID || execution.SessionID != entry.record.SessionID ||
+		execution.TaskID != entry.record.TaskID {
+		m.remoteRecoveryMu.Unlock()
+		return
 	}
+	tracked, exists := m.executionStore.Get(execution.ID)
+	if !exists || tracked != execution {
+		m.remoteRecoveryMu.Unlock()
+		return
+	}
+	trackedSession, exists := m.executionStore.GetBySessionID(entry.record.SessionID)
+	if !exists || trackedSession != execution {
+		m.remoteRecoveryMu.Unlock()
+		return
+	}
+	if m.streamManager != nil {
+		m.streamManager.cancelDeliveryReconciliation(execution.ID)
+	}
+	m.executionStore.Remove(execution.ID)
 	m.remoteRecoveryMu.Unlock()
-	if !stopFenced {
-		m.setRuntimeInterest(execution.SessionID, false)
-	}
+	m.releaseActivity(executionActivityKey(execution.ID))
+	m.closeStreamCoalescer(execution)
+	m.setRuntimeInterest(execution.SessionID, false)
 }
 
 func (m *Manager) finishTrackedRemoteExecution(

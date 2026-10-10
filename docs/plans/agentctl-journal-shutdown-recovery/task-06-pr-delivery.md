@@ -90,19 +90,25 @@ Human approval or merge queue requirements remain separate from green CI.
 
 ## Results
 
-Implementation is committed and rebased. Commit `78065a90aa8f25aaaed4486225ee2b689b636d53` is the current pushed source head on base `43f55a6aad38c7f53c4b7eb56682016639f74405`. Normal commit hooks passed, and the explicit force-with-lease push succeeded. Fresh desktop and phone captures are published on immutable media commit `db7888200de8fdb138a92bba0a5e63b864f38b70`; the live PR body was read back after updating its narrative and screenshots.
+The latest local source is `3f35f29d377fd539945b061435c59baf605039ad`, rebased onto `main` at `3fb026365239bbc893fa4a5272d926640c7ef1f9`. The remote PR branch still points to `78065a90aa8f25aaaed4486225ee2b689b636d53`; this rebased source has not been pushed and has no current-head GitHub checks. The only rebase conflict was `lifecycle/manager.go`; its resolution preserves main's passthrough MCP ownership maps and the PR's remote-recovery and stop-context fields. The rebase range-diff confirmed all seven commits replayed, with only that constructor-field union changed.
 
-The complete PR snapshot for head `78065a90aa8f25aaaed4486225ee2b689b636d53` reported run `38066667357`, attempt 1, job `114255591383` (`Publish PR documentation coverage status`) failed with `Linked delivery documentation is incomplete or invalid.` The run was terminal. I reproduced the exact evaluator from trusted base `43f55a6aad38c7f53c4b7eb56682016639f74405`; it found that the plan omitted requirements `REQ-PLATFORM-DURABLE-AGENT-DELIVERY-002` and `-004`, and Task 08's only referenced design did not declare requirement `-002`. The plan now declares requirements 002 and 004 and references `durable-agent-delivery.md`; Task 08 retains its reattachment design and adds the delivery design. The trusted helper's local preflight now reports `covered` with no errors. The catalog and full specification lint pass. A new exact-head GitHub evaluation is still pending after committing and pushing this documentation correction; other current-head checks were also pending in the captured snapshot. No remote-green claim is made.
+Post-rebase local frontend checks passed: 11 affected recovery/service/store test files passed 179 tests, web TypeScript checking passed, and ESLint passed for all changed TypeScript files with zero warnings. The trusted documentation evaluator from base `3fb026365239bbc893fa4a5272d926640c7ef1f9` evaluated the actual 270-file local PR diff as `covered`, with nine work orders and 14 accepted references. Documentation catalog validation reports 371 decisions and 1,522 specifications; full specification lint and `git diff --check` pass.
+
+The post-rebase rejected-replay regression exposed a real cleanup bug: failed replay deleted `.pi/mcp.json` while the exact remote owner remained live. Cleanup now removes tracking only for the exact still-pending candidate and cancels reconciliation only for that candidate, preserving the persisted remote MCP claims and file for a same-record retry. `TestRemoteRecoveryRetriesAfterPartialReplayTimeout` passes with race instrumentation, all `TestPiProjectMCP*` cleanup controls pass with race instrumentation, and full lifecycle lint reports zero issues. The full four-package lifecycle/orchestrator/executor/backend-app race gate and managed desktop, phone, and Kind checks remain pending after this fix. Task 06 remains in progress; no current-head CI result is claimed.
+
+### Historical terminal CI result for pushed head `78065a90aa8f25aaaed4486225ee2b689b636d53`
+
+The complete snapshot for this earlier head reported run `38066667357`, attempt 1, job `114255591383` (`Publish PR documentation coverage status`) failed with `Linked delivery documentation is incomplete or invalid.` The run was terminal. The evaluator from trusted base `43f55a6aad38c7f53c4b7eb56682016639f74405` identified missing plan links for requirements `REQ-PLATFORM-DURABLE-AGENT-DELIVERY-002` and `-004`, and a missing Task 08 design reference for requirement `-002`. The plan now declares requirements 002 and 004 and references `durable-agent-delivery.md`; Task 08 retains its reattachment design and adds the delivery design. The refreshed trusted evaluator on base `3fb026365239bbc893fa4a5272d926640c7ef1f9` now reports `covered` for the rebased local tree. This historical red run is not a result for the current local HEAD.
 
 Pre-delivery diagnosis reproduced the Docker image build and pinned Kind cluster creation successfully in disposable local environments.
 The prior CI fixtures discarded child output, so those failures remain unclassified until fresh CI runs.
 Fixture diagnostics now retain bounded failure tails without imposing an output-volume limit on successful commands.
 Three focused real-child tests and targeted format/lint checks passed, including a RED/GREEN regression for output larger than 1 MiB.
-The primary coordinator reviewed that fixture change. Current-head CI and final integration review remain pending.
+The primary coordinator reviewed that fixture change. At that historical snapshot, current-head CI and final integration review remained pending.
 
 The second base review found native Resume launching current reattachment asynchronously while acknowledgement trusted an initialized flag retained from inventory. The regression reproduced a startup failure being swallowed by recovery. Native Resume now waits for current startup and authenticated adoption before acknowledgment. The failed-start regression preserves the open block, interrupted submission, and payload with zero acknowledgment calls. Focused successful Resume and context-continuation controls passed with race instrumentation (4.000 seconds); changed-package lint reported zero issues. The coordinator reviewed the two-file correction.
 
-The coordinator reviewed fresh desktop and phone restoration captures. They show the original conversation and normal composer without the rejected restart-resume form. The interrupted turn remains historical. The process native-resume fixture required a logger after integration with pressure-state logging; only test setup changed. The journal terminal-state fixture now distinguishes malformed retired active work (still unresolved) from acknowledged retired interrupted-unknown history. The full process race gate passed after the fixture correction. Normal commit hooks and remote delivery remain pending.
+The coordinator reviewed fresh desktop and phone restoration captures. They show the original conversation and normal composer without the rejected restart-resume form. The interrupted turn remains historical. The process native-resume fixture required a logger after integration with pressure-state logging; only test setup changed. The journal terminal-state fixture now distinguishes malformed retired active work (still unresolved) from acknowledged retired interrupted-unknown history. The full process race gate passed after the fixture correction. At that historical point, normal commit hooks and remote delivery were still pending.
 
 The bounded waiter `24039` completed after 43m54s for pushed head
 `78065a90aa8f25aaaed4486225ee2b689b636d53`: 44 checks passed, 11 skipped, 1 neutral, 14 failed,
@@ -114,7 +120,7 @@ Containers Shards 4/6, 5/6, and 6/6 (`38066670301/114256734487`, `/114256734536`
 (`38066670301/114256734603`, `/114256734656`, `/114256734577`, `/114256734693`, and
 `/114256734688`); aggregate E2E Tests Passed (`38066670301/114264505519`); and Publish PR
 documentation coverage status (`38066667357/114255591383`). The two aggregate checks are not
-additional failing leaves. The local documentation correction is committed as `d36222a8b3d00ee4d6c7d476c11742d25b5b94eb` but remains unpushed; its trusted-base preflight was run against `43f55a6aad38c7f53c4b7eb56682016639f74405`, so it must be refreshed against current main before delivery.
+additional failing leaves. The documentation correction was committed locally as `d36222a8b3d00ee4d6c7d476c11742d25b5b94eb` after this snapshot and is included in the rebased local tree. Its earlier preflight used base `43f55a6aad38c7f53c4b7eb56682016639f74405`; the refreshed preflight on base `3fb026365239bbc893fa4a5272d926640c7ef1f9` is recorded above.
 
 The browser leaves currently classify as follows: Shards 2 and 6 timed out waiting for the read-only
 recovery notice; Shards 7 and 12 rejected Quick Chat `session.launch` with
@@ -142,11 +148,9 @@ These three focused executor regressions passed with race instrumentation, along
 `GOMAXPROCS=2 GOGC=50 GOCACHE=/tmp/kandev-task05-gocache go test -race -p=1 -trimpath ./internal/orchestrator/executor -run '^TestResumeSessionSynchronousStartFailure' -count=1`;
 the backend app command was
 `GOMAXPROCS=2 GOGC=50 GOCACHE=/tmp/kandev-task05-gocache go test -race -p=1 -trimpath ./internal/backendapp -run '^TestManagedGoCacheRecoveryFlows$' -count=1`.
-Current-head PR review state and required CI remain unresolved. Current main advanced to
-`3fb026365239bbc893fa4a5272d926640c7ef1f9`; the pushed branch is conflicting with it and requires
-semantic reconciliation after worker fixes are frozen.
+That terminal waiter and its leaf classifications apply only to the pushed head `78065a90aa8f25aaaed4486225ee2b689b636d53`. The current local head is `3f35f29d377fd539945b061435c59baf605039ad` on base `3fb026365239bbc893fa4a5272d926640c7ef1f9`; its remote checks and review state must be refreshed after the reviewed fixes are committed and pushed.
 
-### Focused local recovery gates before the next rebase
+### Focused local recovery gates on the pre-rebase snapshot
 
 On the shared local source snapshot, the lifecycle race selection passed in 1.098 seconds and the
 orchestrator selection passed in 1.516 seconds. The selection covered
@@ -165,7 +169,7 @@ GOMAXPROCS=2 GOGC=50 GOCACHE=/tmp/kandev-task05-gocache go test -race -p=1 -trim
   -count=1
 ```
 
-Changed-scope Go lint passed with zero issues using
+These results predate the rebase onto `3fb026365239bbc893fa4a5272d926640c7ef1f9` and are not final current-base lifecycle evidence. Changed-scope Go lint passed with zero issues using
 `golangci-lint run ./internal/agent/runtime/lifecycle ./internal/orchestrator --new-from-rev=HEAD --timeout=5m`,
 and `git diff --check` passed. These are local focused results before the pending base reconciliation;
 they do not replace the required post-rebase lifecycle/browser checks or hosted current-head CI.
