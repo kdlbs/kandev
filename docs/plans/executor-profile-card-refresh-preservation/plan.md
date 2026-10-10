@@ -65,6 +65,9 @@ release. No discovery scratch was created in this checkout.
 
 Keep the existing DELETE/POST followed by `listExecutorProfiles` GET with
 `cache: "no-store"`. Use `useAppStoreApi` for the captured provider's store.
+Keep the card-specific hook and observation helper in
+`apps/web/hooks/domains/settings/use-refresh-executor-profiles.ts`, per the
+frontend hook placement convention.
 An eligible result maps only its target over a current store read immediately
 before existing `setExecutors`; no await separates read and write.
 
@@ -203,3 +206,14 @@ task plan and ROOT's instructions, without separate tracked procedural records.
   This deliberately avoids partial stale merging and imposes no server ordering.
 - The existing owning design is close to 32 KiB; its condensed historical
   guidance must preserve existing contracts without expanding this work order.
+
+
+ROOT authorized the required domain-hook placement correction after Greptile's
+review. The hook and guard moved unchanged into
+`apps/web/hooks/domains/settings/use-refresh-executor-profiles.ts`; the card
+imports the hook. No behavior, markup, dependency or global ownership changed.
+The affected 24 tests and scoped ESLint passed (handle 54099, exit 0, join
+5b77a3); typecheck passed (62116, exit 0, join fe6b29). Catalog/spec/whitespace
+and actual tracked+untracked coverage passed (77354, exit 0, join 851ed4):
+eight actual paths, covered, exactly one order and zero errors. The additional
+path is the domain hook; all seven earlier paths remain in the inventory.

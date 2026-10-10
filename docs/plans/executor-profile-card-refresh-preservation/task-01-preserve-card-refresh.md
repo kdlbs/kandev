@@ -129,7 +129,7 @@ Retain every actual command handle and join it; do not duplicate a running check
 ```bash
 (cd apps/web && timeout --signal=TERM --kill-after=10s 3m pnpm exec vitest run --project=browser-locales --maxWorkers=1 --no-file-parallelism components/settings/executor-profiles-card-refresh.test.tsx -t 'retains a saved sibling name|retains an executor created|publishes an ordinary target refresh|retains current inventory after GET failure')
 (cd apps/web && timeout --signal=TERM --kill-after=10s 5m pnpm exec vitest run --project=browser-locales --maxWorkers=1 --no-file-parallelism components/settings/executor-profiles-card-refresh.test.tsx components/settings/executor-profiles-card.test.tsx)
-(cd apps/web && timeout --signal=TERM --kill-after=10s 3m pnpm exec eslint --max-warnings 0 components/settings/executor-profiles-card.tsx components/settings/executor-profiles-card-refresh.test.tsx components/settings/executor-profiles-card-refresh.test-helpers.tsx)
+(cd apps/web && timeout --signal=TERM --kill-after=10s 3m pnpm exec eslint --max-warnings 0 components/settings/executor-profiles-card.tsx components/settings/executor-profiles-card-refresh.test.tsx components/settings/executor-profiles-card-refresh.test-helpers.tsx hooks/domains/settings/use-refresh-executor-profiles.ts)
 (cd apps/web && timeout --signal=TERM --kill-after=10s 10m pnpm run typecheck)
 (cd apps/web && timeout --signal=TERM --kill-after=10s 3m pnpm run i18n:check)
 (cd apps/web && timeout --signal=TERM --kill-after=10s 3m pnpm run i18n:ratchet)
@@ -186,7 +186,7 @@ for (const id of wo.requirements) {
 for (const id of wo.acceptance_criteria) {
   if (!wo.requirements.some(r => id.startsWith(r.replace(/^REQ-/, 'AC-') + '.')) || !fileContents[req].includes(`**${id}:**`)) errors.push(`Unresolved criterion ${id}`);
 }
-const owned = [...docs, 'apps/web/components/settings/executor-profiles-card.tsx', 'apps/web/components/settings/executor-profiles-card-refresh.test.tsx', 'apps/web/components/settings/executor-profiles-card-refresh.test-helpers.tsx'];
+const owned = [...docs, 'apps/web/components/settings/executor-profiles-card.tsx', 'apps/web/hooks/domains/settings/use-refresh-executor-profiles.ts', 'apps/web/components/settings/executor-profiles-card-refresh.test.tsx', 'apps/web/components/settings/executor-profiles-card-refresh.test-helpers.tsx'];
 for (const p of paths) if (!owned.includes(p)) errors.push(`Unexpected changed path; preserve and report: ${p}`);
 const docsOnly = paths.every(p => docs.includes(p));
 if (!coverage.ok || coverage.errors.length || coverage.status !== (docsOnly ? 'exempt' : 'covered')) errors.push('Coverage failed');
@@ -199,6 +199,7 @@ NODE
 ## Files likely touched
 
 - `apps/web/components/settings/executor-profiles-card.tsx`
+- `apps/web/hooks/domains/settings/use-refresh-executor-profiles.ts`
 - `apps/web/components/settings/executor-profiles-card-refresh.test.tsx`
 - `apps/web/components/settings/executor-profiles-card-refresh.test-helpers.tsx`
 - `docs/specs/executors/requirements/profile-editor.md`
@@ -257,3 +258,20 @@ restored; no detached process or subscription remains from local checks.
 Logs and coverage receipts are retained outside Git under
 `/tmp/kandev-child104-card-refresh-design-20261010/`. Normal hooks/publication
 and exact-head hosted delivery remain external operational gates.
+
+
+### Required hook-placement correction
+
+ROOT authorized a behavior-preserving extraction for the frontend's required
+hook location. `useRefreshProfiles` and `observeProfiles` moved into
+`apps/web/hooks/domains/settings/use-refresh-executor-profiles.ts`, with only
+the hook export added; a byte comparison confirmed the extracted body unchanged.
+The card imports it. No regression assertions, interactions or dependencies changed.
+
+- Actual affected test command: `pnpm exec vitest run components/settings/executor-profiles-card-refresh.test.tsx components/settings/executor-profiles-card.test.tsx`, from apps/web under a three-minute timeout. Handle 54099, exit 0, join 5b77a3: 24 passed, no setup/unhandled errors.
+- Scoped ESLint command above, including the new hook: same handle/join, exit 0, zero warnings/errors.
+- Typecheck command above: handle 62116, exit 0, join fe6b29.
+- Catalog/spec/whitespace and actual coverage preflight: handle 77354, exit 0, join 851ed4; eight actual paths covered by this one work order, no errors.
+
+No RED replay or broad unchanged suite was needed for the unchanged hook body.
+Normal hooks and one corrective push remain external operational gates.

@@ -456,7 +456,8 @@ is mounted by the executor listing (`app/settings/executors/page.tsx`) and the
 legacy connection page (`app/settings/executor/[id]/page.tsx`). After DELETE
 acknowledgement or built-in/plugin creation callback, `refreshProfiles` reads
 GET `/api/v1/executors/:id/profiles` through real `listExecutorProfiles` with
-`cache: "no-store"`. Publication belongs only to this card. Keep its subscribed
+`cache: "no-store"`. Publication belongs only to this card through the domain hook
+`hooks/domains/settings/use-refresh-executor-profiles.ts`. Keep the card's
 owner lookup, provider gate, dialogs, interactions and creation navigation.
 
 ### Read eligibility and ownership

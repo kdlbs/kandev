@@ -1,16 +1,17 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconTrash, IconPlus, IconChevronRight } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
-import { deleteExecutorProfile, listExecutorProfiles } from "@/lib/api/domains/settings-api";
+import { deleteExecutorProfile } from "@/lib/api/domains/settings-api";
 import { ExecutorProfileDialog } from "@/components/settings/executor-profile-dialog";
 import { PluginExecutorProfileDialog } from "@/components/settings/plugin-executor-profile-dialog";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStore } from "@/components/state-provider";
 import type { ExecutorProfile } from "@/lib/types/http";
+import { useRefreshProfiles } from "@/hooks/domains/settings/use-refresh-executor-profiles";
 import { useTranslation } from "react-i18next";
 import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
@@ -112,56 +113,6 @@ function ExecutorProfileRows({
       ))}
     </div>
   );
-}
-
-function observeProfiles(store: ReturnType<typeof useAppStoreApi>, executorId: string) {
-  let previous = store.getState().executors.items.find((item) => item.id === executorId);
-  const changes = { missing: !previous, profiles: false };
-  const unsubscribe = store.subscribe((state) => {
-    const current = state.executors.items.find((item) => item.id === executorId);
-    if (!current) changes.missing = true;
-    const before = previous?.profiles ?? [];
-    const after = current?.profiles ?? [];
-    if (
-      before.length !== after.length ||
-      before.some((profile, index) => profile !== after[index])
-    ) {
-      changes.profiles = true;
-    }
-    previous = current;
-  });
-  return { changes, unsubscribe };
-}
-
-function useRefreshProfiles(executorId: string) {
-  const store = useAppStoreApi();
-  const latestRead = useRef(0);
-  return useCallback(async () => {
-    const read = ++latestRead.current;
-    const observation = observeProfiles(store, executorId);
-    try {
-      const resp = await listExecutorProfiles(executorId, { cache: "no-store" });
-      if (
-        read !== latestRead.current ||
-        observation.changes.missing ||
-        observation.changes.profiles
-      ) {
-        return;
-      }
-      const current = store.getState().executors.items;
-      store
-        .getState()
-        .setExecutors(
-          current.map((item) =>
-            item.id === executorId ? { ...item, profiles: resp.profiles } : item,
-          ),
-        );
-    } catch {
-      // Refresh failure leaves the current catalogue intact.
-    } finally {
-      observation.unsubscribe();
-    }
-  }, [executorId, store]);
 }
 
 export function ExecutorProfilesCard({
