@@ -4,9 +4,10 @@ system: agents
 requirements:
   - REQ-AGENTS-CREATION-CATALOGUE-001
   - REQ-AGENTS-PROFILE-DELETION-CATALOGUE-001
+  - REQ-AGENTS-PROFILE-SAVE-CATALOGUE-001
 ---
 
-# Agent creation and deletion catalogue design
+# Agent profile mutation catalogue design
 
 ## Purpose and boundaries
 
@@ -16,6 +17,7 @@ introduces no persistence, transport or ordering abstraction. For creation, the
 independent owner must already be in `settingsAgents.items`; same-target
 concurrent changes are outside that creation contract. The separate list-row
 deletion contract preserves independently held options without rebuilding them.
+The concrete editor save sections below own only accepted target publication.
 
 ## Requirement mapping
 
@@ -28,6 +30,9 @@ deletion contract preserves independently held options without rebuilding them.
 `REQ-AGENTS-PROFILE-DELETION-CATALOGUE-001` maps to the accepted-deletion
 sections below: .1-.3 to publication, .4 to failure behavior, .5 to consumers,
 and .6 to permissions and responsive controls.
+
+`REQ-AGENTS-PROFILE-SAVE-CATALOGUE-001` maps .1-.2 to concrete save publication,
+.3-.4 to compatibility and .5 to the rendered regression boundary below.
 
 ## Current source and accepted evidence
 
@@ -158,6 +163,7 @@ No ADR is required for this local conformance repair of existing store ownership
 
 - [Creation catalogue preservation](../../../plans/agent-creation-catalogue-preservation/plan.md)
 - [List-row deletion catalogue preservation](../../../plans/agent-profile-delete-inventory/plan.md)
+- [Concrete editor save catalogue preservation](../../../plans/agent-profile-save-catalogue/plan.md)
 
 ## Accepted list-row deletion: evidence and inventory
 
@@ -273,3 +279,93 @@ No new ADR, public docs, backend change, API change or global-handler repair is
 needed. This correction restores an existing local ownership boundary; its
 reason fits the owning pair and focused work order. The creation sections and
 their completed delivery package retain their separate scope and guarantees.
+
+## Concrete editor save: source and evidence
+
+At main `ac25d0c22e8e7db8c57cddd5098ba6946dd7d4af`, the active
+`components/settings/agent-profile-page.tsx::ProfileEditor` calls
+`useProfileEditorState`, `useProfileSave` and `useSyncAgentsToStore` from
+`agent-profile-page-state.ts`. After a real PATCH resolves, `useProfileSave`
+calls `acceptProfileSaveResponse`, then builds `nextAgents` from its captured
+`settingsAgents`. `useSyncAgentsToStore` publishes that list and reconciles
+options by newest revision. The options merge retains independently received
+choices, but cannot distinguish a deleted sibling newly rebuilt from the stale
+nested list. `registerAgentsHandlers` already removes live deletions from both
+slices; rewriting that handler does not repair the save writer.
+
+ROOT reports qualified native75344, actual join `d7edb6`, exit 1: one causal
+post-ACK failure plus two passing controls (ordinary save and rejected PATCH).
+The selected deleted sibling changes to Unavailable during the held save, then
+becomes selectable again after another profile's accepted name/revision save.
+This is ROOT's receipt, not independently executed evidence for this package.
+Its protected source is never read or copied. No service deletion reversal or
+other-owner scenario is claimed as proved.
+
+## Concrete editor save: publication
+
+Keep `useProfileSave` in its existing file. Bind the existing `useAppStoreApi`
+to the mounted provider. Only after the awaited PATCH and existing
+`acceptProfileSaveResponse` acceptance, read the current store. Resolve the
+current owner by the admitted agent ID and its current target by response ID.
+If either is absent, skip catalogue/options publication; never append an owner
+or profile. Keep local save-response acceptance and status semantics intact.
+
+For a present target, replace only that target in the current owner's current
+profiles, preserving other owners, profile order and current owner metadata.
+Publish through the existing `setSettingsAgents` action. Reconcile current
+options with only the accepted target projected through its current owner:
+`reconcileAgentProfileOptions(currentOptions, [{ ...currentOwner,
+profiles: [updated] }])`. This preserves the existing newest-option rule for
+the target and leaves every unrelated option's values and order intact. Use
+the existing `setAgentProfiles` action and preserve its slice metadata/version.
+No await occurs between reading and these synchronous setters; this adds no
+global atomicity guarantee.
+
+Remove only the save hook's captured `settingsAgents` and `syncAgentsToStore`
+arguments and their concrete save call-site entries. `ProfileEditor` still
+needs those values for `useProfileDelete`; retain that existing hook and
+`useSyncAgentsToStore` behavior. No new hook is needed. If a correctness-driven
+extraction becomes necessary, new hooks belong in `hooks/domains/settings/`.
+
+## Concrete editor save: compatibility
+
+Leave `shouldSyncProfileSaveResponse`, `useProfileEditorState`,
+`reconcileAgentProfileSnapshot` and `sameEditableProfile` unchanged. Retain
+normalization in `updateAgentProfileAction`, the PATCH builder's permissions,
+enabled omission, Cursor MCP preferences and provider fields, submitted-snapshot
+correlation, dirty-draft handling, dependency/utility conflict and force behavior.
+The separate MCP document contributor remains separate. The
+[Platform editor design](../../platform/system-design/agent-settings-parity.md#editor-reconciliation)
+owns these baseline and revision rules; this repair adds no server ordering.
+
+No backend, auth, selection, tombstone, persistence or observability change is
+needed. This restores local writer ownership and needs no new ADR or public
+workflow documentation. The existing page/picker composition serves phone and
+desktop; targeted rendered state/data checks satisfy the mobile-parity narrow
+exception. If implementation changes layout, navigation or touch behavior,
+reassess scope before proceeding.
+
+## Concrete editor save: rendered regression boundary
+
+After explicit implementation release, independently author
+`components/settings/agent-profile-save-catalogue.test.tsx`. Prefer the actual
+`AgentProfilePage`/`ProfileEditor`, `StateProvider`, `SettingsSaveProvider`, real
+API PATCH action/normalizer, registered WS handler and real
+`AgentProfilePicker`/`Combobox`. Exercise actual task/subtask selector derivation
+and controls for preserved eligible/ineligible options. Hold only external
+transport and seed settled capability/auth/settings prerequisites. If a
+noncausal external capability or toast effect needs isolation, document exactly
+what it replaces; never stub save acceptance, reconciliation, store actions,
+API adapter, WS handler or actual choice consumer.
+
+Select the same-owner sibling before saving another profile, deliver the real
+deletion while PATCH is held, prove unavailable before ACK, and assert both
+nested membership and actual absence of a selectable choice after ACK. Require
+one causal RED and ordinary success/rejected PATCH controls passing before the
+fix, then GREEN. Add bounded current target/owner absence, same-owner latest
+metadata/new membership, independent options, eligibility and late revision/
+new-draft controls. These are planned regressions, not already proved cases.
+Seed real loaded resources and clean up requests, subscriptions, coordinator
+and navigation blockers. Adapt existing direct save-hook mocks only to supply
+the actual store dependency; retain their payload assertions and run all
+changed suites. The work order owns exact commands and final evidence.

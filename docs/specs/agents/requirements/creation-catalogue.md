@@ -6,7 +6,7 @@ owners:
   - kandev
 ---
 
-# Agent creation and deletion catalogue requirements
+# Agent profile mutation catalogue requirements
 
 ## Overview
 
@@ -22,6 +22,10 @@ local availability after creation, not a claim of server deletion.
 The list-row deletion contract below covers local availability after one
 accepted deletion. Selectable profiles can be received independently of the
 loaded agent catalogue. Removing a different profile must preserve those choices.
+
+The concrete editor save contract also preserves the current catalogue when a
+save completes after a live deletion. It does not change server deletion or
+the shared settings editor's draft and revision contract.
 
 ## Terminology
 
@@ -132,6 +136,54 @@ profile or selectable choice.
 ## Implementation plans
 
 - [List-row deletion catalogue preservation](../../../plans/agent-profile-delete-inventory/plan.md)
+- [Concrete editor save catalogue preservation](../../../plans/agent-profile-save-catalogue/plan.md)
+
+## Concrete editor save
+
+### REQ-AGENTS-PROFILE-SAVE-CATALOGUE-001: Current catalogue after concrete editor save
+
+**Intent:** Saving one concrete profile must not restore a deleted profile or
+replace another current profile's membership, metadata or selectable choice.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-PROFILE-SAVE-CATALOGUE-001.1:** When a sibling profile is removed
+  by an accepted live deletion while a concrete editor save is pending, a
+  successful save of the other profile shall leave the sibling absent from
+  the settings catalogue and selectable choices. An already selected deleted
+  sibling shall retain the existing unavailable state after the save completes.
+- **AC-AGENTS-PROFILE-SAVE-CATALOGUE-001.2:** Every unrelated current agent,
+  profile and option shall retain its membership and latest received metadata
+  after that save, including same-owner updates, new profiles and independently
+  held choices. Enabled state, eligibility and the global/Office boundary shall
+  retain their existing meanings. The save shall not insert a missing owner or
+  restore its target if that target was removed while the request was pending.
+- **AC-AGENTS-PROFILE-SAVE-CATALOGUE-001.3:** With its owner and target still
+  present and its response accepted by existing editor revision rules, an
+  ordinary successful save shall publish the normalized returned profile and
+  actual selectable label. Its baseline, dirty clearing and edits made after
+  submission shall retain the shared editor's existing behavior. A response
+  rejected by those revision rules shall not replace the newer profile.
+- **AC-AGENTS-PROFILE-SAVE-CATALOGUE-001.4:** A rejected PATCH shall not publish
+  a catalogue replacement. Deletions and updates received while it was pending
+  shall remain effective. Existing validation, permission checks, dependency
+  conflicts, explicit force confirmation, error reporting and draft recovery
+  shall remain effective.
+- **AC-AGENTS-PROFILE-SAVE-CATALOGUE-001.5:** Desktop and phone consumers,
+  including task and subtask choices, shall receive the same preserved
+  catalogue outcome through their existing selectors and shared save controls.
+  No page composition, copy, touch behavior or navigation change is required.
+
+### Save exclusions
+
+- Other save writers, dynamic editors, creation, duplication, deletion actions,
+  list-fetch reconciliation, availability policy and global event handlers.
+- Server ordering or deletion semantics, backend/API changes, persistence,
+  global journals, tombstones, timestamp frameworks and new conflict policies.
+
+The [shared editor contract](../../platform/requirements/agent-settings-parity.md)
+owns acknowledgement correlation, draft preservation and revision recovery.
+The [permission contract](permission-control-integrity.md) remains unchanged.
 
 ## Related contracts
 
