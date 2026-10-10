@@ -324,14 +324,8 @@ func (r *Repository) applyTaskTransfer(
 	countTables []transferWorkspaceProjection,
 	inventory transferRelationInventory,
 ) (*models.TaskTransferReceipt, error) {
-	placement, err := r.lockAndValidateTaskTransferSource(ctx, tx, command)
+	placement, err := r.lockAndValidateTaskTransferSource(ctx, tx, command, countTables)
 	if err != nil {
-		return nil, err
-	}
-	if err := r.validateUnmappedTransferRelations(ctx, tx, command.TaskID, countTables); err != nil {
-		return nil, err
-	}
-	if err := r.validateTaskTransferRejectedKey(ctx, tx, command); err != nil {
 		return nil, err
 	}
 	destinationStepID, destinationStepName, err := r.resolveTransferDestination(ctx, tx, command)
@@ -408,12 +402,19 @@ func (r *Repository) lockAndValidateTaskTransferSource(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	command models.TaskTransferCommand,
+	countTables []transferWorkspaceProjection,
 ) (*transferTaskPlacement, error) {
 	placement, err := r.lockTransferTask(ctx, tx, command.TaskID)
 	if err != nil || !taskTransferSourceMatches(placement, command) {
 		return nil, taskTransferConflict(err, "source predicate changed")
 	}
 	if err := r.validateTransferCoordinatorActor(ctx, tx, command); err != nil {
+		return nil, err
+	}
+	if err := r.validateUnmappedTransferRelations(ctx, tx, command.TaskID, countTables); err != nil {
+		return nil, err
+	}
+	if err := r.validateTaskTransferRejectedKey(ctx, tx, command); err != nil {
 		return nil, err
 	}
 	return placement, nil
