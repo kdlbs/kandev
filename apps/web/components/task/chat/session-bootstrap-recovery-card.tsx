@@ -10,6 +10,7 @@ import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import {
   isSessionRecoveryBusy,
+  matchingAutomaticRecovery,
   sessionRecoveryOwnerId,
   type SessionRecoveryOwner,
 } from "@/lib/session-recovery-presentation";
@@ -18,6 +19,8 @@ import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summa
 
 import { buildRecoveryCardModel } from "./session-bootstrap-recovery-model";
 import { RecoveryCardContent } from "./session-bootstrap-recovery-content";
+import { ManagedCloneRelocationConfirmation } from "./managed-clone-relocation-confirmation";
+import { useOptionalAppStore } from "@/components/state-provider";
 
 type SessionBootstrapRecoveryCardProps = {
   taskId: string;
@@ -26,6 +29,90 @@ type SessionBootstrapRecoveryCardProps = {
   error: TaskStatusSummaryActiveError;
   automaticRecovery?: SessionRecoveryOwner | null;
 };
+
+type BootstrapRecoveryViewProps = {
+  props: SessionBootstrapRecoveryCardProps;
+  recovery: ReturnType<typeof useSessionRecoveryActions>;
+  model: ReturnType<typeof buildRecoveryCardModel>;
+  profileExists: boolean;
+  providerRestoredResumeEligible: boolean;
+  inspectionBusy: boolean;
+  effectiveBusyAction: ReturnType<typeof useSessionRecoveryActions>["busyAction"];
+  needsManagedCloneRelocation: boolean;
+  showDialog: boolean;
+  setShowDialog: (open: boolean) => void;
+  relocationConfirmationOpen: boolean;
+  setRelocationConfirmationOpen: (open: boolean) => void;
+  handleResume: () => void;
+  handleFreshStart: () => void;
+  copy: {
+    launchNeedsAttention: string;
+    launchErrorNoChanges: string;
+    sessionRecoveryDetails: string;
+  };
+  t: ReturnType<typeof useTranslation>["t"];
+};
+
+function useBootstrapResumeHandler({
+  automaticBusy,
+  manualInspectionBusy,
+  profileExists,
+  matchingRecovery,
+  clearInspectionContentionNotice,
+  handleRecover,
+}: {
+  automaticBusy: boolean;
+  manualInspectionBusy: boolean;
+  profileExists: boolean;
+  matchingRecovery: ReturnType<typeof matchingAutomaticRecovery>;
+  clearInspectionContentionNotice?: () => void;
+  handleRecover: ReturnType<typeof useSessionRecoveryActions>["handleRecover"];
+}) {
+  return useCallback(() => {
+    if (automaticBusy || !profileExists) return;
+    if (manualInspectionBusy) {
+      void handleRecover("resume");
+      return;
+    }
+    if (matchingRecovery?.noticeKind === "inspection_busy") {
+      void matchingRecovery.resumeSession().then((success) => {
+        if (success) clearInspectionContentionNotice?.();
+      });
+      return;
+    }
+    void handleRecover("resume");
+  }, [
+    automaticBusy,
+    clearInspectionContentionNotice,
+    handleRecover,
+    manualInspectionBusy,
+    matchingRecovery,
+    profileExists,
+  ]);
+}
+
+function bootstrapRecoveryCopy(
+  t: ReturnType<typeof useTranslation>["t"],
+): BootstrapRecoveryViewProps["copy"] {
+  return {
+    launchNeedsAttention: t("task:launchNeedsAttention"),
+    launchErrorNoChanges: t("task:launchErrorNoChanges"),
+    sessionRecoveryDetails: t("task:sessionRecoveryDetails"),
+  };
+}
+
+function useSessionAgentDisplayName(sessionId: string) {
+  return useOptionalAppStore((state) => {
+    const session = state.taskSessions.items[sessionId];
+    const profileId = session?.execution_profile_id || session?.agent_profile_id;
+    const profile = profileId
+      ? state.agentProfiles.items.find((candidate) => candidate.id === profileId)
+      : undefined;
+    return profile
+      ? state.availableAgents.items.find((agent) => agent.name === profile.agent_name)?.display_name
+      : undefined;
+  }, undefined);
+}
 
 function BootstrapRecoveryControls({
   taskId,
@@ -36,6 +123,9 @@ function BootstrapRecoveryControls({
 }: SessionBootstrapRecoveryCardProps) {
   const { t } = useTranslation();
   const [showDialog, setShowDialog] = useState(false);
+  const [relocationConfirmationOpen, setRelocationConfirmationOpen] = useState(false);
+  const agentDisplayName = useSessionAgentDisplayName(sessionId);
+  const recovery = useSessionRecoveryActions({ taskId, sessionId, errorStamp: error.stamp });
   const {
     busyAction,
     recoveryError,
@@ -43,53 +133,103 @@ function BootstrapRecoveryControls({
     branchDetails,
     guardDetails,
     recoveryNotice,
+    recoveryNoticeKind,
+    clearInspectionContentionNotice,
+    managedCloneRecoveryStamp,
     handleRecover,
-    handleRestore,
-    handleNewBranch,
-  } = useSessionRecoveryActions({ taskId, sessionId, errorStamp: error.stamp });
+  } = recovery;
+  const needsManagedCloneRelocation =
+    recovery.workspaceRecovery?.kind === "managed_clone_relocation" ||
+    error.category === "managed_clone_relocation_required" ||
+    managedCloneRecoveryStamp !== null;
   const profileExists = useSessionProfileExists(sessionId);
+  const matchingRecovery = matchingAutomaticRecovery(automaticRecovery, taskId, sessionId);
   const automaticBusy = Boolean(
-    automaticRecovery && isSessionRecoveryBusy(automaticRecovery.resumptionState),
+    matchingRecovery && isSessionRecoveryBusy(matchingRecovery.resumptionState),
   );
+  const inspectionBusy =
+    recoveryNoticeKind === "inspection_busy" || matchingRecovery?.noticeKind === "inspection_busy";
   const effectiveBusyAction = automaticBusy ? "resume" : busyAction;
-  const manualFailure = manualRecoveryFailure ?? (recoveryError ? { operation: "resume" } : null);
   const model = buildRecoveryCardModel({
     error,
     automaticRecovery,
-    manualFailure,
+    manualFailure: manualRecoveryFailure,
     manualError: recoveryError,
     recoveryNotice,
+    recoveryNoticeKind,
     translate: t,
+    agentDisplayName,
   });
-  if (guardDetails && recoveryError)
+  if (guardDetails && recoveryError) {
     model.summary = sanitizeSessionErrorDetails(recoveryError.message, 240) || model.summary;
-  if (branchDetails) model.summary = t("task:branchIsNoLongerAvailable");
-  const copy = {
-    launchNeedsAttention: t("task:launchNeedsAttention"),
-    launchErrorNoChanges: t("task:launchErrorNoChanges"),
-    sessionRecoveryDetails: t("task:sessionRecoveryDetails"),
-  };
+    model.showSummary = true;
+  }
+  if (branchDetails) {
+    model.summary = t("task:branchIsNoLongerAvailable");
+    model.showSummary = true;
+  }
+  const copy = bootstrapRecoveryCopy(t);
 
-  const handleResume = useCallback(() => {
-    if (!automaticBusy && profileExists) void handleRecover("resume");
-  }, [automaticBusy, handleRecover, profileExists]);
+  const handleResume = useBootstrapResumeHandler({
+    automaticBusy,
+    manualInspectionBusy: recoveryNoticeKind === "inspection_busy",
+    profileExists,
+    matchingRecovery,
+    clearInspectionContentionNotice,
+    handleRecover,
+  });
 
   const handleFreshStart = useCallback(() => {
     if (automaticBusy) return;
-    if (!profileExists) {
-      setShowDialog(true);
-      return;
-    }
+    if (!profileExists) return setShowDialog(true);
     void handleRecover("fresh_start");
   }, [automaticBusy, handleRecover, profileExists]);
 
-  const cardClassName = model.isReadOnly
-    ? "border-blue-500/30 bg-blue-500/5"
-    : "border-destructive/30 bg-destructive/5";
-  const iconClassName = model.isReadOnly
-    ? "bg-blue-500/10 text-blue-600 dark:text-blue-400"
-    : "bg-red-500/10 text-red-600 dark:text-red-400";
+  return (
+    <BootstrapRecoveryView
+      props={{ taskId, sessionId, workspaceId, error, automaticRecovery }}
+      recovery={recovery}
+      model={model}
+      profileExists={profileExists}
+      providerRestoredResumeEligible={recovery.providerRestoredResumeEligible}
+      inspectionBusy={inspectionBusy}
+      effectiveBusyAction={effectiveBusyAction}
+      needsManagedCloneRelocation={needsManagedCloneRelocation}
+      showDialog={showDialog}
+      setShowDialog={setShowDialog}
+      relocationConfirmationOpen={relocationConfirmationOpen}
+      setRelocationConfirmationOpen={setRelocationConfirmationOpen}
+      handleResume={handleResume}
+      handleFreshStart={handleFreshStart}
+      copy={copy}
+      t={t}
+    />
+  );
+}
 
+function BootstrapRecoveryView({
+  props,
+  recovery,
+  model,
+  profileExists,
+  providerRestoredResumeEligible,
+  inspectionBusy,
+  effectiveBusyAction,
+  needsManagedCloneRelocation,
+  showDialog,
+  setShowDialog,
+  relocationConfirmationOpen,
+  setRelocationConfirmationOpen,
+  handleResume,
+  handleFreshStart,
+  copy,
+  t,
+}: BootstrapRecoveryViewProps) {
+  if (needsManagedCloneRelocation && recovery.workspaceRecovery?.agent_ready) return null;
+  const { taskId, sessionId, workspaceId, error, automaticRecovery } = props;
+  const { busyAction, branchDetails, guardDetails, managedCloneRecoveryStamp } = recovery;
+  const cardClassName = recoveryCardClassName(model.isReadOnly);
+  const iconClassName = recoveryIconClassName(model.isReadOnly);
   return (
     <div
       className={`flex min-w-0 gap-3 rounded-md border p-3 sm:p-4 ${cardClassName}`}
@@ -111,16 +251,26 @@ function BootstrapRecoveryControls({
         model={model}
         error={error}
         profileExists={profileExists}
+        providerRestoredResumeEligible={providerRestoredResumeEligible}
+        inspectionBusy={inspectionBusy}
         busyAction={effectiveBusyAction}
         hasBranchRecovery={branchDetails !== null}
         blocked={Boolean(guardDetails && !guardDetails.retryable)}
         canRestore={!guardDetails}
+        needsManagedCloneRelocation={needsManagedCloneRelocation}
+        workspaceRecovery={needsManagedCloneRelocation ? recovery.workspaceRecovery : null}
+        workspaceRecoveryRepositoryName={recovery.workspaceRecoveryRepositoryName}
+        workspaceRecoveryStatusCheck={
+          needsManagedCloneRelocation ? recovery.workspaceRecoveryStatusCheck : "idle"
+        }
+        onCheckWorkspaceRecoveryStatus={() => void recovery.checkWorkspaceRecoveryStatus()}
         onResume={handleResume}
-        onRestore={() => void handleRestore()}
+        onRestore={() => void recovery.handleRestore()}
         onFreshStart={handleFreshStart}
-        onNewBranch={() => void handleNewBranch()}
+        onNewBranch={() => void recovery.handleNewBranch()}
+        onRelocate={() => setRelocationConfirmationOpen(true)}
         copy={copy}
-        translate={t}
+        t={t}
       />
       <NewSessionDialog
         open={showDialog}
@@ -128,8 +278,25 @@ function BootstrapRecoveryControls({
         taskId={taskId}
         workspaceId={workspaceId}
       />
+      <ManagedCloneRelocationConfirmation
+        open={relocationConfirmationOpen}
+        targetKey={`${sessionId}:${managedCloneRecoveryStamp ?? error.stamp}`}
+        onOpenChange={setRelocationConfirmationOpen}
+        onConfirm={() => recovery.handleManagedCloneRelocation()}
+        disabled={busyAction !== null}
+      />
     </div>
   );
+}
+
+function recoveryCardClassName(readOnly: boolean) {
+  return readOnly ? "border-blue-500/30 bg-blue-500/5" : "border-destructive/30 bg-destructive/5";
+}
+
+function recoveryIconClassName(readOnly: boolean) {
+  return readOnly
+    ? "bg-blue-500/10 text-blue-600 dark:text-blue-400"
+    : "bg-red-500/10 text-red-600 dark:text-red-400";
 }
 
 export function SessionBootstrapRecoveryCard(props: SessionBootstrapRecoveryCardProps) {

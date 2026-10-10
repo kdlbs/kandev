@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -91,6 +92,61 @@ func createTestExecution(id, taskID, sessionID string) *AgentExecution {
 	}
 }
 
+func TestHandleAgentEvent_DelayedCompletedPromptChunkDoesNotRearmExecution(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-delayed-chunk", "task-1", "session-1")
+	execution.Status = v1.AgentStatusReady
+	execution.promptGeneration = 3
+	execution.promptCompletionGeneration = 3
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             "message_chunk",
+		Text:             "late chunk from the completed turn",
+		PromptGeneration: 3,
+	})
+
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("execution status = %q, want %q after a completed turn's delayed chunk", execution.Status, v1.AgentStatusReady)
+	}
+	for _, published := range eventBus.PublishedEvents {
+		if published.Event != nil && published.Event.Type == events.AgentRunning {
+			t.Fatal("delayed completed-turn chunk published agent.running")
+		}
+	}
+}
+
+func TestUncertainDeliveryDisconnectDoesNotCompleteExecutionTurn(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-uncertain-disconnect", "task-1", "session-1")
+	execution.DeliveryMode = DurableDeliveryV1
+	execution.DeliveryStreamID = "stream-1"
+	execution.DeliveryIncarnationID = "incarnation-1"
+	execution.DeliveryHarnessGeneration = 1
+	execution.promptGeneration = 1
+	execution.dispatchedPromptGeneration = 1
+	execution.setDeliverySubmissionID("submission-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.handleStreamDisconnect(execution, errors.New("updates transport closed"), 1)
+
+	if execution.Status != v1.AgentStatusRunning {
+		t.Fatalf("execution status = %q, want running while delivery remains uncertain", execution.Status)
+	}
+	if execution.FailureCode != durableDeliveryUncertainFailureCode || execution.FailureDetails != "submission-1" {
+		t.Fatalf("failure state = (%q, %q), want uncertain submission-1", execution.FailureCode, execution.FailureDetails)
+	}
+	for _, published := range eventBus.PublishedEvents {
+		if published.Subject == events.AgentCompleted || published.Subject == events.AgentFailed {
+			t.Fatalf("uncertain disconnect published terminal event %q", published.Subject)
+		}
+	}
+}
+
 func TestHandleAgentEvent_UserMessageChunkNotBufferedAsAssistant(t *testing.T) {
 	mgr, eventBus := createTestManagerWithTracking()
 	execution := createTestExecution("exec-1", "task-1", "session-1")
@@ -117,6 +173,90 @@ func TestHandleAgentEvent_UserMessageChunkNotBufferedAsAssistant(t *testing.T) {
 	}
 	if streamedText != "Hello." {
 		t.Fatalf("streamed assistant text = %q, want %q", streamedText, "Hello.")
+	}
+}
+
+func TestIdleSuspensionReplaysBufferedAgentEventsWhenCancelled(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := runOwnerTestRepository(t)
+	mgr, eventBus := createTestManagerWithTracking()
+	mgr.SetExecutorRunningWriter(repo)
+	execution := createTestExecution("exec-idle-event", "task-idle-event", "session-idle-event")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: execution.SessionID, SessionID: execution.SessionID, AgentExecutionID: execution.ID,
+	}); err != nil {
+		t.Fatalf("upsert running row: %v", err)
+	}
+
+	execution.idleSuspensionInProgress.Store(true)
+	mgr.handleAgentEventAtContextResetBoundary(execution, agentctl.AgentEvent{
+		Type: "message_chunk",
+		Text: "completion that crossed the suspension boundary\n",
+	}, false, "attempt-1")
+	if got := len(eventBus.getStreamEvents()); got != 0 {
+		t.Fatalf("buffered event published before suspension outcome: got %d events", got)
+	}
+	if err := mgr.CancelIdleSuspension(ctx, execution.SessionID, execution.ID); err != nil {
+		t.Fatalf("cancel idle suspension: %v", err)
+	}
+	streamed := eventBus.getStreamEvents()
+	if len(streamed) != 2 {
+		t.Fatalf("replayed stream events = %d, want original evidence and transcript projection after suspension cancellation", len(streamed))
+	}
+	if streamed[0].Data.Type != "message_chunk" || streamed[0].Data.Text != "completion that crossed the suspension boundary\n" {
+		t.Fatalf("replayed original evidence = %+v, want buffered message_chunk", streamed[0].Data)
+	}
+	if streamed[1].Data.Type != "message_streaming" {
+		t.Fatalf("replayed transcript projection = %+v, want message_streaming", streamed[1].Data)
+	}
+}
+
+func TestSuspendIdleReplaysEventsWhenCandidateValidationFails(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := runOwnerTestRepository(t)
+	mgr, eventBus := createTestManagerWithTracking()
+	mgr.SetExecutorRunningWriter(repo)
+	execution := createTestExecution("exec-idle-validation", "task-idle-validation", "session-idle-validation")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	releaseAdmission, err := execution.acquireContextResetExclusive(ctx)
+	if err != nil {
+		t.Fatalf("acquire reset admission: %v", err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		result <- mgr.SuspendIdle(ctx, IdleSuspensionIdentity{
+			ExecutionID: execution.ID, SessionID: execution.SessionID,
+		})
+	}()
+	deadline := time.Now().Add(time.Second)
+	for !execution.idleSuspensionInProgress.Load() && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+	if !execution.idleSuspensionInProgress.Load() {
+		releaseAdmission()
+		t.Fatal("suspension did not establish its event fence")
+	}
+	mgr.handleAgentEventAtContextResetBoundary(execution, agentctl.AgentEvent{
+		Type: "message_chunk", Text: "completion before rejected suspension\n",
+	}, false, "attempt-2")
+	releaseAdmission()
+	if err := <-result; err == nil {
+		t.Fatal("candidate validation unexpectedly succeeded")
+	}
+	streamed := eventBus.getStreamEvents()
+	if len(streamed) != 2 {
+		t.Fatalf("replayed stream events after rejected claim = %d, want original evidence and transcript projection", len(streamed))
+	}
+	if streamed[0].Data.Type != "message_chunk" || streamed[0].Data.Text != "completion before rejected suspension\n" {
+		t.Fatalf("replayed original evidence = %+v, want buffered message_chunk", streamed[0].Data)
+	}
+	if streamed[1].Data.Type != "message_streaming" {
+		t.Fatalf("replayed transcript projection = %+v, want message_streaming", streamed[1].Data)
 	}
 }
 
@@ -147,6 +287,22 @@ func TestHandleAgentEvent_CompleteCarriesPromptTurnID(t *testing.T) {
 		}
 	}
 	t.Fatal("no complete stream event published")
+}
+
+func TestUsageObservationUsesItsPromptGenerationTurnID(t *testing.T) {
+	execution := &AgentExecution{}
+	execution.setPromptTurnID("turn-a")
+	generationA := beginExecutionPrompt(execution)
+	execution.setPromptTurnID("turn-b")
+	beginExecutionPrompt(execution)
+
+	manager := &Manager{}
+	event := manager.handleAgentEventState(execution, agentctl.AgentEvent{
+		Type: streams.EventTypeUsageObservation, PromptGeneration: generationA,
+	})
+	if event.TurnID != "turn-a" {
+		t.Fatalf("usage turn ID = %q, want turn-a for prompt generation %d", event.TurnID, generationA)
+	}
 }
 
 // TestHandleAgentEvent_CompleteCarriesActingAgentOfficeIdentity pins that the
@@ -2155,7 +2311,7 @@ func TestHandleCompleteEventMarkState_ErrorDoesNotRemoveExecution(t *testing.T) 
 		Data:  map[string]interface{}{"is_error": true},
 	}
 
-	mgr.handleCompleteEventMarkState(execution, errorEvent, true, nil)
+	callCompletionStateWithStartupLease(t, mgr, execution, errorEvent, true, nil)
 
 	// Execution must still be in the store so the orchestrator can clean it up
 	if _, found := mgr.executionStore.Get("exec-1"); !found {
@@ -2175,7 +2331,7 @@ func TestHandleCompleteEventMarkState_SuccessKeepsExecution(t *testing.T) {
 		Type: "complete",
 	}
 
-	mgr.handleCompleteEventMarkState(execution, successEvent, false, nil)
+	callCompletionStateWithStartupLease(t, mgr, execution, successEvent, false, nil)
 
 	got, found := mgr.executionStore.Get("exec-1")
 	if !found {

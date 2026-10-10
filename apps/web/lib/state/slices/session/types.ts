@@ -3,6 +3,7 @@ import type {
   TaskPendingAction,
   TaskPendingActionRevision,
   TaskSession,
+  WorkspaceRecoveryProjection,
   Turn,
   TaskPlan,
   TaskPlanCommentSnapshot,
@@ -10,6 +11,7 @@ import type {
   TaskWalkthrough,
 } from "@/lib/types/http";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import type { ObservedPrompts } from "@/lib/session-last-prompt";
 
 export type MessagesState = {
   bySession: Record<string, Message[]>;
@@ -34,8 +36,11 @@ export type PromptsState = MessagesState & {
   generationBySession: Record<string, number>;
   /** Incremented whenever an authoritative prompt refresh begins. */
   refreshGenerationBySession: Record<string, number>;
+  /** Only the transcript's own completed projection read establishes authority. */
+  authoritativeBySession: Record<string, true>;
+  observedBySession: Record<string, ObservedPrompts>;
+  deletedIdsBySession: Record<string, Record<string, true>>;
 };
-
 export type TurnsState = {
   bySession: Record<string, Turn[]>;
   activeBySession: Record<string, string | null>; // sessionId -> active turnId
@@ -71,11 +76,16 @@ export type TaskSessionsState = {
   activityEpochBySession?: Record<string, number>;
   /** Monotonic cursor generation used to keep older REST snapshots from regressing read state. */
   readCursorEpochBySession?: Record<string, number>;
+  /** Per-session generation used to keep recovery notifications ahead of stale hydration. */
+  workspaceRecoveryEpochBySession?: Record<string, number>;
+  /** Latest event projection for sessions that have not hydrated yet. */
+  workspaceRecoveryByEnvironment?: Record<string, WorkspaceRecoveryProjection>;
 };
 
 export type TaskSessionHydrationEpoch = {
   activity: number;
   readCursor: number;
+  workspaceRecovery?: number;
 };
 
 export type TaskSessionsByTaskState = {
@@ -98,6 +108,8 @@ export type SessionAgentctlStatus = {
   status: "starting" | "ready" | "error";
   errorMessage?: string;
   agentExecutionId?: string;
+  /** Startup identity retained when live session state implies readiness. */
+  startingExecutionId?: string;
   updatedAt?: string;
 };
 
@@ -344,6 +356,11 @@ export type SessionSliceActions = {
     messages: Message[],
     meta?: { hasMore?: boolean; oldestCursor?: string | null },
   ) => void;
+  installAuthoritativePromptMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta: { hasMore: boolean; oldestCursor: string | null },
+  ) => void;
   setPromptMessagesLoading: (sessionId: string, loading: boolean) => void;
   setPromptMessagesLoadingMore: (sessionId: string, loading: boolean) => void;
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
@@ -403,6 +420,10 @@ export type SessionSliceActions = {
     revision?: TaskPendingActionRevision,
     taskId?: string,
   ) => void;
+  setWorkspaceRecoveryProjection: (
+    sessionIds: string[],
+    projection: WorkspaceRecoveryProjection,
+  ) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (
     taskId: string,
@@ -418,6 +439,7 @@ export type SessionSliceActions = {
   setPendingModel: (sessionId: string, modelId: string) => void;
   clearPendingModel: (sessionId: string) => void;
   setActiveModel: (sessionId: string, modelId: string) => void;
+  clearActiveModel: (sessionId: string) => void;
   // Task plan actions
   setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;

@@ -20,6 +20,16 @@ system_design:
 
 # Task 09: Task management claims and human takeover
 
+## Presentation scope correction (2026-09-28)
+
+The user requested removal of the native Manager and Completion requirements
+controls. The [removal package](../remove-native-coordination-ui/plan.md)
+supersedes this record's UI-03 task-detail presentation and its browser
+interaction matrix. The correction was implemented on September 28, 2026. The
+original commands, counts, and results below remain historical UI evidence;
+claim APIs and enforcement remain valid. The new package owns replacement
+browser and recovery coverage.
+
 ## Summary
 
 Implement optional task management claims independently of worker assignment. Add native inspection and explicit human takeover.

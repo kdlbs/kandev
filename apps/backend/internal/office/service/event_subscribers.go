@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -124,13 +125,16 @@ type TaskUpdatedData struct {
 
 // CommentPostedData represents a comment event payload.
 type CommentPostedData struct {
-	TaskID                 string `json:"task_id"`
-	CommentID              string `json:"comment_id"`
-	AuthorID               string `json:"author_id"`
-	AuthorType             string `json:"author_type"`
-	AssigneeAgentProfileID string `json:"assignee_agent_profile_id"`
-	EngineDispatched       string `json:"engine_dispatched"`
-	Source                 string `json:"source"`
+	TaskID                   string `json:"task_id"`
+	CommentID                string `json:"comment_id"`
+	AuthorID                 string `json:"author_id"`
+	AuthorType               string `json:"author_type"`
+	AssigneeAgentProfileID   string `json:"assignee_agent_profile_id"`
+	EngineDispatched         string `json:"engine_dispatched"`
+	EngineRetrySuppressed    string `json:"engine_retry_suppressed"`
+	Source                   string `json:"source"`
+	WorkflowStepID           string `json:"workflow_step_id"`
+	WorkflowStepTransitionID string `json:"workflow_step_transition_id"`
 }
 
 // ApprovalResolvedData represents an approval resolved event payload.
@@ -230,20 +234,21 @@ func exactRunSessionEvent(data *AgentLifecycleData) bool {
 }
 
 type PromptUsageData struct {
-	AgentExecutionID string      `json:"agent_execution_id,omitempty"`
-	TaskID           string      `json:"task_id"`
-	SessionID        string      `json:"session_id"`
-	RunSessionID     string      `json:"run_session_id,omitempty"`
-	RunAttempt       int         `json:"run_attempt,omitempty"`
-	WorkspaceID      string      `json:"workspace_id,omitempty"`
-	AgentID          string      `json:"agent_id"`
-	AgentProfileID   string      `json:"agent_profile_id,omitempty"`
-	AgentType        string      `json:"agent_type"`
-	Model            string      `json:"model"`
-	Provider         string      `json:"provider"`
-	Usage            UsageTokens `json:"usage"`
-	TurnID           string      `json:"turn_id,omitempty"`
-	UsageEventID     string      `json:"usage_event_id,omitempty"`
+	AgentExecutionID string                          `json:"agent_execution_id,omitempty"`
+	TaskID           string                          `json:"task_id"`
+	SessionID        string                          `json:"session_id"`
+	RunSessionID     string                          `json:"run_session_id,omitempty"`
+	RunAttempt       int                             `json:"run_attempt,omitempty"`
+	WorkspaceID      string                          `json:"workspace_id,omitempty"`
+	AgentID          string                          `json:"agent_id"`
+	AgentProfileID   string                          `json:"agent_profile_id,omitempty"`
+	AgentType        string                          `json:"agent_type"`
+	Model            string                          `json:"model"`
+	Provider         string                          `json:"provider"`
+	Usage            UsageTokens                     `json:"usage"`
+	UsageObservation *streams.NativeUsageObservation `json:"usage_observation,omitempty"`
+	TurnID           string                          `json:"turn_id,omitempty"`
+	UsageEventID     string                          `json:"usage_event_id,omitempty"`
 }
 
 // UsageTokens mirrors streams.PromptUsage on the wire. All counts are int64
@@ -271,6 +276,7 @@ type UsageTokens struct {
 	ProviderReportedCostSubcents int64 `json:"provider_reported_cost_subcents,omitempty"`
 	ProviderReportedCostPresent  bool  `json:"provider_reported_cost_present,omitempty"`
 	Estimated                    bool  `json:"estimated,omitempty"`
+	PriceSuppressed              bool  `json:"price_suppressed,omitempty"`
 }
 
 // RegisterEventSubscribers subscribes to system events and queues runs.
@@ -1537,7 +1543,8 @@ func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) e
 	if data.TaskID == "" || data.CommentID == "" {
 		return nil
 	}
-	if data.EngineDispatched == commentkeys.EngineDispatchedValue {
+	if data.EngineDispatched == commentkeys.EngineDispatchedValue ||
+		data.EngineRetrySuppressed == commentkeys.EngineDispatchedValue {
 		return nil
 	}
 	// A session-bridged comment mirrors a turn that already ran; it must
@@ -1556,11 +1563,23 @@ func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) e
 		return nil
 	}
 	key := commentkeys.TaskComment(data.CommentID)
+	payload := engine.OnCommentPayload{
+		CommentID: data.CommentID,
+		AuthorID:  data.AuthorID,
+	}
+	if data.WorkflowStepID != "" || data.WorkflowStepTransitionID != "" {
+		if data.WorkflowStepID == "" || data.WorkflowStepTransitionID == "" {
+			return fmt.Errorf("comment retry has incomplete workflow entry identity")
+		}
+		transitionID, err := strconv.ParseInt(data.WorkflowStepTransitionID, 10, 64)
+		if err != nil {
+			return fmt.Errorf("parse comment retry workflow entry identity: %w", err)
+		}
+		payload.RetryWorkflowStepID = data.WorkflowStepID
+		payload.RetryWorkflowStepTransitionID = transitionID
+	}
 	return s.dispatchEngineTrigger(ctx, data.TaskID, engine.TriggerOnComment,
-		engine.OnCommentPayload{
-			CommentID: data.CommentID,
-			AuthorID:  data.AuthorID,
-		}, key)
+		payload, key)
 }
 
 // handleApprovalResolved dispatches an on_approval_resolved trigger to

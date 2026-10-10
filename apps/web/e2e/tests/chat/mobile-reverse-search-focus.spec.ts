@@ -16,6 +16,7 @@ test.describe("Reverse search focus restoration on mobile", () => {
     await startQuickChatFromSetup(dialog, testPage);
     const editor = dialog.locator(".tiptap.ProseMirror:visible").first();
     await editor.fill("phone quick chat draft");
+    await expect(editor).toHaveText("phone quick chat draft");
 
     await testPage.keyboard.press("Control+r");
     const overlay = dialog.getByTestId("history-search-overlay");
@@ -27,6 +28,8 @@ test.describe("Reverse search focus restoration on mobile", () => {
     await expect(overlay).not.toBeVisible();
     await expect(dialog).toBeVisible();
     await expect(editor).toBeFocused();
+    await expect(editor).toHaveText("phone quick chat draft");
+    await editor.press("End");
     await testPage.keyboard.type(" continued");
     await expect(editor).toHaveText("phone quick chat draft continued");
   });

@@ -27,9 +27,7 @@ describe("SidebarTaskPagination", () => {
   it("hides controls through 100 task rows, regardless of entry headings", () => {
     const props = {
       pending: false,
-      error: null,
       onPageChange: vi.fn(),
-      onRetry: vi.fn(),
     };
     const { rerender } = render(<SidebarTaskPagination page={response(99)} {...props} />);
     expect(screen.queryByTestId("sidebar-page-controls")).toBeNull();
@@ -41,44 +39,20 @@ describe("SidebarTaskPagination", () => {
     expect(screen.getByTestId("sidebar-page-controls")).not.toBeNull();
   });
 
-  it("provides reachable phone controls and keeps Retry separate from paging", () => {
+  it("provides reachable phone paging controls", () => {
     const onPageChange = vi.fn();
-    const onRetry = vi.fn();
     render(
       <SidebarTaskPagination
         page={response(101)}
         pending={false}
-        error="network"
         onPageChange={onPageChange}
-        onRetry={onRetry}
         touchTargets
       />,
     );
-
     const next = screen.getByRole("button", { name: "sidebar:nextPage" });
     expect(next.className).toContain("min-h-11");
     fireEvent.click(next);
     expect(onPageChange).toHaveBeenCalledWith(2);
-    expect(screen.getByRole("alert").textContent).toContain("sidebar:pageLoadFailed");
-    fireEvent.click(screen.getByRole("button", { name: "sidebar:retry" }));
-    expect(onRetry).toHaveBeenCalledOnce();
-    expect(onPageChange).toHaveBeenCalledOnce();
-  });
-
-  it("keeps refresh recovery visible on a list that does not need paging", () => {
-    const onRetry = vi.fn();
-    render(
-      <SidebarTaskPagination
-        page={response(99)}
-        pending={false}
-        error="network"
-        onPageChange={vi.fn()}
-        onRetry={onRetry}
-      />,
-    );
-
-    expect(screen.queryByRole("button", { name: "sidebar:nextPage" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "sidebar:retry" }));
-    expect(onRetry).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

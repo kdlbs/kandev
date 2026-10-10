@@ -9,6 +9,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 func (r *Repository) lockTaskTransferRelations(
@@ -157,9 +158,7 @@ func (r *Repository) addDiscoveredTaskTransferRelations(
 		if !hasTaskID {
 			continue
 		}
-		counts = appendTransferRelationIfMissing(counts, transferWorkspaceProjection{
-			table: table, taskColumn: "task_id", identityColumn: "task_id",
-		})
+		count := transferWorkspaceProjection{table: table, taskColumn: "task_id", identityColumn: "task_id"}
 		hasWorkspaceID, relationErr := r.relationHasColumns(ctx, table, "workspace_id")
 		if relationErr != nil {
 			return nil, nil, relationErr
@@ -173,12 +172,10 @@ func (r *Repository) addDiscoveredTaskTransferRelations(
 				}
 			}
 			if !approved {
-				return nil, nil, fmt.Errorf("task transfer relation %q has unapproved workspace ownership", table)
+				count.unmappedOwner = true
 			}
-			projections = appendTransferRelationIfMissing(projections, transferWorkspaceProjection{
-				table: table, taskColumn: "task_id",
-			})
 		}
+		counts = appendTransferRelationIfMissing(counts, count)
 	}
 	sort.Slice(projections, func(i, j int) bool { return projections[i].table < projections[j].table })
 	sort.Slice(counts, func(i, j int) bool {
@@ -188,6 +185,23 @@ func (r *Repository) addDiscoveredTaskTransferRelations(
 		return counts[i].table < counts[j].table
 	})
 	return projections, counts, nil
+}
+
+func (r *Repository) validateUnmappedTransferRelations(ctx context.Context, tx *sqlx.Tx, taskID string, relations []transferWorkspaceProjection) error {
+	for _, relation := range relations {
+		if !relation.unmappedOwner {
+			continue
+		}
+		var count int
+		query := `SELECT COUNT(*) FROM "` + relation.table + `" WHERE task_id = ?`
+		if err := tx.GetContext(ctx, &count, r.db.Rebind(query), taskID); err != nil {
+			return err
+		}
+		if count != 0 {
+			return fmt.Errorf("%w: task transfer relation %q has unapproved workspace ownership", repoerrors.ErrTaskTransferConflict, relation.table)
+		}
+	}
+	return nil
 }
 
 func (r *Repository) transferRelationTableNames(ctx context.Context) ([]string, error) {
@@ -207,8 +221,9 @@ func appendTransferRelationIfMissing(
 	relations []transferWorkspaceProjection,
 	candidate transferWorkspaceProjection,
 ) []transferWorkspaceProjection {
-	for _, existing := range relations {
+	for index, existing := range relations {
 		if existing.table == candidate.table && existing.taskColumn == candidate.taskColumn {
+			relations[index].unmappedOwner = existing.unmappedOwner || candidate.unmappedOwner
 			return relations
 		}
 	}

@@ -7,6 +7,7 @@ requirements:
   - REQ-TASKS-PRIORITY-VISIBILITY-003
   - REQ-TASKS-PRIORITY-VISIBILITY-004
   - REQ-TASKS-PRIORITY-VISIBILITY-005
+  - REQ-TASKS-PRIORITY-VISIBILITY-006
 created: 2026-09-03
 owners:
   - kandev
@@ -29,6 +30,7 @@ Office task surface remains a separate consumer with its own vocabulary.
 | REQ-TASKS-PRIORITY-VISIBILITY-003 | Data and contracts, Control flow, Failure and recovery |
 | REQ-TASKS-PRIORITY-VISIBILITY-004 | Data and contracts, Persistence |
 | REQ-TASKS-PRIORITY-VISIBILITY-005 | Components and responsibilities, Data and contracts, Control flow, Failure and recovery |
+| REQ-TASKS-PRIORITY-VISIBILITY-006 | Components and responsibilities, Data and contracts, Control flow |
 
 ## Components and responsibilities
 
@@ -54,6 +56,12 @@ Office task surface remains a separate consumer with its own vocabulary.
   state-icon column, so priority presence does not change title alignment. The
   shared task priority metadata owns token order, localized label keys,
   indicator shapes and colors; no sidebar-specific priority vocabulary is added.
+- The `/tasks` task list view renders each row's title line through
+  `PrimaryTaskLine` in `apps/web/app/tasks/rich-task-list-row.tsx`, which both
+  the compact and the detailed row displays share. That line renders the shared
+  `TaskPriorityIndicator` immediately after the title and before the
+  change-request and archived badges, with a task-list-specific test ID. The
+  indicator is display-only; the list adds no priority menu or control.
 - The task creation dialog sends the selected priority token and uses the same
   four-token picker inside the Advanced settings section, which is collapsed by
   default, at every supported breakpoint. On wide layouts, the dependency picker
@@ -78,6 +86,11 @@ carry priority preserves the existing value in the client projection.
 `TaskSwitcherItem` carries the priority from both task-switcher projection
 adapters: the desktop `buildSidebarItem` path and the phone or tablet
 `toSheetItem` path. Both paths read the same `kanbanMulti.snapshots` task data.
+
+The task list view reads `priority` directly from the HTTP `Task` returned by
+the workspace task list endpoint and from `routeData.tasksPage.tasks` in the Go
+boot payload. The SPA route passes these initial tasks to `TasksPageClient`.
+The backend task DTO already carries the field, so no contract change is needed.
 The task switcher does not store another priority value.
 
 ## Control flow
@@ -108,6 +121,14 @@ responsive context-menu surface inside the task-switcher drawer. No hover,
 right-click or long press is required. The drawer remains the single scroll
 owner, and the existing responsive menu styling owns viewport containment,
 safe-area clearance and 44-pixel action rows.
+
+Task list display follows the existing list data path:
+
+`Workspace task list request -> task DTO with priority -> tasks page state -> TaskListRow -> PrimaryTaskLine -> TaskPriorityIndicator`
+
+The list does not subscribe to new events for priority. It shows the value from
+its initial payload and from each existing refetch, such as after a sort, group,
+page, archive, unarchive, delete or pull-to-refresh action.
 
 ## Failure and recovery
 
@@ -154,3 +175,7 @@ from a touch disclosure for coarse pointers.
 - Desktop sidebar and mobile task-action Playwright scenarios verify first
   render, menu reachability, persistence, live convergence, touch target size,
   viewport containment and the absence of document horizontal overflow.
+- Task list row tests verify the indicator in compact and detailed rows, the
+  medium and invalid fallback, and badge order. Desktop and mobile task list
+  Playwright scenarios verify first render and the absence of document
+  horizontal overflow.

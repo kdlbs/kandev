@@ -39,6 +39,12 @@ type RootCandidate struct {
 	Optional      bool
 }
 
+type CapacityRoot struct {
+	RequestedPath string
+	Path          string
+	Aliases       []string
+}
+
 type MountReader interface {
 	Identity(string) (string, error)
 }
@@ -60,25 +66,50 @@ type Scanner interface {
 }
 
 type Config struct {
-	EffectiveRoot string
-	UnixRoot      string
-	GOOS          string
-	RootResolver  func(context.Context) ([]RootCandidate, error)
-	Mounts        MountReader
-	Scanner       Scanner
-	Deadline      time.Duration
-	OnProgress    func(filescan.Progress)
+	EffectiveRoot     string
+	UnixRoot          string
+	GOOS              string
+	RootResolver      func(context.Context) ([]RootCandidate, error)
+	Mounts            MountReader
+	Scanner           Scanner
+	Deadline          time.Duration
+	OnProgress        func(filescan.Progress)
+	ClassifyOwnership func(context.Context, []string) map[string]EntryOwnership
 }
 
 type RootMeasurement struct {
-	RequestedPath string   `json:"requested_path"`
-	Path          string   `json:"path"`
-	Aliases       []string `json:"aliases,omitempty"`
-	Status        Status   `json:"status"`
-	SizeBytes     *int64   `json:"size_bytes,omitempty"`
-	SkippedCount  int      `json:"skipped_count,omitempty"`
-	Reason        string   `json:"reason,omitempty"`
-	Warnings      []string `json:"warnings,omitempty"`
+	RequestedPath string          `json:"requested_path"`
+	Path          string          `json:"path"`
+	Aliases       []string        `json:"aliases,omitempty"`
+	Status        Status          `json:"status"`
+	SizeBytes     *int64          `json:"size_bytes,omitempty"`
+	Breakdown     *EntryBreakdown `json:"breakdown,omitempty"`
+	SkippedCount  int             `json:"skipped_count,omitempty"`
+	Reason        string          `json:"reason,omitempty"`
+	Warnings      []string        `json:"warnings,omitempty"`
+}
+
+type EntryOwnership string
+
+const (
+	EntryOwnershipRegisteredKandev EntryOwnership = "registered_kandev"
+	EntryOwnershipUntracked        EntryOwnership = "untracked"
+	EntryOwnershipUnknown          EntryOwnership = "unknown"
+)
+
+type EntryMeasurement struct {
+	Name         string         `json:"name"`
+	Kind         string         `json:"kind"`
+	SizeBytes    *int64         `json:"size_bytes,omitempty"`
+	Completeness Status         `json:"completeness"`
+	Ownership    EntryOwnership `json:"ownership"`
+}
+
+type EntryBreakdown struct {
+	Status             Status             `json:"status"`
+	Entries            []EntryMeasurement `json:"entries"`
+	OtherObservedBytes int64              `json:"other_observed_bytes"`
+	OtherObservedCount int                `json:"other_observed_count"`
 }
 
 type Analysis struct {
@@ -91,14 +122,15 @@ type Analysis struct {
 }
 
 type Provider struct {
-	effectiveRoot string
-	unixRoot      string
-	goos          string
-	rootResolver  func(context.Context) ([]RootCandidate, error)
-	mounts        MountReader
-	scanner       Scanner
-	deadline      time.Duration
-	onProgress    func(filescan.Progress)
+	effectiveRoot     string
+	unixRoot          string
+	goos              string
+	rootResolver      func(context.Context) ([]RootCandidate, error)
+	mounts            MountReader
+	scanner           Scanner
+	deadline          time.Duration
+	onProgress        func(filescan.Progress)
+	classifyOwnership func(context.Context, []string) map[string]EntryOwnership
 }
 
 func New(config Config) *Provider {
@@ -140,6 +172,7 @@ func New(config Config) *Provider {
 		effectiveRoot: effectiveRoot, unixRoot: unixRoot, goos: goos,
 		rootResolver: resolver, mounts: mounts, scanner: scanner,
 		deadline: deadline, onProgress: config.OnProgress,
+		classifyOwnership: config.ClassifyOwnership,
 	}
 }
 
@@ -181,7 +214,10 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 		scanCtx, cancel := context.WithTimeout(ctx, p.deadline)
 		results := p.scanner.MeasureWithOptions(
 			scanCtx, scanRoots,
-			filescan.MeasureOptions{TolerateEntryErrors: true, CountSkipped: true, MaxWarnings: 10},
+			filescan.MeasureOptions{
+				TolerateEntryErrors: true, CountSkipped: true, MaxWarnings: 10,
+				ChildSummaryLimit: 20,
+			},
 			p.onProgress,
 		)
 		scanDeadline := errors.Is(scanCtx.Err(), context.DeadlineExceeded)
@@ -202,8 +238,10 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 			analysis.Roots[planIndex] = measurementFromResult(
 				analysis.Roots[planIndex], result, scanDeadline,
 			)
+			analysis.Roots[planIndex].Breakdown = entryBreakdownFromResult(result)
 		}
 	}
+	p.classifyBreakdownOwnership(ctx, analysis.Roots)
 	return summarize(analysis), nil
 }
 
@@ -212,6 +250,33 @@ func (p *Provider) resolveRoots(ctx context.Context) ([]RootCandidate, error) {
 		return nil, errors.New("temporary root resolver is unavailable")
 	}
 	return p.rootResolver(ctx)
+}
+
+// CapacityRoots resolves the same server-selected roots as analysis without
+// walking their contents. It retains aliases discovered by the root planner.
+func (p *Provider) CapacityRoots(ctx context.Context) ([]CapacityRoot, error) {
+	candidates, err := p.resolveRoots(ctx)
+	if err != nil {
+		return nil, err
+	}
+	plans := p.planRoots(candidates)
+	roots := make([]CapacityRoot, 0, len(plans))
+	for _, plan := range plans {
+		measurement := plan.measurement
+		path := measurement.Path
+		if path == "" {
+			path = measurement.RequestedPath
+		}
+		if path == "" {
+			continue
+		}
+		roots = append(roots, CapacityRoot{
+			RequestedPath: measurement.RequestedPath,
+			Path:          path,
+			Aliases:       append([]string(nil), measurement.Aliases...),
+		})
+	}
+	return roots, nil
 }
 
 type rootPlan struct {
@@ -496,6 +561,59 @@ func measurementFromResult(
 		measurement.Reason = "some_entries_unmeasured"
 	}
 	return measurement
+}
+
+func entryBreakdownFromResult(result filescan.Result) *EntryBreakdown {
+	if result.ChildSummaryStatus == "" {
+		return nil
+	}
+	entries := make([]EntryMeasurement, 0, len(result.Children))
+	for _, child := range result.Children {
+		entries = append(entries, EntryMeasurement{
+			Name: child.Name, Kind: child.Kind, SizeBytes: child.SizeBytes,
+			Completeness: Status(child.Completeness), Ownership: EntryOwnershipUnknown,
+		})
+	}
+	return &EntryBreakdown{
+		Status: Status(result.ChildSummaryStatus), Entries: entries,
+		OtherObservedBytes: result.OtherObservedBytes,
+		OtherObservedCount: result.OtherObservedCount,
+	}
+}
+
+func (p *Provider) classifyBreakdownOwnership(ctx context.Context, roots []RootMeasurement) {
+	if p == nil || p.classifyOwnership == nil {
+		return
+	}
+	paths := make([]string, 0)
+	for _, root := range roots {
+		if root.Breakdown == nil || root.Path == "" {
+			continue
+		}
+		for _, entry := range root.Breakdown.Entries {
+			paths = append(paths, filepath.Join(root.Path, entry.Name))
+		}
+	}
+	if len(paths) == 0 {
+		return
+	}
+	ownershipByPath := p.classifyOwnership(ctx, paths)
+	for rootIndex := range roots {
+		root := &roots[rootIndex]
+		if root.Breakdown == nil || root.Path == "" {
+			continue
+		}
+		for entryIndex := range root.Breakdown.Entries {
+			entry := &root.Breakdown.Entries[entryIndex]
+			ownership := ownershipByPath[filepath.Join(root.Path, entry.Name)]
+			switch ownership {
+			case EntryOwnershipRegisteredKandev, EntryOwnershipUntracked:
+				entry.Ownership = ownership
+			default:
+				entry.Ownership = EntryOwnershipUnknown
+			}
+		}
+	}
 }
 
 func summarize(analysis Analysis) Analysis {

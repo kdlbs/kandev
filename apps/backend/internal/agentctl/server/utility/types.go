@@ -3,7 +3,11 @@
 // designed for quick tasks like generating commit messages or PR descriptions.
 package utility
 
-import "github.com/kandev/kandev/internal/common/acpprovider"
+import (
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/common/acpprovider"
+	"github.com/kandev/kandev/pkg/agent"
+)
 
 // PromptRequest is the request for executing an inference prompt.
 type PromptRequest struct {
@@ -81,6 +85,13 @@ type ProbeRequest struct {
 	// Refresh asks agent-specific discovery fallbacks to invalidate their own
 	// model caches. ACP session discovery itself always starts a fresh process.
 	Refresh bool `json:"refresh,omitempty"`
+	// ProfileContext marks probes started from a concrete profile discovery
+	// request. It prevents launch settings and provider diagnostics from entering
+	// command logs or client-visible errors.
+	ProfileContext bool `json:"profile_context,omitempty"`
+	// RuntimeObservation contains trusted descriptors supplied by backend
+	// registration. It never comes from a browser request.
+	RuntimeObservation *agents.RuntimeObservationDescriptor `json:"runtime_observation,omitempty"`
 
 	// InferenceConfig is the agent's inference configuration.
 	// Command and WorkDir are required; Model is intentionally omitted for probes.
@@ -105,7 +116,8 @@ type ProbeResponse struct {
 	// AgentName is the agent name reported in initialize response (if any).
 	AgentName string `json:"agent_name,omitempty"`
 	// AgentVersion is the agent version reported in initialize response (if any).
-	AgentVersion string `json:"agent_version,omitempty"`
+	AgentVersion string              `json:"agent_version,omitempty"`
+	RuntimeInfo  *agents.RuntimeInfo `json:"runtime_info,omitempty"`
 
 	// ProtocolVersion is the negotiated ACP protocol version.
 	ProtocolVersion int `json:"protocol_version,omitempty"`
@@ -147,6 +159,11 @@ const (
 	// ProbeFailureManagedRuntimeNPMPolicy means npm rejected the trusted exact
 	// package version under a date-qualified release policy.
 	ProbeFailureManagedRuntimeNPMPolicy ProbeFailureCode = "managed_runtime_npm_policy"
+	// ProbeFailureUnsupportedContext means the selected inference protocol
+	// cannot honor the profile's command prefix or CLI flags.
+	ProbeFailureUnsupportedContext ProbeFailureCode = "unsupported_profile_context"
+	// ProbeFailureAuthenticationRequired is a sanitized authentication failure.
+	ProbeFailureAuthenticationRequired ProbeFailureCode = "authentication_required"
 )
 
 // ProbeAuthMethod is a single advertised authentication method.
@@ -207,7 +224,9 @@ type ProbePromptCapabilities struct {
 
 // InferenceConfigDTO is the inference configuration passed from backend to agentctl.
 type InferenceConfigDTO struct {
-	// Command is the ACP command for one-shot inference.
+	// Protocol selects the one-shot inference transport. Empty means ACP.
+	Protocol agent.Protocol `json:"protocol,omitempty"`
+	// Command is the protocol command for one-shot inference.
 	// e.g., ["npx", "-y", "@agentclientprotocol/claude-agent-acp"]
 	Command []string `json:"command"`
 	// ModelFlag is the flag template for specifying the model.

@@ -2,6 +2,8 @@
 
 import { useTranslation } from "react-i18next";
 import { useEffect, useRef, useState } from "react";
+import { MessageTimeDisplaySettings } from "@/components/settings/message-time-display-settings";
+import { AgentTabCloseBehaviorSettings } from "./agent-tab-close-behavior-settings";
 import { AgentGeneratedTaskTitleSettings } from "@/components/settings/agent-generated-task-title-settings";
 import { AnchoredPromptBarSettings } from "@/components/settings/anchored-prompt-bar-settings";
 import { ArchiveConfirmationSettings } from "@/components/settings/archive-confirmation-settings";
@@ -119,9 +121,11 @@ export function TaskBehaviorSettings() {
             titleTestId="task-behavior-conversation-title"
             data-testid="task-behavior-group"
           >
+            <AgentTabCloseBehaviorSettings />
             <UnreadDividerSettings presentation="row" />
             <AnchoredPromptBarSettings presentation="row" />
             <TodoListPanelSettings presentation="row" />
+            <MessageTimeDisplaySettings />
           </SettingsGroup>
         </SettingsTabsPanel>
         <SettingsTabsPanel value="runtime" className="pt-4">

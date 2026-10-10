@@ -305,12 +305,15 @@ func TestHandleAgentCompleted_BlocksOnTurnCompleteWhileClarificationPending(t *t
 		require.Eventually(t, func() bool {
 			storedTask, taskErr := repo.GetTask(ctx, "t1")
 			storedSession, sessionErr := repo.GetTaskSession(ctx, "s1")
+			activeTurn, turnErr := svc.turnService.GetActiveTurn(ctx, "s1")
 			return taskErr == nil &&
 				sessionErr == nil &&
+				turnErr == nil &&
 				storedTask.WorkflowStepID == "step1" &&
-				storedSession.State == models.TaskSessionStateWaitingForInput
+				storedSession.State == models.TaskSessionStateWaitingForInput &&
+				activeTurn == nil
 		}, 2*time.Second, 10*time.Millisecond,
-			"pending clarification should keep the task at step1 and settle the session waiting for input")
+			"pending clarification should keep the task at step1, settle the session, and complete its turn")
 		turn, err := svc.turnService.GetActiveTurn(ctx, "s1")
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("get active turn: %v", err)

@@ -24,9 +24,10 @@ const (
 
 // Check run status and conclusion values from the GitHub API.
 const (
-	checkStatusCompleted = "completed"
-	checkStatusPending   = "pending"
-	checkStatusSuccess   = "success"
+	checkStatusCompleted  = "completed"
+	checkStatusInProgress = "in_progress"
+	checkStatusPending    = "pending"
+	checkStatusSuccess    = "success"
 
 	checkConclusionSuccess        = "success"
 	checkConclusionFail           = "failure"

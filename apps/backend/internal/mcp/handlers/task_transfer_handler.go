@@ -52,7 +52,7 @@ type taskTransferRequest struct {
 	DestinationStepName       string `json:"destination_workflow_step_name"`
 	IdempotencyKey            string `json:"idempotency_key"`
 	PreservationPolicy        string `json:"preservation_policy"`
-	AuditAttemptID            string `json:"audit_attempt_id"`
+	AuditAttemptID            string `json:"-"`
 }
 
 const rejectedTaskTransferAuditTimeout = 2 * time.Second
@@ -218,11 +218,12 @@ func (h *Handlers) taskTransferActor(ctx context.Context, command models.TaskTra
 		return models.TaskTransferActor{Kind: models.TaskTransferActorHuman, ID: actorID}, nil
 	}
 	if principal.Surface == mcpprofile.SurfaceConfiguration {
-		identity, ok := authn.IdentityFromContext(ctx)
-		if !ok || identity.UserID == "" {
-			return models.TaskTransferActor{}, repoerrors.ErrTaskNotFound
+		identity, _ := authn.IdentityFromContext(ctx)
+		actorID := identity.UserID
+		if actorID == "" {
+			actorID = "local-human"
 		}
-		return models.TaskTransferActor{Kind: models.TaskTransferActorHuman, ID: identity.UserID, SessionID: principal.CallerSessionID}, nil
+		return models.TaskTransferActor{Kind: models.TaskTransferActorHuman, ID: actorID, SessionID: principal.CallerSessionID}, nil
 	}
 	if principal.Surface != mcpprofile.SurfaceOfficeTask {
 		return models.TaskTransferActor{}, repoerrors.ErrTaskNotFound

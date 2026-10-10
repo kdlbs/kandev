@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, fetchBlob, fetchJson, setOnUnauthorized } from "./client";
+import { ApiError, fetchBlob, fetchConditionalJson, fetchJson, setOnUnauthorized } from "./client";
 
 const reloadMocks = vi.hoisted(() => ({
   signalBackendReloadRequired: vi.fn(),
@@ -116,6 +116,60 @@ describe("fetchJson", () => {
       message: "GitHub credentials are invalid",
     });
     expect(unauthorized).not.toHaveBeenCalled();
+  });
+});
+
+describe("fetchConditionalJson", () => {
+  const SESSION_ETAG = '"session-v1"';
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("returns 304 and its validator without parsing a body", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 304, headers: { ETag: SESSION_ETAG } }));
+    vi.stubGlobal("fetch", fetcher);
+
+    const result = await fetchConditionalJson<{ session: { id: string } }>(
+      "/api/v1/task-sessions/sess-1",
+      {
+        baseUrl: BACKEND_URL,
+        init: { headers: { "If-None-Match": SESSION_ETAG } },
+      },
+    );
+
+    expect(result).toEqual({ status: "not-modified", etag: SESSION_ETAG });
+    expect(fetcher).toHaveBeenCalledWith(
+      `${BACKEND_URL}/api/v1/task-sessions/sess-1`,
+      expect.objectContaining({ cache: "no-store", credentials: "include" }),
+    );
+    expect(new Headers(fetcher.mock.calls[0][1]?.headers).get("If-None-Match")).toBe(
+      '"session-v1"',
+    );
+  });
+
+  it("parses an updated response and returns its validator", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ session: { id: "sess-1" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ETag: '"session-v2"' },
+        }),
+      ),
+    );
+
+    await expect(
+      fetchConditionalJson<{ session: { id: string } }>("/api/v1/task-sessions/sess-1", {
+        baseUrl: BACKEND_URL,
+      }),
+    ).resolves.toEqual({
+      status: "ok",
+      data: { session: { id: "sess-1" } },
+      etag: '"session-v2"',
+    });
   });
 });
 

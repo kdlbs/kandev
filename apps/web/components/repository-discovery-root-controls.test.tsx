@@ -57,9 +57,30 @@ describe("RepositoryDiscoveryRootControls", () => {
     expect(screen.getByText("workspaces:removeDiscoveryRoot")).toBeTruthy();
   });
 
-  it("disables refresh while discovery is refreshing", () => {
+  it("renders user home folder label and path when display_path is tilde", () => {
+    render(
+      <RepositoryDiscoveryRootControls
+        {...baseProps}
+        discoveryRoots={[
+          {
+            id: "root-home",
+            path: "/Users/cfl12",
+            display_path: "~",
+            state: "connected",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("workspaces:userHomeFolder")).toBeTruthy();
+    expect(screen.getByText("/Users/cfl12")).toBeTruthy();
+  });
+
+  it("shows scanning indicator and disables refresh while discovery is loading", () => {
     render(<RepositoryDiscoveryRootControls {...baseProps} isLoading />);
 
+    expect(screen.getByTestId("discovery-roots-loading")).toBeTruthy();
+    expect(screen.getByText("workspaces:addingScanFolder")).toBeTruthy();
     expect(
       (screen.getByRole("button", { name: "workspaces:refreshRepositories" }) as HTMLButtonElement)
         .disabled,

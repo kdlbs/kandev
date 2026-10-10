@@ -1,11 +1,10 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";
 import {
-  openSeededAgentReply,
+  openSeededWaitingAgentReply,
   openSeededQuickChatReply,
   SELECTED_REPLY_TEXT,
   selectAgentReplyText,
-  waitForAgentSessionInput,
 } from "./agent-message-comments-helpers";
 
 async function expectTouchTarget(locator: Locator) {
@@ -40,16 +39,15 @@ test.describe("Agent message comments on mobile", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    const { task, body } = await openSeededAgentReply(
+    const { task, body } = await openSeededWaitingAgentReply(
       testPage,
       apiClient,
       seedData,
       "Mobile Agent Message Comments",
     );
 
-    // Run sends directly only when the session is ready for input. The seeded
-    // reply can be visible before the backend reports that state on mobile.
-    await waitForAgentSessionInput(apiClient, task.id, task.session_id!);
+    // The fixture seeds a completed agent turn in a waiting session, so Run
+    // sends directly and does not depend on mock-agent completion timing.
     await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
     const commentTrigger = testPage.getByTestId("agent-message-comment-trigger");
     await expect(commentTrigger).toBeVisible();

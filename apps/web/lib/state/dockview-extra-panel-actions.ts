@@ -8,7 +8,6 @@ import {
   type StoreSet,
 } from "./dockview-panel-actions";
 import { buildTerminalPanelActions } from "./dockview-terminal-panel-actions";
-import { PROMPT_HISTORY_PANEL_ID } from "./layout-manager/constants";
 import { panelTitle } from "./layout-manager/panel-title";
 import {
   parsePluginPanelId,
@@ -87,7 +86,7 @@ function buildTranscriptActions(set: StoreSet, get: StoreGet) {
 
 /**
  * Build the single-instance side-panel actions (plan, plugin task panel,
- * todos, prompt-history) via shared placement rules, plus
+ * todos) via shared placement rules, plus
  * `closePluginPanels` which removes every open panel contributed by a plugin.
  */
 function buildSidePanelActions(get: StoreGet) {
@@ -135,16 +134,27 @@ function buildSidePanelActions(get: StoreGet) {
         opts,
       );
     },
-    addPromptHistoryPanel: (opts?: SidePanelOpts) => {
+    addBackgroundWorkPanel: (
+      opts?: SidePanelOpts & { sessionId?: string; workId?: string; title?: string },
+    ) => {
       const { api, centerGroupId } = get();
       if (!api) return;
+      const sId = opts?.sessionId || "";
+      let id = "background-work";
+      if (opts?.workId) {
+        id = sId ? `background-work:${sId}:${opts.workId}` : `background-work:${opts.workId}`;
+      } else if (sId) {
+        id = `background-work:${sId}`;
+      }
+      const title = opts?.title || panelTitle("background-work");
       addSidePanel(
         api,
         centerGroupId,
         {
-          id: PROMPT_HISTORY_PANEL_ID,
-          component: PROMPT_HISTORY_PANEL_ID,
-          title: panelTitle(PROMPT_HISTORY_PANEL_ID),
+          id,
+          component: "background-work",
+          title,
+          params: { sessionId: sId, workId: opts?.workId },
         },
         opts,
       );

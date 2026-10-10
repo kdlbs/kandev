@@ -5,6 +5,7 @@ type transferWorkspaceProjection struct {
 	taskColumn     string
 	identityColumn string
 	receiptKey     string
+	unmappedOwner  bool
 }
 
 var transferWorkspaceProjections = []transferWorkspaceProjection{

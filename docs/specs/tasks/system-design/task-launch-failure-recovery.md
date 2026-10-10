@@ -4,6 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-002
+  - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003
 created: 2026-08-24
 updated: 2026-09-14
 owners:
@@ -25,6 +26,7 @@ task-owned projection.
 | --- | --- |
 | REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001 | PR gate, initial prompt admission, error projection, recovery actions |
 | REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-002 | Error scope, durable session history, shared task surface |
+| REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003 | Quick Chat retention amendment, retained response contract, recovery and navigation |
 
 ## PR gate and launch paths
 
@@ -298,3 +300,71 @@ Shared view models, action guards, stamps, and request state serve both presenta
 - [ADR-2026-08-18-never-started-agent-stall-terminal](../../../decisions/2026-08-18-never-started-agent-stall-terminal.md)
 
 - [Error scope and history decision](../../../decisions/2026-09-14-error-scope-and-history.md)
+
+## Quick Chat retention amendment (2026-10-02, draft)
+
+REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003 maps to this section.
+
+`httpStartQuickChat` currently rolls back its ephemeral task on any synchronous
+`LaunchSession` error. Retain the task when a session has already been persisted.
+Resolve that session by the newly created task's authoritative primary/session
+records, never by another workspace's most recent session. Persist the safe
+launch error through the existing task/session error machinery before returning
+the failed response. Extend this endpoint's error envelope additively with
+`task_id` and `session_id` when a retained session exists; retain non-2xx status
+and a sanitized error. Extend the typed workspace API error handling so the
+caller can reconcile these identities without parsing English error text.
+No global HTTP-client success semantics change is needed.
+
+Before session allocation, keep the existing cleanup of an unstarted task and
+return an ordinary safe error. The local setup form retains its values and
+inline error, permitting a new request. This distinguishes pre-session form
+failure from an inspectable persisted conversation. Asynchronous failures already
+have an accepted identity and must use existing durable error projection.
+
+`useAgentSelection` must separate whether a response may activate a tab from
+whether the persisted conversation exists. A stale request result upserts its
+returned task/session without deleting it, selecting it, or reopening the
+modal. The current request replaces the setup tab and opens the retained session
+on either success or a typed retained-session error. WS-first and HTTP-first
+orders converge on one identity. Explicit user deletion wins over late responses
+through existing tombstones; a late upsert must not resurrect a deleted tab.
+Unrelated WS updates never supersede request ownership. Review configuration-chat
+start callers for shared reset behavior without extending ordinary-chat changes
+to unrelated runtime contracts.
+
+Render pre-session errors in `QuickChatSetup`, owned above the setup component so
+rerenders do not discard the error or form choices. Persisted failures use
+`QuickChatSessionView`, `TaskLaunchErrorProvider`, preparation progress, and the
+existing error history/recovery surface. Prevent automatic resumption while an
+active launch error exists, scoped to Quick Chat so ordinary stopped-session
+resumption retains its current policy. Retry invokes the existing guarded
+recovery action rather than POSTing a new quick chat. Boot/list/reconnect must
+include failed ephemeral sessions; retain normal authorization and expiration.
+
+Desktop retains the existing dialog and tab strip. Phone retains the shipped
+full-height Quick Chat surface with safe-area padding, fixed navigation and
+composer/footer, and the existing content scroll region. Place pre-session error
+copy above the setup footer; reuse session error cards in persisted conversations.
+This gives error inspection the space of the existing conversation rather than
+opening a nested overlay. All new copy goes through all seven locale catalogs.
+
+Test synchronous post-allocation failures, asynchronous failures, pre-allocation
+errors, tab navigation during a delayed response, explicit deletion racing a late
+response, reload/reconnect, and retry identity. Include mixed healthy/failed tabs.
+Public recovery guidance belongs in `docs/public/tasks-and-workflows.md` when
+implementation lands. See [delivery package](../../../plans/setup-recovery-ux/plan.md).
+
+### Quick Chat launch admission coverage
+
+For a newly allocated ephemeral session, the orchestrator retains the allocated
+identity through initial-prompt persistence and later launch admission failures.
+The prepared-launch failure helper invokes the executor's existing conditional typed
+failure transition, including sanitization, recovery actions and primary-aware
+task reconciliation. Already-settled sessions retain their original error history;
+intentional capacity deferral is not a launch failure. The HTTP handler returns
+the retained identity only after the launch path has attempted this bookkeeping.
+
+Automatic recovery considers task-owned errors and this session's active error.
+A sibling session's error does not block this conversation. Rejecting a late
+response for a tombstoned conversation preserves any pending selection request.

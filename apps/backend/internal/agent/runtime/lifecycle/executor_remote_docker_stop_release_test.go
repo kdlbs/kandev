@@ -30,3 +30,14 @@ func TestRemoteDockerOrdinaryStopReleasesItsSession(t *testing.T) {
 		t.Error("an ordinary stop left the session registered")
 	}
 }
+
+func TestRemoteDockerIdleSuspensionPreservesContainer(t *testing.T) {
+	exec := NewRemoteDockerExecutor(dialerTestLogger(t))
+	if err := exec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID:  "instance-1",
+		ContainerID: "preserved",
+		StopReason:  StopReasonIdleSuspension,
+	}, false); err != nil {
+		t.Fatalf("StopInstance() error = %v", err)
+	}
+}

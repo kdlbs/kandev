@@ -1,6 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { openAddLocalRepositoryDialog } from "../../helpers/add-repository-menu";
 import { KanbanPage } from "../../pages/kanban-page";
 import {
   DISCOVERY_FAILURE_ROOT,
@@ -100,10 +101,8 @@ test.describe("Desktop repository discovery consent", () => {
 
     try {
       await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
-      await testPage.getByRole("button", { name: "Add Local Repository" }).click();
-      const controls = testPage
-        .getByRole("dialog", { name: "Add Local Repository" })
-        .getByTestId("discovery-root-controls");
+      const consentDialog = await openAddLocalRepositoryDialog(testPage);
+      const controls = consentDialog.getByTestId("discovery-root-controls");
       const continueHome = controls.getByRole("button", { name: "Continue Home Discovery" });
       await expect(continueHome).toBeVisible();
       await continueHome.click();
@@ -139,6 +138,10 @@ test.describe("Desktop repository discovery consent", () => {
     await expect(dialog.getByTestId("discovery-root-controls")).toHaveCount(0);
 
     await dialog.getByTestId("repo-chip-trigger").first().click();
+    const settingsButton = testPage.getByTestId("repository-discovery-settings-button");
+    await expect(settingsButton).toBeVisible();
+    await settingsButton.click();
+
     const controls = testPage.getByTestId("discovery-root-controls");
     const chooseFolders = controls.getByTestId("folder-picker-trigger");
     const refreshRepositories = controls.getByRole("button", {
@@ -260,8 +263,7 @@ test.describe("Desktop repository discovery consent", () => {
       testPage.on("request", onRequest);
 
       await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
-      await testPage.getByRole("button", { name: "Add Local Repository" }).click();
-      const dialog = testPage.getByRole("dialog", { name: "Add Local Repository" });
+      const dialog = await openAddLocalRepositoryDialog(testPage);
       const controls = dialog.getByTestId("discovery-root-controls");
       await expect(controls).toBeVisible();
 
@@ -271,9 +273,7 @@ test.describe("Desktop repository discovery consent", () => {
           response.request().method() === "POST" &&
           response.ok(),
       );
-      await controls
-        .getByRole("button", { name: "Choose folders to discover repositories" })
-        .click();
+      await controls.getByTestId("folder-picker-trigger").click();
       expect((await addResponse).status()).toBe(201);
       rootSaved = true;
 

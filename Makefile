@@ -565,6 +565,8 @@ test-cli:
 test-scripts:
 	@printf "$(CYAN)Running script tests...$(RESET)\n"
 	@python3 .github/scripts/lint-action-pinning_test.py
+	@python3 .github/scripts/notify-release-contributors_test.py
+	@python3 .github/scripts/notify-release-contributors-workflow-contract_test.py
 	@node --test .github/scripts/pr-docs-git.test.cjs .github/scripts/pr-docs.test.cjs
 	@bash scripts/pr-state.test.sh
 	@bash scripts/pr-await.test.sh
@@ -580,6 +582,7 @@ test-scripts:
 	@bash scripts/release-desktop.test.sh
 	@bash scripts/release/runtime-bundle.test.sh
 	@bash scripts/release/retry-ghcr-command.test.sh
+	@bash scripts/release/signpath-signing-ready.test.sh
 	@node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs
 	@python3 .github/scripts/release-workflow-contract_test.py
 	@node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs scripts/release/update-scoop-bucket.test.mjs

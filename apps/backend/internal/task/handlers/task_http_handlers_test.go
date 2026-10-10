@@ -580,6 +580,7 @@ func TestHTTPCreateTask_ProjectIDReachesOfficePath(t *testing.T) {
 		"workspace_id": "ws-1",
 		"title": "Analyse integrations",
 		"project_id": "proj-1",
+		"repositories": [],
 		"priority": "medium"
 	}`))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -1879,6 +1880,15 @@ type freshBranchIdentityRepository struct {
 	repositories map[string]*models.Repository
 	listTaskErr  error
 	deletedTask  bool
+}
+
+func (r *freshBranchIdentityRepository) ReplaceTaskRepositories(_ context.Context, _ string, build func(models.TaskRepositoryReplacementSnapshot) ([]*models.TaskRepository, error)) ([]*models.TaskRepository, error) {
+	rows, err := build(models.TaskRepositoryReplacementSnapshot{Repositories: r.taskRepos})
+	if err != nil {
+		return nil, err
+	}
+	r.taskRepos = rows
+	return rows, nil
 }
 
 func (r *freshBranchIdentityRepository) GetTask(_ context.Context, _ string) (*models.Task, error) {

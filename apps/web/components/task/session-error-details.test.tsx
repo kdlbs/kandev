@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { activateLocale } from "@/lib/i18n";
+import { SessionErrorDetails } from "./session-error-details";
 import { TechnicalDetails } from "./chat/messages/action-message-details";
 
 const DETAILS_LABEL = "Technical details";
@@ -37,6 +38,35 @@ describe("safe recovery detail disclosure", () => {
     fireEvent.click(screen.getByRole("button", { name: COPY_LABEL }));
     await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/could not copy/i));
     expect(screen.getByText("connection refused")).toBeTruthy();
+  });
+
+  it("copies the same safe structured details shown on screen", async () => {
+    const attemptId = "resume-1";
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const { container } = render(
+      <SessionErrorDetails
+        structuredFields={[
+          { label: "Attempt", value: "resume-1", kind: "host-attempt-reference" },
+          {
+            label: "Execution",
+            value: "650e8400-e29b-41d4-a716-446655440000",
+            kind: "host-execution-reference",
+          },
+          { label: "Requested model", value: "vendor/opus-5" },
+        ]}
+      >
+        token=synthetic-private
+      </SessionErrorDetails>,
+    );
+
+    fireEvent.click(screen.getByText(DETAILS_LABEL));
+    const displayed = container.querySelector("pre")?.textContent ?? "";
+    expect(displayed).toContain(`Attempt: ${attemptId}`);
+    expect(displayed).toContain("Requested model: vendor/opus-5");
+    expect(displayed).not.toContain("synthetic-private");
+    fireEvent.click(screen.getByRole("button", { name: COPY_LABEL }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(displayed));
   });
 });
 
@@ -79,7 +109,7 @@ it("copies sanitized details through the shared insecure-context fallback", asyn
     fireEvent.click(screen.getByText(DETAILS_LABEL));
     fireEvent.click(screen.getByRole("button", { name: COPY_LABEL }));
     await waitFor(() => expect(copied).toEqual(["***\nconnection refused"]));
-    expect(screen.getByRole("status").textContent).toMatch(/copied/i);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toMatch(/copied/i));
   } finally {
     if (original) Object.defineProperty(document, "execCommand", original);
     else Reflect.deleteProperty(document, "execCommand");

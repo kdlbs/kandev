@@ -14,11 +14,12 @@ const (
 	TasksListSortTitleDesc   = "title_desc"
 	TasksListSortDefault     = TasksListSortUpdatedDesc
 
-	TasksListGroupState      = "state"
-	TasksListGroupWorkflow   = "workflow"
-	TasksListGroupRepository = "repository"
-	TasksListGroupNone       = "none"
-	TasksListGroupDefault    = TasksListGroupState
+	TasksListGroupState        = "state"
+	TasksListGroupWorkflowStep = "workflow_step"
+	TasksListGroupWorkflow     = "workflow"
+	TasksListGroupRepository   = "repository"
+	TasksListGroupNone         = "none"
+	TasksListGroupDefault      = TasksListGroupWorkflowStep
 )
 
 var (
@@ -31,7 +32,7 @@ var (
 		TasksListSortTitleDesc,
 	}
 	tasksListGroupValues = []string{
-		TasksListGroupState,
+		TasksListGroupWorkflowStep,
 		TasksListGroupWorkflow,
 		TasksListGroupRepository,
 		TasksListGroupNone,
@@ -51,7 +52,8 @@ func IsValidTasksListSort(value string) bool {
 }
 
 func IsValidTasksListGroup(value string) bool {
-	return slices.Contains(tasksListGroupValues, strings.TrimSpace(value))
+	value = strings.TrimSpace(value)
+	return value == TasksListGroupState || slices.Contains(tasksListGroupValues, value)
 }
 
 func NormalizeTasksListSort(value string) string {
@@ -64,6 +66,9 @@ func NormalizeTasksListSort(value string) string {
 
 func NormalizeTasksListGroup(value string) string {
 	value = strings.TrimSpace(value)
+	if value == TasksListGroupState {
+		return TasksListGroupWorkflowStep
+	}
 	if IsValidTasksListGroup(value) {
 		return value
 	}

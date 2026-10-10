@@ -473,3 +473,13 @@ func TestGitHubBrokerScopeAuthorizerRejectsNonPublicProviderHostsForDestination(
 		}
 	}
 }
+
+func TestPluginRuntimeAPIURLRequiresAPublicBaseURL(t *testing.T) {
+	public := &config.Config{GitHubCredentialBroker: config.GitHubCredentialBrokerConfig{PublicBaseURL: "https://kandev.example/"}}
+	if got, want := pluginRuntimeAPIURL(public), "https://kandev.example/api/v1"; got != want {
+		t.Fatalf("plugin runtime API URL = %q, want %q", got, want)
+	}
+	if got := pluginRuntimeAPIURL(&config.Config{Server: config.ServerConfig{Port: 49123}}); got != "" {
+		t.Fatalf("plugin runtime API URL without a public base URL = %q, want empty", got)
+	}
+}

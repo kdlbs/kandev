@@ -28,10 +28,11 @@ Office agent record still carries a `model` field that routing ignores. The resu
 an operator who configures a Critic on `opus[1m]`, watches it run on `sonnet`, and has
 nothing in the product that explains the difference.
 
-This spec extends `docs/specs/office/requirements/routing.md`. That spec remains authoritative for
-tiers, provider order, execution profiles, provider health, and wake-reason policy.
-Nothing here changes those contracts except where explicitly named in
-[Precedence](#precedence-contract).
+The active Office tier-selection contract is in
+[the Office tier-selection requirement](../requirements/office-agent-tier-routing.md).
+Provider mappings, shared health, and fallback are part of the migration to
+[Dynamic Agent Routing](../../agents/system-design/dynamic-agent-routing-01.md).
+The requirement's decision section defines tier precedence for routed Office launches.
 
 ## Verified current state
 
@@ -139,14 +140,14 @@ This spec deliberately specifies `tier_per_reason > per-agent > per-role > works
 instead. Reasons, in order of weight:
 
 1. **The card's own goal does not need the reversal.** The Critic and Analyst both ran
-   with reason `task_assigned`, for which no `tier_per_reason` key exists. The frozen
-   spec already guarantees that case falls through to the agent's effective tier
-   (`docs/specs/office/requirements/routing.md`, final wake-reason AC). Per-agent already wins where
-   the card needs it to win.
+   with reason `task_assigned`, for which no `tier_per_reason` key exists. The active
+   Office tier-selection requirement specifies that a missing wake-reason entry falls
+   through to the agent's effective tier. Per-agent already wins where the card needs
+   it to win.
 2. **The reversal breaks a shipped, documented guarantee.**
-   `docs/specs/office/requirements/routing.md` states: *"the resolver picks the Economy tier model
-   regardless of the agent's default tier"* for `tier_per_reason.heartbeat = economy`.
-   Reversing precedence silently voids that line.
+   The active Office tier-selection requirement keeps `tier_per_reason` ahead of the
+   per-agent tier when a wake-reason policy applies. Reversing precedence would change
+   that contract.
 3. **It would regress cost control.** `tier_per_reason` exists to cheap-out predictable
    background work. Under the card's order, one agent pinned to `frontier` runs
    `opus[1m]` on every heartbeat forever — the exact blowup the feature prevents. The

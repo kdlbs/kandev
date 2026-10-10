@@ -18,6 +18,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/common/logger"
+	"go.uber.org/zap"
 )
 
 const (
@@ -51,26 +52,74 @@ func NewEndpointClient(ctx context.Context, resolver ConnectionLeaseResolver, lo
 }
 
 func newEndpointClient(ctx context.Context, resolver ConnectionLeaseResolver, log *logger.Logger, dependencies endpointTransportDependencies, now func() time.Time, opts ...ClientOption) (*Client, error) {
-	manager := newConnectionLeaseManager(resolver, now, nil)
-	lease, err := manager.resolve(ctx)
+	manager, initial, err := resolveInitialEndpoint(ctx, resolver, now)
 	if err != nil {
-		return nil, fmt.Errorf("resolve remote executor connection lease: %w", err)
+		return nil, err
 	}
-	initial, err := url.Parse(lease.BaseURL)
-	if err != nil {
-		return nil, errors.New("remote executor connection lease has an invalid endpoint")
-	}
-	initial.RawQuery = ""
-	initial.ForceQuery = false
 	client := newClient(strings.TrimSuffix(initial.String(), "/"), log, opts...)
-	transport := newEndpointRoundTripper(manager, initial, client.authToken, client.executionID, dependencies)
-	manager.onGeneration = transport.CloseIdleConnections
+	transport := newLeasedRoundTripper(manager, initial, client.authToken, client.executionID, dependencies)
 	client.endpointTransport = transport
 	client.httpClient.Transport = transport
 	client.longRunningHTTPClient.Transport = transport
 	client.httpClient.CheckRedirect = endpointRedirectPolicy
 	client.longRunningHTTPClient.CheckRedirect = endpointRedirectPolicy
 	return client, nil
+}
+
+// NewEndpointControlClient creates a control client that reaches agentctl's
+// control server through provider-issued connection leases.
+func NewEndpointControlClient(ctx context.Context, resolver ConnectionLeaseResolver, log *logger.Logger, opts ...ControlClientOption) (*ControlClient, error) {
+	return newEndpointControlClient(ctx, resolver, log, endpointTransportDependencies{}, nil, opts...)
+}
+
+func newEndpointControlClient(
+	ctx context.Context,
+	resolver ConnectionLeaseResolver,
+	log *logger.Logger,
+	dependencies endpointTransportDependencies,
+	now func() time.Time,
+	opts ...ControlClientOption,
+) (*ControlClient, error) {
+	manager, initial, err := resolveInitialEndpoint(ctx, resolver, now)
+	if err != nil {
+		return nil, err
+	}
+	client := &ControlClient{
+		baseURL: strings.TrimSuffix(initial.String(), "/"),
+		logger:  log.WithFields(zap.String("component", "agentctl-control")),
+	}
+	for _, opt := range opts {
+		opt(client)
+	}
+	transport := newLeasedRoundTripper(manager, initial, client.authToken, "", dependencies)
+	client.applyToken = transport.setAuthToken
+	var guardedTransport http.RoundTripper = transport
+	if client.runtimeGuard != nil {
+		guardedTransport = &runtimeBindingTransport{guard: client.runtimeGuard, base: transport}
+	}
+	client.httpClient = &http.Client{Timeout: 30 * time.Second, Transport: guardedTransport, CheckRedirect: endpointRedirectPolicy}
+	return client, nil
+}
+
+func resolveInitialEndpoint(ctx context.Context, resolver ConnectionLeaseResolver, now func() time.Time) (*connectionLeaseManager, *url.URL, error) {
+	manager := newConnectionLeaseManager(resolver, now, nil)
+	lease, err := manager.resolve(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve remote executor connection lease: %w", err)
+	}
+	initial, err := url.Parse(lease.BaseURL)
+	if err != nil {
+		return nil, nil, errors.New("remote executor connection lease has an invalid endpoint")
+	}
+	initial.RawQuery = ""
+	initial.ForceQuery = false
+	return manager, initial, nil
+}
+
+func newLeasedRoundTripper(manager *connectionLeaseManager, initial *url.URL, authToken, executionID string, dependencies endpointTransportDependencies) *endpointRoundTripper {
+	transport := newEndpointRoundTripper(manager, initial, authToken, executionID, dependencies)
+	manager.onGeneration = transport.CloseIdleConnections
+	return transport
 }
 
 type connectionLeaseManager struct {
@@ -689,6 +738,8 @@ func (t *endpointRoundTripper) dialWebSocket(ctx context.Context, endpoint *url.
 		dialer.NetDialTLSContext = nil
 		if t.transport.TLSClientConfig != nil {
 			dialer.TLSClientConfig = t.transport.TLSClientConfig.Clone()
+			// The HTTP transport adds h2 to its ALPN list; a WebSocket upgrade is HTTP/1.1 only.
+			dialer.TLSClientConfig.NextProtos = []string{"http/1.1"}
 		}
 		dialer.Proxy = nil
 		dialer.Subprotocols = appendUnique(dialer.Subprotocols, lease.WebSocketSubprotocols...)
@@ -731,8 +782,16 @@ func appendUnique(existing []string, add ...string) []string {
 }
 
 func (c *Client) dialWebSocket(ctx context.Context, route string, callerHeaders http.Header, callerProtocols ...string) (*websocket.Conn, *http.Response, error) {
+	boundCtx, cancel, err := c.RuntimeBoundContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer cancel()
+
+	var conn *websocket.Conn
+	var response *http.Response
 	if c.endpointTransport != nil {
-		lease, err := c.endpointTransport.manager.resolve(ctx)
+		lease, err := c.endpointTransport.manager.resolve(boundCtx)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -740,30 +799,55 @@ func (c *Client) dialWebSocket(ctx context.Context, route string, callerHeaders 
 		if err != nil {
 			return nil, nil, errors.New("remote executor lease endpoint is invalid")
 		}
-		return c.endpointTransport.dialWebSocket(ctx, endpoint, lease, route, callerHeaders, callerProtocols, c.executionID)
-	}
-	endpoint, err := url.Parse(c.baseURL)
-	if err != nil {
-		return nil, nil, err
-	}
-	endpoint, err = joinEndpointPath(endpoint, route)
-	if err != nil {
-		return nil, nil, err
-	}
-	dialer := *websocket.DefaultDialer
-	dialer.Subprotocols = append([]string(nil), callerProtocols...)
-	if callerHeaders == nil {
-		callerHeaders = make(http.Header)
+		var dialErr error
+		conn, response, dialErr = c.endpointTransport.dialWebSocket(boundCtx, endpoint, lease, route, callerHeaders, callerProtocols, c.executionID)
+		if dialErr != nil {
+			return nil, response, dialErr
+		}
 	} else {
-		callerHeaders = callerHeaders.Clone()
+		endpoint, parseErr := url.Parse(c.baseURL)
+		if parseErr != nil {
+			return nil, nil, parseErr
+		}
+		endpoint, parseErr = joinEndpointPath(endpoint, route)
+		if parseErr != nil {
+			return nil, nil, parseErr
+		}
+		dialer := *websocket.DefaultDialer
+		dialer.Subprotocols = append([]string(nil), callerProtocols...)
+		if callerHeaders == nil {
+			callerHeaders = make(http.Header)
+		} else {
+			callerHeaders = callerHeaders.Clone()
+		}
+		if c.authToken != "" {
+			callerHeaders.Set("Authorization", "Bearer "+c.authToken)
+		}
+		if c.executionID != "" {
+			callerHeaders.Set("X-Instance-ID", c.executionID)
+		}
+		conn, response, err = dialer.DialContext(boundCtx, endpoint.String(), callerHeaders)
 	}
-	if c.authToken != "" {
-		callerHeaders.Set("Authorization", "Bearer "+c.authToken)
+	if err != nil {
+		return nil, response, err
 	}
-	if c.executionID != "" {
-		callerHeaders.Set("X-Instance-ID", c.executionID)
+	if c.runtimeGuard == nil {
+		return conn, response, nil
 	}
-	return dialer.DialContext(ctx, endpoint.String(), callerHeaders)
+	stop := context.AfterFunc(c.runtimeGuard.binding.ctx, func() { _ = conn.Close() })
+	c.mu.Lock()
+	if c.closed || !c.runtimeGuard.current() {
+		c.mu.Unlock()
+		stop()
+		_ = conn.Close()
+		return nil, response, ErrRuntimeLeaseRetired
+	}
+	if c.runtimeConns == nil {
+		c.runtimeConns = make(map[*websocket.Conn]func() bool)
+	}
+	c.runtimeConns[conn] = stop
+	c.mu.Unlock()
+	return conn, response, nil
 }
 
 // ConnectionGeneration resolves and returns the current provider connection

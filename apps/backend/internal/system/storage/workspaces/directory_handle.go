@@ -20,6 +20,8 @@ type DirectoryHandle interface {
 	VerifyPath(path string) error
 	IsValidWorktree() bool
 	RemoveDirectory(ctx context.Context) error
+	CreateSubdirectory(name string, mode os.FileMode) (DirectoryHandle, error)
+	ProcessPath(inheritedFD int) (string, *os.File, error)
 	OpenFile(name string) (io.ReadCloser, error)
 	OpenSubdirectory(name string) (DirectoryHandle, error)
 	LstatEntry(name string) (os.FileMode, error)
@@ -27,6 +29,15 @@ type DirectoryHandle interface {
 	ReadDir() ([]os.DirEntry, error)
 	ReadFile(name string) ([]byte, error)
 	WriteFile(name string, data []byte, mode os.FileMode) error
+}
+
+// PinnedDirectoryInfo returns metadata for the directory held by handle.
+// The result is read from the pinned native handle, not from its path.
+func PinnedDirectoryInfo(handle DirectoryHandle) (os.FileInfo, error) {
+	if handle == nil {
+		return nil, errors.New("directory metadata requires an open handle")
+	}
+	return pinnedDirectoryInfo(handle)
 }
 
 // WriteOwnershipMarkerNoFollow writes an ownership marker through an already

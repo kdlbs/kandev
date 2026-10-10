@@ -1,6 +1,8 @@
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
+import { createEmptyRemoteRepository } from "../../helpers/empty-remote-repository";
+import { GitHelper } from "../../helpers/git-helper";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -344,8 +346,20 @@ test.describe("PR external detection", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(120_000);
+
+    const repository = createEmptyRemoteRepository(backend.tmpDir, "external-pr");
+    const git = new GitHelper(repository.localPath, repository.gitEnv);
+    git.exec('git commit --allow-empty -m "init"');
+    git.pushMainWithRetry();
+    const githubRepo = await apiClient.createRepository(
+      seedData.workspaceId,
+      repository.localPath,
+      "main",
+      { name: "External PR repository" },
+    );
 
     // --- Seed workflow ---
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "PR Detection Workflow");
@@ -377,13 +391,13 @@ test.describe("PR external detection", () => {
       workflow_id: workflow.id,
       workflow_step_id: inboxStep.id,
       agent_profile_id: seedData.agentProfileId,
-      repositories: [{ repository_id: seedData.repositoryId, checkout_branch: "main" }],
+      repositories: [{ repository_id: githubRepo.id, checkout_branch: "main" }],
     });
     const helperTask = await apiClient.createTask(seedData.workspaceId, "Helper Task", {
       workflow_id: workflow.id,
       workflow_step_id: inboxStep.id,
       agent_profile_id: seedData.agentProfileId,
-      repositories: [{ repository_id: seedData.repositoryId, checkout_branch: "main" }],
+      repositories: [{ repository_id: githubRepo.id, checkout_branch: "main" }],
     });
 
     const kanban = new KanbanPage(testPage);

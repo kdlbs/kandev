@@ -141,8 +141,9 @@ export function createChatScrollMotion(
     const progress = Math.min(1, (time - startedAt) / 180);
     const next = start + (target - start) * (1 - (1 - progress) ** 3);
     element.scrollTop = Math.abs(target - next) < 0.5 ? target : next;
-    if (element.scrollTop !== target) frame = requestAnimationFrame(tick);
-    else target = -1;
+    const settledTop = element.scrollTop;
+    if (Math.abs(settledTop - target) <= 1 || progress >= 1) target = -1;
+    else frame = requestAnimationFrame(tick);
   };
   const interrupt = () => {
     cancel();

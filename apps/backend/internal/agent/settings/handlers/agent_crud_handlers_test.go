@@ -72,17 +72,19 @@ func seedProfile(repo *fakeSettingsRepo, id, agentID, name, workspaceID string) 
 // wantProfileDTO is the DTO the seeded profile is expected to serialize to.
 func wantProfileDTO(id, agentID, name, billingType string) dto.AgentProfileDTO {
 	return dto.AgentProfileDTO{
-		ID:               id,
-		AgentID:          agentID,
-		Kind:             "concrete",
-		Name:             name,
-		AgentDisplayName: "Display",
-		Model:            "model-a",
-		CLIFlags:         []dto.CLIFlagDTO{},
-		Enabled:          true,
-		BillingType:      billingType,
-		CreatedAt:        fixedSettingsTime,
-		UpdatedAt:        fixedSettingsTime,
+		ID:                 id,
+		AgentID:            agentID,
+		Kind:               "concrete",
+		Name:               name,
+		AgentDisplayName:   "Display",
+		Model:              "model-a",
+		CLIFlags:           []dto.CLIFlagDTO{},
+		MCPSelectionMode:   dto.MCPSelectionModeInherit,
+		MCPSelectedServers: []string{},
+		Enabled:            true,
+		BillingType:        billingType,
+		CreatedAt:          fixedSettingsTime,
+		UpdatedAt:          fixedSettingsTime,
 	}
 }
 
@@ -403,6 +405,9 @@ func TestPreviewAgentCommandEndpoint(t *testing.T) {
 			Supported:     true,
 			Command:       []string{"greywall", "--", "preview-agent-binary", "--verbose"},
 			CommandString: "greywall -- preview-agent-binary --verbose",
+			// The preview names where the flags land. This request is not a
+			// passthrough profile, so they reach the launched bridge process.
+			FlagDestination: dto.FlagDestinationACPBridge,
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("preview = %#v, want %#v", got, want)

@@ -275,7 +275,7 @@ test.describe("Mobile terminal key-bar — user flows", () => {
     // Default panel (chat) — hidden.
     await expect(keybar.root).not.toBeVisible();
 
-    const bottomNav = testPage.getByTestId("session-mobile-bottom-nav");
+    const mobileNavigation = testPage.getByTestId("session-mobile-bottom-nav");
     const panels = [
       {
         buttonName: "Files",
@@ -291,7 +291,7 @@ test.describe("Mobile terminal key-bar — user flows", () => {
       },
     ] as const;
     for (const panel of panels) {
-      await bottomNav.getByRole("button", { name: panel.buttonName }).tap();
+      await mobileNavigation.getByRole("button", { name: panel.buttonName }).tap();
       await expect(panel.content).toBeVisible({ timeout: 10_000 });
       await expect(keybar.root).not.toBeVisible();
     }

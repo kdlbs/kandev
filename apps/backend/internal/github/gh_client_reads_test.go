@@ -58,7 +58,7 @@ func TestGHClient_ListWorkflowRunsAndJobs(t *testing.T) {
 	calls := newFakeGH(t,
 		ghResponse{
 			Prefix: "api --paginate repos/acme/widget/actions/runs?head_sha=feature%2Fsha&per_page=100",
-			Stdout: `{"id":7,"run_attempt":2,"workflow_id":9,"name":"Run tests","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"feature/sha","head_branch":"feature","head_repository":{"full_name":"contributor/widget-fork","name":"widget-fork","owner":{"login":"contributor"}},"html_url":"https://github.com/acme/widget/actions/runs/7","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T11:00:00Z","pull_requests":[]}
+			Stdout: `{"id":7,"check_suite_id":88,"run_attempt":2,"workflow_id":9,"name":"Run tests","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"feature/sha","head_branch":"feature","head_repository":{"full_name":"contributor/widget-fork","name":"widget-fork","owner":{"login":"contributor"}},"html_url":"https://github.com/acme/widget/actions/runs/7","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T11:00:00Z","pull_requests":[]}
 {"id":8,"run_attempt":1,"workflow_id":10,"name":"Lint","event":"push","status":"completed","conclusion":"success","head_sha":"feature/sha","head_branch":"feature","html_url":"https://github.com/acme/widget/actions/runs/8","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T11:00:00Z","pull_requests":[]}`,
 		},
 		ghResponse{
@@ -78,7 +78,7 @@ func TestGHClient_ListWorkflowRunsAndJobs(t *testing.T) {
 	if len(runs) != 2 || runs[0].HeadRepoOwner != "contributor" || runs[0].HeadRepoName != "widget-fork" {
 		t.Fatalf("runs = %#v", runs)
 	}
-	if runs[0].Conclusion != "action_required" || runs[0].RunAttempt != 2 || len(runs[0].PullRequests) != 0 {
+	if runs[0].Conclusion != "action_required" || runs[0].RunAttempt != 2 || runs[0].CheckSuiteID != 88 || len(runs[0].PullRequests) != 0 {
 		t.Fatalf("run[0] = %#v", runs[0])
 	}
 

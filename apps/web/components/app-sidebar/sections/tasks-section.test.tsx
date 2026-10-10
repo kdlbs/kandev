@@ -12,13 +12,13 @@ const state = {
   workspaces: { activeId: "ws-1" as string | null },
   kanban: { workflowId: "wf-1" as string | null },
   sidebarViews: {
-    views: [{ id: "all", name: "All tasks" }],
+    views: [{ id: "all", name: "All tasks", filters: [] }],
     activeViewId: "all",
     draft: null,
   },
   sidebarViewsByWorkspace: {
     "ws-1": {
-      views: [{ id: "all", name: "All tasks" }],
+      views: [{ id: "all", name: "All tasks", filters: [] }],
       activeViewId: "all",
       draft: null,
     },
@@ -56,7 +56,7 @@ describe("TasksSection", () => {
     state.appSidebar.sectionExpanded.tasks = true;
     state.workspaces.activeId = "ws-1";
     state.kanban.workflowId = "wf-1";
-    state.sidebarViews.views = [{ id: "all", name: "All tasks" }];
+    state.sidebarViews.views = [{ id: "all", name: "All tasks", filters: [] }];
     state.sidebarViews.activeViewId = "all";
     state.sidebarViews.draft = null;
     state.sidebarViewsByWorkspace["ws-1"] = state.sidebarViews;

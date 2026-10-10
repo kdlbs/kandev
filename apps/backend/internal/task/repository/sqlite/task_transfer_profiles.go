@@ -39,7 +39,7 @@ func (r *Repository) validateTransferCoordinatorActor(
 			AND caller.workspace_id = ?
 			AND `+IsFromOfficePredicate("caller")+`
 			AND profile.workspace_id = ? AND profile.role = 'ceo' AND profile.deleted_at IS NULL
-			AND profile.status IN ('idle', 'working')`),
+			AND profile.enabled = 1 AND profile.status IN ('idle', 'working')`),
 		command.Actor.SessionID, command.Actor.CallerTaskID, command.Actor.ID,
 		models.TaskSessionStateRunning, command.ExpectedSourceWorkspaceID, command.ExpectedSourceWorkspaceID); err != nil {
 		return err

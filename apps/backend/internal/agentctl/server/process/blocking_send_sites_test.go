@@ -301,7 +301,7 @@ func TestWaitForExitParksTheExitErrorEventOnAFullChannel(t *testing.T) {
 		t.Fatalf("close parent stderr pipe: %v", err)
 	}
 
-	stderrDone := make(chan struct{})
+	stderrDone := make(chan stderrReadResult, 1)
 	m.wg.Add(2)
 	go m.readStderr(stderrDone)
 

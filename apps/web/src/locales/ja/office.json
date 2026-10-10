@@ -305,6 +305,7 @@
   "executorConfigurationSaved": "実行設定を保存しました",
   "executorPreference": "実行設定の優先設定",
   "executorType": "実行者タイプ",
+  "executionProfile": "実行プロファイル",
   "existingConfigurationFound": "既存の設定が見つかりました",
   "expand": "展開",
   "export": "エクスポート",
@@ -721,7 +722,6 @@
   "routeOutcomeSkippedUserAction": "ユーザー操作のためスキップ",
   "routineActivated": "ルーチンを有効化しました",
   "routineCreated": "ルーチンを作成しました",
-  "routineCreatedWithoutSchedule": "ルーチンはスケジュールなしで作成されました: {{error}}",
   "routineDeleted": "ルーチンを削除しました",
   "routineFired": "ルーチンが実行されました",
   "routineNotFiring": "実行できません。ルーチンのステータスは {{status}} です",
@@ -1017,5 +1017,9 @@
   "failedToLoadRouteAttempts": "ルート試行の読み込み失敗",
   "failedToLoadRoutingConfig": "ルーティング設定の読み込み失敗",
   "failedToLoadRoutingPreview": "ルーティングプレビューの読み込み失敗",
-  "failedToLoadTaskQuorum": "タスククオーラムの読み込み失敗"
+  "failedToLoadTaskQuorum": "タスククオーラムの読み込み失敗",
+  "openSessionRecovery": "セッション復旧を開く",
+  "sessionRecoveryDescription": "この実行はセッションが復旧されるまで保留されています。Kandev はプロンプトを自動的に再送信しません。",
+  "sessionRecoveryReason": "理由: {{reason}}",
+  "sessionRecoveryRequired": "セッションの復旧が必要"
 }

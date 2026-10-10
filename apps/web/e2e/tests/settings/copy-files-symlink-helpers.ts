@@ -11,7 +11,7 @@ export async function configureSymlinkAndCreateTask(options: {
 }) {
   const { page, apiClient, seedData, title } = options;
   await page.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
-  await expect(page.getByRole("button", { name: "Add Local Repository" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add repository" })).toBeVisible();
 
   const repositoriesResponse = await apiClient.rawRequest(
     "GET",

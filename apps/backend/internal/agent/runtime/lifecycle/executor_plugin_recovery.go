@@ -267,8 +267,11 @@ func (r *PluginRemoteExecutor) attachAndVerifyRecoveredPluginExecutor(
 }
 
 func (r *PluginRemoteExecutor) newRecoveredPluginExecutorInstance(ctx context.Context, record *models.ExecutorRunning, state *pluginExecutorRecoveryState) (*ExecutorInstance, error) {
+	if state.inventory.InstancePort == 0 {
+		return nil, errors.New("plugin executor inventory has no agentctl instance port")
+	}
 	client, err := r.newRecoveredAgentctlClient(
-		ctx, r.connectionResolver(state.operationContext, state.inventory.Resource), r.logger,
+		ctx, r.connectionResolver(state.operationContext, state.inventory.Resource, state.inventory.InstancePort), r.logger,
 		record.AgentExecutionID, record.TransientAuthToken,
 	)
 	if err != nil {
@@ -282,7 +285,7 @@ func (r *PluginRemoteExecutor) newRecoveredPluginExecutorInstance(ctx context.Co
 	metadata[MetadataKeyPluginExecutor] = state.inventory
 	return &ExecutorInstance{
 		InstanceID: record.AgentExecutionID, TaskID: record.TaskID, SessionID: record.SessionID,
-		RuntimeName: agentruntime.RuntimePluginRemote, Client: client, WorkspacePath: "/workspace",
+		RuntimeName: agentruntime.RuntimePluginRemote, Client: client, WorkspacePath: pluginExecutorWorkspacePath,
 		Metadata: metadata, AuthToken: record.TransientAuthToken, AgentProfileID: record.ExecutionProfileID,
 	}, nil
 }
@@ -423,7 +426,11 @@ func (r *PluginRemoteExecutor) cleanupPluginExecutorInstance(ctx context.Context
 	if profile.Provider.Identity != inventory.ProviderIdentity || profile.Provider.InstallationID != inventory.InstallationID {
 		return errors.New("recorded plugin executor provider is unavailable")
 	}
-	return r.destroyPluginExecutorRecord(ctx, record, inventory, inventory.Resource, "task_cleanup")
+	reason := pluginExecutorCleanupReasonTask
+	if instance.StopReason == StopReasonLaunchRollback {
+		reason = pluginExecutorCleanupReasonLaunch
+	}
+	return r.destroyPluginExecutorRecord(ctx, record, inventory, inventory.Resource, reason)
 }
 
 func (r *PluginRemoteExecutor) DestroyTaskEnvironment(ctx context.Context, environment *models.TaskEnvironment) error {

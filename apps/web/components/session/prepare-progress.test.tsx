@@ -9,6 +9,8 @@ let mockSessionState: string = "STARTING";
 let mockMessages: Message[] = [];
 let mockPrepareError: string | undefined;
 const CREATE_WORKTREE = "Create worktree";
+const MCP_VERIFICATION_KIND = "agent_mcp_verification";
+const SHOW_PREPARATION_DETAILS = "Show preparation details";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
@@ -27,6 +29,7 @@ vi.mock("@/components/state-provider", () => ({
         items: {
           "session-1": {
             id: "session-1",
+            task_id: "task-1",
             state: mockSessionState,
           },
         },
@@ -40,7 +43,24 @@ vi.mock("@/components/state-provider", () => ({
         },
       },
     }),
+  useAppStoreApi: () => ({
+    getState: () => ({
+      addUserShell: vi.fn(),
+      setRightPanelActiveTab: vi.fn(),
+      setMobileSessionPanel: vi.fn(),
+    }),
+  }),
 }));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({
+    isFinePointer: true,
+    isMobile: false,
+    usesDesktopWorkbench: true,
+  }),
+}));
+
+vi.mock("@/lib/state/dockview-store", () => ({ useDockviewStore: () => vi.fn() }));
 
 import { PrepareProgress } from "./prepare-progress";
 
@@ -154,10 +174,104 @@ describe("PrepareProgress", () => {
     expect(screen.queryByText(/branch feature\/very-long-name not found/)).toBeNull();
     expect(screen.queryByText(CREATE_WORKTREE)).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Show preparation details" }));
+    fireEvent.click(screen.getByRole("button", { name: SHOW_PREPARATION_DETAILS }));
 
     expect(screen.getByText(/branch feature\/very-long-name not found/)).toBeTruthy();
     expect(screen.getByText(CREATE_WORKTREE)).toBeTruthy();
+  });
+});
+
+describe("PrepareProgress imported MCP warnings", () => {
+  afterEach(resetPrepareProgressMocks);
+
+  it("presents auth-required imported MCP verification as a warning when overall prepare completes", () => {
+    mockPrepareStatus = "completed";
+    mockSessionState = "RUNNING";
+    mockSteps = [
+      {
+        name: "",
+        kind: MCP_VERIFICATION_KIND,
+        mcpServerId: "plugin-atlassian-atlassian",
+        failureCode: "authentication_required",
+        status: "failed",
+      },
+    ];
+
+    render(<PrepareProgress sessionId="session-1" />);
+
+    expect(screen.getByText("Environment prepared with warnings")).toBeTruthy();
+    expect(screen.getByText("Verify connection: plugin-atlassian-atlassian")).toBeTruthy();
+    expect(screen.getByTestId("prepare-step-warning-icon")).toBeTruthy();
+  });
+
+  it("preserves error header when an auth warning coexists with a genuine step failure", () => {
+    mockPrepareStatus = "completed";
+    mockSessionState = "RUNNING";
+    mockSteps = [
+      {
+        name: CREATE_WORKTREE,
+        status: "failed",
+      },
+      {
+        name: "",
+        kind: MCP_VERIFICATION_KIND,
+        mcpServerId: "plugin-atlassian-atlassian",
+        failureCode: "authentication_required",
+        status: "failed",
+      },
+    ];
+
+    render(<PrepareProgress sessionId="session-1" />);
+
+    expect(screen.getByText("Environment setup finished with errors")).toBeTruthy();
+  });
+
+  it("preserves error header for non-authentication MCP verification failure", () => {
+    mockPrepareStatus = "completed";
+    mockSessionState = "RUNNING";
+    mockSteps = [
+      {
+        name: "",
+        kind: MCP_VERIFICATION_KIND,
+        mcpServerId: "plugin-atlassian-atlassian",
+        failureCode: "connection_failed",
+        status: "failed",
+      },
+    ];
+
+    render(<PrepareProgress sessionId="session-1" />);
+
+    expect(screen.getByText("Environment setup finished with errors")).toBeTruthy();
+  });
+
+  it("shows retained command details inside the expanded failed preparation row", () => {
+    mockPrepareStatus = "failed";
+    mockSessionState = "FAILED";
+    mockSteps = [
+      {
+        name: "",
+        kind: "agent_mcp_approval",
+        mcpServerId: "server-a",
+        failureCode: "connection_failed",
+        status: "failed",
+        mcpDiagnostic: {
+          operation: "enable",
+          stage: "wait",
+          kind: "output_wait_timeout",
+          message: "WaitDelay expired before I/O complete",
+          exitCode: 0,
+        },
+      },
+    ];
+
+    render(<PrepareProgress sessionId="session-1" />);
+    fireEvent.click(screen.getByRole("button", { name: SHOW_PREPARATION_DETAILS }));
+
+    expect(screen.getByText("Native command failed during server approval.")).toBeTruthy();
+    expect(screen.getByTestId("agent-mcp-diagnostic-message").textContent).toBe(
+      "WaitDelay expired before I/O complete",
+    );
+    expect(screen.getByTestId("agent-mcp-retry")).toBeTruthy();
   });
 });
 
@@ -196,7 +310,7 @@ describe("PrepareProgress remote helper feedback", () => {
     ];
 
     render(<PrepareProgress sessionId="session-1" />);
-    fireEvent.click(screen.getByRole("button", { name: "Show preparation details" }));
+    fireEvent.click(screen.getByRole("button", { name: SHOW_PREPARATION_DETAILS }));
 
     expect(screen.getByText("Remote helper download timed out (linux/amd64)")).toBeTruthy();
     expect(
@@ -260,7 +374,7 @@ describe("PrepareProgress per-repo setup script", () => {
 
     render(<PrepareProgress sessionId="session-1" />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Show preparation details" }));
+    fireEvent.click(screen.getByRole("button", { name: SHOW_PREPARATION_DETAILS }));
     expect(screen.getByText("Script exited with code 2")).toBeTruthy();
   });
 });

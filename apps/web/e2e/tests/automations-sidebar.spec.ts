@@ -61,6 +61,7 @@ test.describe("Automations section in the app sidebar", () => {
     await expect(header).toHaveAttribute("aria-expanded", "false");
     await expect(testPage.getByTestId(`sidebar-automation-${first.id}`)).toHaveCount(0);
     await expect(testPage.getByTestId(`sidebar-automation-${second.id}`)).toHaveCount(0);
+    await expect(testPage.getByTestId("automations-all-runs")).toHaveCount(0);
 
     // …but it still says how much is behind it, or it reads as an empty section.
     await expect(testPage.getByTestId("sidebar-section-collapsed-summary")).toHaveText("2", {
@@ -94,6 +95,13 @@ test.describe("Automations section in the app sidebar", () => {
 
     // Once the rows are on screen they speak for themselves; the count is noise.
     await expect(testPage.getByTestId("sidebar-section-collapsed-summary")).toHaveCount(0);
+    const all = testPage.locator("#sidebar-section-automations").getByRole("link", {
+      name: "Open automations",
+    });
+    await expect(all).toHaveText("Open automations");
+    await all.click();
+    await expect(testPage).toHaveURL(/\/automations$/);
+    await expect(all).toHaveAttribute("aria-current", "page");
   });
 
   test("shows how long ago each automation last ran", async ({ testPage, apiClient, seedData }) => {

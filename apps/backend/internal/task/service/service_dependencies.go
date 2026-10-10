@@ -654,14 +654,27 @@ func (s *Service) buildDependencyViews(
 		// (Blocked: false) — an indistinguishable, silent "not blocked".
 		return withheldDependencyViews(ids), nil
 	}
+	if ctx.Err() != nil {
+		return withheldDependencyViews(ids), nil
+	}
 	predecessors, err := s.blockers.ListBlockersForTasks(ctx, ids)
 	if err != nil {
-		s.logger.Warn("failed to load task dependencies", zap.Error(err))
+		if !isRequestCancellationError(ctx, err) {
+			s.logger.Warn("failed to load task dependencies", zap.Error(err))
+		}
+		return withheldDependencyViews(ids), nil
+	}
+	if ctx.Err() != nil {
 		return withheldDependencyViews(ids), nil
 	}
 	dependents, err := s.blockers.ListDependentsForTasks(ctx, ids)
 	if err != nil {
-		s.logger.Warn("failed to load task dependents", zap.Error(err))
+		if !isRequestCancellationError(ctx, err) {
+			s.logger.Warn("failed to load task dependents", zap.Error(err))
+		}
+		return withheldDependencyViews(ids), nil
+	}
+	if ctx.Err() != nil {
 		return withheldDependencyViews(ids), nil
 	}
 	// Cut the dependent direction to the display limit BEFORE resolution: no
@@ -675,7 +688,12 @@ func (s *Service) buildDependencyViews(
 	}
 	refs, err := s.resolveDependencyRefs(ctx, predecessors, dependents)
 	if err != nil {
-		s.logger.Warn("failed to resolve dependency edge ends", zap.Error(err))
+		if !isRequestCancellationError(ctx, err) {
+			s.logger.Warn("failed to resolve dependency edge ends", zap.Error(err))
+		}
+		return withheldDependencyViews(ids), nil
+	}
+	if ctx.Err() != nil {
 		return withheldDependencyViews(ids), nil
 	}
 	for _, id := range ids {

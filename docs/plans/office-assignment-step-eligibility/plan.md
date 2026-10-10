@@ -92,6 +92,9 @@ step, and source fields (`office.assignment_wake.step_eligible` or
 when `false`, a `note` explaining the signal was recorded but will not move the
 task. `accepted:true` is unchanged. A step lookup failure omits both fields
 rather than guessing.
+[Task 02](task-02-step-complete-advances-move-action.md) later narrowed
+`advances`: a signal-gated step also needs an `on_turn_complete` move that runs
+automatically.
 
 ## Tests
 
@@ -147,6 +150,15 @@ Wave 1 (sequential):
 Single task: the shared predicate, all four producer gates, and the additive
 `step_complete_kandev` field are one cohesive change with one shared helper: no
 parallel-safe split.
+
+Wave 2 (follow-up):
+
+- [x] [task-02-step-complete-advances-move-action](task-02-step-complete-advances-move-action.md)
+
+Task 01 reported `advances:true` for every signal-gated step. A signal-gated
+step with no `on_turn_complete` move action the engine runs cannot transition,
+so task 02 reports `advances:false` with a `note` for that shape, keeps
+`accepted:true`, and keeps recording the signal.
 
 ## Risks
 

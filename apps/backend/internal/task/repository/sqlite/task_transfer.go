@@ -56,19 +56,24 @@ type transferRelationInventory struct {
 }
 
 type transferStepSemantics struct {
-	Name                       string `db:"name"`
-	Prompt                     string `db:"prompt"`
-	WorkflowPrompt             string `db:"workflow_prompt"`
-	Events                     string `db:"events"`
-	EffectiveAgentProfileID    string `db:"effective_agent_profile_id"`
-	StageType                  string `db:"stage_type"`
-	PullFromName               string `db:"pull_from_name"`
-	AllowManualMove            int    `db:"allow_manual_move"`
-	IsStartStep                int    `db:"is_start_step"`
-	AutoArchiveAfterHours      int    `db:"auto_archive_after_hours"`
-	AutoAdvanceRequiresSignal  int    `db:"auto_advance_requires_signal"`
-	CancelTriggersTurnComplete int    `db:"cancel_triggers_turn_complete"`
-	WIPLimit                   int    `db:"wip_limit"`
+	Name                        string `db:"name"`
+	Prompt                      string `db:"prompt"`
+	WorkflowPrompt              string `db:"workflow_prompt"`
+	Events                      string `db:"events"`
+	EffectiveAgentProfileID     string `db:"effective_agent_profile_id"`
+	StageType                   string `db:"stage_type"`
+	PullFromName                string `db:"pull_from_name"`
+	AllowManualMove             int    `db:"allow_manual_move"`
+	IsStartStep                 int    `db:"is_start_step"`
+	AutoArchiveAfterHours       int    `db:"auto_archive_after_hours"`
+	AutoAdvanceRequiresSignal   int    `db:"auto_advance_requires_signal"`
+	CancelTriggersTurnComplete  int    `db:"cancel_triggers_turn_complete"`
+	WIPLimit                    int    `db:"wip_limit"`
+	ProfileSessionStartPolicy   string `db:"profile_session_start_policy"`
+	ProfileSessionEndPolicy     string `db:"profile_session_end_policy"`
+	DisableUnclassifiedFallback int    `db:"disable_unclassified_fallback"`
+	CompleteTaskOnEnter         int    `db:"complete_task_on_enter"`
+	SessionTarget               string `db:"session_target"`
 }
 
 type transferStepParticipantSemantics struct {
@@ -321,6 +326,12 @@ func (r *Repository) applyTaskTransfer(
 ) (*models.TaskTransferReceipt, error) {
 	placement, err := r.lockAndValidateTaskTransferSource(ctx, tx, command)
 	if err != nil {
+		return nil, err
+	}
+	if err := r.validateUnmappedTransferRelations(ctx, tx, command.TaskID, countTables); err != nil {
+		return nil, err
+	}
+	if err := r.validateTaskTransferRejectedKey(ctx, tx, command); err != nil {
 		return nil, err
 	}
 	destinationStepID, destinationStepName, err := r.resolveTransferDestination(ctx, tx, command)
@@ -618,7 +629,12 @@ func (r *Repository) transferStepsEquivalent(
 				COALESCE(s.auto_archive_after_hours, 0) AS auto_archive_after_hours,
 				COALESCE(s.auto_advance_requires_signal, 0) AS auto_advance_requires_signal,
 				COALESCE(s.cancel_triggers_turn_complete, 0) AS cancel_triggers_turn_complete,
-				COALESCE(s.wip_limit, 0) AS wip_limit
+				COALESCE(s.wip_limit, 0) AS wip_limit,
+				COALESCE(s.profile_session_start_policy, 'reuse') AS profile_session_start_policy,
+				COALESCE(s.profile_session_end_policy, 'park') AS profile_session_end_policy,
+				COALESCE(s.disable_unclassified_fallback, 0) AS disable_unclassified_fallback,
+				COALESCE(s.complete_task_on_enter, 0) AS complete_task_on_enter,
+				COALESCE(s.session_target, '') AS session_target
 			FROM workflow_steps s JOIN workflows w ON w.id = s.workflow_id WHERE s.id = ?`), stepID)
 		if err != nil {
 			return step, taskTransferConflict(err, "lane unavailable")

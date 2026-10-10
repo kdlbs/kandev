@@ -332,7 +332,7 @@ func (h *ShellHandlers) wsUserShellList(ctx context.Context, msg *ws.Message) (*
 				CustomName:     it.CustomName,
 				State:          it.State,
 				PTYStatus:      it.PTYStatus,
-				InitialCommand: it.InitialCommand,
+				InitialCommand: terminalservice.TerminalListInitialCommand(it.ID, it.InitialCommand),
 			})
 		}
 	}
@@ -397,7 +397,7 @@ func appendUnmanagedShells(
 			Kind:           kindForUnmanaged(s.TerminalID),
 			Label:          s.Label,
 			PTYStatus:      ptyStatusFromRunning(s.Running),
-			InitialCommand: s.InitialCommand,
+			InitialCommand: terminalservice.TerminalListInitialCommand(s.TerminalID, s.InitialCommand),
 		})
 	}
 	return items
@@ -799,7 +799,7 @@ func (h *ShellHandlers) httpListTerminals(c *gin.Context) {
 			"running":         shell.Running,
 			"label":           shell.Label,
 			"closable":        shell.Closable,
-			"initial_command": shell.InitialCommand,
+			"initial_command": terminalservice.TerminalListInitialCommand(shell.TerminalID, shell.InitialCommand),
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"terminals": terminals})
@@ -831,7 +831,7 @@ func (h *ShellHandlers) httpListTaskTerminals(c *gin.Context) {
 				CustomName:     it.CustomName,
 				State:          it.State,
 				PTYStatus:      it.PTYStatus,
-				InitialCommand: it.InitialCommand,
+				InitialCommand: terminalservice.TerminalListInitialCommand(it.ID, it.InitialCommand),
 			})
 		}
 	}

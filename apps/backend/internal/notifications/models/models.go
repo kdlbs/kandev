@@ -40,3 +40,13 @@ type Delivery struct {
 	OccurrenceID  string    `json:"occurrence_id"`
 	CreatedAt     time.Time `json:"created_at"`
 }
+
+// RuntimeUpdateMember is one claimed runtime version included in a summary.
+type RuntimeUpdateMember struct {
+	OccurrenceID    string `json:"occurrence_id"`
+	AgentName       string `json:"agent_name"`
+	RuntimeID       string `json:"runtime_id"`
+	DisplayName     string `json:"display_name"`
+	PreviousVersion string `json:"previous_version"`
+	Version         string `json:"version"`
+}

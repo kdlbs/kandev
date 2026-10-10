@@ -1,10 +1,12 @@
 # ADR-2026-09-07-activate-managed-runtime-defaults: Activate Shipped Managed Runtime Defaults
 
-**Status:** accepted
+**Status:** accepted (amended for OpenCode by 2026-09-27-opencode-runtime-adoption)
 **Date:** 2026-09-07
 **Area:** backend, frontend, protocol
 **Amends:**
 [ADR-2026-08-12-validated-managed-runtime-version-selection](2026-08-12-validated-managed-runtime-version-selection.md)
+
+**OpenCode amendment:** [Persisted adoption](2026-09-27-opencode-runtime-adoption.md) restricts OpenCode default resets to its adopted family and preserves runtime source. It does not change other agents.
 
 ## Context
 

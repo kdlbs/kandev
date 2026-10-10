@@ -10,9 +10,14 @@ const mockWebSocketClient = {
   request: vi.fn(),
   subscribeSession: vi.fn(),
   subscribeSessionWithReady: vi.fn(),
-  registerCoreSessionRecovery: vi.fn(() => vi.fn()),
-  retryCoreSessionRecovery: vi.fn(() => undefined),
+  registerCoreSessionRecovery: vi.fn((_sessionId: string, _handler: () => Promise<boolean>) =>
+    vi.fn(),
+  ),
+  retryCoreSessionRecovery: vi.fn(
+    (_sessionId: string) => undefined as Promise<boolean> | undefined,
+  ),
 };
+let registeredCoreRecovery: (() => Promise<boolean>) | undefined;
 
 const mockState = {
   messages: {
@@ -72,6 +77,12 @@ beforeEach(() => {
   mockListSessionTurns.mockResolvedValue({ turns: [], total: 0 });
   mockWebSocketClient.request.mockResolvedValue({ messages: [], has_more: false });
   mockWebSocketClient.subscribeSession.mockReturnValue(vi.fn());
+  registeredCoreRecovery = undefined;
+  mockWebSocketClient.registerCoreSessionRecovery.mockImplementation((_sessionId, handler) => {
+    registeredCoreRecovery = handler;
+    return vi.fn();
+  });
+  mockWebSocketClient.retryCoreSessionRecovery.mockReturnValue(undefined);
   mockState.messages.bySession["sess-1"] = [];
   mockState.messages.metaBySession["sess-1"] = {
     historyInitialized: false,
@@ -376,6 +387,36 @@ describe("cached session entry history readiness", () => {
     expect(result.current.isLoading).toBe(false);
     unmount();
   });
+
+  it("keeps a failed cached refresh unavailable when a live row arrives", async () => {
+    const readiness = Promise.resolve();
+    const response = deferred<{ messages: Message[]; has_more: boolean }>();
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness);
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: readiness,
+      unsubscribe: vi.fn(),
+    });
+    mockWebSocketClient.request.mockReturnValue(response.promise);
+    mockState.messages.bySession["sess-1"] = [makeMessage({ id: "cached" })];
+    mockState.messages.metaBySession["sess-1"].historyInitialized = true;
+
+    const { result, rerender, unmount } = renderHook(() => useSessionMessages("sess-1"));
+    await waitFor(() => expect(mockWebSocketClient.request).toHaveBeenCalledTimes(1));
+
+    mockState.messages.bySession["sess-1"] = [
+      makeMessage({ id: "cached" }),
+      makeMessage({ id: "live" }),
+    ];
+    rerender();
+
+    await act(async () => {
+      response.reject(new Error("refresh failed"));
+      await response.promise.catch(() => undefined);
+    });
+    await waitFor(() => expect(result.current.historyStatus).toBe("unavailable"));
+    expect(result.current.historyError).toEqual(new Error("refresh failed"));
+    unmount();
+  });
 });
 
 describe("session entry loading state", () => {
@@ -574,6 +615,101 @@ describe("session subscription hydration ordering", () => {
 
     expect(mockWebSocketClient.request).not.toHaveBeenCalled();
     expect(mockState.setMessagesLoading).toHaveBeenLastCalledWith("sess-1", false);
+  });
+});
+
+describe("core session recovery retry", () => {
+  it("shows progress and blocks repeated Retry during core stream recovery", async () => {
+    const initial = deferred<{ messages: Message[]; has_more: boolean }>();
+    const manualFailure = deferred<{ messages: Message[]; has_more: boolean }>();
+    const retry = deferred<{ messages: Message[]; has_more: boolean }>();
+    const oldUser = makeMessage({ id: "old-user", session_id: sessionId("sess-1") });
+    const newUser = makeMessage({ id: "new-user", session_id: sessionId("sess-1") });
+    configureSession("sess-1", "RUNNING", [oldUser]);
+    mockState.mergeMessages.mockImplementation((id, messages, metadata) => {
+      (mockState.messages.bySession as Record<string, Message[]>)[id] = messages;
+      (
+        mockState.messages.metaBySession as Record<
+          string,
+          (typeof mockState.messages.metaBySession)["sess-1"]
+        >
+      )[id] = {
+        ...mockState.messages.metaBySession["sess-1"],
+        ...metadata,
+      };
+    });
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(Promise.resolve());
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: Promise.resolve(),
+      unsubscribe: vi.fn(),
+    });
+    mockWebSocketClient.request
+      .mockImplementationOnce(() => initial.promise)
+      .mockRejectedValueOnce(new Error("recovery failed"))
+      .mockImplementationOnce(() => manualFailure.promise)
+      .mockImplementationOnce(() => retry.promise);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { result, unmount } = renderHook(() => useSessionMessages("sess-1"));
+    await waitFor(() => expect(mockWebSocketClient.request).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      initial.resolve({ messages: [oldUser], has_more: false });
+      await initial.promise;
+    });
+    expect(registeredCoreRecovery).toBeTypeOf("function");
+
+    await act(async () => {
+      await expect(registeredCoreRecovery?.()).resolves.toBe(false);
+    });
+    await waitFor(() => expect(result.current.historyStatus).toBe("unavailable"));
+    expect(mockState.messages.bySession["sess-1"]).toEqual([oldUser]);
+
+    mockWebSocketClient.retryCoreSessionRecovery.mockImplementation((sessionId: string) =>
+      sessionId === "sess-1"
+        ? Promise.resolve().then(() => registeredCoreRecovery?.() ?? false)
+        : undefined,
+    );
+    await act(async () => {
+      result.current.retryHistory();
+    });
+
+    await waitFor(() => expect(mockWebSocketClient.request).toHaveBeenCalledTimes(3));
+    expect(result.current.historyStatus).toBe("loading");
+    expect(result.current.isLoading).toBe(true);
+    await act(async () => {
+      result.current.retryHistory();
+    });
+    expect(mockWebSocketClient.retryCoreSessionRecovery).toHaveBeenCalledTimes(1);
+    expect(mockWebSocketClient.request).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      manualFailure.reject(new Error("manual retry failed"));
+      await manualFailure.promise.catch(() => undefined);
+    });
+    await waitFor(() => expect(result.current.historyStatus).toBe("unavailable"));
+    expect(result.current.isLoading).toBe(false);
+
+    await act(async () => {
+      result.current.retryHistory();
+    });
+    await waitFor(() => expect(mockWebSocketClient.request).toHaveBeenCalledTimes(4));
+    expect(result.current.historyStatus).toBe("loading");
+    expect(result.current.isLoading).toBe(true);
+    await act(async () => {
+      result.current.retryHistory();
+    });
+    expect(mockWebSocketClient.retryCoreSessionRecovery).toHaveBeenCalledTimes(2);
+    expect(mockWebSocketClient.request).toHaveBeenCalledTimes(4);
+
+    await act(async () => {
+      retry.resolve({ messages: [newUser], has_more: false });
+      await retry.promise;
+    });
+
+    await waitFor(() => expect(result.current.historyStatus).toBe("ready"));
+    expect(result.current.isLoading).toBe(false);
+    expect(mockState.messages.bySession["sess-1"]).toEqual([newUser]);
+    unmount();
   });
 });
 
@@ -1031,5 +1167,59 @@ describe("deduplicated message request baselines", () => {
     );
     first.unmount();
     second.unmount();
+  });
+});
+
+describe("running message backfill visibility", () => {
+  function messageListCalls() {
+    return mockWebSocketClient.request.mock.calls.filter(([action]) => action === "message.list")
+      .length;
+  }
+
+  async function renderRunningSession() {
+    vi.useFakeTimers();
+    mockState.turns.activeBySession["sess-1"] = "turn-1" as never;
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(Promise.resolve());
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: Promise.resolve(),
+      unsubscribe: vi.fn(),
+    });
+    const hook = renderHook(() => useSessionMessages("sess-1"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    return hook;
+  }
+
+  function setVisibility(state: DocumentVisibilityState) {
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue(state);
+  }
+
+  it("refreshes a running session while the document is visible", async () => {
+    setVisibility("visible");
+    const { unmount } = await renderRunningSession();
+    const before = messageListCalls();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(11_200);
+    });
+
+    expect(messageListCalls() - before).toBe(3);
+    unmount();
+  });
+
+  it("skips the running refresh while the document is hidden", async () => {
+    setVisibility("hidden");
+    const { unmount } = await renderRunningSession();
+    const before = messageListCalls();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(11_200);
+    });
+
+    expect(messageListCalls() - before).toBe(0);
+    unmount();
   });
 });

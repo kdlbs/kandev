@@ -263,7 +263,7 @@ test.describe("Symlink file handling", () => {
 
     // Click real-file.txt in the changes list (has uncommitted diff)
     const fileRow = testPage
-      .getByTestId("unstaged-file-tree")
+      .getByTestId("unstaged-files-section")
       .getByTestId("file-row-real-file.txt");
     await expect(fileRow).toBeVisible({ timeout: 10_000 });
     await fileRow.click();

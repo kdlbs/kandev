@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -17,39 +18,70 @@ func (m *Manager) prepareCursorMCPAuth(
 	executorType string,
 	strategy mcpconfig.PassthroughMCPStrategy,
 ) error {
+	_, _, err := m.prepareCursorMCPAuthWithStatus(execution, profileInfo, executorType, strategy)
+	return err
+}
+
+func (m *Manager) prepareCursorMCPAuthWithStatus(
+	execution *AgentExecution,
+	profileInfo *AgentProfileInfo,
+	executorType string,
+	strategy mcpconfig.PassthroughMCPStrategy,
+) (PrepareStepStatus, string, error) {
 	if execution == nil || execution.WorkspacePath == "" || !isCursorMCPAuthStrategy(strategy) {
-		return nil
+		return PrepareStepSkipped, "ineligible", nil
 	}
 	if !isCursorMCPAuthLocalExecutor(executorType) {
-		return nil
+		return PrepareStepSkipped, "ineligible", nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return nil
+		return PrepareStepSkipped, "home_unavailable", nil
 	}
 	if runtimeHome, exists := execution.RuntimeEnvironment()["HOME"]; exists && !sameCursorMCPAuthHome(home, runtimeHome) {
-		return nil
+		return PrepareStepSkipped, "home_mismatch", nil
 	}
 	if profileInfo == nil {
-		return errors.New("could not resolve Cursor MCP authentication preference")
+		return PrepareStepFailed, pluginExecutorStateUnavailable, errors.New("could not resolve Cursor MCP authentication preference")
 	}
 
 	if !profileInfo.CursorMCPAuthEnabled {
 		if err := mcpconfig.PrepareCursorMCPAuth(execution.WorkspacePath, filepath.Join(home, ".cursor"), false); err != nil {
-			return errors.New("failed to remove shared Cursor MCP credentials")
+			return PrepareStepFailed, pluginExecutorStateUnavailable, errors.New("failed to remove shared Cursor MCP credentials")
 		}
-		return nil
+		return PrepareStepSkipped, string(SSHReclaimSkipDisabled), nil
 	}
 
 	excludedRoots, err := m.cursorMCPAuthTaskRoots()
 	if err != nil {
 		m.logCursorMCPAuthPreparationFailure(execution, "task_root_unavailable")
-		return nil
+		return PrepareStepFailed, pluginExecutorStateUnavailable, nil
 	}
 	if err := mcpconfig.PrepareCursorMCPAuth(execution.WorkspacePath, filepath.Join(home, ".cursor"), true, excludedRoots...); err != nil {
 		m.logCursorMCPAuthPreparationFailure(execution, "prepare_failed")
+		return PrepareStepFailed, pluginExecutorStateUnavailable, nil
 	}
-	return nil
+	return PrepareStepCompleted, "", nil
+}
+
+func (m *Manager) prepareCursorMCPAuthWithProgress(
+	execution *AgentExecution,
+	profileInfo *AgentProfileInfo,
+	executorType string,
+	strategy mcpconfig.PassthroughMCPStrategy,
+	progress *prepareProgressRecorder,
+) error {
+	started := time.Now().UTC()
+	index := appendCursorMCPProgress(progress, "", PrepareStepKindAgentMCPCredentials, PrepareStepRunning, "", &started, nil)
+	status, failureCode, err := m.prepareCursorMCPAuthWithStatus(execution, profileInfo, executorType, strategy)
+	if err != nil {
+		status = PrepareStepFailed
+		if failureCode == "" {
+			failureCode = pluginExecutorStateUnavailable
+		}
+	}
+	updateCursorMCPProgress(progress, index, "", PrepareStepKindAgentMCPCredentials, status, failureCode, started, time.Now().UTC())
+	return err
 }
 
 func (m *Manager) cursorMCPAuthTaskRoots() ([]string, error) {

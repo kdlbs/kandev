@@ -1077,7 +1077,7 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 	// Config mode includes its existing tools, five compact settings tools, and
 	// the audited cross-workspace transfer tool.
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev requires a live task session; must NOT register in config mode")
-	assert.Equal(t, 43, len(tools))
+	assert.Equal(t, 45, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
@@ -1262,7 +1262,7 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 	// Baseline 42 tools plus the five compact settings tools and the audited
 	// cross-workspace transfer tool.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 48, len(tools))
+	assert.Equal(t, 50, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 

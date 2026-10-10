@@ -2,6 +2,18 @@
 // `apps/backend/internal/system/` HTTP surface (see
 // docs/specs/system-page/requirements/system-page.md "Backend surface").
 
+import type { StorageSystemTemporarySummary } from "./system-storage";
+export type {
+  StorageDiskCapacityResponse,
+  StorageSystemTemporarySummary,
+  StorageTemporaryDiskCapacity,
+  StorageTemporaryEntry,
+  StorageTemporaryEntryBreakdown,
+  StorageTemporaryEntryOwnership,
+  StorageTemporaryRootMeasurement,
+  StorageTemporaryRootStatus,
+} from "./system-storage";
+
 export interface SystemInfo {
   version: string;
   commit: string;
@@ -304,6 +316,7 @@ export interface StorageGoCacheSettings {
   enabled: boolean;
   max_bytes: number;
   adopted_path: string;
+  allow_cleanup_while_busy: boolean;
 }
 
 export interface StorageDockerSettings {
@@ -349,6 +362,7 @@ export interface StorageWorkspaceSummary {
 export interface StorageGoCacheSummary {
   path?: string;
   size_bytes?: number;
+  cleanup_eligible_size_bytes?: number;
   owned?: boolean;
   enabled?: boolean;
   unmanaged_path?: string;
@@ -394,28 +408,6 @@ export interface StorageTemporaryArtifactsSummary {
   skipped_count?: number;
   warnings?: string[];
   warning?: string;
-}
-
-export type StorageTemporaryRootStatus = "measured" | "partial" | "unavailable" | "not_applicable";
-
-export interface StorageTemporaryRootMeasurement {
-  requested_path: string;
-  path: string;
-  aliases?: string[];
-  status: StorageTemporaryRootStatus;
-  size_bytes?: number;
-  skipped_count?: number;
-  reason?: string;
-  warnings?: string[];
-}
-
-export interface StorageSystemTemporarySummary {
-  status: StorageTemporaryRootStatus;
-  roots: StorageTemporaryRootMeasurement[];
-  size_bytes?: number;
-  included_in_total: false;
-  reason?: string;
-  warnings?: string[];
 }
 
 export type StorageFootprintMeasurementStatus = "measured" | "unavailable" | "not_applicable";
@@ -569,16 +561,6 @@ export interface StorageOverviewResponse {
   analyzed_at: string | null;
   analysis: StorageAnalysisState;
   last_run: StorageMaintenanceRun | null;
-}
-
-export interface StorageDiskCapacityResponse {
-  path: string;
-  total_bytes: number;
-  used_bytes: number;
-  available_bytes: number;
-  used_percent: number;
-  available: boolean;
-  warning?: string;
 }
 
 export interface StoragePolicyResponse {

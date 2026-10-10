@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/agents"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/configloader"
@@ -295,6 +296,9 @@ func (s *OnboardingService) CompleteOnboarding(ctx context.Context, req Complete
 	result := &CompleteResult{}
 	if err := taskservice.ValidateTaskTitle(req.TaskTitle); err != nil {
 		return nil, fmt.Errorf("invalid onboarding task title: %w", err)
+	}
+	if err := s.validateDynamicOnboardingSource(ctx, req.AgentProfileID); err != nil {
+		return nil, err
 	}
 
 	if err := s.createOnboardingWorkspace(ctx, req.WorkspaceName, req.TaskPrefix); err != nil {
@@ -591,7 +595,24 @@ func (s *OnboardingService) createOnboardingAgent(ctx context.Context, wsID stri
 		if err != nil {
 			return "", fmt.Errorf("look up source profile %s: %w", req.AgentProfileID, err)
 		}
+		if src == nil {
+			return "", errors.New("selected source profile is unavailable")
+		}
+		if src.AgentID == agents.DynamicAgentID {
+			if err := validateDynamicOnboardingSource(src); err != nil {
+				return "", err
+			}
+		}
+		if src.WorkspaceID != "" && src.WorkspaceID != wsID {
+			return "", errors.New("source agent profile belongs to a different workspace")
+		}
 		agent.AgentID = src.AgentID
+		if src.AgentID == agents.DynamicAgentID {
+			// The chosen profile is a dynamic routing owner. Bind the Office
+			// identity to it so launches resolve a concrete candidate; the
+			// Office ID remains the session's logical profile.
+			agent.ExecutionAgentProfileID = src.ID
+		}
 	}
 	if err := s.agentCreator.CreateAgentInstance(ctx, agent); err != nil {
 		return "", err
@@ -601,6 +622,33 @@ func (s *OnboardingService) createOnboardingAgent(ctx context.Context, wsID stri
 	}
 	s.installCoordinatorRoutine(ctx, wsID, agent.ID, agent.Role)
 	return agent.ID, nil
+}
+
+func (s *OnboardingService) validateDynamicOnboardingSource(ctx context.Context, profileID string) error {
+	if profileID == "" || s.sourceProfile == nil {
+		return nil
+	}
+	source, err := s.sourceProfile.GetAgentProfile(ctx, profileID)
+	if err != nil {
+		return fmt.Errorf("look up source profile %s: %w", profileID, err)
+	}
+	if source == nil {
+		return errors.New("selected source profile is unavailable")
+	}
+	if source.AgentID != agents.DynamicAgentID {
+		return nil
+	}
+	return validateDynamicOnboardingSource(source)
+}
+
+func validateDynamicOnboardingSource(source *models.AgentInstance) error {
+	if source == nil || source.DeletedAt != nil || !source.Enabled {
+		return errors.New("selected dynamic agent profile is unavailable")
+	}
+	if source.WorkspaceID != "" {
+		return errors.New("onboarding requires a global dynamic agent profile")
+	}
+	return nil
 }
 
 // seedWorkspaceRouting writes authoritative execution-profile references plus
@@ -693,6 +741,13 @@ func (s *OnboardingService) applyOnboardingTierProfile(
 	src, err := s.sourceProfile.GetAgentProfile(ctx, profileID)
 	if err != nil {
 		return fmt.Errorf("look up tier profile %s: %w", profileID, err)
+	}
+	if src.AgentID == agents.DynamicAgentID {
+		// The legacy workspace routing shape (provider_profiles) only carries
+		// concrete provider families. A dynamic profile is executed through the
+		// dynamic resolver, so there is nothing to seed here; skip instead of
+		// emitting an "unsupported provider" warning.
+		return nil
 	}
 	if src.AgentID == "" {
 		return nil

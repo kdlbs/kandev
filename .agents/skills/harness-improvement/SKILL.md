@@ -7,6 +7,9 @@ description: Improve Kandev's AI harness from session learnings or explicit requ
 
 Use this skill to turn lessons from real agent sessions into durable harness changes: skills, agents, subagents, commands, scripts, and always-on instruction files.
 
+For an explicitly requested session retrospective, use
+[`/retro`](../retro/SKILL.md) to filter lessons and propose shared-file edits.
+
 ## Planner Entry
 
 The planner may inventory, edit, and validate a small localized harness change

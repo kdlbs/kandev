@@ -200,6 +200,71 @@ describe("startReconnectLoop", () => {
   });
 });
 
+describe("startReconnectLoop one-shot terminal completion", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stops retrying after the backend reports a completed initial command", () => {
+    vi.useFakeTimers();
+
+    const connectWebSocket = vi.fn(({ onSocketClose }) => {
+      onSocketClose({ code: 1000, reason: "initial_command_completed" } as CloseEvent);
+    });
+    const onDisconnected = vi.fn();
+    const stop = startReconnectLoop({
+      environmentId: "env-1",
+      wsBaseUrl: WS_BASE_URL,
+      mode: "shell",
+      terminalId: "shell-1",
+      label: undefined,
+      terminal: { reset: vi.fn() } as unknown as Terminal,
+      fitAndResize: vi.fn(),
+      wsRef: { current: null },
+      attachAddonRef: { current: null },
+      onConnected: vi.fn(),
+      onDisconnected,
+      connectWebSocket,
+    });
+
+    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(10_000);
+
+    expect(connectWebSocket).toHaveBeenCalledTimes(1);
+    expect(onDisconnected).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it("continues retrying for other normal WebSocket closes", () => {
+    vi.useFakeTimers();
+
+    const connectWebSocket = vi.fn(({ onSocketClose }) => {
+      if (connectWebSocket.mock.calls.length === 1) {
+        onSocketClose({ code: 1000, reason: "normal close" } as CloseEvent);
+      }
+    });
+    const stop = startReconnectLoop({
+      environmentId: "env-1",
+      wsBaseUrl: WS_BASE_URL,
+      mode: "shell",
+      terminalId: "shell-1",
+      label: undefined,
+      terminal: { reset: vi.fn() } as unknown as Terminal,
+      fitAndResize: vi.fn(),
+      wsRef: { current: null },
+      attachAddonRef: { current: null },
+      onConnected: vi.fn(),
+      connectWebSocket,
+    });
+
+    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(300);
+
+    expect(connectWebSocket).toHaveBeenCalledTimes(2);
+    stop();
+  });
+});
+
 // The env handler refuses a shell on an ended session, identically every time.
 // Opening the socket anyway only restarts the 5s retry timer.
 describe("computeCanConnect on ended sessions", () => {

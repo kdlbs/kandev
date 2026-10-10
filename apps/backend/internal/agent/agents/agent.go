@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -70,6 +71,12 @@ type VirtualAgent interface {
 	IsVirtual() bool
 }
 
+// StoredProfilePreserver marks a disabled optional agent whose saved profiles
+// remain valid historical configuration and must not be orphan-cleaned.
+type StoredProfilePreserver interface {
+	PreserveStoredProfilesWhenDisabled() bool
+}
+
 // IsVirtualAgent reports whether an agent is a non-launchable virtual family.
 // Keeping this as an optional capability lets existing concrete agents remain
 // unchanged while callers can fail closed at launch and discovery boundaries.
@@ -102,6 +109,13 @@ type ManagedNPMRuntimeAgent interface {
 	ManagedNPMRuntime() ManagedNPMRuntimeSpec
 }
 
+// SelectedRuntimeInstallCommandProvider builds the Settings install command
+// for an install-wide runtime selection. Managed installs should prepare the
+// selected cache entry; native installs may update their standalone package.
+type SelectedRuntimeInstallCommandProvider interface {
+	SettingsInstallCommand(managedruntime.OpenCodeSelection) (Command, error)
+}
+
 // PassthroughAgent is an optional capability for agents that support CLI passthrough mode.
 type PassthroughAgent interface {
 	PassthroughConfig() PassthroughConfig
@@ -126,6 +140,8 @@ type NativeBinaryAgent interface {
 type LoginCommand struct {
 	// Cmd is the command + args to spawn, e.g. []string{"claude", "auth", "login"}.
 	Cmd []string
+	// Variants are server-owned command choices selected by opaque identifiers.
+	Variants map[string][]string
 	// Description renders above the terminal as a one-line hint, e.g.
 	// "Authenticate with your Anthropic account."
 	Description string
@@ -225,6 +241,12 @@ type CommandOptions struct {
 	// ManagedRuntimeVersion is an internal exact version override for trusted
 	// managed npm ACP runtimes. Empty uses the built-in exact version pin.
 	ManagedRuntimeVersion string
+	// ManagedRuntimeFamily and ManagedRuntimeSource carry the validated
+	// install-wide OpenCode choice into command construction.
+	ManagedRuntimeFamily managedruntime.OpenCodeFamily
+	ManagedRuntimeSource managedruntime.OpenCodeSource
+	// NativeRuntimeVersion is the observed version of a native OpenCode binary.
+	NativeRuntimeVersion string
 }
 
 // PassthroughOptions are passed to BuildPassthroughCommand.
@@ -244,16 +266,23 @@ type PassthroughOptions struct {
 	// commands, which lifecycle.CommandBuilder appends centrally, passthrough
 	// agents opt in by appending these tokens in BuildPassthroughCommand.
 	CLIFlagTokens []string
+	// BaseCommand overrides the agent's default interactive CLI when the
+	// install-wide runtime selection resolves to a managed distribution.
+	BaseCommand Command
 }
 
 // RuntimeConfig holds Docker / standalone runtime settings.
 type RuntimeConfig struct {
+	// ContainerEnv provides agent-specific environment required only when the
+	// process runs inside a container runtime. These values are independent of
+	// session mode and never reach host or SSH processes.
 	Image          string
 	Tag            string
 	Cmd            Command
 	Entrypoint     Command
 	WorkingDir     string
 	Env            map[string]string
+	ContainerEnv   map[string]string
 	RequiredEnv    []string
 	Mounts         []MountTemplate
 	ResourceLimits ResourceLimits
@@ -370,6 +399,18 @@ type PermissionSetting struct {
 	ApplyMethod  string `json:"apply_method,omitempty"`
 	CLIFlag      string `json:"cli_flag,omitempty"`
 	CLIFlagValue string `json:"cli_flag_value,omitempty"`
+
+	// PassthroughOnly marks a CLI flag that only reaches the agent in CLI
+	// passthrough mode. Over ACP the launched process is the bridge, which
+	// forwards no unrecognized argument to the CLI it wraps, so the flag is
+	// appended to a process that ignores it while the UI reports it as
+	// enabled.
+	PassthroughOnly bool `json:"passthrough_only,omitempty"`
+
+	// ACPEquivalent names the control that achieves the same thing over ACP.
+	// It is the actionable half of refusing a passthrough-only flag: a message
+	// that only says "not available here" leaves the user with no next step.
+	ACPEquivalent string `json:"acp_equivalent,omitempty"`
 }
 
 // PassthroughConfig defines configuration for CLI passthrough mode.
@@ -453,7 +494,10 @@ func UserSkillDirFromRuntime(a Agent) string {
 type InferenceConfig struct {
 	// Supported indicates the agent can do one-shot inference.
 	Supported bool
-	// Command is the ACP command for one-shot inference.
+	// Protocol selects the agentctl one-shot inference transport. Empty keeps
+	// the historical ACP transport.
+	Protocol agent.Protocol
+	// Command is the protocol command for one-shot inference.
 	// e.g., ["npx", "-y", "@agentclientprotocol/claude-agent-acp"]
 	Command Command
 	// ModelFlag is the flag template for specifying the model (e.g., ["--model", "{model}"]).

@@ -3,15 +3,33 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 const taskTransferAuditTimeout = 2 * time.Second
+
+func (r *Repository) validateTaskTransferRejectedKey(ctx context.Context, tx *sqlx.Tx, command models.TaskTransferCommand) error {
+	var count int
+	err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM task_transfer_audit
+		WHERE source_workspace_id = ? AND idempotency_key = ? AND result IN ('denied', 'failed')
+		AND actor_session_id = ? AND (actor_id = ? OR (actor_kind = 'rejected' AND actor_session_id <> ''))`),
+		command.ExpectedSourceWorkspaceID, command.IdempotencyKey, command.Actor.SessionID,
+		command.Actor.ID)
+	if err != nil {
+		return err
+	}
+	if count != 0 {
+		return fmt.Errorf("%w: caller must use a fresh key after a denied or failed attempt", repoerrors.ErrTaskTransferConflict)
+	}
+	return nil
+}
 
 func (r *Repository) persistTaskTransfer(
 	ctx context.Context,

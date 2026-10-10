@@ -126,7 +126,7 @@ func (a taskTransferCoordinatorAttestor) resolveTaskTransferCoordinator(
 }
 
 func taskTransferActiveCEO(agent *settingsmodels.AgentProfile, workspaceID string) bool {
-	return agent != nil && agent.WorkspaceID == workspaceID && agent.Role == settingsmodels.AgentRoleCEO &&
+	return agent != nil && agent.Enabled && agent.WorkspaceID == workspaceID && agent.Role == settingsmodels.AgentRoleCEO &&
 		agent.DeletedAt == nil && (agent.Status == settingsmodels.AgentStatusIdle ||
 		agent.Status == settingsmodels.AgentStatusWorking)
 }

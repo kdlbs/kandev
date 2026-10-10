@@ -100,6 +100,18 @@ export function dockerExec(containerID: string, ...command: string[]): DockerExe
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
+export function dockerFindContainerByTaskID(taskID: string): string | null {
+  const result = spawnSync(
+    "docker",
+    ["ps", "--quiet", "--filter", `label=kandev.task_id=${taskID}`],
+    { encoding: "utf8" },
+  );
+  if (result.status !== 0) {
+    throw new Error(`failed to find Docker container for task ${taskID}: ${result.stderr.trim()}`);
+  }
+  return result.stdout.trim().split("\n").find(Boolean) ?? null;
+}
+
 /**
  * Returns true when the container can perform a full user-namespace map,
  * which requires both the seccomp/AppArmor relaxation AND functioning

@@ -14,9 +14,10 @@ import { useAppStoreApi } from "@/components/state-provider";
 import { TaskRouteSessionHydrationProvider } from "@/components/task/task-route-session-hydration";
 import { KanbanTaskShell } from "@/app/tasks/[id]/kanban-task-shell";
 import {
+  buildTaskNavigationShellData,
   extractInitialRepositories,
   extractInitialScripts,
-  fetchSessionDataForTask,
+  fetchTaskNavigationEnrichment,
   type FetchedSessionData,
 } from "@/lib/ssr/session-page-state";
 import { useTranslation } from "react-i18next";
@@ -24,6 +25,18 @@ import { isDetachedManagedConversation } from "@/lib/plugins/retained-managed-co
 import { RetainedManagedConversationTranscript } from "@/components/plugins/retained-managed-conversation-transcript";
 import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 import type { TaskSessionHydrationEpoch } from "@/lib/state/slices/session/types";
+import {
+  beginTaskNavigation,
+  isTaskNavigationCurrent,
+  retainTaskNavigationRead,
+  readTaskNavigationIdentity,
+  useTaskNavigationReadState,
+} from "@/lib/state/task-navigation-reads";
+import type { TaskNavigationContext } from "@/lib/state/task-navigation-reads";
+import { getOwnedTaskSessionId, useTaskRouteProjection } from "./task-route-projection";
+import { useTaskDetailRouteRecovery } from "./task-detail-route-recovery";
+import { deriveTaskDetailRouteView } from "./task-detail-route-view";
+import type { TaskDetailRouteState } from "./task-detail-route-state";
 
 type TaskDetailRouteProps = {
   taskId: string;
@@ -33,17 +46,6 @@ type TaskDetailRouteProps = {
   mode?: string;
   initialData?: FetchedSessionData;
 };
-
-type TaskDetailRouteState =
-  | { routeKey: string; status: "loading"; data: null }
-  | {
-      routeKey: string;
-      status: "loaded";
-      data: FetchedSessionData;
-      forceMergeSession: boolean;
-      hydrationEpochsAtRequestStart?: Readonly<Record<string, TaskSessionHydrationEpoch>>;
-    }
-  | { routeKey: string; status: "error"; data: null };
 
 function taskRouteKey(taskId: string, sessionId?: string): string {
   return `${taskId}\u0000${sessionId ?? ""}`;
@@ -84,11 +86,13 @@ export function TaskDetailRoute({
   mode,
   initialData,
 }: TaskDetailRouteProps) {
-  const route = useTaskDetailRouteData({ taskId, sessionId, initialData });
-  const [hydratedRouteKey, setHydratedRouteKey] = useState<string | null>(null);
+  const [hydratedState, setHydratedState] = useState<FetchedSessionData["initialState"] | null>(
+    null,
+  );
+  const route = useTaskDetailRouteData({ taskId, sessionId, initialData, hydratedState });
   const markRouteHydrated = useCallback(() => {
-    if (route.displayedRouteKey) setHydratedRouteKey(route.displayedRouteKey);
-  }, [route.displayedRouteKey]);
+    setHydratedState(route.initialState);
+  }, [route.initialState]);
   const onRouteHydrated =
     route.currentRouteStatus === "loaded" &&
     route.displayedRouteKey === route.routeKey &&
@@ -98,10 +102,10 @@ export function TaskDetailRoute({
   const routeDataReady =
     route.currentRouteStatus === "error" ||
     (route.currentRouteStatus === "loaded" &&
-      (route.initialState === null || hydratedRouteKey === route.routeKey));
+      (route.initialState === null || hydratedState === route.initialState));
 
   if (route.showInitialLoading) {
-    return <TaskRouteLoading />;
+    return <TaskRouteLoading retrying={route.readState.phase === "retrying"} />;
   }
 
   return (
@@ -116,7 +120,9 @@ export function TaskDetailRoute({
   );
 }
 
-type TaskDetailRouteView = ReturnType<typeof deriveTaskDetailRouteView>;
+type TaskDetailRouteView = ReturnType<typeof deriveTaskDetailRouteView> & {
+  readState: ReturnType<typeof useTaskNavigationReadState>;
+};
 
 function TaskDetailRouteBody({
   route,
@@ -170,7 +176,9 @@ function TaskDetailRouteBody({
       ) : (
         <TaskRouteLoading />
       )}
-      {route.isLoadingOverPreviousRoute ? <TaskRouteLoading overlay /> : null}
+      {route.isLoadingOverPreviousRoute ? (
+        <TaskRouteLoading overlay retrying={route.readState.phase === "retrying"} />
+      ) : null}
     </div>
   );
 }
@@ -179,11 +187,41 @@ type TaskDetailRouteData = {
   taskId: string;
   sessionId?: string;
   initialData?: FetchedSessionData;
+  hydratedState: FetchedSessionData["initialState"] | null;
 };
 
-function useTaskDetailRouteData({ taskId, sessionId, initialData }: TaskDetailRouteData) {
+function useTaskDetailRouteData({
+  taskId,
+  sessionId,
+  initialData,
+  hydratedState,
+}: TaskDetailRouteData) {
   const store = useAppStoreApi();
+  const projection = useTaskRouteProjection(taskId, sessionId);
   const routeKey = taskRouteKey(taskId, sessionId);
+  const navigationOwnerRef = useRef<object>({});
+  const navigationContext = beginTaskNavigation(store, navigationOwnerRef.current, routeKey);
+  const selectedSessionForNavigationRef = useRef<{
+    navigationContext: TaskNavigationContext;
+    sessionId?: string;
+  } | null>(null);
+  if (selectedSessionForNavigationRef.current?.navigationContext !== navigationContext) {
+    const state = store.getState();
+    selectedSessionForNavigationRef.current = {
+      navigationContext,
+      sessionId:
+        sessionId ?? getOwnedTaskSessionId(state, taskId, state.tasks.activeSessionId) ?? undefined,
+    };
+  }
+  const selectedSessionForNavigation = selectedSessionForNavigationRef.current.sessionId;
+  const readState = useTaskNavigationReadState(store, taskId, navigationContext);
+  const appliedRecoveryCycleRef = useRef({ generation: navigationContext.generation, cycle: 0 });
+  if (appliedRecoveryCycleRef.current.generation !== navigationContext.generation) {
+    appliedRecoveryCycleRef.current = { generation: navigationContext.generation, cycle: 0 };
+  }
+  const hydrationEpochsAtRequestStartRef = useRef<
+    Readonly<Record<string, TaskSessionHydrationEpoch>> | undefined
+  >(undefined);
   const bootRouteKeyRef = useRef(routeKey);
   const bootDataConsumedRef = useRef(false);
   if (routeKey !== bootRouteKeyRef.current) bootDataConsumedRef.current = true;
@@ -204,19 +242,137 @@ function useTaskDetailRouteData({ taskId, sessionId, initialData }: TaskDetailRo
   useTaskDetailRouteFetch({
     taskId,
     sessionId,
+    selectedSessionId: selectedSessionForNavigation,
     routeKey,
     routeInitialData,
     setRouteState,
     previousLoadedRouteRef,
     store,
+    navigationContext,
+    hydrationEpochsAtRequestStartRef,
   });
-
-  return deriveTaskDetailRouteView(
-    currentRouteState,
-    previousLoadedRouteRef.current,
-    taskId,
-    sessionId,
+  useEffect(
+    () => retainTaskNavigationRead(store, taskId, navigationContext),
+    [navigationContext, store, taskId],
   );
+  useTaskDetailRouteRecovery({
+    taskId,
+    selectedSessionId: selectedSessionForNavigation,
+    routeKey,
+    readState,
+    setRouteState,
+    previousLoadedRouteRef,
+    store,
+    navigationContext,
+    hydrationEpochsAtRequestStartRef,
+    appliedRecoveryCycleRef,
+  });
+  const view = deriveTaskDetailRouteView({
+    currentRouteState,
+    previousLoadedRoute: previousLoadedRouteRef.current,
+    routeKey,
+    taskId,
+    routeSessionId: sessionId,
+    selectedSessionId: selectedSessionForNavigation,
+    projection,
+  });
+  useTaskDetailRouteEnrichment({
+    view,
+    hydratedState,
+    store,
+    setRouteState,
+    previousLoadedRouteRef,
+  });
+  return { ...view, readState };
+}
+
+function useTaskDetailRouteEnrichment(args: {
+  view: ReturnType<typeof deriveTaskDetailRouteView>;
+  hydratedState: FetchedSessionData["initialState"] | null;
+  store: ReturnType<typeof useAppStoreApi>;
+  setRouteState: Dispatch<SetStateAction<TaskDetailRouteState>>;
+  previousLoadedRouteRef: MutableRefObject<TaskDetailRouteState | null>;
+}) {
+  const { view, hydratedState, store, setRouteState, previousLoadedRouteRef } = args;
+  useEffect(() => {
+    const identity = view.enrichmentIdentity;
+    if (
+      !identity ||
+      hydratedState !== view.initialState ||
+      view.currentRouteStatus !== "loaded" ||
+      view.displayedRouteKey !== view.routeKey ||
+      !view.data
+    ) {
+      return;
+    }
+
+    const routeKey = view.routeKey;
+    const navigationContext = view.navigationContext;
+    if (!navigationContext || !isTaskNavigationCurrent(store, navigationContext)) return;
+    const shellState: TaskDetailRouteState = {
+      routeKey,
+      status: "loaded",
+      data: view.data,
+      forceMergeSession: false,
+      navigationContext,
+      hydrationEpochsAtRequestStart: view.hydrationEpochsAtRequestStart,
+    };
+    previousLoadedRouteRef.current = shellState;
+    setRouteState((current) =>
+      current.routeKey === routeKey &&
+      current.status === "loaded" &&
+      isTaskNavigationCurrent(store, navigationContext)
+        ? shellState
+        : current,
+    );
+    const hydrationEpochsAtRequestStart = captureTaskSessionHydrationEpochs(
+      store.getState(),
+      view.data.task.id,
+    );
+    void fetchTaskNavigationEnrichment(identity, view.data.sessionId ?? undefined, { store })
+      .then((enriched) => {
+        if (!isTaskNavigationCurrent(store, navigationContext)) return;
+        const loadedState: TaskDetailRouteState = {
+          ...shellState,
+          data: enriched,
+          hydrationEpochsAtRequestStart,
+        };
+        const previousLoadedRoute = previousLoadedRouteRef.current;
+        if (
+          previousLoadedRoute?.status === "loaded" &&
+          previousLoadedRoute.routeKey === routeKey &&
+          previousLoadedRoute.navigationContext === navigationContext
+        ) {
+          previousLoadedRouteRef.current = loadedState;
+        }
+        setRouteState((current) =>
+          current.routeKey === routeKey &&
+          current.status === "loaded" &&
+          current.navigationContext === navigationContext &&
+          isTaskNavigationCurrent(store, navigationContext)
+            ? loadedState
+            : current,
+        );
+      })
+      .catch((error) => {
+        console.warn(
+          "Could not load optional /t/:taskId route enrichment:",
+          error instanceof Error ? error.message : String(error),
+        );
+      });
+  }, [
+    hydratedState,
+    previousLoadedRouteRef,
+    setRouteState,
+    store,
+    view.data,
+    view.displayedRouteKey,
+    view.enrichmentIdentity,
+    view.hydrationEpochsAtRequestStart,
+    view.navigationContext,
+    view.routeKey,
+    view.currentRouteStatus,
+  ]);
 }
 
 function resolveCurrentRouteState(
@@ -233,22 +389,40 @@ function resolveCurrentRouteState(
 function useTaskDetailRouteFetch(args: {
   taskId: string;
   sessionId?: string;
+  selectedSessionId?: string;
   routeKey: string;
   routeInitialData: FetchedSessionData | undefined;
   setRouteState: Dispatch<SetStateAction<TaskDetailRouteState>>;
   previousLoadedRouteRef: MutableRefObject<TaskDetailRouteState | null>;
   store: ReturnType<typeof useAppStoreApi>;
+  navigationContext: TaskNavigationContext;
+  hydrationEpochsAtRequestStartRef: MutableRefObject<
+    Readonly<Record<string, TaskSessionHydrationEpoch>> | undefined
+  >;
 }) {
   const {
     taskId,
     sessionId,
+    selectedSessionId,
     routeKey,
     routeInitialData,
     setRouteState,
     previousLoadedRouteRef,
     store,
+    navigationContext,
+    hydrationEpochsAtRequestStartRef,
   } = args;
   useEffect(() => {
+    const previous = previousLoadedRouteRef.current;
+    const activeWorkspaceId = store.getState().workspaces.activeId;
+    if (
+      activeWorkspaceId &&
+      previous?.status === "loaded" &&
+      previous.routeKey === routeKey &&
+      previous.data.task.workspace_id !== activeWorkspaceId
+    ) {
+      return;
+    }
     if (routeDataMatchesSelection(routeInitialData, taskId, sessionId)) {
       const loadedState: TaskDetailRouteState = {
         routeKey,
@@ -262,102 +436,61 @@ function useTaskDetailRouteFetch(args: {
     }
     let cancelled = false;
     setRouteState({ routeKey, status: "loading", data: null });
-    const hydrationEpochsAtRequestStart = captureTaskSessionHydrationEpochs(
+    hydrationEpochsAtRequestStartRef.current = captureTaskSessionHydrationEpochs(
       store.getState(),
       taskId,
     );
-    fetchSessionDataForTask(taskId, sessionId)
-      .then((next) => {
-        if (!cancelled) {
-          const loadedState: TaskDetailRouteState = {
-            routeKey,
-            status: "loaded",
-            data: next,
-            forceMergeSession: false,
-            hydrationEpochsAtRequestStart,
-          };
-          previousLoadedRouteRef.current = loadedState;
-          setRouteState(loadedState);
-        }
+    readTaskNavigationIdentity(store, taskId, { context: navigationContext })
+      .then((identity) => {
+        if (cancelled || !isTaskNavigationCurrent(store, navigationContext)) return;
+        const shellState: TaskDetailRouteState = {
+          routeKey,
+          status: "loaded",
+          data: buildTaskNavigationShellData(identity, selectedSessionId),
+          forceMergeSession: false,
+          navigationContext,
+          hydrationEpochsAtRequestStart: hydrationEpochsAtRequestStartRef.current,
+          enrichmentIdentity: identity,
+        };
+        previousLoadedRouteRef.current = shellState;
+        setRouteState((current) =>
+          isTaskNavigationCurrent(store, navigationContext) ? shellState : current,
+        );
       })
       .catch((error) => {
-        if (!cancelled) {
-          console.warn(
-            "Could not load /t/:taskId route data; task page will fall back to client fetches:",
-            error instanceof Error ? error.message : String(error),
-          );
-          setRouteState({ routeKey, status: "error", data: null });
+        if (!cancelled && isTaskNavigationCurrent(store, navigationContext)) {
+          if (!(error instanceof Error && error.name === "AbortError")) {
+            console.warn(
+              "Could not load /t/:taskId route data; task page will fall back to client fetches:",
+              error instanceof Error ? error.message : String(error),
+            );
+            setRouteState({ routeKey, status: "error", data: null });
+          }
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [routeInitialData, routeKey, sessionId, taskId, previousLoadedRouteRef, setRouteState, store]);
+  }, [
+    routeInitialData,
+    routeKey,
+    sessionId,
+    selectedSessionId,
+    taskId,
+    previousLoadedRouteRef,
+    setRouteState,
+    store,
+    navigationContext,
+  ]);
 }
 
-function deriveTaskDetailRouteView(
-  currentRouteState: TaskDetailRouteState,
-  previousLoadedRoute: TaskDetailRouteState | null,
-  taskId: string,
-  sessionId?: string,
-) {
-  const displayedRouteState = resolveDisplayedRouteState(currentRouteState, previousLoadedRoute);
-  const isLoadingOverPreviousRoute =
-    currentRouteState.status === "loading" && displayedRouteState !== null;
-  const data = routeDataFromState(displayedRouteState);
-  const activeSessionId = routeSessionFromState(displayedRouteState, sessionId);
-  const forceMergeSession = shouldForceMergeRouteState(displayedRouteState);
-  const initialState = data?.initialState ?? null;
-  const task = data?.task ?? null;
-  const shellTaskId = isLoadingOverPreviousRoute ? (task?.id ?? taskId) : taskId;
-
-  return {
-    routeKey: taskRouteKey(taskId, sessionId),
-    currentRouteStatus: currentRouteState.status,
-    displayedRouteKey: displayedRouteState?.routeKey ?? null,
-    data,
-    task,
-    initialState,
-    activeSessionId,
-    forceMergeSession,
-    hydrationEpochsAtRequestStart:
-      displayedRouteState?.status === "loaded"
-        ? displayedRouteState.hydrationEpochsAtRequestStart
-        : undefined,
-    shellTaskId,
-    isLoadingOverPreviousRoute,
-    showShell: displayedRouteState !== null || currentRouteState.status !== "loading",
-    showInitialLoading: currentRouteState.status === "loading" && displayedRouteState === null,
-  };
-}
-
-function resolveDisplayedRouteState(
-  currentRouteState: TaskDetailRouteState,
-  previousLoadedRoute: TaskDetailRouteState | null,
-): TaskDetailRouteState | null {
-  if (currentRouteState.status === "loaded") return currentRouteState;
-  if (currentRouteState.status === "loading") return previousLoadedRoute;
-  return null;
-}
-
-function routeDataFromState(state: TaskDetailRouteState | null): FetchedSessionData | null {
-  if (state?.status === "loaded") return state.data;
-  return null;
-}
-
-function routeSessionFromState(
-  state: TaskDetailRouteState | null,
-  fallbackSessionId?: string,
-): string | null {
-  if (state?.status === "loaded") return state.data.sessionId ?? null;
-  return fallbackSessionId ?? null;
-}
-
-function shouldForceMergeRouteState(state: TaskDetailRouteState | null): boolean {
-  return state?.status === "loaded" && state.forceMergeSession;
-}
-
-function TaskRouteLoading({ overlay = false }: { overlay?: boolean }) {
+function TaskRouteLoading({
+  overlay = false,
+  retrying = false,
+}: {
+  overlay?: boolean;
+  retrying?: boolean;
+}) {
   const { t } = useTranslation();
   const className = overlay
     ? "absolute inset-0 z-50 flex items-center justify-center bg-background"
@@ -365,7 +498,7 @@ function TaskRouteLoading({ overlay = false }: { overlay?: boolean }) {
   return (
     <div className={className}>
       <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
-        {t("common:loadingTask")}
+        {t(retrying ? "task:retrying" : "common:loadingTask")}
       </p>
     </div>
   );

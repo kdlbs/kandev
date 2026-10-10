@@ -240,3 +240,11 @@ results are recorded in each task file's own `## Validation Results` section.
   clean `main` in files this plan does not touch.
 - `cd apps/web && pnpm e2e`: CI-owned for this branch; green on head `33a4dc3`
   across all 14 E2E shards and all 6 container shards.
+
+## Related explicit steering package
+
+The draft [Agent Background Work package](../agent-background-work/plan.md),
+Tasks 07 and 08, adds explicit native same-turn delivery beside this automatic
+ACP path. It owns the new capability semantics, queue-bypass choice, exact-turn
+receipts and composer controls. Existing results here remain historical evidence
+for provider-managed behavior; they are not native steering validation.

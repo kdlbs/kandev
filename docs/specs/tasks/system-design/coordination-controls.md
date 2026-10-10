@@ -4,7 +4,9 @@ system: tasks
 requirements:
   - REQ-TASKS-COMPLETION-003
   - REQ-TASKS-COMPLETION-001
+  - REQ-TASKS-COMPLETION-004
 created: 2026-09-25
+updated: 2026-09-28
 owners:
   - kandev
 ---
@@ -17,6 +19,7 @@ owners:
 | ---------------------------- | --------------------------------------- |
 | `REQ-TASKS-COMPLETION-003` | [Management claims](#management-claims) |
 | `REQ-TASKS-COMPLETION-001` | [Completion gates](#completion-gates)   |
+| `REQ-TASKS-COMPLETION-004` | [UI and contracts](#ui-and-contracts) |
 
 ## Purpose and boundaries
 
@@ -43,10 +46,10 @@ inside the same domain transaction. An absent claim allows an otherwise authoriz
 command; an existing claim denies competing plugin writers. This is an opt-in
 ownership rule, not a new global task ACL or parent-child permission shortcut.
 
-Human commands remain permitted under normal workspace access. The UI shows the
-manager and offers explicit release/transfer with a reason; mutations record when
-they supersede managed intent. Disable or uninstall leaves the claim visible and
-inert until human release, transfer, or task deletion. A reinstalled plugin has a
+Human commands remain permitted under normal workspace access. Authorized APIs
+expose the manager and support explicit release/transfer with a reason. Mutations
+record when they supersede managed intent. Disable or uninstall retains the claim
+until human release, transfer, or task deletion. A reinstalled plugin has a
 new installation identity and cannot inherit it. Linked descendants have separate
 claims. No automatic recursive adoption.
 
@@ -76,8 +79,8 @@ but queued moves must recheck at application time. The guard precedes completion
 events and cannot be bypassed through `UpdateTask` state fields. Preserve existing
 pending-transition expiry and WIP checks. No new task state enum is required.
 
-A blocked result includes criterion IDs and current versions. Task detail shows
-criteria, provenance, stale evidence, and a completion blocker. A human may override
+A blocked result includes criterion IDs and current versions. Authorized APIs expose
+criteria, provenance, stale evidence, and blockers. A human may override
 with an explicit reason bound to the current criteria revision and intended move.
 An override is one action, not a persistent bypass. Reopening retains history and
 rechecks criteria on the next completion. Tasks already complete before gates are
@@ -85,13 +88,43 @@ introduced remain complete; criteria edits do not silently reopen them.
 
 ## UI and contracts
 
-Add a manager row and completion section to existing task detail, available on
-desktop and phone. On phone, show both summaries and their Manage/Inspect actions
-in one compact toolbar below the fixed top bar, so the chat keeps room above the
-bottom navigation. Keep touch targets at least 44px. Use bottom drawers for phone
-claim transfer and evidence inspection; use shared dialogs on desktop. Keep
-workflow controls visible with an explanation when blocked. MCP and Host adapters
-return the same typed blocker data.
+The September 28 amendment removes the native task-detail controls from PR #3994.
+The task system owns this amendment because it owns task details and the claims
+and gates behind those controls. Plugin presentation remains a plugin concern.
+The host retains enforcement, authorization, and public contracts.
+
+Remove `TaskCoordinationControls` from `task-page-inner.tsx`. Remove its private
+`task-management-claim-*`, `task-completion-gate-*`, and
+`use-task-completion-gate-actions.ts` component tree when no other consumer exists.
+These components are not exported through `host.ui`. Preserve the API clients,
+SDK methods, status projection, workflow completion field, and domain services.
+Do not add a replacement task menu entry or conditional empty-state hiding.
+
+Restore the phone layout contract in `task-layout.tsx` and
+`mobile/session-mobile-layout.tsx`. Before #3994, the panel reserved `3.5rem`
+for the fixed header when no shared task error existed. A shared task error
+already supplied that spacing, so its panel offset was zero. Use that behavior
+as the reference, while preserving later changes. Remove the toolbar's `mt-14`
+spacing and the assumption that it owns the header offset. Keep the current
+safe-area calculation and `3.25rem` bottom navigation offset.
+
+The nearest phone exemplar is the existing `SessionMobileLayout`: fixed task
+header and bottom navigation, one active panel, and an internal scroll owner.
+No new drawer or route replaces the removed toolbar. Chat remains the primary
+interaction; error feedback and composer controls remain reachable by touch.
+Verify normal, blocked-move, and shared-error states, including reload and resize.
+
+Keep existing workflow error feedback. Detailed blocker reads and human recovery
+remain available through the authorized claim, gate, and workflow-move APIs.
+This package does not add a plugin UI or expose private HTTP calls as a plugin API.
+It removes the native recovery dialogs, so browser users lose those shortcuts.
+The removal must not weaken human identity checks or make overrides plugin-callable.
+
+Replace browser tests that use the deleted controls with task-layout regressions.
+Keep claim conflict, unavailable-owner release, stale evidence, and one-move
+override coverage in handler/service tests. Add focused HTTP coverage for any
+recovery behavior that only the removed browser tests previously exercised.
+Check both phone geometry and actual chat/navigation interaction.
 
 New proposed Host methods are `AcquireTaskManagementClaimExact`,
 `ReleaseTaskManagementClaimExact`, `TransferTaskManagementClaimExact`,
@@ -120,4 +153,5 @@ blocked completions, and overrides. Metrics use reason/status only, not task IDs
 
 - [Requirements](../requirements/task-completion.md)
 - [Implementation plan](../../../plans/plugin-coordinator-platform/plan.md)
+- [Native control removal plan](../../../plans/remove-native-coordination-ui/plan.md)
 - [Coordination platform decision](../../../decisions/2026-09-25-plugin-coordination-platform.md)

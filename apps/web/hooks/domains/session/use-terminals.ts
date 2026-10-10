@@ -154,6 +154,7 @@ function useAddTerminal({
   setTerminals,
   setRightPanelActiveTab,
 }: AddTerminalOpts) {
+  const addUserShell = useAppStore((state) => state.addUserShell);
   return useCallback(async () => {
     if (!environmentId) return;
     try {
@@ -176,12 +177,20 @@ function useAddTerminal({
         state: ordinary ? (result.state ?? "open") : result.state,
         ptyStatus: result.ptyStatus ?? "stopped",
       };
+      addUserShell(environmentId, {
+        ...result,
+        kind: newTerm.kind,
+        state: newTerm.state,
+        label: newTerm.label,
+        closable: newTerm.closable,
+        running: result.ptyStatus === "running",
+      });
       setTerminals((prev) => appendTerminalIfMissing(prev, newTerm));
       if (sessionId) setRightPanelActiveTab(sessionId, result.terminalId);
     } catch (error) {
       console.error("Failed to create user shell:", error);
     }
-  }, [environmentId, taskID, sessionId, setRightPanelActiveTab, setTerminals]);
+  }, [environmentId, taskID, sessionId, addUserShell, setRightPanelActiveTab, setTerminals]);
 }
 
 type RemoveTerminalOpts = {
@@ -415,13 +424,20 @@ function useTerminalActions({
           closable: true,
           kind: "script",
         };
+        storeApi.getState().addUserShell(environmentId, {
+          ...result,
+          kind: "script",
+          label: newTerm.label,
+          closable: true,
+          running: result.ptyStatus === "running",
+        });
         setTerminals((prev) => appendTerminalIfMissing(prev, newTerm));
         if (sessionId) setRightPanelActiveTab(sessionId, result.terminalId);
       } catch (error) {
         console.error("Failed to create script terminal:", error);
       }
     },
-    [environmentId, sessionId, setRightPanelActiveTab, setTerminals],
+    [environmentId, sessionId, setRightPanelActiveTab, setTerminals, storeApi],
   );
 
   const handleTerminalDestroyed = useCallback(

@@ -1,4 +1,4 @@
-import { test, expect } from "../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../fixtures/test-base";
 import path from "node:path";
 import {
   GitHelper,
@@ -8,6 +8,10 @@ import {
 } from "../helpers/git-helper";
 
 test.describe("Changes Panel — Active-Tab Highlight", () => {
+  test.beforeEach(({ seedData, backend }) => {
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+  });
+
   test("clicking a file row highlights the row while its diff tab is active", async ({
     testPage,
     apiClient,

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -91,7 +92,13 @@ func TestCaptureArchiveDiffRequiresEnvironmentIdentity(t *testing.T) {
 				}, nil
 			},
 			getGitStatusFreshFunc: func(context.Context, string) (*client.GitStatusResult, error) {
-				return nil, nil
+				return &client.GitStatusResult{
+					Success:       true,
+					StatusState:   "ready",
+					FilesComplete: true,
+					DetailState:   "ready",
+					Files:         map[string]interface{}{"main.go": map[string]interface{}{"status": "modified"}},
+				}, nil
 			},
 		}
 		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
@@ -124,6 +131,35 @@ func TestCaptureArchiveDiffRequiresEnvironmentIdentity(t *testing.T) {
 		callsMu.Lock()
 		require.Zero(t, calls)
 		callsMu.Unlock()
+	})
+
+	t.Run("preserves cumulative diff when status metadata is unavailable", func(t *testing.T) {
+		ctx := context.Background()
+		repo := setupTestRepo(t)
+		seedSharedGitSnapshotEnvironment(t, repo, "task-git-archive-unavailable", "env-git-archive-unavailable", "session-git-archive-unavailable")
+		files := map[string]interface{}{"main.go": map[string]interface{}{"status": "modified", "additions": 3}}
+		agent := &mockAgentManager{
+			getCumulativeDiffFunc: func(context.Context, string, string) (*client.CumulativeDiffResult, error) {
+				return &client.CumulativeDiffResult{Success: true, BaseCommit: "base", HeadCommit: "head", Files: files}, nil
+			},
+			getGitStatusFreshFunc: func(context.Context, string) (*client.GitStatusResult, error) {
+				return &client.GitStatusResult{Success: false, StatusState: "ready", FilesComplete: true, DetailState: "unavailable"}, errors.New("status metadata unavailable")
+			},
+		}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agent)
+		svc.captureArchiveDiff(ctx, "session-git-archive-unavailable", "base")
+
+		rows, err := repo.GetGitSnapshotsBySession(ctx, "session-git-archive-unavailable", 0)
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		require.Equal(t, models.SnapshotTypeArchive, rows[0].SnapshotType)
+		require.Equal(t, "head", rows[0].HeadCommit)
+		savedFile, ok := rows[0].Files["main.go"].(map[string]interface{})
+		require.True(t, ok)
+		require.Equal(t, "modified", savedFile["status"])
+		require.EqualValues(t, 3, savedFile["additions"])
+		require.Empty(t, rows[0].Branch)
+		require.Empty(t, rows[0].Metadata)
 	})
 }
 

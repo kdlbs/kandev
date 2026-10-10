@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/mcp/profile"
 )
@@ -47,9 +48,9 @@ func (m *Manager) canonicalManagedMCPServers() []types.McpServer {
 		wantURL := ""
 		switch server.Type {
 		case managedMCPHTTPTransport:
-			wantURL = fmt.Sprintf("http://localhost:%d/mcp", m.cfg.Port)
+			wantURL = config.MCPServerURL(m.cfg.MCPHost, m.cfg.Port, "/mcp")
 		case "sse":
-			wantURL = fmt.Sprintf("http://localhost:%d/sse", m.cfg.Port)
+			wantURL = config.MCPServerURL(m.cfg.MCPHost, m.cfg.Port, "/sse")
 		default:
 			continue
 		}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 
 	"go.uber.org/zap"
@@ -15,6 +16,144 @@ import (
 // ErrDirtyWorktreeCleanup identifies the expected refusal when cleanup reaches
 // a checkout that contains local changes without explicit discard consent.
 var ErrDirtyWorktreeCleanup = errors.New("worktree cleanup refused because worktree contains local changes")
+
+// Cleanup inspection stages.
+const (
+	CleanupInspectionStageBranch       = "branch_lookup"
+	CleanupInspectionStageRegistration = "registration_inspection"
+	CleanupInspectionStageCommit       = "commit_lookup"
+	CleanupInspectionStageStatus       = "working_tree_status"
+)
+
+// Cleanup inspection reasons.
+const (
+	CleanupInspectionReasonGitStartFailed        = "git_start_failed"
+	CleanupInspectionReasonRepoUnavailable       = "repository_context_unavailable"
+	CleanupInspectionReasonCommandFailed         = "git_command_failed"
+	CleanupInspectionReasonContextCanceled       = "context_canceled"
+	CleanupInspectionReasonDeadlineExceeded      = "deadline_exceeded"
+	CleanupInspectionReasonCompetingRegistration = "competing_registration"
+	CleanupInspectionReasonUnregisteredPath      = "unregistered_path"
+	CleanupInspectionReasonCommitMismatch        = "commit_mismatch"
+)
+
+// CleanupInspectionError classifies a failure encountered during worktree cleanup inspection.
+type CleanupInspectionError struct {
+	Stage  string
+	Reason string
+	Err    error
+}
+
+func (e *CleanupInspectionError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("worktree cleanup inspection failed at %s (%s)", e.Stage, e.Reason)
+}
+
+func (e *CleanupInspectionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func classifyCleanupInspectionError(stage string, err error, repoPath ...string) error {
+	if err == nil {
+		return nil
+	}
+	var existing *CleanupInspectionError
+	if errors.As(err, &existing) {
+		return err
+	}
+	if errors.Is(err, context.Canceled) {
+		return &CleanupInspectionError{Stage: stage, Reason: CleanupInspectionReasonContextCanceled, Err: err}
+	}
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "timed out") {
+		return &CleanupInspectionError{Stage: stage, Reason: CleanupInspectionReasonDeadlineExceeded, Err: err}
+	}
+	if len(repoPath) > 0 && repoPath[0] != "" {
+		if _, statErr := os.Stat(repoPath[0]); errors.Is(statErr, os.ErrNotExist) || os.IsNotExist(statErr) {
+			return &CleanupInspectionError{
+				Stage:  stage,
+				Reason: CleanupInspectionReasonRepoUnavailable,
+				Err:    err,
+			}
+		}
+	}
+	return &CleanupInspectionError{
+		Stage:  stage,
+		Reason: classifyGitInspectionReason(err),
+		Err:    err,
+	}
+}
+
+func classifyGitInspectionReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	if reason := classifyContextReason(err); reason != "" {
+		return reason
+	}
+	if reason := classifyPathOrExecReason(err); reason != "" {
+		return reason
+	}
+	return classifyExitOrMessageReason(err)
+}
+
+func classifyContextReason(err error) string {
+	if errors.Is(err, context.Canceled) {
+		return CleanupInspectionReasonContextCanceled
+	}
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "timed out") {
+		return CleanupInspectionReasonDeadlineExceeded
+	}
+	return ""
+}
+
+func classifyPathOrExecReason(err error) string {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		if pathErr.Op == "fork/exec" {
+			return CleanupInspectionReasonGitStartFailed
+		}
+		if errors.Is(pathErr.Err, os.ErrNotExist) {
+			return CleanupInspectionReasonRepoUnavailable
+		}
+		return CleanupInspectionReasonGitStartFailed
+	}
+	var execErr *exec.Error
+	if errors.As(err, &execErr) {
+		return CleanupInspectionReasonGitStartFailed
+	}
+	return ""
+}
+
+func classifyExitOrMessageReason(err error) string {
+	msg := strings.ToLower(err.Error())
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 128 {
+		if isRepoUnavailableMessage(msg) {
+			return CleanupInspectionReasonRepoUnavailable
+		}
+		return CleanupInspectionReasonCommandFailed
+	}
+	if strings.Contains(msg, "executable file not found") || strings.Contains(msg, "cannot run") || strings.Contains(msg, "fork/exec") {
+		return CleanupInspectionReasonGitStartFailed
+	}
+	if isRepoUnavailableMessage(msg) {
+		return CleanupInspectionReasonRepoUnavailable
+	}
+	return CleanupInspectionReasonCommandFailed
+}
+
+func isRepoUnavailableMessage(msg string) bool {
+	return strings.Contains(msg, "not a git repository") ||
+		strings.Contains(msg, "cannot change to") ||
+		strings.Contains(msg, "does not exist") ||
+		strings.Contains(msg, "no such file or directory") ||
+		strings.Contains(msg, "not a directory")
+}
 
 type worktreeCleanupAudit struct {
 	branchRef    string
@@ -56,13 +195,21 @@ func (m *Manager) auditWorktreeCleanup(
 		worktreeRegistrationOwnershipOptions{allowAnyBranchAtPath: branchRef == ""},
 	)
 	if err != nil {
-		return worktreeCleanupAudit{}, fmt.Errorf("inspect worktree cleanup registration: %w", err)
+		return worktreeCleanupAudit{}, classifyCleanupInspectionError(CleanupInspectionStageRegistration, fmt.Errorf("inspect worktree cleanup registration: %w", err), wt.RepositoryPath)
 	}
 	if registration == worktreeRegistrationCompeting {
-		return worktreeCleanupAudit{}, fmt.Errorf("worktree cleanup target is claimed by unrelated Git metadata: %s", wt.Path)
+		return worktreeCleanupAudit{}, &CleanupInspectionError{
+			Stage:  CleanupInspectionStageRegistration,
+			Reason: CleanupInspectionReasonCompetingRegistration,
+			Err:    fmt.Errorf("worktree cleanup target is claimed by unrelated Git metadata: %s", wt.Path),
+		}
 	}
 	if pathPresent && registration != worktreeRegistrationOwned {
-		return worktreeCleanupAudit{}, fmt.Errorf("worktree cleanup path is not registered to the recorded branch: %s", wt.Path)
+		return worktreeCleanupAudit{}, &CleanupInspectionError{
+			Stage:  CleanupInspectionStageRegistration,
+			Reason: CleanupInspectionReasonUnregisteredPath,
+			Err:    fmt.Errorf("worktree cleanup path is not registered to the recorded branch: %s", wt.Path),
+		}
 	}
 	deleteBranch, err := m.auditCleanupBranchDisposition(
 		ctx, wt, branchRef, branchOID, pathPresent, removeBranch, options,
@@ -141,16 +288,24 @@ func (m *Manager) cleanupBranchIdentity(
 	}
 	expectedOID := strings.TrimSpace(wt.CleanupHeadOID)
 	if wt.CleanupHeadOIDUnavailable && pathPresent {
-		return "", "", fmt.Errorf("cleanup worktree path %q reappeared without immutable expected commit", wt.Path)
+		return "", "", &CleanupInspectionError{
+			Stage:  CleanupInspectionStageCommit,
+			Reason: CleanupInspectionReasonCommitMismatch,
+			Err:    fmt.Errorf("cleanup worktree path %q reappeared without immutable expected commit", wt.Path),
+		}
 	}
 	if expectedOID == "" && pathPresent {
 		output, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
 		if err != nil {
-			return "", "", fmt.Errorf("capture cleanup worktree HEAD: %w", err)
+			return "", "", classifyCleanupInspectionError(CleanupInspectionStageCommit, fmt.Errorf("capture cleanup worktree HEAD: %w", err), wt.Path)
 		}
 		expectedOID = strings.TrimSpace(output)
 		if expectedOID == "" {
-			return "", "", errors.New("capture cleanup worktree HEAD returned an empty commit")
+			return "", "", &CleanupInspectionError{
+				Stage:  CleanupInspectionStageCommit,
+				Reason: CleanupInspectionReasonCommitMismatch,
+				Err:    errors.New("capture cleanup worktree HEAD returned an empty commit"),
+			}
 		}
 	}
 	if branchRef == "" {
@@ -158,7 +313,7 @@ func (m *Manager) cleanupBranchIdentity(
 	}
 	exists, err := m.branchExists(ctx, wt.RepositoryPath, branchRef)
 	if err != nil {
-		return "", "", fmt.Errorf("verify cleanup branch %q: %w", wt.Branch, err)
+		return "", "", classifyCleanupInspectionError(CleanupInspectionStageBranch, fmt.Errorf("verify cleanup branch %q: %w", wt.Branch, err), wt.RepositoryPath)
 	}
 	if !exists {
 		// The local branch is already gone. A stale registration, if any, must
@@ -167,15 +322,23 @@ func (m *Manager) cleanupBranchIdentity(
 		return branchRef, "", nil
 	}
 	if expectedOID == "" && requireImmutableIdentity {
-		return "", "", fmt.Errorf("cleanup branch %q has no immutable expected commit", wt.Branch)
+		return "", "", &CleanupInspectionError{
+			Stage:  CleanupInspectionStageCommit,
+			Reason: CleanupInspectionReasonCommitMismatch,
+			Err:    fmt.Errorf("cleanup branch %q has no immutable expected commit", wt.Branch),
+		}
 	}
 	output, err := m.runBoundedGitInspect(ctx, wt.RepositoryPath, "rev-parse", "--verify", branchRef+"^{commit}")
 	if err != nil {
-		return "", "", fmt.Errorf("resolve cleanup branch %q: %w", wt.Branch, err)
+		return "", "", classifyCleanupInspectionError(CleanupInspectionStageCommit, fmt.Errorf("resolve cleanup branch %q: %w", wt.Branch, err), wt.RepositoryPath)
 	}
 	branchOID := strings.TrimSpace(output)
 	if expectedOID != "" && branchOID != expectedOID {
-		return branchRef, "", fmt.Errorf("cleanup branch %q advanced from audited commit %s to %s", wt.Branch, expectedOID, branchOID)
+		return branchRef, "", &CleanupInspectionError{
+			Stage:  CleanupInspectionStageCommit,
+			Reason: CleanupInspectionReasonCommitMismatch,
+			Err:    fmt.Errorf("cleanup branch %q advanced from audited commit %s to %s", wt.Branch, expectedOID, branchOID),
+		}
 	}
 	return branchRef, branchOID, nil
 }
@@ -226,7 +389,7 @@ func (m *Manager) verifyCleanupBranchRedundant(
 	for _, candidate := range candidates {
 		exists, err := m.branchExists(ctx, wt.RepositoryPath, candidate)
 		if err != nil {
-			return false, fmt.Errorf("verify cleanup base %q: %w", candidate, err)
+			return false, classifyCleanupInspectionError(CleanupInspectionStageBranch, fmt.Errorf("verify cleanup base %q: %w", candidate, err), wt.RepositoryPath)
 		}
 		if !exists {
 			continue
@@ -234,7 +397,7 @@ func (m *Manager) verifyCleanupBranchRedundant(
 		foundBase = true
 		contains, err := m.refContains(ctx, wt.RepositoryPath, candidate, branchRef)
 		if err != nil {
-			return false, fmt.Errorf("verify cleanup branch ancestry: %w", err)
+			return false, classifyCleanupInspectionError(CleanupInspectionStageCommit, fmt.Errorf("verify cleanup branch ancestry: %w", err), wt.RepositoryPath)
 		}
 		if contains {
 			return true, nil

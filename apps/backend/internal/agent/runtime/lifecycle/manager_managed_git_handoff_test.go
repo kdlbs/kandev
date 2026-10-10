@@ -42,7 +42,7 @@ func TestKubernetesManagedGitConfigureHandoff(t *testing.T) {
 			case "partial":
 				require.NoError(t, mgr.SetExecutionEnv(context.Background(), execution.ID, map[string]string{"CURRENT": "yes"}))
 			}
-			_, err := mgr.configureAndStartAgent(context.Background(), execution, "never")
+			_, err := mgr.configureAndStartAgent(context.Background(), execution)
 			require.NoError(t, err)
 			require.Equal(t, "/worker/ca.pem", configured["SSL_CERT_FILE"])
 			require.Equal(t, "preserved", configured["PROFILE_SETTING"])
@@ -120,7 +120,7 @@ func newManagedGitConfigureClient(t *testing.T, captured *map[string]string) *ag
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			if err := manager.Configure("echo", nil, false, request.Env, "", "", nil, false); err != nil {
+			if err := manager.Configure("echo", nil, false, request.Env, "", nil, false); err != nil {
 				t.Error(err)
 				w.WriteHeader(http.StatusBadRequest)
 				return

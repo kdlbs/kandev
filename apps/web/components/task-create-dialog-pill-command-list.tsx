@@ -17,7 +17,7 @@ export function PillCommandList({
   onSelect: (value: string) => void;
   onPointerSelect: (pointerType: string) => void;
   setOpen: (open: boolean) => void;
-  emptyMessage: string;
+  emptyMessage: React.ReactNode;
 }) {
   const groups = new Map<string, { label?: string; options: PillOption[] }>();
   for (const option of options) {

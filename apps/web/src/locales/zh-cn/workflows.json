@@ -309,6 +309,7 @@
   "workflowMutationInProgress": "请等待当前工作流更改完成。",
   "workflowName": "工作流名称",
   "workflowNameIsRequired": "工作流名称为必填项",
+  "workflowPreviewStatusAnnouncement": "{{workflowName}}：{{status}}",
   "workflowNamePlaceholder": "我的项目工作流",
   "workflowPrompt": "工作流提示词",
   "workflowPromptCollapsedHint": "可选；展开以添加共享的步骤入口说明",

@@ -121,6 +121,89 @@ assert_json_envelope() {
   ' <<<"$json" >/dev/null || fail "$name" "$json"
 }
 
+# --- final head observation rejects races after the embedded read ----------
+for mode in first-failure all-terminal; do
+  d="$(make_tmp_dir)"; setup_fake "$d"
+  stale_failed=0; stale_pending=0
+  if [[ "$mode" == first-failure ]]; then
+    stale_failed=1; stale_pending=5
+  fi
+  snapshot "$d" 1 10 "$stale_failed" "$stale_pending" true aaaaaaaaaaaa \
+    '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"aaaaaaaaaaaa"}}'
+  snapshot "$d" 2 20 0 0 true bbbbbbbbbbbb \
+    '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"bbbbbbbbbbbb"}}'
+  # The push happens after the embedded observation, during trailing reads.
+  printf '%s' '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"bbbbbbbbbbbb"}' >"$d/gh.json"
+  out="$(run_await "$d" 12 --mode "$mode" --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+  [[ "$rc" == 0 && "$(jq -r '.summary.checks_head_sha' <<<"$out")" == bbbbbbbbbbbb ]] \
+    || fail "$mode must reject evidence superseded after the embedded observation" "$out"
+  pass "$mode rechecks the live head before trusting stopping evidence"
+done
+
+# --- pending polls reuse metadata; terminal polls recheck the live head -----
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 10 0 2 true aaaaaaaaaaaa \
+  '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"headRefOid":"aaaaaaaaaaaa"}}'
+cp "$d/seq/1.json" "$d/seq/2.json"
+snapshot "$d" 3 20 0 0 true aaaaaaaaaaaa \
+  '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"headRefOid":"aaaaaaaaaaaa"}}'
+cat >"$d/gh" <<'PENDINGGH'
+#!/usr/bin/env bash
+[[ "$(cat "$FAKE_DIR/counter")" -ge 3 ]] || exit 1
+printf 'called\n' >> "$FAKE_DIR/gh-calls"
+printf '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"aaaaaaaaaaaa"}'
+PENDINGGH
+chmod +x "$d/gh"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "pending polls must work without a second API, got $rc" "$out"
+[[ "$(wc -l <"$d/gh-calls" | tr -d ' ')" == 2 ]] || fail "only terminal polls should recheck the head"
+[[ "$(jq -r '.polls' <<<"$out")" == 4 ]] || fail "embedded state must retain terminal confirmation" "$out"
+pass "pending polls avoid the extra API; terminal polls retain confirmation"
+
+# --- embedded metadata cannot make stale failures actionable ---------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 10 1 5 true aaaaaaaaaaaa \
+  '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"bbbbbbbbbbbb"}}'
+snapshot "$d" 2 20 0 0 true bbbbbbbbbbbb \
+  '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"bbbbbbbbbbbb"}}'
+printf '%s' '{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"bbbbbbbbbbbb"}' >"$d/gh.json"
+out="$(run_await "$d" 12 --mode first-failure --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 && "$(jq -r '.summary.checks_head_sha' <<<"$out")" == bbbbbbbbbbbb ]] \
+  || fail "embedded state must discard the old head's failure" "$out"
+pass "embedded metadata discards superseded check evidence"
+
+# --- malformed embedded state uses the existing fail-closed fallback -------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa \
+  '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":""}}'
+cat >"$d/gh" <<'UNAVAILABLEGH'
+#!/usr/bin/env bash
+exit 1
+UNAVAILABLEGH
+chmod +x "$d/gh"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "malformed metadata and failed fallback must block" "$out"
+pass "malformed embedded metadata cannot prove the PR clean"
+
+for pr_status in CLOSED MERGED; do
+  d="$(make_tmp_dir)"; setup_fake "$d"
+  merge_extra="$(jq -nc --arg state "$pr_status" '{merge_state:{state:$state,mergeable:"UNKNOWN",mergeStateStatus:"UNKNOWN",headRefOid:"aaaaaaaaaaaa"}}')"
+  snapshot "$d" 1 10 0 2 true aaaaaaaaaaaa "$merge_extra"
+  out="$(run_await "$d" 12 --deadline-min 0 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+  [[ "$rc" == 3 && "$(jq -r '.outcome' <<<"$out")" == blocked-pr-state ]] \
+    || fail "embedded $pr_status state must stop even with pending checks" "$out"
+done
+pass "embedded closed and merged states stop monitoring"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa \
+  '{"merge_state":{"state":"OPEN","mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","headRefOid":"aaaaaaaaaaaa"}}'
+printf '%s' '{"state":"OPEN","mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","headRefOid":"aaaaaaaaaaaa"}' >"$d/gh.json"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" == 1 && "$(jq -r '.mergeable' <<<"$out")" == CONFLICTING ]] \
+  || fail "embedded merge conflicts must remain findings" "$out"
+pass "embedded merge conflicts cannot become clean"
+
 # --- argument validation ---------------------------------------------------
 d="$(make_tmp_dir)"; setup_fake "$d"
 run_await "$d" >/dev/null 2>&1 && fail "missing PR should exit non-zero" || pass "missing PR argument is rejected"

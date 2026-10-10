@@ -48,6 +48,7 @@ export interface EmptyTurnNoticeInput {
   taskId: string;
   turnId: string;
   hadOutput: boolean | undefined;
+  metadata?: Record<string, unknown>;
   isEphemeralSurface: boolean;
   messages: Message[] | undefined;
   availableCommands: AvailableCommand[] | undefined;
@@ -85,17 +86,18 @@ function hasSubagentTaskMessage(messages: Message[], turnId: string): boolean {
  * Decides whether an empty-turn notice should be shown and, if so, returns the
  * synthetic status Message to inject. Pure: all store reads are passed in.
  *
- * Guards (all must pass): the turn explicitly had no output (orphan turns swept
- * on resume report had_output=true from the backend, so only genuine live
- * completions reach here); the surface is the main task chat (not quick-chat /
- * config-chat); and no notice exists yet for the turn (keyed by a deterministic
- * id, so it fires once).
+ * Guards (all must pass): the turn explicitly had no output; it is a user turn
+ * rather than synthetic lifecycle history or a failure outcome; the surface is
+ * the main task chat (not quick-chat/config-chat); and no notice exists yet for
+ * the turn (keyed by a deterministic id, so it fires once).
  */
 export function computeEmptyTurnNotice(input: EmptyTurnNoticeInput): Message | null {
   // Only an explicit `false` triggers the notice. `true` means the turn had
   // output; `undefined` means an older backend that doesn't send the field —
   // both correctly fall through here and produce no notice.
   if (input.hadOutput !== false) return null;
+  if (input.metadata?.lifecycle_only === true) return null;
+  if (input.metadata?.error_terminated === true) return null;
   if (input.isEphemeralSurface) return null;
 
   const messages = input.messages ?? [];
@@ -140,6 +142,7 @@ export function maybeEmitEmptyTurnNotice(
     taskId: payload.task_id,
     turnId: payload.id,
     hadOutput: payload.had_output,
+    metadata: payload.metadata,
     isEphemeralSurface,
     messages: state.messages.bySession[sid],
     availableCommands: state.availableCommands.bySessionId[sid],

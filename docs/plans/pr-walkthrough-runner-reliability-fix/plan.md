@@ -129,6 +129,13 @@ Wave 2:
 Run both tasks sequentially in the primary conversation. They change the same
 workflow and contract test.
 
+## Later delivery package
+
+The [generation completion package](../pr-walkthrough-generation-completion/plan.md)
+replaces the process-exit acceptance rule after its implementation. It preserves
+the incomplete zero-exit retry within a shared deadline. This completed
+package's recorded results remain historical evidence.
+
 ## Post-Merge Validation
 
 Open a same-repository dummy pull request after this fix reaches `main`. Make

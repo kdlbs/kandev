@@ -20,7 +20,7 @@ import { taskCommandItemFromDetail } from "./task-command-task";
 /** One task action host, shared by desktop and phone and independent of sessions. */
 export function TaskCommands({ task: detailTask }: { task: Task | null }) {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const data = useSidebarData(workspaceId);
+  const data = useSidebarData(workspaceId, true);
   const sidebarTask = data.tasksWithRepositories.find((item) => item.id === data.activeTaskId);
   const task =
     sidebarTask ??

@@ -18,6 +18,8 @@ import {
 import { pickFreshestStatusSummary } from "@/lib/task-status-summary";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { generateUUID } from "@/lib/utils";
+import { reconcileTaskOverviewRead } from "@/lib/state/slices/task-overview-merge";
+import type { TaskCoverage, WorkflowSnapshot } from "@/lib/types/http";
 
 type KanbanTask = KanbanState["tasks"][number];
 type Workflow = { id: string; name: string };
@@ -233,6 +235,7 @@ async function fetchAndWriteSnapshot(
   markSucceeded: (workflowId: string) => void,
   markFailed: (workflowId: string, error: unknown) => void,
 ): Promise<void> {
+  const overviewRead = store.getState().beginTaskOverviewRead?.();
   try {
     const snapshotAtFetchStart = store.getState().kanbanMulti.snapshots[wf.id];
     const snapshot = await fetchWorkflowSnapshot(wf.id, { cache: "no-store" });
@@ -265,18 +268,25 @@ async function fetchAndWriteSnapshot(
     const stepIds = new Set(steps.map((s) => s.id));
 
     const existingSnapshot = store.getState().kanbanMulti.snapshots[wf.id];
-    const tasks = mergeSnapshotTasks(
+    const mergedTasks = mergeSnapshotTasks(
       snapshot.tasks,
       stepIds,
       snapshotAtFetchStart,
       existingSnapshot,
     );
+    const tasks = reconcileSnapshotOverview(store.getState(), mergedTasks, overviewRead, wf.id);
+    if (!tasks) {
+      markFailed(wf.id, new Error("overview_read_expired"));
+      return;
+    }
+    if (overviewRead) store.getState().finishTaskOverviewRead(overviewRead);
 
     const workflowSnapshot = {
       workflowId: wf.id,
       workflowName: snapshot.workflow?.name ?? wf.name,
       steps,
       tasks,
+      taskCoverage: reconciledSnapshotCoverage(snapshot, stepIds, tasks.length),
     };
     store.getState().setWorkflowSnapshot(wf.id, workflowSnapshot);
     const activeKanban = store.getState().kanban;
@@ -306,15 +316,56 @@ async function fetchAndWriteSnapshot(
     // A failed fetch must not leave a placeholder permanently "unknown": that
     // would block the final-step ensure forever. Keep it known-but-empty for
     // now, and mark it retryable for a later task-page mount.
-    const current = store.getState().kanbanMulti.snapshots[wf.id];
-    if (current?.isPlaceholder) {
-      store.getState().setWorkflowSnapshot(wf.id, {
-        ...current,
-        isPlaceholder: false,
-        fetchFailed: true,
-      });
-    }
+    markSnapshotIncomplete(store, wf.id);
+  } finally {
+    if (overviewRead) store.getState().finishTaskOverviewRead(overviewRead);
   }
+}
+
+function markSnapshotIncomplete(store: StoreApi<AppState>, workflowId: string) {
+  const current = store.getState().kanbanMulti.snapshots[workflowId];
+  if (current) {
+    store.getState().setWorkflowSnapshot(workflowId, {
+      ...current,
+      isPlaceholder: false,
+      fetchFailed: true,
+      taskCoverage: current.taskCoverage ? { ...current.taskCoverage, complete: false } : undefined,
+    });
+  }
+}
+
+function reconcileSnapshotOverview(
+  state: AppState,
+  tasks: KanbanTask[],
+  readId: string | undefined,
+  workflowId: string,
+) {
+  const scoped = tasks.map((task) =>
+    task.workflowId === undefined ? { ...task, workflowId } : task,
+  );
+  const reconciled = state.taskOverview
+    ? reconcileTaskOverviewRead(state.taskOverview, scoped, readId, true)
+    : scoped;
+  return reconciled?.filter((task) => task.workflowId === workflowId && !task.isArchived) ?? null;
+}
+
+function reconciledSnapshotCoverage(
+  snapshot: WorkflowSnapshot,
+  stepIds: Set<string>,
+  total: number,
+): TaskCoverage | undefined {
+  const coverage = snapshot.task_coverage;
+  if (!coverage) return undefined;
+  return {
+    ...coverage,
+    complete:
+      coverage.complete &&
+      snapshot.tasks.length === coverage.total &&
+      snapshot.tasks.every((task) =>
+        Boolean(task.workflow_step_id && stepIds.has(task.workflow_step_id)),
+      ),
+    total,
+  };
 }
 
 function safeErrorMessage(error: unknown): string {

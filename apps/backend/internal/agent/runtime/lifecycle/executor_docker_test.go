@@ -144,6 +144,23 @@ func TestDockerStopInstancePreservesContainerOnPlainStop(t *testing.T) {
 	}
 }
 
+func TestDockerStopInstancePreservesContainerOnIdleSuspension(t *testing.T) {
+	log := newTestDockerLogger()
+	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
+	exec.newClientFunc = func(_ config.DockerConfig, _ *logger.Logger) (*docker.Client, error) {
+		t.Fatal("idle suspension should not initialize docker client")
+		return nil, nil
+	}
+
+	if err := exec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID:  "inst-1",
+		ContainerID: "container-1",
+		StopReason:  StopReasonIdleSuspension,
+	}, false); err != nil {
+		t.Fatalf("StopInstance: %v", err)
+	}
+}
+
 func TestDockerStopInstanceStopsContainerWhenAgentStopFailed(t *testing.T) {
 	log := newTestDockerLogger()
 	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
@@ -803,7 +820,7 @@ func TestDockerManagedBrokerReconnectRecreatesInstanceWithFreshLease(t *testing.
 	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
 	dockerExec.brokerPreflight = func(
 		context.Context,
-		brokerAgentctlProcessClient,
+		agentctlProcessClient,
 		string,
 		map[string]string,
 	) error {
@@ -843,7 +860,7 @@ func TestDockerManagedBrokerReconnectStopsBeforeReplacementWhenUnreachable(t *te
 	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
 	dockerExec.brokerPreflight = func(
 		context.Context,
-		brokerAgentctlProcessClient,
+		agentctlProcessClient,
 		string,
 		map[string]string,
 	) error {

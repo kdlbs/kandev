@@ -57,6 +57,13 @@ test.describe("Task creation with branch policies", () => {
         `E2E Branch Policy Local ${Date.now()}`,
       );
       await testPage.goto("/");
+      const divider = testPage.getByTestId("sidebar-navigation-divider");
+      await divider.focus();
+      await divider.press("Home");
+      const expand = testPage.getByTestId("sidebar-navigation-expand");
+      await expect(expand).toHaveAttribute("aria-expanded", "false");
+      await expand.click();
+      await expect(expand).toHaveAttribute("aria-expanded", "true");
       await testPage.getByTestId("create-task-button").first().click();
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
@@ -71,9 +78,11 @@ test.describe("Task creation with branch policies", () => {
       await expectPolicyOptionUsesOneLine(option, policy.name);
       const policyInfo = testPage.getByTestId(`branch-policy-option-info-${policy.id}`);
       await policyInfo.hover();
-      await expect(testPage.getByRole("tooltip")).toContainText(
-        "Base: main. Template: feature/{title}-{suffix}. Pull request target: develop.",
-      );
+      const policyTooltip = testPage.getByRole("tooltip").filter({
+        hasText: "Base: main. Template: feature/{title}-{suffix}. Pull request target: develop.",
+      });
+      await expect(policyTooltip).toHaveCount(1);
+      await expect(policyTooltip).toBeVisible();
       await testPage.mouse.move(0, 0);
       await policyInfo.focus();
       await expect(policyInfo).toBeFocused();

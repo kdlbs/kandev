@@ -1,4 +1,5 @@
 import { defineConfig, globalIgnores } from "eslint/config";
+import tanstackQuery from "@tanstack/eslint-plugin-query";
 import js from "@eslint/js";
 import reactHooks from "eslint-plugin-react-hooks";
 import sonarjs from "eslint-plugin-sonarjs";
@@ -12,6 +13,7 @@ import {
   SLEEP_EXEMPT_FILES,
 } from "./eslint-rules/no-unsanctioned-sleep.mjs";
 import { taskLinksPlugin } from "./eslint-rules/no-task-link-bypass.mjs";
+import { systemQueryOwnerPlugin } from "./eslint-rules/no-migrated-system-query-owner.mjs";
 
 const eslintConfig = defineConfig([
   {
@@ -55,6 +57,17 @@ const eslintConfig = defineConfig([
         "warn",
         { varsIgnorePattern: "^_", argsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" },
       ],
+    },
+  },
+  {
+    files: ["**/*.ts", "**/*.tsx"],
+    plugins: { "@tanstack/query": tanstackQuery },
+    // no-void-query-fn needs TypeScript parser services, which this config does not enable.
+    rules: {
+      "@tanstack/query/exhaustive-deps": "error",
+      "@tanstack/query/no-rest-destructuring": "warn",
+      "@tanstack/query/no-unstable-deps": "error",
+      "@tanstack/query/stable-query-client": "error",
     },
   },
   // Hardcoded user-facing strings. An ERROR, REPO-WIDE.
@@ -104,6 +117,16 @@ const eslintConfig = defineConfig([
     ],
     plugins: { "task-links": taskLinksPlugin },
     rules: { "task-links/no-task-link-bypass": "error" },
+  },
+  {
+    files: [
+      "lib/state/slices/system/types.ts",
+      "lib/state/slices/system/system-slice.ts",
+      "lib/state/slices/system/index.ts",
+      "lib/state/hydration/hydrator.ts",
+    ],
+    plugins: { "system-query-owner": systemQueryOwnerPlugin },
+    rules: { "system-query-owner/no-migrated-system-zustand-owner": "error" },
   },
   // E2E tests (Playwright): disable React hooks rules since Playwright's `use()` and
   // `test.extend()` patterns are falsely flagged, and relax test-specific limits.

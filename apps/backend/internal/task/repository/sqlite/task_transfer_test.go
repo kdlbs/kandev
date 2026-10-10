@@ -70,7 +70,8 @@ func TestTransferTaskPreservesIdentityAndIsIdempotent(t *testing.T) {
 		t.Fatalf("stored placement = %+v", stored)
 	}
 	if stored.State != v1.TaskStateInProgress || stored.Description != "preserve description" ||
-		stored.ParentID != "parent-task" || stored.QueuedForStepID != "step-destination-blocked" {
+		stored.ParentID != "parent-task" || stored.QueuedForStepID != "step-destination-blocked" ||
+		!reflect.DeepEqual(stored.Metadata, task.Metadata) {
 		t.Fatalf("stored durable identity changed = %+v", stored)
 	}
 	if !stored.UpdatedAt.Equal(receipt.TransferredAt) || !receipt.TaskGeneration.Equal(receipt.TransferredAt) {

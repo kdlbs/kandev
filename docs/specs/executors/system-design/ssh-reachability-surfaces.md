@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: executors
 requirements:
   - REQ-EXECUTORS-SSH-REACHABILITY-002
@@ -26,7 +26,7 @@ criterion IDs are retired rather than reused.
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-EXECUTORS-SSH-REACHABILITY-002` | [API and event contracts](#api-and-event-contracts), [Frontend components](#frontend-components) |
+| `REQ-EXECUTORS-SSH-REACHABILITY-002` | [API and event contracts](#api-and-event-contracts), [Frontend components](#frontend-components), [Local settings request lifetime](#local-settings-request-lifetime) |
 | `REQ-EXECUTORS-SSH-REACHABILITY-003` | [Launch interaction](#launch-interaction) |
 
 ## API and event contracts
@@ -150,9 +150,9 @@ state the backend owns.
 next to `SSHTestResult`; the three routes are wrapped in
 `apps/web/lib/api/domains/ssh-api.ts`, which already wraps SSH settings.
 
-**Store slice.** A `reachability` slice keyed by executor id, one record each.
-It hydrates from `GET /api/v1/ssh/reachability` and applies
-`executor.reachability.changed` events in place. Both inputs race — a refetch
+**Store slice.** `sshReachability.byExecutorId` holds one record per executor.
+`setSSHReachability` in `lib/state/slices/settings/settings-slice.ts` reconciles
+HTTP records and `executor.reachability.changed` events. Both inputs race — a refetch
 issued before an event can answer after it — so the slice keeps whichever payload
 carries the later **`updated_at`**.
 
@@ -172,8 +172,9 @@ gains `apps/web/components/settings/ssh-reachability-card.tsx` alongside the
 existing `SSHConnectionCard` and `SSHSessionsCard`. It shows the state, probed
 host, the reason and message when unreachable, the failure count, the age of the
 last completed and last successful probe (or that none is recorded), the stale
-marker, the probing-is-off notice, and the immediate-probe button. It owns the
-once-per-effective-interval refetch above and is the only component to refetch.
+marker, the probing-is-off notice, and the immediate-probe button. Its domain
+hook `hooks/domains/settings/use-ssh-reachability.ts::useSSHReachability` owns
+the once-per-effective-interval refetch and local request controls.
 
 **Launch surfaces.** The backend always emits `session.launch.warning` for the
 launched session; the session view renders it there, and a client that
@@ -183,9 +184,80 @@ for each session and replays it to a later subscriber until the session reaches
 `RUNNING` or is removed. The launch-failure attribution renders what the
 backend reports; the frontend adds no text of its own.
 
-**Cross-cutting.** All copy goes through `t()` with keys in all five locales;
+**Cross-cutting.** All copy goes through `t()` in every supported locale;
 reason tokens render through a translated label map, never raw. State is text as
 well as color. Every surface is verified against `/mobile-parity`.
+
+### Local settings request lifetime
+
+This section implements AC-EXECUTORS-SSH-REACHABILITY-002.13 and .14 within
+the existing settings hook; record reconciliation remains criterion .3.
+`StateProvider` supplies the real `AppStore` through `useAppStoreApi`, while
+the card selects only the current executor's record. Local `loadError` and
+`probing` belong to the committed `(executorId, storeApi, hook instance)`
+visit, not to the keyed record or a backend probe.
+
+Use the small committed-callback/layout-effect pattern already present in
+`hooks/domains/office/use-routing-preview.ts`, with monotonically invalidated
+request generations. Install a fresh lifetime on commit and retire it in
+layout cleanup before passive effects. Do not mutate the active lifetime during
+render or restart it on record updates. The same executor/store revisited after
+a switch, remount, or StrictMode effect replay has a new lifetime. Reset local
+error/pending controls at that committed boundary; keep keyed records intact.
+
+Every initial load, cadence refresh, and immediate probe checks its captured
+scope and producing committed generation at admission. Advance that generation
+in layout setup, including same-scope StrictMode replay, and publish it to the
+hook's rendered actions. A replay must replace current actions while keeping
+retained pre-replay actions inert. After each await, success, catch and finally check the
+same admitted lifetime before any local update or `setSSHReachability` call.
+Retained callbacks and queued interval work from a retired visit are inert:
+they issue no request. Keep latest-request supersession for GET refreshes;
+never reset a sequence so an old request can compare equal again. Track pending
+probes within the current lifetime so each finalizer releases only its own
+admission and cannot release another pending probe. Independent mounted hooks
+do not invalidate one another, including when they read the same executor.
+
+Obsolete successful HTTP responses are ignored by the retired hook. Existing
+records and independently admitted HTTP/WS evidence remain keyed by executor
+and reconcile through the unchanged `updated_at` rule. A current success still
+clears the local load error, including when its record loses reconciliation to
+a newer store version. Current GET/probe failures keep the existing boolean
+error contract; the card shows not-known when no record exists and retains an
+accepted record when one exists. This adds no global GET-versus-probe ordering,
+error policy, retry, shared client request coordinator, or cache eviction.
+
+Retirement only suppresses client admission/publication. Do not abort an
+admitted transport or alter the backend's coalescing, completion, persistence,
+deadline, or shutdown ownership in criterion .6. Cadence and stale timers retain
+their existing timing; callbacks cannot update a retired local lifetime.
+
+For criterion .15, the hook clock and immediate card use the shared
+`parseTurnTimestamp` parser through the hook-local reachability timestamp
+adapter. Reject non-RFC3339 and impossible calendar values before scheduling,
+comparing or formatting probe timestamps. Convert nanoseconds to whole epoch
+milliseconds with floor division, including negative instants, so valid offsets
+and fractional timestamps keep the existing three-interval boundary. Invalid
+completion time arms no stale clock or badge. Each invalid completion/success
+age uses that field's existing missing-time localized fallback independently;
+valid sibling ages and accepted store evidence remain available. The parser,
+global formatter, backend wire shape and store timestamp arbitration do not
+change. This is the same data-only mobile exception described below.
+
+Desktop and phone use the same hook and rendered card. The existing
+`SettingsCardHeader` stacks its action below the heading on phones and places
+it alongside on desktop. This correction changes state/data ownership only:
+no markup, touch target, layout, scrolling, navigation, copy, or breakpoint
+change. Real hook/provider/card tests at the transport boundary satisfy the
+mobile-parity data-only exception; no additional mobile Playwright case is
+required for this correction.
+
+Verify with deferred transport responses through the real SSH API functions,
+`StateProvider`, store, hook, and rendered card. Cover initial/refresh/probe
+settlements across A-to-B and A-to-B-to-A, retained callbacks, layout-cleanup
+attempts before passive effects, unmount/remount and StrictMode, independent
+owners, current failure/success and pending controls, and newer keyed HTTP/WS
+records. Do not replace these consumers with predicate-only ownership tests.
 
 ## Launch interaction
 

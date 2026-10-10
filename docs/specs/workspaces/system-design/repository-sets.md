@@ -49,12 +49,61 @@ The SQLite and PostgreSQL schema migration adds the new column before any query
 uses it. The migration is replay-safe. The base schema includes the column for
 new databases.
 
-Repository-set create and update operations write metadata and all member
-fields in one transaction. Membership replacement preserves the requested
+Repository-set creation writes metadata and all member fields in one
+transaction. Updates write supplied metadata and any supplied member
+replacement in one transaction. Membership replacement preserves the requested
 order and assigns contiguous positions.
 
 Existing rows receive an empty base. Backup and restore include the new column
 through the existing database process.
+
+### Partial updates and concurrency
+
+`AC-WORKSPACES-REPOSITORY-SETS-001.8` through `.11` use a presence-aware
+repository mutation. `UpdateRepositorySetRequest` retains its optional fields
+through validation. The service's initial `GetRepositorySet` supplies immutable
+set identity and workspace authorization context; it is not a source of omitted
+field values for a write.
+
+The internal `models.RepositorySetPatch` contains optional `Name`,
+`Description`, and `Items` values. The type lives in a small models file so
+both the repository interface and its SQLite implementation can import it
+without a dependency cycle. `RepositorySetRepository.PatchRepositorySet`
+accepts the set ID and this validated patch. The service passes normalized
+values only for fields present in the request. A supplied membership input
+produces one explicit ordered `Items` replacement. When neither membership
+input is supplied, `Items` is nil.
+
+The shared SQLite/PostgreSQL store builds the metadata UPDATE from fixed column
+fragments and bound values, using the existing dialect rebinder. Omitted
+`name` and `description` columns do not appear in its assignments. It always
+updates `updated_at`, including a membership-only or empty patch, preserving
+the existing timestamp and successful-update behavior. It checks affected
+rows before deleting or inserting items; a deleted parent returns
+`ErrRepositorySetNotFound` and cannot be recreated by an update.
+
+The parent UPDATE is the first mutation inside the transaction. Any explicit
+membership replacement follows it through `replaceItemsTx` and
+`insertRepositorySetItems`. A member insert or unique-name failure rolls back
+the entire transaction. Nil membership leaves every item row untouched,
+including its identity, position, saved base, and timestamps.
+
+This mutation does not read stored values and merge them before writing.
+PostgreSQL's parent UPDATE obtains the row lock before member replacement;
+concurrent updates to that set therefore serialize at the database, while
+SQLite serializes writers. Disjoint patches cannot overwrite omitted fields.
+Same-field patches retain commit-order last-writer behavior. A process-local
+service lock is not part of the correctness boundary. If a future implementation
+introduces a transactional read-modify-write invariant, it must acquire the
+transaction-scoped PostgreSQL advisory lock required by backend guidance
+before its first read or update.
+
+The existing store `UpdateRepositorySet(ctx, set, repositoryItems)` remains an
+explicit whole-metadata write: name and description are both present, while nil
+membership remains untouched. It forwards to the same transaction helper,
+preserving caller timestamp and item-model population behavior. Service PATCH
+handling uses the patch method rather than this whole-set method. No schema or
+public request shape changes are needed.
 
 ## Service and transport
 
@@ -90,6 +139,14 @@ HTTP and WebSocket handlers use the same request type and service methods. The
 same error categories remain stable. An unsafe base produces a validation
 error and no write.
 
+On update, pointer fields distinguish omission from explicit empty values.
+An empty description is trimmed and stored as empty. An empty name or explicit
+empty membership remains invalid. Existing JSON null decoding remains
+unchanged. Name prevalidation and the case-insensitive database unique index
+continue to protect uniqueness; membership validation remains workspace-scoped.
+The settings editor currently submits its full draft, so this persistence
+contract does not add dirty-field tracking or resolve full-draft conflicts.
+
 ## Events and boot state
 
 Repository-set DTOs include `base_branch` in list, get, create, and update
@@ -98,6 +155,15 @@ the same member shape.
 
 The boot-state projection uses the DTO without a second mapping. The workspace
 store and WebSocket handlers preserve the complete member objects.
+
+After an update commits, the service retains its existing `GetRepositorySet`
+reread and uses that same returned model for the response and
+`repository_set.updated` payload. A failed write publishes no update event.
+The reread may observe later commits; its metadata and membership reads are not
+a single revision snapshot. Responses and notifications do not promise global
+commit ordering or an exact per-write snapshot. A concurrent deletion after
+commit can still make the reread fail. This repair changes field writes, not
+those read and delivery semantics.
 
 ## Settings experience
 
@@ -273,6 +339,14 @@ accessible names. Focus returns to the trigger after a selector closes.
   base persistence, atomic replacement, and SQLite/PostgreSQL behavior.
 - Service and handler tests cover validation, compatibility payloads, DTOs,
   events, and authorization.
+- Real SQLite service/store tests cover deterministic disjoint metadata and
+  membership patches in both write orders, explicit empty versus absent values,
+  same-field commit behavior, deleted parents, and transaction rollback.
+- Registered HTTP PATCH and WebSocket dispatch tests exercise omission,
+  combined fields, response DTOs, and post-change events against the real DB.
+- Environment-gated PostgreSQL behavior tests use independent physical
+  connections in one isolated schema to prove disjoint writes and membership
+  serialization. A missing test DSN is reported as a skip, not dialect evidence.
 - Frontend unit tests cover API mapping, store events, apply rules, unavailable
   bases, save-as-set input, and local base-versus-checkout submission.
 - Component tests cover search, add, remove, reorder, reset, lazy branch loads,

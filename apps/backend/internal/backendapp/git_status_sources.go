@@ -12,9 +12,10 @@ import (
 )
 
 type gitStatusSources struct {
-	environmentID string
-	workspacePath string
-	sessionIDs    []string
+	environmentID  string
+	workspacePath  string
+	workspacePaths map[string]struct{}
+	sessionIDs     []string
 }
 
 func resolveGitStatusSources(
@@ -64,10 +65,22 @@ func resolveGitStatusSources(
 		zap.String("task_environment_id", env.ID),
 		zap.Int("sources", len(ordered)))
 	return &gitStatusSources{
-		environmentID: env.ID,
-		workspacePath: env.WorkspacePath,
-		sessionIDs:    ordered,
+		environmentID:  env.ID,
+		workspacePath:  env.WorkspacePath,
+		workspacePaths: gitStatusWorkspacePaths(env),
+		sessionIDs:     ordered,
 	}, true
+}
+
+func gitStatusWorkspacePaths(env *models.TaskEnvironment) map[string]struct{} {
+	paths := map[string]struct{}{env.WorkspacePath: {}}
+	for _, repo := range env.Repos {
+		if repo == nil || repo.WorktreePath == "" || repo.DeletedAt != nil || repo.Status == "failed" || repo.Status == "deleted" {
+			continue
+		}
+		paths[repo.WorktreePath] = struct{}{}
+	}
+	return paths
 }
 
 func loadGitStatusEnvironment(
@@ -131,8 +144,9 @@ func collectGitStatusSourceIDs(
 ) []string {
 	sourceIDs := make([]string, 0, len(sessions))
 	seen := make(map[string]struct{}, len(sessions))
+	workspacePaths := gitStatusWorkspacePaths(env)
 	for _, candidate := range sessions {
-		if !eligibleGitStatusSession(candidate, env.ID, env.WorkspacePath, recordedPaths, log) {
+		if !eligibleGitStatusSession(candidate, env.ID, workspacePaths, recordedPaths, log) {
 			continue
 		}
 		if _, exists := seen[candidate.ID]; exists {
@@ -158,7 +172,8 @@ func orderGitStatusSourceIDs(sourceIDs []string, requestedID string) []string {
 
 func eligibleGitStatusSession(
 	candidate *models.TaskSession,
-	environmentID, canonicalWorkspacePath string,
+	environmentID string,
+	workspacePaths map[string]struct{},
 	recordedPaths map[string]string,
 	log *logger.Logger,
 ) bool {
@@ -180,7 +195,7 @@ func eligibleGitStatusSession(
 			zap.String("reason", "workspace_unverified"))
 		return false
 	}
-	if workspacePath != canonicalWorkspacePath {
+	if _, allowed := workspacePaths[workspacePath]; !allowed {
 		log.Debug("rejecting git status source",
 			zap.String("source_session_id", candidate.ID),
 			zap.String("task_environment_id", environmentID),

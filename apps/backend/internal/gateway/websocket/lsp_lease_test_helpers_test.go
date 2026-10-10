@@ -137,6 +137,27 @@ func waitForLSPLease(t *testing.T, manager *lspLeaseManager, leaseID string, det
 	}
 }
 
+func waitForLSPLeaseRemoval(t *testing.T, manager *lspLeaseManager, leaseID string) {
+	t.Helper()
+	deadline := time.NewTimer(wsTestTimeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Millisecond * 10)
+	defer ticker.Stop()
+	for {
+		manager.mu.Lock()
+		_, exists := manager.leases[leaseID]
+		manager.mu.Unlock()
+		if !exists {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-deadline.C:
+			t.Fatalf("lease %q was not removed", leaseID)
+		}
+	}
+}
+
 func documentVersionFromMessage(t *testing.T, message []byte) int64 {
 	t.Helper()
 	var payload struct {

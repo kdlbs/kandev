@@ -33,6 +33,8 @@ type handlerRepo interface {
 type TaskHandlers struct {
 	service                       *service.Service
 	orchestrator                  OrchestratorStarter
+	configChatRetirer             ConfigChatSessionRetirer
+	configChatAdmission           configChatAdmission
 	movePreviewer                 WorkflowMovePreviewer
 	foregroundActivity            dto.ForegroundActivityProvider
 	cancellationPending           dto.CancellationPendingProvider
@@ -47,7 +49,16 @@ type TaskHandlers struct {
 	agentProfileRecentUseRecorder agentProfileRecentUseRecorder
 	sidebarSettingsReader         sidebarTaskSettingsReader
 	onTaskCreatedWithPR           func(ctx context.Context, taskID, sessionID, prURL, branch string)
+	backgroundWorkEnabled         bool
 	logger                        *logger.Logger
+}
+
+func (h *TaskHandlers) SetBackgroundWorkEnabled(enabled bool) {
+	h.backgroundWorkEnabled = enabled
+}
+
+func (h *TaskHandlers) isBackgroundWorkEnabled() bool {
+	return h.backgroundWorkEnabled
 }
 
 const defaultUnarchiveRecoveryTimeout = 30 * time.Second
@@ -167,6 +178,9 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	if previewer, ok := orchestrator.(WorkflowMovePreviewer); ok {
 		h.movePreviewer = previewer
 	}
+	if retirer, ok := orchestrator.(ConfigChatSessionRetirer); ok {
+		h.configChatRetirer = retirer
+	}
 	// The orchestrator also surfaces the in-memory fine-grained busy substate
 	// (ADR-0049). Derive the narrow provider from it so the
 	// session-fetch handlers can stamp foreground_activity onto sessions without
@@ -242,6 +256,8 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	// AC-18): per-task and per-session usage/cost totals.
 	api.GET("/tasks/:id/usage", h.httpGetTaskUsageTotals)
 	api.GET("/tasks/:id/sessions/:sessionId/usage", h.httpGetTaskSessionUsageTotals)
+	api.GET("/tasks/:id/sessions/:sessionId/usage/turns", h.httpGetTaskSessionUsageTurns)
+	api.GET("/tasks/:id/sessions/:sessionId/usage/turns/:turnId", h.httpGetTaskSessionUsageTurn)
 
 	// Task dependencies ("this task is blocked by that one"). Task-scoped
 	// equivalents of the Office-only blocker routes; both go through the single
@@ -262,6 +278,12 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	// Session workflow review endpoints
 	api.POST("/sessions/:id/approve", h.httpApproveSession)
 
+	// Background workload endpoints
+	api.GET("/task-sessions/:id/background-work", h.httpListBackgroundWorkloads)
+	api.GET("/task-sessions/:id/background-work/:workId", h.httpGetBackgroundWorkload)
+	api.POST("/task-sessions/:id/background-work/:workId/action", h.httpExecuteBackgroundAction)
+	api.GET("/task-sessions/:id/background-work/:workId/usage", h.httpGetBackgroundWorkloadUsage)
+
 	// Quick chat endpoints - create ephemeral task with prepared session, and
 	// resync the tab strip so clients that missed WS events converge.
 	api.POST("/workspaces/:id/quick-chat", h.httpStartQuickChat)
@@ -269,6 +291,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 
 	// Config chat endpoint - creates ephemeral task with config-mode MCP tools
 	api.POST("/workspaces/:id/config-chat", h.httpStartConfigChat)
+	api.POST("/workspaces/:id/config-chat/restart", h.httpRestartConfigChat)
 }
 
 func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
@@ -283,6 +306,9 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskArchive, h.wsArchiveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskRunner, h.wsUpdateTaskRunner)
 	dispatcher.RegisterFunc(ws.ActionTaskSessionList, h.wsListTaskSessions)
+	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkList, h.wsListBackgroundWorkloads)
+	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkGet, h.wsGetBackgroundWorkload)
+	dispatcher.RegisterFunc(ws.ActionSessionBackgroundWorkAction, h.wsExecuteBackgroundAction)
 	// Git snapshot handler (commits and cumulative diff are handled by agent/handlers/git_handlers.go)
 	dispatcher.RegisterFunc(ws.ActionSessionGitSnapshots, h.wsGetGitSnapshots)
 	// Session file review handlers
@@ -337,13 +363,8 @@ func convertToServiceRepos(repos []dto.TaskRepositoryInput) []service.TaskReposi
 	return result
 }
 
-// convertUpdateRepositories maps an update request's repositories field to the
-// service's replace semantics: an absent field (provided=false) must stay nil
-// so UpdateTask leaves task repositories untouched; a provided list — including
-// an explicitly empty one — replaces them. convertToServiceRepos alone returns
-// a non-nil empty slice for nil input, which wiped repositories on title-only
-// renames.
-func convertUpdateRepositories(provided bool, repos []dto.TaskRepositoryInput) []service.TaskRepositoryInput {
+// convertTaskRepositories preserves whether the repositories field was provided.
+func convertTaskRepositories(provided bool, repos []dto.TaskRepositoryInput) []service.TaskRepositoryInput {
 	if !provided {
 		return nil
 	}

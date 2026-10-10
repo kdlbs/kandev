@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-09-09
-updated: 2026-09-09
+updated: 2026-09-28
 owners:
   - cfl
 ---
@@ -30,6 +30,12 @@ Only a successful inspection that finds no exact branch permits omission of
 that worktree's commit identity. Git exit 128, diagnostic text, cancellation,
 and repository access errors do not establish absence. A quiet ref probe that
 also classifies broken refs as absent cannot authorize this omission.
+
+A surviving checkout whose Git administrative directory or source repository
+is unavailable remains an inspection failure. Preparation and delete preflight
+follow the platform's
+[cleanup failure attribution](../../platform/system-design/runtime-failure-attribution.md#cleanup-preparation-and-deletion-preview)
+contract so this state is diagnosable without relaxing cleanup ownership.
 
 ## Persistence
 

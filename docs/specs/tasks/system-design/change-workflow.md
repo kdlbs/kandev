@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: tasks
 requirements:
   - REQ-TASKS-CHANGE-WORKFLOW-001
@@ -217,6 +217,38 @@ Existing one-shot move options may remain in a collapsed section, with their
 current defaults. Mapping is not a one-shot option and never travels in the
 pending one-shot marker. Reset-context remains off by default.
 
+### Destination step colors
+
+`AC-TASKS-CHANGE-WORKFLOW-001.9` uses the existing snapshot's
+`WorkflowStepDTO.color`. `stepOptions` in
+`apps/web/components/task/change-workflow-form-sections.tsx` currently places
+this value directly in `style.backgroundColor`. Workflow settings persist
+Tailwind tokens such as `bg-blue-500`, so those dots have no valid CSS background.
+The dialog test fixture uses `#abcdef`, which does not exercise this failure.
+
+Resolve each dot through `parseWorkflowStepColor` in
+`apps/web/lib/task-color-presentation.ts`. Apply its static `className` for
+supported tokens or its `style` for supported hex values. This reuses the existing
+neutral fallback without a new color registry. The workflow editor's nine
+`STEP_COLORS` values are represented exactly by this resolver. Other supported
+aliases follow its existing palette normalization.
+
+Retain `ComboboxOption.label` as the plain step name for search and accessibility.
+The same `renderLabel` supplies options and the selected trigger; a separate
+trigger renderer is unnecessary. Mark the dot decorative with `aria-hidden`
+and retain its non-shrinking size beside truncated text. Keep workflow order,
+selection reset, loading states, and shared domain state in their current owners.
+No API, persistence, or translation changes are required.
+
+The nearest phone color exemplar is
+`apps/web/components/kanban/mobile-column-tabs.tsx`, which places a non-shrinking
+colored dot beside a step label. Use the current Change workflow phone drawer
+and combobox interaction without changing their composition or target sizes.
+Focused desktop and phone Playwright checks must inspect computed background
+colors in both option rows and the selected trigger; class presence alone does
+not establish visible color. Component regressions cover class-token input,
+custom hex input, neutral fallback, and reset to the placeholder.
+
 ## Mobile contract
 
 Use `useResponsiveBreakpoint` for a phone form and wider dialog. The nearest
@@ -261,6 +293,7 @@ must reconcile from the committed task using existing event/store paths.
 - [Session lifecycle](workflow-profile-session-lifecycle.md)
 - [Session policy decision](../../../decisions/2026-08-31-workflow-profile-session-switch-policy.md)
 - [Implementation package](../../../plans/change-workflow/plan.md)
+- [Step-color follow-up package](../../../plans/change-workflow-step-colors/plan.md)
 
 No new ADR is needed. This feature reuses the existing storage owner and routing
 policy; the request opt-in and legacy compatibility rationale are captured here.

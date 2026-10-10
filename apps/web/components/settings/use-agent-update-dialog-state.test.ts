@@ -15,6 +15,7 @@ function deferred<T>() {
 }
 
 const FIRST_PREVIEW: AgentUpdatePreview = {
+  update_mode: "pinned",
   agent_name: "claude-acp",
   package: "@agentclientprotocol/claude-agent-acp",
   current_version: "0.62.0",
@@ -25,7 +26,71 @@ const FIRST_PREVIEW: AgentUpdatePreview = {
 const AGENT_NAME = FIRST_PREVIEW.agent_name;
 const UPDATE_ALREADY_RUNNING = "Update is already running";
 
-describe("useAgentUpdateDialogState", () => {
+describe("useAgentUpdateDialogState family migration", () => {
+  it("submits an explicit family migration with the preview revision", async () => {
+    const migrationPreview: AgentUpdatePreview = {
+      ...FIRST_PREVIEW,
+      family: "v1",
+      source: "managed",
+      target_family: "v2",
+      runtime_revision: 12,
+      migration_available: true,
+      target_version: "2.0.18",
+      operation: "migrate",
+    };
+    const onPreview = vi.fn().mockResolvedValue(migrationPreview);
+    const onUpdate = vi.fn().mockResolvedValue({ job_id: "migration-1" } as AgentUpdateJob);
+    const { result } = renderHook(() =>
+      useAgentUpdateDialogState({ agentName: AGENT_NAME, onPreview, onUpdate }),
+    );
+
+    await act(async () => {
+      result.current.selectMigration();
+    });
+    await waitFor(() => expect(result.current.preview).toEqual(migrationPreview));
+    expect(onPreview).toHaveBeenCalledWith(AGENT_NAME, undefined, false, "v2");
+
+    await act(async () => {
+      await result.current.approve();
+    });
+
+    expect(onUpdate).toHaveBeenCalledWith(AGENT_NAME, "2.0.18", false, "v2", 12);
+  });
+
+  it("does not submit a family migration without the matching revision", async () => {
+    const migrationPreview: AgentUpdatePreview = {
+      ...FIRST_PREVIEW,
+      family: "v1",
+      source: "managed",
+      target_family: "v2",
+      migration_available: true,
+      target_version: "2.0.18",
+      operation: "migrate",
+    };
+    const onUpdate = vi.fn().mockResolvedValue({ job_id: "migration-1" } as AgentUpdateJob);
+    const { result } = renderHook(() =>
+      useAgentUpdateDialogState({
+        agentName: AGENT_NAME,
+        onPreview: vi.fn().mockResolvedValue(migrationPreview),
+        onUpdate,
+      }),
+    );
+
+    await act(async () => {
+      result.current.selectMigration();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.preview).toEqual(migrationPreview));
+    await act(async () => {
+      await result.current.approve();
+    });
+
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(result.current.approveError).toBeTruthy();
+  });
+});
+
+describe("useAgentUpdateDialogState request races and failures", () => {
   it("ignores a preview that resolves after close and reopen", async () => {
     const firstRequest = deferred<AgentUpdatePreview>();
     const secondRequest = deferred<AgentUpdatePreview>();
@@ -182,6 +247,44 @@ describe("useAgentUpdateDialogState target selection", () => {
     await waitFor(() => expect(result.current.preview?.target_version).toBe("0.61.0"));
   });
 
+  it("clears an old preview when a family change is loading or fails", async () => {
+    const migrationRequest = deferred<AgentUpdatePreview>();
+    const onPreview = vi
+      .fn<
+        (
+          agentName: string,
+          targetVersion?: string,
+          useDefault?: boolean,
+          targetFamily?: "v2",
+        ) => Promise<AgentUpdatePreview>
+      >()
+      .mockResolvedValueOnce(FIRST_PREVIEW)
+      .mockReturnValueOnce(migrationRequest.promise);
+    const { result } = renderHook(() =>
+      useAgentUpdateDialogState({
+        agentName: AGENT_NAME,
+        onPreview,
+        onUpdate: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.loadPreview();
+    });
+    expect(result.current.preview).toEqual(FIRST_PREVIEW);
+
+    act(() => result.current.selectMigration());
+    expect(result.current.preview).toBeNull();
+    expect(result.current.loading).toBe(true);
+    await act(async () => {
+      migrationRequest.reject(new Error("preview failed"));
+      await migrationRequest.promise.catch(() => undefined);
+    });
+
+    expect(result.current.preview).toBeNull();
+    expect(result.current.previewError).toBe("preview failed");
+  });
+
   it("refreshes a selected target and ignores an older target response", async () => {
     const first = deferred<AgentUpdatePreview>();
     const olderTarget = deferred<AgentUpdatePreview>();
@@ -229,6 +332,7 @@ describe("useAgentUpdateDialogState approval", () => {
   it("approves the selected exact target", async () => {
     const onUpdate = vi.fn().mockResolvedValue({
       job_id: "job-1",
+      update_mode: "pinned",
       agent_name: AGENT_NAME,
       status: "queued",
       started_at: "2026-01-01T00:00:00.000Z",
@@ -268,6 +372,7 @@ describe("useAgentUpdateDialogState approval", () => {
     const onPreview = vi.fn().mockResolvedValue(defaultPreview);
     const onUpdate = vi.fn().mockResolvedValue({
       job_id: "job-2",
+      update_mode: "pinned",
       agent_name: AGENT_NAME,
       status: "queued",
       started_at: "2026-01-01T00:00:00.000Z",
@@ -293,10 +398,86 @@ describe("useAgentUpdateDialogState approval", () => {
   });
 });
 
+describe("useAgentUpdateDialogState self-update", () => {
+  it("approves a targetless repair and renders an empty-ID terminal result locally until reset", async () => {
+    const selfPreview: AgentUpdatePreview = {
+      ...FIRST_PREVIEW,
+      update_mode: "self_update",
+      agent_name: "omp-acp",
+      current_version: "",
+      target_version: "",
+      stable_latest_version: "1.1.0",
+      operation: "repair",
+      command: ["omp", "update"],
+      command_string: "omp update",
+    };
+    const terminal: AgentUpdateJob = {
+      update_mode: "self_update",
+      job_id: "",
+      agent_name: "omp-acp",
+      status: "succeeded",
+      operation: "up_to_date",
+      current_version: "1.1.0",
+      started_at: "2026-09-26T12:00:00Z",
+    };
+    const onUpdate = vi.fn().mockResolvedValue(terminal);
+    const { result } = renderHook(() =>
+      useAgentUpdateDialogState({
+        agentName: "omp-acp",
+        onPreview: vi.fn().mockResolvedValue(selfPreview),
+        onUpdate,
+      }),
+    );
+    await act(async () => {
+      await result.current.loadPreview();
+    });
+    await act(async () => {
+      await result.current.approve();
+    });
+    expect(onUpdate).toHaveBeenCalledWith("omp-acp", "", false, "self_update");
+    expect(result.current.activeJob).toEqual(terminal);
+    act(() => result.current.handleOpenChange(false));
+    expect(result.current.activeJob).toBeUndefined();
+  });
+});
+
+describe("useAgentUpdateDialogState no-op selection", () => {
+  it("clears a terminal no-op when the user selects a different target", async () => {
+    const noOp: AgentUpdateJob = {
+      job_id: "",
+      update_mode: "pinned",
+      agent_name: AGENT_NAME,
+      status: "succeeded",
+      operation: "up_to_date",
+      current_version: "0.61.0",
+      started_at: "2026-09-26T12:00:00Z",
+    };
+    const { result } = renderHook(() =>
+      useAgentUpdateDialogState({
+        agentName: AGENT_NAME,
+        onPreview: vi.fn().mockResolvedValue(FIRST_PREVIEW),
+        onUpdate: vi.fn().mockResolvedValue(noOp),
+      }),
+    );
+    await act(async () => {
+      await result.current.loadPreview();
+    });
+    await act(async () => {
+      await result.current.approve();
+    });
+    expect(result.current.activeJob).toEqual(noOp);
+
+    act(() => result.current.selectTarget("0.60.0"));
+
+    expect(result.current.activeJob).toBeUndefined();
+  });
+});
+
 describe("useAgentUpdateDialogState failed target selection", () => {
   it("clears a failed active job when selecting a new target", async () => {
     const failedJob: AgentUpdateJob = {
       job_id: "runtime-update-job-1",
+      update_mode: "pinned",
       agent_name: AGENT_NAME,
       status: "failed",
       operation: "update",

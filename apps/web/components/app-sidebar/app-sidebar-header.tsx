@@ -92,10 +92,8 @@ export function AppSidebarHeader({
     );
   }
 
-  // Single h-10 row — brand · workspace picker · collapse — so the sidebar's
-  // top section lines up with the page/dockview top bar (also h-10). Brand and
-  // workspace share the same text size so they sit on a common baseline; the
-  // brand carries weight/colour, the workspace stays muted and secondary.
+  // The fixed header aligns with the page/dockview top bar. The larger brand
+  // and compact workspace control stay vertically centered within the row.
   return (
     <div
       {...sidebarHeaderAttributes(false)}
@@ -107,7 +105,7 @@ export function AppSidebarHeader({
         onClick={homeDisabled ? (event) => event.preventDefault() : undefined}
         aria-label={t("sidebar:kandevHome")}
         className={cn(
-          "shrink-0 cursor-pointer text-sm font-semibold tracking-tight",
+          "shrink-0 cursor-pointer text-lg font-bold tracking-tight",
           "text-foreground hover:text-foreground/80 transition-colors",
         )}
       >
@@ -117,7 +115,7 @@ export function AppSidebarHeader({
         /
       </span>
       {/* Hover already provides an anchor; the global picker action persistently expands the rail. */}
-      <AppSidebarWorkspacePicker {...pickerProps} />
+      <AppSidebarWorkspacePicker {...pickerProps} triggerClassName="text-xs" />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

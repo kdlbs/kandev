@@ -13,13 +13,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
 type taskDeletePreflightHTTPCleanup struct {
-	dirty bool
+	dirty      bool
+	inspectErr error
 }
 
 type taskDeletePreflightHTTPRepo struct{ mockRepository }
@@ -40,15 +42,21 @@ func (taskDeletePreflightHTTPCleanup) GetAllByTaskID(
 func (c taskDeletePreflightHTTPCleanup) InspectDirtyWorktrees(
 	context.Context, []*worktree.Worktree,
 ) ([]worktree.DirtyWorktree, error) {
+	if c.inspectErr != nil {
+		return nil, c.inspectErr
+	}
 	if !c.dirty {
 		return nil, nil
 	}
 	return []worktree.DirtyWorktree{{WorktreeID: "wt-1"}}, nil
 }
 
-func newTaskDeletePreflightRouter(t *testing.T, cleanup service.WorktreeCleanup) *gin.Engine {
+func newTaskDeletePreflightRouter(t *testing.T, cleanup service.WorktreeCleanup, logs ...*logger.Logger) *gin.Engine {
 	t.Helper()
 	log := newTestLogger(t)
+	if len(logs) > 0 {
+		log = logs[0]
+	}
 	repo := &taskDeletePreflightHTTPRepo{}
 	svc := service.NewService(service.Repos{
 		Workspaces: repo, Tasks: repo, TaskRepos: repo,

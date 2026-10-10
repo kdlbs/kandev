@@ -1,7 +1,10 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import type { SessionPromptUsagePayload } from "@/lib/types/session-runtime-payloads";
+import type {
+  SessionPromptUsagePayload,
+  SessionUsageUpdatedPayload,
+} from "@/lib/types/session-runtime-payloads";
 
 export function registerPromptUsageHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
@@ -17,6 +20,11 @@ export function registerPromptUsageHandlers(store: StoreApi<AppState>): WsHandle
         cachedWriteTokens: payload.usage.cached_write_tokens,
         totalTokens: payload.usage.total_tokens,
       });
+    },
+    "session.usage_updated": (message) => {
+      const payload = message.payload as SessionUsageUpdatedPayload | undefined;
+      if (!payload?.session_id) return;
+      store.getState().bumpSessionUsageInvalidation(payload.session_id);
     },
   };
 }

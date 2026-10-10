@@ -11,6 +11,7 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
+import { formatCompactDuration } from "@/lib/i18n/formats";
 import { useAppStore } from "@/components/state-provider";
 import { useMRFeedback } from "@/hooks/domains/gitlab/use-mr-feedback";
 import { bucketJobCounts, groupJobsByStage, type JobBucket } from "@/lib/gitlab/pipeline-buckets";
@@ -255,10 +256,10 @@ function MRDiscussionsRow({ unresolvedCount }: { unresolvedCount: number }) {
 }
 
 function elapsedShort(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 60) return formatCompactDuration(seconds, "second");
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  return `${Math.floor(minutes / 60)}h`;
+  if (minutes < 60) return formatCompactDuration(minutes, "minute");
+  return formatCompactDuration(Math.floor(minutes / 60), "hour");
 }
 
 function MRPopoverFooter({ lastUpdatedAt }: { lastUpdatedAt: number | null }) {

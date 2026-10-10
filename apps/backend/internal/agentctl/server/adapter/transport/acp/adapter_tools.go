@@ -732,6 +732,11 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 			status = toolStatusComplete
 		}
 	}
+	if shellExitCode != nil && payload != nil && payload.ShellExec() != nil {
+		if background := payload.BackgroundWork(); background != nil && background.Kind == streams.BackgroundWorkKindShell {
+			payload.SetBackgroundWorkIdentity(background.Kind, background.WorkID, background.Detached, true)
+		}
+	}
 	isTerminal := status == toolStatusComplete || status == toolStatusError || status == toolStatusCancelled
 
 	// Subagent (Task) result metadata is split across meta (Claude) and
@@ -778,8 +783,10 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	}
 
 	if isTerminal {
-		delete(a.activeToolCalls, emittedToolCallID)
-		a.forgetPromptHandoffToolLocked(emittedToolCallID)
+		if payload == nil || !payload.IsActiveBackgroundWork() {
+			delete(a.activeToolCalls, emittedToolCallID)
+			a.forgetPromptHandoffToolLocked(emittedToolCallID)
+		}
 		// Also drop tracked Monitor: this terminal update is the
 		// agent-emitted close, so the prompt-end sweep must not re-emit a
 		// "Monitor exited" event for this same toolCallID.

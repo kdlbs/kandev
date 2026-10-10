@@ -139,6 +139,46 @@ func TestHandleTransferTaskRejectsClientAuditOnlyFieldWithoutTransfer(t *testing
 	require.Len(t, transfer.audits, 1)
 }
 
+func TestHandleTransferTaskRejectsClientAuditAttemptID(t *testing.T) {
+	transfer := &recordingTaskTransferService{}
+	h := &Handlers{taskTransferSvc: transfer, logger: testLogger(t)}
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(transferTaskMessage(t).Payload, &payload))
+	payload["audit_attempt_id"] = "existing-audit-row"
+	response, err := h.handleTransferTask(context.Background(), makeWSMessage(t, ws.ActionMCPTransferTask, payload))
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeBadRequest)
+	require.Empty(t, transfer.commands)
+	require.Len(t, transfer.audits, 1)
+	require.Empty(t, transfer.audits[0].AuditAttemptID)
+}
+
+func TestHandleTransferTaskAcceptsServerDerivedConfigurationHuman(t *testing.T) {
+	transfer := &recordingTaskTransferService{}
+	h := &Handlers{taskTransferSvc: transfer, logger: testLogger(t)}
+	ctx := mcpscope.WithPrincipal(authn.WithIdentity(context.Background(), authn.Identity{UserID: "human-1"}), mcpscope.Principal{
+		CallerTaskID: "config-task", CallerSessionID: "config-session", Surface: mcpprofile.SurfaceConfiguration,
+	})
+	response, err := h.handleTransferTask(ctx, transferTaskMessage(t))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	require.Len(t, transfer.commands, 1)
+	require.Equal(t, models.TaskTransferActor{Kind: models.TaskTransferActorHuman, ID: "human-1", SessionID: "config-session"}, transfer.commands[0].Actor)
+}
+
+func TestHandleTransferTaskAcceptsLocalConfigurationHuman(t *testing.T) {
+	transfer := &recordingTaskTransferService{}
+	h := &Handlers{taskTransferSvc: transfer, logger: testLogger(t)}
+	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		CallerTaskID: "config-task", CallerSessionID: "config-session", Surface: mcpprofile.SurfaceConfiguration,
+	})
+	response, err := h.handleTransferTask(ctx, transferTaskMessage(t))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	require.Len(t, transfer.commands, 1)
+	require.Equal(t, models.TaskTransferActor{Kind: models.TaskTransferActorHuman, ID: "local-human", SessionID: "config-session"}, transfer.commands[0].Actor)
+}
+
 func TestAuditTaskTransferAttemptActionRecordsAuditWithoutTransfer(t *testing.T) {
 	transfer := &recordingTaskTransferService{}
 	h := &Handlers{taskTransferSvc: transfer, logger: testLogger(t)}

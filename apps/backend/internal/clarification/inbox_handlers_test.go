@@ -30,9 +30,11 @@ type fakeInboxTasks struct {
 	sessions          map[string]*taskmodels.TaskSession
 	taskBatchCalls    int
 	sessionBatchCalls int
+	contexts          []context.Context
 }
 
-func (f *fakeInboxTasks) AuthorizeWorkspaceScope(context.Context, string, authz.Scope) error {
+func (f *fakeInboxTasks) AuthorizeWorkspaceScope(ctx context.Context, _ string, _ authz.Scope) error {
+	f.contexts = append(f.contexts, ctx)
 	return f.authzErr
 }
 
@@ -50,7 +52,8 @@ func (f *fakeInboxTasks) GetTaskSession(_ context.Context, id string) (*taskmode
 	return nil, errors.New("session not found")
 }
 
-func (f *fakeInboxTasks) GetTasksByIDs(_ context.Context, ids []string) ([]*taskmodels.Task, error) {
+func (f *fakeInboxTasks) GetTasksByIDs(ctx context.Context, ids []string) ([]*taskmodels.Task, error) {
+	f.contexts = append(f.contexts, ctx)
 	f.taskBatchCalls++
 	result := make([]*taskmodels.Task, 0, len(ids))
 	for _, id := range ids {
@@ -68,7 +71,8 @@ func (f *fakeInboxTasks) GetWorkflowStep(context.Context, string) (*wfmodels.Wor
 	return nil, nil
 }
 
-func (f *fakeInboxTasks) BatchGetSessionsForTasks(_ context.Context, taskIDs []string) (map[string][]*taskmodels.TaskSession, error) {
+func (f *fakeInboxTasks) BatchGetSessionsForTasks(ctx context.Context, taskIDs []string) (map[string][]*taskmodels.TaskSession, error) {
+	f.contexts = append(f.contexts, ctx)
 	f.sessionBatchCalls++
 	result := make(map[string][]*taskmodels.TaskSession)
 	for _, taskID := range taskIDs {
@@ -94,6 +98,7 @@ type sidecarUpsertCall struct {
 type fakeInboxBundleStore struct {
 	stubMessageStore
 	batchMessageCalls int
+	contexts          []context.Context
 
 	page    *taskmodels.ClarificationBundlePage
 	listErr error
@@ -113,8 +118,9 @@ type fakeInboxBundleStore struct {
 }
 
 func (f *fakeInboxBundleStore) FindMessagesByPendingIDs(
-	_ context.Context, pendingIDs []string,
+	ctx context.Context, pendingIDs []string,
 ) (map[string][]*taskmodels.Message, error) {
+	f.contexts = append(f.contexts, ctx)
 	f.batchMessageCalls++
 	if f.findErr != nil {
 		return nil, f.findErr
@@ -127,8 +133,9 @@ func (f *fakeInboxBundleStore) FindMessagesByPendingIDs(
 }
 
 func (f *fakeInboxBundleStore) ListUnresolvedClarificationBundles(
-	_ context.Context, opts taskmodels.ListClarificationBundlesOptions,
+	ctx context.Context, opts taskmodels.ListClarificationBundlesOptions,
 ) (*taskmodels.ClarificationBundlePage, error) {
+	f.contexts = append(f.contexts, ctx)
 	f.lastOpts = opts
 	if f.listErr != nil {
 		return nil, f.listErr
@@ -158,8 +165,9 @@ func (f *fakeInboxBundleStore) DeleteClarificationInboxSidecar(_ context.Context
 }
 
 func (f *fakeInboxBundleStore) CountHiddenClarificationBundles(
-	context.Context, taskmodels.ListClarificationBundlesOptions,
+	ctx context.Context, _ taskmodels.ListClarificationBundlesOptions,
 ) (taskmodels.ClarificationInboxHiddenSummary, error) {
+	f.contexts = append(f.contexts, ctx)
 	if f.summaryErr != nil {
 		return taskmodels.ClarificationInboxHiddenSummary{}, f.summaryErr
 	}
@@ -167,8 +175,9 @@ func (f *fakeInboxBundleStore) CountHiddenClarificationBundles(
 }
 
 func (f *fakeInboxBundleStore) GetClarificationInboxSidecarStates(
-	context.Context, string, []string,
+	ctx context.Context, _ string, _ []string,
 ) (map[string]taskmodels.ClarificationInboxHiddenBundle, error) {
+	f.contexts = append(f.contexts, ctx)
 	if f.statesErr != nil {
 		return nil, f.statesErr
 	}
@@ -266,6 +275,56 @@ func TestHttpListInbox_MissingWorkspaceID_BadRequest(t *testing.T) {
 	}
 }
 
+// AC-PLATFORM-INTERACTIVE-READS-004.2: the HTTP read budget covers authorization,
+// bundle SQL, message hydration, task enrichment, and the hidden count.
+func TestHttpListInboxPassesOneBoundedContextToEveryRead(t *testing.T) {
+	createdAt := testInboxNow.Add(-time.Hour)
+	for _, route := range []struct {
+		name    string
+		target  string
+		handler func(*Handlers, *gin.Context)
+	}{
+		{name: "normal", target: "/api/v1/clarification-inbox?workspace_id=w1", handler: func(h *Handlers, c *gin.Context) { h.httpListInbox(c) }},
+		{name: "hidden", target: "/api/v1/clarification-inbox/hidden?workspace_id=w1", handler: func(h *Handlers, c *gin.Context) { h.httpListInboxHidden(c) }},
+	} {
+		t.Run(route.name, func(t *testing.T) {
+			tasks := &fakeInboxTasks{}
+			bundles := &fakeInboxBundleStore{
+				page: &taskmodels.ClarificationBundlePage{Bundles: []taskmodels.ClarificationBundleSummary{{
+					PendingID: "p1", TaskID: "t1", SessionID: "s1", CreatedAt: createdAt,
+				}}},
+			}
+			msgs := map[string][]*taskmodels.Message{
+				"p1": {{ID: "m1", TaskSessionID: "s1", TaskID: "t1", CreatedAt: createdAt, Metadata: map[string]any{"pending_id": "p1"}}},
+			}
+			h := newInboxTestHandler(t, msgs, alwaysAllowAuthorizer{}, tasks, bundles)
+			rec := runInboxGet(h, route.target, func(c *gin.Context) { route.handler(h, c) })
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+			}
+
+			contexts := append(append([]context.Context{}, tasks.contexts...), bundles.contexts...)
+			if len(contexts) < 4 {
+				t.Fatalf("observed %d read contexts, want authorization and every inbox read stage", len(contexts))
+			}
+			var deadline time.Time
+			for i, ctx := range contexts {
+				got, ok := ctx.Deadline()
+				if !ok {
+					t.Fatalf("read context %d has no total deadline", i)
+				}
+				if i == 0 {
+					deadline = got
+					continue
+				}
+				if !got.Equal(deadline) {
+					t.Fatalf("read context %d deadline = %s, want shared deadline %s", i, got, deadline)
+				}
+			}
+		})
+	}
+}
+
 func TestHttpListInbox_NonNumericLimit_BadRequest(t *testing.T) {
 	h := newInboxTestHandler(t, nil, alwaysAllowAuthorizer{}, &fakeInboxTasks{}, &fakeInboxBundleStore{})
 	rec := runInboxGet(h, "/api/v1/clarification-inbox?workspace_id=w1&limit=abc", h.httpListInbox)
@@ -339,6 +398,23 @@ func TestHttpListInbox_HiddenCountQueryFails_500NotDefaulted(t *testing.T) {
 	rec := runInboxGet(h, "/api/v1/clarification-inbox?workspace_id=w1", h.httpListInbox)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHttpListInbox_InternalReadDeadlineIsRetryable(t *testing.T) {
+	bundles := &fakeInboxBundleStore{listErr: context.DeadlineExceeded}
+	h := newInboxTestHandler(t, nil, alwaysAllowAuthorizer{}, &fakeInboxTasks{}, bundles)
+	rec := runInboxGet(h, "/api/v1/clarification-inbox?workspace_id=w1", h.httpListInbox)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Retry-After"); got != "2" {
+		t.Fatalf("Retry-After = %q, want 2", got)
+	}
+	var body map[string]string
+	decodeInboxBody(t, rec, &body)
+	if body["error"] != errInboxInternal {
+		t.Fatalf("error = %q, want sanitized %q", body["error"], errInboxInternal)
 	}
 }
 

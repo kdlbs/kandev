@@ -67,6 +67,7 @@ const dynamicProfile: AgentProfile = {
             waitForReset: { enabled: false, maxWaitSeconds: 0 },
             onExhausted: "skip",
           },
+          unclassified: { enabled: false, consecutiveFailureThreshold: 0 },
         },
       },
       {
@@ -85,6 +86,7 @@ const dynamicProfile: AgentProfile = {
             waitForReset: { enabled: false, maxWaitSeconds: 0 },
             onExhausted: "stop",
           },
+          unclassified: { enabled: false, consecutiveFailureThreshold: 0 },
         },
       },
     ],

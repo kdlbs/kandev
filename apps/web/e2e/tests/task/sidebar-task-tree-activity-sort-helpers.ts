@@ -1,3 +1,4 @@
+import { expect, type Locator } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 
@@ -31,7 +32,7 @@ export async function seedTaskTreeActivityScenario(
           name: `${prefix} activity view`,
           filters: [],
           sort: { key: "lastActivityAt", direction: "desc" },
-          group: "none",
+          group: "state",
           collapsed_groups: [],
         },
       ],
@@ -45,4 +46,27 @@ export async function seedTaskTreeActivityScenario(
     peer,
     navigationTaskId: navigationTask.task_id,
   };
+}
+
+export async function exerciseRepeatedTreeActivity(
+  surface: Locator,
+  api: ApiClient,
+  tasks: { parent: { id: string }; child: { id: string }; peer: { id: string } },
+) {
+  const order = () =>
+    surface
+      .locator("[data-task-row-id]")
+      .evaluateAll(
+        (rows, ids) =>
+          rows
+            .map((row) => row.getAttribute("data-task-row-id"))
+            .filter((id) => id && ids.includes(id)),
+        [tasks.parent.id, tasks.peer.id],
+      );
+  for (let index = 0; index < 3; index++) {
+    await api.updateTaskTitle(tasks.peer.id, `Peer activity ${index}`);
+    await expect.poll(order).toEqual([tasks.peer.id, tasks.parent.id]);
+    await api.updateTaskTitle(tasks.child.id, `Child activity ${index}`);
+    await expect.poll(order).toEqual([tasks.parent.id, tasks.peer.id]);
+  }
 }

@@ -93,6 +93,19 @@ func (m *MockRepository) UpdateAgentProfileEnabled(_ context.Context, _ string, 
 	return time.Time{}, nil
 }
 
+func (m *MockRepository) UpdateAgentProfileWithEnabledIntent(ctx context.Context, profile *models.AgentProfile, enabled *bool) error {
+	if enabled == nil {
+		current, err := m.GetAgentProfile(ctx, profile.ID)
+		if err != nil {
+			return err
+		}
+		profile.Enabled = current.Enabled
+	} else {
+		profile.Enabled = *enabled
+	}
+	return m.UpdateAgentProfile(ctx, profile)
+}
+
 func (m *MockRepository) DeleteAgentProfile(ctx context.Context, id string) error {
 	return nil
 }
@@ -161,6 +174,8 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 				Name:                       "My Profile",
 				Model:                      "claude-3.5-sonnet",
 				CursorMCPAuthEnabled:       true,
+				MCPSelectionMode:           "selected",
+				MCPSelectedServers:         []string{"plugin-atlassian-atlassian"},
 				AutoApprove:                true,
 				DangerouslySkipPermissions: false,
 			}, nil
@@ -192,6 +207,9 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 	}
 	if !info.CursorMCPAuthEnabled {
 		t.Error("Cursor MCP auth preference was not resolved")
+	}
+	if info.MCPSelectionMode != "selected" || len(info.MCPSelectedServers) != 1 || info.MCPSelectedServers[0] != "plugin-atlassian-atlassian" {
+		t.Errorf("MCP selection = %q / %#v, want selected / exact server ID", info.MCPSelectionMode, info.MCPSelectedServers)
 	}
 	if info.AgentID != "agent-456" {
 		t.Errorf("expected AgentID 'agent-456', got '%s'", info.AgentID)

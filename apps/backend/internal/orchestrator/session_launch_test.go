@@ -179,6 +179,7 @@ func TestValidateLaunchActivationSource(t *testing.T) {
 		"",
 		LaunchActivationSourceUserAction,
 		LaunchActivationSourceSessionOpen,
+		LaunchActivationSourceSessionFocus,
 	} {
 		if err := validateLaunchActivationSource(source); err != nil {
 			t.Errorf("validateLaunchActivationSource(%q) = %v", source, err)
@@ -186,6 +187,13 @@ func TestValidateLaunchActivationSource(t *testing.T) {
 	}
 	if err := validateLaunchActivationSource("background_recovery"); err == nil {
 		t.Fatal("unknown launch activation source was accepted")
+	}
+	if err := validateFocusActivationIntent(&LaunchSessionRequest{
+		ActivationSource: LaunchActivationSourceSessionFocus,
+		Intent:           IntentResume,
+		Prompt:           "must not become a synthetic prompt",
+	}); err == nil {
+		t.Fatal("session focus accepted a prompt")
 	}
 }
 
@@ -433,6 +441,33 @@ func TestLaunchSession_RejectsMismatchedTaskSessionBeforeAttachmentClaim(t *test
 	}
 }
 
+// LaunchSession must consult the installed task-prompt checker before doing
+// anything else for an ordinary (non-restore) intent: this is the seam
+// backendapp wires to AuthorizeTaskPromptScope so that session.launch cannot
+// bypass the coordinator attended-only restriction that message.add already
+// enforces (docs/specs/coordinator/system-design/copilot.md#attended-only).
+func TestLaunchSession_ConsultsTaskPromptCheckerForOrdinaryIntent(t *testing.T) {
+	wantErr := errors.New("workspace.manage required")
+	var calledWith string
+	service := &Service{}
+	service.SetTaskPromptChecker(func(_ context.Context, taskID string) error {
+		calledWith = taskID
+		return wantErr
+	})
+
+	_, err := service.LaunchSession(context.Background(), &LaunchSessionRequest{
+		TaskID:    "task-coordinator",
+		SessionID: "session-1",
+		Intent:    IntentStartCreated,
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("LaunchSession error = %v, want %v", err, wantErr)
+	}
+	if calledWith != "task-coordinator" {
+		t.Fatalf("task prompt checker called with %q, want %q", calledWith, "task-coordinator")
+	}
+}
+
 func TestNormalizeRecoverSessionError(t *testing.T) {
 	t.Run("maps profile not found errors to actionable profile guidance", func(t *testing.T) {
 		in := errors.New("failed to resolve agent profile: profile not found: sql: no rows in result set")
@@ -490,6 +525,288 @@ func TestNormalizeRecoverSessionError(t *testing.T) {
 			t.Fatalf("expected passthrough error %q, got %q", in.Error(), err.Error())
 		}
 	})
+}
+
+func TestRecoverSession_OfficeResolvesBlockForSchedulerAdmission(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	seedTaskAndSession(t, repo, "task-office-recovery", "session-office-recovery", models.TaskSessionStateFailed)
+
+	task, err := repo.GetTask(ctx, "task-office-recovery")
+	if err != nil {
+		t.Fatalf("load Office task: %v", err)
+	}
+	// IsFromOffice is a read-time projection. Mark the persisted task with an
+	// Office project so lookupOfficeTask observes the same production identity
+	// that the scheduler uses.
+	task.ProjectID = "project-office-recovery"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("mark task as Office-owned: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-office-recovery")
+	if err != nil {
+		t.Fatalf("load Office session: %v", err)
+	}
+	incarnationID := session.QueueIncarnationID
+	if incarnationID == "" {
+		incarnationID = session.ID
+	}
+
+	if err := repo.UpsertSessionRecoveryBlock(ctx, &models.SessionRecoveryBlock{
+		ID:                 "office-recovery-block",
+		SessionID:          "session-office-recovery",
+		IncarnationID:      incarnationID,
+		ExpectedGeneration: 0,
+		Reason:             "native_state_missing",
+		State:              models.RecoveryBlockOpen,
+	}); err != nil {
+		t.Fatalf("persist Office recovery block: %v", err)
+	}
+
+	response, err := svc.RecoverSession(ctx, "task-office-recovery", "session-office-recovery", "continue_from_history")
+	if err != nil {
+		t.Fatalf("RecoverSession: %v", err)
+	}
+	if response == nil || !response.Success {
+		t.Fatalf("response = %+v, want successful scheduler authorization", response)
+	}
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-office-recovery"); !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		t.Fatalf("Office recovery launched a direct executor, err = %v", err)
+	}
+	block, err := repo.GetSessionRecoveryBlock(ctx, "office-recovery-block")
+	if err != nil {
+		t.Fatalf("load resolved Office recovery block: %v", err)
+	}
+	if block.State != models.RecoveryBlockResolved || block.AuthorizedAction != "continue_from_history" {
+		t.Fatalf("resolved Office recovery block = %+v", block)
+	}
+}
+
+type continuationAdmissionAgentManager struct {
+	*mockAgentManager
+	repo      *sqliterepo.Repository
+	taskID    string
+	sessionID string
+}
+
+func (m *continuationAdmissionAgentManager) StartAgentProcess(ctx context.Context, executionID string) error {
+	session, err := m.repo.GetTaskSession(ctx, m.sessionID)
+	if err != nil {
+		return err
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	session.UpdatedAt = time.Now().UTC()
+	if err := m.repo.UpdateTaskSession(ctx, session); err != nil {
+		return err
+	}
+	return m.repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "candidate-running",
+		SessionID:        m.sessionID,
+		TaskID:           m.taskID,
+		AgentExecutionID: executionID,
+		Status:           "ready",
+	})
+}
+
+func (m *continuationAdmissionAgentManager) CleanupStaleExecutionBySessionID(
+	ctx context.Context,
+	sessionID string,
+) error {
+	return m.repo.DeleteExecutorRunningBySessionID(ctx, sessionID)
+}
+
+type continuationGenerationCASFailureRepository struct {
+	*sqliterepo.Repository
+	commitErr error
+}
+
+func (r *continuationGenerationCASFailureRepository) CommitHarnessSessionGeneration(
+	context.Context,
+	*models.HarnessSessionGeneration,
+	int64,
+) (bool, error) {
+	return false, r.commitErr
+}
+
+func TestRecoverSession_ContextContinuationCommitsBeforePromptAdmission(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	taskID := "task-continuation-admission"
+	sessionID := "session-continuation-admission"
+	seedTaskAndSession(t, baseRepo, taskID, sessionID, models.TaskSessionStateFailed)
+
+	now := time.Now().UTC()
+	if err := baseRepo.CreateExecutor(ctx, &models.Executor{
+		ID:        "executor-continuation-admission",
+		Name:      "Worktree",
+		Type:      models.ExecutorTypeWorktree,
+		Status:    models.ExecutorStatusActive,
+		Resumable: true,
+	}); err != nil {
+		t.Fatalf("create executor: %v", err)
+	}
+	if err := baseRepo.CreateRepository(ctx, &models.Repository{
+		ID:            "repo-continuation-admission",
+		WorkspaceID:   "ws1",
+		Name:          "backend",
+		SourceType:    "local",
+		LocalPath:     t.TempDir(),
+		DefaultBranch: "main",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	if err := baseRepo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID:           "task-repo-continuation-admission",
+		TaskID:       taskID,
+		RepositoryID: "repo-continuation-admission",
+		BaseBranch:   "main",
+		Position:     0,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}); err != nil {
+		t.Fatalf("create task repository: %v", err)
+	}
+	session, err := baseRepo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentProfileID = "profile-continuation-admission"
+	session.ExecutorID = "executor-continuation-admission"
+	session.RepositoryID = "repo-continuation-admission"
+	session.BaseBranch = "main"
+	if err := baseRepo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	if err := baseRepo.UpsertSessionRecoveryBlock(ctx, &models.SessionRecoveryBlock{
+		ID:                 "continuation-admission-block",
+		SessionID:          sessionID,
+		IncarnationID:      sessionID,
+		ExpectedGeneration: 0,
+		Reason:             "native_state_missing",
+		State:              models.RecoveryBlockOpen,
+	}); err != nil {
+		t.Fatalf("persist recovery block: %v", err)
+	}
+
+	commitErr := errors.New("continuation generation CAS failed")
+	repo := &continuationGenerationCASFailureRepository{
+		Repository: baseRepo,
+		commitErr:  commitErr,
+	}
+	manager := &continuationAdmissionAgentManager{
+		mockAgentManager: &mockAgentManager{
+			isAgentReadyFn: func(context.Context, string) bool {
+				return true
+			},
+			getACPSessionIDForSessionFunc: func(string) (string, bool) {
+				return "native-continuation-admission", true
+			},
+		},
+		repo:      baseRepo,
+		taskID:    taskID,
+		sessionID: sessionID,
+	}
+	promptStarted := make(chan struct{})
+	promptRelease := make(chan struct{})
+	manager.promptAgentFunc = func(
+		context.Context,
+		string,
+		string,
+		[]v1.MessageAttachment,
+		bool,
+	) (*executor.PromptResult, error) {
+		close(promptStarted)
+		<-promptRelease
+		return &executor.PromptResult{}, nil
+	}
+	svc := createTestServiceWithAgent(baseRepo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.repo = repo
+	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+
+	_, err = svc.RecoverSession(ctx, taskID, sessionID, sessionRecoveryActionContinueFromHistory)
+	if !errors.Is(err, commitErr) {
+		t.Fatalf("RecoverSession error = %v, want %v", err, commitErr)
+	}
+	select {
+	case <-promptStarted:
+		close(promptRelease)
+		t.Fatal("continuation prompt was admitted before generation commit")
+	default:
+	}
+	close(promptRelease)
+	block, err := baseRepo.GetSessionRecoveryBlock(ctx, "continuation-admission-block")
+	if err != nil {
+		t.Fatalf("load recovery block: %v", err)
+	}
+	if block.State != models.RecoveryBlockOpen {
+		t.Fatalf("recovery block state = %s, want open after failed commit", block.State)
+	}
+
+	running, err := baseRepo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if !errors.Is(err, models.ErrExecutorRunningNotFound) || running != nil {
+		t.Fatalf("candidate execution after failed commit = %+v, err=%v; want cleaned up", running, err)
+	}
+}
+
+type continuationCandidateCleanupAgentManager struct {
+	*mockAgentManager
+	cleanupCalls int
+}
+
+func (m *continuationCandidateCleanupAgentManager) CleanupStaleExecutionBySessionIDIfCurrent(
+	_ context.Context,
+	_, _ string,
+	_ time.Time,
+) error {
+	m.cleanupCalls++
+	return nil
+}
+
+func TestRollbackContinuationCandidateCleansOnlyCurrentCandidate(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-continuation-rollback", "session-continuation-rollback", models.TaskSessionStateFailed)
+	session, err := repo.GetTaskSession(ctx, "session-continuation-rollback")
+	if err != nil {
+		t.Fatalf("load seeded session: %v", err)
+	}
+	session.ErrorMessage = "native state missing"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("persist seeded session error: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "candidate-row",
+		SessionID:        "session-continuation-rollback",
+		TaskID:           "task-continuation-rollback",
+		AgentExecutionID: "candidate-execution",
+		Status:           "ready",
+	}); err != nil {
+		t.Fatalf("seed candidate execution: %v", err)
+	}
+	agentManager := &continuationCandidateCleanupAgentManager{mockAgentManager: &mockAgentManager{}}
+	service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	checkpoint := &continuationCheckpoint{
+		sessionID:            "session-continuation-rollback",
+		candidateExecutionID: "candidate-execution",
+		previousState:        models.TaskSessionStateFailed,
+		previousErrorMessage: "native state missing",
+	}
+	if err := service.rollbackContinuationCandidate(ctx, checkpoint); err != nil {
+		t.Fatalf("rollbackContinuationCandidate: %v", err)
+	}
+	if agentManager.cleanupCalls != 1 {
+		t.Fatalf("candidate cleanup calls = %d, want 1", agentManager.cleanupCalls)
+	}
+	session, err = repo.GetTaskSession(ctx, checkpoint.sessionID)
+	if err != nil {
+		t.Fatalf("load rolled-back session: %v", err)
+	}
+	if session.State != checkpoint.previousState || session.ErrorMessage != checkpoint.previousErrorMessage {
+		t.Fatalf("rolled-back session = %+v, want state=%q error=%q", session, checkpoint.previousState, checkpoint.previousErrorMessage)
+	}
 }
 
 // --- launchRestoreWorkspace ---

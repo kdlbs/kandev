@@ -207,6 +207,46 @@ func Release(ctx context.Context, db *sqlx.DB, claim *models.TaskEnvironmentReco
 	return tx.Commit()
 }
 
+// Get returns the durable recovery claim for an environment, if one exists.
+// Callers use it to reconcile an operation that published its filesystem
+// replacement before the owning process stopped.
+func Get(ctx context.Context, db *sqlx.DB, environmentID string) (*models.TaskEnvironmentRecoveryClaim, error) {
+	if db == nil || environmentID == "" {
+		return nil, errors.New("task environment recovery claim: database and environment are required")
+	}
+	claim := &models.TaskEnvironmentRecoveryClaim{}
+	err := db.QueryRowxContext(ctx, db.Rebind(`
+		SELECT task_environment_id, owner_task_id, ownership_generation, session_id,
+			operation_id, executor_type, created_at, updated_at
+		FROM task_environment_recovery_claims WHERE task_environment_id = ?
+	`), environmentID).Scan(
+		&claim.TaskEnvironmentID, &claim.OwnerTaskID, &claim.OwnershipGeneration,
+		&claim.SessionID, &claim.OperationID, &claim.ExecutorType,
+		&claim.CreatedAt, &claim.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return claim, nil
+}
+
+// GetTx reads the current claim inside a caller-owned transaction. Registry
+// updates use it while holding the owner-task lock so the proof cannot be
+// released or rebound between validation and publication.
+func GetTx(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID string) (*models.TaskEnvironmentRecoveryClaim, error) {
+	if db == nil || tx == nil || environmentID == "" {
+		return nil, errors.New("task environment recovery claim: database, transaction, and environment are required")
+	}
+	claim, err := loadClaim(ctx, db, tx, environmentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return claim, err
+}
+
 // EnsureAvailableTx rejects mutations that would overlap recovery. A caller
 // carrying the exact claim may continue its own guarded operation.
 func EnsureAvailableTx(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID string) error {
@@ -430,12 +470,18 @@ func environmentHasConsumers(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, envi
 			SELECT 1 FROM executors_running er
 			JOIN task_sessions ts ON ts.id = er.session_id
 			WHERE ts.task_environment_id = ?
+			  AND (er.status IS NULL OR er.status NOT IN (?, ?, ?))
 	`
 	if allowCurrentSessionRuntime {
 		runtimeQuery += ` AND er.session_id <> ?`
 	}
 	runtimeQuery += `)`
-	args := []interface{}{environmentID}
+	args := []interface{}{
+		environmentID,
+		models.ExecutorRunningStatusFailed,
+		models.ExecutorRunningStatusStopped,
+		models.ExecutorRunningStatusComplete,
+	}
 	if allowCurrentSessionRuntime {
 		args = append(args, requestingSessionID)
 	}

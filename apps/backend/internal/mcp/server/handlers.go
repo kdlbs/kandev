@@ -27,6 +27,7 @@ const (
 	promptArg            = "prompt"
 	questionsArg         = "questions"
 	optionsArg           = "options"
+	allowCustomTextArg   = "allow_custom_text"
 	instructionsArg      = "instructions"
 	idArg                = "id"
 	titleArg             = "title"
@@ -45,8 +46,48 @@ const (
 	reqKey               = "required"
 	typeKey              = "type"
 	stringType           = "string"
+	retryKeyArg          = "retry_key"
 	agentProfileIDArg    = "agent_profile_id"
 )
+
+// transportRequestIDMetaKey is the Kandev-private `_meta` key under which the
+// BeforeCallTool hook records the agent's JSON-RPC request id. mcp-go hands the
+// id to hooks but not to tool handlers, so the hook stamps it onto the request
+// the handler receives.
+const transportRequestIDMetaKey = "kandev.transport_request_id"
+
+// stampTransportRequestID records the JSON-RPC request id on the call request
+// so handlers can build a retry-stable identity. RequestId.String() renders
+// numeric and string ids deterministically regardless of JSON decoding.
+func stampTransportRequestID(request *mcp.CallToolRequest, id any) {
+	if request == nil || id == nil {
+		return
+	}
+	if request.Params.Meta == nil {
+		request.Params.Meta = &mcp.Meta{}
+	}
+	if request.Params.Meta.AdditionalFields == nil {
+		request.Params.Meta.AdditionalFields = map[string]any{}
+	}
+	request.Params.Meta.AdditionalFields[transportRequestIDMetaKey] = mcp.NewRequestId(id).String()
+}
+
+// clarificationRetryKey identifies one agent tool call across exact transport
+// retries: the MCP connection (client session) plus the JSON-RPC request id the
+// agent chose. JSON-RPC ids restart on every new connection, so the connection
+// scope keeps two different calls from aliasing each other. Empty when either
+// component is unavailable, which leaves the backend on its random identity.
+func clarificationRetryKey(ctx context.Context, req mcp.CallToolRequest) string {
+	connectionID := mcpConnectionID(ctx)
+	if connectionID == "" || req.Params.Meta == nil {
+		return ""
+	}
+	requestID, _ := req.Params.Meta.AdditionalFields[transportRequestIDMetaKey].(string)
+	if requestID == "" {
+		return ""
+	}
+	return connectionID + "/" + requestID
+}
 
 func moveTaskEntryOptionsToolOption() mcp.ToolOption {
 	return mcp.WithObject("entry_options",
@@ -176,11 +217,13 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		}
 
 		parentID := req.GetString("parent_id", "")
+		parentIsSelf := false
 		if parentID == "self" {
 			if s.taskID == "" {
 				return mcp.NewToolResultError("cannot use 'self' as parent_id: no current task context"), nil
 			}
 			parentID = s.taskID
+			parentIsSelf = true
 		}
 		workspaceID := req.GetString("workspace_id", "")
 		workflowID := req.GetString("workflow_id", "")
@@ -210,6 +253,12 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		}
 		if s.sessionID != "" && s.taskID != "" {
 			payload["source_session_id"] = s.sessionID
+		}
+		if parentIsSelf {
+			// This is an internal server-owned intent marker. The backend still
+			// authenticates the current session and verifies that parent_id is
+			// the authenticated caller task before applying self placement.
+			payload["parent_is_self"] = true
 		}
 		if externalID := req.GetString("external_id", ""); externalID != "" {
 			payload["external_id"] = externalID
@@ -854,6 +903,11 @@ func (s *Server) askUserQuestionHandler() server.ToolHandlerFunc {
 			questionsArg: questions,
 			"context":    questionCtx,
 		}
+		// Carry the connection-scoped transport identity so an exact retry of
+		// an interrupted call reconciles to the bundle it already created.
+		if retryKey := clarificationRetryKey(ctx, req); retryKey != "" {
+			payload[retryKeyArg] = retryKey
+		}
 
 		// Waiting on a human answer routinely outlasts the agent MCP client's
 		// idle timeout on the in-flight tool call. Stream periodic progress
@@ -1018,6 +1072,11 @@ func normalizeAndValidateQuestion(q map[string]interface{}, index int, seenIDs m
 		return mcp.NewToolResultError(fmt.Sprintf("question %d has duplicate id %q", index+1, id))
 	}
 	seenIDs[id] = true
+	if value, exists := q[allowCustomTextArg]; exists {
+		if _, ok := value.(bool); !ok {
+			return mcp.NewToolResultError(fmt.Sprintf("question %d field %q must be a boolean", index+1, allowCustomTextArg))
+		}
+	}
 
 	options, errResult := decodeOptionsForQuestion(q, index)
 	if errResult != nil {
@@ -1316,7 +1375,15 @@ func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
 
-		payload := map[string]string{"task_id": taskID}
+		arguments, marshalErr := json.Marshal(req.GetArguments())
+		if marshalErr != nil {
+			return mcp.NewToolResultError("invalid plan read arguments"), nil
+		}
+		options, parseErr := taskcontract.ParsePlanReadOptions(arguments)
+		if parseErr != nil {
+			return mcp.NewToolResultError(parseErr.Error()), nil
+		}
+		payload := planReadRequestPayload(taskID, options)
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskPlan, payload, &result); err != nil {
 			return mcp.NewToolResultError(planToolError(err)), nil
@@ -1351,6 +1418,20 @@ func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+func planReadRequestPayload(taskID string, options taskcontract.PlanReadOptions) map[string]interface{} {
+	payload := map[string]interface{}{"task_id": taskID}
+	if options.Offset != nil {
+		payload["offset"] = *options.Offset
+	}
+	if options.Limit != nil {
+		payload["limit"] = *options.Limit
+	}
+	if options.ExpectedVersion != nil {
+		payload["expected_version"] = *options.ExpectedVersion
+	}
+	return payload
 }
 
 func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {

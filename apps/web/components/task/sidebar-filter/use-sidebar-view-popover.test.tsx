@@ -8,6 +8,7 @@ const ALL_VIEW: SidebarView = {
   filters: [],
   sort: { key: "state", direction: "asc" },
   group: "repository",
+  groupIndent: true,
   collapsedGroups: [],
 };
 

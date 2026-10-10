@@ -120,8 +120,10 @@ function restoreColumnToTarget(
 /** Keep right-column constraints tied to Dockview's measured container, not
  * `window.innerWidth`. The app sidebar sits outside Dockview, so the browser
  * viewport can materially overstate the space available to chat + files. */
-function applyRightConstraints(api: DockviewReadyEvent["api"]): number {
-  const measuredWidth = measureDockviewGridWidth(api);
+function applyRightConstraints(
+  api: DockviewReadyEvent["api"],
+  measuredWidth: number | undefined,
+): number {
   const sv = getRootSplitview(api);
   const sidebarWidth = sv?.length >= 3 ? sv.getViewSize(0) : 0;
   const maximumWidth = computeRightMaxPx(measuredWidth, sidebarWidth);
@@ -152,9 +154,9 @@ function enforcePinnedTargets(api: DockviewReadyEvent["api"], allowDuringRestore
   enforcing = true;
   try {
     if (rightVisible) {
-      const maximumWidth = applyRightConstraints(api);
-      const sidebarWidth = store.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
       const measuredWidth = measureDockviewGridWidth(api);
+      const sidebarWidth = store.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
+      const maximumWidth = applyRightConstraints(api, measuredWidth);
       const manualRightWidth = getManualRightWidth(store.currentLayoutEnvId);
       const target =
         manualRightWidth ??
@@ -174,7 +176,7 @@ function setLooseConstraints(api: DockviewReadyEvent["api"]): void {
   if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
 
   if (hasPinnedRightColumn(api)) {
-    applyRightConstraints(api);
+    applyRightConstraints(api, measureDockviewGridWidth(api));
   }
 }
 

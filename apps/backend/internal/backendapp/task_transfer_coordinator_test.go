@@ -53,7 +53,7 @@ func TestTaskTransferCoordinatorAttestorRequiresAssignedSourceCEO(t *testing.T) 
 	}
 	validAgent := &settingsmodels.AgentProfile{
 		ID: "ceo-1", WorkspaceID: "ws-source", Role: settingsmodels.AgentRoleCEO,
-		Status: settingsmodels.AgentStatusWorking,
+		Status: settingsmodels.AgentStatusWorking, Enabled: true,
 	}
 	tests := []struct {
 		name    string
@@ -64,6 +64,9 @@ func TestTaskTransferCoordinatorAttestorRequiresAssignedSourceCEO(t *testing.T) 
 		want    bool
 	}{
 		{name: "assigned CEO", task: validTask, session: validSession, agent: validAgent, want: true},
+		{name: "disabled CEO", task: validTask, session: validSession, agent: &settingsmodels.AgentProfile{
+			ID: "ceo-1", WorkspaceID: "ws-source", Role: settingsmodels.AgentRoleCEO, Status: settingsmodels.AgentStatusWorking,
+		}},
 		{name: "task lookup failure", task: validTask, session: validSession, agent: validAgent, err: errors.New("unavailable")},
 		{name: "missing session", task: validTask, agent: validAgent},
 		{name: "completed session", task: validTask, session: &models.TaskSession{

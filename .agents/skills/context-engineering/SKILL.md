@@ -64,6 +64,11 @@ SOURCE: file at failing line plus the code under test
 NEXT: reproduce locally before changing code
 ```
 
+When batching reads, keep their combined output within the outer tool's output
+budget. If files require full reads, split the batch or read bounded ranges.
+If a result is truncated, retrieve only the missing file or range.
+Do not repeat a completed batch to recover one missing result.
+
 ## Trust Levels
 
 - **Trusted:** project source, tests, scoped `AGENTS.md`, committed specs/ADRs.

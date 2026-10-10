@@ -238,6 +238,7 @@ export function SessionRecoveryNotice({
 
 /** Shared inline rendering for automatic resume failures and read-only notices. */
 export function SessionRecoveryFeedback({
+  ownedByChat = false,
   error,
   notice,
   onRetry,
@@ -248,6 +249,7 @@ export function SessionRecoveryFeedback({
   recoveryFailure,
   testId = "session-recovery-error",
 }: {
+  ownedByChat?: boolean;
   error: string | null;
   notice: string | null;
   onRetry: () => void;
@@ -261,6 +263,7 @@ export function SessionRecoveryFeedback({
   const readOnlyRecovery =
     recoveryFailure?.outcome === "workspace_read_only" ? recoveryFailure : null;
   const statusFailure = recoveryFailure?.outcome === "status_unavailable" ? recoveryFailure : null;
+  if (ownedByChat && !statusFailure) return null;
   return (
     <div id={sessionRecoveryOwnerId(recoveryFailure)} tabIndex={-1}>
       {statusFailure ? (

@@ -28,6 +28,51 @@ export function sanitizeSessionErrorDetails(error: unknown, limit = 4096): strin
     .trim();
 }
 
+export type SessionErrorDetailsField = {
+  label: string;
+  value: string;
+  kind?: "host-attempt-reference" | "host-execution-reference";
+};
+
+/** Sanitizes prose first, then adds only explicitly validated structured fields. */
+export function formatSessionErrorDetails(
+  legacyDetails: unknown,
+  fields: readonly SessionErrorDetailsField[],
+  limit = 4097,
+): string {
+  const structured = fields.flatMap((field) => {
+    const label = sanitizeSessionErrorDetails(field.label, 128);
+    let value = "";
+    if (field.kind === "host-attempt-reference") {
+      if (isSafeHostAttemptReference(field.value)) value = field.value;
+    } else if (field.kind === "host-execution-reference") {
+      if (isSafeExecutionReference(field.value)) value = field.value;
+    } else {
+      value = sanitizeSessionErrorDetails(field.value, 1024);
+    }
+    return label && value ? [`${label}: ${value}`] : [];
+  });
+  const safeLegacy = sanitizeSessionErrorDetails(legacyDetails, limit);
+  const output = [...structured, safeLegacy].filter(Boolean).join("\n");
+  return output.slice(0, limit).replace(/[\uD800-\uDBFF]$/u, "");
+}
+
+function isUUIDReference(value: string): boolean {
+  return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(value);
+}
+
+function isSafeHostAttemptReference(value: string): boolean {
+  if (isUUIDReference(value)) return true;
+  const match = /^resume-(0|[1-9][0-9]{0,19})$/u.exec(value);
+  if (!match) return false;
+  const sequence = match[1];
+  return sequence.length < 20 || sequence <= "18446744073709551615";
+}
+
+function isSafeExecutionReference(value: string): boolean {
+  return isUUIDReference(value);
+}
+
 function redactAssignments(text: string): string {
   const lines = text.split("\n");
   const safe: string[] = [];

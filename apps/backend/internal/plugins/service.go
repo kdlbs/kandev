@@ -233,7 +233,7 @@ func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventB
 		eventHub:                        webapp.NewEventHub(),
 		conversationTokens:              newConversationTokenManager(),
 		conversationEpoch:               uuid.NewString(),
-		humanInteractionReceipts:         newHumanInteractionResponseReceiptStore(),
+		humanInteractionReceipts:        newHumanInteractionResponseReceiptStore(),
 		executorProviderOps:             make(map[string]*activeExecutorProviderOperation),
 		executorProviderDispatches:      make(map[string]map[uint64]context.CancelFunc),
 		executorProviderAdmissionClosed: make(map[string]bool),

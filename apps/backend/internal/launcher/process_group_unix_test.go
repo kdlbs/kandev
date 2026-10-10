@@ -268,6 +268,12 @@ func TestAttachSignalsSecondSignalForceKillsChildren(t *testing.T) {
 
 	exitCh, output := captureLauncherExit(t)
 	supervisor := newSupervisor()
+	t.Cleanup(func() {
+		// The second signal can report exit before graceful shutdown finishes its
+		// final log writes. Join the sync.Once shutdown before captureLauncherExit
+		// restores the process-wide output target.
+		_ = supervisor.shutdown("test cleanup")
+	})
 	supervisor.add(proc)
 	supervisor.attachSignals()
 
@@ -277,6 +283,9 @@ func TestAttachSignalsSecondSignalForceKillsChildren(t *testing.T) {
 
 	waitForLauncherExitCode(t, exitCh, 1)
 	waitForManagedProcessDone(t, proc, 5*time.Second)
+	if got := supervisor.shutdown("test completion"); got != 1 {
+		t.Fatalf("shutdown result after second signal = %d, want cached 1", got)
+	}
 	waitForOutputContains(t, output, "forced shutdown after second signal")
 	waitForOutputContains(t, output, "forced shutdown complete")
 	waitForOutputContains(t, output, "graceful shutdown complete")

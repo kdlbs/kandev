@@ -143,6 +143,16 @@ func convertACPConfigOptions(opts []acp.SessionConfigOption) []streams.ConfigOpt
 					Description: derefStr(o.Description),
 				})
 			}
+		} else if s.Options.Grouped != nil {
+			for _, group := range *s.Options.Grouped {
+				for _, o := range group.Options {
+					co.Options = append(co.Options, streams.ConfigOptionValue{
+						Value:       string(o.Value),
+						Name:        o.Name,
+						Description: derefStr(o.Description),
+					})
+				}
+			}
 		}
 		result = append(result, co)
 	}

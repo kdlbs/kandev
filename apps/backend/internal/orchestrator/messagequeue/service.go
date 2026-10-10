@@ -2838,6 +2838,10 @@ type pendingSendNowClaimRepository interface {
 	DeletePendingSendNowClaim(context.Context, *SendNowClaim) error
 }
 
+type pendingSendNowClaimDeliveryRepository interface {
+	SetPendingSendNowClaimDelivery(context.Context, *SendNowClaim, string, string, string) error
+}
+
 // PendingSendNowClaimPersistenceAvailable reports whether ordinary claimed
 // prompts can be recovered after the owning process exits.
 func (s *Service) PendingSendNowClaimPersistenceAvailable() bool {
@@ -2887,10 +2891,40 @@ func (s *Service) DeletePendingSendNowClaim(ctx context.Context, claim *SendNowC
 	})
 }
 
+// SetPendingSendNowClaimDelivery records the negotiated protocol and immutable
+// submission hash before the replacement prompt reaches the harness.
+func (s *Service) SetPendingSendNowClaimDelivery(
+	ctx context.Context,
+	claim *SendNowClaim,
+	protocol, submissionID, payloadHash string,
+) error {
+	repo, ok := s.repo.(pendingSendNowClaimDeliveryRepository)
+	if !ok {
+		if protocol != DeliveryProtocolV1 {
+			return nil
+		}
+		return errors.New("pending Send Now claim delivery persistence unavailable")
+	}
+	if claim == nil {
+		return ErrSendNowClaimChanged
+	}
+	sessionID, err := sendNowClaimSessionID(claim)
+	if err != nil {
+		return err
+	}
+	return s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return repo.SetPendingSendNowClaimDelivery(admittedCtx, claim, protocol, submissionID, payloadHash)
+	})
+}
+
 type pendingQueueDispatchRepository interface {
 	ListPendingQueueDispatches(context.Context) ([]PendingQueueDispatch, error)
 	MarkPendingQueueDispatchAccepted(context.Context, *QueuedMessage) error
 	DeletePendingQueueDispatch(context.Context, *QueuedMessage) error
+}
+
+type pendingQueueDispatchDeliveryRepository interface {
+	SetPendingQueueDispatchDelivery(context.Context, *QueuedMessage, string, string, string) error
 }
 
 // PendingQueueDispatchPersistenceAvailable reports whether ordinary dequeues
@@ -2921,11 +2955,53 @@ func (s *Service) MarkPendingQueueDispatchAccepted(
 	})
 }
 
+// SetPendingQueueDispatchDelivery records the negotiated protocol and
+// immutable submission hash before the ordinary prompt reaches the harness.
+func (s *Service) SetPendingQueueDispatchDelivery(
+	ctx context.Context,
+	msg *QueuedMessage,
+	protocol, submissionID, payloadHash string,
+) error {
+	repo, ok := s.repo.(pendingQueueDispatchDeliveryRepository)
+	if !ok {
+		if protocol != DeliveryProtocolV1 {
+			return nil
+		}
+		return errors.New("pending queue dispatch delivery persistence unavailable")
+	}
+	if msg == nil {
+		return ErrQueueDispatchClaimChanged
+	}
+	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		return repo.SetPendingQueueDispatchDelivery(admittedCtx, msg, protocol, submissionID, payloadHash)
+	})
+}
+
 // DeletePendingQueueDispatch acknowledges the exact recovered or accepted
 // ordinary dispatch attempt carried by msg.
 func (s *Service) DeletePendingQueueDispatch(ctx context.Context, msg *QueuedMessage) error {
 	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
 		return s.deletePendingQueueDispatch(admittedCtx, msg)
+	})
+}
+
+// AcknowledgeDurablePendingQueueDispatch removes the exact pending claim only
+// after its matching retained submission has authoritative terminal evidence.
+// Ordinary dispatch recovery deliberately keeps this claim until then.
+func (s *Service) AcknowledgeDurablePendingQueueDispatch(ctx context.Context, msg *QueuedMessage) error {
+	if msg == nil {
+		return errors.New("queued message is nil")
+	}
+	protocol, submissionID, _ := msg.DeliverySubmission()
+	if protocol != DeliveryProtocolV1 || submissionID == "" {
+		return errors.New("durable queue claim identity is incomplete")
+	}
+	repo, ok := s.repo.(pendingQueueDispatchRepository)
+	if !ok {
+		return errors.New("pending queue dispatch persistence unavailable")
+	}
+	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		return repo.DeletePendingQueueDispatch(admittedCtx, msg)
 	})
 }
 
@@ -3315,6 +3391,20 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 	return status
 }
 
+// HasPendingForSession reports whether a session still owns queued actionable
+// work. Callers that need an atomic admission boundary must hold the session
+// admission lock while checking it.
+func (s *Service) HasPendingForSession(ctx context.Context, sessionID string) (bool, error) {
+	if s == nil || s.repo == nil || sessionID == "" {
+		return false, nil
+	}
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return len(entries) > 0, nil
+}
+
 // Snapshot returns an ordered status bound to one immutable session identity.
 func (s *Service) Snapshot(ctx context.Context, identity QueueSessionIdentity) (*QueueStatus, error) {
 	snapshot, err := s.repo.Snapshot(ctx, identity)
@@ -3375,12 +3465,18 @@ func (s *Service) Snapshot(ctx context.Context, identity QueueSessionIdentity) (
 func (s *Service) CountPendingByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error) {
 	counts, err := s.repo.CountPendingByTaskIDs(ctx, taskIDs)
 	if err != nil {
-		s.logger.Error("count pending by task ids failed",
-			zap.Int("task_count", len(taskIDs)),
-			zap.Error(err))
+		if !isCanceledRequestError(ctx, err) {
+			s.logger.Error("count pending by task ids failed",
+				zap.Int("task_count", len(taskIDs)),
+				zap.Error(err))
+		}
 		return nil, err
 	}
 	return counts, nil
+}
+
+func isCanceledRequestError(ctx context.Context, err error) bool {
+	return errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled)
 }
 
 // CountPendingByTask returns the pending prompt count for one task.

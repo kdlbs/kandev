@@ -5,6 +5,8 @@ import type {
   ChatSubmitDecorationSlotProps as PublicChatSubmitDecorationSlotProps,
   HostReact as PublicHostReact,
   MainTopBarSlotProps as PublicMainTopBarSlotProps,
+  PluginComposerSlotProps as PublicPluginComposerSlotProps,
+  PluginTaskCreatedIdentity as PublicPluginTaskCreatedIdentity,
   PluginConversationApi as PublicPluginConversationApi,
   PluginConversationError as PublicPluginConversationError,
   PluginConversationMessage as PublicPluginConversationMessage,
@@ -20,7 +22,9 @@ import type {
   PluginSessionTurnsState as PublicPluginSessionTurnsState,
   PluginTaskPanelContext as PublicPluginTaskPanelContext,
   PluginTaskPanelProps as PublicPluginTaskPanelProps,
+  PluginTaskCreatedHandler as PublicPluginTaskCreatedHandler,
   PluginUIApi as PublicPluginUIApi,
+  RegisterPluginTaskCreatedHandler as PublicRegisterPluginTaskCreatedHandler,
   RepositoryProviderRegistration as PublicRepositoryProviderRegistration,
   ReviewSummary as PublicReviewSummary,
   ReviewTaskAssociation as PublicReviewTaskAssociation,
@@ -47,6 +51,10 @@ import type {
   PluginSessionTurnsState,
   PluginTaskPanelContext,
   PluginTaskPanelProps,
+  PluginComposerSlotProps,
+  PluginTaskCreatedIdentity,
+  PluginTaskCreatedHandler,
+  RegisterPluginTaskCreatedHandler,
   RepositoryProviderRegistration,
   ReviewItemSummary,
   ReviewTaskAssociation,
@@ -84,6 +92,26 @@ const pluginActionConsumerProps: PublicPluginActionProps = {
   onClick: reactActionClick,
   onPointerDown: reactActionPointerDown,
   ref: reactActionRef,
+};
+
+const registerTaskCreatedHandler: PublicRegisterPluginTaskCreatedHandler = (handler) => {
+  void handler;
+  return () => {};
+};
+const taskCreatedPluginConsumerProps: PublicPluginComposerSlotProps = {
+  surface: "task-create",
+  presentation: "desktop",
+  taskId: null,
+  activeSessionId: null,
+  sessionIds: [],
+  disabled: false,
+  submittable: true,
+  composer: {
+    insertText: () => ({ status: "inserted" }),
+    focus: () => ({ status: "focused" }),
+    submit: async () => ({ status: "submitted" }),
+  },
+  registerTaskCreatedHandler,
 };
 
 const legacyHostUIConsumer: FeatureDetectablePluginUI = { Button: {} };
@@ -221,6 +249,35 @@ describe("public plugin SDK", () => {
     expect(legacyTaskPanelRegistration.title).toBe("Legacy");
     expect(publicHostContract).toBeTypeOf("function");
     expect(publicRegistryContract).toBeTypeOf("function");
+  });
+});
+
+describe("task creation completion SDK contract", () => {
+  it("publishes generic, matching host and plugin callback types", () => {
+    const composerSlotPropsAreCanonical: SameType<
+      PluginComposerSlotProps,
+      PublicPluginComposerSlotProps
+    > = true;
+    const createdTaskIdentityIsCanonical: SameType<
+      PluginTaskCreatedIdentity,
+      PublicPluginTaskCreatedIdentity
+    > = true;
+    const taskCreatedHandlerIsCanonical: SameType<
+      PluginTaskCreatedHandler,
+      PublicPluginTaskCreatedHandler
+    > = true;
+    const taskCreatedRegistrationIsCanonical: SameType<
+      RegisterPluginTaskCreatedHandler,
+      PublicRegisterPluginTaskCreatedHandler
+    > = true;
+
+    expect(composerSlotPropsAreCanonical).toBe(true);
+    expect(createdTaskIdentityIsCanonical).toBe(true);
+    expect(taskCreatedHandlerIsCanonical).toBe(true);
+    expect(taskCreatedRegistrationIsCanonical).toBe(true);
+    expect(taskCreatedPluginConsumerProps.registerTaskCreatedHandler).toBe(
+      registerTaskCreatedHandler,
+    );
   });
 });
 

@@ -196,7 +196,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Autopilot:                   req.Autopilot,
 		Priority:                    req.Priority,
 		State:                       req.State,
-		Repositories:                convertToServiceRepos(repos),
+		Repositories:                convertTaskRepositories(req.Repositories != nil, repos),
 		Position:                    req.Position,
 		Metadata:                    req.Metadata,
 		DeferredLaunch:              deferredLaunch,
@@ -366,7 +366,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Description:    description,
 		Priority:       req.Priority,
 		State:          req.State,
-		Repositories:   convertUpdateRepositories(req.Repositories != nil, repos),
+		Repositories:   convertTaskRepositories(req.Repositories != nil, repos),
 		Position:       req.Position,
 		Metadata:       req.Metadata,
 		ParentID:       req.ParentID,
@@ -414,6 +414,8 @@ func (h *TaskHandlers) wsDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 	)
 	if err != nil {
 		switch {
+		case errors.Is(err, repoerrors.ErrTaskHierarchyConflict):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
 		case errors.Is(err, service.ErrTaskDeleteConfirmationRequired):
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "current task deletion preview is required", nil)
 		case errors.Is(err, service.ErrTaskDeleteConfirmationIdentity):

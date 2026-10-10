@@ -45,6 +45,8 @@ type taskScopedMCPHandler struct {
 	sessionID                 string
 	managedToolPolicy         *mcpprofile.ManagedToolPolicy
 	managedToolPolicyRequired bool
+	coordinatorToolPolicy     *mcpprofile.CoordinatorToolPolicy
+	coordinatorPolicyRequired bool
 	logger                    *logger.Logger
 }
 
@@ -55,6 +57,8 @@ type currentMCPHandler struct {
 	sessionID                 string
 	managedToolPolicy         *mcpprofile.ManagedToolPolicy
 	managedToolPolicyRequired bool
+	coordinatorToolPolicy     *mcpprofile.CoordinatorToolPolicy
+	coordinatorPolicyRequired bool
 }
 
 func (h *currentMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -74,6 +78,8 @@ func (h *currentMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.
 		sessionID:                 h.sessionID,
 		managedToolPolicy:         h.managedToolPolicy,
 		managedToolPolicyRequired: h.managedToolPolicyRequired,
+		coordinatorToolPolicy:     h.coordinatorToolPolicy,
+		coordinatorPolicyRequired: h.coordinatorPolicyRequired,
 		logger:                    h.streamManager.logger,
 	}).Dispatch(ctx, msg)
 }
@@ -88,6 +94,9 @@ func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*
 		SessionID:                 h.sessionID,
 		ManagedToolPolicy:         h.managedToolPolicy,
 		ManagedToolPolicyRequired: h.managedToolPolicyRequired,
+
+		CoordinatorToolPolicy:         h.coordinatorToolPolicy,
+		CoordinatorToolPolicyRequired: h.coordinatorPolicyRequired,
 	})
 	scoped := ctx
 	if h.scope != nil {
@@ -133,6 +142,17 @@ func (sm *StreamManager) mcpHandlerFor(execution *AgentExecution) agentctl.MCPHa
 				zap.String("execution_id", execution.ID), zap.Error(err))
 		}
 	}
+	var coordinatorToolPolicy *mcpprofile.CoordinatorToolPolicy
+	coordinatorPolicyRequired := false
+	if value, present := execution.metadataValue(mcpprofile.CoordinatorToolPolicyMetadataKey); present {
+		coordinatorPolicyRequired = true
+		var err error
+		coordinatorToolPolicy, err = mcpprofile.ParseCoordinatorToolPolicyMetadata(value)
+		if err != nil {
+			sm.logger.Warn("coordinator agent execution has invalid tool policy metadata",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		}
+	}
 	return &currentMCPHandler{
 		streamManager:             sm,
 		executionID:               execution.ID,
@@ -140,6 +160,8 @@ func (sm *StreamManager) mcpHandlerFor(execution *AgentExecution) agentctl.MCPHa
 		sessionID:                 execution.SessionID,
 		managedToolPolicy:         managedToolPolicy,
 		managedToolPolicyRequired: managedToolPolicyRequired,
+		coordinatorToolPolicy:     coordinatorToolPolicy,
+		coordinatorPolicyRequired: coordinatorPolicyRequired,
 	}
 }
 

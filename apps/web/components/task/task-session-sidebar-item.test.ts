@@ -27,6 +27,16 @@ function task(overrides: Partial<SidebarTask> = {}): SidebarTask {
   } as SidebarTask;
 }
 
+function taskWithRunningSummary(hasRunningSession: boolean): SidebarTask {
+  return task({
+    statusSummary: {
+      revision: 2,
+      updated_at: UPDATED_AT,
+      has_running_session: hasRunningSession,
+    },
+  });
+}
+
 function repositoryProjectionTask(): SidebarTask {
   return task({
     repositoryId: "repo-a",
@@ -77,27 +87,10 @@ describe("buildSidebarItem", () => {
       emptyContext(),
     );
 
-    expect(item.prInfo).toEqual({ number: 42, state: "Open", aggregateState: "pending" });
-  });
-
-  it("uses summary presence as the authority for cleared session and pending fields", () => {
-    const item = buildSidebarItem(
-      task({
-        taskPendingAction: "clarification",
-        primarySessionState: "RUNNING",
-        primarySessionId: "legacy-session",
-        foregroundActivity: "background",
-        updatedAt: "legacy-update",
-        statusSummary: { revision: 2, updated_at: UPDATED_AT },
-      }),
-      emptyContext(),
-    );
-
-    expect(item.hasPendingClarification).toBe(false);
-    expect(item.sessionState).toBeUndefined();
-    expect(item.primarySessionId).toBeNull();
-    expect(item.foregroundActivity).toBeUndefined();
-    expect(item.updatedAt).toBe(UPDATED_AT);
+    expect(item.prInfo).toMatchObject({
+      aggregateState: "pending",
+      statusSummaryUpdatedAt: UPDATED_AT,
+    });
   });
 
   it("honors the summary error acknowledgement stamp", () => {
@@ -168,6 +161,37 @@ describe("buildSidebarItem", () => {
   });
 });
 
+describe("buildSidebarItem task status summary", () => {
+  it("uses summary presence as the authority for cleared session and pending fields", () => {
+    const item = buildSidebarItem(
+      task({
+        taskPendingAction: "clarification",
+        primarySessionState: "RUNNING",
+        primarySessionId: "legacy-session",
+        foregroundActivity: "background",
+        updatedAt: "legacy-update",
+        statusSummary: { revision: 2, updated_at: UPDATED_AT },
+      }),
+      emptyContext(),
+    );
+
+    expect(item.hasPendingClarification).toBe(false);
+    expect(item.sessionState).toBeUndefined();
+    expect(item.hasRunningSession).toBeUndefined();
+    expect(item.primarySessionId).toBeNull();
+    expect(item.foregroundActivity).toBeUndefined();
+    expect(item.updatedAt).toBe(UPDATED_AT);
+  });
+
+  it("preserves the task-wide running value, including explicit false", () => {
+    const running = buildSidebarItem(taskWithRunningSummary(true), emptyContext());
+    const settled = buildSidebarItem(taskWithRunningSummary(false), emptyContext());
+
+    expect(running.hasRunningSession).toBe(true);
+    expect(settled.hasRunningSession).toBe(false);
+  });
+});
+
 describe("buildSidebarItem Office identity", () => {
   // @covers AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.4
   it("preserves isFromOffice for candidate filtering", () => {
@@ -221,8 +245,10 @@ describe("buildSidebarItem automation indicators", () => {
     expect(item.prInfo).toEqual({
       number: 42,
       state: "Open",
+      aggregateState: undefined,
       autoFixEnabled: true,
       autoMergeEnabled: true,
+      statusSummaryUpdatedAt: UPDATED_AT,
     });
   });
 });

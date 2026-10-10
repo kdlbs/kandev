@@ -31,6 +31,9 @@ func (r *Repository) prepareWorkspace(workspace *models.Workspace) {
 	if workspace.TaskPrefix == "" {
 		workspace.TaskPrefix = "KAN"
 	}
+	if workspace.ACPIdleTimeoutMinutes == 0 {
+		workspace.ACPIdleTimeoutMinutes = 120
+	}
 }
 
 func (r *Repository) insertWorkspace(ctx context.Context, exec sqlx.ExtContext, workspace *models.Workspace) error {
@@ -49,27 +52,41 @@ func (r *Repository) insertWorkspace(ctx context.Context, exec sqlx.ExtContext, 
 			task_prefix,
 			task_sequence,
 			office_workflow_id,
+			acp_idle_suspension_enabled,
+			acp_idle_timeout_minutes,
 			created_at,
 			updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.OrgID, workspace.UnitID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.TaskPrefix, workspace.TaskSequence, workspace.OfficeWorkflowID, workspace.CreatedAt, workspace.UpdatedAt)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workspace.ID, workspace.Name, workspace.Description, workspace.OwnerID, workspace.OrgID, workspace.UnitID, workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID, workspace.DefaultConfigAgentProfileID, workspace.TaskPrefix, workspace.TaskSequence, workspace.OfficeWorkflowID, workspace.ACPIdleSuspensionEnabled, workspace.ACPIdleTimeoutMinutes, workspace.CreatedAt, workspace.UpdatedAt)
 
 	return err
 }
 
 // GetWorkspace retrieves a workspace by ID
 func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
+	workspace, err := scanWorkspaceRow(r.ro.QueryRowContext(ctx, r.ro.Rebind("SELECT "+workspaceSelectColumns+" FROM workspaces WHERE id = ?"), id))
+	if err == sql.ErrNoRows {
+		return nil, workspaceNotFoundError(id)
+	}
+	return workspace, err
+}
+
+const workspaceSelectColumns = "id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, acp_idle_suspension_enabled, acp_idle_timeout_minutes, created_at, updated_at"
+
+type workspaceScanner interface {
+	Scan(...any) error
+}
+
+func scanWorkspaceRow(scanner workspaceScanner) (*models.Workspace, error) {
 	workspace := &models.Workspace{}
 	var defaultExecutorID sql.NullString
 	var defaultEnvironmentID sql.NullString
 	var defaultAgentProfileID sql.NullString
 	var defaultConfigAgentProfileID sql.NullString
+	var acpIdleSuspensionEnabled bool
 
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, created_at, updated_at
-		FROM workspaces WHERE id = ?
-	`), id).Scan(
+	err := scanner.Scan(
 		&workspace.ID,
 		&workspace.Name,
 		&workspace.Description,
@@ -83,6 +100,8 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 		&workspace.TaskPrefix,
 		&workspace.TaskSequence,
 		&workspace.OfficeWorkflowID,
+		&acpIdleSuspensionEnabled,
+		&workspace.ACPIdleTimeoutMinutes,
 		&workspace.CreatedAt,
 		&workspace.UpdatedAt,
 	)
@@ -98,11 +117,12 @@ func (r *Repository) GetWorkspace(ctx context.Context, id string) (*models.Works
 	if defaultConfigAgentProfileID.Valid && defaultConfigAgentProfileID.String != "" {
 		workspace.DefaultConfigAgentProfileID = &defaultConfigAgentProfileID.String
 	}
+	workspace.ACPIdleSuspensionEnabled = acpIdleSuspensionEnabled
 
-	if err == sql.ErrNoRows {
-		return nil, workspaceNotFoundError(id)
+	if err != nil {
+		return nil, err
 	}
-	return workspace, err
+	return workspace, nil
 }
 
 // UpdateWorkspace updates an existing workspace
@@ -115,6 +135,9 @@ func (r *Repository) UpdateWorkspaceIfUnchanged(ctx context.Context, workspace *
 }
 
 func (r *Repository) updateWorkspace(ctx context.Context, workspace *models.Workspace, expected *time.Time) error {
+	if workspace.ACPIdleTimeoutMinutes == 0 {
+		workspace.ACPIdleTimeoutMinutes = 120
+	}
 	workspace.UpdatedAt = time.Now().UTC()
 	query := `
 		UPDATE workspaces
@@ -125,12 +148,15 @@ func (r *Repository) updateWorkspace(ctx context.Context, workspace *models.Work
 			default_environment_id = ?,
 			default_agent_profile_id = ?,
 			default_config_agent_profile_id = ?,
+			acp_idle_suspension_enabled = ?,
+			acp_idle_timeout_minutes = ?,
 			updated_at = ?
 		WHERE id = ?`
 	args := []interface{}{
 		workspace.Name, workspace.Description, workspace.UnitID,
 		workspace.DefaultExecutorID, workspace.DefaultEnvironmentID, workspace.DefaultAgentProfileID,
-		workspace.DefaultConfigAgentProfileID, workspace.UpdatedAt, workspace.ID,
+		workspace.DefaultConfigAgentProfileID, workspace.ACPIdleSuspensionEnabled,
+		workspace.ACPIdleTimeoutMinutes, workspace.UpdatedAt, workspace.ID,
 	}
 	if expected != nil {
 		query += optimisticUpdatedAtPredicate
@@ -209,11 +235,14 @@ func (r *Repository) deleteWorkspaceCascade(
 	expectedName *string,
 	cleanup func(context.Context, *sqlx.Tx) error,
 ) ([]*models.Task, []*models.Workflow, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, []string{id}, nil); err != nil {
+		return nil, nil, err
+	}
 
 	// Lock the workspace row BEFORE inventorying its tasks: task creation
 	// takes the same lock, so a task created after this point either commits
@@ -260,6 +289,9 @@ func (r *Repository) deleteWorkspaceCascade(
 	}
 	sort.Strings(lockIDs)
 	for _, taskID := range lockIDs {
+		if err := r.managedDeletionBarrierTx(ctx, tx, taskID); err != nil {
+			return nil, nil, err
+		}
 		if err := r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
 			return nil, nil, fmt.Errorf("guard cascade task row %s: %w", taskID, err)
 		}
@@ -322,6 +354,9 @@ func (r *Repository) purgeWorkspaceTaskQueuesInTx(ctx context.Context, tx *sqlx.
 		sessions, err := r.taskQueueSessionsInTx(ctx, tx, task.ID)
 		if err != nil {
 			return fmt.Errorf("task queue sessions for cascade task %s: %w", task.ID, err)
+		}
+		if err := r.purgeTaskPromptSequenceTx(ctx, tx, task.ID, sessions); err != nil {
+			return err
 		}
 		if err := r.purgeTaskQueueInTx(ctx, tx, task.ID, sessions, true); err != nil {
 			return fmt.Errorf("purge task queue for workspace cascade task %s: %w", task.ID, err)
@@ -482,7 +517,7 @@ func (r *Repository) ClaimUnownedWorkspaces(ctx context.Context, ownerID string)
 
 func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	rows, err := r.ro.QueryContext(ctx, `
-		SELECT id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, created_at, updated_at
+		SELECT id, name, description, owner_id, org_id, unit_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, acp_idle_suspension_enabled, acp_idle_timeout_minutes, created_at, updated_at
 		FROM workspaces ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -497,6 +532,7 @@ func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, e
 		var defaultEnvironmentID sql.NullString
 		var defaultAgentProfileID sql.NullString
 		var defaultConfigAgentProfileID sql.NullString
+		var acpIdleSuspensionEnabled bool
 		if err := rows.Scan(
 			&workspace.ID,
 			&workspace.Name,
@@ -511,11 +547,14 @@ func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, e
 			&workspace.TaskPrefix,
 			&workspace.TaskSequence,
 			&workspace.OfficeWorkflowID,
+			&acpIdleSuspensionEnabled,
+			&workspace.ACPIdleTimeoutMinutes,
 			&workspace.CreatedAt,
 			&workspace.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
+		workspace.ACPIdleSuspensionEnabled = acpIdleSuspensionEnabled
 		if defaultExecutorID.Valid && defaultExecutorID.String != "" {
 			workspace.DefaultExecutorID = &defaultExecutorID.String
 		}

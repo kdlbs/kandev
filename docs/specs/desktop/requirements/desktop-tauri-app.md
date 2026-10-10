@@ -2,7 +2,7 @@
 status: active
 system: desktop
 created: 2026-06-23
-updated: 2026-09-25
+updated: 2026-09-30
 owners:
   - tbd
 ---
@@ -47,6 +47,10 @@ Kandev's installed desktop app should behave like a native application without d
   below the native controls; the workspace switcher shall reappear when the
   sidebar expands, including after hover reveal. Neither sidebar state shall
   place an interactive target under the traffic lights.
+
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.12:** After a macOS external-link helper exits, the desktop app shall reap it within one second under normal scheduling. Repeated link opens shall not accumulate zombie children.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.13:** An external-link launch shall not wait for the browser to close or block application interaction. Validation and origin checks shall still reject unauthorized destinations. A process-spawn failure shall return an error to the caller.
+- **AC-DESKTOP-DESKTOP-TAURI-APP-001.14:** External-link cleanup shall reap only the helper for that launch. It shall not consume another child process's exit status or stop the owned backend.
 
 ## System design
 

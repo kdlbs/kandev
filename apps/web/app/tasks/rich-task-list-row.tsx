@@ -6,6 +6,7 @@ import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { RegisteredChangeRequestTaskIcon } from "@/components/integrations/registered-change-request-task-icon";
 import { TaskRowMetadata } from "@/components/task/task-row-plugin-slots";
 import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
+import { TaskPriorityIndicator } from "@/components/task/task-priority-indicator";
 import { taskPRInfoFromSummary } from "@/lib/task-pr-info";
 import { useTaskPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
@@ -52,6 +53,7 @@ function PrimaryTaskLine({
       <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
         {task.title}
       </span>
+      <TaskPriorityIndicator priority={task.priority} testId="tasks-list-row-priority" />
       {showContributions && (
         <span
           className="inline-flex items-center gap-1"

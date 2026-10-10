@@ -25,7 +25,7 @@ import { MessageList } from "@/components/task/chat/message-list";
 import {
   type MessageListHandle,
   type LastPromptEdge,
-  getLastUserMessageId,
+  filterLaunchErrorItems,
   getFirstUserMessageId,
   resolveLastPromptControls,
 } from "@/components/task/chat/message-list-shared";
@@ -46,6 +46,9 @@ import { findUnreadDividerItemId, lastRenderedMessageId } from "@/lib/session-un
 import { useSessionReadTracking } from "./chat/use-session-read-tracking";
 import { useDrainOlderMessages } from "@/components/task/chat/use-drain-older-messages";
 import type { RenderItem } from "@/hooks/use-processed-messages";
+import { useSessionPrompts } from "@/hooks/domains/session/use-session-prompts";
+import { resolveLastPromptMessage } from "@/lib/session-last-prompt";
+import type { Message } from "@/lib/types/http";
 
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
@@ -64,6 +67,9 @@ import { LaunchQueueStatus } from "./launch-queue-status";
 import { WipQueueStatus } from "./wip-queue-status";
 import { useLateClarificationMessage } from "@/hooks/use-late-clarification-message";
 import { JumpToLatestButton } from "./chat/jump-to-latest-button";
+import { ConversationUsageDisplay } from "./chat/conversation-usage-display";
+
+const EMPTY_WINDOW_MESSAGES: Message[] = [];
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -78,13 +84,30 @@ function useClarificationKey(agentMessageCount: number) {
   return { clarificationKey, handleClarificationResolved };
 }
 
-/** Identity for a prompt-history target owned by a non-Dockview host. */
+/** Identity for a transcript scroll target owned by a non-Dockview host. */
 export type PendingMessageScrollTarget = {
   sessionId: string;
   messageId: string;
   token: number;
   hostPanelId: string;
+  generation?: number;
 };
+
+function hasHostScrollTarget(params: {
+  pendingScrollToMessageId?: string | null;
+  pendingScrollTarget?: PendingMessageScrollTarget | null;
+  panelId: string | null;
+  dockviewTarget: TranscriptScrollTarget | null;
+  sessionId: string | null;
+}) {
+  const { pendingScrollToMessageId, pendingScrollTarget, panelId, dockviewTarget, sessionId } =
+    params;
+  return Boolean(
+    pendingScrollToMessageId ||
+    pendingScrollTarget ||
+    (panelId && dockviewTarget?.sessionId === sessionId && dockviewTarget.hostPanelId === panelId),
+  );
+}
 
 export function cancelOlderTranscriptNavigation(params: {
   sessionId: string | null;
@@ -146,13 +169,16 @@ type PendingMessageScrollOptions = {
   readinessKey: string;
   isInitialMessagesLoading: boolean;
   isVisible?: boolean;
+  settlementMode?: "identity" | "visibility";
 };
 
 type MessageTargetLifecycle = {
+  hostSessionId: string | null;
   sessionId: string | null;
   messageId: string | null | undefined;
   target?: PendingMessageScrollTarget | null;
   isVisible: boolean;
+  generation: number;
 };
 
 type AroundWindowRequestOptions = {
@@ -242,10 +268,13 @@ type PendingMessageScrollEffectOptions = {
   readinessKey: string;
   isInitialMessagesLoading: boolean;
   isVisible: boolean;
+  hostSessionId: string | null;
   effectiveSessionId: string | null;
   effectiveMessageId: string | null | undefined;
   effectiveTargetKey: string | null;
   targetBelongsToHost: boolean;
+  settlementMode: "identity" | "visibility";
+  generation: number;
   store: StoreApi<AppState>;
   refs: {
     requestKeys: MutableRefObject<Set<string>>;
@@ -270,6 +299,7 @@ type PendingMessageTargetAttemptOptions = {
   refs: PendingMessageScrollEffectOptions["refs"];
   setIsLoading: (loading: boolean) => void;
   isCurrentTarget: () => boolean;
+  settlementGuard: () => boolean;
   consume: () => void;
 };
 
@@ -283,6 +313,7 @@ function attemptPendingMessageScroll({
   refs,
   setIsLoading,
   isCurrentTarget,
+  settlementGuard,
   consume,
 }: PendingMessageTargetAttemptOptions) {
   if (!isCurrentTarget()) return;
@@ -336,7 +367,7 @@ function attemptPendingMessageScroll({
     store,
     requestKeysRef: refs.requestKeys,
     mountedRef: refs.mounted,
-    isCurrentTarget,
+    isCurrentTarget: settlementGuard,
     setLoading: setIsLoading,
     onMerged: () => {
       refs.completedAround.current.add(targetKey);
@@ -354,10 +385,13 @@ function usePendingMessageScrollEffect(options: PendingMessageScrollEffectOption
     readinessKey,
     isInitialMessagesLoading,
     isVisible,
+    hostSessionId,
     effectiveSessionId,
     effectiveMessageId,
     effectiveTargetKey,
     targetBelongsToHost,
+    settlementMode,
+    generation,
     store,
     refs,
     setIsLoading,
@@ -392,15 +426,18 @@ function usePendingMessageScrollEffect(options: PendingMessageScrollEffectOption
     }
     if (!isVisible) {
       cancelReassertion();
-      refs.completedAround.current.delete(effectiveTargetKey);
+      if (settlementMode === "visibility") refs.completedAround.current.delete(effectiveTargetKey);
       return;
     }
-    const isCurrentTarget = () =>
+    const isSameTarget = () =>
       refs.mounted.current &&
-      refs.lifecycle.current.isVisible &&
       refs.targetIdentity.current === effectiveTargetKey &&
+      refs.lifecycle.current.hostSessionId === hostSessionId &&
       refs.lifecycle.current.sessionId === effectiveSessionId &&
-      refs.lifecycle.current.messageId === effectiveMessageId;
+      refs.lifecycle.current.messageId === effectiveMessageId &&
+      refs.lifecycle.current.generation === generation &&
+      refs.lifecycle.current.target?.token === target?.token;
+    const isCurrentTarget = () => isSameTarget() && refs.lifecycle.current.isVisible;
     const consume = () => onConsumed?.(effectiveMessageId);
     const frame = requestAnimationFrame(() => {
       attemptPendingMessageScroll({
@@ -413,6 +450,7 @@ function usePendingMessageScrollEffect(options: PendingMessageScrollEffectOption
         refs,
         setIsLoading,
         isCurrentTarget,
+        settlementGuard: settlementMode === "identity" ? isSameTarget : isCurrentTarget,
         consume,
       });
     });
@@ -431,7 +469,30 @@ function usePendingMessageScrollEffect(options: PendingMessageScrollEffectOption
     store,
     target,
     targetBelongsToHost,
+    generation,
+    settlementMode,
   ]);
+}
+
+function scrollTargetKey(
+  sessionId: string | null,
+  messageId: string | null | undefined,
+  target: PendingMessageScrollTarget | null | undefined,
+): string | null {
+  if (!sessionId || !messageId) return null;
+  return `${sessionId}\u0000${messageId}\u0000${target?.token ?? 0}\u0000${target?.hostPanelId ?? "pending"}`;
+}
+
+function targetBelongsToSessionHost(
+  target: PendingMessageScrollTarget | null | undefined,
+  sessionId: string | null,
+  generation: number,
+): boolean {
+  return (
+    !target ||
+    (target.sessionId === sessionId &&
+      (target.generation === undefined || target.generation === generation))
+  );
 }
 
 export function usePendingMessageScroll({
@@ -443,6 +504,7 @@ export function usePendingMessageScroll({
   readinessKey,
   isInitialMessagesLoading,
   isVisible = true,
+  settlementMode = "visibility",
 }: PendingMessageScrollOptions) {
   const store = useAppStoreApi();
   const [isLoading, setIsLoading] = useState(false);
@@ -456,23 +518,32 @@ export function usePendingMessageScroll({
       reassertionTimer: { current: null as number | null },
       reassertionAttempted: { current: new Set<string>() },
       mounted: { current: true },
-      lifecycle: { current: { sessionId, messageId, target, isVisible } },
+      lifecycle: {
+        current: {
+          hostSessionId: sessionId,
+          sessionId,
+          messageId,
+          target,
+          isVisible,
+          generation: 0,
+        },
+      },
     }),
     [],
   );
+  const generation = sessionId
+    ? (store.getState().messagePrompts?.generationBySession?.[sessionId] ?? 0)
+    : 0;
   const effectiveSessionId = target?.sessionId ?? sessionId;
   const effectiveMessageId = target?.messageId ?? messageId;
-  const targetToken = target?.token ?? 0;
-  const targetHostPanelId = target?.hostPanelId ?? "pending";
-  const effectiveTargetKey =
-    effectiveSessionId && effectiveMessageId
-      ? `${effectiveSessionId}\u0000${effectiveMessageId}\u0000${targetToken}\u0000${targetHostPanelId}`
-      : null;
+  const effectiveTargetKey = scrollTargetKey(effectiveSessionId, effectiveMessageId, target);
   refs.lifecycle.current = {
+    hostSessionId: sessionId,
     sessionId: effectiveSessionId,
     messageId: effectiveMessageId,
     target,
     isVisible,
+    generation,
   };
   useEffect(() => {
     refs.mounted.current = true;
@@ -488,10 +559,13 @@ export function usePendingMessageScroll({
     readinessKey,
     isInitialMessagesLoading,
     isVisible,
+    hostSessionId: sessionId,
     effectiveSessionId,
     effectiveMessageId,
     effectiveTargetKey,
-    targetBelongsToHost: !target || target.sessionId === sessionId,
+    targetBelongsToHost: targetBelongsToSessionHost(target, sessionId, generation),
+    generation,
+    settlementMode,
     store,
     refs,
     setIsLoading,
@@ -1034,7 +1108,7 @@ function useDockviewTargetEffect(options: DockviewTargetEffectOptions) {
 }
 
 /**
- * Consumes Dockview prompt-history targets. Around-window targets stay owned
+ * Consumes Dockview transcript scroll targets. Around-window targets stay owned
  * through their first rendered placement and one delayed reassertion.
  */
 export function useScrollTargetConsumption({
@@ -1208,9 +1282,8 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   // advance the read cursor, but their transcript is rendered in a visible
   // non-Dockview host. Keep read visibility separate from scroll geometry.
   const transcriptIsVisible = panelId === null || isVisible;
-  const dockviewTargetMessageId = useDockviewStore(
-    (state) => state.scrollTarget?.messageId ?? null,
-  );
+  const dockviewTarget = useDockviewStore((state) => state.scrollTarget);
+  const dockviewTargetMessageId = dockviewTarget?.messageId ?? null;
   const isDockviewJumpLoading = useScrollTargetConsumption({
     resolvedSessionId,
     isVisible,
@@ -1222,6 +1295,42 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     ),
     renderedMessageCount: allMessages.length,
   });
+  const windowMessages = useAppStore((state) =>
+    resolvedSessionId
+      ? (state.messages.bySession[resolvedSessionId] ?? EMPTY_WINDOW_MESSAGES)
+      : EMPTY_WINDOW_MESSAGES,
+  );
+  const hasHostTarget = hasHostScrollTarget({
+    pendingScrollToMessageId,
+    pendingScrollTarget,
+    panelId,
+    dockviewTarget,
+    sessionId: resolvedSessionId,
+  });
+  const [localTarget, setLocalTarget] = useState<PendingMessageScrollTarget | null>(null);
+  const localToken = useRef(0);
+  const pendingRowId =
+    pendingScrollTarget?.messageId ?? pendingScrollToMessageId ?? localTarget?.messageId;
+  const targetRowRendered = Boolean(
+    pendingRowId && isMessageRowRendered(groupedItems, pendingRowId),
+  );
+  const readinessKey = `${windowMessages.length}:${isInitialMessagesLoading}:${
+    windowMessages[0]?.id ?? ""
+  }:${windowMessages.at(-1)?.id ?? ""}:${targetRowRendered}`;
+  const generation = useAppStore((state) =>
+    resolvedSessionId ? (state.messagePrompts.generationBySession?.[resolvedSessionId] ?? 0) : 0,
+  );
+  useEffect(() => {
+    if (
+      hasHostTarget ||
+      (localTarget &&
+        (localTarget.sessionId !== resolvedSessionId || localTarget.generation !== generation))
+    )
+      setLocalTarget(null);
+  }, [generation, hasHostTarget, localTarget, resolvedSessionId]);
+  const consumeLocalTarget = useCallback((messageId: string) => {
+    setLocalTarget((target) => (target?.messageId === messageId ? null : target));
+  }, []);
   const { isLoading: isPendingJumpLoading, cancel: cancelPendingMessageScroll } =
     usePendingMessageScroll({
       messageListRef,
@@ -1229,20 +1338,35 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       messageId: pendingScrollToMessageId,
       target: pendingScrollTarget,
       onConsumed: onPendingScrollConsumed,
-      readinessKey: `${allMessages.length}:${isInitialMessagesLoading}:${
-        allMessages[0]?.id ?? ""
-      }:${allMessages.at(-1)?.id ?? ""}`,
+      readinessKey,
       isInitialMessagesLoading,
       isVisible,
     });
-  const isJumpLoading = isDockviewJumpLoading || isPendingJumpLoading;
-  const lastPromptMessageId = useMemo(() => getLastUserMessageId(allMessages), [allMessages]);
+  const { isLoading: isLocalJumpLoading } = usePendingMessageScroll({
+    messageListRef,
+    sessionId: resolvedSessionId,
+    messageId: null,
+    target: hasHostTarget ? null : localTarget,
+    onConsumed: consumeLocalTarget,
+    readinessKey,
+    isInitialMessagesLoading,
+    isVisible: transcriptIsVisible && !hasHostTarget,
+    settlementMode: "identity",
+  });
+  const isJumpLoading = isDockviewJumpLoading || isPendingJumpLoading || isLocalJumpLoading;
+  const projection = useSessionPrompts(resolvedSessionId, { firstLoadOnly: true });
+  const observed = useAppStore((state) =>
+    resolvedSessionId ? state.messagePrompts.observedBySession?.[resolvedSessionId] : undefined,
+  );
   const lastPromptMessage = useMemo(
-    () =>
-      lastPromptMessageId
-        ? (allMessages.find((message) => message.id === lastPromptMessageId) ?? null)
-        : null,
-    [allMessages, lastPromptMessageId],
+    () => resolveLastPromptMessage(windowMessages, projection.prompts, observed),
+    [windowMessages, projection.prompts, observed],
+  );
+  const lastPromptMessageId = lastPromptMessage?.id ?? null;
+  const unloadedLastPrompt = Boolean(
+    lastPromptMessage &&
+    windowMessages.length > 0 &&
+    !windowMessages.some((message) => message.id === lastPromptMessage.id),
   );
   const [lastPromptEdge, setLastPromptEdge] = useState<LastPromptEdge>("visible");
   const [latestVisibilitySessionId, setLatestVisibilitySessionId] = useState<string | null>(null);
@@ -1264,13 +1388,45 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const [anchoredBarHeight, setAnchoredBarHeight] = useState(0);
   const { anchoredBarVisible, scrollButtonEligible, scrollDirection } =
     resolveLastPromptControls(lastPromptEdge);
+  const renderedItems = filterLaunchErrorItems(
+    groupedItems,
+    launchErrorOwned,
+    taskLaunchError?.stamp,
+    taskLaunchError?.occurred_at,
+  );
+  const canMountBar =
+    windowMessages.length > 0 &&
+    Boolean(
+      lastPromptMessage &&
+      (unloadedLastPrompt || isMessageRowRendered(renderedItems, lastPromptMessage.id)),
+    );
   const showScrollButton =
-    showScrollToLastPrompt && Boolean(lastPromptMessageId) && scrollButtonEligible;
+    showScrollToLastPrompt &&
+    Boolean(lastPromptMessageId) &&
+    windowMessages.length > 0 &&
+    (scrollButtonEligible || unloadedLastPrompt);
   const scrollToLastPrompt = useCallback(() => {
-    if (lastPromptMessageId) {
+    if (!lastPromptMessageId || !resolvedSessionId) return;
+    if (unloadedLastPrompt) {
+      if (hasHostTarget) return;
+      setLocalTarget({
+        sessionId: resolvedSessionId,
+        messageId: lastPromptMessageId,
+        token: ++localToken.current,
+        hostPanelId: panelId ?? "pending",
+        generation,
+      });
+    } else {
       messageListRef.current?.scrollToMessage(lastPromptMessageId, { align: "start" });
     }
-  }, [lastPromptMessageId]);
+  }, [
+    generation,
+    hasHostTarget,
+    lastPromptMessageId,
+    panelId,
+    resolvedSessionId,
+    unloadedLastPrompt,
+  ]);
   const firstMessageId = useMemo(() => getFirstUserMessageId(allMessages), [allMessages]);
   const [isFirstMessageHidden, setIsFirstMessageHidden] = useState(false);
   const showScrollToStartButton =
@@ -1413,11 +1569,13 @@ export const TaskChatPanel = memo(function TaskChatPanel({
                   onOpenFile={onOpenFile}
                   dividerBeforeItemKey={dividerBeforeItemKey}
                   lastPromptMessageId={lastPromptMessageId}
+                  lastPromptMessage={lastPromptMessage}
+                  lastPromptUnloaded={unloadedLastPrompt}
                   onLastPromptEdgeChange={setLastPromptEdge}
                   onLatestVisibilityChange={onLatestVisibilityChange}
                   firstMessageId={firstMessageId}
                   onFirstMessageHiddenChange={setIsFirstMessageHidden}
-                  anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
+                  anchoredBarHeight={showAnchoredBar && canMountBar ? anchoredBarHeight : 0}
                   isVisible={transcriptIsVisible}
                   launchErrorOwned={launchErrorOwned}
                   launchErrorStamp={launchErrorOwned ? taskLaunchError?.stamp : undefined}
@@ -1425,7 +1583,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
                     launchErrorOwned ? taskLaunchError?.occurred_at : undefined
                   }
                   stickyPromptBar={
-                    showAnchoredBar && lastPromptMessage ? (
+                    showAnchoredBar && canMountBar && lastPromptMessage ? (
                       <AnchoredLastPromptBar
                         promptText={lastPromptMessage.content}
                         isVisible={anchoredBarVisible}
@@ -1554,9 +1712,18 @@ function ChatFooter({
   const { t } = useTranslation();
   if (isArchived) {
     return (
-      <div className="bg-muted/50 flex flex-shrink-0 items-center border-t px-4 py-2 text-sm text-muted-foreground">
+      <div
+        data-testid="archived-chat-footer"
+        className="bg-muted/50 flex flex-shrink-0 flex-wrap items-center gap-1.5 border-t px-4 py-2 text-sm text-muted-foreground"
+      >
         <span className="flex-1 text-center">{t("task:thisTaskIsArchivedAndRead")}</span>
-        <JumpToLatestButton isVisible={showJumpToLatest} onClick={onJumpToLatest} />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <ConversationUsageDisplay
+            taskId={panelState.taskId ?? statusTaskId}
+            sessionId={panelState.resolvedSessionId}
+          />
+          <JumpToLatestButton isVisible={showJumpToLatest} onClick={onJumpToLatest} />
+        </div>
       </div>
     );
   }

@@ -48,6 +48,7 @@ export type {
   ThreadViewDraftApi,
   LspStatusLocation,
   LastSeenDisplay,
+  MessageTimeDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
   UserSettings,
@@ -130,6 +131,7 @@ export type StepDefinition = {
   agent_profile_id?: AgentProfileId;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  disable_unclassified_fallback?: boolean;
   session_target?: WorkflowSessionTarget | null;
   execution_profile_id?: AgentProfileId;
   route_generation?: number;
@@ -159,6 +161,7 @@ export type WorkflowStep = {
   agent_profile_id?: string;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  disable_unclassified_fallback?: boolean;
   session_target?: WorkflowSessionTarget | null;
   complete_task_on_enter?: boolean;
   wip_limit?: number;
@@ -312,6 +315,8 @@ export type Workspace = {
   default_environment_id?: string | null;
   default_agent_profile_id?: AgentProfileId | null;
   default_config_agent_profile_id?: AgentProfileId | null;
+  acp_idle_suspension_enabled: boolean;
+  acp_idle_timeout_minutes: number;
   office_workflow_id?: WorkflowId;
   created_at: string;
   updated_at: string;
@@ -437,6 +442,8 @@ export type Task = ActiveSubagentCountFields & {
   workflow_agent_overrides?: WorkflowAgentOverrides;
   position: number;
   title: string;
+  /** Card identifier (e.g. "KAN-42"); shown in place of the title where the UI calls for it. */
+  identifier?: string;
   description: string;
   /** True when the task was created in autopilot mode. Immutable after creation. */
   autopilot?: boolean;
@@ -556,6 +563,7 @@ export type WorkflowStepDTO = {
   agent_profile_id?: AgentProfileId;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  disable_unclassified_fallback?: boolean;
   session_target?: WorkflowSessionTarget | null;
   stage_type?: "work" | "review" | "approval" | "custom";
   wip_limit?: number;
@@ -629,6 +637,33 @@ export type TaskSessionWorktree = {
   created_at?: string;
 };
 
+/** Path-free durable progress for one managed workspace recovery attempt. */
+export type WorkspaceRecoveryProjection = {
+  task_id: string;
+  environment_id: string;
+  session_id: string;
+  operation_id: string;
+  attempt_id: string;
+  ownership_generation: string;
+  revision: string;
+  kind: string;
+  /** Error attempt that admitted a session-owned relocation, when available. */
+  error_stamp?: string;
+  state: string;
+  phase: string;
+  repository_id?: string;
+  repository_position: number;
+  repository_total: number;
+  completed_slots: number;
+  workspace_complete: boolean;
+  agent_ready: boolean;
+  runner_live: boolean;
+  started_at: string;
+  updated_at: string;
+  ended_at?: string | null;
+  reason_code?: string;
+};
+
 export type TaskSession = ActiveSubagentCountFields & {
   id: SessionId;
   task_id: TaskId;
@@ -659,6 +694,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   container_id?: string;
   executor_id?: string;
   environment_id?: string;
+  /** Current backend agent process execution identity for this session. */
+  agent_execution_id?: string;
   repository_id?: RepositoryId;
   base_branch?: string;
   base_commit_sha?: string;
@@ -669,6 +706,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   workspace_path?: string;
   worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
+  /** Latest path-free managed workspace recovery operation for this environment. */
+  workspace_recovery?: WorkspaceRecoveryProjection | null;
   state: TaskSessionState;
   /** Backend-owned runtime cancellation projection; API responses include it explicitly. */
   cancellation_pending?: boolean;
@@ -778,6 +817,7 @@ export type EditorsResponse = {
 };
 
 export type CustomPrompt = {
+  allow_agent_edits?: boolean;
   id: string;
   name: string;
   content: string;
@@ -799,11 +839,28 @@ export type WorkflowSnapshot = {
   workflow: Workflow;
   steps: WorkflowStepDTO[];
   tasks: Task[];
+  task_coverage?: TaskCoverage;
+};
+
+export type TaskCoverage = {
+  workspace_id: string;
+  workflow_id: string;
+  membership: "active";
+  total: number;
+  complete: boolean;
+  ordering_profile: "sqlite_nocase_v1" | "server_only" | (string & {});
+};
+
+export type TaskWorkflowCoverage = {
+  workspace_id: string;
+  workflow_ids: string[];
+  complete: boolean;
 };
 
 export type ListWorkflowsResponse = {
   workflows: Workflow[];
   total: number;
+  task_workflow_coverage?: TaskWorkflowCoverage;
 };
 
 export type ListTasksResponse = {
@@ -817,7 +874,12 @@ export type SidebarTaskQuery = {
     op: string;
     value: string | string[] | boolean;
   }>;
-  sort: { key: string; direction: string };
+  sort: {
+    key: string;
+    direction: string;
+    color?: string;
+    then_by?: Array<{ key: string; direction: string; color?: string }>;
+  };
   group: string;
   collapsed_group_keys: string[];
   collapsed_task_ids: string[];
@@ -833,6 +895,8 @@ export type SidebarTaskPageEntry = {
   group_key?: string;
   group_label?: string;
   workflow_name?: string;
+  workflow_id?: string;
+  workflow_step_id?: string;
   workflow_step_name?: string;
   workflow_step_color?: string;
   depth?: number;
@@ -846,6 +910,8 @@ export type SidebarTaskPageEntry = {
 };
 
 export type SidebarTaskPageResponse = {
+  /** Client reconciliation kept safe rows while membership awaits a trailing refresh. */
+  provisional?: boolean;
   query_key: string;
   page: number;
   page_size: number;
@@ -1116,6 +1182,7 @@ export type StepPortable = {
   agent_profile?: AgentProfilePortable;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  disable_unclassified_fallback?: boolean;
   session_target?: { kind: "initial" } | { kind: "step"; step_position: number } | null;
   complete_task_on_enter: boolean;
   auto_advance_requires_signal: boolean;

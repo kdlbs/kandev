@@ -275,6 +275,48 @@ func (c *Cloner) WorkspaceProviderRepositoryPath(
 	return filepath.Join(parts...), nil
 }
 
+// ManagedCloneRelocationPaths returns the exact managed source candidates and
+// destination eligible for legacy-to-workspace relocation. Unsupported
+// repository sources return ok=false so callers can leave them untouched.
+func (c *Cloner) ManagedCloneRelocationPaths(repository *models.Repository) (
+	root, providerSource, ownerNameSource, destination string, ok bool, err error,
+) {
+	if repository == nil || strings.ToLower(strings.TrimSpace(repository.SourceType)) != "provider" {
+		return "", "", "", "", false, nil
+	}
+	provider := strings.ToLower(strings.TrimSpace(repository.Provider))
+	if provider != githubProvider && provider != gitlabProvider {
+		return "", "", "", "", false, nil
+	}
+	if strings.TrimSpace(repository.WorkspaceID) == "" || strings.TrimSpace(repository.ProviderHost) == "" ||
+		strings.TrimSpace(repository.ProviderOwner) == "" || strings.TrimSpace(repository.ProviderName) == "" {
+		return "", "", "", "", false, nil
+	}
+	root, err = c.ExpandedBasePath()
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	providerSource, err = c.ProviderRepoPath(provider, repository.ProviderHost, repository.ProviderOwner, repository.ProviderName)
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	ownerNameSource, err = c.RepoPath(repository.ProviderOwner, repository.ProviderName)
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	destination, err = c.WorkspaceProviderRepositoryPath(
+		repository.WorkspaceID, provider, repository.ProviderHost, repository.ProviderScope,
+		repository.ProviderRepoID, repository.ProviderOwner, repository.ProviderName,
+	)
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	if filepath.Clean(providerSource) == filepath.Clean(destination) {
+		return "", "", "", "", false, nil
+	}
+	return root, providerSource, ownerNameSource, destination, true, nil
+}
+
 func stableIdentitySegment(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])

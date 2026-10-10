@@ -7,6 +7,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import type { BackendContext } from "../../fixtures/backend";
 import { watchWs } from "../../helpers/causal-waits";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { waitForWorkspaceFile } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 async function setupDesktopContextTask(
@@ -23,11 +24,12 @@ async function setupDesktopContextTask(
     makeGitEnv(backend.tmpDir),
   );
   git.exec("git checkout main");
+  git.exec("git pull --ff-only origin main");
   git.createFile(filePath, "# Context file\n");
   git.createFile(`${directoryPath}/nested.txt`, "directory content\n");
   git.stageAll();
   git.commit(`add chat context fixtures ${suffix}`);
-  git.exec("git push origin main");
+  git.pushMainWithRetry();
 
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -60,11 +62,14 @@ async function setupDesktopContextTask(
     )
     .toBe(true);
 
-  const gateway = watchWs(testPage);
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 45_000 });
+  if (!task.session_id) throw new Error("file tree context task did not return a session_id");
+  await waitForWorkspaceFile(apiClient, task.session_id, filePath);
+  await waitForWorkspaceFile(apiClient, task.session_id, directoryPath);
+  const gateway = watchWs(testPage);
   const treeResponse = gateway.waitForResponse("workspace.tree.get");
   await testPage.reload();
   await session.waitForLoad();
@@ -95,16 +100,18 @@ test.describe("File tree chat context", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
     await session.clickTab("Files");
-    await session.fileTree.waitForFileTreeNode(filePath, 30_000);
-    await session.fileTree.waitForFileTreeNode(directoryPath, 30_000);
 
     const addNodeToContext = async (nodePath: string) => {
+      // File-tree rows are virtualized. Reveal each row immediately before
+      // interacting so a later reveal cannot recycle its DOM node.
+      await session.fileTree.waitForFileTreeNode(nodePath, 30_000);
       await session.fileTreeNode(nodePath).click({ button: "right" });
       await expect(session.fileTreeAddToChatContextMenuItem()).toBeVisible();
       await session.fileTreeAddToChatContextMenuItem().click();
     };
 
     await addNodeToContext(filePath);
+    await session.fileTree.waitForFileTreeNode(directoryPath, 30_000);
     await session.fileTreeNode(directoryPath).click({ button: "right" });
     await expect(session.fileTreeAddToChatContextMenuItem()).toBeVisible();
     await prCapture.screenshot("desktop-file-tree-menu", {

@@ -22,6 +22,7 @@ type Repository struct {
 	log                     *logger.Logger
 	migrate                 *db.MigrateLogger
 	queuePurgeMu            sync.RWMutex
+	clarificationAdmission  clarificationReadAdmission
 	queuePurger             func(context.Context, string)
 	queuePurgePrepare       func(context.Context, string)
 	queuePurgeNotify        func(context.Context, string)
@@ -37,6 +38,8 @@ type Repository struct {
 	// clockNow is a test-only clock seam. Set it before any concurrent
 	// repository call; it carries no synchronization.
 	clockNow func() time.Time
+	// sidebarQueryStage injects failures at resource boundaries in repository tests.
+	sidebarQueryStage func(string, *sqlx.Tx) error
 	// failCutoverAfter is a test-only failpoint for the worktree ownership
 	// cutover: when set to a cutover step name, the migration aborts at that
 	// step so tests can prove rollback restores the pre-upgrade state.
@@ -90,8 +93,15 @@ type Repository struct {
 	// without touching the database, and decrements the counter. Same
 	// rationale as failParticipantSeatReconcileAttempts above.
 	failAgentErrorReconcileAttempts int
-	failUsageEventRollupAttempts    int
-	failUsageEventRollupErr         error
+	// failOnCommentReconcileAttempts is a test-only failpoint for the
+	// on_comment fan-out reconciler's bounded retry loop
+	// (REQ-OFFICE-GATE-COMMENT-004): while > 0, tryHealOnCommentRow reports a
+	// synthetic concurrent-modification retry without touching the database,
+	// and decrements the counter. Same rationale as
+	// failAgentErrorReconcileAttempts above.
+	failOnCommentReconcileAttempts int
+	failUsageEventRollupAttempts   int
+	failUsageEventRollupErr        error
 	// usageEventPreRollupHook is a test-only synchronization seam, called (if
 	// set) inside insertUsageEventAndRollup's transaction at the same point as
 	// the failUsageEventRollup* failpoint - after the ledger row insert
@@ -243,6 +253,19 @@ func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error)
 // caller retains pool ownership until this constructor returns.
 func NewWithDBContext(ctx context.Context, writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error) {
 	return newRepositoryContext(ctx, writer, reader, log, false)
+}
+
+// NewWithInitializedDB binds a repository to a database whose complete task
+// schema has already been initialized. It does not run startup migrations.
+// Callers own the database connection and must guarantee the schema version.
+func NewWithInitializedDB(writer, reader *sqlx.DB, log *logger.Logger) *Repository {
+	return &Repository{
+		db:      writer,
+		ro:      reader,
+		ownsDB:  false,
+		log:     log,
+		migrate: db.NewRequiredMigrateLogger(writer, log),
+	}
 }
 
 // NewReadOnlyWithDB creates a repository over an existing read-only connection

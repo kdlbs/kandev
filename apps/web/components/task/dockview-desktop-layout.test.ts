@@ -1,17 +1,40 @@
 import { describe, it, expect } from "vitest";
+import type { ReactElement } from "react";
 import { t } from "@/lib/i18n";
-import { resolveChatPanelTitle } from "./dockview-panel-content";
-import { DESKTOP_VALID_COMPONENTS } from "./dockview-desktop-layout";
+import { renderPanel, resolveChatPanelTitle } from "./dockview-panel-content";
+import { DESKTOP_COMPONENT_NAMES, DESKTOP_VALID_COMPONENTS } from "./dockview-desktop-layout";
+import { RENDERABLE_COMPONENT_NAMES } from "@/lib/state/layout-manager/renderable-components";
+
+/** The element type `renderPanel` resolves a component to. A name with no
+ *  renderer resolves to the unknownPanel placeholder, whose type is `div`. */
+function renderedElementType(component: string): unknown {
+  return (renderPanel("panel", component, {}) as ReactElement).type;
+}
 
 describe("dockview desktop layout registry", () => {
-  it("accepts the prompt-history component", () => {
-    expect(DESKTOP_VALID_COMPONENTS.has("prompt-history")).toBe(true);
+  it("registers exactly the renderable component names", () => {
+    expect(DESKTOP_COMPONENT_NAMES).toEqual([...RENDERABLE_COMPONENT_NAMES]);
   });
 
   it("accepts every component the desktop renderer knows", () => {
-    for (const component of ["chat", "plan", "todos", "files", "changes", "prompt-history"]) {
+    for (const component of RENDERABLE_COMPONENT_NAMES) {
       expect(DESKTOP_VALID_COMPONENTS.has(component)).toBe(true);
     }
+  });
+
+  it("resolves every renderable name to a real renderer, not the unknownPanel placeholder", () => {
+    // The placeholder is the fallback branch of `renderPanel`, so this pairing
+    // is what gives the loop below its power: "renders something" would pass
+    // for a name with no renderer at all.
+    expect(renderedElementType("component-with-no-renderer")).toBe("div");
+    for (const component of RENDERABLE_COMPONENT_NAMES) {
+      expect(renderedElementType(component), component).not.toBe("div");
+    }
+  });
+
+  it("resolves the legacy aliases to their canonical target", () => {
+    expect(renderedElementType("diff-files")).toBe(renderedElementType("changes"));
+    expect(renderedElementType("all-files")).toBe(renderedElementType("files"));
   });
 });
 

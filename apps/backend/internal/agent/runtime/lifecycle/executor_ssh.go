@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -300,7 +301,9 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		if err != nil {
 			return nil, err
 		}
-		r.maybeUploadCredentials(baseCtx, client, req, platform)
+		if err := r.maybeUploadCredentials(baseCtx, client, req, platform); err != nil {
+			return nil, fmt.Errorf("ssh: prepare initial-mode configuration: %w", err)
+		}
 		if err := r.runPrepareScript(baseCtx, client, taskDir, req, platform, agentctlBin); err != nil {
 			return nil, err
 		}
@@ -802,7 +805,7 @@ func (r *SSHExecutor) StopInstance(ctx context.Context, instance *ExecutorInstan
 	// Use the same SSH client we used for CreateInstance — if it's still
 	// alive we can kill the remote agentctl gracefully; otherwise just drop
 	// the connection on the floor.
-	if classification == sshTransportAnswering && state.client != nil {
+	if classification == sshTransportAnswering && state.client != nil && !r.isTransportLost(state) {
 		stopRemote := r.stopRemote
 		if stopRemote == nil {
 			stopRemote = stopRemoteAgentctl
@@ -1333,7 +1336,7 @@ func (r *SSHExecutor) maybeUploadCredentials(
 	client *ssh.Client,
 	req *ExecutorCreateRequest,
 	platform SSHRemotePlatform,
-) {
+) error {
 	if err := r.uploadCredentials(ctx, client, req, platform); err != nil {
 		r.logger.Warn(
 			"ssh executor: credential upload failed; launch will proceed but agent may not authenticate",
@@ -1342,6 +1345,7 @@ func (r *SSHExecutor) maybeUploadCredentials(
 			zap.Error(err),
 		)
 	}
+	return nil
 }
 
 // preflightAgentBinary probes the remote for the agent's required binary
@@ -1404,6 +1408,9 @@ func buildRemotePreflightAgentCommand(req *ExecutorCreateRequest) agents.Command
 	return req.AgentConfig.BuildCommand(agents.CommandOptions{
 		Runtime:               agentruntime.RuntimeSSH,
 		ManagedRuntimeVersion: req.ManagedRuntimeVersion,
+		ManagedRuntimeFamily:  req.ManagedRuntimeFamily,
+		ManagedRuntimeSource:  req.ManagedRuntimeSource,
+		NativeRuntimeVersion:  req.NativeRuntimeVersion,
 	})
 }
 
@@ -1416,6 +1423,13 @@ func buildRemotePreflightAgentCommand(req *ExecutorCreateRequest) agents.Command
 // The caller falls through to the required default-command probe, which reports
 // transport failures with proper context.
 func (r *SSHExecutor) probeNativeBinary(ctx context.Context, client *ssh.Client, shell string, req *ExecutorCreateRequest, stepName string) bool {
+	if req == nil || req.AgentConfig == nil {
+		return false
+	}
+	if req.AgentConfig.ID() == agents.OpenCodeACPAgentID &&
+		req.ManagedRuntimeSource == managedruntime.OpenCodeSourceManaged {
+		return false
+	}
 	nb, ok := req.AgentConfig.(agents.NativeBinaryAgent)
 	if !ok {
 		return false

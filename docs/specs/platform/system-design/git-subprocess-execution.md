@@ -79,6 +79,7 @@ Windows uses a kill-on-close Job Object installed while Git is suspended, before
 Reuse the implementation in `internal/agentctl/server/winproc` by moving the required generic lifecycle code to a common package.
 Keep compatibility wrappers for existing agentctl consumers. The shared layer must not import the agentctl server.
 Job installation failure kills the owned suspended process and returns an error; it cannot leave a suspended orphan.
+Managed Git also starts without a console window; see [Windows background process console](windows-background-process-console.md).
 
 Use a maximum 500 ms pipe WaitDelay, preserving a shorter caller value.
 Bound owned-tree termination/reaping to two seconds, then return any cleanup failure.

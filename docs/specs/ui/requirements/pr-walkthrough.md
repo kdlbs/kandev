@@ -31,6 +31,10 @@ Reviewers can inspect a diff in GitHub, but a large pull request still takes tim
 - **AC-UI-PR-WALKTHROUGH-001.10:** When Kandev automation changes a pull request description, it shall merge only its marker-owned section with the latest description, preserve other content and marker-owned sections, and report success only after its owned result is readable from GitHub.
 - **AC-UI-PR-WALKTHROUGH-001.11:** When a covered pull request description edit leaves an existing walkthrough callout with a stale or legacy URL and the current canonical walkthrough object is publicly available, reconciliation shall replace only that callout with the canonical URL. If the object is unavailable or the markers are malformed, reconciliation shall make no destructive description write and shall report the reason.
 
+- **AC-UI-PR-WALKTHROUGH-001.12:** When a draft has invalid JSON, the renderer shall report its file, parser message, line, and column without dumping source content.
+- **AC-UI-PR-WALKTHROUGH-001.13:** When rendering completes, generation shall accept the verified output pair for the current attempt and exact PR head without requiring another agent response.
+- **AC-UI-PR-WALKTHROUGH-001.14:** Generation shall enforce one total time limit across attempts and retain diagnostics before the outer job deadline. Cancellation, invalid output, or expiration without verified completion shall prevent publication.
+
 ## Migrated source detail
 
 This generates the walkthrough HTML in CI and publishes the HTML to
@@ -43,72 +47,12 @@ the dedicated Cloudflare R2 walkthrough bucket. Lifecycle controls retention.
 [ADR-2026-08-23-pr-walkthrough-short-urls](../../../decisions/2026-08-23-pr-walkthrough-short-urls.md),
 [ADR-2026-08-23-pr-walkthrough-workflow-provenance](../../../decisions/2026-08-23-pr-walkthrough-workflow-provenance.md),
 [ADR-2026-09-05-pr-walkthrough-description-integrity](../../../decisions/2026-09-05-pr-walkthrough-description-integrity.md),
-[ADR-2026-08-24-unified-fork-approval-label](../../../decisions/2026-08-24-unified-fork-approval-label.md)
+[ADR-2026-08-24-unified-fork-approval-label](../../../decisions/2026-08-24-unified-fork-approval-label.md),
+[ADR-2026-09-30-pr-walkthrough-render-completion](../../../decisions/2026-09-30-pr-walkthrough-render-completion.md)
 
 **Implementation plans:**
-[PR walkthrough description integrity fix](../../../plans/pr-walkthrough-description-integrity-fix/plan.md)
-
-## What
-
-- A project skill named `pr-walkthrough` is available to compatible agents.
-  Its directory is a self-contained, copyable package with instructions,
-  renderer assets, deterministic generation scripts, and focused tests.
-- The skill produces one JSON data file and one HTML file for a pull request:
-  `docs/pr-walkthrough/pr-<number>.json` and
-  `docs/pr-walkthrough/pr-<number>.html`.
-- The JSON describes the pull request, why it exists, an optional architecture
-  diagram, key code changes, data or storage, risk, trade-offs, and review
-  focus.
-- The renderer builds the HTML from the JSON and fixed renderer assets. It
-  escapes code and prose, validates required fields, validates node edges, and
-  rejects unreplaced template tokens.
-- The generated page contains a vertical reviewer story, a dark and light
-  theme, architecture and data diagrams when supplied, highlighted code, diff
-  tinting, GitHub file links, an interactive code canvas, and a linear fallback
-  list. Canvas edges use separate endpoint and node-pair lanes, and their
-  labels follow the routed edge without stacking. Horizontal code scrollbars
-  stay subtle until a reviewer hovers over or focuses a code block. Patch and
-  explicitly marked diff blocks use diff colors. Plain code blocks remain
-  neutral because they provide context rather than a change. Its top bar uses
-  the website brand mark and favicon, and its dark theme uses the
-  documentation shell's dark-gray palette.
-- The configured workflow agent generates and renders the walkthrough for a
-  non-draft same-repository pull request or an authorized contributor pull
-  request when it is opened, reopened, marked ready for review, or updated.
-  OpenCode is the initial runner, but the skill and artifact contract do not
-  depend on it. A maintainer can explicitly retrigger same-repository
-  generation by adding the `generate-pr-walkthrough` label.
-- The workflow gives each runner the same fixed prompt, prepared context, draft
-  JSON path, renderer command, and final output paths. A provider change does
-  not change this contract.
-- The workflow commit is the source for all trusted instructions, scripts,
-  setup actions, context, and PR-description helpers. The event base SHA does
-  not select executable workflow inputs.
-- Kandev CI uses `.pr-walkthrough/draft.json` as the provider-neutral draft
-  path. Its renderer command invokes the script bundled under
-  `.agents/skills/pr-walkthrough/scripts/`.
-- Walkthrough automation lives in `.github/workflows/pr-walkthrough.yml` and
-  is enabled independently with the `PR_WALKTHROUGH_ENABLED` repository
-  variable. The trusted, non-generating repair path for edited descriptions is
-  in `.github/workflows/pr-walkthrough-reconcile.yml`. It does not share the
-  `OPENCODE_REVIEW_ENABLED` code-review gate.
-- The runner uses `opencode/muse-spark-1.3-contributor-free` with the `high`
-  variant (`--model`/`--variant`). Free tier may train on prompts (accepted).
-  Revoke: `opencode-go/muse-spark-1.3-contributor`.
-- The workflow preserves the generated JSON and HTML as CI artifacts and
-  uploads only the HTML to the `kandev-pr-walkthroughs` R2 bucket.
-- Each published object uses the key
-  `pr/<pull-request-number>/<short-head-sha>.html`, where `short-head-sha` is
-  the first 12 lowercase hexadecimal characters of the exact head SHA. It is
-  served at
-  `https://walkthrough.kandev.ai/pr/<pull-request-number>/<short-head-sha>.html`.
-- The workflow regenerates on `synchronize` for same-repository and authorized
-  contributor pull request updates. Each generated object remains keyed by
-  pull request number and the 12-character prefix of the exact head SHA.
-- After public validation succeeds, a separate minimum-permission job prepends
-  a prominent marker-owned walkthrough callout to the pull request
-  description. A rerun replaces only that callout and preserves the rest of
-  the description.
+[PR walkthrough description integrity fix](../../../plans/pr-walkthrough-description-integrity-fix/plan.md),
+[PR walkthrough generation completion](../../../plans/pr-walkthrough-generation-completion/plan.md)
 
 ## Generation contract
 
@@ -122,11 +66,15 @@ includes the pull request number, title, URL, repository slug, base branch,
 head branch, and diff statistics when they are available. The managed runner
 binds identity and links to trusted event metadata before rendering.
 
-The OpenCode adapter accepts an attempt only when the process exits zero and
-both final files are non-empty. If the process exits zero without both files,
-the adapter retries once. The retry starts with an empty draft and no final
-files. Each attempt keeps separate status, standard output, standard error,
-and draft diagnostics. A non-zero process exit fails without a retry.
+The managed adapter accepts a renderer-completed output pair after independent
+verification. A process that remains live after rendering does not delay this
+completion. Unexpected non-zero exits fail without a retry. An incomplete
+zero-exit attempt can retry once within the remaining total time limit.
+
+Each attempt starts with an empty draft and no final outputs or completion
+record. Diagnostics distinguish render completion, process exit, expiration,
+cancellation, and verification failure. The implementation details belong in
+[the system design](../system-design/pr-walkthrough.md#generation-completion).
 
 Each code change includes a real repository-relative file path, a concise
 explanation, and at least one real code or rendered-Markdown block. Code
@@ -162,8 +110,9 @@ adapters remain outside the skill because they are platform integration code.
 - Contributor generation requires the durable `safe-to-review` approval label
   or the existing trusted-contributor allowlist path. The old `safe-to-test`
   label is not an authorization source.
-- The agent invokes the fixed renderer before it finishes. The workflow only
-  verifies and packages the ignored walkthrough output directory.
+- The agent invokes the fixed renderer. Only the renderer can write final
+  files and the completion record. The host stops the agent and verifies the
+  output pair before packaging it.
 - The R2 publishing job receives only the bucket-scoped S3-compatible R2
   credentials required to upload the rendered HTML. The generation job does
   not receive R2 credentials.
@@ -176,8 +125,11 @@ adapters remain outside the skill because they are platform integration code.
 
 ## Failure modes
 
-- If the selected agent command exits non-zero, generation fails and the
-  workflow records the diagnostic output in its CI artifacts.
+- If the agent exits non-zero unexpectedly, generation fails and records
+  diagnostics. Expected termination after verified rendering is successful.
+- If the total time limit expires without verified completion, generation
+  stops, retains diagnostics, and prevents publication.
+- External cancellation prevents publication, even if final files exist.
 - If OpenCode exits zero without both required files, the adapter removes
   partial output and retries once from an empty draft. A second incomplete
   attempt fails and preserves diagnostics from both attempts.

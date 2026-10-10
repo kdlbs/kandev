@@ -14,12 +14,14 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -40,14 +42,16 @@ const (
 
 // Manager manages agent instance lifecycles
 type Manager struct {
-	registry        *registry.Registry
-	eventBus        bus.EventBus
-	credsMgr        CredentialsManager
-	profileResolver ProfileResolver
-	ownerAdmission  OwnerAdmission
-	worktreeMgr     *worktree.Manager
-	mcpProvider     McpConfigProvider
-	logger          *logger.Logger
+	registry              *registry.Registry
+	eventBus              bus.EventBus
+	credsMgr              CredentialsManager
+	profileResolver       ProfileResolver
+	ownerAdmission        OwnerAdmission
+	worktreeMgr           *worktree.Manager
+	mcpProvider           McpConfigProvider
+	cursorInventoryLoader func(context.Context) (mcpconfig.CursorNativeInventory, error)
+	cursorNativeMCPRunner mcpconfig.NativeMCPCommandRunner
+	logger                *logger.Logger
 	// dataDir is the kandev root directory. Misnamed for historical reasons:
 	// cmd/kandev/agents.go passes cfg.ResolvedHomeDir() (the kandev root —
 	// typically ~/.kandev) here, not ResolvedDataDir(). Used for:
@@ -70,12 +74,23 @@ type Manager struct {
 	streamManager  *StreamManager         // Manages WebSocket streams
 	eventPublisher *EventPublisher        // Publishes lifecycle events
 	historyManager *SessionHistoryManager // Stores session history for context injection (fork_session pattern)
+	runtimeOwner   *agentctl.RuntimeOwner // Owns the local standalone agentctl binding
+
+	runtimeAvailabilityMu           sync.Mutex
+	runtimeAvailabilitySubscription bus.Subscription
 
 	// Workspace info provider for on-demand instance creation
-	workspaceInfoProvider WorkspaceInfoProvider
+	workspaceInfoProvider          WorkspaceInfoProvider
+	workspaceRecoveryErrorReporter WorkspaceRecoveryErrorReporter
+
+	// taskRuntimeFences serialize runtime creation with task-scoped cleanup.
+	taskRuntimeFences taskRuntimeOwnershipFences
 
 	// bootMessageService creates boot messages displayed in chat during agent startup.
 	bootMessageService BootMessageService
+
+	// startupRecoveryDelay overrides the managed-runtime retry delay in tests.
+	startupRecoveryDelay func() time.Duration
 
 	// preparerRegistry maps executor types to environment preparers.
 	preparerRegistry *PreparerRegistry
@@ -243,10 +258,12 @@ type Manager struct {
 	// environment so user shell terminals can be given the same profile env
 	// vars the agent subprocess gets. See executor_profile_env.go. Nil → the
 	// terminal inherits only the backend process environment.
-	executorProfileReader       ExecutorProfileReader
-	pluginExecutorProfileLoader PluginExecutorProfileLoader
-	pluginExecutorCallbackMu    sync.Mutex
-	pluginExecutorCallbacks     map[string]*ExecutorCreateRequest
+	executorProfileReader         ExecutorProfileReader
+	sessionSettingsSnapshotWriter SessionSettingsSnapshotWriter
+	pluginExecutorProfileLoader   PluginExecutorProfileLoader
+	pluginRuntimeAPIURL           string
+	pluginExecutorCallbackMu      sync.Mutex
+	pluginExecutorCallbacks       map[string]*ExecutorCreateRequest
 
 	// agentProfileReader resolves the full agent_profiles row (including the
 	// office-enrichment fields added in ADR 0005 Wave A) for the launch-prep
@@ -277,12 +294,9 @@ type Manager struct {
 	// tests override it to avoid touching the real filesystem.
 	remediateNpxCache func(path string, log *zap.Logger) error
 
-	// standaloneHostPID is the OS process id of the standalone agentctl
-	// control-server this backend spawned on the local host. It is the
-	// host-local liveness handle recorded in executors_running.local_pid for
-	// local/standalone rows (see persistence.go / #1597 truthful executor rows).
-	// 0 when unset (tests, or before the launcher wires it). Never used for
-	// SSH/remote rows — their process lives on another host.
+	// standaloneHostPID is the boot-time fallback OS PID for older standalone
+	// callers. Production executions capture the process identity from their
+	// immutable runtime binding instead. Never used for SSH/remote rows.
 	standaloneHostPID atomic.Int64
 
 	// agentctlStartupConfig is the resolved child contract applied to every
@@ -298,10 +312,18 @@ type Manager struct {
 
 	activityCoordinator *activity.Coordinator
 	activityMu          sync.Mutex
+	openCodeAdmission   sync.RWMutex
 	activityLeases      map[string]*activity.TaskLease
 	activityLeaseOwners map[string]uint64
 	activityPending     map[string]map[uint64]*executionActivityClaim
 	activityGeneration  uint64
+}
+
+// SetCursorNativeMCPCommandRunner installs the bounded runner used for native
+// Cursor MCP approval and readiness checks. Production uses the exec runner;
+// tests inject a fake so they never mutate a developer's Cursor account.
+func (m *Manager) SetCursorNativeMCPCommandRunner(runner mcpconfig.NativeMCPCommandRunner) {
+	m.cursorNativeMCPRunner = runner
 }
 
 // SetOwnerAdmission wires the durable owner gate used by run-owned launches.
@@ -361,6 +383,44 @@ func (m *Manager) SetActivityCoordinator(coordinator *activity.Coordinator) {
 // unset in tests that don't exercise the persistence path.
 func (m *Manager) SetStandaloneHostPID(pid int) {
 	m.standaloneHostPID.Store(int64(pid))
+}
+
+// SetRuntimeOwner shares local agentctl ownership with lifecycle consumers.
+// Per-execution clients retain their immutable generation and reject delayed
+// work after a replacement is published.
+func (m *Manager) SetRuntimeOwner(owner *agentctl.RuntimeOwner) {
+	m.runtimeAvailabilityMu.Lock()
+	m.runtimeOwner = owner
+	if owner != nil && m.eventBus != nil && m.runtimeAvailabilitySubscription == nil {
+		select {
+		case <-m.stopCh:
+		default:
+			subscription, err := m.eventBus.Subscribe(events.AgentRuntimeAvailabilityChanged, m.handleRuntimeAvailabilityChanged)
+			if err != nil {
+				m.logger.Error("failed to subscribe to local runtime availability", zap.Error(err))
+			} else {
+				m.runtimeAvailabilitySubscription = subscription
+			}
+		}
+	}
+	m.runtimeAvailabilityMu.Unlock()
+	if m.executorRegistry == nil || owner == nil {
+		return
+	}
+	backend, err := m.executorRegistry.GetBackend(executor.NameStandalone)
+	if err != nil {
+		return
+	}
+	if standalone, ok := backend.(*StandaloneExecutor); ok {
+		standalone.SetRuntimeOwner(owner)
+	}
+}
+
+func (m *Manager) runtimeExecutionCurrent(execution *AgentExecution) bool {
+	if execution == nil || execution.runtimeEpoch == 0 || m.runtimeOwner == nil {
+		return true
+	}
+	return m.runtimeOwner.IsEpochCurrent(execution.runtimeEpoch)
 }
 
 // SetAgentctlStartupConfig wires the resolved backend-owned agentctl values
@@ -453,6 +513,11 @@ func NewManager(
 		OnProcessOutput:                  mgr.handleProcessOutput,
 		OnProcessStatus:                  mgr.handleProcessStatus,
 	}, nil, stopCh)
+	mgr.streamManager.isExecutionCurrent = func(execution *AgentExecution) bool {
+		current, exists := mgr.executionStore.Get(execution.ID)
+		return exists && current == execution && mgr.runtimeExecutionCurrent(execution)
+	}
+	mgr.streamManager.onDeliveryReconciliationPhase = mgr.recordDeliveryReconciliationPhase
 
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
@@ -551,6 +616,24 @@ func (m *Manager) WorktreeManager() *worktree.Manager {
 // can connect before startup wiring installs the dispatcher.
 func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
 	m.streamManager.setMCPHandler(handler)
+}
+
+// MCPHandlerFor returns the execution-bound MCP handler for one execution's stream.
+func (m *Manager) MCPHandlerFor(execution *AgentExecution) agentctl.MCPHandler {
+	if m == nil || m.streamManager == nil {
+		return nil
+	}
+	return m.streamManager.mcpHandlerFor(execution)
+}
+
+// SetAgentDeliveryRepository wires the backend inbox used by retained
+// agentctl streams. The repository is optional for isolated runtimes and
+// legacy embedders; when present, reconnects resume from the projected cursor.
+func (m *Manager) SetAgentDeliveryRepository(repository AgentDeliveryRepository) {
+	if m == nil || m.streamManager == nil {
+		return
+	}
+	m.streamManager.setAgentDeliveryRepository(repository)
 }
 
 // SetMCPIdentityScoper installs the per-user scoping hook for in-session MCP
@@ -823,6 +906,12 @@ func (m *Manager) CheckTaskEnvironmentAccess(ctx context.Context, taskID, taskEn
 // Without this, EnsureWorkspaceExecutionForSession will fail.
 func (m *Manager) SetWorkspaceInfoProvider(provider WorkspaceInfoProvider) {
 	m.workspaceInfoProvider = provider
+}
+
+// SetWorkspaceRecoveryErrorReporter installs the task-service callback for
+// verified managed-clone relocation refusals.
+func (m *Manager) SetWorkspaceRecoveryErrorReporter(reporter WorkspaceRecoveryErrorReporter) {
+	m.workspaceRecoveryErrorReporter = reporter
 }
 
 // SetBootMessageService sets the service used to create boot messages in chat

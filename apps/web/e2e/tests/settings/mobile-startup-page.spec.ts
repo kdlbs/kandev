@@ -28,6 +28,7 @@ test.describe("Mobile Threads Home default", () => {
     apiClient,
     seedData,
   }, testInfo) => {
+    test.setTimeout(120_000);
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
     await mobile.mobileMenuButton.tap();

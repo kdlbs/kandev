@@ -140,6 +140,20 @@ available. The Stats page retries failed sections and keeps successful sections
 visible. If `persistence_unavailable` appears instead, inspect the persistence
 diagnostic because a required store failed its health check.
 
+## Local agent runtime recovery
+
+Kandev can replace a failed local agent runtime without restarting the backend.
+Keep the page open during recovery. Existing route data stays available in the
+browser. If automatic recovery stops, an administrator can select **Retry agent
+runtime** in the alert. This action does not restart Kandev.
+
+A session with an uncertain prompt outcome stays blocked after runtime recovery.
+Use that session's recovery card to reconnect or stop the original work. **Retry
+connection** checks the existing delivery and does not send the prompt again.
+Kandev keeps the composer blocked until it can confirm the delivery outcome. A
+Stop request does not prove cancellation; if Kandev cannot reach the original
+process, the card reports that the outcome is still unknown.
+
 ![Settings > System > Status showing health checks, the running version, and disk usage.](../screenshots/system-status.png)
 
 For a managed service, also check its process manager:
@@ -216,9 +230,10 @@ or cleanup jobs still exist.
 Open **Settings > System > Storage > Host** to inspect Kandev-managed disk usage and
 configure cleanup. Open **Storage > Office retention** for Office history policy and status.
 **Analyze** is read-only. **Run now** applies only the enabled cleanup rules and refuses to start
-while another maintenance run owns the cleanup gate. If task resources are active, the page names
-the active work and offers **Run anyway** after an explicit disruption warning. Use that override
-only when the active task work can tolerate cleanup running alongside it.
+while another maintenance run owns the cleanup gate. Cleanup normally waits for active task
+resources to become idle. If they are active, the page names the work and offers **Run anyway**
+after an explicit disruption warning. Use that override only when the active work can tolerate
+cleanup running alongside it.
 
 ![Settings > System > Storage showing disk capacity, storage analysis, and cleanup controls.](../screenshots/system-storage.png)
 
@@ -255,12 +270,33 @@ measured size and explains that only the distinct bytes contribute. An unavailab
 added to the total and is marked as unavailable. Database rows are not applicable for non-SQLite
 drivers. During a first scan, pending or active rows show their measurement progress.
 
-Scheduled cleanup is disabled by default and runs only after the configured resource-idle quiet
-period. Orphaned task workspaces and rotated Go caches move into Kandev's quarantine before
-permanent deletion. Each entry shows its `delete_after` retention deadline: **Delete** and
+Scheduled cleanup is disabled by default. It normally starts only after the configured resource-idle
+period. Orphaned task workspaces and eligible temporary artifacts move into Kandev's quarantine
+before permanent deletion. Each entry shows its `delete_after` retention deadline: **Delete** and
 **Clear eligible** cannot remove it before that time. The deadline is the earliest safe deletion
-time, not an exact promise, the first successful scheduled or full manual maintenance run after the
-deadline performs the purge, subject to the idle gate and any preemption.
+time, not an exact promise. The first scheduled or full manual maintenance run that reaches the
+quarantine provider after the deadline performs the purge. That provider still must pass the idle
+gate and avoid preemption. A run that cleans only the Go cache does not purge quarantine entries.
+
+Go-cache cleanup uses a separate policy. When managed-cache use is enabled, new host-local
+executions share the selected Go build-cache path. The displayed physical size includes Go's `fuzz`
+corpus, while the cleanup-eligible size and trigger exclude it.
+
+- The configured size is a cleanup trigger, not a quota. The cache can grow between maintenance
+  runs.
+- Cleanup permanently deletes eligible build-cache data without a restorable quarantine entry. It
+  keeps the cache root and ownership marker, and preserves Go's `fuzz` corpus.
+- Deleted build-cache data cannot be restored.
+
+The Go-cache policy includes an off-by-default **Allow cleanup while tasks are running** switch.
+When enabled, Go-cache cleanup skips task-activity and idle-period checks, but it still waits for
+other maintenance runs to finish. Scheduled cleanup still requires scheduling and Go-cache cleanup
+to be enabled and the cleanup-eligible size to exceed its trigger. Explicit Go-cache cleanup can
+also use this setting without a second force prompt.
+
+Other cleanup providers keep their existing admission rules. A build can fail if cleanup removes a
+file that it needs, and Kandev does not retry the build automatically. A later build can repopulate
+the same cache path.
 
 Each full maintenance run also revisits at most 100 Kandev-managed local branches retained when a
 task was archived before its work was integrated. Kandev considers only durable rows that still
@@ -280,18 +316,17 @@ checks still apply.
 
 ![Settings > System > Storage showing quarantined resources with restore, delete, and force-clear controls.](../screenshots/system-quarantine.png)
 
-Kandev keeps at most one restorable Go-cache generation for each original cache path. If that
-generation is still active when the replacement cache exceeds its limit, the next rotation is
-deferred. The maintenance run succeeds and reports `active_quarantine`; both the live cache and
-the retained generation stay unchanged.
+New Go-cache cleanup does not rotate or retain cache generations. Historical Go-cache quarantine
+entries created by older versions remain subject to their saved retention deadline and the existing
+restore and deletion safety checks.
 
-If a Go-cache quarantine payload is already missing, **Delete**, **Clear eligible**, or **Force
-clear all** can close its durable entry without changing the live replacement cache. The purge
-reports zero deleted bytes for that entry. **Restore** remains unavailable because Kandev cannot
-prove which cache generation is currently live.
+If a historical Go-cache quarantine payload is already missing, **Delete**, **Clear eligible**, or
+**Force clear all** can close its durable entry without changing the live cache. The purge reports
+zero deleted bytes for that entry. **Restore** remains unavailable because Kandev cannot prove which
+cache contents are currently live.
 
-If scheduled cleanup is disabled, no independent quarantine sweeper runs: use a full **Run now** or
-one of the quarantine actions when you want cleanup.
+If scheduled cleanup is disabled, no independent quarantine sweeper runs. Use a full **Run now** or
+a quarantine action to purge eligible historical entries.
 
 Archived Git worktrees use the task cleanup worker, not the optional storage schedule. A clean
 worktree can be removed during archive. A worktree with tracked or untracked Git changes remains
@@ -321,11 +356,20 @@ Do not enable those rules on a daemon shared with unrelated workloads.
 
 ![Settings > System > Storage showing Docker cleanup controls, cache retention, unused image cleanup, and quarantine safety.](../screenshots/system-docker-cleanup.png)
 
+The Host tab reports capacity for the filesystem containing Kandev home and for the service's
+effective temporary folder. On Unix, it also reports `/tmp` when it resolves to a separate root.
+Capacity loads independently of the folder analysis and refreshes every 30 seconds while the Host
+tab is visible. A warning starts at 80% used; a critical warning starts at 90% used or when no space
+is available. Temporary-file operations can fail when this filesystem is full, even if task
+workspaces have free space. When Kandev can identify a shared filesystem, the page shows the
+relationship and does not add its capacity twice. These measurements do not change temporary
+directory or tool-cache settings.
+
 The Storage page also reports **System temporary folders** as a read-only footprint. It measures the
 service's effective temporary folder and, on Unix, `/tmp` when it resolves to a distinct folder.
 Resolved roots, measured size, and partial or unavailable status are shown. This footprint is
 informational and can overlap counted categories, so it is excluded from **Total counted**. It has
-no cleanup action and does not claim ownership of any path. The analysis rows use the measured byte
+no direct cleanup action. The analysis rows use the measured byte
 values to order categories from largest to smallest. A decorative bar compares each displayed
 measurement with the largest displayed measurement; zero measurements have an empty bar, and
 unknown or unavailable measurements have no bar. These bars compare footprints and do not change
@@ -336,6 +380,21 @@ A temporary-folder scan that reaches its deadline keeps the sampled bytes, parti
 skipped-entry counts. The expanded row shows one timeout explanation and keeps a bounded set of
 other diagnostic examples. A timeout does not authorize cleanup or indicate that the sampled size
 is a final folder total.
+
+The expanded **System temporary folders** row can show up to 20 largest direct entries for each
+selected root. These sizes are apparent regular-file bytes, not allocated filesystem blocks. Sparse
+files, hard links, metadata, deleted open files, and reserved blocks can make them differ from the
+capacity measurement. Partial entries keep only their observed bytes; unreadable or unvisited usage
+is unknown and is not added to the displayed remainder. Names and sizes identify large paths, but
+do not identify a task or process. Temporary folders can also contain tool caches, browser profiles,
+archives, and test data.
+
+An entry is marked as registered only when its exact path matches this installation's artifact
+registry and its owner-only marker validates. Registration alone does not make a file eligible for
+cleanup. **Review Kandev cleanup** opens the existing registered-artifact row, where the current
+eligibility and confirmation rules remain in effect. It does not start cleanup or pass the selected
+entry to a delete action. Reported candidate bytes do not predict how much filesystem capacity
+cleanup will free.
 
 The Host tab separately reports **Temporary Kandev files** created by services that need a short-lived
 directory under the host temporary root. Each current file is registered in the Kandev database
@@ -363,7 +422,12 @@ service temp path short enough for local Unix-domain socket paths; an excessivel
 exceed the platform socket-address limit.
 
 Persistent Go build caching is separate: Go's default `GOCACHE` is not derived from `TMPDIR`, and
-Kandev injects its managed Go-cache location only when that opt-in Storage setting is enabled.
+Kandev injects its managed Go-cache location only when that opt-in Storage setting is enabled. If
+Kandev cannot prepare that cache for a host-local execution, the agent still starts without the
+managed override. This fallback does not change the saved setting or cache data. Go tools then use
+an independently configured `GOCACHE` or Go's normal default; a tool can still fail if that cache
+is unusable. Adoption, cleanup, restore, and deletion keep strict path checks and reject unsafe
+symlinks.
 Scratch cleanup in the inherited temporary directory belongs to the operating system or the host's
 temporary-file policy. Archive and delete stop and reap the task's host-local processes, but do not
 recursively delete shared temporary files.
@@ -722,6 +786,18 @@ Before archive, delete, reset, or manual cleanup:
 5. check logs and the remote provider afterward, because timeout, network, or permission failures can leave a container, directory, or sandbox behind.
 
 Never delete a managed task directory merely because its database row looks terminal. A borrowed environment or pending asynchronous cleanup can still own it.
+
+### Recover a preserved Worktree inventory mismatch
+
+If a session resume reports that canonical workspace repository inventory is incomplete, first preserve the checkout exactly as it is. Record its branch and HEAD, and inspect tracked, dirty, untracked, and ignored files. Do not use **Reset Environment**, archive/delete cleanup, `git clean`, worktree removal, or a provider reset as an inventory repair.
+
+The task-scoped `repair_workspace_inventory` session recovery action is safe only for a Kandev-managed local Git worktree with exactly one missing or stale repository/branch slot. It performs read-only reciprocal Git inspection, hashes the checkout state, compares current database revisions, rejects another active session, changes only the proven inventory row, appends an immutable receipt identity, verifies the checkout again, durably records monotonic matching post-repair evidence on that receipt, and resumes once through the ordinary validator. Retrying the same operation requires the same idempotency key. See [WebSocket API](websocket-api.md#repair-preserved-workspace-inventory) for the request and receipt contract.
+
+Stop and investigate manually when the action returns a conflict. Common causes are multiple unmatched rows, duplicate repository/branch attachments, a moved or symlinked path, a detached or unexpected branch, a missing Git worktree registration, a user-owned local repository, a Docker/SSH/Sprites-only checkout, another active session (including a child sharing the environment), configured external Git clean/process filters, or state that changed during inspection. A conflict is intentionally preservation-first: Kandev leaves checkout files and provider resources untouched and does not fall back to rematerialization.
+
+A fresh or additional-session launch (a brand-new session, `spawn_session_kandev`, or on-entry auto-start) runs this same guarded repair automatically when it hits the identical single-slot mismatch, using a server-derived idempotency key scoped to that session; no manual action is needed. If automatic repair cannot prove a safe single match, the launch fails exactly as it did before this behavior existed, with no orphaned STARTING/RUNNING session and no primary-session change, and the manual `repair_workspace_inventory` action above remains available.
+
+If Kandev commits the inventory row but cannot durably store positive post-repair evidence, the launch or resume remains blocked and retryable. Use the same idempotency key for manual retries; Kandev re-inspects the preserved checkout and proceeds only after it records matching evidence. Once divergent evidence is durably recorded, retries cannot replace it with a match; preserve the checkout and investigate manually.
 
 ## Updates
 

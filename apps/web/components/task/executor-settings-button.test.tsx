@@ -20,6 +20,7 @@ const KUBERNETES_ENV = {
   executor_id: "executor-1",
   executor_profile_id: "profile-1",
 };
+const mockStoreApi = vi.hoisted(() => ({ current: { getState: () => ({}) } }));
 
 type MockEnv = {
   executor_type: string;
@@ -56,6 +57,7 @@ const flushTicks = () => Promise.resolve().then(() => Promise.resolve());
 
 afterEach(() => {
   cleanup();
+  mockStoreApi.current = { getState: () => ({}) };
   mockPrepareState = null;
   mockSessionState = null;
   mockEnv = null;
@@ -84,6 +86,7 @@ vi.mock("@/components/state-provider", () => ({
           : {},
       },
     }),
+  useOptionalAppStoreApi: () => mockStoreApi.current,
 }));
 
 vi.mock("@/lib/api/domains/task-environment-api", () => ({

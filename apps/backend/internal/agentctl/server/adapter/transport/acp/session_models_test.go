@@ -455,6 +455,7 @@ func TestConfigOptionUpdate_RefreshesCachedConfig(t *testing.T) {
 	a := newTestAdapter()
 
 	a.mu.Lock()
+	a.sessionID = "sess-1"
 	a.availableConfigOptions = []streams.ConfigOption{
 		{Type: "select", ID: "model", Name: "Model", CurrentValue: "stale"},
 	}

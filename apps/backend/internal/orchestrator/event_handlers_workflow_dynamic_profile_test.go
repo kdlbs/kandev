@@ -69,6 +69,9 @@ func TestCreateNewSessionForStep_ResolvesDynamicProfileBeforeWorkspaceAttach(t *
 			persisted.AgentProfileID, persisted.ExecutionProfileID, resolvedProfileID,
 			initialGeneration, persisted.RouteGeneration)
 	}
+	if got := persisted.AgentProfileSnapshot["agent_name"]; got != "concrete-agent" {
+		t.Fatalf("persisted dynamic snapshot agent_name = %v, want concrete-agent", got)
+	}
 }
 
 // TestCreateNewSessionForStep_MarksRouteActionRequiredWhenWorkspaceAttachFails
@@ -169,6 +172,139 @@ func TestCreateNewSessionForStep_RemovesPreparedSessionWhenDynamicResolutionFail
 		t.Fatalf("find reusable session: %v", err)
 	} else if reusable != nil {
 		t.Fatalf("stale replacement session remained reusable: %+v", reusable)
+	}
+}
+
+// TestResolveDynamicLaunchExecution_FollowsOfficeBinding reproduces the Office
+// defect where a routine task's auto-start cannot resolve the CEO row because
+// the row inherits agent_id=dynamic without a dynamic profile of its own. With
+// the Office binding the resolver selects the bound dynamic profile's concrete
+// candidate while the session keeps the Office ID.
+//
+// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.1
+func TestResolveDynamicLaunchExecution_FollowsOfficeBinding(t *testing.T) {
+	ctx := context.Background()
+	taskRepo, current := seedDynamicWorkflowSwitch(t)
+	const dynamicProfileID = "profile-dynamic"
+	const concreteProfileID = "profile-concrete"
+	const officeProfileID = "profile-office-ceo"
+
+	resolver := newWorkflowOfficeDynamicProfileResolver(t, dynamicProfileID, concreteProfileID, officeProfileID)
+	schedulerRepo := newMockTaskRepo()
+	schedulerRepo.tasks[current.TaskID] = &v1.Task{ID: current.TaskID, WorkspaceID: "ws1", Title: "Test Task"}
+	svc := createTestServiceWithScheduler(taskRepo, newMockStepGetter(), schedulerRepo, &mockAgentManager{repoForExecutionLookup: taskRepo})
+	svc.SetProfileExecutionResolver(resolver)
+
+	current.AgentProfileID = officeProfileID
+	current.ExecutionProfileID = ""
+	current.RouteGeneration = 0
+	if err := taskRepo.UpdateTaskSession(ctx, current); err != nil {
+		t.Fatalf("set office session profile: %v", err)
+	}
+	persisted, err := taskRepo.GetTaskSession(ctx, current.ID)
+	if err != nil {
+		t.Fatalf("re-read session: %v", err)
+	}
+	resolvedProfileID, err := svc.resolveDynamicLaunchExecution(ctx, persisted, persisted.AgentProfileID, true)
+	if err != nil {
+		t.Fatalf("resolve office-bound launch: %v", err)
+	}
+	if resolvedProfileID != concreteProfileID || persisted.ExecutionProfileID != concreteProfileID {
+		t.Fatalf("office-bound resolution = %q (%q), want %q", resolvedProfileID, persisted.ExecutionProfileID, concreteProfileID)
+	}
+	if persisted.AgentProfileID != officeProfileID {
+		t.Fatalf("logical profile = %q, want office ID %q", persisted.AgentProfileID, officeProfileID)
+	}
+}
+
+func newWorkflowOfficeDynamicProfileResolver(
+	t *testing.T, dynamicProfileID, concreteProfileID, officeProfileID string,
+) *agentruntime.ProfileExecutionResolver {
+	t.Helper()
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	repo, cleanup, err := agentsettingsstore.Provide(db, db, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cleanup() })
+	ctx := context.Background()
+	for _, agent := range []*agentsettingsmodels.Agent{
+		{ID: "dynamic", Name: "dynamic"},
+		{ID: "concrete-agent", Name: "concrete-agent"},
+	} {
+		if err := repo.CreateAgent(ctx, agent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, profile := range []*agentsettingsmodels.AgentProfile{
+		{ID: dynamicProfileID, AgentID: "dynamic", Name: "Cascade", Enabled: true},
+		{ID: concreteProfileID, AgentID: "concrete-agent", Name: concreteProfileID, Enabled: true},
+		{
+			ID: officeProfileID, AgentID: "dynamic", Name: "CEO", Enabled: true,
+			ExecutionAgentProfileID: dynamicProfileID,
+		},
+	} {
+		if err := repo.CreateAgentProfile(ctx, profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.CreateDynamicAgentProfile(ctx,
+		&agentsettingsmodels.DynamicAgentProfile{ProfileID: dynamicProfileID, Version: 1},
+		[]agentsettingsmodels.DynamicAgentRoute{{
+			DynamicProfileID: dynamicProfileID, ExecutionProfileID: concreteProfileID, Enabled: true,
+		}},
+	); err != nil {
+		t.Fatal(err)
+	}
+	return agentruntime.NewProfileExecutionResolver(repo, dynamicruntime.NewEngine(), true)
+}
+
+func TestOverlappingTaskStartFailuresRestorePriorStateOnce(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-restore", v1.TaskStateReview)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{repoForExecutionLookup: repo})
+
+	first := svc.beginTaskScheduling(ctx, "task-restore")
+	second := svc.beginTaskScheduling(ctx, "task-restore")
+	if first == nil || second == nil {
+		t.Fatal("expected both task starts to hold a scheduling claim")
+	}
+
+	svc.finishTaskScheduling(ctx, "task-restore", first, false)
+	if got := taskRepo.tasks["task-restore"].State; got != v1.TaskStateScheduling {
+		t.Fatalf("state after first failed start = %q, want SCHEDULING while the second start is active", got)
+	}
+	svc.finishTaskScheduling(ctx, "task-restore", second, false)
+
+	if got := taskRepo.tasks["task-restore"].State; got != v1.TaskStateReview {
+		t.Fatalf("state after both starts failed = %q, want REVIEW", got)
+	}
+}
+
+func TestSuccessfulOverlappingTaskStartCommitsSchedulingTransition(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-concurrent", v1.TaskStateReview)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{repoForExecutionLookup: repo})
+
+	first := svc.beginTaskScheduling(ctx, "task-concurrent")
+	second := svc.beginTaskScheduling(ctx, "task-concurrent")
+	if first == nil || second == nil {
+		t.Fatal("expected both task starts to hold a scheduling claim")
+	}
+
+	svc.finishTaskScheduling(ctx, "task-concurrent", first, true)
+	svc.finishTaskScheduling(ctx, "task-concurrent", second, false)
+
+	if got := taskRepo.tasks["task-concurrent"].State; got != v1.TaskStateScheduling {
+		t.Fatalf("state after one start resolved = %q, want SCHEDULING preserved", got)
 	}
 }
 

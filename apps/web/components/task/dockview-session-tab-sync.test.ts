@@ -3,6 +3,8 @@ import type { DockviewReadyEvent } from "dockview-react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { setEnvHiddenSessions } from "@/lib/env-hidden-sessions";
+import { hideSessionPanel } from "./dockview-hidden-session-panels";
 import {
   clearSessionTabUserActivationIntentsForTest,
   markSessionTabUserActivationIntent,
@@ -26,6 +28,7 @@ type SessionTabSyncApi = {
   onDidActivePanelChange: (callback: (panel: { id: string } | null) => void) => {
     dispose: ReturnType<typeof vi.fn<() => void>>;
   };
+  removePanel: ReturnType<typeof vi.fn<(panel: { id: string }) => void>>;
 };
 
 type SessionTabSyncStore = {
@@ -82,6 +85,7 @@ function makeSessionTabSyncHarness(args: {
       activePanelChange = callback;
       return { dispose: vi.fn() };
     },
+    removePanel: vi.fn(),
   };
   const setActiveSession = vi.fn();
   const setActiveSessionAuto = vi.fn();
@@ -175,6 +179,7 @@ beforeEach(() => {
 afterEach(() => {
   for (const disposable of activeDisposables.splice(0)) disposable.dispose();
   clearSessionTabUserActivationIntentsForTest();
+  setEnvHiddenSessions("env-A", []);
   useDockviewStore.setState({ isRestoringLayout: false });
   vi.useRealTimers();
 });
@@ -188,6 +193,24 @@ describe("setupSessionTabSync automatic activation", () => {
 
     expect(harness.setActiveSession).not.toHaveBeenCalled();
     expect(harness.activePanelSetActive).toHaveBeenCalledTimes(1);
+  });
+
+  // @covers AC-UI-AGENT-TAB-CLOSE-BEHAVIOR-001.7
+  it("adopts a visible successor when the active session is explicitly hidden", async () => {
+    const harness = makeDefaultSessionTabSyncHarness({ includeOtherEnv: false });
+
+    startSessionTabSync(harness);
+    hideSessionPanel(
+      harness.api as unknown as DockviewReadyEvent["api"],
+      ACTIVE_SESSION_ID,
+      TASK_ID,
+    );
+
+    await Promise.resolve();
+
+    expect(harness.setActiveSessionAuto).toHaveBeenCalledWith(TASK_ID, OTHER_SESSION_ID);
+    expect(harness.setActiveSession).not.toHaveBeenCalled();
+    expect(harness.activePanelSetActive).not.toHaveBeenCalled();
   });
 });
 

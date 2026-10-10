@@ -43,8 +43,8 @@ func TestReviewChangeSourceUncommittedFiles(t *testing.T) {
 		want       map[string]any
 		wantErr    string
 	}{
-		{name: "files", statusCode: http.StatusOK, body: `{"files":{"main.go":{"status":"modified"}}}`, want: map[string]any{"main.go": map[string]any{"status": "modified"}}},
-		{name: "nil status", statusCode: http.StatusOK, body: `null`},
+		{name: "files", statusCode: http.StatusOK, body: `{"success":true,"status_state":"ready","files_complete":true,"detail_state":"ready","files":{"main.go":{"status":"modified"}}}`, want: map[string]any{"main.go": map[string]any{"status": "modified"}}},
+		{name: "unavailable details", statusCode: http.StatusOK, body: `{"success":false,"status_state":"unavailable","files_complete":false,"detail_state":"unavailable","error_code":"status_unavailable"}`, wantErr: "git status for session s:"},
 		{name: "dependency error", statusCode: http.StatusBadGateway, body: `broken`, wantErr: "git status for session s:"},
 	}
 	for _, tt := range tests {
@@ -99,7 +99,7 @@ func TestReviewChangeSourceCommittedFilesFallsBackToStatusBase(t *testing.T) {
 		requests++
 		switch r.URL.Path {
 		case "/api/v1/git/status":
-			_, _ = w.Write([]byte(`{"base_commit":"fallback"}`))
+			_, _ = w.Write([]byte(`{"success":true,"status_state":"ready","files_complete":true,"detail_state":"ready","base_commit":"fallback"}`))
 		case "/api/v1/git/cumulative-diff":
 			if r.URL.Query().Get("base") != "fallback" {
 				t.Errorf("base = %q", r.URL.Query().Get("base"))

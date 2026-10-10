@@ -24,6 +24,9 @@ func newTestLogger() *logger.Logger {
 
 func newTestConfig(t *testing.T) Config {
 	tmpDir := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(tmpDir); err == nil {
+		tmpDir = resolved
+	}
 	return Config{
 		Enabled:       true,
 		TasksBasePath: tmpDir,

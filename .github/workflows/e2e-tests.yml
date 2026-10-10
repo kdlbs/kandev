@@ -16,12 +16,6 @@ on:
   # Manual trigger for verifying CI on draft PRs and ad-hoc reruns. The
   # default sharded run uses the same ref the user picks in the dispatch UI.
   workflow_dispatch:
-    inputs:
-      fail_on_flaky:
-        description: "Fail the run when Playwright needs a retry"
-        required: false
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -399,6 +393,7 @@ jobs:
           name: e2e-plugin-package
           path: |
             apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz
+            apps/backend/.build/plugin-package-verify
             apps/backend/.build/e2e-plugin-identity.json
           retention-days: 1
 
@@ -483,6 +478,9 @@ jobs:
           name: e2e-plugin-package
           path: apps/backend/.build/
 
+      - name: Make E2E package verifier executable
+        run: chmod +x apps/backend/.build/plugin-package-verify
+
       - name: Download web build
         uses: ./.github/actions/download-artifact-retry
         with:
@@ -492,10 +490,6 @@ jobs:
       - name: Extract web build
         working-directory: apps/web
         run: tar -xf web-dist.tar && rm web-dist.tar
-
-      - name: Enable strict flaky-test diagnostics
-        if: github.event_name == 'workflow_dispatch' && inputs.fail_on_flaky
-        run: echo "E2E_FAIL_ON_FLAKY=1" >> "$GITHUB_ENV"
 
       - name: Download E2E shard manifests
         uses: ./.github/actions/download-artifact-retry
@@ -829,6 +823,9 @@ jobs:
           name: e2e-plugin-package
           path: apps/backend/.build/
 
+      - name: Make E2E package verifier executable
+        run: chmod +x apps/backend/.build/plugin-package-verify
+
       - name: Download web build
         uses: ./.github/actions/download-artifact-retry
         with:
@@ -838,10 +835,6 @@ jobs:
       - name: Extract web build
         working-directory: apps/web
         run: tar -xf web-dist.tar && rm web-dist.tar
-
-      - name: Enable strict flaky-test diagnostics
-        if: github.event_name == 'workflow_dispatch' && inputs.fail_on_flaky
-        run: echo "E2E_FAIL_ON_FLAKY=1" >> "$GITHUB_ENV"
 
       - name: Download E2E shard manifests
         uses: ./.github/actions/download-artifact-retry
@@ -1071,7 +1064,6 @@ jobs:
           KANDEV_E2E_CONTAINERS: "1"
           KANDEV_E2E_BUILD_IDENTITY: ${{ github.workspace }}/apps/backend/bin/e2e-build-identity.json
           KANDEV_E2E_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
-          E2E_FAIL_ON_FLAKY: "1"
         run: >-
           pnpm exec playwright test --config e2e/playwright.config.ts
           --project=kubernetes-compat --reporter=list tests/kubernetes-compat

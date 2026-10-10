@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-09-09
-updated: 2026-09-27
+updated: 2026-09-28
 owners:
   - kandev
 ---
@@ -192,6 +192,36 @@ task environment.
   The system shall audit the action and shall not silently steal a claim after
   a timeout.
 
+### REQ-TASKS-COMPLETION-004: Plugin coordination without native task controls
+
+**Intent:** Preserve ordinary task details while plugins use task-owned coordination contracts.
+
+This amendment replaces the native task-detail presentation specified by
+the original coordination plan. It does not remove management claims or gates.
+
+#### Acceptance criteria
+
+- **AC-TASKS-COMPLETION-004.1:** Desktop and phone task details shall omit the
+  native Manager and Completion requirements controls, including their dialogs,
+  drawers, loading states, and empty states. This applies with or without claims
+  or criteria. The task page shall not request their detail endpoints on open.
+- **AC-TASKS-COMPLETION-004.2:** Removing these controls shall leave no reserved
+  toolbar space. The phone header, existing error feedback, content, composer,
+  and bottom navigation shall remain visible and usable without overlap or
+  horizontal page overflow. Existing desktop panels shall retain their layout.
+- **AC-TASKS-COMPLETION-004.3:** Claims, criteria, evidence, history, version
+  checks, and completion enforcement shall survive the presentation change.
+  Tasks without criteria shall retain their completion behavior. Human recovery
+  through existing authorized APIs shall remain available without a plugin.
+- **AC-TASKS-COMPLETION-004.4:** Existing completion-move failures shall remain
+  visible through normal task error feedback. Removing the controls shall not
+  grant plugins human override authority or erase unmet criteria.
+
+This amendment removes the built-in inspection and recovery UI. It does not
+promise an equivalent plugin UI already exists. Existing authorized human APIs
+continue to satisfy the recovery contracts in criteria 001.16 and 003.13.
+Plugin presentation and any future native recovery entry require separate scope.
+
 ## Compatibility and exclusions
 
 This contract replaces name-based workflow completion and the permanent
@@ -214,6 +244,7 @@ executor, or change physical workspace ownership.
 
 - [Task completion and follow-ups](../../../plans/task-completion/plan.md)
 - [Workspace restoration after completion](../../../plans/completed-workspace-restoration/plan.md)
+- [Remove native coordination controls](../../../plans/remove-native-coordination-ui/plan.md)
 
 ## Coordination controls
 

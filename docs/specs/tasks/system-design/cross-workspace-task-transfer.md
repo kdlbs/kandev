@@ -65,6 +65,22 @@ identifiers and counts, never prompts, message bodies, secrets, or credentials.
 Actor identity is a server-attested structure (human or coordinator) resolved
 from the authenticated context; request payloads never populate it.
 
+Configuration authority requires the persisted calling session's boolean
+configuration-purpose marker. Task metadata and request fields cannot grant
+it. Automation, coordinator, and managed conversation restrictions remain in
+force. Office CEO attestation and the transaction both require an enabled,
+undeleted source profile with an active status and the exact running session
+and runner-seat binding.
+
+Lane equivalence includes session start/end policy, session target, completion
+on entry, and the unclassified fallback veto, alongside prompts, events,
+participants, completion signals, and WIP policy.
+
+Relation discovery inventories and locks every task-keyed table. An unmapped
+workspace-owned relation blocks transfer when it contains rows for the selected
+task; unrelated or empty tables do not block other tasks. Such rows retain their
+original workspace fence until an explicit mapping contract exists.
+
 The stable error vocabulary maps every stale, ambiguous, incompatible,
 unauthorized, or idempotency-mismatched outcome to `task transfer conflict` at
 the boundary, without distinguishing task existence.
@@ -92,6 +108,12 @@ Every failure before commit leaves source and destination state unchanged and
 returns the stable conflict result. Committed transfers are durable: a retry
 after a caller-visible failure replays the stored receipt under the same actor,
 session, and key. Post-commit reconciliation is idempotent under cancellation.
+
+A caller must use a fresh key after its denied or failed attempt. Rejected
+attempts from another actor or session cannot poison that caller's key.
+Committed-receipt replay takes precedence over rejected-attempt history.
+Audit-delivery retries share a server-generated attempt ID; that ID is accepted
+only on the trusted internal audit path and never in a transfer request.
 
 ## Persistence
 

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Locator } from "@playwright/test";
 import { expect, resetSeedRepositoryCheckout, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
@@ -116,7 +117,8 @@ test.describe("Subtask basics", () => {
     seedData,
     prCapture,
   }) => {
-    // Create a task with an agent so we have a session to navigate to
+    // The dialog inherits the active session's branch, but the agent does not
+    // need to finish before the task context menu can be exercised.
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Subtask Parent",
@@ -128,14 +130,16 @@ test.describe("Subtask basics", () => {
         executor_profile_id: seedData.worktreeExecutorProfileId,
       },
     );
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status ?? null, {
+        timeout: 30_000,
+      })
+      .toBe("ready");
 
     // Navigate to the session page
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-
-    // Wait for agent to complete
-    await session.waitForChatIdle({ timeout: 30_000 });
 
     await session.openCreateSubtaskForSidebarTask("Subtask Parent");
 
@@ -383,8 +387,32 @@ test.describe("Subtask basics", () => {
 });
 
 test.describe("MCP subtask creation", () => {
-  test("agent creates subtask via MCP create_task with parent_id", async ({ testPage }) => {
-    const subtaskTitle = "MCP-subtask-e2e-verify";
+  test("agent creates subtask via MCP create_task with parent_id", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const subtaskTitle = `MCP-subtask-e2e-verify-${Date.now()}`;
+    const settingsBefore = await apiClient.getUserSettings();
+    const baselineLayout =
+      settingsBefore.settings.sidebar_layouts_by_workspace?.[seedData.workspaceId];
+    await apiClient.saveUserSettings({
+      sidebar_layout_state: {
+        workspace_id: seedData.workspaceId,
+        expected_revision: baselineLayout?.revision ?? 0,
+        layout: {
+          version: 1,
+          revision: 0,
+          navigation_height: 0,
+          navigation_expanded: false,
+          nodes: [
+            { id: "home", kind: "builtin", destination_id: "home", visible: true },
+            { id: "new-task", kind: "builtin", destination_id: "new_task", visible: true },
+            { id: "integrations", kind: "builtin", destination_id: "integrations", visible: true },
+          ],
+        },
+      },
+    });
 
     const script = [
       'e2e:thinking("Planning subtasks...")',
@@ -394,36 +422,81 @@ test.describe("MCP subtask creation", () => {
       'e2e:message("Done.")',
     ].join("\n");
 
-    // 1. Create parent task via UI dialog
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    try {
+      await kanban.goto();
 
-    await kanban.createTaskButton.first().click();
-    const dialog = testPage.getByTestId("create-task-dialog");
-    await expect(dialog).toBeVisible();
+      await expect(testPage.getByTestId("sidebar-navigation-split")).toBeVisible();
+      const navigationExpand = testPage.getByTestId("sidebar-navigation-expand");
+      await expect(navigationExpand).toHaveAttribute("aria-expanded", "false");
+      const layoutSaved = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
+      await navigationExpand.click();
+      expect((await layoutSaved).ok()).toBeTruthy();
+      await expect(navigationExpand).toHaveAttribute("aria-expanded", "true");
 
-    await testPage.getByTestId("task-title-input").fill("MCP Subtask Parent");
-    await testPage.getByTestId("task-description-input").fill(script);
+      // 1. Create parent task via UI dialog
+      await kanban.createTaskButton.first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
 
-    const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
-    await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
-    await startBtn.click();
-    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+      await testPage.getByTestId("task-title-input").fill("MCP Subtask Parent");
+      await testPage.getByTestId("task-description-input").fill(script);
 
-    // 2. Sidebar task creation navigates directly to the parent session.
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+      const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
+      await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
+      await startBtn.click();
+      await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // 3. Wait for the agent to complete — the MCP create_task call happens during execution
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+      // 2. Sidebar task creation navigates directly to the parent session.
+      await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+      const parentTaskId = new URL(testPage.url()).pathname.match(/^\/t\/([^/]+)/)?.[1];
+      expect(parentTaskId).toBeTruthy();
 
-    // 4. Go back to kanban — subtask card should be visible with parent badge
-    await kanban.goto();
+      // 3. Wait for the agent to complete — the MCP create_task call happens during execution
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-    const subtaskCard = kanban.taskCardByTitle(subtaskTitle);
-    await expect(subtaskCard).toBeVisible({ timeout: 10_000 });
-    await expect(subtaskCard.getByText("MCP Subtask Parent")).toBeVisible();
+      // 4. Confirm the created task is related to its parent and visible in the
+      // sidebar hierarchy, which is independent of the current Kanban workflow filter.
+      await expect
+        .poll(async () => {
+          const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+          return tasks.find((task) => task.title === subtaskTitle)?.id ?? null;
+        })
+        .not.toBeNull();
+      const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+      const child = tasks.find((task) => task.title === subtaskTitle);
+      expect(child).toBeDefined();
+      const childDetails = await apiClient.getTask(child!.id);
+      expect(childDetails.parent_id).toBe(parentTaskId);
+
+      const sidebar = testPage.getByTestId("task-sidebar");
+      const parentRow = sidebar.locator(
+        `[data-testid="sidebar-task-item"][data-task-row-id="${parentTaskId}"]`,
+      );
+      await expect(parentRow).toBeVisible();
+      const subtaskToggle = parentRow.getByTestId("sidebar-subtask-toggle");
+      if ((await subtaskToggle.getAttribute("aria-expanded")) !== "true") {
+        await subtaskToggle.click();
+      }
+      await expect(subtaskToggle).toHaveAttribute("aria-expanded", "true");
+      const childRow = sidebar.locator(
+        `[data-testid="sidebar-task-item"][data-task-row-id="${child!.id}"]`,
+      );
+      await expect(childRow).toBeVisible({ timeout: 10_000 });
+      await expect(childRow).toContainText(subtaskTitle);
+    } finally {
+      const currentLayout = (await apiClient.getUserSettings()).settings
+        .sidebar_layouts_by_workspace?.[seedData.workspaceId];
+      await apiClient.saveUserSettings({
+        sidebar_layout_state: {
+          workspace_id: seedData.workspaceId,
+          expected_revision: currentLayout?.revision ?? 0,
+          layout: baselineLayout ?? null,
+        },
+      });
+    }
   });
 
   test("MCP-created subtask inherits parent task repositories", async ({
@@ -892,6 +965,10 @@ test.describe("Subtask dialog feature parity", () => {
     const gitEnv = makeGitEnv(backend.tmpDir);
     execSync("git init -b main", { cwd: repoDir, env: gitEnv });
     execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
+    execSync("git remote add origin https://github.com/subtask-owner/subtask-repo.git", {
+      cwd: repoDir,
+      env: gitEnv,
+    });
     const ghRepo = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "subtask-owner/subtask-repo",
       provider: "github",

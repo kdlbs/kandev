@@ -1,6 +1,7 @@
 // Executor and environment payload types for WS events
 
 import type { ExecutorProvider, ExecutorType } from "./executor";
+import type { NativeMCPDiagnosticPayload } from "@/lib/prepare/native-mcp-diagnostic";
 
 export type ExecutorPayload = {
   id: string;
@@ -35,6 +36,8 @@ export type PrepareProgressPayload = {
   step_name: string;
   step_kind?: string;
   remote_platform?: string;
+  mcp_server_id?: string;
+  mcp_provider?: string;
   failure_code?: string;
   step_command?: string;
   step_index: number;
@@ -44,8 +47,11 @@ export type PrepareProgressPayload = {
   error?: string;
   warning?: string;
   warning_detail?: string;
+  mcp_diagnostic?: NativeMCPDiagnosticPayload;
   started_at?: string;
   ended_at?: string;
+  preparation_id?: string;
+  preparation_started_at?: string;
   timestamp: string;
 };
 
@@ -56,11 +62,15 @@ export type PrepareCompletedPayload = {
   success: boolean;
   error_message?: string;
   duration_ms: number;
+  preparation_id?: string;
+  preparation_started_at?: string;
   workspace_path?: string;
   steps?: Array<{
     name: string;
     kind?: string;
     remote_platform?: string;
+    mcp_server_id?: string;
+    mcp_provider?: string;
     failure_code?: string;
     command?: string;
     status: string;
@@ -68,6 +78,7 @@ export type PrepareCompletedPayload = {
     error?: string;
     warning?: string;
     warning_detail?: string;
+    mcp_diagnostic?: NativeMCPDiagnosticPayload;
     started_at?: string;
     ended_at?: string;
   }>;

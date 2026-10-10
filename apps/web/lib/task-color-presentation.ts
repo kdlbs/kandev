@@ -98,6 +98,7 @@ export function parseWorkflowStepColor(value: string | undefined): TaskMarkerPre
   const hex = value.match(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/);
   if (hex) return { token: "custom", style: { backgroundColor: hex[0] } };
 
-  const token = WORKFLOW_CLASS_TOKEN[value] ?? WORKFLOW_COLOR_TOKEN[value.toLowerCase()];
+  const normalized = value.toLowerCase();
+  const token = WORKFLOW_CLASS_TOKEN[normalized] ?? WORKFLOW_COLOR_TOKEN[normalized];
   return token ? taskColorPresentation(token) : taskColorPresentation("gray");
 }

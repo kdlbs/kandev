@@ -34,7 +34,7 @@ type peerMessageStartAdmission struct {
 	service         *Service
 	identity        messagequeue.QueueSessionIdentity
 	lifecycleUnlock func()
-	cancelGuard     *sync.Mutex
+	cancelGuard     *cancelInFlightMutex
 	releaseGuardRef func()
 
 	releaseGuardOnce sync.Once

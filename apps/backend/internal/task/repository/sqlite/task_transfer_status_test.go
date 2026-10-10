@@ -14,8 +14,12 @@ func TestTransferTaskRejectsInactiveOrUnknownCEOStatus(t *testing.T) {
 		name              string
 		sourceStatus      string
 		destinationStatus string
+		disabledSource    bool
 		actor             models.TaskTransferActor
 	}{
+		{name: "disabled source coordinator", sourceStatus: "working", destinationStatus: "idle", disabledSource: true, actor: models.TaskTransferActor{
+			Kind: models.TaskTransferActorCoordinator, ID: "ceo-source", SessionID: "session-running", CallerTaskID: "task-transfer",
+		}},
 		{name: "paused source coordinator", sourceStatus: "paused", destinationStatus: "idle", actor: models.TaskTransferActor{
 			Kind: models.TaskTransferActorCoordinator, ID: "ceo-source", SessionID: "session-running",
 			CallerTaskID: "task-transfer",
@@ -42,6 +46,9 @@ func TestTransferTaskRejectsInactiveOrUnknownCEOStatus(t *testing.T) {
 				(?, ?, 'ceo', 1, ?), (?, ?, 'ceo', 1, ?)`,
 				"ceo-source", "ws-source", tt.sourceStatus,
 				"ceo-destination", "ws-destination", tt.destinationStatus)
+			if tt.disabledSource {
+				mustExecTransferTest(t, repo, `UPDATE agent_profiles SET enabled = 0 WHERE id = 'ceo-source'`)
+			}
 			mustExecTransferTest(t, repo, `INSERT INTO workflow_step_participants
 				(id, step_id, task_id, role, agent_profile_id, decision_required, position)
 				VALUES (?, ?, ?, 'runner', ?, 0, 0)`, "participant-ceo", task.WorkflowStepID, task.ID, "ceo-source")

@@ -15,6 +15,7 @@ type queuedDispatchPhase uint32
 const (
 	queuedDispatchPending queuedDispatchPhase = iota + 1
 	queuedDispatchAccepted
+	queuedDispatchAwaitingAdmission
 	queuedDispatchLive
 	queuedDispatchSupersededByNewDispatch
 	queuedDispatchSupersededBySendNow
@@ -180,7 +181,7 @@ func (s *Service) claimQueuedDispatchForExecution(
 		return true, errQueuedDispatchSupersededBySendNow
 	case queuedDispatchSupersededByNewDispatch:
 		return true, errQueuedDispatchSuperseded
-	case queuedDispatchAccepted, queuedDispatchLive:
+	case queuedDispatchAccepted, queuedDispatchAwaitingAdmission, queuedDispatchLive:
 		return true, nil
 	}
 
@@ -272,7 +273,15 @@ func (s *Service) supersedeQueuedDispatchForSendNow(
 
 func (s *Service) isQueuedDispatchAccepted(sessionID string) bool {
 	accepted := s.acceptedQueuedDispatchForSession(sessionID)
-	return accepted != nil && accepted.currentPhase() == queuedDispatchAccepted
+	if accepted == nil {
+		return false
+	}
+	switch accepted.currentPhase() {
+	case queuedDispatchAccepted, queuedDispatchAwaitingAdmission:
+		return true
+	default:
+		return false
+	}
 }
 
 // markAcceptedDispatchLive moves a queued successor out of the handoff
@@ -301,9 +310,48 @@ func (s *Service) markAcceptedDispatchLiveLocked(sessionID string, reservation *
 		return
 	}
 	switch accepted.currentPhase() {
-	case queuedDispatchAccepted, queuedDispatchLive:
+	case queuedDispatchAccepted, queuedDispatchAwaitingAdmission, queuedDispatchLive:
 		accepted.phase.Store(uint32(queuedDispatchLive))
 	}
+}
+
+// retainQueuedDispatchForInitialAdmissionLocked keeps the accepted marker
+// alive when a model-switch worker returns before its asynchronous initial
+// prompt reaches provider admission.
+func (s *Service) retainQueuedDispatchForInitialAdmissionLocked(
+	sessionID, entryID string,
+) *queuedDispatchReservation {
+	reservation := s.queuedDispatchReservationForEntry(sessionID, entryID)
+	if reservation == nil || s.acceptedQueuedDispatchForSession(sessionID) != reservation ||
+		reservation.currentPhase() != queuedDispatchAccepted {
+		return nil
+	}
+	reservation.phase.Store(uint32(queuedDispatchAwaitingAdmission))
+	return reservation
+}
+
+func (s *Service) acceptRetainedQueuedDispatchLocked(
+	sessionID string,
+	reservation *queuedDispatchReservation,
+) {
+	accepted := s.acceptedQueuedDispatchForSession(sessionID)
+	if accepted == nil || accepted != reservation ||
+		accepted.currentPhase() != queuedDispatchAwaitingAdmission {
+		return
+	}
+	accepted.phase.Store(uint32(queuedDispatchLive))
+}
+
+func (s *Service) discardQueuedDispatchAwaitingAdmission(
+	sessionID string,
+	reservation *queuedDispatchReservation,
+) {
+	if reservation == nil || s.acceptedQueuedDispatchForSession(sessionID) != reservation ||
+		reservation.currentPhase() != queuedDispatchAwaitingAdmission {
+		return
+	}
+	reservation.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
+	s.acceptedQueuedDispatch.CompareAndDelete(sessionID, reservation)
 }
 
 // clearQueuedDispatchInFlightIfCurrent clears either phase only for the exact
@@ -322,6 +370,9 @@ func (s *Service) clearQueuedDispatchInFlightIfCurrent(
 		s.dispatchingQueued.CompareAndDelete(sessionID, reservation)
 	}
 	if accepted := s.acceptedQueuedDispatchForSession(sessionID); accepted == reservation {
+		if accepted.currentPhase() == queuedDispatchAwaitingAdmission {
+			return
+		}
 		accepted.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
 		s.acceptedQueuedDispatch.CompareAndDelete(sessionID, reservation)
 	}

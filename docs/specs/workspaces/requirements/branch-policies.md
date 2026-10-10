@@ -57,8 +57,10 @@ duplicate repositories and not a restriction on Git itself.
 
 Each saved repository MUST support zero or more named branch policies. A policy
 MUST contain a name, base branch, and branch template. Clients MAY omit the
-pull-request target; the service MUST default it to the normalized base branch
-before validation and persistence. A policy MAY contain a short description.
+pull-request target on creation; the service MUST default it to the normalized
+base branch before validation and persistence. A policy MAY contain a short
+description. Updates MUST preserve omitted fields and validate the complete
+effective policy atomically against the current saved values.
 
 The repository editor MUST place policy management in a disclosure section that
 is collapsed on each page load. The section header MUST show the policy count.
@@ -92,6 +94,26 @@ be saved before policies can be managed.
   Editing a policy whose saved ref is no longer listed keeps that saved value
   visible until the user chooses a replacement.
 
+- **AC-WORKSPACES-BRANCH-POLICIES-001.7:** REST and WebSocket updates change only supplied fields.
+  Omitted fields retain their current saved values, including the pull-request
+  target when the base changes. JSON null retains the existing omission behavior.
+  A fully supplied update continues to replace every supplied field.
+- **AC-WORKSPACES-BRANCH-POLICIES-001.8:** When overlapping updates to the same policy supply disjoint
+  fields and both succeed, all supplied changes survive regardless of commit
+  order. This includes description or name edits alongside workflow edits.
+  Updates that supply the same field retain the last committed writer's value.
+- **AC-WORKSPACES-BRANCH-POLICIES-001.9:** A successful update response and its update event contain the
+  complete normalized policy committed by that mutation. Validation, name
+  conflict, authorization, read-only, or missing-policy failures commit no
+  partial update and publish no successful update event. A concurrently deleted
+  policy or repository is not recreated. Later commits may supersede that
+  response; global event delivery order is not guaranteed.
+- **AC-WORKSPACES-BRANCH-POLICIES-001.10:** An explicitly supplied empty or whitespace-only
+  pull-request target resets to the effective normalized base: the supplied
+  base if present, otherwise the current saved base when the update is applied.
+  A concurrent base edit that commits before the reset is applied is included
+  in that default. Omitting the target preserves the saved target instead.
+
 ### REQ-WORKSPACES-BRANCH-POLICIES-002: Guided Gitflow starter
 
 An empty policy section MUST offer an `Add Gitflow policies` action. The action
@@ -112,9 +134,21 @@ policies. It MUST create the complete starter set atomically.
   development, `release/{title}-{suffix}`, and production. Each tuple is base,
   template, and pull-request target.
 - **AC-WORKSPACES-BRANCH-POLICIES-002.4:** The starter is rejected without partial writes when the
-  repository already has a policy or another request creates one concurrently.
+  repository has any policy at its atomic admission decision, including a
+  policy committed by an ordinary create admitted before the starter. Competing
+  starters on an empty repository admit one complete set; the loser receives
+  an already-seeded conflict and preserves the winner's values. An ordinary
+  create admitted after the starter retains normal creation semantics and can
+  add a custom policy; overlapping request lifetimes alone do not forbid it.
 - **AC-WORKSPACES-BRANCH-POLICIES-002.5:** Starter policy names are persisted configuration values. Their
   field guidance and built-in descriptions are localized presentation copy.
+- **AC-WORKSPACES-BRANCH-POLICIES-002.6:** A successful starter response and its four created events
+  describe the complete committed starter set for the winning branch pair.
+  A losing starter returns REST `409` or a WebSocket conflict, commits no rows,
+  and publishes no successful creation events. Independent repositories retain
+  independent admission decisions. Validation, authorization, read-only,
+  missing-parent, cancellation, and rollback failures publish no success;
+  unrelated storage errors are not reported as already seeded.
 
 ### REQ-WORKSPACES-BRANCH-POLICIES-003: Task-create policy selection
 
@@ -177,6 +211,11 @@ task-repository record.
   provider CLI. Passthrough agents receive the same instruction as plain text.
   Raw-branch tasks receive no policy-target instruction.
 
+- **AC-WORKSPACES-BRANCH-POLICIES-004.7:** After successful overlapping policy edits have finished,
+  creating a task with that policy persists its complete current identity,
+  name, base, template, and pull-request target. A task created before those
+  edits retains its original snapshot, including after policy deletion.
+
 ### REQ-WORKSPACES-BRANCH-POLICIES-005: Responsive, accessible compatibility
 
 Branch policy settings and selection MUST remain usable with keyboard, pointer,
@@ -212,3 +251,5 @@ and touch input and MUST preserve existing repository and task contracts.
 - System design: [Branch policies](../system-design/branch-policies.md)
 - Decision: [Snapshot task branch policies](../../../decisions/2026-08-24-task-snapshotted-branch-policies.md)
 - Implementation plan: [Branch policies plan](../../../plans/branch-policies/plan.md)
+- Patch repair plan: [Preserve branch-policy workflow edits](../../../plans/branch-policy-patch/plan.md)
+- Starter admission repair plan: [Serialize Gitflow starter admission](../../../plans/gitflow-starter-admission/plan.md)

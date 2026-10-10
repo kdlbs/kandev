@@ -7,8 +7,17 @@ import { SessionRecoveryCard } from "./session-recovery-card";
 const context = vi.hoisted(() => ({ state: "checking", sessionId: "session" }));
 vi.mock("../task-launch-error-context", () => ({
   useTaskLaunchErrorContext: () => ({
+    taskId: "task",
     statusSummary: { active_error: { session_id: context.sessionId } },
-    automaticRecovery: { resumptionState: context.state },
+    automaticRecovery: {
+      resumptionState: context.state,
+      requestIdentity: {
+        taskId: "task",
+        sessionId: context.sessionId,
+        generation: 1,
+        attemptId: 1,
+      },
+    },
   }),
 }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: vi.fn() }) }));

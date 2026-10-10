@@ -178,10 +178,20 @@ test.describe("@chat message pagination", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
     const list = session.activeChat().locator(".chat-message-list");
+    const olderPageResponse = testPage.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        response.request().method() === "GET" &&
+        url.pathname === `/api/v1/task-sessions/${sessionId}/messages` &&
+        url.searchParams.has("before")
+      );
+    });
     const edge = await scrollToOldestLoadedEdge(list, VISIBLE_PAGE_MARKER);
     expect(edge.rowId).not.toBeNull();
     expect(Number.isFinite(edge.rowTop)).toBe(true);
 
+    const response = await olderPageResponse;
+    await response.finished();
     await expect
       .poll(
         async () =>
@@ -190,8 +200,11 @@ test.describe("@chat message pagination", () => {
         { timeout: 15_000, intervals: [100], message: "One older visible page loaded" },
       )
       .toBe(true);
-    const afterLoadTop = await readMessageRowTopById(list, edge.rowId!);
-    expect(Math.abs(afterLoadTop - edge.rowTop)).toBeLessThanOrEqual(8);
+    await expect
+      .poll(async () => Math.abs((await readMessageRowTopById(list, edge.rowId!)) - edge.rowTop), {
+        message: "The visible message anchor is restored after the older page commits",
+      })
+      .toBeLessThanOrEqual(8);
     await dwell(testPage, 750, "negative-assertion", "observe visible-page pagination cascade");
     expect(olderRequests).toHaveLength(1);
   });

@@ -22,6 +22,7 @@ vi.mock("@/hooks/domains/settings/use-custom-prompts", () => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({ getState: () => ({ prompts: { items: mocks.prompts } }) }),
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({ prompts: { items: mocks.prompts }, setPrompts: mocks.setPrompts }),
 }));
@@ -53,6 +54,8 @@ vi.mock("@/lib/api", () => ({
   updatePrompt: mocks.updatePrompt,
 }));
 
+const promptEditButtonTestId = "prompt-edit-button";
+const saveChangesLabel = "Save changes";
 const promptId = "prompt-1";
 const promptName = "Review";
 const promptContent = "Review this change";
@@ -108,7 +111,7 @@ describe("PromptsSettings deletion confirmation", () => {
     mocks.finePointer = false;
     renderPromptSettings();
     const row = screen.getByTestId(promptRowTestId);
-    fireEvent.click(within(row).getByTestId("prompt-edit-button"));
+    fireEvent.click(within(row).getByTestId(promptEditButtonTestId));
     const editor = within(row).getByTestId(promptContentInputTestId) as HTMLTextAreaElement;
     fireEvent.change(editor, { target: { value: "Keep the mobile draft" } });
     const trigger = within(row).getByTestId(promptDeleteButtonTestId);
@@ -130,7 +133,7 @@ describe("PromptsSettings deletion confirmation", () => {
     renderPromptSettings();
 
     const row = screen.getByTestId(promptRowTestId);
-    fireEvent.click(within(row).getByTestId("prompt-edit-button"));
+    fireEvent.click(within(row).getByTestId(promptEditButtonTestId));
     fireEvent.change(within(row).getByTestId(promptContentInputTestId), {
       target: { value: "Keep this draft" },
     });
@@ -169,12 +172,12 @@ describe("PromptsSettings deletion confirmation", () => {
     renderPromptSettings();
 
     const row = screen.getByTestId(promptRowTestId);
-    fireEvent.click(within(row).getByTestId("prompt-edit-button"));
+    fireEvent.click(within(row).getByTestId(promptEditButtonTestId));
     fireEvent.change(within(row).getByTestId(promptContentInputTestId), {
       target: { value: "Save this draft" },
     });
     fireEvent.click(within(row).getByTestId(promptDeleteButtonTestId));
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
 
     await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledTimes(1));
     const confirm = within(screen.getByTestId(promptDeleteInlineTestId)).getByTestId(
@@ -275,9 +278,11 @@ describe("PromptsSettings deletion requests", () => {
 
 describe("PromptsSettings coordinated creation", () => {
   it("treats an opened create form as a dirty route draft", () => {
-    expect(getPromptDraftMeta([], null, true, { name: "", content: "" })).toEqual({
+    expect(
+      getPromptDraftMeta([], null, true, { name: "", content: "", allowAgentEdits: false }),
+    ).toEqual({
       isDirty: true,
-      revision: 'new:{"name":"","content":""}',
+      revision: 'new:{"name":"","content":"","allowAgentEdits":false}',
     });
   });
 
@@ -296,7 +301,7 @@ describe("PromptsSettings coordinated creation", () => {
     expect(screen.queryByTestId("prompt-submit")).toBeNull();
     expect(screen.getByTestId("prompt-create-button").hasAttribute("disabled")).toBe(true);
     expect(mocks.createPrompt).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Save changes" }).hasAttribute("disabled")).toBe(
+    expect(screen.getByRole("button", { name: saveChangesLabel }).hasAttribute("disabled")).toBe(
       true,
     );
 
@@ -312,7 +317,7 @@ describe("PromptsSettings coordinated creation", () => {
         testId: promptContentInputTestId,
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
 
     await waitFor(() =>
       expect(mocks.createPrompt).toHaveBeenCalledWith(
@@ -320,5 +325,49 @@ describe("PromptsSettings coordinated creation", () => {
         { cache: "no-store" },
       ),
     );
+  });
+});
+
+describe("PromptsSettings agent permission intent", () => {
+  it("preserves a remote revocation when saving an unrelated local draft", async () => {
+    mocks.prompts = [{ ...existingPrompt, allow_agent_edits: true }];
+    mocks.updatePrompt.mockImplementation(async (_id, patch) => ({
+      ...mocks.prompts[0],
+      ...patch,
+    }));
+    const tree = (
+      <SettingsSaveProvider>
+        <PromptsSettings />
+      </SettingsSaveProvider>
+    );
+    const { rerender } = render(tree);
+    fireEvent.click(screen.getByTestId(promptEditButtonTestId));
+    fireEvent.change(screen.getByTestId(promptContentInputTestId), {
+      target: { value: "Local draft" },
+    });
+    mocks.prompts = [{ ...existingPrompt, allow_agent_edits: false }];
+    rerender(
+      <SettingsSaveProvider>
+        <PromptsSettings />
+      </SettingsSaveProvider>,
+    );
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("false");
+    expect((screen.getByTestId(promptContentInputTestId) as HTMLTextAreaElement).value).toBe(
+      "Local draft",
+    );
+    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
+    await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledOnce());
+    expect(mocks.updatePrompt.mock.calls[0][1]).not.toHaveProperty("allow_agent_edits");
+    expect(mocks.prompts[0].allow_agent_edits).toBe(false);
+  });
+
+  it("sends an explicitly changed permission with the draft", async () => {
+    mocks.updatePrompt.mockResolvedValue({ ...existingPrompt, allow_agent_edits: true });
+    renderPromptSettings();
+    fireEvent.click(screen.getByTestId(promptEditButtonTestId));
+    fireEvent.click(screen.getByRole("switch"));
+    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
+    await waitFor(() => expect(mocks.updatePrompt).toHaveBeenCalledOnce());
+    expect(mocks.updatePrompt.mock.calls[0][1].allow_agent_edits).toBe(true);
   });
 });

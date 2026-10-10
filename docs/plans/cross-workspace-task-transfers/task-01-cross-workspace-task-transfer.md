@@ -84,6 +84,10 @@ notification wiring, and the public automation document.
 
 ## Results
 
-Implemented and verified per the plan's QA receipt: focused suites, race
-builds, SQL guard, schema conformance, full backend build, and public-docs
-validation pass at the reviewed head.
+Implemented with repository, service, handler, and server regression coverage.
+The original QA results predate integration with current main and are historical.
+Integration coverage includes task-specific unmapped workspace fences, persisted
+configuration purpose, private audit attempt IDs, caller-scoped rejected-key
+reuse, disabled CEO revocation, current lane policies, and preserved metadata.
+Required hosted CI at the exact merge head gates delivery; broad suites and
+hooks are deferred to hosted CI under the contributor-execution policy.

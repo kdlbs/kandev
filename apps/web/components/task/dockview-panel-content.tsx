@@ -9,11 +9,11 @@ import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
+import { useSessionGitRefresh } from "@/hooks/domains/session/use-session-git-refresh";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { usePanelActive } from "@/hooks/use-panel-active";
 import { t } from "@/lib/i18n";
-import { getWebSocketClient } from "@/lib/ws/connection";
-import { panelPortalManager, setPanelTitle } from "@/lib/layout/panel-portal-manager";
+import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { BrowserPanel } from "./browser-panel";
 import type {
@@ -32,9 +32,9 @@ import { TaskChangesPanel } from "./task-changes-panel";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
 import { TerminalPanel } from "./terminal-panel";
-import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
 import { VscodePanel } from "./vscode-panel";
+import { BackgroundWorkPanel } from "./chat/background-work/background-work-panel";
 import { useTranslation } from "react-i18next";
 
 /** Resolve the chat panel's tab title: the session's agent label when present,
@@ -115,20 +115,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
  * after the target becomes reachable again.
  */
 function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
-  useEffect(() => {
-    if (!sessionId) return;
-    const entry = panelPortalManager.get(panelId);
-    if (!entry?.api) return;
-
-    const refreshNow = () => {
-      getWebSocketClient()?.refreshSessionData(sessionId);
-    };
-    if (entry.api.isActive) refreshNow();
-    const disposable = entry.api.onDidActiveChange((event) => {
-      if (event.isActive) refreshNow();
-    });
-    return () => disposable.dispose();
-  }, [panelId, sessionId]);
+  useSessionGitRefresh(sessionId, usePanelActive(panelId));
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or
@@ -295,7 +282,6 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   vscode: (panelId) => <VscodePanel panelId={panelId} />,
   plan: () => <PlanContent />,
   todos: () => <TodosContent />,
-  "prompt-history": () => <PromptHistoryContent />,
   canvas: (_panelId, params) => <CanvasContent params={params} />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
@@ -317,6 +303,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
       presentation="desktop"
     />
   ),
+  "background-work": (panelId, params) => <BackgroundWorkPanel panelId={panelId} params={params} />,
 };
 
 /** Render a dockview panel's portal content by looking up its (alias-resolved)

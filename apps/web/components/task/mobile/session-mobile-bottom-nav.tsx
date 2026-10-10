@@ -26,7 +26,6 @@ import { registrationIsVisible } from "../plugin-task-panel";
 type SessionMobileBottomNavProps = {
   activePanel: MobileSessionPanel;
   onPanelChange: (panel: MobileSessionPanel) => void;
-  showPromptHistory?: boolean;
   planBadge?: boolean;
   changesBadge?: number;
   hasReview?: boolean;
@@ -74,7 +73,6 @@ function buildMobileNavItems({
   showStatus,
   onOpenStatus,
   onOpenPluginPicker,
-  showPromptHistory,
   hasTaskCanvases,
   mobilePluginPanelsAvailable,
   connectionIssueSeverity,
@@ -87,7 +85,6 @@ function buildMobileNavItems({
   showStatus: boolean;
   onOpenStatus: () => void;
   onOpenPluginPicker: () => void;
-  showPromptHistory: boolean;
   hasTaskCanvases: boolean;
   connectionIssueSeverity: ConnectionIssueSeverity;
   t: (key: string) => string;
@@ -140,13 +137,12 @@ function buildMobileNavItems({
       label: t("task:terminal"),
       icon: <IconTerminal2 className="h-5 w-5" />,
     },
-    ...(showPromptHistory || hasTaskCanvases || mobilePluginPanelsAvailable
+    ...(hasTaskCanvases || mobilePluginPanelsAvailable
       ? [
           {
             label: t("common:panels"),
             icon: <IconLayoutGrid className="h-5 w-5" />,
-            active:
-              parsePluginPanelId(activePanel) !== undefined || activePanel === "prompt-history",
+            active: parsePluginPanelId(activePanel) !== undefined,
             onClick: onOpenPluginPicker,
           },
         ]
@@ -167,7 +163,6 @@ function buildMobileNavItems({
 export function SessionMobileBottomNav({
   activePanel,
   onPanelChange,
-  showPromptHistory = false,
   planBadge = false,
   changesBadge = 0,
   hasReview = false,
@@ -195,7 +190,6 @@ export function SessionMobileBottomNav({
         showStatus,
         onOpenStatus,
         onOpenPluginPicker: () => setPluginPickerOpen(true),
-        showPromptHistory,
         hasTaskCanvases: taskCanvases.length > 0,
         mobilePluginPanelsAvailable,
         connectionIssueSeverity,
@@ -210,7 +204,6 @@ export function SessionMobileBottomNav({
       connectionIssueSeverity,
       registryVersion,
       activePanel,
-      showPromptHistory,
       taskCanvases.length,
       mobilePluginPanelsAvailable,
       t,
@@ -235,7 +228,6 @@ export function SessionMobileBottomNav({
         open={pluginPickerOpen}
         onOpenChange={setPluginPickerOpen}
         onSelect={onPanelChange}
-        showPromptHistory={showPromptHistory}
         taskCanvases={taskCanvases}
         onOpenCanvas={onOpenCanvas}
         taskId={taskId}
@@ -266,6 +258,7 @@ function MobileNavButton({
         mobileNavColorClass(item, activePanel, issueDetails !== null),
       )}
       aria-label={issueDetails?.description}
+      data-testid={item.panel === "changes" ? "mobile-session-nav-changes" : undefined}
       data-connection-severity={item.connectionIssueSeverity}
     >
       <span className="relative">

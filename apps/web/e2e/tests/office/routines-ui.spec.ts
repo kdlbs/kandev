@@ -134,15 +134,11 @@ test.describe("Routines UI", () => {
         "Create Routine dialog with assignee, concurrency/catch-up policy, task template and cron schedule filled in",
     });
 
-    // AC-OFFICE-ROUTINE-WIRE-002.1/.2: before this capability, the trigger
-    // create call this arms was rejected outright (`cronExpression` bound to
-    // "" -> `ErrInvalidTrigger` -> 400), so a cron schedule could not be
-    // armed from the UI at all.
+    // AC-OFFICE-ROUTINE-WIRE-002.2/.10: the routine and its cron trigger are
+    // created in one request, so a rejected trigger writes no routine.
     const routineCreated = waitForHttp(testPage, "POST", /\/workspaces\/[^/]+\/routines$/);
-    const triggerCreated = waitForHttp(testPage, "POST", /\/routines\/[^/]+\/triggers$/);
     await testPage.getByRole("button", { name: "Create" }).click();
     await routineCreated;
-    await triggerCreated;
     await expect(testPage.getByText(name)).toBeVisible({ timeout: 10_000 });
 
     const listed = (await officeApi.listRoutines(officeSeed.workspaceId)) as {
@@ -357,18 +353,23 @@ test.describe("Routines UI", () => {
 
     const fireResponse = await officeApi.runRoutine(routine.id);
     expect(fireResponse.ok).toBe(true);
-    const fired = (await fireResponse.json()) as { run: { id: string; created_at: string } };
+    const fired = (await fireResponse.json()) as {
+      run: { id: string; source: string; created_at: string };
+    };
     expect(fired.run.created_at).toBeTruthy();
+    expect(fired.run.source).toBe("manual");
 
     await testPage.goto("/office/routines");
     await testPage.getByRole("tab", { name: "Runs" }).click();
-    // officeSeed's workspace is reset per test, so exactly one run exists.
     const runsList = testPage.locator(".rounded-lg.divide-y > div");
-    await expect(runsList).toHaveCount(1, { timeout: 10_000 });
+    const manualRun = runsList.filter({
+      has: testPage.getByText(fired.run.source, { exact: true }),
+    });
+    await expect(manualRun).toHaveCount(1, { timeout: 10_000 });
     // AC-OFFICE-ROUTINE-WIRE-004.1/.3: `created_at` now reaches the model,
     // so run-row.tsx's `formatTime` renders the real timestamp instead of
     // the "--" placeholder it showed for every run before this capability.
-    await expect(runsList).toContainText(new Date(fired.run.created_at).toLocaleString());
+    await expect(manualRun).toContainText(new Date(fired.run.created_at).toLocaleString());
   });
 
   // Review round 3 (Codex-1): before Build round 4's fix,

@@ -254,7 +254,7 @@ Trigger payloads are untrusted input. Do not let a PR body or webhook field sile
 
 Maximum concurrent runs defaults to 1 and cannot be less than 1. An admitted `triggered` run and a bound `task_created` run are both open until their exact turn is settled. A run counts as active while its task is neither deleted, archived, nor explicitly cancelled, the same definition the UI uses when it says an automation will not fire because a run is still open, so the reason shown and the cap causing it cannot disagree. `reuse_thread` requires `max_concurrent_runs = 1`. When the cap is reached, Kandev records a `skipped` run and advances the schedule's evaluation time rather than retrying every 30 seconds.
 
-Run history can report `triggered`, `task_created`, `succeeded`, `failed`, `skipped`, `archived`, or `cancelled`. `triggered` means that admission succeeded but task/session/turn binding is not complete. The last two are derived at read time, not stored: a `task_created` run whose task was deleted or whose primary session was cancelled reads as `cancelled`, and one whose task was archived reads as `archived`. That derivation is defined once and shared by every view, so two surfaces cannot disagree about the same run.
+Run history can report `triggered`, `task_created`, `succeeded`, `failed`, `skipped`, `archived`, or `cancelled`. `triggered` means that admission succeeded but task/session/turn binding is not complete. When the instance session limit delays a run's start, Kandev keeps the run `triggered` and retries the start automatically; the run holds its concurrency slot for as long as the limit stays full. Stopping the run cancels the waiting start. A delayed start does not survive a backend restart: startup marks the unbound run `failed` and the start is dropped. If the task is deleted while its start waits, Kandev marks the unbound run `failed` and releases its slot. The last two are derived at read time, not stored: a `task_created` run whose task was deleted or whose primary session was cancelled reads as `cancelled`, and one whose task was archived reads as `archived`. That derivation is defined once and shared by every view, so two surfaces cannot disagree about the same run.
 
 A run that produced a task opens its conversation. A run that never produced one (a skipped firing) is listed but inert; there is nothing to read.
 
@@ -334,6 +334,51 @@ Names ending in `_kandev` are the canonical MCP protocol tool names. Some agent 
 Task tools use normal client discovery. When `step_complete_kandev` is required but is not already visible, the agent should search the active tool catalog for its canonical name. Kandev does not request eager loading through client-specific metadata.
 
 `create_task_kandev` advertises `prompt` for instructions delivered to a newly started agent. Older callers may still send `description` when `prompt` is absent, but sending both is an error; the compatibility name is intentionally omitted from the advertised schema.
+
+In task mode, a session-bound Kanban child can pass `parent_id: "self"` to create a sibling under its direct parent when the one-level Kanban depth limit is reached. The result reports the requested and effective parent and explains that the common parent owns coordination while the calling session remains the creation source. An explicit child ID retains the depth error. External MCP callers cannot use the `self` shorthand, and Office task creation keeps its existing runtime and skill boundary.
+
+The additive `parent_resolution` result contains `requested_parent_id`, `resolved_parent_id`, `reason: "kanban_depth_limit"`, and an explanatory `message`. A deduplicated result describes existing work without creation or reparenting; its top-level `parent_id` remains the returned task's actual parent. The `deduplicated` and `creation_complete` indicators retain their existing meaning. See [Coordination](coordination.md#create-a-subtask-from-an-agent) for inheritance and parent controls.
+
+### Read only the relevant part of a plan
+
+For focused changes to a large plan, call `get_task_plan_kandev` with a range:
+
+```json
+{"offset": 0, "limit": 2000}
+```
+
+`offset` is a zero-based Unicode code-point position, not a byte or UTF-16
+position. `limit` is the maximum number of characters to return, from 1 through
+8,192. Supplying either argument enables partial reading: an omitted offset
+defaults to zero, and an omitted limit defaults to 4,096. Omit both for the
+existing full-plan read. Null, fractional, negative, and otherwise invalid
+range arguments are rejected instead of falling back to a full read.
+
+The result separates metadata from exact content. Partial metadata includes
+`partial`, `version`, `offset`, `limit`, `total_characters`,
+`total_content_bytes`, `returned_characters`, `content_bytes`, `has_more`, and
+`next_offset`. `content_bytes` describes the returned fragment; the total fields
+describe the whole plan. Whitespace and line endings are preserved.
+
+To continue, use the returned `next_offset` and pass the first page's `version`
+as `expected_version`. A changed or deleted plan returns `plan_version_conflict`
+without content; reconcile the current plan before continuing. Offset exactly
+at the end returns an empty final page, with `has_more=false` and
+`next_offset=null`. An offset beyond the end is rejected. A missing plan without
+an expected version keeps the existing no-plan result.
+
+Use a fragment from the read with `edit_task_plan_kandev`:
+
+```json
+{"expected_version": "<version from read>", "old_text": "- [ ] Run tests", "new_text": "- [x] Run tests"}
+```
+
+The match must be unique across the entire plan, even when it appears only once
+in the returned page. Never submit a partial read as a whole-document
+replacement. Successful writes return a compact acknowledgement and a new
+version; reuse it for another known fragment edit. Restart pagination after a
+write because previous offsets belong to the earlier version. For adding a
+section, use the append mode described below.
 
 ### Protect task plan writes
 
@@ -752,6 +797,8 @@ Kandev transfers the task UUID atomically and preserves its sessions and active 
 
 Every attempt writes a redacted audit row. A successful receipt includes the operation ID, source and destination placement, committed task generation, step-transition ID, session census, preservation counts and digest, idempotency key, and policy. It never contains prompts, message bodies, secrets, or repository credentials. An exact retry by the bound actor and session returns the stored receipt after current task and destination-workspace access is confirmed; it does not depend on mutable workflow or lane configuration. Reusing the key for a changed request or actor returns a conflict. Destination-bound Office authorization is replay-only and cannot create a fresh transfer.
 
+Configuration access is derived from the calling session's stored purpose. Office CEO authority requires an enabled, active profile. Lane equivalence also checks session start/end policy, session target, completion on entry, and the unclassified fallback veto. An unmapped workspace-owned record blocks its task's transfer; empty tables and records for other tasks do not. After a denied or failed attempt, that caller must supply a fresh idempotency key.
+
 The database migration is additive. Rolling back the application binary leaves transfer receipts and audit rows intact for a later upgrade; do not drop the transfer ledger tables during an application rollback.
 
 <details>
@@ -936,7 +983,7 @@ External MCP exposes tools in these groups:
 - workspace/workflow configuration: list workspaces, workflows, repositories, and workflow steps; create, update, delete, import, or export workflows; create, update, delete, or reorder steps;
 - agents and profiles: list/update agents; create/delete profiles; list/update profiles; get/update profile MCP configuration;
 - executors: list executors and profiles; create, update, or delete executor profiles;
-- saved prompts: list prompt summaries without content or read one prompt by its exact, case-sensitive name; saved prompt tools are read-only;
+- saved prompts: list prompt summaries without content or read one prompt by its exact, case-sensitive name; create new prompts or update custom prompts that allow agent edits;
 - agent-accessible settings: search setting definitions, describe a field, list authorized resource targets, read saved values, and update declared values through one compact contract;
 - tasks: list, create, move, delete, archive, or update task state; list a task's sessions; read task conversation; discover or answer pending clarification questions; and discover or resolve live agent permission requests.
 
@@ -985,7 +1032,7 @@ contains summaries only, so it does not include prompt content:
 ```json
 {
   "shared_prompts": [
-    { "name": "code-review", "builtin": true, "content_bytes": 1234 }
+    { "name": "code-review", "builtin": true, "allow_agent_edits": false, "content_bytes": 1234 }
   ],
   "total": 1
 }
@@ -998,9 +1045,36 @@ Use `get_shared_prompt_kandev` with one saved prompt name to read its full conte
 ```
 
 Names are case-sensitive. Kandev trims surrounding whitespace before lookup. The result contains
-`name`, `content`, `builtin`, `content_bytes`, `created_at`, and `updated_at`; it does not expose the
+`name`, `content`, `builtin`, `allow_agent_edits`, `content_bytes`, `created_at`, and `updated_at`; it does not expose the
 internal prompt ID. An empty or unknown name returns an error without prompt content. These tools
-only read saved prompts. They do not create, update, delete, or expand `@name` references.
+only read saved prompts and do not expand `@name` references.
+
+### Create or update a saved prompt
+
+Configuration and external MCP clients expose `create_shared_prompt_kandev` and
+`update_shared_prompt_kandev`. Both require `org.config.manage` and accept:
+
+```json
+{ "name": "review-policy", "content": "Check correctness and test coverage." }
+```
+
+Creation fails if the exact name already exists. Update replaces the full content
+of an existing, case-sensitive name and cannot rename it. Names allow up to 512
+UTF-8 bytes, content up to 1 MiB; surrounding whitespace is trimmed. Success
+returns the same saved-prompt fields as `get_shared_prompt_kandev`.
+
+**Built-in prompts cannot be changed by agents.** Existing custom prompts and
+prompts created in Settings default to human-only editing. An operator can edit a
+custom prompt in **Settings > Prompts**, enable **Allow agent edits**, and save.
+MCP-created prompts allow later agent edits by default; an operator can turn that
+off. MCP cannot change this permission, and generic `update_settings_kandev`
+prompt writes enforce the same protection.
+
+Apply shared prompt changes before changing workflow steps that inject them, then
+read back both the prompts and steps. Successful writes refresh open prompt
+settings pages and affect future `@name` expansions. They preserve unsaved editor
+drafts and do not rewrite instructions already captured by a running turn.
+There is no shared-prompt deletion tool.
 
 ### Answer a pending clarification question
 
@@ -1020,6 +1094,30 @@ through results oldest-first.
 Each returned bundle carries `pending_id`, `task_id`, `session_id`, `created_at`, `age_seconds`,
 `context`, and an ordered `questions` array; each question carries `question_id`, `title`,
 `prompt`, `status`, and its `options` (`option_id`, `label`, `description`).
+
+The bundle's `pending_id` is the durable identity of the visible question group. If the request
+carrying an `ask_user_question_kandev` call is interrupted or times out while the call is waiting,
+the question remains durably recorded. It stays visible and answerable while its bundle belongs to
+the session's current turn and the session is non-terminal. When the agent re-sends the same
+JSON-RPC request (same request id, normalized questions, and context) within the same MCP session,
+Kandev maps the retry to the bundle its interrupted call created: no second question is published,
+the bundle is marked attached again if the interruption had detached it, and a previously recorded
+answer, rejection, or cancellation is reconciled instead of opening another wait. Reusing a
+completed request id for different question content creates a new bundle. A superseded bundle or a
+bundle on a completed, failed, or cancelled session is reported as no longer active.
+
+Registration and answer delivery use one atomic handoff. If an answer commits during retry
+reconciliation, it either reaches the re-registered tool waiter or continues through detached
+delivery, never both. When detached delivery won first, the retry reports that delivery is already
+in progress instead of returning a duplicate tool response. A new MCP session (for example after a
+stdio agent restarts or a client drops its `Mcp-Session-Id`) starts fresh: a re-sent request id is a
+new question there. A call with a new request id creates a distinct bundle, even when its questions
+match an existing pending bundle. Calls without a transport retry identity retain the existing
+pending-question deduplication behavior.
+
+A provisional answer marked delivery-pending is not a confirmed outcome. An exact retry joins the
+live delivery confirmation and returns only after persistence and the local watchdog notifier
+complete. If confirmation fails, the retry reports an error and the bundle is restored when safe.
 
 After the person answers, pass the bundle's `pending_id` plus one entry per question to
 `answer_question_kandev`:

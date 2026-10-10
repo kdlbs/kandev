@@ -43,11 +43,14 @@ test.describe("Commit file navigation", () => {
       path.join(backend.tmpDir, "repos", "e2e-repo"),
       makeGitEnv(backend.tmpDir),
     );
-    git.createFile("src/navigation-one.ts", "export const one = 1;\n");
-    git.createFile("docs/navigation-two.md", "navigation two\n");
+    git.createFile("navigation-older.ts", "export const older = true;\n");
+    git.stageAll();
+    const olderSha = git.commit("Add earlier navigation history");
+    git.createFile("navigation-one.ts", "export const one = 1;\n");
+    git.createFile("navigation-two.ts", "navigation two\n");
     git.stageAll();
     const sha = git.commit("Add commit navigation files");
-    git.createFile("src/navigation-one.ts", "export const one = 2;\n");
+    git.createFile("navigation-one.ts", "export const one = 2;\n");
 
     // Seed history before the session mounts and fetches its initial commit
     // snapshot. Mutating git after that fetch relies on a later event to refresh
@@ -92,9 +95,57 @@ test.describe("Commit file navigation", () => {
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    const inlineFile = row.getByTestId("commit-file-src-navigation-one.ts");
+    const inlineGroup = testPage.locator(`#${await toggle.getAttribute("aria-controls")}`);
+    const inlineFile = inlineGroup.getByTestId("commit-file-navigation-one.ts");
+    const secondInlineFile = inlineGroup.getByTestId("commit-file-navigation-two.ts");
     await expect(inlineFile).toBeVisible({ timeout: 15_000 });
-    const dirtyFile = testPage.getByTestId("file-row-src-navigation-one.ts");
+    await expect(secondInlineFile).toBeVisible();
+    const followingCommit = testPage.getByTestId(`commit-row-${olderSha.slice(0, 7)}`);
+    await expect(followingCommit).toBeVisible();
+    const inlineGroupId = await inlineGroup.getAttribute("id");
+    await expect
+      .poll(() =>
+        testPage.evaluate(
+          ({ commitSha, nextCommitSha, inlineGroupId }) => {
+            const inlineGroup = document.getElementById(inlineGroupId)!;
+            const commit = document.querySelector<HTMLElement>(
+              `[data-testid="commit-row-${commitSha}"]`,
+            )!;
+            const firstFile = inlineGroup.querySelector<HTMLElement>(
+              '[data-testid="commit-file-navigation-one.ts"]',
+            )!;
+            const secondFile = inlineGroup.querySelector<HTMLElement>(
+              '[data-testid="commit-file-navigation-two.ts"]',
+            )!;
+            const nextCommit = document.querySelector<HTMLElement>(
+              `[data-testid="commit-row-${nextCommitSha}"]`,
+            )!;
+            return {
+              headerToFirstFile:
+                firstFile.getBoundingClientRect().top -
+                commit.closest<HTMLElement>("[data-changes-timeline-row]")!.getBoundingClientRect()
+                  .bottom,
+              fileSiblingGap:
+                secondFile.getBoundingClientRect().top - firstFile.getBoundingClientRect().bottom,
+              commitFooterAndSiblingGap:
+                nextCommit
+                  .closest<HTMLElement>("[data-changes-timeline-row]")!
+                  .getBoundingClientRect().top - secondFile.getBoundingClientRect().bottom,
+            };
+          },
+          {
+            commitSha: sha.slice(0, 7),
+            nextCommitSha: olderSha.slice(0, 7),
+            inlineGroupId: inlineGroupId!,
+          },
+        ),
+      )
+      .toEqual({
+        headerToFirstFile: 0,
+        fileSiblingGap: 2,
+        commitFooterAndSiblingGap: 6,
+      });
+    const dirtyFile = testPage.getByTestId("file-row-navigation-one.ts");
     await expect(dirtyFile).toBeVisible({ timeout: 15_000 });
     const inlineFileBox = await inlineFile.boundingBox();
     const dirtyFileBox = await dirtyFile.boundingBox();
@@ -107,11 +158,22 @@ test.describe("Commit file navigation", () => {
     await prCapture.screenshot("commit-file-navigation-desktop-inline", {
       caption: "Expanded commit files reuse the changes tree styling",
     });
+
+    await expect(toggle).toBeFocused();
+    for (let step = 0; step < 10; step += 1) {
+      await testPage.keyboard.press("ArrowDown");
+      if (await inlineFile.evaluate((element) => element === document.activeElement)) break;
+    }
+    await expect(inlineFile).toBeFocused();
+    await testPage.keyboard.press("Enter");
+    const selectedHeader = detail.locator(
+      'section[data-file-path="navigation-one.ts"] button[data-file-path]',
+    );
+    await expect(selectedHeader).toBeFocused({ timeout: 15_000 });
+    await expect(selectedHeader).toHaveAttribute("aria-expanded", "true");
+
     await inlineFile.click();
 
-    const selectedHeader = detail.locator(
-      'section[data-file-path="src/navigation-one.ts"] button[data-file-path]',
-    );
     await expect(selectedHeader).toBeFocused({ timeout: 15_000 });
     await expect(selectedHeader).toHaveAttribute("aria-expanded", "true");
   });

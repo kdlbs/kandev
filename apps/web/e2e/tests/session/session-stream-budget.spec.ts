@@ -47,6 +47,10 @@ function sessionIdFromFrame(frame: GatewayTrafficFrame): string | undefined {
 }
 
 test.describe("Session stream budget", () => {
+  test.afterEach(async ({ apiClient, seedData }) => {
+    await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+  });
+
   test("keeps task-switcher traffic bounded with 27 task sessions", async ({
     testPage,
     apiClient,
@@ -55,15 +59,16 @@ test.describe("Session stream budget", () => {
     test.setTimeout(180_000);
 
     const capture = attachGatewayTrafficCapture(testPage);
+    const trafficWorkflow = await apiClient.createWorkflow(seedData.workspaceId, "Traffic stream");
     const trafficStep = await apiClient.createWorkflowStep(
-      seedData.workflowId,
+      trafficWorkflow.id,
       "Traffic measurement",
       1,
     );
     const tasks = await Promise.all(
       Array.from({ length: TASK_COUNT }, (_, index) =>
         apiClient.createTask(seedData.workspaceId, trafficTaskTitle(index), {
-          workflow_id: seedData.workflowId,
+          workflow_id: trafficWorkflow.id,
           workflow_step_id: trafficStep.id,
         }),
       ),
