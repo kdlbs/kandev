@@ -118,6 +118,41 @@ and claims. This is a creation-caller inventory, not a broad writer audit.
 
 ## Drafts, navigation and mobile
 
+### New-agent publication across profile-order reconciliation
+
+The discovered-agent branches of `saveNewAgent` are creation publications, not
+ordinary edits to an already configured owner. Both its successful branch and
+its accepted-create/failed-MCP branch identify that provenance explicitly in the
+existing `AgentCreationPublication` callback context. Carry the normalized
+accepted profiles and a narrowly typed new-agent marker from those two call sites;
+do not infer creation from a missing owner at callback time.
+
+`useAgentCreationStoreSync` uses that context to publish a newly accepted agent
+over the current owning catalogue and current options even when another owner's
+live profile has advanced the profile version since save admission. A present
+owner still receives accepted profiles through current-membership publication;
+an absent new owner receives the accepted agent and profiles once. Preserve
+current independent owners/options, the existing profile-order projection,
+normalization, draft correlation, partial MCP data and post-creation navigation.
+
+Keep ordinary save's `syncSavedAgentToStore` revision/missing-owner policy and
+existing-owner additional-profile creation's missing-owner guard unchanged.
+Those paths must not restore an owner removed during an outstanding edit.
+The new marker is supplied only after an actual new-agent create was accepted;
+rejected POST never invokes publication. No store, API, version or event contract
+changes. This restores `AC-AGENTS-CREATION-CATALOGUE-001.5`, with .1-.4/.6 and
+the separate existing-owner creation contract preserved.
+
+The original append-order descriptions above record the earlier delivery.
+Where the current profile-order implementation places newly accepted profiles
+first, retain that ordering and the relative order of current siblings; do not
+restore the former append policy through this repair. Fixture assertions must
+identify profiles by persisted id unless order itself is their subject.
+
+The [bounded CI compatibility package](../../../plans/agent-creation-ci-compatibility/plan.md)
+records the exact tested/main versus candidate source integration required before
+RED; it does not authorize an unrelated base migration or change ordinary saves.
+
 Leave `mergeSavedAgentDraft`, ID correlation, current draft functional setters,
 validation, admin checks, contributors and real routing intact. Tests observe
 the actual coordinator result and route rather than substituting either.

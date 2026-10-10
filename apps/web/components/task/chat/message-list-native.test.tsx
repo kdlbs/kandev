@@ -126,6 +126,7 @@ const MISSING_SCROLL_CONTAINER_ERROR = "scroll container did not render";
 const TARGET_MESSAGE_ID = "target";
 const HANDLE_RENDER_ERROR = "handle did not render";
 const HARNESS_RENDER_ERROR = "harness did not render";
+const NATIVE_NAVIGATION_TARGET = "navigation-target";
 const NATIVE_SCROLL_MANAGEMENT_TEST_ID = "native-scroll-management-container";
 const AUTO_SCROLL_CONTAINER_TEST_ID = "auto-scroll-container";
 const CACHED_MESSAGE_ID = "cached-message";
@@ -431,6 +432,8 @@ function NativeScrollManagementHarness({
   clampScrollTop = false,
   includeDividerPlacement = false,
   dividerBeforeItemKey = null,
+  motionEnabled = false,
+  readerClaimRef,
 }: {
   items: RenderItem[];
   messages?: Message[];
@@ -453,6 +456,8 @@ function NativeScrollManagementHarness({
   clampScrollTop?: boolean;
   includeDividerPlacement?: boolean;
   dividerBeforeItemKey?: string | null;
+  motionEnabled?: boolean;
+  readerClaimRef?: { current: (() => void) | null };
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useNativeScrollMetrics(scrollRef, metrics);
@@ -478,6 +483,7 @@ function NativeScrollManagementHarness({
     loadMore,
     isVisible,
     historyRefreshPending,
+    motionEnabled,
   });
   useNativeScrollHarnessPlacement({
     scrollRef,
@@ -498,15 +504,248 @@ function NativeScrollManagementHarness({
   setOptionalRef(scrollToMessageRef, handleScrollToMessage);
   setOptionalRef(programmaticLockRef, isProgrammaticScrollLocked);
   setOptionalRef(recoveryRef, showRecovery);
-  return (
-    <NativeScrollHarnessContent
-      scrollRef={scrollRef}
-      sentinelRef={sentinelRef}
-      sessionId={sessionId}
-      dividerBeforeItemKey={dividerBeforeItemKey}
-    />
-  );
+  setOptionalRef(readerClaimRef, claimReaderPosition);
+  const contentProps = { scrollRef, sentinelRef, sessionId, dividerBeforeItemKey };
+  return <NativeScrollHarnessContent {...contentProps} />;
 }
+
+function retainedStartFixture(motionEnabled = false) {
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal("requestAnimationFrame", (frame: FrameRequestCallback) => {
+    frames.push(frame);
+    return frames.length;
+  });
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  const geometry = { documentTop: 120, margin: 92 };
+  const metrics = { scrollHeight: 416, scrollTop: 0, clientHeight: 400 };
+  const scrollToMessageRef: NonNullable<
+    Parameters<typeof NativeScrollManagementHarness>[0]["scrollToMessageRef"]
+  > = { current: null };
+  const latestRef = { current: null as (() => boolean) | null };
+  const readerClaimRef = { current: null as (() => void) | null };
+  const programmaticLockRef = { current: null as (() => boolean) | null };
+  const props = {
+    items: [transcriptMessage(NATIVE_NAVIGATION_TARGET)],
+    metrics,
+    motionEnabled,
+    sessionId: "retained-session",
+    scrollToMessageRef,
+    latestRef,
+    readerClaimRef,
+    programmaticLockRef,
+    clampScrollTop: true,
+    includeDividerPlacement: true,
+  };
+  const view = render(<NativeScrollManagementHarness {...props} />);
+  const root = view.container.querySelector<HTMLElement>(
+    `[data-testid="${NATIVE_SCROLL_MANAGEMENT_TEST_ID}"]`,
+  )!;
+  const row = root.querySelector<HTMLElement>("#msg-navigation-target")!;
+  Object.defineProperty(root, "getBoundingClientRect", { value: () => createRect(80, 400) });
+  Object.defineProperty(row, "getBoundingClientRect", {
+    value: () => createRect(80 + geometry.documentTop - metrics.scrollTop, 20),
+  });
+  vi.spyOn(window, "getComputedStyle").mockImplementation(
+    () => ({ scrollMarginTop: `${geometry.margin}px` }) as CSSStyleDeclaration,
+  );
+  vi.spyOn(row, "scrollIntoView").mockImplementation(() => {
+    root.scrollTop = geometry.documentTop - geometry.margin;
+  });
+  const jump = () =>
+    act(() => {
+      expect(scrollToMessageRef.current?.(NATIVE_NAVIGATION_TARGET, { align: "start" })).toBe(true);
+      for (let i = 0; i < 6 && frames.length; i++) frames.shift()!(i);
+      root.dispatchEvent(new Event("scroll"));
+      root.dispatchEvent(new Event("scrollend"));
+      vi.advanceTimersByTime(300);
+    });
+  const prepend = (sessionId = props.sessionId) => {
+    geometry.documentTop += 500;
+    metrics.scrollHeight += 600;
+    props.items = [transcriptMessage(`older-${geometry.documentTop}`), ...props.items];
+    view.rerender(<NativeScrollManagementHarness {...props} sessionId={sessionId} />);
+  };
+  return {
+    ...view,
+    root,
+    row,
+    metrics,
+    geometry,
+    jump,
+    prepend,
+    props,
+    latestRef,
+    readerClaimRef,
+    scrollToMessageRef,
+    programmaticLockRef,
+  };
+}
+
+// @covers AC-UI-PINNED-PROMPT-AVAILABILITY-001.2, .7, .8
+describe("retained start target", () => {
+  beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }));
+  afterEach(() => vi.useRealTimers());
+  it.each([false, true])(
+    "retains start alignment after guard release and successive delayed prepends (motion=%s)",
+    (motion) => {
+      const fixture = retainedStartFixture(motion);
+      fixture.jump();
+      expect(fixture.programmaticLockRef.current?.()).toBe(false);
+      expect(fixture.metrics.scrollTop).toBe(16); // Nearest reachable initial landing.
+      fixture.prepend();
+      expect(
+        fixture.row.getBoundingClientRect().top - fixture.root.getBoundingClientRect().top,
+      ).toBe(92);
+      fixture.geometry.margin = 110;
+      fixture.prepend();
+      expect(
+        fixture.row.getBoundingClientRect().top - fixture.root.getBoundingClientRect().top,
+      ).toBe(110);
+    },
+  );
+
+  it.each(["wheel", "keyboard", "touch", "claim"])(
+    "yields to existing %s reader intent before prepend",
+    (intent) => {
+      const fixture = retainedStartFixture();
+      fixture.jump();
+      act(() => {
+        if (intent === "wheel") fixture.root.dispatchEvent(new WheelEvent("wheel", { deltaY: -1 }));
+        if (intent === "keyboard")
+          fixture.root.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "PageUp", bubbles: true }),
+          );
+        if (intent === "touch") {
+          fixture.root.dispatchEvent(touchEvent("touchstart", 100));
+          fixture.root.dispatchEvent(touchEvent("touchmove", 120));
+        }
+        if (intent === "claim") fixture.readerClaimRef.current?.();
+        fixture.root.scrollTop = 0;
+        fixture.root.dispatchEvent(new Event("scroll"));
+      });
+      fixture.prepend();
+      expect(fixture.metrics.scrollTop).toBe(500);
+    },
+  );
+
+  it("yields to an absent superseding request", () => {
+    const fixture = retainedStartFixture();
+    fixture.jump();
+    act(() =>
+      expect(fixture.scrollToMessageRef.current?.("absent", { align: "start" })).toBe(false),
+    );
+    fixture.prepend();
+    expect(fixture.row.getBoundingClientRect().top - fixture.root.getBoundingClientRect().top).toBe(
+      104,
+    );
+  });
+
+  it("clears the target before a different session's prepend", () => {
+    const fixture = retainedStartFixture();
+    fixture.jump();
+    fixture.rerender(
+      <NativeScrollManagementHarness {...fixture.props} sessionId="different-session" />,
+    );
+    act(() => {
+      fixture.root.scrollTop = 16;
+      fixture.root.dispatchEvent(new Event("scroll"));
+    });
+    fixture.prepend("different-session");
+    expect(fixture.row.getBoundingClientRect().top - fixture.root.getBoundingClientRect().top).toBe(
+      104,
+    );
+  });
+});
+
+describe("retained start target ownership", () => {
+  beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }));
+  afterEach(() => vi.useRealTimers());
+
+  it("yields to a centered superseding request", () => {
+    const fixture = retainedStartFixture();
+    fixture.jump();
+    act(() => {
+      fixture.scrollToMessageRef.current?.(NATIVE_NAVIGATION_TARGET, { align: "center" });
+      fixture.root.dispatchEvent(new Event("scrollend"));
+    });
+    fixture.prepend();
+    expect(fixture.row.getBoundingClientRect().top - fixture.root.getBoundingClientRect().top).toBe(
+      104,
+    );
+  });
+
+  it("clears the target on explicit latest navigation", () => {
+    const fixture = retainedStartFixture();
+    fixture.jump();
+    act(() => {
+      expect(fixture.latestRef.current?.()).toBe(true);
+      fixture.root.dispatchEvent(new Event("scroll"));
+    });
+    fixture.prepend();
+    expect(fixture.row.getBoundingClientRect().top - fixture.root.getBoundingClientRect().top).toBe(
+      104,
+    );
+  });
+
+  it("clears the target at the existing placement boundary", () => {
+    const fixture = retainedStartFixture();
+    fixture.jump();
+    mockDockviewState.pendingChatInitialPlacement = { sessionId: "retained-session", token: 100 };
+    fixture.rerender(<NativeScrollManagementHarness {...fixture.props} />);
+    act(() => {
+      fixture.root.scrollTop = 16;
+      fixture.root.dispatchEvent(new Event("scroll"));
+    });
+    fixture.prepend();
+    expect(fixture.row.getBoundingClientRect().top - fixture.root.getBoundingClientRect().top).toBe(
+      104,
+    );
+  });
+
+  it("keeps the retained target local to its message list", () => {
+    const first = retainedStartFixture();
+    const second = retainedStartFixture();
+    first.jump();
+    act(() => {
+      second.root.scrollTop = 16;
+      second.root.dispatchEvent(new Event("scroll"));
+    });
+    second.prepend();
+    expect(second.row.getBoundingClientRect().top - second.root.getBoundingClientRect().top).toBe(
+      104,
+    );
+    first.prepend();
+    expect(first.row.getBoundingClientRect().top - first.root.getBoundingClientRect().top).toBe(92);
+  });
+});
+
+describe("retained start target supersession", () => {
+  beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }));
+  afterEach(() => vi.useRealTimers());
+
+  it("preserves the newer start target instead of the previous row", () => {
+    const fixture = retainedStartFixture();
+    fixture.jump();
+    const newer = document.createElement("div");
+    newer.id = "msg-new-target";
+    fixture.root.append(newer);
+    Object.defineProperty(newer, "getBoundingClientRect", {
+      value: () => createRect(100 + fixture.geometry.documentTop - fixture.metrics.scrollTop, 20),
+    });
+    vi.spyOn(newer, "scrollIntoView").mockImplementation(() => {
+      fixture.root.scrollTop = fixture.geometry.documentTop + 20 - fixture.geometry.margin;
+    });
+    act(() => {
+      expect(fixture.scrollToMessageRef.current?.("new-target", { align: "start" })).toBe(true);
+      fixture.root.dispatchEvent(new Event("scrollend"));
+    });
+    fixture.prepend();
+    expect(newer.getBoundingClientRect().top - fixture.root.getBoundingClientRect().top).toBe(92);
+    expect(fixture.row.getBoundingClientRect().top - fixture.root.getBoundingClientRect().top).toBe(
+      72,
+    );
+  });
+});
 
 describe("resolvePaginationStopReason", () => {
   it.each([

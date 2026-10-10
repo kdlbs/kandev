@@ -1,6 +1,8 @@
 import { render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ToastProvider } from "@/components/toast-provider";
+
 import type { AgentUpdateJob } from "@/lib/api";
 
 const startUpdateMock = vi.fn();
@@ -15,16 +17,21 @@ let onUpdateCallback:
     ) => Promise<AgentUpdateJob>)
   | undefined;
 
+const pageStore = vi.hoisted(() => {
+  const state = {
+    settingsAgents: { items: [] },
+    agentProfiles: { items: [], version: 1, orderByAgent: {} },
+    installJobs: { byAgent: {} },
+    setAgentDiscovery: vi.fn(),
+    setSettingsAgents: vi.fn(),
+    setAvailableAgents: vi.fn(),
+    setAgentProfiles: vi.fn(),
+  };
+  return { state, api: { getState: () => state } };
+});
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (select: (state: unknown) => unknown) =>
-    select({
-      settingsAgents: { items: [] },
-      installJobs: { byAgent: {} },
-      setAgentDiscovery: vi.fn(),
-      setSettingsAgents: vi.fn(),
-      setAvailableAgents: vi.fn(),
-      setAgentProfiles: vi.fn(),
-    }),
+  useAppStore: (select: (state: unknown) => unknown) => select(pageStore.state),
+  useAppStoreApi: () => pageStore.api,
 }));
 vi.mock("@/hooks/domains/auth/use-is-admin", () => ({ useIsAdmin: () => true }));
 vi.mock("@/hooks/domains/settings/use-agent-discovery", () => ({
@@ -111,7 +118,11 @@ describe("Agents settings self-update approval", () => {
       started_at: "2026-09-26T12:00:00Z",
     };
     startUpdateMock.mockResolvedValue(terminal);
-    render(<AgentsSettingsPage />);
+    render(
+      <ToastProvider>
+        <AgentsSettingsPage />
+      </ToastProvider>,
+    );
 
     if (!onUpdateCallback) throw new Error("installed agent update callback was not rendered");
     updatePromise = onUpdateCallback("omp-acp", "", false, "self_update");
@@ -137,7 +148,11 @@ describe("Agents settings self-update approval", () => {
       status: "queued",
       started_at: "2026-09-26T12:00:00Z",
     } satisfies AgentUpdateJob);
-    render(<AgentsSettingsPage />);
+    render(
+      <ToastProvider>
+        <AgentsSettingsPage />
+      </ToastProvider>,
+    );
 
     if (!onUpdateCallback) throw new Error("installed agent update callback was not rendered");
     updatePromise = onUpdateCallback("omp-acp", "", false, "self_update");
