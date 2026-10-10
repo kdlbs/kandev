@@ -31,6 +31,11 @@ Keep this package and the existing dirty work uncommitted.
 
 ## Scope
 
+The later [missing delivery record package](../durable-agent-record-recovery/plan.md)
+adds verified reconstruction for older journal submissions without canonical
+backend records. Its work orders and results are separate from this completed
+package and depend on PR #4380's interrupted-session recovery flow.
+
 ### In scope
 
 - Repeatable state-only reconciliation with the documented initial recovery window.
@@ -146,3 +151,9 @@ Implementation checks passed on 2026-09-28:
 Tasks 01-05 are implemented sequentially with TDD, and each work order records its results. All edits remain in the worktree and uncommitted.
 
 Task 01's full process race suite still has the independently reported `TestWorkspaceTracker_StopsWhenGitBroken` goroutine-shutdown timeout; its durable producer, terminal-tail, and detach/reattach regressions pass. PostgreSQL and native Windows/macOS validation remain release gates and are not represented as passing.
+
+## Journal shutdown and recovery follow-up (2026-10-09)
+
+The [repair package](../agentctl-journal-shutdown-recovery/plan.md) owns the observed journal-close panic and retry failure after execution removal.
+It also covers recovery-control alignment and the complete post-crash desktop/phone interaction.
+Its four work orders are completed. The repair package records the backend, desktop, and phone validation results. Earlier results and outstanding release gates remain unchanged.

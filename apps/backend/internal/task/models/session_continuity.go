@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"time"
 )
 
@@ -12,23 +13,72 @@ const (
 	AgentDeliveryRecoveryUncertain    = "uncertain"
 	AgentDeliveryRecoveryRecovered    = "recovered"
 	AgentDeliveryRecoverySettled      = "settled"
+	AgentDeliveryRecoveryContinued    = "continued"
 )
 
 // AgentDeliveryRecovery is the persisted UI and admission snapshot for one
 // immutable prompt whose transport is being reconciled or whose outcome is
 // uncertain. Revision is assigned by the repository's compare-and-set write.
 type AgentDeliveryRecovery struct {
-	Phase             string    `json:"phase"`
-	Revision          int64     `json:"revision"`
-	SessionID         string    `json:"session_id"`
-	AgentExecutionID  string    `json:"agent_execution_id"`
-	SubmissionID      string    `json:"submission_id"`
-	StreamID          string    `json:"stream_id"`
-	IncarnationID     string    `json:"incarnation_id"`
-	HarnessGeneration int64     `json:"harness_generation"`
-	PromptGeneration  uint64    `json:"prompt_generation"`
-	Message           string    `json:"message,omitempty"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	OriginalRuntime   processidentity.Identity               `json:"original_runtime,omitempty"`
+	Phase             string                                 `json:"phase"`
+	Revision          int64                                  `json:"revision"`
+	SessionID         string                                 `json:"session_id"`
+	AgentExecutionID  string                                 `json:"agent_execution_id"`
+	SubmissionID      string                                 `json:"submission_id"`
+	StreamID          string                                 `json:"stream_id"`
+	IncarnationID     string                                 `json:"incarnation_id"`
+	HarnessGeneration int64                                  `json:"harness_generation"`
+	PromptGeneration  uint64                                 `json:"prompt_generation"`
+	Message           string                                 `json:"message,omitempty"`
+	Reconstruction    *AgentDeliveryReconstructionProvenance `json:"reconstruction,omitempty"`
+	UpdatedAt         time.Time                              `json:"updated_at"`
+}
+
+// AgentDeliveryReconstructionProvenance records the retained journal evidence
+// that justified restoring a missing canonical submission association.
+type AgentDeliveryReconstructionProvenance struct {
+	SourceSessionID           string    `json:"source_session_id"`
+	SourceIncarnationID       string    `json:"source_incarnation_id"`
+	SourceHarnessGeneration   int64     `json:"source_harness_generation"`
+	SourceStreamID            string    `json:"source_stream_id"`
+	PayloadHash               string    `json:"payload_hash"`
+	ObservedState             string    `json:"observed_state"`
+	SourceStreamHighWater     int64     `json:"source_stream_high_water"`
+	SourceStreamAcknowledged  int64     `json:"source_stream_acknowledged"`
+	SourceStreamFirstRetained int64     `json:"source_stream_first_retained"`
+	ProcessIdentityKnown      bool      `json:"process_identity_known"`
+	ProcessTerminated         *bool     `json:"process_terminated,omitempty"`
+	ReconstructedAt           time.Time `json:"reconstructed_at"`
+}
+
+// AgentDeliveryReconstructionRequest is the validated owner snapshot passed
+// to the transaction that restores one retained prompt's canonical association.
+type AgentDeliveryReconstructionRequest struct {
+	TaskID                    string
+	SessionID                 string
+	IncarnationID             string
+	HarnessGeneration         int64
+	ExpectedExecutionID       string
+	ExpectedSessionState      TaskSessionState
+	ExpectedWorkspacePath     string
+	NativeSessionID           string
+	MessageID                 string
+	ExpectedBlock             SessionRecoveryBlock
+	SourceStreamHighWater     int64
+	SourceStreamAcknowledged  int64
+	SourceStreamFirstRetained int64
+	ExpectedCursor            *AgentDeliveryCursor
+	Submission                AgentDeliverySubmission
+	Recovery                  AgentDeliveryRecovery
+}
+
+// AgentDeliveryReconstructionResult reports the committed recovery identity.
+// It intentionally contains no prompt payload.
+type AgentDeliveryReconstructionResult struct {
+	Inserted bool
+	Recovery AgentDeliveryRecovery
+	Block    SessionRecoveryBlock
 }
 
 // LoadAgentDeliveryRecovery decodes the typed recovery view from session
@@ -136,3 +186,13 @@ const (
 	RecoveryBlockOpen     = "open"
 	RecoveryBlockResolved = "resolved"
 )
+
+// InterruptedContinuationCommit binds a verified native restore to its admitted instruction.
+type InterruptedContinuationCommit struct {
+	Recovery             AgentDeliveryRecovery
+	Generation           HarnessSessionGeneration
+	CandidateExecutionID string
+	BlockID              string
+	SnapshotID           string
+	ContentHash          string
+}

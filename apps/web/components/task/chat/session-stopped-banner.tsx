@@ -2,6 +2,8 @@
 
 import { useCallback, useState } from "react";
 import { IconAlertTriangle, IconCircleCheck, IconPlayerStop } from "@tabler/icons-react";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { InterruptedSessionContinuation } from "./interrupted-session-continuation";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
@@ -186,38 +188,55 @@ function UncertainDeliveryActions({
   const { t } = useTranslation();
   const { stop } = useSessionActions({ taskId, sessionId });
   const [stopping, setStopping] = useState(false);
+  const [stopFailed, setStopFailed] = useState(false);
   const [stopRequested, setStopRequested] = useState(false);
   const handleStop = useCallback(async () => {
     setStopping(true);
+    setStopFailed(false);
     try {
       if (await stop()) setStopRequested(true);
+      else setStopFailed(true);
+    } catch {
+      setStopFailed(true);
     } finally {
       setStopping(false);
     }
   }, [stop]);
 
   return (
-    <div className="mt-3 flex min-w-0 flex-col gap-2">
-      <div className="flex min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
-        <RecoveryActions
-          actions={actions.map((action) => ({ ...action, disabled: stopping || action.disabled }))}
-          busy={busyAction !== null}
-          busyAction={busyAction}
-          blocked={blocked}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          aria-label={t("task:stop")}
-          disabled={busyAction !== null || stopping || !taskId || !sessionId}
-          onClick={() => void handleStop()}
-          data-testid="recovery-stop-button"
-          className="h-auto min-h-11 w-full cursor-pointer gap-1.5 whitespace-normal md:min-h-7 md:w-auto"
+    <div className="min-w-0">
+      <RecoveryActions
+        actions={actions.map((action) => ({ ...action, disabled: stopping || action.disabled }))}
+        busy={busyAction !== null}
+        busyAction={busyAction}
+        blocked={blocked}
+        trailingActions={
+          <Button
+            type="button"
+            variant="outline"
+            aria-label={t("task:stop")}
+            disabled={stopping || !taskId || !sessionId}
+            onClick={() => void handleStop()}
+            data-testid="recovery-stop-button"
+            className={controlSizingClassName(
+              "standard",
+              "h-auto min-h-7 w-full cursor-pointer gap-1.5 whitespace-normal py-0.5 md:w-auto",
+            )}
+          >
+            <IconPlayerStop aria-hidden="true" className="size-3.5 shrink-0" />
+            {stopping ? t("task:stopping") : t("task:stop")}
+          </Button>
+        }
+      />
+      {stopFailed && (
+        <p
+          role="status"
+          data-testid="delivery-stop-failed"
+          className="mt-2 text-xs text-muted-foreground"
         >
-          <IconPlayerStop aria-hidden="true" className="size-3.5 shrink-0" />
-          {stopping ? t("task:stopping") : t("task:stop")}
-        </Button>
-      </div>
+          {t("task:deliveryStopFailed")}
+        </p>
+      )}
       {stopRequested && (
         <p
           role="status"
@@ -316,6 +335,15 @@ function StoppedSessionMessages({
           {props.actions.recoveryNotice}
         </p>
       )}
+      {props.actions.deliveryRecoveryNotice && (
+        <p
+          role="status"
+          data-testid="delivery-recovery-result"
+          className="mt-1 text-xs text-muted-foreground"
+        >
+          {props.actions.deliveryRecoveryNotice}
+        </p>
+      )}
     </>
   );
 }
@@ -332,13 +360,21 @@ function StoppedSessionRecoveryControls({
   const { busyAction } = props.actions;
   if (props.uncertainDelivery && props.mode !== "completed") {
     return (
-      <UncertainDeliveryActions
-        actions={choices}
-        busyAction={busyAction}
-        blocked={blocked}
-        taskId={props.taskId}
-        sessionId={props.sessionId}
-      />
+      <>
+        <UncertainDeliveryActions
+          actions={choices}
+          busyAction={busyAction}
+          blocked={blocked}
+          taskId={props.taskId}
+          sessionId={props.sessionId}
+        />
+        {props.actions.deliveryRecoveryResult?.allowed_actions?.includes("resume_interrupted") && (
+          <InterruptedSessionContinuation
+            key={`${props.sessionId}:${props.actions.deliveryRecoveryResult.recovery_revision}`}
+            observed={props.actions.deliveryRecoveryResult}
+          />
+        )}
+      </>
     );
   }
   return (

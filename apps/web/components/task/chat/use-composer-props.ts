@@ -91,10 +91,14 @@ export function useComposerProps(args: ComposerPropsArgs) {
   const { resolvedSessionId, taskId, isAgentBusy, isWorking, needsRecovery, planModeEnabled } =
     panelState;
   const deliveryRecovery = readAgentDeliveryRecovery(panelState.session?.metadata);
+  const hasDeliveryRecoveryBlock =
+    panelState.session?.session_recovery_blocks?.some(
+      (block) => block.consumer_reference === "agent_delivery",
+    ) ?? false;
   const legacyUncertainDelivery = panelState.lastAgentError?.code === DURABLE_DELIVERY_UNCERTAIN;
   const recoveryPresentation = deliveryRecoveryPresentation(
     deliveryRecovery?.phase,
-    legacyUncertainDelivery,
+    legacyUncertainDelivery || hasDeliveryRecoveryBlock,
   );
   const canQueueWhileStarting = panelState.inputMode === "queue" && panelState.isQueueReady;
   const supportsSteering = panelState.supportsSteering;

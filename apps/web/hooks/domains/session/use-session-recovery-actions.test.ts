@@ -17,6 +17,13 @@ type RecoveryEligibilityState = {
         metadata?: Record<string, unknown> | null;
         task_environment_id?: string;
         workspace_recovery?: WorkspaceRecoveryProjection | null;
+        session_recovery_blocks?: Array<{
+          id: string;
+          incarnation_id: string;
+          expected_generation: number;
+          reason: string;
+          consumer_reference: string;
+        }>;
       }
     >;
   };
@@ -54,6 +61,9 @@ vi.mock("@/lib/services/session-recovery-service", () => ({
   sessionRecoveryGuardDetails: () => null,
   sessionRecoveryGuardMessage: () => "",
   contextContinuationDetails: () => null,
+  sessionDeliveryRecoveryMessage: (result: { outcome: string }) =>
+    `task:deliveryRecovery${result.outcome}`,
+  sessionDeliveryRecoveryReasonMessage: (reason: string) => `task:deliveryRecovery:${reason}`,
   requestSessionRecover: mocks.requestSessionRecover,
   restoreSessionWorkspace: mocks.restoreSessionWorkspace,
   getWorkspaceRecoveryStatus: mocks.getWorkspaceRecoveryStatus,
@@ -129,165 +139,95 @@ function eligibleRecoveryState(): RecoveryEligibilityState {
   };
 }
 
-describe("provider-restored resume eligibility", () => {
-  it("sends the recovery policy for an eligible failed Auggie ACP task session", async () => {
-    mocks.appState = eligibleRecoveryState();
-    const { result } = renderHook(() =>
-      useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
-    );
-
-    expect(result.current.providerRestoredResumeEligible).toBe(true);
-    await act(async () => {
-      await result.current.handleRecover("resume");
-    });
-
-    expect(mocks.requestSessionRecover).toHaveBeenCalledWith({
-      taskId: TASK_ID,
-      sessionId: SESSION_ID,
-      action: "resume",
-      failureMessage: FAILED_TO_RESUME_MESSAGE_KEY,
-      settingsPolicy: "provider_restored",
-    });
-  });
-
-  it.each([
-    [
-      "empty execution profile ID falls back to the agent profile",
-      (state: RecoveryEligibilityState) => {
-        state.taskSessions.items[SESSION_ID].execution_profile_id = "";
-        state.taskSessions.items[SESSION_ID].agent_profile_id = "profile-1";
-      },
-    ],
-    [
-      "ACP metadata native session ID",
-      (state: RecoveryEligibilityState) => {
-        delete state.taskSessions.items[SESSION_ID].downstream_acp_session_id;
-        state.taskSessions.items[SESSION_ID].metadata = {
-          acp: { session_id: "native-session-from-metadata" },
-        };
-      },
-    ],
-  ])("supports %s", async (_description, updateState) => {
-    const state = eligibleRecoveryState();
-    updateState(state);
-    mocks.appState = state;
-    const { result } = renderHook(() =>
-      useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
-    );
-
-    expect(result.current.providerRestoredResumeEligible).toBe(true);
-  });
-
-  it("supports a Quick Chat task session when the canonical task is not in kanban", async () => {
-    const state = eligibleRecoveryState();
-    state.kanban.tasks = [];
-    state.quickChat.sessions = [{ kind: "chat", sessionId: SESSION_ID, taskId: TASK_ID }];
-    mocks.appState = state;
-    const { result } = renderHook(() =>
-      useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
-    );
-
-    expect(result.current.providerRestoredResumeEligible).toBe(true);
-    await act(async () => {
-      await result.current.handleRecover("resume");
-    });
-    expect(mocks.requestSessionRecover).toHaveBeenCalledWith({
-      taskId: TASK_ID,
-      sessionId: SESSION_ID,
-      action: "resume",
-      failureMessage: FAILED_TO_RESUME_MESSAGE_KEY,
-      settingsPolicy: "provider_restored",
-    });
-  });
-});
-
-describe("provider-restored resume eligibility exclusions", () => {
-  it.each([
-    [
-      "Office task",
-      (state: RecoveryEligibilityState) => (state.kanban.tasks[0].isFromOffice = true),
-    ],
-    [
-      "nonfailed session",
-      (state: RecoveryEligibilityState) => (state.taskSessions.items[SESSION_ID].state = "RUNNING"),
-    ],
-    [
-      "other provider",
-      (state: RecoveryEligibilityState) => (state.agentProfiles.items[0].agent_name = "claude-acp"),
-    ],
-    [
-      "passthrough session",
-      (state: RecoveryEligibilityState) =>
-        (state.taskSessions.items[SESSION_ID].is_passthrough = true),
-    ],
-    [
-      "passthrough profile",
-      (state: RecoveryEligibilityState) => (state.agentProfiles.items[0].cli_passthrough = true),
-    ],
-    [
-      "missing native session token",
-      (state: RecoveryEligibilityState) =>
-        delete state.taskSessions.items[SESSION_ID].downstream_acp_session_id,
-    ],
-    ["missing task", (state: RecoveryEligibilityState) => (state.kanban.tasks = [])],
-    [
-      "mismatched Quick Chat ownership",
-      (state: RecoveryEligibilityState) => {
-        state.kanban.tasks = [];
-        state.quickChat.sessions = [{ kind: "chat", sessionId: SESSION_ID, taskId: "task-2" }];
-      },
-    ],
-    [
-      "session owned by another task",
-      (state: RecoveryEligibilityState) =>
-        (state.taskSessions.items[SESSION_ID].task_id = "task-2"),
-    ],
-    [
-      "missing provider profile",
-      (state: RecoveryEligibilityState) => (state.agentProfiles.items = []),
-    ],
-  ])("omits the recovery policy for an ineligible %s", async (_reason, makeIneligible) => {
-    const state = eligibleRecoveryState();
-    makeIneligible(state);
-    mocks.appState = state;
-    const { result } = renderHook(() =>
-      useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
-    );
-
-    expect(result.current.providerRestoredResumeEligible).toBe(false);
-    await act(async () => {
-      await result.current.handleRecover("resume");
-    });
-
-    expect(mocks.requestSessionRecover).toHaveBeenCalledWith({
-      taskId: TASK_ID,
-      sessionId: SESSION_ID,
-      action: "resume",
-      failureMessage: FAILED_TO_RESUME_MESSAGE_KEY,
-    });
-  });
-
-  it("omits the recovery policy for other actions even when resume is eligible", async () => {
-    mocks.appState = eligibleRecoveryState();
-    const { result } = renderHook(() =>
-      useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
-    );
-
-    await act(async () => {
-      await result.current.handleRecover("fresh_start");
-    });
-
-    expect(mocks.requestSessionRecover).toHaveBeenCalledWith({
-      taskId: TASK_ID,
-      sessionId: SESSION_ID,
-      action: "fresh_start",
-      failureMessage: FAILED_TO_RESUME_MESSAGE_KEY,
-    });
-  });
-});
-
 // eslint-disable-next-line max-lines-per-function -- recovery retry scenarios share one hook harness.
 describe("useSessionRecoveryActions", () => {
+  it("fences a delayed block retry result after the committed recovery identity replaces it", async () => {
+    const state = eligibleRecoveryState();
+    state.taskSessions.items[SESSION_ID].session_recovery_blocks = [
+      {
+        id: "block-1",
+        incarnation_id: "incarnation-1",
+        expected_generation: 7,
+        reason: "unresolved_durable_work",
+        consumer_reference: "agent_delivery",
+      },
+    ];
+    mocks.appState = state;
+    let finishRequest!: (value: unknown) => void;
+    mocks.requestSessionRecover.mockReturnValue(
+      new Promise((resolve) => {
+        finishRequest = resolve;
+      }),
+    );
+    const { result, rerender } = renderHook(() =>
+      useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
+    );
+    let pending!: Promise<boolean>;
+    await act(async () => {
+      pending = result.current.handleRecover("retry_connection");
+      await Promise.resolve();
+    });
+
+    mocks.appState.taskSessions.items[SESSION_ID].metadata = {
+      agent_delivery_recovery: {
+        phase: "uncertain",
+        revision: 1,
+        session_id: SESSION_ID,
+        agent_execution_id: "",
+        submission_id: "prompt:message-1",
+        stream_id: "stream-1",
+        incarnation_id: "incarnation-1",
+        harness_generation: 7,
+        prompt_generation: 0,
+        reconstruction: { process_identity_known: false },
+      },
+    };
+    mocks.appState.taskSessions.items[SESSION_ID].session_recovery_blocks = [];
+    rerender();
+    await act(async () => {
+      finishRequest({
+        task_id: TASK_ID,
+        session_id: SESSION_ID,
+        outcome: "blocked",
+        reason: "missing_canonical_submission",
+        recovery_revision: 0,
+      });
+      await pending;
+    });
+
+    expect(result.current.deliveryRecoveryResult).toBeNull();
+    expect(result.current.deliveryRecoveryNotice).toBe(
+      "task:deliveryRecovery:recovery_identity_incomplete",
+    );
+  });
+
+  it("keeps the typed delivery retry outcome as localized status", async () => {
+    const onDeliveryReconciled = vi.fn();
+    mocks.requestSessionRecover.mockResolvedValueOnce({
+      task_id: TASK_ID,
+      session_id: SESSION_ID,
+      outcome: "blocked",
+      reason: "missing_canonical_submission",
+      recovery_revision: 0,
+    });
+    const { result } = renderHook(() =>
+      useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID, onDeliveryReconciled }),
+    );
+
+    await act(async () => {
+      await result.current.handleRecover("retry_connection");
+    });
+
+    expect(result.current.deliveryRecoveryNotice).toBe("task:deliveryRecoveryblocked");
+    expect(result.current.deliveryRecoveryResult).toMatchObject({
+      outcome: "blocked",
+      reason: "missing_canonical_submission",
+    });
+    expect(result.current.recoveryError).toBeNull();
+    expect(result.current.busyAction).toBeNull();
+    expect(onDeliveryReconciled).toHaveBeenCalledTimes(1);
+  });
+
   it("clears busy and error state after a successful recovery", async () => {
     mocks.requestSessionRecover.mockResolvedValueOnce(undefined);
     const { result } = renderHook(() =>

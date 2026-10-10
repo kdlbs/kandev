@@ -24,7 +24,8 @@ COPY apps/backend/ ./
 
 RUN go build -ldflags "-s -w" -o /out/kandev ./cmd/kandev && \
     go build -ldflags "-s -w" -o /out/agentctl ./cmd/agentctl && \
-    go build -ldflags "-s -w" -o /out/mock-agent ./cmd/mock-agent
+    go build -ldflags "-s -w" -o /out/mock-agent ./cmd/mock-agent && \
+    go test -c -trimpath -tags fts5 -o /out/e2e-delivery-fixture ./internal/agent/runtime/lifecycle
 
 # ---------------------------------------------------------------------------
 # Stage 2: Node builder — install deps + build web app
@@ -76,6 +77,7 @@ COPY --from=node-builder /build/apps/ ./apps/
 # Copy Go binaries into the location global-setup.ts expects
 COPY --from=go-builder /out/kandev ./apps/backend/bin/kandev
 COPY --from=go-builder /out/mock-agent ./apps/backend/bin/mock-agent
+COPY --from=go-builder /out/e2e-delivery-fixture ./apps/backend/bin/e2e-delivery-fixture
 # agentctl must be in PATH — kandev spawns it as a subprocess
 COPY --from=go-builder /out/agentctl /usr/local/bin/agentctl
 

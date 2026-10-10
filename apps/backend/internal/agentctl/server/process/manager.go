@@ -118,19 +118,25 @@ type Manager struct {
 
 	// deliveryJournal is opened before any agent process starts. A configured
 	// but unreadable journal is an admission error, never a legacy fallback.
-	deliveryJournal            *journal.Journal
-	deliveryJournalErr         error
-	deliveryWriter             *deliveryEventWriter
-	deliveryJournalMu          sync.RWMutex
-	deliveryJournalClose       sync.Once
-	deliveryJournalCloseErr    error
-	deliveryWakeOnce           sync.Once
-	deliveryWakeCh             chan struct{}
-	deliverySubmissionMu       sync.Mutex
-	deliveryActiveMu           sync.RWMutex
-	deliveryActiveID           string
-	deliveryPromptMu           sync.Mutex
-	deliveryPromptByGeneration map[uint64]string
+	deliveryJournal             *journal.Journal
+	deliveryJournalErr          error
+	deliveryWriter              *deliveryEventWriter
+	deliveryJournalMu           sync.RWMutex
+	deliveryJournalClose        sync.Once
+	deliveryJournalCloseErr     error
+	deliveryWakeOnce            sync.Once
+	deliveryWakeCh              chan struct{}
+	deliverySubmissionMu        sync.Mutex
+	deliveryActiveMu            sync.RWMutex
+	deliveryActiveID            string
+	deliveryHealth              DeliveryHealth
+	deliveryPausedWriters       int
+	deliveryBlocked             bool
+	deliveryPressureCancelledID string
+	deliveryPressureTerminalID  string
+	deliveryCancellationFailed  bool
+	deliveryPromptMu            sync.Mutex
+	deliveryPromptByGeneration  map[uint64]string
 
 	// Process state
 	cmd                *exec.Cmd
@@ -658,6 +664,15 @@ func (m *Manager) AdmitDeliverySubmission(ctx context.Context, submission journa
 	if err != nil {
 		return journal.Submission{}, err
 	}
+	if err := m.refreshDeliveryPressure(ctx, deliveryJournal, ""); err != nil {
+		return journal.Submission{}, err
+	}
+	m.deliveryActiveMu.RLock()
+	blocked := m.deliveryBlocked
+	m.deliveryActiveMu.RUnlock()
+	if blocked {
+		return journal.Submission{}, errDeliveryPressure
+	}
 	if submission.StreamID == "" {
 		submission.StreamID = m.DeliveryStreamID()
 	}
@@ -678,7 +693,14 @@ func (m *Manager) DispatchDeliverySubmission(
 	}
 	m.deliverySubmissionMu.Lock()
 	defer m.deliverySubmissionMu.Unlock()
+	if err := m.refreshDeliveryPressure(ctx, deliveryJournal, ""); err != nil {
+		return journal.Submission{}, err
+	}
 	m.deliveryActiveMu.Lock()
+	if m.deliveryBlocked {
+		m.deliveryActiveMu.Unlock()
+		return journal.Submission{}, errDeliveryPressure
+	}
 	m.deliveryActiveID = id
 	m.deliveryActiveMu.Unlock()
 	defer func() {
@@ -747,6 +769,14 @@ func (m *Manager) RetireDeliverySubmission(ctx context.Context, id string, recov
 	deliveryJournal, err := m.DeliveryJournal()
 	if err != nil {
 		return err
+	}
+	submission, err := deliveryJournal.GetSubmission(ctx, id)
+	if err != nil {
+		return err
+	}
+	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+	if submission.SessionID != sessionID || submission.IncarnationID != incarnationID || generation != recoveryGeneration || submission.HarnessGeneration >= generation {
+		return journal.ErrOwnerMismatch
 	}
 	_, err = deliveryJournal.RetireSubmission(ctx, id, recoveryGeneration)
 	return err
@@ -2441,13 +2471,15 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 			if !ok {
 				return
 			}
+			update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
 			persisted, err := m.persistDeliveryEvent(update)
 			if err != nil {
 				m.logger.Error("failed to commit durable delivery event", zap.Error(err))
 				// A configured journal is the commit-before-publish boundary. Stop
 				// forwarding when it cannot commit so the backend never observes an
 				// event that cannot be replayed after a disconnect.
-				m.status.Store(StatusError)
+				m.recordDeliveryStorageFailure(err)
+				m.cancelDeliveryAfterStorageFailure(update.DeliverySubmissionID)
 				return
 			}
 			update = persisted
@@ -2474,13 +2506,18 @@ func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.Agent
 	m.deliveryJournalMu.Lock()
 	configured := m.cfg != nil && m.cfg.DurableJournalPath != ""
 	deliveryJournal := m.deliveryJournal
-	if deliveryJournal != nil && m.deliveryWriter == nil {
+	if deliveryJournal != nil && m.deliveryJournalErr == nil && (m.deliveryWriter == nil ||
+		(m.deliveryWriter.ctx.Err() != nil && (m.Status() == StatusRunning || m.Status() == StatusStarting))) {
 		m.deliveryWriter = newDeliveryEventWriter(m)
 	}
 	writer := m.deliveryWriter
 	m.deliveryJournalMu.Unlock()
-	if !configured || deliveryJournal == nil {
+	if !configured {
 		return update, nil
+	}
+	if deliveryJournal == nil {
+		_, err := m.DeliveryJournal()
+		return update, err
 	}
 	if writer != nil {
 		return writer.persist(context.Background(), update)
@@ -2494,10 +2531,18 @@ func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.Agent
 
 func (m *Manager) persistDeliveryBatch(ctx context.Context, updates []adapter.AgentEvent) ([]adapter.AgentEvent, error) {
 	m.deliveryJournalMu.RLock()
+	configured := m.cfg != nil && m.cfg.DurableJournalPath != ""
 	deliveryJournal := m.deliveryJournal
+	deliveryJournalErr := m.deliveryJournalErr
 	m.deliveryJournalMu.RUnlock()
-	if deliveryJournal == nil {
+	if !configured {
 		return updates, nil
+	}
+	if deliveryJournal == nil {
+		if deliveryJournalErr != nil {
+			return updates, deliveryJournalErr
+		}
+		return updates, journal.ErrJournalCorrupt
 	}
 	events := make([]journal.Event, len(updates))
 	for i, update := range updates {
@@ -2535,13 +2580,8 @@ func (m *Manager) persistDeliveryBatch(ctx context.Context, updates []adapter.Ag
 			Terminal:          update.Type == adapter.EventTypeComplete || update.Type == adapter.EventTypeError,
 		}
 	}
-	committed, err := deliveryJournal.AppendBatch(ctx, events)
+	committed, err := m.appendDeliveryWithRecovery(ctx, deliveryJournal, events)
 	if err != nil {
-		m.deliveryJournalMu.Lock()
-		if m.deliveryJournalErr == nil {
-			m.deliveryJournalErr = err
-		}
-		m.deliveryJournalMu.Unlock()
 		return updates, err
 	}
 	for i := range updates {
@@ -2680,7 +2720,10 @@ func (m *Manager) StopForTeardown(ctx context.Context) error {
 	m.CloseAdmission()
 	previewErr := m.CloseWorkspacePreview(ctx)
 	if err := m.WaitForAdmission(ctx); err != nil {
-		return errors.Join(previewErr, fmt.Errorf("wait for process admission to drain: %w", err))
+		// Close durable storage even when an owner misses the drain deadline.
+		// Late readers then fail with a typed closed-journal error, and cannot
+		// mistake shutdown for an empty successful replay.
+		return errors.Join(previewErr, fmt.Errorf("wait for process admission to drain: %w", err), m.closeDeliveryJournal())
 	}
 	stopErr := m.stop(ctx)
 	return errors.Join(previewErr, stopErr, m.closeDeliveryJournal())
@@ -2691,8 +2734,12 @@ func (m *Manager) closeDeliveryJournal() error {
 		return nil
 	}
 	m.deliveryJournalClose.Do(func() {
-		if m.deliveryWriter != nil {
-			m.deliveryWriter.close()
+		m.deliveryJournalMu.Lock()
+		m.deliveryJournalErr = journal.ErrJournalClosed
+		writer := m.deliveryWriter
+		m.deliveryJournalMu.Unlock()
+		if writer != nil {
+			writer.close()
 		}
 		m.deliveryJournalMu.Lock()
 		defer m.deliveryJournalMu.Unlock()
@@ -2701,6 +2748,10 @@ func (m *Manager) closeDeliveryJournal() error {
 		}
 		m.deliveryJournalCloseErr = m.deliveryJournal.Close()
 		m.deliveryJournal = nil
+		m.deliveryJournalErr = journal.ErrJournalClosed
+		if m.deliveryJournalCloseErr != nil {
+			m.deliveryJournalErr = errors.Join(journal.ErrJournalClosed, m.deliveryJournalCloseErr)
+		}
 	})
 	return m.deliveryJournalCloseErr
 }
@@ -2847,6 +2898,12 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) error {
 // It reports whether this call closed stopCh, i.e. whether goroutines were just
 // released and still need draining.
 func (m *Manager) closeAdapterAndStdin() bool {
+	m.deliveryJournalMu.RLock()
+	writer := m.deliveryWriter
+	m.deliveryJournalMu.RUnlock()
+	if writer != nil {
+		writer.close()
+	}
 	m.logger.Debug("closing adapter")
 	if m.adapter != nil {
 		if err := m.adapter.Close(); err != nil {

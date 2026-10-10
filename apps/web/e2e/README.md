@@ -84,6 +84,12 @@ artifact, and each shard validates that immutable identity after download.
 `KANDEV_E2E_BIN` selects a custom backend binary. The setup still checks the
 local mock agent and other required artifacts.
 
+Recovery tests also require `bin/e2e-delivery-fixture`. The managed runner builds
+it with `make build-e2e-delivery-fixture`. CI and Docker runs use the compiled
+fixture, so test execution does not require Go. Its test-only source has its own
+freshness check. The fixture fills an isolated, stopped session's retained
+journal to the shipped 256 MiB limit and checks pruning after Retry.
+
 ## Playwright projects
 
 The suite is split into six projects. Pick one with `--project=<name>`.

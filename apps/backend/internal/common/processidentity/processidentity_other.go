@@ -14,3 +14,6 @@ func Inspect(Identity) (State, error) { return StateUnknown, ErrUnverifiableIden
 func TerminateOwnedSession(context.Context, Identity, time.Duration) error {
 	return ErrUnverifiableIdentity
 }
+
+// OwnedSessionTerminated fails closed when descendant ownership cannot be inspected.
+func OwnedSessionTerminated(Identity) (bool, error) { return false, ErrUnverifiableIdentity }

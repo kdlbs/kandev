@@ -249,3 +249,12 @@ func (c *Client) doDeliveryRequest(ctx context.Context, method, path string, inp
 	}
 	return nil
 }
+
+// RetireInterruptedDeliverySubmission binds retirement to the observed predecessor stream.
+func (c *Client) RetireInterruptedDeliverySubmission(ctx context.Context, id, streamID string, generation uint64) error {
+	path := "/api/v1/agent/submissions/" + url.PathEscape(id) + "/retire"
+	return c.doDeliveryRequest(ctx, http.MethodPost, path, struct {
+		StreamID   string `json:"stream_id"`
+		Generation uint64 `json:"harness_generation"`
+	}{StreamID: streamID, Generation: generation}, nil)
+}

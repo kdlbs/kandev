@@ -1968,6 +1968,9 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		execution.TaskScope = req.TaskScope
 		execution.setSessionSettingsStartupPolicy(req.SessionSettingsPolicy)
 		execution.RequiredNativeConversationID = req.RequiredNativeConversationID
+		execution.InterruptedSubmissionID = req.InterruptedSubmissionID
+		execution.InterruptedStreamID = req.InterruptedStreamID
+		execution.InterruptedHarnessGeneration = req.InterruptedHarnessGeneration
 		// The workspace-only execution was created before a prompt was admitted.
 		// Transfer this launch's prompt payload before StartAgentProcess reads it.
 		execution.setMetadataValue("task_description", req.TaskDescription)
@@ -2341,6 +2344,9 @@ func (m *Manager) buildExecutionFromInstance(
 	execution.TaskScope = req.TaskScope
 	execution.setSessionSettingsStartupPolicy(req.SessionSettingsPolicy)
 	execution.RequiredNativeConversationID = req.RequiredNativeConversationID
+	execution.InterruptedSubmissionID = req.InterruptedSubmissionID
+	execution.InterruptedStreamID = req.InterruptedStreamID
+	execution.InterruptedHarnessGeneration = req.InterruptedHarnessGeneration
 	execution.ResumeAttemptID = ResumeAttemptIDFromContext(ctx)
 	execution.RuntimeName = rt.Name()
 	execution.WorkspaceID = req.WorkspaceID

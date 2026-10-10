@@ -2,33 +2,8 @@ package journal
 
 import (
 	"context"
-	"errors"
-	"path/filepath"
-	"testing"
 	"time"
-
-	bolt "go.etcd.io/bbolt"
 )
-
-func TestJournalOperationsAfterClose(t *testing.T) {
-	j, err := Open(Config{Path: filepath.Join(t.TempDir(), "delivery.bbolt")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := j.Close(); err != nil {
-		t.Fatal(err)
-	}
-	for name, operation := range closedJournalOperations(j) {
-		t.Run(name, func(t *testing.T) {
-			if err := operation(); !errors.Is(err, bolt.ErrDatabaseNotOpen) {
-				t.Fatalf("operation after close = %v, want database not open", err)
-			}
-		})
-	}
-	if err := j.Close(); err != nil {
-		t.Fatalf("repeated close: %v", err)
-	}
-}
 
 func closedJournalOperations(j *Journal) map[string]func() error {
 	ctx := context.Background()

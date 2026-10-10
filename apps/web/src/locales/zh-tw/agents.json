@@ -429,7 +429,7 @@
   "useCustomModelId": "將「{{model}}」用作模型 ID",
   "modelDiscoveryNotInstalled": "Kandev 無法使用該命令列工具。",
   "modelDiscoveryNotLoggedIn": "該命令列工具尚未登入。",
-  "modelDiscoveryTimeout": "模型清單請求逾時。",
+  "modelDiscoveryTimeout": "模型清單請求超時。",
   "modelSourceCli": "CLI",
   "modelSourceAcp": "ACP",
   "profileDragInstructions": "按空格鍵選取設定檔。使用方向鍵移動，再按空格鍵放下，或按 Escape 取消。",

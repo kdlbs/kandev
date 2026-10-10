@@ -124,6 +124,7 @@ const (
 	ActionSessionLaunch                   = "session.launch"
 	ActionSessionFork                     = "session.fork"
 	ActionSessionEnsure                   = "session.ensure"
+	ActionSessionRecoverBatch             = "session.recover_batch"
 	ActionSessionRecover                  = "session.recover"
 	ActionSessionWorkspaceRecoveryGet     = "session.workspace_recovery.get"
 	ActionSessionWorkspaceRecoveryChanged = "session.workspace_recovery.changed"

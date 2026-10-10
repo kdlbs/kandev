@@ -189,6 +189,13 @@ type agentPromptStreamRecoverer interface {
 	RecoverAgentPromptStream(ctx context.Context, sessionID string) error
 }
 
+type agentPromptStreamIdentityRecoverer interface {
+	RecoverAgentPromptStreamWithIdentity(
+		context.Context,
+		lifecycle.AgentDeliveryRecoveryIdentity,
+	) lifecycle.DeliveryReconciliationResult
+}
+
 type resumeAttemptBinder interface {
 	BindResumeAttempt(ctx context.Context, sessionID, attemptID string) error
 }

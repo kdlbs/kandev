@@ -31,7 +31,11 @@ const AgentCtlPort = ports.AgentCtl
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
 	RequiredNativeConversationID string
-	ID                           string
+	InterruptedSubmissionID      string
+	InterruptedStreamID          string
+	InterruptedHarnessGeneration uint64
+
+	ID string
 	// startupDisposition is frozen from the merged executor metadata before
 	// this execution is published to lifecycle callers.
 	startupDisposition AgentStartupDisposition
@@ -1476,12 +1480,16 @@ type RouteOverride struct {
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
 	RequiredNativeConversationID string
-	TaskID                       string
-	TaskScope                    TaskLaunchScope
-	SessionSettingsPolicy        SessionSettingsPolicy
-	WorkspaceID                  string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
-	SessionID                    string
-	TaskEnvironmentID            string // Env this session belongs to (shared across sessions in same task)
+	InterruptedSubmissionID      string
+	InterruptedStreamID          string
+	InterruptedHarnessGeneration uint64
+
+	TaskID                string
+	TaskScope             TaskLaunchScope
+	SessionSettingsPolicy SessionSettingsPolicy
+	WorkspaceID           string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
+	SessionID             string
+	TaskEnvironmentID     string // Env this session belongs to (shared across sessions in same task)
 	// WorkspaceReuseRequired selects attach-only environment preparation.
 	WorkspaceReuseRequired bool
 	// AllowBranchReplacement is an explicit user-selected recovery permission.

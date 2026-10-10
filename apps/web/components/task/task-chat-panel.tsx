@@ -15,6 +15,7 @@ import {
 import { SessionRecoveryProvider } from "./chat/session-recovery-context";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { ComposerFooterAllocation } from "./chat/composer-disclosure";
+import { InterruptedSessionsRecovery } from "@/components/app-status-bar/interrupted-sessions-recovery";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import {
   type ChatInputContainerHandle,
@@ -1515,6 +1516,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   return (
     <SessionRecoveryProvider
       messagesLoading={messagesLoading}
+      onDeliveryReconciled={retryHistory}
       session={session}
       messages={[...allMessages, ...footerActionMessages]}
       taskId={taskId}
@@ -1610,6 +1612,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
         </PanelBody>
         <ComposerFooterAllocation>
+          {isMobile && <InterruptedSessionsRecovery />}
           {!isArchived && (
             <ClarificationPanelSection
               pending={Boolean(pendingClarification)}

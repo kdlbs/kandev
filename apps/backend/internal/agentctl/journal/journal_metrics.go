@@ -8,7 +8,7 @@ func (j *Journal) refreshMetrics() {
 	}
 	j.mu.RLock()
 	defer j.mu.RUnlock()
-	if j.db == nil {
+	if _, err := j.dbLocked(); err != nil {
 		return
 	}
 	j.refreshMetricsLocked()

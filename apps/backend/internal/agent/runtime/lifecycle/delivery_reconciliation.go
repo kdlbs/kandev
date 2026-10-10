@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -19,6 +20,7 @@ const (
 var (
 	ErrDeliveryTransportUnavailable = errors.New("agent delivery transport is unavailable")
 	ErrDeliveryOwnerMismatch        = errors.New("agent delivery owner no longer matches")
+	ErrDeliveryRecoveryBlocked      = errors.New("agent delivery recovery is blocked")
 )
 
 type DeliveryReconciliationOutcome string
@@ -27,6 +29,7 @@ const (
 	DeliveryReconciliationRunningAttached      DeliveryReconciliationOutcome = "running_attached"
 	DeliveryReconciliationTerminalSettled      DeliveryReconciliationOutcome = "terminal_settled"
 	DeliveryReconciliationUncertain            DeliveryReconciliationOutcome = "uncertain"
+	DeliveryReconciliationBlocked              DeliveryReconciliationOutcome = "blocked"
 	DeliveryReconciliationOwnerMismatch        DeliveryReconciliationOutcome = "owner_mismatch"
 	DeliveryReconciliationTransportUnavailable DeliveryReconciliationOutcome = "transport_unavailable"
 )
@@ -43,6 +46,7 @@ const (
 // accepted the prompt. RuntimeEpoch is local-runtime fencing only; remote
 // executor identity is independent of that local generation.
 type DeliveryReconciliationIdentity struct {
+	OriginalRuntime   processidentity.Identity
 	SessionID         string
 	ExecutionID       string
 	Owner             ExecutionOwner
@@ -56,10 +60,12 @@ type DeliveryReconciliationIdentity struct {
 }
 
 type DeliveryReconciliationResult struct {
-	Identity DeliveryReconciliationIdentity
-	Outcome  DeliveryReconciliationOutcome
-	Attempts int
-	Err      error
+	Identity          DeliveryReconciliationIdentity
+	Outcome           DeliveryReconciliationOutcome
+	Reason            string
+	ProcessTerminated bool
+	Attempts          int
+	Err               error
 }
 
 func (r DeliveryReconciliationResult) AsError() error {
@@ -71,6 +77,8 @@ func (r DeliveryReconciliationResult) AsError() error {
 		return nil
 	case DeliveryReconciliationOwnerMismatch:
 		return errors.Join(ErrDeliveryOwnerMismatch, r.Err)
+	case DeliveryReconciliationBlocked:
+		return errors.Join(ErrDeliveryRecoveryBlocked, r.Err)
 	case DeliveryReconciliationTransportUnavailable:
 		return errors.Join(ErrDeliveryTransportUnavailable, r.Err)
 	default:
@@ -130,14 +138,18 @@ func captureDeliveryReconciliationIdentity(execution *AgentExecution) (DeliveryR
 	if execution == nil {
 		return DeliveryReconciliationIdentity{}, ErrExecutionNotFound
 	}
-	submissionID := execution.deliverySubmissionIDSnapshot()
+	submissionID := currentDeliverySubmissionID(execution)
 	if execution.ID == "" || execution.SessionID == "" || execution.DeliveryMode != DurableDeliveryV1 ||
 		execution.DeliveryIncarnationID == "" || execution.DeliveryHarnessGeneration == 0 ||
 		execution.DeliveryStreamID == "" || submissionID == "" {
 		return DeliveryReconciliationIdentity{}, fmt.Errorf("durable delivery reconciliation identity is incomplete")
 	}
+	client, release := execution.AcquireAgentCtlClient()
+	originalRuntime := client.RuntimeProcessIdentity()
+	release()
 	return DeliveryReconciliationIdentity{
-		SessionID: execution.SessionID, ExecutionID: execution.ID, Owner: execution.Owner,
+		OriginalRuntime: originalRuntime,
+		SessionID:       execution.SessionID, ExecutionID: execution.ID, Owner: execution.Owner,
 		IncarnationID: execution.DeliveryIncarnationID, HarnessGeneration: execution.DeliveryHarnessGeneration,
 		StreamID: execution.DeliveryStreamID, SubmissionID: submissionID, RuntimeEpoch: execution.runtimeEpoch,
 		StartupGeneration: execution.startupAttemptSnapshot(), PromptGeneration: execution.promptGenerationSnapshot(),
@@ -315,6 +327,10 @@ func (sm *StreamManager) runDeliveryReconciliation(
 		outcome, retry, attempted, err := sm.runDeliveryReconciliationAttempt(ctx, execution, identity, peer, deadline, now)
 		if outcome != "" {
 			result.Outcome, result.Err = outcome, err
+			var pressure *deliveryPressureRecoveryError
+			if errors.As(err, &pressure) {
+				result.Reason = pressure.reason
+			}
 			if outcome == DeliveryReconciliationRunningAttached {
 				sm.notifyDeliveryReconciliationPhase(execution, identity, DeliveryReconciliationPhaseRecovered)
 			}
@@ -408,6 +424,9 @@ func (sm *StreamManager) probeDeliveryOwner(
 	if submissionHasRetainedTerminal(submission) {
 		return sm.reconcileTerminalDelivery(ctx, execution, identity, submission, peer)
 	}
+	if reason := deliveryPressureRecoveryReason(status); reason != "" {
+		return DeliveryReconciliationBlocked, &deliveryPressureRecoveryError{reason: reason}
+	}
 	if !status.IsAgentRunning() {
 		return "", fmt.Errorf("agent process is not running: %s", status.AgentStatus)
 	}
@@ -473,7 +492,7 @@ func (sm *StreamManager) deliveryReconciliationCurrent(
 		execution.DeliveryHarnessGeneration != identity.HarnessGeneration || execution.DeliveryStreamID != identity.StreamID ||
 		execution.runtimeEpoch != identity.RuntimeEpoch || execution.startupAttemptSnapshot() != identity.StartupGeneration ||
 		execution.promptGenerationSnapshot() != identity.PromptGeneration ||
-		execution.deliverySubmissionIDSnapshot() != identity.SubmissionID {
+		currentDeliverySubmissionID(execution) != identity.SubmissionID {
 		return false
 	}
 	return sm.isExecutionCurrent == nil || sm.isExecutionCurrent(execution)

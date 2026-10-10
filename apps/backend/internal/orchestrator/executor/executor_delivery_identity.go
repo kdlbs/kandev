@@ -40,6 +40,12 @@ func (e *Executor) applyDeliveryIdentity(
 	if req.ForceContextContinuation && current != nil {
 		generation++
 	}
+	if req.InterruptedSubmissionID != "" {
+		if current == nil || req.RequiredNativeConversationID == "" || current.NativeSessionID != req.RequiredNativeConversationID || uint64(current.Generation) != req.InterruptedHarnessGeneration || req.InterruptedStreamID == "" || req.ForceContextContinuation {
+			return errors.New("interrupted native continuation identity changed")
+		}
+		generation = current.Generation + 1
+	}
 	req.DeliveryIncarnationID = incarnationID
 	req.DeliveryHarnessGeneration = uint64(generation)
 	req.DeliveryStreamID = fmt.Sprintf("%s:g%d", incarnationID, generation)

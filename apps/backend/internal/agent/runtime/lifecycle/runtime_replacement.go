@@ -133,7 +133,7 @@ func (m *Manager) runtimeLossState(execution *AgentExecution, runtimeEpoch uint6
 			return
 		}
 		state.promptGeneration = current.promptGeneration
-		state.submissionID = current.deliverySubmissionIDSnapshot()
+		state.submissionID = currentDeliverySubmissionID(current)
 		state.reconcile, state.uncertain = classifyRuntimeLossStatus(current.Status, state.submissionID)
 	}); err != nil {
 		return runtimeLossExecutionState{}
@@ -166,7 +166,7 @@ func (m *Manager) isRetiredLocalExecution(execution *AgentExecution) bool {
 
 func (m *Manager) isIdleSettledRetiredLocalExecution(execution *AgentExecution) bool {
 	return m.isRetiredLocalExecution(execution) && execution.Status == v1.AgentStatusReady &&
-		execution.deliverySubmissionIDSnapshot() == ""
+		currentDeliverySubmissionID(execution) == ""
 }
 
 func (m *Manager) runtimeReplacementRecoveryError(execution *AgentExecution) error {

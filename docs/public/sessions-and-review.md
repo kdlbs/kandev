@@ -138,6 +138,43 @@ not resend the prompt or start a replacement conversation. Legacy streams use
 bounded intake and can show the same uncertain state when their missing output
 cannot be replayed.
 
+After Retry confirms that the previous process stopped, the card can offer
+continuation of the saved conversation. Review the retained changes, enter a
+new instruction, and select the acknowledgment before **Resume session**.
+The Kandev session, native conversation, and workspace remain the same.
+The new instruction appears once in the saved conversation.
+Its acceptance leaves the previous prompt outcome uncertain.
+
+If the saved prompt record is missing, **Retry connection** checks the retained
+delivery record. Kandev restores it only when one saved user message matches one
+retained record. The original message stays in the conversation with a blocked
+delivery label. Retry does not send that message again, and the prompt outcome
+stays unknown. If the original agent process cannot be verified, Kandev keeps
+the session blocked and shows the reason. Record repair alone does not allow
+continuation.
+
+Use **Resume interrupted sessions** to select up to 20 sessions for recovery.
+The control appears in the runtime recovery notice and the phone chat recovery
+area. Each session has its own result. Accepted instructions are not repeated
+after retry or browser refresh. A missing prompt record or changed owner keeps
+that session blocked while other eligible sessions can continue.
+
+**Stop** remains available while Retry is pending. The card reports a failed
+Stop request or an unconfirmed cancellation. Successful reconnection or native
+conversation load alone does not mean that a new instruction was accepted.
+
+Agent output uses bounded local storage until the backend confirms that it saved
+the output. A connected session still uses this journal. After reconnection,
+Kandev retries acknowledgments through the current connection, including when
+the agent has no new output.
+
+If retained output approaches its limit, Kandev blocks new prompts and requests
+cancellation of the affected turn. It keeps committed output for replay and
+keeps status, acknowledgments, and Stop available. Pending output can continue
+through delivery after confirmed records are removed. This does not resend the
+prompt or create a new conversation. A failed cancellation remains unconfirmed;
+a storage error does not establish that the agent process stopped.
+
 Kandev can replace the local agent runtime while the backend and browser
 connection stay active. This restores runtime service only. A session with an
 uncertain prompt outcome remains blocked until you resolve its recovery card.
