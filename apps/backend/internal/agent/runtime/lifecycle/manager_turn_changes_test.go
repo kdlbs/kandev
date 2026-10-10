@@ -397,7 +397,7 @@ func TestStreamDisconnectFinishesAdmittedTurnBeforeErrorPublication(t *testing.T
 	manager.SetTurnChangeCaptureHandler(handler)
 	disconnectDone := make(chan struct{})
 	go func() {
-		manager.handleStreamDisconnectWithAttempt(execution, errors.New("stream closed"), 1, "")
+		manager.handleStreamDisconnectWithAttempt(execution, errors.New("stream closed"), 1, "", nil)
 		close(disconnectDone)
 	}()
 	select {
