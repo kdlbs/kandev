@@ -158,3 +158,23 @@ describe("useComposerProps", () => {
     expect(result.current.deliveryRecoveryPhase).toBeUndefined();
   });
 });
+
+describe("canonical interrupted prompt recovery", () => {
+  it("keeps existing Resume available for canonical interrupted work without a recovery record", () => {
+    const args = composerArgs();
+    args.panelState.needsRecovery = true;
+    args.panelState.session = {
+      session_recovery_blocks: [
+        {
+          id: "block-1",
+          reason: "unknown_prompt_outcome",
+          consumer_reference: "agent_delivery",
+          delivery_submission_id: "canonical-submission",
+        },
+      ],
+    } as never;
+    const { result } = renderHook(() => useComposerProps(args));
+    expect(result.current.uncertainDelivery).toBe(false);
+    expect(result.current.needsRecovery).toBe(true);
+  });
+});

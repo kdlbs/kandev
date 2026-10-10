@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.12
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.16
 func TestInterruptedRetirementPreservesEvidenceAndReleasesAdmission(t *testing.T) {
 	j, err := Open(Config{Path: t.TempDir() + "/journal"})
 	if err != nil {
@@ -31,5 +31,25 @@ func TestInterruptedRetirementPreservesEvidenceAndReleasesAdmission(t *testing.T
 	descriptor, err := j.RecoveryDescriptor(ctx, "session", "session", 2, "session:g2")
 	if err != nil || descriptor.Unresolved || len(descriptor.Submissions) != 0 {
 		t.Fatalf("retired descriptor = %+v, %v", descriptor, err)
+	}
+}
+
+func TestSuccessorRetirementPreservesUnfinishedEvidence(t *testing.T) {
+	for _, state := range []SubmissionState{SubmissionPrepared, SubmissionAccepted, SubmissionDispatching} {
+		t.Run(string(state), func(t *testing.T) {
+			ctx := context.Background()
+			j, event := terminalSubmissionFixture(t, state, false)
+			retired, err := j.RetireSubmission(ctx, event.SubmissionID, event.HarnessGeneration+1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !retired.Retired || retired.State != SubmissionInterruptedUnknown || string(retired.Payload) != "prompt" {
+				t.Fatalf("retirement discarded unfinished evidence: %+v", retired)
+			}
+			unresolved, err := j.HasUnresolvedWork(ctx)
+			if err != nil || unresolved {
+				t.Fatalf("retirement retained admission fence: %v, %v", unresolved, err)
+			}
+		})
 	}
 }

@@ -234,3 +234,32 @@ Typecheck and focused ESLint passed. Both managed browser commands recorded
 above were rerun and passed all six tests. The remediation changes recovery
 behavior, not rendered markup, so the published viewport captures remain valid.
 Remote CI and review disposition remain delivery work.
+
+### Main conflict and CI remediation
+
+Integrated the published native-resume retirement contract from main. Retirement
+keeps the idle-dispatch guard and exact current owner checks, permits same-generation
+acknowledgement only for interrupted-unknown work, and retains unfinished evidence
+under successor retirement. Published acceptance IDs remain stable; branch-only
+criteria now use 006.15 through 006.18.
+
+Canonical interrupted-prompt blocks without a runtime recovery record retain the
+existing Resume action. Runtime recovery records retain state-only Retry and
+explicit continuation. Updated disconnect browser assertions to check the specific
+Retry result rather than an obsolete error. The incoming process test fixture now
+provides the logger required by delivery-pressure updates.
+
+Post-integration verification passed:
+
+- Four backend packages with race detection: journal, process, lifecycle, and
+  orchestrator. Coverage includes both native Resume and explicit continuation,
+  owner fencing, read-lock replacement, and unfinished-evidence retirement.
+- Four frontend test files, 54 tests; web typecheck and focused ESLint.
+- Sixteen focused browser checks: seven desktop recovery/order checks, five phone
+  recovery checks, two desktop cancellation checks, and two phone cancellation
+  and failed-resume checks. Every check passed on its first attempt.
+- Full backend changed-scope lint against the integrated main revision (zero
+  issues). The first run exceeded its time budget; the warmed-cache rerun passed.
+- Documentation/specification validators and whitespace/conflict scans.
+
+Exact-head remote CI and review remain externally pending until after push.

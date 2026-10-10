@@ -34,11 +34,15 @@ func TestActivityRetention_StartRunsPassAndTickerThenStops(t *testing.T) {
 	old := svc.store.now().UTC().Add(-activityRetentionAge - time.Hour)
 	seedActivity(t, store, c.ID, "o1", ActionMove, ActivityProposed, old)
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		cancel()
+		svc.WaitActivityRetentionStopped()
+	})
 	tick := make(chan time.Time)
 	stopped := make(chan struct{})
 	svc.startActivityRetention(ctx, tick, func() { close(stopped) })
 	deadline := time.After(5 * time.Second)
-	for retentionRowCount(t, store, c.ID) != 0 {
+	for retentionRowCount(t, store, c.ID) != 0 || svc.retentionRunning.Load() {
 		select {
 		case <-deadline:
 			t.Fatal("startup pass did not delete")

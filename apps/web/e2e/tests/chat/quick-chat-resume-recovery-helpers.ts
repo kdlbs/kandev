@@ -1,7 +1,10 @@
-import { createRequire } from "node:module";
-import path from "node:path";
-import { randomUUID } from "node:crypto";
-import { expect, type Page } from "@playwright/test";
+import {
+  seedInterruptedPrompt,
+  expectJournalRetirement,
+  readRecovery,
+} from "../../helpers/interrupted-prompt-recovery";
+import { expect, type Page, type Locator } from "@playwright/test";
+import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
 import { watchWs } from "../../helpers/causal-waits";
@@ -11,72 +14,6 @@ import {
   sendQuickChatMessage,
   startQuickChatFromSetup,
 } from "./quick-chat-helpers";
-
-const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
-type TestDatabase = {
-  prepare(sql: string): { get(...args: unknown[]): unknown; run(...args: unknown[]): unknown };
-  close(): void;
-};
-
-function withDatabase<T>(tmpDir: string, read: (db: TestDatabase) => T): T {
-  const { DatabaseSync } = nodeRequire("node:sqlite") as {
-    DatabaseSync: new (databasePath: string) => TestDatabase;
-  };
-  const db = new DatabaseSync(path.join(tmpDir, "kandev.db"));
-  try {
-    return read(db);
-  } finally {
-    db.close();
-  }
-}
-
-function seedInterruptedPrompt(tmpDir: string, sessionId: string) {
-  return withDatabase(tmpDir, (db) => {
-    const submission = db
-      .prepare(
-        `SELECT id, incarnation_id, harness_generation
-      FROM agent_delivery_submissions WHERE session_id = ? ORDER BY created_at DESC LIMIT 1`,
-      )
-      .get(sessionId) as { id: string; incarnation_id: string; harness_generation: number };
-    expect(submission).toBeTruthy();
-    const blockId = randomUUID();
-    const submissionId = `prompt:${randomUUID()}`;
-    db.prepare(
-      `INSERT INTO agent_delivery_submissions
-      (id, session_id, incarnation_id, harness_generation, owner_generation,
-       payload_hash, payload, state, outcome, created_at, updated_at)
-      SELECT ?, session_id, incarnation_id, harness_generation, owner_generation,
-       payload_hash, payload, 'interrupted_unknown', 'prompt_dispatch_failed', created_at, updated_at
-      FROM agent_delivery_submissions WHERE id = ?`,
-    ).run(submissionId, submission.id);
-    db.prepare(
-      `INSERT INTO session_recovery_blocks
-      (id, session_id, incarnation_id, expected_generation, reason, state,
-       consumer_reference, delivery_submission_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'unknown_prompt_outcome', 'open', 'agent_delivery', ?, ?, ?)`,
-    ).run(
-      blockId,
-      sessionId,
-      submission.incarnation_id,
-      submission.harness_generation,
-      submissionId,
-      new Date().toISOString(),
-      new Date().toISOString(),
-    );
-    return { blockId, submissionId };
-  });
-}
-
-function readRecovery(tmpDir: string, blockId: string, submissionId: string) {
-  return withDatabase(tmpDir, (db) => ({
-    block: db
-      .prepare("SELECT state, authorized_action FROM session_recovery_blocks WHERE id = ?")
-      .get(blockId),
-    submission: db
-      .prepare("SELECT state FROM agent_delivery_submissions WHERE id = ?")
-      .get(submissionId),
-  }));
-}
 
 async function openExistingQuickChat(page: Page, mobile: boolean) {
   if (mobile) {
@@ -90,6 +27,22 @@ async function openExistingQuickChat(page: Page, mobile: boolean) {
   return dialog;
 }
 
+async function expectResumeReachable(resume: Locator, mobile: boolean) {
+  if (mobile) {
+    const box = await resume.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+  }
+  expect(
+    await resume.evaluate((button) => {
+      const box = button.getBoundingClientRect();
+      return button.contains(
+        document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+      );
+    }),
+  ).toBe(true);
+}
+
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.7
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8
 // @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.9
@@ -98,6 +51,7 @@ export async function verifyQuickChatResumeRecovery(
   apiClient: ApiClient,
   tmpDir: string,
   mobile: boolean,
+  capture?: PrAssetCapture,
 ) {
   const recoveryMessages = captureSessionRecoveryMessages(page);
   const ws = watchWs(page);
@@ -138,7 +92,10 @@ export async function verifyQuickChatResumeRecovery(
       { timeout: 30_000 },
     )
     .toBe(false);
-  const { blockId, submissionId } = seedInterruptedPrompt(tmpDir, started.session_id);
+  const { blockId, submissionId, journalPath, submission } = seedInterruptedPrompt(
+    tmpDir,
+    started.session_id,
+  );
   const restored = await apiClient.wsRequest<{ success: boolean }>("session.launch", {
     task_id: started.task_id,
     session_id: started.session_id,
@@ -153,8 +110,15 @@ export async function verifyQuickChatResumeRecovery(
   await page.waitForLoadState("networkidle");
   dialog = await openExistingQuickChat(page, mobile);
   await dialog.locator(`[data-tab-reference="conversation:${started.session_id}"]`).click();
+  const resume = dialog.getByTestId("recovery-resume-button");
+  await expect(resume).toBeVisible();
+  await expect(resume).toBeEnabled();
+  await expectResumeReachable(resume, mobile);
+  await capture?.screenshot(mobile ? "phone-existing-resume" : "desktop-existing-resume", {
+    caption: "Existing Resume remains available for interrupted Quick Chat.",
+  });
   const recovered = ws.waitForResponse("session.recover", { timeout: 60_000 });
-  await dialog.getByTestId("recovery-resume-button").click();
+  await resume.click();
   await recovered;
   await expect.poll(() => recoveryMessages.requestCounts.resume ?? 0).toBe(1);
   await waitForSessionState(apiClient, {
@@ -168,6 +132,7 @@ export async function verifyQuickChatResumeRecovery(
     block: { state: "resolved", authorized_action: "resume" },
     submission: { state: "interrupted_unknown" },
   });
+  await expectJournalRetirement(journalPath, submission);
   const resumed = (await apiClient.listTaskSessions(started.task_id)).sessions.find(
     (session) => session.id === started.session_id,
   )!;

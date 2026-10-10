@@ -93,7 +93,9 @@ export function useComposerProps(args: ComposerPropsArgs) {
   const deliveryRecovery = readAgentDeliveryRecovery(panelState.session?.metadata);
   const hasDeliveryRecoveryBlock =
     panelState.session?.session_recovery_blocks?.some(
-      (block) => block.consumer_reference === "agent_delivery",
+      (block) =>
+        block.consumer_reference === "agent_delivery" &&
+        (block.reason !== "unknown_prompt_outcome" || !block.delivery_submission_id),
     ) ?? false;
   const legacyUncertainDelivery = panelState.lastAgentError?.code === DURABLE_DELIVERY_UNCERTAIN;
   const recoveryPresentation = deliveryRecoveryPresentation(

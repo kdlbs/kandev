@@ -126,10 +126,10 @@ A missing execution entry or an available replacement runtime alone cannot autho
 
 The request preserves the same task, session, worktree, and recoverable native conversation.
 It records acknowledgment of the old uncertainty without converting that submission into completed or cancelled work.
-Native restore alone does not release durable admission. The current implementation retires unresolved submissions only for forced history continuation.
+Native restore alone does not release durable admission. Explicit native resume acknowledges matching interrupted-unknown work only after the authenticated SQL and journal evidence agree.
 For acknowledged native recovery, admit a new delivery generation while retaining the original native conversation ID.
 After native load succeeds, retire only the proven interrupted submission through a generation-fenced journal operation.
-The existing retirement method writes `cancelled` and drops the payload. Extend its explicit recovery contract to retain the original uncertain outcome and evidence.
+Retirement retains the original uncertain outcome and payload. Same-generation native resume may retire only interrupted-unknown work; retiring unfinished work requires a newer current owner generation and records its uncertainty. The idle dispatcher guard excludes concurrent dispatch.
 This retirement must remain effective in capability, recovery-descriptor, and admission queries without claiming provider cancellation.
 Persist recovery progress before dispatch. A crash between native load, retirement, projection, and dispatch must resume the same recovery operation.
 A prepared checkpoint precedes the atomic generation commit, so a retry may restore it after rechecking process termination, ownership, revision, and independent blocks.

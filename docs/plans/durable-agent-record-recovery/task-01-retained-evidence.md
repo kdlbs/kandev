@@ -121,7 +121,9 @@ The dependency foundation from PR #4380 at
 The branch also incorporates main through
 `d92d40b67bf3ecabf74072c95325f3f86cdd5e30`, including the existing Quick Chat
 Resume behavior. Published acceptance IDs from main were retained; the
-unmerged dependency's conflicting IDs were moved to 006.11 through 006.14.
+unmerged dependency's conflicting IDs were initially moved to 006.11 through
+006.14. Main subsequently published 006.11 and 006.12 in PR #4402; the
+branch-only criteria and their references now use 006.15 through 006.18.
 
 Verification passed:
 

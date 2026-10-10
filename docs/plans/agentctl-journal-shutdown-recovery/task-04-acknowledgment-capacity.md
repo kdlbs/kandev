@@ -17,7 +17,7 @@ acceptance_criteria:
   - AC-PLATFORM-DURABLE-AGENT-DELIVERY-005.4
   - AC-PLATFORM-DURABLE-AGENT-DELIVERY-005.5
   - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.1
-  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.11
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.15
 system_design:
   - ../../specs/platform/system-design/durable-agent-stream-processing.md
   - ../../specs/platform/system-design/durable-agent-reattachment.md

@@ -248,6 +248,12 @@ non-nested client leases, and lost-reply checkpoint recovery. Focused backend,
 frontend, and all six browser checks passed again. Remote CI and review
 thread disposition remain delivery work.
 
+The conflict-fixup round preserves main's published native-resume contract and
+restores its existing Resume controls for canonical interrupted work. Sixteen
+focused desktop/phone browser checks, four backend race-test packages, 54 frontend
+tests, typecheck, focused web lint, and documentation validators passed. Remote
+CI and review remain pending for the next pushed head.
+
 ## Risks
 
 - PR #4380 can change before implementation. Refresh its source and contracts.
