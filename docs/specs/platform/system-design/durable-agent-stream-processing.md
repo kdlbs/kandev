@@ -49,6 +49,16 @@ It flushes pending progress after 20 ms or 256 projected events, whichever occur
 A terminal boundary requests an immediate ACK without blocking committed output notification.
 Failed requests retain the highest pending cursor for bounded retry under the existing recovery window.
 Owner replacement cancels the scheduler. Reconnection reconstructs progress from SQL.
+The scheduler's stream key identifies durable ordering, not a permanent HTTP client.
+Bind each worker to the current authenticated execution and runtime epoch. Replace its client binding when that owner changes.
+Cancel the previous worker before granting replacement send authority. Late responses and teardown must not mutate or cancel the replacement worker.
+Initialize pending progress from the committed projected cursor, including when no new event arrives.
+Compare it with the authenticated journal's acknowledged cursor during attachment and later reconciliation.
+Retain projection-before-ACK in this repair; changing to inbox-only acknowledgment requires a separate projector recovery proof.
+Retry transient ACK failures with jittered exponential delay from 100 ms to 5 seconds and a 3-second request timeout.
+Keep at most one request in flight per stream. Record bounded error categories and surface persistent lag instead of silently retrying every 20 ms.
+Owner mismatch stops that worker and returns through authenticated attachment. It never retries indefinitely with an obsolete credential or lease.
+ACK recovery is independent of prompt admission, event arrival, terminal arrival, and browser focus.
 Projection failure enters typed recovery and stops cursor advancement.
 It cannot leave an apparently healthy stream consuming later events behind a permanent gap.
 
@@ -61,6 +71,43 @@ Only bounded terminal and health metadata can consume reserved space.
 If ordinary capacity is exhausted, admission stops and cancellation targets the exact current owner.
 Status and Stop remain available even if the event writer cannot commit.
 Failure to persist a terminal outcome preserves uncertainty.
+
+### Pressure recovery before exhaustion
+
+Remote agents retain output and continue independent work during prolonged backend absence, including a week, while usable disk remains.
+Default production retention has no fixed logical byte ceiling. The former 256 MiB stream and 2 GiB journal limits do not stop execution.
+Explicit positive internal limits remain available for bounded-quota tests.
+Keep the existing bbolt format, sequence checks, and owner checks.
+Keep the 1 MiB event limit and bounded pending producer buffers and replay pages.
+Unacknowledged records grow on the executor volume without age-based expiry or deletion to reclaim space.
+
+Disk pressure uses available capacity on that volume, a 32 MiB control/recovery reserve, and pending write headroom.
+Capacity sampling is cached and bounded independently of event count.
+Unknown disk statistics are not proof of exhaustion. Actual write failures retain typed handling.
+ACK pruning reuses free database pages. Optional compaction cannot start if its temporary copy would breach the reserve.
+Capacity accounting may credit reusable bbolt pages against payload writes, but not against the physical reserve or allocation headroom.
+Exclude pending pages held by readers and deduct in-flight reservations. Report reusable journal pages separately from available filesystem bytes.
+
+On pressure, reconcile the backend's projected cursor with the journal's acknowledged cursor.
+Advance only to a verified contiguous committed cursor with matching owner identity, then prune through the existing journal transaction.
+Do not fabricate acknowledgment, clear submissions, or require a new prompt to drain the backlog.
+When the disk cannot safely accept more output, request cancellation of the exact owned turn before the reserve is exhausted.
+Keep status, Stop, and ACK processing available. A failed terminal write preserves uncertainty.
+Process liveness remains separate from delivery health. Session focus and stale-execution cleanup cannot kill a live harness because delivery is unhealthy.
+
+Backend shutdown preserves remote runtimes. Local survival remains optional and off by default.
+An outage can delay operations that require the backend even while independent agent work continues.
+The journal format remains compatible. Older binaries retain their older quota behavior after downgrade.
+Downgrade does not grant the long-outage guarantee or permit deletion of unacknowledged records.
+Tests cover real retention beyond 256 MiB, accounting beyond 2 GiB, a deterministic elapsed week, reconnect/replay, low disk, and compaction headroom.
+
+Report retained/unacknowledged bytes, ACK pending age, last successful ACK, retry/error categories, pressure transitions, and projection lag.
+Keep metric labels bounded; session/stream identifiers belong in structured diagnostics only.
+Use the existing recovery card for a localized delivery-storage explanation and Retry connection/Stop, with desktop and phone parity.
+Raw SQL cursors and internal storage paths are diagnostic details, not required user decisions.
+
+Oversized text must use the existing bounded chunk representation. Add coverage for cumulative tool-output snapshots that can multiply retained bytes.
+Do not silently truncate authoritative output. Any representation change requires the existing version and rollback compatibility checks.
 
 Idle rollover changes transport stream identity without creating a new harness conversation.
 It requires settled submissions and completed projection/acknowledgment evidence for the old stream.
@@ -79,3 +126,5 @@ Neither mode silently drops output or automatically resends a prompt.
 The existing chat recovery surface shows reconnecting or uncertain state on desktop and phone.
 Stop remains reachable. Retry connection only queries and reconnects the original work.
 Storage failure alone does not authorize context continuation.
+
+The [journal shutdown and recovery package](../../../plans/agentctl-journal-shutdown-recovery/plan.md) owns the October ACK replacement and capacity recurrence repairs.

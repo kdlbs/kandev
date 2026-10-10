@@ -131,6 +131,26 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	})
 }
 
+func TestBuildExecutionFromInstanceCarriesSilentRestoreBootSuppression(t *testing.T) {
+	mgr := newTestManager(t)
+	ag := &resumeTestAgent{}
+	request := &LaunchRequest{
+		TaskID: "task-1", SessionID: "session-1", SuppressBootStatusMessage: true,
+	}
+	executorRequest := &ExecutorCreateRequest{
+		InstanceID: "execution-1", TaskID: request.TaskID, SessionID: request.SessionID,
+		AgentConfig: ag, Env: map[string]string{}, Metadata: map[string]interface{}{},
+	}
+	instance := &ExecutorInstance{InstanceID: executorRequest.InstanceID, SessionID: request.SessionID}
+	backend := &MockExecutor{name: executor.NameStandalone}
+
+	execution, err := mgr.buildExecutionFromInstance(
+		context.Background(), request, executorRequest, instance, backend, nil, ag, nil,
+	)
+	require.NoError(t, err)
+	require.True(t, execution.suppressBootStatusMessage)
+}
+
 func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	mgr := newTestManager(t)

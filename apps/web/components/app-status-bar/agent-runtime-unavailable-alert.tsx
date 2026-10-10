@@ -13,9 +13,13 @@ import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 export function AgentRuntimeUnavailableAlert() {
   const agentRuntime = useAppStore((state) => state.agentRuntime);
-  if (!agentRuntime || agentRuntime.status === "available") return null;
-
-  return <AgentRuntimeAlertContent recovering={agentRuntime.status === "recovering"} />;
+  return (
+    <>
+      {agentRuntime && agentRuntime.status !== "available" && (
+        <AgentRuntimeAlertContent recovering={agentRuntime.status === "recovering"} />
+      )}
+    </>
+  );
 }
 
 function AgentRuntimeAlertContent({ recovering }: { recovering: boolean }) {

@@ -141,6 +141,51 @@ func TestRemoteDockerTeardownRedialsAfterTransportLoss(t *testing.T) {
 	}
 }
 
+func TestRemoteDockerTeardownUsesPersistedTargetAfterRestart(t *testing.T) {
+	server := newFakeSSHServer(t, nil)
+	defer server.Close()
+	engine := &recordingEngine{}
+	server.setStreamHandler(engine.handler(t))
+
+	exec := NewRemoteDockerExecutor(dialerTestLogger(t))
+	launchForRedialTest(t, exec)
+	exec.mu.Lock()
+	delete(exec.targets, "instance-1")
+	exec.mu.Unlock()
+
+	var redialTarget map[string]interface{}
+	endpoints := &countingEndpointResolver{}
+	exec.connect = func(_ context.Context, req *ExecutorCreateRequest) (*remoteDockerSession, error) {
+		redialTarget = req.Metadata
+		sshClient := server.dial(t)
+		cli, err := docker.NewRemoteClient(NewSSHDockerDialer(sshClient, dialerTestLogger(t)), dialerTestLogger(t))
+		if err != nil {
+			return nil, err
+		}
+		return &remoteDockerSession{sshClient: sshClient, dockerClient: cli, endpoints: endpoints}, nil
+	}
+	metadata := remoteDockerTargetMetadata()
+	metadata[MetadataKeyContainerID] = "container-1"
+	err := exec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID: "instance-1", ContainerID: "container-1", Metadata: metadata,
+	}, true)
+	if err != nil {
+		t.Fatalf("StopInstance() error = %v, want terminal cleanup to redial the persisted target", err)
+	}
+	if got := getMetadataString(redialTarget, MetadataKeySSHHost); got != "docker-host.lan" {
+		t.Fatalf("redialed host = %q, want the persisted executor target", got)
+	}
+	if got := getMetadataString(redialTarget, MetadataKeyContainerID); got != "container-1" {
+		t.Fatalf("redialed container ID = %q, want the exact persisted container", got)
+	}
+	if !engine.called("DELETE ") || !engine.called("/containers/container-1") {
+		t.Fatalf("no exact container removal reached the daemon; calls = %v", engine.calls)
+	}
+	if endpoints.closes != 1 {
+		t.Errorf("redialed session closed %d time(s), want 1", endpoints.closes)
+	}
+}
+
 // TestRemoteDockerTeardownReportsAFailedRedial names the connection failure
 // rather than a generic "no live connection", so the operator can fix it.
 func TestRemoteDockerTeardownReportsAFailedRedial(t *testing.T) {

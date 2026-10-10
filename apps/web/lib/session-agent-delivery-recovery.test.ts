@@ -47,3 +47,14 @@ describe("readAgentDeliveryRecovery", () => {
     ).toBeNull();
   });
 });
+
+it.each(["continued", "restored"] as const)(
+  "accepts the %s terminal revision so late uncertain snapshots cannot restore the old block",
+  (phase) => {
+    expect(
+      readAgentDeliveryRecovery({
+        agent_delivery_recovery: { ...validRecovery, phase, revision: 5 },
+      })?.phase,
+    ).toBe(phase);
+  },
+);

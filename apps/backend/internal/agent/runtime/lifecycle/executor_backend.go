@@ -305,6 +305,7 @@ const (
 	MetadataKeySSHRemoteTaskDir        = "ssh_remote_task_dir"
 	MetadataKeySSHRemoteSessionDir     = "ssh_remote_session_dir"
 	MetadataKeySSHRemoteAgentctlPort   = "ssh_remote_agentctl_port"
+	MetadataKeySSHRemoteControlPort    = "ssh_remote_control_port"
 	MetadataKeySSHRemoteAgentctlPID    = "ssh_remote_agentctl_pid"
 	MetadataKeySSHAgentctlInstanceID   = "ssh_remote_agentctl_instance_id"
 	MetadataKeySSHLocalForwardPort     = "ssh_local_forward_port"
@@ -357,6 +358,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHRemoteTaskDir:        true,
 	MetadataKeySSHRemoteSessionDir:     true,
 	MetadataKeySSHRemoteAgentctlPort:   true,
+	MetadataKeySSHRemoteControlPort:    true,
 	MetadataKeySSHRemoteAgentctlPID:    true,
 	MetadataKeySSHAgentctlInstanceID:   true,
 	MetadataKeySSHLocalForwardPort:     true,
@@ -739,6 +741,12 @@ type ExecutorInstance struct {
 	// Agentctl client for communicating with this instance
 	Client *agentctl.Client
 
+	// DiscardRecovery closes only host-side resources allocated for this
+	// recovery attempt. It must never stop the remote process or resource. The
+	// manager calls it when a candidate cannot be authenticated or tracked;
+	// successful tracking transfers ownership to the runtime backend.
+	DiscardRecovery func() `json:"-"`
+
 	// Runtime-specific identifiers (only one set is populated)
 	ContainerID          string // Docker
 	ContainerIP          string // Docker
@@ -783,6 +791,10 @@ type ExecutorInstance struct {
 	// lifecycle manager. The instance remains attached so the manager can use
 	// its existing bounded stop and recovery-guard path.
 	DeliveryRecoveryError error
+	// agentSessionAssociation is the authenticated, read-only owner projection
+	// captured for this exact recovery attempt. It is process-local only.
+	agentSessionAssociation  *agentctl.AgentSessionAssociation
+	expectedDeliveryStreamID string
 
 	// AgentProfileID is a recovery-only carrier for
 	// AC-EXECUTORS-SURVIVAL-002.14's "agent profile identity" row: the

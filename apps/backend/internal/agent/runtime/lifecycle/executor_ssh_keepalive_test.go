@@ -775,6 +775,7 @@ func TestSSHExecutorBuildInstanceForLostRaceReusesAResumedWinnersProcess(t *test
 		authToken:      "resumed-token",
 		reusingProcess: true,
 		port:           41234,
+		controlPort:    41235,
 		workdirRoot:    "/custom/workdir",
 	}
 	req := &ExecutorCreateRequest{InstanceID: "instance-1", TaskID: "task-1", SessionID: "session-1"}
@@ -786,6 +787,9 @@ func TestSSHExecutorBuildInstanceForLostRaceReusesAResumedWinnersProcess(t *test
 	}
 	if got := instance.Metadata[MetadataKeyReuseExistingProcess]; got != true {
 		t.Fatalf("Metadata[MetadataKeyReuseExistingProcess] = %v, want true — otherwise the loser's startup spawns a second agent subprocess against the winner's already-running remote process", got)
+	}
+	if got := instance.Metadata[MetadataKeySSHRemoteControlPort]; got != "41235" {
+		t.Fatalf("Metadata[MetadataKeySSHRemoteControlPort] = %v, want the winner's authenticated control listener", got)
 	}
 }
 

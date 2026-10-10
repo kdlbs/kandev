@@ -130,24 +130,41 @@ endpoints, or host paths that do not work in the executor. A fresh provision or
 **Reset Environment** can replace the target file. A warm resume keeps the
 existing executor file and does not read the host again.
 
+Each configuration file is limited to 1 MiB and each launch is limited to
+4 MiB of copied configuration. Kandev writes copied files with owner-only
+mode `0600`. Missing, unreadable, invalid, or oversized optional files produce
+a preparation warning and do not stop the launch. File contents are not
+returned by the API or stored in the profile.
+
+SSH writes below the configured remote user's home. If that account is shared,
+the copied configuration can affect other processes that use the same account.
+Review the selected bundles before saving the profile.
+
+### Agent lifetime and reconnect
+
 Kandev also keeps durable delivery records in retained executor storage when
 the executor supports them. The records help Kandev replay accepted output
 after an agentctl replacement or backend restart. A compatible surviving
 agentctl keeps its delivery identity, and Kandev replays committed records
 before it accepts new work. These records do not replace native harness state.
-Durable delivery is independent of the optional process-survival setting. When
-process survival is disabled, the agent process stops and there is no live
-agentctl to adopt. If the retained journal is unavailable, Kandev blocks unsafe
-prompt admission. It does not silently use a less durable path.
 
-Each file is limited to 1 MiB and each launch is limited to 4 MiB. Kandev
-writes copied files with owner-only mode `0600`. Missing, unreadable, invalid,
-or oversized optional files produce a preparation warning and do not stop the
-launch. File contents are not returned by the API or stored in the profile.
+Local and worktree agents stop with Kandev by default. To keep supported local
+agents alive across a backend restart, enable **Agent survival across backend
+restart** under **Settings > System > Feature Toggles**, then restart Kandev.
+The equivalent environment variable is `KANDEV_FEATURES_AGENT_SURVIVAL=true`.
+This installation setting is not an agent-profile setting.
 
-SSH writes below the configured remote user's home. If that account is shared,
-the copied configuration can affect other processes that use the same account.
-Review the selected bundles before saving the profile.
+Remote agents continue when the local Kandev backend stops or disconnects.
+Remote survival does not depend on the local survival setting. When Kandev
+returns, it verifies the recorded execution and reconnects to the same agent.
+It replays saved output without sending another prompt. **Stop** still stops
+the selected remote agent.
+
+The executor needs usable disk space to retain output during a long outage.
+Provider expiration and external process termination can still stop a remote
+agent. Backend tools and credential services require connectivity to Kandev.
+If the retained journal is unavailable, Kandev blocks unsafe prompt admission.
+It does not silently use a less durable path.
 
 ### Model selection in remote executors
 
@@ -450,7 +467,11 @@ Sprites profiles do not copy the host-active `gh` CLI token. Kandev may copy exp
 
 Network rules are stored in `sprites_network_policy_rules` as JSON entries with `domain`, `action` (`allow` or `deny`), and optional `include`. Kandev applies them only on fresh sandbox creation, and currently does so after credential upload, prepare, controller startup, and agent-instance creation. Bootstrap traffic can therefore occur before the profile policy is installed. A parse/provider failure is reported as skipped and does not abort launch. Provider semantics remain authoritative; do not treat this late, best-effort step as a security boundary, and test the resulting policy.
 
-Fresh launch creates a sandbox named `kandev-<execution-prefix>`, uploads the Linux/amd64 `agentctl`, uploads credentials, runs prepare, starts the controller, and opens a local proxy to its control port. The current Sprites path does not probe sandbox architecture; it assumes x86-64. A failed fresh launch destroys the new sandbox. Resume reconnects to the recorded sandbox; if it no longer exists or has expired, Kandev warns and provisions a fresh one on the recorded branch.
+Fresh launch creates a sandbox named `kandev-<execution-prefix>`, uploads the Linux/amd64 `agentctl`, uploads credentials, runs prepare, starts the controller, and opens a local proxy to its control port. The current Sprites path does not probe sandbox architecture; it assumes x86-64. A failed fresh launch destroys the new sandbox. An explicit resume reconnects to the recorded sandbox; if it no longer exists or has expired, Kandev warns and provisions a fresh one on the recorded branch.
+
+Backend shutdown closes the local proxy and leaves the remote agent working.
+Automatic startup recovery reconnects only to the recorded sandbox and agent.
+It preserves unavailable resources for a later retry and does not provision a replacement or send a prompt.
 
 Plain Stop preserves the sandbox and workspace for resume. Archive/delete terminal stops attempt to destroy it, and the profile page can list and explicitly destroy Kandev-named sandboxes with the selected provider token. **Reset Environment** also requests sandbox destruction, but the current direct-reset path does not carry the profile's Sprites secret into that destroy request; after a reset or backend restart, verify the old sandbox in the profile page and destroy it there if it remains. Provider retention, quotas, network behavior, and billing remain provider-dependent. Destroying a sandbox out of band breaks any session that still references it.
 
@@ -510,7 +531,11 @@ SSH materializes the primary attached repository at the remote task-workspace ro
 
 The runtime preflights the selected agent command and reports an installation hint when missing; it does not install the agent or its toolchain. Only these resolved credential environment names are forwarded to the remote agent: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GITHUB_TOKEN`, and `GH_TOKEN`. Arbitrary profile variables and control-plane process variables are not forwarded to that agent process. Agent-specific auth setup scripts can still consume a selected stored secret and materialize their own remote login state.
 
-Stop attempts to kill the session's remote `agentctl` and remove only the remote session-runtime directory, then closes forwarding and SSH. Terminal archive/delete stops run the profile cleanup script first; cleanup is best-effort, so a failure does not block controller teardown. Plain Stop and backend restart skip cleanup and preserve the task workspace for resume. The task directory always remains and no background sweeper currently removes it. The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` also remain for later sessions. Periodically audit the remote process list, session directories, and `<workdir-root>/tasks/` after confirming no session needs the data. Resume re-dials SSH and reuses a live recorded PID when possible; otherwise Kandev starts a fresh remote controller and re-runs preparation.
+Stop attempts to kill the session's remote `agentctl` and remove only the remote session-runtime directory, then closes forwarding and SSH. Terminal archive/delete stops run the profile cleanup script first; cleanup is best-effort, so a failure does not block controller teardown. Plain Stop skips cleanup and preserves the task workspace for resume. The task directory always remains and no background sweeper currently removes it. The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` also remain for later sessions. Periodically audit the remote process list, session directories, and `<workdir-root>/tasks/` after confirming no session needs the data. An explicit resume re-dials SSH and reuses a live recorded PID when possible; otherwise Kandev starts a fresh remote controller and re-runs preparation.
+
+Backend shutdown closes forwarding and SSH without killing remote processes or running cleanup.
+Startup recovery reconnects to the recorded controller and verifies its authenticated session identity before replay.
+An unavailable connection stays pending for retry; recovery does not start a replacement controller.
 
 </details>
 

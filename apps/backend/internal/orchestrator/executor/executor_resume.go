@@ -1029,7 +1029,17 @@ const (
 )
 
 type ResumeOptions struct {
-	RequiredNativeConversationID     string
+	RequiredNativeConversationID string
+	InterruptedSubmissionID      string
+	InterruptedStreamID          string
+	InterruptedHarnessGeneration uint64
+	// CandidateExecutionID pins a restart-only restore process to the durable
+	// checkpoint allocated before lifecycle launch side effects.
+	CandidateExecutionID string
+	// OnExecutionAllocated is runtime-only and advances the exact restore
+	// checkpoint before lifecycle can load the native conversation.
+	OnExecutionAllocated func(context.Context, string) error
+
 	SettingsPolicy                   ResumeSettingsPolicy
 	AllowBranchReplacement           bool
 	RepairWorkspaceInventory         bool
@@ -1045,6 +1055,9 @@ type ResumeOptions struct {
 	// NoInitialPrompt keeps the task description out of a fresh recovery boot;
 	// the owning continuation delivers the captured submission after readiness.
 	NoInitialPrompt bool
+	// SuppressInitialMessageBackfill is used only by silent restart restore,
+	// which must preserve the transcript exactly until an ordinary prompt arrives.
+	SuppressInitialMessageBackfill bool
 	// HoldForInitialPrompt keeps boot-ready queue draining behind an explicit
 	// fresh-start submission until its provider admission resolves.
 	HoldForInitialPrompt bool
@@ -2092,6 +2105,12 @@ func newResumeLaunchRequest(
 		TaskID:                       task.ID,
 		SessionSettingsPolicy:        options.SettingsPolicy,
 		RequiredNativeConversationID: options.RequiredNativeConversationID,
+		ACPSessionID:                 options.RequiredNativeConversationID,
+		InterruptedSubmissionID:      options.InterruptedSubmissionID,
+		InterruptedStreamID:          options.InterruptedStreamID,
+		InterruptedHarnessGeneration: options.InterruptedHarnessGeneration,
+		CandidateExecutionID:         options.CandidateExecutionID,
+		OnExecutionAllocated:         options.OnExecutionAllocated,
 		WorkspaceID:                  task.WorkspaceID,
 		SessionID:                    session.ID,
 		TaskTitle:                    task.Title,
@@ -2107,6 +2126,7 @@ func newResumeLaunchRequest(
 		AllowBranchReplacement:       options.AllowBranchReplacement,
 		ForceContextContinuation:     options.ForceContextContinuation,
 		RecoveryAction:               options.RecoveryAction,
+		SuppressBootStatusMessage:    options.SuppressInitialMessageBackfill,
 	}
 	if options.ForceContextContinuation {
 		if options.DeferInitialPrompt {

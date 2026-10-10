@@ -42,7 +42,8 @@ func TestTerminalCompletionPreservesOtherSubmissionStates(t *testing.T) {
 		{"uncertain", SubmissionInterruptedUnknown, "complete", false, SubmissionInterruptedUnknown, true},
 		{"failed", SubmissionFailed, "complete", false, SubmissionFailed, false},
 		{"cancelled", SubmissionCancelled, "complete", false, SubmissionCancelled, false},
-		{"retired", SubmissionDispatching, "complete", true, SubmissionDispatching, true},
+		{"retired-active", SubmissionDispatching, "complete", true, SubmissionDispatching, true},
+		{"retired-uncertain", SubmissionInterruptedUnknown, "complete", true, SubmissionInterruptedUnknown, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -189,6 +189,13 @@ type agentPromptStreamRecoverer interface {
 	RecoverAgentPromptStream(ctx context.Context, sessionID string) error
 }
 
+type agentPromptStreamIdentityRecoverer interface {
+	RecoverAgentPromptStreamWithIdentity(
+		context.Context,
+		lifecycle.AgentDeliveryRecoveryIdentity,
+	) lifecycle.DeliveryReconciliationResult
+}
+
 type resumeAttemptBinder interface {
 	BindResumeAttempt(ctx context.Context, sessionID, attemptID string) error
 }
@@ -3404,13 +3411,22 @@ func (s *Service) resumeTaskSessionAndPrompt(
 	return result, err
 }
 
-//
-//nolint:cyclop,gocognit,funlen // Resume coordinates state validation, launch recovery, and ready-state persistence.
 func (s *Service) resumeTaskSessionWithContinuation(
 	ctx context.Context,
 	taskID, sessionID string,
 	options executor.ResumeOptions,
 	continuation func(context.Context, *resumeAttempt, *executor.TaskExecution) error,
+) (*executor.TaskExecution, error) {
+	return s.resumeTaskSessionWithContinuationAndReservation(ctx, taskID, sessionID, options, continuation, nil)
+}
+
+//nolint:cyclop,gocognit,funlen // Resume coordinates state validation, launch recovery, and ready-state persistence.
+func (s *Service) resumeTaskSessionWithContinuationAndReservation(
+	ctx context.Context,
+	taskID, sessionID string,
+	options executor.ResumeOptions,
+	continuation func(context.Context, *resumeAttempt, *executor.TaskExecution) error,
+	preReserved *sessionKeyedCeilingReservation,
 ) (*executor.TaskExecution, error) {
 	if err := validateSessionRecoverySettingsPolicyAction(recoveryActionResume, options.SettingsPolicy); err != nil {
 		return nil, err
@@ -3427,87 +3443,16 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
 
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	admission, err := s.prepareResumeSessionAdmission(ctx, taskID, sessionID, options, continuation != nil, entryBinding)
 	if err != nil {
 		return nil, err
 	}
-	if session.TaskID != taskID {
-		return nil, fmt.Errorf("task session does not belong to task")
+	if admission.attempt == nil {
+		return admission.existingExecution, nil
 	}
-	if session.RouteState != "" && session.RouteState != dynamicRouteStatusActive {
-		return nil, &sessionOpenRecoveryBlockedError{reason: autoResumeBlockedDynamicRoute}
-	}
-	if err := s.validateClaimedCeilingBinding(ctx, taskID, entryBinding); err != nil {
-		return nil, err
-	}
-	allowCompletedResume := options.AllowCompletedSessionResume &&
-		session.State == models.TaskSessionStateCompleted
-	// The completed-session permission is valid only for the exact completed
-	// row admitted by the caller. Do not let an option intended for that state
-	// alter the ordinary FAILED/CANCELLED recovery paths.
-	options.AllowCompletedSessionResume = allowCompletedResume
-	// Completed sessions remain closed to every implicit resume path. Check this
-	// before looking for an executor row because cleanup commonly removes that
-	// row, and the caller should receive the terminal-state rejection rather
-	// than an incidental "no executor record" error.
-	if session.State == models.TaskSessionStateCompleted && !allowCompletedResume {
-		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
-	}
-	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-	if (err != nil || running == nil) &&
-		session.State != models.TaskSessionStateCancelled &&
-		session.State != models.TaskSessionStateFailed &&
-		!models.HasInterruptedRecoveryPending(session.Metadata) &&
-		options.RequiredNativeConversationID == "" &&
-		!allowCompletedResume {
-		// Executor record is required for non-terminal sessions. For cancelled/failed sessions
-		// the record may already have been cleaned up before the user clicked Resume — allow it.
-		// Explicit completed follow-up has the same cleanup shape and is admitted
-		// only through the narrow permission above.
-		return nil, fmt.Errorf("session is not resumable: no executor record")
-	}
-	if options.RequireIdleSuspensionProvenance {
-		shortcut, provenanceErr := s.idleSuspensionResumeShortcut(ctx, taskID, sessionID, session, running)
-		if provenanceErr != nil {
-			return nil, provenanceErr
-		}
-		if shortcut != nil {
-			return shortcut, nil
-		}
-		options.AllowCompletedSessionResume = session.State == models.TaskSessionStateCompleted
-	}
-	attempt, owner, err := s.beginResumeAttempt(ctx, taskID, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	if !owner {
-		if options.SettingsPolicy == executor.ResumeSettingsPolicyProviderRestored {
-			return nil, fmt.Errorf("provider-restored recovery is already owned by another resume attempt")
-		}
-		if continuation != nil {
-			// A compound retry cannot safely hand its prompt to an attempt owned
-			// by another caller. The owner may finish and remove the registry
-			// entry before this continuation reaches provider admission.
-			return nil, fmt.Errorf("%w: recovery is already owned by another caller", ErrResumeAttemptCancelled)
-		}
-		// The lifecycle lock normally prevents two callers from reaching this
-		// branch together. Keep the registry join behavior explicit for callers
-		// that entered through a different recovery path: share the completed
-		// result instead of launching a second provider execution.
-		waitCtx, cancelWait := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
-		waitErr := attempt.wait(waitCtx)
-		cancelWait()
-		if waitErr != nil {
-			return nil, waitErr
-		}
-		if attempt.context().Err() != nil {
-			return nil, ErrResumeAttemptCancelled
-		}
-		if execution, ok := s.executor.GetExecutionBySession(sessionID); ok && execution != nil {
-			return execution, nil
-		}
-		return nil, ErrResumeAttemptCancelled
-	}
+	session := admission.session
+	options = admission.options
+	attempt := admission.attempt
 	defer attempt.finish(s.resumeAttemptStore())
 	initialPromptHeld := false
 	if options.HoldForInitialPrompt {
@@ -3521,22 +3466,11 @@ func (s *Service) resumeTaskSessionWithContinuation(
 			}
 		}()
 	}
-	if options.SettingsPolicy == executor.ResumeSettingsPolicyProviderRestored {
-		currentSession, loadErr := s.repo.GetTaskSession(ctx, sessionID)
-		if loadErr != nil {
-			return nil, fmt.Errorf("reload session at provider-restored recovery admission: %w", loadErr)
-		}
-		if currentSession == nil || currentSession.TaskID != taskID {
-			return nil, fmt.Errorf("session not found at provider-restored recovery admission")
-		}
-		if err := s.validateProviderRestoredRecoveryEligibility(ctx, taskID, currentSession); err != nil {
-			return nil, err
-		}
-		if !s.resumeAttemptStore().setSettingsPolicy(attempt, options.SettingsPolicy) {
-			return nil, ErrResumeAttemptCancelled
-		}
-		options.SettingsPolicy = s.resumeAttemptStore().settingsPolicy(attempt)
-		session = currentSession
+	session, options, err = s.refreshProviderRestoredResumeAdmission(
+		ctx, taskID, sessionID, session, options, attempt,
+	)
+	if err != nil {
+		return nil, err
 	}
 	resumeCtx := cancellableResumeContext(attempt)
 	decorateResumeFailure := func(failure error) error {
@@ -3552,32 +3486,9 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		}
 	}
 
-	isOfficeTask, err := s.lookupOfficeTask(resumeCtx, taskID)
-	if err != nil {
-		if attemptErr := s.validateResumeAttempt(attempt); attemptErr != nil {
-			s.cleanupCancelledResumeAttempt(attempt)
-			return nil, attemptErr
-		}
-		return nil, decorateResumeFailure(fmt.Errorf("failed to determine office task status: %w", err))
-	}
-	if isOfficeTask {
-		return nil, decorateResumeFailure(errOfficeTaskResumeRequiresScheduler)
-	}
-	admissionCtx := ctx
-	releaseAdmission := func() {}
-	if isSessionOpenRecoveryContext(ctx) {
-		admissionCtx, releaseAdmission = s.lockCeilingEntryAdmission(ctx, taskID)
-	}
-	seam4Res, deferred, err := func() (*sessionKeyedCeilingReservation, bool, error) {
-		defer releaseAdmission()
-		if isSessionOpenRecoveryContext(ctx) {
-			if reason := s.sessionOpenRecoveryBlockReason(admissionCtx, taskID, session); reason != "" {
-				return nil, false, &sessionOpenRecoveryBlockedError{reason: reason}
-			}
-		}
-		return s.admitOrDeferSeam4(admissionCtx, taskID, sessionID, launchOrigin(options.Origin),
-			seam4ResumePayloadWithBinding(sessionID, options, entryBinding))
-	}()
+	seam4Res, deferred, err := s.admitResumeSessionLaunch(
+		ctx, resumeCtx, taskID, sessionID, session, options, entryBinding, preReserved, attempt, decorateResumeFailure,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -3585,43 +3496,11 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		return nil, nil
 	}
 	defer seam4Res.releaseIfNotConsumed()
-	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam4Res.manualOverride, seam4Res.population, seam4Res.populationKnown, seam4Res.ceiling)
 
-	if _, err := s.resolveDynamicLaunchExecution(resumeCtx, session, session.AgentProfileID, true); err != nil {
-		if attemptErr := s.validateResumeAttempt(attempt); attemptErr != nil {
-			s.cleanupCancelledResumeAttempt(attempt)
-			return nil, attemptErr
-		}
-		return nil, decorateResumeFailure(err)
-	}
-
-	// Bury any open turns from the previous run before relaunching. Without
-	// this, startTurnForSession adopts the orphan on the next prompt and the
-	// UI's running timer counts from the orphan's started_at — which can be
-	// hours or days ago. Zero-duration completion keeps analytics honest about
-	// the dead window. A failure here shouldn't block the resume; the next
-	// completeTurnForSession sweep will mop up.
-	//
-	// Drop the activeTurns cache entry first, mirroring completeTurnForSession.
-	// Otherwise a stale entry would let getActiveTurnID return the now-abandoned
-	// turn ID without re-reading the DB, tagging new messages to a closed turn.
-	if s.turnService != nil {
-		s.activeTurns.Delete(sessionID)
-		if err := s.turnService.AbandonOpenTurns(resumeCtx, sessionID); err != nil {
-			s.logger.Warn("failed to abandon orphan turns on resume; continuing",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
-	}
-	if err := s.validateClaimedCeilingBinding(resumeCtx, taskID, entryBinding); err != nil {
-		s.cleanupCancelledResumeAttempt(attempt)
-		return nil, err
-	}
-	dispatchCtx, releaseCeilingDispatch, err := s.commitCeilingEntryDispatch(
-		resumeCtx, taskID, entryBinding,
+	dispatchCtx, releaseCeilingDispatch, err := s.prepareResumeDispatch(
+		resumeCtx, taskID, sessionID, session, entryBinding, attempt, decorateResumeFailure,
 	)
 	if err != nil {
-		s.cleanupCancelledResumeAttempt(attempt)
 		return nil, err
 	}
 	execution, err := s.executor.ResumeSessionWithOptions(dispatchCtx, session, true, options)
@@ -3716,9 +3595,9 @@ func (s *Service) resumeTaskSessionWithContinuation(
 			zap.String("task_id", taskID),
 			zap.Error(taskErr))
 	} else if task != nil {
-		if options.InitialPromptSubmission == nil {
+		if options.InitialPromptSubmission == nil && !options.SuppressInitialMessageBackfill {
 			s.backfillInitialUserMessageIfMissing(resumeCtx, taskID, sessionID, task.Description)
-		} else {
+		} else if options.InitialPromptSubmission != nil {
 			recorded, recordErr := s.initialSubmissionUserMessageExists(
 				resumeCtx, taskID, sessionID, options.InitialPromptSubmission,
 			)
@@ -3745,6 +3624,249 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	}
 
 	return execution, nil
+}
+
+func (s *Service) admitResumeSessionLaunch(
+	ctx, resumeCtx context.Context,
+	taskID, sessionID string,
+	session *models.TaskSession,
+	options executor.ResumeOptions,
+	entryBinding *models.CeilingWorkflowEntryBinding,
+	preReserved *sessionKeyedCeilingReservation,
+	attempt *resumeAttempt,
+	decorateFailure func(error) error,
+) (*sessionKeyedCeilingReservation, bool, error) {
+	isOfficeTask, err := s.lookupOfficeTask(resumeCtx, taskID)
+	if err != nil {
+		if attemptErr := s.validateResumeAttempt(attempt); attemptErr != nil {
+			s.cleanupCancelledResumeAttempt(attempt)
+			return nil, false, attemptErr
+		}
+		return nil, false, decorateFailure(fmt.Errorf("failed to determine office task status: %w", err))
+	}
+	if isOfficeTask {
+		return nil, false, decorateFailure(errOfficeTaskResumeRequiresScheduler)
+	}
+	admissionCtx := ctx
+	releaseAdmission := func() {}
+	if isSessionOpenRecoveryContext(ctx) {
+		admissionCtx, releaseAdmission = s.lockCeilingEntryAdmission(ctx, taskID)
+	}
+	seam4Res, deferred, err := func() (*sessionKeyedCeilingReservation, bool, error) {
+		defer releaseAdmission()
+		if isSessionOpenRecoveryContext(ctx) {
+			if reason := s.sessionOpenRecoveryBlockReason(admissionCtx, taskID, session); reason != "" {
+				return nil, false, &sessionOpenRecoveryBlockedError{reason: reason}
+			}
+		}
+		if preReserved != nil {
+			return preReserved, false, nil
+		}
+		return s.admitOrDeferSeam4(admissionCtx, taskID, sessionID, launchOrigin(options.Origin),
+			seam4ResumePayloadWithBinding(sessionID, options, entryBinding))
+	}()
+	if err != nil || deferred {
+		return seam4Res, deferred, err
+	}
+	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam4Res.manualOverride,
+		seam4Res.population, seam4Res.populationKnown, seam4Res.ceiling)
+	return seam4Res, false, nil
+}
+
+func (s *Service) prepareResumeDispatch(
+	resumeCtx context.Context,
+	taskID, sessionID string,
+	session *models.TaskSession,
+	entryBinding *models.CeilingWorkflowEntryBinding,
+	attempt *resumeAttempt,
+	decorateFailure func(error) error,
+) (context.Context, func(), error) {
+	if _, err := s.resolveDynamicLaunchExecution(resumeCtx, session, session.AgentProfileID, true); err != nil {
+		if attemptErr := s.validateResumeAttempt(attempt); attemptErr != nil {
+			s.cleanupCancelledResumeAttempt(attempt)
+			return nil, nil, attemptErr
+		}
+		return nil, nil, decorateFailure(err)
+	}
+	// Abandon previous turns after dynamic launch resolution and before dispatch.
+	if s.turnService != nil {
+		s.activeTurns.Delete(sessionID)
+		if err := s.turnService.AbandonOpenTurns(resumeCtx, sessionID); err != nil {
+			s.logger.Warn("failed to abandon orphan turns on resume; continuing",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
+	if err := s.validateClaimedCeilingBinding(resumeCtx, taskID, entryBinding); err != nil {
+		s.cleanupCancelledResumeAttempt(attempt)
+		return nil, nil, err
+	}
+	dispatchCtx, releaseCeilingDispatch, err := s.commitCeilingEntryDispatch(
+		resumeCtx, taskID, entryBinding,
+	)
+	if err != nil {
+		s.cleanupCancelledResumeAttempt(attempt)
+		return nil, nil, err
+	}
+	return dispatchCtx, releaseCeilingDispatch, nil
+}
+
+func (s *Service) refreshProviderRestoredResumeAdmission(
+	ctx context.Context,
+	taskID, sessionID string,
+	session *models.TaskSession,
+	options executor.ResumeOptions,
+	attempt *resumeAttempt,
+) (*models.TaskSession, executor.ResumeOptions, error) {
+	if options.SettingsPolicy != executor.ResumeSettingsPolicyProviderRestored {
+		return session, options, nil
+	}
+	currentSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, options, fmt.Errorf("reload session at provider-restored recovery admission: %w", err)
+	}
+	if currentSession == nil || currentSession.TaskID != taskID {
+		return nil, options, fmt.Errorf("session not found at provider-restored recovery admission")
+	}
+	if err := s.validateProviderRestoredRecoveryEligibility(ctx, taskID, currentSession); err != nil {
+		return nil, options, err
+	}
+	if !s.resumeAttemptStore().setSettingsPolicy(attempt, options.SettingsPolicy) {
+		return nil, options, ErrResumeAttemptCancelled
+	}
+	options.SettingsPolicy = s.resumeAttemptStore().settingsPolicy(attempt)
+	return currentSession, options, nil
+}
+
+type resumeSessionAdmission struct {
+	session           *models.TaskSession
+	options           executor.ResumeOptions
+	attempt           *resumeAttempt
+	existingExecution *executor.TaskExecution
+}
+
+type resumeSessionCandidate struct {
+	session *models.TaskSession
+	options executor.ResumeOptions
+	running *models.ExecutorRunning
+}
+
+func (s *Service) prepareResumeSessionAdmission(
+	ctx context.Context,
+	taskID, sessionID string,
+	options executor.ResumeOptions,
+	hasContinuation bool,
+	entryBinding *models.CeilingWorkflowEntryBinding,
+) (*resumeSessionAdmission, error) {
+	candidate, err := s.loadResumeSessionCandidate(ctx, taskID, sessionID, options, entryBinding)
+	if err != nil {
+		return nil, err
+	}
+	if candidate.options.RequireIdleSuspensionProvenance {
+		shortcut, provenanceErr := s.idleSuspensionResumeShortcut(
+			ctx, taskID, sessionID, candidate.session, candidate.running,
+		)
+		if provenanceErr != nil {
+			return nil, provenanceErr
+		}
+		if shortcut != nil {
+			return &resumeSessionAdmission{existingExecution: shortcut}, nil
+		}
+		candidate.options.AllowCompletedSessionResume = candidate.session.State == models.TaskSessionStateCompleted
+	}
+	attempt, owner, err := s.beginResumeAttempt(ctx, taskID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !owner {
+		return s.joinResumeSessionAdmission(ctx, sessionID, candidate.options, hasContinuation, attempt)
+	}
+	return &resumeSessionAdmission{session: candidate.session, options: candidate.options, attempt: attempt}, nil
+}
+
+func (s *Service) loadResumeSessionCandidate(
+	ctx context.Context,
+	taskID, sessionID string,
+	options executor.ResumeOptions,
+	entryBinding *models.CeilingWorkflowEntryBinding,
+) (*resumeSessionCandidate, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session.TaskID != taskID {
+		return nil, fmt.Errorf("task session does not belong to task")
+	}
+	if session.RouteState != "" && session.RouteState != dynamicRouteStatusActive {
+		return nil, &sessionOpenRecoveryBlockedError{reason: autoResumeBlockedDynamicRoute}
+	}
+	if err := s.validateClaimedCeilingBinding(ctx, taskID, entryBinding); err != nil {
+		return nil, err
+	}
+	allowCompletedResume := options.AllowCompletedSessionResume &&
+		session.State == models.TaskSessionStateCompleted
+	// The completed-session permission is valid only for the exact completed
+	// row admitted by the caller. Do not let an option intended for that state
+	// alter the ordinary FAILED/CANCELLED recovery paths.
+	options.AllowCompletedSessionResume = allowCompletedResume
+	// Check terminal state before executor lookup because cleanup commonly
+	// removes the row and callers should receive the terminal-state rejection.
+	if session.State == models.TaskSessionStateCompleted && !allowCompletedResume {
+		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
+	}
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if resumeRequiresExecutorRecord(session, running, err, options, allowCompletedResume) {
+		// Cancelled/failed and explicit completed resumes can outlive cleanup of
+		// the executor record. Other sessions require that record.
+		return nil, fmt.Errorf("session is not resumable: no executor record")
+	}
+	return &resumeSessionCandidate{session: session, options: options, running: running}, nil
+}
+
+func resumeRequiresExecutorRecord(
+	session *models.TaskSession,
+	running *models.ExecutorRunning,
+	lookupErr error,
+	options executor.ResumeOptions,
+	allowCompletedResume bool,
+) bool {
+	return (lookupErr != nil || running == nil) &&
+		session.State != models.TaskSessionStateCancelled &&
+		session.State != models.TaskSessionStateFailed &&
+		!models.HasInterruptedRecoveryPending(session.Metadata) &&
+		options.RequiredNativeConversationID == "" &&
+		!allowCompletedResume
+}
+
+func (s *Service) joinResumeSessionAdmission(
+	ctx context.Context,
+	sessionID string,
+	options executor.ResumeOptions,
+	hasContinuation bool,
+	attempt *resumeAttempt,
+) (*resumeSessionAdmission, error) {
+	if options.SettingsPolicy == executor.ResumeSettingsPolicyProviderRestored {
+		return nil, fmt.Errorf("provider-restored recovery is already owned by another resume attempt")
+	}
+	if hasContinuation {
+		// A compound retry cannot safely hand its prompt to an attempt owned by
+		// another caller. The owner may finish before provider admission.
+		return nil, fmt.Errorf("%w: recovery is already owned by another caller", ErrResumeAttemptCancelled)
+	}
+	// Share a completed result when another recovery path owns the attempt.
+	waitCtx, cancelWait := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
+	waitErr := attempt.wait(waitCtx)
+	cancelWait()
+	if waitErr != nil {
+		return nil, waitErr
+	}
+	if attempt.context().Err() != nil {
+		return nil, ErrResumeAttemptCancelled
+	}
+	if execution, ok := s.executor.GetExecutionBySession(sessionID); ok && execution != nil {
+		return &resumeSessionAdmission{existingExecution: execution}, nil
+	}
+	return nil, ErrResumeAttemptCancelled
 }
 
 func (s *Service) idleSuspensionResumeShortcut(

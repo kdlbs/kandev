@@ -69,6 +69,7 @@ type sshSessionState struct {
 	// must come from here, not from re-deriving values the surviving session
 	// may not actually have.
 	port        int
+	controlPort int
 	workdirRoot string
 
 	// Transport liveness (docs/specs/executors/requirements/ssh-transport-liveness.md).
@@ -325,7 +326,7 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		return nil, err
 	}
 
-	port, pid, fwd, authToken, err := r.startAndForwardAgentctl(launchCtx, client, agentctlBin, taskDir, sessionDir, req, platform)
+	port, controlPort, pid, fwd, authToken, err := r.startAndForwardAgentctl(launchCtx, client, agentctlBin, taskDir, sessionDir, req, platform)
 	if err != nil {
 		return nil, err
 	}
@@ -361,6 +362,7 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		platform:         platform,
 		runtimeAPITunnel: runtimeAPITunnel,
 		port:             port,
+		controlPort:      controlPort,
 		workdirRoot:      workdir,
 	}
 	r.sessions[req.InstanceID] = state
@@ -368,7 +370,7 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	r.mu.Unlock()
 	released = true // ownership transferred to session state; released on StopInstance
 
-	return r.buildInstance(req, target, fwd, taskDir, sessionDir, port, pid, workdir, authToken), nil
+	return r.buildInstance(req, target, fwd, taskDir, sessionDir, port, controlPort, pid, workdir, authToken), nil
 }
 
 // buildInstanceForLostRace builds an ExecutorInstance for a caller that lost
@@ -397,6 +399,9 @@ func (r *SSHExecutor) buildInstanceForLostRace(req *ExecutorCreateRequest, exist
 		MetadataKeySSHWorkdirRoot:        existing.workdirRoot,
 		MetadataKeyIsRemote:              true,
 		MetadataKeyReuseExistingProcess:  existing.reusingProcess,
+	}
+	if existing.controlPort > 0 {
+		metadata[MetadataKeySSHRemoteControlPort] = strconv.Itoa(existing.controlPort)
 	}
 	// existing.metadata is the winning session's own cloned request metadata
 	// (cloneSSHMetadata(req.Metadata), captured after openSSHRuntimeAPITunnelForRequest
@@ -536,15 +541,15 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	agentctlBin, taskDir, sessionDir string,
 	req *ExecutorCreateRequest,
 	platform SSHRemotePlatform,
-) (int, int, *SSHPortForwarder, string, error) {
+) (int, int, int, *SSHPortForwarder, string, error) {
 	if err := uploadSSHSkillManifest(ctx, client, taskDir, req.Metadata); err != nil {
-		return 0, 0, nil, "", fmt.Errorf("ssh: upload skill manifest: %w", err)
+		return 0, 0, 0, nil, "", fmt.Errorf("ssh: upload skill manifest: %w", err)
 	}
 	shell := sshShellForRemote(req.Metadata, platform)
 	controlPort, pid, authToken, err := r.startAgentctlAndHandshake(ctx, client, shell, agentctlBin, taskDir, sessionDir, req)
 	if err != nil {
 		r.report(req.OnProgress, "Starting agent controller", PrepareStepFailed, err.Error())
-		return 0, 0, nil, "", err
+		return 0, 0, 0, nil, "", err
 	}
 	r.report(req.OnProgress, "Starting agent controller", PrepareStepCompleted,
 		fmt.Sprintf("pid=%d control_port=%d", pid, controlPort))
@@ -558,7 +563,7 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	if ierr != nil {
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
 		r.report(req.OnProgress, "Creating agent instance", PrepareStepFailed, ierr.Error())
-		return 0, 0, nil, "", ierr
+		return 0, 0, 0, nil, "", ierr
 	}
 	r.report(req.OnProgress, "Creating agent instance", PrepareStepCompleted,
 		fmt.Sprintf("instance_port=%d", instancePort))
@@ -566,16 +571,16 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	fwd, err := StartPortForward(client, instancePort, r.logger)
 	if err != nil {
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
-		return 0, 0, nil, "", fmt.Errorf("ssh: port forward: %w", err)
+		return 0, 0, 0, nil, "", fmt.Errorf("ssh: port forward: %w", err)
 	}
 	if err := waitAgentctlHealthy(ctx, fwd.LocalPort(), sshAgentctlHealthTimeout); err != nil {
 		_ = fwd.Close()
 		_ = stopRemoteAgentctl(ctx, client, sessionDir, pid)
-		return 0, 0, nil, "", fmt.Errorf("ssh: agentctl health: %w", err)
+		return 0, 0, 0, nil, "", fmt.Errorf("ssh: agentctl health: %w", err)
 	}
 	r.report(req.OnProgress, "Connecting to agent controller", PrepareStepCompleted,
 		fmt.Sprintf("local:%d -> remote:%d", fwd.LocalPort(), instancePort))
-	return instancePort, pid, fwd, authToken, nil
+	return instancePort, controlPort, pid, fwd, authToken, nil
 }
 
 // startAgentctlAndHandshake starts a fresh agentctl instance and completes
@@ -662,7 +667,7 @@ func (r *SSHExecutor) buildInstance(
 	target *SSHTarget,
 	fwd *SSHPortForwarder,
 	taskDir, sessionDir string,
-	port, pid int,
+	port, controlPort, pid int,
 	workdir, authToken string,
 ) *ExecutorInstance {
 	metadata := map[string]interface{}{
@@ -678,6 +683,9 @@ func (r *SSHExecutor) buildInstance(
 		MetadataKeySSHLocalForwardPort:   strconv.Itoa(fwd.LocalPort()),
 		MetadataKeySSHWorkdirRoot:        workdir,
 		MetadataKeyIsRemote:              true,
+	}
+	if controlPort > 0 {
+		metadata[MetadataKeySSHRemoteControlPort] = strconv.Itoa(controlPort)
 	}
 	copySSHRuntimeAPIMetadata(metadata, req.Metadata)
 	return &ExecutorInstance{
@@ -701,6 +709,10 @@ func (r *SSHExecutor) buildInstance(
 // don't see a partial view.
 func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *sshSessionState) *ExecutorInstance {
 	port, _ := strconv.Atoi(getMetadataString(req.Metadata, MetadataKeySSHRemoteAgentctlPort))
+	controlPort := parseSSHControlPortMetadata(req.Metadata)
+	if controlPort == 0 {
+		controlPort = state.controlPort
+	}
 	taskDir := getMetadataString(req.Metadata, MetadataKeySSHRemoteTaskDir)
 	workdir := r.workdirRoot(req.Metadata)
 	client := state.agentctlClient
@@ -723,6 +735,9 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 		MetadataKeySSHWorkdirRoot:        workdir,
 		MetadataKeyIsRemote:              true,
 		MetadataKeyReuseExistingProcess:  state.reusingProcess,
+	}
+	if controlPort > 0 {
+		metadata[MetadataKeySSHRemoteControlPort] = strconv.Itoa(controlPort)
 	}
 	copySSHRuntimeAPIMetadata(metadata, req.Metadata)
 	return &ExecutorInstance{
@@ -923,14 +938,9 @@ func instanceID(instance *ExecutorInstance) string {
 	return instance.InstanceID
 }
 
-// RecoverInstances re-opens SSH connections for sessions that were live before
-// a backend restart. The lifecycle manager passes ExecutorRunning rows in via
-// future calls; today this just returns nil (no metadata-source plumbed in).
-// Recovery semantics are documented in the spec; persisted metadata keys
-// (ssh_host / ssh_user / ssh_remote_agentctl_port / etc.) are honored by
-// ResumeRemoteInstance below.
-func (r *SSHExecutor) RecoverInstances(_ context.Context, _ []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
-	return nil, nil
+func (r *SSHExecutor) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
+	instances, _, err := r.RecoverInstancesDetailed(ctx, records)
+	return instances, err
 }
 
 // ResumeRemoteInstance is called by the lifecycle manager when re-attaching to
@@ -1053,6 +1063,7 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		prepareEnv:       sshRemoteContributionEnv(req, agentctlBin),
 		runtimeAPITunnel: runtimeAPITunnel,
 		port:             remotePort,
+		controlPort:      parseSSHControlPortMetadata(req.Metadata),
 		workdirRoot:      r.workdirRoot(req.Metadata),
 	}
 	r.sessions[req.InstanceID] = state
@@ -1240,6 +1251,7 @@ func clearSSHResumeRuntimeMetadata(metadata map[string]interface{}) {
 	for _, key := range []string{
 		MetadataKeySSHRemoteSessionDir,
 		MetadataKeySSHRemoteAgentctlPort,
+		MetadataKeySSHRemoteControlPort,
 		MetadataKeySSHRemoteAgentctlPID,
 		MetadataKeySSHAgentctlInstanceID,
 		MetadataKeySSHLocalForwardPort,

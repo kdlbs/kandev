@@ -2,6 +2,7 @@
 status: draft
 system: platform
 requirements:
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-003
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-004
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005
@@ -20,6 +21,7 @@ A surviving remote server must not enter the local replacement coordinator.
 
 | Requirement | Design boundary |
 | --- | --- |
+| REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001 | Journal shutdown and stream lifetime |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-003 | State-only reconciliation and admission fences |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-004 | Detached journal delivery and ordered reattachment |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005 | Terminal settlement and projection barrier |
@@ -43,6 +45,23 @@ Detachment does not acknowledge or prune events. Existing quota, reserve, health
 Legacy delivery keeps its bounded queue and explicit overload semantics; it cannot silently drop payloads or claim journal replay.
 Do not add an unbounded channel or increase capacity as the repair.
 
+## Journal shutdown and stream lifetime
+
+The journal owns a terminal closed state under its existing mutex.
+Every public database operation checks that state while holding the same lock used for database access.
+An operation admitted before close finishes before close obtains exclusive ownership.
+An operation admitted after close returns a typed closed-journal error.
+Replay, acknowledgment, submission reads and writes, retirement, health, and compaction follow this rule.
+Repeated close remains safe. A closed journal never becomes an empty successful replay.
+
+Instance teardown first closes admission and cancels its stream writers and readers.
+It waits for those owners within the existing teardown deadline, then closes the journal.
+Late consumers still receive the closed-state error, including after a drain deadline expires.
+API stream writers handle this result as instance shutdown and release their sockets and goroutines.
+They must not panic or affect another instance in the shared agentctl process.
+Backend detach remains different from instance teardown and leaves the journal open.
+Committed records and exclusive file ownership survive the close/reopen cycle.
+
 ## Repeatable reconciliation
 
 Replace the disconnect-only boolean query with one reusable lifecycle operation.
@@ -65,12 +84,125 @@ Re-read status and durable evidence through the current authenticated client; do
 A running peer permits reattachment while existing turn admission continues to block a second prompt.
 A complete peer record still requires ordered canonical replay and terminal effect settlement.
 
-This package does not implement executor-specific redial or a permanent background retry loop.
 If an executor's transport has been destroyed, return transport_unavailable while retaining recoverable identity.
-A later executor redial hook can supply the authenticated replacement connection and invoke the same operation.
+Remote startup adoption uses the lifecycle retry path below to supply an authenticated replacement connection.
 The ten-second initial window does not define a maximum lifetime for recoverable uncertainty.
 
 Established Docker environments remain retained after recoverable agent failure. Cleanup stops process ownership without force-removing the container, so a later authorized resume can reuse its workspace. Fresh bootstrap rollback, task/session deletion, and explicit force-stop remain destructive. This policy does not authorize a prompt resend.
+
+### Recovery without an in-memory execution
+
+`RetrySessionDelivery` resolves recovery identity from durable session, generation, submission, and environment records before requiring a live client.
+`RecoverAgentPromptStream` remains the live-execution path, not the sole recovery authority.
+Execution removal must not discard the recovery descriptor or its original runtime ownership evidence.
+The replacement runtime opens a retained journal only through the existing authenticated, exclusive ownership boundary.
+It can read and project evidence without starting a harness or sending a prompt.
+Unknown ownership, a locked journal, or ambiguous identity produces a typed blocked result.
+
+The recovery response carries a bounded outcome, reason, allowed actions, and an observed recovery revision.
+Outcomes distinguish attached, settled, uncertain, unavailable evidence, and blocked ownership.
+Responses contain no raw paths, credentials, or provider output.
+The request remains authorized for the exact task/session pair.
+Repeated requests join the existing bounded operation. Late responses cannot overwrite a newer recovery revision.
+
+Initial prompt submission must persist its canonical identity before harness dispatch, as later prompt submissions already require.
+The lifecycle and orchestrator use that same identity when recording runtime loss.
+An older session with missing canonical submission data must retain a typed unresolved notice.
+Recovery does not invent a completed submission or silently discard the notice because a lookup failed.
+Unique retained journal and generation evidence can reconstruct the association through the existing repository contract.
+Ambiguous records remain blocked and retain an explicit explanation.
+
+### Automatic restart recovery without prompt dispatch
+
+Local/worktree processes stop on normal backend shutdown by default. The existing local survival flag remains off unless an operator enables it.
+Supported remote executors instead detach host transport and preserve remote agentctl and active agents independently of that local flag.
+Startup must first authenticate and adopt a surviving remote execution; native restore is reserved for confirmed process termination.
+For an exact local predecessor, a terminal row can lack its former PID. If row liveness is unknown, the pinned authenticated runtime identity may prove that the old process and its owned descendants have terminated.
+This proof applies only to the matching standalone execution. A live process, mismatched owner, incomplete identity, or failed inspection blocks restoration; remote rows never use this local proof.
+Audit proxy teardown and executor-specific stop paths, including Sprites, so preserving an environment cannot mask a stopped agent.
+Explicit Stop and authorized archive/reset/delete cleanup remain separate from backend shutdown.
+
+The lifecycle manager retains unresolved remote records behind a retryable recovery guard. The guard prevents a fresh launch while remote liveness or authenticated ownership is unknown.
+The existing remote-status loop retries a bounded, rotating set of records on its normal tick, with a deadline for each attempt. Shutdown cancels and joins the loop.
+Each attempt validates the durable execution, task, session, and environment before attachment and again before tracking. Stop, archive, cleanup, and ownership changes fence a stale attempt.
+Successful attachment shares startup's authenticated evidence and replay path. It clears pending recovery only after tracking succeeds.
+Failed attachment closes temporary host clients without stopping remote processes or deleting their environments. Pending records remain eligible for later attempts without a new prompt.
+Each adapter supplies cleanup for the local transport created by that attempt. Rejected adoption invokes that cleanup without calling remote Stop.
+Cleanup checks the exact transport identity before removing adapter state, so a stale attempt cannot close its successor.
+Final ownership validation and execution registration serialize with explicit Stop. A changed durable execution ID blocks adoption instead of repairing the row to match an older runtime.
+Plugin attempts reload the current durable checkpoint for that same owner. They preserve provider, environment, operation, and execution identity while accepting checkpoint revisions saved by an earlier attempt.
+This applies to both reconnect and pending Stop, so a transient failure after checkpoint persistence does not make later attempts stale.
+
+This revision supersedes the manual interruption form and batch continuation design.
+It implements AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.20 through 006.24.
+The earlier explicit continuation implementation remains historical evidence in the package results.
+
+The orchestrator owns one bounded startup recovery worker after lifecycle adoption and startup reconciliation complete.
+It uses durable recovery records, not browser state or the count of disconnected streams.
+Each candidate passes existing authorization, route, archive, process-identity, native-state, and execution admission checks.
+Recover the authenticated owner from authoritative persisted ownership; do not synthesize an administrator identity or bypass session scopes.
+Auth-disabled installations can have an empty stored workspace owner. The auth resolver permits that existing unscoped mode, while the checkpoint still pins the exact empty owner and organization.
+Enabled authentication requires a current eligible identity and rejects an empty or disabled owner.
+Office and automation remain with their schedulers. Ordinary recovery uses automatic admission, including capacity limits.
+Shutdown cancels and joins the worker before repository or runtime teardown.
+Transient transport unavailability uses bounded retry. Failed candidates do not block the remaining candidates.
+Each startup candidate has a two-minute deadline and at most three native launch attempts per pass.
+The worker owns this retry budget. The durable checkpoint preserves identity, not a permanent retry-exhaustion counter.
+A later backend restart can retry the same checkpoint after fresh owner and liveness validation.
+
+For a surviving owned process, use `RecoverAgentPromptStreamWithIdentity` and the existing adoption/replay path.
+Do not initialize, load, or resume a native conversation that remains live.
+For confirmed process termination, load the original native conversation with `NoInitialPrompt` and pause pending queued work through durable Auto-run state.
+A missing execution record alone does not prove termination.
+Missing native state has no fresh-session or history-continuation fallback in this automatic operation.
+
+Separate restore-only checkpoints from instruction-bearing `ContinuationSnapshot` records.
+The checkpoint identifies the session, incarnation, observed recovery revision, old generation, candidate execution, and target native conversation.
+Use a registered additive migration if the existing restore-attempt contract cannot represent those fields and stages.
+Do not manufacture a prompt submission ID, instruction message, or receiver-acceptance marker for a restore-only operation.
+
+Persist the checkpoint before native load. Revalidate it under the existing session admission and lifecycle locks.
+Before native restore, use the existing durable Auto-run pause when pending queue entries exist. Preserve their IDs, contents, and order.
+Publish the queue status so the pause remains visible and survives another restart. Explicit Auto-run re-enable retains its existing behavior.
+The checkpoint moves from `prepared` to `candidate_allocated`, then to `candidate_launching` before launch side effects.
+An allocated candidate with no execution row can start only while the durable launching marker is absent.
+A launching candidate with no execution row has unknown liveness and remains blocked.
+Reuse a live candidate only after verifying its execution identity and native conversation.
+Allocate a fresh execution identity for replacement only after confirming the exact previous candidate has stopped.
+Persist `candidate_dead` with that exact execution identity before deleting its runtime record.
+On restart, this stage permits cleanup to finish when the record is absent. A remaining record must match and be proven dead again.
+After cleanup, move from `candidate_dead` to `candidate_allocated` with a fresh execution identity.
+Do not rotate directly from `candidate_launching`; deletion before durable death evidence would make a crash indistinguishable from unknown liveness.
+After native identity verification, retire only the identified interrupted journal submission without changing its uncertain outcome.
+Commit the new delivery generation, matching recovery-block resolution, and checkpoint outcome with compare-and-set guards.
+Preserve unrelated blocks and the interrupted queue claim. Recovery itself never drains queued user work.
+A later normal user message uses ordinary admission against the restored generation.
+A crash between journal retirement and SQL commit resumes the same checkpoint after rechecking current ownership.
+If a new execution already owns that checkpoint, reconcile it instead of comparing it only with the old execution ID.
+A foreign execution, generation, or native identity remains blocked.
+
+Workspace reads must not allocate a competing execution while durable recovery is unresolved.
+Check this at the workspace-only creation boundary, preserving access through an existing owned workspace execution.
+The restore launch keeps its pinned candidate identity and allocation checkpoint; it must not adopt an unrelated workspace-only successor.
+A generic prompt block without a saved executor identity, delivery binding, or pending restore identity does not alone prevent workspace-only creation.
+Creation and registration must recheck that distinction; the workspace operation never clears the prompt block or starts an agent.
+
+Silent restoration must also suppress persisted boot-status messages that would synthesize a lifecycle-only turn.
+Setup and boot execution still run; ordinary starts and explicit resumes retain their status reporting.
+Clear a delivery-uncertainty error only for the exact restored execution and submission.
+Keep submission identity in a structured error field, separate from sanitized display text.
+Frontend metadata merging uses the same identity and newer-recovery checks, preserving unrelated or newer errors.
+Legacy sanitized errors without exact identity remain as history; successful restoration and dismissal must not expose recovery actions for that history.
+
+The `continued` phase from the earlier implementation retains an old identity for historical evidence.
+Do not treat it as an unresolved recovery candidate or submit it to old-generation retry validation.
+Clear only obsolete presentation metadata when durable checkpoint and generation evidence prove successful restoration.
+Do not clear unrelated errors or rewrite unknown outcomes as successful completion.
+
+Remove `InterruptedSessionsRecovery` from the app status surface and phone task panel.
+Remove the interruption-specific instruction form from `SessionStoppedBanner` and retire its unused hook/service wiring.
+Remove the new batch continuation API if it has no remaining supported caller; do not retain a hidden prompt-dispatch alternative.
+Existing generic recovery choices for unrelated failures remain governed by their own contracts.
 
 ## Submission-specific block settlement
 
@@ -119,7 +251,21 @@ Desktop and phone show reconnecting, uncertain, or recovered state in the existi
 Retry connection queries/reconnects only; Stop targets the original owned work and reports unconfirmed cancellation honestly.
 Do not offer context continuation merely because transport failed.
 Keep one chat scroll owner, stacked 44px phone actions, keyboard access, and safe-area clearance.
-Localize new copy in all six shipped languages. No raw credentials or provider errors reach the notice.
+Localize new copy in all seven shipped catalogs. No raw credentials or provider errors reach the notice.
+
+The missing-execution result replaces the generic resume error with a localized cause and available next actions.
+The card announces progress and success or failure even when its title does not change.
+The action row contains the buttons themselves. Busy text, warnings, and disclosures sit outside that row.
+The row owns its outer spacing, so a nested retry wrapper cannot shift Retry connection relative to Stop.
+Both buttons use `controlSizingClassName`: 28px desktop controls and at least 44px phone or coarse-pointer targets.
+Phone actions stack at the existing 768px boundary without horizontal overflow.
+The existing recovery card and mobile runtime-replacement tests are the nearest shipped exemplars.
+
+Successful restart recovery leaves the normal chat and composer visible on desktop and phone.
+It adds no global form, overlay, selection workflow, or user message.
+An unresolved failure uses the existing session-local status and safe Retry/Stop controls.
+Phone retains its existing chat scroll owner, safe-area handling, and touch targets.
+Browser tests assert both the absence of the interruption forms and unchanged prompt counts after restart.
 
 ## Surviving-agent reattachment
 
@@ -147,4 +293,5 @@ New durable block/phase fields require SQLite fresh/reopen/upgrade and PostgreSQ
 Old ambiguous records fail closed. Preserve journals, native state, and user edits across upgrades.
 Reuse existing agent_delivery_* metrics with bounded reasons; keep IDs out of metric labels.
 The [work package](../../../plans/durable-agent-reattachment/plan.md) owns implementation and validation.
-Executor redial, long-horizon triggers, detached MCP waiting/offline budgets, and richer remote-working UI remain follow-up work.
+The [shutdown and recovery repair](../../../plans/agentctl-journal-shutdown-recovery/plan.md) owns the later closed-journal and missing-execution regressions.
+Detached MCP waiting/offline budgets and richer remote-working UI remain follow-up work.

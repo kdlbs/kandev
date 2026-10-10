@@ -13,6 +13,22 @@ export type SessionRecoveryAction =
   | "relocate_and_resume"
   | "retry_connection";
 
+export type SessionDeliveryRecoveryOutcome =
+  | "attached"
+  | "settled"
+  | "uncertain"
+  | "blocked"
+  | "unavailable"
+  | "continued";
+
+export type SessionDeliveryRecoveryResponse = {
+  task_id: string;
+  session_id: string;
+  outcome: SessionDeliveryRecoveryOutcome;
+  reason?: string;
+  recovery_revision: number;
+};
+
 export type SessionRecoverySettingsPolicy = "provider_restored";
 
 export type SessionRecoveryRequest = {
@@ -59,7 +75,6 @@ export type RecoveryInspectionBusyDetails = WebSocketRequestErrorDetails & {
   kind: "recovery_inspection_busy";
 };
 
-type RecoveryResponse = { success?: boolean; error?: string };
 type WorkspaceRecoveryStatusResponse = {
   workspace_recovery?: WorkspaceRecoveryProjection | null;
 };
@@ -72,6 +87,69 @@ function responseFailure(response: unknown, fallback: string): Error | null {
   if (!isRecord(response) || response.success !== false) return null;
   const message = typeof response.error === "string" && response.error ? response.error : fallback;
   return new Error(message);
+}
+
+const recoveryOutcomes: readonly unknown[] = [
+  "attached",
+  "settled",
+  "uncertain",
+  "blocked",
+  "unavailable",
+  "continued",
+];
+
+export function sessionDeliveryRecoveryResponse(
+  value: unknown,
+): SessionDeliveryRecoveryResponse | null {
+  if (!isRecord(value) || !recoveryOutcomes.includes(value.outcome)) return null;
+  if (
+    typeof value.task_id !== "string" ||
+    typeof value.session_id !== "string" ||
+    typeof value.recovery_revision !== "number" ||
+    !Number.isSafeInteger(value.recovery_revision) ||
+    value.recovery_revision < 0
+  )
+    return null;
+  if (value.reason !== undefined && typeof value.reason !== "string") return null;
+  return value as SessionDeliveryRecoveryResponse;
+}
+
+export function sessionDeliveryRecoveryMessage(
+  result: SessionDeliveryRecoveryResponse,
+  t: Translator,
+): string {
+  switch (result.outcome) {
+    case "continued":
+    case "attached":
+      return t("task:deliveryRecoveryAttached");
+    case "settled":
+      return t("task:deliveryRecoverySettled");
+    case "uncertain":
+      return t("task:deliveryRecoveryUncertain");
+    case "unavailable":
+      return t("task:deliveryRecoveryUnavailable");
+    case "blocked":
+      return blockedDeliveryRecoveryMessage(result.reason, t);
+  }
+}
+
+function blockedDeliveryRecoveryMessage(reason: string | undefined, t: Translator): string {
+  if (reason === "delivery_output_paused") return t("task:deliveryRecoveryOutputPaused");
+  if (reason === "delivery_cancellation_pending")
+    return t("task:deliveryRecoveryCancellationPending");
+  if (reason === "delivery_storage_pressure") return t("task:deliveryRecoveryStoragePressure");
+  if (reason === "missing_canonical_submission") {
+    return t("task:deliveryRecoveryMissingSubmission");
+  }
+  if (
+    reason === "recovery_identity_mismatch" ||
+    reason === "execution_identity_changed" ||
+    reason === "instance_identity_mismatch" ||
+    reason === "delivery_identity_mismatch"
+  ) {
+    return t("task:deliveryRecoveryOwnershipBlocked");
+  }
+  return t("task:deliveryRecoveryBlocked");
 }
 
 /** Returns the structured branch-loss context that authorizes replacement. */
@@ -170,30 +248,50 @@ export function asRecoveryError(error: unknown, fallback: string): Error {
   return error instanceof Error ? error : new Error(fallback);
 }
 
+function validateRecoveryRequest(options: SessionRecoveryRequest) {
+  const { action, errorStamp, settingsPolicy, failureMessage } = options;
+  if (action === "relocate_and_resume" && !errorStamp) throw new Error(failureMessage);
+  if (settingsPolicy && action !== "resume") throw new Error(failureMessage);
+}
+
+function recoveryRequestPayload(options: SessionRecoveryRequest) {
+  const { taskId, sessionId, action, errorStamp, settingsPolicy } = options;
+  return {
+    task_id: taskId,
+    session_id: sessionId,
+    action,
+    ...(action === "relocate_and_resume" ? { error_stamp: errorStamp } : {}),
+    ...(action === "resume" && settingsPolicy ? { settings_policy: settingsPolicy } : {}),
+  };
+}
+
+function recoveryRequestTimeout(options: SessionRecoveryRequest) {
+  if (options.action === "relocate_and_resume") return MANAGED_CLONE_RELOCATION_TIMEOUT_MS;
+  return 30_000;
+}
+
 /** Send one of the explicit session.recover actions. */
-export async function requestSessionRecover(options: SessionRecoveryRequest): Promise<void> {
-  const { taskId, sessionId, action, failureMessage, errorStamp, settingsPolicy } = options;
-  if (action === "relocate_and_resume" && !errorStamp) {
-    throw new Error(failureMessage);
-  }
-  if (settingsPolicy && action !== "resume") {
-    throw new Error(failureMessage);
-  }
+export async function requestSessionRecover(
+  options: SessionRecoveryRequest,
+): Promise<SessionDeliveryRecoveryResponse | void> {
+  const { taskId, sessionId, action, failureMessage } = options;
+  validateRecoveryRequest(options);
   const client = getWebSocketClient();
   if (!client) throw new Error(failureMessage);
-  const response = await client.request<RecoveryResponse>(
+  const response = await client.request<unknown>(
     "session.recover",
-    {
-      task_id: taskId,
-      session_id: sessionId,
-      action,
-      ...(action === "relocate_and_resume" ? { error_stamp: errorStamp } : {}),
-      ...(action === "resume" && settingsPolicy ? { settings_policy: settingsPolicy } : {}),
-    },
-    action === "relocate_and_resume" ? MANAGED_CLONE_RELOCATION_TIMEOUT_MS : 30_000,
+    recoveryRequestPayload(options),
+    recoveryRequestTimeout(options),
   );
   const failure = responseFailure(response, failureMessage);
   if (failure) throw failure;
+  if (action === "retry_connection") {
+    const recovery = sessionDeliveryRecoveryResponse(response);
+    if (!recovery || recovery.task_id !== taskId || recovery.session_id !== sessionId) {
+      throw new Error(failureMessage);
+    }
+    return recovery;
+  }
 }
 
 /** Resume through recovery and retain the workspace projection for the caller. */

@@ -294,6 +294,42 @@ type LaunchSessionResponse struct {
 	ActivationReason                  string                                    `json:"activation_reason,omitempty"`
 }
 
+type SessionDeliveryRecoveryOutcome string
+
+const (
+	SessionDeliveryRecoveryContinued   SessionDeliveryRecoveryOutcome = "continued"
+	SessionDeliveryRecoveryAttached    SessionDeliveryRecoveryOutcome = "attached"
+	SessionDeliveryRecoverySettled     SessionDeliveryRecoveryOutcome = "settled"
+	SessionDeliveryRecoveryUncertain   SessionDeliveryRecoveryOutcome = "uncertain"
+	SessionDeliveryRecoveryBlocked     SessionDeliveryRecoveryOutcome = "blocked"
+	SessionDeliveryRecoveryUnavailable SessionDeliveryRecoveryOutcome = "unavailable"
+)
+
+type SessionDeliveryRecoveryIdentity struct {
+	SubmissionID      string `json:"submission_id"`
+	StreamID          string `json:"stream_id"`
+	IncarnationID     string `json:"incarnation_id"`
+	HarnessGeneration int64  `json:"harness_generation"`
+	PromptGeneration  uint64 `json:"prompt_generation"`
+}
+
+// SessionDeliveryRecoveryResponse is the bounded result of a state-only
+// recovery request. It contains no provider output or runtime paths.
+type SessionDeliveryRecoveryResponse struct {
+	TaskID           string                           `json:"task_id"`
+	SessionID        string                           `json:"session_id"`
+	Outcome          SessionDeliveryRecoveryOutcome   `json:"outcome"`
+	Reason           string                           `json:"reason,omitempty"`
+	RecoveryRevision int64                            `json:"recovery_revision"`
+	RecoveryIdentity *SessionDeliveryRecoveryIdentity `json:"recovery_identity,omitempty"`
+}
+
+type sessionDeliveryRecoveryAttempt struct {
+	outcome           SessionDeliveryRecoveryOutcome
+	reason            string
+	processTerminated bool
+}
+
 // ResolveIntent infers the session intent from request fields when Intent is empty.
 func ResolveIntent(req *LaunchSessionRequest) SessionIntent {
 	if req.Intent != "" {
@@ -975,7 +1011,8 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		ContinuationPrompt:               req.ContinuationPrompt,
 		DeferInitialPrompt:               req.DeferRecoveryResolution,
 		RecoveryAction:                   req.RecoveryAction,
-		StartAgentSynchronously:          req.DeferRecoveryResolution && req.ForceContextContinuation,
+		StartAgentSynchronously: req.DeferRecoveryResolution &&
+			(req.ForceContextContinuation || req.RecoveryAction == recoveryActionResume),
 	}
 	var execution *executor.TaskExecution
 	var err error
@@ -1924,39 +1961,6 @@ func (s *Service) workspaceRecoveryExecutionID(ctx context.Context, sessionID st
 		return "", nil
 	}
 	return running.AgentExecutionID, nil
-}
-
-// RetrySessionDelivery reconnects the existing agent stream and replays from
-// its committed cursor. It is deliberately separate from RecoverSession:
-// reconnecting after an uncertain prompt must never send that prompt again or
-// create a replacement native session.
-func (s *Service) RetrySessionDelivery(ctx context.Context, taskID, sessionID string) (*LaunchSessionResponse, error) {
-	if err := s.authorizeTaskSessionPair(ctx, taskID, sessionID); err != nil {
-		return nil, err
-	}
-	if err := s.authorizeSessionControl(ctx, sessionID); err != nil {
-		return nil, err
-	}
-	if err := s.ensureTaskNotArchived(ctx, taskID); err != nil {
-		return nil, err
-	}
-	recoverer, ok := s.agentManager.(agentPromptStreamRecoverer)
-	if !ok {
-		return nil, errors.New("agent prompt stream recovery is unavailable")
-	}
-	retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
-	if err := recoverer.RecoverAgentPromptStream(retryCtx, sessionID); err != nil {
-		return nil, fmt.Errorf("failed to reconnect agent stream: %w", err)
-	}
-	if err := s.reconcileAgentDeliverySettlements(retryCtx, sessionID); err != nil {
-		return nil, fmt.Errorf("failed to settle recovered delivery outcome: %w", err)
-	}
-	return &LaunchSessionResponse{
-		Success:   true,
-		TaskID:    taskID,
-		SessionID: sessionID,
-	}, nil
 }
 
 func (s *Service) handleContinuationLaunchError(

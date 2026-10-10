@@ -144,7 +144,8 @@ func (s *Service) agentDeliveryRecoveryCursorMatches(
 
 func agentDeliveryRecoveryFromEvent(payload agentruntime.AgentctlEventPayload) *models.AgentDeliveryRecovery {
 	return &models.AgentDeliveryRecovery{
-		Phase: payload.DeliveryRecoveryPhase, SessionID: payload.SessionID,
+		OriginalRuntime: payload.OriginalRuntime,
+		Phase:           payload.DeliveryRecoveryPhase, SessionID: payload.SessionID,
 		AgentExecutionID: payload.AgentExecutionID, SubmissionID: payload.DeliverySubmissionID,
 		StreamID: payload.DeliveryStreamID, IncarnationID: payload.DeliveryIncarnationID,
 		HarnessGeneration: int64(payload.DeliveryHarnessGeneration), PromptGeneration: payload.PromptGeneration,

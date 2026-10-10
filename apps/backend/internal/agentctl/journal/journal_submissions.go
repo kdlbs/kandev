@@ -70,64 +70,132 @@ func (j *Journal) ListSubmissions(ctx context.Context, sessionID string) ([]Subm
 	return submissions, err
 }
 
-// RetireSubmission seals an explicitly recovered submission. Native resume
-// may acknowledge an interrupted unknown outcome in the same generation;
-// retiring other work requires a newer generation.
+// RetireSubmission seals explicitly recovered work. Native resume may
+// acknowledge an interrupted unknown outcome in the same generation; other
+// work requires a newer generation.
 func (j *Journal) RetireSubmission(ctx context.Context, id string, recoveryGeneration uint64) (Submission, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
-	var retired Submission
-	err := j.updateLocked(func(tx *bolt.Tx) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		bucket := tx.Bucket(bucketSubmissions)
-		raw := bucket.Get([]byte(id))
-		if raw == nil {
-			return ErrSubmissionNotFound
-		}
-		if err := json.Unmarshal(raw, &retired); err != nil {
-			return ErrJournalCorrupt
-		}
-		if recoveryGeneration == 0 || recoveryGeneration < retired.HarnessGeneration ||
-			(recoveryGeneration == retired.HarnessGeneration && retired.State != SubmissionInterruptedUnknown) {
-			return ErrSubmissionGeneration
-		}
-		retired.Retired = true
-		if retired.State != SubmissionInterruptedUnknown {
-			retired.State = SubmissionCancelled
-			retired.Payload = nil
-		}
-		retired.UpdatedAt = time.Now().UTC()
-		encoded, err := json.Marshal(retired)
-		if err != nil {
-			return err
-		}
-		journalBytes, err := decodeInt64(tx.Bucket(bucketMeta).Get(keyJournalBytes))
-		if err != nil {
-			return err
-		}
-		journalBytes -= int64(len(raw)) - int64(len(encoded))
-		if journalBytes < 0 {
-			journalBytes = 0
-		}
-		if err := bucket.Put([]byte(id), encoded); err != nil {
-			return err
-		}
-		return tx.Bucket(bucketMeta).Put(keyJournalBytes, encodeInt64(journalBytes))
-	})
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		RecordJournalError(classifyJournalError(err))
+	db, err := j.dbLocked()
+	if err != nil {
+		return Submission{}, err
 	}
+	current, err := j.getSubmissionLocked(ctx, id)
+	if err != nil {
+		return Submission{}, err
+	}
+	if !canRetireSubmissionAtGeneration(current, recoveryGeneration) {
+		return Submission{}, ErrSubmissionGeneration
+	}
+	updatedAt := time.Now().UTC()
+	current.Retired = true
+	if current.State == SubmissionPrepared || current.State == SubmissionAccepted || current.State == SubmissionDispatching {
+		current.State = SubmissionInterruptedUnknown
+	}
+	current.UpdatedAt = updatedAt
+	encoded, err := json.Marshal(current)
+	if err != nil {
+		return Submission{}, err
+	}
+	diskReservation, err := j.reserveSubmissionWrite(ctx, db, encoded, false)
+	if err != nil {
+		return Submission{}, err
+	}
+	var retired Submission
+	err = j.updateLocked(func(tx *bolt.Tx) error {
+		var updateErr error
+		retired, updateErr = retireSubmissionTx(ctx, tx, id, recoveryGeneration, updatedAt)
+		return updateErr
+	})
+	j.finishDiskCapacityReservation(diskReservation, err == nil)
+	recordSubmissionWriteError(err)
 	if err == nil {
 		j.refreshMetrics()
 	}
 	return retired, err
 }
 
+func canRetireSubmissionAtGeneration(submission Submission, recoveryGeneration uint64) bool {
+	return recoveryGeneration > 0 && (recoveryGeneration > submission.HarnessGeneration ||
+		(recoveryGeneration == submission.HarnessGeneration && submission.State == SubmissionInterruptedUnknown))
+}
+
+func retireSubmissionTx(ctx context.Context, tx *bolt.Tx, id string, recoveryGeneration uint64, updatedAt time.Time) (Submission, error) {
+	var current Submission
+	if err := ctx.Err(); err != nil {
+		return current, err
+	}
+	bucket := tx.Bucket(bucketSubmissions)
+	raw := bucket.Get([]byte(id))
+	if raw == nil {
+		return current, ErrSubmissionNotFound
+	}
+	if err := json.Unmarshal(raw, &current); err != nil {
+		return current, ErrJournalCorrupt
+	}
+	if !canRetireSubmissionAtGeneration(current, recoveryGeneration) {
+		return current, ErrSubmissionGeneration
+	}
+	current.Retired = true
+	if current.State == SubmissionPrepared || current.State == SubmissionAccepted || current.State == SubmissionDispatching {
+		current.State = SubmissionInterruptedUnknown
+	}
+	current.UpdatedAt = updatedAt
+	encoded, err := json.Marshal(current)
+	if err != nil {
+		return current, err
+	}
+	journalBytes, err := decodeInt64(tx.Bucket(bucketMeta).Get(keyJournalBytes))
+	if err != nil {
+		return current, err
+	}
+	journalBytes -= int64(len(raw)) - int64(len(encoded))
+	if journalBytes < 0 {
+		journalBytes = 0
+	}
+	if err := bucket.Put([]byte(id), encoded); err != nil {
+		return current, err
+	}
+	return current, tx.Bucket(bucketMeta).Put(keyJournalBytes, encodeInt64(journalBytes))
+}
+
+func (j *Journal) reserveSubmissionWrite(ctx context.Context, db *bolt.DB, encoded []byte, preserveReserve bool) (diskCapacityReservation, error) {
+	reserved, err := j.checkDiskCapacity(ctx, db, int64(len(encoded)), preserveReserve)
+	recordSubmissionWriteError(err)
+	return reserved, err
+}
+
+func recordSubmissionWriteError(err error) {
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		RecordJournalError(classifyJournalError(err))
+	}
+}
+
+func (j *Journal) getSubmissionLocked(ctx context.Context, id string) (Submission, error) {
+	var submission Submission
+	err := j.viewLocked(func(tx *bolt.Tx) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		raw := tx.Bucket(bucketSubmissions).Get([]byte(id))
+		if raw == nil {
+			return ErrSubmissionNotFound
+		}
+		if err := json.Unmarshal(raw, &submission); err != nil {
+			return ErrJournalCorrupt
+		}
+		return nil
+	})
+	return submission, err
+}
+
 func (j *Journal) PutSubmission(ctx context.Context, submission Submission) (Submission, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return Submission{}, err
+	}
 	if submission.ID == "" || submission.Hash == "" {
 		return Submission{}, fmt.Errorf("submission id and hash are required")
 	}
@@ -143,8 +211,30 @@ func (j *Journal) PutSubmission(ctx context.Context, submission Submission) (Sub
 	if submission.State == "" {
 		submission.State = SubmissionPrepared
 	}
+	existing, found, err := j.findExistingSubmissionLocked(ctx, submission)
+	if err != nil {
+		if errors.Is(err, ErrSubmissionConflict) {
+			RecordDuplicateSubmission("hash_conflict")
+		}
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			RecordJournalError(classifyJournalError(err))
+		}
+		return Submission{}, err
+	}
+	if found {
+		RecordDuplicateSubmission("same_hash")
+		return existing, nil
+	}
+	encoded, err := json.Marshal(submission)
+	if err != nil {
+		return Submission{}, err
+	}
+	diskReservation, err := j.reserveSubmissionWrite(ctx, db, encoded, true)
+	if err != nil {
+		return Submission{}, err
+	}
 	duplicate := false
-	err := j.updateLocked(func(tx *bolt.Tx) error {
+	err = j.updateLocked(func(tx *bolt.Tx) error {
 		journalBytes, err := decodeInt64(tx.Bucket(bucketMeta).Get(keyJournalBytes))
 		if err != nil {
 			return err
@@ -157,16 +247,29 @@ func (j *Journal) PutSubmission(ctx context.Context, submission Submission) (Sub
 		duplicate = isDuplicate
 		return nil
 	})
+	j.finishDiskCapacityReservation(diskReservation, err == nil && !duplicate)
 	if duplicate {
 		RecordDuplicateSubmission("same_hash")
 	}
 	if errors.Is(err, ErrSubmissionConflict) {
 		RecordDuplicateSubmission("hash_conflict")
 	}
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		RecordJournalError(classifyJournalError(err))
-	}
+	recordSubmissionWriteError(err)
 	return submission, err
+}
+
+func (j *Journal) findExistingSubmissionLocked(ctx context.Context, submission Submission) (Submission, bool, error) {
+	var existing Submission
+	var found bool
+	err := j.viewLocked(func(tx *bolt.Tx) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var err error
+		existing, found, err = loadExistingSubmission(tx.Bucket(bucketSubmissions), submission)
+		return err
+	})
+	return existing, found, err
 }
 
 func putSubmissionTx(ctx context.Context, tx *bolt.Tx, submission Submission, journalBytes, maxJournalBytes, reserveBytes int64) (Submission, bool, error) {
@@ -194,7 +297,7 @@ func putSubmissionTx(ctx context.Context, tx *bolt.Tx, submission Submission, jo
 	if err != nil {
 		return Submission{}, false, err
 	}
-	if journalBytes+int64(len(encoded)) > maxJournalBytes-reserveBytes {
+	if exceedsLimit(journalBytes, int64(len(encoded)), logicalLimit(maxJournalBytes, reserveBytes)) {
 		return Submission{}, false, ErrJournalFull
 	}
 	if err := bucket.Put([]byte(submission.ID), encoded); err != nil {
@@ -282,7 +385,7 @@ func markSubmissionTerminalTx(ctx context.Context, tx *bolt.Tx, event Event, max
 	if err != nil {
 		return err
 	}
-	if newBytes > oldBytes && journalBytes+newBytes-oldBytes > maxJournalBytes {
+	if newBytes > oldBytes && exceedsLimit(journalBytes, newBytes-oldBytes, maxJournalBytes) {
 		return ErrJournalFull
 	}
 	if err := bucket.Put([]byte(event.SubmissionID), encoded); err != nil {
@@ -364,16 +467,49 @@ func (j *Journal) HasUnresolvedWork(ctx context.Context) (bool, error) {
 func (j *Journal) TransitionSubmission(ctx context.Context, id string, next SubmissionState, updatedAt time.Time) (Submission, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return Submission{}, err
+	}
+	current, err := j.getSubmissionLocked(ctx, id)
+	if err != nil {
+		return Submission{}, err
+	}
+	if !validSubmissionTransition(current.State, next) {
+		return Submission{}, ErrSubmissionState
+	}
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+	updated := current
+	updated.State = next
+	updated.UpdatedAt = updatedAt
+	encoded, err := json.Marshal(updated)
+	if err != nil {
+		return Submission{}, err
+	}
+	diskReservation, err := j.reserveSubmissionWrite(ctx, db, encoded, !terminalSubmissionState(next))
+	if err != nil {
+		return Submission{}, err
+	}
 	var submission Submission
-	err := j.updateLocked(func(tx *bolt.Tx) error {
+	err = j.updateLocked(func(tx *bolt.Tx) error {
 		var err error
 		submission, err = j.transitionSubmissionTx(ctx, tx, id, next, updatedAt)
 		return err
 	})
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		RecordJournalError(classifyJournalError(err))
-	}
+	j.finishDiskCapacityReservation(diskReservation, err == nil)
+	recordSubmissionWriteError(err)
 	return submission, err
+}
+
+func terminalSubmissionState(state SubmissionState) bool {
+	switch state {
+	case SubmissionCompleted, SubmissionFailed, SubmissionCancelled, SubmissionInterruptedUnknown:
+		return true
+	default:
+		return false
+	}
 }
 
 func (j *Journal) transitionSubmissionTx(ctx context.Context, tx *bolt.Tx, id string, next SubmissionState, updatedAt time.Time) (Submission, error) {
@@ -407,7 +543,7 @@ func (j *Journal) transitionSubmissionTx(ctx context.Context, tx *bolt.Tx, id st
 	}
 	oldBytes := int64(len(raw))
 	newBytes := int64(len(encoded))
-	if newBytes > oldBytes && journalBytes+newBytes-oldBytes > j.config.MaxJournalBytes {
+	if newBytes > oldBytes && exceedsLimit(journalBytes, newBytes-oldBytes, j.config.MaxJournalBytes) {
 		return submission, ErrJournalFull
 	}
 	if err := bucket.Put([]byte(id), encoded); err != nil {

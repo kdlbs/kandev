@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -57,10 +58,61 @@ func TestRecoverSessionUnknownPromptKeepsNativeHistory(t *testing.T) {
 	}
 }
 
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.9
+func TestNativeResumeStartFailureLeavesUnknownDeliveryUnacknowledged(t *testing.T) {
+	service, manager, block, submission, launched, _ := nativeResumeFixture(
+		t, "unknown_prompt_outcome", false, false,
+	)
+	startupErr := errors.New("native agent did not become ready")
+	startupFinished := make(chan struct{})
+	var acknowledgeCalls atomic.Int32
+	originalAcknowledge := manager.acknowledge
+	manager.acknowledge = func(ctx context.Context, sessionID string) error {
+		acknowledgeCalls.Add(1)
+		return originalAcknowledge(ctx, sessionID)
+	}
+	manager.startAgentProcess = func(ctx context.Context, executionID string) error {
+		if err := manager.sessionUpdatingAgentManager.StartAgentProcess(ctx, executionID); err != nil {
+			return err
+		}
+		defer close(startupFinished)
+		return startupErr
+	}
+
+	response, err := service.RecoverSession(context.Background(), "task1", submission.SessionID, "resume")
+	select {
+	case <-startupFinished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("native resume did not attempt to start the agent")
+	}
+	require.ErrorIs(t, err, startupErr)
+	require.Nil(t, response)
+	require.Zero(t, acknowledgeCalls.Load(), "native history must not be acknowledged after a failed start")
+	require.NotNil(t, *launched)
+	require.Equal(t, "native-conversation", (*launched).ACPSessionID)
+
+	repo := service.repo.(nativeResumeTestRepository)
+	stored, err := repo.GetAgentDeliverySubmission(context.Background(), submission.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, stored.State)
+	require.Equal(t, submission.Payload, stored.Payload)
+	recovery, err := repo.GetSessionRecoveryBlock(context.Background(), block.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RecoveryBlockOpen, recovery.State)
+}
+
 // The optional capability is present on the production lifecycle adapter.
 type nativeResumeTestManager struct {
 	*sessionUpdatingAgentManager
-	acknowledge func(context.Context, string) error
+	acknowledge       func(context.Context, string) error
+	startAgentProcess func(context.Context, string) error
+}
+
+func (m *nativeResumeTestManager) StartAgentProcess(ctx context.Context, executionID string) error {
+	if m.startAgentProcess != nil {
+		return m.startAgentProcess(ctx, executionID)
+	}
+	return m.sessionUpdatingAgentManager.StartAgentProcess(ctx, executionID)
 }
 
 func (m *nativeResumeTestManager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID string) error {

@@ -54,6 +54,8 @@ vi.mock("@/lib/services/session-recovery-service", () => ({
   sessionRecoveryGuardDetails: () => null,
   sessionRecoveryGuardMessage: () => "",
   contextContinuationDetails: () => null,
+  sessionDeliveryRecoveryMessage: (result: { outcome: string }) =>
+    `task:deliveryRecovery${result.outcome}`,
   requestSessionRecover: mocks.requestSessionRecover,
   restoreSessionWorkspace: mocks.restoreSessionWorkspace,
   getWorkspaceRecoveryStatus: mocks.getWorkspaceRecoveryStatus,
@@ -288,6 +290,29 @@ describe("provider-restored resume eligibility exclusions", () => {
 
 // eslint-disable-next-line max-lines-per-function -- recovery retry scenarios share one hook harness.
 describe("useSessionRecoveryActions", () => {
+  it("keeps the typed delivery retry outcome as localized status", async () => {
+    const onDeliveryReconciled = vi.fn();
+    mocks.requestSessionRecover.mockResolvedValueOnce({
+      task_id: TASK_ID,
+      session_id: SESSION_ID,
+      outcome: "blocked",
+      reason: "missing_canonical_submission",
+      recovery_revision: 0,
+    });
+    const { result } = renderHook(() =>
+      useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID, onDeliveryReconciled }),
+    );
+
+    await act(async () => {
+      await result.current.handleRecover("retry_connection");
+    });
+
+    expect(result.current.deliveryRecoveryNotice).toBe("task:deliveryRecoveryblocked");
+    expect(result.current.recoveryError).toBeNull();
+    expect(result.current.busyAction).toBeNull();
+    expect(onDeliveryReconciled).toHaveBeenCalledTimes(1);
+  });
+
   it("clears busy and error state after a successful recovery", async () => {
     mocks.requestSessionRecover.mockResolvedValueOnce(undefined);
     const { result } = renderHook(() =>

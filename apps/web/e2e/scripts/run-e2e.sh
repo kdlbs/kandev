@@ -160,7 +160,7 @@ build_fe() {
 
 build_backend_host() {
   log "building backend (host)"
-  local targets=(build)
+  local targets=(build build-e2e-delivery-fixture)
   # Both real-runtime projects need Linux helpers; the deprecated docker alias
   # is normalized to containers before this point.
   is_container_project && targets+=(build-agentctl-linux build-mock-agent-linux)
@@ -190,7 +190,7 @@ build_backend_in_build_image() {
   docker run --rm -v "$REPO_ROOT":/work -w /work/apps/backend \
     -v kandev-gocache:/root/.cache/go-build -v kandev-gomod:/go/pkg/mod \
     "$BUILD_IMAGE" \
-    bash -lc "git config --global --add safe.directory /work 2>/dev/null; make build VERSION=dev-docker && chown -R $uid_gid /work/apps/backend/bin" \
+    bash -lc "git config --global --add safe.directory /work 2>/dev/null; make build build-e2e-delivery-fixture VERSION=dev-docker && chown -R $uid_gid /work/apps/backend/bin" \
     >/dev/null || die "in-container backend build failed"
 }
 

@@ -11,6 +11,7 @@ export type LastAgentError = {
   occurredAt?: string;
   agentExecutionId?: string;
   executionId?: string;
+  deliverySubmissionId?: string;
   phase?: string;
   attemptId?: string;
   causes?: AgentErrorCause[];
@@ -264,6 +265,10 @@ function readStructuredFailureMetadata(record: Record<string, unknown>) {
   const startupAttempts = record.startup_attempts ?? record.startupAttempts;
   return {
     code: readFirstOptionalString(record, ["code", "failure_code", "failureCode"]),
+    deliverySubmissionId: readFirstOptionalString(record, [
+      "delivery_submission_id",
+      "deliverySubmissionId",
+    ]),
     details: readFirstOptionalString(record, [
       "details",
       "failure_details",

@@ -1,9 +1,16 @@
 import { expect, test } from "../../fixtures/test-base";
+import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
+import { attachMessageAddCapture } from "../../helpers/ws-capture";
 import {
   observeAgentRuntimeAvailability,
   waitForAgentRuntimeReplacement,
 } from "../../helpers/agent-runtime-availability";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import {
+  captureSilentRestartSnapshot,
+  countSessionMessageAdds,
+  expectSilentRestartRestoration,
+} from "../../helpers/silent-restart-recovery";
 import { SessionPage } from "../../pages/session-page";
 
 type RuntimeStoreWindow = Window & {
@@ -19,14 +26,18 @@ type RuntimeStoreWindow = Window & {
 };
 
 test.describe("Mobile agent runtime replacement", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
-  test("keeps the task usable after a real local runtime replacement", async ({
+  test("restores the interrupted conversation silently after backend restart", async ({
     testPage,
     apiClient,
     seedData,
+    prCapture,
+    backend,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(300_000);
+    const traffic = attachGatewayTrafficCapture(testPage);
+    const messageAdds = attachMessageAddCapture(testPage);
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile agent runtime replacement keeps this task open",
@@ -69,11 +80,72 @@ test.describe("Mobile agent runtime replacement", () => {
         exact: true,
       }),
     ).toBeVisible({ timeout: 30_000 });
+    await expect(testPage.getByTestId("interrupted-sessions-notice")).toHaveCount(0);
+    await expect(testPage.getByTestId("interrupted-session-continuation")).toHaveCount(0);
 
     const stop = session.chat.getByTestId("recovery-stop-button");
     await expect(stop).toBeEnabled();
     const stopBox = await stop.boundingBox();
     expect(stopBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     await assertNoDocumentHorizontalOverflow(testPage, "mobile runtime replacement");
+    if (!task.session_id) throw new Error("missing interrupted session");
+    const sessionId = task.session_id;
+    const beforeRestart = await captureSilentRestartSnapshot(apiClient, task.id, sessionId);
+    const messageAddsBeforeRestart = countSessionMessageAdds(
+      messageAdds.frames,
+      task.id,
+      sessionId,
+    );
+    const sessionRecoveriesBeforeRestart = traffic.frames.filter(
+      (frame) =>
+        frame.direction === "sent" &&
+        frame.action === "session.recover" &&
+        frame.sessionId === sessionId,
+    ).length;
+
+    await backend.restart();
+    expect(await apiClient.getBackendBootID()).not.toBe(bootID);
+    await testPage.reload();
+    await session.waitForLoad();
+    await expectSilentRestartRestoration(
+      testPage,
+      apiClient,
+      task.id,
+      beforeRestart,
+      traffic.frames,
+    );
+    expect(countSessionMessageAdds(messageAdds.frames, task.id, sessionId)).toBe(
+      messageAddsBeforeRestart,
+    );
+    expect(
+      traffic.frames.filter(
+        (frame) =>
+          frame.direction === "sent" &&
+          frame.action === "session.recover" &&
+          frame.sessionId === sessionId,
+      ),
+    ).toHaveLength(sessionRecoveriesBeforeRestart);
+
+    await session.waitForChatIdle({ timeout: 60_000, requireEditable: true });
+    await expect(session.chat.getByText(/Started agent|Resumed agent/i)).toHaveCount(1);
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile silent restart recovery");
+    await prCapture.screenshot("phone-silent-restart-restoration", {
+      caption: "The existing conversation is ready after a backend restart",
+    });
+
+    await session.sendMessageViaButton("/e2e:simple-message");
+    await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 45_000 });
+    expect(countSessionMessageAdds(messageAdds.frames, task.id, sessionId)).toBe(
+      messageAddsBeforeRestart + 1,
+    );
+    expect(
+      (await apiClient.listSessionMessages(sessionId)).messages.filter(
+        (message) => message.author_type === "user" && message.content === "/e2e:simple-message",
+      ),
+    ).toHaveLength(1);
+    expect((await apiClient.listSessionTurns(sessionId)).turns).toHaveLength(
+      beforeRestart.turnIds.length + 1,
+    );
   });
 });

@@ -43,6 +43,7 @@ const sessionContinuitySchema = `
 			reason TEXT NOT NULL DEFAULT '',
 			target_workspace TEXT NOT NULL DEFAULT '',
 			authorized INTEGER NOT NULL DEFAULT 0,
+			checkpoint_json TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMP NOT NULL,
 			completed_at TIMESTAMP,
 			FOREIGN KEY (session_id) REFERENCES task_sessions(id) ON DELETE CASCADE
@@ -157,6 +158,9 @@ func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generat
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), generation.SessionID); err != nil {
+		return false, err
+	}
 	var current int64
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT generation FROM harness_session_generations
@@ -226,14 +230,18 @@ func (r *Repository) CreateRestoreAttempt(ctx context.Context, attempt *models.R
 	if attempt.CreatedAt.IsZero() {
 		attempt.CreatedAt = time.Now().UTC()
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	checkpointJSON, err := marshalSilentRestoreCheckpoint(attempt.Checkpoint)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO session_restore_attempts
 		(id, session_id, incarnation_id, expected_generation, action, outcome, reason,
-		 target_workspace, authorized, created_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		 target_workspace, authorized, checkpoint_json, created_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		attempt.ID, attempt.SessionID, attempt.IncarnationID, attempt.ExpectedGeneration,
 		attempt.Action, attempt.Outcome, attempt.Reason, attempt.TargetWorkspace,
-		boolToInt(attempt.Authorized), attempt.CreatedAt, attempt.CompletedAt)
+		boolToInt(attempt.Authorized), checkpointJSON, attempt.CreatedAt, attempt.CompletedAt)
 	return err
 }
 

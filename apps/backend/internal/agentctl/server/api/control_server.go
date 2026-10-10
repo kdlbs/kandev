@@ -135,6 +135,7 @@ func (m *ControlServer) setupRoutes() {
 	api := m.router.Group("/api/v1")
 	api.POST("/instances", m.handleCreateInstance)
 	api.GET("/instances", m.handleListInstances)
+	api.POST("/delivery/retained", m.handleRetainedDelivery)
 	api.GET("/instances/:id", m.handleGetInstance)
 	api.DELETE("/instances/:id", m.handleDeleteInstance)
 	api.GET("/instances/:id/turn-outcome", m.handleGetTurnOutcome)

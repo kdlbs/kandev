@@ -1,8 +1,14 @@
 import type { TaskSession, WorkspaceRecoveryProjection } from "@/lib/types/http";
 import { mergePendingActionProjection } from "./task-session-projection-actions";
 import { getAgentGoal, isAgentGoalSnapshotNewer, mergeAgentGoalMetadata } from "@/lib/agent-goal";
-import { readAgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery";
+import {
+  readAgentDeliveryRecovery,
+  type AgentDeliveryRecovery,
+} from "@/lib/session-agent-delivery-recovery";
 import { parseTurnTimestamp } from "./turn-actions";
+
+// i18n-exempt: stable backend failure code, not user-facing copy.
+const DURABLE_DELIVERY_UNCERTAIN = "DURABLE_DELIVERY_UNCERTAIN";
 
 function asMetadataRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -91,6 +97,38 @@ function hasIncomingGoalClear(session: TaskSession): boolean {
   return meta?.goal === null && Object.prototype.hasOwnProperty.call(meta ?? {}, "goal");
 }
 
+function matchesDurableDeliveryUncertainty(
+  error: unknown,
+  recovery: AgentDeliveryRecovery,
+): boolean {
+  const record = asMetadataRecord(error);
+  if (record?.code !== DURABLE_DELIVERY_UNCERTAIN) return false;
+  const agentExecutionID = readDeliveryErrorExecutionID(record);
+  const submissionID = readDeliveryErrorSubmissionID(record);
+  return agentExecutionID === recovery.agentExecutionId && submissionID === recovery.submissionId;
+}
+
+function readDeliveryErrorExecutionID(error: Record<string, unknown>): string {
+  if (typeof error.agent_execution_id === "string" && error.agent_execution_id.length > 0) {
+    return error.agent_execution_id;
+  }
+  if (typeof error.execution_id === "string" && error.execution_id.length > 0) {
+    return error.execution_id;
+  }
+  return "";
+}
+
+function readDeliveryErrorSubmissionID(error: Record<string, unknown>): string {
+  const hasStructuredSubmissionID =
+    Object.prototype.hasOwnProperty.call(error, "delivery_submission_id") ||
+    Object.prototype.hasOwnProperty.call(error, "deliverySubmissionId");
+  if (hasStructuredSubmissionID) {
+    const value = error.delivery_submission_id ?? error.deliverySubmissionId;
+    return typeof value === "string" ? value : "";
+  }
+  return typeof error.details === "string" ? error.details : "";
+}
+
 function mergeDeliveryRecoveryMetadata(
   current: Record<string, unknown>,
   incoming: Record<string, unknown>,
@@ -99,11 +137,23 @@ function mergeDeliveryRecoveryMetadata(
   if (!Object.prototype.hasOwnProperty.call(incoming, "agent_delivery_recovery")) return;
   const currentRecovery = readAgentDeliveryRecovery(current);
   const incomingRecovery = readAgentDeliveryRecovery(incoming);
+  const incomingRecoveryIsCurrent =
+    incomingRecovery !== null &&
+    (!currentRecovery || incomingRecovery.revision >= currentRecovery.revision);
+  const incomingRecoveryIsNewer =
+    incomingRecovery !== null &&
+    (!currentRecovery || incomingRecovery.revision > currentRecovery.revision);
+
   if (
-    !currentRecovery ||
-    (incomingRecovery && incomingRecovery.revision >= currentRecovery.revision)
-  )
-    return;
+    incomingRecoveryIsNewer &&
+    incomingRecovery.phase === "restored" &&
+    !Object.prototype.hasOwnProperty.call(incoming, "last_agent_error") &&
+    matchesDurableDeliveryUncertainty(current.last_agent_error, incomingRecovery)
+  ) {
+    delete next.last_agent_error;
+  }
+
+  if (!currentRecovery || incomingRecoveryIsCurrent) return;
 
   // Keep the legacy error paired with the revisioned recovery snapshot.
   next.agent_delivery_recovery = current.agent_delivery_recovery;
