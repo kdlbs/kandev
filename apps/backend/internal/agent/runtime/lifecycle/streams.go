@@ -370,6 +370,13 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 		return
 	}
 
+	sm.rebindDurableDeliveryAck(client, streamID)
+	if after > 0 {
+		sm.scheduleDurableDeliveryAck(client, agentctl.AgentEvent{
+			DeliveryStreamID: streamID,
+			DeliverySequence: after,
+		})
+	}
 	processor := newStreamEventProcessor(sm, ctx, execution, client, delivery, startupGeneration)
 	err := client.StreamUpdatesFrom(ctx, func(event agentctl.AgentEvent) {
 		if !processor.enqueue(event) {

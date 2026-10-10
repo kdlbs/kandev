@@ -193,7 +193,42 @@ func (w *deliveryEventWriter) commit(batch []deliveryWriteRequest) {
 	for i, request := range batch {
 		updates[i] = request.update
 	}
-	committed, err := w.manager.persistDeliveryBatch(context.Background(), updates)
+	ctx := w.manager.lifetimeCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	stopCh, _ := w.manager.stopChSnapshot.Load().(chan struct{})
+	var committed []adapter.AgentEvent
+	var err error
+retry:
+	for {
+		committed, err = w.manager.persistDeliveryBatch(ctx, updates)
+		// These bare errors mean retained capacity is exhausted. Wrapped
+		// size errors cannot be repaired by waiting for acknowledgements.
+		if err != journal.ErrStreamFull && err != journal.ErrJournalFull {
+			break
+		}
+		if status := w.manager.Status(); status == StatusStopping || (status == StatusStopped && stopCh != nil) {
+			err = errDeliveryWriterClosed
+			break
+		}
+		timer := time.NewTimer(deliveryWriterBatchWait)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			err = ctx.Err()
+			break retry
+		case <-stopCh:
+			timer.Stop()
+			err = errDeliveryWriterClosed
+			break retry
+		case <-w.closedCh:
+			timer.Stop()
+			err = errDeliveryWriterClosed
+			break retry
+		}
+	}
 	for i, request := range batch {
 		result := deliveryWriteResult{update: request.update, err: err}
 		if err == nil {

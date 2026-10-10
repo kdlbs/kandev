@@ -1422,7 +1422,7 @@ func (s *Service) RecoverSessionWithOptions(
 		ForceContextContinuation:         resumeOptions.ForceContextContinuation,
 		ContinuationPrompt:               resumeOptions.ContinuationPrompt,
 		RecoveryAction:                   action,
-		DeferRecoveryResolution:          checkpoint != nil,
+		DeferRecoveryResolution:          checkpoint != nil || action == recoveryActionResume,
 		InitialPromptSubmission:          initialSubmission,
 	})
 	if err != nil {
@@ -1437,6 +1437,14 @@ func (s *Service) RecoverSessionWithOptions(
 		return nil, err
 	}
 	if checkpoint == nil {
+		if action == recoveryActionResume && resp.AgentExecutionID != "" {
+			if _, err := s.resolveDeliveryProtocol(ctx, sessionID, resp.AgentExecutionID, ""); err != nil {
+				return nil, err
+			}
+			if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
+				return nil, err
+			}
+		}
 		return resp, nil
 	}
 	checkpoint.candidateExecutionID = resp.AgentExecutionID

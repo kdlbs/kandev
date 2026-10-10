@@ -126,7 +126,10 @@ func (w *durableDeliveryAckWorker) waitForDelay() bool {
 
 func (w *durableDeliveryAckWorker) sendPending(sequence uint64) bool {
 	requestCtx, cancel := context.WithTimeout(w.ctx, durableDeliveryAckRequestTime)
-	err := w.send(requestCtx, sequence)
+	w.mu.Lock()
+	send := w.send
+	w.mu.Unlock()
+	err := send(requestCtx, sequence)
 	cancel()
 	if err == nil {
 		w.clearFlush(sequence)
@@ -135,6 +138,18 @@ func (w *durableDeliveryAckWorker) sendPending(sequence uint64) bool {
 	// Keep pending at the highest projected sequence. The next bounded retry is
 	// independent of event notification and prompt dispatch.
 	return w.waitForDelay()
+}
+
+func (sm *StreamManager) rebindDurableDeliveryAck(client *agentctl.Client, streamID string) {
+	sm.ackMu.Lock()
+	defer sm.ackMu.Unlock()
+	if worker := sm.ackWorkers[streamID]; worker != nil {
+		worker.mu.Lock()
+		worker.send = func(ctx context.Context, sequence uint64) error {
+			return client.AcknowledgeDelivery(ctx, streamID, sequence)
+		}
+		worker.mu.Unlock()
+	}
 }
 
 func (sm *StreamManager) scheduleDurableDeliveryAck(client *agentctl.Client, event agentctl.AgentEvent) {

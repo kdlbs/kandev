@@ -2443,6 +2443,10 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 			}
 			persisted, err := m.persistDeliveryEvent(update)
 			if err != nil {
+				if errors.Is(err, errDeliveryWriterClosed) ||
+					(errors.Is(err, context.Canceled) && m.lifetimeCtx != nil && m.lifetimeCtx.Err() != nil) {
+					return
+				}
 				m.logger.Error("failed to commit durable delivery event", zap.Error(err))
 				// A configured journal is the commit-before-publish boundary. Stop
 				// forwarding when it cannot commit so the backend never observes an
@@ -2537,11 +2541,16 @@ func (m *Manager) persistDeliveryBatch(ctx context.Context, updates []adapter.Ag
 	}
 	committed, err := deliveryJournal.AppendBatch(ctx, events)
 	if err != nil {
-		m.deliveryJournalMu.Lock()
-		if m.deliveryJournalErr == nil {
-			m.deliveryJournalErr = err
+		// Capacity pressure must leave replay, acknowledgements and explicit
+		// cancellation available so retained events can be released.
+		if !errors.Is(err, journal.ErrStreamFull) && !errors.Is(err, journal.ErrJournalFull) &&
+			!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			m.deliveryJournalMu.Lock()
+			if m.deliveryJournalErr == nil {
+				m.deliveryJournalErr = err
+			}
+			m.deliveryJournalMu.Unlock()
 		}
-		m.deliveryJournalMu.Unlock()
 		return updates, err
 	}
 	for i := range updates {
