@@ -3,11 +3,14 @@ created: 2026-10-09
 status: in_progress
 requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-002
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-003
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-004
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
   - REQ-PLATFORM-AGENT-RUNTIME-AVAILABILITY-003
 system_design:
+  - ../../specs/platform/system-design/durable-agent-delivery.md
   - ../../specs/platform/system-design/durable-agent-stream-processing.md
   - ../../specs/platform/system-design/durable-agent-reattachment.md
   - ../../specs/platform/system-design/agent-runtime-availability.md
