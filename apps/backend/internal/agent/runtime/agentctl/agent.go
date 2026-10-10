@@ -688,8 +688,12 @@ func (c *Client) readUpdatesStream(
 		// Try to parse as ws.Message to check message type
 		var wsMsg ws.Message
 		if err := json.Unmarshal(message, &wsMsg); err == nil {
-			// Check if this is a response/error to a pending request
-			if (wsMsg.Type == ws.MessageTypeResponse || wsMsg.Type == ws.MessageTypeError) && c.resolvePendingRequest(&wsMsg) {
+			// Keep RPC replies separate from the durable agent event stream.
+			if (wsMsg.Type == ws.MessageTypeResponse || wsMsg.Type == ws.MessageTypeError) &&
+				wsMsg.ID != "" && wsMsg.Action != "" {
+				// A cancelled request can receive a late reply after its waiter
+				// is removed. It is still an RPC reply, not a durable agent event.
+				c.resolvePendingRequest(&wsMsg)
 				continue
 			}
 
