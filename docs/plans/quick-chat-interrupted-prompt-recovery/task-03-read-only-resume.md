@@ -85,3 +85,28 @@ transport and preserve existing continuation recovery semantics.
   Final focused race checks and Go lint results are recorded in the PR validation.
 - Public how-to documentation now explains the read-only notice's existing Resume action.
 - PR publication is tracked in the task handoff; no production recovery data was modified.
+
+## PR review remediation
+
+- Merged the current main branch into the PR branch without conflicts.
+- Validate every unresolved SQL row against the peer by submission ID, session,
+  incarnation, generation, and payload hash before any retirement. Missing SQL access,
+  live SQL work, missing journal records, and mismatches fail closed. After retirement,
+  re-read both stores and require matching retained acknowledgement before clearing recovery.
+- Lifecycle regressions reproduced missing and mismatched SQL evidence being accepted.
+  They now reject it without mutating either store and prove matching acknowledgement
+  remains adoptable after restart, including earlier generations and idempotent recovery.
+- Browser fixtures seed the same interrupted record into SQL and the real retained bbolt
+  journal using the mock binary. Both desktop and phone flows inspect retirement before
+  sending a new instruction; read-only workspace recovery also restarts the backend first.
+- The PostgreSQL activity-retention test now waits for startup cleanup to finish before
+  sending its tick and joins its goroutines on assertion failure. The existing test passed
+  15 PostgreSQL 16 race-enabled repetitions before remediation; the complete retention
+  suite passed 30 repetitions afterward. The CI failure exposed a startup/tick race.
+- Focused verification commands: `go test -trimpath -race` with native resume,
+  durable adoption, journal-fixture, and orchestrator recovery cases; frontend typecheck
+  and zero-warning ESLint; managed Chromium and mobile Chrome recovery specs with
+  retries disabled; Go lint on the three affected packages against main; documentation
+  catalog validation and full specification lint.
+- Remote CI and review verification remain pending until the remediation commit is pushed
+  and the new head's checks and review threads are clear.

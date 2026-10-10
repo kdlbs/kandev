@@ -30,6 +30,9 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 	if err != nil {
 		return fmt.Errorf("list native resume delivery submissions: %w", err)
 	}
+	if err := m.validateNativeResumeSQLHistory(ctx, execution, status, submissions, false); err != nil {
+		return err
+	}
 	ids, err := nativeResumeInterruptedSubmissionIDs(execution, submissions)
 	if err != nil {
 		return err
@@ -49,7 +52,11 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 	if status.Unresolved {
 		return fmt.Errorf("native resume delivery remains unresolved")
 	}
-	return nil
+	submissions, err = client.ListDeliverySubmissions(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("confirm native resume retirement evidence: %w", err)
+	}
+	return m.validateNativeResumeSQLHistory(ctx, execution, status, submissions, true)
 }
 
 func validateNativeResumeDeliveryOwner(execution *AgentExecution, status *agentctl.DeliveryStatus) error {

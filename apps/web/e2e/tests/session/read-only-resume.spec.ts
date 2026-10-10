@@ -13,5 +13,6 @@ test("Resume works after read-only workspace fallback without a stopped-agent ca
     tmpDir: backend.tmpDir,
     capture: prCapture,
     mobile: false,
+    restart: backend.restart,
   });
 });

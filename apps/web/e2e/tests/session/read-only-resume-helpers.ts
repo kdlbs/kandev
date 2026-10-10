@@ -6,6 +6,7 @@ import { watchWs } from "../../helpers/causal-waits";
 import { createSettledHistoryTask } from "../../helpers/session-entry-recovery";
 import {
   seedInterruptedPrompt,
+  expectJournalRetirement,
   readRecovery,
   withDatabase,
 } from "../../helpers/interrupted-prompt-recovery";
@@ -17,7 +18,12 @@ export async function verifyReadOnlyResume(
   page: Page,
   api: ApiClient,
   seed: SeedData,
-  options: { tmpDir: string; capture: PrAssetCapture; mobile: boolean },
+  options: {
+    tmpDir: string;
+    capture: PrAssetCapture;
+    mobile: boolean;
+    restart: () => Promise<void>;
+  },
 ) {
   const { tmpDir, capture, mobile } = options;
   const task = await createSettledHistoryTask(api, seed, "Resume restored workspace");
@@ -48,7 +54,10 @@ export async function verifyReadOnlyResume(
       { timeout: 30_000 },
     )
     .toBe(false);
-  const { blockId, submissionId } = seedInterruptedPrompt(tmpDir, sessionId);
+  const { blockId, submissionId, journalPath, submission } = seedInterruptedPrompt(
+    tmpDir,
+    sessionId,
+  );
   withDatabase(tmpDir, (db) => {
     db.prepare(
       "UPDATE task_sessions SET state = 'WAITING_FOR_INPUT', error_message = '', metadata = json_remove(metadata, '$.last_agent_error', '$.agent_delivery_recovery') WHERE id = ?",
@@ -82,8 +91,12 @@ export async function verifyReadOnlyResume(
     block: { state: "resolved", authorized_action: "resume" },
     submission: { state: "interrupted_unknown" },
   });
+  await expectJournalRetirement(journalPath, submission);
   const resumed = (await api.listTaskSessions(task.id)).sessions.find((s) => s.id === sessionId)!;
   expect(resumed.metadata?.acp).toEqual(original.metadata?.acp);
+  await options.restart();
+  await page.reload();
+  await expect(notice).toHaveCount(0);
   const session = new SessionPage(page);
   await expect(
     session.activeChat().getByText("simple mock response", { exact: false }),

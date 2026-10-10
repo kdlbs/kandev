@@ -67,8 +67,12 @@ Native Resume waits for existing runtime readiness and defers block resolution. 
 the lifecycle owner reads authenticated journal status and the full session submission list.
 It validates session, incarnation, stream, generation, and healthy durable storage, rejects live
 or incomplete-terminal work before mutation, and retires only interrupted-unknown records
-from the current incarnation at or before the current generation. The process owner serializes
-retirement against prompt dispatch and checks the trusted owner. Retirement preserves unknown
+after matching every unresolved SQL row to its peer record by ID, session, incarnation,
+generation, and payload hash. Missing or conflicting evidence prevents every retirement write.
+It then re-reads both stores and requires retained retirement for each unresolved SQL row
+before clearing the database block. Already-retired matching records make this idempotent.
+The eligible journal records belong to the current incarnation at or before the current generation.
+The process owner serializes retirement against prompt dispatch and checks the trusted owner. Retirement preserves unknown
 state and payload and makes duplicate admission or dispatch of that ID fail. Existing newer
 generation retirement still cancels other superseded work. A refreshed capability must be clear
 before SQL block resolution and parked queue release. Legacy peers retain ordinary compatibility;

@@ -81,6 +81,11 @@ func TestNativeResumeAcknowledgesRealJournalBeforeNewWork(t *testing.T) {
 				require.NoError(t, err)
 			}
 			mgr := newTestManager(t)
+			repository := &adoptionDeliveryRepository{submissions: map[string]*models.AgentDeliverySubmission{
+				original.ID: {ID: original.ID, SessionID: original.SessionID, IncarnationID: original.IncarnationID,
+					HarnessGeneration: int64(original.HarnessGeneration), PayloadHash: original.Hash, State: models.DeliverySubmissionInterruptedUnknown},
+			}}
+			mgr.streamManager.setAgentDeliveryRepository(repository)
 			execution := &AgentExecution{ID: "execution", SessionID: "session", ACPSessionID: "native-conversation", DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 2, DeliveryStreamID: "stream", agentctl: nativeResumeJournalPeer(t, store, condition == "retirement rejected")}
 			execution.setSessionInitialized(condition != "uninitialized")
 			if condition == "wrong incarnation" {
@@ -101,6 +106,12 @@ func TestNativeResumeAcknowledgesRealJournalBeforeNewWork(t *testing.T) {
 			require.Equal(t, original.State, stored.State)
 			require.Equal(t, original.Payload, stored.Payload)
 			require.Equal(t, "native-conversation", execution.ACPSessionID)
+			if stored.Retired {
+				status, err := execution.agentctl.GetDeliveryStatus(ctx, execution.DeliveryStreamID)
+				require.NoError(t, err)
+				require.NoError(t, newAdoptionManager(repository).restoreRecoveredSubmission(ctx, execution, status, repository, execution.agentctl))
+				require.Empty(t, execution.deliverySubmissionIDSnapshot())
+			}
 		})
 	}
 }

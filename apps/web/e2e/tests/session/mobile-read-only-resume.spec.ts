@@ -13,5 +13,6 @@ test("touch Resume works after read-only workspace fallback without a stopped-ag
     tmpDir: backend.tmpDir,
     capture: prCapture,
     mobile: true,
+    restart: backend.restart,
   });
 });

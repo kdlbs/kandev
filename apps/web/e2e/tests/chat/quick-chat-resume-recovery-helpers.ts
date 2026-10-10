@@ -1,4 +1,8 @@
-import { seedInterruptedPrompt, readRecovery } from "../../helpers/interrupted-prompt-recovery";
+import {
+  seedInterruptedPrompt,
+  expectJournalRetirement,
+  readRecovery,
+} from "../../helpers/interrupted-prompt-recovery";
 import { expect, type Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
@@ -70,7 +74,10 @@ export async function verifyQuickChatResumeRecovery(
       { timeout: 30_000 },
     )
     .toBe(false);
-  const { blockId, submissionId } = seedInterruptedPrompt(tmpDir, started.session_id);
+  const { blockId, submissionId, journalPath, submission } = seedInterruptedPrompt(
+    tmpDir,
+    started.session_id,
+  );
   const restored = await apiClient.wsRequest<{ success: boolean }>("session.launch", {
     task_id: started.task_id,
     session_id: started.session_id,
@@ -100,6 +107,7 @@ export async function verifyQuickChatResumeRecovery(
     block: { state: "resolved", authorized_action: "resume" },
     submission: { state: "interrupted_unknown" },
   });
+  await expectJournalRetirement(journalPath, submission);
   const resumed = (await apiClient.listTaskSessions(started.task_id)).sessions.find(
     (session) => session.id === started.session_id,
   )!;
