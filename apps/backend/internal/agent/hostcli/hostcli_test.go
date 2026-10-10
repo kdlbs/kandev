@@ -147,10 +147,10 @@ func TestVersionOutputIsBounded(t *testing.T) {
 func TestExecProcessKillReleasesBlockedProtocolRead(t *testing.T) {
 	inReader, inWriter := io.Pipe()
 	outReader, outWriter := io.Pipe()
-	defer inReader.Close()
-	defer inWriter.Close()
-	defer outReader.Close()
-	defer outWriter.Close()
+	defer func() { _ = inReader.Close() }()
+	defer func() { _ = inWriter.Close() }()
+	defer func() { _ = outReader.Close() }()
+	defer func() { _ = outWriter.Close() }()
 	readStarted := make(chan struct{})
 	readDone := make(chan error, 1)
 	go func() {

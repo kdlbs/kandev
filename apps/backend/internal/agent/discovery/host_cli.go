@@ -136,7 +136,6 @@ func (h *hostCLIResolver) resolve(ctx context.Context, spec hostcli.Spec, matche
 	h.mu.Lock()
 	entry, cached := h.cache[key]
 	now := h.now()
-	generation := h.generation
 	h.mu.Unlock()
 	if cached && now.Before(entry.expiresAt) {
 		return entry.state
@@ -152,7 +151,7 @@ func (h *hostCLIResolver) resolve(ctx context.Context, spec hostcli.Spec, matche
 	h.mu.Lock()
 	entry, cached = h.cache[key]
 	now = h.now()
-	generation = h.generation
+	generation := h.generation
 	h.mu.Unlock()
 	if cached && now.Before(entry.expiresAt) {
 		return entry.state
