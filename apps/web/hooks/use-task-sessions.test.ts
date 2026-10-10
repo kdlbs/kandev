@@ -259,7 +259,7 @@ describe("useTaskSessions live reconciliation", () => {
       .mockReturnValueOnce(firstResponse.promise)
       .mockResolvedValueOnce({ sessions: [existing, liveHydrated] });
 
-    const { rerender } = renderHook(() => useTaskSessions(TASK_ID));
+    renderHook(() => useTaskSessions(TASK_ID));
     await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));
 
     mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [existing, livePartial];
@@ -274,7 +274,6 @@ describe("useTaskSessions live reconciliation", () => {
         },
       ),
     );
-    rerender();
 
     await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(2));
     expect(mockState.setTaskSessionsForTask).toHaveBeenLastCalledWith(
@@ -575,4 +574,23 @@ describe("useTaskSessions queued refreshes", () => {
     await secondReload;
     expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(2);
   });
+});
+
+it("refreshes compact membership when a live event adds a sibling row", async () => {
+  mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("first")];
+  mockState.taskSessionsByTask.loadedByTaskId[TASK_ID] = true;
+  const { rerender } = renderHook(() => useTaskSessions(TASK_ID));
+  expect(apiMock.listTaskSessions).not.toHaveBeenCalled();
+  const sibling = { ...session("sibling"), repository_id: "repository-b" };
+  apiMock.listTaskSessions.mockResolvedValue({ sessions: [session("first"), sibling] });
+  mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("first"), session("sibling")];
+  rerender();
+  await waitFor(() =>
+    expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(
+      TASK_ID,
+      [session("first"), sibling],
+      expect.anything(),
+    ),
+  );
+  expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1);
 });

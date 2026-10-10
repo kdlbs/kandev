@@ -274,8 +274,10 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
   effectiveTaskIdRef.current = effectiveTaskId;
   const isCurrentTaskDetailsRequest = (requestId: number, taskId: string) =>
     requestId === taskDetailsRequestIdRef.current && effectiveTaskIdRef.current === taskId;
-  const kanbanTask = useAppStore((state) =>
-    resolveLatestTaskProjection(effectiveTaskId, state.kanban.tasks, state.kanbanMulti.snapshots),
+  const kanbanTask = useAppStore(
+    (state) =>
+      (effectiveTaskId ? state.taskOverview.byId[effectiveTaskId] : null) ??
+      resolveLatestTaskProjection(effectiveTaskId, state.kanban.tasks, state.kanbanMulti.snapshots),
   );
   const task = useMemo(
     () => resolveEffectiveTask(taskDetails, initialTask, kanbanTask, effectiveTaskId),

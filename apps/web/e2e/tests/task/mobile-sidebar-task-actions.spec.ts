@@ -210,7 +210,7 @@ test.describe("Mobile sidebar task actions", () => {
     await destinationRow.tap();
 
     await expect(drawer).toBeHidden();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${destination.id}$`));
+    await expect(testPage).toHaveURL(new RegExp(`/t/${destination.id}(?:\\?sessionId=[^&]+)?$`));
     const mobileTopBar = testPage
       .getByTestId("mobile-task-picker-trigger")
       .locator("xpath=ancestor::header");

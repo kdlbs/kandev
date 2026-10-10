@@ -137,6 +137,35 @@ describe("version-2 boot entity graph", () => {
     });
   });
 
+  it("expands the bounded task-detail initial state without rewriting nested settings", () => {
+    const task = { id: "task-1", title: "Task" };
+    const settings = { taskScope: { mode: "selected", taskIds: ["task-1"] } };
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        version: 2,
+        routeData: {
+          taskDetail: {
+            initialState: {
+              kanban: { taskIds: ["task-1"] },
+              kanbanMulti: { snapshots: { wf: { taskIds: ["task-1"] } } },
+              settings,
+            },
+          },
+        },
+        entities: { tasks: { "task-1": task }, sessions: {} },
+      },
+    } as unknown as Window;
+    expect(readBootPayload(win).routeData).toMatchObject({
+      taskDetail: {
+        initialState: {
+          kanban: { tasks: [task] },
+          kanbanMulti: { snapshots: { wf: { tasks: [task] } } },
+          settings,
+        },
+      },
+    });
+  });
+
   it("preserves saved selected-task views, drafts, and unrelated task identities", () => {
     const scope = { mode: "selected", taskIds: ["task-1", "missing-task"] };
     const settings = {

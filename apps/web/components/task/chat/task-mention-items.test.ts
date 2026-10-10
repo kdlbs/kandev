@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "@/lib/state/store";
-import { buildTaskMentionItems } from "./task-mention-items";
+import { buildTaskMentionItems, loadTaskMentionItems } from "./task-mention-items";
 
 function makeState(overrides: Partial<AppState> = {}): AppState {
   const base = {
@@ -95,4 +95,60 @@ describe("buildTaskMentionItems", () => {
       "task-b",
     ]);
   });
+});
+
+const listTasksByWorkspace = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/api/domains/kanban-api", () => ({ listTasksByWorkspace }));
+afterEach(() => vi.clearAllMocks());
+it("searches one bounded task page when sibling tasks are absent from the boot", async () => {
+  listTasksByWorkspace.mockResolvedValue({
+    tasks: [
+      {
+        id: "sibling",
+        workspace_id: "workspace",
+        workflow_id: "wf-1",
+        workflow_step_id: "step",
+        title: "Sibling",
+        position: 0,
+      },
+    ],
+  });
+  const controller = new AbortController();
+  const items = await loadTaskMentionItems(makeState(), "current", "workspace", "Sibling", {
+    signal: controller.signal,
+    isCurrent: () => true,
+  });
+  expect(listTasksByWorkspace).toHaveBeenCalledWith(
+    "workspace",
+    { query: "Sibling", page: 1, pageSize: 50 },
+    { init: { signal: controller.signal } },
+  );
+  expect(items.map((item) => item.task?.taskId)).toEqual(["sibling"]);
+});
+it("rejects a delayed search after its scope retires even when transport ignores cancellation", async () => {
+  let resolve!: (value: unknown) => void;
+  listTasksByWorkspace.mockReturnValue(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  let current = true;
+  const request = loadTaskMentionItems(makeState(), null, "workspace", "Sibling", {
+    signal: new AbortController().signal,
+    isCurrent: () => current,
+  });
+  current = false;
+  resolve({
+    tasks: [
+      {
+        id: "stale",
+        workspace_id: "workspace",
+        workflow_id: "wf-1",
+        workflow_step_id: "step",
+        title: "Stale",
+        position: 0,
+      },
+    ],
+  });
+  expect(await request).toEqual([]);
 });

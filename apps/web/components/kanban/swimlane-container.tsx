@@ -235,17 +235,18 @@ const WorkflowItemContent = memo(function WorkflowItemContent({
     () => moveTargetSteps.filter((step) => !autoHiddenSet.has(step.id)),
     [moveTargetSteps, autoHiddenSet],
   );
-  const content = snapshot ? (
-    <ViewComponent
-      workflowId={wf.id}
-      steps={steps}
-      moveTargetSteps={moveTargetSteps}
-      tasks={tasks}
-      {...viewProps}
-    />
-  ) : (
-    <div className="min-h-56" />
-  );
+  const content =
+    snapshot || viewProps.mobileWorkflowNavigation ? (
+      <ViewComponent
+        workflowId={wf.id}
+        steps={steps}
+        moveTargetSteps={moveTargetSteps}
+        tasks={tasks}
+        {...viewProps}
+      />
+    ) : (
+      <div className="min-h-56" />
+    );
 
   if (hideHeader) {
     return <div className={fillHeight ? "h-full min-h-0" : undefined}>{content}</div>;

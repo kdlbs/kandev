@@ -128,3 +128,7 @@ for commands, fixture corrections, and results.
 ### Review correction
 
 Window reconciliation clears markers whose merged row proves completion or retirement. A null active-turn response is authoritative only for its captured request-start identity, epoch, and freshness. Late responses preserve newer WebSocket turns. Initial fetch, gap repair, pagination, route enrichment, and hydration regressions cover both directions of the race. See the [review correction results](implementation-evidence.md#review-remediation).
+
+### PR CI fixture verification
+
+Frontend CI exposed legacy fixtures for session activation and turn hydration. Test-only corrections align them with compact membership and message-window context while retaining stale-session rejection and raw backfill assertions. The combined suite passed 198 tests across 12 files. Four deliberate contract mutations failed before byte-for-byte source restoration. TypeScript and corrected-fixture ESLint passed. See [CI fixture results](implementation-evidence.md#frontend-ci-fixture-remediation).

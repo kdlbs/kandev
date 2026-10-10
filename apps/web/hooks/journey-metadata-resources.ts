@@ -6,6 +6,7 @@ import {
   storeReadScopeIdentity,
 } from "@/lib/state/shared-resource-reads";
 import { fetchUserSettings, listRepositories, listWorkflows, listWorkspaces } from "@/lib/api";
+import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import { getTaskCIAutomationOptions } from "@/lib/api/domains/github-api";
 import { getAgentProfileMcpConfigAction } from "@/app/actions/agents";
 
@@ -63,6 +64,7 @@ function metadataRead<T>() {
 const repositoryRead = metadataRead<Awaited<ReturnType<typeof listRepositories>>>();
 const workspaceRead = metadataRead<Awaited<ReturnType<typeof listWorkspaces>>>();
 const workflowRead = metadataRead<Awaited<ReturnType<typeof listWorkflows>>>();
+const stepRead = metadataRead<Awaited<ReturnType<typeof listWorkflowSteps>>>();
 const settingsRead = metadataRead<Awaited<ReturnType<typeof fetchUserSettings>>>();
 const ciRead = metadataRead<Awaited<ReturnType<typeof getTaskCIAutomationOptions>>>();
 const mcpRead = metadataRead<Awaited<ReturnType<typeof getAgentProfileMcpConfigAction>>>();
@@ -179,6 +181,26 @@ export function readJourneyMcpConfig(
     store,
     profileId,
     (signal) => getAgentProfileMcpConfigAction(profileId, { signal }),
+    options,
+  );
+}
+
+export function readJourneyWorkflowSteps(
+  store: StoreApi<AppState> | undefined,
+  workflowId: string,
+  options: ReadOptions = {},
+) {
+  if (!store)
+    return listWorkflowSteps(
+      workflowId,
+      options.signal
+        ? { cache: "no-store", init: { signal: options.signal } }
+        : { cache: "no-store" },
+    );
+  return stepRead(
+    store,
+    workflowId,
+    (signal) => listWorkflowSteps(workflowId, { cache: "no-store", init: { signal } }),
     options,
   );
 }

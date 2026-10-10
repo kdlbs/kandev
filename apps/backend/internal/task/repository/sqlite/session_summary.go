@@ -96,6 +96,8 @@ func taskSessionSummarySelectCols(driver string) string {
 	if dialect.IsPostgres(driver) {
 		metadata = "CASE WHEN ts.metadata IS NULL OR ts.metadata = 'null' OR ts.metadata = '' THEN '{}'::jsonb ELSE ts.metadata::jsonb END"
 	}
+	metadata = "(" + metadata + ")"
+	modelID, modelName := sessionSummaryModelColumns(driver, metadata)
 	return strings.Join([]string{
 		"ts.id", "ts.task_id", "ts.queue_incarnation_id",
 		"COALESCE(er.agent_execution_id, '')", "COALESCE(er.container_id, '')",
@@ -106,7 +108,7 @@ func taskSessionSummarySelectCols(driver string) string {
 		dialect.JSONExtract(driver, "ts.agent_profile_snapshot", "name"),
 		"e.type AS executor_type", "e.name AS executor_name",
 		dialect.JSONExtract(driver, "ts.repository_snapshot", "path"),
-		"ts.state", "ts.error_message", dialect.JSONExtract(driver, metadata, models.SessionMetaKeyLastAgentError),
+		"ts.state", "ts.error_message", dialect.JSONExtract(driver, metadata, models.SessionMetaKeyLastAgentError), modelID, modelName,
 		"ts.started_at", "ts.completed_at", "ts.updated_at", "ts.is_primary", "ts.review_status",
 		"ts.is_passthrough", "ts.task_environment_id", "ts.name", "ts.last_read_message_id",
 	}, ", ")
@@ -133,6 +135,8 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 		repositoryPath     sql.NullString
 		state              sql.NullString
 		errorMessage       sql.NullString
+		modelID            sql.NullString
+		modelName          sql.NullString
 		lastAgentErrorJSON sql.NullString
 		completedAt        sql.NullTime
 		isPrimary          int
@@ -149,7 +153,7 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 		&routeState, &routeReason, &executorID, &executorProfileID,
 		&environmentID, &repositoryID, &baseBranch, &baseCommitSHA, &workspacePath,
 		&agentProfileName, &executorType, &executorName, &repositoryPath,
-		&state, &errorMessage, &lastAgentErrorJSON,
+		&state, &errorMessage, &lastAgentErrorJSON, &modelID, &modelName,
 		&observation.StartedAt, &completedAt, &observation.UpdatedAt, &isPrimary,
 		&reviewStatus, &isPassthrough, &taskEnvironmentID, &name, &lastReadMessageID,
 	); err != nil {
@@ -182,6 +186,15 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 	if completedAt.Valid {
 		observation.CompletedAt = &completedAt.Time
 	}
+	metadata, err := sessionSummaryMetadata(lastAgentErrorJSON, modelID.String, modelName.String)
+	if err != nil {
+		return nil, err
+	}
+	observation.Metadata = metadata
+	return &observation, nil
+}
+
+func sessionSummaryMetadata(lastAgentErrorJSON sql.NullString, modelID, modelName string) (map[string]interface{}, error) {
 	metadata := map[string]interface{}{models.SessionMetaKeyLastAgentError: nil}
 	if lastAgentErrorJSON.Valid && lastAgentErrorJSON.String != "" && lastAgentErrorJSON.String != "null" {
 		var lastAgentError interface{}
@@ -190,8 +203,10 @@ func scanTaskSessionSummaryObservation(rows *sql.Rows) (*models.TaskSessionSumma
 		}
 		metadata[models.SessionMetaKeyLastAgentError] = lastAgentError
 	}
-	observation.Metadata = metadata
-	return &observation, nil
+	if label := models.SessionModelLabelMetadata(modelID, modelName); label != nil {
+		metadata[models.SessionMetaKeyACPModelState] = label
+	}
+	return metadata, nil
 }
 
 func sessionSummaryNullableString(value sql.NullString) string {

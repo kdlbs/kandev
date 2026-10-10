@@ -88,12 +88,14 @@ func TestBootTaskDetailCompactRuntimeStates(t *testing.T) {
 			state = models.TaskSessionStateWaitingForInput
 		}
 		sessions = append(sessions, &models.TaskSession{ID: id, TaskID: fixture.taskIDs[0], State: state,
-			Metadata: map[string]any{"rich_sibling_state": richSentinel}, AgentProfileSnapshot: map[string]any{"rich": richSentinel},
+			Metadata: map[string]any{"rich_sibling_state": richSentinel, models.SessionMetaKeyACPModelState: map[string]any{
+				"current_model_id": id + "-model", "models": []any{map[string]any{"model_id": id + "-model", "name": id + " label"}}, "config_options": richSentinel,
+			}}, AgentProfileSnapshot: map[string]any{"rich": richSentinel},
 		})
 	}
 	// The selected projection remains rich. Its data is deliberately small so
 	// the total bound detects metadata leaking from any inactive sibling.
-	sessions[0].Metadata = map[string]any{}
+	sessions[0].Metadata = map[string]any{models.SessionMetaKeyACPModelState: map[string]any{"current_model_id": "selected-model", "models": []any{map[string]any{"model_id": "selected-model", "name": "selected label"}}}}
 	sessions[0].AgentProfileSnapshot = nil
 	for _, session := range sessions {
 		if err := fixture.taskRepo.CreateTaskSession(t.Context(), session); err != nil {
@@ -119,6 +121,16 @@ func TestBootTaskDetailCompactRuntimeStates(t *testing.T) {
 		t.Fatalf("compact siblings leaked rich metadata: payload bytes=%d", len(raw))
 	}
 	var response struct {
+		SessionModels struct {
+			BySessionID map[string]struct {
+				CurrentModelID string `json:"currentModelId"`
+				Models         []struct {
+					ModelID string `json:"modelId"`
+					Name    string `json:"name"`
+				}
+				ConfigOptions []any `json:"configOptions"`
+			} `json:"bySessionId"`
+		} `json:"sessionModels"`
 		TaskSessions       struct{ Items map[string]dto.TaskSessionDTO }
 		TaskSessionsByTask struct {
 			ItemsByTaskID map[string][]dto.TaskSessionDTO
@@ -132,6 +144,10 @@ func TestBootTaskDetailCompactRuntimeStates(t *testing.T) {
 		t.Fatalf("session membership changed: %+v", list)
 	}
 	for _, row := range list {
+		label := response.SessionModels.BySessionID[row.ID]
+		if label.CurrentModelID != row.ID+"-model" || len(label.Models) != 1 || label.Models[0].Name != row.ID+" label" || len(label.ConfigOptions) != 0 {
+			t.Errorf("bounded boot model identity for %s = %+v", row.ID, label)
+		}
 		want := provider[row.ID]
 		expectedActivity := want.activity
 		if row.ID == "settled" {

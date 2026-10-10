@@ -217,6 +217,23 @@ function useBoardCandidates(
   );
 }
 
+function useHiddenStepDemand(
+  hiddenWorkflowStepIds: Record<string, string[]>,
+  snapshots: Record<string, WorkflowSnapshotData>,
+  workflowIdsWithAutoHideEmptySteps: string[],
+) {
+  return useCallback(
+    (workflowId: string) => {
+      const hidden = hiddenWorkflowStepIds[workflowId];
+      if (workflowIdsWithAutoHideEmptySteps.includes(workflowId)) return true;
+      if (!hidden?.length) return false;
+      const liveStepIds = new Set((snapshots[workflowId]?.steps ?? []).map((step) => step.id));
+      return hidden.some((id) => liveStepIds.has(id));
+    },
+    [hiddenWorkflowStepIds, snapshots, workflowIdsWithAutoHideEmptySteps],
+  );
+}
+
 export function useSwimlaneRenderData(
   workflowFilter: string | null | undefined,
   selectedRepositoryIds: string[],
@@ -275,15 +292,10 @@ export function useSwimlaneRenderData(
     priorityFilterTokens,
   });
 
-  const hasLiveHiddenSteps = useCallback(
-    (workflowId: string) => {
-      const hidden = hiddenWorkflowStepIds[workflowId];
-      if (workflowIdsWithAutoHideEmptySteps.includes(workflowId)) return true;
-      if (!hidden?.length) return false;
-      const liveStepIds = new Set((snapshots[workflowId]?.steps ?? []).map((step) => step.id));
-      return hidden.some((id) => liveStepIds.has(id));
-    },
-    [hiddenWorkflowStepIds, snapshots, workflowIdsWithAutoHideEmptySteps],
+  const hasLiveHiddenSteps = useHiddenStepDemand(
+    hiddenWorkflowStepIds,
+    snapshots,
+    workflowIdsWithAutoHideEmptySteps,
   );
 
   const workflowOptions = useStableWorkflowOptions(
@@ -296,12 +308,24 @@ export function useSwimlaneRenderData(
         workspaceWorkflows,
         getFilteredTasks,
         hasLiveHiddenSteps,
+        (workflowId) =>
+          !snapshots[workflowId] &&
+          workflowCoverage?.workspace_id === activeWorkspaceId &&
+          workflowCoverage.workflow_ids.includes(workflowId),
       ).map(({ workflow, tasks }) => ({
         id: workflow.id,
         name: workflow.name,
         taskCount: snapshots[workflow.id] ? tasks.length : null,
       }));
-    }, [getFilteredTasks, hasLiveHiddenSteps, snapshots, workflowFilter, workspaceWorkflows]),
+    }, [
+      activeWorkspaceId,
+      getFilteredTasks,
+      hasLiveHiddenSteps,
+      snapshots,
+      workflowCoverage,
+      workflowFilter,
+      workspaceWorkflows,
+    ]),
   );
 
   return {

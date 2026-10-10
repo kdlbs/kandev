@@ -44,6 +44,7 @@ export function selectMobileNavigatorWorkflows(
   workflows: WorkflowLike[],
   getFilteredTasks: (workflowId: string) => unknown[],
   hasLiveHiddenSteps: (workflowId: string) => boolean = () => false,
+  hasUnloadedTasks: (workflowId: string) => boolean = () => false,
 ): Array<{ workflow: WorkflowLike; tasks: unknown[] }> {
   const visibleIds = new Set(visibleOrdered.map((workflow) => workflow.id));
   const entries: Array<{ workflow: WorkflowLike; tasks: unknown[] }> = [];
@@ -53,7 +54,7 @@ export function selectMobileNavigatorWorkflows(
   for (const workflow of workflows) {
     if (!workflow.hidden || visibleIds.has(workflow.id)) continue;
     const tasks = getFilteredTasks(workflow.id);
-    if (tasks.length > 0 || hasLiveHiddenSteps(workflow.id)) {
+    if (tasks.length > 0 || hasLiveHiddenSteps(workflow.id) || hasUnloadedTasks(workflow.id)) {
       entries.push({ workflow, tasks });
     }
   }

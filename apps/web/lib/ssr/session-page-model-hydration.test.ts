@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
 }));
 
+vi.mock("@/lib/api/domains/workflow-api", () => ({ listWorkflowSteps: mocks.listWorkflowSteps }));
+
 vi.mock("@/lib/api", () => ({
   fetchTask: mocks.fetchTask,
   fetchTaskSession: mocks.fetchTaskSession,

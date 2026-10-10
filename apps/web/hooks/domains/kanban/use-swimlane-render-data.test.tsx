@@ -348,3 +348,28 @@ describe("bounded board candidates", () => {
     ]);
   });
 });
+
+it("offers an unloaded hidden workflow with authorized task coverage without fetching its board", () => {
+  const { result } = renderOverview();
+  act(() =>
+    result.current.store.setState((state) => ({
+      workspaces: { ...state.workspaces, activeId: "workspace" },
+      workflows: {
+        ...state.workflows,
+        items: [
+          { id: "visible", name: "Visible", workspaceId: "workspace" },
+          { id: "hidden", name: "Hidden", hidden: true, workspaceId: "workspace" },
+          { id: "empty-hidden", name: "Empty hidden", hidden: true, workspaceId: "workspace" },
+        ],
+        taskWorkflowCoverage: {
+          workspace_id: "workspace",
+          workflow_ids: ["visible", "hidden"],
+          complete: true,
+        },
+      },
+      kanbanMulti: { ...state.kanbanMulti, snapshots: { visible: snapshot("visible") } },
+    })),
+  );
+  expect(result.current.data.workflowOptions.map(({ id }) => id)).toEqual(["visible", "hidden"]);
+  expect(result.current.store.getState().kanbanMulti.snapshots.hidden).toBeUndefined();
+});

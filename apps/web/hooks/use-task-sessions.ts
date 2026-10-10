@@ -82,6 +82,13 @@ async function hydrateTaskSessions({
   }
 }
 
+async function hydrateCurrentTaskSessions(args: Parameters<typeof hydrateTaskSessions>[0]) {
+  let needsFollowUp = await hydrateTaskSessions(args);
+  while (needsFollowUp && args.isCurrent()) {
+    needsFollowUp = await hydrateTaskSessions({ ...args, force: true });
+  }
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
@@ -163,6 +170,75 @@ function useTaskSessionReconnect(
   }, [connectionStatus, loadSessions, taskId]);
 }
 
+function observeStoredMembership(
+  observed: { current: { taskId: string | null; key: string; loaded: boolean } },
+  getState: () => AppState,
+  taskId: string,
+) {
+  observed.current = {
+    taskId,
+    key: JSON.stringify(
+      storedTaskSessions(getState, taskId)
+        .map((session) => session.id)
+        .sort(),
+    ),
+    loaded: getState().taskSessionsByTask.loadedByTaskId[taskId] ?? false,
+  };
+}
+
+function useTaskSessionLoadEffects({
+  taskId,
+  isLoaded,
+  isLoading,
+  error,
+  loadSessions,
+  membershipKey,
+  observedMembershipRef,
+  pendingForcedReloadRef,
+  pendingForcedReloadWaitersRef,
+}: {
+  taskId: string | null;
+  isLoaded: boolean;
+  isLoading: boolean;
+  error: string | null;
+  loadSessions: (force?: boolean) => Promise<void>;
+  membershipKey: string;
+  observedMembershipRef: { current: { taskId: string | null; key: string; loaded: boolean } };
+  pendingForcedReloadRef: { current: boolean };
+  pendingForcedReloadWaitersRef: { current: Array<() => void> };
+}) {
+  useEffect(() => {
+    if (!taskId) return;
+    if (isLoaded || isLoading || error) return;
+    loadSessions();
+  }, [error, isLoaded, isLoading, loadSessions, taskId]);
+
+  useEffect(() => {
+    pendingForcedReloadRef.current = false;
+    resolveForcedReloadWaiters(pendingForcedReloadWaitersRef);
+  }, [taskId]);
+
+  useEffect(() => {
+    if (!taskId || isLoading) return;
+    if (!pendingForcedReloadRef.current) return;
+    pendingForcedReloadRef.current = false;
+    void loadSessions(true);
+  }, [isLoading, loadSessions, taskId]);
+
+  useEffect(() => {
+    const previous = observedMembershipRef.current;
+    observedMembershipRef.current = { taskId, key: membershipKey, loaded: isLoaded };
+    if (
+      previous.taskId === taskId &&
+      previous.loaded &&
+      isLoaded &&
+      previous.key !== membershipKey
+    ) {
+      void loadSessions(true);
+    }
+  }, [taskId, membershipKey, isLoaded, loadSessions]);
+}
+
 export function useTaskSessions(taskId: string | null) {
   const store = useAppStoreApi();
   useAppStore(stateReadScopeIdentity);
@@ -185,6 +261,9 @@ export function useTaskSessions(taskId: string | null) {
     pendingForcedReloadWaitersRef,
   });
 
+  const membershipKey = JSON.stringify(sessions.map((session) => session.id).sort());
+  const observedMembershipRef = useRef({ taskId, key: membershipKey, loaded: isLoaded });
+
   const loadSessions = useCallback(
     async (force = false) => {
       if (!taskId) return;
@@ -204,7 +283,7 @@ export function useTaskSessions(taskId: string | null) {
       requestInFlightRef.current = true;
       setTaskSessionsLoading(taskId, true);
       try {
-        const needsFollowUp = await hydrateTaskSessions({
+        await hydrateCurrentTaskSessions({
           taskId,
           force,
           isCurrent: () => reads.isCurrent(taskId),
@@ -213,9 +292,9 @@ export function useTaskSessions(taskId: string | null) {
           setTaskSessionsForTask,
           setTaskSessionsError,
         });
-        if (isCurrent() && needsFollowUp) pendingForcedReloadRef.current = true;
       } finally {
         if (isCurrent()) {
+          observeStoredMembership(observedMembershipRef, getStoreState, taskId);
           requestInFlightRef.current = false;
           if (force && !pendingForcedReloadRef.current) {
             resolveForcedReloadWaiters(pendingForcedReloadWaitersRef);
@@ -238,23 +317,17 @@ export function useTaskSessions(taskId: string | null) {
     ],
   );
 
-  useEffect(() => {
-    if (!taskId) return;
-    if (isLoaded || isLoading || error) return;
-    loadSessions();
-  }, [error, isLoaded, isLoading, loadSessions, taskId]);
-
-  useEffect(() => {
-    pendingForcedReloadRef.current = false;
-    resolveForcedReloadWaiters(pendingForcedReloadWaitersRef);
-  }, [taskId]);
-
-  useEffect(() => {
-    if (!taskId || isLoading) return;
-    if (!pendingForcedReloadRef.current) return;
-    pendingForcedReloadRef.current = false;
-    void loadSessions(true);
-  }, [isLoading, loadSessions, taskId]);
+  useTaskSessionLoadEffects({
+    taskId,
+    isLoaded,
+    isLoading,
+    error,
+    loadSessions,
+    membershipKey,
+    observedMembershipRef,
+    pendingForcedReloadRef,
+    pendingForcedReloadWaitersRef,
+  });
 
   useTaskSessionReconnect(taskId, connectionStatus, loadSessions);
 

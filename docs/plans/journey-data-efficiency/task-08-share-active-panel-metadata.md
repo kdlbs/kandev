@@ -152,3 +152,8 @@ Review corrections retain the metadata owner and its post-response scope checks.
 ### PR fixup
 
 PR #4404 fixup reran shared-read and task-session regressions on current main. Updated source fingerprints distinguish the corrected tree from historical browser and timing captures. The historical persistence deadlines and unresolved incident attribution remain unchanged. See [fixup results](implementation-evidence.md#pr-4404-fixup).
+
+
+## PR #4404 browser CI remediation
+
+Route, detail, filter, and destination-menu step reads share the existing resource owner. Offscreen workflow choices use metadata without acquiring board task snapshots. Regressions cover overlapping controls, workspace authorization, delayed destination responses, and explicit menu demand. Final CI-head verification remains pending until the remediation push passes checks.

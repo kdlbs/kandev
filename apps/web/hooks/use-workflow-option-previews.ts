@@ -8,7 +8,11 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
+import { readJourneyWorkflowSteps } from "@/hooks/journey-metadata-resources";
+import { useOptionalAppStore, useOptionalAppStoreApi } from "@/components/state-provider";
+import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
 
 export type WorkflowOptionPreviewStep = {
   id: string;
@@ -35,6 +39,7 @@ type RequestCycle = {
   active: boolean;
   pending: Set<string>;
   requestIds: Map<string, number>;
+  controller: AbortController;
 };
 
 function loadingEntries(workflowIds: string[]): Record<string, StoredPreview> {
@@ -69,6 +74,7 @@ function requestPreview(
   workflowId: string,
   requestSequence: { current: number },
   setState: Dispatch<SetStateAction<PreviewState>>,
+  store: StoreApi<AppState> | undefined,
 ) {
   if (!cycle.active || cycle.pending.has(workflowId)) return;
   const requestId = ++requestSequence.current;
@@ -85,7 +91,7 @@ function requestPreview(
     };
   });
 
-  void listWorkflowSteps(workflowId, { cache: "no-store" })
+  void readJourneyWorkflowSteps(store, workflowId, { signal: cycle.controller.signal })
     .then((response) => {
       const steps = [...response.steps]
         .sort((left, right) => left.position - right.position)
@@ -115,10 +121,14 @@ export function useWorkflowOptionPreviews(
   previews: Record<string, WorkflowOptionPreview>;
   retry: (workflowId: string) => void;
 } {
+  const store = useOptionalAppStoreApi() ?? undefined;
+  const readScope = useOptionalAppStore(stateReadScopeIdentity, "");
   const workflowIdsKey = JSON.stringify([...new Set(workflowIds)].sort());
   const normalizedWorkflowIds = JSON.parse(workflowIdsKey) as string[];
   const scopeIdentity =
-    open && workspaceId ? JSON.stringify([workspaceId, workflowIdsKey, refreshKey]) : null;
+    open && workspaceId
+      ? JSON.stringify([workspaceId, workflowIdsKey, refreshKey, readScope])
+      : null;
   const [generation, setGeneration] = useState({ scopeIdentity, value: 0 });
   const currentGeneration =
     generation.scopeIdentity === scopeIdentity ? generation.value : generation.value + 1;
@@ -142,17 +152,19 @@ export function useWorkflowOptionPreviews(
       active: true,
       pending: new Set(),
       requestIds: new Map(),
+      controller: new AbortController(),
     };
     cycleRef.current = cycle;
     for (const workflowId of cycle.workflowIds) {
-      requestPreview(cycle, workflowId, requestSequence, setState);
+      requestPreview(cycle, workflowId, requestSequence, setState, store);
     }
     return () => {
       cycle.active = false;
+      cycle.controller.abort();
       if (cycleRef.current === cycle) cycleRef.current = null;
     };
     // workflowIdsKey provides stable membership while callers rebuild arrays.
-  }, [scopeKey, workspaceId, workflowIdsKey]);
+  }, [scopeKey, workspaceId, workflowIdsKey, store]);
 
   const previews: Record<string, WorkflowOptionPreview> = {};
   if (scopeKey) {
@@ -181,9 +193,9 @@ export function useWorkflowOptionPreviews(
       ) {
         return;
       }
-      requestPreview(cycle, workflowId, requestSequence, setState);
+      requestPreview(cycle, workflowId, requestSequence, setState, store);
     },
-    [scopeKey, state],
+    [scopeKey, state, store],
   );
 
   return { previews, retry };

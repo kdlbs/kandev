@@ -105,3 +105,8 @@ No engine gap remains for this order. The test-only PostgreSQL container is disp
 ### Review correction
 
 Compact observations authorize the task before narrow or fallback repository reads. New service and HTTP/WS regressions cover owner access, foreign account/workspace denial, unscoped internal callers, and missing tasks. Compact boot siblings use the same runtime summary enrichers as list rows. Tests retain foreground activity, cancellation revisions, and parked epochs/revisions without rich metadata. See the [review correction results](implementation-evidence.md#review-remediation).
+
+
+## PR #4404 browser CI remediation
+
+Compact summary observations now retain the selected model ID and matching display name. SQLite and PostgreSQL extract two scalar values. The full-model fallback uses the same bounded projection. Provider-restored model identity remains authoritative over stale local overrides; unrelated configuration growth does not enlarge compact responses. Boot siblings receive one display choice, without configuration options or rich metadata. E2E fixtures request a full session explicitly when inspecting preparation, delivery recovery, or persisted configuration.

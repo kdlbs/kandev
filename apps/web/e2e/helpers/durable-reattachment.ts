@@ -34,7 +34,7 @@ async function waitForUncertainRecovery(apiClient: ApiClient, taskId: string, se
     await expect
       .poll(
         async () => {
-          const current = await apiClient.listTaskSessions(taskId);
+          const current = await apiClient.listTaskSessionDetails(taskId);
           const session = current.sessions.find((candidate) => candidate.id === sessionId);
           latestSession = session
             ? {
@@ -122,13 +122,13 @@ export async function triggerActualDeliveryDisconnect(
 
   expect(await apiClient.getBackendBootID()).toBe(bootID);
   expect(await testPage.evaluate(() => performance.timeOrigin)).toBe(pageTimeOrigin);
-  const sessions = await apiClient.listTaskSessions(task.id);
+  const sessions = await apiClient.listTaskSessionDetails(task.id);
   const session = sessions.sessions.find((candidate) => candidate.is_primary);
   if (!session) throw new Error("created task has no primary session");
 
   await waitForUncertainRecovery(apiClient, task.id, session.id);
 
-  const persistedSession = (await apiClient.listTaskSessions(task.id)).sessions.find(
+  const persistedSession = (await apiClient.listTaskSessionDetails(task.id)).sessions.find(
     (candidate) => candidate.id === session.id,
   );
   const recovery = persistedSession?.metadata?.agent_delivery_recovery as

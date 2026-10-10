@@ -121,3 +121,10 @@ Shared reads reject obsolete success and error responses after scope changes, di
 ### PR fixup
 
 PR #4404 fixup keeps response publication and loading settlement under the retained shared-read scope when the initiating hook leaves. Success, failure, retry, final release, and scope-retirement regressions passed. Waiting callers now receive the final queued refresh failure instead of an earlier successful value. See [fixup results](implementation-evidence.md#pr-4404-fixup).
+
+
+## PR #4404 browser CI remediation
+
+A sibling added during an older membership request triggers a direct compact follow-up before settlement. The regression omits any extra test render and covers the repository-label repair observed on phone.
+
+Task detail and cached route projection consume canonical task records. A live move retains the selected detail after its source board releases the row. Sidebar edit, link, detach, and reparent actions use bounded page records. Task mentions search one authorized page of up to 50 tasks and reject obsolete responses.

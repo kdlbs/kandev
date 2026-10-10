@@ -626,3 +626,60 @@ cover both viewport consumers without changing layout or touch interaction.
 Eight of ten historical write-loaded probes exceeded two seconds. Historical
 writer ownership and separate agentctl filesystem failures remain unresolved.
 This fixup does not establish universal health recovery.
+
+### Frontend CI fixture remediation
+
+At `b381612f3ca8e19d454a60de318ae355fd924872`, frontend run `38058965767`
+(job `114233211580`) completed with 18 failing assertions in four test files.
+All reproduced locally. The lazy-message fixture omitted turn observation state
+and the `include_turns` request field. The add-panel fixture omitted the shared
+session-loading action. Recovery still modeled full turn-history replacement
+instead of bounded window context. The stale-tab fixture retained a valid compact
+session row, which now legitimately permits activation before environment enrichment.
+
+Test-only corrections restore the fixture contracts. The tab tests separately
+cover compact activation and a removed session absent from both membership and
+its environment map. Recovery asserts message/turn-window hydration with no full
+turn-list request. Four deliberate production mutations each failed their intended
+assertion, then source was restored byte for byte. No production change was part
+of this initial fixture-only phase. The subsequent browser CI phase below changes production loading paths.
+
+The fixture-only phase combined suite passed 198 tests across 12 files, including the four
+corrected fixtures, older-message pagination, turn actions, and the earlier PR
+review regressions. Corrected fixtures passed ESLint with zero warnings and web
+TypeScript passed. See [CI remediation context](evidence/pr-4404-ci-remediation.json)
+for source provenance and mutation results. The verification context records
+source/test bytes for the latest delivered remediation; the fixture-only digest is retained as historical provenance. Historical desktop/phone captures, persistence
+probe outcomes, unknown writer ownership, and agentctl filesystem limitations
+remain unchanged. Hosted CI remains a separate required gate.
+
+```sh
+(cd apps/web && pnpm exec vitest run src/boot-payload.test.ts hooks/use-task-sessions.test.ts hooks/use-task-sessions.foreground.test.ts hooks/use-task-sessions.stale-reads.test.ts lib/state/task-session-reads.test.ts lib/state/task-navigation-reads.test.ts hooks/use-lazy-load-messages.test.ts components/task/dockview-add-panel-items.test.tsx components/task/dockview-session-tab-sync.test.ts hooks/domains/session/use-session-recovery.test.tsx hooks/domains/session/older-message-pagination.test.ts lib/state/slices/session/turn-actions.test.ts)
+(cd apps/web && pnpm exec eslint --max-warnings 0 hooks/use-lazy-load-messages.test.ts components/task/dockview-add-panel-items.test.tsx components/task/dockview-session-tab-sync.test.ts hooks/domains/session/use-session-recovery.test.tsx)
+(cd apps/web && pnpm run typecheck)
+```
+
+
+## PR #4404 browser CI remediation
+
+CI exposed missing task IDs in nested route boot state, actions that depended on complete board records, and absent metadata for offscreen workflow choices. The fixes retain bounded boot, sidebar paging, and visibility-based session demand.
+
+Compact session reads retain only the current model ID/name beside existing status fields. The scalar SQL projection excludes unrelated model choices and configuration. Explicit E2E inspection of preparation, persisted settings, and recovery metadata uses full session detail. Production list reads remain compact.
+
+Task detail consumes canonical task authority after a live workflow move. Route readiness uses authorized workflow metadata and keeps the phone navigator mounted while board tasks load. Sidebar actions use their bounded page records. Explicit task mention search requests one page of 50 tasks and rejects retired scope responses.
+
+Step filter, detail, route, and destination-menu reads share the existing metadata resource owner. They do not acquire task snapshots for offscreen boards. New regressions prove metadata demand, authorization, obsolete-response rejection, and overlap deduplication. Empty placeholder snapshots do not count as loaded step metadata. A sibling added during an older membership request is hydrated by a direct follow-up before the request owner settles; repair does not depend on an additional React render.
+
+The branch was rebased onto main `43f55a6aad38c7f53c4b7eb56682016639f74405`. The Quick Chat conflict retains upstream journal-retirement verification and explicit full-session metadata inspection. The incoming read-only Resume fixture uses the same full-detail inspection while preserving its recovery and restart assertions. Main subsequently advanced to `8d2246e323eef5764e428b73b948818d5437e1cc` with browser-native demo support. The final rebase was conflict-free and preserved all 78 tracked and eleven untracked fixup files byte for byte. The new base passed 125 focused integration tests in thirteen files, including boot routing, task status, Quick Terminal reconciliation, and browser-demo selection. Backend source did not change in this base advancement. Final-base TypeScript and the production Vite build passed. A normal commit hook rejected the compact scanner at 84 lines against its 80-line limit. Extracting the existing metadata decoding into a helper preserved its projection and error behavior; race-enabled SQLite summary regressions passed afterward. No hook was bypassed.
+
+The recovered phone follow-up exposed intermittent dropped taps. Trace and passive listeners changed timing, so their passing samples did not retire the failure. A real-tooltip regression demonstrated that readiness changes remounted the phone submit target. Phone submit controls now keep a stable target without a desktop keyboard-tooltip wrapper; disabled state and accessible reasons remain intact. Desktop hints remain unchanged. Final phone verification uses ordinary taps without diagnostic listeners or trace snapshots.
+
+Public documentation was inspected with the docs-maintainer skill. These fixes preserve existing controls, navigation, and mutation semantics. The public WebSocket API reference now documents compact session lists and the full-detail endpoint. The journey system design clarifies the projection; no new public setting or workflow is introduced.
+
+Local focused validation passed: 84 composer/draft tests in five files, 37 membership/cancellation tests in four files, earlier bounded-navigation/resource regressions, changed-file ESLint, TypeScript, architecture budgets, four backend race packages, two exact compact boot runtime regressions, and three PostgreSQL 18 parity regressions. Documentation catalog, all specification lint, and eight-work-order coverage passed. The owned PostgreSQL fixture was removed.
+
+Browser results preserve each failed phase: the broad desktop run passed 48 of 50 before the placeholder metadata fix; all 15 final desktop path cases subsequently passed. The broad phone run passed 35 of 37; membership repair and the stable touch target address its two failures. Three container Sources cases and focused sidebar filter/navigation checks passed. After rebasing, Quick Chat and both live workflow moves passed. The incoming read-only fixture was corrected, and its full desktop and phone flows passed. Three final recovered-follow-up phone samples passed without instrumentation, trace snapshots, or retries.
+
+The initial full frontend run was stopped after a known corrected fixture failure to rebase; it is not counted as passing. The fresh two-worker run exposed eleven stale-mock failures in the task-list step and automation-selector fixtures. Both omitted the optional store exports now used by shared metadata reads. All thirteen original tests in those two files pass after correcting the mock interface, without changing their assertions. The destination-menu regression also retained a pre-sharing request signature. Its corrected assertion preserves the exact single-request count and now proves that closing the menu aborts the request. All fourteen tests in the three discovered fixture files pass. The complete run then finished with 2,831 passing files and the same twelve failures in those three files (25,343 passed tests and four skipped). It is a failed pre-correction run, not an all-green result. The full selection preceded the final fixture edits and stable-target regression; corrected focused tests cover those later changes. Hosted CI on the remediation head remains a separate pending gate until the fixup is pushed. The verification context records the latest source bytes, distinct from historical captures.
+
+The historical measurement limits still apply: eight of ten write-loaded probes exceeded two seconds. Historical writer ownership and separate agentctl filesystem failures remain unresolved. No universal health recovery is claimed.

@@ -311,6 +311,9 @@ func taskSessionSummaryObservation(session *models.TaskSession) *models.TaskSess
 	if raw, ok := session.Metadata[models.SessionMetaKeyLastAgentError]; ok {
 		observation.Metadata[models.SessionMetaKeyLastAgentError] = raw
 	}
+	if label := models.ProjectSessionModelLabel(session.Metadata); label != nil {
+		observation.Metadata[models.SessionMetaKeyACPModelState] = label
+	}
 	if session.AgentProfileSnapshot != nil {
 		observation.AgentProfileName, _ = session.AgentProfileSnapshot["name"].(string)
 	}

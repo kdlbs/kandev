@@ -113,3 +113,14 @@ The new compact-membership regression failed before the fix (`null` instead of t
 ### Review correction
 
 The final review suite repeats desktop split-tab visibility and phone session-switcher tests with the corrected route/read owners. Rich subscriptions remain bounded by visible chats. See the [review correction results](implementation-evidence.md#review-remediation).
+
+### PR CI fixture verification
+
+Frontend CI exposed legacy fixtures for session activation and turn hydration. Test-only corrections align them with compact membership and message-window context while retaining stale-session rejection and raw backfill assertions. The combined suite passed 198 tests across 12 files. Four deliberate contract mutations failed before byte-for-byte source restoration. TypeScript and corrected-fixture ESLint passed. See [CI fixture results](implementation-evidence.md#frontend-ci-fixture-remediation).
+
+
+## PR #4404 browser CI remediation
+
+Loaded membership refreshes through the shared compact read owner when live events add or remove a session. Inactive siblings retain current model labels without rich session effects. Phone repository pickers use refreshed compact membership.
+
+The real phone submit target stays mounted through readiness changes. A real-tooltip unit regression fails before the correction; phone recovery validation uses native taps without diagnostic listeners.

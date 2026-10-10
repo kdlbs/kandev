@@ -19,11 +19,13 @@ type taskSessionSummaryProjectionReader interface {
 func TestSessionSummaryProjectionExcludesUnrelatedMetadata(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	assertSessionSummaryProjection(t, repo)
+	assertSessionSummaryProviderModel(t, repo)
 }
 
 func TestSessionSummaryProjectionPostgres(t *testing.T) {
 	repo := openPostgresRepo(t)
 	assertSessionSummaryProjection(t, repo)
+	assertSessionSummaryProviderModel(t, repo)
 }
 
 func TestSessionSummaryProjectionSelectsOnlySummaryFields(t *testing.T) {
@@ -81,6 +83,12 @@ func assertSessionSummaryProjection(t *testing.T, repo *Repository) {
 		RepositorySnapshot:   map[string]interface{}{"path": "/repo/summary", "irrelevant": strings.Repeat("c", 1<<20)},
 		EnvironmentSnapshot:  map[string]interface{}{"irrelevant": strings.Repeat("d", 1<<20)},
 		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPModelState: map[string]interface{}{
+				"current_model_id": "model-old",
+				"models":           []interface{}{map[string]interface{}{"model_id": "model-current", "name": "Current model"}},
+				"config_options":   strings.Repeat("z", 1<<20),
+			},
+			"runtime_config_overrides":          map[string]interface{}{"model": "model-current"},
 			models.SessionMetaKeyLastAgentError: lastError,
 			"unrelated_blob":                    strings.Repeat("x", 1<<20),
 		},
@@ -103,6 +111,12 @@ func assertSessionSummaryProjection(t *testing.T, repo *Repository) {
 		RepositorySnapshot:   map[string]interface{}{"path": "/repo/summary", "irrelevant": strings.Repeat("c", 4<<10)},
 		EnvironmentSnapshot:  map[string]interface{}{"irrelevant": strings.Repeat("d", 4<<10)},
 		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPModelState: map[string]interface{}{
+				"current_model_id": "model-old",
+				"models":           []interface{}{map[string]interface{}{"model_id": "model-current", "name": "Current model"}},
+				"config_options":   strings.Repeat("z", 4<<10),
+			},
+			"runtime_config_overrides":          map[string]interface{}{"model": "model-current"},
 			models.SessionMetaKeyLastAgentError: lastError,
 			"unrelated_blob":                    strings.Repeat("y", 4<<10),
 		},
@@ -151,6 +165,13 @@ func assertSessionSummaryProjection(t *testing.T, repo *Repository) {
 	}
 	if raw, ok := got.Metadata[models.SessionMetaKeyLastAgentError]; !ok || raw == nil {
 		t.Fatalf("last-agent-error projection = %#v, want the typed visible error", got.Metadata)
+	}
+	modelState, ok := got.Metadata[models.SessionMetaKeyACPModelState].(map[string]interface{})
+	if !ok || modelState["current_model_id"] != "model-current" {
+		t.Fatalf("compact model state = %#v", modelState)
+	}
+	if _, ok := modelState["config_options"]; ok {
+		t.Fatal("compact label included rich configuration")
 	}
 	if _, ok := got.Metadata["unrelated_blob"]; ok {
 		t.Fatal("narrow summary observation returned unrelated session metadata")
@@ -218,5 +239,30 @@ func assertSessionSummaryProjection(t *testing.T, repo *Repository) {
 	}
 	if len(full.Metadata["unrelated_blob"].(string)) != 1<<20 || len(full.AgentProfileSnapshot["irrelevant"].(string)) != 1<<20 {
 		t.Fatal("full selected-session read lost the complete metadata or configuration snapshots")
+	}
+}
+
+func assertSessionSummaryProviderModel(t *testing.T, repo *Repository) {
+	t.Helper()
+	taskID := "summary-provider-model"
+	if err := repo.CreateTask(t.Context(), &models.Task{ID: taskID, Title: "Provider model"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(t.Context(), &models.TaskSession{ID: taskID + "-session", TaskID: taskID, State: models.TaskSessionStateWaitingForInput, Metadata: map[string]interface{}{
+		models.SessionMetaKeyACPModelState: map[string]interface{}{"current_model_id": "observed", "settings_policy": "provider_restored", "models": []interface{}{map[string]interface{}{"model_id": "observed", "name": "Observed"}}},
+		"runtime_config_overrides":         map[string]interface{}{"model": "stale-local"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := repo.ListTaskSessionSummaryObservations(t.Context(), taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("provider rows = %d, want 1", len(rows))
+	}
+	label, _ := rows[0].Metadata[models.SessionMetaKeyACPModelState].(map[string]interface{})
+	if label["current_model_id"] != "observed" {
+		t.Fatalf("provider projection = %#v, want observed", label)
 	}
 }

@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   fetchTaskSession: vi.fn(),
   listTaskSessionMessages: vi.fn(),
 }));
+vi.mock("@/lib/api/domains/workflow-api", () => ({ listWorkflowSteps: mocks.listWorkflowSteps }));
+
 vi.mock("@/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api")>()),
   ...mocks,

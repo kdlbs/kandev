@@ -41,6 +41,7 @@ import { toKanbanTask } from "@/lib/kanban/map-task";
 import {
   readJourneyRepositories,
   readJourneyWorkspaces,
+  readJourneyWorkflowSteps,
   readJourneyWorkflows,
   readJourneyUserSettings,
 } from "@/hooks/journey-metadata-resources";
@@ -469,7 +470,7 @@ function routeMetadataReads(
   return [
     optionalHydration.load("workflow steps", (signal) =>
       task.workflow_id
-        ? listWorkflowSteps(task.workflow_id, { cache: "no-store", init: { signal } })
+        ? readJourneyWorkflowSteps(store, task.workflow_id, { signal })
         : Promise.resolve({ steps: [], total: 0 }),
     ),
     optionalHydration.load("agents", loadAgentList),

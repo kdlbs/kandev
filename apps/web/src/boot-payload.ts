@@ -186,10 +186,13 @@ function expandTaskReference(
 }
 
 function isBootTaskListPath(path: string[]): boolean {
+  const initialStatePath =
+    path.slice(0, 3).join(".") === "routeData.taskDetail.initialState" ? path.slice(2) : path;
   return (
-    path.join(".") === "initialState.kanban" ||
+    initialStatePath.join(".") === "initialState.kanban" ||
     path.join(".") === "routeData.tasksPage" ||
-    (path.length === 4 && path.slice(0, 3).join(".") === "initialState.kanbanMulti.snapshots")
+    (initialStatePath.length === 4 &&
+      initialStatePath.slice(0, 3).join(".") === "initialState.kanbanMulti.snapshots")
   );
 }
 

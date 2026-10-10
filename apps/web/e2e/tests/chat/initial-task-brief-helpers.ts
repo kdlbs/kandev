@@ -61,7 +61,7 @@ type PreparedSessionSnapshot = {
 };
 
 function preparedSessionSnapshot(
-  session: Awaited<ReturnType<ApiClient["listTaskSessions"]>>["sessions"][number] | undefined,
+  session: Awaited<ReturnType<ApiClient["getTaskSession"]>>["session"] | undefined,
 ): PreparedSessionSnapshot {
   const preparation = session?.metadata?.prepare_result;
   const preparationStatus =
@@ -92,8 +92,8 @@ async function waitForPreparedSession(
   await expect
     .poll(
       async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        return preparedSessionSnapshot(sessions.find((candidate) => candidate.id === sessionId));
+        const { session } = await apiClient.getTaskSession(sessionId);
+        return preparedSessionSnapshot(session);
       },
       { timeout: 90_000, message },
     )

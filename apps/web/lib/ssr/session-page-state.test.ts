@@ -48,6 +48,8 @@ vi.mock("@/lib/api", () => ({
   listWorkspaces: mocks.listWorkspaces,
 }));
 
+vi.mock("@/lib/api/domains/workflow-api", () => ({ listWorkflowSteps: mocks.listWorkflowSteps }));
+
 vi.mock("@/lib/api/domains/session-api", () => ({
   listSessionTurns: mocks.listSessionTurns,
 }));

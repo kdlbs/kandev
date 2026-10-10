@@ -504,9 +504,6 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 			}
 			worktreesBySession[session.ID] = []string{summaryDTO.WorktreeID}
 		}
-		if !isActive {
-			continue
-		}
 		addTaskDetailSessionMetadata(session, sessionModelsByID, sessionModeByID, sessionMCPStatusByID)
 	}
 	state["taskSessions"] = map[string]any{"items": sessionItems}

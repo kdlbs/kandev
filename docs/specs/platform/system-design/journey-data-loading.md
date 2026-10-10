@@ -58,7 +58,7 @@ For 1,000 tasks, gate work is at most ten read snapshots and sixty data queries,
 
 Replace list enrichment's `BatchGetSessionsByTaskIDs` dependency with narrow summary observations.
 The proposed `BatchGetTaskSessionSummaryObservations` returns session identity, primary identity, state, foreground activity, profile/executor labels, and fields actually consumed by summary logic.
-Project required error or launch fields explicitly through existing dialect helpers. Do not decode or return the entire session metadata or configuration snapshots.
+Project required error fields and the selected model ID/name through existing dialect helpers. Inactive session tabs retain their current model label. Exclude other model choices, descriptions, configuration options, and runtime settings. Do not decode or return entire session metadata or configuration snapshots.
 Preserve session counts, pending-action precedence, primary fallback, error clearing, queue state, and runner mutability.
 Batch primary information with these observations instead of rereading full primary sessions.
 
@@ -135,6 +135,8 @@ Load one sidebar page through the existing saved-view query, with its 100-row li
 Do not load a complete workflow snapshot solely to populate task navigation.
 If an optional sidebar read fails or is cancelled, omit its membership and preserve the detail outcome. The sidebar's existing controller owns later recovery.
 Initial task/session membership is independent from repository scripts, CI options, model settings, and other panel-owned enrichment.
+Task actions use the bounded sidebar row or canonical task record. A workflow move keeps the selected detail record authoritative after it leaves a loaded board.
+Step filters and destination menus request lightweight workflow steps on explicit demand. These reads share flights with route and detail metadata. They do not request destination board tasks.
 Those resources load when a mounted active consumer needs them.
 
 [Shared sidebar state](../../ui/system-design/sidebar-shared-task-state.md) remains authoritative for coverage, local evaluation, retention, tombstones, and authorization barriers.

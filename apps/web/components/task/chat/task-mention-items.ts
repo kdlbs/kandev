@@ -1,5 +1,7 @@
 import type { MentionItem } from "@/hooks/use-inline-mention";
 import type { AppState } from "@/lib/state/store";
+import { listTasksByWorkspace } from "@/lib/api/domains/kanban-api";
+import { toKanbanTask } from "@/lib/kanban/map-task";
 import { t } from "@/lib/i18n";
 
 type TaskLike = AppState["kanban"]["tasks"][number];
@@ -49,6 +51,7 @@ function toMentionItem(
 export function buildTaskMentionItems(
   state: AppState,
   currentTaskId: string | null,
+  candidates: TaskLike[] = [],
 ): MentionItem[] {
   const items: MentionItem[] = [];
   const seen = new Set<string>();
@@ -74,5 +77,30 @@ export function buildTaskMentionItems(
     for (const task of snapshot.tasks) addTask(task, workflowId);
   }
 
+  for (const task of candidates) addTask(task, task.workflowId ?? "");
   return items;
+}
+
+export async function loadTaskMentionItems(
+  state: AppState,
+  currentTaskId: string | null,
+  workspaceId: string | null,
+  query: string,
+  { signal, isCurrent }: { signal: AbortSignal; isCurrent: () => boolean },
+): Promise<MentionItem[]> {
+  if (!workspaceId) return buildTaskMentionItems(state, currentTaskId);
+  try {
+    const response = await listTasksByWorkspace(
+      workspaceId,
+      { query, page: 1, pageSize: 50 },
+      { init: { signal } },
+    );
+    if (signal.aborted || !isCurrent()) return [];
+    const candidates = response.tasks
+      .filter((task) => task.workspace_id === workspaceId)
+      .map(toKanbanTask);
+    return buildTaskMentionItems(state, currentTaskId, candidates);
+  } catch {
+    return signal.aborted || !isCurrent() ? [] : buildTaskMentionItems(state, currentTaskId);
+  }
 }

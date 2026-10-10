@@ -113,7 +113,7 @@ test("phone drawer edits and saves a touch-reachable sort chain and group inset"
 
     await testPage.reload();
     await session.waitForLoad();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${navigation.id}$`));
+    await expect(testPage).toHaveURL(new RegExp(`/t/${navigation.id}(?:\\?sessionId=[^&]+)?$`));
     await expect(session.activeChat().getByText(conversationText).last()).toBeVisible();
     await picker.tap();
     await expectSidebarRootOrder(sheet, scenario.rootIds, [
@@ -359,12 +359,12 @@ test("phone drawer edits and saves a touch-reachable sort chain and group inset"
     expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
-    await expect(testPage).toHaveURL(new RegExp(`/t/${navigation.id}$`));
+    await expect(testPage).toHaveURL(new RegExp(`/t/${navigation.id}(?:\\?sessionId=[^&]+)?$`));
     await expect(session.activeChat().getByText(conversationText).last()).toBeVisible();
 
     await finalEditor.filters.close();
     await sheet.locator(`[data-task-row-id="${scenario.child.id}"]`).tap();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${scenario.child.id}$`));
+    await expect(testPage).toHaveURL(new RegExp(`/t/${scenario.child.id}(?:\\?sessionId=[^&]+)?$`));
   } finally {
     await cleanupSidebarSortColors(apiClient, scenario.colorIds);
     await restoreSidebarViewState(apiClient, seedData.workspaceId, previousViews);
@@ -457,7 +457,7 @@ test("phone task picker keeps task-wide running rank through secondary session c
     const picker = testPage.getByTestId("mobile-task-picker-trigger");
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     const expectConversationStable = async () => {
-      await expect(testPage).toHaveURL(new RegExp(`/t/${navigation.id}$`));
+      await expect(testPage).toHaveURL(new RegExp(`/t/${navigation.id}(?:\\?sessionId=[^&]+)?$`));
       await expect(session.activeChat()).toHaveAttribute("data-session-id", conversationId);
       await expect(session.activeChat().getByText(conversationText).last()).toBeVisible();
     };

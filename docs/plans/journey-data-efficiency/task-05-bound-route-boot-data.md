@@ -124,3 +124,8 @@ All-workflow cold boot seeds exactly the first displayed board. Existing complet
 ### PR fixup
 
 PR #4404 fixup restricts task entity expansion to normalized board, task-page, detail, and sidebar fields. Saved selected-task views, drafts, and ordinary task identities retain their ID fields. The boot parser regression passed with positive controls for normalized collections. See [fixup results](implementation-evidence.md#pr-4404-fixup).
+
+
+## PR #4404 browser CI remediation
+
+Normalized task membership is decoded in both top-level and nested task-detail state. Saved-view filter values remain unchanged. Authorized workflow metadata makes the board route ready while its demand owner loads task data. This keeps the phone navigator mounted and preserves All Workflows during SPA return.
