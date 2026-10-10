@@ -336,6 +336,17 @@ bind mounts; agent-only HOME/temp paths and full Docker-executor parity are not
 covered. Review the recipe's recorded test evidence and runtime limitations
 before use. No production deployment or universal cgroup compatibility is implied.
 
+
+For heavy validation, the full-worker renderer also accepts `--isolated`. This
+opt-in mode runs supported Make and E2E entry points in one separately limited
+validation container under the existing Docker companion. Sibling sessions share
+its admission slot; missing resource-accounting proof fails instead of running
+checks in agent memory. Startup verifies the companion's own bounded cgroup,
+including when the runtime exposes a host cgroup namespace, and reports the
+failed preflight stage on refusal. Follow the [validation procedure](../../k8s/worker-images/full/README.md#isolate-repository-validation)
+for image, budgets, coverage and rollout. Direct provider shell commands bypass
+repository entry-point routing; use guarded commands or the explicit runner.
+
 ### Choose workspace storage
 
 | Mode | Profile fields | Lifecycle |
@@ -358,6 +369,11 @@ Current connection configuration and recorded workload configuration serve diffe
 On resume, Kandev reloads environment definitions from the recorded executor profile and resolves secret references at the launch checkpoint. Changes to that profile's environment can therefore affect a resumed process; they do not rewrite the Pod or storage snapshot. If the profile has been deleted, its environment definitions are unavailable. Profile lookup failures and executor ownership mismatches block resume.
 
 Stop, including force-stop, terminates only the selected session’s agentctl instance and closes its local clients and forwards. Sibling sessions, the Pod, and the workspace remain available. Backend shutdown closes local connections and preserves the remote resources. Agent or main-container restart keeps the Pod volumes; Kandev performs a new nonce handshake and local port-forward. If a Pod disappears, managed or existing PVC storage can support a replacement Pod after identity checks; `emptyDir` cannot.
+
+After a main-container restart, Stop and recovery cleanup authenticate again
+before releasing the old execution. An already-absent remote instance completes
+cleanup; credential or deletion failures retain state for a later retry. This
+does not depend on waiting for the periodic status refresh.
 
 A recoverable agent error also preserves the established Pod, workspace, and
 recovery credentials. Use **Resume** to continue that session. If its retained

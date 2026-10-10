@@ -9,11 +9,13 @@ import { prepareCompactRuntimeFixture } from "./compact-runtime";
 import {
   assertRuntimeImageTagAvailable,
   FixtureResourceOwnership,
+  cleanupFailedFixture,
   redactKubernetesDiagnosticText,
   renderWorkloadRBACRules,
   WORKLOAD_RBAC_PROBES,
 } from "./kubernetes-fixture-policy";
 import { buildServiceAccountKubeconfig } from "./kubernetes-kubeconfig";
+import { waitForKubernetesStorageReady } from "./kubernetes-storage-readiness";
 import {
   KIND_SHA256_AMD64,
   KIND_VERSION,
@@ -42,7 +44,7 @@ const HOST_SERVICE_ACCOUNT = "kandev-host";
 const IN_CLUSTER_SERVICE_ACCOUNT = "kandev-in-cluster";
 const RESTRICTED_SERVICE_ACCOUNT = "kandev-restricted";
 const TOOL_DOWNLOAD_TIMEOUT_MS = 120_000;
-const KIND_IMAGE_LOAD_TIMEOUT_MS = 300_000;
+const KIND_IMAGE_LOAD_TIMEOUT_MS = 600_000;
 
 export type KubernetesPod = {
   metadata: {
@@ -61,6 +63,7 @@ export type KubernetesPod = {
       ready?: boolean;
       restartCount: number;
       state?: Record<string, unknown>;
+      lastState?: { terminated?: { exitCode: number; reason?: string; signal?: number } };
     }>;
   };
 };
@@ -244,7 +247,7 @@ WORKDIR /workspace
       path.join(context, "mock-agent-linux-amd64"),
     );
     fs.cpSync(WEB_DIST_DIR, path.join(context, "web-dist"), { recursive: true });
-    execFileSync("docker", ["build", "--tag", tag, "--file", "-", context], {
+    execFileSync("docker", ["build", "--network=none", "--tag", tag, "--file", "-", context], {
       input: dockerfile,
       timeout: 300_000,
       stdio: process.env.E2E_DEBUG ? ["pipe", "inherit", "inherit"] : ["pipe", "ignore", "inherit"],
@@ -805,6 +808,7 @@ export async function provisionKubernetesCluster(
       stdio: process.env.E2E_DEBUG ? "inherit" : "ignore",
     });
     kubectl(["apply", "-f", "-"], { input: workloadRBAC() });
+    waitForKubernetesStorageReady({ kubectl, image, namespace: WORKLOAD_NAMESPACE });
     serviceAccountKubeconfig(tools.kubectl, adminKubeconfig, HOST_SERVICE_ACCOUNT, hostKubeconfig);
     assertWorkloadServiceAccountRBAC(tools.kubectl, hostKubeconfig);
     serviceAccountKubeconfig(
@@ -814,12 +818,7 @@ export async function provisionKubernetesCluster(
       restrictedKubeconfig,
     );
   } catch (error) {
-    try {
-      deleteCluster();
-    } finally {
-      removeRuntimeImage();
-    }
-    throw error;
+    cleanupFailedFixture(error, [deleteCluster, removeRuntimeImage]);
   }
 
   const cleanupWorkloads = async () => {

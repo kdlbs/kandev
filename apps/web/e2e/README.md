@@ -354,6 +354,14 @@ pnpm exec tsx e2e/scripts/retry-summary.ts --input <blob-dir> --output /tmp/retr
 pnpm exec tsx e2e/scripts/flake-report.ts --summary /tmp/retry-summary.json
 ```
 
+Draft Kubernetes resilience PRs also have a single-job `Kubernetes Session Acceptance`
+workflow. It builds the bounded full worker and managed application artifacts,
+runs the two restart/OOM scenarios plus three retained recovery/task-Pod controls
+with zero retries, and requires five executed passes without skips or setup
+errors. Build logs, blob diagnostics and the JSON report remain available on
+failure. Ready PRs keep ordinary containers CI; after this workflow lands it can
+also be dispatched explicitly for focused diagnostics.
+
 ### `pnpm e2e:run` — the managed runner (build + run + teardown)
 
 `e2e/scripts/run-e2e.sh` (aliased as `pnpm e2e:run`) handles the build, the run, and cleanup so you don't have to assemble the steps by hand. It **auto-selects docker vs host**, runs a resource-bounded number of shards concurrently, enforces one Playwright worker per shard, strict WS accounting by default (`KANDEV_E2E_WS_ASSERT=1`, matching CI), and never leaves root-owned artifacts behind.
@@ -839,3 +847,19 @@ finite preparation failure, retained/replaced workspaces, independent daemons,
 Pod cgroup ancestry and exact cleanup including an untouched existing claim.
 The cgroup case fails if nested work escapes the Pod budget. Missing image input
 skips the suite; skips and test discovery do not count as execution acceptance.
+
+### Enabled Kubernetes validation isolation
+
+On the opt-in full-worker profile with `FULL_WORKER_CHECK_MODE=isolated`, managed
+and raw runners dispatch through the shared `scripts/worker-check` slot before
+builds or Playwright. Browser checks use one worker/shard in a bounded child
+container and keep workspace artifacts. Docker/Kind/SSH projects are rejected
+because the child has no daemon socket or agent-only runtime files. Missing
+accounting or isolation fails; do not fall back to direct commands in agent
+memory. See the [worker recipe](../../../k8s/worker-images/full/README.md#isolate-repository-validation)
+for budgets, entry-point coverage and rollout.
+
+The container CI shard that owns `kubernetes-session-resilience.spec.ts` builds
+and verifies the full worker before tests, then passes its exact local image ID
+to the fixture. Other shards do not incur that build. Build and blob reports are
+retained; a missing image or failed verification is a failure rather than a skip.

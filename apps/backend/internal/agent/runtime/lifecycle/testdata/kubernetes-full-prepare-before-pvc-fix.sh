@@ -17,14 +17,6 @@ until timeout 3 docker info >/dev/null 2>&1; do
   sleep 1
 done
 
-if [ "${FULL_WORKER_CHECK_MODE:-}" = isolated ]; then
-  proof_deadline=$(( $(date +%s) + 240 ))
-  until timeout 10 python3 /opt/full-worker/check.py --preflight; do
-    [ "$(date +%s)" -lt "$proof_deadline" ] || exit 1
-    sleep 1
-  done
-fi
-
 create_workspace_caches() {
   mkdir -p "$workspace/.cache/npm" "$workspace/.cache/pip" "$workspace/.cache/go-build" \
     "$workspace/.cache/go-mod" "$workspace/.npm-global" "$workspace/.pnpm" \
@@ -35,13 +27,6 @@ workspace={{workspace.path}}
 repository_url={{repository.clone_url}}
 repository_branch={{repository.branch}}
 clone_tmp=/opt/kandev/.workspace-clone
-
-normalize_repository_origin() {
-  printf '%s\n' "$1" | sed \
-    -e 's|^https://[^/@]*@github.com/|https://github.com/|' \
-    -e 's|^git@github.com:|https://github.com/|' \
-    -e 's|^ssh://git@github.com/|https://github.com/|'
-}
 
 # ---- Git identity and HTTPS authentication ----
 {{git.identity_setup}}
@@ -59,8 +44,8 @@ if [ -n "$repository_url" ]; then
       exit 1
     fi
     workspace_origin=$(git -C "$workspace" remote get-url origin 2>/dev/null || true)
-    expected_origin=$(normalize_repository_origin "$repository_url")
-    retained_origin=$(normalize_repository_origin "$workspace_origin")
+    expected_origin=$(printf '%s\n' "$repository_url" | sed 's|^https://[^/@]*@github.com/|https://github.com/|')
+    retained_origin=$(printf '%s\n' "$workspace_origin" | sed 's|^https://[^/@]*@github.com/|https://github.com/|')
     if [ -z "$workspace_origin" ] || [ "$retained_origin" != "$expected_origin" ]; then
       echo 'kandev: retained workspace repository origin does not match the configured repository' >&2
       exit 1
@@ -75,7 +60,7 @@ if [ -n "$repository_url" ]; then
     rm -rf "$clone_tmp"
     trap 'rm -rf "$clone_tmp"' 0 1 2 15
     git clone --depth=1 --branch "$repository_branch" "$repository_url" "$clone_tmp"
-    cp -R "$clone_tmp"/. "$workspace"/
+    cp -a "$clone_tmp"/. "$workspace"/
     rm -rf "$clone_tmp"
     trap - 0 1 2 15
   fi

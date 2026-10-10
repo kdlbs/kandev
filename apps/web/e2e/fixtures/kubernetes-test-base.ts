@@ -137,7 +137,7 @@ export const kubernetesTest = backendFixture.extend<
         await cluster.dispose();
       }
     },
-    { scope: "worker", timeout: 600_000 },
+    { scope: "worker", timeout: 900_000 },
   ],
 
   workerImages: [

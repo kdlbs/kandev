@@ -37,3 +37,13 @@ configuration clamps unsafe worker overrides to its 20-percent budget. Set
 `KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM=1` or
 `KANDEV_ALLOW_UNSAFE_TEST_PARALLELISM=1` only for a deliberate, monitored
 resource experiment, and record the resource limit and result.
+
+
+On an enabled full Kubernetes worker (`FULL_WORKER_CHECK_MODE=isolated`), both
+E2E entry points dispatch into the task's bounded validation container before
+builds. One task-wide slot covers sibling lint/build/browser commands. Browser
+checks run in host mode inside that container with one worker/shard. Do not use
+Docker/Kind/SSH projects there: the child has no daemon socket or agent-only HOME.
+Run those suites on an explicitly provisioned disposable host. A failed admission
+or missing accounting proof must not be bypassed with direct Playwright/Go/linter
+commands in the agent container. The worker recipe documents coverage and limits.

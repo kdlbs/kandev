@@ -1,0 +1,178 @@
+name: Kubernetes Session Acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/kubernetes-session-acceptance.yml"
+      - ".github/scripts/*kubernetes-session-acceptance*"
+      - ".github/scripts/prepare-full-worker-acceptance*"
+      - "apps/backend/internal/agent/runtime/agentctl/**"
+      - "apps/backend/internal/agent/runtime/lifecycle/executor_kubernetes*"
+      - "apps/web/e2e/fixtures/kubernetes*"
+      - "apps/web/e2e/helpers/kubernetes*"
+      - "apps/web/e2e/tests/kubernetes/**"
+      - "k8s/worker-images/full/**"
+      - "scripts/worker-*"
+  workflow_dispatch:
+
+concurrency:
+  group: kubernetes-session-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  acceptance:
+    # Draft fault verification avoids the normal build/manifest/shard DAG.
+    # Ready PRs keep the same assertions in the ordinary containers workflow.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: "2GiB"
+      GOFLAGS: "-p=1"
+      MAKEFLAGS: "GOFLAGS=-p=1"
+      NODE_OPTIONS: "--max-old-space-size=3072"
+      KUBERNETES_E2E_BASE_IMAGE: ghcr.io/kdlbs/kandev-ci:runtime-sha-6f288a23c526@sha256:b9636e1c20adb0fcce1c65858a767fb1b0fe48a15ac5688b9c623163575efb8d
+
+    steps:
+      - name: Checkout exact acceptance source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          version: "9.15.9"
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: apps/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: apps
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare host Chromium
+        working-directory: apps/web
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          # The default Azure mirror stalled this disposable job before tests.
+          printf '%s\n' 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          printf '%s\n' 'Acquire::http::Timeout "30";' 'Acquire::https::Timeout "30";' 'Acquire::Retries "2";' \
+            | sudo tee /etc/apt/apt.conf.d/99kandev-acceptance-timeouts >/dev/null
+          pnpm exec playwright install --with-deps chromium
+
+      - name: Install pinned Kind and kubectl
+        env:
+          KIND_VERSION: v0.32.0
+          KIND_SHA256_AMD64: 50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54
+          KUBERNETES_VERSION: v1.36.1
+          KUBECTL_SHA256_AMD64: 629d3f410e09bf49b64ae7079f7f0bda1191efed311f7d37fdbab0ad5b0ec2b7
+          KIND_NODE_IMAGE: kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5
+        run: |
+          set -euo pipefail
+          tool_dir="$RUNNER_TEMP/kandev-kubernetes-tools"
+          mkdir -p "$tool_dir"
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors \
+            "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64" \
+            --output "$tool_dir/kind"
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors \
+            "https://dl.k8s.io/release/${KUBERNETES_VERSION}/bin/linux/amd64/kubectl" \
+            --output "$tool_dir/kubectl"
+          echo "${KIND_SHA256_AMD64}  $tool_dir/kind" | sha256sum --check --strict
+          echo "${KUBECTL_SHA256_AMD64}  $tool_dir/kubectl" | sha256sum --check --strict
+          chmod 0755 "$tool_dir/kind" "$tool_dir/kubectl"
+          "$tool_dir/kind" version
+          "$tool_dir/kubectl" version --client
+          echo "Kind node image: $KIND_NODE_IMAGE"
+          echo "KANDEV_E2E_KIND_BIN=$tool_dir/kind" >> "$GITHUB_ENV"
+          echo "KANDEV_E2E_KUBECTL_BIN=$tool_dir/kubectl" >> "$GITHUB_ENV"
+          echo "KANDEV_E2E_KIND_CLUSTER_NAME=kandev-e2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-session-acceptance" >> "$GITHUB_ENV"
+          echo "KANDEV_E2E_KIND_OWNERSHIP_MARKER=$RUNNER_TEMP/kandev-kind-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-session-acceptance.owned" >> "$GITHUB_ENV"
+
+      - name: Build and verify exact full worker
+        run: |
+          set -euo pipefail
+          docker info
+          # These SDKs are unused on this disposable GitHub-hosted job.
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          timeout 180 docker pull "$KUBERNETES_E2E_BASE_IMAGE"
+          manifest="$RUNNER_TEMP/session-acceptance-manifest.json"
+          printf '%s\n' '{"shards":[{"index":1,"files":["tests/kubernetes/kubernetes-session-resilience.spec.ts"]}]}' > "$manifest"
+          bash .github/scripts/prepare-full-worker-acceptance.sh "$manifest" 1
+
+      - name: Run five real Kubernetes acceptance scenarios
+        working-directory: apps/web
+        env:
+          VERSION: 0.0.0-e2e.${{ github.sha }}
+          PLAYWRIGHT_BLOB_OUTPUT_DIR: ${{ github.workspace }}/apps/web/e2e/blob-report
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/kubernetes-session-acceptance-results.json
+        run: |
+          pnpm e2e:run --host --shards 1 --project containers \
+            tests/kubernetes/kubernetes-session-resilience.spec.ts \
+            tests/kubernetes/kubernetes-failure-recovery.spec.ts \
+            tests/kubernetes/kubernetes-task-pod.spec.ts \
+            --retries 0 --max-failures 0 --reporter=blob,list,json
+
+      - name: Require five executed passes
+        run: node .github/scripts/verify-kubernetes-session-acceptance.cjs "${{ runner.temp }}/kubernetes-session-acceptance-results.json"
+
+      - name: Delete exact Kind cluster
+        if: always()
+        run: |
+          set -euo pipefail
+          kind_bin="${KANDEV_E2E_KIND_BIN:-}"
+          cluster_name="${KANDEV_E2E_KIND_CLUSTER_NAME:-}"
+          ownership_marker="${KANDEV_E2E_KIND_OWNERSHIP_MARKER:-}"
+          if [[ -z "$kind_bin" || -z "$cluster_name" || -z "$ownership_marker" ]]; then
+            echo "Kind tools or exact target were never initialized; cleanup is a no-op."
+            exit 0
+          fi
+          if [[ ! -f "$ownership_marker" ]]; then
+            echo "No reserved ownership marker for $cluster_name; cleanup is a no-op."
+            exit 0
+          fi
+          if [[ ! -x "$kind_bin" ]]; then
+            echo "Pinned Kind tool is not executable: $kind_bin" >&2
+            exit 1
+          fi
+          if [[ ! "$cluster_name" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+            echo "Refusing cleanup for invalid exact Kind cluster name: $cluster_name" >&2
+            exit 1
+          fi
+          owned_name="$(tr -d '\r\n' < "$ownership_marker")"
+          if ! [[ "$owned_name" == "$cluster_name" ]]; then
+            echo "Refusing cleanup: marker owns '$owned_name', not '$cluster_name'." >&2
+            exit 1
+          fi
+          "$kind_bin" delete cluster --name "$cluster_name"
+          rm -f -- "$ownership_marker"
+
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kubernetes-session-acceptance-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/kandev-full-worker-acceptance-build.log
+            ${{ runner.temp }}/kubernetes-session-acceptance-results.json
+            apps/web/e2e/blob-report/
+            apps/web/e2e/test-results/
+          if-no-files-found: warn
+          retention-days: 7

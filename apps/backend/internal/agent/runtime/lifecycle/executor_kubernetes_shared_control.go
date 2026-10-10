@@ -20,15 +20,8 @@ func (r *KubernetesExecutor) connectSharedKubernetesAgentctl(ctx context.Context
 		return nil, nil, "", 0, err
 	}
 	defer func() { _ = forward.Close() }()
-	unlock := r.lockInstance("control:" + req.TaskEnvironmentID)
-	defer unlock()
-	token, err := r.sharedKubernetesControlToken(ctx, req)
-	if err != nil {
-		return nil, nil, "", 0, err
-	}
-	secretID := getMetadataString(req.Metadata, MetadataKeyAuthTokenSecret)
-	control.SetAuthToken(token)
-	response, created, err := getOrCreateSharedKubernetesInstance(ctx, control, req, remoteID)
+	var response *agentctl.CreateInstanceResponse
+	var created bool
 	defer func() {
 		if returnedErr != nil && created {
 			rollbackCtx, cancel := kubernetesDurableContext(ctx)
@@ -36,15 +29,11 @@ func (r *KubernetesExecutor) connectSharedKubernetesAgentctl(ctx context.Context
 			returnedErr = errors.Join(returnedErr, control.DeleteInstance(rollbackCtx, remoteID))
 		}
 	}()
-	if isAgentctlAuthError(err) && req.BootstrapNonce != "" {
-		token, err = control.Handshake(ctx, req.BootstrapNonce)
-		if err == nil && r.secretStore != nil && secretID != "" {
-			err = r.persistSharedKubernetesControlToken(ctx, secretID, token)
-		}
-		if err == nil {
-			response, created, err = getOrCreateSharedKubernetesInstance(ctx, control, req, remoteID)
-		}
-	}
+	token, err := r.withSharedKubernetesControlAuth(ctx, req, control, func() error {
+		var operationErr error
+		response, created, operationErr = getOrCreateSharedKubernetesInstance(ctx, control, req, remoteID)
+		return operationErr
+	})
 	if err != nil {
 		return nil, nil, "", 0, err
 	}

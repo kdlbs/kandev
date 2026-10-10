@@ -46,19 +46,24 @@ func TestKubernetesPreparationAcceptsEquivalentGitHubOrigins(t *testing.T) {
 }
 
 func TestKubernetesPrepareScriptUpgradesPersistedManagedScripts(t *testing.T) {
-	full, err := os.ReadFile("../../../../../../k8s/worker-images/full/prepare.sh")
+	// A persisted script is historical input. Deriving it from today's recipe
+	// changes its hash whenever an unrelated opt-in preparation stage is added.
+	legacyFull, err := os.ReadFile("testdata/kubernetes-full-prepare-before-pvc-fix.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
 	legacyDefault := persistedKubernetesPrepareScriptBeforePVCFix(t, DefaultPrepareScript("k8s"))
-	for name, current := range map[string]string{
-		"default": DefaultPrepareScript("k8s"),
-		"full":    string(full),
+	for name, legacy := range map[string]string{
+		"default": legacyDefault,
+		"full":    string(legacyFull),
 	} {
 		t.Run(name, func(t *testing.T) {
-			legacy := persistedKubernetesPrepareScriptBeforePVCFix(t, current)
-			if upgraded := upgradeLegacyKubernetesPrepareScript(legacy); upgraded != current {
+			upgraded := upgradeLegacyKubernetesPrepareScript(legacy)
+			if upgraded == legacy || (name == "default" && upgraded != DefaultPrepareScript("k8s")) {
 				t.Fatalf("managed script upgrade did not produce the current script")
+			}
+			if name == "full" && strings.Contains(upgraded, "FULL_WORKER_CHECK_MODE") {
+				t.Fatal("historical PVC repair must not enroll retained profiles in validation isolation")
 			}
 			req := validKubernetesCreateRequest()
 			req.Metadata[MetadataKeySetupScript] = legacy
@@ -72,6 +77,10 @@ func TestKubernetesPrepareScriptUpgradesPersistedManagedScripts(t *testing.T) {
 			}
 			if strings.Contains(resolved, `cp -a "$clone_tmp"/. "$workspace"/`) {
 				t.Fatalf("persisted managed script retained archive copy:\n%s", resolved)
+			}
+			custom := legacy + "\n# user-managed customization"
+			if upgradeLegacyKubernetesPrepareScript(custom) != custom {
+				t.Fatal("customized historical script was modified")
 			}
 		})
 	}

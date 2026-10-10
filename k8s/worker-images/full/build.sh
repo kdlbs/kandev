@@ -16,7 +16,7 @@ for key in GOLANGCI_VERSION PLAYWRIGHT_VERSION CHROMIUM_VERSION CHROMIUM_REVISIO
 done
 [[ "$PLATFORM" == linux/amd64 ]]
 grep -Fq "$DOCKER_IMAGE" "$here/pod-template.yaml"
-for file in Dockerfile smoke.sh prepare.sh pod-template.yaml; do test -s "$here/$file"; done
+for file in Dockerfile smoke.sh prepare.sh pod-template.yaml check.py daemon-validation-preflight.sh; do test -s "$here/$file"; done
 if [[ "$mode" == --check ]]; then echo 'Full worker immutable inputs and recipe files valid'; exit; fi
 # The dedicated builder enforces limits; shell variables alone do not bound builds.
 free_kb=$(df -Pk "$here" | awk 'END {print $4}')

@@ -1,3 +1,7 @@
+WORKER_CHECK_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))../..)
+WORKER_CHECK_DEFAULT := build
+include $(WORKER_CHECK_ROOT)/scripts/worker-make-guard.mk
+ifneq ($(WORKER_CHECK_DISPATCH),1)
 # Kandev Makefile
 
 # Variables
@@ -5,6 +9,9 @@ BINARY_NAME := kandev
 BUILD_DIR := bin
 GO := go
 GOFLAGS := -v
+ifeq ($(FULL_WORKER_CHECK_INSIDE),1)
+  override GOFLAGS := -p=1
+endif
 LDFLAGS := -s -w
 
 # Debug launches get a distinct browser identity by default. An explicit
@@ -459,7 +466,7 @@ proto:
 ## Run linter (requires golangci-lint)
 lint:
 	@echo "Running linter..."
-	golangci-lint run ./...
+	golangci-lint run ./... $(if $(filter 1,$(FULL_WORKER_CHECK_INSIDE)),--concurrency=2,)
 
 ## Report unreachable functions in the host production Go program.
 # deadcode results are specific to one GOOS/GOARCH/build-tag configuration.
@@ -529,3 +536,5 @@ help:
 	@echo "  deps          Download dependencies"
 	@echo "  build-cross   Build for Linux, macOS, and Windows"
 	@echo "  help          Show this help message"
+
+endif # ordinary host or already isolated validation

@@ -53,6 +53,27 @@ The executor system owns resource retention; task state remains task-owned.
   remain unresolved until the existing launch checkpoint; recovery shall retain
   the existing environment precedence and secret-resolution rules.
 
+- **AC-EXECUTORS-K8S-FAILURE-RECOVERY-001.9:** Cleanup immediately after an
+  agent-container restart shall authenticate against the exact retained Pod,
+  recover its changed control token, and finish without waiting for a status poll.
+  An authenticated already-absent remote instance shall count as successful stop.
+- **AC-EXECUTORS-K8S-FAILURE-RECOVERY-001.10:** Concurrent stop, attachment, and
+  refresh for sibling sessions shall share recovered environment credentials;
+  they shall not consume the same bootstrap handshake independently or restore
+  an older token over the recovered token.
+- **AC-EXECUTORS-K8S-FAILURE-RECOVERY-001.11:** When authentication, identity
+  verification, remote deletion, or credential persistence fails, cleanup shall
+  retain the exact execution's repairable ownership and credential recovery state.
+  Retry, including after backend restart, shall not require a database edit.
+- **AC-EXECUTORS-K8S-FAILURE-RECOVERY-001.12:** Successful cleanup shall close
+  only the stopped execution's local connections. Failed cleanup shall preserve
+  the recovery information needed to rebuild broken connections; it shall not
+  disable shared recovery or disrupt live siblings.
+- **AC-EXECUTORS-K8S-FAILURE-RECOVERY-001.13:** Resume after container restart
+  shall retain the same session, native conversation identity, and workspace
+  edits. It shall start at most one replacement execution and continue through
+  the normal queued-prompt path without replaying the original task prompt.
+
 ## Exclusions
 
 Restoring already-deleted data, changing provider error classification, changing

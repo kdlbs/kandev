@@ -856,7 +856,9 @@ jobs:
           if (!shard) throw new Error(`container shard ${process.env.SHARD_INDEX} is absent`);
           const hasKubernetes = shard.files.some((file) => file.startsWith("tests/kubernetes/"));
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `has_kubernetes=${hasKubernetes}\n`);
-          console.log(`Kubernetes specs assigned: ${hasKubernetes}`);
+          const hasFullWorker = shard.files.includes("tests/kubernetes/kubernetes-session-resilience.spec.ts");
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `has_full_worker=${hasFullWorker}\n`);
+          console.log(`Kubernetes specs assigned: ${hasKubernetes}; full-worker acceptance: ${hasFullWorker}`);
           NODE
 
       # Tool and node versions are intentionally coupled. The Kind fixture
@@ -889,6 +891,27 @@ jobs:
           echo "KANDEV_E2E_KUBECTL_BIN=$tool_dir/kubectl" >> "$GITHUB_ENV"
           echo "KANDEV_E2E_KIND_CLUSTER_NAME=kandev-e2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.shard }}" >> "$GITHUB_ENV"
           echo "KANDEV_E2E_KIND_OWNERSHIP_MARKER=$RUNNER_TEMP/kandev-kind-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.shard }}.owned" >> "$GITHUB_ENV"
+
+      - name: Prepare verified full worker for acceptance
+        if: steps.kubernetes.outputs.has_full_worker == 'true'
+        env:
+          MANIFEST_PATH: ${{ github.workspace }}/e2e-manifests/containers/${{ matrix.shard }}.json
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          # This GitHub-hosted job needs no Android, .NET or Haskell SDKs.
+          # Reclaim those preinstalled tools before the recipe's 20 GiB disk gate.
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          bash .github/scripts/prepare-full-worker-acceptance.sh "$MANIFEST_PATH" "$SHARD_INDEX"
+
+      - name: Upload full-worker acceptance build log
+        if: always() && steps.kubernetes.outputs.has_full_worker == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: full-worker-acceptance-build-${{ matrix.shard }}
+          path: ${{ runner.temp }}/kandev-full-worker-acceptance-build.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       # Validate the same immutable build identity as the regular shards.
       - name: Run planned container-backed E2E tests shard ${{ matrix.shard }}/6 (Docker + SSH + Kubernetes)

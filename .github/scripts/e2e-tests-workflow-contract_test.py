@@ -2,10 +2,13 @@
 """Contract tests for the E2E workflow and prebuilt images."""
 
 import hashlib
+import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
+import textwrap
 import unittest
 
 
@@ -13,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = REPO_ROOT / ".github" / "docker" / "ci-base" / "Dockerfile"
 IMAGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci-base-image.yml"
 E2E_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "e2e-tests.yml"
+SESSION_ACCEPTANCE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "kubernetes-session-acceptance.yml"
 DOWNLOAD_ARTIFACT_RETRY_ACTION = (
     REPO_ROOT / ".github" / "actions" / "download-artifact-retry" / "action.yml"
 )
@@ -41,6 +45,142 @@ def job_block(workflow: str, job: str, next_job: str) -> str:
 
 
 class E2EWorkflowContractTest(unittest.TestCase):
+    def test_session_browser_setup_uses_bounded_https_mirror_before_install(self):
+        workflow = SESSION_ACCEPTANCE_WORKFLOW.read_text()
+        step = workflow.split('      - name: Prepare host Chromium\n', 1)[1].split('      - name:', 1)[0]
+        self.assertIn('timeout-minutes: 10', step)
+        self.assertIn('run: |', step)
+        script = textwrap.dedent(step.split('run: |\n', 1)[1])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            commands = {
+                'sudo': 'exec "$@"',
+                'tee': '''case "$1" in
+/etc/apt/apt-mirrors.txt|/etc/apt/apt.conf.d/99kandev-acceptance-timeouts)
+  exec /usr/bin/tee "$APT_ROOT/$(basename "$1")";;
+*) exit 2;;
+esac''',
+                'pnpm': '''test "$*" = 'exec playwright install --with-deps chromium' || exit 2
+test -s "$APT_ROOT/apt-mirrors.txt" && test -s "$APT_ROOT/99kandev-acceptance-timeouts" || exit 3
+echo installed''',
+            }
+            for name, body in commands.items():
+                command = root/name
+                command.write_text('#!/bin/sh\n' + body + '\n')
+                command.chmod(0o755)
+            result = subprocess.run(['bash', '-ceu', script], capture_output=True, text=True,
+                timeout=5, env={**os.environ, 'PATH': f"{root}:{os.environ['PATH']}", 'APT_ROOT': str(root)})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('installed', result.stdout)
+            self.assertEqual((root/'apt-mirrors.txt').read_text(), 'https://archive.ubuntu.com/ubuntu/\n')
+            config = root/'99kandev-acceptance-timeouts'
+            parsed = subprocess.run(['apt-config', '-c', str(config), 'dump'],
+                capture_output=True, text=True, timeout=5, check=True).stdout
+            for key, value in (('http::Timeout', '30'), ('https::Timeout', '30'), ('Retries', '2')):
+                self.assertIn(f'Acquire::{key} "{value}";', parsed)
+
+    def test_session_acceptance_uses_one_read_only_draft_job(self):
+        workflow = SESSION_ACCEPTANCE_WORKFLOW.read_text()
+        self.assertIn("pull_request:", workflow)
+        self.assertIn("github.event.pull_request.draft == true", workflow)
+        self.assertNotIn("needs:", workflow)
+        self.assertEqual(re.findall(r"^  ([a-z][a-z0-9_-]*):$", workflow.split("jobs:\n", 1)[1], re.MULTILINE), ["acceptance"])
+        self.assertIn("contents: read", workflow)
+        self.assertIn("packages: read", workflow)
+        self.assertNotIn("packages: write", workflow)
+        self.assertNotIn("docker push", workflow)
+
+    def test_session_acceptance_runs_exact_controls_without_retries(self):
+        workflow = SESSION_ACCEPTANCE_WORKFLOW.read_text()
+        self.assertLess(workflow.index("prepare-full-worker-acceptance.sh"), workflow.index("pnpm e2e:run"))
+        for spec in ("kubernetes-session-resilience", "kubernetes-failure-recovery", "kubernetes-task-pod"):
+            self.assertIn(f"tests/kubernetes/{spec}.spec.ts", workflow)
+        self.assertIn("--host --shards 1 --project containers", workflow)
+        self.assertIn("--retries 0", workflow)
+        self.assertIn('MAKEFLAGS: "GOFLAGS=-p=1"', workflow)
+        self.assertIn('GOMAXPROCS: "2"', workflow)
+        self.assertIn("verify-kubernetes-session-acceptance.cjs", workflow)
+
+    def test_session_acceptance_scopes_runner_paths_to_steps(self):
+        workflow = SESSION_ACCEPTANCE_WORKFLOW.read_text()
+        job_env = workflow.split("    env:\n", 1)[1].split("    steps:\n", 1)[0]
+        self.assertNotIn("runner.", job_env, "runner context is unavailable in job env")
+        execute = workflow.split("      - name: Run five real Kubernetes acceptance scenarios\n", 1)[1]
+        self.assertIn("PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}", execute)
+        self.assertIn('verify-kubernetes-session-acceptance.cjs "${{ runner.temp }}', execute)
+
+    def test_session_acceptance_preserves_exact_cleanup_and_failure_artifacts(self):
+        workflow = SESSION_ACCEPTANCE_WORKFLOW.read_text()
+        self.assertIn("if: always()", workflow)
+        self.assertIn('"$owned_name" == "$cluster_name"', workflow)
+        self.assertIn('delete cluster --name "$cluster_name"', workflow)
+        self.assertIn("apps/web/e2e/blob-report/", workflow)
+        self.assertIn("kandev-full-worker-acceptance-build.log", workflow)
+        self.assertIn("kubernetes-session-acceptance-results.json", workflow)
+
+    def test_session_acceptance_build_identity_is_valid_for_compact_runtime(self):
+        workflow = SESSION_ACCEPTANCE_WORKFLOW.read_text()
+        execute = workflow.split("      - name: Run five real Kubernetes acceptance scenarios\n", 1)[1].split("      - name:", 1)[0]
+        configured = re.search(r"^\s+VERSION: (.+)$", execute, re.MULTILINE)
+        self.assertIsNotNone(configured, "shallow checkout needs an explicit release-compatible app version")
+        commit = "a" * 40
+        version = configured.group(1).strip('"').replace("${{ github.sha }}", commit)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helpers = root / "bin"
+            helpers.mkdir()
+            for platform in ("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64"):
+                helper = helpers / f"agentctl-{platform}"
+                helper.write_bytes(b"fixture helper\n")
+                helper.chmod(0o755)
+            result = subprocess.run([
+                "node", str(REPO_ROOT / "scripts/release/remote-helper-assets.mjs"), "build",
+                "--bin-dir", str(helpers), "--output-dir", str(root / "artifact"),
+                "--version", version, "--commit", commit, "--stable", "true",
+            ], capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_session_acceptance_requires_five_executed_passes(self):
+        verify = REPO_ROOT / ".github/scripts/verify-kubernetes-session-acceptance.cjs"
+        tests = [{"expectedStatus": "passed", "results": [{"status": "passed", "retry": 0}]} for _ in range(5)]
+        report = {"stats": {"expected": 5, "unexpected": 0, "skipped": 0, "flaky": 0},
+                  "errors": [], "suites": [{"suites": [{"specs": [{"tests": tests}]}]}]}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.json"
+            for case in ("passed", "zero", "skipped", "retried", "missing_results", "failed", "wrong_count", "setup_error"):
+                current = json.loads(json.dumps(report))
+                if case == "zero":
+                    current["suites"] = []
+                elif case == "skipped":
+                    current["stats"]["skipped"] = 1
+                elif case == "retried":
+                    current["suites"][0]["suites"][0]["specs"][0]["tests"][0]["results"][0]["retry"] = 1
+                elif case == "failed":
+                    current["suites"][0]["suites"][0]["specs"][0]["tests"][0]["results"][0]["status"] = "failed"
+                elif case == "wrong_count":
+                    current["stats"]["expected"] = 4
+                elif case == "setup_error":
+                    current["errors"] = [{"message": "fixture setup failed"}]
+                elif case == "missing_results":
+                    current["suites"][0]["suites"][0]["specs"][0]["tests"][0]["results"] = []
+                output.write_text(json.dumps(current))
+                result = subprocess.run(["node", str(verify), str(output)], capture_output=True, text=True, timeout=10)
+                if case == "passed":
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                else:
+                    self.assertNotEqual(result.returncode, 0, case)
+
+    def test_full_worker_acceptance_is_prepared_before_its_container_shard(self):
+        workflow = E2E_WORKFLOW.read_text()
+        job = job_block(workflow, "e2e-containers", "e2e-kubernetes-compatibility")
+        self.assertIn('shard.files.includes("tests/kubernetes/kubernetes-session-resilience.spec.ts")', job)
+        self.assertIn("steps.kubernetes.outputs.has_full_worker == 'true'", job)
+        prepare = job.index("bash .github/scripts/prepare-full-worker-acceptance.sh")
+        execute = job.index("run: bash e2e/scripts/run-planned-shard.sh")
+        self.assertLess(prepare, execute)
+        self.assertIn("kandev-full-worker-acceptance-build.log", job)
+        self.assertIn("prepare-full-worker-acceptance_test.py", LINT_WORKFLOW.read_text())
+
     def run_image_digest_resolver(
         self,
         *,

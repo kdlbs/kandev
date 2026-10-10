@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { kubernetesTest } from "./kubernetes-test-base";
+import { waitForKubernetesStorageReady } from "./kubernetes-storage-readiness";
 
 const ROOT = path.resolve(__dirname, "../../../..");
 const RECIPE = path.join(ROOT, "k8s/worker-images/full");
@@ -61,8 +62,9 @@ export const test = kubernetesTest.extend<object, { fullWorkerImage: string }>({
         );
         execFileSync("docker", ["commit", container, tag], { timeout: 60_000 });
         execFileSync(cluster.kindBin, ["load", "docker-image", tag, "--name", cluster.name], {
-          timeout: 300_000,
+          timeout: 600_000,
         });
+        waitForKubernetesStorageReady({ ...cluster, image: tag });
         await use(tag);
       } finally {
         if (created) execFileSync("docker", ["rm", container], { timeout: 30_000 });
@@ -73,7 +75,7 @@ export const test = kubernetesTest.extend<object, { fullWorkerImage: string }>({
         if (found) execFileSync("docker", ["image", "rm", tag], { timeout: 60_000 });
       }
     },
-    { scope: "worker", timeout: 480_000 },
+    { scope: "worker", timeout: 900_000 },
   ],
 });
 export { expect } from "@playwright/test";

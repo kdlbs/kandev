@@ -51,6 +51,10 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ ${FULL_WORKER_CHECK_MODE:-} == isolated ]]; then
+  source "$SCRIPT_DIR/worker-isolation.sh"
+  worker_isolation_dispatch run-e2e.sh "$@" || exit $?
+fi
 source "$SCRIPT_DIR/resource-guard.sh"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
@@ -255,6 +259,7 @@ e2e_validate_shards "$SHARDS" || die "unsafe shard count rejected"
 e2e_validate_playwright_args "${PW_ARGS[@]}" || die "unsafe Playwright worker count rejected"
 
 # Resolve mode
+if [[ ${FULL_WORKER_CHECK_INSIDE:-} == 1 ]]; then MODE=host; fi
 if [[ "$MODE" == auto ]]; then
   if docker_up && { [[ -n "$RUNTIME_IMAGE" ]] || docker image inspect kandev-ci:runtime-local >/dev/null 2>&1 || docker image inspect ghcr.io/kdlbs/kandev-ci:runtime-latest >/dev/null 2>&1; }; then
     MODE=docker

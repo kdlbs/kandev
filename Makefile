@@ -1,3 +1,7 @@
+WORKER_CHECK_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))).)
+WORKER_CHECK_DEFAULT :=
+include $(WORKER_CHECK_ROOT)/scripts/worker-make-guard.mk
+ifneq ($(WORKER_CHECK_DISPATCH),1)
 # Kandev Root Makefile
 # Orchestrates both backend (Go) and web app (Vite/React)
 
@@ -725,3 +729,5 @@ clean-web:
 clean-db:
 	@printf "$(CYAN)Removing dev database (.kandev-dev/)...$(RESET)\n"
 	@$(RMDIR) .kandev-dev
+
+endif # ordinary host or already isolated validation
