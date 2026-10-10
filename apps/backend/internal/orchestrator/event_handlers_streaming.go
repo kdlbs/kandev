@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -2042,6 +2043,14 @@ func (s *Service) publishTaskSessionStateChanged(
 	}
 	if session.TaskEnvironmentID != "" {
 		eventData["task_environment_id"] = session.TaskEnvironmentID
+	}
+	if reader, ok := s.repo.(dto.SessionRecoveryBlockProjectionReader); ok {
+		projection := dto.TaskSessionDTO{}
+		if err := dto.EnrichSessionRecoveryBlocks(ctx, &projection, session, reader); err == nil {
+			eventData["session_recovery_blocks"] = projection.SessionRecoveryBlocks
+		} else {
+			s.logger.Warn("cannot project session recovery blocks", zap.String("session_id", sessionID), zap.Error(err))
+		}
 	}
 	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(events.TaskSessionStateChanged, "task-session", eventData))
 }

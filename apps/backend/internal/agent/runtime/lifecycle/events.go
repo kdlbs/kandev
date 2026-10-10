@@ -213,6 +213,7 @@ func (p *EventPublisher) PublishAgentctlDeliveryRecovery(
 		message = "the original agent delivery stream is reattached"
 	}
 	payload := p.agentctlEventPayload(ctx, execution, message)
+	payload.OriginalRuntime = identity.OriginalRuntime
 	payload.DeliveryRecoveryPhase = string(phase)
 	payload.DeliverySubmissionID = identity.SubmissionID
 	payload.DeliveryStreamID = identity.StreamID

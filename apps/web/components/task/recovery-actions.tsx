@@ -1,6 +1,6 @@
 "use client";
 
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconPlayerPlay,
@@ -33,6 +33,7 @@ export type RecoveryChoice = {
 };
 
 type RecoveryActionsProps = {
+  trailingActions?: ReactNode;
   actions: RecoveryChoice[];
   busy?: boolean;
   blocked?: boolean;
@@ -114,7 +115,7 @@ function isRelocationAlreadyReady(
 export function RecoveryActions(props: RecoveryActionsProps) {
   const warningId = useId();
   const view = buildRecoveryActionsView(props);
-  if (view.shouldHide) return null;
+  if (view.shouldHide && !props.trailingActions) return null;
   return (
     <div>
       <WorkspaceRecoveryProgress
@@ -130,6 +131,7 @@ export function RecoveryActions(props: RecoveryActionsProps) {
         busy={props.busy}
         controlsBlocked={view.controlsBlocked}
         warningId={warningId}
+        trailingActions={props.trailingActions}
       />
       <RecoveryWarnings id={warningId} warnings={view.warnings} />
       <RecoveryBusyStatus busy={props.busy ?? false} busyAction={props.busyAction} />
@@ -155,42 +157,46 @@ function RecoveryChoiceButtons({
   busy,
   controlsBlocked,
   warningId,
+  trailingActions,
 }: {
   actions: RecoveryChoice[];
   primary?: RecoveryChoice;
   busy?: boolean;
   controlsBlocked: boolean;
   warningId: string;
+  trailingActions?: ReactNode;
 }) {
   return (
     <div
       className={cn(
         "mt-3 flex min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-center",
-        controlsBlocked && "hidden",
+        controlsBlocked && !trailingActions && "hidden",
       )}
       aria-busy={busy || undefined}
     >
-      {actions.map((action) => (
-        <Button
-          key={action.kind}
-          type="button"
-          variant="outline"
-          aria-label={action.label}
-          aria-describedby={action.tooltip ? warningId : undefined}
-          title={action.tooltip ? sanitizeSessionErrorDetails(action.tooltip) : undefined}
-          data-recommended={action === primary}
-          disabled={busy || action.disabled || controlsBlocked}
-          onClick={action.onClick}
-          data-testid={action.testId}
-          className={controlSizingClassName(
-            "standard",
-            "h-auto min-h-7 w-full cursor-pointer gap-1.5 whitespace-normal py-0.5 md:w-auto",
-          )}
-        >
-          <RecoveryActionIcon kind={action.kind} />
-          {action.label}
-        </Button>
-      ))}
+      {(!controlsBlocked || !trailingActions) &&
+        actions.map((action) => (
+          <Button
+            key={action.kind}
+            type="button"
+            variant="outline"
+            aria-label={action.label}
+            aria-describedby={action.tooltip ? warningId : undefined}
+            title={action.tooltip ? sanitizeSessionErrorDetails(action.tooltip) : undefined}
+            data-recommended={action === primary}
+            disabled={busy || action.disabled || controlsBlocked}
+            onClick={action.onClick}
+            data-testid={action.testId}
+            className={controlSizingClassName(
+              "standard",
+              "h-auto min-h-7 w-full cursor-pointer gap-1.5 whitespace-normal py-0.5 md:w-auto",
+            )}
+          >
+            <RecoveryActionIcon kind={action.kind} />
+            {action.label}
+          </Button>
+        ))}
+      {trailingActions}
     </div>
   );
 }

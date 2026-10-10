@@ -89,6 +89,8 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
 
     await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });
     await waitForQuickChatDirectInput(quickChat);
+    await sendQuickChatMessage(quickChat, testPage, "/e2e:bulk:2");
+    await expect(quickChat.getByText("Done. Emitted 2 messages", { exact: false })).toBeVisible();
     await prCapture.screenshot("mobile-quick-chat-cancel-palette", {
       caption: "Quick Chat cancellation remains available through the touch-sized command palette",
     });

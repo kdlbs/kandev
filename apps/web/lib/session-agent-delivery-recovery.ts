@@ -1,4 +1,9 @@
-export type AgentDeliveryRecoveryPhase = "reconnecting" | "uncertain" | "recovered" | "settled";
+export type AgentDeliveryRecoveryPhase =
+  | "reconnecting"
+  | "uncertain"
+  | "recovered"
+  | "settled"
+  | "continued";
 
 export type AgentDeliveryRecovery = {
   phase: AgentDeliveryRecoveryPhase;
@@ -11,6 +16,7 @@ export type AgentDeliveryRecovery = {
   harnessGeneration: number;
   promptGeneration: number;
   message?: string;
+  reconstruction?: { processIdentityKnown: boolean };
 };
 
 type RecoveryIdentity = {
@@ -21,6 +27,7 @@ type RecoveryIdentity = {
   incarnation_id: string;
   harness_generation: number;
   prompt_generation: number;
+  reconstruction?: { process_identity_known?: boolean };
 };
 
 export function readAgentDeliveryRecovery(
@@ -31,7 +38,10 @@ export function readAgentDeliveryRecovery(
   const record = raw as Record<string, unknown>;
   if (!isAgentDeliveryRecoveryPhase(record.phase) || !isPositiveSafeInteger(record.revision))
     return null;
-  if (!hasRecoveryIdentity(record)) return null;
+  if (!hasPersistedRecoveryIdentity(record)) return null;
+  const reconstruction = isRecord(record.reconstruction)
+    ? { processIdentityKnown: record.reconstruction.process_identity_known === true }
+    : undefined;
   return {
     phase: record.phase,
     revision: record.revision,
@@ -43,7 +53,18 @@ export function readAgentDeliveryRecovery(
     harnessGeneration: record.harness_generation,
     promptGeneration: record.prompt_generation,
     ...(typeof record.message === "string" ? { message: record.message } : {}),
+    ...(reconstruction ? { reconstruction } : {}),
   };
+}
+
+export function isAgentDeliveryRecoveryContinuationEligible(
+  recovery: AgentDeliveryRecovery,
+): boolean {
+  return (
+    recovery.agentExecutionId !== "" &&
+    recovery.promptGeneration > 0 &&
+    (!recovery.reconstruction || recovery.reconstruction.processIdentityKnown)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -55,26 +76,31 @@ function isAgentDeliveryRecoveryPhase(value: unknown): value is AgentDeliveryRec
     value === "reconnecting" ||
     value === "uncertain" ||
     value === "recovered" ||
-    value === "settled"
+    value === "settled" ||
+    value === "continued"
   );
 }
 
-function hasRecoveryIdentity(
+function hasPersistedRecoveryIdentity(
   record: Record<string, unknown>,
 ): record is Record<string, unknown> & RecoveryIdentity {
   return (
     isNonEmptyString(record.session_id) &&
-    isNonEmptyString(record.agent_execution_id) &&
+    typeof record.agent_execution_id === "string" &&
     isNonEmptyString(record.submission_id) &&
     isNonEmptyString(record.stream_id) &&
     isNonEmptyString(record.incarnation_id) &&
     isPositiveSafeInteger(record.harness_generation) &&
-    isPositiveSafeInteger(record.prompt_generation)
+    isNonNegativeSafeInteger(record.prompt_generation)
   );
 }
 
 function isPositiveSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function isNonEmptyString(value: unknown): value is string {

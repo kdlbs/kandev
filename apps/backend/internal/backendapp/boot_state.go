@@ -529,6 +529,7 @@ func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID str
 	for _, item := range items {
 		sessions = append(sessions, mapQuickChatSessionState(item))
 		sessionDTO := taskdto.FromTaskSession(item.Session)
+		b.enrichSessionRecoveryBlocks(ctx, &sessionDTO, item.Session)
 		if item.Session != nil && item.Session.TaskEnvironmentID != "" {
 			operation, runnerLive, recoveryErr := b.p.taskSvc.WorkspaceRecoveryProjection(ctx, item.Session.TaskEnvironmentID)
 			if recoveryErr != nil {
@@ -1143,6 +1144,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 			continue
 		}
 		dto := taskdto.FromTaskSession(session)
+		b.enrichSessionRecoveryBlocks(ctx, &dto, session)
 		if session.TaskEnvironmentID != "" {
 			operation, runnerLive, recoveryErr := b.p.taskSvc.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
 			if recoveryErr != nil {

@@ -12,6 +12,7 @@ import { matchingAutomaticRecovery } from "@/lib/session-recovery-presentation";
 
 type RecoveryContext = {
   sessionId: string;
+  onDeliveryReconciled?: () => void;
   model: ActiveSessionRecovery | null;
   pending: import("@/hooks/domains/session/use-session-recovery-actions").SessionRecoveryBusyAction;
 };
@@ -23,6 +24,7 @@ export function SessionRecoveryProvider({
   taskId,
   enabled,
   messagesLoading = false,
+  onDeliveryReconciled,
   children,
 }: {
   session: TaskSession | null | undefined;
@@ -30,6 +32,7 @@ export function SessionRecoveryProvider({
   taskId: string | null;
   enabled: boolean;
   messagesLoading?: boolean;
+  onDeliveryReconciled?: () => void;
   children: ReactNode;
 }) {
   const pending = usePendingSessionRecovery(`${taskId ?? ""}\u0000${session?.id ?? ""}`);
@@ -56,6 +59,7 @@ export function SessionRecoveryProvider({
         model: presentedModel,
         pending,
         lastPending: lastPending.current,
+        onDeliveryReconciled,
       })}
     >
       {children}
@@ -78,17 +82,20 @@ function recoveryContextValue({
   model,
   pending,
   lastPending,
+  onDeliveryReconciled,
 }: {
   enabled: boolean;
   session: TaskSession | null | undefined;
   model: ActiveSessionRecovery | null;
   pending: RecoveryContext["pending"];
   lastPending: RecoveryContext["pending"];
+  onDeliveryReconciled?: () => void;
 }): RecoveryContext | null {
   if (!enabled || !session) return null;
   const startingPending = session.state === "STARTING" && model ? (lastPending ?? "resume") : null;
   return {
     sessionId: session.id,
+    onDeliveryReconciled,
     model,
     pending: pending ?? startingPending,
   };

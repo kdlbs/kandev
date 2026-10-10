@@ -319,6 +319,9 @@ func (r *Repository) UpsertSessionRecoveryBlock(ctx context.Context, block *mode
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.advanceRecoverySessionRevisionTx(ctx, tx, block.SessionID); err != nil {
+		return err
+	}
 	if err := r.upsertSessionRecoveryBlockTx(ctx, tx, block); err != nil {
 		return err
 	}
@@ -441,6 +444,39 @@ func (r *Repository) GetOpenSessionRecoveryBlock(ctx context.Context, sessionID,
 	return &block, nil
 }
 
+// ListOpenSessionRecoveryBlocks returns all live causes for one observed owner.
+// Recovery consumers must not treat the earliest cause as the only one.
+func (r *Repository) ListOpenSessionRecoveryBlocks(
+	ctx context.Context,
+	sessionID, incarnationID string,
+	expectedGeneration int64,
+) ([]*models.SessionRecoveryBlock, error) {
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT id, session_id, incarnation_id, expected_generation, reason, state,
+		       consumer_reference, delivery_submission_id, delivery_stream_id, delivery_sequence,
+		       delivery_turn_id, delivery_outcome, authorized_action, created_at, updated_at, resolved_at
+		FROM session_recovery_blocks
+		WHERE session_id = ? AND incarnation_id = ? AND expected_generation = ? AND state = ?
+		ORDER BY created_at, id`), sessionID, incarnationID, expectedGeneration, models.RecoveryBlockOpen)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	blocks := make([]*models.SessionRecoveryBlock, 0)
+	for rows.Next() {
+		block := new(models.SessionRecoveryBlock)
+		if err := rows.Scan(&block.ID, &block.SessionID, &block.IncarnationID,
+			&block.ExpectedGeneration, &block.Reason, &block.State, &block.ConsumerReference,
+			&block.DeliverySubmissionID, &block.DeliveryStreamID, &block.DeliverySequence,
+			&block.DeliveryTurnID, &block.DeliveryOutcome, &block.AuthorizedAction,
+			&block.CreatedAt, &block.UpdatedAt, &block.ResolvedAt); err != nil {
+			return nil, err
+		}
+		blocks = append(blocks, block)
+	}
+	return blocks, rows.Err()
+}
+
 // GetSessionRecoveryBlock returns a block by stable identity, including
 // resolved blocks that autonomous consumers use to release their parked work.
 func (r *Repository) GetSessionRecoveryBlock(ctx context.Context, id string) (*models.SessionRecoveryBlock, error) {
@@ -461,14 +497,32 @@ func (r *Repository) GetSessionRecoveryBlock(ctx context.Context, id string) (*m
 }
 
 func (r *Repository) ResolveSessionRecoveryBlock(ctx context.Context, id, action string, resolvedAt time.Time) (bool, error) {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE session_recovery_blocks SET state = ?, authorized_action = ?, updated_at = ?, resolved_at = ?
-		WHERE id = ? AND state = ?`), models.RecoveryBlockResolved, action, resolvedAt, resolvedAt, id, models.RecoveryBlockOpen)
+	block, err := r.GetSessionRecoveryBlock(ctx, id)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err = r.advanceRecoverySessionRevisionTx(ctx, tx, block.SessionID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+  UPDATE session_recovery_blocks SET state = ?, authorized_action = ?, updated_at = ?, resolved_at = ?
+  WHERE id = ? AND state = ?`), models.RecoveryBlockResolved, action, resolvedAt, resolvedAt, id, models.RecoveryBlockOpen)
 	if err != nil {
 		return false, err
 	}
 	count, err := result.RowsAffected()
-	return count == 1, err
+	if err != nil || count != 1 {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 func boolToInt(value bool) int {

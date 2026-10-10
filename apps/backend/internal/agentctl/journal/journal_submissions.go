@@ -16,8 +16,12 @@ import (
 func (j *Journal) HasUnresolvedSubmissions(ctx context.Context) (bool, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return false, err
+	}
 	var unresolved bool
-	err := j.viewLocked(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -45,8 +49,12 @@ func (j *Journal) HasUnresolvedSubmissions(ctx context.Context) (bool, error) {
 func (j *Journal) ListSubmissions(ctx context.Context, sessionID string) ([]Submission, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return nil, err
+	}
 	var submissions []Submission
-	err := j.viewLocked(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -76,8 +84,12 @@ func (j *Journal) ListSubmissions(ctx context.Context, sessionID string) ([]Subm
 func (j *Journal) RetireSubmission(ctx context.Context, id string, recoveryGeneration uint64) (Submission, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return Submission{}, err
+	}
 	var retired Submission
-	err := j.updateLocked(func(tx *bolt.Tx) error {
+	err = db.Update(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -94,9 +106,8 @@ func (j *Journal) RetireSubmission(ctx context.Context, id string, recoveryGener
 			return ErrSubmissionGeneration
 		}
 		retired.Retired = true
-		if retired.State != SubmissionInterruptedUnknown {
-			retired.State = SubmissionCancelled
-			retired.Payload = nil
+		if retired.State == SubmissionPrepared || retired.State == SubmissionAccepted || retired.State == SubmissionDispatching {
+			retired.State = SubmissionInterruptedUnknown
 		}
 		retired.UpdatedAt = time.Now().UTC()
 		encoded, err := json.Marshal(retired)
@@ -128,6 +139,10 @@ func (j *Journal) RetireSubmission(ctx context.Context, id string, recoveryGener
 func (j *Journal) PutSubmission(ctx context.Context, submission Submission) (Submission, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return Submission{}, err
+	}
 	if submission.ID == "" || submission.Hash == "" {
 		return Submission{}, fmt.Errorf("submission id and hash are required")
 	}
@@ -144,7 +159,7 @@ func (j *Journal) PutSubmission(ctx context.Context, submission Submission) (Sub
 		submission.State = SubmissionPrepared
 	}
 	duplicate := false
-	err := j.updateLocked(func(tx *bolt.Tx) error {
+	err = db.Update(func(tx *bolt.Tx) error {
 		journalBytes, err := decodeInt64(tx.Bucket(bucketMeta).Get(keyJournalBytes))
 		if err != nil {
 			return err
@@ -300,8 +315,12 @@ func submissionOwnsTerminal(submission Submission, event Event) bool {
 func (j *Journal) GetSubmission(ctx context.Context, id string) (Submission, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return Submission{}, err
+	}
 	var submission Submission
-	err := j.viewLocked(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -323,8 +342,12 @@ func (j *Journal) GetSubmission(ctx context.Context, id string) (Submission, err
 func (j *Journal) HasUnresolvedWork(ctx context.Context) (bool, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return false, err
+	}
 	var unresolved bool
-	err := j.viewLocked(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -364,8 +387,12 @@ func (j *Journal) HasUnresolvedWork(ctx context.Context) (bool, error) {
 func (j *Journal) TransitionSubmission(ctx context.Context, id string, next SubmissionState, updatedAt time.Time) (Submission, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return Submission{}, err
+	}
 	var submission Submission
-	err := j.updateLocked(func(tx *bolt.Tx) error {
+	err = db.Update(func(tx *bolt.Tx) error {
 		var err error
 		submission, err = j.transitionSubmissionTx(ctx, tx, id, next, updatedAt)
 		return err

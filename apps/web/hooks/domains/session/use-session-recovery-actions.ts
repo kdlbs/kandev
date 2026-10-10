@@ -3,8 +3,13 @@ import { useCallback, useEffect, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
-import type { AppState } from "@/lib/state/store";
-import type { TaskSession } from "@/lib/types/http";
+import { readAgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery";
+import { isProviderRestoredResumeEligible } from "./session-recovery-eligibility";
+import {
+  deliveryRecoveryRequestIdentity,
+  isDeliveryRecoveryResultCurrent,
+  persistedDeliveryRecoveryNotice,
+} from "./session-delivery-recovery-view";
 import {
   asRecoveryError,
   branchRecoveryDetails,
@@ -15,38 +20,39 @@ import {
   recoveryInspectionBusyMessage,
   requestSessionRecover,
   restoreSessionWorkspace,
+  sessionDeliveryRecoveryMessage,
   sessionRecoveryGuardDetails,
   sessionRecoveryGuardMessage,
   type BranchRecoveryDetails,
   type ContextContinuationDetails,
   type SessionRecoveryAction,
+  type SessionDeliveryRecoveryResponse,
   type SessionRecoveryGuardDetails,
 } from "@/lib/services/session-recovery-service";
 import type { SessionRecoveryNoticeKind } from "./use-session-resumption";
 import {
   useRecoveryOperationFence,
+  currentRecoveryValue,
   isOlderWorkspaceRecoveryProjection,
   workspaceRecoveryMatchesFailure,
   type RecoveryOperation,
+  type SessionRecoveryBusyAction,
+  type WorkspaceRecoveryStatusCheck,
+  type ManualSessionRecoveryFailure,
 } from "./session-recovery-operation-fence";
 
-export type SessionRecoveryBusyAction = SessionRecoveryAction | "restore" | null;
-export type WorkspaceRecoveryStatusCheck = "idle" | "checking" | "unresolved";
-
-export type ManualSessionRecoveryFailure = {
-  operation: "resume" | "restore_workspace";
-  sessionId: string;
-  errorStamp: string | null;
-  requestKey: string;
-  operationId: number;
-};
-
+export type {
+  SessionRecoveryBusyAction,
+  WorkspaceRecoveryStatusCheck,
+  ManualSessionRecoveryFailure,
+} from "./session-recovery-operation-fence";
 const FAILED_TO_RESUME_MESSAGE_KEY = "task:failedToResumeSession";
 
 type SessionRecoveryActionsOptions = {
   taskId: string;
   sessionId: string;
   errorStamp?: string | null;
+  onDeliveryReconciled?: () => void;
 };
 
 function combineRecoveryErrors(
@@ -120,55 +126,13 @@ function recoveryFailureAssociation({
   return { managedClone, errorStamp: associatedStamp, requestKey };
 }
 
-function hasNativeACPSessionToken(session: TaskSession): boolean {
-  if (
-    typeof session.downstream_acp_session_id === "string" &&
-    session.downstream_acp_session_id.trim()
-  ) {
-    return true;
-  }
-  const acp = session.metadata?.acp;
-  if (!acp || typeof acp !== "object" || Array.isArray(acp)) return false;
-  const nativeSessionId = (acp as Record<string, unknown>).session_id;
-  return typeof nativeSessionId === "string" && nativeSessionId.trim().length > 0;
-}
-
-function isProviderRestoredResumeEligible(
-  state: AppState,
-  taskId: string,
-  sessionId: string,
-): boolean {
-  const session = state.taskSessions.items[sessionId];
-  if (
-    !session ||
-    session.task_id !== taskId ||
-    session.state !== "FAILED" ||
-    session.is_passthrough ||
-    !hasNativeACPSessionToken(session)
-  ) {
-    return false;
-  }
-
-  const task = state.kanban.tasks.find((candidate) => candidate.id === taskId);
-  if (task?.isFromOffice) return false;
-  const quickChatOwnsTaskSession = state.quickChat.sessions.some(
-    (candidate) =>
-      candidate.kind === "chat" && candidate.sessionId === sessionId && candidate.taskId === taskId,
-  );
-  if (!task && !quickChatOwnsTaskSession) return false;
-
-  const profileId = session.execution_profile_id || session.agent_profile_id;
-  if (!profileId) return false;
-  const profile = state.agentProfiles.items.find((candidate) => candidate.id === profileId);
-  return !!profile && !profile.cli_passthrough && profile.agent_name.toLowerCase() === "auggie";
-}
-
 /** Owns shared manual recovery state while a failed session remains visible. */
 // eslint-disable-next-line max-lines-per-function -- the hook owns one coherent recovery state machine.
 export function useSessionRecoveryActions({
   taskId,
   sessionId,
   errorStamp,
+  onDeliveryReconciled,
 }: SessionRecoveryActionsOptions) {
   const { t } = useTranslation();
   const providerRestoredResumeEligible = useAppStore((state) =>
@@ -207,9 +171,19 @@ export function useSessionRecoveryActions({
     (state) => state.setWorkspaceRecoveryProjection,
   );
   const pendingKey = `${taskId}\u0000${sessionId}`;
+  const selectedSession = useAppStore((state) => state.taskSessions.items[sessionId]);
+  const persistedDeliveryRecovery = readAgentDeliveryRecovery(selectedSession?.metadata);
+  const recoveryRevision = persistedDeliveryRecovery?.revision;
+  const deliveryRecoveryBlock = selectedSession?.session_recovery_blocks?.find(
+    (block) => block.consumer_reference === "agent_delivery",
+  );
   const sharedBusyAction = usePendingSessionRecovery(pendingKey);
   const sessionKey = pendingKey;
-  const requestKey = `${taskId}\u0000${sessionId}\u0000${errorStamp ?? ""}`;
+  const deliveryRecoveryKey = deliveryRecoveryRequestIdentity(
+    persistedDeliveryRecovery,
+    deliveryRecoveryBlock,
+  );
+  const requestKey = `${taskId}\u0000${sessionId}\u0000${deliveryRecoveryKey ?? errorStamp ?? ""}`;
   const { beginOperation, isCurrentOperation, isCurrentSession, matchesLatestErrorStamp } =
     useRecoveryOperationFence(requestKey, sessionKey, errorStamp);
   const [busyAction, setBusyAction] = useState<SessionRecoveryBusyAction>(null);
@@ -223,6 +197,9 @@ export function useSessionRecoveryActions({
   const [managedCloneRecoveryStamp, setManagedCloneRecoveryStamp] = useState<string | null>(null);
   const [lastFailedAction, setLastFailedAction] = useState<SessionRecoveryAction | null>(null);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
+  const [deliveryRecoveryResult, setDeliveryRecoveryResult] =
+    useState<SessionDeliveryRecoveryResponse | null>(null);
+  const [deliveryRecoveryNotice, setDeliveryRecoveryNotice] = useState<string | null>(null);
   const [recoveryNoticeKind, setRecoveryNoticeKind] = useState<SessionRecoveryNoticeKind | null>(
     null,
   );
@@ -242,6 +219,8 @@ export function useSessionRecoveryActions({
     setManagedCloneRecoveryStamp(null);
     setLastFailedAction(null);
     setRecoveryNotice(null);
+    setDeliveryRecoveryNotice(null);
+    setDeliveryRecoveryResult(null);
     setRecoveryNoticeKind(null);
     setManualRecoveryFailure(null);
     setLocalResultRequestKey(null);
@@ -249,9 +228,19 @@ export function useSessionRecoveryActions({
   }, [requestKey]);
 
   const localResultIsCurrent = localResultRequestKey === requestKey;
+  const deliveryResultIsCurrent = isDeliveryRecoveryResultCurrent(
+    localResultIsCurrent,
+    deliveryRecoveryResult,
+    recoveryRevision,
+  );
   const recoveryError = localResultIsCurrent
     ? combineRecoveryErrors(resumeError, restoreError, t)
     : null;
+  const deliveryRecoveryPersistentNotice = persistedDeliveryRecoveryNotice(
+    persistedDeliveryRecovery,
+    deliveryRecoveryBlock,
+    t,
+  );
 
   const reconcileWorkspaceRecoveryStatus = useCallback(
     async (operation: RecoveryOperation): Promise<WorkspaceRecoveryStatusRead> => {
@@ -446,9 +435,18 @@ export function useSessionRecoveryActions({
       setWorkspaceRecoveryStatusCheck("idle");
       setBusyAction(action);
       try {
-        await requestRecovery(action);
+        const result = await requestRecovery(action);
         if (!isCurrentOperation(operation)) return false;
-        clearRecoveryResult(operation);
+        if (action === "retry_connection" && result) {
+          setLocalResultRequestKey(operation.requestKey);
+          setDeliveryRecoveryNotice(sessionDeliveryRecoveryMessage(result, t));
+          setDeliveryRecoveryResult(result);
+          onDeliveryReconciled?.();
+        } else {
+          setDeliveryRecoveryNotice(null);
+          setDeliveryRecoveryResult(null);
+          clearRecoveryResult(operation);
+        }
       } catch (cause) {
         if (action === "relocate_and_resume" && (await reconcileFailedRelocation(operation)))
           return false;
@@ -468,6 +466,8 @@ export function useSessionRecoveryActions({
       pendingKey,
       reconcileFailedRelocation,
       requestRecovery,
+      onDeliveryReconciled,
+      t,
     ],
   );
 
@@ -587,6 +587,10 @@ export function useSessionRecoveryActions({
     checkWorkspaceRecoveryStatus,
     lastFailedAction: currentRecoveryValue(localResultIsCurrent, lastFailedAction),
     recoveryNotice: currentRecoveryValue(localResultIsCurrent, recoveryNotice),
+    deliveryRecoveryNotice:
+      currentRecoveryValue(deliveryResultIsCurrent, deliveryRecoveryNotice) ??
+      deliveryRecoveryPersistentNotice,
+    deliveryRecoveryResult: currentRecoveryValue(deliveryResultIsCurrent, deliveryRecoveryResult),
     recoveryNoticeKind: currentRecoveryValue(localResultIsCurrent, recoveryNoticeKind),
     clearInspectionContentionNotice,
     manualRecoveryFailure: currentRecoveryValue(localResultIsCurrent, manualRecoveryFailure),
@@ -600,17 +604,4 @@ export function useSessionRecoveryActions({
   };
 }
 
-function currentRecoveryValue<T>(isCurrent: boolean, value: T): T | null {
-  return isCurrent ? value : null;
-}
-
-export type SessionRecoveryActions = Omit<
-  ReturnType<typeof useSessionRecoveryActions>,
-  | "workspaceRecoveryMatchesCurrentFailure"
-  | "recoveryNoticeKind"
-  | "clearInspectionContentionNotice"
-> & {
-  workspaceRecoveryMatchesCurrentFailure?: boolean;
-  recoveryNoticeKind?: SessionRecoveryNoticeKind | null;
-  clearInspectionContentionNotice?: () => void;
-};
+export type { SessionRecoveryActions } from "./session-recovery-operation-fence";

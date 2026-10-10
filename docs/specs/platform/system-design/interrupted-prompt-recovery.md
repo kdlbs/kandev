@@ -74,7 +74,8 @@ before clearing the database block. Already-retired matching records make this i
 The eligible journal records belong to the current incarnation at or before the current generation.
 The process owner serializes retirement against prompt dispatch and checks the trusted owner. Retirement preserves unknown
 state and payload and makes duplicate admission or dispatch of that ID fail. Existing newer
-generation retirement still cancels other superseded work. A refreshed capability must be clear
+generation retirement records unfinished superseded work as interrupted-unknown and retains
+its payload; previously terminal outcomes remain unchanged. A refreshed capability must be clear
 before SQL block resolution and parked queue release. Legacy peers retain ordinary compatibility;
 authentication and storage errors fail closed.
 
@@ -107,3 +108,19 @@ Follow-up verification includes the no-composer-owner read-only browser state on
 and phone, real bbolt acknowledgement, no replay and distinct new delivery, busy/foreign-owner
 rejection, failed journal acknowledgement retaining SQL blocks, journal reopen, and authenticated
 adoption of acknowledged unknown history.
+
+Canonical interrupted-prompt blocks with a submission ID and no structured runtime
+recovery record retain the existing explicit Resume action. They do not select
+Retry-only controls. A runtime recovery record or legacy uncertain-delivery error
+still selects state-only Retry and the separately guarded continuation flow.
+The browser tests prove the existing Resume target remains clickable on desktop
+and at a 320-pixel phone width, with a touch target of at least 44 pixels.
+
+An open delivery block keeps ordinary input disabled even without a coarse session
+error. Canonical interrupted work retains existing Resume; structured runtime
+recovery retains Retry and explicit continuation. Terminal SQL settlement advances
+the session snapshot timestamp in the block-resolution transaction. The backend
+publishes the cleared block array even when no runtime recovery metadata exists.
+Explicit Resume publishes the same projection after resolving the saved block,
+before releasing parked queue work. A later queue failure does not hide a
+committed block resolution from the browser.

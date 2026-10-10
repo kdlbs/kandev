@@ -43,7 +43,7 @@ test.describe("mobile durable delivery reattachment", () => {
         /prompt|message\.added|chat\.submit/i.test(frame.action ?? ""),
     ).length;
     await banner.getByTestId("recovery-retry-connection-button").tap();
-    await expect(banner.getByTestId("session-recovery-error")).toBeVisible({ timeout: 30_000 });
+    await expect(banner.getByTestId("delivery-recovery-result")).toBeVisible({ timeout: 30_000 });
     await expect
       .poll(() =>
         traffic.frames.some(

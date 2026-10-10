@@ -2,6 +2,7 @@
 status: draft
 system: platform
 requirements:
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-003
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-004
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005
@@ -20,6 +21,7 @@ A surviving remote server must not enter the local replacement coordinator.
 
 | Requirement | Design boundary |
 | --- | --- |
+| REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001 | Journal shutdown and stream lifetime |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-003 | State-only reconciliation and admission fences |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-004 | Detached journal delivery and ordered reattachment |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005 | Terminal settlement and projection barrier |
@@ -43,6 +45,23 @@ Detachment does not acknowledge or prune events. Existing quota, reserve, health
 Legacy delivery keeps its bounded queue and explicit overload semantics; it cannot silently drop payloads or claim journal replay.
 Do not add an unbounded channel or increase capacity as the repair.
 
+## Journal shutdown and stream lifetime
+
+The journal owns a terminal closed state under its existing mutex.
+Every public database operation checks that state while holding the same lock used for database access.
+An operation admitted before close finishes before close obtains exclusive ownership.
+An operation admitted after close returns a typed closed-journal error.
+Replay, acknowledgment, submission reads and writes, retirement, health, and compaction follow this rule.
+Repeated close remains safe. A closed journal never becomes an empty successful replay.
+
+Instance teardown first closes admission and cancels its stream writers and readers.
+It waits for those owners within the existing teardown deadline, then closes the journal.
+Late consumers still receive the closed-state error, including after a drain deadline expires.
+API stream writers handle this result as instance shutdown and release their sockets and goroutines.
+They must not panic or affect another instance in the shared agentctl process.
+Backend detach remains different from instance teardown and leaves the journal open.
+Committed records and exclusive file ownership survive the close/reopen cycle.
+
 ## Repeatable reconciliation
 
 Replace the disconnect-only boolean query with one reusable lifecycle operation.
@@ -62,6 +81,9 @@ A late old result cannot clear state belonging to a successor.
 Reuse RecoverAgentPromptStream and RetrySessionDelivery as entry points where practical.
 Both disconnect-triggered and user-triggered paths must use the same reconciler.
 Re-read status and durable evidence through the current authenticated client; do not trust cached transient state.
+Pin the exact client for each bounded network request, then release its lease.
+Do not hold a client read lease across identity capture, callbacks, or asynchronous stream attachment.
+Check that the client still owns the execution before and after each reconciliation attempt.
 A running peer permits reattachment while existing turn admission continues to block a second prompt.
 A complete peer record still requires ordered canonical replay and terminal effect settlement.
 
@@ -72,7 +94,81 @@ The ten-second initial window does not define a maximum lifetime for recoverable
 
 Established Docker environments remain retained after recoverable agent failure. Cleanup stops process ownership without force-removing the container, so a later authorized resume can reuse its workspace. Fresh bootstrap rollback, task/session deletion, and explicit force-stop remain destructive. This policy does not authorize a prompt resend.
 
+### Recovery without an in-memory execution
+
+`RetrySessionDelivery` resolves recovery identity from durable session, generation, submission, and environment records before requiring a live client.
+`RecoverAgentPromptStream` remains the live-execution path, not the sole recovery authority.
+Execution removal must not discard the recovery descriptor or its original runtime ownership evidence.
+The replacement runtime opens a retained journal only through the existing authenticated, exclusive ownership boundary.
+It can read and project evidence without starting a harness or sending a prompt.
+Unknown ownership, a locked journal, or ambiguous identity produces a typed blocked result.
+
+The recovery response carries a bounded outcome, reason, allowed actions, and an observed recovery revision.
+Outcomes distinguish attached, settled, uncertain, unavailable evidence, and blocked ownership.
+Responses contain no raw paths, credentials, or provider output.
+The request remains authorized for the exact task/session pair.
+Repeated requests join the existing bounded operation. Late responses cannot overwrite a newer recovery revision.
+
+Initial prompt submission must persist its canonical identity before harness dispatch, as later prompt submissions already require.
+The lifecycle and orchestrator use that same identity when recording runtime loss.
+An older session with missing canonical submission data must retain a typed unresolved notice.
+Recovery does not invent a completed submission or silently discard the notice because a lookup failed.
+Unique retained journal and generation evidence can reconstruct the association through the existing repository contract.
+Ambiguous records remain blocked and retain an explicit explanation.
+
+### Explicit continuation after confirmed interruption
+
+State-only retry never starts another prompt. An uncertain result can advertise a separate native resume action only after ownership checks succeed.
+The existing `resume` recovery request gains an optional interruption acknowledgment, observed recovery identity/revision, new instruction, and idempotency key.
+This branch reuses session authorization, admission serialization, native restore, and durable submission preparation.
+The server rechecks the original process termination and all independent recovery blocks at the mutation boundary.
+A missing execution entry or an available replacement runtime alone cannot authorize continuation.
+
+The request preserves the same task, session, worktree, and recoverable native conversation.
+It records acknowledgment of the old uncertainty without converting that submission into completed or cancelled work.
+Native restore alone does not release durable admission. Explicit native resume acknowledges matching interrupted-unknown work only after the authenticated SQL and journal evidence agree.
+For acknowledged native recovery, admit a new delivery generation while retaining the original native conversation ID.
+After native load succeeds, retire only the proven interrupted submission through a generation-fenced journal operation.
+Retirement retains the original uncertain outcome and payload. Same-generation native resume may retire only interrupted-unknown work; retiring unfinished work requires a newer current owner generation and records its uncertainty. The idle dispatcher guard excludes concurrent dispatch.
+This retirement must remain effective in capability, recovery-descriptor, and admission queries without claiming provider cancellation.
+Persist recovery progress before dispatch. A crash between native load, retirement, projection, and dispatch must resume the same recovery operation.
+A prepared checkpoint precedes the atomic generation commit, so a retry may restore it after rechecking process termination, ownership, revision, and independent blocks.
+A restored checkpoint can have dispatched already. Retry checks its stable canonical instruction message, which is written only at agentctl acceptance, before completing acceptance bookkeeping.
+Backend submission admission alone is not receiver acceptance. Missing acceptance evidence remains restored-but-blocked without redispatch.
+Do not advertise a ready session merely because native loading or stream attachment succeeded.
+Native initialization defers its default prompt. Only the explicitly supplied new instruction receives a new submission identifier.
+For ordinary first-instruction launch, the runtime accepts an already admitted canonical row only when the launch handoff identifies that message, its full owner and payload match, and this execution has not dispatched a prompt. Runtime-owned duplicates still require reconciliation.
+The interrupted payload, queued claims, permissions, and tool calls are never replayed by this action.
+Duplicate requests return the first operation result without another dispatch.
+Unrelated recovery blocks and Office scheduler ownership remain effective.
+An Office action returns through its scheduler, never a direct chat launch.
+
+Missing native state still uses the existing explicit history-continuation contract, with its separate user choice.
+Missing process ownership or conflicting retained identities remain blocked, even after user acknowledgment.
+No recovery request silently creates another conversation or clears every open recovery cause.
+
+### Bulk recovery of existing conversations
+
+Offer Resume interrupted sessions from the shared runtime recovery notice, with a selectable session list and per-session eligibility reasons.
+Keep the same control available on phone, using stacked session rows and touch-sized actions.
+Selection is explicit; the number of disconnected streams alone cannot identify active interrupted tasks.
+The batch delegates to the same generation-fenced per-session recovery operation with bounded concurrency.
+Each item carries its own observed identity, recovery revision, continuation instruction, and idempotency key.
+One blocked session does not prevent other eligible sessions from recovering. Refresh preserves progress and completed item results.
+Browser requests, in-flight operations, and results are scoped to the task, session, and full recovery identity. A later interruption starts with a blank instruction and unchecked acknowledgment.
+A saved request remains available when the same identity advances its recovery revision, even if the acceptance reply was lost.
+Retry sends that original idempotency key and immutable instruction to recover the accepted result without a fresh preflight or redispatch.
+A completed result stays visible across the revision change. Late replies cannot overwrite a different interruption's checkpoint or current batch result.
+The Resume button keeps its accessible name while a translated status region announces progress.
+Preserve queued user instructions and their order without redispatching an uncertain claim.
+The operation never uses fresh-start, a new Kandev session, or history replacement as an implicit fallback.
+Report restored-but-blocked separately from work that has actually accepted its continuation instruction.
+
 ## Submission-specific block settlement
+
+The [missing delivery record design](durable-agent-record-recovery.md) defines a
+bounded reconstruction path before this settlement flow. Verified reconstruction
+restores delivery associations only. Ambiguous records remain blocked.
 
 SessionRecoveryBlock currently identifies session/incarnation/generation but not the original submission.
 Add a durable binding between an agent_delivery block and submission ID plus stream/turn identity where needed.
@@ -119,7 +215,21 @@ Desktop and phone show reconnecting, uncertain, or recovered state in the existi
 Retry connection queries/reconnects only; Stop targets the original owned work and reports unconfirmed cancellation honestly.
 Do not offer context continuation merely because transport failed.
 Keep one chat scroll owner, stacked 44px phone actions, keyboard access, and safe-area clearance.
-Localize new copy in all six shipped languages. No raw credentials or provider errors reach the notice.
+Localize new copy in all seven shipped catalogs. No raw credentials or provider errors reach the notice.
+
+The missing-execution result replaces the generic resume error with a localized cause and available next actions.
+The card announces progress and success or failure even when its title does not change.
+The action row contains the buttons themselves. Busy text, warnings, and disclosures sit outside that row.
+The row owns its outer spacing, so a nested retry wrapper cannot shift Retry connection relative to Stop.
+Both buttons use `controlSizingClassName`: 28px desktop controls and at least 44px phone or coarse-pointer targets.
+Phone actions stack at the existing 768px boundary without horizontal overflow.
+The existing recovery card and mobile runtime-replacement tests are the nearest shipped exemplars.
+
+Eligible continuation expands an inline instruction field and explicit acknowledgment within the same card.
+The user reviews the warning and supplies the next instruction before activating Resume session.
+This rare recovery flow stays in the chat scroll region on desktop and phone, without another overlay or scroll owner.
+Unauthorized or blocked users see the reason, workspace access, and safe state-only controls.
+New copy uses all seven shipped catalogs, including Korean and generated Traditional Chinese variants.
 
 ## Surviving-agent reattachment
 
@@ -147,4 +257,5 @@ New durable block/phase fields require SQLite fresh/reopen/upgrade and PostgreSQ
 Old ambiguous records fail closed. Preserve journals, native state, and user edits across upgrades.
 Reuse existing agent_delivery_* metrics with bounded reasons; keep IDs out of metric labels.
 The [work package](../../../plans/durable-agent-reattachment/plan.md) owns implementation and validation.
+The [shutdown and recovery repair](../../../plans/agentctl-journal-shutdown-recovery/plan.md) owns the later closed-journal and missing-execution regressions.
 Executor redial, long-horizon triggers, detached MCP waiting/offline budgets, and richer remote-working UI remain follow-up work.

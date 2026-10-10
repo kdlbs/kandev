@@ -28,6 +28,7 @@ const (
 
 var (
 	ErrJournalCorrupt       = errors.New("agent delivery journal is corrupt")
+	ErrJournalClosed        = errors.New("journal is closed")
 	ErrJournalNewerVersion  = errors.New("agent delivery journal uses a newer version")
 	ErrJournalFull          = errors.New("agent delivery journal is full")
 	ErrStreamFull           = errors.New("agent delivery stream is full")
@@ -51,6 +52,8 @@ var (
 )
 
 type Config struct {
+	ExistingOnly    bool
+	ReadOnly        bool
 	Path            string
 	MaxEventBytes   int64
 	MaxStreamBytes  int64
@@ -147,18 +150,33 @@ func Open(config Config) (journal *Journal, err error) {
 	if config.Path == "" {
 		return nil, fmt.Errorf("journal path is required")
 	}
-	if err := os.MkdirAll(filepath.Dir(config.Path), 0o700); err != nil {
-		return nil, fmt.Errorf("create journal directory: %w", err)
+	if config.ReadOnly {
+		config.ExistingOnly = true
+	} else {
+		if err := os.MkdirAll(filepath.Dir(config.Path), 0o700); err != nil {
+			return nil, fmt.Errorf("create journal directory: %w", err)
+		}
+		if err := os.Chmod(filepath.Dir(config.Path), 0o700); err != nil {
+			return nil, fmt.Errorf("secure journal directory: %w", err)
+		}
 	}
-	if err := os.Chmod(filepath.Dir(config.Path), 0o700); err != nil {
-		return nil, fmt.Errorf("secure journal directory: %w", err)
+	options := &bolt.Options{Timeout: config.OpenTimeout, NoSync: false, ReadOnly: config.ReadOnly}
+	if config.ExistingOnly {
+		options.OpenFile = func(path string, flags int, mode os.FileMode) (*os.File, error) {
+			return os.OpenFile(path, flags&^os.O_CREATE, mode)
+		}
 	}
-	db, err := bolt.Open(config.Path, 0o600, &bolt.Options{Timeout: config.OpenTimeout, NoSync: false})
+	db, err := bolt.Open(config.Path, 0o600, options)
 	if err != nil {
 		return nil, fmt.Errorf("open delivery journal: %w", err)
 	}
 	journal = &Journal{db: db, config: config}
-	if err := journal.initialize(); err != nil {
+	if config.ReadOnly {
+		err = journal.validateReadOnly()
+	} else {
+		err = journal.initialize()
+	}
+	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -174,6 +192,9 @@ func (j *Journal) initialize() error {
 		}
 		version := meta.Get(keyVersion)
 		if version == nil {
+			if j.config.ExistingOnly {
+				return ErrJournalCorrupt
+			}
 			return initializeFreshJournal(tx, meta)
 		}
 		return validateExistingJournal(tx, meta, version)
@@ -182,6 +203,19 @@ func (j *Journal) initialize() error {
 		return fmt.Errorf("initialize delivery journal: %w", err)
 	}
 	return nil
+}
+
+func (j *Journal) validateReadOnly() error {
+	return j.db.View(func(tx *bolt.Tx) error {
+		meta := tx.Bucket(bucketMeta)
+		if meta == nil {
+			return ErrJournalCorrupt
+		}
+		if err := validateExistingJournalReadOnly(tx, meta, meta.Get(keyVersion)); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func initializeFreshJournal(tx *bolt.Tx, meta *bolt.Bucket) error {
@@ -222,17 +256,55 @@ func validateExistingJournal(tx *bolt.Tx, meta *bolt.Bucket, version []byte) err
 // any new record is accepted. Older journals counted event payloads only, so
 // reopening them must include retained submission metadata and payloads.
 func reconcileJournalBytes(tx *bolt.Tx, meta *bolt.Bucket) error {
-	var total int64
+	total, err := calculateJournalBytes(tx)
+	if err != nil {
+		return err
+	}
+	return meta.Put(keyJournalBytes, encodeInt64(total))
+}
+
+func validateExistingJournalReadOnly(tx *bolt.Tx, meta *bolt.Bucket, version []byte) error {
+	if len(version) != 4 {
+		return ErrJournalCorrupt
+	}
+	switch got := binary.BigEndian.Uint32(version); {
+	case got > CurrentVersion:
+		return ErrJournalNewerVersion
+	case got != CurrentVersion:
+		return ErrJournalCorrupt
+	}
+	if err := validateJournalBuckets(tx); err != nil {
+		return err
+	}
+	stored, err := decodeInt64(meta.Get(keyJournalBytes))
+	if err != nil {
+		return err
+	}
+	actual, legacyEventOnly, err := calculateJournalAccounting(tx)
+	if err != nil || (stored != actual && stored != legacyEventOnly) {
+		return ErrJournalCorrupt
+	}
+	return nil
+}
+
+func calculateJournalBytes(tx *bolt.Tx) (int64, error) {
+	total, _, err := calculateJournalAccounting(tx)
+	return total, err
+}
+
+func calculateJournalAccounting(tx *bolt.Tx) (total, legacyEventOnly int64, err error) {
 	if err := tx.Bucket(bucketEvents).ForEach(func(streamID, value []byte) error {
 		if value != nil {
 			return nil
 		}
 		return tx.Bucket(bucketEvents).Bucket(streamID).ForEach(func(_, eventValue []byte) error {
-			total += int64(len(eventValue))
+			size := int64(len(eventValue))
+			total += size
+			legacyEventOnly += size
 			return nil
 		})
 	}); err != nil {
-		return ErrJournalCorrupt
+		return 0, 0, ErrJournalCorrupt
 	}
 	if err := tx.Bucket(bucketSubmissions).ForEach(func(_, value []byte) error {
 		if value != nil {
@@ -240,9 +312,9 @@ func reconcileJournalBytes(tx *bolt.Tx, meta *bolt.Bucket) error {
 		}
 		return nil
 	}); err != nil {
-		return ErrJournalCorrupt
+		return 0, 0, ErrJournalCorrupt
 	}
-	return meta.Put(keyJournalBytes, encodeInt64(total))
+	return total, legacyEventOnly, nil
 }
 
 func createJournalBuckets(tx *bolt.Tx) error {
@@ -277,6 +349,16 @@ func (j *Journal) Close() error {
 	return err
 }
 
+// dbLocked returns the current database while the caller holds j.mu. The
+// lifetime lock keeps Close from invalidating the handle until the operation
+// releases its read or write lock.
+func (j *Journal) dbLocked() (*bolt.DB, error) {
+	if j == nil || j.db == nil {
+		return nil, ErrJournalClosed
+	}
+	return j.db, nil
+}
+
 // Compact rewrites the journal into a sibling temporary database and swaps it
 // into place while all journal operations are excluded. A crash before the
 // atomic rename leaves the original database intact; a crash after it leaves
@@ -290,8 +372,9 @@ func (j *Journal) Compact(ctx context.Context) error {
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if j.db == nil {
-		return errors.New("journal is closed")
+	db, err := j.dbLocked()
+	if err != nil {
+		return err
 	}
 	temporaryPath := fmt.Sprintf("%s.compact-%d", j.config.Path, time.Now().UnixNano())
 	defer func() { _ = os.Remove(temporaryPath) }()
@@ -299,14 +382,15 @@ func (j *Journal) Compact(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("open compacted journal: %w", err)
 	}
-	compactErr := bolt.Compact(destination, j.db, 0)
+	compactErr := bolt.Compact(destination, db, 0)
 	closeErr := destination.Close()
 	if compactErr != nil || closeErr != nil {
 		return errors.Join(compactErr, closeErr)
 	}
-	if err := j.db.Close(); err != nil {
+	if err := db.Close(); err != nil {
 		return fmt.Errorf("close journal before compaction swap: %w", err)
 	}
+	j.db = nil
 	if err := os.Rename(temporaryPath, j.config.Path); err != nil {
 		reopened, reopenErr := bolt.Open(j.config.Path, 0o600, &bolt.Options{Timeout: j.config.OpenTimeout, NoSync: false})
 		if reopenErr == nil {
@@ -333,6 +417,12 @@ func (j *Journal) CompactIfNeeded(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	j.mu.RLock()
+	_, err := j.dbLocked()
+	j.mu.RUnlock()
+	if err != nil {
+		return err
+	}
 	info, err := os.Stat(j.config.Path)
 	if err != nil {
 		return err
@@ -342,12 +432,13 @@ func (j *Journal) CompactIfNeeded(ctx context.Context) error {
 		return nil
 	}
 	j.mu.RLock()
-	if j.db == nil {
+	db, err := j.dbLocked()
+	if err != nil {
 		j.mu.RUnlock()
-		return errors.New("journal is closed")
+		return err
 	}
 	var logicalBytes int64
-	err = j.db.View(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		var decodeErr error
 		logicalBytes, decodeErr = decodeInt64(tx.Bucket(bucketMeta).Get(keyJournalBytes))
 		return decodeErr
@@ -385,6 +476,10 @@ func (j *Journal) Append(ctx context.Context, event Event) (Event, error) {
 func (j *Journal) AppendBatch(ctx context.Context, events []Event) ([]Event, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return nil, err
+	}
 	if len(events) == 0 {
 		return nil, nil
 	}
@@ -394,7 +489,7 @@ func (j *Journal) AppendBatch(ctx context.Context, events []Event) ([]Event, err
 	if err := prepareAppendEvents(events, j.config.MaxEventBytes); err != nil {
 		return nil, err
 	}
-	err := j.updateLocked(func(tx *bolt.Tx) error {
+	err = db.Update(func(tx *bolt.Tx) error {
 		for i := range events {
 			if err := j.appendEventTx(ctx, tx, &events[i]); err != nil {
 				return err
@@ -451,7 +546,7 @@ func (j *Journal) appendEventTx(ctx context.Context, tx *bolt.Tx, event *Event) 
 	if err != nil {
 		return err
 	}
-	if err := validateAppendCapacity(j, stream, journalBytes, newBytes); err != nil {
+	if err := validateAppendCapacity(j, stream, journalBytes, newBytes, event.Terminal); err != nil {
 		return err
 	}
 	stream.HighWater = event.Sequence
@@ -510,11 +605,17 @@ func sameStreamOwner(stream Stream, event Event) bool {
 		stream.HarnessGeneration == event.HarnessGeneration
 }
 
-func validateAppendCapacity(j *Journal, stream Stream, journalBytes, eventBytes int64) error {
-	if stream.Bytes+eventBytes > j.config.MaxStreamBytes {
+func validateAppendCapacity(j *Journal, stream Stream, journalBytes, eventBytes int64, terminal bool) error {
+	streamLimit := j.config.MaxStreamBytes
+	journalLimit := j.config.MaxJournalBytes
+	if !terminal {
+		streamLimit -= min(j.config.ReserveBytes, streamLimit/10)
+		journalLimit -= j.config.ReserveBytes
+	}
+	if stream.Bytes+eventBytes > streamLimit {
 		return ErrStreamFull
 	}
-	if journalBytes+eventBytes > j.config.MaxJournalBytes-j.config.ReserveBytes {
+	if journalBytes+eventBytes > journalLimit {
 		return ErrJournalFull
 	}
 	return nil
@@ -541,12 +642,16 @@ func writeAppendedEvent(tx *bolt.Tx, stream Stream, event Event, encoded []byte,
 func (j *Journal) Replay(ctx context.Context, streamID string, after uint64, limit int) ([]Event, Stream, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return nil, Stream{}, err
+	}
 	if limit <= 0 {
 		limit = 1000
 	}
 	var out []Event
 	var stream Stream
-	err := j.viewLocked(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -599,7 +704,13 @@ func replayEvents(tx *bolt.Tx, streamID string, after uint64, limit int) ([]Even
 
 func (j *Journal) Acknowledge(ctx context.Context, streamID string, sequence uint64) error {
 	j.mu.RLock()
-	err := j.updateLocked(func(tx *bolt.Tx) error {
+	db, err := j.dbLocked()
+	if err != nil {
+		j.mu.RUnlock()
+		RecordJournalError(classifyJournalError(err))
+		return err
+	}
+	err = db.Update(func(tx *bolt.Tx) error {
 		return acknowledgeStreamTx(ctx, tx, streamID, sequence)
 	})
 	j.mu.RUnlock()
@@ -755,8 +866,12 @@ func pruneSubmissionPayloadTx(ctx context.Context, bucket *bolt.Bucket, key []by
 func (j *Journal) GetStream(ctx context.Context, streamID string) (Stream, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return Stream{}, err
+	}
 	var stream Stream
-	err := j.viewLocked(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

@@ -22,6 +22,7 @@ type SubmissionSummary struct {
 	SessionID             string          `json:"session_id"`
 	IncarnationID         string          `json:"incarnation_id"`
 	HarnessGeneration     uint64          `json:"harness_generation"`
+	StreamID              string          `json:"stream_id"`
 	Hash                  string          `json:"hash"`
 	State                 SubmissionState `json:"state"`
 	TerminalEventRetained bool            `json:"terminal_event_retained,omitempty"`
@@ -48,9 +49,11 @@ type RecoveryDescriptor struct {
 }
 
 // RecoveryDescriptor returns a bounded, owner-scoped snapshot suitable for a
-// backend adopting a surviving process. A stream that has not emitted an
-// event yet is represented by a nil Stream; that is a valid empty journal,
-// distinct from a journal read failure.
+// backend adopting a surviving process. When no stream is requested and the
+// journal has one unresolved submission, its stream is included in the same
+// snapshot. A stream that has not emitted an event yet is represented by a
+// nil Stream; that is a valid empty journal, distinct from a journal read
+// failure.
 func (j *Journal) RecoveryDescriptor(
 	ctx context.Context,
 	sessionID, incarnationID string,
@@ -59,6 +62,10 @@ func (j *Journal) RecoveryDescriptor(
 ) (RecoveryDescriptor, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return RecoveryDescriptor{}, err
+	}
 
 	descriptor := RecoveryDescriptor{
 		SessionID:         sessionID,
@@ -67,23 +74,27 @@ func (j *Journal) RecoveryDescriptor(
 		StreamID:          streamID,
 		StorageCapability: StorageCapability{Version: CurrentVersion, Durable: true},
 	}
-	err := j.viewLocked(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-
-		stream, streamUnresolved, err := recoveryStream(tx, sessionID, incarnationID, harnessGeneration, streamID)
-		if err != nil {
-			return err
-		}
-		descriptor.Stream = stream
-		descriptor.Unresolved = streamUnresolved
 
 		submissions, submissionsUnresolved, err := recoverySubmissionSummaries(tx, sessionID)
 		if err != nil {
 			return err
 		}
-		descriptor.Unresolved = descriptor.Unresolved || submissionsUnresolved
+		selectedStreamID := streamID
+		if selectedStreamID == "" && len(submissions) == 1 {
+			selectedStreamID = submissions[0].StreamID
+		}
+		descriptor.StreamID = selectedStreamID
+
+		stream, streamUnresolved, err := recoveryStream(tx, sessionID, incarnationID, harnessGeneration, selectedStreamID)
+		if err != nil {
+			return err
+		}
+		descriptor.Stream = stream
+		descriptor.Unresolved = streamUnresolved || submissionsUnresolved
 		descriptor.SubmissionCount = len(submissions)
 		descriptor.Submissions = boundRecoverySubmissions(submissions, &descriptor.SubmissionsTruncated)
 		return nil
@@ -159,6 +170,7 @@ func submissionSummary(submission Submission) SubmissionSummary {
 		SessionID:             submission.SessionID,
 		IncarnationID:         submission.IncarnationID,
 		HarnessGeneration:     submission.HarnessGeneration,
+		StreamID:              submission.StreamID,
 		Hash:                  submission.Hash,
 		State:                 submission.State,
 		TerminalEventRetained: submission.TerminalEventRetained,
@@ -169,7 +181,7 @@ func submissionSummary(submission Submission) SubmissionSummary {
 }
 
 func submissionNeedsRecovery(submission Submission) bool {
-	if submission.Retired && submission.State == SubmissionInterruptedUnknown {
+	if submission.Retired {
 		return false
 	}
 	switch submission.State {

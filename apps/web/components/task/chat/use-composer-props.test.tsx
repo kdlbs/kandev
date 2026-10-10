@@ -85,6 +85,29 @@ describe("useComposerProps", () => {
     expect(result.current.deliveryRecoveryPhase).toBe("reconnecting");
   });
 
+  it("shows delivery recovery for an open block before a recovery record exists", () => {
+    const args = composerArgs();
+    args.panelState.session = {
+      session_recovery_blocks: [
+        {
+          id: "block-1",
+          incarnation_id: "inc-1",
+          expected_generation: 2,
+          reason: "unresolved_durable_work",
+          consumer_reference: "agent_delivery",
+          delivery_submission_id: "",
+          delivery_stream_id: "",
+          updated_at: "2026-10-10T10:00:00Z",
+        },
+      ],
+    } as never;
+
+    const { result } = renderHook(() => useComposerProps(args));
+
+    expect(result.current.uncertainDelivery).toBe(true);
+    expect(result.current.deliveryRecoveryPhase).toBe("uncertain");
+  });
+
   it("does not let a settled delivery tombstone revive a stale uncertain breadcrumb", () => {
     const args = composerArgs();
     args.panelState.session = {
@@ -133,5 +156,25 @@ describe("useComposerProps", () => {
 
     expect(result.current.uncertainDelivery).toBe(false);
     expect(result.current.deliveryRecoveryPhase).toBeUndefined();
+  });
+});
+
+describe("canonical interrupted prompt recovery", () => {
+  it("keeps existing Resume available for canonical interrupted work without a recovery record", () => {
+    const args = composerArgs();
+    args.panelState.needsRecovery = false;
+    args.panelState.session = {
+      session_recovery_blocks: [
+        {
+          id: "block-1",
+          reason: "unknown_prompt_outcome",
+          consumer_reference: "agent_delivery",
+          delivery_submission_id: "canonical-submission",
+        },
+      ],
+    } as never;
+    const { result } = renderHook(() => useComposerProps(args));
+    expect(result.current.uncertainDelivery).toBe(false);
+    expect(result.current.needsRecovery).toBe(true);
   });
 });

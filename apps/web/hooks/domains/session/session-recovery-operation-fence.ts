@@ -1,4 +1,8 @@
+import type { useSessionRecoveryActions } from "./use-session-recovery-actions";
+import type { SessionRecoveryNoticeKind } from "./use-session-resumption";
+import type { SessionDeliveryRecoveryResponse } from "@/lib/services/session-recovery-service";
 import { useCallback, useRef } from "react";
+import type { SessionRecoveryAction } from "@/lib/services/session-recovery-service";
 import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
 
 export type RecoveryOperation = { requestKey: string; sessionKey: string; operationId: number };
@@ -91,3 +95,33 @@ export function workspaceRecoveryMatchesFailure(
     !recovery.agent_ready,
   );
 }
+
+export function currentRecoveryValue<T>(isCurrent: boolean, value: T): T | null {
+  return isCurrent ? value : null;
+}
+
+export type SessionRecoveryBusyAction = SessionRecoveryAction | "restore" | null;
+export type WorkspaceRecoveryStatusCheck = "idle" | "checking" | "unresolved";
+
+export type ManualSessionRecoveryFailure = {
+  operation: "resume" | "restore_workspace";
+  sessionId: string;
+  errorStamp: string | null;
+  requestKey: string;
+  operationId: number;
+};
+
+export type SessionRecoveryActions = Omit<
+  ReturnType<typeof useSessionRecoveryActions>,
+  | "workspaceRecoveryMatchesCurrentFailure"
+  | "recoveryNoticeKind"
+  | "deliveryRecoveryNotice"
+  | "deliveryRecoveryResult"
+  | "clearInspectionContentionNotice"
+> & {
+  workspaceRecoveryMatchesCurrentFailure?: boolean;
+  recoveryNoticeKind?: SessionRecoveryNoticeKind | null;
+  deliveryRecoveryNotice?: string | null;
+  deliveryRecoveryResult?: SessionDeliveryRecoveryResponse | null;
+  clearInspectionContentionNotice?: () => void;
+};

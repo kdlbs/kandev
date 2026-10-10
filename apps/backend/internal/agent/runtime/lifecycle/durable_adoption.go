@@ -51,6 +51,25 @@ func initialPromptDeliverySubmissionID(execution *AgentExecution) string {
 	return id
 }
 
+func currentDeliverySubmissionID(execution *AgentExecution) string {
+	if execution == nil {
+		return ""
+	}
+	if id := execution.deliverySubmissionIDSnapshot(); id != "" {
+		return id
+	}
+	return models.StringFromAny(execution.MetadataSnapshot()[initialDeliverySubmissionIDMetadataKey])
+}
+
+func clearInitialDeliverySubmissionID(execution *AgentExecution, submissionID string) {
+	if execution == nil || submissionID == "" {
+		return
+	}
+	if models.StringFromAny(execution.MetadataSnapshot()[initialDeliverySubmissionIDMetadataKey]) == submissionID {
+		execution.setMetadataValue(initialDeliverySubmissionIDMetadataKey, "")
+	}
+}
+
 // deliverySubmissionIdentityForPrompt keeps the caller's immutable identity
 // attached to the prompt it admitted. Agentctl clients also expose their most
 // recently accepted ID for legacy requests, but another concurrent prompt can
@@ -353,7 +372,7 @@ func peerSubmissionBelongsToRecovery(
 func peerSubmissionSummary(peer *journal.Submission) journal.SubmissionSummary {
 	return journal.SubmissionSummary{
 		ID: peer.ID, SessionID: peer.SessionID, IncarnationID: peer.IncarnationID,
-		HarnessGeneration: peer.HarnessGeneration, Hash: peer.Hash, State: peer.State,
+		HarnessGeneration: peer.HarnessGeneration, StreamID: peer.StreamID, Hash: peer.Hash, State: peer.State,
 		TerminalEventRetained: peer.TerminalEventRetained, TerminalSequence: peer.TerminalSequence,
 		CreatedAt: peer.CreatedAt, UpdatedAt: peer.UpdatedAt,
 	}

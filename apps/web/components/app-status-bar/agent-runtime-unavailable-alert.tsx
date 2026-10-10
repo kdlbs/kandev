@@ -1,5 +1,6 @@
 "use client";
 
+import { InterruptedSessionsRecovery } from "./interrupted-sessions-recovery";
 import { useTranslation } from "react-i18next";
 import { IconAlertTriangle, IconLoader2 } from "@tabler/icons-react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
@@ -11,11 +12,20 @@ import { useRestartCapability } from "@/hooks/domains/system/use-restart-capabil
 import { RestartProgressDialog } from "@/components/settings/system/restart-progress-dialog";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
-export function AgentRuntimeUnavailableAlert() {
+export function AgentRuntimeUnavailableAlert({
+  showInterruptedSessions = true,
+}: {
+  showInterruptedSessions?: boolean;
+}) {
   const agentRuntime = useAppStore((state) => state.agentRuntime);
-  if (!agentRuntime || agentRuntime.status === "available") return null;
-
-  return <AgentRuntimeAlertContent recovering={agentRuntime.status === "recovering"} />;
+  return (
+    <>
+      {agentRuntime && agentRuntime.status !== "available" && (
+        <AgentRuntimeAlertContent recovering={agentRuntime.status === "recovering"} />
+      )}
+      {showInterruptedSessions && <InterruptedSessionsRecovery />}
+    </>
+  );
 }
 
 function AgentRuntimeAlertContent({ recovering }: { recovering: boolean }) {
