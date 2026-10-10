@@ -70,6 +70,19 @@ without repeating the failure solely to recover its cause.
 - **AC-AGENTS-MCP-PREP-004.3:** Diagnostics shall exclude native stdout/stderr, credentials, runtime environment values, authentication URLs and private endpoint details. Error text shall be sanitized before logging, publication or persistence, bounded to 1024 UTF-8 bytes per message and at most two messages per failed command. Missing historical diagnostics shall not invent a cause.
 - **AC-AGENTS-MCP-PREP-004.4:** Desktop and phone users shall see the retained safe cause in the failed preparation step with localized explanatory labels, selectable plain text and reachable existing recovery controls. Phone text shall wrap without document horizontal overflow. Busy recovery shall explain that the current turn must finish before retry; it shall not imply a second connection attempt failed.
 
+### REQ-AGENTS-MCP-PREP-005: Project-local MCP continuity
+
+Project-local MCP injection shall remain available when executions for one
+workspace are replaced, resumed, recovered, or started concurrently. The
+project file is shared by those executions, so its lifetime must not depend on
+the cleanup timing of one execution.
+
+- **AC-AGENTS-MCP-PREP-005.1:** When a Pi execution starts or is promoted, the project-local MCP configuration shall be materialized before the Pi process starts and shall contain the current execution's Kandev endpoint, `streamable-http` transport, and `eager` lifecycle. A predecessor execution shall not be able to remove that successor configuration after it has been materialized.
+- **AC-AGENTS-MCP-PREP-005.2:** When a project MCP file existed before Kandev used it, launch shall preserve its non-Kandev servers, unrelated top-level fields, and unrelated lifecycle values. Ending the Kandev execution shall not delete that file.
+- **AC-AGENTS-MCP-PREP-005.3:** When Kandev created a project MCP file and no user-owned content has replaced it, Kandev may remove it only after the last related execution has released the file. A successor, pending launch, or active recovery claim shall keep the file available.
+- **AC-AGENTS-MCP-PREP-005.4:** Concurrent launch, profile/session replacement, resume, recovery, and backend restart shall either preserve a current Kandev-owned definition or fail closed by leaving an unknown or user-modified file untouched. Project-local ownership state shall not contain credentials, tokens, headers, environment values, or full MCP file contents.
+- **AC-AGENTS-MCP-PREP-005.5:** Pi project-local injection shall not require or write a Kandev endpoint to `~/.pi/agent/mcp.json`, and existing Pi ACP managed-runtime and eager-MCP behavior shall remain unchanged.
+
 ## Out of scope
 
 Implementing adapters for other agents, remote credential transfer, plugin
@@ -82,3 +95,4 @@ business operations during readiness checks are excluded.
 - [Native MCP failure diagnostics](../../../plans/native-mcp-failure-diagnostics/plan.md)
 - [Setup recovery UX](../../../plans/setup-recovery-ux/plan.md)
 - [Agent MCP preparation](../../../plans/agent-mcp-preparation/plan.md)
+- [Pi project MCP ownership](../../../plans/pi-project-mcp-ownership/plan.md)

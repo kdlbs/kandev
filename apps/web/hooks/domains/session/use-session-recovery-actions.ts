@@ -590,7 +590,6 @@ export function useSessionRecoveryActions({
     deliveryRecoveryNotice:
       currentRecoveryValue(deliveryResultIsCurrent, deliveryRecoveryNotice) ??
       deliveryRecoveryPersistentNotice,
-    deliveryRecoveryResult: currentRecoveryValue(deliveryResultIsCurrent, deliveryRecoveryResult),
     recoveryNoticeKind: currentRecoveryValue(localResultIsCurrent, recoveryNoticeKind),
     clearInspectionContentionNotice,
     manualRecoveryFailure: currentRecoveryValue(localResultIsCurrent, manualRecoveryFailure),

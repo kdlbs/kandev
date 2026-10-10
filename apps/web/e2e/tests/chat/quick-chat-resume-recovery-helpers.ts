@@ -96,12 +96,6 @@ export async function verifyQuickChatResumeRecovery(
     tmpDir,
     started.session_id,
   );
-  const restored = await apiClient.wsRequest<{ success: boolean }>("session.launch", {
-    task_id: started.task_id,
-    session_id: started.session_id,
-    intent: "restore_workspace",
-  });
-  expect(restored.success).toBe(true);
   expect(readRecovery(tmpDir, blockId, submissionId)).toMatchObject({
     block: { state: "open" },
     submission: { state: "interrupted_unknown" },

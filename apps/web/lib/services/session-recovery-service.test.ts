@@ -10,12 +10,10 @@ import {
   recoveryInspectionBusyMessage,
   resolveRequestErrorMessage,
   sessionRecoveryGuardDetails,
-  sessionDeliveryRecoveryMessage,
   sessionDeliveryRecoveryResponse,
+  sessionDeliveryRecoveryMessage,
 } from "./session-recovery-service";
 import { WebSocketRequestError } from "@/lib/ws/client";
-
-const RECOVER_ACTION = "session.recover";
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("@/lib/ws/connection", () => ({
@@ -25,6 +23,8 @@ vi.mock("@/lib/ws/connection", () => ({
 const CONTINUE_FROM_HISTORY = "continue_from_history";
 
 beforeEach(() => vi.clearAllMocks());
+
+const recoveryAction = "session.recover";
 
 describe("recoveryInspectionBusyDetails", () => {
   it("recognizes only the structured inspection-contention conflict", () => {
@@ -71,7 +71,7 @@ describe("native session resume", () => {
     mocks.request.mockResolvedValueOnce(response);
     await expect(resumeSession("task-1", "session-1", "failed")).resolves.toBe(response);
     expect(mocks.request).toHaveBeenCalledWith(
-      RECOVER_ACTION,
+      recoveryAction,
       { task_id: "task-1", session_id: "session-1", action: "resume" },
       60_000,
     );
@@ -170,8 +170,8 @@ describe("session recovery service", () => {
       }),
     ).resolves.toBeUndefined();
     expect(mocks.request).toHaveBeenCalledWith(
-      RECOVER_ACTION,
-      { task_id: "task-1", session_id: "session-1", action: "continue_from_history" },
+      recoveryAction,
+      { task_id: "task-1", session_id: "session-1", action: CONTINUE_FROM_HISTORY },
       30_000,
     );
   });
@@ -187,7 +187,7 @@ it("sends the current stamp with an explicit managed clone relocation", async ()
     errorStamp: "stamp-1",
   });
   expect(mocks.request).toHaveBeenCalledWith(
-    RECOVER_ACTION,
+    recoveryAction,
     {
       task_id: "task-1",
       session_id: "session-1",
@@ -241,7 +241,7 @@ it("sends provider-restored settings policy only with an explicit resume", async
     settingsPolicy: "provider_restored",
   });
   expect(mocks.request).toHaveBeenCalledWith(
-    RECOVER_ACTION,
+    recoveryAction,
     {
       task_id: "task-1",
       session_id: "session-1",
@@ -307,64 +307,28 @@ it("recognizes only the typed, path-free managed clone error details", () => {
   expect(managedCloneRelocationRecoveryDetails(new Error("plain"))).toBeNull();
 });
 
-it("sends acknowledged interrupted resume and requires accepted continuation", async () => {
-  const interruptedResume = {
-    acknowledge_interruption: true,
-    recovery_revision: 7,
-    recovery_identity: {
-      submission_id: "old",
-      stream_id: "stream",
-      incarnation_id: "inc",
-      harness_generation: 1,
-      prompt_generation: 3,
-    },
-    instruction: "Inspect saved changes and continue",
-    idempotency_key: "stable-key",
-  };
-  mocks.request.mockResolvedValue({
+it("treats historical continued as restored instead of showing an uncertainty warning", () => {
+  const response = sessionDeliveryRecoveryResponse({
     task_id: "task",
     session_id: "session",
-    outcome: "restored_blocked",
-    recovery_revision: 7,
-    reason: "continuation_outcome_unknown",
+    outcome: "continued",
+    recovery_revision: 1,
   });
-  const result = await requestSessionRecover({
-    taskId: "task",
-    sessionId: "session",
-    action: "resume",
-    failureMessage: "failed",
-    interruptedResume,
-  });
-  expect(result?.outcome).toBe("restored_blocked");
-  expect(mocks.request).toHaveBeenCalledWith(
-    RECOVER_ACTION,
-    {
-      task_id: "task",
-      session_id: "session",
-      action: "resume",
-      interrupted_resume: interruptedResume,
-    },
-    150_000,
+  expect(response?.outcome).toBe("continued");
+  expect(response && sessionDeliveryRecoveryMessage(response, (key) => key)).toBe(
+    "task:deliveryRecoveryAttached",
   );
 });
 
-it("refuses malformed recovery identities that would enable a continuation", async () => {
-  mocks.request.mockResolvedValue({
-    task_id: "task",
-    session_id: "session",
-    outcome: "uncertain",
-    recovery_revision: 1,
-    allowed_actions: ["resume_interrupted"],
-    recovery_identity: { submission_id: "old" },
-  });
-  await expect(
-    requestSessionRecover({
-      taskId: "task",
-      sessionId: "session",
-      action: "retry_connection",
-      failureMessage: "failed",
+it("rejects the retired restored-blocked continuation outcome", () => {
+  expect(
+    sessionDeliveryRecoveryResponse({
+      task_id: "task",
+      session_id: "session",
+      outcome: "restored_blocked",
+      recovery_revision: 1,
     }),
-  ).rejects.toThrow("failed");
+  ).toBeNull();
 });
 
 it("returns the typed retry outcome and rejects malformed retry results", async () => {
@@ -430,38 +394,6 @@ it("translates typed delivery outcomes and bounded block reasons", () => {
       t,
     ),
   ).toBe("task:deliveryRecoveryOwnershipBlocked");
-  expect(
-    sessionDeliveryRecoveryMessage(
-      { ...base, outcome: "blocked", reason: "retained_evidence_ambiguous" },
-      t,
-    ),
-  ).toBe("task:deliveryRecoveryAmbiguousEvidence");
-});
-
-it("accepts an incomplete reconstructed identity only for a blocked retry result", () => {
-  const result = {
-    task_id: "task-1",
-    session_id: "session-1",
-    outcome: "blocked",
-    reason: "recovery_identity_incomplete",
-    recovery_revision: 1,
-    recovery_identity: {
-      submission_id: "prompt:message-1",
-      stream_id: "stream-1",
-      incarnation_id: "incarnation-1",
-      harness_generation: 7,
-      prompt_generation: 0,
-    },
-  };
-
-  expect(sessionDeliveryRecoveryResponse(result)).toEqual(result);
-  expect(
-    sessionDeliveryRecoveryResponse({
-      ...result,
-      allowed_actions: ["resume_interrupted"],
-    }),
-  ).toBeNull();
-  expect(sessionDeliveryRecoveryResponse({ ...result, outcome: "uncertain" })).toBeNull();
 });
 
 it.each([
@@ -473,6 +405,25 @@ it.each([
     sessionDeliveryRecoveryMessage(
       { task_id: "task", session_id: "session", outcome: "blocked", recovery_revision: 1, reason },
       (value) => value,
+    ),
+  ).toBe(key);
+});
+
+it.each([
+  ["unresolved_durable_work", "task:deliveryRecoveryMissingSubmission"],
+  ["recovery_identity_incomplete", "task:deliveryRecoveryIdentityIncomplete"],
+  ["retained_evidence_ambiguous", "task:deliveryRecoveryAmbiguousEvidence"],
+])("reports retained-record recovery cause %s", (reason, key) => {
+  expect(
+    sessionDeliveryRecoveryMessage(
+      {
+        task_id: "task",
+        session_id: "session",
+        outcome: "blocked",
+        recovery_revision: 1,
+        reason,
+      },
+      (translationKey) => translationKey,
     ),
   ).toBe(key);
 });

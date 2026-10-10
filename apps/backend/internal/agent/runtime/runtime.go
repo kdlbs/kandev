@@ -41,6 +41,7 @@ type DeliveryRecordEvidence = lifecycle.DeliveryRecordEvidence
 type DeliveryRecordSubmissionRequest = lifecycle.DeliveryRecordSubmissionRequest
 type DeliveryRecordSubmission = lifecycle.DeliveryRecordSubmission
 type RetainedPromptFailureError = lifecycle.RetainedPromptFailureError
+type RemoteRecoverySnapshot = lifecycle.RemoteRecoverySnapshot
 type WorkspaceRecoveryProjectionError = lifecycle.WorkspaceRecoveryProjectionError
 type BackgroundWorkloadProbeResult = client.ProbeResult
 

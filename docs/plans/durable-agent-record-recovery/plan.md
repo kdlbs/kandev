@@ -12,10 +12,30 @@ legacy_specs: []
 
 # Implementation plan: recover missing delivery records
 
+## Integration with landed restart recovery
+
+PR #4380 is now merged. Its automatic restore-only recovery and retirement of
+the manual restart-resume form supersede the earlier continuation and batch
+steps and their historical validation below. This integration preserves
+missing-record reconstruction, repeated evidence inspection, and persistent
+blocked results. It does not restore the retired instruction API or UI.
+Conflict integration validation passed focused race tests in journal, runtime
+agentctl client, API recovery, orchestrator recovery, and SQLite reconstruction.
+The full lifecycle, SQLite, DTO, and task-handler package tests passed. Frontend
+regressions passed 71 tests across six files, followed by 42 tests in the two
+edited service/hook files. Web typecheck passed. Desktop and phone record-repair
+and live-block browser checks passed two tests per viewport. Documentation
+catalog, specification lint, and both public-doc validators passed.
+
+Two unrelated process-output API tests fail locally because the host login
+shell exits while sourcing a missing `.cargo/env` from `.profile`. Their process
+path is unchanged from main. Focused API recovery tests pass under race;
+required remote CI remains the delivery gate. Real providers were not exercised.
+
 ## Overview
 
 Recover a verified journal submission whose backend association is missing.
-Then use the existing reconciliation and explicit continuation operations.
+Then use the landed reconciliation and automatic restore-only operations.
 Implement inspection first, atomic reconstruction second, and visible recovery
 with browser evidence third. All three work orders and local review remediation
 are complete. Remote CI and automated review remain part of PR delivery.
@@ -69,7 +89,7 @@ If its implementation changes this gap, revise these work orders first.
 - Bounded authenticated inspection of one session's retained submission.
 - Unique evidence selection, immutable payload validation, and conflict refusal.
 - Atomic reconstruction, provenance, block binding, and persistent presentation.
-- State-only Retry followed by the existing explicit continuation flow.
+- State-only Retry with reconstruction, preserving automatic restore-only recovery.
 - SQLite/PostgreSQL races, restart regressions, desktop/phone browser evidence,
   and recovery guidance in public documentation.
 

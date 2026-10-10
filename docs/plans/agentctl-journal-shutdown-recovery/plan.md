@@ -1,13 +1,16 @@
 ---
 created: 2026-10-09
-status: completed
+status: in_progress
 requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-001
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-002
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-003
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-004
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
   - REQ-PLATFORM-AGENT-RUNTIME-AVAILABILITY-003
 system_design:
+  - ../../specs/platform/system-design/durable-agent-delivery.md
   - ../../specs/platform/system-design/durable-agent-stream-processing.md
   - ../../specs/platform/system-design/durable-agent-reattachment.md
   - ../../specs/platform/system-design/agent-runtime-availability.md
@@ -18,11 +21,18 @@ legacy_specs: []
 
 ## Overview
 
-Prevent one instance shutdown from crashing the shared agentctl process.
-Recover retained delivery evidence after execution removal, then provide useful recovery controls on desktop and phone.
-Platform owns this repair because it owns the journal lifetime and session recovery contract.
-Work proceeds sequentially: journal safety, ACK/capacity repair, recovery authority, then UI and end-to-end evidence.
-All four work orders are complete. Backend, frontend, and desktop/phone browser checks passed; detailed evidence and platform limits are recorded below.
+Prevent one instance shutdown from crashing the shared agentctl process, then restore eligible retained agents silently after a backend restart.
+Platform owns this repair because it owns journal lifetime, runtime ownership, and session recovery.
+The first proposal's manual continuation controls, batch UI, and fixed-quota test flow are historical and superseded by the restart-recovery revision below.
+Tasks 01 through 04 record that earlier implementation. The user rejected its manual interruption form and revised retention and remote lifetime requirements. Tasks 05 and 08 are complete; Task 07's retention implementation and checks are complete. Task 06 covers final integration and delivery and is in progress. Earlier validation does not cover the revised behavior.
+
+On 2026-10-10 the user clarified executor lifetime and extended disconnected operation.
+Local/worktree agents stop with Kandev by default; local survival remains an explicit opt-in.
+Remote agentctl and agents, including Sprites environments, continue independently and reconnect automatically when Kandev returns.
+The fixed 256 MiB/2 GiB cancellation policy is superseded by retention limited by usable disk capacity with a control/recovery reserve.
+Week-long backend absence must not itself cancel work or expire unacknowledged output.
+Implementation resumed on 2026-10-10 with explicit user authorization for delegated implementation and delivery. Tasks 07 and 08 extend the package before Task 06 delivery.
+Task 04's prior capacity tests establish only the historical finite-quota behavior. They do not establish the new long-outage requirement.
 
 ## Evidence and assumptions
 
@@ -105,18 +115,22 @@ Task 04 is numbered after the existing files but executes between Tasks 01 and 0
 - Closed-journal errors and bounded instance-stream teardown, including sibling isolation.
 - ACK worker replacement, durable cursor catch-up, verified pruning, bounded pressure handling, and process/delivery health separation.
 - Canonical initial submission identity, retained recovery descriptors, and state-only retry without a live execution.
-- Safe explicit native continuation after confirmed process termination and acknowledgment of uncertainty.
-- Bulk recovery of selected interrupted sessions with the same Kandev and native conversation identities, and results for each session.
+- Silent restart restoration after confirmed process termination, with the same Kandev session and native conversation.
+- Independent recovery of eligible startup candidates without an instruction, user message, new turn, or queued-work dispatch.
+- Remote executor survival across backend shutdown and authenticated reconnection, with local termination remaining the default.
+- Long-outage journal retention without default logical byte limits, while preserving physical disk reserve and unacknowledged output.
 - Specific localized outcomes, aligned controls, visible Stop results, and desktop/mobile coverage.
 - Recovery instructions in public documentation when implementation ships.
 
 ### Out of scope
 
 - Automatic resend, tool replay, fake terminal outcomes, deleting journals, or blanket recovery-block removal.
-- Remote executor restart policies, new feature flags, automatic conversation replacement, or full Kandev restart as the repair.
+- New feature flags, automatic conversation replacement, or full Kandev restart as the repair for an agentctl crash.
 - Deployment, production publication, or changes to the user's live database. The user separately authorized commit, push, and PR creation.
 
 ## Technical approach
+
+This section records the historical first proposal. Its manual resume, batch recovery, and fixed-quota behavior do not describe the revised implementation below.
 
 Task 01 adds closed-state handling to every exported journal database operation and coordinates instance stream shutdown.
 Task 04 repairs ACK ownership and quiet-stream catch-up, then adds pressure recovery and liveness safeguards.
@@ -238,18 +252,18 @@ Show paused only when flow is actually paused. Otherwise show cancellation pendi
 Copy is illustrative and localized during implementation. Use the same accessible controls and scroll owner as UI-01.
 This view covers delivery criterion 001.4.
 
-## Tests
+## Historical tests proposal (superseded)
 
 | Acceptance criteria | Proposed regression evidence |
 | --- | --- |
-| Delivery 001.1-001.3 | `journal_shutdown_test.go`: `TestJournalOperationsAfterClose`, `TestJournalCloseDuringReplay`; API `TestInstanceTeardownDoesNotCrashSiblingStream` |
+| Delivery 001.1-001.3 | `journal_shutdown_test.go`: `TestJournalShutdownLifecycle`, `TestJournalCloseDuringReplay`; API `TestInstanceTeardownDoesNotCrashSiblingStream` |
 | Delivery 003.1-003.2, 005.1-005.3 | `agent_delivery_submission_test.go`: initial dispatch persistence; real repository replay with duplicate terminal settlement |
 | Delivery 006.1, 006.4-006.8; runtime 003.1-003.6 | Missing-execution replay, terminal, unknown, missing association, locked journal, stale epoch, explicit resume, duplicate request, mixed live/dead sessions |
 | Delivery 006.7-006.9; runtime 003.5 | Component/service tests plus real crash/retry browser flows and button geometry |
 | Delivery 006.10 | Batch partial failure, retry/reload idempotency, same native identity, queue ordering, and accepted continuation per eligible item |
 | Delivery 001.4, 005.4-005.5 | Same-stream client replacement, quiet ACK catch-up, quota-pressure control, projected-but-unacknowledged recovery, and live-harness cleanup refusal |
 
-## E2E tests
+## Historical E2E proposal (superseded)
 
 Task 03 extends `tests/layout/agent-runtime-replacement.spec.ts` and its mobile counterpart.
 The flow kills an isolated child, waits for replacement, clicks retry, observes a typed outcome, and checks dispatch count.
@@ -261,12 +275,55 @@ The browser recurrence fixture fills the shipped 256 MiB quota after isolated ch
 At true capacity exhaustion, status and Stop stay responsive. Focusing the task must not replace a live harness merely because delivery is unhealthy.
 Existing durable stream-recovery suites remain regression inputs.
 
+## Restart recovery revision
+
+The user requires silent recovery after restart, without a new prompt or a resume form.
+Platform owns this revision because it changes durable runtime recovery, not only presentation.
+The spec and design revision supersede the original manual continuation and batch UI sections above, including their fixed-quota E2E proposal.
+Historical test results remain evidence for the prior implementation only.
+
+Source evidence: the global component selects `uncertain`, `reconnecting`, and `continued` metadata.
+A committed continuation increments the generation while retaining the old identity in `continued` metadata.
+`recoverySessionMatches` rejects that old identity against the current generation.
+This explains a reproducible stale-notice path; the screenshots alone do not prove which identity guard rejected each live session.
+The backend diagnostic bundle is partial and identifies a different running build, so it cannot establish that exact live cause.
+
+The branch was rebased locally onto `6b2147b5de85fa47cf5c0bdef0fbd6a32c0c1d11` without conflicts.
+The remote head remains `5d50992ee303001a607832bb746a22b77c23cf2a`; its checks do not validate the local rebase.
+The initial remote snapshot reported four failed E2E jobs and pending jobs.
+Container shard 2 failed in the Docker image build fixture. Other leaf failures need their own logs and reproduction.
+No new implementation, test run, push, or green-CI claim accompanies this design revision.
+
+### ASCII UI preview
+
+UI-05: Existing task chat after restart, shared desktop and phone composition.
+
+```text
+Before: [Resume interrupted sessions]
+        [session selection]
+        [Next instruction]
+        [acknowledgment] [Resume selected]
+After:  [existing conversation]
+        [normal composer]
+```
+
+Recovery runs without a browser entry point. Successful recovery adds no surface.
+The existing chat is the mobile exemplar and owns scrolling; its composer retains safe-area clearance.
+Unresolved failures stay within the affected session's existing status surface, with Retry and Stop where safe.
+Desktop controls retain normal sizing; phone actions stack with targets of at least 44 pixels.
+No new drawer, global notice, or scroll owner is introduced. Spacing above is illustrative.
+This preview maps to AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.20 through 006.24.
+
 ## Work orders
 
 - [x] [Task 01: Make journal shutdown safe for late consumers](task-01-journal-shutdown.md)
 - [x] [Task 04: Recover acknowledgments and contain delivery pressure](task-04-acknowledgment-capacity.md)
 - [x] [Task 02: Recover interrupted sessions after execution removal](task-02-session-recovery.md)
-- [x] [Task 03: Complete recovery controls and browser coverage](task-03-recovery-ui.md)
+- [x] [Task 03: Complete recovery controls and browser coverage](task-03-recovery-ui.md) (prior behavior)
+- [x] [Task 05: Restore interrupted sessions silently](task-05-silent-restart-recovery.md)
+- [x] [Task 07: Retain output through extended backend outages](task-07-long-outage-retention.md)
+- [x] [Task 08: Preserve remote agents across backend shutdown](task-08-remote-agent-lifetime.md)
+- [ ] [Task 06: Deliver revised PR and clear CI](task-06-pr-delivery.md)
 
 ## Verification results
 
@@ -322,10 +379,6 @@ Linux host process proof was exercised. Darwin/Windows runtime behavior, real pr
 
 ## Related implementation records
 
-- [Missing delivery record recovery](../durable-agent-record-recovery/plan.md):
-  its Task 02 reconstructs verified retained submissions that lack canonical
-  backend associations, using this package's authenticated inspection and
-  explicit continuation flow.
 - [Runtime replacement](../agentctl-runtime-replacement/plan.md).
 - [Durable reattachment](../durable-agent-reattachment/plan.md).
 - [Earlier streaming repair](../durable-agent-stream-repair/plan.md): prior implementation remains historical; Task 04 owns this recurrence.
@@ -341,3 +394,14 @@ Prepared checkpoints retry through the existing admission gates. Canonical accep
 The first-instruction persistence guard also accepts the matching canonical submission from the orchestrator launch handoff before the execution dispatches its first prompt. The desktop monitor, board Copilot, coordinator proposal, and phone Configuration Chat scenarios reproduced the original failure and passed after the correction. Focused race regressions also verify admission callbacks, launch handoffs, duplicate refusal, and foreign-owner refusal.
 
 Final review validation passed: the exact five-package SQLite race command, SQL guard, SQLite store conformance, changed-scope Go lint, 147 frontend tests, type checking, web lint, translation checks, and documentation validation. Both recovery browser selections passed sequentially (Chromium 39.5 seconds; mobile-chrome 28.8 seconds), and all four reproduced CI scenarios passed. Four fresh screenshots document the final UI. Storage contracts did not change during this follow-up, so the earlier PostgreSQL validation remains applicable.
+
+## Authorized implementation coordination
+
+On 2026-10-09, the user authorized implementation and delivery through GPT-6 Luna subagents with maximum reasoning.
+Backend and web ownership are disjoint; cross-boundary contracts remain coordinated in the primary session.
+The primary coordinator reviews the combined implementation before delivery. Browser runs remain sequential after backend readiness.
+A later delivery agent owns rebase, push to PR 4380, and CI/review remediation. No merge is authorized.
+
+## Revised implementation validation
+
+Tasks 05, 07, and 08 are implemented and locally verified. On the final rebased source, four phone cases, three focused desktop recovery cases, and both real SSH scenarios passed with retries disabled. The merged native Resume/read-only recovery contract passed 358 focused frontend tests and type checking. Native startup failure preserves the recovery block and unknown payload without acknowledgment. The coordinator reviewed the new desktop and phone captures and the rebase composition. Earlier complete backend race, SQLite/PostgreSQL conformance, physical-capacity, lint, public docs, and build checks remain recorded in the owning work orders. Task 06 remains in progress until the pushed PR head has green CI and complete review dispositions.

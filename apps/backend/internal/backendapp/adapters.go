@@ -456,6 +456,8 @@ func buildLifecycleLaunchRequest(
 		InterruptedSubmissionID:       req.InterruptedSubmissionID,
 		InterruptedStreamID:           req.InterruptedStreamID,
 		InterruptedHarnessGeneration:  req.InterruptedHarnessGeneration,
+		CandidateExecutionID:          req.CandidateExecutionID,
+		OnExecutionAllocated:          req.OnExecutionAllocated,
 		WorkspaceID:                   req.WorkspaceID,
 		SessionID:                     req.SessionID,
 		TaskEnvironmentID:             req.TaskEnvironmentID,
@@ -467,6 +469,7 @@ func buildLifecycleLaunchRequest(
 		AgentProfileID:                officeProfileID,
 		ExecutionProfileID:            req.AgentProfileID,
 		StartAgent:                    req.StartAgent,
+		SuppressBootStatusMessage:     req.SuppressBootStatusMessage,
 		TurnID:                        req.TurnID,
 		WorkspacePath:                 workspacePath,
 		OriginalWorkspacePath:         req.OriginalWorkspacePath,
@@ -1189,6 +1192,12 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 // and this lookup must never lazily create an execution.
 func (a *lifecycleAdapter) HasLiveExecution(sessionID string) bool {
 	return a.mgr.HasLiveAgentExecution(sessionID)
+}
+
+// HasPendingRemoteRecovery reports whether the exact remote execution owner
+// still has retryable lifecycle recovery pending.
+func (a *lifecycleAdapter) HasPendingRemoteRecovery(sessionID, executionID string) bool {
+	return a.mgr.HasPendingRemoteRecovery(sessionID, executionID)
 }
 
 // GetGitLog retrieves the git log for a session from baseCommit to HEAD.

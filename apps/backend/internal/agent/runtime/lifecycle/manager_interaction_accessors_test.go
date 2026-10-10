@@ -434,14 +434,18 @@ func TestStopAgentWithReasonRetainsExecutionWhenBackendCleanupFails(t *testing.T
 }
 
 func TestStopAgentWithReasonCleansPersistedKubernetesInventoryAfterRestart(t *testing.T) {
-	testPersistedKubernetesCleanupAfterRestart(t, StopReasonTaskDeleted, true)
+	testPersistedKubernetesCleanupAfterRestart(t, StopReasonTaskDeleted, true, false)
 }
 
 func TestForceStopAgentCleansPersistedKubernetesInventoryAfterRestartWithoutTerminalReason(t *testing.T) {
-	testPersistedKubernetesCleanupAfterRestart(t, "", true)
+	testPersistedKubernetesCleanupAfterRestart(t, "", true, false)
 }
 
-func testPersistedKubernetesCleanupAfterRestart(t *testing.T, reason string, force bool) {
+func TestPendingKubernetesStopAfterTaskDeletionUsesExactPersistedOwner(t *testing.T) {
+	testPersistedKubernetesCleanupAfterRestart(t, StopReasonTaskDeleted, true, true)
+}
+
+func testPersistedKubernetesCleanupAfterRestart(t *testing.T, reason string, force, missingSession bool) {
 	t.Helper()
 	controlPort := startKubernetesAgentctlServer(t, true, 41001)
 	instancePort := startKubernetesAgentctlServer(t, false, 0)
@@ -503,6 +507,10 @@ func testPersistedKubernetesCleanupAfterRestart(t *testing.T, reason string, for
 	cleanupManagerStopCh(t, mgr)
 	mgr.SetExecutorRunningWriter(store)
 	mgr.SetSecretStore(runtimeSecrets)
+	if missingSession {
+		mgr.workspaceInfoProvider = &deletedTaskSessionSnapshotProvider{err: models.ErrTaskSessionNotFound}
+		require.NotNil(t, mgr.queueRemoteRecovery(row, task08RemoteSnapshot(row)))
+	}
 
 	err = mgr.StopAgentWithReason(context.Background(), instance.InstanceID, reason, force)
 

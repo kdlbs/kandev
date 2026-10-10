@@ -13,6 +13,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -109,24 +110,56 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.resetRetrackedSessions()
 
 	// Read every runtime-owned startup recovery record before contacting any
-	// endpoint. Remote plugin rows carry decrypted auth tokens only in memory.
+	// endpoint. Remote credentials are hydrated only on clones used for one
+	// recovery attempt.
 	startup.BeginStep(ctx, startup.StepSessionsRecovery)
-	records, listErr := m.ListLiveStandaloneExecutorsRunning(ctx)
+	standaloneRecords, listErr := m.ListLiveStandaloneExecutorsRunning(ctx)
 	pluginRecords, pluginListErr := m.ListLivePluginExecutorsRunning(ctx)
+	remoteRecords, remoteListErr := m.ListLiveRemoteExecutorsRunning(ctx)
 	if listErr == nil && pluginListErr != nil {
 		listErr = pluginListErr
 	}
+	if remoteListErr != nil {
+		m.logger.Warn("remote execution recovery inventory could not be read; remote owners remain untouched",
+			zap.Error(remoteListErr))
+	}
+	records := append([]*models.ExecutorRunning(nil), standaloneRecords...)
+	remoteRecordsForRecovery := make([]*models.ExecutorRunning, 0, len(remoteRecords)+len(pluginRecords))
 	if listErr == nil {
+		pluginTerminalRecords := make([]*models.ExecutorRunning, 0, len(pluginRecords))
+		pluginLiveRecords := make([]*models.ExecutorRunning, 0, len(pluginRecords))
 		for _, record := range pluginRecords {
-			if record == nil {
+			if record == nil || remoteRecoveryOwnerUnsupported(record) {
 				continue
 			}
-			record.TransientAuthToken = m.revealRuntimeSecret(ctx, record.Metadata, MetadataKeyAuthTokenSecret)
+			copyRecord := cloneRemoteRecoveryRecord(record)
+			copyRecord.TransientAuthToken = m.revealRuntimeSecret(ctx, copyRecord.Metadata, MetadataKeyAuthTokenSecret)
+			copyRecord.TransientBootstrapNonce = m.revealRuntimeSecret(ctx, copyRecord.Metadata, MetadataKeyBootstrapNonceSecret)
+			if isTerminalExecutorRunningStatus(copyRecord.Status) {
+				pluginTerminalRecords = append(pluginTerminalRecords, copyRecord)
+			} else {
+				pluginLiveRecords = append(pluginLiveRecords, copyRecord)
+			}
 		}
-		records = append(records, pluginRecords...)
+		eligibleRemote := m.establishRemoteRecoveryCandidates(ctx, append(remoteRecords, pluginLiveRecords...))
+		eligiblePlugin := make([]*models.ExecutorRunning, 0, len(eligibleRemote))
+		eligibleBuiltInRemote := make([]*models.ExecutorRunning, 0, len(eligibleRemote))
+		for _, record := range eligibleRemote {
+			if record.Runtime == agentruntime.RuntimePluginRemote {
+				credentialed := m.revealRemoteRecoveryCredentials(ctx, record)
+				eligiblePlugin = append(eligiblePlugin, credentialed)
+			} else {
+				eligibleBuiltInRemote = append(eligibleBuiltInRemote, m.revealRemoteRecoveryCredentials(ctx, record))
+			}
+		}
+		remoteRecordsForRecovery = append(remoteRecordsForRecovery, pluginTerminalRecords...)
+		remoteRecordsForRecovery = append(remoteRecordsForRecovery, eligiblePlugin...)
+		remoteRecordsForRecovery = append(remoteRecordsForRecovery, eligibleBuiltInRemote...)
+		records = append(records, remoteRecordsForRecovery...)
 	}
-	recoveryOutcome := recoveryOutcomeSummary{candidateCountKnown: listErr == nil}
-	m.runRecoveryErr = listErr
+	inventoryKnown := listErr == nil && remoteListErr == nil
+	recoveryOutcome := recoveryOutcomeSummary{candidateCountKnown: inventoryKnown}
+	m.runRecoveryErr = errors.Join(listErr, remoteListErr)
 	if listErr != nil {
 		// A failed read leaves the record set unknown, which is not the same
 		// thing as empty. AC-EXECUTORS-SURVIVAL-002.6 stops a live instance
@@ -159,7 +192,21 @@ func (m *Manager) Start(ctx context.Context) error {
 	if passthroughLookup == nil {
 		passthroughLookup = func(context.Context, string) (bool, bool) { return false, false }
 	}
-	guardedSessions := SessionsToGuard(ctx, sessionIDsFromExecutorRunning(records), passthroughLookup)
+	guardInventory := append([]*models.ExecutorRunning(nil), records...)
+	guardInventory = append(guardInventory, remoteRecords...)
+	guardedSessions := SessionsToGuard(ctx, sessionIDsFromExecutorRunning(guardInventory), passthroughLookup)
+	guardedSet := make(map[string]struct{}, len(guardedSessions))
+	for _, sessionID := range guardedSessions {
+		guardedSet[sessionID] = struct{}{}
+	}
+	for _, remoteRecord := range remoteRecords {
+		if remoteRecord != nil && remoteRecord.SessionID != "" {
+			if _, exists := guardedSet[remoteRecord.SessionID]; !exists {
+				guardedSessions = append(guardedSessions, remoteRecord.SessionID)
+				guardedSet[remoteRecord.SessionID] = struct{}{}
+			}
+		}
+	}
 	for _, sessionID := range guardedSessions {
 		m.recoveryGuard.AcquireOrObserve(sessionID)
 	}
@@ -172,10 +219,13 @@ func (m *Manager) Start(ctx context.Context) error {
 	// survived, which the AC forbids. Only standalone records reach here
 	// (ListLiveStandaloneExecutorsRunning), and StandaloneExecutor is the
 	// only backend that reads them, so this narrows nothing else.
-	records = recoverableRecords(records, guardedSessions)
-	if listErr == nil {
+	standaloneRecords = recoverableRecords(standaloneRecords, guardedSessions)
+	records = append(append([]*models.ExecutorRunning(nil), standaloneRecords...), remoteRecordsForRecovery...)
+	if inventoryKnown {
 		recoveryOutcome.candidateCount = len(records)
 		startup.SetTotal(ctx, startup.StepSessionsRecovery, int64(len(records)))
+	} else {
+		startup.Degrade(ctx, startup.StepSessionsRecovery)
 	}
 
 	// AC-EXECUTORS-SURVIVAL-003.7: bound this pass's
@@ -225,6 +275,33 @@ func (m *Manager) Start(ctx context.Context) error {
 	var stopWG sync.WaitGroup
 	if len(recovered) > 0 {
 		for _, ri := range recovered {
+			if ri != nil {
+				if pending := m.pendingRemoteRecoveryForSession(ri.SessionID); pending != nil {
+					if !m.beginRemoteRecovery(pending) {
+						m.discardRemoteRecoveryInstance(ri)
+						startup.Advance(ctx, startup.StepSessionsRecovery, 1)
+						continue
+					}
+					err := m.processRecoveredRemoteInstance(recoveryCtx, pending, ri)
+					m.finishRemoteRecoveryAttempt(pending)
+					if err != nil {
+						m.logger.Debug("remote recovery candidate remains guarded after startup attach",
+							zap.String("session_id", ri.SessionID), zap.Error(err))
+						if _, tracked := m.executionStore.Get(ri.InstanceID); !tracked {
+							m.discardRemoteRecoveryInstance(ri)
+						}
+					} else {
+						recordOutcomes[ri.SessionID] = recoveryOutcomeRetracked
+					}
+					startup.Advance(ctx, startup.StepSessionsRecovery, 1)
+					continue
+				}
+				if isRemoteRecoveryRuntime(ri.RuntimeName) {
+					m.discardRemoteRecoveryInstance(ri)
+					startup.Advance(ctx, startup.StepSessionsRecovery, 1)
+					continue
+				}
+			}
 			if recoveryCtx.Err() != nil {
 				// AC-EXECUTORS-SURVIVAL-003.7: the deadline elapsed before this
 				// record could be reconstructed -- treat it as not re-tracked
@@ -578,8 +655,17 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.recoveryComplete.Store(true)
 
 	// Start remote status polling loop for runtimes exposing remote status.
+	remoteStatusCtx, cancelRemoteStatus := context.WithCancel(ctx)
+	stopRemoteStatus := func() bool { return false }
+	if m.stopContext != nil {
+		stopRemoteStatus = context.AfterFunc(m.stopContext, cancelRemoteStatus)
+	}
 	m.wg.Add(1)
-	go m.remoteStatusLoop(ctx)
+	go func() {
+		defer cancelRemoteStatus()
+		defer stopRemoteStatus()
+		m.remoteStatusLoop(remoteStatusCtx)
+	}()
 	m.logger.Info("remote status loop started")
 	// Set up callbacks for passthrough mode (using standalone runtime)
 	if standaloneRT, err := m.executorRegistry.GetBackend(executor.NameStandalone); err == nil {
@@ -816,7 +902,12 @@ func (m *Manager) IsShuttingDown() bool {
 
 // closeStopCh closes the manager shutdown channel at most once.
 func (m *Manager) closeStopCh() {
-	m.stopOnce.Do(func() { close(m.stopCh) })
+	m.stopOnce.Do(func() {
+		close(m.stopCh)
+		if m.cancelStop != nil {
+			m.cancelStop()
+		}
+	})
 }
 
 // Stop stops the lifecycle manager and releases resources held by executors.

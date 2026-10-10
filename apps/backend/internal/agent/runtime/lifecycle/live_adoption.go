@@ -19,30 +19,35 @@ func (m *Manager) adoptExistingAgentSession(
 	if m.streamManager == nil || execution == nil || client == nil {
 		return fmt.Errorf("existing agent recovery dependencies are unavailable")
 	}
-	association, err := client.GetAgentSessionAssociation(ctx)
-	if err != nil {
-		return fmt.Errorf("read live agent session association: %w", err)
-	}
-	if err := validateExistingAgentAssociation(execution, association); err != nil {
-		return err
-	}
-	status, err := client.GetDeliveryStatus(ctx, execution.DeliveryStreamID)
-	if err != nil {
-		return fmt.Errorf("read existing agent delivery state: %w", err)
-	}
-	if err := validateExistingDeliveryAssociation(execution, association, status); err != nil {
-		return err
-	}
 	recovered := &ExecutorInstance{
-		InstanceID:        execution.ID,
-		SessionID:         execution.SessionID,
-		ProviderSessionID: association.NativeSessionID,
-		Client:            client,
+		InstanceID:               execution.ID,
+		SessionID:                execution.SessionID,
+		RuntimeName:              execution.RuntimeName,
+		ProviderSessionID:        execution.ACPSessionID,
+		Client:                   client,
+		Metadata:                 execution.MetadataSnapshot(),
+		expectedDeliveryStreamID: execution.DeliveryStreamID,
 	}
-	if err := m.restoreExistingAgentDelivery(ctx, execution, association, status, recovered); err != nil {
+	if err := m.captureAuthenticatedAgentSessionEvidence(ctx, recovered); err != nil {
+		return fmt.Errorf("capture authenticated existing-agent evidence: %w", err)
+	}
+	if recovered.agentSessionAssociation == nil {
+		return fmt.Errorf("authenticated existing-agent association is unavailable")
+	}
+	if err := validateExistingAgentAssociation(execution, recovered.agentSessionAssociation); err != nil {
 		return err
 	}
-	execution.ACPSessionID = association.NativeSessionID
+	if recovered.DeliveryStatus != nil {
+		if err := validateExistingDeliveryAssociation(execution, recovered.agentSessionAssociation, recovered.DeliveryStatus); err != nil {
+			return err
+		}
+	} else if !recovered.DeliveryLegacyEvidence {
+		return fmt.Errorf("authenticated existing-agent delivery evidence is unavailable")
+	}
+	if err := m.restoreExistingAgentDelivery(ctx, execution, recovered.agentSessionAssociation, recovered.DeliveryStatus, recovered); err != nil {
+		return err
+	}
+	execution.ACPSessionID = recovered.agentSessionAssociation.NativeSessionID
 	if err := m.attachExistingAgentStreams(ctx, execution, client); err != nil {
 		return err
 	}
@@ -67,7 +72,8 @@ func validateExistingAgentIdentity(
 	execution *AgentExecution,
 	association *agentctl.AgentSessionAssociation,
 ) error {
-	if association.InstanceID == "" || association.InstanceID != execution.ID {
+	expectedID, err := recordedAgentctlInstanceID(execution.RuntimeName, execution.ID, execution.MetadataSnapshot())
+	if err != nil || association.InstanceID == "" || association.InstanceID != expectedID {
 		return fmt.Errorf("existing agent instance identity does not match execution")
 	}
 	if association.SessionID == "" || association.SessionID != execution.SessionID {
@@ -120,6 +126,12 @@ func (m *Manager) restoreExistingAgentDelivery(
 	status *agentctl.DeliveryStatus,
 	recovered *ExecutorInstance,
 ) error {
+	if status == nil {
+		if recovered != nil && recovered.DeliveryLegacyEvidence {
+			return m.restoreLegacyAgentDelivery(ctx, execution, association)
+		}
+		return fmt.Errorf("existing agent delivery evidence is unavailable")
+	}
 	if status.Durable && status.Version == journal.CurrentVersion {
 		recovered.DeliveryStatus = status
 		if err := m.restoreRecoveredDelivery(ctx, execution, recovered); err != nil {

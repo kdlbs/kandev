@@ -195,7 +195,6 @@ describe("useSessionRecoveryActions", () => {
       await pending;
     });
 
-    expect(result.current.deliveryRecoveryResult).toBeNull();
     expect(result.current.deliveryRecoveryNotice).toBe(
       "task:deliveryRecovery:recovery_identity_incomplete",
     );
@@ -219,10 +218,6 @@ describe("useSessionRecoveryActions", () => {
     });
 
     expect(result.current.deliveryRecoveryNotice).toBe("task:deliveryRecoveryblocked");
-    expect(result.current.deliveryRecoveryResult).toMatchObject({
-      outcome: "blocked",
-      reason: "missing_canonical_submission",
-    });
     expect(result.current.recoveryError).toBeNull();
     expect(result.current.busyAction).toBeNull();
     expect(onDeliveryReconciled).toHaveBeenCalledTimes(1);

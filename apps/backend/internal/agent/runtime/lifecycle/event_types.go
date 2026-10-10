@@ -33,6 +33,7 @@ type AgentEventPayload struct {
 	ErrorMessage             string                           `json:"error_message,omitempty"`
 	FailureCode              string                           `json:"failure_code,omitempty"`
 	FailureDetails           string                           `json:"failure_details,omitempty"`
+	DeliverySubmissionID     string                           `json:"delivery_submission_id,omitempty"`
 	StartupFailureReason     string                           `json:"startup_reason,omitempty"`
 	StartupFailureAttempts   int                              `json:"startup_attempts,omitempty"`
 	StartupFailureNPMCode    string                           `json:"startup_npm_code,omitempty"`
@@ -41,9 +42,10 @@ type AgentEventPayload struct {
 	// SessionSettingsPolicy is a host-owned snapshot of the policy used by this
 	// execution's startup. It lets delayed lifecycle callbacks retain their
 	// startup provenance after the orchestrator releases the admission attempt.
-	SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
-	ExitCode              *int                          `json:"exit_code,omitempty"`
-	PromptGeneration      uint64                        `json:"prompt_generation,omitempty"`
+	SessionSettingsPolicy     streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
+	ExitCode                  *int                          `json:"exit_code,omitempty"`
+	PromptGeneration          uint64                        `json:"prompt_generation,omitempty"`
+	RecoveredAvailabilityOnly bool                          `json:"recovered_availability_only,omitempty"`
 	// Prompt replay evidence is populated on terminal failure events. It is
 	// captured by lifecycle before the terminal event is published so consumers
 	// do not have to infer output or effects from independently subscribed

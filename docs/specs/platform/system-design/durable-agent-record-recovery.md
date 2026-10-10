@@ -17,8 +17,8 @@ the canonical conversation store. Agentctl supplies retained transport evidence.
 Tasks and Agents retain task ownership, workspace identity, and native history.
 
 This design extends [reattachment](durable-agent-reattachment.md), including the
-explicit continuation operation introduced by PR #4380. It does not implement
-another continuation engine. The implementation package pins that dependency.
+automatic restore-only operation landed in PR #4380. It does not implement
+another continuation engine or restore the retired instruction form.
 
 | Requirement | Design boundary |
 | --- | --- |
@@ -173,9 +173,10 @@ through reconstruction. The reconciler checks termination after this commit.
 
 If the original process is alive, retain attachment/Stop behavior and prohibit
 a replacement prompt. If verified termination and native identity permit
-continuation, use PR #4380's `ResumeInterruptedSession` unchanged in authority:
-explicit acknowledgment, observed recovery revision, one new instruction, and
-the existing idempotency key. Preserve the old uncertain outcome.
+restoration, use PR #4380's automatic restore-only checkpoint and ordinary
+admission after restoration. Retry itself never loads or dispatches a new
+instruction, and no manual restart-resume form is exposed. Preserve the old
+uncertain outcome.
 
 A saved instruction rejected before provider admission is not the old journal
 submission. Keep its message and mark its delivery as blocked. Do not bind it to
@@ -187,7 +188,7 @@ as a side effect of Retry. Only a later explicit user action admits new work.
 Use the existing recovery card, `session.recover` result, and session projection.
 Before a canonical recovery identity exists, identify the notice by the durable
 block ID, incarnation, generation, and revision. Keep that identity distinct from
-PR #4380's complete continuation identity.
+the complete identity used by the landed restore-only checkpoint.
 
 After reconstruction, replace that notice only with the matching committed
 recovery result. Discard late responses after task, session, block, or generation

@@ -65,7 +65,7 @@ func (s *Service) retryMissingCanonicalDeliverySubmission(ctx context.Context, s
 	}
 	store, ok := s.repo.(repository.AgentDeliveryReconstructionRepository)
 	if !ok {
-		return blocked("recovery_state_unavailable")
+		return blocked(recoveryStateUnavailableReason)
 	}
 	selected, reason, err := s.readReconstructionSelection(ctx, client, session, incarnationID, generation, block)
 	if err != nil {
@@ -117,7 +117,7 @@ func (s *Service) commitDeliveryReconstruction(ctx context.Context, session *mod
 func (s *Service) validateReconstructionMessage(ctx context.Context, session *models.TaskSession, messageID string) (string, error) {
 	messages, ok := s.repo.(repository.MessageRepository)
 	if !ok {
-		return "recovery_state_unavailable", nil
+		return recoveryStateUnavailableReason, nil
 	}
 	message, err := messages.GetMessage(ctx, messageID)
 	if err != nil || message == nil {

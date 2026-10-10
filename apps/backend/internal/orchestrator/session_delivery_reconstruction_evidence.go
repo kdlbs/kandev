@@ -59,7 +59,7 @@ func (s *Service) prepareReconstructionRequest(ctx context.Context, session *mod
 	evidence, selected, stream, messageID := selection.evidence, selection.submission, selection.stream, selection.messageID
 	continuity, ok := s.repo.(sessionContinuityStore)
 	if !ok {
-		return blocked("recovery_state_unavailable")
+		return blocked(recoveryStateUnavailableReason)
 	}
 	current, err := continuity.GetCurrentHarnessSessionGeneration(ctx, session.ID, incarnationID)
 	if err != nil || current == nil || current.Generation != generation || current.NativeSessionID == "" {
@@ -67,7 +67,7 @@ func (s *Service) prepareReconstructionRequest(ctx context.Context, session *mod
 	}
 	submissions, ok := s.repo.(repository.AgentDeliveryRepository)
 	if !ok {
-		return blocked("recovery_state_unavailable")
+		return blocked(recoveryStateUnavailableReason)
 	}
 	cursor, err := submissions.GetAgentDeliveryCursor(ctx, stream.StreamID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestJournalOperationsAfterClose(t *testing.T) {
+func TestJournalShutdownLifecycle(t *testing.T) {
 	path := t.TempDir() + "/delivery.bbolt"
 	j, err := Open(Config{Path: path})
 	if err != nil {
@@ -29,19 +29,31 @@ func TestJournalOperationsAfterClose(t *testing.T) {
 		StreamID: "stream", SessionID: "session", IncarnationID: "incarnation",
 		HarnessGeneration: 1, Type: "complete", Payload: []byte(`{}`), Terminal: true,
 	}
+	submission := Submission{ID: "submission", Hash: "hash", SessionID: "session", State: SubmissionPrepared}
 	tests := []struct {
 		name string
 		run  func() error
 	}{
+		{name: "append", run: func() error { _, err := j.Append(ctx, event); return err }},
 		{name: "append batch", run: func() error { _, err := j.AppendBatch(ctx, []Event{event}); return err }},
+		{name: "replay", run: func() error { _, _, err := j.Replay(ctx, "stream", 0, 10); return err }},
+		{name: "acknowledge", run: func() error { return j.Acknowledge(ctx, "stream", 1) }},
+		{name: "get stream", run: func() error { _, err := j.GetStream(ctx, "stream"); return err }},
 		{name: "compact", run: func() error { return j.Compact(ctx) }},
 		{name: "compact if needed", run: func() error { return j.CompactIfNeeded(ctx) }},
-	}
-	for name, operation := range closedJournalOperations(j) {
-		tests = append(tests, struct {
-			name string
-			run  func() error
-		}{name: name, run: operation})
+		{name: "unresolved submissions", run: func() error { _, err := j.HasUnresolvedSubmissions(ctx); return err }},
+		{name: "list submissions", run: func() error { _, err := j.ListSubmissions(ctx, "session"); return err }},
+		{name: "retire submission", run: func() error { _, err := j.RetireSubmission(ctx, "submission", 2); return err }},
+		{name: "put submission", run: func() error { _, err := j.PutSubmission(ctx, submission); return err }},
+		{name: "get submission", run: func() error { _, err := j.GetSubmission(ctx, "submission"); return err }},
+		{name: "unresolved work", run: func() error { _, err := j.HasUnresolvedWork(ctx); return err }},
+		{name: "transition submission", run: func() error {
+			_, err := j.TransitionSubmission(ctx, "submission", SubmissionAccepted, time.Now())
+			return err
+		}},
+		{name: "recovery descriptor", run: func() error { _, err := j.RecoveryDescriptor(ctx, "session", "incarnation", 1, "stream"); return err }},
+		{name: "rollover stream", run: func() error { return j.RolloverStream(ctx, "stream", Stream{StreamID: "replacement"}) }},
+		{name: "cancel submission", run: func() error { return j.CancelSubmission(ctx, "submission", event) }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

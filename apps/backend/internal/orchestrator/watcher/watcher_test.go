@@ -25,11 +25,13 @@ type mockSubscription struct {
 func TestAgentLifecycleSettingsPolicyReachesWatcher(t *testing.T) {
 	w := &Watcher{}
 	payload := lifecycle.AgentEventPayload{
-		TaskID:                "task-1",
-		SessionID:             "session-1",
-		AgentExecutionID:      "execution-1",
-		AttemptID:             "resume-3",
-		SessionSettingsPolicy: streams.SessionSettingsPolicyProviderRestored,
+		TaskID:                    "task-1",
+		SessionID:                 "session-1",
+		AgentExecutionID:          "execution-1",
+		AttemptID:                 "resume-3",
+		Status:                    string(v1.AgentStatusReady),
+		SessionSettingsPolicy:     streams.SessionSettingsPolicyProviderRestored,
+		RecoveredAvailabilityOnly: true,
 	}
 	var got AgentEventData
 	if err := w.parseEventData(payload, &got); err != nil {
@@ -37,6 +39,12 @@ func TestAgentLifecycleSettingsPolicyReachesWatcher(t *testing.T) {
 	}
 	if got.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
 		t.Fatalf("settings policy = %q, want provider_restored", got.SessionSettingsPolicy)
+	}
+	if !got.RecoveredAvailabilityOnly {
+		t.Fatal("recovered availability marker was lost while decoding lifecycle event")
+	}
+	if got.Status != string(v1.AgentStatusReady) {
+		t.Fatalf("agent status = %q, want ready", got.Status)
 	}
 	if got.AttemptID != payload.AttemptID || got.AgentExecutionID != payload.AgentExecutionID {
 		t.Fatalf("attempt/execution identity changed in watcher: %#v", got)

@@ -74,28 +74,32 @@ Failure to persist a terminal outcome preserves uncertainty.
 
 ### Pressure recovery before exhaustion
 
-The 256 MiB stream limit bounds a temporary retained backlog, not the total transcript or task lifetime.
-Keep existing finite defaults while fixing retention. Size future changes from measured serialized event rate and the supported disconnected interval.
-Per-stream limits, per-journal limits, physical file size, and host free space remain separate budgets.
-A larger per-stream limit increases the worst-case footprint across concurrent sessions; it cannot correct stalled acknowledgments.
+Remote agents retain output and continue independent work during prolonged backend absence, including a week, while usable disk remains.
+Default production retention has no fixed logical byte ceiling. The former 256 MiB stream and 2 GiB journal limits do not stop execution.
+Explicit positive internal limits remain available for bounded-quota tests.
+Keep the existing bbolt format, sequence checks, and owner checks.
+Keep the 1 MiB event limit and bounded pending producer buffers and replay pages.
+Unacknowledged records grow on the executor volume without age-based expiry or deletion to reclaim space.
 
-Introduce pressure at 75 percent of ordinary retained capacity and an admission/producer guard at 90 percent.
-Clear pressure below 60 percent after verified ACK pruning. Apply these bounds to both stream and journal budgets.
-Reserve enough capacity for all bounded pending writes, one maximum event, and terminal/health records before admitting additional output.
-The guard must engage earlier when those bounds exceed the remaining headroom. Percentages alone are insufficient admission checks.
-Existing disk-space checks can engage the same state before the logical limit.
+Disk pressure uses available capacity on that volume, a 32 MiB control/recovery reserve, and pending write headroom.
+Capacity sampling is cached and bounded independently of event count.
+Unknown disk statistics are not proof of exhaustion. Actual write failures retain typed handling.
+ACK pruning reuses free database pages. Optional compaction cannot start if its temporary copy would breach the reserve.
+Capacity accounting may credit reusable bbolt pages against payload writes, but not against the physical reserve or allocation headroom.
+Exclude pending pages held by readers and deduct in-flight reservations. Report reusable journal pages separately from available filesystem bytes.
 
-On pressure, immediately reconcile the backend's projected cursor and the journal's acknowledged cursor.
+On pressure, reconcile the backend's projected cursor with the journal's acknowledged cursor.
 Advance only to a verified contiguous committed cursor with matching owner identity, then prune through the existing journal transaction.
 Do not fabricate acknowledgment, clear submissions, or require a new prompt to drain the backlog.
-Do not increase limits automatically or roll over an unacknowledged stream to evade its budget.
+When the disk cannot safely accept more output, request cancellation of the exact owned turn before the reserve is exhausted.
+Keep status, Stop, and ACK processing available. A failed terminal write preserves uncertainty.
+Process liveness remains separate from delivery health. Session focus and stale-execution cleanup cannot kill a live harness because delivery is unhealthy.
 
-Use producer backpressure only when the adapter can preserve control responsiveness and bounded pending data.
-If it cannot, request cancellation of the exact owned turn before exhausting the reserved capacity.
-There is no assumption that arbitrary providers support pause-and-resume of an in-flight RPC.
-A failed commit enters a typed delivery-unavailable state and reports out of band if the journal cannot store the notice.
-Keep process liveness separate from delivery health. Session focus and stale-execution cleanup must not kill a live harness because its delivery status is unhealthy.
-After space returns, resume the existing delivery pump when its state is recoverable. Otherwise preserve uncertainty and use explicit same-conversation continuation.
+Backend shutdown preserves remote runtimes. Local survival remains optional and off by default.
+An outage can delay operations that require the backend even while independent agent work continues.
+The journal format remains compatible. Older binaries retain their older quota behavior after downgrade.
+Downgrade does not grant the long-outage guarantee or permit deletion of unacknowledged records.
+Tests cover real retention beyond 256 MiB, accounting beyond 2 GiB, a deterministic elapsed week, reconnect/replay, low disk, and compaction headroom.
 
 Report retained/unacknowledged bytes, ACK pending age, last successful ACK, retry/error categories, pressure transitions, and projection lag.
 Keep metric labels bounded; session/stream identifiers belong in structured diagnostics only.

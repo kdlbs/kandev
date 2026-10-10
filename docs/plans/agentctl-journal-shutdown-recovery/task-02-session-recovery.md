@@ -19,9 +19,9 @@ acceptance_criteria:
   - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.4
   - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5
   - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.6
-  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.15
   - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.16
-  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.18
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.17
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.19
   - AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-003.1
   - AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-003.3
   - AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-003.5
@@ -142,9 +142,8 @@ PR review follow-up:
 - Three desktop CI scenarios and the phone Configuration Chat scenario reproduced the initial-admission failure before the fix. All four passed after the fix through the managed browser runner.
 - The final exact five-package SQLite race run passed: lifecycle 133.808 seconds, orchestrator 183.684 seconds, handlers 5.746 seconds, executor 10.428 seconds, and repository results in the retained test log. SQL guard, SQLite store conformance, and changed-scope Go lint passed. Storage contracts did not change in this review follow-up; the earlier isolated PostgreSQL results remain the package evidence.
 
-## Follow-up package
+## Superseding restart behavior
 
-[Missing delivery record recovery Task 02](../durable-agent-record-recovery/task-02-atomic-reconstruction.md)
-builds on this recovery and continuation flow to restore uniquely verified
-retained submissions whose canonical backend association is missing. The
-dependency work-order results above remain unchanged.
+The user rejected the manual interruption flow on 2026-10-09.
+[Task 05](task-05-silent-restart-recovery.md) replaces it with automatic restoration without prompt dispatch.
+The results above describe the prior implementation, not validation of that revision.

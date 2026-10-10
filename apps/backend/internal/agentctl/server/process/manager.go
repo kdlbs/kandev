@@ -779,7 +779,9 @@ func (m *Manager) RetireDeliverySubmission(ctx context.Context, id string, recov
 		return err
 	}
 	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
-	if submission.SessionID != sessionID || submission.IncarnationID != incarnationID || generation != recoveryGeneration || submission.HarnessGeneration > generation {
+	if submission.SessionID != sessionID || submission.IncarnationID != incarnationID ||
+		generation != recoveryGeneration || submission.HarnessGeneration > generation ||
+		(submission.HarnessGeneration == generation && submission.State != journal.SubmissionInterruptedUnknown) {
 		return journal.ErrOwnerMismatch
 	}
 	_, err = deliveryJournal.RetireSubmission(ctx, id, recoveryGeneration)

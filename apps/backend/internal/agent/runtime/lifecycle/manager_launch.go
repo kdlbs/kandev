@@ -1026,11 +1026,23 @@ func invalidScratchPathID(id string) bool {
 // launchPrepareRequest copies the launch request, sets the resolved workspace path,
 // and populates metadata from the request fields. Runtime/profile environment
 // values are composed later, after every managed source has been collected.
-func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentProfileInfo, workspacePath string) (LaunchRequest, string, error) {
+func (m *Manager) launchPrepareRequest(ctx context.Context, req *LaunchRequest, profileInfo *AgentProfileInfo, workspacePath string) (LaunchRequest, string, error) {
 	if err := m.validateLaunchCheckoutOptions(req); err != nil {
 		return LaunchRequest{}, "", err
 	}
 	executionID := uuid.New().String()
+	if req.CandidateExecutionID != "" {
+		if req.OnExecutionAllocated == nil {
+			return LaunchRequest{}, "", errors.New("restore candidate requires an allocation checkpoint callback")
+		}
+		if _, exists := m.executionStore.Get(req.CandidateExecutionID); exists {
+			return LaunchRequest{}, "", fmt.Errorf("restore candidate execution %q already exists", req.CandidateExecutionID)
+		}
+		executionID = req.CandidateExecutionID
+		if err := req.OnExecutionAllocated(ctx, executionID); err != nil {
+			return LaunchRequest{}, "", fmt.Errorf("record restore candidate launch boundary: %w", err)
+		}
+	}
 	reqWithWorktree := *req
 	reqWithWorktree.WorkspacePath = workspacePath
 
@@ -2097,7 +2109,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// Compose the request before preparation so setup scripts receive the same
 	// final snapshot that the runtime, agent, shell, and terminal will use.
-	reqWithWorktree, executionID, err := m.launchPrepareRequest(req, profileInfo, workspacePath)
+	reqWithWorktree, executionID, err := m.launchPrepareRequest(ctx, req, profileInfo, workspacePath)
 	if err != nil {
 		m.publishLaunchPrepareCompleted(req, nil, progressRecorder, workspacePath, false, err)
 		return nil, err
@@ -2344,6 +2356,7 @@ func (m *Manager) buildExecutionFromInstance(
 	execution.TaskScope = req.TaskScope
 	execution.setSessionSettingsStartupPolicy(req.SessionSettingsPolicy)
 	execution.RequiredNativeConversationID = req.RequiredNativeConversationID
+	execution.suppressBootStatusMessage = req.SuppressBootStatusMessage
 	execution.InterruptedSubmissionID = req.InterruptedSubmissionID
 	execution.InterruptedStreamID = req.InterruptedStreamID
 	execution.InterruptedHarnessGeneration = req.InterruptedHarnessGeneration
@@ -2689,9 +2702,11 @@ func (m *Manager) finishRegisteredLaunchRollback(execution *AgentExecution, task
 		// A failed resume only owns the newly opened local client and forward. The
 		// recorded Pod/PVC inventory remains the authority for a later retry or
 		// terminal cleanup, so never discard its durable row here.
+		m.cleanupPassthroughMCPConfig(execution)
 		m.executionStore.Remove(execution.ID)
 		return
 	}
+	m.cleanupPassthroughMCPConfig(execution)
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if !discardDurable || taskCleanupActive {
@@ -2733,6 +2748,7 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 		client.Close()
 	}
 	execution.EndSessionSpan()
+	m.cleanupPassthroughMCPConfig(execution)
 }
 
 // rollbackRegisteredLaunch stops the runtime before removing either side of
@@ -2892,7 +2908,7 @@ func (m *Manager) resolveAgentDisplayName(ctx context.Context, execution *AgentE
 // createBootMessage creates a boot message and starts the stderr polling goroutine.
 // Returns nil values when boot messages are unavailable.
 func (m *Manager) createBootMessage(ctx context.Context, execution *AgentExecution, bootCommand, agentDisplayName string) (*models.Message, chan struct{}) {
-	if m.bootMessageService == nil || execution == nil {
+	if m.bootMessageService == nil || execution == nil || execution.suppressBootStatusMessage {
 		return nil, nil
 	}
 	bootMsg, bootErr := m.bootMessageService.CreateMessage(ctx, &BootMessageRequest{

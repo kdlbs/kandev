@@ -841,6 +841,50 @@ func (s *Service) resumeAttemptAllowsExecution(sessionID, executionID string, or
 	return resumeAttemptTombstoneAllowsExecution(registry, sessionID, executionID, originID)
 }
 
+func (s *Service) activeResumeAttemptOwnsStartup(sessionID, executionID, originID string) bool {
+	id, ok := parseResumeAttemptIdentity(originID)
+	if !ok || sessionID == "" || executionID == "" {
+		return false
+	}
+	registry := s.resumeAttemptStore()
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	current := registry.attempts[sessionID]
+	if current == nil || current.id != id || current.ctx.Err() != nil || current.accepted {
+		return false
+	}
+	return activeResumeAttemptAllowsExecutionLocked(registry, current, executionID, originID)
+}
+
+// resumeAttemptOwnsUnacceptedStartupStop identifies a stop from the exact
+// latest resume attempt that never transferred startup ownership to a
+// provider turn. Such a callback can accompany a failed startup, but it must
+// not complete a turn after that failure has already been projected.
+func (s *Service) resumeAttemptOwnsUnacceptedStartupStop(sessionID, executionID, originID string) bool {
+	id, ok := parseResumeAttemptIdentity(originID)
+	if !ok || sessionID == "" || executionID == "" {
+		return false
+	}
+	registry := s.resumeAttemptStore()
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if current := registry.attempts[sessionID]; current != nil {
+		return current.id == id && current.ctx.Err() == nil && !current.accepted &&
+			activeResumeAttemptAllowsExecutionLocked(registry, current, executionID, originID)
+	}
+	tombstone, found := registry.tombstoneLocked(sessionID, id)
+	if !found || tombstone.cancelled || tombstone.accepted ||
+		tombstone.executionID != executionID {
+		return false
+	}
+	for _, later := range registry.tombstones[sessionID] {
+		if later.id > id {
+			return false
+		}
+	}
+	return true
+}
+
 // resumeAttemptOwnsNotice reports whether the attempt is still the session's
 // newest accepted startup owner. A completed attempt remains eligible for a
 // replay after its owner releases the registry entry, but an older event cannot
@@ -944,6 +988,11 @@ func resumeAttemptTombstoneAllowsExecution(
 	}
 	if tombstone.cancelled {
 		return false
+	}
+	for _, later := range registry.tombstones[sessionID] {
+		if later.id > id {
+			return false
+		}
 	}
 	return tombstone.executionID == "" || executionID == "" || tombstone.executionID == executionID
 }

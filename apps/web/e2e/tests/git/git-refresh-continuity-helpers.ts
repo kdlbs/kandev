@@ -56,6 +56,10 @@ export async function scrollDiffIntoReadingPosition(
   filePath: string,
   interaction: "programmatic" | "touch" = "programmatic",
 ) {
+  const targetSection = page
+    .locator('[data-testid="review-diff-scroll"]')
+    .locator(`[data-review-file-key="${encodeURIComponent(filePath)}"]`);
+  await targetSection.scrollIntoViewIfNeeded();
   await expect
     .poll(
       async () => {

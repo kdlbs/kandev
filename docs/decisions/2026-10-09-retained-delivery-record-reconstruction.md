@@ -4,6 +4,12 @@
 **Date:** 2026-10-09
 **Area:** backend, protocol
 
+## Landed recovery integration
+
+PR #4380's automatic restore-only recovery supersedes references below to its
+earlier explicit continuation form. Reconstruction preserves that landed
+contract and never reintroduces the retired instruction API or batch UI.
+
 ## Context
 
 An older session can retain a submitted prompt in agentctl while its canonical

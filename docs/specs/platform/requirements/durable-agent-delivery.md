@@ -2,7 +2,7 @@
 status: draft
 system: platform
 created: 2026-09-10
-updated: 2026-10-09
+updated: 2026-10-10
 owners:
   - kandev
 ---
@@ -17,7 +17,7 @@ This draft defines proposed behavior. It does not claim that the current impleme
 
 ## Terminology
 
-- Journal: A bounded agentctl store for submissions and normalized events.
+- Journal: An agentctl disk store for submissions and normalized events, with bounded memory use and explicit storage-exhaustion handling.
 - Inbox: Backend SQL records that durably receive journal events.
 - Acknowledged cursor: Highest contiguous sequence committed to the backend inbox.
 - Projected cursor: Highest contiguous sequence applied to canonical product state.
@@ -35,7 +35,7 @@ This draft defines proposed behavior. It does not claim that the current impleme
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-001.1:** When durable delivery is active, agentctl must commit normalized events before publication and recover committed records after a process crash.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-001.2:** When storage is unavailable, corrupt, locked, or full, agentctl must refuse unsafe admissions and expose a typed error. It must not silently discard unacknowledged records.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-001.3:** When an instance stops during journal access, the operation shall finish safely or return a typed unavailable result. Other instances shall remain operational, and committed records shall remain recoverable.
-- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-001.4:** Before retained output exhausts ordinary storage capacity, Kandev shall expose delivery pressure and apply bounded flow control. If the provider cannot pause safely, Kandev shall request cancellation of the current owned turn while control capacity remains. Status, acknowledgment, replay, and Stop shall remain available. A persistence failure shall preserve uncertainty and shall not be treated as proof of process termination.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-001.4:** Before usable disk capacity is exhausted, agentctl shall expose delivery pressure and preserve capacity for control and recovery records. The fixed 256 MiB stream and 2 GiB journal thresholds shall not cancel ongoing work while usable disk capacity remains. At actual storage exhaustion or persistence failure, bounded flow control and exact-owner cancellation may protect recoverable state. Status, acknowledgment, replay, and Stop shall remain available where storage permits. Persistence failure shall preserve uncertainty and shall not establish process termination.
 
 ### REQ-PLATFORM-DURABLE-AGENT-DELIVERY-002: Executor storage lifetime
 
@@ -47,6 +47,7 @@ This draft defines proposed behavior. It does not claim that the current impleme
 
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-002.1:** When an executor advertises durable delivery, its journal must survive agentctl replacement within the retained environment. Native harness state must remain separate.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-002.2:** When an environment loses its journal, Kandev must report unavailable delivery history and an uncertain active submission. Cleanup must preserve live or unacknowledged records.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-002.3:** Normal Kandev shutdown shall stop local/worktree agents by default. Explicit local survival remains optional. Backend shutdown or disconnection shall preserve supported remote agentctl and agent processes independently of that local setting. Backend return shall authenticate and reconnect to the recorded remote execution; explicit Stop and provider environment loss remain separate events.
 
 ### REQ-PLATFORM-DURABLE-AGENT-DELIVERY-003: Idempotent prompt submission
 
@@ -72,6 +73,8 @@ This draft defines proposed behavior. It does not claim that the current impleme
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-004.3:** When a backend adopts a surviving agent, recovery must preserve the original stream identity and replay position. Adoption must not replace the conversation.
 
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-004.4:** While detached and within journal capacity, a durable producer shall continue committing output without waiting for an absent stream consumer. Reattachment shall deliver the complete retained tail, including terminal events.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-004.5:** A supported remote agentctl and its active agent shall continue independent work during prolonged backend disconnection, including a week-long outage, while the remote environment and usable disk capacity remain available. Unacknowledged output shall not expire because of backend absence or crossing the former fixed journal limits. Memory use shall remain bounded.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-004.6:** On backend return, Kandev shall automatically authenticate and reconnect to the same surviving remote execution, replay retained output incrementally, and join live delivery without a prompt, duplicate tool execution, or replacement conversation. Explicit Stop remains separate from backend shutdown. Operations requiring an unavailable backend may wait without fabricating completion.
 
 ### REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005: Idempotent backend projection
 
@@ -101,16 +104,21 @@ This draft defines proposed behavior. It does not claim that the current impleme
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.4:** After bounded initial reconciliation expires, later state-only reconciliation shall remain possible for the same owned submission without resend.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.5:** When retained evidence settles an uncertain submission, Kandev shall resolve only its matching delivery block after projection and authoritative outcome settlement. Other recovery blocks shall remain effective.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.6:** Reconnecting and uncertain session state shall survive browser reload and backend restart. It shall not appear idle and ready for new work while delivery remains unresolved.
-- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.7:** When a session has an uncertain prompt, workspace-only restoration shall remain available for inspection without starting an agent, resending a prompt, or resolving its uncertainty.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.7:** When a session has an uncertain prompt, workspace-only inspection shall remain available through an existing owned workspace execution. Cold workspace restoration may proceed when no saved execution or delivery recovery identity can be replaced. It shall not overwrite a pinned recovery source or candidate, start an agent, resend a prompt, or resolve uncertainty.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8:** When a user clicks the existing Resume action in Quick Chat or task chat, Kandev shall use explicit session recovery rather than an ordinary launch blocked by an interrupted prompt. Automatic opening and focus shall remain subject to recovery admission.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.9:** A successful explicit native resume shall preserve the native conversation and record its recovery action without resending the interrupted instruction or declaring its historical unknown outcome terminal. Failed recovery shall retain the recovery block.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.10:** Workspace-only restoration shall never resolve a prompt recovery block, including when a request carries a recovery action. Native-state loss and unresolved live durable work shall retain their existing distinct recovery rules.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.11:** A read-only workspace fallback without a composer recovery owner shall expose the existing explicit Resume action with details collapsed. The action shall honor busy state and remain reachable on desktop and phone.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.12:** Successful explicit native resume shall match every unresolved SQL submission to authenticated journal evidence by ID, session, incarnation, generation, and payload hash before retiring interrupted-unknown work. It shall confirm matching retirement before resolving the database recovery block. Acknowledged uncertainty shall retain its historical payload and outcome, remain non-replayable, and survive journal reopen and backend adoption. Live work, ownership mismatch, or unavailable SQL or journal evidence shall keep recovery blocked.
-- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.15:** Retry connection shall report progress and a specific result, including when the original execution is absent. Retained evidence shall remain usable without that execution. Missing or ambiguous evidence shall produce an actionable blocked result without resend.
-- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.16:** After confirmed termination of the original owned process, an authorized user can explicitly continue an interrupted session with a new instruction. Kandev shall retain the prior uncertainty, preserve native identity when recoverable, and reject stale recovery requests. Repeated requests shall not dispatch another instruction. Unknown process ownership shall block continuation.
-- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.17:** Recovery actions shall use aligned desktop controls and stacked phone controls. Phone and coarse-pointer targets shall measure at least 44 pixels. Retry results, Stop limitations, and continuation choices shall remain visible and keyboard-accessible.
-- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.18:** Users can resume selected sessions interrupted by a shared runtime failure in one operation. Each eligible session shall retain its Kandev session and native conversation identities. The operation shall report progress and results per session, preserve independent admission and ownership checks, and exclude already active or completed work. Retrying the operation shall not repeat accepted continuation instructions. Missing native state shall block that session without creating a replacement conversation.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.16:** Retry connection shall report progress and a specific result, including when the original execution is absent. Retained evidence shall remain usable without that execution. Missing or ambiguous evidence shall produce an actionable blocked result without resend.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.17:** After confirmed termination of the original owned process, an authorized user can explicitly continue an interrupted session with a new instruction. Kandev shall retain the prior uncertainty, preserve native identity when recoverable, and reject stale recovery requests. Repeated requests shall not dispatch another instruction. Unknown process ownership shall block continuation. **Superseded by AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.20 through 006.24 for restart recovery.**
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.18:** Recovery actions shall use aligned desktop controls and stacked phone controls. Phone and coarse-pointer targets shall measure at least 44 pixels. Retry results, Stop limitations, and continuation choices shall remain visible and keyboard-accessible. **Superseded by AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.20 through 006.24 for restart recovery.**
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.19:** Users can resume selected sessions interrupted by a shared runtime failure in one operation. Each eligible session shall retain its Kandev session and native conversation identities. The operation shall report progress and results per session, preserve independent admission and ownership checks, and exclude already active or completed work. Retrying the operation shall not repeat accepted continuation instructions. Missing native state shall block that session without creating a replacement conversation. **Superseded by AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.20 through 006.24 for restart recovery.**
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.20:** After backend restart, Kandev shall automatically reconcile eligible interrupted sessions without browser interaction. Surviving agents shall retain their process, conversation, and active turn.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.21:** After confirmed process termination, recovery shall load the same saved native conversation without sending any prompt. It shall preserve session identity, workspace, retained output, and the interrupted submission's uncertain outcome. It shall not create a user message, replay tools, or drain queued work.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.22:** Desktop and phone shall not show a restart-resume form, session-selection list, acknowledgment checkbox, or continuation-instruction field. Unresolved failures shall remain inspectable within the affected session, without blocking unrelated sessions or the application layout.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.23:** Recovery shall verify current ownership, process termination, native identity, and independent admission restrictions. Missing or conflicting evidence shall preserve a blocked session. Archived, completed, Office-owned, and automation-owned sessions shall not enter ordinary automatic chat recovery.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.24:** Repeated restart or interrupted recovery shall reuse durable progress without duplicate restore or prompt dispatch. Resolved recovery metadata shall not trigger another recovery attempt or stale-owner warning. One blocked candidate shall not prevent other eligible candidates from recovering.
 
 ### REQ-PLATFORM-DURABLE-AGENT-DELIVERY-007: Compatible rollout
 
@@ -141,7 +149,7 @@ This requirement extends recovery for existing installations. It does not change
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-008.3:** Concurrent recovery requests and retries after interruption shall create at most one association. Conflicting existing records shall remain unchanged. Other recovery causes shall remain effective.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-008.4:** Reconstructing an association shall not dispatch a prompt, replay tools, release queued instructions, or fabricate completion. Retained output and authoritative terminal evidence shall use normal reconciliation.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-008.5:** Missing associations shall produce a persistent recovery notice on desktop and phone. A rejected instruction shall remain visible with its blocked delivery status. Retry shall show progress and the remaining cause after reload.
-- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-008.6:** After reconstruction, eligible users shall use explicit continuation with a new instruction in the same recoverable conversation. Continuation shall require verified termination, current ownership, and acknowledgment of uncertainty. Duplicate requests shall not repeat the instruction.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-008.6:** After reconstruction, restoration shall follow AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.20 through 006.24. Verified termination, current ownership, and native identity shall permit restoration of the same conversation without prompt dispatch. New instructions shall use ordinary admission after restoration; duplicate recovery shall not dispatch them.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-008.7:** Older or unsupported peers shall retain their records and expose a specific blocked result. Reconstruction shall not create a replacement conversation or downgrade unresolved durable work to legacy delivery.
 
 ## Implementation records
@@ -157,3 +165,7 @@ This requirement extends recovery for existing installations. It does not change
 - Survival of an erased executor volume or an unsupported shared filesystem.
 - Keeping agent processes alive after an executor intentionally terminates them.
 - Replacing backend SQL transcripts or the existing browser subscription contract.
+
+## Implementation records
+
+- [Journal shutdown and interrupted-session recovery repair](../../../plans/agentctl-journal-shutdown-recovery/plan.md).

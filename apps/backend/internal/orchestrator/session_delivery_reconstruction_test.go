@@ -143,7 +143,6 @@ func TestRetrySessionDeliveryReconstructsMissingSubmission(t *testing.T) {
 	require.Equal(t, SessionDeliveryRecoveryBlocked, response.Outcome)
 	require.Equal(t, "recovery_identity_incomplete", response.Reason)
 	require.EqualValues(t, 1, response.RecoveryRevision)
-	require.Empty(t, response.AllowedActions)
 	require.Equal(t, 1, manager.inspectCalls)
 	require.Equal(t, 1, manager.selectedPayloadReads)
 	require.Zero(t, manager.recoveryCalls, "incomplete historical identity must not enter stream reconciliation")
@@ -183,14 +182,6 @@ func TestRetrySessionDeliveryReconstructsMissingSubmission(t *testing.T) {
 	require.Equal(t, 2, manager.inspectCalls, "Retry must inspect again for newly available historical proof")
 	require.Empty(t, manager.capturedPromptCalls)
 
-	continued, err := service.ResumeInterruptedSession(ctx, session.TaskID, session.ID, InterruptedSessionResumeRequest{
-		Acknowledge: true, RecoveryRevision: response.RecoveryRevision, RecoveryIdentity: *response.RecoveryIdentity,
-		Instruction: "Continue after reviewing the uncertainty", IdempotencyKey: "continue-once",
-	})
-	require.NoError(t, err)
-	require.Equal(t, SessionDeliveryRecoveryBlocked, continued.Outcome)
-	require.Empty(t, continued.AllowedActions)
-	require.Empty(t, manager.capturedPromptCalls, "only a recovery identity with verified termination may continue")
 	_, err = repo.ResolveSessionRecoveryBlock(ctx, independent.ID, "retry", time.Now().UTC())
 	require.NoError(t, err)
 	require.NoError(t, repo.DeleteExecutorRunningBySessionID(ctx, session.ID))
@@ -205,11 +196,9 @@ func TestRetrySessionDeliveryReconstructsMissingSubmission(t *testing.T) {
 	require.Equal(t, SessionDeliveryRecoveryUncertain, enriched.Outcome)
 	require.EqualValues(t, 2, enriched.RecoveryRevision)
 	require.EqualValues(t, 9, enriched.RecoveryIdentity.PromptGeneration)
-	require.Empty(t, enriched.AllowedActions, "proof of ownership alone does not prove termination")
 	manager.terminated = true
 	ready, err := service.RetrySessionDelivery(ctx, session.TaskID, session.ID)
 	require.NoError(t, err)
-	require.Equal(t, []SessionDeliveryRecoveryAction{SessionDeliveryRecoveryActionContinueInterrupted}, ready.AllowedActions)
 	require.EqualValues(t, 2, ready.RecoveryRevision)
 	require.Empty(t, manager.capturedPromptCalls, "Retry must never dispatch")
 

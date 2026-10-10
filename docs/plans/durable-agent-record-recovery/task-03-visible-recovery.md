@@ -22,6 +22,16 @@ system_design:
 
 # Task 03: Present and verify missing-record recovery
 
+## Integration with landed restart recovery
+
+PR #4380 is now merged. Its automatic restore-only recovery and retirement of
+the manual restart-resume form supersede the earlier continuation and batch
+steps and their historical validation below. This integration preserves
+missing-record reconstruction, repeated evidence inspection, and persistent
+blocked results. It does not restore the retired instruction API or UI.
+Current conflict-integration validation and the host-shell limitation are
+recorded in the sibling plan. Remote CI and merge evidence remain external.
+
 ## Summary
 
 Show the durable missing-record notice before a complete continuation identity
