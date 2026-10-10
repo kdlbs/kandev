@@ -446,6 +446,10 @@ func (j *Journal) Append(ctx context.Context, event Event) (Event, error) {
 func (j *Journal) AppendBatch(ctx context.Context, events []Event) ([]Event, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return nil, err
+	}
 	if len(events) == 0 {
 		return nil, nil
 	}
@@ -453,10 +457,6 @@ func (j *Journal) AppendBatch(ctx context.Context, events []Event) ([]Event, err
 		return nil, err
 	}
 	if err := prepareAppendEvents(events, j.config.MaxEventBytes); err != nil {
-		return nil, err
-	}
-	db, err := j.dbLocked()
-	if err != nil {
 		return nil, err
 	}
 	writeBytes, err := estimateEncodedEventBytes(events)

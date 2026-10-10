@@ -14,7 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.7
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.16
 func TestRetainedDeliveryReadsEvidenceWithoutCreatingInstance(t *testing.T) {
 	root := t.TempDir()
 	capability := journal.CheckStorage(root, "session")

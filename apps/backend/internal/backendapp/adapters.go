@@ -465,6 +465,7 @@ func buildLifecycleLaunchRequest(
 		AgentProfileID:                officeProfileID,
 		ExecutionProfileID:            req.AgentProfileID,
 		StartAgent:                    req.StartAgent,
+		SuppressBootStatusMessage:     req.SuppressBootStatusMessage,
 		TurnID:                        req.TurnID,
 		WorkspacePath:                 workspacePath,
 		OriginalWorkspacePath:         req.OriginalWorkspacePath,

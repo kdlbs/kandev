@@ -776,28 +776,6 @@ func writeSilentRestoreRecoveryTx(
 	return rows == 1, err
 }
 
-const durableDeliveryUncertainErrorCode = "DURABLE_DELIVERY_UNCERTAIN"
-
-func clearSilentRestoreUncertainError(metadata map[string]json.RawMessage, recovery models.AgentDeliveryRecovery) {
-	raw, exists := metadata[models.SessionMetaKeyLastAgentError]
-	if !exists {
-		return
-	}
-	var decoded map[string]interface{}
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return
-	}
-	lastError, exists := models.LoadLastAgentError(map[string]interface{}{
-		models.SessionMetaKeyLastAgentError: decoded,
-	})
-	if !exists || lastError.Code != durableDeliveryUncertainErrorCode ||
-		lastError.Details != recovery.SubmissionID ||
-		(lastError.AgentExecutionID != recovery.AgentExecutionID && lastError.ExecutionID != recovery.AgentExecutionID) {
-		return
-	}
-	delete(metadata, models.SessionMetaKeyLastAgentError)
-}
-
 func resolveSilentRestoreBlockTx(
 	ctx context.Context,
 	tx *sqlx.Tx,

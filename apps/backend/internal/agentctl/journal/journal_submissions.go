@@ -192,6 +192,10 @@ func (j *Journal) getSubmissionLocked(ctx context.Context, id string) (Submissio
 func (j *Journal) PutSubmission(ctx context.Context, submission Submission) (Submission, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return Submission{}, err
+	}
 	if submission.ID == "" || submission.Hash == "" {
 		return Submission{}, fmt.Errorf("submission id and hash are required")
 	}
@@ -206,10 +210,6 @@ func (j *Journal) PutSubmission(ctx context.Context, submission Submission) (Sub
 	}
 	if submission.State == "" {
 		submission.State = SubmissionPrepared
-	}
-	db, err := j.dbLocked()
-	if err != nil {
-		return Submission{}, err
 	}
 	existing, found, err := j.findExistingSubmissionLocked(ctx, submission)
 	if err != nil {

@@ -1,7 +1,7 @@
 ---
 id: "06-pr-delivery"
 title: "Deliver silent recovery and clear PR checks"
-status: pending
+status: in_progress
 wave: 6
 depends_on:
   - "05-silent-restart-recovery"
@@ -11,10 +11,10 @@ plan: "plan.md"
 requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
 acceptance_criteria:
-  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.11
-  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.12
-  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.13
-  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.15
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.20
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.21
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.22
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.24
 system_design:
   - ../../specs/platform/system-design/durable-agent-reattachment.md
 ---
@@ -34,7 +34,10 @@ Do not merge the PR or mutate the user's live sessions.
 
 ## Current evidence
 
-The local rebase onto `6b2147b5de85fa47cf5c0bdef0fbd6a32c0c1d11` succeeded without conflicts.
+The revised implementation passed normal commit hooks before rebasing onto current main.
+The rebase reconciled upstream closed-journal transaction helpers with physical-capacity reservations and retained both sets of shutdown tests.
+The frontend recovery-service conflict preserves upstream native-resume behavior and the revised recovery tests.
+The six-package backend race gate and six desktop browser cases passed against the rebased source. Main then advanced with native-retirement changes that require another conflict resolution. Phone and SSH validation remains in progress; no current-head CI result is claimed yet.
 The captured remote branch head is `5d50992ee303001a607832bb746a22b77c23cf2a`.
 No rebased head has been pushed during this revision.
 
@@ -83,10 +86,12 @@ Human approval or merge queue requirements remain separate from green CI.
 
 ## Results
 
-Pending implementation and delivery.
+Implementation is committed and rebased. Final local validation and remote delivery remain in progress.
 
 Pre-delivery diagnosis reproduced the Docker image build and pinned Kind cluster creation successfully in disposable local environments.
 The prior CI fixtures discarded child output, so those failures remain unclassified until fresh CI runs.
 Fixture diagnostics now retain bounded failure tails without imposing an output-volume limit on successful commands.
 Three focused real-child tests and targeted format/lint checks passed, including a RED/GREEN regression for output larger than 1 MiB.
 The primary coordinator reviewed that fixture change. Current-head CI and final integration review remain pending.
+
+The second base review found native Resume launching current reattachment asynchronously while acknowledgement trusted an initialized flag retained from inventory. Current-attempt readiness and authenticated adoption must finish before retirement and block resolution. A focused late-start failure regression and synchronous native-recovery boundary are part of the pending integration work.

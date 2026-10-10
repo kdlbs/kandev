@@ -13,7 +13,9 @@ type workspaceSessionRecoveryReader interface {
 	GetOpenSessionRecoveryBlock(context.Context, string, string, int64) (*models.SessionRecoveryBlock, error)
 }
 
-func (m *Manager) ensureWorkspaceRecoveryResolved(ctx context.Context, sessionID string) error {
+const workspaceRecoveryUnknownPromptOutcome = "unknown_prompt_outcome"
+
+func (m *Manager) ensureWorkspaceRecoveryResolved(ctx context.Context, sessionID, expectedExecutionID string) error {
 	if m.executorProfileReader == nil || sessionID == "" {
 		return nil
 	}
@@ -44,9 +46,9 @@ func (m *Manager) ensureWorkspaceRecoveryResolved(ctx context.Context, sessionID
 		return err
 	}
 	if generation == nil {
-		return nil
+		return m.ensureWorkspaceRecoveryBlockSafe(ctx, reader, session, 0, expectedExecutionID)
 	}
-	return ensureWorkspaceRecoveryBlockAbsent(ctx, reader, session, generation)
+	return m.ensureWorkspaceRecoveryBlockSafe(ctx, reader, session, generation.Generation, expectedExecutionID)
 }
 
 func (m *Manager) readWorkspaceRecoverySession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
@@ -111,13 +113,14 @@ func readWorkspaceRecoveryGeneration(
 	return generation, nil
 }
 
-func ensureWorkspaceRecoveryBlockAbsent(
+func (m *Manager) ensureWorkspaceRecoveryBlockSafe(
 	ctx context.Context,
 	reader workspaceSessionRecoveryReader,
 	session *models.TaskSession,
-	generation *models.HarnessSessionGeneration,
+	generation int64,
+	expectedExecutionID string,
 ) error {
-	block, err := reader.GetOpenSessionRecoveryBlock(ctx, session.ID, session.QueueIncarnationID, generation.Generation)
+	block, err := reader.GetOpenSessionRecoveryBlock(ctx, session.ID, session.QueueIncarnationID, generation)
 	if err != nil {
 		if isNoRows(err) {
 			return nil
@@ -128,8 +131,50 @@ func ensureWorkspaceRecoveryBlockAbsent(
 		return workspaceRecoveryRequired("session recovery block result is unavailable", nil)
 	}
 	if block.SessionID != session.ID || block.IncarnationID != session.QueueIncarnationID ||
-		block.ExpectedGeneration != generation.Generation || block.State != models.RecoveryBlockOpen {
+		block.ExpectedGeneration != generation || block.State != models.RecoveryBlockOpen {
 		return workspaceRecoveryRequired("session recovery block is inconsistent", nil)
+	}
+	if workspaceRecoveryBlockAllowsUnpinnedInspection(block) {
+		return m.ensureWorkspaceRecoveryBlockHasNoExecution(ctx, session.ID, expectedExecutionID, block)
+	}
+	return &SessionRecoveryBlockedError{Block: block}
+}
+
+func workspaceRecoveryBlockAllowsUnpinnedInspection(block *models.SessionRecoveryBlock) bool {
+	if block == nil || block.Reason != workspaceRecoveryUnknownPromptOutcome {
+		return false
+	}
+	switch block.ConsumerReference {
+	case "", "interactive", "queue":
+	default:
+		return false
+	}
+	return block.DeliverySubmissionID == "" && block.DeliveryStreamID == "" &&
+		block.DeliverySequence == 0 && block.DeliveryTurnID == "" && block.DeliveryOutcome == ""
+}
+
+func (m *Manager) ensureWorkspaceRecoveryBlockHasNoExecution(
+	ctx context.Context,
+	sessionID, expectedExecutionID string,
+	block *models.SessionRecoveryBlock,
+) error {
+	reader, ok := m.runningWriter.(executorRunningReader)
+	if !ok {
+		return workspaceRecoveryRequired("executor recovery identity reader is unavailable", nil)
+	}
+	running, err := reader.GetExecutorRunningBySessionID(ctx, sessionID)
+	if errors.Is(err, models.ErrExecutorRunningNotFound) || isNoRows(err) {
+		return nil
+	}
+	if err != nil {
+		return workspaceRecoveryRequired("read executor recovery identity", err)
+	}
+	if running == nil {
+		return workspaceRecoveryRequired("executor recovery identity is unavailable", nil)
+	}
+	if expectedExecutionID != "" && running.SessionID == sessionID &&
+		running.AgentExecutionID == expectedExecutionID {
+		return nil
 	}
 	return &SessionRecoveryBlockedError{Block: block}
 }

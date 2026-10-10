@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.17
 func TestInterruptedRetirementPreservesEvidenceAndReleasesAdmission(t *testing.T) {
 	j, err := Open(Config{Path: t.TempDir() + "/journal"})
 	if err != nil {

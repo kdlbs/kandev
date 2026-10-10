@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -294,6 +295,79 @@ func TestSilentRestoreCommitPreservesUnrelatedLastAgentError(t *testing.T) {
 	lastError, ok := models.LoadLastAgentError(session.Metadata)
 	if !ok || lastError.Code != "EXECUTOR_START_FAILED" || lastError.Message != "unrelated" {
 		t.Fatalf("unrelated last-agent error after restore = %+v (ok=%v)", lastError, ok)
+	}
+}
+
+func TestSilentRestoreStructuredErrorIdentitySQLite(t *testing.T) {
+	testSilentRestoreStructuredErrorIdentity(t, newRepoForSessionTests(t))
+}
+
+func TestSilentRestoreStructuredErrorIdentityPostgres(t *testing.T) {
+	database := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 4)
+	repo, err := NewWithDB(database, database, nil)
+	if err != nil {
+		t.Fatalf("create PostgreSQL task repository: %v", err)
+	}
+	testSilentRestoreStructuredErrorIdentity(t, repo)
+}
+
+func testSilentRestoreStructuredErrorIdentity(t *testing.T, repo *Repository) {
+	t.Helper()
+	cases := []struct {
+		name          string
+		submissionID  string
+		explicitEmpty bool
+		malformed     bool
+		wantCleared   bool
+	}{
+		{name: "matching structured identity", wantCleared: true},
+		{name: "mismatched structured identity", submissionID: "newer-submission"},
+		{name: "present empty structured identity", explicitEmpty: true},
+		{name: "malformed structured identity", malformed: true},
+		{name: "legacy exact details fallback", wantCleared: true},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newSilentRestoreFixture(t, repo, "structured-"+strings.ReplaceAll(test.name, " ", "-"), models.TaskSessionStateRunning)
+			submissionID := fixture.recovery.SubmissionID
+			lastError := map[string]interface{}{
+				"message": "delivery outcome is uncertain", "occurred_at": time.Now().UTC(),
+				"code": durableDeliveryUncertainErrorCode, "details": "redacted delivery details",
+				"agent_execution_id": fixture.recovery.AgentExecutionID,
+			}
+			switch {
+			case test.malformed:
+				lastError["details"] = submissionID
+				lastError["delivery_submission_id"] = 42
+			case test.explicitEmpty:
+				lastError["details"] = submissionID
+				lastError["delivery_submission_id"] = ""
+			case test.name == "legacy exact details fallback":
+				lastError["details"] = submissionID
+			case test.submissionID != "":
+				lastError["details"] = submissionID
+				lastError["delivery_submission_id"] = test.submissionID
+			default:
+				lastError["delivery_submission_id"] = submissionID
+			}
+			if err := repo.SetSessionMetadataKey(ctx, fixture.session.ID, models.SessionMetaKeyLastAgentError, lastError); err != nil {
+				t.Fatalf("SetSessionMetadataKey(last error): %v", err)
+			}
+			_, commit := prepareSilentRestoreCandidate(t, repo, fixture, "candidate-structured-"+strings.ReplaceAll(test.name, " ", "-"))
+			changed, err := repo.CommitSilentRestore(ctx, commit)
+			if err != nil || !changed {
+				t.Fatalf("CommitSilentRestore = %v, %v; want committed", changed, err)
+			}
+			stored, err := repo.GetTaskSession(ctx, fixture.session.ID)
+			if err != nil {
+				t.Fatalf("GetTaskSession: %v", err)
+			}
+			_, present := stored.Metadata[models.SessionMetaKeyLastAgentError]
+			if present == test.wantCleared {
+				t.Fatalf("last-agent-error present = %v, want cleared %v", present, test.wantCleared)
+			}
+		})
 	}
 }
 

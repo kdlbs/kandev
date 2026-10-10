@@ -134,7 +134,7 @@ Plugin attempts reload the current durable checkpoint for that same owner. They 
 This applies to both reconnect and pending Stop, so a transient failure after checkpoint persistence does not make later attempts stale.
 
 This revision supersedes the manual interruption form and batch continuation design.
-It implements AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.11 through 006.15.
+It implements AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.20 through 006.24.
 The earlier explicit continuation implementation remains historical evidence in the package results.
 
 The orchestrator owns one bounded startup recovery worker after lifecycle adoption and startup reconciliation complete.
@@ -184,6 +184,15 @@ A foreign execution, generation, or native identity remains blocked.
 Workspace reads must not allocate a competing execution while durable recovery is unresolved.
 Check this at the workspace-only creation boundary, preserving access through an existing owned workspace execution.
 The restore launch keeps its pinned candidate identity and allocation checkpoint; it must not adopt an unrelated workspace-only successor.
+A generic prompt block without a saved executor identity, delivery binding, or pending restore identity does not alone prevent workspace-only creation.
+Creation and registration must recheck that distinction; the workspace operation never clears the prompt block or starts an agent.
+
+Silent restoration must also suppress persisted boot-status messages that would synthesize a lifecycle-only turn.
+Setup and boot execution still run; ordinary starts and explicit resumes retain their status reporting.
+Clear a delivery-uncertainty error only for the exact restored execution and submission.
+Keep submission identity in a structured error field, separate from sanitized display text.
+Frontend metadata merging uses the same identity and newer-recovery checks, preserving unrelated or newer errors.
+Legacy sanitized errors without exact identity remain as history; successful restoration and dismissal must not expose recovery actions for that history.
 
 The `continued` phase from the earlier implementation retains an old identity for historical evidence.
 Do not treat it as an unresolved recovery candidate or submit it to old-generation retry validation.

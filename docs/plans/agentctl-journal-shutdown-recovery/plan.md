@@ -22,7 +22,7 @@ Prevent one instance shutdown from crashing the shared agentctl process.
 Recover retained delivery evidence after execution removal, then provide useful recovery controls on desktop and phone.
 Platform owns this repair because it owns the journal lifetime and session recovery contract.
 Work proceeds sequentially: journal safety, ACK/capacity repair, recovery authority, then UI and end-to-end evidence.
-Tasks 01 through 04 record the prior implementation. The user rejected its manual interruption form and revised retention and remote lifetime requirements. Tasks 05 and 08 are in progress; Task 07's retention implementation and checks are complete. Task 06 covers final integration and delivery and remains pending. Earlier validation does not cover the revised behavior.
+Tasks 01 through 04 record the prior implementation. The user rejected its manual interruption form and revised retention and remote lifetime requirements. Tasks 05 and 08 are in progress; Task 07's retention implementation and checks are complete. Task 06 covers final integration and delivery and is in progress. Earlier validation does not cover the revised behavior.
 
 On 2026-10-10 the user clarified executor lifetime and extended disconnected operation.
 Local/worktree agents stop with Kandev by default; local survival remains an explicit opt-in.
@@ -252,7 +252,7 @@ This view covers delivery criterion 001.4.
 
 | Acceptance criteria | Proposed regression evidence |
 | --- | --- |
-| Delivery 001.1-001.3 | `journal_shutdown_test.go`: `TestJournalOperationsAfterClose`, `TestJournalCloseDuringReplay`; API `TestInstanceTeardownDoesNotCrashSiblingStream` |
+| Delivery 001.1-001.3 | `journal_shutdown_test.go`: `TestJournalShutdownLifecycle`, `TestJournalCloseDuringReplay`; API `TestInstanceTeardownDoesNotCrashSiblingStream` |
 | Delivery 003.1-003.2, 005.1-005.3 | `agent_delivery_submission_test.go`: initial dispatch persistence; real repository replay with duplicate terminal settlement |
 | Delivery 006.1, 006.4-006.8; runtime 003.1-003.6 | Missing-execution replay, terminal, unknown, missing association, locked journal, stale epoch, explicit resume, duplicate request, mixed live/dead sessions |
 | Delivery 006.7-006.9; runtime 003.5 | Component/service tests plus real crash/retry browser flows and button geometry |
@@ -308,7 +308,7 @@ The existing chat is the mobile exemplar and owns scrolling; its composer retain
 Unresolved failures stay within the affected session's existing status surface, with Retry and Stop where safe.
 Desktop controls retain normal sizing; phone actions stack with targets of at least 44 pixels.
 No new drawer, global notice, or scroll owner is introduced. Spacing above is illustrative.
-This preview maps to AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.11 through 006.15.
+This preview maps to AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.20 through 006.24.
 
 ## Work orders
 

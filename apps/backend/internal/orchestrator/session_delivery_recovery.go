@@ -14,10 +14,11 @@ import (
 // RetrySessionDelivery reconciles one durable submission without dispatching a
 // prompt. A missing or ambiguous durable owner remains visible as blocked.
 const (
-	agentDeliveryConsumer            = "agent_delivery"
-	missingCanonicalSubmissionReason = "missing_canonical_submission"
-	unknownPromptOutcome             = "unknown_prompt_outcome"
-	recoveryUnavailableReason        = "recovery_unavailable"
+	agentDeliveryConsumer               = "agent_delivery"
+	missingCanonicalSubmissionReason    = "missing_canonical_submission"
+	unknownPromptOutcome                = "unknown_prompt_outcome"
+	recoveryUnavailableReason           = "recovery_unavailable"
+	silentRestartRestoredCreationReason = "silent_restart_restored"
 )
 
 func (s *Service) RetrySessionDelivery(
@@ -139,7 +140,7 @@ func recoverySuccessorOutcome(phase string) (string, SessionDeliveryRecoveryOutc
 	if phase == models.AgentDeliveryRecoveryContinued {
 		return "interrupted_continued", SessionDeliveryRecoveryContinued
 	}
-	return "silent_restart_restored", SessionDeliveryRecoveryAttached
+	return silentRestartRestoredCreationReason, SessionDeliveryRecoveryAttached
 }
 
 func sameRecoverySuccessorGeneration(

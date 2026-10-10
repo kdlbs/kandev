@@ -166,9 +166,10 @@ async function expectSlowSSHRestartRecovery({
   expect(afterRow).toMatchObject({
     session_id: state.beforeRow.session_id,
     remote_agentctl_port: state.beforeRow.remote_agentctl_port,
-    status: "running",
+    status: "ready",
   });
   expect(afterRow!.local_forward_port).toBeGreaterThan(0);
+  execInContainer(seedData.sshTarget, ["kill", "-0", String(state.remotePid)]);
   const pidFile = `${state.beforeRow.remote_task_dir}/.kandev/sessions/${state.sessionId}/agentctl.pid`;
   expect(readRemoteFile(seedData.sshTarget, pidFile).trim()).toBe(String(state.remotePid));
 }

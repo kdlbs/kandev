@@ -2126,6 +2126,7 @@ func newResumeLaunchRequest(
 		AllowBranchReplacement:       options.AllowBranchReplacement,
 		ForceContextContinuation:     options.ForceContextContinuation,
 		RecoveryAction:               options.RecoveryAction,
+		SuppressBootStatusMessage:    options.SuppressInitialMessageBackfill,
 	}
 	if options.ForceContextContinuation {
 		if options.DeferInitialPrompt {
