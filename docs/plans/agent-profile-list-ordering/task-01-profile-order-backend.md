@@ -248,3 +248,17 @@ checks passed. No local PostgreSQL server or broad package suite was run.
 Hosted PostgreSQL, store, race, lint, and full backend results must pass on the
 corrective head before this work order can return to done. Public behavior and
 documentation are unchanged by this fixture correction.
+
+## Corrective CI synchronization
+
+The corrective combined-head backend shard exposed a clarification retry test
+that asserted message creation as soon as the pending request was registered.
+Registration precedes durable reconciliation and message publication. The
+foreign-owner retry and different-question retry fixtures now await their
+creator count within the existing one-second deadline before retaining their
+exactly-one-bundle and identity assertions. Production registration ordering,
+timeouts, and assertion values are unchanged. The bounded local package proof
+could not execute because its dependencies were absent from the isolated cache;
+fresh hosted backend execution is required.
+
+Additional file: `apps/backend/internal/mcp/handlers/handlers_ask_retry_test.go`.
