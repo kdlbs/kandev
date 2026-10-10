@@ -2,9 +2,11 @@ package discovery
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/hostcli"
@@ -235,4 +237,51 @@ func TestApplyHostCLISkipsCancelledSweep(t *testing.T) {
 	if runner.versionCalls() != 0 {
 		t.Fatal("cancelled sweep ran a version probe")
 	}
+}
+
+type sharedVersionRunner struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (r *sharedVersionRunner) Output(ctx context.Context, _ []string) (string, error) {
+	r.started <- struct{}{}
+	select {
+	case <-r.release:
+		return "1.0.0", nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+func (r *sharedVersionRunner) Start(context.Context, []string) (hostcli.Process, error) {
+	return nil, hostcli.ErrNotInstalled
+}
+func TestHostCLIVersionConcurrencyIsSharedAcrossRequests(t *testing.T) {
+	h := newHostCLIResolver(nil)
+	runner := &sharedVersionRunner{started: make(chan struct{}, 8), release: make(chan struct{})}
+	h.runner = runner
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer func() { cancel(); close(runner.release); wg.Wait() }()
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			h.resolve(ctx, hostcli.Spec{Executable: fmt.Sprintf("testcli-%d", index)}, "")
+		}(i)
+	}
+	for i := 0; i < 4; i++ {
+		select {
+		case <-runner.started:
+		case <-ctx.Done():
+			t.Fatal("four probes were not admitted")
+		}
+	}
+	select {
+	case <-runner.started:
+		t.Fatal("overlapping requests exceeded four active probes")
+	case <-time.After(100 * time.Millisecond):
+	}
+	cancel()
+	wg.Wait()
 }

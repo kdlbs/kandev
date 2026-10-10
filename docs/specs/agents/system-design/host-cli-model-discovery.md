@@ -142,7 +142,9 @@ to `timeout`; anything else maps to `failed`.
 The controller keeps one in-memory entry per agent type with the discovered
 models, a status, an error message, and a check timestamp. Per-agent refresh
 generations fence superseded and invalidated results. One controller-wide
-semaphore bounds concurrent catalogue processes across all refresh callers. Agent types with
+semaphore bounds concurrent catalogue processes across all refresh callers.
+Version discovery uses a shared four-process limit across sweeps and rechecks
+the version cache after admission. Agent types with
 `ModelSourceNone` resolve to `skipped` immediately, without a process.
 
 ### Merged model response

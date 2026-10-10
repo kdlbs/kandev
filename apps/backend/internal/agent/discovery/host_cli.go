@@ -17,7 +17,7 @@ import (
 // CLI updated outside Kandev on a backend nobody rescans.
 const hostCLICacheTTL = 10 * time.Minute
 
-// hostCLIMaxConcurrent bounds the version subprocesses one sweep may spawn.
+// hostCLIMaxConcurrent bounds active version subprocesses across sweeps.
 const hostCLIMaxConcurrent = 4
 
 // HostCLIState is the detected state of one agent type's vendor CLI.
@@ -40,6 +40,7 @@ type hostCLIResolver struct {
 	mu         sync.Mutex
 	cache      map[string]hostCLICacheEntry
 	generation uint64
+	slots      chan struct{}
 }
 
 func newHostCLIResolver(log *zap.Logger) *hostCLIResolver {
@@ -48,6 +49,7 @@ func newHostCLIResolver(log *zap.Logger) *hostCLIResolver {
 		logger: log,
 		now:    time.Now,
 		cache:  make(map[string]hostCLICacheEntry),
+		slots:  make(chan struct{}, hostCLIMaxConcurrent),
 	}
 }
 
@@ -135,6 +137,22 @@ func (h *hostCLIResolver) resolve(ctx context.Context, spec hostcli.Spec, matche
 	entry, cached := h.cache[key]
 	now := h.now()
 	generation := h.generation
+	h.mu.Unlock()
+	if cached && now.Before(entry.expiresAt) {
+		return entry.state
+	}
+
+	select {
+	case h.slots <- struct{}{}:
+	case <-ctx.Done():
+		return HostCLIState{VersionError: versionErrorMessage(ctx.Err())}
+	}
+	defer func() { <-h.slots }()
+	// A queued caller may now reuse the preceding probe's result.
+	h.mu.Lock()
+	entry, cached = h.cache[key]
+	now = h.now()
+	generation = h.generation
 	h.mu.Unlock()
 	if cached && now.Before(entry.expiresAt) {
 		return entry.state
