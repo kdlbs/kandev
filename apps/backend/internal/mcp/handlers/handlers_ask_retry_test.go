@@ -214,6 +214,8 @@ func TestHandleAskUserQuestion_RetryReattachesDetachedBundle(t *testing.T) {
 	require.NoError(t, repo.UpdateMessage(ctx, seeded[0]))
 
 	store := clarification.NewStore(time.Minute)
+	waitEntered := make(chan struct{}, 1)
+	store.SetOnWaitEntered(func(string) { waitEntered <- struct{}{} })
 	creator := &countingMessageCreator{}
 	h := NewHandlers(svc, nil, store, nil, creator, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
 
@@ -234,6 +236,12 @@ func TestHandleAskUserQuestion_RetryReattachesDetachedBundle(t *testing.T) {
 		_, detached := messages[0].Metadata["agent_disconnected"]
 		return !detached
 	}, time.Second, 5*time.Millisecond, "the adopted bundle must no longer be marked agent_disconnected")
+	// Reattachment commits before publication; waiting begins after both finish.
+	select {
+	case <-waitEntered:
+	case <-time.After(time.Second):
+		t.Fatal("retry did not enter its waiter after reattachment publication")
+	}
 	batches := creator.publishedBatches()
 	require.Len(t, batches, 1, "the reattached rows must be published once")
 	require.Len(t, batches[0], 1)

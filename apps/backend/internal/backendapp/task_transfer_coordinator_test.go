@@ -206,6 +206,15 @@ func TestOfficeCEOTransfersAnotherTaskAndDestinationReplay(t *testing.T) {
 	if !ok {
 		t.Fatal("source CEO was not attested")
 	}
+	if _, err := officeRepo.ExecRaw(ctx, `UPDATE agent_profiles SET enabled = 0 WHERE id = ?`, actor.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := attestor.AttestTaskTransferCoordinator(ctx, principal); ok {
+		t.Fatal("persisted disabled CEO was attested")
+	}
+	if _, err := officeRepo.ExecRaw(ctx, `UPDATE agent_profiles SET enabled = 1 WHERE id = ?`, actor.ID); err != nil {
+		t.Fatal(err)
+	}
 	command := models.TaskTransferCommand{
 		TaskID: targetTask.ID, ExpectedSourceWorkspaceID: targetTask.WorkspaceID,
 		ExpectedSourceWorkflowID: targetTask.WorkflowID, ExpectedSourceStepID: targetTask.WorkflowStepID,
