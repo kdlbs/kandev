@@ -127,13 +127,40 @@ independent Node24 coverage checker live in
 | `pnpm run i18n:ratchet` / `i18n:check` | `b72a7d`, `5fc3e5` | Exit 0; staged new files are also checked by the normal hook |
 | Actual nine-path documentation preflight | `64ebab`, `410c79` | Catalog/spec lint pass; coverage covered, no errors; one order, six criteria, thirteen valid links, whitespace pass |
 
-There are 58 distinct passing cases across scoped runs, not a claimed single
-58-case replay. The partial-retry failure drove replacement of the remapped
+There are 65 distinct passing cases across scoped runs, across the initial execution and bounded review correction; the final
+correction matrix and precision checks below are recorded separately. The partial-retry failure drove replacement of the remapped
 create-mode baseline entry; ordinary-save assembly remains unchanged. One short
 format check overlapped the original retained typecheck, was joined, and reported
 only test formatting; subsequent heavy commands were serialized. Final normal
 hooks, commit/publication and current hosted evidence are recorded in the live task
 plan rather than requiring metadata-only follow-up commits.
+
+## Bounded review correction
+
+CodeRabbit review `5477493135` and Greptile comment `4236329788` identified invalid
+wire timestamps deciding the accepted-ID winner. Greptile `4236329783` identified
+partial MCP retry using the older POST draft despite preserving the newer live
+copy in the store. Both findings belong to criteria .2/.5 and this same order.
+ROOT granted one correction lease and one batched corrective push.
+
+| Check | Actual terminal join | Result |
+| --- | --- | --- |
+| Malformed timestamp RED | `77bfd9` | Four malformed-current/accepted failures, five existing controls pass |
+| Newer-copy partial retry RED | `b93827` | Two failures: unnecessary older PATCH; genuine name edit with old model. Five original page controls pass |
+| Five-suite corrected matrix | `e732fb` | Exit 0; 64 cases pass |
+| Submillisecond ordering RED | `f4aa0c` | One valid precision failure, nine hook controls pass |
+| Final corrected hook/page matrix | `3fc3f4` | Exit 0; 17 cases pass, including all ten hook guards and seven page cases |
+| Final scoped lint / formatting | `32cefa`, `7abc07` | Exit 0; four affected code/test paths pass after fixture-only lint corrections |
+| Final `pnpm run typecheck` | `df4879` | Exit 0; current code and tests |
+
+The hook compares strict parser epoch-nanosecond results, omitting invalid recency
+rather than comparing Date-normalized inputs. Partial creation remaps against the
+actual published profile; only real changed draft fields override it, so genuine
+in-flight edits coexist with the current live model. Original ordinary-save draft
+merging remains the default. Current known owned check groups are absent; original
+hosted observer and its deadline remain retained through the correction. Final
+documentation checks, normal hooks, corrective publication and hosted disposition
+receipts are retained in the live task plan.
 
 ## Delivery constraints and risks
 

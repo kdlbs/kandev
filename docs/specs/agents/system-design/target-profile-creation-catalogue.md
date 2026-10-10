@@ -59,7 +59,8 @@ sibling. Reading only the outer list later is insufficient.
 ## Creation result boundary
 
 `SaveAgentCallbacks.upsertAgent` accepts the optional, narrowly typed
-`AgentCreationPublication` context. It identifies only
+`AgentCreationPublication` context and returns the target actually published when
+available. The context identifies only
 the normalized profiles actually accepted as new by this submission, plus the
 agent fields owned by a successful submitted patch when applicable. This context
 is supplied only for `saveExistingAgent` with `isCreateMode`; new-agent and ordinary
@@ -79,6 +80,14 @@ Create-mode retry replaces the submitted persisted profile's baseline entry in
 `nextProfiles` instead of appending it a second time. This keeps the draft's accepted
 identity unique after partial MCP recovery; ordinary-save assembly is unchanged.
 
+Partial creation reconciliation uses the actual published target to build its
+remapped saved draft. Compare each current draft field with the submitted field:
+only genuine in-flight edits override that published profile. Unchanged fields
+follow the published name/model and other normalized metadata, so an MCP retry
+does not PATCH an older POST snapshot over a newer received copy. Retain pending
+MCP state and the persisted ID. Ordinary-save draft merging keeps its existing
+behavior; this field reconciliation is enabled only for partial creation.
+
 ## Accepted-creation publication
 
 At the creation callback, read the mounted provider's current store immediately
@@ -91,9 +100,12 @@ read. Apply only the existing successful submission's owned workspace/MCP-path
 fields where needed; do not republish captured owner capability metadata.
 
 If an accepted ID has already arrived through the event path, replace/deduplicate
-only that ID. Reuse `compareTimestamps` in settings types for the bounded same-ID
-case: a strictly newer current profile remains, otherwise the normalized accepted
-profile wins. Partial MCP draft data is retained separately on that accepted ID
+only that ID. Parse both wire revisions with the shared strict `parseTurnTimestamp`
+and compare its epoch-nanosecond results for the bounded same-ID case. Invalid or
+missing revisions supply no recency evidence: a valid current revision beats an
+unknown accepted revision; an unknown current revision yields to the accepted copy.
+With valid revisions, a strictly newer current profile remains, otherwise the
+normalized accepted profile wins. Partial MCP draft data is retained separately on that accepted ID
 even if its current persisted representation is newer. This is a local callback
 guard, not a new global revision or conflict policy.
 

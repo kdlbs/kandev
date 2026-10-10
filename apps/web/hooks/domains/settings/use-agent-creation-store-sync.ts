@@ -1,5 +1,6 @@
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { compareTimestamps, toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 
 export type AgentCreationPublication = {
@@ -8,7 +9,10 @@ export type AgentCreationPublication = {
 };
 
 function acceptedProfile(current: AgentProfile | undefined, accepted: AgentProfile) {
-  if (!current || compareTimestamps(current.updatedAt, accepted.updatedAt) <= 0) return accepted;
+  const currentTime = parseTurnTimestamp(current?.updatedAt);
+  const acceptedTime = parseTurnTimestamp(accepted.updatedAt);
+  if (!current || currentTime === null || (acceptedTime !== null && currentTime <= acceptedTime))
+    return accepted;
   return "mcp_config" in accepted ? { ...current, mcp_config: accepted.mcp_config } : current;
 }
 
@@ -37,6 +41,7 @@ export function useAgentCreationStoreSync() {
     setAgentProfiles(
       next.flatMap((item) => item.profiles.map((profile) => toAgentProfileOption(item, profile))),
     );
+    return target;
   };
 
   return { upsertAgent };

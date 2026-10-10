@@ -234,7 +234,7 @@ export type SaveAgentCallbacks = {
   currentAgentModelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
   resolveDisplayName: (name: string) => string;
-  upsertAgent: (agent: Agent, creation?: AgentCreationPublication) => void;
+  upsertAgent: (agent: Agent, creation?: AgentCreationPublication) => Agent | void;
   setDraftAgent: (agent: DraftAgent | ((current: DraftAgent) => DraftAgent)) => void;
   ensureProfiles: EnsureProfilesFn;
   cloneAgent: CloneAgentFn;
@@ -484,7 +484,7 @@ function reconcilePartialProfileSave(
     ...savedAgent,
     profiles: [...profilesById.values()],
   };
-  callbacks.upsertAgent(
+  const published = callbacks.upsertAgent(
     reconciled,
     isCreateMode ? { profiles: partial.persistedProfiles } : undefined,
   );
@@ -495,17 +495,18 @@ function reconcilePartialProfileSave(
     ),
   };
   const persistedIds = new Set(partial.persistedProfiles.map((profile) => profile.id));
+  const draftSource = isCreateMode && published ? published : reconciled;
   const savedDraft = callbacks.ensureProfiles(
     {
-      ...callbacks.cloneAgent(reconciled),
-      profiles: reconciled.profiles.filter((profile) => persistedIds.has(profile.id)),
+      ...callbacks.cloneAgent(draftSource),
+      profiles: draftSource.profiles.filter((profile) => persistedIds.has(profile.id)),
     },
     callbacks.resolveDisplayName(reconciled.name),
     callbacks.currentAgentModelConfig.default_model,
     callbacks.permissionSettings,
   );
   callbacks.setDraftAgent((current) =>
-    mergeSavedAgentDraft(current, submitted, savedDraft, partial.profileIds),
+    mergeSavedAgentDraft(current, submitted, savedDraft, partial.profileIds, isCreateMode),
   );
 }
 
@@ -576,6 +577,7 @@ export function mergeSavedAgentDraft(
   submitted: DraftAgent,
   saved: DraftAgent,
   profileIds: ReadonlyMap<string, string> = new Map(),
+  preserveOnlyEditedFields = false,
 ): DraftAgent {
   const currentById = new Map(current.profiles.map((profile) => [profile.id, profile]));
   const submittedBySavedId = new Map(
@@ -587,6 +589,15 @@ export function mergeSavedAgentDraft(
     const currentProfile = currentById.get(submittedProfile.id);
     if (!currentProfile || JSON.stringify(currentProfile) === JSON.stringify(submittedProfile)) {
       return savedProfile;
+    }
+    if (preserveOnlyEditedFields) {
+      const edits = Object.fromEntries(
+        Object.entries(currentProfile).filter(
+          ([key, value]) =>
+            JSON.stringify(value) !== JSON.stringify(submittedProfile[key as keyof DraftProfile]),
+        ),
+      );
+      return { ...savedProfile, ...edits, id: savedProfile.id };
     }
     return { ...savedProfile, ...currentProfile, id: savedProfile.id };
   });

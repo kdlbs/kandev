@@ -117,3 +117,42 @@ describe("accepted creation publication guards", () => {
     });
   });
 });
+
+describe("accepted creation timestamp validation", () => {
+  it.each(["9999", "2026-02-30T00:00:00Z"])(
+    "does not treat malformed current timestamp %s as a newer copy",
+    (updatedAt) => {
+      const accepted = { ...profile, updatedAt: "2026-02-28T00:00:00Z" };
+      const current = { ...profile, name: "Malformed live copy", updatedAt };
+      const { result } = setup({ ...owner, profiles: [current] });
+      act(() => result.current.upsertAgent(owner, { profiles: [accepted] }));
+      expect(result.current.store.getState().settingsAgents.items[0].profiles).toEqual([accepted]);
+      expect(result.current.store.getState().agentProfiles.items[0].updatedAt).toBe(
+        accepted.updatedAt,
+      );
+    },
+  );
+
+  it.each(["9999", "2026-02-30T00:00:00Z"])(
+    "omits malformed accepted timestamp %s from recency comparison",
+    (updatedAt) => {
+      const accepted = { ...profile, name: "Malformed accepted copy", updatedAt };
+      const current = { ...profile, updatedAt: "2026-02-28T00:00:00Z" };
+      const { result } = setup({ ...owner, profiles: [current] });
+      act(() => result.current.upsertAgent(owner, { profiles: [accepted] }));
+      expect(result.current.store.getState().settingsAgents.items[0].profiles).toEqual([current]);
+    },
+  );
+});
+
+it("keeps a strictly newer accepted copy within the same millisecond", () => {
+  const accepted = { ...profile, updatedAt: "2026-10-10T12:00:00.000000100Z" };
+  const current = {
+    ...profile,
+    name: "Nanosecond newer",
+    updatedAt: "2026-10-10T12:00:00.000000200Z",
+  };
+  const { result } = setup({ ...owner, profiles: [current] });
+  act(() => result.current.upsertAgent(owner, { profiles: [accepted] }));
+  expect(result.current.store.getState().settingsAgents.items[0].profiles).toEqual([current]);
+});

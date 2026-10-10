@@ -206,3 +206,23 @@ A short format check overlapped a retained typecheck; both joined, the test form
 was corrected, and subsequent heavy checks were serial. Normal active hooks and
 ordinary publication follow under the same lease, with live task-plan receipts;
 no bypass or extra ROOT publication handoff is authorized or needed.
+
+
+### Review correction results
+
+The same order also covers the reproduced review composition: newer accepted-ID
+name/model during partial MCP failure, then retry, with and without a genuine
+in-flight draft edit. RED `b93827` failed those two cases while all five original
+page controls passed. Malformed timestamp RED `77bfd9` failed four inputs with five
+hook controls passing. Precision RED `f4aa0c` failed one submillisecond case with
+nine controls passing. No setup, unhandled or cleanup failure supplied these REDs.
+
+The callback now returns the actual published target for partial creation draft
+reconciliation; only fields changed since submission override that current copy.
+The guard compares strict parsed epoch-nanoseconds, omitting invalid recency.
+Ordinary draft merging remains unchanged. GREEN `e732fb` passed 64 cases across
+five suites; final `3fc3f4` passed 17 affected page/hook cases after the precision
+correction. Final lint `32cefa`, formatting `7abc07` and typecheck `df4879` pass.
+The [manifest](plan.md#bounded-review-correction) records the scoped results;
+normal hooks, the one batched corrective push and review-thread dispositions are
+recorded in the live task plan without another planning or publication handoff.
