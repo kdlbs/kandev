@@ -10,6 +10,7 @@ import type { Agent, AgentProfile } from "@/lib/types/http";
 
 export type AgentCreationPublication = {
   profiles: AgentProfile[];
+  newAgent?: true;
   agentPatch?: Pick<Agent, "workspace_id" | "mcp_config_path">;
 };
 
@@ -55,8 +56,8 @@ export function useAgentCreationStoreSync() {
     if (!creation) return syncSavedAgentToStore(storeApi, agent, profileVersionAtSaveStart);
     const agents = storeApi.getState().settingsAgents.items;
     const current = agents.find((item) => item.id === agent.id);
-    if (creation && !current) return;
-    const target = creation && current ? publishCreatedProfiles(current, creation) : agent;
+    if (!current && !creation.newAgent) return;
+    const target = publishCreatedProfiles(current ?? agent, creation);
     const next = current
       ? agents.map((item) => (item.id === agent.id ? target : item))
       : [...agents, target];

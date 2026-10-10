@@ -247,7 +247,13 @@ describe("custom TUI MCP acknowledgement controls", () => {
         fixture.pending.get(A)!.response.reject(error);
       });
       expect(fixture.store.getState().settingsAgents.items).toEqual(current);
-      expect(fixture.store.getState().settingsAgents.items[0].profiles[1]).toEqual(
+      expect(
+        fixture.store
+          .getState()
+          .settingsAgents.items[0].profiles.find(
+            (profile) => profile.id === fixture.profileIds.received,
+          ),
+      ).toEqual(
         normalizeAgentProfile(
           profileWire(fixture.profileIds.received, A, "Retained after failure"),
         ),

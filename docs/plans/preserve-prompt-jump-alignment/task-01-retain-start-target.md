@@ -162,3 +162,14 @@ RED,25affected unit controls GREEN, scopedlint/i18n/ratchet PASS, unchanged
 desktop and phone E2E each PASS/oneworker/retries0. Original native joins and
 current-owned cleanup/RETURN recorded externally. Normal hooks and batched
 publication await separately released Agents correction; order stays in_progress.
+
+
+### Batched delivery checkpoint
+
+Scroll local checks and both exact existing desktop/phone E2E actual JOIN0 were
+completed before the separately reviewed Agents correction. The authorized exact
+upstream prerequisite merged normally without conflicting with either scroll file.
+No passing scroll/browser checks were replayed solely for main drift. Required
+Agents affected cases and scoped checks are now complete; batch publication and
+fresh hosted acceptance remain. Original failed observer actual JOIN1 and clock
+are retained; no old-head rerun.

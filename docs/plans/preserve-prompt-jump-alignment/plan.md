@@ -207,3 +207,14 @@ pending Agents review/release and correction; PR is not READY.
   lifetime must follow existing ownership, not the transient animation guard.
 - Shard8's unknown timeout and the separately classified Frontend leaf remain
   delivery blockers; this package does not claim to resolve unrelated causes.
+
+
+### Batched delivery checkpoint
+
+Scroll local checks and both exact existing desktop/phone E2E actual JOIN0 were
+completed before the separately reviewed Agents correction. The authorized exact
+upstream prerequisite merged normally without conflicting with either scroll file.
+No passing scroll/browser checks were replayed solely for main drift. Required
+Agents affected cases and scoped checks are now complete; batch publication and
+fresh hosted acceptance remain. Original failed observer actual JOIN1 and clock
+are retained; no old-head rerun.

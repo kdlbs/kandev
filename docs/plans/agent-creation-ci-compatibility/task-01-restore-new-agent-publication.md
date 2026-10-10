@@ -1,7 +1,7 @@
 ---
 id: "01-restore-new-agent-publication"
 title: "Restore new-agent publication and CI compatibility"
-status: pending
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -133,3 +133,50 @@ DESIGN_READY; lightweight checks and ROOT full actual-file review complete; see
 [manifest results](plan.md#verification-results). LATER explicit release and
 heavy admission pending, including the reviewed exact02ff057 normal merge.
 No Agents production/tests/integration/runtime changed.
+
+
+## Released implementation checkpoint
+
+ROOT later implementation/integration release and exclusive GLOBALheavy111 received.
+Normal-hook local scroll checkpoint `dcb0137d075f3826fe5499a62f751a5a020f8f21`
+then normal merge `232f6a98699965c26403249844f0c70457e64535` integrated the
+exact prerequisite `02ff0578357040b0546ea17cd9a00dff9ca9ee3b` without conflicts.
+Full candidate-to-prerequisite dependency manifests and lockfile comparison was
+empty; retained dependencies were used without install. Upstream integration is
+separate from the owned correction measured relative to that exact prerequisite.
+
+Before production, original causal RED native79510 actual JOIN1/b24e12 showed
+precisely the two missing accepted new-agent publications; ordinary profile,
+new-agent no-event, and rejection controls passed (three). A preceding attempt
+retained an unrelated dirty-state assertion in the new control, corrected before
+qualification. Partial loss now reports a precise missing-owner assertion.
+
+Only the two named production paths changed: `newAgent: true` in the two accepted
+new-agent callbacks and the private existing creation-publication branch. Existing
+owner reconciliation, ordinary-save/version/missing-owner guards remain intact.
+Ten proved stale CI fixtures now assert accepted-new-first order, metadata by ID,
+one deletion version advance, and the stable current-store API. Agents page uses
+the real ToastProvider required by the integrated ordering hook.
+
+Affected eight-suite GREEN native40964 actual JOIN1/b10de1: 90 passed, two page
+fixtures failed only for the missing ToastProvider. Corrected page-only native21141
+actual JOIN0/e00b8b: two passed. All 92 affected cases now pass; seven passing suites
+were not replayed. Scoped lint/staged i18n/docs/normal hooks/publication pending.
+State/data-only mobile exception retained; no copy/layout/navigation/browser changes.
+
+
+### Final local checks
+
+Scoped lint native11999 actual JOIN0/6a758b passed after extracting the repeated
+saved-route test constant; first lint's single duplicate-string warning is retained.
+Staged i18n check and exact-base ratchet native4326 actual JOIN0/bb20a2 passed,
+zero added/four modified production files clean. Catalogue (370 decisions/1519
+specifications), full spec lint and whitespace passed. Complete unfiltered
+tracked/cached/untracked inventory retained (111259 entries); actual 23 owned
+paths relative exact02ff expose all four production paths with three separately
+owned work orders and coverage errors[]. Documentation exemptions are recorded
+separately from production coverage. The first aggregate coverage invocation
+omitted the two unchanged reused requirements from its input map; corrected
+complete inputs passed without modifying those requirements.
+
+Normal hooks/one batched publication and fresh hosted current-head acceptance remain.
