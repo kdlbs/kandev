@@ -712,3 +712,34 @@ Final ordinary browser selection: three phone recovery flows and two desktop con
 pnpm --dir apps/web e2e:run --host --project mobile-chrome tests/chat/mobile-initial-task-brief.spec.ts -- --grep 'keeps the first brief after prompt-free recovery' --repeat-each=3 --retries=0
 pnpm --dir apps/web e2e:run --host --project chromium tests/session/read-only-resume.spec.ts tests/chat/initial-task-brief.spec.ts -- --grep 'Resume works after read-only|keeps the first brief after prompt-free recovery' --retries=0
 ```
+
+### Final hosted E2E remediation
+
+The preceding remote head's E2E workflow `38068936135` reported four failed shards (`114263234544`, `114263234374`, `114263234437`, and `114263234545`). Full job logs identify five failed cases: hidden transcript catch-up; created-session runtime inheritance; two workflow-peer parking checks; and phone cascade archive navigation. Four desktop cases reproduced locally with retries disabled before correction. The phone case passed in the first local reproduction, while a focused query assertion deterministically reproduced its ordering defect.
+
+The parking and runtime fixtures now request full session detail when inspecting rich metadata. Compact membership remains unchanged. The transcript fixture proves the hidden message is persisted without entering the inactive cache, then retains its activation, newest-content, bottom-following, and reader-position assertions. It no longer requires a rich hidden-session stream.
+
+The archive fallback queried newest activity after bounded route boot exhausted its cached candidates; it could choose the later task instead of the canonical board list's earlier survivor. The bounded page now uses ascending creation order, preserving recent-use priority, workspace restrictions, liveness/ancestry checks, and the 100-row limit. The request-order regression fails on the original sort; 44 removal/coordinator/action tests pass after correction. Final ordinary desktop/phone E2E checks and exact-head hosted results remain pending.
+
+Two more terminal shards (`114263234356` and `114263234510`, same workflow/head) exposed seven additional stale-fixture failures. Both clarification fixtures waited for a full-history HTTP turns request that the window-based loader no longer makes. They now wait for the actual `message.list` response and assert that both seeded turn IDs are present in its `turns` context before exercising the unchanged clarification overlay/selection checks. Five model-selector persistence/error fixtures inspected rich ACP/runtime configuration on compact lists; their fixture reads now request full session detail. The nine-case selection reproduced those seven failures, then all nine passed with retries disabled after correction.
+
+The first four corrected desktop cases also passed with retries disabled. Three intermediate phone archive samples reached the correct task, but failed the stale exact-URL assertion because a valid `sessionId` query was retained. The fixture now compares the exact pathname, preserving the expected task identity and the later SPA navigation/no-document-reload checks. All three final phone archive samples passed with retries disabled, including the later SPA selection and no-document-reload guards. Hosted delivery remains pending; failed intermediate samples are retained separately.
+
+Final local hosted-failure correction checks: 13 desktop cases and three independent phone archive samples passed with retries disabled, using fresh production assets and isolated fixtures. The preceding recovered-brief correction separately passed three phone flows and two desktop controls. Forty-four removal/coordinator/action unit tests, TypeScript, changed-file ESLint, documentation catalog (371 decisions/1,524 specifications), and all specification lint passed. Final hosted CI is still a separate required gate. Commands:
+
+```sh
+pnpm --dir apps/web e2e:run --host --project chromium tests/workflow/workflow-peer-resume.spec.ts tests/task/subtask.spec.ts tests/chat/auto-scroll-toggle.spec.ts -- --grep 'review peer message resumes implement|opening parked implement resumes|a changed second session creates|inactive session transcript reopens' --retries=0
+pnpm --dir apps/web e2e:run --host --project chromium tests/chat/clarification-lifecycle-turn-shadow.spec.ts tests/chat/model-selector-error.spec.ts -- --retries=0
+pnpm --dir apps/web e2e:run --host --project mobile-chrome tests/task/mobile-archive-task-redirect.spec.ts -- --repeat-each=3 --retries=0
+(cd apps/web && pnpm exec vitest run hooks/use-task-removal.test.ts hooks/use-task-removal-coordinator.test.ts hooks/use-task-actions.test.ts)
+```
+
+Historical limits remain unchanged: eight of ten write-loaded probes exceeded two seconds; historical writer ownership and separate agentctl filesystem failures remain unresolved. No universal health recovery is claimed.
+
+The seventh shard (`114263234422`) was cancelled at its 45-minute job limit and produced no final blob report. Its progress log nevertheless contains two failed cases before cancellation. A read-only catalog mapped them to inactive sibling transcript reconciliation and restored Quick Chat model-catalog inspection. Both reproduced locally with retries disabled: the former exhausted its existing three-minute limit while expecting a hidden rich stream; the latter could not obtain rich metadata from the compact membership list. These failures are not classified as external timeout noise.
+
+The sibling regression now proves hidden message persistence and absence from the inactive cache, restores the disjoint cached window, activates the receiver, and then exercises foreground reconciliation and pagination to the older attributed sibling prompt. The restart fixture reads the exact session detail for its durable model catalog, preserving the existing restart, configuration, and resume assertions. Both passed without retries (`/tmp/kandev-run.e2e.3JuY9O09.log`); both preceding failures are retained at `/tmp/kandev-run.e2e.FTvCrkso.log`. Changed-file ESLint passed. Across the seven affected shards, 14 observed failed cases now have local correction evidence; the corrected desktop selections total 15 passing cases, alongside three independent phone archive samples. The complete final hosted run remains required after delivery.
+
+```sh
+pnpm --dir apps/web e2e:run --host --project chromium tests/chat/inactive-session-transcript-reconciliation.spec.ts tests/chat/quick-chat.spec.ts -- --grep 'reaches an attributed sibling prompt|resumes a restored session after backend restart' --retries=0
+```

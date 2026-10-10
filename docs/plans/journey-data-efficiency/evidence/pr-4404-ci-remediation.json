@@ -1,6 +1,6 @@
 {
   "head": "b381612f3ca8e19d454a60de318ae355fd924872",
-  "recorded_at_utc": "2026-10-10T14:52:58.331327+00:00",
+  "recorded_at_utc": "2026-10-10T18:05:10.334243+00:00",
   "ci_failure": {
     "failed_head": "b381612f3ca8e19d454a60de318ae355fd924872",
     "workflow_run_id": 38058965767,
@@ -64,15 +64,16 @@
       "base_sha": "43f55a6aad38c7f53c4b7eb56682016639f74405"
     },
     "historical_limits": "Eight of ten write-loaded persistence probes exceeded two seconds; historical writer ownership and separate agentctl filesystem failures remain unresolved. No universal health recovery is claimed.",
-    "source_sha256": "acf6cda377e70c883b53cb7ad15aa5b50a3e0db6ffd1396ab1acf1170b4d7408",
-    "source_files": 253,
+    "source_sha256": "a466bb9ac39bab99a5a924fb52ab087c9d84d8b4ce975641f47357ca4705cc99",
+    "source_files": 263,
     "touch_target": {
       "red": "Real tooltip readiness transition replaced the mobile submit button.",
       "focused_green_tests": 84,
       "focused_green_files": 5,
       "uninstrumented_phone_samples": 3,
       "retries": 0,
-      "instrumentation": "None in final samples. Trace/passive-listener samples remain diagnostic only."
+      "instrumentation": "None in final samples. Trace/passive-listener samples remain diagnostic only.",
+      "causality_limit": "Wrapper remount is independently proven; later admission diagnostics show native click and draft followed by an authoritative busy rejection. Stable target alone did not retire every browser failure."
     },
     "local_browser": {
       "desktop_before_rebase": "48/50 initially; both live move regressions subsequently passed, including 15/15 final path checks.",
@@ -126,6 +127,40 @@
       "diagnostic_result": "Native click and correct draft reached backend, which rejected an active turn. No production admission bypass.",
       "diagnostic_instrumentation": "Removed byte-for-byte before final ordinary samples.",
       "desktop": "2/2 passed: recovered brief follow-up and read-only Resume, retries disabled."
+    },
+    "final_hosted_e2e_remediation": {
+      "failed_head": "ced72219ad00b4cf3282d7c0aee8e434fd11a342",
+      "workflow_run_id": 38068936135,
+      "failed_job_ids": [
+        114263234544,
+        114263234374,
+        114263234437,
+        114263234545,
+        114263234356,
+        114263234510
+      ],
+      "failed_cases": 14,
+      "desktop_red_cases": 13,
+      "desktop_red_control_passes": 2,
+      "phone_first_reproduction": "passed; independent bounded-query sort regression failed",
+      "phone_intermediate_cases": "3/3 failed after correct destination because valid sessionId query was excluded by the fixture URL assertion",
+      "desktop_green_cases": 15,
+      "phone_green_cases": 3,
+      "retries": 0,
+      "changed_web_lint": "passed",
+      "typescript": "passed",
+      "removal_unit_tests": 44,
+      "scope": "Explicit rich fixture reads; hidden transcript activation catch-up; actual message-window turn context; canonical board-list fallback order; exact pathname with session query preserved; visible disjoint sibling reconciliation; exact restored session model catalog",
+      "hosted_status": "Pending delivery and exact-head verification",
+      "browser_logs": [
+        "/tmp/kandev-run.e2e.Td623LX1.log",
+        "/tmp/kandev-run.e2e.1xN22We6.log",
+        "/tmp/kandev-run.e2e.gexasCr9.log",
+        "/tmp/kandev-run.e2e.3JuY9O09.log"
+      ],
+      "cancelled_job_id": 114263234422,
+      "cancelled_job_observed_failures": 2,
+      "cancelled_job_red_log": "/tmp/kandev-run.e2e.FTvCrkso.log"
     }
   }
 }

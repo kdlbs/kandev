@@ -132,3 +132,7 @@ Window reconciliation clears markers whose merged row proves completion or retir
 ### PR CI fixture verification
 
 Frontend CI exposed legacy fixtures for session activation and turn hydration. Test-only corrections align them with compact membership and message-window context while retaining stale-session rejection and raw backfill assertions. The combined suite passed 198 tests across 12 files. Four deliberate contract mutations failed before byte-for-byte source restoration. TypeScript and corrected-fixture ESLint passed. See [CI fixture results](implementation-evidence.md#frontend-ci-fixture-remediation).
+
+Hosted clarification lifecycle-shadow fixtures were reconciled with message-window hydration. They assert that the actual `message.list` response includes both exactly seeded turn IDs before checking clarification visibility and selection; they no longer wait for a removed full-history HTTP request. Both marked and unmarked lifecycle-shadow cases fail before the fixture correction and pass afterward. All nine model/clarification cases passed with retries disabled. See final hosted E2E remediation in implementation evidence.
+
+PR fixup also reconciles the disjoint inactive-sibling transcript fixture with visible detail demand. Hidden persistence is proven independently; activation recovers the latest window and pagination still reaches the older attributed prompt. Its original hidden-stream wait failed; the corrected ordinary browser flow passed with retries disabled.

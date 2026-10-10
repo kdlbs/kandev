@@ -23,7 +23,7 @@ test.describe("Workflow peer resume", () => {
       expect(beforeMessage.workflow_step_id).toBe(scenario.reviewStepId);
       expect(beforeMessage.primary_session_id).toBe(scenario.initialSessionId);
 
-      const sessionsBefore = await apiClient.listTaskSessions(scenario.taskId);
+      const sessionsBefore = await apiClient.listTaskSessionDetails(scenario.taskId);
       const implementationBefore = sessionsBefore.sessions.find(
         (session) => session.id === scenario!.implementationSessionId,
       );
@@ -53,7 +53,7 @@ test.describe("Workflow peer resume", () => {
       const activeTask = await apiClient.getTask(scenario.taskId);
       expect(activeTask.workflow_step_id).toBe(scenario.reviewStepId);
       expect(activeTask.primary_session_id).toBe(scenario.initialSessionId);
-      const activeSessions = await apiClient.listTaskSessions(scenario.taskId);
+      const activeSessions = await apiClient.listTaskSessionDetails(scenario.taskId);
       expect(
         activeSessions.sessions.find((session) => session.id === scenario!.implementationSessionId)
           ?.metadata?.workflow_parking,
@@ -121,7 +121,7 @@ test.describe("Workflow peer resume", () => {
           scenario.implementationMarker,
         ),
       ).toBe(1);
-      const beforeOpen = await apiClient.listTaskSessions(scenario.taskId);
+      const beforeOpen = await apiClient.listTaskSessionDetails(scenario.taskId);
       expect(
         beforeOpen.sessions.find((session) => session.id === scenario!.implementationSessionId)
           ?.metadata?.workflow_parking,

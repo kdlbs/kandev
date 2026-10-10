@@ -85,7 +85,7 @@ export async function loadSidebarFallbackTasks(
       workspaceId,
       {
         filters: [{ dimension: "archived", op: "is", value: false }],
-        sort: { key: "lastActivityAt", direction: "desc" },
+        sort: { key: "createdAt", direction: "asc" },
         group: "none",
         collapsed_group_keys: [],
         collapsed_task_ids: [],
