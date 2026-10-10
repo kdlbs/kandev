@@ -15,6 +15,7 @@ test.describe("mobile: queued session ownership", () => {
     apiClient,
     backend,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(240_000);
     const releaseCeiling = await backend.useEnv({ KANDEV_MAX_CONCURRENT_SESSIONS: "1" });
@@ -41,6 +42,11 @@ test.describe("mobile: queued session ownership", () => {
       await expect(queueStatus).toContainText("1 of 1");
       await expect(queueStatus).toContainText(scenario.destinationProfileName);
       await assertNoDocumentHorizontalOverflow(testPage, "queued launch mobile detail");
+      if (prCapture.capturing) {
+        await prCapture.screenshot("queued-session-status-mobile", {
+          caption: "The queued destination stays visible above the mobile conversation.",
+        });
+      }
 
       await mobileLayout.getByTestId("mobile-task-picker-trigger").tap();
       const taskDrawer = testPage.getByRole("dialog", { name: "Tasks" });

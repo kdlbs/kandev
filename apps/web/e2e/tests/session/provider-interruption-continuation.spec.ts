@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import {
   createContinuationFixture,
   waitForContinuationMessage,
+  waitForNativeContinuationPrompt,
   assertNativeContinuationTrace,
   assertNativeNoContinuationTrace,
   assertContinuationSettingRetired,
@@ -444,6 +445,7 @@ for (const survives of [false, true]) {
         fixture.sessionId,
         (message) => message.metadata?.recovery_phase === "continuing",
       );
+      await waitForNativeContinuationPrompt(fixture.tracePath);
       assertNativeContinuationTrace(fixture.tracePath, "read-hold");
       await backend.restart(overrides);
       await testPage.goto(`/t/${fixture.taskId}`);

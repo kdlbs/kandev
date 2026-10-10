@@ -116,3 +116,47 @@ E2E_PORT_OFFSET=29 pnpm --dir apps/web e2e:run --host --no-build --project mobil
 E2E_PORT_OFFSET=29 pnpm --dir apps/web e2e:run --host --no-build --project chromium e2e/tests/chat/html-preview.spec.ts e2e/tests/git/diff-refresh-continuity.spec.ts e2e/tests/terminal/quick-terminal.spec.ts --retries=0
 E2E_PORT_OFFSET=29 MAKEFLAGS=GOFLAGS=-buildvcs=false pnpm --dir apps/web e2e:run --host --project chromium e2e/tests/terminal/quick-terminal.spec.ts --retries=0
 ```
+
+### Subsequent October 9–10 fixup
+
+The later rebases preserve demo dispatch, contributor notification, and Windows signing tests.
+The final rebase also retains upstream preview cleanup and its zero-retry setting.
+All 63 release-contract tests passed on the updated base.
+CI exposed three failures: cancellation event ordering, missing mobile queue status, and an early native continuation assertion.
+Queue status now reads the shared task store before legacy board snapshots.
+Cancellation assertions hold settlement frames from the cancel action until the pending-state assertion finishes.
+The background cancellation fixture waits for the persisted agent launch response before checking UI activity.
+Composer and palette fixtures use acknowledged cancellation-gated turns instead of timed sleeps.
+The underlying task also remains active until cancellation, so setup cannot consume its test period.
+Restart assertions wait for the native continuation prompt before restarting the backend.
+These fixture changes affect test observation only. They retain the existing production contracts.
+
+The queue and cancellation regressions failed before the fixes and passed afterward.
+Summary, store, cancellation, demo, and Quick Chat checks passed 183 tests across 23 files after the final rebase.
+The standalone demo build, translation checks, sleep ratchet, and harness checks passed.
+Three continuation repetitions passed without retries.
+All three Quick Chat cancellation cases passed without retries after the fixture changes.
+The first mixed browser run had two Quick Chat setup failures under shared-host load.
+One exceeded the background-event wait; the other exceeded backend readiness before test execution.
+A second browser run reproduced the missing launch-response prerequisite before cancellation.
+Desktop queue ownership and both continuation restart cases passed without retries.
+An earlier phone run passed queue presentation but exceeded the destination startup wait under shared-host load.
+After the final rebase and complete fixture rebuild, the logged phone lifecycle passed without retries in 32.5 seconds.
+Full typecheck and web lint passed on the updated base.
+The earlier overlapping typecheck was interrupted; this final sequential run supersedes that incomplete result.
+Current-head CI and automated review remain pending until the remediation push is verified.
+
+Additional verification commands, run from the repository root:
+
+```bash
+pnpm --dir apps/web exec vitest run hooks/domains/task/use-task-status-summary.test.ts lib/task-status-summary.test.ts lib/state/slices/task-overview.test.ts e2e/helpers/cancellation-observation.test.ts lib/browser-demo components/task/task-item-ready.test.tsx components/settings/system/feature-toggles-settings.test.tsx lib/state/slices/ui/quick-chat-sync.test.ts lib/state/slices/ui/quick-chat-actions.test.ts hooks/use-quick-chat-resync.test.ts
+pnpm --dir apps/web typecheck
+pnpm --dir apps/web lint
+pnpm --dir apps/web i18n:check
+pnpm --dir apps/web i18n:ratchet
+python3 .github/scripts/release-workflow-contract_test.py
+scripts/browser-demo/build-web-demo.sh /root/.cache/kandev-demo-pr1785-final-browser-build
+pnpm --dir apps/web e2e:sleep-ratchet
+TMPDIR=/root/.cache/kandev-demo-pr1785-e2e GOMAXPROCS=4 E2E_PORT_OFFSET=0 pnpm --dir apps/web e2e:run --host --no-build --project chromium e2e/tests/chat/quick-chat-cancel-palette.spec.ts -- --retries=0
+E2E_DEBUG=1 TMPDIR=/root/.cache/kandev-demo-pr1785-e2e GOMAXPROCS=4 E2E_PORT_OFFSET=0 MAKEFLAGS=GOFLAGS=-buildvcs=false pnpm --dir apps/web e2e:run --host --project mobile-chrome e2e/tests/workflow/mobile-queued-session-ownership.spec.ts -- --retries=0
+```

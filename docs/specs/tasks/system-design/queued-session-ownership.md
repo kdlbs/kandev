@@ -392,6 +392,9 @@ rows show Queued text with an existing clock/status icon. Task details place the
 status above conversation content, independently of selected session and transcript
 scroll. Do not show a parking-specific note for the selected conversation. The destination's
 CREATED start/recovery affordance yields to queued status while accepted work exists.
+Status selectors read the canonical `taskOverview.byId` record and compare summary
+revisions with legacy board and archived records. A direct task route can show the
+queue before a board snapshot loads.
 
 Use the existing `SessionTaskSwitcherSheet` phone drawer and
 `session-mobile-layout.tsx` dedicated composition. Place a compact task queue

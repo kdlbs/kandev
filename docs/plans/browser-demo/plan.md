@@ -53,3 +53,11 @@ The sketch shows structural requirements, not exact spacing. Task preview stays 
 Run focused demo tests, typecheck, lint, translation checks, release-workflow tests, and the production demo build.
 Use the existing frontend and E2E CI gates after the rebase.
 Inspect the demo locally for the rendered behaviors described in UI-01 before release.
+
+## PR fixup verification
+
+The October 9–10 rebases preserve demo dispatch, contributor notification, and Windows signing contracts.
+The fixup also restores queue status for tasks held only in the shared task store.
+Cancellation fixtures hold settlement from the action boundary, including messages that arrive before the pending notification.
+Continuation restart tests must observe the native prompt before the backend restarts.
+The work order records local verification. CI remains pending until checks pass on the pushed head.
