@@ -234,6 +234,7 @@ function ChatStatusBarRightControls({
   );
 }
 
+/** Wrapped action lines share the toolbar's right content edge. */
 function ChatStatusBarActions({
   rightControlProps,
   showRightControls,
@@ -255,7 +256,7 @@ function ChatStatusBarActions({
   return (
     <div
       data-testid="chat-status-bar-actions"
-      className="ml-auto flex min-w-0 flex-wrap items-center gap-1.5"
+      className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5"
     >
       {showRightControls && <ChatStatusBarRightControls {...rightControlProps} />}
       {showProceed && nextStepName && (
@@ -264,7 +265,7 @@ function ChatStatusBarActions({
           nextStepName={nextStepName}
           onProceed={onProceed}
           isMoving={isMoving}
-          className="h-6"
+          className="h-6 max-md:min-h-11 max-md:min-w-11"
           testId="proceed-next-step"
         />
       )}

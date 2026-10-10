@@ -4,6 +4,11 @@ import type { Locator, Page } from "@playwright/test";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { dwell } from "../../helpers/causal-waits";
 import {
+  COMPOSER_HISTORY_PROMPT,
+  expectComposerActionLayout,
+  revealTranscriptControls,
+} from "./composer-action-layout-helpers";
+import {
   expectMoveInstructionsDelivered,
   fillMoveOverrides,
   MOVE_INSTRUCTIONS,
@@ -57,6 +62,70 @@ async function expectTargetStep(
     .poll(async () => (await apiClient.getTask(taskId)).workflow_step_id, { timeout: 15_000 })
     .toBe(targetStepId);
 }
+
+/**
+ * Verifies wrapped touch targets stay reachable on the right and still move the task.
+ * @covers AC-UI-COMPOSER-ACTION-WRAP-001.2, .3, .4
+ */
+test("keeps the wrapped mobile workflow action on the right and moves the task", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const { settings } = await apiClient.getUserSettings();
+  try {
+    await apiClient.saveUserSettings({
+      show_transcript_auto_scroll_control: true,
+      show_scroll_to_start: true,
+      show_scroll_to_last_prompt: true,
+    });
+    const fixture = await seedMoveOverrideFixture(
+      testPage,
+      apiClient,
+      seedData,
+      "Wrapped Phone Move",
+      {
+        targetStepName: "Open pull request for review",
+        sourcePrompt: COMPOSER_HISTORY_PROMPT,
+      },
+    );
+    const chat = fixture.session.activeChat();
+    for (const width of [393, 360, 767, 768]) {
+      const label = width < 767 ? "Open pull request for review" : "Open PR";
+      await apiClient.updateWorkflowStep(fixture.targetStepId, { name: label });
+      await testPage.setViewportSize({ width, height: 844 });
+      await expect(chat.getByTestId("proceed-next-step")).toHaveText(label);
+      await revealTranscriptControls(chat);
+      await expectComposerActionLayout(chat, {
+        wrapped: width < 767 ? true : undefined,
+        touch: true,
+      });
+    }
+    await apiClient.updateWorkflowStep(fixture.targetStepId, {
+      name: "Open pull request and continue review",
+    });
+    await testPage.setViewportSize({ width: 360, height: 844 });
+    await expect(chat.getByTestId("proceed-next-step")).toContainText(
+      "Open pull request and continue review",
+    );
+    await revealTranscriptControls(chat);
+    await expectComposerActionLayout(chat, { wrapped: true, touch: true });
+    await testPage.screenshot({
+      path: test.info().outputPath("wrapped-workflow-action-phone.png"),
+    });
+
+    const request = waitForMoveRequest(testPage, fixture.taskId);
+    await chat.getByTestId("proceed-next-step").tap();
+    expect((await request).postDataJSON().workflow_step_id).toBe(fixture.targetStepId);
+    await expectTargetStep(apiClient, fixture.taskId, fixture.targetStepId);
+  } finally {
+    await apiClient.saveUserSettings({
+      show_transcript_auto_scroll_control: settings.show_transcript_auto_scroll_control ?? false,
+      show_scroll_to_start: settings.show_scroll_to_start === true,
+      show_scroll_to_last_prompt: settings.show_scroll_to_last_prompt === true,
+    });
+  }
+});
 
 test("short-taps the existing mobile next-step button for a direct move", async ({
   testPage,

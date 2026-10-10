@@ -2,6 +2,11 @@ import { expectPreviewFooter } from "./workflow-move-preview-assertions";
 import { expect, test } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
 import {
+  COMPOSER_HISTORY_PROMPT,
+  expectComposerActionLayout,
+  revealTranscriptControls,
+} from "./composer-action-layout-helpers";
+import {
   expectMoveInstructionsDelivered,
   fillMoveOverrides,
   MOVE_INSTRUCTIONS,
@@ -11,6 +16,71 @@ import {
 } from "./workflow-step-move-overrides-helpers";
 
 type SpecApiClient = Parameters<typeof seedMoveOverrideFixture>[1];
+
+/**
+ * Verifies phone target size and mouse activation while preserving compact desktop placement.
+ * @covers AC-UI-COMPOSER-ACTION-WRAP-001.1, .3, .4, .5
+ */
+test("keeps the workflow action right-aligned on a phone with a mouse and on desktop", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const { settings } = await apiClient.getUserSettings();
+  try {
+    await apiClient.saveUserSettings({
+      show_transcript_auto_scroll_control: true,
+      show_scroll_to_start: true,
+      show_scroll_to_last_prompt: true,
+    });
+    const fixture = await seedMoveOverrideFixture(
+      testPage,
+      apiClient,
+      seedData,
+      "Wrapped Mouse Move",
+      {
+        targetStepName: "Open pull request for review",
+        sourcePrompt: COMPOSER_HISTORY_PROMPT,
+      },
+    );
+    for (const { width, wrapped } of [
+      { width: 360, wrapped: true },
+      { width: 393, wrapped: true },
+      { width: 767 },
+      { width: 768 },
+      { width: 1440, wrapped: false },
+    ]) {
+      const label = width < 767 ? "Open pull request for review" : "Open PR";
+      await apiClient.updateWorkflowStep(fixture.targetStepId, { name: label });
+      await testPage.setViewportSize({ width, height: 900 });
+      const chat = fixture.session.activeChat();
+      await expect(chat.getByTestId("proceed-next-step")).toHaveText(label);
+      await revealTranscriptControls(chat);
+      await expectComposerActionLayout(chat, {
+        wrapped,
+        touch: width < 768,
+      });
+    }
+    await apiClient.updateWorkflowStep(fixture.targetStepId, {
+      name: "Open pull request for review",
+    });
+    await testPage.setViewportSize({ width: 360, height: 900 });
+    const chat = fixture.session.activeChat();
+    await expect(chat.getByTestId("proceed-next-step")).toHaveText("Open pull request for review");
+    await revealTranscriptControls(chat);
+    await expectComposerActionLayout(chat, { wrapped: true, touch: true });
+    const request = waitForMoveRequest(testPage, fixture.taskId);
+    await chat.getByTestId("proceed-next-step").click();
+    expect((await request).postDataJSON().workflow_step_id).toBe(fixture.targetStepId);
+    await waitForStepCommitted(apiClient, fixture.taskId, fixture.targetStepId);
+  } finally {
+    await apiClient.saveUserSettings({
+      show_transcript_auto_scroll_control: settings.show_transcript_auto_scroll_control ?? false,
+      show_scroll_to_start: settings.show_scroll_to_start === true,
+      show_scroll_to_last_prompt: settings.show_scroll_to_last_prompt === true,
+    });
+  }
+});
 
 /**
  * Count messages the session received as input (author_type "user") whose
