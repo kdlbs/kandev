@@ -157,3 +157,13 @@ Further replay found that runtime-bound proxy responses lost their writable inte
 
 
 Final merged local verification: 15 repeated desktop integration checks and eight repeated mobile checks passed without retries. After merging main through `3fed5570cec533f468c25ed03c84967bdc972588`, fresh builds passed five desktop integration checks and all seven desktop/mobile changed-files scenarios. The Linux editor IPC lookup now follows code-server's `XDG_RUNTIME_DIR` rule; its regression failed before the fix and passed afterwards. Affected upstream probe/API/credential race checks, repeated runtime-proxy races, and document validation passed. See `qa-findings.md` for commands, logs, partial full-shard results, and the still-pending remote CI gate. This work order stays `in_progress`.
+
+### Windows CI fixture remediation (2026-10-10)
+
+The Windows process job failed because the copy-export fixture used a tab and a double quote in a filename. The fixture now exercises plain and space-containing names on every platform, and retains the tab/quote case on non-Windows systems. Copy classification, patch isolation, and both rendering bodies remain asserted in every case. This changes test setup only; the production contract and qualification status are unchanged.
+
+- `cd apps/backend && go test -trimpath -race ./internal/agentctl/server/process -run '^TestTurnCheckpointCopyPatchExcludesChangedSource$' -count=1`: passed locally with all three filename cases.
+- `cd apps/backend && go test -trimpath ./internal/agent/runtime/lifecycle ./internal/orchestrator -run 'TurnChange|NativeResume|PassthroughMCP' -count=1`: both packages passed after the conflict-free rebase.
+- `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all`: passed.
+- Fresh remote Windows and full CI results remain pending after publication.
+- Work order 09 retains all disclosed executor and performance qualification gaps.

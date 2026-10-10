@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -11,7 +12,11 @@ import (
 )
 
 func TestTurnCheckpointCopyPatchExcludesChangedSource(t *testing.T) {
-	for _, copiedPath := range []string{"copy.txt", "copy with \t quote\".txt"} {
+	copiedPaths := []string{"copy.txt", "copy with spaces.txt"}
+	if runtime.GOOS != "windows" {
+		copiedPaths = append(copiedPaths, "copy with \t quote\".txt")
+	}
+	for _, copiedPath := range copiedPaths {
 		t.Run(copiedPath, func(t *testing.T) {
 			dir, cleanup := setupTestRepo(t)
 			t.Cleanup(cleanup)
