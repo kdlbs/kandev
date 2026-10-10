@@ -1328,6 +1328,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		}
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	execution.cancelStartupRecovery()
 	execution.remoteInstanceLifecycleMu.Lock()
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {

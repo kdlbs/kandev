@@ -176,13 +176,7 @@ func (s *Service) BindHostShellSession(ctx context.Context, tabID, sessionID str
 
 func (s *Service) reconcileTab(ctx context.Context, tab *models.Tab) error {
 	if tab == nil || tab.SessionID == nil {
-		if tab != nil && tab.Status == models.StatusConnecting {
-			tab.Status = models.StatusExited
-			tab.Error = "terminal session unavailable"
-			if err := s.repo.UpdateLifecycle(ctx, tab.UserID, tab.TabID, "", tab.Status, nil, tab.Error); err != nil {
-				return err
-			}
-		}
+		// A connecting descriptor without a session can still be started by its client.
 		return nil
 	}
 	if !s.ownsSession(tab.TabID, *tab.SessionID) {
