@@ -3,7 +3,6 @@ package sqlguard
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -61,11 +60,7 @@ var schema = "CREATE TABLE items (enabled INTEGER DEFAULT 0, created_at {{timest
 }
 
 func TestTaskTransferSourcesUsePortableSQL(t *testing.T) {
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller() failed")
-	}
-	backendRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "../../.."))
+	backendRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	exemptions, err := LoadExemptions(filepath.Join(backendRoot, "internal/db/sqlguard/exemptions.json"))
 	if err != nil {
 		t.Fatalf("LoadExemptions() error = %v", err)

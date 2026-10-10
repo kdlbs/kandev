@@ -163,8 +163,8 @@ func TestOfficeCEOTransfersAnotherTaskAndDestinationReplay(t *testing.T) {
 			t.Fatalf("insert agent: %v", err)
 		}
 		if _, err := officeRepo.ExecRaw(ctx, `INSERT INTO agent_profiles
-			(id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, 'ceo', ?, ?)`, profile.id, "agent-"+profile.id,
+			(id, agent_id, name, agent_display_name, workspace_id, role, enabled, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, 'ceo', 1, ?, ?)`, profile.id, "agent-"+profile.id,
 			profile.id, profile.id, profile.workspace, now, now); err != nil {
 			t.Fatalf("insert agent profile: %v", err)
 		}
