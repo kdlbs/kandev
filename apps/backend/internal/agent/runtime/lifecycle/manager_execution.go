@@ -1008,7 +1008,10 @@ func (m *Manager) ensureExecutionAdmission(
 	if agentLaunch {
 		return m.ensureLaunchSessionStillActive(ctx, info.SessionID, executionAdmissionAgent)
 	}
-	return m.ensureWorkspaceSessionAdmitted(ctx, taskID, info)
+	if err := m.ensureWorkspaceSessionAdmitted(ctx, taskID, info); err != nil {
+		return err
+	}
+	return m.ensureWorkspaceRecoveryResolved(ctx, info.SessionID)
 }
 
 type executionCreatePreparation struct {

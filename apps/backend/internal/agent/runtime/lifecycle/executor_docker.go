@@ -553,6 +553,7 @@ func isAgentctlAuthError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "status 401") ||
+		strings.Contains(msg, "health check failed: 401") ||
 		strings.Contains(msg, "unauthorized") ||
 		strings.Contains(msg, "auth token")
 }

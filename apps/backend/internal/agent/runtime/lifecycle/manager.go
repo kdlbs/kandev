@@ -210,6 +210,11 @@ type Manager struct {
 	remoteStatusPollInterval time.Duration
 	remoteStatusMu           sync.RWMutex
 	remoteStatusBySession    map[string]*RemoteStatus
+	remoteRecoveryMu         sync.Mutex
+	remoteRecoveryPending    map[string]*remoteRecoveryRetry
+	remoteRecoveryCursor     string
+	stopContext              context.Context
+	cancelStop               context.CancelFunc
 	// Bounds the non-mutating contribution push check before agent launch.
 	// A zero value uses the production default and keeps test Manager literals safe.
 	remoteContributionPreflightTimeout time.Duration
@@ -455,6 +460,7 @@ func NewManager(
 
 	// Create stop channel for graceful shutdown
 	stopCh := make(chan struct{})
+	stopContext, cancelStop := context.WithCancel(context.Background())
 
 	// Initialize session manager
 	sessionManager := NewSessionManager(log, stopCh)
@@ -488,6 +494,9 @@ func NewManager(
 		historyManager:           historyManager,
 		remoteStatusPollInterval: 60 * time.Second,
 		remoteStatusBySession:    make(map[string]*RemoteStatus),
+		remoteRecoveryPending:    make(map[string]*remoteRecoveryRetry),
+		stopContext:              stopContext,
+		cancelStop:               cancelStop,
 		stopCh:                   stopCh,
 		skillDeployer:            NoopSkillDeployer(),
 		remediateNpxCache:        routingerr.RemediateNpxCache,

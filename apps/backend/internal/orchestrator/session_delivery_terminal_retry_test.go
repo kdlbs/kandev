@@ -40,7 +40,6 @@ func TestRetrySessionDeliverySettlesProjectedTerminalWithoutOpenBlock(t *testing
 	result, err := service.RetrySessionDelivery(ctx, session.TaskID, session.ID)
 	require.NoError(t, err)
 	require.Equal(t, SessionDeliveryRecoverySettled, result.Outcome, result.Reason)
-	require.Empty(t, result.AllowedActions)
 	result, err = service.RetrySessionDelivery(ctx, session.TaskID, session.ID)
 	require.NoError(t, err)
 	require.Equal(t, SessionDeliveryRecoverySettled, result.Outcome)

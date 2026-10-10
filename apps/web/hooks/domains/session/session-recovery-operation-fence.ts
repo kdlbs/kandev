@@ -1,6 +1,5 @@
 import type { useSessionRecoveryActions } from "./use-session-recovery-actions";
 import type { SessionRecoveryNoticeKind } from "./use-session-resumption";
-import type { SessionDeliveryRecoveryResponse } from "@/lib/services/session-recovery-service";
 import { useCallback, useRef } from "react";
 import type { SessionRecoveryAction } from "@/lib/services/session-recovery-service";
 import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
@@ -116,12 +115,10 @@ export type SessionRecoveryActions = Omit<
   | "workspaceRecoveryMatchesCurrentFailure"
   | "recoveryNoticeKind"
   | "deliveryRecoveryNotice"
-  | "deliveryRecoveryResult"
   | "clearInspectionContentionNotice"
 > & {
   workspaceRecoveryMatchesCurrentFailure?: boolean;
   recoveryNoticeKind?: SessionRecoveryNoticeKind | null;
   deliveryRecoveryNotice?: string | null;
-  deliveryRecoveryResult?: SessionDeliveryRecoveryResponse | null;
   clearInspectionContentionNotice?: () => void;
 };

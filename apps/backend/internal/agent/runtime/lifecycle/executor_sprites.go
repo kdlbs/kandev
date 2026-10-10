@@ -112,14 +112,15 @@ type SpritesProxySession struct {
 
 // SpritesExecutor implements ExecutorBackend for Sprites.dev remote sandboxes.
 type SpritesExecutor struct {
-	secretStore      secrets.SecretStore
-	agentList        RemoteAuthAgentLister
-	agentctlResolver *AgentctlResolver
-	logger           *logger.Logger
-	agentctlPort     int
-	mu               sync.RWMutex
-	proxies          map[string]*SpritesProxySession
-	tokens           map[string]string // cached API tokens per instance
+	secretStore           secrets.SecretStore
+	agentList             RemoteAuthAgentLister
+	agentctlResolver      *AgentctlResolver
+	logger                *logger.Logger
+	agentctlPort          int
+	recoveryClientFactory func(string) *sprites.Client
+	mu                    sync.RWMutex
+	proxies               map[string]*SpritesProxySession
+	tokens                map[string]string // cached API tokens per instance
 }
 
 // NewSpritesExecutor creates a new Sprites runtime.
@@ -593,8 +594,9 @@ func (r *SpritesExecutor) buildInstanceResult(
 	}
 }
 
-func (r *SpritesExecutor) RecoverInstances(_ context.Context, _ []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
-	return nil, nil
+func (r *SpritesExecutor) RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
+	instances, _, err := r.RecoverInstancesDetailed(ctx, records)
+	return instances, err
 }
 
 func (r *SpritesExecutor) GetInteractiveRunner() *process.InteractiveRunner {

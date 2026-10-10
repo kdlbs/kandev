@@ -1483,6 +1483,12 @@ type LaunchRequest struct {
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
 	InterruptedHarnessGeneration uint64
+	// CandidateExecutionID is a fresh per-process identity persisted by the
+	// orchestrator before this request can load a native conversation.
+	CandidateExecutionID string `json:"-"`
+	// OnExecutionAllocated advances the restore checkpoint before launch
+	// side effects. It is runtime-only and never serialized with deferred work.
+	OnExecutionAllocated func(context.Context, string) error `json:"-"`
 
 	TaskID                string
 	TaskScope             TaskLaunchScope

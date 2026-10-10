@@ -1033,6 +1033,12 @@ type ResumeOptions struct {
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
 	InterruptedHarnessGeneration uint64
+	// CandidateExecutionID pins a restart-only restore process to the durable
+	// checkpoint allocated before lifecycle launch side effects.
+	CandidateExecutionID string
+	// OnExecutionAllocated is runtime-only and advances the exact restore
+	// checkpoint before lifecycle can load the native conversation.
+	OnExecutionAllocated func(context.Context, string) error
 
 	SettingsPolicy                   ResumeSettingsPolicy
 	AllowBranchReplacement           bool
@@ -1049,6 +1055,9 @@ type ResumeOptions struct {
 	// NoInitialPrompt keeps the task description out of a fresh recovery boot;
 	// the owning continuation delivers the captured submission after readiness.
 	NoInitialPrompt bool
+	// SuppressInitialMessageBackfill is used only by silent restart restore,
+	// which must preserve the transcript exactly until an ordinary prompt arrives.
+	SuppressInitialMessageBackfill bool
 	// HoldForInitialPrompt keeps boot-ready queue draining behind an explicit
 	// fresh-start submission until its provider admission resolves.
 	HoldForInitialPrompt bool
@@ -2100,6 +2109,8 @@ func newResumeLaunchRequest(
 		InterruptedSubmissionID:      options.InterruptedSubmissionID,
 		InterruptedStreamID:          options.InterruptedStreamID,
 		InterruptedHarnessGeneration: options.InterruptedHarnessGeneration,
+		CandidateExecutionID:         options.CandidateExecutionID,
+		OnExecutionAllocated:         options.OnExecutionAllocated,
 		WorkspaceID:                  task.WorkspaceID,
 		SessionID:                    session.ID,
 		TaskTitle:                    task.Title,

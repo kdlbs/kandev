@@ -885,6 +885,14 @@ type Service struct {
 	parkedLoopStopped bool
 	parkedLoopWorkers sync.WaitGroup
 
+	// silentRestore workers are bounded to the startup inventory and joined
+	// during shutdown before the repositories and runtime are torn down.
+	silentRestoreMu           sync.Mutex
+	silentRestoreCancel       context.CancelFunc
+	silentRestoreWorkers      sync.WaitGroup
+	silentRestoreStopped      bool
+	silentRestoreOwnerContext silentRestoreOwnerContextResolver
+
 	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, for
 	// entry points that name a task rather than a session (session.launch,
 	// session.ensure). Nil = unscoped.
@@ -2276,6 +2284,15 @@ func (s *Service) SetRetrackedSessionChecker(check func(sessionID string) bool) 
 	s.retrackedSessionCheck = check
 }
 
+// SetStartupRecoveryOwnerContextResolver binds startup restore work to the
+// workspace's current persisted owner. Authentication-disabled deployments
+// may return the supplied context unchanged.
+func (s *Service) SetStartupRecoveryOwnerContextResolver(
+	resolver func(context.Context, string, string) (context.Context, error),
+) {
+	s.silentRestoreOwnerContext = resolver
+}
+
 // wasSessionRetracked applies the configured retrackedSessionCheck. Nil
 // checker or empty sessionID is treated as "not retracked" -- today's
 // unconditional reconciliation, the correct default.
@@ -3280,6 +3297,7 @@ func (s *Service) Start(ctx context.Context) (startErr error) {
 	// the already-running check so a rejected duplicate Start cannot reopen a
 	// sweep while the service is active.
 	s.resetLifecycleSweepWorkers()
+	s.resetSilentRestoreRecovery()
 	s.running = true
 	s.startedAt = time.Now()
 	recoveryLifecycleCtx, recoveryLifecycleCancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -3330,9 +3348,9 @@ func (s *Service) reconcileStartupState(ctx context.Context) error {
 		return err
 	}
 	s.resetParkedSamplingWorkers()
-	// Reconcile session state from persisted runtime state on startup.
-	// This does NOT launch any agent processes — sessions are recovered lazily
-	// when the user opens them (via task.session.status → task.session.resume).
+	// Reconcile coarse session state from persisted runtime state before the
+	// background startup recovery workers begin. This phase does not launch
+	// agent processes; eligible sessions may be reattached or restored afterward.
 	if s.turnService == nil {
 		err := errors.New("reconcile unpublished prompt turns on startup: turn service is unavailable")
 		s.logger.Error("failed to reconcile unpublished prompt turns on startup", zap.Error(err))
@@ -3452,6 +3470,9 @@ func (s *Service) startBackgroundRecovery(ctx context.Context) {
 	// before tearing down repo / agentManager.
 	s.startIdleSessionReaper(ctx)
 	s.startCeilingSweeper(ctx)
+	if lifecycleCtx := s.recoveryLifecycleContext(); lifecycleCtx != nil {
+		s.startSilentRestoreRecovery(lifecycleCtx)
+	}
 }
 
 func (s *Service) setNotRunning() {
@@ -3506,6 +3527,7 @@ func (s *Service) Stop() error {
 	// Stop owns every in-flight resume attempt. Its detached request context
 	// must not let startup callbacks outlive the service generation.
 	s.cancelResumeAttempts()
+	s.stopSilentRestoreRecovery()
 	// Stop detached dynamic successors before the scheduler and watcher. Their
 	// workers can otherwise observe the shutdown only after those components
 	// have already stopped, and may launch or recover a session during teardown.

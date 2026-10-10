@@ -1,4 +1,11 @@
 import { test, expect } from "../../fixtures/test-base";
+import { attachMessageAddCapture } from "../../helpers/ws-capture";
+import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
+import {
+  captureSilentRestartSnapshot,
+  countSessionMessageAdds,
+  expectRestartConversationIdentity,
+} from "../../helpers/silent-restart-recovery";
 import { SessionPage } from "../../pages/session-page";
 
 async function localExecutorProfileId(apiClient: {
@@ -28,7 +35,7 @@ async function localExecutorProfileId(apiClient: {
 // the capability — what the capability controls is whether the backend's own
 // graceful-shutdown path stops it on the way down.
 test.describe("Agent survival across backend restart", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test("a worktree session's in-flight turn survives a graceful backend restart", async ({
     testPage,
@@ -37,6 +44,8 @@ test.describe("Agent survival across backend restart", () => {
     backend,
   }) => {
     test.setTimeout(120_000);
+    const traffic = attachGatewayTrafficCapture(testPage);
+    const messageAdds = attachMessageAddCapture(testPage);
 
     const releaseFeature = await backend.useEnv({
       KANDEV_FEATURES_AGENT_SURVIVAL: "true",
@@ -73,6 +82,13 @@ test.describe("Agent survival across backend restart", () => {
         (item) => item.is_primary,
       )?.id;
       expect(liveSessionID).toBeTruthy();
+      const beforeRestart = await captureSilentRestartSnapshot(apiClient, task.id, liveSessionID!);
+      expect(beforeRestart.agentExecutionId).toBeTruthy();
+      const messageAddsBeforeRestart = countSessionMessageAdds(
+        messageAdds.frames,
+        task.id,
+        liveSessionID!,
+      );
 
       // Restart the backend while the turn is still running.
       await backend.restart();
@@ -89,6 +105,18 @@ test.describe("Agent survival across backend restart", () => {
       const reattachedSession = reattachedSessions.sessions.find((item) => item.is_primary);
       expect(reattachedSession?.id).toBe(liveSessionID);
       expect(reattachedSession?.state).toBe("RUNNING");
+      await expectRestartConversationIdentity({
+        page: testPage,
+        api: apiClient,
+        taskId: task.id,
+        snapshot: beforeRestart,
+        traffic: traffic.frames,
+        expectedState: "RUNNING",
+        executionDisposition: "preserved",
+      });
+      expect(countSessionMessageAdds(messageAdds.frames, task.id, liveSessionID!)).toBe(
+        messageAddsBeforeRestart,
+      );
 
       // The instance was re-tracked, not relaunched: exactly the one boot
       // message from the original launch, no second "Started agent" and no
@@ -130,6 +158,10 @@ test.describe("Agent survival across backend restart", () => {
       // response through the re-tracked, still-live instance.
       await session.sendMessage("/e2e:simple-message");
       await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
+      await session.waitForChatIdle({ timeout: 45_000 });
+      expect(countSessionMessageAdds(messageAdds.frames, task.id, liveSessionID!)).toBe(
+        messageAddsBeforeRestart + 1,
+      );
 
       // The completed Review task remains in the sidebar even when it has no
       // active board column. Its row must not advertise an interrupted turn.
@@ -148,6 +180,8 @@ test.describe("Agent survival across backend restart", () => {
     backend,
   }) => {
     test.setTimeout(120_000);
+    const traffic = attachGatewayTrafficCapture(testPage);
+    const messageAdds = attachMessageAddCapture(testPage);
 
     const releaseFeature = await backend.useEnv({
       KANDEV_FEATURES_AGENT_SURVIVAL: "true",
@@ -180,6 +214,13 @@ test.describe("Agent survival across backend restart", () => {
         (item) => item.is_primary,
       )?.id;
       expect(liveSessionID).toBeTruthy();
+      const beforeRestart = await captureSilentRestartSnapshot(apiClient, task.id, liveSessionID!);
+      expect(beforeRestart.agentExecutionId).toBeTruthy();
+      const messageAddsBeforeRestart = countSessionMessageAdds(
+        messageAdds.frames,
+        task.id,
+        liveSessionID!,
+      );
 
       await backend.restart();
       await testPage.reload();
@@ -191,6 +232,18 @@ test.describe("Agent survival across backend restart", () => {
       const reattachedSession = reattachedSessions.sessions.find((item) => item.is_primary);
       expect(reattachedSession?.id).toBe(liveSessionID);
       expect(reattachedSession?.state).toBe("RUNNING");
+      await expectRestartConversationIdentity({
+        page: testPage,
+        api: apiClient,
+        taskId: task.id,
+        snapshot: beforeRestart,
+        traffic: traffic.frames,
+        expectedState: "RUNNING",
+        executionDisposition: "preserved",
+      });
+      expect(countSessionMessageAdds(messageAdds.frames, task.id, liveSessionID!)).toBe(
+        messageAddsBeforeRestart,
+      );
 
       await expect(session.chat.getByText(/Started agent|Resumed agent/i)).toHaveCount(1);
       await expect(session.recoveryFreshButton()).toHaveCount(0);
@@ -205,6 +258,10 @@ test.describe("Agent survival across backend restart", () => {
 
       await session.sendMessage("/e2e:simple-message");
       await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
+      await session.waitForChatIdle({ timeout: 45_000 });
+      expect(countSessionMessageAdds(messageAdds.frames, task.id, liveSessionID!)).toBe(
+        messageAddsBeforeRestart + 1,
+      );
     } finally {
       await releaseFeature();
     }

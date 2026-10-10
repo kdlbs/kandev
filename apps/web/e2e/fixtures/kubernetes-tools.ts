@@ -6,6 +6,7 @@ import path from "node:path";
 import { dwell } from "../helpers/causal-waits";
 import { waitForHealth } from "./backend";
 import { prepareCompactRuntimeFixture } from "./compact-runtime";
+import { runFixtureCommand } from "./fixture-command";
 import {
   assertRuntimeImageTagAvailable,
   FixtureResourceOwnership,
@@ -781,7 +782,7 @@ export async function provisionKubernetesCluster(
     fs.writeFileSync(kindConfigPath, kindClusterConfig(), { mode: 0o600 });
     writeClusterOwnershipMarker(marker, name);
     ownership.acquire("cluster", () =>
-      execFileSync(
+      runFixtureCommand(
         tools.kind,
         [
           "create",
@@ -797,7 +798,7 @@ export async function provisionKubernetesCluster(
           "--wait",
           "180s",
         ],
-        { timeout: 300_000, stdio: process.env.E2E_DEBUG ? "inherit" : "ignore" },
+        { timeout: 300_000 },
       ),
     );
     execFileSync(tools.kind, ["load", "docker-image", image, "--name", name], {

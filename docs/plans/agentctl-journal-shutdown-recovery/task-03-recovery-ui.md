@@ -192,3 +192,9 @@ PR review follow-up:
 - The Resume action keeps its accessible name while a separate status announces progress. The component regression covers pending state, interruption replacement, and a late response.
 - The final combined frontend run passed 147 tests across ten files. Type checking, full web lint, changed-service lint, and translation validation passed.
 - The final browser selections passed sequentially: two Chromium specs in 39.5 seconds and two mobile-chrome specs in 28.8 seconds. Four fresh screenshots were captured and inspected. The staged translation ratchet and documentation coverage preflight passed.
+
+## Superseding restart behavior
+
+The user rejected the manual interruption flow on 2026-10-09.
+[Task 05](task-05-silent-restart-recovery.md) replaces it with automatic restoration without prompt dispatch.
+The results above describe the prior implementation, not validation of that revision.

@@ -72,17 +72,21 @@ func TestSSHNewControllerRecordsItsOwnIdentity(t *testing.T) {
 		}},
 		&SSHTarget{Host: "ssh.example", Port: 22, User: "agent"},
 		&SSHPortForwarder{localPort: 43124},
-		"/remote/task", "/remote/session", 43123, 99, "/home/agent/.kandev", "token",
+		"/remote/task", "/remote/session", 43123, 43122, 99, "/home/agent/.kandev", "token",
 	)
 	require.Equal(t, "new-instance", instance.Metadata["ssh_remote_agentctl_instance_id"])
+	require.Equal(t, "43122", instance.Metadata[MetadataKeySSHRemoteControlPort])
+	require.True(t, ShouldPersistMetadataKey(MetadataKeySSHRemoteControlPort), "control listener must survive same-session restart")
+	require.Contains(t, FilterPersistentMetadata(instance.Metadata), MetadataKeySSHRemoteControlPort)
 }
 
 func TestSSHControllerIdentityMetadataLifecycle(t *testing.T) {
 	const key = "ssh_remote_agentctl_instance_id"
 	require.True(t, ShouldPersistMetadataKey(key), "identity must survive same-session restart")
 	require.True(t, IsSessionScopedMetadataKey(key), "identity must not leak to sibling sessions")
-	metadata := map[string]interface{}{key: "stale-instance", MetadataKeySSHRemoteTaskDir: "/remote/task"}
+	metadata := map[string]interface{}{key: "stale-instance", MetadataKeySSHRemoteControlPort: "43122", MetadataKeySSHRemoteTaskDir: "/remote/task"}
 	clearSSHResumeRuntimeMetadata(metadata)
 	require.NotContains(t, metadata, key, "replacement controllers must not inherit stale identity")
+	require.NotContains(t, metadata, MetadataKeySSHRemoteControlPort, "replacement controllers must not inherit stale control port")
 	require.Equal(t, "/remote/task", metadata[MetadataKeySSHRemoteTaskDir])
 }

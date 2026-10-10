@@ -16,9 +16,28 @@ func (r *SpritesExecutor) setupPortForwarding(
 	spriteName, instanceID string,
 	remotePort int,
 ) (int, error) {
+	proxy, err := r.createPortForwardingSession(sprite, spriteName, remotePort)
+	if err != nil {
+		return 0, err
+	}
+	r.mu.Lock()
+	previous := r.proxies[instanceID]
+	r.proxies[instanceID] = proxy
+	r.mu.Unlock()
+	if previous != nil && previous != proxy {
+		r.closeProxySession(previous)
+	}
+	return proxy.localPort, nil
+}
+
+func (r *SpritesExecutor) createPortForwardingSession(
+	sprite *sprites.Sprite,
+	spriteName string,
+	remotePort int,
+) (*SpritesProxySession, error) {
 	localPort, err := getFreePort()
 	if err != nil {
-		return 0, fmt.Errorf("failed to get free port: %w", err)
+		return nil, fmt.Errorf("failed to get free port: %w", err)
 	}
 
 	r.logger.Debug("setting up port forwarding",
@@ -29,19 +48,15 @@ func (r *SpritesExecutor) setupPortForwarding(
 	session, err := sprite.ProxyPort(proxyCtx, localPort, remotePort)
 	if err != nil {
 		cancel()
-		return 0, fmt.Errorf("port forwarding failed: %w", err)
+		return nil, fmt.Errorf("port forwarding failed: %w", err)
 	}
 
-	r.mu.Lock()
-	r.proxies[instanceID] = &SpritesProxySession{
+	return &SpritesProxySession{
 		spriteName:   spriteName,
 		localPort:    localPort,
 		proxySession: session,
 		cancel:       cancel,
-	}
-	r.mu.Unlock()
-
-	return localPort, nil
+	}, nil
 }
 
 func (r *SpritesExecutor) applyNetworkPolicy(

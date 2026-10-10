@@ -2,8 +2,9 @@ package models
 
 import (
 	"encoding/json"
-	"github.com/kandev/kandev/internal/common/processidentity"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/processidentity"
 )
 
 const SessionMetaKeyAgentDeliveryRecovery = "agent_delivery_recovery"
@@ -14,6 +15,19 @@ const (
 	AgentDeliveryRecoveryRecovered    = "recovered"
 	AgentDeliveryRecoverySettled      = "settled"
 	AgentDeliveryRecoveryContinued    = "continued"
+	AgentDeliveryRecoveryRestored     = "restored"
+)
+
+const (
+	SilentRestoreStagePrepared           = "prepared"
+	SilentRestoreStageCandidateAllocated = "candidate_allocated"
+	SilentRestoreStageCandidateLaunching = "candidate_launching"
+	SilentRestoreStageCandidateDead      = "candidate_dead"
+	SilentRestoreStageTerminal           = "terminal"
+
+	SilentRestoreAction          = "silent_restart_restore"
+	SilentRestoreOutcomePending  = "pending"
+	SilentRestoreOutcomeRestored = "restored"
 )
 
 // AgentDeliveryRecovery is the persisted UI and admission snapshot for one
@@ -77,17 +91,52 @@ type HarnessSessionGeneration struct {
 // RestoreAttempt records the decision and result of one native restore or
 // explicitly authorized continuation action.
 type RestoreAttempt struct {
-	ID                 string     `json:"id"`
-	SessionID          string     `json:"session_id"`
-	IncarnationID      string     `json:"incarnation_id"`
-	ExpectedGeneration int64      `json:"expected_generation"`
-	Action             string     `json:"action"`
-	Outcome            string     `json:"outcome"`
-	Reason             string     `json:"reason"`
-	TargetWorkspace    string     `json:"target_workspace,omitempty"`
-	Authorized         bool       `json:"authorized"`
-	CreatedAt          time.Time  `json:"created_at"`
-	CompletedAt        *time.Time `json:"completed_at,omitempty"`
+	ID                 string                   `json:"id"`
+	SessionID          string                   `json:"session_id"`
+	IncarnationID      string                   `json:"incarnation_id"`
+	ExpectedGeneration int64                    `json:"expected_generation"`
+	Action             string                   `json:"action"`
+	Outcome            string                   `json:"outcome"`
+	Reason             string                   `json:"reason"`
+	TargetWorkspace    string                   `json:"target_workspace,omitempty"`
+	Authorized         bool                     `json:"authorized"`
+	CreatedAt          time.Time                `json:"created_at"`
+	CompletedAt        *time.Time               `json:"completed_at,omitempty"`
+	Checkpoint         *SilentRestoreCheckpoint `json:"checkpoint,omitempty"`
+}
+
+// SilentRestoreCheckpoint pins every durable identity that a restart restore
+// must revalidate after native loading and across process crashes.
+type SilentRestoreCheckpoint struct {
+	Version              int                      `json:"version"`
+	Stage                string                   `json:"stage"`
+	SourceRecovery       AgentDeliveryRecovery    `json:"source_recovery"`
+	SourceGeneration     HarnessSessionGeneration `json:"source_generation"`
+	SourceBlock          SessionRecoveryBlock     `json:"source_block"`
+	TaskID               string                   `json:"task_id"`
+	WorkspaceID          string                   `json:"workspace_id"`
+	WorkspaceOwnerID     string                   `json:"workspace_owner_id"`
+	WorkspaceOrgID       string                   `json:"workspace_org_id"`
+	CandidateExecutionID string                   `json:"candidate_execution_id,omitempty"`
+}
+
+// SilentRestoreCandidate is a bounded startup inventory row. The caller must
+// validate its metadata and load exact generation and block evidence.
+type SilentRestoreCandidate struct {
+	TaskID      string
+	SessionID   string
+	WorkspaceID string
+	State       TaskSessionState
+	Metadata    map[string]interface{}
+}
+
+// SilentRestoreCommit binds a candidate execution to its pinned checkpoint
+// and native generation in one transaction.
+type SilentRestoreCommit struct {
+	AttemptID   string
+	Checkpoint  SilentRestoreCheckpoint
+	Generation  HarnessSessionGeneration
+	CompletedAt time.Time
 }
 
 // ContinuationSnapshot is bounded, untrusted context composed from canonical

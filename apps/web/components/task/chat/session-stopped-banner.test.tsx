@@ -234,12 +234,13 @@ describe("SessionStoppedBanner delivery recovery", () => {
     expect(screen.getByTestId(FRESH_BUTTON_TEST_ID)).toBeTruthy();
   });
 
-  it("offers connection retry and Stop for an uncertain prompt outcome", async () => {
+  it("keeps retry state-only when the response advertises a retired action", async () => {
     mocks.request.mockResolvedValueOnce({
       task_id: TASK_ID,
       session_id: SESSION_ID,
-      outcome: "attached",
+      outcome: "uncertain",
       recovery_revision: 1,
+      allowed_actions: ["resume_interrupted"],
     });
     render(<BannerHarness mode="recoverable" uncertainDelivery />);
 
@@ -257,10 +258,8 @@ describe("SessionStoppedBanner delivery recovery", () => {
         30000,
       ),
     );
-    expect(await screen.findByTestId("delivery-recovery-result")).toHaveProperty(
-      "textContent",
-      "The connection is restored without resending the prompt.",
-    );
+    expect(await screen.findByTestId("delivery-recovery-result")).toBeTruthy();
+    expect(screen.queryByTestId("interrupted-session-continuation")).toBeNull();
 
     fireEvent.click(screen.getByTestId(STOP_BUTTON));
     await waitFor(() => expect(mocks.stop).toHaveBeenCalledTimes(1));

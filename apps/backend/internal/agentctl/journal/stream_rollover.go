@@ -21,19 +21,65 @@ func (j *Journal) RolloverStream(ctx context.Context, oldStreamID string, replac
 	}
 	j.mu.RLock()
 	defer j.mu.RUnlock()
-	err := j.updateLocked(func(tx *bolt.Tx) error {
+	db, err := j.dbLocked()
+	if err != nil {
+		return err
+	}
+	var old Stream
+	err = j.viewLocked(func(tx *bolt.Tx) error {
+		var err error
+		old, err = validateRolloverStreamTx(ctx, tx, oldStreamID, replacement)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	writeBytes, err := estimateRolloverWriteBytes(old, replacement)
+	if err != nil {
+		return err
+	}
+	diskReservation, err := j.checkDiskCapacity(ctx, db, writeBytes, false)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			RecordJournalError(classifyJournalError(err))
+		}
+		return err
+	}
+	err = j.updateLocked(func(tx *bolt.Tx) error {
 		old, err := validateRolloverStreamTx(ctx, tx, oldStreamID, replacement)
 		if err != nil {
 			return err
 		}
 		return writeRolloverStreamsTx(tx, oldStreamID, old, replacement)
 	})
+	j.finishDiskCapacityReservation(diskReservation, err == nil)
 	if err != nil {
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			RecordJournalError(classifyJournalError(err))
 		}
 	}
 	return err
+}
+
+func estimateRolloverWriteBytes(old, replacement Stream) (int64, error) {
+	old.Sealed = true
+	encodedOld, err := json.Marshal(old)
+	if err != nil {
+		return 0, err
+	}
+	replacement.SessionID = old.SessionID
+	replacement.IncarnationID = old.IncarnationID
+	replacement.HarnessGeneration = old.HarnessGeneration
+	replacement.HighWater = 0
+	replacement.Acknowledged = 0
+	replacement.FirstRetained = 0
+	replacement.Bytes = 0
+	replacement.Sealed = false
+	encodedReplacement, err := json.Marshal(replacement)
+	if err != nil {
+		return 0, err
+	}
+	return int64(len(encodedOld) + len(encodedReplacement)), nil
 }
 
 func validateRolloverStreamTx(ctx context.Context, tx *bolt.Tx, oldStreamID string, replacement Stream) (Stream, error) {

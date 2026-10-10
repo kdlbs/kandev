@@ -134,7 +134,6 @@ it("hides an eligible retry result when persisted recovery advances", async () =
     session_id: SESSION_ID,
     outcome: "uncertain",
     recovery_revision: 1,
-    allowed_actions: ["resume_interrupted"],
   });
   const { result, rerender } = renderHook(() =>
     useSessionRecoveryActions({ taskId: TASK_ID, sessionId: SESSION_ID }),
@@ -142,11 +141,10 @@ it("hides an eligible retry result when persisted recovery advances", async () =
   await act(async () => {
     await result.current.handleRecover("retry_connection");
   });
-  expect(result.current.deliveryRecoveryResult?.allowed_actions).toEqual(["resume_interrupted"]);
+  expect(result.current.deliveryRecoveryNotice).toBe("task:deliveryRecoveryuncertain");
   mocks.appState.taskSessions.items[SESSION_ID].metadata = {
     agent_delivery_recovery: { ...recovery, revision: 2 },
   };
   rerender();
-  expect(result.current.deliveryRecoveryResult).toBeNull();
   expect(result.current.deliveryRecoveryNotice).toBeNull();
 });

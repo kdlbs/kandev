@@ -164,9 +164,7 @@ export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) 
   return (
     <AppStatusDrawerContext.Provider value={drawer}>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <AgentRuntimeUnavailableAlert
-          showInterruptedSessions={!isMobile || !pathname.startsWith("/t/")}
-        />
+        <AgentRuntimeUnavailableAlert />
         <BackendReloadRequiredAlert />
         {children}
         {(useDrawerSurface ? drawerEnabled : inlineStatusBarVisible) &&

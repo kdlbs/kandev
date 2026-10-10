@@ -60,6 +60,8 @@ test("surfaces uncertain delivery with state-only retry and Stop", async ({
   await expect(banner).toContainText("Delivery was interrupted. The prompt outcome is uncertain.");
   await expect(banner.getByTestId("recovery-resume-button")).toHaveCount(0);
   await expect(banner.getByTestId("recovery-fresh-button")).toHaveCount(0);
+  await expect(testPage.getByTestId("interrupted-sessions-notice")).toHaveCount(0);
+  await expect(testPage.getByTestId("interrupted-session-continuation")).toHaveCount(0);
 
   const retryBox = await banner.getByTestId("recovery-retry-connection-button").boundingBox();
   const stopBox = await banner.getByTestId("recovery-stop-button").boundingBox();
@@ -80,6 +82,7 @@ test("surfaces uncertain delivery with state-only retry and Stop", async ({
   proxy.releaseHeldResponses("session.recover");
   await banner.getByTestId("recovery-retry-connection-button").click();
   await expect(banner.getByTestId("delivery-recovery-result")).toBeVisible({ timeout: 30_000 });
+  await expect(testPage.getByTestId("interrupted-session-continuation")).toHaveCount(0);
   await expect
     .poll(
       () =>

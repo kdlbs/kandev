@@ -64,6 +64,8 @@ test("keeps uncertain delivery recovery usable on a phone", async ({
   await expect(banner.getByTestId("recovery-retry-connection-button")).toBeVisible();
   await expect(banner.getByTestId("recovery-stop-button")).toBeVisible();
   await expect(banner.getByTestId("recovery-resume-button")).toHaveCount(0);
+  await expect(testPage.getByTestId("interrupted-sessions-notice")).toHaveCount(0);
+  await expect(testPage.getByTestId("interrupted-session-continuation")).toHaveCount(0);
 
   await banner.getByTestId("recovery-retry-connection-button").tap();
   await expect.poll(() => proxy.heldResponseCount("session.recover")).toBe(1);
@@ -73,6 +75,7 @@ test("keeps uncertain delivery recovery usable on a phone", async ({
   await assertDeliveryRecoveryGeometry(testPage);
   proxy.releaseHeldResponses("session.recover");
   await expect(banner.getByTestId("delivery-recovery-result")).toBeVisible({ timeout: 30_000 });
+  await expect(testPage.getByTestId("interrupted-session-continuation")).toHaveCount(0);
   for (const id of ["recovery-retry-connection-button", "recovery-stop-button"]) {
     const box = await banner.getByTestId(id).boundingBox();
     expect(box?.height).toBeGreaterThanOrEqual(44);

@@ -501,7 +501,9 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
           const nextEnv = scopedEnv.apply(baselineEnv, envOverrides);
           const runningProcess = backendProc;
           if (!runningProcess) throw new Error("Backend process is not running");
-          await killProcessGroup(runningProcess);
+          if (runningProcess.exitCode === null && runningProcess.signalCode === null) {
+            await killProcessGroup(runningProcess);
+          }
           // Poll until the OS releases the TCP port rather than sleeping a fixed
           // 2 s. TIME_WAIT can linger for 30–120 s under load; the probe exits
           // as soon as the port stops accepting connections (typically <200 ms).

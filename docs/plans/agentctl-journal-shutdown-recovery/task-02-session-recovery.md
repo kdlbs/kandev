@@ -141,3 +141,9 @@ PR review follow-up:
 - The runtime accepts an orchestrator-admitted first instruction only when its canonical identity, owner, generation, dispatch attempt, and payload match, and the execution has not dispatched a prompt. Launch-handoff and admission-callback regressions passed; duplicate dispatch and foreign ownership remain blocked.
 - Three desktop CI scenarios and the phone Configuration Chat scenario reproduced the initial-admission failure before the fix. All four passed after the fix through the managed browser runner.
 - The final exact five-package SQLite race run passed: lifecycle 133.808 seconds, orchestrator 183.684 seconds, handlers 5.746 seconds, executor 10.428 seconds, and repository results in the retained test log. SQL guard, SQLite store conformance, and changed-scope Go lint passed. Storage contracts did not change in this review follow-up; the earlier isolated PostgreSQL results remain the package evidence.
+
+## Superseding restart behavior
+
+The user rejected the manual interruption flow on 2026-10-09.
+[Task 05](task-05-silent-restart-recovery.md) replaces it with automatic restoration without prompt dispatch.
+The results above describe the prior implementation, not validation of that revision.

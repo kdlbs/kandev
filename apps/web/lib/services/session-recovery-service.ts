@@ -19,36 +19,17 @@ export type SessionDeliveryRecoveryOutcome =
   | "uncertain"
   | "blocked"
   | "unavailable"
-  | "continued"
-  | "restored_blocked";
-
-export type SessionDeliveryRecoveryIdentity = {
-  submission_id: string;
-  stream_id: string;
-  incarnation_id: string;
-  harness_generation: number;
-  prompt_generation: number;
-};
+  | "continued";
 
 export type SessionDeliveryRecoveryResponse = {
   task_id: string;
   session_id: string;
   outcome: SessionDeliveryRecoveryOutcome;
   reason?: string;
-  allowed_actions?: string[];
   recovery_revision: number;
-  recovery_identity?: SessionDeliveryRecoveryIdentity;
 };
 
 export type SessionRecoverySettingsPolicy = "provider_restored";
-
-export type InterruptedSessionResumeRequest = {
-  acknowledge_interruption: boolean;
-  recovery_revision: number;
-  recovery_identity: SessionDeliveryRecoveryIdentity;
-  instruction: string;
-  idempotency_key: string;
-};
 
 export type SessionRecoveryRequest = {
   taskId: string;
@@ -57,7 +38,6 @@ export type SessionRecoveryRequest = {
   failureMessage: string;
   errorStamp?: string | null;
   settingsPolicy?: SessionRecoverySettingsPolicy;
-  interruptedResume?: InterruptedSessionResumeRequest;
 };
 
 const MANAGED_CLONE_RELOCATION_TIMEOUT_MS = 30 * 60 * 1000;
@@ -109,19 +89,6 @@ function responseFailure(response: unknown, fallback: string): Error | null {
   return new Error(message);
 }
 
-function validRecoveryIdentity(value: unknown): value is SessionDeliveryRecoveryIdentity {
-  if (!isRecord(value)) return false;
-  return (
-    [value.submission_id, value.stream_id, value.incarnation_id].every(
-      (id) => typeof id === "string" && id.length > 0,
-    ) &&
-    [value.harness_generation, value.prompt_generation].every(
-      (generation) =>
-        typeof generation === "number" && Number.isSafeInteger(generation) && generation > 0,
-    )
-  );
-}
-
 const recoveryOutcomes: readonly unknown[] = [
   "attached",
   "settled",
@@ -129,23 +96,7 @@ const recoveryOutcomes: readonly unknown[] = [
   "blocked",
   "unavailable",
   "continued",
-  "restored_blocked",
 ];
-
-function validRecoveryActions(value: Record<string, unknown>): boolean {
-  if (value.allowed_actions === undefined) return true;
-  if (
-    !Array.isArray(value.allowed_actions) ||
-    value.allowed_actions.some((action) => typeof action !== "string")
-  )
-    return false;
-  if (!value.allowed_actions.includes("resume_interrupted")) return true;
-  return (
-    validRecoveryIdentity(value.recovery_identity) &&
-    typeof value.recovery_revision === "number" &&
-    value.recovery_revision >= 1
-  );
-}
 
 export function sessionDeliveryRecoveryResponse(
   value: unknown,
@@ -160,9 +111,6 @@ export function sessionDeliveryRecoveryResponse(
   )
     return null;
   if (value.reason !== undefined && typeof value.reason !== "string") return null;
-  if (value.recovery_identity !== undefined && !validRecoveryIdentity(value.recovery_identity))
-    return null;
-  if (!validRecoveryActions(value)) return null;
   return value as SessionDeliveryRecoveryResponse;
 }
 
@@ -172,9 +120,6 @@ export function sessionDeliveryRecoveryMessage(
 ): string {
   switch (result.outcome) {
     case "continued":
-      return t("task:interruptedRecoveryContinued");
-    case "restored_blocked":
-      return t("task:interruptedRecoveryRestoredBlocked");
     case "attached":
       return t("task:deliveryRecoveryAttached");
     case "settled":
@@ -304,27 +249,24 @@ export function asRecoveryError(error: unknown, fallback: string): Error {
 }
 
 function validateRecoveryRequest(options: SessionRecoveryRequest) {
-  const { action, errorStamp, settingsPolicy, interruptedResume, failureMessage } = options;
+  const { action, errorStamp, settingsPolicy, failureMessage } = options;
   if (action === "relocate_and_resume" && !errorStamp) throw new Error(failureMessage);
   if (settingsPolicy && action !== "resume") throw new Error(failureMessage);
-  if (interruptedResume && (action !== "resume" || settingsPolicy)) throw new Error(failureMessage);
 }
 
 function recoveryRequestPayload(options: SessionRecoveryRequest) {
-  const { taskId, sessionId, action, errorStamp, settingsPolicy, interruptedResume } = options;
+  const { taskId, sessionId, action, errorStamp, settingsPolicy } = options;
   return {
     task_id: taskId,
     session_id: sessionId,
     action,
     ...(action === "relocate_and_resume" ? { error_stamp: errorStamp } : {}),
-    ...(interruptedResume ? { interrupted_resume: interruptedResume } : {}),
     ...(action === "resume" && settingsPolicy ? { settings_policy: settingsPolicy } : {}),
   };
 }
 
 function recoveryRequestTimeout(options: SessionRecoveryRequest) {
   if (options.action === "relocate_and_resume") return MANAGED_CLONE_RELOCATION_TIMEOUT_MS;
-  if (options.interruptedResume) return 150_000;
   return 30_000;
 }
 
@@ -332,7 +274,7 @@ function recoveryRequestTimeout(options: SessionRecoveryRequest) {
 export async function requestSessionRecover(
   options: SessionRecoveryRequest,
 ): Promise<SessionDeliveryRecoveryResponse | void> {
-  const { taskId, sessionId, action, failureMessage, interruptedResume } = options;
+  const { taskId, sessionId, action, failureMessage } = options;
   validateRecoveryRequest(options);
   const client = getWebSocketClient();
   if (!client) throw new Error(failureMessage);
@@ -343,7 +285,7 @@ export async function requestSessionRecover(
   );
   const failure = responseFailure(response, failureMessage);
   if (failure) throw failure;
-  if (action === "retry_connection" || interruptedResume) {
+  if (action === "retry_connection") {
     const recovery = sessionDeliveryRecoveryResponse(response);
     if (!recovery || recovery.task_id !== taskId || recovery.session_id !== sessionId) {
       throw new Error(failureMessage);

@@ -79,16 +79,18 @@ type PluginExecutorInventoryStore interface {
 
 type pluginControlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string) (*agentctl.ControlClient, string, error)
 type pluginRecoveredAgentctlClientFactory func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.Client, error)
+type pluginRecoveredAgentctlInstanceReader func(context.Context, agentctl.ConnectionLeaseResolver, *logger.Logger, string, string) (*agentctl.InstanceInfo, error)
 type pluginAgentctlReadinessCheck func(context.Context, *agentctl.Client) error
 
 type PluginRemoteExecutor struct {
-	operations                 PluginExecutorProviderOperations
-	logger                     *logger.Logger
-	profileLoader              PluginExecutorProfileLoader
-	inventoryStore             PluginExecutorInventoryStore
-	newAgentctlControlClient   pluginControlClientFactory
-	newRecoveredAgentctlClient pluginRecoveredAgentctlClientFactory
-	ready                      pluginAgentctlReadinessCheck
+	operations                  PluginExecutorProviderOperations
+	logger                      *logger.Logger
+	profileLoader               PluginExecutorProfileLoader
+	inventoryStore              PluginExecutorInventoryStore
+	newAgentctlControlClient    pluginControlClientFactory
+	newRecoveredAgentctlClient  pluginRecoveredAgentctlClientFactory
+	recoveredAgentctlInfoReader pluginRecoveredAgentctlInstanceReader
+	ready                       pluginAgentctlReadinessCheck
 }
 
 func (r *PluginRemoteExecutor) SetRecoveryDependencies(loader PluginExecutorProfileLoader, inventory PluginExecutorInventoryStore) {
@@ -133,6 +135,20 @@ func NewPluginRemoteExecutor(operations PluginExecutorProviderOperations, log *l
 	runtime.newRecoveredAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
 		return agentctl.NewEndpointClient(ctx, resolver, log,
 			agentctl.WithExecutionID(executionID), agentctl.WithAuthToken(token))
+	}
+	runtime.recoveredAgentctlInfoReader = func(
+		ctx context.Context,
+		resolver agentctl.ConnectionLeaseResolver,
+		log *logger.Logger,
+		executionID string,
+		token string,
+	) (*agentctl.InstanceInfo, error) {
+		control, err := agentctl.NewEndpointControlClient(ctx, resolver, log, agentctl.WithControlAuthToken(token))
+		if err != nil {
+			return nil, err
+		}
+		defer control.Close()
+		return control.GetInstance(ctx, executionID)
 	}
 	runtime.ready = func(ctx context.Context, client *agentctl.Client) error { return client.Health(ctx) }
 	return runtime

@@ -14,9 +14,10 @@ import (
 // RetrySessionDelivery reconciles one durable submission without dispatching a
 // prompt. A missing or ambiguous durable owner remains visible as blocked.
 const (
-	agentDeliveryConsumer     = "agent_delivery"
-	unknownPromptOutcome      = "unknown_prompt_outcome"
-	recoveryUnavailableReason = "recovery_unavailable"
+	agentDeliveryConsumer            = "agent_delivery"
+	missingCanonicalSubmissionReason = "missing_canonical_submission"
+	unknownPromptOutcome             = "unknown_prompt_outcome"
+	recoveryUnavailableReason        = "recovery_unavailable"
 )
 
 func (s *Service) RetrySessionDelivery(
@@ -58,14 +59,119 @@ func (s *Service) RetrySessionDelivery(
 		if block != nil {
 			reason := "independent_recovery_block"
 			if block.ConsumerReference == agentDeliveryConsumer {
-				reason = "missing_canonical_submission"
+				reason = missingCanonicalSubmissionReason
 			}
 			return sessionDeliveryRecoveryResponse(taskID, sessionID, SessionDeliveryRecoveryBlocked,
 				reason, 0, nil), nil
 		}
 		return s.retryLegacySessionDelivery(ctx, taskID, sessionID)
 	}
+	if response, handled, terminalErr := s.retryRecoverySuccessor(ctx, session, recovery, currentGeneration, block); handled || terminalErr != nil {
+		return response, terminalErr
+	}
 	return s.retryKnownSessionDelivery(ctx, session, block, recovery, currentGeneration)
+}
+
+func (s *Service) retryRecoverySuccessor(
+	ctx context.Context,
+	session *models.TaskSession,
+	recovery models.AgentDeliveryRecovery,
+	currentGeneration int64,
+	block *models.SessionRecoveryBlock,
+) (*SessionDeliveryRecoveryResponse, bool, error) {
+	if !hasRecoverySuccessorPhase(recovery.Phase) {
+		return nil, false, nil
+	}
+	identity := recoverySuccessorIdentity(recovery)
+	if block != nil {
+		return sessionDeliveryRecoveryResponse(session.TaskID, session.ID, SessionDeliveryRecoveryBlocked,
+			"independent_recovery_block", recovery.Revision, identity), true, nil
+	}
+	generation, available, err := s.loadRecoverySuccessorGeneration(ctx, session.ID, recovery.IncarnationID)
+	if err != nil {
+		return nil, true, err
+	}
+	if !available {
+		return sessionDeliveryRecoveryResponse(session.TaskID, session.ID, SessionDeliveryRecoveryBlocked,
+			"recovery_state_unavailable", recovery.Revision, identity), true, nil
+	}
+	creationReason, outcome := recoverySuccessorOutcome(recovery.Phase)
+	if !sameRecoverySuccessorGeneration(generation, recovery, creationReason) {
+		return sessionDeliveryRecoveryResponse(session.TaskID, session.ID, SessionDeliveryRecoveryBlocked,
+			"recovery_identity_mismatch", recovery.Revision, identity), true, nil
+	}
+	reason, err := s.verifyRecoverySuccessorSubmission(ctx, session, recovery)
+	if err != nil {
+		return nil, true, err
+	}
+	if reason != "" {
+		return sessionDeliveryRecoveryResponse(session.TaskID, session.ID, SessionDeliveryRecoveryBlocked,
+			reason, recovery.Revision, identity), true, nil
+	}
+	return sessionDeliveryRecoveryResponse(session.TaskID, session.ID, outcome, "", recovery.Revision, identity), true, nil
+}
+
+func hasRecoverySuccessorPhase(phase string) bool {
+	return phase == models.AgentDeliveryRecoveryRestored || phase == models.AgentDeliveryRecoveryContinued
+}
+
+func recoverySuccessorIdentity(recovery models.AgentDeliveryRecovery) *SessionDeliveryRecoveryIdentity {
+	return &SessionDeliveryRecoveryIdentity{
+		SubmissionID: recovery.SubmissionID, StreamID: recovery.StreamID,
+		IncarnationID: recovery.IncarnationID, HarnessGeneration: recovery.HarnessGeneration,
+		PromptGeneration: recovery.PromptGeneration,
+	}
+}
+
+func (s *Service) loadRecoverySuccessorGeneration(
+	ctx context.Context,
+	sessionID, incarnationID string,
+) (*models.HarnessSessionGeneration, bool, error) {
+	continuity, ok := s.repo.(sessionContinuityStore)
+	if !ok {
+		return nil, false, nil
+	}
+	generation, err := continuity.GetCurrentHarnessSessionGeneration(ctx, sessionID, incarnationID)
+	return generation, true, err
+}
+
+func recoverySuccessorOutcome(phase string) (string, SessionDeliveryRecoveryOutcome) {
+	if phase == models.AgentDeliveryRecoveryContinued {
+		return "interrupted_continued", SessionDeliveryRecoveryContinued
+	}
+	return "silent_restart_restored", SessionDeliveryRecoveryAttached
+}
+
+func sameRecoverySuccessorGeneration(
+	generation *models.HarnessSessionGeneration,
+	recovery models.AgentDeliveryRecovery,
+	creationReason string,
+) bool {
+	return generation != nil && generation.Generation == recovery.HarnessGeneration+1 &&
+		generation.PredecessorGeneration == recovery.HarnessGeneration &&
+		generation.NativeSessionID != "" && generation.CreationReason == creationReason
+}
+
+func (s *Service) verifyRecoverySuccessorSubmission(
+	ctx context.Context,
+	session *models.TaskSession,
+	recovery models.AgentDeliveryRecovery,
+) (string, error) {
+	submissions, ok := s.repo.(taskrepo.AgentDeliveryRepository)
+	if !ok {
+		return "recovery_state_unavailable", nil
+	}
+	submission, err := submissions.GetAgentDeliverySubmission(ctx, recovery.SubmissionID)
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrTaskSessionNotFound) {
+		return missingCanonicalSubmissionReason, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !canonicalRecoverySubmissionMatches(session, recovery, submission, recovery.HarnessGeneration) {
+		return "recovery_identity_mismatch", nil
+	}
+	return "", nil
 }
 
 func (s *Service) retryKnownSessionDelivery(ctx context.Context, session *models.TaskSession, block *models.SessionRecoveryBlock, recovery models.AgentDeliveryRecovery, currentGeneration int64) (*SessionDeliveryRecoveryResponse, error) {
@@ -82,7 +188,7 @@ func (s *Service) retryKnownSessionDelivery(ctx context.Context, session *models
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrTaskSessionNotFound) {
 			return sessionDeliveryRecoveryResponse(session.TaskID, session.ID, SessionDeliveryRecoveryBlocked,
-				"missing_canonical_submission", recovery.Revision, nil), nil
+				missingCanonicalSubmissionReason, recovery.Revision, nil), nil
 		}
 		return nil, err
 	}
@@ -131,14 +237,10 @@ func (s *Service) retryVerifiedSessionDelivery(ctx context.Context, session *mod
 	})
 	response := sessionDeliveryRecoveryResponse(session.TaskID, session.ID, attempt.outcome,
 		attempt.reason, recovery.Revision, identity)
-	if attempt.outcome == SessionDeliveryRecoveryUncertain && attempt.processTerminated && s.interruptedContinuationEligible(retryCtx, session, recovery) {
-		response.AllowedActions = []SessionDeliveryRecoveryAction{SessionDeliveryRecoveryActionContinueInterrupted}
-	}
 	if attempt.outcome == SessionDeliveryRecoverySettled {
 		if err := s.reconcileAgentDeliverySettlements(retryCtx, session.ID); err != nil {
 			response.Outcome = SessionDeliveryRecoveryBlocked
 			response.Reason = "terminal_settlement_pending"
-			response.AllowedActions = nil
 		}
 	}
 	return response, nil
@@ -245,7 +347,7 @@ func publicDeliveryRecoveryReason(reason string) string {
 		return ""
 	}
 	switch reason {
-	case unknownPromptOutcome, "delivery_output_paused", "delivery_cancellation_pending", "delivery_storage_pressure", "invalid_continuation_request", "stale_recovery", "continuation_checkpoint_failed", "idempotency_conflict", "continuation_outcome_unknown", "recovery_state_unavailable", "missing_canonical_submission", "recovery_identity_incomplete", "recovery_identity_mismatch",
+	case unknownPromptOutcome, "delivery_output_paused", "delivery_cancellation_pending", "delivery_storage_pressure", "invalid_continuation_request", "stale_recovery", "continuation_checkpoint_failed", "idempotency_conflict", "continuation_outcome_unknown", "recovery_state_unavailable", missingCanonicalSubmissionReason, "recovery_identity_incomplete", "recovery_identity_mismatch",
 		"execution_identity_changed", "instance_not_found", "instance_identity_mismatch",
 		"delivery_evidence_unavailable", "submission_evidence_unavailable", "delivery_identity_mismatch",
 		"terminal_evidence_incomplete", "delivery_projection_unavailable", "retained_replay_failed",
@@ -274,26 +376,6 @@ func sessionDeliveryRecoveryResponse(
 		Reason: publicDeliveryRecoveryReason(reason), RecoveryRevision: revision,
 		RecoveryIdentity: identity,
 	}
-}
-
-func (s *Service) interruptedContinuationEligible(ctx context.Context, session *models.TaskSession, recovery models.AgentDeliveryRecovery) bool {
-	if session == nil || session.State == models.TaskSessionStateCompleted || session.IsPassthrough || (session.RouteState != "" && session.RouteState != dynamicRouteStatusActive) {
-		return false
-	}
-	task, err := s.repo.GetTask(ctx, session.TaskID)
-	if err != nil || task == nil || models.IsAutomationTaskOrigin(task.Origin) {
-		return false
-	}
-	office, err := s.lookupOfficeTask(ctx, session.TaskID)
-	if err != nil || office {
-		return false
-	}
-	store, ok := s.repo.(sessionContinuityStore)
-	if !ok {
-		return false
-	}
-	generation, err := store.GetCurrentHarnessSessionGeneration(ctx, session.ID, recovery.IncarnationID)
-	return err == nil && generation != nil && generation.Generation == recovery.HarnessGeneration && generation.NativeSessionID != ""
 }
 
 func recoverySessionMatches(session *models.TaskSession, recovery models.AgentDeliveryRecovery, currentGeneration int64) bool {

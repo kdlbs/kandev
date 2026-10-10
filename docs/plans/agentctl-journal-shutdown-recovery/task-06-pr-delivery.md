@@ -1,0 +1,92 @@
+---
+id: "06-pr-delivery"
+title: "Deliver silent recovery and clear PR checks"
+status: pending
+wave: 6
+depends_on:
+  - "05-silent-restart-recovery"
+  - "07-long-outage-retention"
+  - "08-remote-agent-lifetime"
+plan: "plan.md"
+requirements:
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
+acceptance_criteria:
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.11
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.12
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.13
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.15
+system_design:
+  - ../../specs/platform/system-design/durable-agent-reattachment.md
+---
+
+# Task 06: Deliver silent recovery and clear PR checks
+
+## Summary
+
+Deliver Tasks 05, 07, and 08 on PR 4380 and resolve every current-head CI or review failure.
+Keep the live description and screenshots consistent with the revised behavior.
+
+## Scope and ownership
+
+Own PR delivery, conflict resolutions, CI remediation, screenshots, and package result synchronization.
+Use the commit, push, PR, and PR-fixup skills for their respective operations.
+Do not merge the PR or mutate the user's live sessions.
+
+## Current evidence
+
+The local rebase onto `6b2147b5de85fa47cf5c0bdef0fbd6a32c0c1d11` succeeded without conflicts.
+The captured remote branch head is `5d50992ee303001a607832bb746a22b77c23cf2a`.
+No rebased head has been pushed during this revision.
+
+The first remote snapshot listed these failed jobs in E2E run `37988372921`:
+
+- Containers 2/6: job `114037186865`; Docker image build failed in `fixtures/docker-probe.ts:73`.
+- Containers 3/6: job `114037186903`; failure cause not yet inspected.
+- Containers 6/6: job `114037186859`; failure cause not yet inspected.
+- Browser 3/14: job `114037187338`; failure cause not yet inspected.
+
+Other jobs were pending. These are historical inputs, not results for the future implementation head.
+The review snapshot had no unresolved threads; refresh it after every push.
+
+## Acceptance
+
+1. The revised implementation passes Task 05's targeted checks on the current base, with all conflicts resolved semantically.
+2. Local HEAD, remote branch, and PR head match. Current-head required checks pass, with no pending or failed checks or unresolved actionable reviews.
+3. The PR description, new desktop/phone captures, and package results describe silent restoration and its verified limits.
+
+## Procedure and verification
+
+1. Read fresh PR and branch state before committing or pushing.
+2. Fetch current `main`; reconcile any base advance and rerun affected Task 05 checks.
+3. Reproduce each current leaf failure with retries disabled before changing its owning code or fixture.
+4. Commit through normal hooks; use an explicit force-with-lease after rebase.
+5. Replace affected old screenshots on a new immutable media ref. Read back the live PR body after editing it.
+6. Wait for checks through `scripts/pr-await`, then disposition current review evidence through PR-fixup.
+7. Update work-order results without presenting older green runs as current-head evidence.
+
+```bash
+scripts/pr-state --compact 4380
+scripts/pr-resolve list 4380
+git ls-remote origin refs/heads/feature/investigate-interrup-ef7 refs/heads/main
+scripts/pr-await 4380
+scripts/pr-state --summary 4380
+scripts/pr-resolve list 4380
+git status --short
+git rev-parse HEAD
+git rev-parse '@{upstream}'
+git diff --check
+```
+
+Capture and inspect each helper's exit status. Preserve every long-running command handle.
+If the remote branch changed since the captured lease, inspect that change before pushing.
+Human approval or merge queue requirements remain separate from green CI.
+
+## Results
+
+Pending implementation and delivery.
+
+Pre-delivery diagnosis reproduced the Docker image build and pinned Kind cluster creation successfully in disposable local environments.
+The prior CI fixtures discarded child output, so those failures remain unclassified until fresh CI runs.
+Fixture diagnostics now retain bounded failure tails without imposing an output-volume limit on successful commands.
+Three focused real-child tests and targeted format/lint checks passed, including a RED/GREEN regression for output larger than 1 MiB.
+The primary coordinator reviewed that fixture change. Current-head CI and final integration review remain pending.

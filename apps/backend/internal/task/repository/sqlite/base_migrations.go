@@ -89,6 +89,7 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		{"session_recovery_blocks.delivery_sequence", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_sequence BIGINT NOT NULL DEFAULT 0`},
 		{"session_recovery_blocks.delivery_turn_id", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_turn_id TEXT NOT NULL DEFAULT ''`},
 		{"session_recovery_blocks.delivery_outcome", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_outcome TEXT NOT NULL DEFAULT ''`},
+		{"session_restore_attempts.checkpoint_json", `ALTER TABLE session_restore_attempts ADD COLUMN checkpoint_json TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.session_id", `ALTER TABLE agent_delivery_effects ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.incarnation_id", `ALTER TABLE agent_delivery_effects ADD COLUMN incarnation_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.harness_generation", `ALTER TABLE agent_delivery_effects ADD COLUMN harness_generation BIGINT NOT NULL DEFAULT 0`},

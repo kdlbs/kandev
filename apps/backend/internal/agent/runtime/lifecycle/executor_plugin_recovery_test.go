@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -184,6 +186,7 @@ func TestPluginExecutorRestartRecovery(t *testing.T) {
 	}
 	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
 	runtime.SetRecoveryDependencies(loader, store)
+	setPluginRecoveredInstanceInfoFixture(t, runtime)
 	runtime.newRecoveredAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
 		if executionID != "execution-plugin-recovery" || token != "agentctl-secret" {
 			t.Fatalf("recovered client identity = %q token=%q", executionID, token)
@@ -208,6 +211,11 @@ func TestPluginExecutorRestartRecovery(t *testing.T) {
 		t.Fatalf("recovered instances = %#v", instances)
 	}
 	defer instances[0].Client.Close()
+	if instances[0].WorkspacePath != pluginExecutorWorkspacePath ||
+		!slices.Equal(instances[0].WorkspaceSourceRoots, []string{"/workspace", "/workspace/src"}) ||
+		instances[0].Env["KANDEV_RUN_ID"] != "run-plugin-recovery" {
+		t.Fatalf("recovered live instance metadata = path %q roots %v env %v", instances[0].WorkspacePath, instances[0].WorkspaceSourceRoots, instances[0].Env)
+	}
 	if !loader.called || loader.config["region"] != "eu-west-1" || loader.refs["credential"] != "vault-ref-2" {
 		t.Fatalf("recorded profile snapshot was not restored: called=%v config=%v refs=%v", loader.called, loader.config, loader.refs)
 	}
@@ -297,7 +305,7 @@ func TestPluginExecutorPreHandshakeRecoveryCleansKnownResources(t *testing.T) {
 	resource := &pluginsdk.ExecutorResourceDescriptor{
 		ResourceHandle: "resource-partial-bootstrap", StateJson: `{"resource":"partial"}`, Platform: "linux-amd64", StateVersion: 1,
 	}
-	for _, phase := range []string{"artifact_staging", "bootstrapping", "provisioned", "ready"} {
+	for _, phase := range []string{"artifact_staging", "bootstrapping", "provisioned"} {
 		t.Run(phase, func(t *testing.T) {
 			operations := &pluginExecutorOperationsFake{
 				destroyResponse: &pluginsdk.DestroyExecutorEnvironmentResponse{ConfirmedAbsent: true},
@@ -326,6 +334,36 @@ func TestPluginExecutorPreHandshakeRecoveryCleansKnownResources(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPluginExecutorReadyRecoveryWithoutTokenPreservesEstablishedResource(t *testing.T) {
+	resource := &pluginsdk.ExecutorResourceDescriptor{
+		ResourceHandle: "resource-established", StateJson: `{"resource":"established"}`, Platform: "linux-amd64", StateVersion: 1,
+	}
+	operations := &pluginExecutorOperationsFake{}
+	loader := &pluginExecutorRecoveryProfileLoaderFake{profile: models.ExecutorProviderLaunchProfile{
+		Provider: testPluginExecutorLaunchProvider(), ProfileID: "profile-plugin-recovery",
+	}}
+	store := &pluginExecutorInventoryStoreFake{
+		record:  pluginExecutorRecoveryRecord(t, "ready", resource),
+		session: &models.TaskSession{ID: "session-plugin-recovery", TaskID: "task-plugin-recovery", State: models.TaskSessionStateWaitingForInput},
+	}
+	store.record.TransientAuthToken = ""
+	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
+	runtime.SetRecoveryDependencies(loader, store)
+
+	instances, err := runtime.RecoverInstances(context.Background(), []*models.ExecutorRunning{store.record})
+
+	require.NoError(t, err)
+	require.Empty(t, instances, "a missing local token must leave the established provider resource blocked")
+	require.Nil(t, operations.destroyRequest, "missing credentials do not prove that remote compute is incomplete")
+	require.Nil(t, operations.attachRequest, "the provider must not be contacted without the saved credential")
+	require.False(t, store.deleted, "the established inventory row remains available for later retry")
+	persisted, err := decodePluginExecutorInventory(store.record.Metadata)
+	require.NoError(t, err)
+	require.Equal(t, "ready", persisted.Phase)
+	require.NotNil(t, persisted.Resource)
+	require.Equal(t, resource.GetResourceHandle(), persisted.Resource.GetResourceHandle())
 }
 
 func TestPluginExecutorPreHandshakeUnknownDestroyRetainsCleanupInventory(t *testing.T) {
@@ -376,6 +414,7 @@ func TestPluginExecutorPostHandshakeRecoveryAttachesEveryCheckpointPhase(t *test
 			}
 			runtime := NewPluginRemoteExecutor(operations, newTestLogger())
 			runtime.SetRecoveryDependencies(loader, store)
+			setPluginRecoveredInstanceInfoFixture(t, runtime)
 			runtime.newRecoveredAgentctlClient = func(ctx context.Context, resolver agentctl.ConnectionLeaseResolver, log *logger.Logger, executionID, token string) (*agentctl.Client, error) {
 				if executionID != "execution-plugin-recovery" || token != "agentctl-secret" {
 					t.Fatalf("recovered client execution=%q token=%q", executionID, token)
@@ -406,6 +445,71 @@ func TestPluginExecutorPostHandshakeRecoveryAttachesEveryCheckpointPhase(t *test
 			}
 		})
 	}
+}
+
+func setPluginRecoveredInstanceInfoFixture(t *testing.T, runtime *PluginRemoteExecutor) {
+	t.Helper()
+	runtime.recoveredAgentctlInfoReader = func(_ context.Context, _ agentctl.ConnectionLeaseResolver, _ *logger.Logger, executionID, token string) (*agentctl.InstanceInfo, error) {
+		if executionID != "execution-plugin-recovery" || token != "agentctl-secret" {
+			t.Fatalf("instance metadata read identity = %q token=%q", executionID, token)
+		}
+		return &agentctl.InstanceInfo{
+			ID: executionID, TaskID: "task-plugin-recovery", SessionID: "session-plugin-recovery",
+			Port: testPluginExecutorInstancePort, WorkspacePath: pluginExecutorWorkspacePath,
+			Env:                  map[string]string{"KANDEV_RUN_ID": "run-plugin-recovery"},
+			WorkspaceSourceRoots: []string{"/workspace", "/workspace/src"}, ProviderSessionID: "native-plugin-session",
+		}, nil
+	}
+}
+
+func TestPluginRecoveredInstanceMetadataUsesAuthenticatedControlReader(t *testing.T) {
+	var gotExecutionID string
+	var gotAuthToken string
+	responseSession := "session-plugin-recovery"
+	operations := &pluginExecutorOperationsFake{connectionResponse: &pluginsdk.ResolveExecutorConnectionResponse{
+		Lease: &pluginsdk.ExecutorConnectionLease{
+			BaseUrl: "https://executor.example", ExpiresAt: time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano), Generation: "lease-read-only",
+		},
+	}}
+	runtime := NewPluginRemoteExecutor(operations, newTestLogger())
+	runtime.recoveredAgentctlInfoReader = func(
+		ctx context.Context,
+		resolver agentctl.ConnectionLeaseResolver,
+		_ *logger.Logger,
+		executionID string,
+		token string,
+	) (*agentctl.InstanceInfo, error) {
+		gotExecutionID = executionID
+		gotAuthToken = token
+		_, err := resolver(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return &agentctl.InstanceInfo{
+			ID: "execution-plugin-recovery", TaskID: "task-plugin-recovery", SessionID: responseSession,
+			Port: testPluginExecutorInstancePort, WorkspacePath: pluginExecutorWorkspacePath,
+			Env:                  map[string]string{"KANDEV_RUN_ID": "run-plugin-recovery"},
+			WorkspaceSourceRoots: []string{"/workspace/src"}, ProviderSessionID: "native-plugin-session",
+		}, nil
+	}
+	record := pluginExecutorRecoveryRecord(t, pluginExecutorPhaseReady, &pluginsdk.ExecutorResourceDescriptor{ResourceHandle: "resource-recovery"})
+	state := &pluginExecutorRecoveryState{
+		inventory: pluginExecutorInventory{
+			Resource:     &pluginsdk.ExecutorResourceDescriptor{ResourceHandle: "resource-recovery"},
+			InstancePort: testPluginExecutorInstancePort,
+		},
+		operationContext: &pluginsdk.ExecutorProviderRequestContext{},
+	}
+	info, err := runtime.readRecoveredAgentctlInstance(context.Background(), record, state)
+	require.NoError(t, err)
+	require.Equal(t, "execution-plugin-recovery", gotExecutionID)
+	require.Equal(t, "agentctl-secret", gotAuthToken)
+	require.Equal(t, int(pluginExecutorRuntimePort), operations.connectionPorts[0])
+	require.Equal(t, "run-plugin-recovery", info.Env["KANDEV_RUN_ID"])
+	require.Equal(t, []string{"/workspace/src"}, info.WorkspaceSourceRoots)
+	responseSession = "different-session"
+	_, err = runtime.readRecoveredAgentctlInstance(context.Background(), record, state)
+	require.Error(t, err, "a control endpoint must not hydrate metadata from a different task session")
 }
 
 func TestPluginExecutorResetCleanupUsesTaskClaim(t *testing.T) {
