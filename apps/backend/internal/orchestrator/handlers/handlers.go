@@ -156,6 +156,9 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		if archivedResponse, responseErr := taskArchivedConflictResponse(msg, err); archivedResponse != nil || responseErr != nil {
 			return archivedResponse, responseErr
 		}
+		if recoveryResponse, responseErr := runtimeCleanupFailureResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
 		if recoveryResponse, responseErr := restoreRequiredRecoveryResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr
 		}
@@ -503,6 +506,9 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		if guardResponse, responseErr := sessionRecoveryGuardConflictResponse(msg, err); guardResponse != nil || responseErr != nil {
 			return guardResponse, responseErr
+		}
+		if recoveryResponse, responseErr := runtimeCleanupFailureResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
 		}
 		if recoveryResponse, responseErr := restoreRequiredRecoveryResponse(msg, err, req.SessionID); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr

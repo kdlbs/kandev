@@ -2714,5 +2714,7 @@
   "sortOldestFirst": "오래된 순",
   "sortAscending": "오름차순",
   "sortMatchingFirst": "일치 항목 우선",
-  "sortRuleColor": "정렬 기준 {{position}}의 색상"
+  "sortRuleColor": "정렬 기준 {{position}}의 색상",
+  "sessionRuntimeCleanupFailedTitle": "재개를 완료할 수 없습니다",
+  "sessionRuntimeCleanupFailedBody": "이전 런타임을 중지할 수 없습니다. 실행기 연결을 확인한 후 재개를 다시 시도하세요."
 }

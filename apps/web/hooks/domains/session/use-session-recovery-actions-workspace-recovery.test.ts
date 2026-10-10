@@ -28,7 +28,8 @@ const mocks = vi.hoisted(() => ({
   appState: null as unknown as RecoveryState,
 }));
 
-vi.mock("@/lib/services/session-recovery-service", () => ({
+vi.mock("@/lib/services/session-recovery-service", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/services/session-recovery-service")>()),
   asRecoveryError: (error: unknown, fallback: string) =>
     error instanceof Error ? error : new Error(fallback),
   branchRecoveryDetails: () => null,

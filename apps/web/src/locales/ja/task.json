@@ -2714,5 +2714,7 @@
   "sortOldestFirst": "古い順",
   "sortAscending": "昇順",
   "sortMatchingFirst": "一致する項目を優先",
-  "sortRuleColor": "並べ替え項目 {{position}} の色"
+  "sortRuleColor": "並べ替え項目 {{position}} の色",
+  "sessionRuntimeCleanupFailedTitle": "再開を完了できませんでした",
+  "sessionRuntimeCleanupFailedBody": "以前のランタイムを停止できませんでした。実行環境への接続を確認してから、再開を再試行してください。"
 }

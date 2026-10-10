@@ -2714,5 +2714,7 @@
   "sortOldestFirst": "最早優先",
   "sortAscending": "升序",
   "sortMatchingFirst": "匹配項優先",
-  "sortRuleColor": "排序欄位 {{position}} 的顏色"
+  "sortRuleColor": "排序欄位 {{position}} 的顏色",
+  "sessionRuntimeCleanupFailedTitle": "無法完成恢復",
+  "sessionRuntimeCleanupFailedBody": "無法停止先前的執行環境。請檢查執行器連接，然後重試恢復。"
 }

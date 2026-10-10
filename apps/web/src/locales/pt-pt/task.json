@@ -2714,5 +2714,7 @@
   "sortOldestFirst": "Mais antigas primeiro",
   "sortAscending": "Ascendente",
   "sortMatchingFirst": "Correspondentes primeiro",
-  "sortRuleColor": "Cor do campo de ordenação {{position}}"
+  "sortRuleColor": "Cor do campo de ordenação {{position}}",
+  "sessionRuntimeCleanupFailedTitle": "Não foi possível concluir a retoma",
+  "sessionRuntimeCleanupFailedBody": "Não foi possível parar o ambiente de execução anterior. Verifique a ligação ao executor e tente retomar novamente."
 }

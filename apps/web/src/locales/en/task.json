@@ -2714,5 +2714,7 @@
   "sortOldestFirst": "Oldest first",
   "sortAscending": "Ascending",
   "sortMatchingFirst": "Matching first",
-  "sortRuleColor": "Color for sort field {{position}}"
+  "sortRuleColor": "Color for sort field {{position}}",
+  "sessionRuntimeCleanupFailedTitle": "Resume could not finish",
+  "sessionRuntimeCleanupFailedBody": "The previous runtime could not be stopped. Check executor connectivity, then retry Resume."
 }

@@ -1,3 +1,4 @@
+import type { AgentErrorCause } from "@/lib/types/task-status-summary";
 import { buildRestoreWorkspaceRequest } from "./session-launch-helpers";
 import { launchSession, type LaunchSessionResponse } from "./session-launch-service";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -107,6 +108,41 @@ export function recoveryInspectionBusyDetails(
   return error.details as RecoveryInspectionBusyDetails;
 }
 
+export function runtimeCleanupFailureDetails(error: unknown, sessionId?: string) {
+  if (!(error instanceof WebSocketRequestError) || !isRecord(error.details)) return null;
+  const details = error.details;
+  if (details.kind !== "runtime_cleanup_failed" || typeof details.session_id !== "string")
+    return null;
+  if (sessionId && details.session_id !== sessionId) return null;
+  return {
+    sessionId: details.session_id,
+    errorStamp: typeof details.error_stamp === "string" ? details.error_stamp : undefined,
+  };
+}
+
+/** Copy only host-owned cleanup evidence; transport detail remains absent. */
+export function runtimeCleanupFailureCauses(error: unknown, sessionId?: string): AgentErrorCause[] {
+  if (!runtimeCleanupFailureDetails(error, sessionId)) return [];
+  const causes = (error as WebSocketRequestError).details?.causes;
+  const cause = Array.isArray(causes)
+    ? causes.find(
+        (candidate: unknown) =>
+          isRecord(candidate) &&
+          candidate.operation === "resume" &&
+          candidate.code === "runtime_cleanup_failed",
+      )
+    : undefined;
+  return [
+    {
+      operation: "resume",
+      code: "runtime_cleanup_failed",
+      ...(isRecord(cause) && typeof cause.prompt_not_sent === "boolean"
+        ? { prompt_not_sent: cause.prompt_not_sent }
+        : {}),
+    },
+  ];
+}
+
 /** Minimal shape both `useTranslation()`'s `t` and the module-level `t` satisfy. */
 type Translator = (key: string, options?: Record<string, unknown>) => string;
 
@@ -146,6 +182,7 @@ export function resolveRequestErrorMessage(
   t: Translator,
   fallback = t("common:unknownError"),
 ): string {
+  if (runtimeCleanupFailureDetails(error)) return t("task:sessionRuntimeCleanupFailedBody");
   const guard = sessionRecoveryGuardDetails(error);
   if (guard) return sessionRecoveryGuardMessage(guard, t);
   if (recoveryInspectionBusyDetails(error)) return recoveryInspectionBusyMessage(t);

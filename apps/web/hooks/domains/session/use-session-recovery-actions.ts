@@ -7,6 +7,9 @@ import type { AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
 import {
   asRecoveryError,
+  runtimeCleanupFailureCauses,
+  runtimeCleanupFailureDetails,
+  resolveRequestErrorMessage,
   branchRecoveryDetails,
   contextContinuationDetails,
   getWorkspaceRecoveryStatus,
@@ -39,6 +42,7 @@ export type ManualSessionRecoveryFailure = {
   errorStamp: string | null;
   requestKey: string;
   operationId: number;
+  causes?: import("@/lib/types/task-status-summary").AgentErrorCause[];
 };
 
 const FAILED_TO_RESUME_MESSAGE_KEY = "task:failedToResumeSession";
@@ -70,6 +74,8 @@ function guardOrFallbackError(
   fallback: string,
 ): Error {
   if (guard) return new Error(sessionRecoveryGuardMessage(guard, translate));
+  if (runtimeCleanupFailureDetails(cause))
+    return new Error(resolveRequestErrorMessage(cause, translate, fallback));
   return asRecoveryError(cause, fallback);
 }
 
@@ -105,19 +111,27 @@ function recoveryFailureAssociation({
 }): RecoveryFailureAssociation | null {
   const managedClone = managedCloneRelocationRecoveryDetails(cause);
   const currentOperation = isCurrentOperation(operation);
-  const isSuccessorRelocation =
-    managedClone?.kind === "managed_clone_relocation_required" &&
-    isCurrentSession(operation) &&
-    matchesLatestErrorStamp(managedClone.error_stamp);
-  if (!currentOperation && !isSuccessorRelocation) return null;
-
-  const associatedStamp = isSuccessorRelocation
-    ? (managedClone.error_stamp ?? errorStamp ?? null)
-    : (errorStamp ?? null);
+  const successorStamp = recoveryFailureSuccessorStamp(cause, sessionId, managedClone);
+  const isSuccessor = Boolean(
+    successorStamp && isCurrentSession(operation) && matchesLatestErrorStamp(successorStamp),
+  );
+  if (!currentOperation && !isSuccessor) return null;
+  const associatedStamp = isSuccessor ? (successorStamp ?? null) : (errorStamp ?? null);
   const requestKey = currentOperation
     ? operation.requestKey
     : `${taskId}\u0000${sessionId}\u0000${associatedStamp ?? ""}`;
   return { managedClone, errorStamp: associatedStamp, requestKey };
+}
+
+function recoveryFailureSuccessorStamp(
+  cause: unknown,
+  sessionId: string,
+  managedClone: RecoveryFailureAssociation["managedClone"],
+): string | undefined {
+  const cleanup = runtimeCleanupFailureDetails(cause, sessionId);
+  if (cleanup?.errorStamp) return cleanup.errorStamp;
+  if (managedClone?.kind === "managed_clone_relocation_required") return managedClone.error_stamp;
+  return undefined;
 }
 
 function hasNativeACPSessionToken(session: TaskSession): boolean {
@@ -347,6 +361,7 @@ export function useSessionRecoveryActions({
       setRecoveryNoticeKind(null);
       setManualRecoveryFailure({
         operation: "resume",
+        causes: runtimeCleanupFailureCauses(cause, sessionId),
         sessionId,
         errorStamp: associatedStamp,
         requestKey,

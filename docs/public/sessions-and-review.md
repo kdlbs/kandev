@@ -636,3 +636,9 @@ Related: [Use Kandev](use-kandev.md), [Tasks and workflows](tasks-and-workflows.
 On desktop, the X on a deletable Agent tab deletes the session after confirmation by default. In **Settings > Preferences > Task Behavior > Conversation**, choose **Hide panel** when the X should only remove that panel. The conversation remains available from **+ > Agents**, where selecting it reopens the panel.
 
 Hidden panels remain hidden when you reload the same browser tab. They are local to that browser tab and task environment. Mobile Sessions controls continue to use the existing Delete action.
+
+### Resume cannot stop the previous runtime
+
+If Resume says the previous runtime could not be stopped, check the task executor's connectivity, then retry **Resume** in the same session. Kandev keeps the runtime registration until it can confirm cleanup, so this error does not mean another session started or that the previous runtime is definitely stopped.
+
+The recovery card shows the cause and keeps technical details collapsed. The explanation remains after reloading. **Start fresh** is not a connectivity repair and can encounter the same unavailable executor.
