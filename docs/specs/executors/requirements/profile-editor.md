@@ -11,9 +11,9 @@ owners:
 ## Overview
 
 Users need the same profile controls regardless of how they reach an executor
-profile. Creation, editing, executor policy and connection saves must retain
-independently received catalogue choices. The executor system owns this contract because it
-owns profiles and their available settings.
+profile. Creation, editing, executor policy, connection saves and profile-list
+refreshes must retain independently received catalogue choices. The executor
+system owns this contract because it owns profiles and their available settings.
 
 ## Requirements
 
@@ -49,6 +49,10 @@ owns profiles and their available settings.
 - **AC-EXECUTORS-PROFILE-EDITOR-001.23:** When connection persistence succeeds but refresh fails or omits the saved executor, the save shall remain successful. Submitted name and configuration shall supply unchanged fields without undoing observed changes or restoring removed entries. The existing post-save callback shall run once, after catalogue publication, and its asynchronous completion or failure shall retain its existing meaning. Connection trust, validation, authorization, save coordination, and Remote Docker configuration unrelated to the connection shall retain their existing behavior.
 - **AC-EXECUTORS-PROFILE-EDITOR-001.24:** A failed connection persistence request shall reject without publishing submitted or refreshed values or invoking the post-save callback. Current live catalogue changes shall remain visible, and the existing rendered form and save coordinator shall report failure and retain the recoverable draft.
 
+- **AC-EXECUTORS-PROFILE-EDITOR-001.25:** When a profile-card refresh succeeds after profile creation or deletion, every unrelated current executor shall retain its name, configuration, status, profiles, membership and order, including additions, updates and removals received while refreshing. The refreshed executor shall retain its current non-profile metadata. Desktop and phone task creation and subtask choices shall expose retained eligible profiles with current names and owner metadata; removed choices shall remain absent in a mixed catalogue.
+- **AC-EXECUTORS-PROFILE-EDITOR-001.26:** An uncontested successful profile-card refresh shall replace only the selected executor's profile list with the returned list, including an empty list. If that executor's profiles change while the read is pending, the current profile list shall remain intact as a whole, including changes later restored and profiles added or deleted meanwhile. A removed executor, including one removed and reintroduced while reading, shall not receive that read's result. Changes only to unrelated entries or the executor's non-profile metadata shall not prevent its refresh.
+- **AC-EXECUTORS-PROFILE-EDITOR-001.27:** If profile-card reads overlap, starting a newer read from that card shall make older reads ineligible to publish, even if the newer read fails. A failed read shall leave the current catalogue unchanged. Failed deletion shall retain the existing failure handling and shall not initiate its success refresh. Creation shall retain its existing post-refresh navigation, including when refreshing fails or publication is skipped; existing provider eligibility, creation controls, profile opening and deletion interactions shall remain available.
+
 ## Related requirements
 
 The [card-spacing requirement](../../ui/requirements/executor-settings-card-spacing.md)
@@ -62,9 +66,9 @@ editor reachability without redesigning those controls.
 - Redesign of the settings shell or profile creation forms.
 - Concurrent omission preservation for other profile fields or stale editor drafts that explicitly submit both scripts.
 - Changes to script execution timing, running resources, credentials, or runtime cleanup policy.
-- Concurrent server arbitration for the edited profile, target deletion versus save ordering, retired-page request ownership, or catalogue-wide revision policies.
+- Concurrent server arbitration for the edited profile, target deletion versus save ordering, retired-page request ownership, or catalogue-wide revision policies. Profile-card refresh alone retains observed target changes as specified above.
 - Restoring an executor removed during creation, arbitration against a newer update of the accepted target, repairing previously duplicated catalogue rows, or redesigning live notification writers and separate SSH, Remote Docker, Kubernetes, or plugin creation flows.
-- Executor-policy save versus newer same-executor server writes, policy validation redesign, executor deletion and profile-card refresh publication, or request lifetime and navigation redesign.
+- Executor-policy save versus newer same-executor server writes, policy validation redesign, executor deletion outside profile-card refresh publication, or request lifetime and navigation redesign.
 
 - Connection server-write arbitration, stale full-config submission prevention, global snapshot freshness, or changes to connection-page reload ownership. Connection saves preserve observed client changes; they do not impose an ordering on unobserved server writes.
 
@@ -76,3 +80,4 @@ editor reachability without redesigning those controls.
 - [Preserve choices during built-in profile creation](../../../plans/executor-profile-create-catalogue-preservation/plan.md)
 - [Preserve choices during executor policy saves](../../../plans/executor-policy-catalogue-preservation/plan.md)
 - [Preserve choices during connection refresh](../../../plans/executor-connection-catalogue-preservation/plan.md)
+- [Preserve live executors during profile-card refresh](../../../plans/executor-profile-card-refresh-preservation/plan.md)
