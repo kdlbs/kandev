@@ -48,6 +48,8 @@ test.describe("Agent host CLI version and model discovery", () => {
       await expect(customRow).toBeVisible();
       await expect(customRow).toContainText(customModelId);
       await customRow.click();
+      await testPage.keyboard.press("Escape");
+      await expect(customRow).toBeHidden();
 
       const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
       await expect(saveButton).toBeEnabled({ timeout: 10_000 });

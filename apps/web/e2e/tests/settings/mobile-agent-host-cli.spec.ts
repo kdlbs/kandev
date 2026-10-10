@@ -39,6 +39,8 @@ test.describe("Agent host CLI model discovery on mobile", () => {
       expect(bounds!.x).toBeGreaterThanOrEqual(0);
       expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
       await customRow.click();
+      await testPage.keyboard.press("Escape");
+      await expect(customRow).toBeHidden();
 
       const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
       await expect(saveButton).toBeEnabled({ timeout: 10_000 });
@@ -47,6 +49,10 @@ test.describe("Agent host CLI model discovery on mobile", () => {
 
       const stored = await apiClient.getAgentProfile(profile.id);
       expect(stored.model).toBe(customModelId);
+
+      await testPage.reload();
+      await expect(trigger).toBeVisible({ timeout: 15_000 });
+      await expect(trigger).toContainText(customModelId);
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true);
     }
