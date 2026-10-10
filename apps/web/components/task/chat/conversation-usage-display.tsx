@@ -21,6 +21,7 @@ import {
 type ConversationUsageDisplayProps = {
   taskId?: string | null;
   sessionId: string | null;
+  detailActive?: boolean;
 };
 
 function UsageValue({ label, value }: { label: string; value: number }) {
@@ -345,7 +346,11 @@ function UsageDisclosure({ usage, close }: { usage: ConversationUsage; close: ()
   );
 }
 
-export function ConversationUsageDisplay({ taskId, sessionId }: ConversationUsageDisplayProps) {
+export function ConversationUsageDisplay({
+  taskId,
+  sessionId,
+  detailActive = true,
+}: ConversationUsageDisplayProps) {
   const { t } = useTranslation();
   const label = t("task:conversationUsage.open");
   const [open, setOpen] = useState(false);
@@ -353,7 +358,7 @@ export function ConversationUsageDisplay({ taskId, sessionId }: ConversationUsag
   const touchDrawer = useTouchDrawer();
   const touch = isMobile || touchDrawer;
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const usage = useConversationUsage(taskId ?? null, sessionId);
+  const usage = useConversationUsage(taskId ?? null, sessionId, detailActive);
   const hasUsage = (usage.totals?.event_count ?? 0) > 0;
   if (!taskId || !sessionId || (!hasUsage && !usage.loading && !usage.error)) return null;
 

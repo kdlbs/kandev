@@ -76,6 +76,20 @@ Task and workspace systems retain authority over their records and permissions.
 - **AC-PLATFORM-INTERACTIVE-READS-005.6:** Desktop and phone users shall have equivalent keyboard and touch recovery actions. Phone targets shall measure at least 44px without horizontal overflow.
 - **AC-PLATFORM-INTERACTIVE-READS-005.7:** When a refresh fails after task details load, those details shall remain visible. The page shall identify the failed refresh without presenting stale data as newly verified.
 
+### REQ-PLATFORM-INTERACTIVE-READS-006: Navigation reads without writer reservation
+
+**Intent:** Users can inspect boards and tasks while an unrelated database write remains active.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-INTERACTIVE-READS-006.1:** With current summaries and healthy storage, homepage, board snapshot, and standalone completion-gate reads shall complete before an unrelated held write is released.
+- **AC-PLATFORM-INTERACTIVE-READS-006.2:** Inspection shall return a coherent completion-gate observation without acquiring mutation authority. Completion decisions shall still reject stale evidence atomically.
+- **AC-PLATFORM-INTERACTIVE-READS-006.3:** SQLite and PostgreSQL shall retain equivalent completion, status, missing-task, and authorization outcomes after optimization.
+- **AC-PLATFORM-INTERACTIVE-READS-006.4:** On the reference workload, navigation read work shall grow with requested task summaries and bounded batches, not full session metadata or unrelated transcript history.
+- **AC-PLATFORM-INTERACTIVE-READS-006.5:** Missing or stale summaries shall converge from authoritative state. Cancellation, failed repair, and concurrent updates shall not publish fabricated status or overwrite a newer summary.
+
+The [journey loading design](../system-design/journey-data-loading.md) owns this extension. Criteria 006.1–006.2 concern inspection, not mutation admission or a guarantee during storage failure.
+
 ## Related contracts
 
 - [Required-store health](postgres-domain-store-parity.md), REQ-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.

@@ -317,7 +317,8 @@ function useKanbanBoardSetup(
     setWorkflows,
   } = useKanbanBoardStore();
 
-  const { refresh } = useAllWorkflowSnapshots(workspaceState.activeId);
+  const [workflowSnapshotScope, setWorkflowSnapshotScope] = useState<string[]>([]);
+  const { refresh } = useAllWorkflowSnapshots(workspaceState.activeId, workflowSnapshotScope);
   useWorkspacePRs(workspaceState.activeId);
   useWorkspaceMRs(workspaceState.activeId);
 
@@ -394,6 +395,7 @@ function useKanbanBoardSetup(
     effectiveWorkflowId,
     effectiveSteps,
     refresh,
+    setWorkflowSnapshotScope,
   };
 }
 
@@ -481,6 +483,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         onWorkflowChange={s.handleWorkflowChange}
         isMobile={s.isMobile}
         onRefresh={s.refresh}
+        onSnapshotDemandChange={s.setWorkflowSnapshotScope}
       />
       <TaskMultiSelectToolbar
         selectedIds={s.multiSelect.selectedIds}

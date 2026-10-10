@@ -6,18 +6,13 @@ import { useAppStore } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import type { FilterDimension } from "@/lib/state/slices/ui/sidebar-view-types";
 import { getExecutorLabel } from "@/lib/executor-icons";
+import { useWorkflowOptionPreviews } from "@/hooks/use-workflow-option-previews";
+import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
 import { repositorySlug } from "@/lib/repository-slug";
 
 type Option = { value: string; label: string; color?: string; group?: string };
 type Snapshots = AppState["kanbanMulti"]["snapshots"];
 type ReposByWorkspace = AppState["repositories"]["itemsByWorkspaceId"];
-
-function workflowOptions(snapshots: Snapshots): Option[] {
-  return Object.entries(snapshots).map(([id, snap]) => ({
-    value: id,
-    label: snap.workflowName || id,
-  }));
-}
 
 export function workflowStepOptions(snapshots: Snapshots): Option[] {
   const out: Option[] = [];
@@ -57,6 +52,16 @@ export function repositoryOptions(repositoriesByWorkspace: ReposByWorkspace): Op
 
 export function useFilterValueOptions(dimension: FilterDimension): Option[] {
   const snapshots = useAppStore((s) => s.kanbanMulti.snapshots);
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const workflows = useAppStore((s) => s.workflows.items);
+  const scope = useAppStore(stateReadScopeIdentity);
+  const authorizedWorkflows = workflows.filter((workflow) => workflow.workspaceId === workspaceId);
+  const { previews } = useWorkflowOptionPreviews(
+    workspaceId,
+    dimension === "workflowStep",
+    authorizedWorkflows.map((workflow) => workflow.id),
+    scope,
+  );
   const repositoriesByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
   // `executorTypeOptions` resolves its labels through `getExecutorLabel`, which
   // now reads the catalog. Subscribing here — and keeping the language in the
@@ -65,10 +70,30 @@ export function useFilterValueOptions(dimension: FilterDimension): Option[] {
   const { i18n } = useTranslation();
 
   return useMemo(() => {
-    if (dimension === "workflow") return workflowOptions(snapshots);
-    if (dimension === "workflowStep") return workflowStepOptions(snapshots);
+    if (dimension === "workflow")
+      return authorizedWorkflows.map((workflow) => ({ value: workflow.id, label: workflow.name }));
+    if (dimension === "workflowStep") {
+      const metadata = Object.fromEntries(
+        authorizedWorkflows.map((workflow) => {
+          const preview = previews[workflow.id];
+          return [
+            workflow.id,
+            {
+              workflowId: workflow.id,
+              workflowName: workflow.name,
+              steps:
+                preview?.status === "success"
+                  ? preview.steps
+                  : (snapshots[workflow.id]?.steps ?? []),
+              tasks: [],
+            },
+          ];
+        }),
+      );
+      return workflowStepOptions(metadata);
+    }
     if (dimension === "executorType") return executorTypeOptions(snapshots);
     if (dimension === "repository") return repositoryOptions(repositoriesByWorkspace);
     return [];
-  }, [dimension, snapshots, repositoriesByWorkspace, i18n.language]);
+  }, [dimension, snapshots, repositoriesByWorkspace, i18n.language, authorizedWorkflows, previews]);
 }

@@ -457,6 +457,12 @@ task.walkthrough.get
 
 There are no ordinary dispatcher registrations for direct workflow-step update, delete, or reorder requests. Those operations are available through the workflow HTTP/configuration surfaces and relevant MCP tools.
 
+### Session list projection
+
+`task.session.list` and `GET /api/v1/tasks/{id}/sessions` return compact membership and status rows. The caller must have access to the task. Rows retain session and repository identity, pending actions, runtime activity, cancellation revisions, and parked-work revisions.
+
+Metadata includes the latest agent error and, when available, the current model ID and display name. It excludes other model choices, configuration options, preparation records, and delivery-recovery state. Use `GET /api/v1/task-sessions/{id}` when full session details are needed. An explicit `last_agent_error: null` clears a retained error.
+
 ### Partial workflow updates
 
 `workflow.update` and REST `PATCH /api/v1/workflows/:id` change only supplied
@@ -554,6 +560,8 @@ permission.respond
 ```
 
 `agent.launch`, `agent.stdin`, and related calls are lower-level agent controls. Task clients should normally use `session.launch`, `message.add`, and `session.stop`. Constants such as `agent.prompt`, `message.get`, and `session.set_mode` currently have no dispatcher registration and are deliberately absent.
+
+`message.list` accepts `session_id`, `limit`, `before`, `after`, and `sort`. Set `include_turns: true` to receive `turns` and `turn_coverage` with the message page. The equivalent HTTP option is `GET /api/v1/task-sessions/{id}/messages?include_turns=true`. Turn context comes from the same reader snapshot as the messages and contains only turns referenced by those messages plus the current active turn. The response has at most one turn per distinct message turn ID and one additional active turn. `turn_coverage.message_ids` lists the returned messages covered by the read; `turn_coverage.active_turn_id` is the active turn observed by that snapshot, or `null` when none was active. Without `include_turns`, the response keeps its message-only shape.
 
 ### Repositories, executors, files, Git, and terminals
 

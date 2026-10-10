@@ -70,6 +70,7 @@ const mockAppState = vi.hoisted(() => ({
   taskSessions: { items: {} },
   repositories: { itemsByWorkspaceId: {} },
   userShells: { byEnvironmentId: {} },
+  setTaskSessionsLoading: vi.fn(),
   updateUserShell: vi.fn(),
   removeUserShell: vi.fn(),
   agentProfiles: { items: [] },

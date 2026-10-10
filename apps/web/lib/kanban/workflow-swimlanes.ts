@@ -1,3 +1,5 @@
+import type { TaskWorkflowCoverage } from "@/lib/types/http";
+
 export type WorkflowLike = { id: string; name: string; hidden?: boolean };
 
 /**
@@ -15,12 +17,17 @@ export function selectWorkflowSwimlanes(
   workflowFilter: string | null | undefined,
   workflows: WorkflowLike[],
   snapshots: Record<string, unknown>,
+  includeUnloaded = false,
 ): WorkflowLike[] {
   if (workflowFilter) {
-    const workflow = workflows.find((item) => item.id === workflowFilter && snapshots[item.id]);
+    const workflow = workflows.find(
+      (item) => item.id === workflowFilter && (includeUnloaded || snapshots[item.id]),
+    );
     return workflow ? [workflow] : [];
   }
-  return workflows.filter((workflow) => !workflow.hidden && snapshots[workflow.id]);
+  return workflows.filter(
+    (workflow) => !workflow.hidden && (includeUnloaded || snapshots[workflow.id]),
+  );
 }
 
 /**
@@ -37,6 +44,7 @@ export function selectMobileNavigatorWorkflows(
   workflows: WorkflowLike[],
   getFilteredTasks: (workflowId: string) => unknown[],
   hasLiveHiddenSteps: (workflowId: string) => boolean = () => false,
+  hasUnloadedTasks: (workflowId: string) => boolean = () => false,
 ): Array<{ workflow: WorkflowLike; tasks: unknown[] }> {
   const visibleIds = new Set(visibleOrdered.map((workflow) => workflow.id));
   const entries: Array<{ workflow: WorkflowLike; tasks: unknown[] }> = [];
@@ -46,7 +54,7 @@ export function selectMobileNavigatorWorkflows(
   for (const workflow of workflows) {
     if (!workflow.hidden || visibleIds.has(workflow.id)) continue;
     const tasks = getFilteredTasks(workflow.id);
-    if (tasks.length > 0 || hasLiveHiddenSteps(workflow.id)) {
+    if (tasks.length > 0 || hasLiveHiddenSteps(workflow.id) || hasUnloadedTasks(workflow.id)) {
       entries.push({ workflow, tasks });
     }
   }
@@ -91,4 +99,31 @@ export function selectVisibleWorkflows({
   );
   if (retained.length > 0 || !showEmptyBoard) return retained;
   return orderedWorkflows;
+}
+
+export function selectBoardDemandCandidates(
+  workflows: WorkflowLike[],
+  options: {
+    workflowFilter: string | null | undefined;
+    workspaceId: string | null;
+    coverage?: TaskWorkflowCoverage;
+    snapshots: Record<string, unknown>;
+    hiddenStepIds: Record<string, string[]>;
+    autoHideIds: string[];
+  },
+) {
+  const { workflowFilter, workspaceId, coverage, snapshots, hiddenStepIds, autoHideIds } = options;
+  if (workflowFilter || !coverage?.complete || coverage.workspace_id !== workspaceId)
+    return workflows;
+  const populated = new Set(coverage.workflow_ids);
+  const retained = workflows.filter(
+    (workflow) =>
+      Boolean(snapshots[workflow.id]) ||
+      populated.has(workflow.id) ||
+      hiddenStepIds[workflow.id]?.length > 0 ||
+      autoHideIds.includes(workflow.id),
+  );
+  if (retained.some((workflow) => !workflow.hidden)) return retained;
+  const firstVisible = workflows.find((workflow) => !workflow.hidden);
+  return firstVisible ? [firstVisible] : [];
 }

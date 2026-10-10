@@ -59,7 +59,7 @@ test.describe("Chat model selector — RPC failure", () => {
     await expect
       .poll(
         async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
+          const { sessions } = await apiClient.listTaskSessionDetails(task.id);
           const baseline = sessions[0]?.metadata?.acp_config_baseline as
             | Record<string, string>
             | undefined;
@@ -252,7 +252,7 @@ test.describe("Chat model selector — persistence", () => {
     });
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
         const metadata = sessions.find((item) => item.id === task.session_id)?.metadata;
         const runtime = metadata?.runtime_config as { model?: string } | undefined;
         const selector = metadata?.acp_model_state as
@@ -376,7 +376,7 @@ test.describe("Chat model selector — persistence", () => {
 
       await expect
         .poll(async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
+          const { sessions } = await apiClient.listTaskSessionDetails(task.id);
           const metadata = sessions[0]?.metadata;
           const runtime = metadata?.runtime_config as
             | { config_options?: Record<string, string> }
@@ -455,7 +455,7 @@ test.describe("Chat model selector — persistence", () => {
 
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
         const baseline = sessions[0]?.metadata?.acp_config_baseline as
           | Record<string, string>
           | undefined;
@@ -484,7 +484,7 @@ test.describe("Chat model selector — persistence", () => {
     await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
         const runtime = sessions[0]?.metadata?.runtime_config as
           | { model?: string; config_options?: Record<string, string> }
           | undefined;
@@ -502,7 +502,7 @@ test.describe("Chat model selector — persistence", () => {
     await testPage.getByRole("button", { name: "Low", exact: true }).click();
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
         const runtime = sessions[0]?.metadata?.runtime_config as
           | { config_options?: Record<string, string> }
           | undefined;
@@ -526,7 +526,7 @@ test.describe("Chat model selector — persistence", () => {
 
     await expect
       .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const { sessions } = await apiClient.listTaskSessionDetails(task.id);
         const metadata = sessions[0]?.metadata;
         const runtime = metadata?.runtime_config as
           | { config_options?: Record<string, string> }
@@ -595,7 +595,7 @@ test.describe("Chat model selector — popover open/close behavior", () => {
     await expect
       .poll(
         async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
+          const { sessions } = await apiClient.listTaskSessionDetails(task.id);
           const runtime = sessions.find((candidate) => candidate.id === task.session_id)?.metadata
             ?.runtime_config as { model?: string } | undefined;
           return runtime?.model;

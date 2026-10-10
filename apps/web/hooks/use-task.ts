@@ -6,7 +6,7 @@ import type { KanbanState } from "@/lib/state/slices";
 
 type Task = KanbanState["tasks"][number];
 
-export function useTask(taskId: string | null) {
+export function useTask(taskId: string | null, detailActive = true) {
   // The active workflow's tasks live in `kanban.tasks`, but cross-workflow
   // tasks (PR-review boards, multi-workflow swimlanes) live in
   // `kanbanMulti.snapshots[*].tasks`. Mirror the lookup used by
@@ -28,14 +28,14 @@ export function useTask(taskId: string | null) {
   });
 
   useEffect(() => {
-    if (!taskId) return;
+    if (!detailActive || !taskId) return;
     const client = getWebSocketClient();
     if (!client) return;
     const unsubscribe = client.subscribe(taskId);
     return () => {
       unsubscribe();
     };
-  }, [taskId]);
+  }, [detailActive, taskId]);
 
   return task;
 }

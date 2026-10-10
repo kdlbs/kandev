@@ -94,8 +94,8 @@ function MentionChipView({ node }: ReactNodeViewProps) {
     kind: MentionKind;
     path: string;
   };
-  const { sessionId, taskId } = useEditorContext();
-  const { openFile, addPlan } = usePanelActions();
+  const { sessionId, taskId, detailActive } = useEditorContext();
+  const { openFile, addPlan } = usePanelActions({ detailActive });
   const [hoverOpen, setHoverOpen] = useState(false);
   const suppressRef = useRef(false);
 

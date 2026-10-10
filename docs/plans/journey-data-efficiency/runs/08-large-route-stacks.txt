@@ -1,0 +1,645 @@
+goroutine 312233 [running]:
+runtime/pprof.writeGoroutineStacks({0x731ef1743830, 0x2e2b6b642d00})
+	runtime/pprof/pprof.go:819 +0x6b
+runtime/pprof.writeGoroutine({0x731ef1743830?, 0x2e2b6b642d00?}, 0x2e2b6c013040?)
+	runtime/pprof/pprof.go:782 +0x25
+runtime/pprof.(*Profile).WriteTo(0x87434f0?, {0x731ef1743830?, 0x2e2b6b642d00?}, 0xc?)
+	runtime/pprof/pprof.go:408 +0x149
+net/http/pprof.handler.ServeHTTP({0x4e83471, 0x9}, {0x731ef173a000, 0x2e2b6b642d00}, 0x2e2b7125c8c0)
+	net/http/pprof/pprof.go:273 +0x52a
+github.com/kandev/kandev/internal/debug.RegisterPprofRoutes.WrapH.func7(0x2e2b6b642d00?)
+	github.com/gin-gonic/gin@v1.9.1/utils.go:49 +0x4b
+github.com/gin-gonic/gin.(*Context).Next(0x2e2b6b642d00)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174 +0x2b
+github.com/kandev/kandev/internal/backendapp.buildHTTPServer.integrationWorkspaceScopeMiddleware.func7(0x2e2b6b642d00?)
+	github.com/kandev/kandev/internal/backendapp/helpers.go:2136 +0x50
+github.com/gin-gonic/gin.(*Context).Next(0x2e2b6b642d00)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174 +0x2b
+github.com/kandev/kandev/internal/backendapp.buildHTTPServer.Middleware.func6(0x2e2b6b642d00)
+	github.com/kandev/kandev/internal/auth/httpmw/middleware.go:41 +0xeb
+github.com/gin-gonic/gin.(*Context).Next(0x2e2b6b642d00)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174 +0x2b
+github.com/kandev/kandev/internal/backendapp.buildHTTPServer.requiredPersistenceMiddleware.func5(0x2e2b6b642d00?)
+	github.com/kandev/kandev/internal/backendapp/persistence_middleware.go:21 +0x65
+github.com/gin-gonic/gin.(*Context).Next(0x2e2b6b642d00)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174 +0x2b
+github.com/kandev/kandev/internal/backendapp.buildHTTPServer.corsMiddleware.func4(0x2e2b6b642d00)
+	github.com/kandev/kandev/internal/backendapp/middleware.go:54 +0x230
+github.com/gin-gonic/gin.(*Context).Next(...)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174
+github.com/gin-gonic/gin.CustomRecoveryWithWriter.func1(0x2e2b6b642d00)
+	github.com/gin-gonic/gin@v1.9.1/recovery.go:102 +0x6f
+github.com/gin-gonic/gin.(*Context).Next(...)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174
+github.com/kandev/kandev/internal/common/httpmw.OtelTracing.func1(0x2e2b6b642d00)
+	github.com/kandev/kandev/internal/common/httpmw/tracing.go:30 +0x2cb
+github.com/gin-gonic/gin.(*Context).Next(0x2e2b6b642d00)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174 +0x2b
+github.com/kandev/kandev/internal/backendapp.buildHTTPServer.RequestLogger.func3(0x2e2b6b642d00)
+	github.com/kandev/kandev/internal/common/httpmw/logging.go:24 +0x9e
+github.com/gin-gonic/gin.(*Context).Next(...)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174
+github.com/gin-gonic/gin.(*Engine).handleHTTPRequest(0x2e2b707689c0, 0x2e2b6b642d00)
+	github.com/gin-gonic/gin@v1.9.1/gin.go:620 +0x64b
+github.com/gin-gonic/gin.(*Engine).ServeHTTP(0x2e2b707689c0, {0x53980d0, 0x2e2b6c28dd10}, 0x2e2b7125c500)
+	github.com/gin-gonic/gin@v1.9.1/gin.go:576 +0x1ad
+github.com/kandev/kandev/internal/backendapp.(*handlerSwitch).ServeHTTP(0x48e2f9?, {0x53980d0?, 0x2e2b6c28dd10?}, 0x2e2b6b6f5b68?)
+	github.com/kandev/kandev/internal/backendapp/httpserver.go:49 +0x28
+net/http.serverHandler.ServeHTTP({0x2e2b70b37000?}, {0x53980d0?, 0x2e2b6c28dd10?}, 0x1?)
+	net/http/server.go:3311 +0x8e
+net/http.(*conn).serve(0x2e2b71905440, {0x53a1508, 0x2e2b6bf341b0})
+	net/http/server.go:2073 +0x650
+created by net/http.(*Server).Serve in goroutine 51
+	net/http/server.go:3464 +0x485
+
+goroutine 1 [select, 1 minutes]:
+github.com/kandev/kandev/internal/backendapp.(*startupSignalController).wait(0x2e2b6c03f5c0, {0x53a1508, 0x2e2b6c088060})
+	github.com/kandev/kandev/internal/backendapp/startup.go:146 +0xbe
+github.com/kandev/kandev/internal/backendapp.awaitShutdown({0x53a1508, 0x2e2b6c088300}, 0x2e2b6c09a000, 0x2e2b6c09c000, 0x2e2b70cdab60, 0x2e2b6be0f908, 0x2e2b6c116008, 0x2e2b6da87d18, 0x2e2b6bbff090)
+	github.com/kandev/kandev/internal/backendapp/main.go:3111 +0x11e
+github.com/kandev/kandev/internal/backendapp.startGatewayAndServe({0x53a1508, 0x2e2b6c088300}, 0x2e2b6c020908, 0x2e2b6bbff090, {0x53ad530, 0x2e2b6b7c8180}, 0x2e2b6b9f85a0, 0x2e2b6b860d20, _, 0x2e2b6b69a0e0, ...)
+	github.com/kandev/kandev/internal/backendapp/main.go:1595 +0x3eb9
+github.com/kandev/kandev/internal/backendapp.startAgentInfrastructure({0x53a1508, 0x2e2b6c088300}, 0x2e2b6c020908, 0x2e2b6bbff090, 0x2e2b6c068b70, {0x53ad530, 0x2e2b6b7c8180}, 0x2e2b6b9f85a0, 0x2e2b6b860d20, 0x2e2b6c096b90, ...)
+	github.com/kandev/kandev/internal/backendapp/main.go:1047 +0x4746
+github.com/kandev/kandev/internal/backendapp.startServices({0x53a1508, 0x2e2b6c088300}, 0x2e2b6c020908, 0x2e2b6bbff090, 0x2e2b6c068b70, {0x53ad530, 0x2e2b6b7c8180}, 0x2e2b6c2ffd18, 0x2e2b6c096000)
+	github.com/kandev/kandev/internal/backendapp/main.go:616 +0x1a85
+github.com/kandev/kandev/internal/backendapp.initializeApplication({0x53a1508, 0x2e2b6c088300}, 0x2e2b6c020908, 0x2e2b6bbff090, 0x2e2b6c068b70, 0x2e2b6c29dd18)
+	github.com/kandev/kandev/internal/backendapp/main.go:384 +0x226
+github.com/kandev/kandev/internal/backendapp.run.func3({0x53a1508?, 0x2e2b6c088300?})
+	github.com/kandev/kandev/internal/backendapp/main.go:369 +0x2d
+github.com/kandev/kandev/internal/backendapp.runWithBootstrap({0x53a1540?, 0x2e2b6bbff0e0?}, 0x2e2b6c020908, 0x2e2b6bbff090, 0x2e2b6c29dbc0)
+	github.com/kandev/kandev/internal/backendapp/startup.go:219 +0x452
+github.com/kandev/kandev/internal/backendapp.run(0x2e2b6c020908, 0x2e2b6bbff090, 0x2e2b6b7ebe48, 0x2e2b6c29dd18)
+	github.com/kandev/kandev/internal/backendapp/main.go:368 +0x326
+github.com/kandev/kandev/internal/backendapp.Run({0x2e2b6b698050?, 0x469935?, 0x1c8?}, {{0x536efc0, 0x1e}, {0x5396000, 0x28}, {0x536d1f0, 0x14}})
+	github.com/kandev/kandev/internal/backendapp/main.go:314 +0x89b
+main.dispatch({0x2e2b6b698050, 0x1, 0x1}, {{0x536efc0, 0x1e}, {0x5396000, 0x28}, {0x536d1f0, 0x14}}, 0x534e940, ...)
+	github.com/kandev/kandev/cmd/kandev/main.go:47 +0x1ac
+main.run(...)
+	github.com/kandev/kandev/cmd/kandev/main.go:38
+main.main()
+	github.com/kandev/kandev/cmd/kandev/main.go:33 +0xd5
+
+goroutine 20 [select]:
+github.com/kandev/kandev/internal/common/logger.(*retryDailyWriter).retryLoop(0x2e2b6b912bd0)
+	github.com/kandev/kandev/internal/common/logger/backend_logger.go:271 +0xdd
+created by github.com/kandev/kandev/internal/common/logger.newRetryDailyWriter in goroutine 1
+	github.com/kandev/kandev/internal/common/logger/backend_logger.go:226 +0x125
+
+goroutine 21 [sync.Cond.Wait]:
+sync.runtime_notifyListWait(0x2e2b6bf9be50, 0xbe)
+	runtime/sema.go:617 +0x1b3
+sync.(*Cond).Wait(0x0?)
+	sync/cond.go:71 +0x73
+github.com/kandev/kandev/internal/common/logger.(*asyncSink).next(0x2e2b6c048400)
+	github.com/kandev/kandev/internal/common/logger/async_sink.go:129 +0x90
+github.com/kandev/kandev/internal/common/logger.(*asyncSink).run(0x2e2b6c048400)
+	github.com/kandev/kandev/internal/common/logger/async_sink.go:113 +0x65
+created by github.com/kandev/kandev/internal/common/logger.newAsyncSink in goroutine 1
+	github.com/kandev/kandev/internal/common/logger/async_sink.go:67 +0x185
+
+goroutine 22 [sync.Cond.Wait]:
+sync.runtime_notifyListWait(0x2e2b6bf9be90, 0x17)
+	runtime/sema.go:617 +0x1b3
+sync.(*Cond).Wait(0x2e2b6b6b4120?)
+	sync/cond.go:71 +0x73
+github.com/kandev/kandev/internal/common/logger.(*asyncSink).next(0x2e2b6c048600)
+	github.com/kandev/kandev/internal/common/logger/async_sink.go:129 +0x90
+github.com/kandev/kandev/internal/common/logger.(*asyncSink).run(0x2e2b6c048600)
+	github.com/kandev/kandev/internal/common/logger/async_sink.go:113 +0x65
+created by github.com/kandev/kandev/internal/common/logger.newAsyncSink in goroutine 1
+	github.com/kandev/kandev/internal/common/logger/async_sink.go:67 +0x185
+
+goroutine 24 [syscall, 2 minutes]:
+os/signal.signal_recv()
+	runtime/sigqueue.go:152 +0x98
+os/signal.loop()
+	os/signal/signal_unix.go:23 +0x13
+created by os/signal.Notify.func1.1 in goroutine 1
+	os/signal/signal.go:152 +0x1f
+
+goroutine 50 [select, 2 minutes]:
+github.com/kandev/kandev/internal/backendapp.newStartupSignalController.func1()
+	github.com/kandev/kandev/internal/backendapp/startup.go:60 +0x116
+created by github.com/kandev/kandev/internal/backendapp.newStartupSignalController in goroutine 1
+	github.com/kandev/kandev/internal/backendapp/startup.go:58 +0x3e5
+
+goroutine 51 [IO wait]:
+internal/poll.runtime_pollWait(0x731f14f69e00, 0x72)
+	runtime/netpoll.go:351 +0x85
+internal/poll.(*pollDesc).wait(0x2e2b6ba08180?, 0x900000036?, 0x0)
+	internal/poll/fd_poll_runtime.go:84 +0x27
+internal/poll.(*pollDesc).waitRead(...)
+	internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Accept(0x2e2b6ba08180)
+	internal/poll/fd_unix.go:613 +0x28c
+net.(*netFD).accept(0x2e2b6ba08180)
+	net/fd_unix.go:150 +0x29
+net.(*TCPListener).accept(0x2e2b6b7c8000)
+	net/tcpsock_posix.go:159 +0x1b
+net.(*TCPListener).Accept(0x2e2b6b7c8000)
+	net/tcpsock.go:387 +0x30
+net/http.(*Server).Serve(0x2e2b6c09a000, {0x5397dc0, 0x2e2b6b7c8000})
+	net/http/server.go:3434 +0x30c
+github.com/kandev/kandev/internal/backendapp.(*serverListeners).serve.func1()
+	github.com/kandev/kandev/internal/backendapp/httpserver.go:223 +0x24b
+created by github.com/kandev/kandev/internal/backendapp.(*serverListeners).serve in goroutine 1
+	github.com/kandev/kandev/internal/backendapp/httpserver.go:219 +0x74
+
+goroutine 52 [select]:
+github.com/kandev/kandev/internal/backendapp.runWithBootstrap.func1()
+	github.com/kandev/kandev/internal/backendapp/startup.go:205 +0x168
+created by github.com/kandev/kandev/internal/backendapp.runWithBootstrap in goroutine 1
+	github.com/kandev/kandev/internal/backendapp/startup.go:199 +0x3d8
+
+goroutine 53 [select, 2 minutes]:
+database/sql.(*DB).connectionOpener(0x2e2b6c094410, {0x53a1540, 0x2e2b6bc980a0})
+	database/sql/sql.go:1261 +0x89
+created by database/sql.OpenDB in goroutine 1
+	database/sql/sql.go:841 +0x130
+
+goroutine 54 [select, 2 minutes]:
+database/sql.(*DB).connectionOpener(0x2e2b6c0944e0, {0x53a1540, 0x2e2b6bc980f0})
+	database/sql/sql.go:1261 +0x89
+created by database/sql.OpenDB in goroutine 1
+	database/sql/sql.go:841 +0x130
+
+goroutine 500 [select, 2 minutes]:
+github.com/kandev/kandev/internal/auth/hostnames.(*Resolver).triggerWorker(0x2e2b6c66a000)
+	github.com/kandev/kandev/internal/auth/hostnames/resolver.go:233 +0x186
+created by github.com/kandev/kandev/internal/auth/hostnames.(*Resolver).Start in goroutine 1
+	github.com/kandev/kandev/internal/auth/hostnames/resolver.go:110 +0x1f6
+
+goroutine 118608 [select, 1 minutes]:
+github.com/kandev/kandev/internal/agent/settings/controller.(*Controller).StartRuntimeUpdateBackground.func3()
+	github.com/kandev/kandev/internal/agent/settings/controller/runtime_update_background.go:60 +0x205
+created by github.com/kandev/kandev/internal/agent/settings/controller.(*Controller).StartRuntimeUpdateBackground in goroutine 1
+	github.com/kandev/kandev/internal/agent/settings/controller/runtime_update_background.go:45 +0x498
+
+goroutine 118606 [select, 1 minutes]:
+github.com/kandev/kandev/internal/agent/settings/controller.(*Controller).runRuntimeAvailabilityCollector(0x2e2b74b6ffd0?, {0x53a1540, 0x2e2b6deeb680}, 0x2e2b70cdac60, 0x2e2b70cdac80)
+	github.com/kandev/kandev/internal/agent/settings/controller/runtime_update_notifications.go:211 +0x169
+github.com/kandev/kandev/internal/agent/settings/controller.(*Controller).StartRuntimeUpdateBackground.func1()
+	github.com/kandev/kandev/internal/agent/settings/controller/runtime_update_background.go:39 +0x5e
+created by github.com/kandev/kandev/internal/agent/settings/controller.(*Controller).StartRuntimeUpdateBackground in goroutine 1
+	github.com/kandev/kandev/internal/agent/settings/controller/runtime_update_background.go:37 +0x385
+
+goroutine 462 [select, 2 minutes]:
+github.com/kandev/kandev/internal/workflow/service.(*Service).runHistoryWriter(0x2e2b6b8cb140)
+	github.com/kandev/kandev/internal/workflow/service/service.go:108 +0xf6
+created by github.com/kandev/kandev/internal/workflow/service.NewService in goroutine 1
+	github.com/kandev/kandev/internal/workflow/service/service.go:101 +0x205
+
+goroutine 499 [select, 2 minutes]:
+github.com/kandev/kandev/internal/auth/hostnames.(*Resolver).worker(0x2e2b6c66a000)
+	github.com/kandev/kandev/internal/auth/hostnames/resolver.go:315 +0xcf
+created by github.com/kandev/kandev/internal/auth/hostnames.(*Resolver).Start in goroutine 1
+	github.com/kandev/kandev/internal/auth/hostnames/resolver.go:107 +0x145
+
+goroutine 498 [select, 2 minutes]:
+github.com/kandev/kandev/internal/auth/hostnames.(*Resolver).worker(0x2e2b6c66a000)
+	github.com/kandev/kandev/internal/auth/hostnames/resolver.go:315 +0xcf
+created by github.com/kandev/kandev/internal/auth/hostnames.(*Resolver).Start in goroutine 1
+	github.com/kandev/kandev/internal/auth/hostnames/resolver.go:107 +0x145
+
+goroutine 64 [select, 2 minutes]:
+github.com/kandev/kandev/internal/auth/hostnames.(*Resolver).worker(0x2e2b6c66a000)
+	github.com/kandev/kandev/internal/auth/hostnames/resolver.go:315 +0xcf
+created by github.com/kandev/kandev/internal/auth/hostnames.(*Resolver).Start in goroutine 1
+	github.com/kandev/kandev/internal/auth/hostnames/resolver.go:107 +0x145
+
+goroutine 65 [select, 2 minutes]:
+github.com/kandev/kandev/internal/auth/hostnames.(*Resolver).worker(0x2e2b6c66a000)
+	github.com/kandev/kandev/internal/auth/hostnames/resolver.go:315 +0xcf
+created by github.com/kandev/kandev/internal/auth/hostnames.(*Resolver).Start in goroutine 1
+	github.com/kandev/kandev/internal/auth/hostnames/resolver.go:107 +0x145
+
+goroutine 497 [select, 2 minutes]:
+github.com/kandev/kandev/internal/gitlab.(*Poller).reviewWatchLoop(0x2e2b6bbff450, {0x53a1540, 0x2e2b6bbff4a0})
+	github.com/kandev/kandev/internal/gitlab/poller.go:198 +0x139
+created by github.com/kandev/kandev/internal/gitlab.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/gitlab/poller.go:62 +0x1bc
+
+goroutine 118546 [select]:
+github.com/kandev/kandev/internal/orchestrator.(*ceilingSweeper).runLoop(0x2e2b6bf9b340, {0x53a1540, 0x2e2b78745310}, 0x2e2b707971d0)
+	github.com/kandev/kandev/internal/orchestrator/ceiling_sweep.go:105 +0xe7
+github.com/kandev/kandev/internal/orchestrator.(*ceilingSweeper).start.func1()
+	github.com/kandev/kandev/internal/orchestrator/ceiling_sweep.go:62 +0x55
+created by github.com/kandev/kandev/internal/orchestrator.(*ceilingSweeper).start in goroutine 1
+	github.com/kandev/kandev/internal/orchestrator/ceiling_sweep.go:60 +0x193
+
+goroutine 496 [select]:
+github.com/kandev/kandev/internal/gitlab.(*Poller).mrMonitorLoop(0x2e2b6bbff450, {0x53a1540, 0x2e2b6bbff4a0})
+	github.com/kandev/kandev/internal/gitlab/poller.go:116 +0x139
+created by github.com/kandev/kandev/internal/gitlab.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/gitlab/poller.go:61 +0x165
+
+goroutine 664 [select, 2 minutes]:
+github.com/kandev/kandev/internal/task/usage.(*Writer).run(0x2e2b6c1ce580)
+	github.com/kandev/kandev/internal/task/usage/writer.go:125 +0xd5
+created by github.com/kandev/kandev/internal/task/usage.(*Writer).Start in goroutine 1
+	github.com/kandev/kandev/internal/task/usage/writer.go:84 +0xc5
+
+goroutine 118541 [select]:
+github.com/kandev/kandev/internal/orchestrator/scheduler.(*Scheduler).processLoop(0x2e2b6c106210, {0x53a1508, 0x2e2b6c088300})
+	github.com/kandev/kandev/internal/orchestrator/scheduler/scheduler.go:263 +0x15c
+created by github.com/kandev/kandev/internal/orchestrator/scheduler.(*Scheduler).Start in goroutine 1
+	github.com/kandev/kandev/internal/orchestrator/scheduler/scheduler.go:131 +0x215
+
+goroutine 304 [select]:
+github.com/kandev/kandev/internal/gateway/websocket.(*Hub).runConversationChecks(0x2e2b6b8531e0, {0x53a1508, 0x2e2b6c088060})
+	github.com/kandev/kandev/internal/gateway/websocket/conversation_checks.go:17 +0xe5
+github.com/kandev/kandev/internal/gateway/websocket.(*Hub).Run.func2()
+	github.com/kandev/kandev/internal/gateway/websocket/hub.go:164 +0x4f
+created by github.com/kandev/kandev/internal/gateway/websocket.(*Hub).Run in goroutine 641
+	github.com/kandev/kandev/internal/gateway/websocket/hub.go:164 +0x1a5
+
+goroutine 615 [select, 2 minutes]:
+github.com/kandev/kandev/internal/agent/runtime/agentctl.(*RuntimeOwner).runPublisher(0x2e2b6b9f85a0)
+	github.com/kandev/kandev/internal/agent/runtime/agentctl/availability.go:809 +0x85
+created by github.com/kandev/kandev/internal/agent/runtime/agentctl.NewRuntimeOwner in goroutine 1
+	github.com/kandev/kandev/internal/agent/runtime/agentctl/availability.go:154 +0x176
+
+goroutine 618 [IO wait]:
+internal/poll.runtime_pollWait(0x731f14f69a00, 0x72)
+	runtime/netpoll.go:351 +0x85
+internal/poll.(*pollDesc).wait(0x2e2b6bf59a40?, 0x2e2b6c17a000?, 0x1)
+	internal/poll/fd_poll_runtime.go:84 +0x27
+internal/poll.(*pollDesc).waitRead(...)
+	internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0x2e2b6bf59a40, {0x2e2b6c17a000, 0x1000, 0x1000})
+	internal/poll/fd_unix.go:165 +0x2ae
+os.(*File).read(...)
+	os/file_posix.go:29
+os.(*File).Read(0x2e2b6bf4a340, {0x2e2b6c17a000?, 0x0?, 0x0?})
+	os/file.go:144 +0x4f
+bufio.(*Reader).fill(0x2e2b6c2bff10)
+	bufio/bufio.go:113 +0x103
+bufio.(*Reader).ReadSlice(0x2e2b6c2bff10, 0xa)
+	bufio/bufio.go:377 +0x29
+github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher.(*Launcher).pipeOutput(0x2e2b6b938f00, {0x4df5ed0, 0x6}, {0x536f180, 0x2e2b6bf4a340?})
+	github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher/launcher_output.go:27 +0x208
+github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher.(*Launcher).buildAndStartProcess.func1()
+	github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher/launcher.go:343 +0x85
+created by github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher.(*Launcher).buildAndStartProcess in goroutine 1
+	github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher/launcher.go:341 +0xb52
+
+goroutine 619 [IO wait, 1 minutes]:
+internal/poll.runtime_pollWait(0x731f14f69600, 0x72)
+	runtime/netpoll.go:351 +0x85
+internal/poll.(*pollDesc).wait(0x2e2b6bf59b00?, 0x2e2b6c1c2000?, 0x1)
+	internal/poll/fd_poll_runtime.go:84 +0x27
+internal/poll.(*pollDesc).waitRead(...)
+	internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0x2e2b6bf59b00, {0x2e2b6c1c2000, 0x1000, 0x1000})
+	internal/poll/fd_unix.go:165 +0x2ae
+os.(*File).read(...)
+	os/file_posix.go:29
+os.(*File).Read(0x2e2b6bf4a350, {0x2e2b6c1c2000?, 0x0?, 0x0?})
+	os/file.go:144 +0x4f
+bufio.(*Reader).fill(0x2e2b6c2dff10)
+	bufio/bufio.go:113 +0x103
+bufio.(*Reader).ReadSlice(0x2e2b6c2dff10, 0xa)
+	bufio/bufio.go:377 +0x29
+github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher.(*Launcher).pipeOutput(0x2e2b6b938f00, {0x4df5dec, 0x6}, {0x536f180, 0x2e2b6bf4a350?})
+	github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher/launcher_output.go:27 +0x208
+github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher.(*Launcher).buildAndStartProcess.func2()
+	github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher/launcher.go:347 +0x85
+created by github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher.(*Launcher).buildAndStartProcess in goroutine 1
+	github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher/launcher.go:345 +0xbb5
+
+goroutine 620 [syscall, 2 minutes]:
+syscall.Syscall6(0xf7, 0x3, 0x17, 0x2e2b6bd69be8, 0x4, 0x2e2b6c67e360, 0x0)
+	syscall/syscall_linux.go:96 +0x39
+internal/syscall/unix.Waitid(0x0?, 0x0?, 0x0?, 0x0?, 0x0?)
+	internal/syscall/unix/waitid_linux.go:18 +0x39
+os.(*Process).pidfdWait.func1(...)
+	os/pidfd_linux.go:108
+os.ignoringEINTR(...)
+	os/file_posix.go:256
+os.(*Process).pidfdWait(0x2e2b6b7c8100)
+	os/pidfd_linux.go:107 +0x1c7
+os.(*Process).wait(0x0?)
+	os/exec_unix.go:25 +0x1a
+os.(*Process).Wait(...)
+	os/exec.go:346
+os/exec.(*Cmd).Wait(0x2e2b6ba67380)
+	os/exec/exec.go:930 +0x45
+github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher.(*Launcher).monitorExit(0x2e2b6b938f00)
+	github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher/launcher.go:919 +0x31
+created by github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher.(*Launcher).buildAndStartProcess in goroutine 1
+	github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher/launcher.go:349 +0xbfb
+
+goroutine 495 [select, 1 minutes]:
+github.com/kandev/kandev/internal/integrations/healthpoll.(*Poller).loop(0x2e2b6bf48ba0, {0x53a1540, 0x2e2b6bbff4f0})
+	github.com/kandev/kandev/internal/integrations/healthpoll/healthpoll.go:103 +0x11d
+created by github.com/kandev/kandev/internal/integrations/healthpoll.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/integrations/healthpoll/healthpoll.go:72 +0x16c
+
+goroutine 626 [select, 2 minutes]:
+github.com/kandev/kandev/internal/gitlab.(*Poller).issueWatchLoop(0x2e2b6bbff450, {0x53a1540, 0x2e2b6bbff4a0})
+	github.com/kandev/kandev/internal/gitlab/poller.go:242 +0x139
+created by github.com/kandev/kandev/internal/gitlab.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/gitlab/poller.go:63 +0x213
+
+goroutine 627 [select, 1 minutes]:
+github.com/kandev/kandev/internal/integrations/healthpoll.(*Poller).loop(0x2e2b6bf48c00, {0x53a1540, 0x2e2b6bbff630})
+	github.com/kandev/kandev/internal/integrations/healthpoll/healthpoll.go:103 +0x11d
+created by github.com/kandev/kandev/internal/integrations/healthpoll.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/integrations/healthpoll/healthpoll.go:72 +0x16c
+
+goroutine 628 [select]:
+github.com/kandev/kandev/internal/azuredevops.(*Poller).watchLoop(0x2e2b6bf9b6c0, {0x53a1540, 0x2e2b6bbff5e0})
+	github.com/kandev/kandev/internal/azuredevops/poller.go:82 +0x11b
+created by github.com/kandev/kandev/internal/azuredevops.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/azuredevops/poller.go:53 +0x186
+
+goroutine 629 [select, 1 minutes]:
+github.com/kandev/kandev/internal/integrations/healthpoll.(*Poller).loop(0x2e2b6bf48c60, {0x53a1540, 0x2e2b6bbff720})
+	github.com/kandev/kandev/internal/integrations/healthpoll/healthpoll.go:103 +0x11d
+created by github.com/kandev/kandev/internal/integrations/healthpoll.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/integrations/healthpoll/healthpoll.go:72 +0x16c
+
+goroutine 630 [select]:
+github.com/kandev/kandev/internal/jira.(*Poller).issueWatchLoop(0x2e2b6bbff680, {0x53a1540, 0x2e2b6bbff6d0})
+	github.com/kandev/kandev/internal/jira/poller.go:108 +0x110
+created by github.com/kandev/kandev/internal/jira.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/jira/poller.go:73 +0x17c
+
+goroutine 631 [select, 1 minutes]:
+github.com/kandev/kandev/internal/integrations/healthpoll.(*Poller).loop(0x2e2b6bf48cc0, {0x53a1540, 0x2e2b6bbff860})
+	github.com/kandev/kandev/internal/integrations/healthpoll/healthpoll.go:103 +0x11d
+created by github.com/kandev/kandev/internal/integrations/healthpoll.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/integrations/healthpoll/healthpoll.go:72 +0x16c
+
+goroutine 632 [select]:
+github.com/kandev/kandev/internal/linear.(*Poller).issueWatchLoop(0x2e2b6bbff770, {0x53a1540, 0x2e2b6bbff810})
+	github.com/kandev/kandev/internal/linear/poller.go:101 +0x110
+created by github.com/kandev/kandev/internal/linear.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/linear/poller.go:71 +0x17c
+
+goroutine 633 [select, 1 minutes]:
+github.com/kandev/kandev/internal/integrations/healthpoll.(*Poller).loop(0x2e2b6bf48d20, {0x53a1540, 0x2e2b6baba0a0})
+	github.com/kandev/kandev/internal/integrations/healthpoll/healthpoll.go:103 +0x11d
+created by github.com/kandev/kandev/internal/integrations/healthpoll.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/integrations/healthpoll/healthpoll.go:72 +0x16c
+
+goroutine 634 [select]:
+github.com/kandev/kandev/internal/sentry.(*Poller).issueWatchLoop(0x2e2b6baba000, {0x53a1540, 0x2e2b6baba050})
+	github.com/kandev/kandev/internal/sentry/poller.go:111 +0x11d
+created by github.com/kandev/kandev/internal/sentry.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/sentry/poller.go:81 +0x17c
+
+goroutine 635 [select]:
+github.com/kandev/kandev/internal/workflowsync.(*Poller).loop(0x2e2b6bf9ba00, {0x53a1540, 0x2e2b6baba140})
+	github.com/kandev/kandev/internal/workflowsync/poller.go:74 +0x113
+created by github.com/kandev/kandev/internal/workflowsync.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/workflowsync/poller.go:49 +0x13d
+
+goroutine 636 [select]:
+github.com/kandev/kandev/internal/executors/reachability.(*Poller).loop(0x2e2b6c664ab0, {0x53a1540, 0x2e2b6baba190})
+	github.com/kandev/kandev/internal/executors/reachability/poller.go:203 +0x139
+created by github.com/kandev/kandev/internal/executors/reachability.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/executors/reachability/poller.go:112 +0x1b2
+
+goroutine 637 [select, 2 minutes]:
+github.com/kandev/kandev/internal/agent/runtime/lifecycle.(*OrphanSweepScheduler).loop(0x2e2b6c664b40, {0x53a1540, 0x2e2b6baba1e0})
+	github.com/kandev/kandev/internal/agent/runtime/lifecycle/executor_ssh_orphan_sweep_scheduler.go:213 +0x139
+created by github.com/kandev/kandev/internal/agent/runtime/lifecycle.(*OrphanSweepScheduler).Start in goroutine 1
+	github.com/kandev/kandev/internal/agent/runtime/lifecycle/executor_ssh_orphan_sweep_scheduler.go:159 +0x425
+
+goroutine 638 [select, 2 minutes]:
+github.com/kandev/kandev/internal/backendapp.(*pluginToolCatalogRefresher).run(0x2e2b6bf48d80)
+	github.com/kandev/kandev/internal/backendapp/plugin_tool_refresher.go:56 +0xc9
+created by github.com/kandev/kandev/internal/backendapp.newPluginToolCatalogRefresher in goroutine 1
+	github.com/kandev/kandev/internal/backendapp/plugin_tool_refresher.go:37 +0x156
+
+goroutine 639 [select, 2 minutes]:
+github.com/kandev/kandev/internal/plugins.(*AutoUpdatePoller).loop(0x2e2b6bf9bb80, {0x53a1540, 0x2e2b6baba640})
+	github.com/kandev/kandev/internal/plugins/autoupdate_poller.go:85 +0x11d
+created by github.com/kandev/kandev/internal/plugins.(*AutoUpdatePoller).Start in goroutine 1
+	github.com/kandev/kandev/internal/plugins/autoupdate_poller.go:54 +0x165
+
+goroutine 640 [select, 2 minutes]:
+github.com/kandev/kandev/internal/delivery.(*Sweep).loop(0x2e2b6bf9bdc0, {0x53a1540, 0x2e2b6baba730})
+	github.com/kandev/kandev/internal/delivery/sweep.go:92 +0xed
+created by github.com/kandev/kandev/internal/delivery.(*Sweep).Start in goroutine 1
+	github.com/kandev/kandev/internal/delivery/sweep.go:65 +0x13d
+
+goroutine 641 [select, 2 minutes]:
+github.com/kandev/kandev/internal/gateway/websocket.(*Hub).Run(0x2e2b6b8531e0, {0x53a1508, 0x2e2b6c088060})
+	github.com/kandev/kandev/internal/gateway/websocket/hub.go:168 +0x2b3
+created by github.com/kandev/kandev/internal/backendapp.provideGateway in goroutine 1
+	github.com/kandev/kandev/internal/backendapp/gateway.go:309 +0x1125
+
+goroutine 674 [chan receive, 2 minutes]:
+github.com/kandev/kandev/internal/gateway/websocket.RegisterTaskNotifications.func1()
+	github.com/kandev/kandev/internal/gateway/websocket/task_notifications.go:112 +0x2c
+created by github.com/kandev/kandev/internal/gateway/websocket.RegisterTaskNotifications in goroutine 1
+	github.com/kandev/kandev/internal/gateway/websocket/task_notifications.go:111 +0x19b1
+
+goroutine 675 [chan receive, 2 minutes]:
+github.com/kandev/kandev/internal/task/statussummary.(*Projector).Start.func1()
+	github.com/kandev/kandev/internal/task/statussummary/projector.go:356 +0x2c
+created by github.com/kandev/kandev/internal/task/statussummary.(*Projector).Start in goroutine 1
+	github.com/kandev/kandev/internal/task/statussummary/projector.go:355 +0x3b0
+
+goroutine 676 [chan receive, 2 minutes]:
+github.com/kandev/kandev/internal/gateway/websocket.RegisterUserNotifications.func1()
+	github.com/kandev/kandev/internal/gateway/websocket/user_notifications.go:35 +0x2c
+created by github.com/kandev/kandev/internal/gateway/websocket.RegisterUserNotifications in goroutine 1
+	github.com/kandev/kandev/internal/gateway/websocket/user_notifications.go:34 +0x27e
+
+goroutine 677 [chan receive, 2 minutes]:
+github.com/kandev/kandev/internal/gateway/websocket.RegisterOfficeNotifications.func1()
+	github.com/kandev/kandev/internal/gateway/websocket/office_notifications.go:84 +0x2c
+created by github.com/kandev/kandev/internal/gateway/websocket.RegisterOfficeNotifications in goroutine 1
+	github.com/kandev/kandev/internal/gateway/websocket/office_notifications.go:83 +0x70e
+
+goroutine 678 [chan receive, 2 minutes]:
+github.com/kandev/kandev/internal/gateway/websocket.RegisterRunNotifications.func1()
+	github.com/kandev/kandev/internal/gateway/websocket/run_notifications.go:49 +0x2c
+created by github.com/kandev/kandev/internal/gateway/websocket.RegisterRunNotifications in goroutine 1
+	github.com/kandev/kandev/internal/gateway/websocket/run_notifications.go:48 +0x3a9
+
+goroutine 679 [chan receive, 2 minutes]:
+github.com/kandev/kandev/internal/gateway/websocket.RegisterSessionStreamNotifications.func1()
+	github.com/kandev/kandev/internal/gateway/websocket/session_notifications.go:67 +0x2c
+created by github.com/kandev/kandev/internal/gateway/websocket.RegisterSessionStreamNotifications in goroutine 1
+	github.com/kandev/kandev/internal/gateway/websocket/session_notifications.go:66 +0x632
+
+goroutine 312234 [IO wait]:
+internal/poll.runtime_pollWait(0x731f14f69200, 0x72)
+	runtime/netpoll.go:351 +0x85
+internal/poll.(*pollDesc).wait(0x2e2b706b0080?, 0x2e2b70b37021?, 0x0)
+	internal/poll/fd_poll_runtime.go:84 +0x27
+internal/poll.(*pollDesc).waitRead(...)
+	internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0x2e2b706b0080, {0x2e2b70b37021, 0x1, 0x1})
+	internal/poll/fd_unix.go:165 +0x2ae
+net.(*netFD).Read(0x2e2b706b0080, {0x2e2b70b37021?, 0x2e2b6b71c070?, 0x0?})
+	net/fd_posix.go:68 +0x25
+net.(*conn).Read(0x2e2b70d6a5e0, {0x2e2b70b37021?, 0x893d2f?, 0x2e2b6becf720?})
+	net/net.go:196 +0x45
+net/http.(*connReader).backgroundRead(0x2e2b70b37000)
+	net/http/server.go:702 +0x33
+created by net/http.(*connReader).startBackgroundRead in goroutine 312233
+	net/http/server.go:698 +0xb6
+
+goroutine 118610 [select, 1 minutes]:
+github.com/kandev/kandev/internal/system/logbundle.(*Service).buildWorker(0x2e2b6b7739e0)
+	github.com/kandev/kandev/internal/system/logbundle/service.go:643 +0xe7
+created by github.com/kandev/kandev/internal/system/logbundle.(*Service).Start.func1 in goroutine 1
+	github.com/kandev/kandev/internal/system/logbundle/service.go:167 +0x267
+
+goroutine 118612 [select, 1 minutes]:
+github.com/kandev/kandev/internal/system/updates.(*Service).pollerLoop(0x2e2b6c28c0f0, {0x53a1540, 0x2e2b6deeb7c0}, 0x13a52453c000)
+	github.com/kandev/kandev/internal/system/updates/poller.go:63 +0x125
+created by github.com/kandev/kandev/internal/system/updates.(*Service).StartPoller in goroutine 1
+	github.com/kandev/kandev/internal/system/updates/poller.go:32 +0x1af
+
+goroutine 118611 [select, 1 minutes]:
+github.com/kandev/kandev/internal/system/logbundle.(*Service).cleanupWorker(0x2e2b6b7739e0)
+	github.com/kandev/kandev/internal/system/logbundle/service.go:657 +0x105
+created by github.com/kandev/kandev/internal/system/logbundle.(*Service).Start.func1 in goroutine 1
+	github.com/kandev/kandev/internal/system/logbundle/service.go:168 +0x2a9
+
+goroutine 118613 [select, 1 minutes]:
+github.com/kandev/kandev/internal/task/service.(*Service).runTaskResourceCleanupWorker(0x2e2b6bdf9008, {0x53a1540, 0x2e2b6deeb810}, 0x2e2b6fdc42a0, {0x0?, 0x53a1540?, 0x0?})
+	github.com/kandev/kandev/internal/task/service/resource_cleanup_jobs.go:525 +0x33d
+created by github.com/kandev/kandev/internal/task/service.(*Service).StartTaskResourceCleanupWorker in goroutine 1
+	github.com/kandev/kandev/internal/task/service/resource_cleanup_jobs.go:498 +0x36e
+
+goroutine 8972 [select]:
+github.com/kandev/kandev/internal/persistence/requiredstores.(*Health).run(0x2e2b6b9fc770, {0x53a1540, 0x2e2b6c0e3cc0}, 0x0?, 0x0?)
+	github.com/kandev/kandev/internal/persistence/requiredstores/health.go:294 +0xfc
+created by github.com/kandev/kandev/internal/persistence/requiredstores.(*Health).Start in goroutine 1
+	github.com/kandev/kandev/internal/persistence/requiredstores/health.go:285 +0x1eb
+
+goroutine 11191 [select, 1 minutes]:
+github.com/kandev/kandev/internal/agent/runtime/lifecycle.(*Manager).remoteStatusLoop(0x2e2b6c116008, {0x53a1508, 0x2e2b6c088300})
+	github.com/kandev/kandev/internal/agent/runtime/lifecycle/manager_remote_status.go:17 +0x145
+created by github.com/kandev/kandev/internal/agent/runtime/lifecycle.(*Manager).Start in goroutine 1
+	github.com/kandev/kandev/internal/agent/runtime/lifecycle/manager_lifecycle.go:582 +0x1825
+
+goroutine 118609 [select, 1 minutes]:
+github.com/kandev/kandev/internal/system/toolretention.(*Service).loop(0x2e2b6c290080, {0x53a1540, 0x2e2b6deeb720})
+	github.com/kandev/kandev/internal/system/toolretention/scheduler.go:48 +0x16f
+created by github.com/kandev/kandev/internal/system/toolretention.(*Service).Start in goroutine 1
+	github.com/kandev/kandev/internal/system/toolretention/scheduler.go:24 +0x1d0
+
+goroutine 118597 [select]:
+github.com/kandev/kandev/internal/runs/scheduler.(*Scheduler).loop(0x2e2b6deeb180, {0x53a1540, 0x2e2b6deeb1d0})
+	github.com/kandev/kandev/internal/runs/scheduler/scheduler.go:155 +0x2dd
+created by github.com/kandev/kandev/internal/runs/scheduler.(*Scheduler).Start in goroutine 1
+	github.com/kandev/kandev/internal/runs/scheduler/scheduler.go:118 +0x15c
+
+goroutine 118620 [select]:
+github.com/kandev/kandev/internal/system/sleepinhibition.(*Service).run(0x2e2b6bdf6410, {0x53a1540, 0x2e2b6deeb9a0}, 0x87180f0?)
+	github.com/kandev/kandev/internal/system/sleepinhibition/service.go:189 +0x1af
+created by github.com/kandev/kandev/internal/system/sleepinhibition.(*Service).Start in goroutine 1
+	github.com/kandev/kandev/internal/system/sleepinhibition/service.go:105 +0x32e
+
+goroutine 118621 [chan receive, 1 minutes]:
+github.com/kandev/kandev/internal/gateway/websocket.RegisterSystemNotifications.func1()
+	github.com/kandev/kandev/internal/gateway/websocket/system_notifications.go:40 +0x2c
+created by github.com/kandev/kandev/internal/gateway/websocket.RegisterSystemNotifications in goroutine 1
+	github.com/kandev/kandev/internal/gateway/websocket/system_notifications.go:39 +0x228
+
+goroutine 118556 [select]:
+github.com/kandev/kandev/internal/automation.(*CronScheduler).loop(0x2e2b6bee8b40, {0x53a1540, 0x2e2b78745770})
+	github.com/kandev/kandev/internal/automation/scheduler.go:76 +0x11b
+created by github.com/kandev/kandev/internal/automation.(*CronScheduler).Start in goroutine 1
+	github.com/kandev/kandev/internal/automation/scheduler.go:48 +0xd5
+
+goroutine 118555 [select]:
+github.com/kandev/kandev/internal/automation.(*Service).runManagedAutomationDeliveryWorker(0x2e2b6be96900, {0x53a1540, 0x2e2b78745720})
+	github.com/kandev/kandev/internal/automation/provider.go:76 +0xea
+github.com/kandev/kandev/internal/automation.(*Components).Start.func2()
+	github.com/kandev/kandev/internal/automation/provider.go:49 +0x53
+created by github.com/kandev/kandev/internal/automation.(*Components).Start in goroutine 1
+	github.com/kandev/kandev/internal/automation/provider.go:49 +0x774
+
+goroutine 118600 [select]:
+github.com/kandev/kandev/internal/task/service.(*Service).StartSessionReconciliationLoop.func1()
+	github.com/kandev/kandev/internal/task/service/archived_session_reconciliation.go:53 +0x169
+created by github.com/kandev/kandev/internal/task/service.(*Service).StartSessionReconciliationLoop in goroutine 1
+	github.com/kandev/kandev/internal/task/service/archived_session_reconciliation.go:50 +0xa5
+
+goroutine 118557 [select, 1 minutes]:
+github.com/kandev/kandev/internal/automation.(*GitHubEvaluator).loop(0x2e2b6ba2b740, {0x53a1540, 0x2e2b787457c0})
+	github.com/kandev/kandev/internal/automation/evaluator.go:75 +0x125
+created by github.com/kandev/kandev/internal/automation.(*GitHubEvaluator).Start in goroutine 1
+	github.com/kandev/kandev/internal/automation/evaluator.go:48 +0xdd
+
+goroutine 118559 [select, 1 minutes]:
+github.com/kandev/kandev/internal/github.(*Poller).reviewQueueLoop(0x2e2b6c01a090, {0x53a1540, 0x2e2b78745900})
+	github.com/kandev/kandev/internal/github/poller.go:909 +0x15b
+created by github.com/kandev/kandev/internal/github.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/github/poller.go:151 +0x134
+
+goroutine 118601 [select, 1 minutes]:
+github.com/kandev/kandev/internal/task/service.(*Service).StartQuickChatExpirationLoop.func1()
+	github.com/kandev/kandev/internal/task/service/quick_chat_expiration.go:23 +0x155
+created by github.com/kandev/kandev/internal/task/service.(*Service).StartQuickChatExpirationLoop in goroutine 1
+	github.com/kandev/kandev/internal/task/service/quick_chat_expiration.go:19 +0xcb
+
+goroutine 118545 [select]:
+github.com/kandev/kandev/internal/orchestrator.(*idleSessionReaper).runLoop(0x893d2f?, {0x53a1540, 0x2e2b787452c0}, 0x2e2b70797170)
+	github.com/kandev/kandev/internal/orchestrator/idle_session_reaper.go:206 +0xdd
+github.com/kandev/kandev/internal/orchestrator.(*idleSessionReaper).start.func1()
+	github.com/kandev/kandev/internal/orchestrator/idle_session_reaper.go:175 +0x55
+created by github.com/kandev/kandev/internal/orchestrator.(*idleSessionReaper).start in goroutine 1
+	github.com/kandev/kandev/internal/orchestrator/idle_session_reaper.go:173 +0x193
+
+goroutine 118560 [select, 1 minutes]:
+github.com/kandev/kandev/internal/github.(*Poller).issueWatchLoop(0x2e2b6c01a090, {0x53a1540, 0x2e2b78745900})
+	github.com/kandev/kandev/internal/github/poller.go:1023 +0x15b
+created by github.com/kandev/kandev/internal/github.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/github/poller.go:152 +0x190
+
+goroutine 118605 [select, 1 minutes]:
+github.com/kandev/kandev/internal/office/retention.(*Scheduler).run(0x2e2b6c056320, {0x53a1540, 0x2e2b6deeb630}, {0x1, 0x6, 0x1388, {0x1e, 0x32, 0x61a8}, {0x1e, ...}, ...}, ...)
+	github.com/kandev/kandev/internal/office/retention/scheduler.go:140 +0x1c7
+created by github.com/kandev/kandev/internal/office/retention.(*Scheduler).Start in goroutine 1
+	github.com/kandev/kandev/internal/office/retention/scheduler.go:89 +0x427
+
+goroutine 118599 [select, 1 minutes]:
+github.com/kandev/kandev/internal/task/service.(*Service).StartAutoArchiveLoop.func1()
+	github.com/kandev/kandev/internal/task/service/auto_archive.go:19 +0xdd
+created by github.com/kandev/kandev/internal/task/service.(*Service).StartAutoArchiveLoop in goroutine 1
+	github.com/kandev/kandev/internal/task/service/auto_archive.go:16 +0xa5
+
+goroutine 118558 [select, 1 minutes]:
+github.com/kandev/kandev/internal/github.(*Poller).prMonitorLoop(0x2e2b6c01a090, {0x53a1540, 0x2e2b78745900})
+	github.com/kandev/kandev/internal/github/poller.go:183 +0x15b
+created by github.com/kandev/kandev/internal/github.(*Poller).Start in goroutine 1
+	github.com/kandev/kandev/internal/github/poller.go:150 +0xdd
+
+goroutine 118598 [select]:
+github.com/kandev/kandev/internal/scheduler/cron.(*Loop).loop(0x2e2b6deeb4a0, {0x53a1540, 0x2e2b6deeb4f0})
+	github.com/kandev/kandev/internal/scheduler/cron/cron.go:148 +0x425
+created by github.com/kandev/kandev/internal/scheduler/cron.(*Loop).Start in goroutine 1
+	github.com/kandev/kandev/internal/scheduler/cron/cron.go:111 +0x165
+
+goroutine 118622 [chan receive, 1 minutes]:
+github.com/kandev/kandev/internal/gateway/websocket.RegisterAgentRuntimeNotifications.func2()
+	github.com/kandev/kandev/internal/gateway/websocket/system_notifications.go:81 +0x2c
+created by github.com/kandev/kandev/internal/gateway/websocket.RegisterAgentRuntimeNotifications in goroutine 1
+	github.com/kandev/kandev/internal/gateway/websocket/system_notifications.go:80 +0x28b
+
+goroutine 118554 [select]:
+github.com/kandev/kandev/internal/automation.(*Service).runWebhookWorker(0x2e2b6be96900, {0x53a1540, 0x2e2b787456d0})
+	github.com/kandev/kandev/internal/automation/plugin_webhook_worker.go:303 +0xe5
+github.com/kandev/kandev/internal/automation.(*Components).Start.func1()
+	github.com/kandev/kandev/internal/automation/provider.go:45 +0x53
+created by github.com/kandev/kandev/internal/automation.(*Components).Start in goroutine 1
+	github.com/kandev/kandev/internal/automation/provider.go:45 +0x67c
+
+goroutine 118607 [select, 1 minutes]:
+github.com/kandev/kandev/internal/agent/settings/controller.(*Controller).runRuntimeUpdateDeliveryWorker(0x2e2b6ba671e0, {0x53a1540, 0x2e2b6deeb680}, 0x2e2b70cdac80)
+	github.com/kandev/kandev/internal/agent/settings/controller/runtime_update_notifications.go:284 +0xf0
+github.com/kandev/kandev/internal/agent/settings/controller.(*Controller).StartRuntimeUpdateBackground.func2()
+	github.com/kandev/kandev/internal/agent/settings/controller/runtime_update_background.go:43 +0x59
+created by github.com/kandev/kandev/internal/agent/settings/controller.(*Controller).StartRuntimeUpdateBackground in goroutine 1
+	github.com/kandev/kandev/internal/agent/settings/controller/runtime_update_background.go:41 +0x3f4

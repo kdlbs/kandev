@@ -75,6 +75,7 @@ export type ChatSubmitPayload = {
 type ChatInputContainerProps = {
   onSubmit: (payload: ChatSubmitPayload) => ChatSubmitResult;
   sessionId: string | null;
+  detailActive?: boolean;
   taskId: string | null;
   workspaceId?: string | null;
   workspaceResolutionFailed?: boolean;
@@ -217,6 +218,7 @@ function buildEditorAreaProps(
     onAddContextFile: p.onAddContextFile,
     onToggleContextFile: p.onToggleContextFile,
     planContextEnabled: p.planContextEnabled,
+    detailActive: p.detailActive ?? true,
     addFiles: s.addFiles,
     fileInputRef: s.fileInputRef,
     showRequestChangesTooltip: p.showRequestChangesTooltip,
@@ -275,18 +277,21 @@ function useChatPromptEnhancement({
   inputRef,
   taskId,
   sessionId,
+  detailActive,
   taskTitle,
   taskDescription,
 }: {
   inputRef: ContainerState["inputRef"];
   taskId: string | null;
   sessionId: string | null;
+  detailActive: boolean;
   taskTitle?: string;
   taskDescription: string;
 }) {
   const isUtilityConfigured = useIsUtilityConfigured();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
     sessionId,
+    detailActive,
     taskTitle,
     taskDescription,
   });
@@ -374,6 +379,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       inputRef: s.inputRef,
       taskId,
       sessionId,
+      detailActive: p.detailActive ?? true,
       taskTitle,
       taskDescription,
     });

@@ -2903,10 +2903,23 @@ export class ApiClient {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
   }
 
+  async listTaskSessionDetails(taskId: string) {
+    const summary = await this.listTaskSessions(taskId);
+    const sessions = await Promise.all(
+      summary.sessions.map(async (row) => {
+        const { session } = await this.getTaskSession(row.id);
+        return { ...row, ...session };
+      }),
+    );
+    return { ...summary, sessions };
+  }
+
   async getTaskSession(sessionId: string): Promise<{
     session: {
       id: string;
       task_id: string;
+      metadata?: Record<string, unknown>;
+      agent_execution_id?: string;
       agent_profile_id?: string;
       agent_profile_snapshot?: Record<string, unknown> | null;
       state: string;

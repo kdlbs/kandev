@@ -239,7 +239,13 @@ function BackgroundWorkDrawerBody({
   );
 }
 
-export function BackgroundWorkChip({ sessionId }: { sessionId: string | null }) {
+type BackgroundWorkChipProps = {
+  sessionId: string | null;
+  detailActive?: boolean;
+};
+
+export function BackgroundWorkChip(props: BackgroundWorkChipProps) {
+  const { sessionId, detailActive = true } = props;
   const enabled = useFeature("agentBackgroundWork");
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const usesDrawer = !isFinePointer || isMobile;
@@ -248,7 +254,7 @@ export function BackgroundWorkChip({ sessionId }: { sessionId: string | null }) 
   const triggerRef = useRef<HTMLButtonElement>(null);
   const outputEndRef = useRef<HTMLDivElement>(null);
   const detailsId = `background-work-details-${useId()}`;
-  const { workloads, totalCount } = useBackgroundWork(sessionId);
+  const { workloads, totalCount } = useBackgroundWork(sessionId, { detailActive });
 
   const handleOpenWorkload = (workId: string, title: string) => {
     if (usesDrawer) {

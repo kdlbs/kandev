@@ -1,0 +1,51 @@
+File: kandev
+Build ID: 83e57fbe3b78f804382faa86c351ab37a509a79b
+Type: cpu
+Time: 2026-10-10 13:33:17 WEST
+Duration: 20s, Total samples = 16.35s (81.75%)
+Showing nodes accounting for 16.24s, 99.33% of 16.35s total
+Dropped 86 nodes (cum <= 0.08s)
+      flat  flat%   sum%        cum   cum%
+    16.24s 99.33% 99.33%     16.24s 99.33%  runtime.cgocall
+         0     0% 99.33%      0.44s  2.69%  database/sql.(*DB).queryDC
+         0     0% 99.33%      0.44s  2.69%  database/sql.(*DB).queryDC.func1
+         0     0% 99.33%      0.43s  2.63%  database/sql.(*Tx).QueryContext
+         0     0% 99.33%      0.44s  2.69%  database/sql.ctxDriverQuery
+         0     0% 99.33%      0.44s  2.69%  database/sql.withLock
+         0     0% 99.33%      0.50s  3.06%  github.com/gin-gonic/gin.(*Context).Next (partial-inline)
+         0     0% 99.33%      0.50s  3.06%  github.com/gin-gonic/gin.(*Engine).ServeHTTP
+         0     0% 99.33%      0.50s  3.06%  github.com/gin-gonic/gin.(*Engine).handleHTTPRequest
+         0     0% 99.33%      0.50s  3.06%  github.com/gin-gonic/gin.CustomRecoveryWithWriter.func1
+         0     0% 99.33%      0.50s  3.06%  github.com/gin-gonic/gin.serveError
+         0     0% 99.33%      0.50s  3.06%  github.com/kandev/kandev/internal/backendapp.(*handlerSwitch).ServeHTTP
+         0     0% 99.33%      0.49s  3.00%  github.com/kandev/kandev/internal/backendapp.bootPayload
+         0     0% 99.33%      0.46s  2.81%  github.com/kandev/kandev/internal/backendapp.bootRouteData
+         0     0% 99.33%      0.46s  2.81%  github.com/kandev/kandev/internal/backendapp.bootStateBuilder.taskDetailRouteData
+         0     0% 99.33%      0.46s  2.81%  github.com/kandev/kandev/internal/backendapp.bootStateBuilder.taskDetailSidebarTaskPage
+         0     0% 99.33%      0.50s  3.06%  github.com/kandev/kandev/internal/backendapp.buildHTTPServer.Middleware.func6
+         0     0% 99.33%      0.50s  3.06%  github.com/kandev/kandev/internal/backendapp.buildHTTPServer.RequestLogger.func3
+         0     0% 99.33%      0.50s  3.06%  github.com/kandev/kandev/internal/backendapp.buildHTTPServer.corsMiddleware.func4
+         0     0% 99.33%      0.50s  3.06%  github.com/kandev/kandev/internal/backendapp.buildHTTPServer.integrationWorkspaceScopeMiddleware.func7
+         0     0% 99.33%      0.50s  3.06%  github.com/kandev/kandev/internal/backendapp.buildHTTPServer.requiredPersistenceMiddleware.func5
+         0     0% 99.33%      0.49s  3.00%  github.com/kandev/kandev/internal/backendapp.newWebAppHandler.webAppHandlerOptions.func1
+         0     0% 99.33%      0.50s  3.06%  github.com/kandev/kandev/internal/backendapp.registerRoutes.func4
+         0     0% 99.33%      0.50s  3.06%  github.com/kandev/kandev/internal/common/httpmw.OtelTracing.func1
+         0     0% 99.33%      0.44s  2.69%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).QuerySidebarTaskPage
+         0     0% 99.33%      0.44s  2.69%  github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).readSidebarTaskPage
+         0     0% 99.33%      0.44s  2.69%  github.com/kandev/kandev/internal/task/service.(*Service).QuerySidebarTaskPage
+         0     0% 99.33%      0.50s  3.06%  github.com/kandev/kandev/internal/webapp.(*Handler).ServeHTTP
+         0     0% 99.33%      0.44s  2.69%  github.com/mattn/go-sqlite3.(*SQLiteConn).QueryContext
+         0     0% 99.33%      0.44s  2.69%  github.com/mattn/go-sqlite3.(*SQLiteConn).prepare
+         0     0% 99.33%      0.44s  2.69%  github.com/mattn/go-sqlite3.(*SQLiteConn).prepare.func2 (inline)
+         0     0% 99.33%      0.44s  2.69%  github.com/mattn/go-sqlite3.(*SQLiteConn).query
+         0     0% 99.33%     15.71s 96.09%  github.com/mattn/go-sqlite3.(*SQLiteRows).Next.func1
+         0     0% 99.33%     15.71s 96.09%  github.com/mattn/go-sqlite3.(*SQLiteRows).nextSyncLocked
+         0     0% 99.33%     15.71s 96.09%  github.com/mattn/go-sqlite3.(*SQLiteRows).nextSyncLocked.func1 (inline)
+         0     0% 99.33%      0.09s  0.55%  github.com/mattn/go-sqlite3.(*SQLiteStmt).exec.func1
+         0     0% 99.33%      0.09s  0.55%  github.com/mattn/go-sqlite3.(*SQLiteStmt).execSync
+         0     0% 99.33%      0.09s  0.55%  github.com/mattn/go-sqlite3.(*SQLiteStmt).execSync.func3 (inline)
+         0     0% 99.33%      0.44s  2.69%  github.com/mattn/go-sqlite3._Cfunc__sqlite3_prepare_v2_internal
+         0     0% 99.33%     15.71s 96.09%  github.com/mattn/go-sqlite3._Cfunc__sqlite3_step_internal
+         0     0% 99.33%      0.09s  0.55%  github.com/mattn/go-sqlite3._Cfunc__sqlite3_step_row_internal
+         0     0% 99.33%      0.50s  3.06%  net/http.(*conn).serve
+         0     0% 99.33%      0.50s  3.06%  net/http.serverHandler.ServeHTTP

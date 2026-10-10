@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useRef } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { Repository } from "@/lib/types/http";
-import { listRepositories } from "@/lib/api";
+import { readJourneyRepositories } from "@/hooks/journey-metadata-resources";
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
 
 const EMPTY_REPOSITORIES: Repository[] = [];
-const REPOSITORY_LIST_RETRY_DELAYS_MS = [100, 250, 500, 1_000] as const;
-const activeRepositoryRequests = new Map<string, number>();
+const repositoryRequestsByStore = new WeakMap<StoreApi<AppState>, Map<string, number>>();
 
 function beginRepositoryRequest(
+  store: StoreApi<AppState>,
   workspaceId: string,
   setRepositoriesLoading: (workspaceId: string, loading: boolean) => void,
 ): () => void {
+  const activeRepositoryRequests =
+    repositoryRequestsByStore.get(store) ?? new Map<string, number>();
+  repositoryRequestsByStore.set(store, activeRepositoryRequests);
   activeRepositoryRequests.set(workspaceId, (activeRepositoryRequests.get(workspaceId) ?? 0) + 1);
   setRepositoriesLoading(workspaceId, true);
   let released = false;
@@ -28,17 +33,6 @@ function beginRepositoryRequest(
   };
 }
 
-async function listRepositoriesUntilSettled(workspaceId: string) {
-  for (const retryDelayMs of REPOSITORY_LIST_RETRY_DELAYS_MS) {
-    try {
-      return await listRepositories(workspaceId, undefined, { cache: "no-store" });
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
-    }
-  }
-  return listRepositories(workspaceId, undefined, { cache: "no-store" });
-}
-
 /**
  * Loads a workspace's repositories from the store, fetching once when not yet
  * loaded. Pass `forceRefresh` to instead pull a fresh list once per workspace on
@@ -48,6 +42,7 @@ async function listRepositoriesUntilSettled(workspaceId: string) {
  * retry on the next mount.
  */
 export function useRepositories(workspaceId: string | null, enabled = true, forceRefresh = false) {
+  const store = useAppStoreApi();
   const repositories = useAppStore((state) =>
     workspaceId
       ? (state.repositories.itemsByWorkspaceId[workspaceId] ?? EMPTY_REPOSITORIES)
@@ -61,24 +56,20 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
   );
   const setRepositories = useAppStore((state) => state.setRepositories);
   const setRepositoriesLoading = useAppStore((state) => state.setRepositoriesLoading);
-  // No in-flight ref: the effect deps (enabled/forceRefresh/workspaceId + stable
-  // store actions) don't change mid-fetch, so the effect can't re-run and start
-  // a duplicate fetch for the same workspace; `cancelled` discards stale results
-  // on workspace switch, and forcedRef/isLoaded gate re-fetches after success.
   const forcedRef = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!enabled || !workspaceId) return;
-    const releaseRequest = beginRepositoryRequest(workspaceId, setRepositoriesLoading);
+    const releaseRequest = beginRepositoryRequest(store, workspaceId, setRepositoriesLoading);
     try {
-      const response = await listRepositoriesUntilSettled(workspaceId);
+      const response = await readJourneyRepositories(store, workspaceId);
       setRepositories(workspaceId, response.repositories);
     } catch {
       // Keep the existing cached repositories when a manual refresh fails.
     } finally {
       releaseRequest();
     }
-  }, [enabled, setRepositories, setRepositoriesLoading, workspaceId]);
+  }, [enabled, setRepositories, setRepositoriesLoading, store, workspaceId]);
 
   // Force-refresh: pull a fresh list once per workspace, bypassing the
   // isLoaded cache. forcedRef is set only on success so a failed fetch retries.
@@ -86,8 +77,9 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
     if (!enabled || !workspaceId || !forceRefresh) return;
     if (forcedRef.current === workspaceId) return;
     let cancelled = false;
-    const releaseRequest = beginRepositoryRequest(workspaceId, setRepositoriesLoading);
-    listRepositoriesUntilSettled(workspaceId)
+    const controller = new AbortController();
+    const releaseRequest = beginRepositoryRequest(store, workspaceId, setRepositoriesLoading);
+    readJourneyRepositories(store, workspaceId, { signal: controller.signal })
       .then((response) => {
         if (cancelled) return;
         forcedRef.current = workspaceId;
@@ -99,16 +91,18 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
       .finally(releaseRequest);
     return () => {
       cancelled = true;
+      controller.abort();
       releaseRequest();
     };
-  }, [enabled, forceRefresh, workspaceId, setRepositories, setRepositoriesLoading]);
+  }, [enabled, forceRefresh, workspaceId, setRepositories, setRepositoriesLoading, store]);
 
   useEffect(() => {
     if (!enabled || !workspaceId || forceRefresh) return;
     if (isLoaded) return;
     let cancelled = false;
-    const releaseRequest = beginRepositoryRequest(workspaceId, setRepositoriesLoading);
-    listRepositoriesUntilSettled(workspaceId)
+    const controller = new AbortController();
+    const releaseRequest = beginRepositoryRequest(store, workspaceId, setRepositoriesLoading);
+    readJourneyRepositories(store, workspaceId, { signal: controller.signal })
       .then((response) => {
         if (cancelled) return;
         setRepositories(workspaceId, response.repositories);
@@ -120,9 +114,18 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
       .finally(releaseRequest);
     return () => {
       cancelled = true;
+      controller.abort();
       releaseRequest();
     };
-  }, [enabled, forceRefresh, isLoaded, setRepositories, setRepositoriesLoading, workspaceId]);
+  }, [
+    enabled,
+    forceRefresh,
+    isLoaded,
+    setRepositories,
+    setRepositoriesLoading,
+    store,
+    workspaceId,
+  ]);
 
   return { repositories, isLoading, refresh };
 }

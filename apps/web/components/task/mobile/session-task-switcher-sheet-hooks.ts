@@ -198,6 +198,7 @@ export function useSheetData(workspaceId: string | null) {
   );
 
   return {
+    allTasks,
     activeTaskId,
     selectedTaskId,
     workspaces,
@@ -629,8 +630,8 @@ function useSheetDeleteActions(
  * Re-parent via drag: runs the same composite nest operation the context menu
  * uses, resolving the workflow from the snapshot keys.
  */
-function useSheetNestTask() {
-  return useNestTaskByDrag();
+function useSheetNestTask(pageTasks: readonly TaskSwitcherItem[]) {
+  return useNestTaskByDrag(pageTasks);
 }
 
 export function useSheetArchiveActions(
@@ -702,6 +703,7 @@ export function useSheetActions(
   onOpenChange: (open: boolean) => void,
   selection: TaskSheetSelectionController,
   navigate?: (taskId: string, sessionId?: string) => void,
+  pageTasks: readonly TaskSwitcherItem[] = [],
 ) {
   const router = useRouter();
   const navigateTask = useCallback(
@@ -725,8 +727,8 @@ export function useSheetActions(
     notifySuccess,
   });
   const deleteActions = useSheetDeleteActions(store, runTaskRemoval);
-  const detachActions = useTaskDetachDialog(store);
-  const handleNestTask = useSheetNestTask();
+  const detachActions = useTaskDetachDialog(store, pageTasks);
+  const handleNestTask = useSheetNestTask(pageTasks);
   const handleSelectTask = useCallback(
     (taskId: string) => {
       const state = store.getState();

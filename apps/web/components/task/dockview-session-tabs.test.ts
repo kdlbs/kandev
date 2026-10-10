@@ -508,6 +508,18 @@ describe("resolveSessionTabSyncTarget", () => {
     expect(target).toEqual({ taskId: "task-A", sessionId: "s-pending-hydration" });
   });
 
+  it("accepts a compact task-session member before its environment mapping is available", () => {
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:s-compact",
+      activeTaskId: "task-A",
+      activeSessionId: "s-current",
+      taskSessionsById: { "s-compact": makeSession("s-compact", "task-A") },
+      environmentIdBySessionId: {},
+    });
+
+    expect(target).toEqual({ taskId: "task-A", sessionId: "s-compact" });
+  });
+
   /**
    * Regression for a one-frame UI glitch: `removeTaskSession` clears
    * `taskSessions.items[sid]` and `environmentIdBySessionId[sid]` atomically.

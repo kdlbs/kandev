@@ -149,20 +149,18 @@ test.describe("inactive session transcript reconciliation", () => {
       content: RECENT_RECEIVER_MARKER,
       authorType: "agent",
     });
-    await testPage.waitForFunction(
-      ({ sid, marker }) => {
-        const store = (window as E2EMessageStoreWindow).__KANDEV_E2E_STORE__;
-        return store
-          ?.getState()
-          .messages.bySession[sid]?.some((message) => message.content === marker);
-      },
-      { sid: receiverId, marker: RECENT_RECEIVER_MARKER },
-      {
-        message:
-          "RECENT_RECEIVER_MARKER should arrive in the inactive receiver cache via live delivery",
-      },
-    );
+    const persistedRecent = await apiClient.listSessionMessages(receiverId);
+    expect(
+      persistedRecent.messages.some((message) => message.content === RECENT_RECEIVER_MARKER),
+    ).toBe(true);
+    expect(
+      (await snapshotCachedMessages(testPage, receiverId)).some(
+        (message) => message.content === RECENT_RECEIVER_MARKER,
+      ),
+    ).toBe(false);
     await restoreCachedMessages(testPage, receiverId, staleReceiverCache);
+    await session.sessionTabBySessionId(receiverId).click();
+    await waitForStableActiveSession(testPage, receiverId);
     await testPage.evaluate(() => window.dispatchEvent(new Event("focus")));
     await testPage.waitForFunction(
       ({ sid, marker }) => {
@@ -182,8 +180,6 @@ test.describe("inactive session transcript reconciliation", () => {
       persisted.messages.slice(-100).some((message) => message.content === PEER_PROMPT_MARKER),
     ).toBe(false);
 
-    await session.sessionTabBySessionId(receiverId).click();
-    await waitForStableActiveSession(testPage, receiverId);
     await session.waitForLoad();
     const chat = session.activeChat();
     const list = chat.locator(".chat-message-list");

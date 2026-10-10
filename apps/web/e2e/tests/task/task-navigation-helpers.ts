@@ -218,7 +218,7 @@ export async function assertProgressiveNavigation(
   await expect(status).toHaveCount(0);
   const taskBRequestOffset = gate.requests.length;
   await selectNavigationTask(page, b.title, mobile);
-  await expect(page).toHaveURL(new RegExp(`/t/${b.id}$`));
+  await expect(page).toHaveURL(new RegExp(`/t/${b.id}(?:\\?sessionId=[^&]+)?$`));
   await session.waitForChatIdle();
   await waitForSessionGitHydration(page, b.session_id!);
   await showNavigationFiles(page, mobile);

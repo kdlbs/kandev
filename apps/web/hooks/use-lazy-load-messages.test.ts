@@ -5,6 +5,7 @@ const listTaskSessionMessages = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api", () => ({ listTaskSessionMessages }));
 
 const storeMock = vi.hoisted(() => ({
+  turns: { activeBySession: {}, reconcileEpochBySession: {}, bySession: {} },
   meta: {
     hasMore: true,
     oldestCursor: "m3" as string | null,
@@ -35,6 +36,7 @@ vi.mock("@/components/state-provider", () => ({
         bySession: { s1: storeMock.bySession },
         metaBySession: { s1: storeMock.meta },
       },
+      turns: storeMock.turns,
       setMessagesMetadata: storeMock.setMessagesMetadata,
       prependMessages: (_sessionId: string, messages: Array<{ id: string }>, _meta: unknown) => {
         storeMock.prepended = [...messages, ...storeMock.prepended];
@@ -156,6 +158,7 @@ describe("useLazyLoadMessages loadMore", () => {
       limit: 20,
       before: "m3",
       sort: "desc",
+      include_turns: true,
     });
     expect(storeMock.prepended.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
   });

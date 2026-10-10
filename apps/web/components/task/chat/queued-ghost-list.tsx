@@ -62,6 +62,7 @@ function headPreviewText(entries: QueuedMessage[]): string {
 
 type QueueAffordanceProps = {
   sessionId: string | null;
+  detailActive?: boolean;
   children: ReactNode;
   /**
    * Optional render slot for placing the chip inside an external row (e.g. the
@@ -357,7 +358,12 @@ function QueuePanelDisclosure({
  *   auto-collapse.
  */
 // eslint-disable-next-line max-lines-per-function -- coordinates the queue panel's responsive controls and mutations.
-export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueAffordanceProps) {
+export function QueueAffordance({
+  sessionId,
+  detailActive = true,
+  children,
+  renderStatusBar,
+}: QueueAffordanceProps) {
   const {
     entries,
     count,
@@ -377,7 +383,7 @@ export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueA
     reorderEntries,
     sendEntryNow,
     cancellationPending,
-  } = useQueue(sessionId);
+  } = useQueue(sessionId, { detailActive });
   const { editingEntryId, editLease, beginEdit, completeEdit } = useQueueEditProtection({
     sessionId,
     entries,

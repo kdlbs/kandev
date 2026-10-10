@@ -87,7 +87,7 @@ function SendSubmitButton({
     <KeyboardShortcutTooltip
       shortcut={submitShortcut}
       description={tooltipDescription}
-      enabled={!isDisabled || !!tooltipDescription}
+      enabled={presentation !== "mobile" && (!isDisabled || !!tooltipDescription)}
     >
       <span
         className="relative inline-flex"

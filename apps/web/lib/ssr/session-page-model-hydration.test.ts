@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   fetchTaskSession: vi.fn(),
   fetchUserSettings: vi.fn(),
   fetchWorkflowSnapshot: vi.fn(),
+  listWorkflowSteps: vi.fn().mockResolvedValue({ steps: [] }),
   listAgents: vi.fn(),
   listAvailableAgents: vi.fn(),
   listExecutors: vi.fn(),
@@ -19,11 +20,14 @@ const mocks = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
 }));
 
+vi.mock("@/lib/api/domains/workflow-api", () => ({ listWorkflowSteps: mocks.listWorkflowSteps }));
+
 vi.mock("@/lib/api", () => ({
   fetchTask: mocks.fetchTask,
   fetchTaskSession: mocks.fetchTaskSession,
   fetchUserSettings: mocks.fetchUserSettings,
   fetchWorkflowSnapshot: mocks.fetchWorkflowSnapshot,
+  listWorkflowSteps: mocks.listWorkflowSteps,
   listAgents: mocks.listAgents,
   listAvailableAgents: mocks.listAvailableAgents,
   listExecutors: mocks.listExecutors,

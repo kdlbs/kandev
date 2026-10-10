@@ -1,0 +1,577 @@
+{
+  "route_measurements": {
+    "baseline": {
+      "source": "runs/01-gate-baseline.log",
+      "samples": [
+        {
+          "workload": "idle",
+          "elapsed_ms": 4.863,
+          "payload_bytes": 261406
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 5.245,
+          "payload_bytes": 261158
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 7.39,
+          "payload_bytes": 261174
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 4.988,
+          "payload_bytes": 261390
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 4.907,
+          "payload_bytes": 261412
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 6.105,
+          "payload_bytes": 261412
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 5.378,
+          "payload_bytes": 261396
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 4.052,
+          "payload_bytes": 261186
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 4.244,
+          "payload_bytes": 261430
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 6.1,
+          "payload_bytes": 261206
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 914.21,
+          "payload_bytes": 9607
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1336.757,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 256.671,
+          "payload_bytes": 9607
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 802.706,
+          "payload_bytes": 9605
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1251.921,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 153.085,
+          "payload_bytes": 9607
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 538.685,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 2898.051,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 710.106,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1110.885,
+          "payload_bytes": 9605
+        }
+      ],
+      "summary": {
+        "idle": {
+          "n": 10,
+          "p50_ms": 5.1165,
+          "p95_nearest_rank_ms": 7.39,
+          "median_payload_bytes": 261393.0
+        },
+        "large_message_write": {
+          "n": 10,
+          "p50_ms": 858.4580000000001,
+          "p95_nearest_rank_ms": 2898.051,
+          "median_payload_bytes": 9608.0
+        }
+      }
+    },
+    "gate_read_candidate": {
+      "source": "runs/02-gate-candidate.log",
+      "samples": [
+        {
+          "workload": "idle",
+          "elapsed_ms": 20.371,
+          "payload_bytes": 261422
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 9.93,
+          "payload_bytes": 261418
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 7.107,
+          "payload_bytes": 261384
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 8.114,
+          "payload_bytes": 261386
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 10.303,
+          "payload_bytes": 260998
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 4.797,
+          "payload_bytes": 261410
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 7.086,
+          "payload_bytes": 261422
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 9.023,
+          "payload_bytes": 261394
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 7.431,
+          "payload_bytes": 261402
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 6.071,
+          "payload_bytes": 261418
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.469,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.335,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.314,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.218,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.578,
+          "payload_bytes": 9601
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.495,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.121,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.634,
+          "payload_bytes": 9607
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.543,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.987,
+          "payload_bytes": 9609
+        }
+      ],
+      "summary": {
+        "idle": {
+          "n": 10,
+          "p50_ms": 7.772500000000001,
+          "p95_nearest_rank_ms": 20.371,
+          "median_payload_bytes": 261406.0
+        },
+        "large_message_write": {
+          "n": 10,
+          "p50_ms": 1.4820000000000002,
+          "p95_nearest_rank_ms": 1.987,
+          "median_payload_bytes": 9609.0
+        }
+      }
+    },
+    "integrated": {
+      "source": "runs/08-integrated-route.log",
+      "samples": [
+        {
+          "workload": "idle",
+          "elapsed_ms": 2.958,
+          "payload_bytes": 261406
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 4.873,
+          "payload_bytes": 261198
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 3.715,
+          "payload_bytes": 261406
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 3.811,
+          "payload_bytes": 261402
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 5.276,
+          "payload_bytes": 261386
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 4.104,
+          "payload_bytes": 261394
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 3.425,
+          "payload_bytes": 261422
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 4.025,
+          "payload_bytes": 261422
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 3.27,
+          "payload_bytes": 261406
+        },
+        {
+          "workload": "idle",
+          "elapsed_ms": 2.936,
+          "payload_bytes": 261412
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.49,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 0.951,
+          "payload_bytes": 9607
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.072,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.866,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.438,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.579,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.084,
+          "payload_bytes": 9607
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 1.481,
+          "payload_bytes": 9609
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 0.931,
+          "payload_bytes": 9601
+        },
+        {
+          "workload": "large_message_write",
+          "elapsed_ms": 3.244,
+          "payload_bytes": 9609
+        }
+      ],
+      "summary": {
+        "idle": {
+          "n": 10,
+          "p50_ms": 3.763,
+          "p95_nearest_rank_ms": 5.276,
+          "median_payload_bytes": 261406.0
+        },
+        "large_message_write": {
+          "n": 10,
+          "p50_ms": 1.4595,
+          "p95_nearest_rank_ms": 3.244,
+          "median_payload_bytes": 9609.0
+        }
+      }
+    }
+  },
+  "limits": "Synthetic shared-host measurements. Health probe fixture checks two required tables with the real probe implementation. Route benchmark uses the Task 01 HTTP fixture; health benchmark runs concurrent route reads, without HTTP admission middleware.",
+  "health_measurements": {
+    "source": "runs/08-health-final-samples.log",
+    "samples": [
+      {
+        "iteration": 0,
+        "workload": "idle",
+        "probe_ms": 2.42,
+        "probe_failed": false,
+        "route_ms": 2.294,
+        "writer_waits": 0,
+        "writer_wait_ms": 0.0,
+        "error": null
+      },
+      {
+        "iteration": 1,
+        "workload": "idle",
+        "probe_ms": 0.088,
+        "probe_failed": false,
+        "route_ms": 1.574,
+        "writer_waits": 0,
+        "writer_wait_ms": 0.0,
+        "error": null
+      },
+      {
+        "iteration": 2,
+        "workload": "idle",
+        "probe_ms": 0.312,
+        "probe_failed": false,
+        "route_ms": 1.346,
+        "writer_waits": 0,
+        "writer_wait_ms": 0.0,
+        "error": null
+      },
+      {
+        "iteration": 3,
+        "workload": "idle",
+        "probe_ms": 0.134,
+        "probe_failed": false,
+        "route_ms": 1.121,
+        "writer_waits": 0,
+        "writer_wait_ms": 0.0,
+        "error": null
+      },
+      {
+        "iteration": 4,
+        "workload": "idle",
+        "probe_ms": 0.123,
+        "probe_failed": false,
+        "route_ms": 1.087,
+        "writer_waits": 0,
+        "writer_wait_ms": 0.0,
+        "error": null
+      },
+      {
+        "iteration": 5,
+        "workload": "idle",
+        "probe_ms": 0.103,
+        "probe_failed": false,
+        "route_ms": 1.233,
+        "writer_waits": 0,
+        "writer_wait_ms": 0.0,
+        "error": null
+      },
+      {
+        "iteration": 6,
+        "workload": "idle",
+        "probe_ms": 0.201,
+        "probe_failed": false,
+        "route_ms": 1.238,
+        "writer_waits": 0,
+        "writer_wait_ms": 0.0,
+        "error": null
+      },
+      {
+        "iteration": 7,
+        "workload": "idle",
+        "probe_ms": 0.105,
+        "probe_failed": false,
+        "route_ms": 0.93,
+        "writer_waits": 0,
+        "writer_wait_ms": 0.0,
+        "error": null
+      },
+      {
+        "iteration": 8,
+        "workload": "idle",
+        "probe_ms": 0.114,
+        "probe_failed": false,
+        "route_ms": 1.015,
+        "writer_waits": 0,
+        "writer_wait_ms": 0.0,
+        "error": null
+      },
+      {
+        "iteration": 9,
+        "workload": "idle",
+        "probe_ms": 0.11,
+        "probe_failed": false,
+        "route_ms": 0.977,
+        "writer_waits": 0,
+        "writer_wait_ms": 0.0,
+        "error": null
+      },
+      {
+        "iteration": 0,
+        "workload": "large_message_write",
+        "probe_ms": 2000.174,
+        "probe_failed": true,
+        "route_ms": 1.571,
+        "writer_waits": 16,
+        "writer_wait_ms": 18947.949,
+        "error": "journey: writer ping failed: context deadline exceeded"
+      },
+      {
+        "iteration": 1,
+        "workload": "large_message_write",
+        "probe_ms": 881.681,
+        "probe_failed": false,
+        "route_ms": 1.62,
+        "writer_waits": 11,
+        "writer_wait_ms": 6936.033,
+        "error": null
+      },
+      {
+        "iteration": 2,
+        "workload": "large_message_write",
+        "probe_ms": 2000.129,
+        "probe_failed": true,
+        "route_ms": 1.175,
+        "writer_waits": 15,
+        "writer_wait_ms": 16414.008,
+        "error": "journey: writer ping failed: context deadline exceeded"
+      },
+      {
+        "iteration": 3,
+        "workload": "large_message_write",
+        "probe_ms": 2003.143,
+        "probe_failed": true,
+        "route_ms": 1.434,
+        "writer_waits": 15,
+        "writer_wait_ms": 12772.018,
+        "error": "journey: table probe failed: context deadline exceeded"
+      },
+      {
+        "iteration": 4,
+        "workload": "large_message_write",
+        "probe_ms": 1999.658,
+        "probe_failed": true,
+        "route_ms": 1.09,
+        "writer_waits": 18,
+        "writer_wait_ms": 20252.98,
+        "error": "journey: table probe failed: context deadline exceeded"
+      },
+      {
+        "iteration": 5,
+        "workload": "large_message_write",
+        "probe_ms": 1731.438,
+        "probe_failed": false,
+        "route_ms": 3.689,
+        "writer_waits": 13,
+        "writer_wait_ms": 12456.198,
+        "error": null
+      },
+      {
+        "iteration": 6,
+        "workload": "large_message_write",
+        "probe_ms": 2000.392,
+        "probe_failed": true,
+        "route_ms": 1.202,
+        "writer_waits": 15,
+        "writer_wait_ms": 15451.396,
+        "error": "journey: writer ping failed: context deadline exceeded"
+      },
+      {
+        "iteration": 7,
+        "workload": "large_message_write",
+        "probe_ms": 2000.237,
+        "probe_failed": true,
+        "route_ms": 1.417,
+        "writer_waits": 15,
+        "writer_wait_ms": 11876.823,
+        "error": "journey: table probe failed: context deadline exceeded"
+      },
+      {
+        "iteration": 8,
+        "workload": "large_message_write",
+        "probe_ms": 2000.975,
+        "probe_failed": true,
+        "route_ms": 1.495,
+        "writer_waits": 13,
+        "writer_wait_ms": 15148.503,
+        "error": "journey: writer ping failed: context deadline exceeded"
+      },
+      {
+        "iteration": 9,
+        "workload": "large_message_write",
+        "probe_ms": 2000.849,
+        "probe_failed": true,
+        "route_ms": 1.409,
+        "writer_waits": 17,
+        "writer_wait_ms": 19030.173,
+        "error": "journey: table probe failed: context deadline exceeded"
+      }
+    ],
+    "summary": {
+      "idle": {
+        "n": 10,
+        "failures": 0
+      },
+      "large_message_write": {
+        "n": 10,
+        "failures": 8
+      }
+    }
+  }
+}

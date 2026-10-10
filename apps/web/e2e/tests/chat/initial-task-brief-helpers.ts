@@ -61,7 +61,7 @@ type PreparedSessionSnapshot = {
 };
 
 function preparedSessionSnapshot(
-  session: Awaited<ReturnType<ApiClient["listTaskSessions"]>>["sessions"][number] | undefined,
+  session: Awaited<ReturnType<ApiClient["getTaskSession"]>>["session"] | undefined,
 ): PreparedSessionSnapshot {
   const preparation = session?.metadata?.prepare_result;
   const preparationStatus =
@@ -92,8 +92,8 @@ async function waitForPreparedSession(
   await expect
     .poll(
       async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        return preparedSessionSnapshot(sessions.find((candidate) => candidate.id === sessionId));
+        const { session } = await apiClient.getTaskSession(sessionId);
+        return preparedSessionSnapshot(session);
       },
       { timeout: 90_000, message },
     )
@@ -222,6 +222,20 @@ async function assertInitialTaskBriefChatFlow({
   const renderedFirstPrompt = (await firstBubble.innerText()).replace(/\s+/g, " ").trim();
   expect(renderedFirstPrompt.split(INITIAL_TASK_BRIEF)).toHaveLength(2);
   expect(renderedFirstPrompt.split(INITIAL_TASK_INSTRUCTION)).toHaveLength(2);
+
+  await expect
+    .poll(
+      async () => {
+        const [{ messages }, { turns }] = await Promise.all([
+          apiClient.listSessionMessages(sessionId),
+          apiClient.listSessionTurns(sessionId),
+        ]);
+        const turnId = messages.find((message) => message.id === firstStoredMessage?.id)?.turn_id;
+        return turnId ? turns.find((turn) => turn.id === turnId)?.completed_at : null;
+      },
+      { timeout: 60_000, message: "Waiting for the first prompt's own turn to complete" },
+    )
+    .toBeTruthy();
 
   await testPage.reload();
   await session.waitForLoad();

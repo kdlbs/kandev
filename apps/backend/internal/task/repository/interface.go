@@ -293,6 +293,16 @@ type TaskCompletionGateRepository interface {
 	ListTaskCompletionGateHistory(ctx context.Context, taskID string) ([]*models.TaskCompletionGateHistory, error)
 }
 
+// TaskCompletionGateSummaryReader batches compact gate observations for
+// navigation and status-summary repair. It does not return criterion text or
+// audit history.
+type TaskCompletionGateSummaryReader interface {
+	GetTaskCompletionGateSummaries(
+		ctx context.Context,
+		taskIDs []string,
+	) (models.TaskCompletionGateSummaryBatch, error)
+}
+
 // ExactTaskCompletionGateRepository atomically applies plugin completion
 // commands, claim fences, task resource versions, and replay receipts.
 type ExactTaskCompletionGateRepository interface {
@@ -475,6 +485,13 @@ type ConversationSourceRepository interface {
 	ReadConversationTurnsPage(context.Context, models.ConversationTurnPageRequest) (models.ConversationTurnPage, error)
 }
 
+// MessageTurnWindowReader reads a paginated transcript and its required turn
+// context from one reader snapshot. It is optional during repository migration
+// so older implementations can retain the message-only path.
+type MessageTurnWindowReader interface {
+	ReadMessageTurnWindow(context.Context, string, models.ListMessagesOptions) (models.MessageTurnWindow, error)
+}
+
 // ConversationMutationWriter returns a transient receipt from the same
 // transaction as a source mutation. It is optional during the migration so
 // existing repository fakes and exceptional bulk writers remain operational.
@@ -592,6 +609,20 @@ type TurnRepository interface {
 }
 
 // SessionRepository handles task session lifecycle and workflow-session relationships.
+// TaskSessionSummaryObservationReader reads compact session projections for
+// navigation. It remains optional so unrelated repositories and test doubles
+// can keep their full-session capabilities without widening their contracts.
+type TaskSessionSummaryObservationReader interface {
+	BatchGetTaskSessionSummaryObservations(
+		ctx context.Context,
+		taskIDs []string,
+	) (map[string][]*models.TaskSessionSummaryObservation, error)
+	ListTaskSessionSummaryObservations(
+		ctx context.Context,
+		taskID string,
+	) ([]*models.TaskSessionSummaryObservation, error)
+}
+
 type SessionRepository interface {
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)

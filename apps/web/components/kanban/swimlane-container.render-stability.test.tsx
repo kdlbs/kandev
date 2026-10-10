@@ -9,7 +9,7 @@ const renderCounts = vi.hoisted(() => ({
   stepLists: new Map<string, Array<{ steps: unknown; moveTargetSteps: unknown }>>(),
 }));
 const stableCallbacks = vi.hoisted(() => ({
-  isCollapsed: () => false,
+  isCollapsed: vi.fn(() => false),
   toggleCollapse: vi.fn(),
   onToggleStepVisibility: vi.fn(),
   onToggleAutoHideEmpty: vi.fn(),
@@ -102,6 +102,7 @@ function StoreCapture({ holder }: { holder: { current: StoreApi<AppState> | null
 function renderSwimlanes(
   holder: { current: StoreApi<AppState> | null },
   matchesPluginTaskFilters?: (taskId: string) => boolean,
+  onSnapshotDemandChange?: (workflowIds: string[]) => void,
 ) {
   return render(
     <StateProvider
@@ -134,6 +135,7 @@ function renderSwimlanes(
     >
       <StoreCapture holder={holder} />
       <SwimlaneContainer
+        onSnapshotDemandChange={onSnapshotDemandChange}
         viewMode="graph2"
         workflowFilter={null}
         onPreviewTask={vi.fn()}
@@ -151,6 +153,7 @@ beforeEach(() => {
   renderCounts.lanes.clear();
   renderCounts.cards.clear();
   renderCounts.stepLists.clear();
+  stableCallbacks.isCollapsed.mockReset().mockReturnValue(false);
   responsive.isMobile = false;
   responsive.isTablet = false;
 });
@@ -268,5 +271,15 @@ describe("SwimlaneContainer render isolation", () => {
       ([taskId]) => taskId === "task-b",
     ).length;
     expect(callsAfterRestore - callsBeforeRemoval).toBe(4);
+  });
+});
+
+describe("visible phone board demand", () => {
+  it("keeps focused phone demand when desktop lanes were collapsed", () => {
+    responsive.isMobile = true;
+    stableCallbacks.isCollapsed.mockReturnValue(true);
+    const onDemandChange = vi.fn();
+    renderSwimlanes({ current: null }, undefined, onDemandChange);
+    expect(onDemandChange).toHaveBeenLastCalledWith([WORKFLOW_A]);
   });
 });

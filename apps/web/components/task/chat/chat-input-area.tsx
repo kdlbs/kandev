@@ -34,11 +34,7 @@ import { useComposerWorkspace } from "@/hooks/domains/task/use-composer-workspac
 import { t } from "@/lib/i18n";
 import { ChatStatusBar, ComposerCIStatus, resolveStatusRowTaskId } from "./chat-status-bar";
 import { DynamicRouteRecovery } from "./dynamic-route-recovery";
-import {
-  hasPendingClarification,
-  shouldHideChatInputForLaunchError,
-  shouldRenderStoppedSessionBanner,
-} from "./types";
+import { shouldHideChatInputForLaunchError, shouldRenderStoppedSessionBanner } from "./types";
 import { toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
 import { toTaskPreviewFeedbackRefs } from "@/lib/preview-feedback-refs";
 import { PlanCommentMigrationNotice } from "@/components/task/plan-comment-migration-notice";
@@ -560,7 +556,7 @@ function ComposerStatusNotices({
         show={showAgentStartHint}
         needsRecovery={panelState.needsRecovery}
         executorUnavailable={executorUnavailable}
-        hasPendingClarification={Boolean(panelState.pendingClarification)}
+        hasPendingClarification={panelState.hasPendingClarification}
       />
       <PlanCommentMigrationNotice {...panelState.planCommentMigration} />
     </>
@@ -591,17 +587,11 @@ export function ChatInputArea(props: ChatInputAreaProps) {
   const { resolvedSessionId, taskId, isAgentBusy } = panelState;
   const disclosure = useComposerDisclosureContext();
   useComposerActivity({ required: Boolean(panelState.session?.pending_action) });
-  const statusRowTaskId = resolveStatusRowTaskId(taskId, statusTaskId);
   const composerWorkspace = useComposerWorkspace(resolvedSessionId, taskId);
-  const sessionState = panelState.session?.state ?? null;
   const { planActions, executor, placeholder } = useChatInputDerived(
     panelState,
     chatInputRef,
     placeholderOverride,
-  );
-  const clarificationPending = hasPendingClarification(
-    Boolean(panelState.pendingClarification),
-    panelState.session?.pending_action,
   );
   const { implementPlanHandler, proceedStepName, proceed, isMoving } = planActions;
   const composerProps = useComposerProps({
@@ -625,7 +615,11 @@ export function ChatInputArea(props: ChatInputAreaProps) {
       )}
     >
       {disclosure?.enabled && (
-        <ComposerCIStatus taskId={statusRowTaskId} sessionId={resolvedSessionId} standalone />
+        <ComposerCIStatus
+          taskId={resolveStatusRowTaskId(taskId, statusTaskId)}
+          sessionId={resolvedSessionId}
+          standalone
+        />
       )}
       <ComposerDisclosureRegion className={disclosure?.enabled ? "px-2 pb-2 pt-1" : undefined}>
         <ComposerStatusNotices
@@ -635,17 +629,19 @@ export function ChatInputArea(props: ChatInputAreaProps) {
         />
         <QueueAffordance
           sessionId={resolvedSessionId}
+          detailActive={panelState.detailActive}
           renderStatusBar={(queueChip) => (
             <ChatStatusBar
               todoItems={panelState.todoItems}
-              taskId={statusRowTaskId}
+              taskId={resolveStatusRowTaskId(taskId, statusTaskId)}
               sessionId={resolvedSessionId}
-              sessionState={sessionState}
+              detailActive={panelState.detailActive}
+              sessionState={panelState.session?.state ?? null}
               previewTarget={planActions.proceedPreviewTarget}
               nextStepName={proceedStepName}
               onProceed={proceed}
               isAgentBusy={isAgentBusy}
-              hasPendingClarification={clarificationPending}
+              hasPendingClarification={panelState.hasPendingClarification}
               isMoving={isMoving}
               queueChip={queueChip}
               showScrollToLastPrompt={showScrollToLastPrompt}

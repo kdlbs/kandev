@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 )
 
 // ErrInvalidMarkSessionRead marks a MarkSessionRead failure as caused by bad
@@ -238,6 +239,92 @@ func (s *Service) GetPendingActionsForSessions(ctx context.Context, sessionIDs [
 // from one round trip instead of three.
 func (s *Service) BatchGetSessionsForTasks(ctx context.Context, taskIDs []string) (map[string][]*models.TaskSession, error) {
 	return s.sessions.BatchGetSessionsByTaskIDs(ctx, taskIDs)
+}
+
+// BatchGetTaskSessionSummaryObservations loads the bounded session fields used
+// by task navigation. Repositories without the narrow capability retain the
+// existing full-model fallback.
+func (s *Service) BatchGetTaskSessionSummaryObservations(
+	ctx context.Context,
+	taskIDs []string,
+) (map[string][]*models.TaskSessionSummaryObservation, error) {
+	if reader, ok := s.sessions.(repository.TaskSessionSummaryObservationReader); ok {
+		return reader.BatchGetTaskSessionSummaryObservations(ctx, taskIDs)
+	}
+	full, err := s.sessions.BatchGetSessionsByTaskIDs(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string][]*models.TaskSessionSummaryObservation, len(full))
+	for taskID, sessions := range full {
+		observations := make([]*models.TaskSessionSummaryObservation, 0, len(sessions))
+		for _, session := range sessions {
+			observations = append(observations, taskSessionSummaryObservation(session))
+		}
+		result[taskID] = observations
+	}
+	return result, nil
+}
+
+// ListTaskSessionSummaryObservations returns the compact session rows used by
+// the task's session switcher and timeline header.
+func (s *Service) ListTaskSessionSummaryObservations(
+	ctx context.Context,
+	taskID string,
+) ([]*models.TaskSessionSummaryObservation, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, err
+	}
+	if reader, ok := s.sessions.(repository.TaskSessionSummaryObservationReader); ok {
+		return reader.ListTaskSessionSummaryObservations(ctx, taskID)
+	}
+	full, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*models.TaskSessionSummaryObservation, 0, len(full))
+	for _, session := range full {
+		result = append(result, taskSessionSummaryObservation(session))
+	}
+	return result, nil
+}
+
+func taskSessionSummaryObservation(session *models.TaskSession) *models.TaskSessionSummaryObservation {
+	if session == nil {
+		return nil
+	}
+	observation := &models.TaskSessionSummaryObservation{
+		ID: session.ID, TaskID: session.TaskID, QueueIncarnationID: session.QueueIncarnationID,
+		Name: session.Name, AgentExecutionID: session.AgentExecutionID, ContainerID: session.ContainerID,
+		AgentProfileID: session.AgentProfileID, ExecutionProfileID: session.ExecutionProfileID,
+		RouteGeneration: session.RouteGeneration, RouteState: session.RouteState, RouteReason: session.RouteReason,
+		ExecutorID: session.ExecutorID, ExecutorProfileID: session.ExecutorProfileID,
+		EnvironmentID: session.EnvironmentID, RepositoryID: session.RepositoryID,
+		BaseBranch: session.BaseBranch, BaseCommitSHA: session.BaseCommitSHA, WorkspacePath: session.WorkspacePath,
+		State: session.State, ErrorMessage: session.ErrorMessage,
+		StartedAt: session.StartedAt, CompletedAt: session.CompletedAt, UpdatedAt: session.UpdatedAt,
+		IsPrimary: session.IsPrimary, IsPassthrough: session.IsPassthrough, ReviewStatus: session.ReviewStatus,
+		TaskEnvironmentID: session.TaskEnvironmentID, LastReadMessageID: session.LastReadMessageID,
+		Worktrees: session.Worktrees,
+		Metadata:  map[string]interface{}{models.SessionMetaKeyLastAgentError: nil},
+	}
+	if raw, ok := session.Metadata[models.SessionMetaKeyLastAgentError]; ok {
+		observation.Metadata[models.SessionMetaKeyLastAgentError] = raw
+	}
+	if label := models.ProjectSessionModelLabel(session.Metadata); label != nil {
+		observation.Metadata[models.SessionMetaKeyACPModelState] = label
+	}
+	if session.AgentProfileSnapshot != nil {
+		observation.AgentProfileName, _ = session.AgentProfileSnapshot["name"].(string)
+	}
+	if session.ExecutorSnapshot != nil {
+		observation.ExecutorType, _ = session.ExecutorSnapshot["executor_type"].(string)
+		observation.ExecutorName, _ = session.ExecutorSnapshot["executor_name"].(string)
+	}
+	if session.RepositorySnapshot != nil {
+		observation.RepositoryPath, _ = session.RepositorySnapshot["path"].(string)
+	}
+	return observation
 }
 
 // SetPrimarySession sets a session as the primary session for its task.

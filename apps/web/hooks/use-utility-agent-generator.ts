@@ -26,6 +26,7 @@ const UTILITY_AGENT_IDS: Record<GeneratorType, string> = {
 
 type UseUtilityAgentGeneratorOptions = {
   sessionId: string | null;
+  detailActive?: boolean;
   taskTitle?: string;
   taskDescription?: string;
 };
@@ -49,13 +50,14 @@ type GenerateOptions = {
 
 export function useUtilityAgentGenerator({
   sessionId,
+  detailActive = true,
   taskTitle,
   taskDescription,
 }: UseUtilityAgentGeneratorOptions) {
   const [generating, setGenerating] = useState<Set<GeneratorType>>(new Set());
   const { t } = useTranslation();
   const { toast } = useToast();
-  const gitStatus = useSessionGitStatus(sessionId);
+  const gitStatus = useSessionGitStatus(sessionId, { detailActive });
 
   const collectGitContext = useCallback(() => {
     const changedFiles = gitStatus?.files ? Object.keys(gitStatus.files) : [];

@@ -5,17 +5,14 @@ import (
 	"net/http"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
-	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/authn"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
-	"github.com/kandev/kandev/internal/task/statussummary"
 	userdto "github.com/kandev/kandev/internal/user/dto"
 	"github.com/kandev/kandev/internal/webapp"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 const (
@@ -23,6 +20,7 @@ const (
 	legacyOfficeWorkspaceCookie = "office-active-workspace"
 	bootStateKeySessionID       = "sessionId"
 	bootStateKeyWorkspaceID     = "workspaceId"
+	bootRepositoryGroup         = "repository"
 )
 
 // ssoProvidersForBoot lists the plugin-contributed external-login options for
@@ -135,7 +133,7 @@ func bootRouteData(
 	builder := bootStateBuilder{p: p}
 	switch route.Route {
 	case webapp.RouteTaskDetail:
-		return builder.taskDetailRouteData(ctx, route.Params["taskId"])
+		return builder.taskDetailRouteData(ctx, req, route.Params["taskId"], queryValue(req, "sessionId"))
 	case webapp.RouteTasks:
 		_, routeData := builder.tasksPageBootData(ctx, req)
 		if routeData == nil {
@@ -599,10 +597,13 @@ func (b bootStateBuilder) addKanbanSnapshotsState(
 	workflows []*taskmodels.Workflow,
 	activeWorkflowID string,
 ) {
+	if activeWorkflowID == "" {
+		activeWorkflowID = firstBootBoardWorkflowID(workflows, state)
+	}
 	snapshots := make(map[string]any, len(workflows))
 	var active map[string]any
 	for _, workflow := range workflows {
-		if workflow == nil {
+		if workflow == nil || activeWorkflowID == "" || workflow.ID != activeWorkflowID {
 			continue
 		}
 		snapshot, ok := b.workflowSnapshotState(ctx, workflow)
@@ -626,6 +627,47 @@ func (b bootStateBuilder) addKanbanSnapshotsState(
 			"isLoading":  false,
 		}
 	}
+}
+
+func firstBootBoardWorkflowID(workflows []*taskmodels.Workflow, state map[string]any) string {
+	demanded := bootBoardDemandIDs(state)
+	first := ""
+	for _, workflow := range workflows {
+		if workflow == nil || workflow.Hidden {
+			continue
+		}
+		if first == "" {
+			first = workflow.ID
+		}
+		if demanded == nil || demanded[workflow.ID] {
+			return workflow.ID
+		}
+	}
+	return first
+}
+
+func bootBoardDemandIDs(state map[string]any) map[string]bool {
+	workflowState, _ := state["workflows"].(map[string]any)
+	coverage, _ := workflowState["taskWorkflowCoverage"].(*taskmodels.TaskWorkflowCoverage)
+	if coverage == nil || !coverage.Complete {
+		return nil
+	}
+	demanded := make(map[string]bool, len(coverage.WorkflowIDs))
+	for _, id := range coverage.WorkflowIDs {
+		demanded[id] = true
+	}
+	settings, _ := state["userSettings"].(map[string]any)
+	hiddenSteps, _ := settings["hiddenWorkflowStepIds"].(map[string][]string)
+	for id, steps := range hiddenSteps {
+		if len(steps) > 0 {
+			demanded[id] = true
+		}
+	}
+	autoHideIDs, _ := settings["workflowIdsWithAutoHideEmptySteps"].([]string)
+	for _, id := range autoHideIDs {
+		demanded[id] = true
+	}
+	return demanded
 }
 
 func (b bootStateBuilder) workflowSnapshotState(ctx context.Context, workflow *taskmodels.Workflow) (map[string]any, bool) {
@@ -677,565 +719,25 @@ func (b bootStateBuilder) workflowStepStates(ctx context.Context, workflowID str
 	return result, nil
 }
 
-func (b bootStateBuilder) taskDetailRouteData(ctx context.Context, taskID string) map[string]any {
-	if b.p.taskSvc == nil || taskID == "" {
-		return nil
-	}
-	task, err := b.p.taskSvc.GetTask(ctx, taskID)
-	if err != nil {
-		b.logBootError("get task detail task", err)
-		return nil
-	}
-	sessions, err := b.p.taskSvc.ListTaskSessions(ctx, task.ID)
-	if err != nil {
-		b.logBootError("list task detail sessions", err)
-		sessions = nil
-	}
-	activeSessionID := resolveTaskDetailSessionID(task, sessions)
-	taskDTO := b.taskDTOWithSessionInfo(ctx, task)
-	initialState := b.taskDetailInitialState(ctx, task, taskDTO, sessions, activeSessionID)
-	return map[string]any{
-		"taskDetail": map[string]any{
-			"task":             taskDTO,
-			"sessionId":        nullString(activeSessionID),
-			"initialState":     initialState,
-			"initialTerminals": []any{},
-		},
-	}
-}
-
-func resolveTaskDetailSessionID(task *taskmodels.Task, sessions []*taskmodels.TaskSession) string {
-	if task != nil {
-		for _, session := range sessions {
-			if session != nil && session.IsPrimary {
-				return session.ID
-			}
-		}
-	}
-	for _, session := range sessions {
-		if session != nil && session.ID != "" {
-			return session.ID
-		}
-	}
-	return ""
-}
-
-func (b bootStateBuilder) taskDTOWithSessionInfo(ctx context.Context, task *taskmodels.Task) taskdto.TaskDTO {
-	if task == nil {
-		return taskdto.TaskDTO{}
-	}
-	dtos := b.taskDTOsWithSessionInfo(ctx, []*taskmodels.Task{task})
-	if len(dtos) == 0 {
-		return taskdto.FromTask(task)
-	}
-	return dtos[0]
-}
-
-func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*taskmodels.Task) []taskdto.TaskDTO {
-	if len(tasks) == 0 {
-		return []taskdto.TaskDTO{}
-	}
-	taskIDs := make([]string, 0, len(tasks))
-	for _, task := range tasks {
-		if task != nil {
-			taskIDs = append(taskIDs, task.ID)
-		}
-	}
-	statusSummaries, summaryErr := b.p.taskSvc.GetTaskStatusSummaries(ctx, taskIDs)
-	if summaryErr != nil {
-		b.logBootError("batch task status summaries", summaryErr)
-		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
-	}
-	sessionsByTask, err := b.p.taskSvc.BatchGetSessionsForTasks(ctx, taskIDs)
-	if err != nil {
-		b.logBootError("batch task detail sessions", err)
-		return taskDTOsWithStatusSummaries(tasks, statusSummaries)
-	}
-	primaryInfoByTask, err := b.p.taskSvc.GetPrimarySessionInfoForTasks(ctx, taskIDs)
-	if err != nil {
-		b.logBootError("get task detail primary session info", err)
-		return taskDTOsWithStatusSummaries(tasks, statusSummaries)
-	}
-	pendingActionsBySession, pendingErr := b.bootPendingActionsForInputCapableSessions(ctx, sessionsByTask)
-	if pendingErr != nil {
-		b.logBootError("get task detail pending actions", pendingErr)
-		pendingActionsBySession = map[string]taskmodels.TaskPendingAction{}
-	}
-	if summaryErr == nil && pendingErr == nil {
-		reconciledSummaries, reconcileErr := b.p.taskSvc.ReconcileTaskStatusSummaries(
-			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
-		)
-		statusSummaries = reconciledSummaries
-		if reconcileErr != nil {
-			b.logBootError("reconcile task status summaries", reconcileErr)
-		}
-	}
-	// Stamp the authoritative per-task queued prompt count onto every summary so
-	// the boot payload shows the sidebar badge on first paint, matching the
-	// shared list/snapshot assembly. Best-effort: a counter failure omits the
-	// badge instead of failing the boot payload.
-	queuedByTask, queuedErr := b.p.taskSvc.CountPendingQueuedByTaskIDs(ctx, taskIDs)
-	if queuedErr != nil {
-		b.logBootError("queued prompt counts", queuedErr)
-	}
-	// Dependency state is derived per read (never stored, so the auto-start gate
-	// can never read a stale value). One batched call for the whole boot payload.
-	dependencyViews := b.p.taskSvc.BuildDependencyViews(ctx, tasks)
-	// The boot payload is a board-snapshot projection path, so it must run the
-	// runner-mutability evaluation itself rather than rely on
-	// FromTaskWithSessionInfo's fail-closed default.
-	runnerViews := b.p.taskSvc.BuildRunnerMutabilityViews(ctx, tasks)
-	result := make([]taskdto.TaskDTO, 0, len(tasks))
-	for _, task := range tasks {
-		if task == nil {
-			continue
-		}
-		sessions := sessionsByTask[task.ID]
-		var primarySessionID *string
-		for _, session := range sessions {
-			if session != nil && session.IsPrimary {
-				id := session.ID
-				primarySessionID = &id
-				break
-			}
-		}
-		var sessionCount *int
-		if len(sessions) > 0 {
-			count := len(sessions)
-			sessionCount = &count
-		}
-		info := bootSessionInfo(primaryInfoByTask[task.ID])
-		dto := taskdto.FromTaskWithSessionInfo(
-			task,
-			primarySessionID,
-			sessionCount,
-			info.reviewStatus,
-			info.executorID,
-			info.executorProfileID,
-			info.executorType,
-			info.executorName,
-			info.agentName,
-			info.agentProfileID,
-			info.workingDirectory,
-			info.sessionState,
-			bootPendingActionPtr(info.sessionID, pendingActionsBySession),
-		)
-		dto.TaskPendingAction = bootTaskPendingActionPtr(sessions, pendingActionsBySession)
-		// Stamp the task-level MOST-ACTIVE-WINS activity aggregate so the board
-		// card and task list show the background-running affordance on first paint
-		// / in a second tab, without holding the task's full session set client-side
-		// No-op when no session is running.
-		if b.p.orchestratorSvc != nil {
-			taskdto.EnrichTaskForegroundActivity(&dto, sessions, b.p.orchestratorSvc)
-			taskdto.EnrichTaskParkedProjection(&dto, b.p.orchestratorSvc)
-		}
-		taskdto.EnrichTaskDependencies(&dto, bootDependencyProjection(dependencyViews[task.ID]), task)
-		taskdto.EnrichTaskRunnerMutability(&dto, bootRunnerMutabilityProjection(runnerViews[task.ID]))
-		taskdto.EnrichTaskStatusSummary(&dto, task.ID, statusSummaries)
-		if dto.StatusSummary != nil {
-			switch {
-			case queuedErr != nil:
-				// Counter failed: honor the documented no-badge fallback in the
-				// boot payload without persisting the cleared value.
-				dto.StatusSummary.QueuedPromptCount = 0
-			case queuedByTask != nil:
-				dto.StatusSummary.QueuedPromptCount = queuedByTask[task.ID]
-			}
-		}
-		result = append(result, dto)
-	}
-	return result
-}
-
-func taskDTOsWithStatusSummaries(tasks []*taskmodels.Task, summaries map[string]*statussummary.TaskStatusSummary) []taskdto.TaskDTO {
-	result := make([]taskdto.TaskDTO, 0, len(tasks))
-	for _, task := range tasks {
-		if task == nil {
-			continue
-		}
-		dto := taskdto.FromTask(task)
-		dto.StatusSummary = summaries[task.ID]
-		result = append(result, dto)
-	}
-	return result
-}
-
-func taskDTOs(tasks []*taskmodels.Task) []taskdto.TaskDTO {
-	result := make([]taskdto.TaskDTO, 0, len(tasks))
-	for _, task := range tasks {
-		if task != nil {
-			result = append(result, taskdto.FromTask(task))
-		}
-	}
-	return result
-}
-
-type bootSessionInfoFields struct {
-	sessionID         *string
-	reviewStatus      taskmodels.ReviewStatus
-	sessionState      *string
-	executorID        *string
-	executorProfileID *string
-	executorType      *string
-	executorName      *string
-	agentName         *string
-	agentProfileID    *string
-	workingDirectory  *string
-}
-
-func bootSessionInfo(session *taskmodels.TaskSession) bootSessionInfoFields {
-	var info bootSessionInfoFields
-	if session == nil {
-		return info
-	}
-	if session.ID != "" {
-		value := session.ID
-		info.sessionID = &value
-	}
-	info.reviewStatus = session.ReviewStatus
-	if session.State != "" {
-		value := string(session.State)
-		info.sessionState = &value
-	}
-	if session.ExecutorID != "" {
-		value := session.ExecutorID
-		info.executorID = &value
-	}
-	if session.ExecutorProfileID != "" {
-		value := session.ExecutorProfileID
-		info.executorProfileID = &value
-	}
-	if session.ExecutorSnapshot != nil {
-		if value, ok := session.ExecutorSnapshot["executor_type"].(string); ok && value != "" {
-			info.executorType = &value
-		}
-		if value, ok := session.ExecutorSnapshot["executor_name"].(string); ok && value != "" {
-			info.executorName = &value
-		}
-	}
-	if session.AgentProfileSnapshot != nil {
-		if value, ok := session.AgentProfileSnapshot["name"].(string); ok && value != "" {
-			info.agentName = &value
-		}
-	}
-	if session.AgentProfileID != "" {
-		value := session.AgentProfileID
-		info.agentProfileID = &value
-	}
-	if session.RepositorySnapshot != nil {
-		if value, ok := session.RepositorySnapshot["path"].(string); ok && value != "" {
-			info.workingDirectory = &value
-		}
-	}
-	return info
-}
-
-func (b bootStateBuilder) bootPendingActionsForInputCapableSessions(
-	ctx context.Context,
-	sessionsByTask map[string][]*taskmodels.TaskSession,
-) (map[string]taskmodels.TaskPendingAction, error) {
-	sessionIDs := make([]string, 0)
-	for _, sessions := range sessionsByTask {
-		for _, session := range sessions {
-			if bootInputCapableSession(session) {
-				sessionIDs = append(sessionIDs, session.ID)
-			}
-		}
-	}
-	if len(sessionIDs) == 0 {
-		return map[string]taskmodels.TaskPendingAction{}, nil
-	}
-	return b.p.taskSvc.GetPendingActionsForSessions(ctx, sessionIDs)
-}
-
-func bootInputCapableSession(session *taskmodels.TaskSession) bool {
-	return session != nil && (session.State == taskmodels.TaskSessionStateRunning || session.State == taskmodels.TaskSessionStateWaitingForInput)
-}
-
-func bootTaskPendingActionPtr(sessions []*taskmodels.TaskSession, actions map[string]taskmodels.TaskPendingAction) *string {
-	var clarification bool
-	for _, session := range sessions {
-		if !bootInputCapableSession(session) {
-			continue
-		}
-		switch actions[session.ID] {
-		case taskmodels.TaskPendingActionPermission:
-			value := string(taskmodels.TaskPendingActionPermission)
-			return &value
-		case taskmodels.TaskPendingActionClarification:
-			clarification = true
-		}
-	}
-	if clarification {
-		value := string(taskmodels.TaskPendingActionClarification)
-		return &value
-	}
-	return nil
-}
-
-func bootPendingActionPtr(
-	sessionID *string,
-	pendingActionsBySession map[string]taskmodels.TaskPendingAction,
-) *string {
-	if sessionID == nil {
-		return nil
-	}
-	action, ok := pendingActionsBySession[*sessionID]
-	if !ok {
-		return nil
-	}
-	value := string(action)
-	return &value
-}
-
-func (b bootStateBuilder) taskDetailInitialState(
-	ctx context.Context,
-	task *taskmodels.Task,
-	taskDTO taskdto.TaskDTO,
-	sessions []*taskmodels.TaskSession,
-	activeSessionID string,
-) map[string]any {
-	state := map[string]any{}
-	b.addTaskDetailResourceState(ctx, state, task)
-	b.addTaskDetailKanbanState(ctx, state, task)
-	b.addTaskDetailActiveTaskState(ctx, state, taskDTO, activeSessionID)
-	b.addTaskDetailSessionsState(ctx, state, task.ID, sessions, activeSessionID)
-	b.addTaskDetailAgentsState(ctx, state)
-	return state
-}
-
-func (b bootStateBuilder) addTaskDetailResourceState(ctx context.Context, state map[string]any, task *taskmodels.Task) {
-	b.addWorkspaceState(ctx, state, &task.WorkspaceID)
-	b.addUserSettingsState(ctx, state, task.WorkspaceID)
-	workflows, err := b.p.taskSvc.ListWorkflows(ctx, task.WorkspaceID, true)
-	if err != nil {
-		b.logBootError("list task detail workflows", err)
-	} else {
-		state["workflows"] = map[string]any{
-			"items":                workflowItemStates(workflows),
-			"activeId":             nil,
-			"taskWorkflowCoverage": b.taskWorkflowCoverage(ctx, task.WorkspaceID),
-		}
-	}
-	b.addRepositoriesState(ctx, state, task.WorkspaceID)
-}
-
-func workflowItemStates(workflows []*taskmodels.Workflow) []map[string]any {
-	items := make([]map[string]any, 0, len(workflows))
-	for _, workflow := range workflows {
-		if workflow != nil {
-			items = append(items, mapWorkflowItemState(taskdto.FromWorkflow(workflow)))
-		}
-	}
-	return items
-}
-
-func (b bootStateBuilder) addTaskDetailKanbanState(ctx context.Context, state map[string]any, task *taskmodels.Task) {
-	if task.WorkflowID == "" {
-		state["kanban"] = map[string]any{"workflowId": "", "steps": []any{}, "tasks": []any{}, "isLoading": false}
-		return
-	}
-	workflows, err := b.p.taskSvc.ListWorkflows(ctx, task.WorkspaceID, true)
-	if err != nil {
-		b.logBootError("list task detail kanban workflows", err)
-		return
-	}
-	for _, workflow := range workflows {
-		if workflow == nil || workflow.ID != task.WorkflowID {
-			continue
-		}
-		snapshot, ok := b.workflowSnapshotState(ctx, workflow)
-		if !ok {
-			return
-		}
-		state["kanban"] = map[string]any{
-			"workflowId": snapshot["workflowId"],
-			"steps":      snapshot["steps"],
-			"tasks":      snapshot["tasks"],
-			"isLoading":  false,
-		}
-		state["kanbanMulti"] = map[string]any{
-			"snapshots": map[string]any{workflow.ID: snapshot},
-			"isLoading": false,
-		}
-		return
-	}
-}
-
-func (b bootStateBuilder) addTaskDetailActiveTaskState(
-	ctx context.Context,
-	state map[string]any,
-	task taskdto.TaskDTO,
-	activeSessionID string,
+func addTaskDetailSessionMetadata(
+	session *taskmodels.TaskSession,
+	sessionModelsByID, sessionModeByID, sessionMCPStatusByID map[string]any,
 ) {
-	state["tasks"] = map[string]any{
-		"activeTaskId":        task.ID,
-		"activeSessionId":     nullString(activeSessionID),
-		"pinnedSessionId":     nil,
-		"lastSessionByTaskId": lastSessionByTaskState(task.ID, activeSessionID),
-	}
-	if activeSessionID == "" {
-		return
-	}
-	messages, hasMore, err := b.p.taskSvc.ListMessagesPaginated(ctx, taskservice.ListMessagesRequest{
-		TaskSessionID: activeSessionID,
-		Limit:         50,
-		Sort:          "desc",
-	})
-	if err != nil {
-		b.logBootError("list task detail messages", err)
-		return
-	}
-	apiMessages := make([]*v1.Message, 0, len(messages))
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i] != nil {
-			apiMessages = append(apiMessages, messages[i].ToAPI())
+	if snapshot, ok := lifecycle.LoadSessionModelsSnapshot(
+		session.Metadata[taskmodels.SessionMetaKeyACPModelState],
+	); ok {
+		sessionModelsByID[session.ID] = taskSessionModelsBootState(
+			snapshot, sessionACPConfigBaseline(session),
+		)
+		if snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored {
+			sessionModeByID[session.ID] = taskSessionModeBootState(snapshot)
 		}
 	}
-	var oldest any
-	if len(apiMessages) > 0 {
-		oldest = apiMessages[0].ID
+	if history, ok := lifecycle.LoadMCPAttachmentHistory(
+		session.Metadata[taskmodels.SessionMetaKeyMCPAttachmentState],
+	); ok {
+		sessionMCPStatusByID[session.ID] = history
 	}
-	state["messages"] = map[string]any{
-		"bySession": map[string]any{activeSessionID: apiMessages},
-		"metaBySession": map[string]any{
-			activeSessionID: map[string]any{
-				"isLoading":    false,
-				"hasMore":      hasMore,
-				"oldestCursor": oldest,
-			},
-		},
-	}
-}
-
-func lastSessionByTaskState(taskID, sessionID string) map[string]string {
-	if taskID == "" || sessionID == "" {
-		return map[string]string{}
-	}
-	return map[string]string{taskID: sessionID}
-}
-
-func (b bootStateBuilder) addTaskDetailSessionsState(
-	ctx context.Context,
-	state map[string]any,
-	taskID string,
-	sessions []*taskmodels.TaskSession,
-	activeSessionID string,
-) {
-	sessionItems := make(map[string]taskdto.TaskSessionDTO, len(sessions))
-	sessionList := make([]taskdto.TaskSessionDTO, 0, len(sessions))
-	environmentBySession := make(map[string]string, len(sessions))
-	worktrees := make(map[string]any)
-	worktreesBySession := make(map[string]any)
-	sessionModelsByID := make(map[string]any)
-	sessionModeByID := make(map[string]any)
-	sessionMCPStatusByID := make(map[string]any)
-	pendingActionsBySession, err := b.bootPendingActionsForInputCapableSessions(
-		ctx,
-		map[string][]*taskmodels.TaskSession{taskID: sessions},
-	)
-	if err != nil {
-		b.logBootError("get task detail session pending actions", err)
-		pendingActionsBySession = map[string]taskmodels.TaskPendingAction{}
-	}
-	for _, session := range sessions {
-		if session == nil {
-			continue
-		}
-		dto := taskdto.FromTaskSession(session)
-		if session.TaskEnvironmentID != "" {
-			operation, runnerLive, recoveryErr := b.p.taskSvc.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
-			if recoveryErr != nil {
-				b.logBootError("get task detail workspace recovery projection", recoveryErr)
-			} else {
-				taskdto.EnrichWorkspaceRecovery(&dto, operation, runnerLive)
-			}
-		}
-		// Mirror the in-memory fine-grained busy substate onto a RUNNING session
-		// so a fresh page-load / second tab sees the accept-input +
-		// working-in-background affordance without waiting for a WS flip
-		// (ADR-0049). No-op for non-RUNNING sessions.
-		if b.p.orchestratorSvc != nil {
-			taskdto.EnrichForegroundActivity(&dto, b.p.orchestratorSvc)
-			taskdto.EnrichCancellationPending(&dto, b.p.orchestratorSvc)
-			taskdto.EnrichParkedProjection(&dto, b.p.orchestratorSvc)
-		}
-		dto.PendingAction = bootPendingActionPtr(&session.ID, pendingActionsBySession)
-		sessionItems[session.ID] = dto
-		sessionList = append(sessionList, dto)
-		if session.TaskEnvironmentID != "" {
-			environmentBySession[session.ID] = session.TaskEnvironmentID
-		}
-		if dto.WorktreeID != "" {
-			worktrees[dto.WorktreeID] = map[string]any{
-				"id":           dto.WorktreeID,
-				"sessionId":    session.ID,
-				"repositoryId": nullString(dto.RepositoryID),
-				"path":         nullString(dto.WorktreePath),
-				branchFieldKey: nullString(dto.WorktreeBranch),
-			}
-			worktreesBySession[session.ID] = []string{dto.WorktreeID}
-		}
-		if snapshot, ok := lifecycle.LoadSessionModelsSnapshot(
-			session.Metadata[taskmodels.SessionMetaKeyACPModelState],
-		); ok {
-			sessionModelsByID[session.ID] = taskSessionModelsBootState(
-				snapshot, sessionACPConfigBaseline(session),
-			)
-			if snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored {
-				sessionModeByID[session.ID] = taskSessionModeBootState(snapshot)
-			}
-		}
-		if history, ok := lifecycle.LoadMCPAttachmentHistory(
-			session.Metadata[taskmodels.SessionMetaKeyMCPAttachmentState],
-		); ok {
-			sessionMCPStatusByID[session.ID] = history
-		}
-	}
-	state["taskSessions"] = map[string]any{"items": sessionItems}
-	state["taskSessionsByTask"] = map[string]any{
-		"itemsByTaskId":   map[string]any{taskID: sessionList},
-		"loadingByTaskId": map[string]any{taskID: false},
-		"loadedByTaskId":  map[string]any{taskID: true},
-	}
-	state["turns"] = b.taskDetailTurnsState(ctx, activeSessionID)
-	state["environmentIdBySessionId"] = environmentBySession
-	state["worktrees"] = map[string]any{"items": worktrees}
-	state["sessionWorktreesBySessionId"] = map[string]any{"itemsBySessionId": worktreesBySession}
-	if len(sessionModelsByID) > 0 {
-		state["sessionModels"] = map[string]any{"bySessionId": sessionModelsByID}
-	}
-	if len(sessionModeByID) > 0 {
-		state["sessionMode"] = map[string]any{"bySessionId": sessionModeByID}
-	}
-	if len(sessionMCPStatusByID) > 0 {
-		state["sessionMcpStatus"] = map[string]any{"bySessionId": sessionMCPStatusByID}
-	}
-}
-
-func (b bootStateBuilder) taskDetailTurnsState(ctx context.Context, sessionID string) map[string]any {
-	bySession := map[string]any{}
-	activeBySession := activeTurnBySessionState(sessionID)
-	if sessionID == "" {
-		return map[string]any{"bySession": bySession, "activeBySession": activeBySession}
-	}
-	turns, err := b.p.taskSvc.ListTurnsBySession(ctx, sessionID)
-	if err != nil {
-		b.logBootError("list task detail turns", err)
-		return map[string]any{"bySession": bySession, "activeBySession": activeBySession}
-	}
-	items := make([]taskdto.TurnDTO, 0, len(turns))
-	for _, turn := range turns {
-		if turn == nil {
-			continue
-		}
-		items = append(items, taskdto.FromTurn(turn))
-		if turn.CompletedAt == nil {
-			activeBySession[sessionID] = turn.ID
-		}
-	}
-	bySession[sessionID] = items
-	return map[string]any{"bySession": bySession, "activeBySession": activeBySession}
 }
 
 func taskSessionModelsBootState(
@@ -1286,46 +788,4 @@ func taskSessionModeBootState(snapshot lifecycle.SessionModelsSnapshot) map[stri
 		"availableModes": []any{},
 		"settingsPolicy": string(snapshot.SettingsPolicy),
 	}
-}
-
-func activeTurnBySessionState(sessionID string) map[string]any {
-	if sessionID == "" {
-		return map[string]any{}
-	}
-	return map[string]any{sessionID: nil}
-}
-
-func (b bootStateBuilder) addTaskDetailAgentsState(ctx context.Context, state map[string]any) {
-	if b.p.agentSettingsController == nil {
-		return
-	}
-	response, err := b.p.agentSettingsController.ListAgents(ctx)
-	if err != nil {
-		b.logBootError("list task detail agents", err)
-		return
-	}
-	state["settingsAgents"] = map[string]any{"items": response.Agents}
-	state["settingsData"] = map[string]any{"agentsLoaded": true, "executorsLoaded": false}
-	state["agentProfiles"] = map[string]any{
-		"items":         agentProfileOptionStates(response.Agents),
-		versionFieldKey: 0,
-	}
-}
-
-func agentProfileOptionStates(agents []agentsettingsdto.AgentDTO) []map[string]any {
-	items := []map[string]any{}
-	for _, agent := range agents {
-		for _, profile := range agent.Profiles {
-			items = append(items, map[string]any{
-				"id":                profile.ID,
-				"label":             profile.AgentDisplayName + " - " + profile.Name,
-				"agent_id":          agent.ID,
-				"agent_name":        agent.Name,
-				"cli_passthrough":   profile.CLIPassthrough,
-				"capability_status": nullString(agent.CapabilityStatus),
-				"capability_error":  nullString(agent.CapabilityError),
-			})
-		}
-	}
-	return items
 }

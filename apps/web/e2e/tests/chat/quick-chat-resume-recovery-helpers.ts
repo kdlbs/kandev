@@ -57,8 +57,7 @@ export async function verifyQuickChatResumeRecovery(
     timeout: 30_000,
   });
   await expect(dialog.getByText("simple mock response", { exact: false })).toBeVisible();
-  const { sessions } = await apiClient.listTaskSessions(started.task_id);
-  const original = sessions.find((session) => session.id === started.session_id)!;
+  const { session: original } = await apiClient.getTaskSession(started.session_id);
   const nativeIdentity = original.metadata?.acp;
   expect(nativeIdentity).toBeTruthy();
   await apiClient.stopSession({ session_id: started.session_id, force: true });
@@ -108,9 +107,7 @@ export async function verifyQuickChatResumeRecovery(
     submission: { state: "interrupted_unknown" },
   });
   await expectJournalRetirement(journalPath, submission);
-  const resumed = (await apiClient.listTaskSessions(started.task_id)).sessions.find(
-    (session) => session.id === started.session_id,
-  )!;
+  const { session: resumed } = await apiClient.getTaskSession(started.session_id);
   expect(resumed.metadata?.acp).toEqual(nativeIdentity);
   await expect(dialog.getByText("simple mock response", { exact: false })).toHaveCount(1);
   await sendQuickChatMessage(dialog, page, "/e2e:bulk:3");

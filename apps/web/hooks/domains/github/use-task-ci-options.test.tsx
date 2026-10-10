@@ -48,13 +48,36 @@ afterEach(() => {
 });
 
 describe("useTaskCIAutomationOptions", () => {
+  it("joins two visible controls for the same task", async () => {
+    let resolve!: (value: TaskCIAutomationOptions) => void;
+    apiMocks.getOptionsMock.mockReturnValue(
+      new Promise((next) => {
+        resolve = next;
+      }),
+    );
+    const { result } = renderHook(
+      () => ({
+        first: useTaskCIAutomationOptions("task-1"),
+        second: useTaskCIAutomationOptions("task-1"),
+      }),
+      { wrapper },
+    );
+    expect(apiMocks.getOptionsMock).toHaveBeenCalledTimes(1);
+    resolve(makeOptions({ auto_fix_enabled: true }));
+    await waitFor(() => expect(result.current.first.options?.auto_fix_enabled).toBe(true));
+    expect(result.current.second.options?.auto_fix_enabled).toBe(true);
+  });
+
   it("loads options for the task and stores the response", async () => {
     apiMocks.getOptionsMock.mockResolvedValue(makeOptions({ auto_fix_enabled: true }));
 
     const { result } = renderHook(() => useTaskCIAutomationOptions("task-1"), { wrapper });
 
     await waitFor(() => expect(result.current.options?.auto_fix_enabled).toBe(true));
-    expect(apiMocks.getOptionsMock).toHaveBeenCalledWith("task-1", { cache: "no-store" });
+    expect(apiMocks.getOptionsMock).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ cache: "no-store" }),
+    );
     expect(result.current.loading).toBe(false);
   });
 
@@ -127,13 +150,12 @@ describe("useTaskCIAutomationOptions", () => {
     await act(async () => {
       secondRefresh = result.current.refresh();
     });
+    expect(apiMocks.getOptionsMock).toHaveBeenCalledTimes(1);
+    resolveFirst(makeOptions({ auto_fix_enabled: false }));
+    await waitFor(() => expect(apiMocks.getOptionsMock).toHaveBeenCalledTimes(2));
     resolveSecond(makeOptions({ auto_fix_enabled: true }));
     await act(async () => {
       await secondRefresh!;
-    });
-    resolveFirst(makeOptions({ auto_fix_enabled: false }));
-    await act(async () => {
-      await Promise.resolve();
     });
 
     expect(result.current.options?.auto_fix_enabled).toBe(true);

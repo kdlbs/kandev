@@ -39,10 +39,11 @@ let mockState: MockState = {
   setWorkspaceSnapshotRead: mockSetWorkspaceSnapshotRead,
   hydrate: mockHydrate,
 };
+let mockStoreApi = { getState: () => mockState };
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
-  useAppStoreApi: () => ({ getState: () => mockState }),
+  useAppStoreApi: () => mockStoreApi,
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -53,6 +54,7 @@ import { useAllWorkflowSnapshots, useWorkflowSnapshotById } from "./use-all-work
 
 function resetMocks(workflows: Workflow[] = []) {
   vi.clearAllMocks();
+  mockFetchWorkflowSnapshot.mockReset();
   mockFetchWorkflowSnapshot.mockResolvedValue({ steps: [], tasks: [] });
   mockState = {
     connection: { status: "connected" },
@@ -67,6 +69,7 @@ function resetMocks(workflows: Workflow[] = []) {
     setWorkspaceSnapshotRead: mockSetWorkspaceSnapshotRead,
     hydrate: mockHydrate,
   };
+  mockStoreApi = { getState: () => mockState };
 }
 
 describe("useAllWorkflowSnapshots — workspace scoping", () => {
@@ -104,6 +107,43 @@ describe("useAllWorkflowSnapshots — workspace scoping", () => {
     expect(mockClearKanbanMulti).not.toHaveBeenCalled();
   });
 
+  it("limits a selected-board read to the selected workflow", async () => {
+    resetMocks([
+      { id: "wf-A", workspaceId: "ws-A", name: "A" },
+      { id: "wf-B", workspaceId: "ws-A", name: "B" },
+    ]);
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A", ["wf-B"]));
+
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1));
+    expect(mockFetchWorkflowSnapshot).toHaveBeenCalledWith(
+      "wf-B",
+      expect.objectContaining({ cache: "no-store" }),
+    );
+  });
+
+  it("shares an in-flight workflow read between mounted board consumers", async () => {
+    let resolveSnapshot!: (value: { steps: never[]; tasks: never[] }) => void;
+    mockFetchWorkflowSnapshot.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSnapshot = resolve;
+      }),
+    );
+
+    const { unmount } = renderHook(
+      () =>
+        [
+          useAllWorkflowSnapshots("ws-A", ["wf-A"]),
+          useAllWorkflowSnapshots("ws-A", ["wf-A"]),
+        ] as const,
+    );
+
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1));
+    resolveSnapshot({ steps: [], tasks: [] });
+    await waitFor(() => expect(mockSetWorkflowSnapshot).toHaveBeenCalled());
+    unmount();
+  });
+
   it("refetches boot-hydrated snapshots when the Kandev window regains focus", async () => {
     mockState.kanbanMulti.snapshots = {
       "wf-A": { workflowId: "wf-A", workflowName: "A", steps: [], tasks: [] },
@@ -115,9 +155,10 @@ describe("useAllWorkflowSnapshots — workspace scoping", () => {
     act(() => window.dispatchEvent(new Event("focus")));
 
     await waitFor(() =>
-      expect(mockFetchWorkflowSnapshot).toHaveBeenCalledWith("wf-A", {
-        cache: "no-store",
-      }),
+      expect(mockFetchWorkflowSnapshot).toHaveBeenCalledWith(
+        "wf-A",
+        expect.objectContaining({ cache: "no-store" }),
+      ),
     );
   });
 
@@ -177,9 +218,10 @@ describe("useWorkflowSnapshotById", () => {
     renderHook(() => useWorkflowSnapshotById("ws-A", NEW_WORKFLOW_ID));
 
     await waitFor(() =>
-      expect(mockFetchWorkflowSnapshot).toHaveBeenCalledWith(NEW_WORKFLOW_ID, {
-        cache: "no-store",
-      }),
+      expect(mockFetchWorkflowSnapshot).toHaveBeenCalledWith(
+        NEW_WORKFLOW_ID,
+        expect.objectContaining({ cache: "no-store" }),
+      ),
     );
     await waitFor(() =>
       expect(mockSetWorkflowSnapshot).toHaveBeenCalledWith(
@@ -326,26 +368,29 @@ describe("useAllWorkflowSnapshots — fetch guards", () => {
 
   it("retries a workflow whose previous snapshot request failed", async () => {
     mockFetchWorkflowSnapshot.mockRejectedValueOnce(new Error("snapshot unavailable"));
-    const { rerender } = renderHook(
-      ({ workflows }: { workflows: Workflow[] }) => {
-        mockState.workflows = { items: workflows };
-        return useAllWorkflowSnapshots("ws-A");
-      },
-      { initialProps: { workflows: [{ id: "wf-A", workspaceId: "ws-A", name: "A" }] } },
-    );
+    const firstMount = renderHook(() => useAllWorkflowSnapshots("ws-A"));
 
     await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mockSetWorkspaceSnapshotRead).toHaveBeenLastCalledWith(
+        "ws-A",
+        0,
+        "transient",
+        undefined,
+        expect.any(String),
+      ),
+    );
     expect(mockSetWorkflowSnapshot).not.toHaveBeenCalled();
+    firstMount.unmount();
 
     mockFetchWorkflowSnapshot.mockResolvedValueOnce({ steps: [], tasks: [] });
-    rerender({
-      workflows: [{ id: "wf-A", workspaceId: "ws-A", name: "A" }],
-    });
+    const secondMount = renderHook(() => useAllWorkflowSnapshots("ws-A"));
 
     await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(2));
     await waitFor(() =>
       expect(mockSetWorkflowSnapshot).toHaveBeenCalledWith("wf-A", expect.anything()),
     );
+    secondMount.unmount();
   });
 
   it("publishes a failed snapshot as shared workspace recovery state", async () => {

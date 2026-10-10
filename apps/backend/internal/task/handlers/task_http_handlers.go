@@ -230,7 +230,7 @@ func buildTaskDTOsWithSessionInfo(
 	for i, t := range tasks {
 		taskIDs[i] = t.ID
 	}
-	sessionsByTask, err := svc.BatchGetSessionsForTasks(ctx, taskIDs)
+	sessionObservationsByTask, err := svc.BatchGetTaskSessionSummaryObservations(ctx, taskIDs)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
 	}
@@ -240,16 +240,8 @@ func buildTaskDTOsWithSessionInfo(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	primarySessionInfoMap, err := svc.GetPrimarySessionInfoForTasks(ctx, taskIDs)
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, ctxErr
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
+	sessionsByTask := taskSessionModelsFromSummaryObservations(sessionObservationsByTask)
+	primarySessionInfoMap := primaryTaskSessionModelsFromSummaryObservations(sessionObservationsByTask)
 	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(ctx, svc, sessionsByTask)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
@@ -385,7 +377,7 @@ func reconcileTaskStatusSummariesAfterRevision(
 	}
 	// The summary revision fences repairs, so observations used for a repair
 	// must be captured after that revision.
-	sessions, err := svc.BatchGetSessionsForTasks(ctx, taskIDs)
+	sessionObservations, err := svc.BatchGetTaskSessionSummaryObservations(ctx, taskIDs)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
 	}
@@ -393,6 +385,7 @@ func reconcileTaskStatusSummariesAfterRevision(
 		log.Warn("failed to refresh task sessions for status summary reconciliation", zap.Error(err))
 		return statusSummaries, nil
 	}
+	sessions := taskSessionModelsFromSummaryObservations(sessionObservations)
 	pendingActions, err := pendingActionsForInputCapableSessions(ctx, svc, sessions)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return nil, ctxErr
@@ -409,6 +402,35 @@ func reconcileTaskStatusSummariesAfterRevision(
 		log.Warn("failed to reconcile task status summaries", zap.Error(err))
 	}
 	return reconciled, nil
+}
+
+func taskSessionModelsFromSummaryObservations(
+	observations map[string][]*models.TaskSessionSummaryObservation,
+) map[string][]*models.TaskSession {
+	sessionsByTask := make(map[string][]*models.TaskSession, len(observations))
+	for taskID, taskObservations := range observations {
+		sessions := make([]*models.TaskSession, 0, len(taskObservations))
+		for _, observation := range taskObservations {
+			sessions = append(sessions, observation.ToTaskSession())
+		}
+		sessionsByTask[taskID] = sessions
+	}
+	return sessionsByTask
+}
+
+func primaryTaskSessionModelsFromSummaryObservations(
+	observations map[string][]*models.TaskSessionSummaryObservation,
+) map[string]*models.TaskSession {
+	primaryByTask := make(map[string]*models.TaskSession, len(observations))
+	for taskID, taskObservations := range observations {
+		for _, observation := range taskObservations {
+			if observation != nil && observation.IsPrimary {
+				primaryByTask[taskID] = observation.ToTaskSession()
+				break
+			}
+		}
+	}
+	return primaryByTask
 }
 
 type sessionInfoFields struct {
@@ -491,7 +513,11 @@ func pendingActionsForInputCapableSessions(
 }
 
 func isInputCapableSession(session *models.TaskSession) bool {
-	return session != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateWaitingForInput)
+	return session != nil && isInputCapableSessionState(session.State)
+}
+
+func isInputCapableSessionState(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateRunning || state == models.TaskSessionStateWaitingForInput
 }
 
 func pendingActionPtr(
@@ -609,7 +635,7 @@ func (h *TaskHandlers) httpGetArchiveSourceManifest(c *gin.Context) {
 
 func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 	ctx := c.Request.Context()
-	sessions, err := h.service.ListTaskSessions(ctx, c.Param("id"))
+	sessions, err := h.service.ListTaskSessionSummaryObservations(ctx, c.Param("id"))
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task sessions not found")
 		return

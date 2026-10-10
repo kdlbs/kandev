@@ -10,7 +10,7 @@ import (
 
 func (h *TaskHandlers) taskSessionSummariesWithPendingActions(
 	ctx context.Context,
-	sessions []*models.TaskSession,
+	sessions []*models.TaskSessionSummaryObservation,
 ) ([]dto.TaskSessionSummaryDTO, error) {
 	sessionIDs := make([]string, 0, len(sessions))
 	for _, session := range sessions {
@@ -22,11 +22,11 @@ func (h *TaskHandlers) taskSessionSummariesWithPendingActions(
 	}
 	summaries := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
 	for _, session := range sessions {
-		summary := dto.FromTaskSessionSummary(session)
+		summary := dto.FromTaskSessionSummaryObservation(session)
 		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
 		dto.EnrichCancellationPendingSummary(&summary, h.cancellationPending)
 		dto.EnrichParkedProjectionSummary(&summary, h.parkedProjection)
-		if isInputCapableSession(session) {
+		if isInputCapableSessionState(session.State) {
 			summary.PendingAction = pendingActionPtr(&session.ID, actions)
 		}
 		summary.PendingActionRevision = pendingActionRevisionPtr(session.ID, revisions)

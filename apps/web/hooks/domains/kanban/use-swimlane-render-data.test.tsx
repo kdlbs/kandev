@@ -30,6 +30,35 @@ function renderOverview() {
 
 // @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.1
 describe("overview snapshot hydration", () => {
+  it("offers unloaded workflows for navigation when boot contains one selected snapshot", () => {
+    const { result } = renderHook(
+      () => ({
+        store: useAppStoreApi(),
+        data: useSwimlaneRenderData("selected", REPOSITORIES, ""),
+      }),
+      { wrapper: ({ children }) => <StateProvider>{children}</StateProvider> },
+    );
+    act(() => {
+      result.current.store.setState((state) => ({
+        workspaces: { ...state.workspaces, activeId: "workspace" },
+        workflows: {
+          ...state.workflows,
+          activeId: "selected",
+          items: [
+            { id: "selected", name: "Selected", workspaceId: "workspace" },
+            { id: "unloaded", name: "Unloaded", workspaceId: "workspace" },
+          ],
+        },
+        kanbanMulti: { ...state.kanbanMulti, snapshots: { selected: snapshot("selected") } },
+      }));
+    });
+
+    expect(result.current.data.workflowOptions).toEqual([
+      { id: "selected", name: "Selected", taskCount: 1 },
+      { id: "unloaded", name: "Unloaded", taskCount: null },
+    ]);
+  });
+
   it("renders a missing snapshot beside a loaded workflow", () => {
     const { result } = renderOverview();
     act(() => {
@@ -264,3 +293,83 @@ it.each(["CLIENT-UI", "/projects/client"])(
     expect(result.current.focused.tasks).toEqual([]);
   },
 );
+
+describe("bounded board candidates", () => {
+  it("starts All-workflow demand at its seeded nonempty board", () => {
+    const { result } = renderOverview();
+    act(() =>
+      result.current.store.setState((state) => ({
+        workspaces: { ...state.workspaces, activeId: "workspace" },
+        workflows: {
+          ...state.workflows,
+          taskWorkflowCoverage: {
+            workspace_id: "workspace",
+            workflow_ids: ["populated"],
+            complete: true,
+          },
+          items: [
+            { id: "empty", name: "Empty", workspaceId: "workspace" },
+            { id: "populated", name: "Populated", workspaceId: "workspace" },
+            { id: "offscreen-empty", name: "Empty offscreen", workspaceId: "workspace" },
+          ],
+        },
+        kanbanMulti: { ...state.kanbanMulti, snapshots: { populated: snapshot("populated") } },
+      })),
+    );
+    expect(result.current.data.orderedWorkflows.map((workflow) => workflow.id)).toEqual([
+      "populated",
+    ]);
+    expect(result.current.data.workflowOptions.map((workflow) => workflow.id)).toEqual([
+      "empty",
+      "populated",
+      "offscreen-empty",
+    ]);
+  });
+
+  it("retains unloaded All-workflow lanes only in the active workspace", () => {
+    const { result } = renderOverview();
+    act(() =>
+      result.current.store.setState((state) => ({
+        workspaces: { ...state.workspaces, activeId: "workspace" },
+        workflows: {
+          ...state.workflows,
+          items: [
+            { id: "selected", name: "Selected", workspaceId: "workspace" },
+            { id: "unloaded", name: "Unloaded", workspaceId: "workspace" },
+            { id: "foreign", name: "Other workspace", workspaceId: "foreign-workspace" },
+          ],
+        },
+        kanbanMulti: { ...state.kanbanMulti, snapshots: { selected: snapshot("selected") } },
+      })),
+    );
+    expect(result.current.data.orderedWorkflows.map((workflow) => workflow.id)).toEqual([
+      "selected",
+      "unloaded",
+    ]);
+  });
+});
+
+it("offers an unloaded hidden workflow with authorized task coverage without fetching its board", () => {
+  const { result } = renderOverview();
+  act(() =>
+    result.current.store.setState((state) => ({
+      workspaces: { ...state.workspaces, activeId: "workspace" },
+      workflows: {
+        ...state.workflows,
+        items: [
+          { id: "visible", name: "Visible", workspaceId: "workspace" },
+          { id: "hidden", name: "Hidden", hidden: true, workspaceId: "workspace" },
+          { id: "empty-hidden", name: "Empty hidden", hidden: true, workspaceId: "workspace" },
+        ],
+        taskWorkflowCoverage: {
+          workspace_id: "workspace",
+          workflow_ids: ["visible", "hidden"],
+          complete: true,
+        },
+      },
+      kanbanMulti: { ...state.kanbanMulti, snapshots: { visible: snapshot("visible") } },
+    })),
+  );
+  expect(result.current.data.workflowOptions.map(({ id }) => id)).toEqual(["visible", "hidden"]);
+  expect(result.current.store.getState().kanbanMulti.snapshots.hidden).toBeUndefined();
+});

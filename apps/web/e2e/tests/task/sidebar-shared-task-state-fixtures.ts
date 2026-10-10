@@ -79,13 +79,7 @@ export async function waitForCoverage(page: Page, workspaceId: string) {
           window as Window & { __KANDEV_E2E_STORE__: StoreApi<AppState> }
         ).__KANDEV_E2E_STORE__.getState();
         const coverage = state.workflows.taskWorkflowCoverage;
-        return (
-          coverage?.workspace_id === workspaceId &&
-          coverage.complete &&
-          coverage.workflow_ids.every(
-            (id) => state.kanbanMulti.snapshots[id]?.taskCoverage?.complete,
-          )
-        );
+        return coverage?.workspace_id === workspaceId && coverage.complete;
       }, workspaceId),
     )
     .toBe(true);

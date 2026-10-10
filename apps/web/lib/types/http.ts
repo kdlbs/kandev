@@ -1079,6 +1079,13 @@ export type ListMessagesResponse = {
   total: number;
   has_more: boolean;
   cursor: string;
+  turns?: Turn[];
+  turn_coverage?: MessageTurnCoverage;
+};
+
+export type MessageTurnCoverage = {
+  message_ids: string[];
+  active_turn_id: string | null;
 };
 
 export type MessageAuthorType = "user" | "agent";

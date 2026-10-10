@@ -46,8 +46,8 @@ export function resolveSessionWorktrees(
   return result;
 }
 
-export function useSessionWorktrees(sessionId: string | null) {
-  const { session } = useSession(sessionId);
+export function useSessionWorktrees(sessionId: string | null, detailActive = true) {
+  const { session } = useSession(sessionId, { detailActive });
   const worktrees = useAppStore((state) => state.worktrees.items);
   const sessionWorktreesBySessionId = useAppStore(
     (state) => state.sessionWorktreesBySessionId.itemsBySessionId,

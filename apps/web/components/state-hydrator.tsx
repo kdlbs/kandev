@@ -2,7 +2,10 @@
 
 import { useLayoutEffect, useRef } from "react";
 import type { AppState } from "@/lib/state/store";
-import type { TaskSessionHydrationEpoch } from "@/lib/state/slices/session/types";
+import type {
+  ActiveTurnWindowObservation,
+  TaskSessionHydrationEpoch,
+} from "@/lib/state/slices/session/types";
 import { useAppStoreApi } from "@/components/state-provider";
 
 type StateHydratorProps = {
@@ -11,6 +14,7 @@ type StateHydratorProps = {
   sessionId?: string;
   /** Session generations captured when the request for this snapshot started. */
   taskSessionHydrationEpochsAtRequestStart?: Readonly<Record<string, TaskSessionHydrationEpoch>>;
+  turnWindowObservationsAtRequestStart?: Readonly<Record<string, ActiveTurnWindowObservation>>;
   onHydrated?: () => void;
 };
 
@@ -18,6 +22,7 @@ export function StateHydrator({
   initialState,
   sessionId,
   taskSessionHydrationEpochsAtRequestStart,
+  turnWindowObservationsAtRequestStart,
   onHydrated,
 }: StateHydratorProps) {
   const store = useAppStoreApi();
@@ -32,10 +37,17 @@ export function StateHydrator({
       store.getState().hydrate(initialState, {
         forceMergeSessionId: sessionId,
         taskSessionHydrationEpochsAtRequestStart,
+        turnWindowObservationsAtRequestStart,
       });
     }
     onHydratedRef.current?.();
-  }, [initialState, sessionId, store, taskSessionHydrationEpochsAtRequestStart]);
+  }, [
+    initialState,
+    sessionId,
+    store,
+    taskSessionHydrationEpochsAtRequestStart,
+    turnWindowObservationsAtRequestStart,
+  ]);
 
   return null;
 }

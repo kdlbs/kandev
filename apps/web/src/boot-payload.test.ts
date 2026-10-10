@@ -94,6 +94,109 @@ describe("readBootPayload", () => {
   });
 });
 
+describe("version-2 boot entity graph", () => {
+  it("expands entity IDs before store hydration", () => {
+    const task = { id: "task-1", title: "Task" };
+    const session = { id: "session-1", task_id: "task-1", state: "WAITING_FOR_INPUT" };
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        version: 2,
+        initialState: {
+          kanban: { workflowId: "workflow-1", taskIds: ["task-1"] },
+          kanbanMulti: { snapshots: { "workflow-1": { taskIds: ["task-1"] } } },
+          taskSessions: { sessionIds: ["session-1"] },
+          taskSessionsByTask: { sessionIdsByTask: { "task-1": ["session-1"] } },
+        },
+        routeData: {
+          tasksPage: { taskIds: ["task-1"] },
+          taskDetail: {
+            taskId: "task-1",
+            sessionId: "session-1",
+            sidebarTaskPage: { entries: [{ kind: "task", taskId: "task-1" }] },
+          },
+        },
+        entities: { tasks: { "task-1": task }, sessions: { "session-1": session } },
+      },
+    } as unknown as Window;
+
+    expect(readBootPayload(win)).toMatchObject({
+      initialState: {
+        kanban: { tasks: [task] },
+        kanbanMulti: { snapshots: { "workflow-1": { tasks: [task] } } },
+        taskSessions: { items: { "session-1": session } },
+        taskSessionsByTask: { itemsByTaskId: { "task-1": [session] } },
+      },
+      routeData: {
+        tasksPage: { tasks: [task] },
+        taskDetail: {
+          task,
+          sessionId: "session-1",
+          sidebarTaskPage: { entries: [{ kind: "task", task }] },
+        },
+      },
+    });
+  });
+
+  it("expands the bounded task-detail initial state without rewriting nested settings", () => {
+    const task = { id: "task-1", title: "Task" };
+    const settings = { taskScope: { mode: "selected", taskIds: ["task-1"] } };
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        version: 2,
+        routeData: {
+          taskDetail: {
+            initialState: {
+              kanban: { taskIds: ["task-1"] },
+              kanbanMulti: { snapshots: { wf: { taskIds: ["task-1"] } } },
+              settings,
+            },
+          },
+        },
+        entities: { tasks: { "task-1": task }, sessions: {} },
+      },
+    } as unknown as Window;
+    expect(readBootPayload(win).routeData).toMatchObject({
+      taskDetail: {
+        initialState: {
+          kanban: { tasks: [task] },
+          kanbanMulti: { snapshots: { wf: { tasks: [task] } } },
+          settings,
+        },
+      },
+    });
+  });
+
+  it("preserves saved selected-task views, drafts, and unrelated task identities", () => {
+    const scope = { mode: "selected", taskIds: ["task-1", "missing-task"] };
+    const settings = {
+      threadViews: [{ id: "saved", taskScope: scope }],
+      threadViewDraft: { taskScope: scope },
+      lastSelection: { taskId: "task-1" },
+    };
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        version: 2,
+        initialState: { settings },
+        entities: { tasks: { "task-1": { id: "task-1", title: "Task" } }, sessions: {} },
+      },
+    } as unknown as Window;
+    expect(readBootPayload(win).initialState).toEqual({ settings });
+  });
+
+  it("preserves optional-data failures", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        version: 2,
+        initialState: { features: { office: true } },
+        entities: { tasks: {}, sessions: {} },
+      },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).initialState).toEqual({ features: { office: true } });
+    expect(readBootPayload(win).routeData).toBeUndefined();
+  });
+});
+
 describe("readBootPayload runtime metadata", () => {
   it("reads the native folder picker capability from the runtime block", () => {
     const win = {

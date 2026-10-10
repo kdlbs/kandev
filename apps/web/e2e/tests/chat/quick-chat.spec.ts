@@ -878,9 +878,8 @@ test.describe("Quick Chat", () => {
     // the ACP catalog. Wait for the durable session metadata before reloading
     // the shell, so the reload hydrates the same state that the backend owns.
     const readPersistedModelCatalog = async () => {
-      const { sessions } = await apiClient.listTaskSessions(started.task_id);
-      const rawState = sessions.find((session) => session.id === started.session_id)?.metadata
-        ?.acp_model_state;
+      const { session } = await apiClient.getTaskSession(started.session_id);
+      const rawState = session.metadata?.acp_model_state;
       if (!rawState || typeof rawState !== "object") {
         return { currentModelId: "", configOptionIds: [] as string[] };
       }

@@ -1,0 +1,169 @@
+goroutine 442602 [select]:
+database/sql.(*DB).conn(0xbfff0cf2270, {0x5342ba8, 0xbfff5843350}, 0x1)
+	database/sql/sql.go:1369 +0x415
+database/sql.(*DB).begin(0xbfff0cf2270, {0x5342ba8, 0xbfff5843350}, 0x0, 0x56?)
+	database/sql/sql.go:1891 +0x2d
+database/sql.(*DB).BeginTx.func1(0xa?)
+	database/sql/sql.go:1874 +0x3e
+database/sql.(*DB).retry(0xbfff2d9bda0?, 0xbfff2d9bd98)
+	database/sql/sql.go:1576 +0x42
+database/sql.(*DB).BeginTx(0x0?, {0x5342ba8?, 0xbfff5843350?}, 0xbfff5884ea0?)
+	database/sql/sql.go:1873 +0x6c
+github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).GetTaskCompletionGate(0xbfff06c4900, {0x5342ba8, 0xbfff5843350}, {0xbfff1312bd0, 0x11})
+	github.com/kandev/kandev/internal/task/repository/sqlite/completion_gates.go:274 +0x67
+github.com/kandev/kandev/internal/task/service.(*Service).completionGateSummary(0xbfff14e4808, {0x5342ba8, 0xbfff5843350}, {0xbfff1312bd0, 0x11})
+	github.com/kandev/kandev/internal/task/service/service_status_summary_rebuild.go:365 +0xa9
+github.com/kandev/kandev/internal/task/service.(*Service).reconcileExistingSummary(0xbfff14e4808, {0x5342ba8, 0xbfff5843350}, 0xbfff0bd8200, 0xbfff1214500, {0x0, 0x0}, {0xdf0ae08, 0xee25ae519, 0x0}, ...)
+	github.com/kandev/kandev/internal/task/service/service_status_summary_rebuild.go:444 +0x9b
+github.com/kandev/kandev/internal/task/service.(*Service).reconcileExistingSummaries(0xbfff14e4808, {0x5342ba8, 0xbfff5843350}, {0xbfff95ba008, 0x1ef, 0xbfff5843350?}, 0xbfff16c49c0, 0x1, 0xbfff5884c30, 0xbfff57efa40, ...)
+	github.com/kandev/kandev/internal/task/service/service_status_summary_rebuild.go:156 +0x4df
+github.com/kandev/kandev/internal/task/service.(*Service).ReconcileTaskStatusSummaries(0xbfff14e4808, {0x5342ba8, 0xbfff5843350}, {0xbfff95ba008, 0x1ef, 0x25f}, 0xbfff16c49c0, 0xbfff5884c30, 0xbfff27f27f0?)
+	github.com/kandev/kandev/internal/task/service/service_status_summary_rebuild.go:106 +0x336
+github.com/kandev/kandev/internal/task/handlers.reconcileTaskStatusSummariesAfterRevision({0x5342ba8, 0xbfff5843350}, 0xbfff14e4808, 0xbfff149cff0, {0xbfff95ba008, 0x1ef, 0x25f}, {0xbfff1dca008, 0x1ef, 0x1ef}, ...)
+	github.com/kandev/kandev/internal/task/handlers/task_http_handlers.go:404 +0x41c
+github.com/kandev/kandev/internal/task/handlers.buildTaskDTOsWithSessionInfo({0x5342ba8, 0xbfff5843350}, 0xbfff14e4808, 0xbfff149cff0, {0x53136a0, 0xbfff0798608}, {0x532a1d8, 0xbfff0798608}, {0xbfff95ba008, 0x1ef, ...})
+	github.com/kandev/kandev/internal/task/handlers/task_http_handlers.go:274 +0x779
+github.com/kandev/kandev/internal/task/handlers.(*WorkflowHandlers).convertTasksWithPrimarySessions(...)
+	github.com/kandev/kandev/internal/task/handlers/workflow_handlers.go:641
+github.com/kandev/kandev/internal/task/handlers.(*WorkflowHandlers).httpGetWorkflowSnapshot(0xbfff14c4140, 0xbfff055e000)
+	github.com/kandev/kandev/internal/task/handlers/workflow_handlers.go:346 +0x207
+github.com/gin-gonic/gin.(*Context).Next(0xbfff055e000)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174 +0x2b
+github.com/kandev/kandev/internal/backendapp.buildHTTPServer.integrationWorkspaceScopeMiddleware.func7(0xbfff055e000?)
+	github.com/kandev/kandev/internal/backendapp/helpers.go:2130 +0x50
+github.com/gin-gonic/gin.(*Context).Next(0xbfff055e000)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174 +0x2b
+github.com/kandev/kandev/internal/backendapp.buildHTTPServer.Middleware.func6(0xbfff055e000)
+	github.com/kandev/kandev/internal/auth/httpmw/middleware.go:41 +0xeb
+github.com/gin-gonic/gin.(*Context).Next(0xbfff055e000)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174 +0x2b
+github.com/kandev/kandev/internal/backendapp.buildHTTPServer.requiredPersistenceMiddleware.func5(0xbfff055e000?)
+	github.com/kandev/kandev/internal/backendapp/persistence_middleware.go:21 +0x65
+github.com/gin-gonic/gin.(*Context).Next(0xbfff055e000)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174 +0x2b
+github.com/kandev/kandev/internal/backendapp.buildHTTPServer.corsMiddleware.func4(0xbfff055e000)
+	github.com/kandev/kandev/internal/backendapp/middleware.go:54 +0x230
+github.com/gin-gonic/gin.(*Context).Next(...)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174
+github.com/gin-gonic/gin.CustomRecoveryWithWriter.func1(0xbfff055e000)
+	github.com/gin-gonic/gin@v1.9.1/recovery.go:102 +0x6f
+github.com/gin-gonic/gin.(*Context).Next(...)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174
+github.com/kandev/kandev/internal/common/httpmw.OtelTracing.func1(0xbfff055e000)
+	github.com/kandev/kandev/internal/common/httpmw/tracing.go:30 +0x2cb
+github.com/gin-gonic/gin.(*Context).Next(0xbfff055e000)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174 +0x2b
+github.com/kandev/kandev/internal/backendapp.buildHTTPServer.RequestLogger.func3(0xbfff055e000)
+	github.com/kandev/kandev/internal/common/httpmw/logging.go:24 +0x9e
+github.com/gin-gonic/gin.(*Context).Next(...)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174
+github.com/gin-gonic/gin.(*Engine).handleHTTPRequest(0xbfff140a9c0, 0xbfff055e000)
+	github.com/gin-gonic/gin@v1.9.1/gin.go:620 +0x64b
+github.com/gin-gonic/gin.(*Engine).ServeHTTP(0xbfff140a9c0, {0x5339770, 0xbfff0ff2780}, 0xbfff09c2280)
+	github.com/gin-gonic/gin@v1.9.1/gin.go:576 +0x1ad
+github.com/kandev/kandev/internal/backendapp.(*handlerSwitch).ServeHTTP(0x48e2f9?, {0x5339770?, 0xbfff0ff2780?}, 0xbfff0feab68?)
+	github.com/kandev/kandev/internal/backendapp/httpserver.go:49 +0x28
+net/http.serverHandler.ServeHTTP({0xbfff16e8600?}, {0x5339770?, 0xbfff0ff2780?}, 0x1?)
+	net/http/server.go:3311 +0x8e
+net/http.(*conn).serve(0xbfff0cb18c0, {0x5342ba8, 0xbfff0c3e300})
+	net/http/server.go:2073 +0x650
+created by net/http.(*Server).Serve in goroutine 36
+	net/http/server.go:3464 +0x485
+
+goroutine 442612 [select]:
+github.com/mattn/go-sqlite3.(*SQLiteStmt).exec(0xbfff0eac0f0, {0x5342ba8, 0xbfff13b9290}, {0x87e7240, 0x0, 0x0})
+	github.com/mattn/go-sqlite3@v1.14.33/sqlite3.go:2099 +0x1c8
+github.com/mattn/go-sqlite3.(*SQLiteConn).exec(0xbfff0cea180, {0x5342ba8, 0xbfff13b9290}, {0x4ec09ec?, 0x46c4560?}, {0x0, 0x0, 0x0})
+	github.com/mattn/go-sqlite3@v1.14.33/sqlite3.go:889 +0x255
+github.com/mattn/go-sqlite3.(*SQLiteConn).begin(0xbfff0cea180, {0x5342ba8?, 0xbfff13b9290?})
+	github.com/mattn/go-sqlite3@v1.14.33/sqlite3.go:969 +0x33
+github.com/mattn/go-sqlite3.(*SQLiteConn).BeginTx(0x883340?, {0x5342ba8?, 0xbfff13b9290?}, {0xbfff2da5018?, 0x94?})
+	github.com/mattn/go-sqlite3@v1.14.33/sqlite3_go18.go:43 +0x1d
+database/sql.ctxDriverBegin({0x5342ba8, 0xbfff13b9290}, 0x0?, {0x533ae50, 0xbfff0cea180})
+	database/sql/ctxutil.go:104 +0x77
+database/sql.(*DB).beginDC.func1()
+	database/sql/sql.go:1906 +0xae
+database/sql.withLock({0x532bb20, 0xbfff07c6300}, 0xbfff2da4fe0)
+	database/sql/sql.go:3572 +0x71
+database/sql.(*DB).beginDC(0xbfff0cf2270, {0x5342ba8, 0xbfff13b9290}, 0xbfff07c6300, 0xbfff0aff180, 0x43e69c?)
+	database/sql/sql.go:1902 +0xab
+database/sql.(*DB).begin(0xbfff0cf2270, {0x5342ba8, 0xbfff13b9290}, 0x0, 0x56?)
+	database/sql/sql.go:1895 +0x8d
+database/sql.(*DB).BeginTx.func1(0xa?)
+	database/sql/sql.go:1874 +0x3e
+database/sql.(*DB).retry(0xbfff2da5130?, 0xbfff2da5128)
+	database/sql/sql.go:1576 +0x42
+database/sql.(*DB).BeginTx(0x7d9d017ef738?, {0x5342ba8?, 0xbfff13b9290?}, 0x7d9d017ef738?)
+	database/sql/sql.go:1873 +0x6c
+github.com/kandev/kandev/internal/task/repository/sqlite.(*Repository).GetTaskCompletionGate(0xbfff06c4900, {0x5342ba8, 0xbfff13b9290}, {0xbfff1d4e798, 0x11})
+	github.com/kandev/kandev/internal/task/repository/sqlite/completion_gates.go:274 +0x67
+github.com/kandev/kandev/internal/task/service.(*Service).completionGateSummary(0xbfff14e4808, {0x5342ba8, 0xbfff13b9290}, {0xbfff1d4e798, 0x11})
+	github.com/kandev/kandev/internal/task/service/service_status_summary_rebuild.go:365 +0xa9
+github.com/kandev/kandev/internal/task/service.(*Service).reconcileExistingSummary(0xbfff14e4808, {0x5342ba8, 0xbfff13b9290}, 0xbfff2db6000, 0xbfff154d220, {0x0, 0x0}, {0xdf0ae08, 0xee25ae519, 0x0}, ...)
+	github.com/kandev/kandev/internal/task/service/service_status_summary_rebuild.go:444 +0x9b
+github.com/kandev/kandev/internal/task/service.(*Service).reconcileExistingSummaries(0xbfff14e4808, {0x5342ba8, 0xbfff13b9290}, {0xbfff15fc008, 0x1ef, 0xbfff13b9290?}, 0xbfff57e8150, 0x1, 0xbfff0d70180, 0xbfff581da70, ...)
+	github.com/kandev/kandev/internal/task/service/service_status_summary_rebuild.go:156 +0x4df
+github.com/kandev/kandev/internal/task/service.(*Service).ReconcileTaskStatusSummaries(0xbfff14e4808, {0x5342ba8, 0xbfff13b9290}, {0xbfff15fc008, 0x1ef, 0x1ef}, 0xbfff57e8150, 0xbfff0d70180, 0xbfff0d41d40?)
+	github.com/kandev/kandev/internal/task/service/service_status_summary_rebuild.go:106 +0x336
+github.com/kandev/kandev/internal/backendapp.bootStateBuilder.taskDTOsWithSessionInfo({{{0x5342ba8, 0xbfff0c766c0}, 0xbfff140a9c0, 0xbfff0cb02d0, 0xbfff14e4808, 0xbfff06c4900, 0xbfff0962930, {0x5355a98, 0xbfff0d41d40}, 0xbfff0798608, ...}}, ...)
+	github.com/kandev/kandev/internal/backendapp/boot_state.go:765 +0x551
+github.com/kandev/kandev/internal/backendapp.bootStateBuilder.workflowSnapshotState({{{0x5342ba8, 0xbfff0c766c0}, 0xbfff140a9c0, 0xbfff0cb02d0, 0xbfff14e4808, 0xbfff06c4900, 0xbfff0962930, {0x5355a98, 0xbfff0d41d40}, 0xbfff0798608, ...}}, ...)
+	github.com/kandev/kandev/internal/backendapp/boot_state.go:650 +0x385
+github.com/kandev/kandev/internal/backendapp.bootStateBuilder.addKanbanSnapshotsState({{{0x5342ba8, 0xbfff0c766c0}, 0xbfff140a9c0, 0xbfff0cb02d0, 0xbfff14e4808, 0xbfff06c4900, 0xbfff0962930, {0x5355a98, 0xbfff0d41d40}, 0xbfff0798608, ...}}, ...)
+	github.com/kandev/kandev/internal/backendapp/boot_state.go:608 +0x125
+github.com/kandev/kandev/internal/backendapp.bootStateBuilder.addHomeKanbanRouteState({{{0x5342ba8, 0xbfff0c766c0}, 0xbfff140a9c0, 0xbfff0cb02d0, 0xbfff14e4808, 0xbfff06c4900, 0xbfff0962930, {0x5355a98, 0xbfff0d41d40}, 0xbfff0798608, ...}}, ...)
+	github.com/kandev/kandev/internal/backendapp/boot_state.go:343 +0x1527
+github.com/kandev/kandev/internal/backendapp.bootInitialState({_, _}, _, {{0x5342ba8, 0xbfff0c766c0}, 0xbfff140a9c0, 0xbfff0cb02d0, 0xbfff14e4808, 0xbfff06c4900, 0xbfff0962930, ...}, ...)
+	github.com/kandev/kandev/internal/backendapp/boot_state.go:111 +0xa27
+github.com/kandev/kandev/internal/backendapp.bootPayload({_, _}, _, {{0x5342ba8, 0xbfff0c766c0}, 0xbfff140a9c0, 0xbfff0cb02d0, 0xbfff14e4808, 0xbfff06c4900, 0xbfff0962930, ...}, ...)
+	github.com/kandev/kandev/internal/backendapp/helpers.go:1529 +0xf1
+github.com/kandev/kandev/internal/backendapp.newWebAppHandler.webAppHandlerOptions.func1(_, {{_, _}, {_, _}, {_, _}, _})
+	github.com/kandev/kandev/internal/backendapp/helpers.go:1503 +0x132
+github.com/kandev/kandev/internal/webapp.(*Handler).ServeHTTP(0xbfff066ce70, {0x7d9d2c0b0e20, 0xbfff0ce8100}, 0xbfff140c640)
+	github.com/kandev/kandev/internal/webapp/handler.go:83 +0x198
+github.com/kandev/kandev/internal/backendapp.registerRoutes.func4(0xbfff0ce8100?)
+	github.com/kandev/kandev/internal/backendapp/helpers.go:1381 +0x47
+github.com/gin-gonic/gin.(*Context).Next(0xbfff0ce8100)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174 +0x2b
+github.com/kandev/kandev/internal/backendapp.buildHTTPServer.integrationWorkspaceScopeMiddleware.func7(0xbfff0ce8100?)
+	github.com/kandev/kandev/internal/backendapp/helpers.go:2130 +0x50
+github.com/gin-gonic/gin.(*Context).Next(0xbfff0ce8100)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174 +0x2b
+github.com/kandev/kandev/internal/backendapp.buildHTTPServer.Middleware.func6(0xbfff0ce8100)
+	github.com/kandev/kandev/internal/auth/httpmw/middleware.go:41 +0xeb
+github.com/gin-gonic/gin.(*Context).Next(0xbfff0ce8100)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174 +0x2b
+github.com/kandev/kandev/internal/backendapp.buildHTTPServer.requiredPersistenceMiddleware.func5(0xbfff0ce8100?)
+	github.com/kandev/kandev/internal/backendapp/persistence_middleware.go:21 +0x65
+github.com/gin-gonic/gin.(*Context).Next(0xbfff0ce8100)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174 +0x2b
+github.com/kandev/kandev/internal/backendapp.buildHTTPServer.corsMiddleware.func4(0xbfff0ce8100)
+	github.com/kandev/kandev/internal/backendapp/middleware.go:54 +0x230
+github.com/gin-gonic/gin.(*Context).Next(...)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174
+github.com/gin-gonic/gin.CustomRecoveryWithWriter.func1(0xbfff0ce8100)
+	github.com/gin-gonic/gin@v1.9.1/recovery.go:102 +0x6f
+github.com/gin-gonic/gin.(*Context).Next(...)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174
+github.com/kandev/kandev/internal/common/httpmw.OtelTracing.func1(0xbfff0ce8100)
+	github.com/kandev/kandev/internal/common/httpmw/tracing.go:30 +0x2cb
+github.com/gin-gonic/gin.(*Context).Next(0xbfff0ce8100)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174 +0x2b
+github.com/kandev/kandev/internal/backendapp.buildHTTPServer.RequestLogger.func3(0xbfff0ce8100)
+	github.com/kandev/kandev/internal/common/httpmw/logging.go:24 +0x9e
+github.com/gin-gonic/gin.(*Context).Next(...)
+	github.com/gin-gonic/gin@v1.9.1/context.go:174
+github.com/gin-gonic/gin.serveError(0xbfff0ce8100, 0x194, {0x8701df0, 0x12, 0x12})
+	github.com/gin-gonic/gin@v1.9.1/gin.go:656 +0x4b
+github.com/gin-gonic/gin.(*Engine).handleHTTPRequest(0xbfff140a9c0, 0xbfff0ce8100)
+	github.com/gin-gonic/gin@v1.9.1/gin.go:649 +0x485
+github.com/gin-gonic/gin.(*Engine).ServeHTTP(0xbfff140a9c0, {0x5339770, 0xbfff22d8000}, 0xbfff140c280)
+	github.com/gin-gonic/gin@v1.9.1/gin.go:576 +0x1ad
+github.com/kandev/kandev/internal/backendapp.(*handlerSwitch).ServeHTTP(0x48e2f9?, {0x5339770?, 0xbfff22d8000?}, 0xbfff0fedb68?)
+	github.com/kandev/kandev/internal/backendapp/httpserver.go:49 +0x28
+net/http.serverHandler.ServeHTTP({0xbfff0b288c0?}, {0x5339770?, 0xbfff22d8000?}, 0x1?)
+	net/http/server.go:3311 +0x8e
+net/http.(*conn).serve(0xbfff0fcc000, {0x5342ba8, 0xbfff0c3e300})
+	net/http/server.go:2073 +0x650
+created by net/http.(*Server).Serve in goroutine 36
+	net/http/server.go:3464 +0x485

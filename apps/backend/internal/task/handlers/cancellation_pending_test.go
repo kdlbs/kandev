@@ -189,6 +189,11 @@ func TestTaskSessionSummariesWithPendingActionsCentralizesInputGating(t *testing
 		{ID: "running", TaskID: "task-1", State: models.TaskSessionStateRunning},
 		{ID: "completed", TaskID: "task-1", State: models.TaskSessionStateCompleted},
 	}
+	observations := []*models.TaskSessionSummaryObservation{
+		{ID: "waiting", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput},
+		{ID: "running", TaskID: "task-1", State: models.TaskSessionStateRunning},
+		{ID: "completed", TaskID: "task-1", State: models.TaskSessionStateCompleted},
+	}
 	repo := &cancellationListRepo{
 		mockRepository: mockRepository{sessions: map[string]*models.TaskSession{}},
 		sessionsByTask: sessions,
@@ -206,7 +211,7 @@ func TestTaskSessionSummariesWithPendingActionsCentralizesInputGating(t *testing
 	}, nil, newTestLogger(t), service.RepositoryDiscoveryConfig{})
 	h := &TaskHandlers{service: svc, logger: newTestLogger(t)}
 
-	summaries, err := h.taskSessionSummariesWithPendingActions(context.Background(), sessions)
+	summaries, err := h.taskSessionSummariesWithPendingActions(context.Background(), observations)
 	require.NoError(t, err)
 	require.Len(t, summaries, 3)
 	require.Equal(t, string(models.TaskPendingActionClarification), *summaries[0].PendingAction)

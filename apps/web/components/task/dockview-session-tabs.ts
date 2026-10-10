@@ -39,13 +39,10 @@ const debug = createDebugLogger("dockview:session-tabs");
  * Two ownership gates:
  * 1. Reject when the session is hydrated and known to belong to a different
  *    task (the primary leak path).
- * 2. Reject when the session has no `environmentIdBySessionId` entry. The
- *    session slice clears `taskSessions.items[sid]` and
- *    `environmentIdBySessionId[sid]` together on `removeTaskSession`, so a
- *    missing env mapping means the session has been deleted or never existed.
- *    Writing `activeSessionId = sid` in that window briefly points every
- *    activeSessionId-consumer (chat / file editor / shell / pr-detail / ...)
- *    at a dead session.
+ * 2. Reject when the session is absent from both hydrated session state and
+ *    its environment mapping. A compact task-session row is sufficient proof
+ *    of membership even before the environment mapping arrives. Removal
+ *    clears both sources together, so stale panels cannot select deleted rows.
  */
 export function resolveSessionTabSyncTarget(args: {
   panelId: string;
@@ -61,8 +58,8 @@ export function resolveSessionTabSyncTarget(args: {
   if (!sid) return null;
   if (sid === activeSessionId) return null;
   if (!activeTaskId) return null;
-  if (!environmentIdBySessionId[sid]) return null;
   const sessionTaskId = taskSessionsById[sid]?.task_id;
+  if (!environmentIdBySessionId[sid] && !sessionTaskId) return null;
   if (sessionTaskId && sessionTaskId !== activeTaskId) return null;
   return { taskId: activeTaskId, sessionId: sid };
 }

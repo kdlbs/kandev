@@ -39,6 +39,7 @@ export function deriveTaskDetailRouteView({
     initialState: null,
     activeSessionId: projection.sessionId,
     forceMergeSession: false,
+    turnWindowObservationsAtRequestStart: undefined,
     hydrationEpochsAtRequestStart: undefined,
     shellTaskId: taskId,
     isLoadingOverPreviousRoute: false,
@@ -111,12 +112,14 @@ function loadedRouteMetadata(state: TaskDetailRouteState | null) {
     return {
       navigationContext: undefined,
       enrichmentIdentity: undefined,
+      turnWindowObservationsAtRequestStart: undefined,
       hydrationEpochsAtRequestStart: undefined,
     };
   }
   return {
     navigationContext: state.navigationContext,
     enrichmentIdentity: state.enrichmentIdentity,
+    turnWindowObservationsAtRequestStart: state.turnWindowObservationsAtRequestStart,
     hydrationEpochsAtRequestStart: state.hydrationEpochsAtRequestStart,
   };
 }

@@ -65,6 +65,7 @@ const state = {
   mergeMessages: vi.fn(),
   setMessagesLoading: vi.fn(),
   mergeTurnsSnapshot: vi.fn(),
+  mergeTurnsWindow: vi.fn(),
   addTurn: vi.fn(),
   markTurnsLoaded: vi.fn(),
   reconcileActiveTurnAfterHydration: vi.fn(),
@@ -111,6 +112,8 @@ beforeEach(() => {
     return Promise.resolve({
       messages: messageRequest === 1 ? [staleMessage] : [repairedMessage],
       has_more: false,
+      turns: [repairedTurn],
+      turn_coverage: { message_ids: [staleMessage.id], active_turn_id: null },
     });
   });
   state.mergeMessages.mockImplementation(
@@ -121,15 +124,12 @@ beforeEach(() => {
       Object.assign(metaBySession[sessionId], meta);
     },
   );
-  state.mergeTurnsSnapshot.mockImplementation(
-    (sessionId: string, turns: Turn[], _epoch: number, options?: { replace?: boolean }) => {
-      const turnsBySession = state.turns.bySession as Record<string, Turn[]>;
-      turnsBySession[sessionId] = options?.replace
-        ? turns
-        : [...turnsBySession[sessionId], ...turns];
-      (state.turns.loadedBySession as Record<string, boolean>)[sessionId] = true;
-    },
-  );
+  state.mergeTurnsWindow.mockImplementation((sessionId: string, turns: Turn[]) => {
+    const turnsBySession = state.turns.bySession as Record<string, Turn[]>;
+    const byId = new Map(turnsBySession[sessionId].map((turn) => [turn.id, turn]));
+    for (const turn of turns) byId.set(turn.id, turn);
+    turnsBySession[sessionId] = [...byId.values()];
+  });
 });
 
 afterEach(() => {
@@ -138,7 +138,7 @@ afterEach(() => {
 });
 
 describe("core session recovery", () => {
-  it("rehydrates both core snapshots before resuming after invalid resume", async () => {
+  it("rehydrates message and turn context from one window before resuming after invalid resume", async () => {
     const { unmount } = renderHook(() => useSessionMessages("sess-1"));
 
     await waitFor(() => expect(recoveryHandlers.has("sess-1")).toBe(true));
@@ -156,9 +156,20 @@ describe("core session recovery", () => {
       [repairedMessage],
       expect.objectContaining({ historyInitialized: true }),
     );
-    expect(state.mergeTurnsSnapshot).toHaveBeenCalledWith("sess-1", [repairedTurn], 0, {
-      replace: true,
-    });
+    expect(state.mergeTurnsWindow).toHaveBeenCalledWith(
+      "sess-1",
+      [repairedTurn],
+      { message_ids: [staleMessage.id], active_turn_id: null },
+      0,
+      { activeTurnId: null, reconcileEpoch: 0, updatedAt: undefined },
+    );
+    expect(state.mergeTurnsSnapshot).not.toHaveBeenCalled();
+    expect(listSessionTurns).not.toHaveBeenCalled();
+    expect(webSocketClient.request).toHaveBeenCalledWith(
+      "message.list",
+      expect.objectContaining({ include_turns: true }),
+      expect.anything(),
+    );
 
     unmount();
   });

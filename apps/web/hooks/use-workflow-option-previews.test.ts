@@ -68,6 +68,7 @@ it("distinguishes loading from successful empty results and orders step metadata
   expect(workflowApiMocks.listWorkflowSteps).toHaveBeenCalledTimes(3);
   expect(workflowApiMocks.listWorkflowSteps).toHaveBeenCalledWith("populated", {
     cache: "no-store",
+    init: { signal: expect.any(AbortSignal) },
   });
 
   await act(async () => {

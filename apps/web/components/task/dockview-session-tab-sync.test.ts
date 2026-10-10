@@ -56,6 +56,7 @@ function makeSessionTabSyncHarness(args: {
   activeSessionId: string;
   otherSessionId: string;
   includeOtherEnv?: boolean;
+  includeOtherSession?: boolean;
   includeOtherInTaskList?: boolean;
   otherEnvironmentId?: string;
   otherSessionTaskId?: string;
@@ -104,10 +105,14 @@ function makeSessionTabSyncHarness(args: {
       taskSessions: {
         items: {
           [args.activeSessionId]: { id: args.activeSessionId, task_id: args.activeTaskId },
-          [args.otherSessionId]: {
-            id: args.otherSessionId,
-            task_id: args.otherSessionTaskId ?? args.activeTaskId,
-          },
+          ...(args.includeOtherSession === false
+            ? {}
+            : {
+                [args.otherSessionId]: {
+                  id: args.otherSessionId,
+                  task_id: args.otherSessionTaskId ?? args.activeTaskId,
+                },
+              }),
         },
       },
       taskSessionsByTask: {
@@ -139,6 +144,7 @@ function makeSessionTabSyncHarness(args: {
 
 function makeDefaultSessionTabSyncHarness(args?: {
   includeOtherEnv?: boolean;
+  includeOtherSession?: boolean;
   includeOtherInTaskList?: boolean;
   otherEnvironmentId?: string;
   otherSessionTaskId?: string;
@@ -151,6 +157,7 @@ function makeDefaultSessionTabSyncHarness(args?: {
     activeSessionId: ACTIVE_SESSION_ID,
     otherSessionId: OTHER_SESSION_ID,
     includeOtherEnv: args?.includeOtherEnv,
+    includeOtherSession: args?.includeOtherSession,
     includeOtherInTaskList: args?.includeOtherInTaskList,
     otherEnvironmentId: args?.otherEnvironmentId,
     otherSessionTaskId: args?.otherSessionTaskId,
@@ -360,7 +367,11 @@ describe("setupSessionTabSync explicit activation", () => {
   });
 
   it("restores active panel for stale session panels without an environment mapping", () => {
-    const harness = makeDefaultSessionTabSyncHarness({ includeOtherEnv: false });
+    const harness = makeDefaultSessionTabSyncHarness({
+      includeOtherEnv: false,
+      includeOtherSession: false,
+      includeOtherInTaskList: false,
+    });
 
     startSessionTabSync(harness);
     markSessionTabUserActivationIntent(OTHER_SESSION_ID);
@@ -368,5 +379,14 @@ describe("setupSessionTabSync explicit activation", () => {
 
     expect(harness.setActiveSession).not.toHaveBeenCalled();
     expect(harness.activePanelSetActive).toHaveBeenCalledTimes(1);
+  });
+
+  it("selects a compact session before its environment mapping arrives", () => {
+    const harness = makeDefaultSessionTabSyncHarness({ includeOtherEnv: false });
+    startSessionTabSync(harness);
+    markSessionTabUserActivationIntent(OTHER_SESSION_ID);
+    harness.fireActivePanelChange(OTHER_SESSION_PANEL_ID);
+    expect(harness.setActiveSession).toHaveBeenCalledWith(TASK_ID, OTHER_SESSION_ID);
+    expect(harness.activePanelSetActive).not.toHaveBeenCalled();
   });
 });
