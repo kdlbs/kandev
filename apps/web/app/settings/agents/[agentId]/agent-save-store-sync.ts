@@ -11,11 +11,13 @@ export function syncSavedAgentToStore(
   store: StoreApi<AppState>,
   agent: Agent,
   profileVersionAtSaveStart: number,
+  allowMissingAgent = false,
 ) {
   const state = store.getState();
   const settingsAgents = state.settingsAgents.items;
   const existing = settingsAgents.find((item) => item.id === agent.id);
-  if (!existing && state.agentProfiles.version !== profileVersionAtSaveStart) return;
+  if (!existing && state.agentProfiles.version !== profileVersionAtSaveStart && !allowMissingAgent)
+    return;
   const { profiles, membershipChanged } = reconcileSavedProfiles(
     existing,
     agent,

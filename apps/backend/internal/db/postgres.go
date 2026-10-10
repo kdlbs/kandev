@@ -14,9 +14,18 @@ import (
 // OpenPostgres opens a PostgreSQL database connection using pgx.
 // If maxConns or minConns are 0, they default to 25 and 5 respectively.
 func OpenPostgres(dsn string, maxConns, minConns int) (*sql.DB, error) {
+	return OpenPostgresWithRuntimeParams(dsn, maxConns, minConns, nil)
+}
+
+// OpenPostgresWithRuntimeParams opens a PostgreSQL database with additional
+// server runtime parameters applied to every pooled connection.
+func OpenPostgresWithRuntimeParams(dsn string, maxConns, minConns int, runtimeParams map[string]string) (*sql.DB, error) {
 	config, err := pgx.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse postgres configuration: %w", err)
+	}
+	for name, value := range runtimeParams {
+		config.RuntimeParams[name] = value
 	}
 	db := sql.OpenDB(stdlib.GetConnector(*config, stdlib.OptionAfterConnect(func(_ context.Context, conn *pgx.Conn) error {
 		return configurePostgresTimeTypes(conn.TypeMap())

@@ -11,9 +11,9 @@ import (
 	internaldb "github.com/kandev/kandev/internal/db"
 )
 
-// OpenIsolatedPostgres opens dsn with a unique schema on a single connection.
-// It lets package tests share one Postgres database without racing on
-// DROP SCHEMA public when Go runs packages in parallel.
+// OpenIsolatedPostgres opens dsn with a unique schema as each connection's
+// search_path. It lets package tests share one Postgres database without
+// racing on DROP SCHEMA public when Go runs packages in parallel.
 func OpenIsolatedPostgres(t testing.TB, dsn string) *sqlx.DB {
 	t.Helper()
 
@@ -30,15 +30,23 @@ func OpenIsolatedPostgres(t testing.TB, dsn string) *sqlx.DB {
 		_ = db.Close()
 		t.Fatalf("create postgres schema %s: %v", schema, err)
 	}
-	t.Cleanup(func() {
+	isolatedRaw, err := internaldb.OpenPostgresWithRuntimeParams(dsn, 1, 1, map[string]string{"search_path": schema})
+	if err != nil {
 		_, _ = db.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE")
 		_ = db.Close()
-	})
-
-	if _, err := db.Exec("SET search_path TO " + schema); err != nil {
-		t.Fatalf("set postgres search_path %s: %v", schema, err)
+		t.Fatalf("open postgres with isolated schema %s: %v", schema, err)
 	}
-	return db
+	if err := db.Close(); err != nil {
+		_, _ = isolatedRaw.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE")
+		_ = isolatedRaw.Close()
+		t.Fatalf("close postgres schema setup connection: %v", err)
+	}
+	isolatedDB := sqlx.NewDb(isolatedRaw, "pgx")
+	t.Cleanup(func() {
+		_, _ = isolatedDB.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE")
+		_ = isolatedDB.Close()
+	})
+	return isolatedDB
 }
 
 func PostgresDSNFromEnv(t testing.TB) string {
