@@ -272,3 +272,11 @@ func TestBuildLifecycleLaunchRequestCarriesInitialDeliverySubmissionID(t *testin
 		t.Fatalf("initial delivery submission ID = %q, want message-1", launch.InitialDeliverySubmissionID)
 	}
 }
+
+func TestBuildLifecycleLaunchRequestCarriesBootStatusSuppression(t *testing.T) {
+	launch := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		SuppressBootStatusMessage: true,
+	}, "/workspace", "profile-1")
+
+	require.True(t, launch.SuppressBootStatusMessage)
+}

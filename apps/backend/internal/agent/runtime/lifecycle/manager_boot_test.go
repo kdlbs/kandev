@@ -247,6 +247,26 @@ func TestCreateBootMessage_MarksResumedSession(t *testing.T) {
 	}
 }
 
+func TestCreateBootMessageSkipsSilentRestoreStatus(t *testing.T) {
+	mgr := newTestManager(t)
+	bootSvc := &MockBootMessageService{}
+	mgr.bootMessageService = bootSvc
+	execution := &AgentExecution{
+		TaskID:                    "task-1",
+		SessionID:                 "session-1",
+		ACPSessionID:              "acp-session-1",
+		suppressBootStatusMessage: true,
+	}
+
+	message, stopCh := mgr.createBootMessage(context.Background(), execution, "agent --resume", "Mock")
+	if message != nil || stopCh != nil {
+		t.Fatalf("silent restore boot status = (%v, %v), want (nil, nil)", message, stopCh)
+	}
+	if len(bootSvc.CreatedMessages) != 0 {
+		t.Fatalf("created boot messages = %d, want 0", len(bootSvc.CreatedMessages))
+	}
+}
+
 func TestManagedStartupProgress(t *testing.T) {
 	mgr := newTestManager(t)
 	bootSvc := &MockBootMessageService{}

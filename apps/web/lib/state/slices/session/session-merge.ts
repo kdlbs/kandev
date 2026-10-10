@@ -104,11 +104,8 @@ function matchesDurableDeliveryUncertainty(
   const record = asMetadataRecord(error);
   if (record?.code !== DURABLE_DELIVERY_UNCERTAIN) return false;
   const agentExecutionID = readDeliveryErrorExecutionID(record);
-  return (
-    agentExecutionID === recovery.agentExecutionId &&
-    typeof record.details === "string" &&
-    record.details === recovery.submissionId
-  );
+  const submissionID = readDeliveryErrorSubmissionID(record);
+  return agentExecutionID === recovery.agentExecutionId && submissionID === recovery.submissionId;
 }
 
 function readDeliveryErrorExecutionID(error: Record<string, unknown>): string {
@@ -119,6 +116,17 @@ function readDeliveryErrorExecutionID(error: Record<string, unknown>): string {
     return error.execution_id;
   }
   return "";
+}
+
+function readDeliveryErrorSubmissionID(error: Record<string, unknown>): string {
+  const hasStructuredSubmissionID =
+    Object.prototype.hasOwnProperty.call(error, "delivery_submission_id") ||
+    Object.prototype.hasOwnProperty.call(error, "deliverySubmissionId");
+  if (hasStructuredSubmissionID) {
+    const value = error.delivery_submission_id ?? error.deliverySubmissionId;
+    return typeof value === "string" ? value : "";
+  }
+  return typeof error.details === "string" ? error.details : "";
 }
 
 function mergeDeliveryRecoveryMetadata(

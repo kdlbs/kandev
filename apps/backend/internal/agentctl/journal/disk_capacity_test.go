@@ -618,14 +618,18 @@ func TestConcurrentWritesCannotDoubleReserveReusablePages(t *testing.T) {
 	}
 	close(start)
 	successes := 0
+	reservations := make([]diskCapacityReservation, 0, 2)
 	for i := 0; i < 2; i++ {
 		result := <-results
 		if result.err == nil {
 			successes++
-			j.finishDiskCapacityReservation(result.reservation, false)
+			reservations = append(reservations, result.reservation)
 		} else if !errors.Is(result.err, ErrJournalFull) {
 			t.Fatalf("disk reservation error = %v, want only one request rejected for pressure", result.err)
 		}
+	}
+	for _, reservation := range reservations {
+		j.finishDiskCapacityReservation(reservation, false)
 	}
 	if successes != 1 {
 		t.Fatalf("concurrent write reservations succeeded = %d, want exactly one reusable-page credit", successes)

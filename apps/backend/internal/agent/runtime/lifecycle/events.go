@@ -138,6 +138,7 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 	evidence *PromptAttemptEvidence,
 ) AgentEventPayload {
 	startupFailure := execution.startupFailureMetadataSnapshot()
+	deliverySubmissionID := uncertainFailureSubmissionID(execution)
 	payload := AgentEventPayload{
 		AgentExecutionID:       execution.ID,
 		AttemptID:              execution.currentStartupAttemptID(),
@@ -160,6 +161,7 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 		ErrorMessage:           execution.ErrorMessage,
 		FailureCode:            execution.FailureCode,
 		FailureDetails:         execution.FailureDetails,
+		DeliverySubmissionID:   deliverySubmissionID,
 		StartupFailureReason:   startupFailure.reason,
 		StartupFailureAttempts: startupFailure.attempts,
 		StartupFailureNPMCode:  startupFailure.npmCode,
@@ -184,6 +186,16 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 		payload.ProviderDiagnosticText = evidence.ProviderDiagnosticText
 	}
 	return payload
+}
+
+func uncertainFailureSubmissionID(execution *AgentExecution) string {
+	if execution == nil || execution.FailureCode != durableDeliveryUncertainFailureCode || execution.FailureDetails == "" {
+		return ""
+	}
+	if currentDeliverySubmissionID(execution) != execution.FailureDetails {
+		return ""
+	}
+	return execution.FailureDetails
 }
 
 // PublishAgentctlEvent publishes an agentctl lifecycle event (starting, ready, error).

@@ -33,6 +33,7 @@ type AgentEventPayload struct {
 	ErrorMessage             string                           `json:"error_message,omitempty"`
 	FailureCode              string                           `json:"failure_code,omitempty"`
 	FailureDetails           string                           `json:"failure_details,omitempty"`
+	DeliverySubmissionID     string                           `json:"delivery_submission_id,omitempty"`
 	StartupFailureReason     string                           `json:"startup_reason,omitempty"`
 	StartupFailureAttempts   int                              `json:"startup_attempts,omitempty"`
 	StartupFailureNPMCode    string                           `json:"startup_npm_code,omitempty"`

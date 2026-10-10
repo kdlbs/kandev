@@ -2356,6 +2356,7 @@ func (m *Manager) buildExecutionFromInstance(
 	execution.TaskScope = req.TaskScope
 	execution.setSessionSettingsStartupPolicy(req.SessionSettingsPolicy)
 	execution.RequiredNativeConversationID = req.RequiredNativeConversationID
+	execution.suppressBootStatusMessage = req.SuppressBootStatusMessage
 	execution.InterruptedSubmissionID = req.InterruptedSubmissionID
 	execution.InterruptedStreamID = req.InterruptedStreamID
 	execution.InterruptedHarnessGeneration = req.InterruptedHarnessGeneration
@@ -2904,7 +2905,7 @@ func (m *Manager) resolveAgentDisplayName(ctx context.Context, execution *AgentE
 // createBootMessage creates a boot message and starts the stderr polling goroutine.
 // Returns nil values when boot messages are unavailable.
 func (m *Manager) createBootMessage(ctx context.Context, execution *AgentExecution, bootCommand, agentDisplayName string) (*models.Message, chan struct{}) {
-	if m.bootMessageService == nil || execution == nil {
+	if m.bootMessageService == nil || execution == nil || execution.suppressBootStatusMessage {
 		return nil, nil
 	}
 	bootMsg, bootErr := m.bootMessageService.CreateMessage(ctx, &BootMessageRequest{

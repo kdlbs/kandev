@@ -10,11 +10,11 @@ plan: "plan.md"
 requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
 acceptance_criteria:
-  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.11
-  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.12
-  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.13
-  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.14
-  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.15
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.20
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.21
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.22
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.23
+  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.24
 system_design:
   - ../../specs/platform/system-design/durable-agent-reattachment.md
 ---
@@ -136,6 +136,10 @@ Implementation authorized on 2026-10-09 and resumed on 2026-10-10. GPT-6 Luna ma
 - Startup recovery: the expected RED showed that restart did not restore the native conversation. The final focused orchestrator selection passed without race instrumentation, including startup restoration, queue behavior, previous-owner and changed-generation guards, worker cancellation, candidate-dead crash boundaries, missing launch evidence, eligibility filtering, and capacity denial. The startup auth resolver, retired-handler rejection, runtime flags, configuration, and profile checks passed after fixture repairs. SQL guard passed. The integrated race gate and managed browsers remain pending.
 - Public docs validation (63 validator tests, 47 published pages), specification catalog validation, and specification lint passed for the updated docs.
 - The first desktop browser run exposed a blocked restore behind a terminal predecessor with no persisted PID. Exact saved process-identity proof now passes focused race tests, including live descendants, incomplete identity, remote exclusion, and inspection errors. Cleanup regressions also prove that a concurrently created workspace successor remains untouched. The workspace-only allocation guard passes race tests across all three lazy creation APIs, including the interval before recovery-block persistence, malformed evidence, historical completion, cached access, and ordinary allocation.
-- Resume admission refactoring passed the focused `ResumeTaskSession` and `RecoverSession_ContextContinuation` race selection. The combined backend run passed lifecycle after integration fixes, runtime agentctl, handlers, executor, and SQLite. Final orchestrator and browser gates will run after rebase.
+- Resume admission refactoring passed the focused `ResumeTaskSession` and `RecoverSession_ContextContinuation` race selection. The combined backend run passed lifecycle after integration fixes, runtime agentctl, handlers, executor, and SQLite.
+- After rebase, the full lifecycle (111.989 seconds) and orchestrator (177.717 seconds) race gates passed. Recovery-service and state-merge suites passed 36 tests, with scoped ESLint clean. The first fresh Chromium restart case found an extra turn after restart with unchanged user messages; diagnostics identified a persisted resumed-agent boot message creating a lifecycle-only turn. A separate stale notice compares sanitized error details with an exact submission ID. Both defects are fixed with focused regressions. The previously failing Chromium runtime-replacement case passed on its first attempt with retries disabled (23.7 seconds); the complete managed selections remain in progress.
+- Rebase review found upstream workspace-inspection behavior overlapping the new allocation guard. The integrated contract permits existing owned access and generic-block workspace creation without a saved recovery identity, while preserving pinned source and candidate rows. The real Manager regression passed under race, preserving the open prompt block and denying pinned or non-prompt recovery states. Scoped lifecycle lint passed. The subsequent lifecycle (106.823 seconds) and orchestrator (172.092 seconds) race union passed before the later boot-status and error-identity fixes.
 
 These results do not establish final runtime or PR readiness. Integration, managed browsers, final review, and delivery remain pending.
+
+Post-rebase browser remediation passed focused boot-status suppression and request-propagation tests, plus the real sanitized-error persistence and atomic-restore path. The structured-identity matrix passed with race on SQLite and PostgreSQL (2.568 seconds), including mismatched, empty, malformed, and legacy-fallback cases. Frontend identity tests passed 33 cases; the combined legacy restored/dismissed recovery suite passed 25 cases. Scoped frontend lint, formatting, and typecheck passed. The frozen-source backend race union passed lifecycle (165.577 seconds), orchestrator (265.166 seconds), executor (15.529 seconds), watcher (1.077 seconds), backendapp (128.627 seconds), and task models (1.476 seconds). Six desktop cases passed with retries disabled. Three of four phone cases passed; the remaining initial Mock launch failure did not reproduce in an isolated rerun. Complete phone and SSH selections remain pending after current-base reconciliation. Later constant and helper-file extraction is behavior-preserving and receives focused checks.

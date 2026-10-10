@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestJournalOperationsAfterClose(t *testing.T) {
+func TestJournalShutdownLifecycle(t *testing.T) {
 	path := t.TempDir() + "/delivery.bbolt"
 	j, err := Open(Config{Path: path})
 	if err != nil {

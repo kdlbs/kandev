@@ -564,7 +564,7 @@ func (s *Service) finishLaunchedSilentRestoreCandidateLocked(
 	next := checkpoint.SourceGeneration
 	next.Generation++
 	next.PredecessorGeneration = checkpoint.SourceGeneration.Generation
-	next.CreationReason = "silent_restart_restored"
+	next.CreationReason = silentRestartRestoredCreationReason
 	next.CreatedAt, next.CommittedAt = now, now
 	committed, err := store.CommitSilentRestore(ownerCtx, &models.SilentRestoreCommit{
 		AttemptID: attemptID, Checkpoint: commitCheckpoint, Generation: next, CompletedAt: now,

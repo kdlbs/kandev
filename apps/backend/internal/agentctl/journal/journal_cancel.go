@@ -14,15 +14,15 @@ import (
 func (j *Journal) CancelSubmission(ctx context.Context, id string, event Event) error {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
+	db, err := j.dbLocked()
+	if err != nil {
+		return err
+	}
 	events := []Event{event}
 	if err := prepareAppendEvents(events, j.config.MaxEventBytes); err != nil {
 		return err
 	}
 	event = events[0]
-	db, err := j.dbLocked()
-	if err != nil {
-		return err
-	}
 	alreadyTerminal := false
 	err = j.viewLocked(func(tx *bolt.Tx) error {
 		if err := ctx.Err(); err != nil {

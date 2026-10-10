@@ -95,6 +95,9 @@ func activeWorkspaceRecoveryMetadata(phase string, generation int64) map[string]
 			Phase: phase, Revision: 1, SessionID: workspaceRecoverySessionID,
 			SubmissionID:      "submission-workspace-recovery",
 			IncarnationID:     workspaceRecoveryIncarnationID,
+			AgentExecutionID:  "execution-prior",
+			StreamID:          "stream-workspace-recovery",
+			PromptGeneration:  1,
 			HarnessGeneration: generation,
 		},
 	}
@@ -105,6 +108,88 @@ func currentWorkspaceRecoveryGeneration(generation int64) *models.HarnessSession
 		SessionID:     workspaceRecoverySessionID,
 		IncarnationID: workspaceRecoveryIncarnationID,
 		Generation:    generation,
+	}
+}
+
+func TestWorkspaceOnlyAllocationAllowsUnpinnedPromptBlockWithoutExecutorRow(t *testing.T) {
+	block := &models.SessionRecoveryBlock{
+		ID: "block-generic-prompt", SessionID: workspaceRecoverySessionID,
+		IncarnationID: workspaceRecoveryIncarnationID, ExpectedGeneration: 3,
+		Reason: workspaceRecoveryUnknownPromptOutcome, State: models.RecoveryBlockOpen,
+		ConsumerReference: "interactive",
+	}
+	reader := &workspaceRecoveryReader{
+		generation: currentWorkspaceRecoveryGeneration(3),
+		block:      block,
+	}
+	manager, backend, writer := newWorkspaceRecoveryFixture(t, nil, reader)
+	writer.prior = nil
+
+	execution, err := manager.EnsureWorkspaceExecutionForSession(
+		context.Background(), workspaceRecoveryTaskID, workspaceRecoverySessionID,
+	)
+	if err != nil {
+		t.Fatalf("workspace-only inspection returned error: %v", err)
+	}
+	if execution == nil || execution.AgentCommand != "" {
+		t.Fatalf("workspace inspection execution = %+v, want workspace-only execution", execution)
+	}
+	if got := backend.createCount.Load(); got != 1 {
+		t.Fatalf("workspace runtime creation count = %d, want 1", got)
+	}
+	if writer.running == nil || writer.running.AgentExecutionID != execution.ID {
+		t.Fatalf("workspace execution row = %+v, want newly registered workspace execution %q", writer.running, execution.ID)
+	}
+	if block.State != models.RecoveryBlockOpen {
+		t.Fatalf("prompt recovery block state = %q, want open", block.State)
+	}
+}
+
+func TestWorkspaceOnlyAllocationProtectsExecutorIdentityForBlockWithoutGeneration(t *testing.T) {
+	block := &models.SessionRecoveryBlock{
+		ID: "block-generic-prompt-no-generation", SessionID: workspaceRecoverySessionID,
+		IncarnationID: workspaceRecoveryIncarnationID, ExpectedGeneration: 0,
+		Reason: workspaceRecoveryUnknownPromptOutcome, State: models.RecoveryBlockOpen,
+		ConsumerReference: "interactive",
+	}
+	reader := &workspaceRecoveryReader{
+		generationErr: sql.ErrNoRows,
+		block:         block,
+	}
+	manager, backend, writer := newWorkspaceRecoveryFixture(t, nil, reader)
+
+	_, err := manager.GetOrEnsureExecution(context.Background(), workspaceRecoverySessionID)
+	if !errors.Is(err, ErrSessionRecoveryRequired) {
+		t.Fatalf("workspace allocation error = %v, want %v", err, ErrSessionRecoveryRequired)
+	}
+	if got := backend.createCount.Load(); got != 0 {
+		t.Fatalf("runtime creation count = %d, want 0", got)
+	}
+	if writer.running != nil || writer.prior == nil || writer.prior.AgentExecutionID != "execution-prior" {
+		t.Fatalf("executor-running row changed: prior=%+v current=%+v", writer.prior, writer.running)
+	}
+}
+
+func TestWorkspaceOnlyAllocationKeepsNonPromptRecoveryBlockGuarded(t *testing.T) {
+	block := &models.SessionRecoveryBlock{
+		ID: "block-native-state", SessionID: workspaceRecoverySessionID,
+		IncarnationID: workspaceRecoveryIncarnationID, ExpectedGeneration: 3,
+		Reason: "native_state_unavailable", State: models.RecoveryBlockOpen,
+		ConsumerReference: "interactive",
+	}
+	reader := &workspaceRecoveryReader{
+		generation: currentWorkspaceRecoveryGeneration(3),
+		block:      block,
+	}
+	manager, backend, writer := newWorkspaceRecoveryFixture(t, nil, reader)
+	writer.prior = nil
+
+	_, err := manager.GetOrEnsureExecution(context.Background(), workspaceRecoverySessionID)
+	if !errors.Is(err, ErrSessionRecoveryRequired) {
+		t.Fatalf("workspace allocation error = %v, want %v", err, ErrSessionRecoveryRequired)
+	}
+	if backend.createCount.Load() != 0 || writer.running != nil {
+		t.Fatalf("non-prompt recovery block allowed allocation: creates=%d row=%+v", backend.createCount.Load(), writer.running)
 	}
 }
 

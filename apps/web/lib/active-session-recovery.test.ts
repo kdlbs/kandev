@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { selectActiveSessionRecovery } from "./active-session-recovery";
+import {
+  readLastAgentError,
+  readLastAgentErrorIncludingDismissed,
+} from "./session-last-agent-error";
 const FAILED_AT = "2026-09-20T10:00:00Z";
 const RESOLVED_AT = "2026-09-20T11:00:00Z";
 const NEW_FAILURE_AT = "2026-09-20T12:00:00Z";
@@ -285,6 +289,61 @@ it("keeps the composer usable after durable recovery or a successful later boot"
           metadata: { script_type: "agent_boot", status: "exited", exit_code: 0 },
         },
       ],
+    ),
+  ).toBeNull();
+});
+
+it("keeps a dismissed legacy delivery error as history without active recovery after restoration", () => {
+  const legacyError = {
+    message: "Prompt delivery outcome is uncertain",
+    code: "DURABLE_DELIVERY_UNCERTAIN",
+    execution_id: "execution-1",
+    details: "prompt:initial:<redacted>",
+    occurred_at: FAILED_AT,
+    dismissed_at: RESOLVED_AT,
+  };
+  const metadata = {
+    agent_delivery_recovery: {
+      phase: "restored",
+      revision: 4,
+      session_id: "session",
+      agent_execution_id: "execution-1",
+      submission_id: "submission-1",
+      stream_id: "stream-1",
+      incarnation_id: "incarnation-1",
+      harness_generation: 2,
+      prompt_generation: 3,
+    },
+    last_agent_error: legacyError,
+  };
+  const recoveryHistory = {
+    id: "delivery-recovery-history",
+    session_id: "session",
+    type: "status",
+    created_at: FAILED_AT,
+    content: legacyError.message,
+    metadata: {
+      recovery_actions: true,
+      error_stamp: `${FAILED_AT}:${legacyError.message}`,
+    },
+  };
+
+  expect(readLastAgentError(metadata)).toBeNull();
+  expect(readLastAgentErrorIncludingDismissed(metadata)).toMatchObject({
+    code: "DURABLE_DELIVERY_UNCERTAIN",
+    details: "prompt:initial:<redacted>",
+    dismissedAt: RESOLVED_AT,
+  });
+  expect(readLastAgentErrorIncludingDismissed(metadata)?.deliverySubmissionId).toBeUndefined();
+  expect(
+    selectActiveSessionRecovery(
+      {
+        ...session,
+        state: "WAITING_FOR_INPUT",
+        error_message: null,
+        metadata,
+      },
+      [recoveryHistory],
     ),
   ).toBeNull();
 });

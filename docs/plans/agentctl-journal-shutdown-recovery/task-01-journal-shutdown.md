@@ -38,7 +38,7 @@ Session recovery presentation, prompt admission changes, global panic suppressio
 
 ## Acceptance
 
-1. `TestJournalOperationsAfterClose` and `TestJournalCloseDuringReplay` fail on the current panic and pass with typed errors.
+1. `TestJournalShutdownLifecycle` and `TestJournalCloseDuringReplay` fail on the current panic and pass with typed errors.
 2. `TestInstanceTeardownDoesNotCrashSiblingStream` proves that the sibling delivers output while the stopped instance releases its stream resources.
 3. Committed records replay after reopen, repeated close is safe, and the race detector reports no database lifetime race.
 

@@ -6,11 +6,19 @@ import type { TaskSession } from "@/lib/types/http";
 const EQUAL_UPDATED_AT = "2026-09-28T08:01:00.000Z";
 const EARLIER_UPDATED_AT = "2026-09-28T08:00:00.000Z";
 const LATER_UPDATED_AT = "2026-09-28T08:02:00.000Z";
+const UNCERTAIN_CODE = "DURABLE_DELIVERY_UNCERTAIN";
+const EXECUTION_ID = "execution-1";
+const SUBMISSION_ID = "submission-1";
 const UNCERTAIN_ERROR = {
-  code: "DURABLE_DELIVERY_UNCERTAIN",
+  code: UNCERTAIN_CODE,
   message: "Old notice",
-  agent_execution_id: "execution-1",
-  details: "submission-1",
+  agent_execution_id: EXECUTION_ID,
+  details: SUBMISSION_ID,
+};
+const SANITIZED_UNCERTAIN_ERROR = {
+  ...UNCERTAIN_ERROR,
+  details: "prompt:initial:<redacted>",
+  delivery_submission_id: SUBMISSION_ID,
 };
 const UNRELATED_ERROR = { code: "NATIVE_RESTORE_FAILED", message: "Restore needs attention" };
 
@@ -30,8 +38,8 @@ function recovery(phase: AgentDeliveryRecoveryPhase, revision: number) {
     phase,
     revision,
     session_id: "session-1",
-    agent_execution_id: "execution-1",
-    submission_id: "submission-1",
+    agent_execution_id: EXECUTION_ID,
+    submission_id: SUBMISSION_ID,
     stream_id: "stream-1",
     incarnation_id: "incarnation-1",
     harness_generation: 2,
@@ -146,8 +154,8 @@ describe("TaskSession durable-delivery uncertainty error reconciliation", () => 
     const legacyError = {
       code: UNCERTAIN_ERROR.code,
       message: UNCERTAIN_ERROR.message,
-      execution_id: "execution-1",
-      details: "submission-1",
+      execution_id: EXECUTION_ID,
+      details: SUBMISSION_ID,
     };
     const merged = mergeTaskSession(
       session(
@@ -164,13 +172,67 @@ describe("TaskSession durable-delivery uncertainty error reconciliation", () => 
   });
 });
 
+describe("TaskSession structured durable-delivery identity", () => {
+  it("clears a matching submission ID when legacy details are sanitized", () => {
+    const merged = mergeTaskSession(
+      session(
+        {
+          agent_delivery_recovery: recovery("uncertain", 2),
+          last_agent_error: SANITIZED_UNCERTAIN_ERROR,
+        },
+        EARLIER_UPDATED_AT,
+      ),
+      session({ agent_delivery_recovery: recovery("restored", 3) }, LATER_UPDATED_AT),
+    );
+
+    expect(merged.metadata).not.toHaveProperty("last_agent_error");
+  });
+
+  it("preserves a mismatched structured submission ID even if legacy details match", () => {
+    const error = {
+      ...SANITIZED_UNCERTAIN_ERROR,
+      details: SUBMISSION_ID,
+      delivery_submission_id: "submission-other",
+    };
+    const merged = mergeTaskSession(
+      session(
+        {
+          agent_delivery_recovery: recovery("uncertain", 2),
+          last_agent_error: error,
+        },
+        EARLIER_UPDATED_AT,
+      ),
+      session({ agent_delivery_recovery: recovery("restored", 3) }, LATER_UPDATED_AT),
+    );
+
+    expect(merged.metadata?.last_agent_error).toEqual(error);
+  });
+
+  it("preserves a different error code with matching execution and structured submission", () => {
+    const error = { ...SANITIZED_UNCERTAIN_ERROR, code: "NATIVE_RESTORE_FAILED" };
+    const merged = mergeTaskSession(
+      session(
+        {
+          agent_delivery_recovery: recovery("uncertain", 2),
+          last_agent_error: error,
+        },
+        EARLIER_UPDATED_AT,
+      ),
+      session({ agent_delivery_recovery: recovery("restored", 3) }, LATER_UPDATED_AT),
+    );
+
+    expect(merged.metadata?.last_agent_error).toEqual(error);
+  });
+});
+
 describe("TaskSession delivery recovery revision reconciliation", () => {
   it("requires a newer recovery revision before clearing uncertainty", () => {
+    const error = SANITIZED_UNCERTAIN_ERROR;
     const merged = mergeTaskSession(
       session(
         {
           agent_delivery_recovery: recovery("uncertain", 3),
-          last_agent_error: UNCERTAIN_ERROR,
+          last_agent_error: error,
         },
         EARLIER_UPDATED_AT,
       ),
@@ -178,7 +240,7 @@ describe("TaskSession delivery recovery revision reconciliation", () => {
     );
 
     expect(merged.metadata?.agent_delivery_recovery).toEqual(recovery("restored", 3));
-    expect(merged.metadata?.last_agent_error).toEqual(UNCERTAIN_ERROR);
+    expect(merged.metadata?.last_agent_error).toEqual(error);
   });
 
   it("does not let a late uncertain snapshot restore the error after silent restoration", () => {

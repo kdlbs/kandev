@@ -1105,24 +1105,25 @@ const SessionMetaKeyLastAgentError = "last_agent_error"
 // RemediationURL is only ever set from an adapter-validated provider
 // diagnostic; it is never reconstructed from the error message.
 type LastAgentError struct {
-	Message          string            `json:"message"`
-	OccurredAt       time.Time         `json:"occurred_at"`
-	Scope            string            `json:"scope,omitempty"`
-	AgentExecutionID string            `json:"agent_execution_id,omitempty"`
-	ExecutionID      string            `json:"execution_id,omitempty"`
-	Phase            string            `json:"phase,omitempty"`
-	AttemptID        string            `json:"attempt_id,omitempty"`
-	Causes           []AgentErrorCause `json:"causes,omitempty"`
-	RemediationURL   string            `json:"remediation_url,omitempty"`
-	Code             string            `json:"code,omitempty"`
-	Details          string            `json:"details,omitempty"`
-	StartupReason    string            `json:"startup_reason,omitempty"`
-	StartupAttempts  int               `json:"startup_attempts,omitempty"`
-	StartupNPMCode   string            `json:"startup_npm_code,omitempty"`
-	RecoveryActions  []string          `json:"recovery_actions,omitempty"`
-	TaskRepositoryID string            `json:"task_repository_id,omitempty"`
-	StampValue       string            `json:"stamp,omitempty"`
-	DismissedAt      *time.Time        `json:"dismissed_at,omitempty"`
+	Message              string            `json:"message"`
+	OccurredAt           time.Time         `json:"occurred_at"`
+	Scope                string            `json:"scope,omitempty"`
+	AgentExecutionID     string            `json:"agent_execution_id,omitempty"`
+	ExecutionID          string            `json:"execution_id,omitempty"`
+	Phase                string            `json:"phase,omitempty"`
+	AttemptID            string            `json:"attempt_id,omitempty"`
+	Causes               []AgentErrorCause `json:"causes,omitempty"`
+	RemediationURL       string            `json:"remediation_url,omitempty"`
+	Code                 string            `json:"code,omitempty"`
+	Details              string            `json:"details,omitempty"`
+	DeliverySubmissionID string            `json:"delivery_submission_id,omitempty"`
+	StartupReason        string            `json:"startup_reason,omitempty"`
+	StartupAttempts      int               `json:"startup_attempts,omitempty"`
+	StartupNPMCode       string            `json:"startup_npm_code,omitempty"`
+	RecoveryActions      []string          `json:"recovery_actions,omitempty"`
+	TaskRepositoryID     string            `json:"task_repository_id,omitempty"`
+	StampValue           string            `json:"stamp,omitempty"`
+	DismissedAt          *time.Time        `json:"dismissed_at,omitempty"`
 }
 
 func LoadLastAgentError(metadata map[string]interface{}) (LastAgentError, bool) {

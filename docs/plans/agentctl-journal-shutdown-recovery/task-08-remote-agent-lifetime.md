@@ -71,6 +71,8 @@ Authorized on 2026-10-10. Common lifecycle and plugin regressions reproduced the
 - Partial replay coverage passes: the first event remains projected after a timeout, the recovery guard stays active, and the next attachment resumes from the saved cursor.
 - Current SSH/Sprites hydration and pending Stop tests pass. Lifecycle lint reports zero issues after refactoring. The combined race run identified an SDK WebSocket race in the Sprites probe, a zero-port SSH fixture, and duplicate standalone inventory classification. The fixes passed the full lifecycle race suite (111.462 seconds). Runtime agentctl, orchestrator handlers, executor, and SQLite packages also passed. The remaining orchestrator gate and managed browser selections are pending.
 
+Post-rebase backend race verification passed all six affected packages, including lifecycle and orchestrator. The managed SSH selection passed both graceful restart and hard backend outage scenarios with retries disabled (1.7 minutes). The latter expects the live idle `ready` state after the remote turn finishes, checks the exact remote PID with `kill -0`, preserves session and control-port identity, recreates the local forward, and verifies once-only output. The first attempt had a stale `running` expectation; no remote runtime defect was found. Final current-base integration remains pending after main advanced.
+
 ### Initial integration findings
 
 The following findings describe the implementation before Task 08 changes. Final test results above track their resolution.

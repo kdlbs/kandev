@@ -3358,22 +3358,28 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentEventData) error {
 	errMsg := agentFailureMessage(data)
 	details := routingerr.Sanitize(data.FailureDetails)
+	deliverySubmissionID := ""
+	if data.FailureCode == "DURABLE_DELIVERY_UNCERTAIN" && data.DeliverySubmissionID != "" &&
+		data.DeliverySubmissionID == data.FailureDetails {
+		deliverySubmissionID = data.DeliverySubmissionID
+	}
 	lastErr := models.LastAgentError{
-		Message:          errMsg,
-		OccurredAt:       time.Now().UTC(),
-		Scope:            models.ErrorScopeSession,
-		AgentExecutionID: data.AgentExecutionID,
-		ExecutionID:      data.AgentExecutionID,
-		Phase:            data.Phase,
-		AttemptID:        data.AttemptID,
-		Causes:           models.NormalizeAgentErrorCauses(data.Causes),
-		RemediationURL:   providerRemediationURL(data),
-		Code:             data.FailureCode,
-		Details:          details,
-		StartupReason:    data.StartupFailureReason,
-		StartupAttempts:  data.StartupFailureAttempts,
-		StartupNPMCode:   data.StartupFailureNPMCode,
-		StampValue:       agentFailureStamp(data),
+		Message:              errMsg,
+		OccurredAt:           time.Now().UTC(),
+		Scope:                models.ErrorScopeSession,
+		AgentExecutionID:     data.AgentExecutionID,
+		ExecutionID:          data.AgentExecutionID,
+		Phase:                data.Phase,
+		AttemptID:            data.AttemptID,
+		Causes:               models.NormalizeAgentErrorCauses(data.Causes),
+		RemediationURL:       providerRemediationURL(data),
+		Code:                 data.FailureCode,
+		Details:              details,
+		DeliverySubmissionID: deliverySubmissionID,
+		StartupReason:        data.StartupFailureReason,
+		StartupAttempts:      data.StartupFailureAttempts,
+		StartupNPMCode:       data.StartupFailureNPMCode,
+		StampValue:           agentFailureStamp(data),
 	}
 	if err := s.repo.SetSessionMetadataKey(ctx, data.SessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
 		s.logger.Warn("failed to persist last agent error",
@@ -3411,6 +3417,9 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 		}
 		if lastErr.Details != "" {
 			eventData["details"] = lastErr.Details
+		}
+		if lastErr.DeliverySubmissionID != "" {
+			eventData["delivery_submission_id"] = lastErr.DeliverySubmissionID
 		}
 		if err := s.eventBus.Publish(ctx, events.TaskSessionErrorChanged, bus.NewEvent(
 			events.TaskSessionErrorChanged,

@@ -33,6 +33,14 @@ Reject a nonempty prompt on workspace-only requests. Workspace restoration does 
 a prompt recovery block, including when `RecoveryAction` is supplied. No ACP initialize, new,
 load, resume, prompt, or queue drain may occur. Quick Chat requires no Git repository.
 
+Workspace inspection must preserve durable restart recovery ownership. An existing owned
+workspace execution remains accessible. A generic prompt block alone may permit cold
+workspace creation only when fresh evidence contains no saved execution, delivery binding,
+or pending recovery source or candidate. Recheck this at creation and registration.
+Active or malformed delivery recovery evidence blocks competing allocation, even for an
+explicit workspace request. Wait for exact-owner reconnection or restoration instead of
+replacing its row. See [durable reattachment](durable-agent-reattachment.md).
+
 ## Manual resume
 
 `useManualResumeSession` calls `session.recover` with action `resume`, matching the existing
@@ -48,6 +56,11 @@ feedback continue to work. Use the existing 60-second manual resume timeout. Do 
 Automatic open/focus paths still use `session.launch` with their existing activation source.
 They cannot acquire explicit recovery authorization. Do not pass a recovery action directly
 on an ordinary launch request to bypass the recovery coordinator.
+
+Explicit native recovery must await the current agent-start or reattachment result before
+acknowledging uncertain delivery or resolving its database block. An initialized flag retained
+from recovered inventory is not proof that the current authenticated reattachment succeeded.
+A current-start failure must leave the block and historical unknown submission intact.
 
 `RecoverSessionWithOptions` retains existing runtime control, workspace recovery preflight,
 configuration restoration, native-token preservation, Office dispatcher handoff, and
@@ -87,7 +100,8 @@ new endpoint, migration, native conversation replacement, or generation rotation
 
 Native-state loss remains an existing typed history-continuation failure, not an automatic
 fallback. Resume failure leaves the block open. Late replies must not update another active
-session. Workspace restoration remains usable while the original delivery block is open.
+session. Workspace inspection through an owned execution remains usable while the original
+delivery block is open; cold allocation follows the ownership checks above.
 Task chat and Quick Chat share the manual hook. Desktop and phone use existing controls and
 layouts; the read-only notice reuses the localized Resume label and shared recovery actions.
 

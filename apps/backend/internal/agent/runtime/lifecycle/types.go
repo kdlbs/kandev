@@ -271,6 +271,9 @@ type AgentExecution struct {
 	// (e.g., after backend restart). Used by StartAgentProcess to route passthrough sessions
 	// to ResumePassthroughSession instead of startPassthroughSession.
 	isResumedSession bool
+	// suppressBootStatusMessage is set only for silent restart restore, where a
+	// boot status would otherwise create a synthetic completed transcript turn.
+	suppressBootStatusMessage bool
 
 	// Buffers for accumulating agent response during a prompt
 	messageBuffer  strings.Builder
@@ -1513,14 +1516,17 @@ type LaunchRequest struct {
 	AgentProfileID string
 	// ExecutionProfileID selects the complete CLI runtime profile. Empty keeps
 	// backward-compatible behavior by using AgentProfileID.
-	ExecutionProfileID    string
-	StartAgent            bool                // Transfer launch activity through initial startup/prompt
-	TurnID                string              // Durable Kandev turn for the initial prompt, when present
-	WorkspacePath         string              // Host path to workspace (original repository path)
-	OriginalWorkspacePath string              // First agent-visible path for native restore policy
-	TaskDescription       string              // Task description to send via ACP prompt
-	Attachments           []MessageAttachment // Attachments (images/files) for the initial prompt
-	Env                   map[string]string   // Additional env vars
+	ExecutionProfileID string
+	StartAgent         bool // Transfer launch activity through initial startup/prompt
+	// SuppressBootStatusMessage keeps silent restore initialization out of the
+	// transcript without changing the resumed agent startup itself.
+	SuppressBootStatusMessage bool
+	TurnID                    string              // Durable Kandev turn for the initial prompt, when present
+	WorkspacePath             string              // Host path to workspace (original repository path)
+	OriginalWorkspacePath     string              // First agent-visible path for native restore policy
+	TaskDescription           string              // Task description to send via ACP prompt
+	Attachments               []MessageAttachment // Attachments (images/files) for the initial prompt
+	Env                       map[string]string   // Additional env vars
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string

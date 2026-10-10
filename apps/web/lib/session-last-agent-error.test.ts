@@ -68,6 +68,23 @@ describe("readLastAgentError", () => {
       startupAttempts: 2,
     });
   });
+
+  it("reads the structured durable-delivery submission identity when details are sanitized", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: "Prompt delivery outcome is uncertain",
+          code: "DURABLE_DELIVERY_UNCERTAIN",
+          details: "prompt:initial:<redacted>",
+          delivery_submission_id: "submission-1",
+        },
+      }),
+    ).toMatchObject({
+      code: "DURABLE_DELIVERY_UNCERTAIN",
+      details: "prompt:initial:<redacted>",
+      deliverySubmissionId: "submission-1",
+    });
+  });
 });
 
 // eslint-disable-next-line max-lines-per-function -- this group preserves the complete metadata compatibility matrix.

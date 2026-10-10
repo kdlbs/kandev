@@ -569,6 +569,9 @@ type LaunchAgentRequest struct {
 	DeliveryIncarnationID       string
 	DeliveryHarnessGeneration   uint64
 	InitialDeliverySubmissionID string
+	// SuppressBootStatusMessage is set only for silent restart restore so
+	// startup does not create a lifecycle-only transcript turn.
+	SuppressBootStatusMessage bool
 	// BeforeAgentStart runs inside the executor before it starts the harness.
 	// The callback is never forwarded into the runtime request.
 	BeforeAgentStart      func(context.Context, string) error
