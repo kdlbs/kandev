@@ -1250,6 +1250,7 @@ func (m *Manager) initializeCreatedExecution(
 	if info.ACPSessionID != "" {
 		execution.ACPSessionID = info.ACPSessionID
 	}
+	execution.TurnChangeCheckouts = turnChangeCheckoutsFromWorkspaceRepositories(info.WorkspaceRepositories)
 	_, sessionSpan := tracing.TraceSessionStart(context.Background(), taskID, info.SessionID, executionID)
 	execution.SetSessionSpan(sessionSpan)
 	if client, releaseClient := execution.AcquireAgentCtlClient(); client != nil {

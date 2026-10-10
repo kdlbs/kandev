@@ -28,6 +28,18 @@ export type CommitFileNavigationRequest = {
   token: number;
 };
 
+/** Exact immutable file identity for a retained turn comparison. */
+export type HistoricalTurnDiffTarget = {
+  sessionId: string;
+  changeSetId: string;
+  repositoryChangeId?: string;
+  fileChangeId?: string;
+  checkoutId?: string;
+  path?: string;
+  fileKind?: string;
+  oldPath?: string | null;
+};
+
 export type OpenDiffOptions = {
   source?: DiffSource;
   repositoryName?: string;
@@ -49,4 +61,5 @@ export type DiffSheetMode =
       kind: "commit";
       target: CommitDetailTarget;
       fileNavigation?: CommitFileNavigationRequest | null;
-    };
+    }
+  | { kind: "historical"; target: HistoricalTurnDiffTarget };

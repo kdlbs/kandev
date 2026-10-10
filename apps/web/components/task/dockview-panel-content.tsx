@@ -19,6 +19,7 @@ import { BrowserPanel } from "./browser-panel";
 import type {
   CommitDetailTarget,
   CommitFileNavigationRequest,
+  HistoricalTurnDiffTarget,
   OpenDiffOptions,
 } from "@/lib/state/diff-target-types";
 import { ChangesPanel } from "./changes-panel";
@@ -79,11 +80,20 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   const sessionId = paramSessionId ?? storeSessionId;
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   const { openFile } = useFileEditors();
+  const addDiffViewerPanel = useDockviewStore((state) => state.addDiffViewerPanel);
+  const setSelectedDiff = useDockviewStore((state) => state.setSelectedDiff);
   const isPassthrough = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
   );
   useChatSessionTitle(panelId, sessionId);
   const isVisible = usePanelActive(panelId);
+  const handleOpenHistoricalDiff = useCallback(
+    (target: HistoricalTurnDiffTarget) => {
+      setSelectedDiff({ path: target.path ?? "", historical: target });
+      addDiffViewerPanel();
+    },
+    [addDiffViewerPanel, setSelectedDiff],
+  );
 
   if (isPassthrough) {
     return (
@@ -100,6 +110,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
       taskId={sessionId ? taskId : null}
       statusTaskId={taskId}
       onOpenFile={openFile}
+      onOpenHistoricalDiff={handleOpenHistoricalDiff}
       onOpenFileAtLine={openFile}
       hideSessionsDropdown
       isVisible={isVisible}

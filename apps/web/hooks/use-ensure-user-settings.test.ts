@@ -77,6 +77,7 @@ function makeUnloadedSettings(): UserSettingsState {
     showScrollToLastPrompt: true,
     showScrollToStart: false,
     showTranscriptAutoScrollControl: true,
+    showTurnChangedFiles: true,
     showTodoListPanel: false,
     showTodoListPanelOnlyWhenNotEmpty: false,
     showReleaseNotification: true,

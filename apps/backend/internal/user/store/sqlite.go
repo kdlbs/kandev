@@ -121,7 +121,10 @@ func (r *sqliteRepository) runMigrations() error {
 	if err := m.Err(); err != nil {
 		return fmt.Errorf("required user migration: %w", err)
 	}
-	return r.migrateSidebarPresentation()
+	if err := r.migrateSidebarPresentation(); err != nil {
+		return err
+	}
+	return r.migrateTurnChangedFilesPreference()
 }
 
 // ensureDefaultUser inserts the pre-auth default user row when it does not
@@ -637,6 +640,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"show_transcript_auto_scroll_control":      settings.ShowTranscriptAutoScrollControl,
 		"show_todo_list_panel":                     settings.ShowTodoListPanel,
 		"show_todo_list_panel_only_when_not_empty": settings.ShowTodoListPanelOnlyWhenNotEmpty,
+		"show_turn_changed_files":                  settings.ShowTurnChangedFiles,
 		"show_release_notification":                settings.ShowReleaseNotification,
 		"release_notes_last_seen_version":          settings.ReleaseNotesLastSeenVersion,
 		"lsp_auto_start_languages":                 lspAutoStart,
@@ -751,6 +755,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ShowTranscriptAutoScrollControl:   false,
 		ShowTodoListPanel:                 false,
 		ShowTodoListPanelOnlyWhenNotEmpty: false,
+		ShowTurnChangedFiles:              true,
 		ShowReleaseNotification:           true,
 		LspAutoStartLanguages:             []string{},
 		LspAutoInstallLanguages:           []string{},
@@ -839,6 +844,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ShowTranscriptAutoScrollControl   *bool                                   `json:"show_transcript_auto_scroll_control"`
 		ShowTodoListPanel                 *bool                                   `json:"show_todo_list_panel"`
 		ShowTodoListPanelOnlyWhenNotEmpty *bool                                   `json:"show_todo_list_panel_only_when_not_empty"`
+		ShowTurnChangedFiles              *bool                                   `json:"show_turn_changed_files"`
 		ShowReleaseNotification           *bool                                   `json:"show_release_notification"`
 		ReleaseNotesLastSeenVersion       string                                  `json:"release_notes_last_seen_version"`
 		LspAutoStartLanguages             []string                                `json:"lsp_auto_start_languages"`
@@ -948,6 +954,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	if payload.ShowTodoListPanelOnlyWhenNotEmpty != nil {
 		settings.ShowTodoListPanelOnlyWhenNotEmpty = *payload.ShowTodoListPanelOnlyWhenNotEmpty
+	}
+	if payload.ShowTurnChangedFiles != nil {
+		settings.ShowTurnChangedFiles = *payload.ShowTurnChangedFiles
 	}
 	if payload.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *payload.ShowReleaseNotification

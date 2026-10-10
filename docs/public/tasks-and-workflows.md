@@ -518,6 +518,18 @@ If the selected profile is unhealthy or incompatible with the executor, fix that
 
 When you send the first message from Chat on a prepared task, Kandev keeps the task description in the first user prompt and places your instruction after it. This also applies if the backend restarts after workspace preparation but before the first user prompt is accepted. The combined prompt is stored and remains after reload. Later messages contain only their own text.
 
+### Show changed files after a turn
+
+After a completed turn, Kandev can show a changed-files card below the agent reply. The card summarizes repository changes captured between that turn's start and end.
+
+By default, this preference is on. To change it, open **Settings > General**. Under **Chat preferences**, set **Show changed files after each turn**, then select **Save**.
+
+Each card uses retained data for that turn. Later edits, commits, or branch changes do not rewrite it. Select **Open diff** to review the full turn. Select a file row to open its historical diff. On a phone, the diff opens in a full-height drawer.
+
+The diff shows the selected file’s full path and its previous path after a rename. If a file list fails to load, select **Retry**.
+
+Some captures are partial or unavailable. The card labels that state and gives the reason when available. Retained content can expire. Kandev then shows an expiry message and does not replace the historical diff with current workspace content. The **Changes** panel continues to show the current workspace and Git history.
+
 By default, a running session keeps the coarse **Generating** state and queues
 another message even if Kandev detects background work. Operators can opt into
 the high-risk **Claude background prompt handoff** feature toggle for controlled

@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -69,6 +70,13 @@ func (s *Service) createTurn(
 	defer unlock()
 
 	metadata := turnStartRuntimeMetadata(session)
+	if identity, ok := authn.IdentityFromContext(ctx); ok {
+		if identity.Synthetic {
+			metadata[models.TurnMetaKeyTurnChangeSyntheticActor] = true
+		} else if identity.UserID != "" {
+			metadata[models.TurnMetaKeyTurnChangeActorUserID] = identity.UserID
+		}
+	}
 	if recovery != nil {
 		metadata[models.TurnMetaKeyPromptDispatchPending] = true
 		metadata[models.TurnMetaKeyPromptDispatchClarificationPendingID] = recovery.PendingID
@@ -1154,14 +1162,21 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 		return nil, err
 	}
 	worktreesByIdentity := indexWorkspaceWorktrees(sessionWorktrees)
+	worktreesByRepository := indexUniqueWorkspaceWorktreesByRepository(sessionWorktrees)
 	projections, err := s.workspaceRepositoryProjections(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
 	repositories := indexWorkspaceRepositoryEntities(projections)
+	projectionCounts := make(map[string]int, len(projections))
+	for _, projection := range projections {
+		projectionCounts[projection.taskRepository.RepositoryID]++
+	}
 	branchPlans := worktree.BuildBranchIdentityPlans(workspaceBranchIdentityInputs(projections))
 	for index, projection := range projections {
-		info.WorkspaceRepositories = append(info.WorkspaceRepositories, s.workspaceRepositorySpec(projection, branchPlans[index].IdentitySlug, worktreesByIdentity))
+		info.WorkspaceRepositories = append(info.WorkspaceRepositories, s.workspaceRepositorySpec(
+			projection, branchPlans[index].IdentitySlug, worktreesByIdentity, worktreesByRepository, projectionCounts,
+		))
 	}
 	return repositories, nil
 }
@@ -1188,6 +1203,26 @@ func indexWorkspaceWorktrees(sessionWorktrees []*models.TaskEnvironmentRepo) map
 	return worktreesByIdentity
 }
 
+func indexUniqueWorkspaceWorktreesByRepository(sessionWorktrees []*models.TaskEnvironmentRepo) map[string]*models.TaskEnvironmentRepo {
+	worktrees := make(map[string]*models.TaskEnvironmentRepo, len(sessionWorktrees))
+	ambiguous := make(map[string]struct{})
+	for _, worktree := range sessionWorktrees {
+		if worktree == nil || worktree.RepositoryID == "" {
+			continue
+		}
+		if _, exists := ambiguous[worktree.RepositoryID]; exists {
+			continue
+		}
+		if _, exists := worktrees[worktree.RepositoryID]; exists {
+			delete(worktrees, worktree.RepositoryID)
+			ambiguous[worktree.RepositoryID] = struct{}{}
+			continue
+		}
+		worktrees[worktree.RepositoryID] = worktree
+	}
+	return worktrees
+}
+
 func indexWorkspaceRepositoryEntities(projections []workspaceRepositoryProjection) map[string]*models.Repository {
 	repositories := make(map[string]*models.Repository, len(projections))
 	for _, projection := range projections {
@@ -1200,6 +1235,8 @@ func (s *Service) workspaceRepositorySpec(
 	projection workspaceRepositoryProjection,
 	branchIdentitySlug string,
 	worktreesByIdentity map[workspaceWorktreeKey]*models.TaskEnvironmentRepo,
+	worktreesByRepository map[string]*models.TaskEnvironmentRepo,
+	projectionCounts map[string]int,
 ) lifecycle.WorkspaceRepositorySpec {
 	taskRepository, repository := projection.taskRepository, projection.repository
 	branchTemplate := repository.WorktreeBranchTemplate
@@ -1208,18 +1245,25 @@ func (s *Service) workspaceRepositorySpec(
 	}
 	cloneRelocation := s.managedCloneRelocationProof(repository)
 	spec := lifecycle.WorkspaceRepositorySpec{
-		RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: projection.repoName,
+		RepositoryID: taskRepository.RepositoryID, TaskRepositoryID: taskRepository.ID,
+		RepositoryPath: repository.LocalPath, RepoName: projection.repoName,
+		RepositorySubpath: projection.repoName, RepositorySubpathKnown: projection.repoName != "",
 		CloneRelocation: cloneRelocation,
 		BaseBranch:      taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
 		CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
 	}
-	if selected := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchIdentitySlug}]; selected != nil {
+	selected := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchIdentitySlug}]
+	if selected == nil && projectionCounts[taskRepository.RepositoryID] == 1 {
+		selected = worktreesByRepository[taskRepository.RepositoryID]
+	}
+	if selected != nil {
+		spec.TaskEnvironmentRepoID = selected.ID
 		spec.WorktreeID = selected.WorktreeID
 		spec.WorktreePath = selected.WorktreePath
 		spec.WorktreeBranch = selected.WorktreeBranch
 		spec.BranchSlug = selected.BranchSlug
-		spec.BranchIdentitySlug = selected.BranchSlug
+		spec.BranchIdentitySlug = branchIdentitySlug
 		spec.WorktreeSourceClonePath = selected.WorktreeSourceClonePath
 		spec.WorktreeSourceCommonDir = selected.WorktreeSourceCommonDir
 		if cloneRelocation != nil {

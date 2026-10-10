@@ -16,6 +16,11 @@ import { useChatMotion } from "@/hooks/use-chat-motion";
 import { ChatMotionProvider } from "./chat-motion";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { Message, TaskSessionState } from "@/lib/types/http";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
+import { useAppStore } from "@/components/state-provider";
+import { useSessionTurnChanges } from "@/hooks/domains/session/use-turn-changes";
+import { TurnChangedFilesCard } from "./turn-changed-files-card";
+import { projectTurnChangeSummary } from "@/lib/turn-changes/projection";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import { OLDER_PAGE_LIMIT, useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
@@ -466,6 +471,10 @@ type NativeMessageListBodyProps = {
   sessionState?: TaskSessionState;
   worktreePath?: string;
   onOpenFile?: (path: string, repo?: string) => void;
+  onOpenHistoricalDiff?: MessageListProps["onOpenHistoricalDiff"];
+  turnChangeSummaries: NonNullable<MessageListProps["turnChangeSummaries"]>;
+  messageHistoryHasMore: boolean;
+  showTurnChangedFiles: boolean;
   hasMore: boolean;
   isLoadingMore: boolean;
   isInitialLoading: boolean;
@@ -646,6 +655,9 @@ function NativeMessageListBody({
   sessionState,
   worktreePath,
   onOpenFile,
+  onOpenHistoricalDiff,
+  turnChangeSummaries,
+  showTurnChangedFiles,
   hasMore,
   isLoadingMore,
   isInitialLoading,
@@ -687,25 +699,26 @@ function NativeMessageListBody({
         showRecovery={showRecovery}
       />
 
-      {items.map((item) => (
-        <MessageRow
-          key={getItemKey(item)}
-          item={item}
-          sessionId={sessionId}
-          permissionsByToolCallId={permissionsByToolCallId}
-          childrenByParentToolCallId={childrenByParentToolCallId}
-          taskId={taskId}
-          worktreePath={worktreePath}
-          onOpenFile={onOpenFile}
-          isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
-          activeTurnId={activeTurnId}
-          streamingMessageId={streamingMessageId}
-          onScrollToMessage={onScrollToMessage}
-          dividerBeforeItemKey={dividerBeforeItemKey}
-        />
-      ))}
+      <TranscriptMessageItems
+        items={items}
+        permissionsByToolCallId={permissionsByToolCallId}
+        childrenByParentToolCallId={childrenByParentToolCallId}
+        taskId={taskId}
+        sessionId={sessionId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+        onOpenHistoricalDiff={onOpenHistoricalDiff}
+        turnChangeSummaries={turnChangeSummaries}
+        messageHistoryHasMore={hasMore}
+        showTurnChangedFiles={showTurnChangedFiles}
+        lastTurnGroupId={lastTurnGroupId}
+        activeTurnId={activeTurnId}
+        streamingMessageId={streamingMessageId}
+        onScrollToMessage={onScrollToMessage}
+        dividerBeforeItemKey={dividerBeforeItemKey}
+      />
 
-      <MessageListFooter
+      <NativeMessageListFooter
         sessionState={sessionState}
         sessionId={sessionId}
         messages={messages}
@@ -716,13 +729,204 @@ function NativeMessageListBody({
         launchErrorOccurredAt={launchErrorOccurredAt}
       />
 
-      {/* Bottom anchor keeps the view pinned while auto-scroll is enabled.
-          The scroll container disables anchoring entirely while it is off,
-          so status/footer updates cannot choose a different anchor and move
-          the frozen transcript. */}
-      <div style={{ overflowAnchor: autoScrollEnabled ? "auto" : "none", height: 1 }} />
+      <TranscriptAutoScrollAnchor enabled={autoScrollEnabled} />
     </div>
   );
+}
+
+// The anchor owns the transcript position only while auto-scroll is enabled.
+function TranscriptAutoScrollAnchor({ enabled }: { enabled: boolean }) {
+  return <div style={{ overflowAnchor: enabled ? "auto" : "none", height: 1 }} />;
+}
+
+type TranscriptMessageItemsProps = Pick<
+  NativeMessageListBodyProps,
+  | "items"
+  | "permissionsByToolCallId"
+  | "childrenByParentToolCallId"
+  | "taskId"
+  | "sessionId"
+  | "worktreePath"
+  | "onOpenFile"
+  | "onOpenHistoricalDiff"
+  | "turnChangeSummaries"
+  | "messageHistoryHasMore"
+  | "showTurnChangedFiles"
+  | "lastTurnGroupId"
+  | "activeTurnId"
+  | "streamingMessageId"
+  | "onScrollToMessage"
+  | "dividerBeforeItemKey"
+>;
+
+function TranscriptMessageItems({
+  items,
+  permissionsByToolCallId,
+  childrenByParentToolCallId,
+  taskId,
+  sessionId,
+  worktreePath,
+  onOpenFile,
+  onOpenHistoricalDiff,
+  turnChangeSummaries,
+  messageHistoryHasMore,
+  showTurnChangedFiles,
+  lastTurnGroupId,
+  activeTurnId,
+  streamingMessageId,
+  onScrollToMessage,
+  dividerBeforeItemKey,
+}: TranscriptMessageItemsProps) {
+  const fallbackByItem = new Map<number, NonNullable<MessageListProps["turnChangeSummaries"]>>();
+  if (showTurnChangedFiles && sessionId) {
+    turnChangeSummaries.forEach((summary) => {
+      if (!projectTurnChangeSummary(summary).visible) return;
+      if (
+        !shouldRenderTurnChangeFallback(
+          summary.final_assistant_message_id,
+          items,
+          messageHistoryHasMore,
+        )
+      )
+        return;
+      const index = turnChangeFallbackIndex(items, summary.turn_id, summary.terminal_at);
+      if (index < 0) return;
+      const bucket = fallbackByItem.get(index) ?? [];
+      bucket.push(summary);
+      fallbackByItem.set(index, bucket);
+    });
+  }
+  return items.map((item, itemIndex) => (
+    <div key={getItemKey(item)}>
+      <MessageRow
+        item={item}
+        sessionId={sessionId}
+        permissionsByToolCallId={permissionsByToolCallId}
+        childrenByParentToolCallId={childrenByParentToolCallId}
+        taskId={taskId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+        isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
+        activeTurnId={activeTurnId}
+        streamingMessageId={streamingMessageId}
+        onScrollToMessage={onScrollToMessage}
+        dividerBeforeItemKey={dividerBeforeItemKey}
+      />
+      <TurnChangedFilesAfterMessage
+        item={item}
+        sessionId={sessionId}
+        summaries={turnChangeSummaries}
+        enabled={showTurnChangedFiles}
+        onOpenDiff={onOpenHistoricalDiff}
+      />
+      {(fallbackByItem.get(itemIndex) ?? []).map((summary) => (
+        <div
+          key={`turn-change-fallback-${summary.id}`}
+          data-transcript-fallback-anchor={summary.fallback_anchor}
+        >
+          <TurnChangedFilesCard
+            sessionId={sessionId!}
+            summary={summary}
+            onOpenDiff={onOpenHistoricalDiff ?? NOOP_HISTORICAL_DIFF}
+          />
+        </div>
+      ))}
+    </div>
+  ));
+}
+
+export function shouldRenderTurnChangeFallback(
+  finalAssistantMessageID: string | undefined,
+  items: RenderItem[],
+  messageHistoryHasMore: boolean,
+): boolean {
+  if (
+    finalAssistantMessageID &&
+    items.some((item) => item.type === "message" && item.message.id === finalAssistantMessageID)
+  )
+    return false;
+  // The anchor may be in an older message page. Wait until history is complete
+  // before treating its absence as a genuinely reply-less terminal turn.
+  return !messageHistoryHasMore;
+}
+
+export function turnChangeFallbackIndex(
+  items: RenderItem[],
+  turnId: string,
+  terminalAt?: string,
+): number {
+  let matchingTurnIndex = -1;
+  items.forEach((item, index) => {
+    if (item.type === "turn_group" && item.turnId === turnId) matchingTurnIndex = index;
+    else if (item.type === "message" && item.message.turn_id === turnId) matchingTurnIndex = index;
+  });
+  if (matchingTurnIndex >= 0) return matchingTurnIndex;
+  const terminalTime = parseTurnTimestamp(terminalAt);
+  if (terminalTime === null) return items.length - 1;
+  let lastBeforeTerminal = -1;
+  items.forEach((item, index) => {
+    const latestTime = messagesInRenderItem(item).reduce<bigint | null>((latest, message) => {
+      const timestamp = parseTurnTimestamp(message.created_at);
+      if (timestamp === null) return latest;
+      return latest === null || timestamp > latest ? timestamp : latest;
+    }, null);
+    if (latestTime !== null && latestTime <= terminalTime) lastBeforeTerminal = index;
+  });
+  return lastBeforeTerminal;
+}
+
+function messagesInRenderItem(item: RenderItem): Message[] {
+  if (item.type === "message") return [item.message];
+  if (item.type === "turn_group") return item.messages;
+  return [];
+}
+
+function NativeMessageListFooter(props: {
+  sessionState?: TaskSessionState;
+  sessionId: string | null;
+  messages: Message[];
+  isWorking: boolean;
+  footerActionMessages?: Message[];
+  launchErrorOwned: boolean;
+  launchErrorStamp?: string;
+  launchErrorOccurredAt?: string;
+}) {
+  return <MessageListFooter {...props} />;
+}
+
+type TurnChangedFilesTranscriptProps = {
+  sessionId: string | null;
+  summaries: NonNullable<MessageListProps["turnChangeSummaries"]>;
+  enabled: boolean;
+  onOpenDiff: MessageListProps["onOpenHistoricalDiff"];
+};
+
+const NOOP_HISTORICAL_DIFF = () => {};
+
+function TurnChangedFilesAfterMessage({
+  item,
+  sessionId,
+  summaries,
+  enabled,
+  onOpenDiff,
+}: TurnChangedFilesTranscriptProps & { item: RenderItem }) {
+  if (!enabled || !sessionId || item.type !== "message" || item.message.author_type !== "agent") {
+    return null;
+  }
+  return summaries
+    .filter(
+      (summary) =>
+        summary.final_assistant_message_id === item.message.id &&
+        projectTurnChangeSummary(summary).visible,
+    )
+    .map((summary) => (
+      <TurnChangedFilesCard
+        key={summary.id}
+        sessionId={sessionId}
+        summary={summary}
+        onOpenDiff={onOpenDiff ?? NOOP_HISTORICAL_DIFF}
+      />
+    ));
 }
 
 /**
@@ -752,6 +956,7 @@ export const NativeMessageList = memo(
       sessionState,
       worktreePath,
       onOpenFile,
+      onOpenHistoricalDiff,
       lastPromptMessageId,
       lastPromptMessage,
       lastPromptUnloaded,
@@ -770,6 +975,8 @@ export const NativeMessageList = memo(
     ref,
   ) {
     const scrollRef = useRef<HTMLDivElement>(null);
+    const showTurnChangedFiles = useAppStore((state) => state.userSettings.showTurnChangedFiles);
+    const turnChanges = useSessionTurnChanges(sessionId);
 
     const visibleItems = useMemo(
       () =>
@@ -786,6 +993,14 @@ export const NativeMessageList = memo(
         ),
       [messages, launchErrorOwned, launchErrorStamp, launchErrorOccurredAt],
     );
+    useEffect(() => {
+      const visibleTurnIds = visibleItems.flatMap((item) => {
+        if (item.type === "turn_group") return item.turnId ? [item.turnId] : [];
+        if (item.type === "message") return item.message.turn_id ? [item.message.turn_id] : [];
+        return [];
+      });
+      void turnChanges.ensureTurnsLoaded(visibleTurnIds);
+    }, [visibleItems, turnChanges.ensureTurnsLoaded, turnChanges.summaries]);
     const visibleFooterActionMessages = useMemo(
       () =>
         filterLaunchErrorMessages(
@@ -878,6 +1093,12 @@ export const NativeMessageList = memo(
             sessionState={sessionState}
             worktreePath={worktreePath}
             onOpenFile={onOpenFile}
+            onOpenHistoricalDiff={onOpenHistoricalDiff}
+            turnChangeSummaries={turnChanges.summaries.filter(
+              (summary) => projectTurnChangeSummary(summary).visible,
+            )}
+            messageHistoryHasMore={hasMore}
+            showTurnChangedFiles={showTurnChangedFiles}
             hasMore={hasMore}
             isLoadingMore={isLoadingMore}
             isInitialLoading={isInitialLoading}

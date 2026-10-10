@@ -125,7 +125,9 @@ test.describe("@chat last prompt scroll affordance", () => {
     await expect(button).toBeVisible({ timeout: 15_000 });
     // Opening the task must not fetch older pages just to locate the prompt.
     expect(olderPageRequests).toHaveLength(0);
-    await expect(chat.getByText(FIRST_PROMPT_MARKER, { exact: false })).toHaveCount(0);
+    // The mock agent quotes the prompt in its response, so match the original
+    // user message exactly when checking whether its row is still paginated out.
+    await expect(chat.getByText(FIRST_PROMPT_MARKER, { exact: true })).toHaveCount(0);
     await button.click();
     await expect(marker).toBeInViewport({ timeout: 10_000 });
   });

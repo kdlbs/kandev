@@ -699,6 +699,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"showScrollToLastPrompt":          settings.ShowScrollToLastPrompt,
 		"showScrollToStart":               settings.ShowScrollToStart,
 		"showTranscriptAutoScrollControl": settings.ShowTranscriptAutoScrollControl,
+		"showTurnChangedFiles":            settings.ShowTurnChangedFiles,
 		"showTodoListPanel":               settings.ShowTodoListPanel,
 
 		// Sub-option: only auto-pin when the agent's todo list is not empty.

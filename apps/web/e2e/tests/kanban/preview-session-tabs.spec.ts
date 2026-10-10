@@ -85,13 +85,19 @@ test.describe("Preview session tabs", () => {
     );
 
     await apiClient.setPrimarySession(initialSessionId);
+    await expect
+      .poll(() => apiClient.getTask(task.id).then((current) => current.primary_session_id), {
+        timeout: 30_000,
+        message: "the original session should become primary before opening the preview",
+      })
+      .toBe(initialSessionId);
 
     const { sessions: afterSecond } = await apiClient.listTaskSessions(task.id);
-    const taskAfterSecond = await apiClient.getTask(task.id);
-    const primaryId = taskAfterSecond.primary_session_id;
-    if (!primaryId) throw new Error("Primary session not set after creating sessions");
-    const secondaryId = afterSecond.find((s) => s.id !== primaryId)?.id;
-    if (!secondaryId) throw new Error("Secondary session not created");
+    expect(afterSecond.map((session) => session.id)).toEqual(
+      expect.arrayContaining([initialSessionId, launched.session_id]),
+    );
+    const primaryId = initialSessionId;
+    const secondaryId = launched.session_id;
     const responseBySessionId: Record<string, string> = {
       [initialSessionId]: "simple mock response",
       [launched.session_id]: "secondary-session-response",

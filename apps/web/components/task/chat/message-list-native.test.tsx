@@ -106,7 +106,11 @@ vi.mock("@/components/state-provider", () => ({
   }),
 }));
 
-import { useScrollToDividerOrBottom } from "./message-list-native";
+import {
+  shouldRenderTurnChangeFallback,
+  turnChangeFallbackIndex,
+  useScrollToDividerOrBottom,
+} from "./message-list-native";
 import { useTranscriptEdgeTracking } from "./message-list-native";
 import { getItemKey, type LastPromptEdge } from "./message-list-shared";
 import { preserveChatScrollDuringLayout } from "@/lib/state/dockview-scroll-preserve";
@@ -134,6 +138,76 @@ const LATEST_MESSAGE_ID = "latest-message";
 const TEST_MESSAGES = [{} as Message];
 /** Always returns false: the harness never locks programmatic scrolling. */
 const NEVER_LOCKED = () => false;
+
+describe("turn change transcript fallback placement", () => {
+  const messageItems = [
+    {
+      type: "message",
+      message: { id: "reply-1", turn_id: "turn-1", created_at: "2026-10-08T10:00:00Z" } as Message,
+    },
+    {
+      type: "message",
+      message: { id: "tool-2", turn_id: "turn-2", created_at: "2026-10-08T10:02:00Z" } as Message,
+    },
+    {
+      type: "message",
+      message: { id: "reply-2", turn_id: "turn-2", created_at: "2026-10-08T10:03:00Z" } as Message,
+    },
+  ] as RenderItem[];
+
+  it("keeps cards under their own final replies when multiple turns are loaded", () => {
+    expect(shouldRenderTurnChangeFallback("reply-1", messageItems, true)).toBe(false);
+    expect(shouldRenderTurnChangeFallback("reply-2", messageItems, false)).toBe(false);
+    expect(turnChangeFallbackIndex(messageItems, "turn-2")).toBe(2);
+  });
+
+  it("waits for older pages before treating a missing anchor as a no-reply terminal row", () => {
+    expect(shouldRenderTurnChangeFallback("reply-old", messageItems, true)).toBe(false);
+    expect(shouldRenderTurnChangeFallback(undefined, messageItems, true)).toBe(false);
+    expect(shouldRenderTurnChangeFallback(undefined, messageItems, false)).toBe(true);
+  });
+
+  it("places a cancellation fallback at its chronological turn row", () => {
+    expect(turnChangeFallbackIndex(messageItems, "cancelled-turn", "2026-10-08T10:02:30Z")).toBe(1);
+    expect(turnChangeFallbackIndex(messageItems, "turn-2")).toBe(2);
+  });
+
+  it("ignores calendar-invalid wire timestamps when placing fallback cards", () => {
+    const malformedMessageItems = [
+      {
+        type: "message",
+        message: {
+          id: "before",
+          turn_id: "turn-before",
+          created_at: "2026-02-28T10:00:00Z",
+        } as Message,
+      },
+      {
+        type: "message",
+        message: {
+          id: "malformed",
+          turn_id: "turn-malformed",
+          created_at: "2026-02-30T10:00:00Z",
+        } as Message,
+      },
+      {
+        type: "message",
+        message: {
+          id: "after",
+          turn_id: "turn-after",
+          created_at: "2026-03-05T10:00:00Z",
+        } as Message,
+      },
+    ] as RenderItem[];
+
+    expect(
+      turnChangeFallbackIndex(malformedMessageItems, "cancelled", "2026-03-03T10:00:00Z"),
+    ).toBe(0);
+    expect(turnChangeFallbackIndex(messageItems, "invalid-terminal", "2026-02-30T10:02:30Z")).toBe(
+      2,
+    );
+  });
+});
 
 function touchEvent(type: "touchstart" | "touchmove", clientY: number): TouchEvent {
   const event = new Event(type) as TouchEvent;
@@ -229,6 +303,7 @@ function AutoScrollHarness({
   isVisible = true,
   sessionId = null,
   metrics,
+  initialPlacementPending = false,
 }: {
   isWorking: boolean;
   hasUnreadDivider: boolean;
@@ -239,8 +314,10 @@ function AutoScrollHarness({
   isVisible?: boolean;
   sessionId?: string | null;
   metrics?: NativeScrollMetrics;
+  initialPlacementPending?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  useNativeScrollMetrics(scrollRef, metrics);
   const useAutoScrollWithVisibility = useAutoScroll as unknown as (
     params: Parameters<typeof useAutoScroll>[0] & { isVisible: boolean },
   ) => ReturnType<typeof useAutoScroll>;
@@ -251,13 +328,17 @@ function AutoScrollHarness({
     sessionId,
     enabled,
     motionEnabled,
+    initialPlacementPending,
     hasUnreadDivider,
     isProgrammaticScrollLocked: NEVER_LOCKED,
     isVisible,
   });
-  useNativeScrollMetrics(scrollRef, metrics);
   if (markRef) markRef.current = markNotNearBottom;
-  return <div ref={scrollRef} data-testid={AUTO_SCROLL_CONTAINER_TEST_ID} />;
+  return (
+    <div ref={scrollRef} data-testid={AUTO_SCROLL_CONTAINER_TEST_ID}>
+      <div data-chat-content />
+    </div>
+  );
 }
 
 /** Stubs scrollHeight (1000) and clientHeight (400) onto an element. */
@@ -2033,13 +2114,17 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
   });
 
   it("does not follow the bottom when work starts with an unread divider", () => {
-    const { rerender } = render(<AutoScrollHarness isWorking={false} hasUnreadDivider={true} />);
+    const markRef: { current?: () => void } = {};
+    const { rerender } = render(
+      <AutoScrollHarness isWorking={false} hasUnreadDivider={true} markRef={markRef} />,
+    );
     const scrollContainer = document.querySelector<HTMLElement>(
       `[data-testid="${AUTO_SCROLL_CONTAINER_TEST_ID}"]`,
     );
     if (!scrollContainer) throw new Error("auto-scroll container did not render");
     setScrollMetrics(scrollContainer);
     scrollContainer.scrollTop = 123;
+    markRef.current!();
     scrollContainer.dispatchEvent(new Event("scroll"));
 
     rerender(<AutoScrollHarness isWorking={true} hasUnreadDivider={true} />);
@@ -3266,3 +3351,73 @@ describe("missing prompt row scope", () => {
     view.unmount();
   });
 });
+
+it.each([
+  { enabled: true, reading: false, pending: false, expected: 900 },
+  { enabled: true, reading: false, pending: true, expected: 900 },
+  { enabled: true, reading: true, pending: true, expected: 570 },
+  { enabled: false, reading: false, pending: true, expected: 600 },
+])(
+  "handles delayed card growth with enabled=$enabled reading=$reading pending=$pending",
+  ({ enabled, reading, pending, expected }) => {
+    let contentResize: (() => void) | undefined;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(private callback: ResizeObserverCallback) {}
+        observe(element: Element) {
+          if (element.hasAttribute("data-chat-content")) {
+            contentResize = () => this.callback([], this as unknown as ResizeObserver);
+          }
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    const metrics = { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 };
+    try {
+      const view = render(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          metrics={metrics}
+          enabled={enabled}
+          initialPlacementPending={pending}
+        />,
+      );
+      const container = screen.getByTestId(AUTO_SCROLL_CONTAINER_TEST_ID);
+      Object.defineProperty(container, "scrollTop", {
+        configurable: true,
+        get: () => metrics.scrollTop,
+        set: (value: number) => {
+          metrics.scrollTop = Math.max(
+            0,
+            Math.min(value, metrics.scrollHeight - metrics.clientHeight),
+          );
+        },
+      });
+      act(() => {
+        if (reading) {
+          container.dispatchEvent(new WheelEvent("wheel", { deltaY: -30 }));
+          metrics.scrollTop = 570;
+        }
+        metrics.scrollHeight = 1300;
+        container.dispatchEvent(new Event("scroll"));
+        contentResize?.();
+      });
+      view.rerender(
+        <AutoScrollHarness
+          isWorking={false}
+          hasUnreadDivider={false}
+          metrics={metrics}
+          enabled={enabled}
+          initialPlacementPending={false}
+        />,
+      );
+      expect(metrics.scrollTop).toBe(expected);
+    } finally {
+      cleanup();
+      vi.unstubAllGlobals();
+    }
+  },
+);

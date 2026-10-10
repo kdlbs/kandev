@@ -59,6 +59,7 @@ type AgentExecution struct {
 	TaskID                          string
 	SessionID                       string
 	TaskEnvironmentID               string // Env owning this execution; sessions in the same task share one env
+	TurnChangeCheckouts             []TurnChangeCheckout
 	WorkspaceID                     string
 	// ExecutorType preserves launch locality for features that must only access
 	// the backend user's host filesystem. Empty means locality is unknown.
@@ -141,6 +142,8 @@ type AgentExecution struct {
 	promptSettlementGeneration               uint64
 	promptSettlementAcknowledgedGeneration   uint64
 	promptSettlementWaiterReleasedGeneration uint64
+	turnChangeCaptureGeneration              uint64
+	turnChangeCaptureDone                    chan struct{}
 	// dispatchedPromptGeneration is the generation of the prompt that has been
 	// accepted by agentctl and is still in flight. It is set only after the
 	// ordinary prompt's triggerPrompt succeeds and reset by beginExecutionPrompt.
@@ -285,6 +288,9 @@ type AgentExecution struct {
 	// reusing the same source ID cannot merge visible and reasoning content.
 	protocolMessageIDs  map[string]string
 	protocolThinkingIDs map[string]string
+	// lastAssistantMessageIDByGeneration outlives streaming correlation reset
+	// until the terminal turn-change record has persisted its reply anchor.
+	lastAssistantMessageIDByGeneration map[uint64]string
 	// responseAttemptMessageIDs preserves allocation order for assistant and
 	// thinking records created since the latest committed response boundary.
 	responseAttemptMessageIDs []string
@@ -1436,6 +1442,10 @@ type WorkspaceFolderSpec struct {
 // a task's owned repository entry after a restart.
 type WorkspaceRepositorySpec struct {
 	RepositoryID            string
+	TaskRepositoryID        string
+	TaskEnvironmentRepoID   string
+	RepositorySubpath       string
+	RepositorySubpathKnown  bool
 	RepositoryPath          string
 	WorktreePath            string
 	WorktreeBranch          string

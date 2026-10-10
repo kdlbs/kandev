@@ -12,6 +12,7 @@ import type {
   TaskSessionHydrationEpoch,
 } from "./types";
 import { buildTurnActions, isSettledSessionState, parseTurnTimestamp } from "./turn-actions";
+import { buildTurnChangeActions } from "./turn-changes-actions";
 import {
   buildTaskSessionProjectionActions,
   mergeOrphanPendingActionProjection,
@@ -325,6 +326,7 @@ export const defaultSessionState: SessionSliceState = {
     reconcileEpochBySession: {},
     settledBoundaryBySession: {},
   },
+  turnChanges: { bySession: {}, nextOffsetBySession: {}, loadedBySession: {} },
   taskSessions: {
     items: {},
     activityEpochBySession: {},
@@ -865,6 +867,9 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       delete draft.turns.loadedBySession[sessionId];
       delete draft.turns.reconcileEpochBySession[sessionId];
       delete draft.turns.settledBoundaryBySession[sessionId];
+      delete draft.turnChanges.bySession[sessionId];
+      delete draft.turnChanges.nextOffsetBySession[sessionId];
+      delete draft.turnChanges.loadedBySession[sessionId];
       // Cascade into the runtime slice (shell/process/git buffers + per-session
       // maps); this also removes the environmentIdBySessionId mapping.
       purgeSessionRuntimeState(draft as unknown as SessionRuntimeSliceState, sessionId);
@@ -1238,6 +1243,7 @@ export const createSessionSlice: StateCreator<
   ...defaultSessionState,
   ...buildMessageActions(set),
   ...buildTurnActions(set),
+  ...buildTurnChangeActions(set),
   ...buildTaskSessionActions(set),
   ...buildTaskSessionReconciliationActions(set),
   ...buildTaskSessionProjectionActions(set),

@@ -59,6 +59,7 @@ func TestResolveRemoteCLI(t *testing.T) {
 }
 
 func TestFindVscodeIPCSocket_NoSockets(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "")
 	// Use a temp dir that has no vscode-ipc-*.sock files
 	origTmpDir := os.Getenv("TMPDIR")
 	tmpDir := t.TempDir()
@@ -75,6 +76,7 @@ func TestFindVscodeIPCSocket_NoSockets(t *testing.T) {
 }
 
 func TestFindVscodeIPCSocket_ReturnsMostRecent(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "")
 	if runtime.GOOS == "windows" {
 		t.Skip("vscode IPC uses Unix sockets on Linux/macOS and named pipes on Windows; no shared production code path here")
 	}
@@ -102,6 +104,7 @@ func TestFindVscodeIPCSocket_ReturnsMostRecent(t *testing.T) {
 }
 
 func TestFindVscodeIPCSocket_IgnoresNonSockFiles(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "")
 	tmpDir := t.TempDir()
 	t.Setenv("TMPDIR", tmpDir)
 
@@ -115,6 +118,7 @@ func TestFindVscodeIPCSocket_IgnoresNonSockFiles(t *testing.T) {
 }
 
 func TestWaitForVscodeIPCSocket_SocketAppearsAfterDelay(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "")
 	if runtime.GOOS == "windows" {
 		t.Skip("vscode IPC uses Unix sockets on Linux/macOS and named pipes on Windows; no shared production code path here")
 	}
@@ -151,6 +155,7 @@ func TestWaitForVscodeIPCSocket_SocketAppearsAfterDelay(t *testing.T) {
 }
 
 func TestWaitForVscodeIPCSocket_Timeout(t *testing.T) {
+	t.Setenv("XDG_RUNTIME_DIR", "")
 	tmpDir := t.TempDir()
 	t.Setenv("TMPDIR", tmpDir)
 
@@ -534,4 +539,27 @@ func TestVscodeManager_WaitForRunning_TransitionsToRunning(t *testing.T) {
 
 	err := v.WaitForRunning(ctx)
 	assert.NoError(t, err)
+}
+
+func TestFindVscodeIPCSocketHonorsRuntimeDirectory(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("XDG runtime socket placement is Linux-specific")
+	}
+	root, err := os.MkdirTemp("/tmp", "vscode-xdg-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	runtimeDir := filepath.Join(root, "runtime")
+	require.NoError(t, os.Mkdir(runtimeDir, 0o700))
+	t.Setenv("TMPDIR", root)
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	runtimeSocket := filepath.Join(runtimeDir, "vscode-ipc-runtime.sock")
+	listener, err := net.Listen("unix", runtimeSocket)
+	require.NoError(t, err)
+	defer func() { _ = listener.Close() }()
+	other, err := net.Listen("unix", filepath.Join(root, "vscode-ipc-other.sock"))
+	require.NoError(t, err)
+	defer func() { _ = other.Close() }()
+	got, err := findVscodeIPCSocket()
+	require.NoError(t, err)
+	require.Equal(t, runtimeSocket, got)
 }

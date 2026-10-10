@@ -244,6 +244,7 @@ func initCoreTaskServices(
 			Messages:           repos.Task,
 			Attachments:        repos.Task,
 			Turns:              repos.Task,
+			TurnChanges:        repos.Task,
 			Sessions:           repos.Task,
 			GitSnapshots:       repos.Task,
 			RepoEntities:       repos.Task,

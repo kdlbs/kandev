@@ -1,0 +1,169 @@
+---
+id: turn-changed-files-09
+title: Executor qualification, performance evidence, and public docs
+status: in_progress
+wave: 9
+depends_on:
+  - turn-changed-files-01
+  - turn-changed-files-02
+  - turn-changed-files-03
+  - turn-changed-files-04
+  - turn-changed-files-05
+  - turn-changed-files-06
+  - turn-changed-files-07
+  - turn-changed-files-08
+plan: plan.md
+requirements:
+  - REQ-TASKS-TURN-CHANGES-002
+  - REQ-TASKS-TURN-CHANGES-003
+  - REQ-TASKS-TURN-CHANGES-004
+  - REQ-TASKS-TURN-CHANGES-006
+  - REQ-TASKS-TURN-CHANGES-007
+acceptance_criteria:
+  - AC-TASKS-TURN-CHANGES-002.7
+  - AC-TASKS-TURN-CHANGES-002.9
+  - AC-TASKS-TURN-CHANGES-003.2
+  - AC-TASKS-TURN-CHANGES-003.3
+  - AC-TASKS-TURN-CHANGES-003.4
+  - AC-TASKS-TURN-CHANGES-003.5
+  - AC-TASKS-TURN-CHANGES-003.6
+  - AC-TASKS-TURN-CHANGES-004.5
+  - AC-TASKS-TURN-CHANGES-004.6
+  - AC-TASKS-TURN-CHANGES-004.7
+  - AC-TASKS-TURN-CHANGES-006.4
+  - AC-TASKS-TURN-CHANGES-006.6
+  - AC-TASKS-TURN-CHANGES-007.1
+  - AC-TASKS-TURN-CHANGES-007.2
+  - AC-TASKS-TURN-CHANGES-007.3
+  - AC-TASKS-TURN-CHANGES-007.4
+system_design:
+  - ../../specs/tasks/system-design/turn-changed-files.md
+---
+
+# Executor qualification, performance evidence, and public docs
+
+## Summary
+
+Qualify actual executor lifetime behavior, measure bounded capture, and document the delivered feature without overstating coverage.
+
+## Scope and owned files
+
+- Focused container/SSH/Kind E2E scenarios, available Sprites/plugin executor qualification, and retention/restart integration tests.
+- New capture/comparison/export benchmarks and deterministic representative Git fixtures.
+- Bounded metric labels, cancellation/cleanup telemetry, and retention growth measurements.
+- `docs/public/git-operations.md` and `docs/public/tasks-and-workflows.md` sections for preference, interval meaning, availability, and historical navigation.
+- Scoped AGENTS.md updates only where new package/contract ownership makes existing guidance inaccurate.
+- Package result records and a new `performance-results.md` under this plan, created only from measurements.
+
+## Exclusions
+
+No unrelated broad-suite audit, new public retention-control UI, speculative performance guarantees, or completion policy changes.
+
+## Implementation acceptance
+
+1. Promised history survives real ephemeral teardown and restart on supported executors; missing environments and unsupported capabilities remain explicit acceptance limitations.
+2. Measured cases establish actual capture/comparison duration, bytes, failure behavior, retention growth, and cancellation bounds against proposed limits.
+3. Public how-to guidance and the final report match observed behavior, preference defaults, content preservation, and remaining acceptance failures.
+
+## Verification
+
+New container specs must follow existing daemon-backed fixtures and agentctl capability readiness; do not merely seed ready summaries.
+Run these commands sequentially after infrastructure is ready:
+
+```bash
+cd apps/backend
+go test -trimpath -race ./internal/task/changes ./internal/agent/runtime/lifecycle -run 'TurnChangeExecutor|TurnChangeRetentionRestart|TurnChangeCleanup' -count=1
+go test -trimpath ./internal/agentctl/server/process ./internal/task/changes -run '^$' -bench 'TurnCheckpoint|TurnChangeExport' -benchtime=10x -benchmem
+```
+
+```bash
+cd apps/web
+KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --project containers tests/git/turn-changed-files-executors.spec.ts
+```
+
+Add capability-specific external tests for Sprites/plugin executors where credentials and environments exist.
+Report the exact command and blocker if an environment cannot run; shared unit tests do not prove its support.
+
+```bash
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+```
+
+## Performance protocol
+
+Measure actual end-to-end service wall time, including Git admission and executor transport, alongside package benchmarks.
+Use a 100-file small repository, a 20,000-file repository, large text/binary changes, multi-checkout capture, and shared-checkout contention.
+Use warm/cold cases and ten observations per representative case after setup. Record median, p95, maximum, and failures.
+Record Git/OS/CPU/filesystem/executor/database versions, tracked/untracked counts, changed bytes, new object bytes, and compressed retained bytes.
+Include staged/committed changes and repeated turns to measure deduplication growth.
+Use slow storage where available; controlled latency injection must be labeled synthetic rather than physical-storage evidence.
+Also measure size-limit failures and Stop/Cancel deadline behavior. Do not report source inspection as performance evidence.
+
+## Dependencies and risks
+
+Depends on all preceding orders. Docker/SSH/Kind require a real daemon; Sprites can require credentials.
+Final completion requires either passing promised executor acceptance or an explicit product-scope correction reviewed by the user.
+Leave unverified cross-executor criteria open rather than calling partial support complete.
+No new rendered UI belongs to this order; its existing UI coverage comes from 07 and 08.
+
+## Results
+
+Public Git and task guidance is implemented. The Docker retention E2E passed after removing the executor container and restarting the backend. The SSH retention E2E passed after removing the remote task checkout. Local capture/export benchmarks passed for all six recorded cases; updated ten-observation medians and maxima are in [performance-results.md](performance-results.md).
+
+Still open: Kind-backed Kubernetes, Sprites, and plugin executor qualification; database-backed compressed-retention growth and deduplication; end-to-end transport timing; cold/slow storage; size-limit and cancellation-bound measurements; PostgreSQL-specific tests. The Kubernetes fixture currently seeds no repository, and no Sprites or plugin environment was exercised in this run. Do not treat the remaining executor matrix or performance criteria as complete.
+
+### Review follow-up verification (2026-10-08)
+
+Targeted review regressions passed: six focused Go package groups, seven Vitest files (107 tests), web typecheck, `i18n:check`, ESLint on the updated E2E files, and the desktop and mobile historical-turn E2Es. The managed desktop E2E run rebuilt backend and Vite assets successfully. No full test-suite rerun or cross-executor/performance qualification was performed for this review; all gaps listed above remain open, so this work order stays `in_progress`.
+
+### PR remediation verification (2026-10-08)
+
+- Changed-package Go lint and changed-file Web ESLint passed.
+- `cd apps/backend && go test -race ./internal/task/changes` passed.
+- `cd apps/backend && go test -race ./internal/task/repository/sqlite -run 'Test(TurnChange(Content|History|Set|Retention)|TurnRepositoryStart|FinalizeTurnChangeSet)'` passed.
+- `cd apps/backend && go test ./internal/agentctl/server/process -run 'Test(TurnCheckpoint(CapturesExactIntervalWithoutMutatingUserGitState|CompareAndExportIgnoreMovedOrRemovedReachabilityRefs|ExportsImmutablePatchesAndRenderingBlobs|DeletesOnlyOwnedRefsWithAcceptedOIDCAS|ConcurrentCaptureSharesOneImmutableEndpoint)|ValidateTurnCheckpointCandidateBytesEnforcesEntryAndByteLimits)'` passed.
+- `cd apps/web && pnpm exec vitest run components/task/chat/message-list-native.test.tsx components/task/chat/turn-changed-files-card.test.tsx components/task/task-changes-panel-historical.test.tsx hooks/domains/session/use-turn-changes.test.ts hooks/domains/session/use-turn-changes-pagination.test.tsx lib/state/slices/session/turn-changes-actions.test.ts lib/turn-changes/history-scope.test.ts lib/turn-changes/projection.test.ts lib/turn-changes/tree.test.ts lib/turn-changes/view-state.test.ts lib/api/domains/turn-changes-api.test.ts`: 11 files and 117 tests passed.
+- `cd apps/web && pnpm exec tsc --noEmit` and `pnpm run i18n:check` passed.
+- Desktop and mobile changed-files and settings E2Es passed after rebuilding the backend and E2E plugin fixture: two tests per viewport. The captured screenshots were refreshed and validated.
+- No completed full-suite rerun or cross-executor/performance qualification was performed for this remediation. A broad SQLite race run was cancelled before completion; the focused SQLite and process tests above passed. All qualification gaps listed above remain open, so this work order stays `in_progress`.
+
+An initial PR CI run found an invalid `binary` column identifier in PostgreSQL and stale generated settings-catalog snapshots; both are corrected (`is_binary` in the database schema and refreshed generated contracts). Eight work orders also had invalid list frontmatter for `depends_on`, which is corrected. Focused lifecycle, change-coordinator, SQLite repository, and transcript tests passed locally after these fixes. The PostgreSQL test DSN is absent locally, so the targeted PostgreSQL case skipped; fresh-head CI is the next check. No broad local suite was rerun. Kind/Kubernetes, Sprites, plugin executors, PostgreSQL-specific acceptance, transport timing, cold/slow storage, retention-growth evidence, and size/cancellation bounds remain open.
+
+The current-head frontend CI run found that `show_turn_changed_files` was present in the mutable DTO inventory but absent from the settings-discovery field catalog. Added the field descriptor and independent coverage-inventory entry, regenerated the contract, and passed the focused backend catalog test and frontend catalog/coverage tests (20 tests). At that verification point the corrected PR CI run was pending; the later PR fixup verification is recorded below. All qualification gaps listed above remain open.
+
+The following exact-head PR failures were also reproduced locally and corrected: the command-panel assertion matched the new settings preference text instead of a Files group heading, and normal/cancelled workflow completion waited on terminal capture before publishing readiness. The assertion now targets the exact group heading. Normal completion publishes while terminal capture runs asynchronously; the generation fence remains through durable terminal ownership and accepted end endpoints, then releases before comparison/export summary work. Stop and disconnect settlement performs one bounded summary-processing attempt before executor teardown. Capture failures settle through short independent persistence contexts, and summary retries do not fence successor prompts. Focused lifecycle tests passed normally and under `-race`; the targeted workflow-session-targeting, mobile cancel-completion, and command-panel E2Es each passed. Changed-package `golangci-lint` and changed-file ESLint passed. No broad local suite rerun was performed; at that point full current-head PR CI was the next check, with its result recorded below. The qualification gaps listed above remain open.
+
+The next exact-head PR run completed with four failed browser cases across six failing CI checks (four E2E shards and two dependent aggregate checks). The failures were a canvas proxy setup timeout, GitLab and GitHub push-autolink successor prompts, and a mobile walkthrough mock-agent output failure. After the split-phase terminal fix, the previously failing GitHub autolink passed locally; a combined targeted run passed all five canvas proxy cases and the GitLab autolink; the mobile walkthrough's three tests also passed. `go test ./internal/agent/runtime/lifecycle ./internal/task/changes -count=1`, focused race tests for both packages, backend adapter compilation, and changed-package Go lint passed. At that point, a fresh PR CI run was required to verify those results against the updated head. No broad local suite rerun was performed, and all qualification gaps listed above remain open.
+
+### PR CI result for the endpoint-capture fix
+
+The updated code head `26d41fd33a68f3b6c3026c468e58286516fd0a53` completed PR CI with 61 checks passed, 11 skipped, and no failures or pending checks. The PR was mergeable and clean with no unresolved review threads. This verifies the prior targeted browser failures at that code head. The qualification gaps listed in this work order remain open; no cross-executor or performance acceptance is claimed.
+
+### UX and reliability QA (2026-10-08)
+
+The [QA findings](qa-findings.md) record eleven corrected issues, reference comparison, visual evidence, and local measurements. Six focused frontend test files passed (36 tests), as did desktop/mobile browser scenarios, typecheck, localization, and changed-file lint. Backend checkpoint/coordinator/SQLite race tests and seven PostgreSQL 16 tests passed without skips. The full checkpoint group also passed on Git 2.39.5. This closes the previously disclosed focused PostgreSQL execution gap.
+
+Warm local API and UI measurements, tiny-file retention reuse, and ten-observation 100-file/20,000-file checkpoint benchmarks are recorded in the QA report. These do not close remote executor, cold/slow storage, large retention-growth, or full end-to-end timing qualification. This work order remains `in_progress`.
+
+### Conflict and Windows CI remediation (2026-10-09)
+
+Merged current main while preserving delivery submission identity, runtime-retention guards, schema admission, and turn capture. Fixed a Windows-invalid test filename without removing quoted-path coverage. New failing regressions exposed missing canonical reply anchors and skipped capture on retained failed turns; both now pass. Focused backend race tests, full lifecycle/backendapp/coordinator/catalog tests, focused SQLite tests, 36 frontend tests, typecheck, localization, documentation checks, and four desktop plus three mobile E2Es passed. Current-head CI remains pending after delivery; work order 09's external qualification limits are unchanged.
+
+The merged CI run found a v0.93.0 fixture inventory mismatch, successor admission during terminal capture, and second-precision tool-completion timestamps. Corrected the missing-table metadata, waited for capture before admitting follow-ups, and preserved precise completion timestamps. SQLite conformance and PostgreSQL 16 upgrade/manifest race checks passed. Capture admission, cancellation, and completion regressions passed repeated race checks. Browser replays also exposed hidden-column settings leaking across tests; the per-test reset now clears them. Full shard replay and fresh-head CI remain in progress. These fixes do not change the external qualification limits above.
+
+Further replay found that runtime-bound proxy responses lost their writable interface, breaking embedded VS Code WebSocket upgrades. A failing real-proxy regression now passes with duplex and retirement fencing preserved. Browser fixtures explicitly bind local editor execution, await stopped-workspace readiness, and restore native runtime selection after managed-runtime scenarios. Eight isolated mobile scenarios passed. Final rebuilt desktop validation passed; remote CI remains pending. Executor/storage qualification limits remain unchanged.
+
+
+Final merged local verification: 15 repeated desktop integration checks and eight repeated mobile checks passed without retries. After merging main through `3fed5570cec533f468c25ed03c84967bdc972588`, fresh builds passed five desktop integration checks and all seven desktop/mobile changed-files scenarios. The Linux editor IPC lookup now follows code-server's `XDG_RUNTIME_DIR` rule; its regression failed before the fix and passed afterwards. Affected upstream probe/API/credential race checks, repeated runtime-proxy races, and document validation passed. See `qa-findings.md` for commands, logs, partial full-shard results, and the still-pending remote CI gate. This work order stays `in_progress`.
+
+### Windows CI fixture remediation (2026-10-10)
+
+The Windows process job failed because the copy-export fixture used a tab and a double quote in a filename. The fixture now exercises plain and space-containing names on every platform, and retains the tab/quote case on non-Windows systems. Copy classification, patch isolation, and both rendering bodies remain asserted in every case. This changes test setup only; the production contract and qualification status are unchanged.
+
+- `cd apps/backend && go test -trimpath -race ./internal/agentctl/server/process -run '^TestTurnCheckpointCopyPatchExcludesChangedSource$' -count=1`: passed locally with all three filename cases.
+- `cd apps/backend && go test -trimpath ./internal/agent/runtime/lifecycle ./internal/orchestrator -run 'TurnChange|NativeResume|PassthroughMCP' -count=1`: both packages passed after the conflict-free rebase.
+- `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all`: passed.
+- Fresh remote Windows and full CI results remain pending after publication.
+- Work order 09 retains all disclosed executor and performance qualification gaps.

@@ -277,6 +277,9 @@ func gitOperatorTimeout(args []string) time.Duration {
 func validateGitCommandArgs(args []string) error {
 	// Validate that user-controlled arguments don't introduce command injection risks.
 	// exec.CommandContext does not use a shell, but git still interprets unsafe flags.
+	if isAcceptedTurnCheckpointDelete(args) {
+		return nil
+	}
 	skipNextArg := false
 	afterDoubleDash := false
 	for i, arg := range args {
@@ -292,6 +295,19 @@ func validateGitCommandArgs(args []string) error {
 		afterDoubleDash = separator
 	}
 	return nil
+}
+
+func isAcceptedTurnCheckpointDelete(args []string) bool {
+	if len(args) != 4 || args[0] != "update-ref" || args[1] != "-d" {
+		return false
+	}
+	parts := strings.Split(args[2], "/")
+	if len(parts) != 6 || parts[0] != "refs" || parts[1] != "kandev" || parts[2] != "turn-changes" ||
+		!validTurnChangeIdentity(parts[3]) || !validTurnChangeIdentity(parts[4]) ||
+		(parts[5] != "start" && parts[5] != "end") {
+		return false
+	}
+	return securityutil.LooksLikeCommitSHA(args[3])
 }
 
 func validateGitCommandArgument(arg string) (skipNextArg, separator bool, err error) {

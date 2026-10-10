@@ -22,6 +22,10 @@ parent and dependency relationships, task creation and launch behavior, task
 runtime state publication, workflow definitions and transitions, completion
 signals, and task-scoped scheduling contracts.
 
+Task-owned turn change sets bind immutable repository intervals to capture
+policy, historical content availability, and transcript anchors. The workspace
+system supplies checkout identity; runtime supplies ordered executor access.
+
 ## Exclusions
 
 - Agent identity, permissions, and runtime profiles belong to the

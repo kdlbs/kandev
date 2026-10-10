@@ -31,6 +31,15 @@ func TestMapKanbanStateIncludesWIPAdmissionFields(t *testing.T) {
 	}
 }
 
+func TestMapUserSettingsStateIncludesTurnChangedFilesPreference(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{ShowTurnChangedFiles: false},
+	}, "workspace-1")
+	if state["showTurnChangedFiles"] != false {
+		t.Fatalf("showTurnChangedFiles = %#v, want false", state["showTurnChangedFiles"])
+	}
+}
+
 func TestMapKanbanStepStateIncludesProfileSessionPolicies(t *testing.T) {
 	step := mapKanbanStepState(taskdto.WorkflowStepDTO{
 		ID:                        "step-policy",
