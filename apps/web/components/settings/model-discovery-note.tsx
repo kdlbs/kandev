@@ -27,18 +27,18 @@ export function ModelDiscoveryNote({ discovery }: { discovery?: ModelDiscovery }
     case "no_listing":
       text = t("agents:modelDiscoveryNoListing", { executable: presentation.executable });
       break;
-    case "failed":
-      text = t("agents:modelDiscoveryFailed", {
-        reason:
-          presentation.status === "not_installed"
-            ? t("agents:modelDiscoveryNotInstalled")
-            : presentation.status === "not_logged_in"
-              ? t("agents:modelDiscoveryNotLoggedIn")
-              : presentation.status === "timeout"
-                ? t("agents:modelDiscoveryTimeout")
-                : presentation.reason,
-      });
+    case "failed": {
+      let reason = presentation.reason;
+      if (presentation.status === "not_installed") {
+        reason = t("agents:modelDiscoveryNotInstalled");
+      } else if (presentation.status === "not_logged_in") {
+        reason = t("agents:modelDiscoveryNotLoggedIn");
+      } else if (presentation.status === "timeout") {
+        reason = t("agents:modelDiscoveryTimeout");
+      }
+      text = t("agents:modelDiscoveryFailed", { reason });
       break;
+    }
   }
 
   return (
