@@ -58,8 +58,8 @@ Paths in this table are relative to `apps/web/`.
 
 | Component | Responsibility and current source anchor |
 | --- | --- |
-| `app/settings/agents/[agentId]/page.tsx` | `AgentSetupPage` resolves creation from discovery or configured name/id; saved ordinary routes redirect. `useAgentStoreSync` at line 169 publishes both catalogue and options. |
-| `app/settings/agents/[agentId]/agent-save-helpers.ts` | `saveNewAgent` line 320 and `saveExistingAgent` line 506 assemble accepted targets and invoke `upsertAgent`; partial reconciliation at lines 329 and 475 uses the same callback. |
+| `app/settings/agents/[agentId]/page.tsx` | `AgentSetupPage` resolves creation from discovery or configured name/id; saved ordinary routes redirect. `useAgentCreationStoreSync` publishes both catalogue and options. |
+| `app/settings/agents/[agentId]/agent-save-helpers.ts` | `saveNewAgent` and `saveExistingAgent` assemble accepted targets and invoke `upsertAgent`; partial reconciliation uses the same callback. |
 | `app/settings/agents/[agentId]/agent-save-contributor.ts` | `useAgentSaveContributor` registers the actual page draft with the shared settings coordinator. |
 | `app/actions/agents.ts` | `createAgentAction` line 71 and `createAgentProfileAction` line 118 call `fetchJson` via `agentSettingsRequest`, normalizing real responses. |
 | `lib/ws/handlers/agents.ts` | `registerAgentsHandlers` line 247 uses `applyProfileCreatedEvent` line 217 to update the owning store and flattened options. |
@@ -67,7 +67,7 @@ Paths in this table are relative to `apps/web/`.
 
 ## Current-store publication
 
-Creation publication uses `useAgentStoreSync`, bound through `useAppStoreApi()`
+Creation publication uses `useAgentCreationStoreSync`, bound through `useAppStoreApi()`
 to this provider's store. Inside `upsertAgent`, obtain
 `storeApi.getState().settingsAgents.items` immediately before deciding whether
 to replace the accepted target by ID or append it. Do not read the catalogue at
