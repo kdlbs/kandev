@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/kandev/kandev/internal/agent/hostcli"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/hostcli"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
@@ -71,6 +71,10 @@ func TestFetchProfileDynamicModelsPreservesRuntimeInfo(t *testing.T) {
 		},
 	}
 	ctrl.hostUtility = utility
+	ctrl.hostCLIModels = map[string]hostCLIModelEntry{"codex-acp": {
+		status: hostCLIModelStatusOK, checkedAt: time.Now(),
+		models: []hostcli.Model{{ID: "cli-only", Name: "CLI Only"}},
+	}}
 	envVars := []dto.ProfileEnvVarDTO{}
 	cliFlags := []dto.CLIFlagDTO{}
 	commandPrefix := ""
