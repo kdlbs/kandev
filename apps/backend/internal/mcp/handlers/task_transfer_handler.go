@@ -18,6 +18,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const taskTransferLocalHumanActorID = "local-human"
+
 type TaskTransferService interface {
 	TransferTask(context.Context, models.TaskTransferCommand) (*models.TaskTransferReceipt, error)
 	ResolveTaskTransferReplayActor(context.Context, models.TaskTransferCommand) (models.TaskTransferActor, bool, error)
@@ -165,7 +167,7 @@ func (h *Handlers) recordRejectedTaskTransfer(
 		identity, _ := authn.IdentityFromContext(ctx)
 		actorID = identity.UserID
 		if actorID == "" {
-			actorID = "local-human"
+			actorID = taskTransferLocalHumanActorID
 		}
 	}
 	command := models.TaskTransferCommand{
@@ -213,7 +215,7 @@ func (h *Handlers) taskTransferActor(ctx context.Context, command models.TaskTra
 		identity, _ := authn.IdentityFromContext(ctx)
 		actorID := identity.UserID
 		if actorID == "" {
-			actorID = "local-human"
+			actorID = taskTransferLocalHumanActorID
 		}
 		return models.TaskTransferActor{Kind: models.TaskTransferActorHuman, ID: actorID}, nil
 	}
@@ -221,7 +223,7 @@ func (h *Handlers) taskTransferActor(ctx context.Context, command models.TaskTra
 		identity, _ := authn.IdentityFromContext(ctx)
 		actorID := identity.UserID
 		if actorID == "" {
-			actorID = "local-human"
+			actorID = taskTransferLocalHumanActorID
 		}
 		return models.TaskTransferActor{Kind: models.TaskTransferActorHuman, ID: actorID, SessionID: principal.CallerSessionID}, nil
 	}
