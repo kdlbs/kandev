@@ -9,12 +9,16 @@ const PLUGIN_HOST = "https://git.example.test";
 const PLUGIN_URL = `${PLUGIN_HOST}/curtis/tooling`;
 const PLUGIN_CLONE_URL = `${PLUGIN_URL}.git`;
 const WORKSPACE_ID = "workspace-1";
+const PLUGIN_FULL_NAME = "curtis/tooling";
 
 const mocks = vi.hoisted(() => ({
   registerRemoteRepositoryAction: vi.fn(),
   useRemoteRepositoriesCalls: 0,
   inspections: new Map<string, RepositoryInspection>(),
   settledUrls: new Set<string>(),
+  deferInspection: false,
+  branchError: undefined as Error | undefined,
+  inspectionError: undefined as Error | undefined,
 }));
 
 vi.mock("@/app/actions/workspaces", () => ({
@@ -37,7 +41,7 @@ vi.mock("@/hooks/domains/integrations/use-remote-repositories", async () => {
             id: "42",
             owner: "curtis",
             name: "tooling",
-            fullName: "curtis/tooling",
+            fullName: PLUGIN_FULL_NAME,
             url: PLUGIN_URL,
             providerHost: PLUGIN_HOST,
             defaultBranch: "dev",
@@ -52,7 +56,7 @@ vi.mock("@/hooks/domains/github/use-branches-by-url", () => ({
   useBranchesByURL: () => ({
     branches: () => [{ name: "main", type: "remote" }],
     loading: () => false,
-    error: () => undefined,
+    error: () => mocks.branchError,
     ensure: () => undefined,
     clear: () => undefined,
   }),
@@ -61,12 +65,12 @@ vi.mock("@/hooks/domains/github/use-pr-info-by-url", async (importOriginal) => (
   ...(await importOriginal<typeof import("@/hooks/domains/github/use-pr-info-by-url")>()),
   usePRInfoByURL: () => ({
     ensure: (url: string) => {
-      mocks.settledUrls.add(url);
+      if (!mocks.deferInspection) mocks.settledUrls.add(url);
     },
     info: () => undefined,
     loading: () => false,
     settled: (url: string) => mocks.settledUrls.has(url),
-    error: () => undefined,
+    error: () => mocks.inspectionError,
     inspection: (url: string) => mocks.inspections.get(url),
     clear: () => undefined,
   }),
@@ -108,7 +112,18 @@ function renderDialog(open = true) {
       />
     </TooltipProvider>,
   );
-  return { onOpenChange, onRegistered, view };
+  const rerender = () =>
+    view.rerender(
+      <TooltipProvider>
+        <AddRemoteRepositoryDialog
+          open={open}
+          onOpenChange={onOpenChange}
+          workspaceId={WORKSPACE_ID}
+          onRegistered={onRegistered}
+        />
+      </TooltipProvider>,
+    );
+  return { onOpenChange, onRegistered, view, rerender };
 }
 
 function pickOption(fullName: string, providerTab?: string) {
@@ -127,6 +142,13 @@ function pickOption(fullName: string, providerTab?: string) {
   fireEvent.click(option);
 }
 
+function pastePluginURL() {
+  fireEvent.click(screen.getByTestId("remote-repo-chip-trigger"));
+  const input = screen.getByTestId("remote-repo-input");
+  fireEvent.change(input, { target: { value: PLUGIN_URL } });
+  fireEvent.keyDown(input, { key: "Enter" });
+}
+
 function confirmButton() {
   return screen.getByRole("button", { name: CONFIRM_LABEL });
 }
@@ -137,6 +159,86 @@ afterEach(() => {
   mocks.useRemoteRepositoriesCalls = 0;
   mocks.inspections.clear();
   mocks.settledUrls.clear();
+  mocks.deferInspection = false;
+  mocks.branchError = undefined;
+  mocks.inspectionError = undefined;
+});
+
+describe("AddRemoteRepositoryDialog resolution", () => {
+  it("uses the inspected default when branches arrive before plugin inspection", async () => {
+    mocks.deferInspection = true;
+    mocks.registerRemoteRepositoryAction.mockResolvedValue(registered);
+    const { rerender } = renderDialog();
+    pastePluginURL();
+    expect(confirmButton().hasAttribute("disabled")).toBe(true);
+    mocks.inspections.set(PLUGIN_URL, {
+      providerId: "forgejo",
+      providerHost: PLUGIN_HOST,
+      repositoryId: "42",
+      ownerOrProject: "curtis",
+      repositoryName: "tooling",
+      cloneUrl: PLUGIN_CLONE_URL,
+      defaultBranch: "dev",
+    } as RepositoryInspection);
+    mocks.settledUrls.add(PLUGIN_URL);
+    rerender();
+    await waitFor(() => expect(confirmButton().hasAttribute("disabled")).toBe(false));
+    fireEvent.click(confirmButton());
+    await waitFor(() =>
+      expect(mocks.registerRemoteRepositoryAction).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        expect.objectContaining({ default_branch: "dev" }),
+      ),
+    );
+  });
+
+  it.each([
+    ["acme/site", undefined],
+    [PLUGIN_FULL_NAME, "Forgejo"],
+  ])("saves picked %s when optional branch lookup fails", async (fullName, providerTab) => {
+    mocks.branchError = new Error("branch service unavailable");
+    mocks.inspectionError = new Error("optional inspection unavailable");
+    mocks.registerRemoteRepositoryAction.mockResolvedValue(registered);
+    const { onRegistered } = renderDialog();
+    pickOption(fullName, providerTab);
+    await waitFor(() => expect(confirmButton().hasAttribute("disabled")).toBe(false));
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(onRegistered).toHaveBeenCalledWith(registered));
+  });
+
+  it("blocks pasted plugin registration when required inspection fails", async () => {
+    mocks.inspectionError = new Error("provider inspection unavailable");
+    renderDialog();
+    pastePluginURL();
+    expect(confirmButton().hasAttribute("disabled")).toBe(true);
+    fireEvent.click(confirmButton());
+    expect(mocks.registerRemoteRepositoryAction).not.toHaveBeenCalled();
+  });
+
+  it("preserves a chosen branch after inspected metadata refresh", async () => {
+    mocks.registerRemoteRepositoryAction.mockResolvedValue(registered);
+    const { rerender } = renderDialog();
+    pickOption(PLUGIN_FULL_NAME, "Forgejo");
+    fireEvent.click(screen.getByTestId("remote-branch-chip-trigger"));
+    fireEvent.click(await screen.findByRole("option", { name: /^main/ }));
+    mocks.inspections.set(PLUGIN_URL, {
+      providerId: "forgejo",
+      providerHost: PLUGIN_HOST,
+      repositoryId: "42",
+      ownerOrProject: "curtis",
+      repositoryName: "tooling",
+      cloneUrl: PLUGIN_CLONE_URL,
+      defaultBranch: "dev",
+    } as RepositoryInspection);
+    rerender();
+    fireEvent.click(confirmButton());
+    await waitFor(() =>
+      expect(mocks.registerRemoteRepositoryAction).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        expect.objectContaining({ default_branch: "main" }),
+      ),
+    );
+  });
 });
 
 describe("AddRemoteRepositoryDialog", () => {
@@ -166,7 +268,7 @@ describe("AddRemoteRepositoryDialog", () => {
     mocks.registerRemoteRepositoryAction.mockResolvedValue(registered);
     renderDialog();
 
-    pickOption("curtis/tooling", "Forgejo");
+    pickOption(PLUGIN_FULL_NAME, "Forgejo");
     await waitFor(() => expect(confirmButton().hasAttribute("disabled")).toBe(false));
     fireEvent.click(confirmButton());
 
@@ -199,9 +301,7 @@ describe("AddRemoteRepositoryDialog", () => {
     } as RepositoryInspection);
     renderDialog();
 
-    fireEvent.click(screen.getByTestId("remote-repo-chip-trigger"));
-    fireEvent.change(screen.getByTestId("remote-repo-input"), { target: { value: PLUGIN_URL } });
-    fireEvent.keyDown(screen.getByTestId("remote-repo-input"), { key: "Enter" });
+    pastePluginURL();
 
     await waitFor(() => expect(confirmButton().hasAttribute("disabled")).toBe(false));
     fireEvent.click(confirmButton());

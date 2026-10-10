@@ -109,10 +109,14 @@ fills the row's URL, provider hints, and default branch; a pasted URL fills
 only the URL and is inspected through `usePRInfoByURL(workspaceId)`, the same
 inspection task creation uses: when a registered plugin provider claims the
 URL, its inspection descriptor (clone URL, provider identity, default branch)
-replaces the bare URL on the row before submission is allowed. Branch loading
+replaces the bare URL on the row before submission is allowed. A pasted row
+does not expose list-derived branch defaults until that inspection descriptor
+has been applied; a user-selected branch is preserved. Branch loading
 uses `useBranchesByURL(workspaceId)`, which already routes plugin providers
 through their `repositories.branches` action. Confirmation is enabled only
-with a non-empty URL whose inspection has settled without error. A plain
+with a non-empty URL. Pasted URLs require inspection to settle without error;
+picker rows already carry complete metadata and remain savable when optional
+browser lookups fail. Branch enumeration errors never block registration. A plain
 built-in repository URL settles without fetching PR or issue metadata. On success
 the page inserts the returned repository into the saved baseline and the
 rendered list; a repository the page already lists keeps its loaded entry and
@@ -147,6 +151,15 @@ the dialog refuses close requests (Cancel, Escape, overlay) until the request
 settles. Registration enables `ResolveProviderDefaults`, so a GitHub locator
 without a branch probes the provider's default branch; that probe is best
 effort and a failure leaves the branch empty rather than failing registration.
+
+Self-managed GitLab origins are admitted only after the server-owned
+`GitLabRepositoryOriginVerifier` confirms the exact scheme, host, and port
+against the selected workspace connection. Backend wiring reads public
+connection metadata through the existing GitLab service, without resolving
+credentials or making a provider request. Missing or mismatched connections
+fail closed with `repository_selection_invalid`; connection-read failures
+produce `repository_selection_unavailable`. Only that successful verification
+sets the internal `TrustedRemote` marker consumed by shared resolution.
 
 Provider hints that disagree with a built-in locator (owner, name, provider,
 host) are rejected by `validateBuiltInRemoteHints` as

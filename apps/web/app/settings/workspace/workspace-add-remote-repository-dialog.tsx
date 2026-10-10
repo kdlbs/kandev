@@ -100,11 +100,8 @@ function RemoteRepositoryForm({
   const [row, setRow] = useState<TaskRemoteRepoRow>(EMPTY_ROW);
   const [error, setError] = useState<string | null>(null);
   const accessibleRepos = useRemoteRepositories(workspaceId);
-  const { branches, prInfo, resolutionError, resolving, retryResolution } = useRemoteRowResolution(
-    workspaceId,
-    row,
-    setRow,
-  );
+  const { branches, rowBranches, prInfo, resolutionError, resolving, retryResolution } =
+    useRemoteRowResolution(workspaceId, row, setRow);
 
   const handleURLChange = useCallback<Parameters<typeof RemoteRepoChip>[0]["onURLChange"]>(
     (url, source, metadata) => {
@@ -140,8 +137,8 @@ function RemoteRepositoryForm({
         <RemoteRepoChip
           workspaceId={workspaceId}
           row={row}
-          branches={branches.branches(row.url)}
-          branchesLoading={branches.loading(row.url)}
+          branches={rowBranches}
+          branchesLoading={branches.loading(row.url) || resolving}
           prInfo={prInfo.info(row.url)}
           resolutionError={resolutionError}
           onRetry={retryResolution}
@@ -216,15 +213,21 @@ function useRemoteRowResolution(
     if (remoteRepositoryUpdateNeeded(row, update)) setRow({ ...row, ...update });
   }, [inspection, row, setRow]);
 
-  const resolutionError = prInfo.error(row.url) ?? branches.error(row.url);
+  // Picker metadata is complete; server-side registration still verifies it.
+  // Branch enumeration is optional even when a pasted URL needs inspection.
+  const resolutionError = row.source === "paste" ? prInfo.error(row.url) : undefined;
   const resolving = Boolean(row.url) && row.source === "paste" && !prInfo.settled(row.url);
+  // Do not let list fallback selection race the pasted provider descriptor.
+  const awaitingDescriptor =
+    row.source === "paste" && (resolving || Boolean(inspection?.(row.url) && !row.provider));
+  const rowBranches = awaitingDescriptor ? [] : branches.branches(row.url);
   const retryResolution = () => {
     branches.clear(row.url);
     prInfo.clear(row.url);
     branches.ensure(row.url);
     prInfo.ensure(row.url);
   };
-  return { branches, prInfo, resolutionError, resolving, retryResolution };
+  return { branches, rowBranches, prInfo, resolutionError, resolving, retryResolution };
 }
 
 function RegistrationStatus({ error, submitting }: { error: string | null; submitting: boolean }) {

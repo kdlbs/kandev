@@ -587,6 +587,7 @@ func initThirdPartyProviders(
 		return nil, fmt.Errorf("initialize gitlab: %w", recordErr)
 	}
 	if gitlabSvc != nil {
+		taskSvc.SetGitLabRepositoryOriginVerifier(gitLabRepositoryOriginVerifier{connections: gitlabSvc})
 		gitlabSvc.SetPromptResolver(promptSvc)
 		gitlabSvc.SetComparisonTargetObserver(taskSvc)
 	}

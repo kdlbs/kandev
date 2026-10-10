@@ -118,3 +118,22 @@ Desktop and phone E2E cover picker and pasted URL registration, persistence,
 unchanged task counts, and phone action sizing. Broad lint, typecheck, unit,
 race, and E2E checks belong to hosted CI; they were not run locally during
 remediation. Contributor commit hooks were not run on the host.
+
+
+Additional PR remediation preserves the provider default when a pasted URL's
+branch list arrives before inspection, keeps a user-selected branch, and lets
+complete picker rows register despite optional browser lookup failures.
+Self-managed GitLab registration verifies the exact origin against only the
+selected workspace's configured connection before persistence. Missing,
+different, disabled, and unreadable connections fail closed; no credential
+resolution or network request occurs in this host-verification adapter.
+
+Focused isolated checks after this remediation:
+
+- Dialog regression suite: 11 tests passed, including the three previously
+  failing branch-order and picker-error cases.
+- `go test -mod=readonly -p=1 ./internal/task/service -run '^TestRegisterRemoteRepository' -count=1`: passed after the self-managed-origin regression failed on the prior code.
+- Host-verifier adapter tests cover matching origin, scheme/host/port mismatch,
+  absent or disabled connection, and read failure.
+- The settings section extraction passed changed-file ESLint with zero warnings
+  and the existing 36 repository-client tests, preserving hook and markup bytes.

@@ -51,6 +51,9 @@ func (s *Service) RegisterRemoteRepository(
 	if err := s.preflightRepositoryInputs(ctx, req.WorkspaceID, inputs); err != nil {
 		return nil, false, err
 	}
+	if err := s.verifyRemoteRepositoryOrigin(ctx, req.WorkspaceID, &inputs[0]); err != nil {
+		return nil, false, err
+	}
 	if err := validateBuiltInRemoteHints(inputs[0]); err != nil {
 		return nil, false, err
 	}
@@ -98,7 +101,7 @@ func validateBuiltInRemoteHints(input TaskRepositoryInput) error {
 		return NewRepositorySelectionError(RepositorySelectionErrorInvalid,
 			fmt.Errorf("remote_url provider host %q does not match %q", providerHost, input.ProviderHost))
 	}
-	if provider == providerGitLab && providerHost != "https://gitlab.com" {
+	if provider == providerGitLab && providerHost != "https://gitlab.com" && !input.TrustedRemote {
 		return NewRepositorySelectionError(RepositorySelectionErrorInvalid,
 			fmt.Errorf("untrusted GitLab origin %q", providerHost))
 	}

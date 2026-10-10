@@ -576,6 +576,7 @@ type Service struct {
 	stallNotifiedSessions          map[string]map[string]struct{}
 	remoteBranchLister             RemoteBranchLister
 	repositorySelectionResolver    RepositorySelectionResolver
+	gitLabRepositoryOriginVerifier GitLabRepositoryOriginVerifier
 	repoCloneLocation              RepoCloneLocation
 	blockers                       BlockerRepository
 	comments                       CommentRepository

@@ -88,6 +88,8 @@ layout is introduced.
 
 Review remediation uses focused isolated regressions for URL settlement,
 selected plugin branches, duplicate settings preservation, and authorization.
+Additional review regressions cover configured self-managed GitLab origins,
+branch-list/inspection ordering, and optional picker lookup failures.
 Broad verification commands below are hosted CI responsibilities. See the
 work order's Results for the actual focused outcomes.
 

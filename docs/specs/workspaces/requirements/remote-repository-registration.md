@@ -61,7 +61,8 @@ before any task exists.
 - **AC-WORKSPACES-REMOTE-REPOSITORY-REGISTRATION-001.3:** When the user
   confirms a selection, the system shall verify the locator on the server
   before it persists anything: a built-in provider locator through the
-  existing URL contract, and a plugin provider locator through the owning
+  existing URL contract and, for self-managed GitLab, the selected
+  workspace's configured origin, and a plugin provider locator through the owning
   plugin's repository inspection. Provider hints supplied by the browser shall
   never be persisted without that verification.
 - **AC-WORKSPACES-REMOTE-REPOSITORY-REGISTRATION-001.4:** When the verified
