@@ -9,6 +9,7 @@ import {
   fetchMessageQueueSettings,
   fetchSessionCapacitySettings,
   fetchSleepInhibitionSettings,
+  probeAgentProfile,
   resolveAgentModelConfig,
   startHostShell,
   updateMessageQueueSettings,
@@ -249,6 +250,36 @@ describe("resolveAgentModelConfig", () => {
       model: "opencode/gpt-5.6",
       mode: "build",
       config_options: { reasoning_effort: "high" },
+    });
+  });
+});
+
+describe("probeAgentProfile", () => {
+  it("posts a complete launch snapshot to the profile probe route", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ agent_name: "codex-acp", status: "ok", models: [], error: null }),
+    );
+
+    await probeAgentProfile("codex-acp", {
+      profile_id: "profile-1",
+      launch_settings: {
+        env_vars: [{ key: "CODEX_PATH", value: "/opt/codex" }],
+        cli_flags: [{ flag: "--profile", description: "", enabled: true }],
+        command_prefix: "npx --",
+      },
+      refresh: true,
+    });
+
+    expect(lastCall().url).toBe("http://api.test/api/v1/agent-models/codex-acp/probe");
+    expect(lastCall().init?.method).toBe("POST");
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      profile_id: "profile-1",
+      launch_settings: {
+        env_vars: [{ key: "CODEX_PATH", value: "/opt/codex" }],
+        cli_flags: [{ flag: "--profile", description: "", enabled: true }],
+        command_prefix: "npx --",
+      },
+      refresh: true,
     });
   });
 });

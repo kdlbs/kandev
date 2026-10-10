@@ -64,6 +64,9 @@ func (h *ExecutorHandlers) listExecutors(ctx context.Context) (dto.ListExecutors
 	for _, executor := range executors {
 		d := dto.FromExecutor(executor)
 		d.Profiles = profilesByExecutor[executor.ID]
+		for index := range d.Profiles {
+			d.Profiles[index].Provider = executor.Provider
+		}
 		resp.Executors = append(resp.Executors, d)
 	}
 	return resp, nil

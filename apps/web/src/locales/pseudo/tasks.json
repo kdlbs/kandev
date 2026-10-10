@@ -22,7 +22,6 @@
   "group": "Ĝŕōũƥ",
   "groupByNone": "Ńōńē",
   "groupByRepository": "Ŕēƥōśĩţōŕŷ",
-  "groupByState": "Śţàţē",
   "groupByWorkflow": "Ŵōŕķƒĺōŵ",
   "ungrouped": "Ũńĝŕōũƥēď",
   "loading": "Ĺōàďĩńĝ...",
@@ -56,5 +55,10 @@
   "unarchivedBranchesMissing_one": "Ɓŕàńćĥ {{branches}} ńō ĺōńĝēŕ ēxĩśţś ĺōćàĺĺŷ ōŕ ōń ţĥē ŕēḿōţē. Ţĥē ńēxţ śēśśĩōń śţàŕţś ƒŕēśĥ ƒŕōḿ ţĥē ƀàśē ƀŕàńćĥ.",
   "unarchivedBranchesMissing_other": "Ɓŕàńćĥēś {{branches}} ńō ĺōńĝēŕ ēxĩśţ ĺōćàĺĺŷ ōŕ ōń ţĥē ŕēḿōţē. Ţĥē ńēxţ śēśśĩōń śţàŕţś ƒŕēśĥ ƒŕōḿ ţĥē ƀàśē ƀŕàńćĥ.",
   "unarchivedTaskRestored": "Ţĥē ţàśķ ĥàś ƀēēń ŕēśţōŕēď.",
-  "unarchiveTask": "Ũńàŕćĥĩvē ţàśķ"
+  "unarchiveTask": "Ũńàŕćĥĩvē ţàśķ",
+  "groupByWorkflowStep": "Ŵōŕķƒĺōŵ śţēƥ",
+  "noWorkflowStep": "Ńō ŵōŕķƒĺōŵ śţēƥ",
+  "loadingWorkflowStep": "Ĺōàďĩńĝ ŵōŕķƒĺōŵ śţēƥ...",
+  "unknownWorkflowStep": "Ũńķńōŵń ŵōŕķƒĺōŵ śţēƥ",
+  "workflowStepSection": "{{workflow}} / {{step}}"
 }

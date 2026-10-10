@@ -3,7 +3,6 @@ package discovery
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"time"
 
@@ -38,8 +37,9 @@ type hostCLIResolver struct {
 	logger *zap.Logger
 	now    func() time.Time
 
-	mu    sync.Mutex
-	cache map[string]hostCLICacheEntry
+	mu         sync.Mutex
+	cache      map[string]hostCLICacheEntry
+	generation uint64
 }
 
 func newHostCLIResolver(log *zap.Logger) *hostCLIResolver {
@@ -64,6 +64,7 @@ func (r *Registry) SetHostCLIRunner(runner hostcli.Runner) {
 	} else {
 		r.hostCLI.runner = runner
 	}
+	r.hostCLI.generation++
 	r.hostCLI.cache = make(map[string]hostCLICacheEntry)
 }
 
@@ -75,6 +76,7 @@ func (r *Registry) InvalidateHostCLICache() {
 	}
 	r.hostCLI.mu.Lock()
 	defer r.hostCLI.mu.Unlock()
+	r.hostCLI.generation++
 	r.hostCLI.cache = make(map[string]hostCLICacheEntry)
 }
 
@@ -86,7 +88,7 @@ func (r *Registry) ApplyHostCLI(
 	lookup func(name string) (agents.Agent, bool),
 	results []Availability,
 ) {
-	if r == nil || r.hostCLI == nil || lookup == nil {
+	if r == nil || r.hostCLI == nil || lookup == nil || ctx.Err() != nil {
 		return
 	}
 	slots := make(chan struct{}, hostCLIMaxConcurrent)
@@ -110,7 +112,11 @@ func (r *Registry) ApplyHostCLI(
 		wg.Add(1)
 		go func(idx int, spec hostcli.Spec) {
 			defer wg.Done()
-			slots <- struct{}{}
+			select {
+			case slots <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 			defer func() { <-slots }()
 			state := r.hostCLI.resolve(ctx, spec, results[idx].MatchedPath)
 			results[idx].CLIVersion = state.Version
@@ -122,15 +128,13 @@ func (r *Registry) ApplyHostCLI(
 
 // resolve returns the cached state for a CLI path or detects it once.
 func (h *hostCLIResolver) resolve(ctx context.Context, spec hostcli.Spec, matchedPath string) HostCLIState {
-	path := strings.TrimSpace(matchedPath)
-	if path == "" {
-		path = spec.Executable
-	}
+	path := hostcli.ExecutablePath(spec, matchedPath)
 	key := spec.Executable + "\x00" + path
 
 	h.mu.Lock()
 	entry, cached := h.cache[key]
 	now := h.now()
+	generation := h.generation
 	h.mu.Unlock()
 	if cached && now.Before(entry.expiresAt) {
 		return entry.state
@@ -139,7 +143,9 @@ func (h *hostCLIResolver) resolve(ctx context.Context, spec hostcli.Spec, matche
 	state := h.detect(ctx, spec, path)
 
 	h.mu.Lock()
-	h.cache[key] = hostCLICacheEntry{state: state, expiresAt: h.now().Add(hostCLICacheTTL)}
+	if h.generation == generation && ctx.Err() == nil {
+		h.cache[key] = hostCLICacheEntry{state: state, expiresAt: h.now().Add(hostCLICacheTTL)}
+	}
 	h.mu.Unlock()
 	return state
 }

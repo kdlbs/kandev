@@ -16,10 +16,14 @@ import {
   getChatDraftAttachments,
   setChatDraftAttachments,
   setChatDraftContent,
-  restoreAttachmentPreview,
 } from "@/lib/local-storage";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { processFile, MAX_FILES, MAX_TOTAL_SIZE, type FileAttachment } from "./file-attachment";
+import {
+  attachmentUploadFailedMessage,
+  restoreDraftAttachment,
+  restoreOpeningMessageAttachments,
+} from "./chat-input-attachment-restore";
 import {
   useAttachmentCountFeedback,
   useAttachmentFileFeedback,
@@ -38,10 +42,12 @@ import type { ImagePasteIssue } from "./clipboard-attachments";
 import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";
 import { ApiError } from "@/lib/api/client";
 import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
+import { matchesSubmittedAttachments } from "./chat-input-payload";
+import { attachmentSnapshot, clearDraftText, useDraftVisit } from "./use-chat-draft-visit";
 
 type UseChatInputStateProps = {
   sessionId: string | null;
+  taskId?: string | null;
   workspaceId?: string | null;
   isSending: boolean;
   contextItems: ContextItem[];
@@ -93,17 +99,8 @@ function clearDraft(sessionId: string | null) {
   setChatDraftAttachments(sessionId, []);
 }
 
-function clearDraftText(sessionId: string | null) {
-  if (!sessionId) return;
-  setChatDraftText(sessionId, "");
-  setChatDraftContent(sessionId, null);
-}
-
-function attachmentSnapshot(attachments: FileAttachment[]): string {
-  return attachments.map((att) => `${att.id}:${att.deliveryMode ?? "prompt"}`).join("|");
-}
-
 type ClearSubmittedInputArgs = {
+  isCurrentVisit: () => boolean;
   valueRef: MutableRefObject<string>;
   submittedText: string;
   attachmentsRef: MutableRefObject<FileAttachment[]>;
@@ -117,6 +114,7 @@ type ClearSubmittedInputArgs = {
 };
 
 function clearSubmittedInput(args: ClearSubmittedInputArgs) {
+  if (!args.isCurrentVisit()) return;
   // Abort if the user already typed new content since this submit started.
   if (args.valueRef.current.trim() !== args.submittedText) return;
   const attachmentsChanged =
@@ -183,12 +181,7 @@ function submitDraft(args: SubmitDraftArgs) {
   const trimmed = args.valueRef.current.trim();
   const allComments = collectComments(args.pendingCommentsRef.current);
   const currentAttachments = args.attachmentsRef.current;
-  if (
-    args.workspaceId &&
-    currentAttachments.some((attachment) => attachment.file && !attachment.attachmentId)
-  ) {
-    return;
-  }
+  if (currentAttachments.some((attachment) => !attachment.attachmentId)) return;
   const submittedAttachments = attachmentSnapshot(currentAttachments);
   const hasContent =
     trimmed || allComments.length > 0 || currentAttachments.length > 0 || args.hasContextComments;
@@ -219,30 +212,72 @@ function submitDraft(args: SubmitDraftArgs) {
 // Attachment staging, retry, and draft persistence share one state machine so
 // desktop and mobile composers cannot drift.
 // eslint-disable-next-line max-lines-per-function
-function useAttachments(sessionId: string | null, workspaceId?: string | null) {
+function useAttachments(
+  taskId: string | null,
+  sessionId: string | null,
+  workspaceId?: string | null,
+) {
   const [attachments, setAttachments] = useState<FileAttachment[]>(() =>
-    sessionId ? getChatDraftAttachments(sessionId).map(restoreAttachmentPreview) : [],
+    sessionId ? getChatDraftAttachments(sessionId).map(restoreDraftAttachment) : [],
   );
   const warnAttachmentCountLimit = useAttachmentCountFeedback();
   const rejectOversizedFile = useAttachmentFileFeedback();
   const warnAttachmentTotalSizeLimit = useAttachmentTotalSizeFeedback();
   const warnUnreadablePastedImage = useUnreadablePastedImageFeedback();
   const attachmentsRef = useRef(attachments);
-  const prevSessionIdRef = useRef(sessionId);
+  const prevDraftOwnerRef = useRef({ taskId, sessionId });
   const prevPersistSessionIdRef = useRef(sessionId);
+  const draftIdentity = `${taskId ?? ""}\u0000${sessionId ?? ""}`;
+  const draftIdentityRef = useRef({ key: draftIdentity, generation: 0 });
+  const uploadOwner = `${taskId ?? ""}\u0000${sessionId ?? ""}\u0000${workspaceId ?? ""}`;
+  const uploadOwnerRef = useRef(uploadOwner);
+  const inFlightUploadsRef = useRef(new Map<string, string>());
 
-  // Reset attachments from storage when session changes (runs before paint)
   useLayoutEffect(() => {
-    if (sessionId === prevSessionIdRef.current) return;
-    prevSessionIdRef.current = sessionId;
-    const newAttachments = sessionId
-      ? getChatDraftAttachments(sessionId).map(restoreAttachmentPreview)
-      : [];
+    const current = draftIdentityRef.current;
+    if (current.key === draftIdentity) return;
+    draftIdentityRef.current = { key: draftIdentity, generation: current.generation + 1 };
+  }, [draftIdentity]);
+
+  // Reset attachment state when either owner changes (runs before paint).
+  useLayoutEffect(() => {
+    const previousOwner = prevDraftOwnerRef.current;
+    if (previousOwner.taskId === taskId && previousOwner.sessionId === sessionId) return;
+    prevDraftOwnerRef.current = { taskId, sessionId };
+
+    const taskChangedWithinSession =
+      previousOwner.sessionId === sessionId && previousOwner.taskId !== taskId;
+    if (taskChangedWithinSession) {
+      for (const attachment of attachmentsRef.current) {
+        if (attachment.attachmentId) {
+          void deleteAttachment(attachment.attachmentId).catch(() => undefined);
+        }
+      }
+      if (sessionId) setChatDraftAttachments(sessionId, []);
+    }
+    const newAttachments =
+      sessionId && !taskChangedWithinSession
+        ? getChatDraftAttachments(sessionId).map(restoreDraftAttachment)
+        : [];
     /* eslint-disable react-hooks/set-state-in-effect -- syncing from localStorage on session switch */
     setAttachments(newAttachments);
     /* eslint-enable react-hooks/set-state-in-effect */
     attachmentsRef.current = newAttachments;
-  }, [sessionId]);
+  }, [sessionId, taskId]);
+
+  useLayoutEffect(() => {
+    if (uploadOwnerRef.current === uploadOwner) return;
+    uploadOwnerRef.current = uploadOwner;
+    setAttachments((previous) => {
+      const next = previous.map((attachment) =>
+        attachment.file && !attachment.attachmentId && attachment.uploadStatus === "uploading"
+          ? { ...attachment, uploadStatus: "pending" as const }
+          : attachment,
+      );
+      attachmentsRef.current = next;
+      return next;
+    });
+  }, [uploadOwner]);
 
   // Persist attachments to storage when they change (for the same session)
   useEffect(() => {
@@ -268,6 +303,9 @@ function useAttachments(sessionId: string | null, workspaceId?: string | null) {
   const uploadPendingAttachment = useCallback(
     async (attachment: FileAttachment) => {
       if (!workspaceId || !attachment.file || attachment.attachmentId) return;
+      const requestOwner = uploadOwner;
+      if (inFlightUploadsRef.current.get(attachment.id) === requestOwner) return;
+      inFlightUploadsRef.current.set(attachment.id, requestOwner);
       updateAttachment(attachment.id, { uploadStatus: "uploading", uploadError: undefined });
       try {
         const uploaded = await uploadAttachment(attachment.file, {
@@ -275,34 +313,43 @@ function useAttachments(sessionId: string | null, workspaceId?: string | null) {
           kind: attachment.isImage ? "image" : "resource",
           deliveryMode: attachment.deliveryMode,
         });
-        if (!attachmentsRef.current.some((current) => current.id === attachment.id)) {
+        if (
+          uploadOwnerRef.current !== requestOwner ||
+          !attachmentsRef.current.some((current) => current.id === attachment.id)
+        ) {
           void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
           return;
         }
         updateAttachment(attachment.id, {
           attachmentId: uploaded.attachment_id,
+          expiresAt: uploaded.expires_at,
           uploadStatus: "ready",
           uploadError: undefined,
           size: uploaded.size_bytes,
         });
       } catch (error) {
+        if (uploadOwnerRef.current !== requestOwner) return;
         updateAttachment(attachment.id, {
           uploadStatus: "failed",
-          uploadError: error instanceof ApiError ? error.message : t("task:attachmentUploadFailed"),
+          uploadError: error instanceof ApiError ? error.message : attachmentUploadFailedMessage(),
         });
+      } finally {
+        if (inFlightUploadsRef.current.get(attachment.id) === requestOwner) {
+          inFlightUploadsRef.current.delete(attachment.id);
+        }
       }
     },
-    [updateAttachment, workspaceId],
+    [updateAttachment, uploadOwner, workspaceId],
   );
 
   useEffect(() => {
     if (!workspaceId) return;
-    for (const attachment of attachmentsRef.current) {
-      if (attachment.file && !attachment.attachmentId && attachment.uploadStatus !== "uploading") {
+    for (const attachment of attachments) {
+      if (attachment.file && !attachment.attachmentId && attachment.uploadStatus === "pending") {
         void uploadPendingAttachment(attachment);
       }
     }
-  }, [uploadPendingAttachment, workspaceId]);
+  }, [attachments, uploadPendingAttachment, workspaceId]);
 
   const addFiles = useCallback(
     async (files: File[], issue?: ImagePasteIssue) => {
@@ -314,6 +361,7 @@ function useAttachments(sessionId: string | null, workspaceId?: string | null) {
         warnAttachmentCountLimit();
         return;
       }
+      const startingDraftIdentity = draftIdentityRef.current;
       let acceptedCount = attachments.length;
       let acceptedTotalSize = attachments.reduce((sum, att) => sum + att.size, 0);
       for (const file of files) {
@@ -327,19 +375,25 @@ function useAttachments(sessionId: string | null, workspaceId?: string | null) {
           break;
         }
         const attachment = await processFile(file);
+        const currentDraftIdentity = draftIdentityRef.current;
+        if (
+          currentDraftIdentity.key !== startingDraftIdentity.key ||
+          currentDraftIdentity.generation !== startingDraftIdentity.generation
+        ) {
+          return;
+        }
         if (attachment) {
           acceptedCount += 1;
           acceptedTotalSize += attachment.size;
           const staged = {
             ...attachment,
-            uploadStatus: workspaceId ? ("pending" as const) : attachment.uploadStatus,
+            uploadStatus: "pending" as const,
           };
           setAttachments((prev) => {
             const next = [...prev, staged];
             attachmentsRef.current = next;
             return next;
           });
-          void uploadPendingAttachment(staged);
         }
       }
     },
@@ -349,8 +403,7 @@ function useAttachments(sessionId: string | null, workspaceId?: string | null) {
       warnAttachmentCountLimit,
       warnAttachmentTotalSizeLimit,
       warnUnreadablePastedImage,
-      uploadPendingAttachment,
-      workspaceId,
+      draftIdentityRef,
     ],
   );
 
@@ -385,6 +438,29 @@ function useAttachments(sessionId: string | null, workspaceId?: string | null) {
     [uploadPendingAttachment],
   );
 
+  const restoreStagedAttachments = useCallback(
+    (messageAttachments: MessageAttachment[]) => {
+      if (!sessionId) return;
+      const restored = restoreOpeningMessageAttachments(sessionId, messageAttachments);
+      if (restored.length === 0) return;
+
+      setAttachments((previous) => {
+        const existingIds = new Set(
+          previous.flatMap((attachment) =>
+            attachment.attachmentId ? [attachment.attachmentId] : [],
+          ),
+        );
+        const additions = restored.filter(
+          (attachment) => !existingIds.has(attachment.attachmentId!),
+        );
+        const next = additions.length > 0 ? [...previous, ...additions] : previous;
+        attachmentsRef.current = next;
+        return next;
+      });
+    },
+    [sessionId, setAttachments],
+  );
+
   return {
     attachments,
     attachmentsRef,
@@ -394,12 +470,14 @@ function useAttachments(sessionId: string | null, workspaceId?: string | null) {
     handleDeliveryModeChange,
     handleRetryAttachment,
     getAttachments,
+    restoreStagedAttachments,
   };
 }
 
 // eslint-disable-next-line max-lines-per-function
 export function useChatInputState({
   sessionId,
+  taskId = null,
   workspaceId,
   isSending,
   contextItems,
@@ -416,6 +494,7 @@ export function useChatInputState({
   const valueRef = useRef(value);
   const pendingCommentsRef = useRef(pendingCommentsByFile);
   const prevTextSessionIdRef = useRef(sessionId);
+  const getDraftVisit = useDraftVisit(taskId, sessionId);
 
   const {
     attachments,
@@ -426,7 +505,8 @@ export function useChatInputState({
     handleDeliveryModeChange,
     handleRetryAttachment,
     getAttachments,
-  } = useAttachments(sessionId, workspaceId);
+    restoreStagedAttachments,
+  } = useAttachments(taskId, sessionId, workspaceId);
 
   // Reset text value from storage when session changes (runs before paint)
   useLayoutEffect(() => {
@@ -459,6 +539,8 @@ export function useChatInputState({
 
   const handleSubmit = useCallback(
     (resetHeight: () => void) => {
+      const visit = getDraftVisit();
+      if (!visit) return;
       submitDraft({
         isSending,
         workspaceId,
@@ -469,6 +551,7 @@ export function useChatInputState({
         inputRef,
         onSubmit,
         clearArgs: {
+          isCurrentVisit: () => getDraftVisit() === visit,
           valueRef,
           attachmentsRef,
           inputRef,
@@ -481,6 +564,7 @@ export function useChatInputState({
       });
     },
     [
+      getDraftVisit,
       onSubmit,
       isSending,
       workspaceId,
@@ -489,6 +573,36 @@ export function useChatInputState({
       setAttachments,
       hasContextComments,
     ],
+  );
+
+  const clearAcceptedPayload = useCallback(
+    (payload: Pick<ChatSubmitPayload, "message" | "attachments">, resetHeight: () => void) => {
+      const visit = getDraftVisit();
+      if (!visit) return false;
+      const submittedText = payload.message.trim();
+      const currentAttachments = attachmentsRef.current;
+      if (
+        valueRef.current.trim() !== submittedText ||
+        !matchesSubmittedAttachments(currentAttachments, payload.attachments)
+      ) {
+        return false;
+      }
+      clearSubmittedInput({
+        isCurrentVisit: () => getDraftVisit() === visit,
+        valueRef,
+        submittedText,
+        attachmentsRef,
+        submittedAttachments: attachmentSnapshot(currentAttachments),
+        inputRef,
+        setValue,
+        setAttachments,
+        setHistoryIndex,
+        resetHeight,
+        sessionId,
+      });
+      return true;
+    },
+    [getDraftVisit, sessionId, setAttachments],
   );
 
   const allItems = useMemo((): ContextItem[] => {
@@ -502,7 +616,7 @@ export function useChatInputState({
               attachment: att,
               onRemove: () => handleRemoveAttachment(att.id),
               onDeliveryModeChange: (mode) => handleDeliveryModeChange(att.id, mode),
-              onRetry: () => handleRetryAttachment(att.id),
+              ...(att.file && { onRetry: () => handleRetryAttachment(att.id) }),
             } as ImageContextItem)
           : ({
               kind: "file-attachment" as const,
@@ -510,7 +624,7 @@ export function useChatInputState({
               label: att.fileName,
               attachment: att,
               onRemove: () => handleRemoveAttachment(att.id),
-              onRetry: () => handleRetryAttachment(att.id),
+              ...(att.file && { onRetry: () => handleRetryAttachment(att.id) }),
             } as FileAttachmentContextItem),
     );
     return [...contextItems, ...attachmentItems];
@@ -522,10 +636,20 @@ export function useChatInputState({
     handleRetryAttachment,
   ]);
 
-  const hasPendingAttachmentUploads =
-    Boolean(workspaceId) &&
-    attachments.some((attachment) => attachment.file && !attachment.attachmentId);
+  const hasPendingAttachmentUploads = attachments.some((attachment) => !attachment.attachmentId);
 
   // prettier-ignore
-  return { value, attachments, inputRef, addFiles, handleChange, handleSubmit, allItems, getAttachments, hasPendingAttachmentUploads };
+  return {
+    value,
+    attachments,
+    inputRef,
+    addFiles,
+    handleChange,
+    handleSubmit,
+    clearAcceptedPayload,
+    restoreStagedAttachments,
+    allItems,
+    getAttachments,
+    hasPendingAttachmentUploads,
+  };
 }

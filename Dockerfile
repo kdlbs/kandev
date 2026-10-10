@@ -46,6 +46,7 @@ RUN apt-get update && \
         gh \
         gosu \
         tini \
+        procps \
         python3 \
         python3-venv \
         pipx && \

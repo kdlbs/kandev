@@ -17,19 +17,13 @@ import (
 // (threaded from execution.officeProfileID() at the point the agent
 // actually ran — see lifecycle.AgentStreamEventPayload.AgentProfileID). The
 // task_sessions.agent_profile_id lookup is a fallback for events published
-// before that field existed: it is NOT reliable in production, because
-// officeSessionOwnerID only stores the acting agent's id there when
-// features.officeSessionIdentity is on, which defaults to off in every
-// shipped profile — off, that column holds the assignee for every
-// participant's session row. TestAutoPostAgentComment_AttributesFromEventPayloadEvenWithStaleSessionRow
-// pins exactly that: the fix must not depend on the session row being
-// correct.
+// before that field existed. Historical rows can still name the task's
+// assignee rather than the acting participant, so attribution must not depend
+// on the session row being correct.
 
 // TestAutoPostAgentComment_AttributesFromEventPayloadEvenWithStaleSessionRow
 // pins the core regression. The task_sessions row is seeded with the
-// ASSIGNEE's id (reproducing officeSessionOwnerID's behavior with
-// features.officeSessionIdentity off, the default in every shipped
-// profile), but the event carries the real acting agent's profile id
+// ASSIGNEE's id, but the event carries the real acting agent's profile id
 // directly. Attribution must come from the event, not the stale row.
 func TestAutoPostAgentComment_AttributesFromEventPayloadEvenWithStaleSessionRow(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
@@ -38,8 +32,7 @@ func TestAutoPostAgentComment_AttributesFromEventPayloadEvenWithStaleSessionRow(
 	createTestAgent(t, svc, "ws-1", "runner-pm")
 	createTestAgent(t, svc, "ws-1", "critic")
 	taskID := createOfficeTask(t, svc, "ws-1", "runner-pm")
-	// Reproduces production with officeSessionIdentity off: the session row
-	// holds the assignee, not the agent that is actually running.
+	// The existing row holds the assignee, not the agent that is running.
 	insertTestTaskSession(t, svc, "sess-critic", taskID, "runner-pm")
 
 	event := bus.NewEvent(events.AgentTurnMessageSaved, "orchestrator", map[string]string{
@@ -182,11 +175,9 @@ func TestAutoPostAgentComment_NonAssigneeAuthorQueuesNoRun(t *testing.T) {
 
 // TestAutoPostAgentComment_RecordsSuccessForActingAgent pins that a
 // successful turn's consecutive-failure reset credits the agent that
-// actually spoke, not the assignee — the same resolved identity used for
-// attribution (event_subscribers.go), not a second, independently-wrong
-// value. The session row is seeded with the assignee's id (as
-// officeSessionOwnerID leaves it with features.officeSessionIdentity off) to
-// prove the reset is driven by the event's agent_profile_id, not that row.
+// actually spoke, not the assignee. The session row is seeded with the
+// assignee's id to prove the reset is driven by the event's agent_profile_id,
+// not that row.
 func TestAutoPostAgentComment_RecordsSuccessForActingAgent(t *testing.T) {
 	svc, eb := newTestServiceWithBus(t)
 	ctx := context.Background()

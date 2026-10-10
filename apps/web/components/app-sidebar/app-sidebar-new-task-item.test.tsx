@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 
 function renderItem(collapsed: boolean) {
   return render(
-    <TooltipProvider>
+    <TooltipProvider delayDuration={0}>
       <AppSidebarNewTaskItem collapsed={collapsed} />
     </TooltipProvider>,
   );
@@ -27,6 +27,11 @@ const WORKSPACE_ID = "ws-1";
 const WORKSPACE_NAME = "Default Workspace";
 
 const state = {
+  userSettings: {
+    sidebarFastActionsEnabled: true,
+    sidebarNewTaskStyle: "compact" as "simple" | "compact",
+    keyboardShortcuts: {} as Record<string, { key: string }>,
+  },
   workspaces: {
     activeId: WORKSPACE_ID as string | null,
     items: [{ id: WORKSPACE_ID, name: WORKSPACE_NAME }],
@@ -52,8 +57,12 @@ const state = {
   setActiveSession: mocks.setActiveSession,
   setImproveDialogOpen: mocks.setImproveDialogOpen,
 };
+const CREATE_TASK_TEST_ID = "create-task-button";
+const QUICK_ACTIONS_GROUP_TEST_ID = "sidebar-quick-actions";
 const QUICK_TERMINAL_TEST_ID = "sidebar-quick-terminal-shortcut";
 const QUICK_CHAT_TEST_ID = "sidebar-quick-chat-shortcut";
+const UTILITIES_LABEL = "Utilities";
+const ARIA_LABEL_ATTRIBUTE = "aria-label";
 let officeEnabled = false;
 let pathname = "/";
 let workspaceMode: "office" | "kanban" | "unknown" = "kanban";
@@ -141,6 +150,8 @@ function setImproveWorkspaceActive() {
 }
 
 function resetTestState() {
+  state.userSettings.sidebarFastActionsEnabled = true;
+  state.userSettings.sidebarNewTaskStyle = "compact";
   workspaceMode = "kanban";
   state.workspaces.activeId = WORKSPACE_ID;
   state.workspaces.items = [{ id: WORKSPACE_ID, name: WORKSPACE_NAME }];
@@ -170,6 +181,19 @@ beforeEach(resetTestState);
 afterEach(() => cleanup());
 
 describe("AppSidebarNewTaskItem dialog routing", () => {
+  it("omits the shortcut hint for configured and unbound actions", () => {
+    state.userSettings.keyboardShortcuts = { NEW_TASK: { key: "x" } };
+    const view = renderItem(false);
+    expect(screen.getByTestId(CREATE_TASK_TEST_ID).querySelector("kbd")).toBeNull();
+    state.userSettings.keyboardShortcuts = { NEW_TASK: { key: "" } };
+    view.rerender(
+      <TooltipProvider>
+        <AppSidebarNewTaskItem collapsed={false} />
+      </TooltipProvider>,
+    );
+    expect(screen.getByTestId(CREATE_TASK_TEST_ID).querySelector("kbd")).toBeNull();
+  });
+
   it("opens a queued New Task request after its listener remounts", () => {
     act(() => requestNewTaskCreation());
 
@@ -229,7 +253,7 @@ describe("AppSidebarNewTaskItem dialog routing", () => {
     // footer-hosted Improve Kandev dialog opens via the shared store flag.
     expect(screen.queryByTestId(REGULAR_DIALOG_TESTID)).toBeNull();
 
-    screen.getByTestId("create-task-button").click();
+    screen.getByTestId(CREATE_TASK_TEST_ID).click();
 
     expect(mocks.setImproveDialogOpen).toHaveBeenCalledWith(true);
   });
@@ -252,41 +276,47 @@ describe("AppSidebarNewTaskItem dialog routing", () => {
 });
 
 describe("AppSidebarNewTaskItem row actions", () => {
-  it("opens quick terminal from the action immediately left of Quick Chat", () => {
+  it("keeps icon-only Terminal and Quick Chat actions beside New Task", () => {
     renderItem(false);
 
+    const create = screen.getByTestId(CREATE_TASK_TEST_ID);
+    const actions = screen.getByTestId(QUICK_ACTIONS_GROUP_TEST_ID);
     const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
     const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
-    expect(terminal.nextElementSibling).toBe(quickChat);
+    expect(create.parentElement).toBe(actions.parentElement);
+    expect(actions.parentElement?.firstElementChild).toBe(create);
+    expect(actions.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(UTILITIES_LABEL);
+    expect(Array.from(actions.querySelectorAll("button"))).toEqual([terminal, quickChat]);
+    expect(terminal.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe("Quick terminal");
+    expect(quickChat.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe("Quick Chat");
+    expect(terminal.textContent).toBe("");
+    expect(quickChat.textContent).toBe("");
 
     terminal.click();
     expect(mocks.openQuickTerminal).toHaveBeenCalledOnce();
   });
 
-  it("does not show the terminal tooltip when focus returns after closing", async () => {
-    renderItem(false);
+  it.each([QUICK_CHAT_TEST_ID, QUICK_TERMINAL_TEST_ID])(
+    "%s exposes its name on keyboard focus and hover",
+    (testId) => {
+      renderItem(false);
 
-    const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
-    fireEvent.pointerEnter(terminal);
-    expect(await screen.findByRole("tooltip")).toBeTruthy();
-    fireEvent.focus(terminal);
+      const action = screen.getByTestId(testId);
+      fireEvent.focus(action);
+      expect(screen.getByRole("tooltip").textContent).toBe(
+        action.getAttribute(ARIA_LABEL_ATTRIBUTE),
+      );
 
-    expect(screen.queryByRole("tooltip")).toBeNull();
-  });
+      fireEvent.pointerEnter(action);
+      expect(screen.getByRole("tooltip").textContent).toBe(
+        action.getAttribute(ARIA_LABEL_ATTRIBUTE),
+      );
+      fireEvent.pointerLeave(action);
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    },
+  );
 
-  it("shows the terminal tooltip on pointer hover", async () => {
-    renderItem(false);
-
-    const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
-    fireEvent.pointerEnter(terminal);
-
-    expect((await screen.findByRole("tooltip")).textContent).toBe("Quick terminal");
-
-    fireEvent.pointerLeave(terminal);
-    expect(screen.queryByRole("tooltip")).toBeNull();
-  });
-
-  it("opens quick chat from the trailing action beside New Task", () => {
+  it("opens quick chat from its labelled secondary action", () => {
     renderItem(false);
     screen.getByTestId(QUICK_CHAT_TEST_ID).click();
     expect(mocks.openQuickChat).toHaveBeenCalledOnce();
@@ -345,7 +375,6 @@ describe("AppSidebarNewTaskItem row actions", () => {
 
 describe("AppSidebarNewTaskItem sidebar-workspace-actions plugin slot", () => {
   const PLUGIN_TEST_ID = "plugin-workspace-action";
-  const INSET_TEST_ID = "create-task-button";
 
   function registerPlugin(Component: (props: { slotProps?: unknown }) => JSX.Element) {
     workspaceActionsRegistrations = [{ registrationId: "reg-1", pluginId: "plugin-1", Component }];
@@ -368,8 +397,24 @@ describe("AppSidebarNewTaskItem sidebar-workspace-actions plugin slot", () => {
     const plugin = screen.getByTestId(PLUGIN_TEST_ID);
     const pluginSlot = plugin.parentElement;
     expect(pluginSlot?.getAttribute("data-plugin-slot")).toBe("sidebar-workspace-actions");
-    expect(terminal.nextElementSibling).toBe(quickChat);
-    expect(quickChat.nextElementSibling).toBe(pluginSlot);
+    expect(
+      Array.from(screen.getByTestId(QUICK_ACTIONS_GROUP_TEST_ID).querySelectorAll("button")),
+    ).toEqual([terminal, quickChat]);
+    expect(screen.getByTestId(QUICK_ACTIONS_GROUP_TEST_ID).nextElementSibling).toBe(pluginSlot);
+  });
+
+  it("renders plugin controls after the labelled utilities when fast actions are disabled", () => {
+    state.userSettings.sidebarFastActionsEnabled = false;
+    registerPlugin(() => <button type="button" data-testid={PLUGIN_TEST_ID} />);
+    renderItem(false);
+
+    const utilities = screen.getByTestId("sidebar-labelled-utilities");
+    const plugin = screen.getByTestId(PLUGIN_TEST_ID);
+    const pluginSlot = plugin.parentElement;
+    const utilitiesPosition = utilities.compareDocumentPosition(pluginSlot!);
+
+    expect(utilitiesPosition & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(pluginSlot?.getAttribute("data-plugin-slot")).toBe("sidebar-workspace-actions");
   });
 
   it("A2: forwards the active workspace id and label as slotProps", () => {
@@ -387,13 +432,6 @@ describe("AppSidebarNewTaskItem sidebar-workspace-actions plugin slot", () => {
     });
   });
 
-  it("A3: keeps the label and action cluster in one flow layout", () => {
-    renderItem(false);
-    const createTask = screen.getByTestId(INSET_TEST_ID);
-    expect(createTask.className).toContain("flex-1");
-    expect(createTask.parentElement?.className).toContain("items-center");
-  });
-
   it("A3: keeps multiple plugin actions from overlapping the task label", () => {
     registerPlugins([
       () => <button type="button" data-testid={`${PLUGIN_TEST_ID}-one`} />,
@@ -401,12 +439,13 @@ describe("AppSidebarNewTaskItem sidebar-workspace-actions plugin slot", () => {
     ]);
     renderItem(false);
 
-    const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
     const firstPlugin = screen.getByTestId(`${PLUGIN_TEST_ID}-one`);
     const secondPlugin = screen.getByTestId(`${PLUGIN_TEST_ID}-two`);
     const pluginSlot = firstPlugin.parentElement;
     expect(pluginSlot).toBe(secondPlugin.parentElement);
-    expect(quickChat.nextElementSibling).toBe(pluginSlot);
+    expect(screen.getByTestId(QUICK_ACTIONS_GROUP_TEST_ID).nextElementSibling).toBe(pluginSlot);
+    expect(pluginSlot?.className).toContain("flex-wrap");
+    expect(pluginSlot?.className).toContain("max-w-full");
     expect(firstPlugin.nextElementSibling).toBe(secondPlugin);
   });
 
@@ -485,4 +524,21 @@ it("retains the current task after background sidebar creation", () => {
   expect(mocks.setActiveTask).not.toHaveBeenCalled();
   expect(mocks.setActiveSession).not.toHaveBeenCalled();
   expect(mocks.routerPush).not.toHaveBeenCalled();
+});
+
+it.each([
+  { fast: false, style: "simple" as const },
+  { fast: true, style: "simple" as const },
+  { fast: false, style: "compact" as const },
+  { fast: true, style: "compact" as const },
+])("keeps launch actions available for $style with fast actions $fast", ({ fast, style }) => {
+  state.userSettings.sidebarFastActionsEnabled = fast;
+  state.userSettings.sidebarNewTaskStyle = style;
+  renderItem(false);
+  expect(Boolean(screen.queryByTestId(QUICK_ACTIONS_GROUP_TEST_ID))).toBe(fast);
+  expect(Boolean(screen.queryByTestId("sidebar-labelled-utilities"))).toBe(!fast);
+  fireEvent.click(screen.getByTestId(QUICK_CHAT_TEST_ID));
+  fireEvent.click(screen.getByTestId(QUICK_TERMINAL_TEST_ID));
+  expect(mocks.openQuickChat).toHaveBeenCalledOnce();
+  expect(mocks.openQuickTerminal).toHaveBeenCalledOnce();
 });

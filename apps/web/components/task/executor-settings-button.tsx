@@ -48,6 +48,7 @@ export function ExecutorSettingsButton({
     env,
     container,
     ssh,
+    pluginExecutor,
     kubernetes,
     kubernetesLoaded,
     kubernetesError,
@@ -82,6 +83,7 @@ export function ExecutorSettingsButton({
         env={env}
         container={container}
         ssh={ssh}
+        pluginExecutor={pluginExecutor}
         kubernetes={kubernetes}
         kubernetesLoaded={kubernetesLoaded}
         kubernetesError={kubernetesError}
@@ -159,7 +161,7 @@ function ExecutorDisclosureSurface({
                 </DrawerDescription>
               </div>
               <DrawerClose asChild>
-                <Button variant="ghost" size="sm" className="min-h-11 cursor-pointer">
+                <Button variant="ghost" size="sm" className="min-h-12 cursor-pointer">
                   {t("common:close")}
                 </Button>
               </DrawerClose>
@@ -230,7 +232,7 @@ const ExecutorTrigger = forwardRef<HTMLButtonElement, ExecutorTriggerProps>(
         data-testid="executor-settings-button"
         className={
           touch
-            ? "relative h-11 w-11 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
+            ? "relative h-12 w-12 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
             : "relative h-7 cursor-pointer gap-1 px-1.5 text-muted-foreground hover:text-foreground"
         }
       >

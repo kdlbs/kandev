@@ -39,6 +39,18 @@ an identity rejection, and expected non-recovery without exposing request data.
   recovery finishes below its inventory count, diagnostics shall distinguish
   retracked records from records not retracked and classify known reasons.
   Unknown liveness shall not be treated as absence or trigger cleanup.
+- **AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.5:** When successful runtime
+  enumeration finds no instance matching a recovery candidate, the summary
+  shall distinguish that result from failed enumeration, identity rejection,
+  and an unclassified backend omission. Each candidate shall contribute to at
+  most one terminal summary category. Missing runtime inventory shall not be
+  represented as successful empty enumeration or proof of process death.
+- **AC-PLATFORM-RUNTIME-FAILURE-ATTRIBUTION-001.6:** When worktree cleanup cannot
+  inspect Git state, its diagnostic shall distinguish failure to start Git,
+  unavailable repository context, command failure, and cancellation or deadline
+  from a verified absent reference. Ownership and changed-commit refusals shall
+  remain distinguishable. Diagnostics shall preserve cleanup evidence and
+  existing retry and deletion-safety policy.
 
 ## Out of scope
 

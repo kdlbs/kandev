@@ -56,6 +56,15 @@ type TaskCreateInput struct {
 	StartAgent bool
 }
 
+// ExactTaskCreateInput adds the stable source identity and durable operation
+// identity used by the exact Host create path.
+type ExactTaskCreateInput struct {
+	Task          TaskCreateInput
+	ExternalID    string
+	OperationID   string
+	PayloadDigest string
+}
+
 // TaskLaunchInput contains validated launch fields for a freshly-created
 // plugin task. The backendapp adapter translates it to the orchestrator's
 // StartTask arguments without exposing the task service here.
@@ -78,6 +87,23 @@ type TaskUpdateInput struct {
 	Priority       *string
 }
 
+// ExactTaskUpdateInput is the plugin-host-local shape passed to the task
+// service adapter after approval, idempotency, and resource-version checks.
+type ExactTaskUpdateInput struct {
+	TaskID                  string
+	WorkspaceID             string
+	ExpectedResourceVersion string
+	OperationID             string
+	PayloadDigest           string
+	Title                   *string
+	Description             *string
+	State                   *string
+	Priority                *string
+	Labels                  *[]string
+	AssigneeUserID          *string
+	ClaimFence              taskmodels.TaskManagementClaimFence
+}
+
 // TaskMoveInput is the plugins-local task-move request a taskWriter adapter
 // translates into internal/task/service.MoveTaskWithOptions. Unlike
 // TaskUpdateInput's WorkflowStepID (rejected on the plugin path), Move
@@ -92,6 +118,74 @@ type TaskMoveInput struct {
 	WorkflowID     *string
 	Position       int32
 	Source         string
+}
+
+// ExactTaskMoveInput carries the Host's durable operation identity to the
+// shared workflow move service.
+type ExactTaskMoveInput struct {
+	TaskID                  string
+	WorkspaceID             string
+	ExpectedResourceVersion string
+	OperationID             string
+	PayloadDigest           string
+	ClaimFence              taskmodels.TaskManagementClaimFence
+	Move                    TaskMoveInput
+}
+
+type ExactTaskArchiveInput struct {
+	TaskID                  string
+	WorkspaceID             string
+	ExpectedResourceVersion string
+	OperationID             string
+	PayloadDigest           string
+	ClaimFence              taskmodels.TaskManagementClaimFence
+}
+
+type ExactTaskRelationInput struct {
+	WorkspaceID                    string
+	TaskID                         string
+	RelatedTaskID                  string
+	ExpectedTaskResourceVersion    string
+	ExpectedRelatedResourceVersion string
+	OperationID                    string
+	PayloadDigest                  string
+	ClaimFence                     taskmodels.TaskManagementClaimFence
+}
+
+type ExactTaskMessageInput struct {
+	WorkspaceID                    string
+	TaskID                         string
+	SessionID                      string
+	ExpectedTaskResourceVersion    string
+	ExpectedSessionResourceVersion string
+	Content                        string
+	Source                         string
+	OperationID                    string
+	PayloadDigest                  string
+	ClaimFence                     taskmodels.TaskManagementClaimFence
+}
+
+type ExactTaskCompletionCriteriaInput struct {
+	TaskID                      string
+	WorkspaceID                 string
+	ExpectedTaskResourceVersion string
+	ExpectedRevision            int64
+	OperationID                 string
+	PayloadDigest               string
+	ClaimFence                  taskmodels.TaskManagementClaimFence
+	Criteria                    []taskmodels.TaskCompletionCriterion
+}
+
+type ExactTaskCompletionEvidenceInput struct {
+	TaskID                      string
+	WorkspaceID                 string
+	ExpectedTaskResourceVersion string
+	ExpectedRevision            int64
+	OperationID                 string
+	PayloadDigest               string
+	ClaimFence                  taskmodels.TaskManagementClaimFence
+	CriterionID                 string
+	Evidence                    taskmodels.TaskCompletionEvidence
 }
 
 // TaskMoveResult is the outcome of a plugin-initiated move. Transitioned and
@@ -124,6 +218,36 @@ type taskWriter interface {
 	UpdateTask(ctx context.Context, in TaskUpdateInput) (*taskmodels.Task, error)
 	DeleteTask(ctx context.Context, id string) error
 	MoveTask(ctx context.Context, in TaskMoveInput) (*TaskMoveResult, error)
+}
+
+type exactTaskWriter interface {
+	UpdateTaskExact(ctx context.Context, in ExactTaskUpdateInput) (*taskmodels.Task, bool, error)
+}
+
+type exactTaskCreateWriter interface {
+	CreateTaskExact(ctx context.Context, in ExactTaskCreateInput) (*taskmodels.Task, bool, error)
+}
+
+type exactTaskMoveWriter interface {
+	MoveTaskExact(ctx context.Context, in ExactTaskMoveInput) (*taskmodels.Task, bool, error)
+}
+
+type exactTaskArchiveWriter interface {
+	ArchiveTaskExact(ctx context.Context, in ExactTaskArchiveInput) (*taskmodels.Task, bool, error)
+}
+
+type exactTaskRelationWriter interface {
+	AddTaskRelationExact(ctx context.Context, in ExactTaskRelationInput) (alreadyApplied bool, err error)
+	RemoveTaskRelationExact(ctx context.Context, in ExactTaskRelationInput) (alreadyApplied bool, err error)
+}
+
+type exactTaskMessageMessenger interface {
+	SendMessageExact(ctx context.Context, in ExactTaskMessageInput) (queueID string, alreadyApplied bool, err error)
+}
+
+type exactTaskCompletionGateWriter interface {
+	SetTaskCompletionCriteriaExact(ctx context.Context, in ExactTaskCompletionCriteriaInput) (*taskmodels.TaskCompletionGateSnapshot, bool, error)
+	VerifyTaskCompletionCriterionExact(ctx context.Context, in ExactTaskCompletionEvidenceInput) (*taskmodels.TaskCompletionGateSnapshot, bool, error)
 }
 
 // taskMessenger delivers a prompt to a task session through the orchestrator's
@@ -175,47 +299,11 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 	if r.host.taskWriter == nil {
 		return r.host.UnimplementedHostData.Tasks().Create(ctx, in)
 	}
-	if in.Title == "" {
-		return nil, invalidArgument("title is required")
-	}
-	if in.Priority != "" && taskmodels.ValidateTaskPriority(in.Priority) != nil {
-		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", in.Priority))
-	}
-	metadata, err := r.host.pluginTaskMetadata(in.Metadata)
+	prepared, launch, err := r.prepareCreate(ctx, in)
 	if err != nil {
 		return nil, err
 	}
-	if err := r.host.validatePluginTaskRepositories(in.Repositories); err != nil {
-		return nil, err
-	}
-	launch, err := taskLaunchInput(in.Launch)
-	if err != nil {
-		return nil, err
-	}
-	if in.StartAgent {
-		if err := r.host.validateTaskLaunch(ctx, launch); err != nil {
-			return nil, err
-		}
-	}
-	workspaceID, workflowID, err := r.host.resolveCreatePlacement(ctx, in)
-	if err != nil {
-		return nil, err
-	}
-	created, err := r.host.taskWriter.CreateTask(ctx, TaskCreateInput{
-		WorkspaceID:    workspaceID,
-		WorkflowID:     workflowID,
-		WorkflowStepID: strDeref(in.WorkflowStepID),
-		Title:          in.Title,
-		Description:    in.Description,
-		ParentID:       strDeref(in.ParentID),
-		Source:         r.host.pluginSource(),
-		Repositories:   in.Repositories,
-		Launch:         launch,
-		Metadata:       metadata,
-		PlanMode:       launch.PlanMode,
-		Priority:       in.Priority,
-		StartAgent:     in.StartAgent,
-	})
+	created, err := r.host.taskWriter.CreateTask(ctx, prepared)
 	if err != nil {
 		return nil, err
 	}
@@ -227,6 +315,43 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 		return nil, err
 	}
 	return &items[0], nil
+}
+
+func (r taskReader) prepareCreate(ctx context.Context, in pluginsdk.CreateTaskInput) (TaskCreateInput, TaskLaunchInput, error) {
+	if in.Title == "" {
+		return TaskCreateInput{}, TaskLaunchInput{}, invalidArgument("title is required")
+	}
+	if in.Priority != "" && taskmodels.ValidateTaskPriority(in.Priority) != nil {
+		return TaskCreateInput{}, TaskLaunchInput{}, invalidArgument(fmt.Sprintf("invalid task priority %q", in.Priority))
+	}
+	metadata, err := r.host.pluginTaskMetadata(in.Metadata)
+	if err != nil {
+		return TaskCreateInput{}, TaskLaunchInput{}, err
+	}
+	if err := r.host.validatePluginTaskRepositories(in.Repositories); err != nil {
+		return TaskCreateInput{}, TaskLaunchInput{}, err
+	}
+	launch, err := taskLaunchInput(in.Launch)
+	if err != nil {
+		return TaskCreateInput{}, TaskLaunchInput{}, err
+	}
+	if in.StartAgent {
+		if err := r.host.validateTaskLaunch(ctx, launch); err != nil {
+			return TaskCreateInput{}, TaskLaunchInput{}, err
+		}
+	}
+	workspaceID, workflowID, err := r.host.resolveCreatePlacement(ctx, in)
+	if err != nil {
+		return TaskCreateInput{}, TaskLaunchInput{}, err
+	}
+	return TaskCreateInput{
+		WorkspaceID: workspaceID, WorkflowID: workflowID,
+		WorkflowStepID: strDeref(in.WorkflowStepID), Title: in.Title,
+		Description: in.Description, ParentID: strDeref(in.ParentID),
+		Source: r.host.pluginSource(), Repositories: in.Repositories,
+		Launch: launch, Metadata: metadata, PlanMode: launch.PlanMode,
+		Priority: in.Priority, StartAgent: in.StartAgent,
+	}, launch, nil
 }
 
 // writeTaskUpdate performs UpdateTask's validation and mutation without
@@ -551,8 +676,9 @@ func hasExecutorProfile(profiles []*taskmodels.ExecutorProfile, id string) bool 
 	return false
 }
 
-// PluginOwnedTaskTrees returns a manager whose preview and delete operations
-// require api_write:tasks and exact source provenance on every traversed node.
+// PluginOwnedTaskTrees returns a manager whose preview is source-provenance
+// scoped. Delete remains present for wire compatibility but requires a native
+// task deletion preview that this legacy API cannot carry, so it is denied.
 func (h *pluginHost) PluginOwnedTaskTrees() pluginsdk.PluginOwnedTaskTreeManager {
 	return pluginOwnedTaskTreeManager{host: h}
 }
@@ -573,30 +699,8 @@ func (m pluginOwnedTaskTreeManager) Preview(ctx context.Context, rootTaskID stri
 }
 
 func (m pluginOwnedTaskTreeManager) Delete(ctx context.Context, rootTaskID string) ([]string, error) {
-	tasks, err := m.host.pluginOwnedTaskTree(ctx, rootTaskID)
-	if err != nil {
-		// Deletion is a retry boundary. A prior attempt may have removed the
-		// root before its caller persisted progress, so absence is success.
-		if status.Code(err) == codes.NotFound {
-			return []string{}, nil
-		}
-		return nil, err
-	}
-	if m.host.taskWriter == nil {
-		return m.host.UnimplementedHostData.PluginOwnedTaskTrees().Delete(ctx, rootTaskID)
-	}
-	if err := m.host.rejectMixedOwnershipDelete(ctx, tasks); err != nil {
-		return nil, err
-	}
-	deleted := make([]string, 0, len(tasks))
-	deleteCtx := context.WithoutCancel(ctx)
-	for index := len(tasks) - 1; index >= 0; index-- {
-		if err := m.host.taskWriter.DeleteTask(deleteCtx, tasks[index].ID); err != nil {
-			return deleted, fmt.Errorf("delete plugin-owned task tree after deleting %d task(s): %w", len(deleted), err)
-		}
-		deleted = append(deleted, tasks[index].ID)
-	}
-	return deleted, nil
+	_, _ = ctx, rootTaskID
+	return nil, status.Error(codes.PermissionDenied, "native_human_confirmation_required")
 }
 
 func (h *pluginHost) rejectMixedOwnershipDelete(ctx context.Context, ownedTasks []*taskmodels.Task) error {

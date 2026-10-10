@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   IconArrowBackUp,
   IconCopy,
@@ -272,7 +272,7 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
   const { t } = useTranslation();
   const { filePath, onCommentFile } = props;
   const [open, setOpen] = useState(false);
-  const [commentSelected, setCommentSelected] = useState(false);
+  const commentSelectedRef = useRef(false);
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -293,16 +293,15 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
       </DropdownMenuTrigger>
       <DropdownMenuContent
         onCloseAutoFocus={(event) => {
-          if (commentSelected) {
-            event.preventDefault();
-            setCommentSelected(false);
-            onCommentFile?.();
-          }
+          if (!commentSelectedRef.current) return;
+          event.preventDefault();
+          commentSelectedRef.current = false;
+          requestAnimationFrame(() => onCommentFile?.());
         }}
         data-testid="review-file-actions-menu"
         aria-label={t("review:actionsFor", { filePath })}
         align="end"
-        className="w-64"
+        className="w-64 mobile-review-file-actions-menu"
       >
         <DropdownMenuLabel className="truncate font-medium text-foreground" title={filePath}>
           {filePath.split("/").pop() || filePath}
@@ -310,7 +309,9 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
         {onCommentFile && (
           <DropdownMenuItem
             className={`${mobileMenuItem} min-h-11`}
-            onSelect={() => setCommentSelected(true)}
+            onSelect={() => {
+              commentSelectedRef.current = true;
+            }}
           >
             <IconMessagePlus className={mobileMenuIcon} />
             {t("review:commentOnFile")}

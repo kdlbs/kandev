@@ -80,7 +80,7 @@ jobs:
         )
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     environment: opencode-review-trusted
     permissions:
       contents: read
@@ -88,26 +88,25 @@ jobs:
 
     steps:
       - name: Checkout trusted workflow
+        timeout-minutes: 2
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ github.workflow_sha }}
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
 
-      - name: Fetch immutable PR head object
+      - name: Fetch trusted and PR history
+        timeout-minutes: 4
         env:
           TRUSTED_SHA: ${{ github.workflow_sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$TRUSTED_SHA"
-          git fetch --no-tags --filter=blob:none --negotiation-tip="$TRUSTED_SHA" origin "refs/pull/${PR_NUMBER}/head"
-          test "$(git rev-parse FETCH_HEAD)" = "$HEAD_SHA"
-          MERGE_BASE="$(git merge-base "$TRUSTED_SHA" "$HEAD_SHA")"
-          test -n "$MERGE_BASE"
+          bash .github/scripts/pr-walkthrough-history.sh
 
       - name: Prepare trusted walkthrough context
+        timeout-minutes: 3
         env:
           TRUSTED_SHA: ${{ github.workflow_sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -131,10 +130,12 @@ jobs:
           test -f "$SKILL_DIR/references/shell.html"
           test -f "$SKILL_DIR/scripts/pr-walkthrough-context"
           test -f "$SKILL_DIR/scripts/pr-walkthrough-render"
+          test -f "$SKILL_DIR/scripts/pr-walkthrough-verify"
           git show "$TRUSTED_SHA:.github/actions/setup-opencode/action.yml" > .trusted-actions/setup-opencode/action.yml
           chmod +x \
             "$SKILL_DIR/scripts/pr-walkthrough-context" \
-            "$SKILL_DIR/scripts/pr-walkthrough-render"
+            "$SKILL_DIR/scripts/pr-walkthrough-render" \
+            "$SKILL_DIR/scripts/pr-walkthrough-verify"
 
           "$SKILL_DIR/scripts/pr-walkthrough-context" \
             --repo "$GITHUB_WORKSPACE" \
@@ -166,9 +167,11 @@ jobs:
           } > "$WALK_DIR/guidelines.md"
 
       - name: Install OpenCode
+        timeout-minutes: 1
         uses: ./.trusted-actions/setup-opencode
 
       - name: Run OpenCode walkthrough
+        timeout-minutes: 11
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           TRUSTED_SHA: ${{ github.workflow_sha }}
@@ -226,71 +229,24 @@ jobs:
           - Never put shell template sentinels such as PR_TITLE or PR_URL in a code, patch, or rendered-Markdown block. If a source diff hunk contains a shell template sentinel, trim that hunk or use a shorter excerpt that omits the sentinel.
           - Follow the pr-walkthrough skill from the trusted repository checkout.
           - Write the complete JSON object to .pr-walkthrough/draft.json, then run the renderer.
-          - If the renderer rejects the draft, correct that file and run the renderer again.
-          - Finish only after the renderer confirms that both JSON and HTML were rendered.
+          - If the renderer reports an error, repair the reported field or JSON position and run it again.
+          - After the renderer succeeds, stop editing and finish immediately.
 
           Final response:
           - Output only <kandev_pr_walkthrough_complete /> after rendering succeeds.
           EOF
 
-          for attempt in 1 2; do
-            ATTEMPT_DIR=".pr-walkthrough/attempt-${attempt}"
-            rm -rf "$ATTEMPT_DIR"
-            mkdir -p "$ATTEMPT_DIR"
-            rm -f \
-              "docs/pr-walkthrough/pr-${PR_NUMBER}.json" \
-              "docs/pr-walkthrough/pr-${PR_NUMBER}.html"
-            printf '{}\n' > .pr-walkthrough/draft.json
-
-            set +e
+          python3 .github/scripts/pr-walkthrough-runner.py -- \
             "$HOME/.opencode/bin/opencode" run \
-              --agent github-pr-walkthrough \
-              --model "$PR_WALKTHROUGH_MODEL" \
-              --variant "$PR_WALKTHROUGH_VARIANT" \
-              --title "PR #${PR_NUMBER} walkthrough" \
-              --file .pr-walkthrough/guidelines.md \
-              --file .pr-walkthrough/walkthrough.patch \
-              --file .pr-walkthrough/head-context/manifest.json \
-              -- \
-              "Generate and render the walkthrough for PR #${PR_NUMBER} at head ${HEAD_SHA}. Read the trusted skill and prepared context, write only the draft JSON, run the fixed renderer, and correct the draft until rendering succeeds." \
-              > "$ATTEMPT_DIR/stdout" \
-              2> "$ATTEMPT_DIR/stderr"
-            opencode_status=$?
-            set -e
-
-            printf '%s\n' "$opencode_status" > "$ATTEMPT_DIR/status"
-            cp .pr-walkthrough/draft.json "$ATTEMPT_DIR/draft.json"
-            for output_path in \
-              "docs/pr-walkthrough/pr-${PR_NUMBER}.json" \
-              "docs/pr-walkthrough/pr-${PR_NUMBER}.html"; do
-              if [ -e "$output_path" ]; then
-                cp "$output_path" "$ATTEMPT_DIR/$(basename "$output_path")"
-              fi
-            done
-
-            if [ "$opencode_status" -ne 0 ]; then
-              echo "OpenCode attempt ${attempt} failed with status ${opencode_status}." >&2
-              exit "$opencode_status"
-            fi
-
-            if [ -s "docs/pr-walkthrough/pr-${PR_NUMBER}.json" ] && [ -s "docs/pr-walkthrough/pr-${PR_NUMBER}.html" ]; then
-              break
-            fi
-
-            if [ "$attempt" -eq 2 ]; then
-              echo "OpenCode produced incomplete walkthrough output after two attempts." >&2
-              exit 1
-            fi
-            echo "OpenCode exited successfully without complete output; retrying once." >&2
-          done
-
-      - name: Verify agent-built walkthrough
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          test -s "docs/pr-walkthrough/pr-${PR_NUMBER}.json"
-          test -s "docs/pr-walkthrough/pr-${PR_NUMBER}.html"
+            --agent github-pr-walkthrough \
+            --model "$PR_WALKTHROUGH_MODEL" \
+            --variant "$PR_WALKTHROUGH_VARIANT" \
+            --title "PR #${PR_NUMBER} walkthrough" \
+            --file .pr-walkthrough/guidelines.md \
+            --file .pr-walkthrough/walkthrough.patch \
+            --file .pr-walkthrough/head-context/manifest.json \
+            -- \
+            "Generate and render the walkthrough for PR #${PR_NUMBER} at head ${HEAD_SHA}. Read the trusted skill and prepared context, write only the draft JSON, run the fixed renderer, and correct the draft until rendering succeeds."
 
       - name: Stage walkthrough artifact
         if: always()

@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -85,14 +87,20 @@ func (r *stubCLIRunner) Start(_ context.Context, _ []string) (hostcli.Process, e
 	r.processes = append(r.processes, proc)
 	r.mu.Unlock()
 	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := inRead.Read(buf)
-			if n > 0 && strings.Contains(string(buf[:n]), "model/list") {
-				_, _ = io.WriteString(outW, listJSON+"\n")
+		scanner := bufio.NewScanner(inRead)
+		for scanner.Scan() {
+			var request struct {
+				Method string `json:"method"`
+				ID     int    `json:"id"`
 			}
-			if err != nil {
-				return
+			if json.Unmarshal(scanner.Bytes(), &request) != nil {
+				continue
+			}
+			if request.Method == "initialize" {
+				_, _ = io.WriteString(outW, `{"id":1,"result":{}}`+"\n")
+			}
+			if request.Method == "model/list" {
+				_, _ = io.WriteString(outW, listJSON+"\n")
 			}
 		}
 	}()
@@ -345,7 +353,7 @@ func TestHostCLIInstallSucceededRediscoversModels(t *testing.T) {
 	// The existing install flow replaced the binary on disk, so the cached
 	// catalogue is dropped and rediscovered without an explicit refresh.
 	ctrl.hostCLIInstallSucceeded("codex-acp")
-	waitForStartCount(t, runner, 2)
+	waitForHostCLICache(t, ctrl, runner, 2)
 
 	resp, err := ctrl.FetchDynamicModels(context.Background(), "codex-acp", false)
 	if err != nil {
@@ -367,14 +375,64 @@ func TestHostCLIInstallSucceededIgnoresAgentsWithoutCLI(t *testing.T) {
 	}
 }
 
-func waitForStartCount(t *testing.T, runner *stubCLIRunner, want int) {
+func waitForHostCLICache(t *testing.T, ctrl *Controller, runner *stubCLIRunner, want int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if runner.startCount() >= want {
+		if runner.startCount() >= want && ctrl.hostCLIModelsFresh("codex-acp") {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("start count = %d, want %d", runner.startCount(), want)
+}
+
+type gatedCLIRunner struct {
+	mu      sync.Mutex
+	first   bool
+	started chan struct{}
+	release chan struct{}
+	old     *stubCLIRunner
+	fresh   *stubCLIRunner
+}
+
+func (r *gatedCLIRunner) Output(context.Context, []string) (string, error) { return "1.0.0", nil }
+func (r *gatedCLIRunner) Start(ctx context.Context, argv []string) (hostcli.Process, error) {
+	r.mu.Lock()
+	first := !r.first
+	r.first = true
+	r.mu.Unlock()
+	if first {
+		close(r.started)
+		select {
+		case <-r.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return r.old.Start(ctx, argv)
+	}
+	return r.fresh.Start(ctx, argv)
+}
+func TestHostCLIModelInvalidationFencesInflightRefresh(t *testing.T) {
+	runner := &gatedCLIRunner{started: make(chan struct{}), release: make(chan struct{}),
+		old:   &stubCLIRunner{listJSON: `{"id":2,"result":{"data":[{"model":"old"}]}}`},
+		fresh: &stubCLIRunner{listJSON: codexListJSON}}
+	ctrl := newHostCLIController(t, runner, bridgeCapabilities("bridge"))
+	done := make(chan struct{})
+	go func() { defer close(done); ctrl.refreshHostCLIModels(context.Background(), "codex-acp") }()
+	<-runner.started
+	ctrl.InvalidateHostCLIModels("codex-acp")
+	ctrl.refreshHostCLIModels(context.Background(), "codex-acp")
+	close(runner.release)
+	<-done
+	entry := ctrl.cachedHostCLIModels("codex-acp", agents.NewCodexACP().HostCLI())
+	if len(entry.models) != 2 || entry.models[0].ID != "gpt-6-astra" {
+		t.Fatalf("stale catalogue replaced fresh result: %+v", entry.models)
+	}
+}
+func TestHostCLIPathIgnoresBridgePath(t *testing.T) {
+	ctrl := newHostCLIController(t, &stubCLIRunner{}, bridgeCapabilities("bridge"))
+	if got := ctrl.hostCLIPath(context.Background(), "codex-acp", agents.NewCodexACP().HostCLI()); got != "codex" {
+		t.Fatalf("got %q", got)
+	}
 }

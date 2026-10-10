@@ -10,12 +10,14 @@ const unloadPlugin = vi.fn();
 const installPluginFromUrl = vi.fn<() => Promise<InstallResult>>();
 const installPluginUpload = vi.fn<() => Promise<InstallResult>>();
 const enablePlugin = vi.fn(async () => ({ enabled: true }));
+const disablePlugin = vi.fn(async () => ({ disabled: true, remote_resources_may_remain: false }));
 const getPlugin = vi.fn<() => Promise<PluginRecord>>();
 const syncPlugins = vi.fn();
 const listPlugins = vi.fn(async () => []);
 const uninstallPlugin = vi.fn<() => Promise<{ deleted: boolean }>>();
-const { toastError, toastSuccess, toastWarning } = vi.hoisted(() => ({
+const { toastError, toastInfo, toastSuccess, toastWarning } = vi.hoisted(() => ({
   toastError: vi.fn(),
+  toastInfo: vi.fn(),
   toastSuccess: vi.fn(),
   toastWarning: vi.fn(),
 }));
@@ -23,6 +25,7 @@ const { toastError, toastSuccess, toastWarning } = vi.hoisted(() => ({
 vi.mock("@/lib/toast/sonner", () => ({
   toast: {
     error: (...args: unknown[]) => toastError(...args),
+    info: (...args: unknown[]) => toastInfo(...args),
     success: (...args: unknown[]) => toastSuccess(...args),
     warning: (...args: unknown[]) => toastWarning(...args),
   },
@@ -42,6 +45,7 @@ vi.mock("@/lib/api/domains/plugins-api", async () => {
     installPluginFromUrl: (...args: unknown[]) => installPluginFromUrl(...(args as [])),
     installPluginUpload: (...args: unknown[]) => installPluginUpload(...(args as [])),
     enablePlugin: (...args: unknown[]) => enablePlugin(...(args as [])),
+    disablePlugin: (...args: unknown[]) => disablePlugin(...(args as [])),
     getPlugin: (...args: unknown[]) => getPlugin(...(args as [])),
     syncPlugins: (...args: unknown[]) => syncPlugins(...(args as [])),
     listPlugins: (...args: unknown[]) => listPlugins(...(args as [])),
@@ -81,12 +85,15 @@ beforeEach(() => {
   installPluginFromUrl.mockReset();
   installPluginUpload.mockReset();
   enablePlugin.mockClear();
+  disablePlugin.mockReset();
+  disablePlugin.mockResolvedValue({ disabled: true, remote_resources_may_remain: false });
   getPlugin.mockReset();
   syncPlugins.mockReset();
   listPlugins.mockClear();
   listPlugins.mockResolvedValue([]);
   uninstallPlugin.mockReset();
   toastError.mockReset();
+  toastInfo.mockReset();
   toastSuccess.mockReset();
   toastWarning.mockReset();
 });
@@ -185,6 +192,23 @@ describe("usePluginActions — enable", () => {
     await waitFor(() => expect(result.current.stored?.last_error).toBe("new executable failure"));
     expect(result.current.stored?.last_error).not.toBe(plugin.last_error);
     expect(getPlugin).toHaveBeenCalledWith(plugin.id, { cache: "no-store" });
+  });
+});
+
+describe("usePluginActions — disable", () => {
+  it("warns when remote environments can remain after the provider is disabled", async () => {
+    const plugin = activeRecord();
+    disablePlugin.mockResolvedValueOnce({ disabled: true, remote_resources_may_remain: true });
+
+    const { result } = renderHook(() => usePluginActions(), { wrapper });
+
+    await act(async () => {
+      await result.current.handleDisable(plugin);
+    });
+
+    expect(disablePlugin).toHaveBeenCalledWith(plugin.id);
+    expect(toastInfo).toHaveBeenCalledWith(expect.any(String));
+    expect(unloadPlugin).toHaveBeenCalledWith(plugin.id);
   });
 });
 

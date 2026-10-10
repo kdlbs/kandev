@@ -16,6 +16,8 @@ function projectFileChange(
     staged: layer === "staged",
     additions: facet.additions,
     deletions: facet.deletions,
+    diff_state: facet.diff_state,
+    display_stale: facet.display_stale,
     old_path: facet.old_path,
     diff: facet.diff,
     diff_skip_reason: facet.diff_skip_reason,

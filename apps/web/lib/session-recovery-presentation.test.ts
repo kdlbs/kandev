@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isBootstrapSessionRecoveryError,
+  hasSessionRecoveryMessage,
   ownsSessionRecoveryChat,
   selectSessionRecoveryError,
 } from "./session-recovery-presentation";
@@ -21,6 +22,117 @@ describe("session recovery presentation", () => {
     expect(ownsSessionRecoveryChat(bootstrapError, "session-1")).toBe(true);
   });
 
+  it("keeps attempt identity and only safe typed evidence from the active projection", () => {
+    const active = {
+      ...bootstrapError,
+      execution_id: "550e8400-e29b-41d4-a716-446655440000",
+      attempt_id: "650e8400-e29b-41d4-a716-446655440000",
+      causes: [
+        {
+          operation: "start",
+          code: "model_unavailable",
+          reason: "requested_not_advertised",
+          requested_model: "vendor/opus-5",
+          effective_model: "gpt-5.2",
+          prompt_not_sent: true,
+        },
+      ],
+    };
+
+    expect(selectSessionRecoveryError(active, "session-1")).toMatchObject({
+      execution_id: active.execution_id,
+      attempt_id: active.attempt_id,
+      causes: [
+        {
+          operation: "start",
+          code: "model_unavailable",
+          reason: "requested_not_advertised",
+          requested_model: "vendor/opus-5",
+          effective_model: "gpt-5.2",
+          prompt_not_sent: true,
+        },
+      ],
+    });
+    expect(
+      selectSessionRecoveryError(
+        {
+          ...active,
+          causes: [
+            {
+              ...active.causes[0],
+              reason: "wrong_reason",
+              requested_model: "/private/model",
+            },
+          ],
+        },
+        "session-1",
+      )?.causes,
+    ).toEqual([{ operation: "start", code: "model_unavailable" }]);
+  });
+
+  it("keeps the newer same-text failure separate when its attempt stamp changes", () => {
+    const metadata = {
+      last_agent_error: {
+        message: "The agent could not start.",
+        occurred_at: "2026-09-11T10:00:00Z",
+        stamp: "failure-old",
+        phase: "bootstrap",
+        causes: [
+          {
+            operation: "start",
+            code: "model_unavailable",
+            reason: "requested_not_advertised",
+            requested_model: "model-old",
+          },
+        ],
+      },
+    };
+    const active = {
+      ...bootstrapError,
+      stamp: "failure-new",
+      occurred_at: "2026-09-11T10:01:00Z",
+      causes: [
+        {
+          operation: "resume",
+          code: "model_unavailable",
+          reason: "requested_not_advertised",
+          requested_model: "model-new",
+        },
+      ],
+    };
+
+    expect(selectSessionRecoveryError(active, "session-1", metadata)).toMatchObject({
+      stamp: "failure-new",
+      occurred_at: "2026-09-11T10:01:00Z",
+      causes: [{ requested_model: "model-new" }],
+    });
+  });
+});
+
+describe("session recovery timestamp selection", () => {
+  it("uses a valid active error when the persisted timestamp is malformed", () => {
+    const metadata = {
+      last_agent_error: {
+        message: "The agent could not start.",
+        occurred_at: "2026-02-30T10:00:00Z",
+        stamp: "failure-malformed-time",
+        phase: "bootstrap",
+      },
+    };
+    const active = {
+      ...bootstrapError,
+      stamp: "failure-valid-time",
+      occurred_at: "2026-02-28T10:00:00Z",
+    };
+
+    expect(selectSessionRecoveryError(active, "session-1", metadata)).toMatchObject({
+      stamp: "failure-valid-time",
+      occurred_at: "2026-02-28T10:00:00Z",
+    });
+  });
+});
+
+describe("persisted session recovery presentation", () => {
   it("selects an older session's persisted bootstrap error instead of the task-wide newest error", () => {
     const selectedSessionMetadata = {
       last_agent_error: {
@@ -62,5 +174,24 @@ describe("session recovery presentation", () => {
     expect(isBootstrapSessionRecoveryError(error)).toBe(false);
     expect(selectSessionRecoveryError(error, "session-1")).toBeNull();
     expect(ownsSessionRecoveryChat(error, "session-1")).toBe(false);
+  });
+});
+
+describe("correlated recovery ownership", () => {
+  it("suppresses only a matching session/stamp, never equal error text", () => {
+    const messages = [
+      { session_id: "session-1", metadata: { recovery_actions: true, error_stamp: "failure-1" } },
+    ];
+    expect(hasSessionRecoveryMessage(messages, "session-1", "failure-1")).toBe(true);
+    expect(hasSessionRecoveryMessage(messages, "session-1", "failure-2")).toBe(false);
+    expect(hasSessionRecoveryMessage(messages, "session-2", "failure-1")).toBe(false);
+    expect(hasSessionRecoveryMessage(messages, "session-1", undefined)).toBe(false);
+    expect(
+      hasSessionRecoveryMessage(
+        [{ ...messages[0], metadata: { ...messages[0].metadata, scope: "task" } }],
+        "session-1",
+        "failure-1",
+      ),
+    ).toBe(false);
   });
 });

@@ -1,7 +1,8 @@
 "use client";
 
-import { memo, useCallback, useLayoutEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useId, useLayoutEffect, useMemo, useRef } from "react";
 import { countGroupTasks, type SidebarGroup } from "@/lib/sidebar/apply-view";
+import type { GroupKey } from "@/lib/state/slices/ui/sidebar-view-types";
 import {
   SortableTaskLevel,
   SortableTaskNode,
@@ -11,6 +12,7 @@ import {
 import { GroupHeader } from "./task-switcher-group";
 import { TaskRow, type SubtaskToggleInfo, type TaskRowProps } from "./task-switcher-row";
 import type { TaskSwitcherItem } from "./task-switcher-types";
+import { useTranslation } from "react-i18next";
 
 export type TaskRowBaseProps = Omit<
   TaskRowProps,
@@ -104,10 +106,12 @@ const TaskTreeNode = memo(function TaskTreeNode({
   ctx,
   isDraggable,
 }: TaskTreeNodeProps) {
+  const { t } = useTranslation();
   const subs = ctx.subTasksByParentId.get(task.id);
-  const hasSubs = !!subs?.length;
+  const subtaskCount =
+    task.subtaskCount ?? (subs ? countGroupTasks(subs, ctx.subTasksByParentId) : 0);
+  const hasSubs = subtaskCount > 0 || !!subs?.length;
   const subsHidden = hasSubs && !!ctx.onToggleSubtasks && ctx.collapsedSubs.has(task.id);
-  const subtaskCount = hasSubs ? countGroupTasks(subs, ctx.subTasksByParentId) : 0;
   const handleToggleSubtasks = useCallback(
     () => ctx.onToggleSubtasks?.(task.id),
     [ctx.onToggleSubtasks, task.id],
@@ -129,6 +133,11 @@ const TaskTreeNode = memo(function TaskTreeNode({
     // The relative wrapper keeps the nest drop zone pinned to this row's
     // left edge rather than spanning the nested subtree below it.
     <div className="relative">
+      {task.continuationParentTitle && (
+        <div className="truncate pl-3 pt-1 text-xs text-muted-foreground">
+          {t("sidebar:continuedFrom", { title: task.continuationParentTitle })}
+        </div>
+      )}
       <TaskRow
         task={task}
         depth={depth}
@@ -144,7 +153,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
     </div>
   );
   const nested =
-    !subsHidden && hasSubs ? (
+    !subsHidden && !!subs?.length ? (
       <TaskTreeLevel parentTaskId={task.id} tasks={subs} depth={depth + 1} ctx={ctx} />
     ) : undefined;
   return (
@@ -195,6 +204,7 @@ function getReorderHandler(parentTaskId: string | null, ctx: TaskTreeContext) {
 }
 
 export type GroupSectionProps = {
+  grouping?: GroupKey;
   group: SidebarGroup;
   subTasksByParentId: Map<string, TaskSwitcherItem[]>;
   getNestHierarchyTasks?: () => TaskSwitcherItem[] | undefined;
@@ -205,6 +215,7 @@ export type GroupSectionProps = {
   collapsedSubtaskParentIds?: string[];
   onToggleSubtasks?: (parentTaskId: string) => void;
   showHeader: boolean;
+  groupIndent?: boolean;
   onReorderGroup?: (groupTaskIds: string[]) => void;
   onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
   onNestTask?: (taskId: string, parentTaskId: string) => void;
@@ -241,22 +252,7 @@ function sameTaskSubtree(
 }
 
 function groupSectionEqual(previous: GroupSectionProps, next: GroupSectionProps): boolean {
-  if (
-    previous.group !== next.group ||
-    previous.rowProps !== next.rowProps ||
-    previous.getNestHierarchyTasks !== next.getNestHierarchyTasks ||
-    previous.pinnedSet !== next.pinnedSet ||
-    previous.isCollapsed !== next.isCollapsed ||
-    previous.onToggleGroup !== next.onToggleGroup ||
-    previous.collapsedSubtaskParentIds !== next.collapsedSubtaskParentIds ||
-    previous.onToggleSubtasks !== next.onToggleSubtasks ||
-    previous.showHeader !== next.showHeader ||
-    previous.onReorderGroup !== next.onReorderGroup ||
-    previous.onReorderSubtasks !== next.onReorderSubtasks ||
-    previous.onNestTask !== next.onNestTask
-  ) {
-    return false;
-  }
+  if (!groupSectionOptionsEqual(previous, next)) return false;
   return (
     previous.subTasksByParentId === next.subTasksByParentId ||
     sameTaskSubtree(
@@ -265,6 +261,25 @@ function groupSectionEqual(previous: GroupSectionProps, next: GroupSectionProps)
       previous.subTasksByParentId,
       next.subTasksByParentId,
     )
+  );
+}
+
+function groupSectionOptionsEqual(previous: GroupSectionProps, next: GroupSectionProps): boolean {
+  return (
+    previous.grouping === next.grouping &&
+    previous.group === next.group &&
+    previous.rowProps === next.rowProps &&
+    previous.getNestHierarchyTasks === next.getNestHierarchyTasks &&
+    previous.pinnedSet === next.pinnedSet &&
+    previous.isCollapsed === next.isCollapsed &&
+    previous.onToggleGroup === next.onToggleGroup &&
+    previous.collapsedSubtaskParentIds === next.collapsedSubtaskParentIds &&
+    previous.onToggleSubtasks === next.onToggleSubtasks &&
+    previous.showHeader === next.showHeader &&
+    previous.groupIndent === next.groupIndent &&
+    previous.onReorderGroup === next.onReorderGroup &&
+    previous.onReorderSubtasks === next.onReorderSubtasks &&
+    previous.onNestTask === next.onNestTask
   );
 }
 
@@ -309,11 +324,15 @@ export const GroupSection = memo(function GroupSection({
   collapsedSubtaskParentIds,
   onToggleSubtasks,
   showHeader,
+  groupIndent = true,
   onReorderGroup,
   onReorderSubtasks,
   onNestTask,
 }: GroupSectionProps) {
-  const totalCount = countGroupTasks(group.tasks, subTasksByParentId);
+  const sectionId = useId();
+  const headerId = `${sectionId}-header`;
+  const bodyId = `${sectionId}-body`;
+  const totalCount = group.matchingCount ?? countGroupTasks(group.tasks, subTasksByParentId);
   const groupTasks = useMemo(
     () => flattenGroupTasks(group.tasks, subTasksByParentId),
     [group.tasks, subTasksByParentId],
@@ -340,17 +359,33 @@ export const GroupSection = memo(function GroupSection({
       nestTargetIds,
       externalDragContext: true,
     };
-    return <TaskTreeLevel parentTaskId={null} tasks={group.tasks} depth={0} ctx={ctx} />;
+    return (
+      <div
+        id={bodyId}
+        role={showHeader ? "group" : undefined}
+        aria-labelledby={showHeader ? headerId : undefined}
+        className={showHeader && groupIndent ? "ml-5" : undefined}
+      >
+        <TaskTreeLevel parentTaskId={null} tasks={group.tasks} depth={0} ctx={ctx} />
+      </div>
+    );
   };
 
   return (
-    <div data-testid="sidebar-group" data-group-key={group.key}>
+    <div
+      data-testid="sidebar-group"
+      data-group-key={group.key}
+      className={showHeader ? "pb-1 last:pb-0" : undefined}
+    >
       {showHeader && (
         <GroupHeader
+          id={headerId}
+          controlsId={bodyId}
           label={group.label}
           groupKey={group.key}
           count={totalCount}
           isCollapsed={isCollapsed}
+          isContinuation={group.isContinuation}
           onToggle={() => onToggleGroup?.(group.key)}
         />
       )}

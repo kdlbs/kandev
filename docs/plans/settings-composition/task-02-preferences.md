@@ -3,7 +3,7 @@ id: "02-preferences"
 title: "Remaining preferences"
 status: complete
 wave: 2
-depends_on: 
+depends_on:
   - 01-task-behavior
 plan: "plan.md"
 requirements:

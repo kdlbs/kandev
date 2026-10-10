@@ -5,13 +5,14 @@ import type { KanbanState } from "@/lib/state/slices";
 import type { Task, TaskSession } from "@/lib/types/http";
 import { linkToTask, linkToTaskOverview } from "@/lib/links";
 import { fetchTask, listTaskSessions } from "@/lib/api";
-import { captureTaskSessionActivityEpochs } from "@/lib/state/slices/session/activity-epochs";
+import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import { getRecentTasks } from "@/lib/recent-tasks";
 import { createAbortError, isAbortError } from "@/lib/utils/abort-error";
 import { softNavigate } from "@/lib/routing/client-router";
 import { ownsTaskRemovalDeparture, type TaskRemovalAction } from "@/lib/state/task-removal";
 import { coordinateTaskRemovalBatch } from "./task-removal-coordinator";
+import { findSidebarFallbackTask } from "./task-removal-sidebar-fallback";
 import { useToast } from "@/components/toast-provider";
 import { useTranslation } from "react-i18next";
 
@@ -135,7 +136,7 @@ function taskSessionListRequestOptions(signal?: AbortSignal) {
 type TaskSessionLoadCommit = {
   sessions: TaskSession[];
   force: boolean;
-  activityEpochsAtRequestStart: Readonly<Record<string, number>>;
+  hydrationEpochsAtRequestStart: ReturnType<typeof captureTaskSessionHydrationEpochs>;
 };
 
 function commitTaskSessionLoad(
@@ -144,9 +145,9 @@ function commitTaskSessionLoad(
   generation: number,
   commit: TaskSessionLoadCommit,
 ): TaskSession[] {
-  const { sessions, force, activityEpochsAtRequestStart } = commit;
+  const { sessions, force, hydrationEpochsAtRequestStart } = commit;
   if (taskSessionLoadIsCurrent(store, taskId, generation)) {
-    store.getState().setTaskSessionsForTask(taskId, sessions, activityEpochsAtRequestStart);
+    store.getState().setTaskSessionsForTask(taskId, sessions, hydrationEpochsAtRequestStart);
     return sessions;
   }
   // Forced callers use this result to choose a pending-action owner. Never
@@ -173,7 +174,7 @@ async function loadTaskSessionsForTaskFromStore(
     return cachedSessions;
   }
   const loadGeneration = beginTaskSessionLoad(store, taskId);
-  const activityEpochsAtRequestStart = captureTaskSessionActivityEpochs(store.getState(), taskId);
+  const hydrationEpochsAtRequestStart = captureTaskSessionHydrationEpochs(store.getState(), taskId);
   store.getState().setTaskSessionsLoading(taskId, true);
   try {
     const response = await listTaskSessions(taskId, taskSessionListRequestOptions(signal));
@@ -181,7 +182,7 @@ async function loadTaskSessionsForTaskFromStore(
     return commitTaskSessionLoad(store, taskId, loadGeneration, {
       sessions,
       force,
-      activityEpochsAtRequestStart,
+      hydrationEpochsAtRequestStart,
     });
   } catch (error) {
     if (!isAbortError(error)) console.error("Failed to load task sessions:", error);
@@ -542,21 +543,21 @@ async function switchAfterRemoval(params: {
     useLayoutSwitch,
     loadTaskSessionsForTask,
   } = params;
-  const nextTask = await selectNextTaskAfterRemoval(
-    collectRemainingTasks(store),
+  const workspaceId = opts?.workspaceId ?? store.getState().workspaces?.activeId;
+  const candidate = await findSidebarFallbackTask({
+    workspaceId,
     taskId,
-    taskIsLive,
-    {
-      excludedTaskIds,
-      workspaceId: opts?.workspaceId,
-      validateTaskAncestry: opts?.validateTaskAncestry,
-    },
-  );
-  if (!nextTask) return { candidateFound: false, switchedTaskId: null };
+    cachedTasks: collectRemainingTasks(store),
+    excludedTaskIds,
+    validateTaskAncestry: opts?.validateTaskAncestry,
+    isLive: taskIsLive,
+    selectCandidate: selectNextTaskAfterRemoval,
+  });
+  if (!candidate) return { candidateFound: false, switchedTaskId: null };
 
   const switched = await switchToNextTask({
     store,
-    nextTask,
+    nextTask: candidate,
     oldEnvId,
     useLayoutSwitch,
     loadTaskSessionsForTask,
@@ -570,7 +571,7 @@ async function switchAfterRemoval(params: {
             )
         : undefined,
   });
-  return { candidateFound: true, switchedTaskId: switched ? nextTask.id : null };
+  return { candidateFound: true, switchedTaskId: switched ? candidate.id : null };
 }
 
 function shouldRedirectAfterNoRemovalCandidate(

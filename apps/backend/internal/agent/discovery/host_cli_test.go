@@ -192,3 +192,47 @@ func TestApplyHostCLISkipsUnavailableAgents(t *testing.T) {
 		t.Fatalf("unavailable agent was probed: %+v (calls=%d)", withCLI, runner.versionCalls())
 	}
 }
+
+type gatedVersionRunner struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (r *gatedVersionRunner) Output(ctx context.Context, _ []string) (string, error) {
+	close(r.started)
+	select {
+	case <-r.release:
+		return "1.0.0", nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+func (r *gatedVersionRunner) Start(context.Context, []string) (hostcli.Process, error) {
+	return nil, hostcli.ErrNotInstalled
+}
+func TestHostCLIVersionInvalidationFencesInflightProbe(t *testing.T) {
+	runner := &gatedVersionRunner{started: make(chan struct{}), release: make(chan struct{})}
+	r := newHostCLIRegistry(t, []agents.Agent{}, runner)
+	spec := hostcli.Spec{Executable: "testcli", VersionArgs: []string{"--version"}}
+	done := make(chan struct{})
+	go func() { defer close(done); r.hostCLI.resolve(context.Background(), spec, "/bin/testcli") }()
+	<-runner.started
+	r.InvalidateHostCLICache()
+	close(runner.release)
+	<-done
+	r.hostCLI.mu.Lock()
+	defer r.hostCLI.mu.Unlock()
+	if len(r.hostCLI.cache) != 0 {
+		t.Fatalf("invalidated version probe repopulated cache: %+v", r.hostCLI.cache)
+	}
+}
+func TestApplyHostCLISkipsCancelledSweep(t *testing.T) {
+	runner := &versionRunner{output: "1.0.0"}
+	r := newHostCLIRegistry(t, []agents.Agent{cliTestAgent("with-cli", "/bin/testcli")}, runner)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r.ApplyHostCLI(ctx, r.registry.Get, []Availability{{Name: "with-cli", Available: true}})
+	if runner.versionCalls() != 0 {
+		t.Fatal("cancelled sweep ran a version probe")
+	}
+}

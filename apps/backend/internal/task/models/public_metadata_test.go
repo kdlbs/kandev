@@ -13,12 +13,20 @@ func TestPublicTaskMetadataStripsWorkflowMoveMarker(t *testing.T) {
 			"move_id":      "move-abc",
 			"options":      `{"instructions":"secret reviewer note"}`,
 		},
+		MetaKeyTaskManagementDeferredFence: map[string]interface{}{
+			"installation_id": "manager",
+			"instance_key":    "instance",
+			"generation":      int64(2),
+		},
 	}
 
 	public := PublicTaskMetadata(metadata)
 
 	if _, leaked := public[MetaKeyWorkflowMovePending]; leaked {
 		t.Fatal("public metadata must not carry the transient workflow_move_pending marker")
+	}
+	if _, leaked := public[MetaKeyTaskManagementDeferredFence]; leaked {
+		t.Fatal("public metadata must not carry the task management fence")
 	}
 	if _, ok := public["title_generated"]; !ok {
 		t.Fatal("public metadata must preserve unrelated keys")

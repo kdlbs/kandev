@@ -34,7 +34,6 @@ import type {
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import { reviewItemId, useReviewItemSelection } from "../review-selection";
 import { PluginTaskPanel } from "../plugin-task-panel";
-import { PromptHistoryPanelContent } from "../prompt-history-panel-content";
 import { parsePluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import { useEffectiveMobilePanel, type MobileReviewSource } from "./mobile-plugin-panel-lifecycle";
 import { useTranslation } from "react-i18next";
@@ -81,8 +80,19 @@ export function resolveMobileReviewSource(
 const TOP_NAV_HEIGHT = "3.5rem";
 const BOTTOM_NAV_HEIGHT = "3.25rem";
 
-export function mobilePanelTopNavHeight(hasSharedTaskError: boolean): string {
-  return hasSharedTaskError ? "0px" : TOP_NAV_HEIGHT;
+export function mobilePanelTopNavHeight(
+  hasSharedTaskError: boolean,
+  hasPageLevelFeedback = false,
+): string {
+  return hasSharedTaskError || hasPageLevelFeedback ? "0px" : TOP_NAV_HEIGHT;
+}
+
+export function mobilePanelTopPadding(
+  hasSharedTaskError: boolean,
+  hasPageLevelFeedback = false,
+): string {
+  if (hasPageLevelFeedback) return "0px";
+  return `calc(${mobilePanelTopNavHeight(hasSharedTaskError)} + env(safe-area-inset-top, 0px))`;
 }
 
 type SessionMobileLayoutProps = {
@@ -107,6 +117,7 @@ type SessionMobileLayoutProps = {
   taskCanvases?: Canvas[];
   onOpenCanvas?: (canvasId: string) => void;
   hasSharedTaskError?: boolean;
+  hasPageLevelFeedback?: boolean;
 };
 
 function MobileChatPanelContent({
@@ -182,7 +193,7 @@ type MobilePanelAreaProps = {
   onNavigateToPrompt: (messageId: string) => PluginOpenMessageResult;
   onScrollTargetConsumed?: (messageId: string) => void;
   mobileScrollTarget: PendingMessageScrollTarget | null;
-  topNavHeight: string;
+  topPadding: string;
   bottomNavHeight: string;
   reviews: readonly ReviewItemSummary[];
   selectedReview: ReviewItemSummary | null;
@@ -238,7 +249,7 @@ export function MobilePanelArea({
   onNavigateToPrompt,
   onScrollTargetConsumed = () => {},
   mobileScrollTarget,
-  topNavHeight,
+  topPadding,
   bottomNavHeight,
   reviews,
   selectedReview,
@@ -249,7 +260,7 @@ export function MobilePanelArea({
     <div
       className="flex flex-col"
       style={{
-        paddingTop: `calc(${topNavHeight} + env(safe-area-inset-top, 0px))`,
+        paddingTop: topPadding,
         paddingBottom: `calc(${bottomNavHeight} + env(safe-area-inset-bottom, 0px))`,
         height: "100%",
       }}
@@ -265,11 +276,6 @@ export function MobilePanelArea({
             onScrollTargetConsumed={onScrollTargetConsumed}
             isVisible
           />
-        </div>
-      )}
-      {currentMobilePanel === "prompt-history" && (
-        <div className="flex-1 min-h-0 flex flex-col p-2">
-          <PromptHistoryPanelContent onNavigateToPrompt={onNavigateToPrompt} />
         </div>
       )}
       {currentMobilePanel === "plan" && (
@@ -575,7 +581,6 @@ type SessionMobileFooterProps = {
   sessionKind: "managed" | "passthrough" | null;
   activePanel: MobileSessionPanel;
   onPanelChange: (panel: MobileSessionPanel) => void;
-  showPromptHistory: boolean;
   planBadge: boolean;
   changesBadge: number;
   hasReview: boolean;
@@ -592,7 +597,6 @@ function SessionMobileFooter({
   sessionKind,
   activePanel,
   onPanelChange,
-  showPromptHistory,
   planBadge,
   changesBadge,
   hasReview,
@@ -612,7 +616,6 @@ function SessionMobileFooter({
       <SessionMobileBottomNav
         activePanel={activePanel}
         onPanelChange={onPanelChange}
-        showPromptHistory={showPromptHistory}
         planBadge={planBadge}
         changesBadge={changesBadge}
         hasReview={hasReview}
@@ -762,7 +765,10 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         onNavigateToPrompt={handleNavigateToPrompt}
         onScrollTargetConsumed={handleMobileScrollTargetConsumed}
         mobileScrollTarget={mobileScrollTarget}
-        topNavHeight={mobilePanelTopNavHeight(Boolean(props.hasSharedTaskError))}
+        topPadding={mobilePanelTopPadding(
+          Boolean(props.hasSharedTaskError),
+          Boolean(props.hasPageLevelFeedback),
+        )}
         bottomNavHeight={BOTTOM_NAV_HEIGHT}
         reviews={reviews}
         selectedReview={selectedReview}
@@ -777,7 +783,6 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         planBadge={hasUnseenPlanUpdate}
         changesBadge={totalChangesCount}
         hasReview={reviews.length > 0}
-        showPromptHistory={!isPassthroughMode && effectiveSessionId !== null}
         taskCanvases={props.taskCanvases}
         onOpenCanvas={props.onOpenCanvas}
       />

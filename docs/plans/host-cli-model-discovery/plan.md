@@ -175,32 +175,27 @@ Phone: the same popover, viewport-contained, 44 px rows (existing behavior).
 
 ## Verification results
 
-- Backend: `go build ./...`, `go vet ./...`, `gofmt -l internal/agent internal/backendapp cmd/mock-agent`
-  (clean), and the full `go test ./...` all pass, including the new
-  `hostcli`, `discovery/host_cli_test.go`, and
-  `controller/host_cli_models_test.go` suites.
-- Frontend: `tsc --noEmit`, `pnpm run lint` (0 warnings, `--max-warnings 0`),
-  and `pnpm run i18n:check`/`i18n:ratchet` all pass. Vitest: 95 tests across
-  `lib/agent-host-cli.test.ts`, `components/model-config-selector.test.tsx`,
-  `components/model-config-selector-custom-model.test.tsx`,
-  `components/settings/installed-agent-card.test.tsx`,
-  `components/settings/profile-model-fields.test.tsx`,
-  `components/settings/profile-form-fields.test.tsx`, and
-  `hooks/domains/settings/use-dynamic-models.test.ts`.
-- E2E: `agent-host-cli.spec.ts` (chromium) and `mobile-agent-host-cli.spec.ts`
-  (mobile-chrome) both pass against a full local build (backend, web,
-  e2e plugin fixture), driving the mock agent's host-CLI surfaces.
-- Public docs: `node scripts/validate-public-docs.mjs` passes for the new
-  `docs/public/agents-and-profiles.md` section.
-- Live verification: with a real `claude` (2.1.220) and `codex` (0.155.1)
-  CLI installed on the host, `go test` exercises `DetectVersion` and
-  `ListCodexModels` against them directly (see `hostcli_test.go`,
-  `codex_models_test.go`); a full app run was blocked in this sandboxed task
-  workspace by an unrelated launcher bug (`make dev`'s supervisor control
-  socket path exceeds the AF_UNIX `sun_path` limit under this host's long
-  task-workspace path — unrelated to this change), so live UI verification
-  used the E2E harness's backend-only spawn path instead, which does not hit
-  that code path.
+The original contributor reported full backend, frontend and E2E success.
+Those claims describe the original head and are historical, not verification
+of the current integration. The original hostcli tests use deterministic
+runners and protocol fixtures; they do not invoke installed Claude or Codex.
+
+Scoped remediation preserves current main's profile authorization, launch
+settings, runtime maintenance and mobile settings composition. It fixes
+process reaping, initialization failures, pagination, bounded output,
+vendor-versus-bridge executable identity, cache invalidation races, catalogue
+projection and localized failures, including the Korean catalogue.
+
+- Focused hostcli regression proof: first reproduced missing Wait and ignored
+  initialization errors, then passed the hostcli package with deterministic
+  protocol fixtures in a nonroot, credential-free sandbox with no network,
+  a read-only root, no capabilities and bounded memory, CPU and PIDs.
+- Go formatting and whitespace checks are static local checks.
+- Prettier formatting ran in the same isolation boundary.
+- Broad backend, frontend, i18n, desktop and mobile E2E suites and commit-hook
+  equivalents are delegated to required hosted CI. They remain pending until
+  successful exact-head results are collected in the external review receipt.
+- No installed host CLI, user profile, app-server or agent session was invoked.
 
 ## Risks
 

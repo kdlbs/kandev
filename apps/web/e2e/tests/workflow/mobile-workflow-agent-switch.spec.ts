@@ -14,7 +14,10 @@ test.describe("Workflow agent profile switching on mobile", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const { profileA, profileB } = await createWorkflowAgentProfiles(apiClient);
+    const { profileA, profileB } = await createWorkflowAgentProfiles(
+      apiClient,
+      seedData.agentProfileId,
+    );
     const workflow = await apiClient.createWorkflow(
       seedData.workspaceId,
       "Mobile workflow session tabs",
@@ -50,7 +53,8 @@ test.describe("Workflow agent profile switching on mobile", () => {
         workflow_id: workflow.id,
         workflow_step_id: stepA.id,
         repository_ids: [seedData.repositoryId],
-        description: "Run the workflow session picker scenario",
+        // Exercise session ownership without randomized model response delays.
+        description: "/e2e:simple-message",
       },
     );
     const originalASessionId = await waitForWorkflowProfileSession(apiClient, task.id, profileA.id);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { Trans } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { rememberSettingsPath } from "@/lib/settings/last-settings-page";
 
@@ -43,4 +44,21 @@ export function useRememberSettingsPath(pathname: string, knownPaths: ReadonlySe
   useEffect(() => {
     rememberSettingsPath(pathname, knownPaths);
   }, [pathname, knownPaths]);
+}
+
+/**
+ * Shown for a settings path the route table recognizes the shape of (a
+ * workspace sub-page, a flag-gated feature not yet enabled) but has no
+ * dedicated client page for yet.
+ */
+export function SettingsRouteFallback({ pathname }: { pathname: string }) {
+  return (
+    <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
+      {/* `pathname` is a route string, never translated. */}
+      <Trans i18nKey="system:settingsRouteNotPorted" values={{ pathname }}>
+        This settings route is handled by the SPA shell, but its dedicated client page is still
+        being ported: <span className="font-mono">{pathname}</span>
+      </Trans>
+    </div>
+  );
 }

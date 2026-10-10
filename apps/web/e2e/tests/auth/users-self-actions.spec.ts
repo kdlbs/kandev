@@ -16,9 +16,7 @@ import { responseUserId } from "./users-auth-helpers";
  *
  * Isolation: the worker-scoped backend fixture and `restart()` preserve the
  * SQLite DB, and auth setup is single-shot per database. This spec restarts
- * with its own database path so the full auth project stays deterministic in
- * either file order (auth-screenshots.spec.ts sets up the same admin email on
- * the baseline database).
+ * with its own database path so setup state stays within this suite.
  */
 const ADMIN = { email: "admin@demo.dev", password: "adminpass123", displayName: "Ada Admin" };
 const MEMBER = { email: "sam@demo.dev", password: "memberpass123", displayName: "Sam Member" };

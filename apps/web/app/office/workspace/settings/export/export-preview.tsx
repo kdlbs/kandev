@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { ApiError } from "@/lib/api/client";
 import * as officeApi from "@/lib/api/domains/office-api";
+import { triggerBlobDownload } from "@/lib/utils/file-download";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { ExportFileTree } from "./export-file-tree";
 import { ExportFilePreview } from "./export-file-preview";
@@ -55,7 +56,12 @@ function ExportDownloadError({ errorKey, onRetry }: ExportErrorProps) {
     <div className="flex shrink-0 items-center justify-between gap-3 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-sm text-destructive">
       <span>{t(errorKey)}</span>
       {errorKey === "office:exportConfigurationChanged" && (
-        <Button size="sm" variant="ghost" onClick={onRetry} className="min-h-11 cursor-pointer">
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onRetry}
+          className="max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 cursor-pointer"
+        >
           {t("office:retry")}
         </Button>
       )}
@@ -270,12 +276,7 @@ export function ExportPreview() {
       ) {
         return;
       }
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = "kandev-config-selected.zip";
-      anchor.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      triggerBlobDownload(blob, "kandev-config-selected.zip");
     } catch (error) {
       setDownloadErrorKey(
         error instanceof ApiError && error.status === 409

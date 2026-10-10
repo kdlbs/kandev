@@ -101,7 +101,7 @@ for (const status of [503, 403]) {
 }
 
 // @covers AC-UI-MOBILE-MENU-004.1
-test("embedded Tasks retains the current archived task outside archived views", async ({
+test("embedded Tasks filters the current archived task outside archived views", async ({
   testPage,
   apiClient,
   seedData,
@@ -114,5 +114,5 @@ test("embedded Tasks retains the current archived task outside archived views", 
   await testPage.goto(`/t/${task.task_id}`);
   await testPage.getByTestId("app-nav-trigger").tap();
   const menu = testPage.getByTestId("app-nav-sheet");
-  await expect(menu.getByText("Current archived navigation task", { exact: true })).toBeVisible();
+  await expect(menu.getByText("Current archived navigation task", { exact: true })).toHaveCount(0);
 });

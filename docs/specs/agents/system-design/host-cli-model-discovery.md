@@ -105,7 +105,8 @@ Codex spec declares `ModelSourceCodexAppServer`, the documented
 
 ### Version detection
 
-Discovery runs `<matched path> --version` with a five-second timeout and
+Discovery resolves the compiled vendor executable independently of a bridge
+matched for agent availability, then runs `<vendor path> --version` with a five-second timeout and
 extracts the first `MAJOR.MINOR.PATCH` token, so `2.1.220 (Claude Code)` and
 `codex-cli 0.155.1` both resolve. A non-zero exit that still printed a version
 is accepted; anything else becomes a one-line reason. The result is cached per
@@ -127,24 +128,33 @@ unchanged.
 
 ### Model discovery
 
-`hostcli.ListCodexModels` spawns `<codex> app-server`, starts reading, then
-sends `initialize`, `initialized`, and `model/list` (`{"limit": 200}`) with a
-fifteen-second overall timeout, then terminates the process. Reading starts
-before writing because the peer answers `initialize` before the client
-finishes writing `model/list`; a reader started afterwards deadlocks on a full
-pipe. Each entry maps `model`/`id`, `displayName`, `description`, `isDefault`,
+`hostcli.ListCodexModels` spawns `<codex> app-server`, sends `initialize`,
+waits for successful initialization, then sends `initialized` and `model/list`
+(`{"limit": 200}`). It follows `nextCursor` for up to ten pages within a
+fifteen-second overall timeout and an eight-MiB output budget, then terminates
+and waits for the process on every exit path. Cancellation closes the pipes
+and joins the exchange, including when a write is blocked. Each entry maps `model`/`id`, `displayName`, `description`, `isDefault`,
 and keeps `supportedReasoningEfforts` and `defaultReasoningEffort` in `Meta`.
 Hidden models are excluded. A JSON-RPC error mentioning authentication maps to
 `not_logged_in`; a missing executable maps to `not_installed`; a deadline maps
 to `timeout`; anything else maps to `failed`.
 
 The controller keeps one in-memory entry per agent type with the discovered
-models, a status, an error message, and a check timestamp. Agent types with
+models, a status, an error message, and a check timestamp. Per-agent refresh
+generations fence superseded and invalidated results. One controller-wide
+semaphore bounds concurrent catalogue processes across all refresh callers. Agent types with
 `ModelSourceNone` resolve to `skipped` immediately, without a process.
 
 ### Merged model response
 
-`DynamicModelsResponse` and `ModelConfigDTO` gain:
+`DynamicModelsResponse` and `ModelConfigDTO` gain the following metadata.
+The profile capability endpoint preserves authorization, resolved launch
+settings, context revision and runtime information while adding the host
+catalogue. Host CLI entries are suggestions from the host CLI's own context;
+they do not verify availability under a profile's overridden launch settings.
+The profile editor retains its refresh and stale-context gates.
+
+`DynamicModelsResponse` and `ModelConfigDTO` include:
 
 ```json
 {
@@ -226,8 +236,12 @@ string.
   request field reaches a process argument.
 - Discovery runs as the Kandev process user and relies on the CLI's own stored
   login; it never sends credentials.
-- Discovery is read-only: it starts no session, writes no file, and changes no
-  installed package.
+- Discovery requests only version and catalogue metadata. It starts no
+  inference session and changes no installed package. The vendor process may
+  maintain its own caches or logs.
+- A CLI catalogue may be bundled or cached; it is not an entitlement check.
+  See the [official app-server contract](https://learn.chatgpt.com/docs/app-server)
+  and [catalogue limitations](https://developers.openai.com/siwc/token-sharing-open-source/codex-app-server).
 
 ## Observability
 

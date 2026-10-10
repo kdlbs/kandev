@@ -76,8 +76,8 @@ const FAKE_AVAILABLE_AGENTS = {
   total: 3,
 };
 
-test.describe("OnboardingDialog with realistic agent data — mobile layout", () => {
-  test("AI Agents step does not overflow the dialog with realistic agent data (Pixel 7)", async ({
+test.describe("First-run onboarding with realistic agent data — mobile", () => {
+  test("opens on a larger viewport after a phone visit and keeps agent data contained", async ({
     testPage,
   }) => {
     await testPage.route("**/api/v1/agents/available**", async (route) => {
@@ -97,11 +97,21 @@ test.describe("OnboardingDialog with realistic agent data — mobile layout", ()
     await testPage.goto("/");
 
     const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toHaveCount(0);
+    await expect(testPage.getByTestId("mobile-kanban-layout")).toBeVisible();
+    await expect(testPage.getByTestId("mobile-fab")).toBeEnabled();
+    expect(
+      await testPage.evaluate(() => localStorage.getItem("kandev.onboarding.completed")),
+    ).toBeNull();
+
+    await testPage.setViewportSize({ width: 768, height: 915 });
     await expect(dialog).toBeVisible();
     await expect(testPage.getByRole("heading", { name: "AI Agents" })).toBeVisible();
-    // Wait for the agent rows to render — listAvailableAgents resolves async.
     await expect(testPage.getByText("Claude Code (Anthropic CLI)", { exact: true })).toBeVisible();
 
-    await assertNoDescendantOverflowsRight(dialog, "Pixel 7 AI Agents");
+    await assertNoDescendantOverflowsRight(dialog, "larger viewport AI Agents");
+    expect(
+      await testPage.evaluate(() => localStorage.getItem("kandev.onboarding.completed")),
+    ).toBeNull();
   });
 });

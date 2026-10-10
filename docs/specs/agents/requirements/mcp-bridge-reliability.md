@@ -55,6 +55,12 @@ client timeout without diagnostic evidence.
 - **AC-AGENTS-MCP-BRIDGE-RELIABILITY-001.7:** Default logs shall identify the
   action, request, and session for accepted requests and terminal bridge
   errors. These logs shall not contain tool arguments.
+- **AC-AGENTS-MCP-BRIDGE-RELIABILITY-001.8:** During backend startup, recovered
+  and newly launched agents shall have a fully configured, scoped backend MCP
+  dispatcher before their streams can request tools. Initial tool discovery
+  shall not fail solely because backend handler registration is still pending.
+  Failed initialization shall prevent those consumers from starting and shall
+  preserve unsuccessful readiness.
 
 ### REQ-AGENTS-MCP-BRIDGE-RELIABILITY-002: Empty response payload reporting
 

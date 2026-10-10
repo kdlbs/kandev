@@ -1,6 +1,6 @@
 import { createRef } from "react";
 import type { Window as HappyDOMWindow } from "happy-dom";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatInputBody, type ChatInputBodyProps } from "./chat-input-body";
@@ -31,6 +31,31 @@ afterEach(() => {
   cleanup();
   viewport.setWindowSize({ width: initialWidth });
   tipTapPropsMock.mockClear();
+});
+
+it("shows localized workspace recovery beside staged attachments", () => {
+  const retry = vi.fn();
+  render(
+    <TooltipProvider>
+      <ChatInputBody
+        {...props({
+          contextAreaProps: {
+            hasContextZone: true,
+            allItems: [],
+            sessionId: "session-1",
+            scopeError: true,
+            onRetryScope: retry,
+          },
+        })}
+      />
+    </TooltipProvider>,
+  );
+
+  expect(screen.getByTestId("attachment-scope-error").textContent).toContain(
+    "Could not find this task's workspace.",
+  );
+  fireEvent.click(screen.getByTestId("attachment-scope-retry"));
+  expect(retry).toHaveBeenCalledOnce();
 });
 
 function props(overrides: Partial<ChatInputBodyProps> = {}): ChatInputBodyProps {

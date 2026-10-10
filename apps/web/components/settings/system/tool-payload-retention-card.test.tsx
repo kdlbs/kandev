@@ -1,4 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { StateProvider } from "@/components/state-provider";
+import { SystemInfoQueryProvider } from "@/components/system-info-query-provider";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { SettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type {
@@ -16,11 +18,33 @@ vi.mock("@/components/settings/settings-save-provider", () => ({
     contributor = value;
   },
 }));
+const AUTH = {
+  mode: "enabled" as const,
+  authenticated: true,
+  user: {
+    id: "user-1",
+    email: "user@example.com",
+    display_name: "User",
+    role: "admin" as const,
+    status: "active" as const,
+  },
+};
+function renderRetentionCard() {
+  return render(
+    <StateProvider initialState={{ auth: AUTH }}>
+      <SystemInfoQueryProvider bootId="retention-card-test-boot">
+        <ToolPayloadRetentionCard />
+      </SystemInfoQueryProvider>
+    </StateProvider>,
+  );
+}
 const ENABLED_TEST_ID = "tool-payload-enabled";
 const AGE_TEST_ID = "tool-payload-age";
 const ERROR_TEST_ID = "tool-payload-error";
 const ANALYZE_TEST_ID = "tool-payload-analyze";
 const LAST_RUN_TEST_ID = "tool-payload-last-run";
+const OPERATION_STARTED_AT = "2026-01-01T00:00:00.000Z";
+const OPERATION_FINISHED_AT = "2026-01-01T00:01:00.000Z";
 
 const baseline: ToolPayloadRetentionStatus = {
   supported: true,
@@ -34,7 +58,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 async function open() {
-  render(<ToolPayloadRetentionCard />);
+  renderRetentionCard();
   await screen.findByTestId(ENABLED_TEST_ID);
 }
 
@@ -42,20 +66,42 @@ it("clears a recovered status polling error without manual refresh", async () =>
   vi.useFakeTimers();
   try {
     const readError = new Error("status unavailable");
+    const lastAnalysis: ToolPayloadOperation = {
+      id: "last-analysis",
+      kind: "analysis",
+      state: "succeeded",
+      scanned: 4,
+      eligible_tasks: 1,
+      eligible_messages: 1,
+      removed_messages: 0,
+      payload_bytes: 4096,
+      skipped: {},
+      cutoff: OPERATION_STARTED_AT,
+      started_at: OPERATION_STARTED_AT,
+      finished_at: OPERATION_FINISHED_AT,
+      age: baseline.policy.age,
+    };
     vi.mocked(api.fetchToolPayloadRetention)
-      .mockResolvedValueOnce(baseline)
+      .mockResolvedValueOnce({ ...baseline, last_analysis: lastAnalysis })
       .mockRejectedValueOnce(readError)
-      .mockResolvedValueOnce(baseline);
-    render(<ToolPayloadRetentionCard />);
+      .mockResolvedValueOnce({ ...baseline, last_analysis: lastAnalysis });
+    renderRetentionCard();
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
     expect(screen.getByTestId(ENABLED_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId("tool-payload-estimate").textContent).toMatch(/Completed/);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
-    expect(screen.getByTestId(ERROR_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId(ERROR_TEST_ID).textContent).toMatch(
+      /Current status is unavailable.*last known analysis remains visible/i,
+    );
+    expect(screen.getByTestId(ERROR_TEST_ID).textContent).not.toMatch(
+      /operation could not complete/i,
+    );
+    expect(screen.getByTestId("tool-payload-estimate").textContent).toMatch(/Completed/);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
@@ -79,9 +125,9 @@ it("preserves an action failure after status recovery", async () => {
       removed_messages: 0,
       payload_bytes: 0,
       skipped: {},
-      cutoff: "2026-01-01T00:00:00.000Z",
-      started_at: "2026-01-01T00:00:00.000Z",
-      finished_at: "2026-01-01T00:01:00.000Z",
+      cutoff: OPERATION_STARTED_AT,
+      started_at: OPERATION_STARTED_AT,
+      finished_at: OPERATION_FINISHED_AT,
       error: "cleanup_failed",
       age: baseline.policy.age,
     };
@@ -89,7 +135,7 @@ it("preserves an action failure after status recovery", async () => {
       .mockResolvedValueOnce(baseline)
       .mockResolvedValueOnce({ ...baseline, last_run: failedRun });
     vi.mocked(api.analyzeToolPayloadRetention).mockRejectedValueOnce(actionError);
-    render(<ToolPayloadRetentionCard />);
+    renderRetentionCard();
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -100,10 +146,12 @@ it("preserves an action failure after status recovery", async () => {
       await Promise.resolve();
     });
     expect(screen.getByTestId(ERROR_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId(ERROR_TEST_ID).textContent).toMatch(/operation could not complete/i);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
     expect(screen.getByTestId(ERROR_TEST_ID)).toBeTruthy();
+    expect(screen.getByTestId(ERROR_TEST_ID).textContent).toMatch(/operation could not complete/i);
     expect(screen.getByTestId(LAST_RUN_TEST_ID).textContent).toMatch(/failed/i);
   } finally {
     vi.useRealTimers();

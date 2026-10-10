@@ -135,3 +135,135 @@ pnpm e2e:run tests/integrations/jira-default-view.spec.ts
 pnpm e2e:run --project mobile-chrome tests/integrations/mobile-jira-default-view.spec.ts
 1 passed
 ```
+
+## CI retry follow-up
+
+PR #3924 merged on 2026-09-25. Its E2E retry report identified 11 retry-only passes. Follow-up changes restore persisted model/config state when the live session cache is empty after restart; correlate the taskless RoutineRun with the live Office run through their shared causation ID; position the mobile PR selector above the bottom navigation; wait for its prior selection to close and its menu animation to finish; scope dropped WebSocket replies to the test session; and wait for screenshot and virtualized file-tree content before asserting. Mobile touch-size assertions use unrounded measured dimensions.
+
+```text
+chromium taskless-routine-session.spec.ts, repeat-each=10, retries=0
+10 passed
+mobile PR re-request-review, threads saved-view, and session-entry-recovery scenarios, retries=0
+15 passed across repeat counts 3, 3, and 3 (two PR and two saved-view cases per repeat)
+Quick Chat backend-restart recovery, repeat-each=3, retries=0
+3 passed
+completed-workspace restoration, repeat-each=2, retries=0
+2 passed
+preview feedback, repeat-each=3, retries=0
+3 passed
+pnpm run typecheck
+PASS
+focused ESLint on changed web files
+PASS
+go test ./internal/backendapp -run 'TestAppendSessionModelsMessage' -count=1
+PASS
+git diff --check
+PASS
+```
+
+The live Office run-list response now includes its existing causation ID so the E2E can require an exact match with the RoutineRun returned by the manual fire. `TestRunToListItemPreservesCausationID` covers this response contract. The corrected PR head's CI will provide final shared-runner confirmation.
+
+## PR #3936 CI retry remediation
+
+The PR #3936 retry artifact reported nine retry-only E2E failures. The fixes add causal waits for cancellation, file-tree, reload readiness, and persisted responses; select the seeded repository by ID; open the created task directly for the terminal check; and tolerate subpixel representation at the 44px touch-target boundary. A backend regression reproduces worktree cleanup failing when a checkout disappears between the path check and `git rev-parse`; cleanup now uses the branch commit only after confirming that disappearance.
+
+Focused no-retry repetitions pass for all changed desktop and mobile cases (10 desktop, 8 mobile). `go test ./internal/worktree ./internal/task/service ./internal/backendapp`, web typecheck, focused ESLint, E2E sleep ratchet, and `git diff --check` pass. The updated PR head's CI and retry artifact remain the final shared-runner verification.
+
+## Latest PR #3936 CI follow-up
+
+The exact-head blob audit reported ten retry-only scenarios and one file-tree test that failed all attempts. The follow-up removes the observed E2E races and fixture coupling: wait for file-tree and screenshot-capture readiness, open tasks by ID when cards update, isolate run-observation agent data, keep the workflow task command deterministic, restore PR-chip focus after a 2-to-1 unlink, retain a completed workflow preview during quick surface handoff, and confirm mobile prompt selection before checking its composer chip. No timeout was raised for the passthrough failure.
+
+```text
+pnpm run build:e2e
+PASS
+chromium markdown preview, pane isolation, run observation, preview feedback, and workflow lifecycle, repeat-each=3, retries=0
+15 passed
+chromium office error handling, repeat-each=10, retries=0, CI=true, GITHUB_ACTIONS=true, IPv4-first DNS
+10 passed
+mobile menu hierarchy and PR unlink, repeat-each=3, retries=0
+6 passed
+mobile passthrough composer prompt selection, repeat-each=10, retries=0
+10 passed
+chromium large file tree, repeat-each=3, retries=0
+3 passed
+mobile workflow move preview, repeat-each=5, retries=0
+5 passed
+PR chip and workflow preview focused unit tests
+59 passed
+web typecheck and ESLint on changed files
+PASS
+git diff --check
+PASS
+```
+
+The original office `TypeError: fetch failed` did not recur in ten runs with CI environment settings. Exact-head CI and its zero-retry blob audit remain pending for the pushed follow-up.
+
+## PR #3936 retry follow-up after e767f4d
+
+The exact-head E2E artifact for `e767f4d698e0f88bbefdb6aa49b91ce14710088e` contained six retry-only scenarios. Fixes isolate workflow steps from mutable worker data; navigate to tasks by ID; wait for the source environment, fixture file, and causal file-tree response; restore and confirm the shared Office CEO is idle before each routine fire; and tolerate a worktree that disappears during Git status inspection. Office-specific reset/settings calls use the existing backend transport-recovery wrapper. Preview cleanup timers are drained in the fake-timer component test teardown.
+
+```text
+Four other Chromium retry scenarios, repeat-each=3, retries=0
+12 passed
+Taskless routine, repeat-each=3, retries=0
+3 passed
+Mobile changes panel, repeat-each=3, retries=0
+3 passed
+pnpm exec vitest run components/task/workflow-move-proceed-button.test.tsx
+26 passed
+pnpm run typecheck
+PASS
+Focused ESLint on changed web files
+PASS
+pnpm run e2e:sleep-ratchet
+PASS
+go test ./internal/worktree ./internal/task/service ./internal/backendapp
+PASS
+git diff --check
+PASS
+```
+
+Kubernetes compatibility had failed on the previous PR head while downloading external tools after repeated HTTP 500 responses. Exact-head CI and a zero-retry blob audit remain pending for this fixup.
+
+## PR #3936 retry follow-up after 4059bcef
+
+The exact-head retry summary for `4059bcef607b7da9050de8cfd4c7e2a111999288` reported four retry-only scenarios and one compact-stepper test that failed all attempts. The compact-stepper fixture now creates enough workflow steps to select the compact layout at the tested viewport. Symlink and rename tests wait for the prepared environment, exact fixture files, and a fresh workspace-tree response. The slow Docker task now selects its custom executor profile before environment setup. Mobile file-comment selection uses a ref so dropdown close timing cannot lose the action.
+
+Retry-free local checks pass: the workflow-stepper pair passed three repetitions each (6); directory and editor symlinks plus rename commit/cancel passed three repetitions each (15); the mobile file-comment flow passed five repetitions; and the Docker slow-bootstrap flow passed three repetitions. The review toolbar unit suite passes 12 tests. Web typecheck, focused ESLint, E2E sleep ratchet, and `git diff --check` pass. Exact-head CI and the explicit blob retry audit are pending for this fixup.
+
+## PR #3936 exact-head E2E follow-up after 42886d6
+
+The exact-head run for `42886d63340ab5823c8e1002d50f302e83292d93` reported four retry-only scenarios and two rename tests that failed every attempt. The rename setup helper had been converted to an options object at only two of its four call sites. The retry cases exposed fixture commits that were not pushed to the task's source branch, file-tree reads that raced worktree materialization, an import assertion that raced SPA navigation, and a PR-detection watcher attached after the existing WebSocket had opened. The rename fixtures now use the new helper shape and publish their seed commits on `main`; file-tree cases wait for exact worktree content and a fresh tree response; workflow import stays on its existing page; and PR detection subscribes before navigation and waits for the exact persisted PR update emitted by the poller.
+
+The changed no-retry E2E cases pass three repetitions each (21 total): PR detection, chat context, file and directory download, blur and no-op rename, and workflow import. The first local PR-detection run exposed that `watchWs` must attach before navigation; after moving it, the PR case passed three repetitions alone and in the combined run. Web typecheck, focused ESLint, E2E sleep ratchet, E2E bundle build, and `git diff --check` pass. The next exact-head CI and blob audit will confirm these changes on the shared runner.
+
+## PR #3936 E2E fixup after 3a6e83b
+
+The exact-head blob audit for `3a6e83b1d6245bb42bff774874bb11786791d967` found three retry-only E2E flakes and one preview-session test that failed all attempts. The preview test now follows the persisted primary session and checks that session's response. The Office manager test waits for the browser's agent-list response and verifies the CEO and worker fixtures before opening the picker. Workflow paste import waits for the refreshed row without starting a competing navigation. Mobile merge-queue recovery keeps its fixture turn active until the queue-removal transition has been observed.
+
+The failures were reproduced locally. The preview, Office, and workflow tests pass three no-retry repetitions each (9 total); mobile queue recovery passes three no-retry repetitions. E2E backend and web bundle builds pass. Typecheck, focused ESLint, E2E sleep ratchet, whitespace check, and `list-docs.py validate` pass. Exact-head CI and the complete blob audit must confirm zero retries, errors, and unexpected statuses.
+
+## PR #3936 no-retry follow-up after dd62af1
+
+The exact-head Playwright blob audit for `dd62af16265ee35bf1df38670ac86585655d6fb7` found eight retry-only attempts across workflow stepper, Office onboarding, transient retry notices, task workflow layout, a virtualized file tree, Docker launch, and mobile symlink flows. The tests now wait for authoritative WebSocket or fixture readiness, use task-scoped symlink setup, tolerate the supported compact workflow layout, and let the Jira task page own its single idempotent session ensure. The Office retry exposed a lazy system-skill sync path that inserted bundled skills without reapplying role-default skills to an existing CEO. Lazy sync now triggers the existing workspace backfill when it inserts or removes system skills; a focused regression test covers that state. This preserves the existing Office agent onboarding contract, so no Office requirements or design change was needed.
+
+The affected E2E cases pass locally without retries: the five-spec Chromium group passes 45/45 at three repetitions, mobile symlink and transient retry pass 6/6 at three repetitions, Docker slow bootstrap passes 3/3 in host/container mode, and the full Office system-skills file passes 15/15 at five repetitions after the backend fix. Backend skills, agents, and onboarding Go tests pass; Go lint reports zero issues. Web typecheck, focused ESLint and Prettier, E2E sleep ratchet, E2E backend/web build, and `git diff --check` pass. The first build and lint attempts hit `ENOSPC`; after removing the task-owned 711 MB prior-head artifact bundle, both reruns passed. Exact-head CI and its blob audit remain pending.
+
+```text
+chromium workflow stepper, workflow change, virtualized file tree, system skills, and transient retry; repeat-each=3, retries=0
+45 passed
+mobile symlink and transient retry; repeat-each=3, retries=0
+6 passed
+Docker slow bootstrap in host/container mode; repeat-each=3, retries=0
+3 passed
+Office system-skills file; repeat-each=5, retries=0
+15 passed
+go test ./internal/office/skills ./internal/office/agents ./internal/office/onboarding
+PASS
+golangci-lint run ./... --new-from-rev=852a867fd5c59f5845ca1eaf0291138ebc113660 --timeout=5m
+0 issues
+pnpm run typecheck; focused ESLint and Prettier; pnpm run e2e:sleep-ratchet
+PASS
+git diff --check
+PASS
+```

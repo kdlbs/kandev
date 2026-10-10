@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/notifications/models"
 )
 
 // doShellTouch is a quote-less `do shell script` invocation spelling
@@ -292,6 +294,56 @@ func TestEscapePowerShell_NeutralizesSubExpression(t *testing.T) {
 				t.Fatalf("escapePowerShell(%q) = %q, want %q", tc.input, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLocalizedSystemRuntimeSummaryUsesSystemLocale(t *testing.T) {
+	message := Message{
+		Title: "2 agent runtime updates available",
+		Body:  "Review runtime versions in Settings > Agents.",
+		RuntimeUpdates: []models.RuntimeUpdateMember{
+			{}, {},
+		},
+	}
+	cases := []struct {
+		locale string
+		title  string
+		body   string
+	}{
+		{locale: "en_US.UTF-8", title: "2 agent runtime updates available", body: "Review runtime versions in Settings > Agents."},
+		{locale: "pt_PT.UTF-8", title: "2 atualizações de runtime de agentes disponíveis", body: "Reveja as versões de runtime em Definições > Agentes."},
+		{locale: "zh_CN.UTF-8", title: "有 2 个代理运行时更新可用", body: "请在“设置”>“代理”中查看运行时版本。"},
+		{locale: "zh_HK.UTF-8", title: "有 2 個代理執行環境更新可用", body: "請前往「設定」>「代理」查看執行環境版本。"},
+		{locale: "zh_TW.UTF-8", title: "有 2 個代理執行環境更新可用", body: "請前往「設定」>「代理」檢視執行環境版本。"},
+		{locale: "zh-Hant", title: "有 2 個代理執行環境更新可用", body: "請前往「設定」>「代理」檢視執行環境版本。"},
+		{locale: "ja_JP.UTF-8", title: "エージェントランタイムの更新が2件あります", body: "設定 > エージェントでランタイムのバージョンを確認してください。"},
+		{locale: "ko_KR.UTF-8", title: "에이전트 런타임 업데이트 2개를 사용할 수 있습니다", body: "설정 > 에이전트에서 런타임 버전을 확인하세요."},
+		{locale: "fr_FR.UTF-8", title: "2 agent runtime updates available", body: "Review runtime versions in Settings > Agents."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.locale, func(t *testing.T) {
+			title, body := localizedSystemMessage(systemConfig{Locale: tc.locale}, message)
+			if title != tc.title || body != tc.body {
+				t.Fatalf("localized summary = (%q, %q), want (%q, %q)", title, body, tc.title, tc.body)
+			}
+		})
+	}
+
+	t.Setenv("LC_ALL", "pt_PT.UTF-8")
+	t.Setenv("LANG", "ko_KR.UTF-8")
+	cfg, err := parseSystemConfig(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Locale != "pt_PT.UTF-8" {
+		t.Fatalf("system locale = %q, want LC_ALL value", cfg.Locale)
+	}
+	cfg, err = parseSystemConfig(map[string]interface{}{"locale": "ja-JP"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Locale != "ja-JP" {
+		t.Fatalf("configured locale = %q, want ja-JP", cfg.Locale)
 	}
 }
 

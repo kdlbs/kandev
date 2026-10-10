@@ -1,15 +1,7 @@
 "use client";
 
-import { IconDotsVertical, IconEye, IconCircleCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import {
   selectOfficeAgentProfiles,
@@ -17,7 +9,6 @@ import {
 } from "@/lib/state/slices/office/selectors";
 import type { AgentProfile, Project } from "@/lib/state/slices/office/types";
 import type { IssueDraft } from "./new-task-draft";
-import { ParticipantRow } from "./new-task-participant-row";
 import { Trans, useTranslation } from "react-i18next";
 
 type Props = {
@@ -114,7 +105,6 @@ function ProjectPickerPopover({
 }
 
 export function NewTaskSelectorRow({ draft, onUpdate }: Props) {
-  const { t } = useTranslation();
   const agents = useAppStore(selectOfficeAgentProfiles);
   const projects = useAppStore(selectOfficeProjects);
 
@@ -142,55 +132,7 @@ export function NewTaskSelectorRow({ draft, onUpdate }: Props) {
             onSelect={(id) => onUpdate({ projectId: id })}
           />
         </Trans>
-        <DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="cursor-pointer">
-                  <IconDotsVertical className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent>{t("office:moreOptions")}</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="start">
-            <DropdownMenuItem
-              className="cursor-pointer"
-              onClick={() => onUpdate({ showReviewer: !draft.showReviewer })}
-            >
-              <IconEye className="h-4 w-4 mr-2" />
-              {draft.showReviewer ? t("office:hideReviewer") : t("office:addReviewer")}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="cursor-pointer"
-              onClick={() => onUpdate({ showApprover: !draft.showApprover })}
-            >
-              <IconCircleCheck className="h-4 w-4 mr-2" />
-              {draft.showApprover ? t("office:hideApprover") : t("office:addApprover")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
-
-      {draft.showReviewer && (
-        <ParticipantRow
-          kind="reviewer"
-          agents={agents}
-          selectedIds={draft.reviewerIds}
-          onSelect={(ids) => onUpdate({ reviewerIds: ids })}
-          onHide={() => onUpdate({ showReviewer: false, reviewerIds: [] })}
-        />
-      )}
-
-      {draft.showApprover && (
-        <ParticipantRow
-          kind="approver"
-          agents={agents}
-          selectedIds={draft.approverIds}
-          onSelect={(ids) => onUpdate({ approverIds: ids })}
-          onHide={() => onUpdate({ showApprover: false, approverIds: [] })}
-        />
-      )}
     </div>
   );
 }

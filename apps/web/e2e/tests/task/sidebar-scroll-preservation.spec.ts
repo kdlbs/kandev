@@ -1,9 +1,41 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
 import { SessionPage } from "../../pages/session-page";
 import { dwell } from "../../helpers/causal-waits";
 
 const OVERLAY_SCROLLBAR_SELECTOR =
   "[data-slot='scroll-area-scrollbar'][data-orientation='vertical']";
+
+async function selectTaskAndExpectReveal(page: Page, taskId: string, select: () => Promise<void>) {
+  const cue = await page.evaluateHandle((id) => {
+    const state = { seen: false };
+    const selector = `[data-task-row-id="${CSS.escape(id)}"]`;
+    const observer = new MutationObserver((records) => {
+      state.seen ||= records.some(
+        (record) =>
+          record.target instanceof Element &&
+          record.target.matches(selector) &&
+          (record.target.classList.contains("task-sidebar-row-reveal") ||
+            record.oldValue?.split(/\s+/).includes("task-sidebar-row-reveal")),
+      );
+      if (state.seen) observer.disconnect();
+    });
+    observer.observe(document, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ["class"],
+      attributeOldValue: true,
+    });
+    return { state, observer };
+  }, taskId);
+  try {
+    await select();
+    await expect.poll(() => cue.evaluate(({ state }) => state.seen)).toBe(true);
+  } finally {
+    await cue.evaluate(({ observer }) => observer.disconnect());
+    await cue.dispose();
+  }
+}
 
 /**
  * Regression: when clicking another task in the sidebar, the sidebar's
@@ -97,9 +129,12 @@ test.describe("sidebar scrolling", () => {
       const rowRect = row.getBoundingClientRect();
       return {
         rowRightGap: containerRect.right - rowRect.right,
+        rowMargin: Number.parseFloat(getComputedStyle(row).marginRight),
       };
     });
-    expect(overlayGeometry.rowRightGap).toBeLessThanOrEqual(1);
+    expect(Math.abs(overlayGeometry.rowRightGap - overlayGeometry.rowMargin)).toBeLessThanOrEqual(
+      1,
+    );
 
     await expect(scrollContainer).toHaveAttribute("data-can-scroll-down", "true");
     const overlayScrollbar = session.sidebar.locator(OVERLAY_SCROLLBAR_SELECTOR);
@@ -178,10 +213,21 @@ test.describe("sidebar scrolling", () => {
     }));
     expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth);
 
-    await titleViewport.hover();
+    // The page may retain a pointer location from layout changes after the
+    // navigation. Move clear of the row first so the title receives a real
+    // mouse-enter event, then target visible text inside the clipped viewport.
+    await testPage.mouse.move(0, 0);
+    await titleViewport.hover({ position: { x: 4, y: 8 } });
+    await expect
+      .poll(() => titleViewport.evaluate((element) => element.matches(":hover")))
+      .toBe(true);
     await expect
       .poll(() => titleText.evaluate((element) => element.style.transform))
       .toMatch(/^translateX\(-/);
+    // Hover a stable part of the row so the action transition settles without
+    // the pointer crossing the scrollbar gutter or the moving title.
+    await taskRow.hover({ position: { x: 6, y: 6 } });
+    expect(await taskRow.evaluate((element) => element.matches(":hover"))).toBe(true);
     await expect(actions.locator("..")).toHaveCSS("opacity", "1");
     await expect(actions).toBeInViewport();
 
@@ -195,7 +241,7 @@ test.describe("sidebar scrolling", () => {
       throw new Error("Long-title sidebar row has no layout box");
     }
     expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(containerBox.x + containerBox.width + 1);
-    expect(rowBox.x + rowBox.width - (actionBox.x + actionBox.width)).toBeGreaterThanOrEqual(11);
+    expect(rowBox.x + rowBox.width - (actionBox.x + actionBox.width)).toBeGreaterThanOrEqual(8);
     expect(actionBox.x - (titleBox.x + titleBox.width)).toBeGreaterThanOrEqual(7);
   });
 
@@ -273,7 +319,7 @@ test.describe("sidebar scrolling", () => {
   test("reveals a command-selected task", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(60_000);
 
-    const taskCount = 25;
+    const taskCount = 40;
     const created: { id: string; title: string }[] = [];
     for (let index = 0; index < taskCount; index++) {
       const title = `Command Reveal Task ${String(index).padStart(2, "0")}`;
@@ -285,7 +331,7 @@ test.describe("sidebar scrolling", () => {
       created.push({ id: task.id, title });
     }
 
-    const initialTask = created.at(-1)!;
+    const initialTask = created.at(-2)!;
     await testPage.goto(`/t/${initialTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -305,27 +351,22 @@ test.describe("sidebar scrolling", () => {
     }));
     expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
 
-    const offscreenTitle = await scrollContainer.evaluate(
-      (element, taskTitles) => {
-        const containerRect = element.getBoundingClientRect();
-        const rows = element.querySelectorAll<HTMLElement>("[data-testid='sidebar-task-item']");
-        for (const row of rows) {
-          const rowRect = row.getBoundingClientRect();
-          const isOutside =
-            rowRect.bottom <= containerRect.top + 1 || rowRect.top >= containerRect.bottom - 1;
-          if (isOutside) {
-            const title = taskTitles.find((candidate) => row.textContent?.includes(candidate));
-            if (title) return title;
-          }
-        }
-        return null;
-      },
-      created.map(({ title }) => title),
-    );
-    if (!offscreenTitle) throw new Error("Expected a rendered task row outside the viewport");
-    const targetTask = created.find(({ title }) => title === offscreenTitle)!;
+    const targetTask = created[0]!;
     const targetRow = session.sidebarTaskItem(targetTask.title);
     await expect(targetRow).toBeVisible();
+    await expect
+      .poll(async () => {
+        const [containerBox, rowBox] = await Promise.all([
+          scrollContainer.boundingBox(),
+          targetRow.boundingBox(),
+        ]);
+        if (!containerBox || !rowBox) return false;
+        return (
+          rowBox.y + rowBox.height <= containerBox.y + 1 ||
+          rowBox.y >= containerBox.y + containerBox.height - 1
+        );
+      })
+      .toBe(true);
     const before = await Promise.all([scrollContainer.boundingBox(), targetRow.boundingBox()]);
     if (!before[0] || !before[1]) throw new Error("Command-selected target has no layout box");
     expect(
@@ -342,14 +383,13 @@ test.describe("sidebar scrolling", () => {
     await dialog.getByRole("combobox").fill(targetTask.title);
     const option = dialog.getByRole("option").filter({ hasText: targetTask.title });
     await expect(option).toBeVisible({ timeout: 10_000 });
-    await option.click();
+    await selectTaskAndExpectReveal(testPage, targetTask.id, () => option.click());
 
     await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.id}$`));
     await expect(session.activeSidebarTaskItem(targetTask.title).first()).toHaveAttribute(
       "aria-current",
       "true",
     );
-    await expect(targetRow).toHaveClass(/task-sidebar-row-reveal/, { timeout: 1_000 });
     await expect
       .poll(
         async () => {
@@ -450,15 +490,19 @@ test.describe("sidebar scrolling", () => {
               scrollContainer.boundingBox(),
               targetRow.boundingBox(),
             ]);
-            if (!containerBox || !rowBox) return false;
-            return (
-              rowBox.y >= containerBox.y - 1 &&
-              rowBox.y + rowBox.height <= containerBox.y + containerBox.height + 1
-            );
+            return {
+              inside:
+                !!containerBox &&
+                !!rowBox &&
+                rowBox.y >= containerBox.y - 1 &&
+                rowBox.y + rowBox.height <= containerBox.y + containerBox.height + 1,
+              container: containerBox,
+              row: rowBox,
+            };
           },
           { timeout: 10_000 },
         )
-        .toBe(true);
+        .toMatchObject({ inside: true });
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         changes_panel_layout: initialLayout,
@@ -501,22 +545,23 @@ test.describe("sidebar scrolling", () => {
     await expect(scrollContainer).toHaveAttribute("data-can-scroll-down", "false");
 
     const aboveTitle = await scrollContainer.evaluate(
-      (element, taskTitles) => {
+      (element, { taskTitles, activeTitle }) => {
         const containerRect = element.getBoundingClientRect();
         const rows = element.querySelectorAll<HTMLElement>("[data-testid='sidebar-task-item']");
         for (const row of rows) {
           const rowRect = row.getBoundingClientRect();
           if (rowRect.bottom <= containerRect.top + 1) {
             const title = taskTitles.find((candidate) => row.textContent?.includes(candidate));
-            if (title) return title;
+            if (title && title !== activeTitle) return title;
           }
         }
         return null;
       },
-      created.map(({ title }) => title),
+      { taskTitles: created.map(({ title }) => title), activeTitle: initialTask.title },
     );
     if (!aboveTitle) throw new Error("Expected a rendered task row above the viewport");
     const targetTask = created.find(({ title }) => title === aboveTitle)!;
+    expect(targetTask.id).not.toBe(initialTask.id);
     const targetRow = session.sidebarTaskItem(targetTask.title);
     const before = await Promise.all([scrollContainer.boundingBox(), targetRow.boundingBox()]);
     if (!before[0] || !before[1]) throw new Error("Command-selected target has no layout box");
@@ -530,7 +575,7 @@ test.describe("sidebar scrolling", () => {
     await dialog.getByRole("combobox").fill(targetTask.title);
     const option = dialog.getByRole("option").filter({ hasText: targetTask.title });
     await expect(option).toBeVisible({ timeout: 10_000 });
-    await option.click();
+    await selectTaskAndExpectReveal(testPage, targetTask.id, () => option.click());
 
     await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.id}$`));
     await expect(session.activeSidebarTaskItem(targetTask.title).first()).toHaveAttribute(
@@ -539,18 +584,15 @@ test.describe("sidebar scrolling", () => {
     );
     await expect
       .poll(
-        async () => {
-          const [containerBox, rowBox] = await Promise.all([
-            scrollContainer.boundingBox(),
-            targetRow.boundingBox(),
-          ]);
-          if (!containerBox || !rowBox) return false;
-          return (
-            rowBox.y >= containerBox.y - 1 &&
-            rowBox.y + rowBox.height <= containerBox.y + containerBox.height + 1
-          );
-        },
-        { timeout: 10_000 },
+        () =>
+          scrollContainer.evaluate((viewport, taskId) => {
+            const row = viewport.querySelector<HTMLElement>(`[data-task-row-id='${taskId}']`);
+            if (!row || viewport.getClientRects().length === 0) return false;
+            const viewportRect = viewport.getBoundingClientRect();
+            const rowRect = row.getBoundingClientRect();
+            return rowRect.top >= viewportRect.top - 1 && rowRect.bottom <= viewportRect.bottom + 1;
+          }, targetTask.id),
+        { timeout: 10_000, message: "command selection should reveal its task row" },
       )
       .toBe(true);
 

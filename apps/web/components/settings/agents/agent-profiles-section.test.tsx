@@ -35,6 +35,7 @@ const EMPTY_AGENT = { ...AGENT, profiles: [] } as unknown as Agent;
 let storeState: {
   settingsAgents: { items: Agent[] };
   agentProfiles: { items: Array<{ id: string }> };
+  features?: { codexAppServer: boolean };
   // The row's actions are gated on org.config.manage, which useIsAdmin reads
   // off the auth slice. Auth disabled is the default install and resolves to
   // an administrator, matching the backend's synthetic identity.
@@ -89,13 +90,20 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
   DropdownMenuItem: ({
     children,
     onSelect,
+    disabled,
     "data-testid": testId,
   }: {
     children?: ReactNode;
     onSelect?: () => void;
+    disabled?: boolean;
     "data-testid"?: string;
   }) => (
-    <button type="button" data-testid={testId ?? "delete-item"} onClick={onSelect}>
+    <button
+      type="button"
+      disabled={disabled}
+      data-testid={testId ?? "delete-item"}
+      onClick={onSelect}
+    >
       {children}
     </button>
   ),
@@ -343,6 +351,15 @@ describe("ProfileRow duplicate", () => {
     fireEvent.click(row.querySelector('[data-testid="duplicate-profile-p-1"]')!);
 
     await waitFor(() => expect(mocks.duplicateAgentProfileAction).toHaveBeenCalledWith("p-1"));
+  });
+
+  it("keeps saved native Codex profiles while disabling duplicate when the feature is off", () => {
+    const nativeAgent = { ...AGENT, name: "codex-app-server" } as Agent;
+    storeState.features = { codexAppServer: false };
+    renderWithTooltipProvider(<ProfileRow agent={nativeAgent} profile={nativeAgent.profiles[0]} />);
+
+    expect((screen.getByTestId("duplicate-profile-p-1") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId("delete-profile-p-1") as HTMLButtonElement).disabled).toBe(false);
   });
 });
 

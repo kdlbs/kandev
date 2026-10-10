@@ -6,10 +6,12 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -71,6 +73,72 @@ func setupTestRepoWithDB(t *testing.T) (*Repository, *sqlx.DB) {
 		t.Fatalf("failed to create repo: %v", err)
 	}
 	return repo, sqlxDB
+}
+
+func TestExactWorkflowStepWritesFenceStoredVersions(t *testing.T) {
+	repo, database := setupTestRepoWithDB(t)
+	ctx := context.Background()
+	var workflowVersion time.Time
+	if err := database.QueryRowContext(ctx, `SELECT updated_at FROM workflows WHERE id = ?`, "wf-test").Scan(&workflowVersion); err != nil {
+		t.Fatal(err)
+	}
+	staleWorkflowVersion := workflowVersion.Add(-time.Hour)
+	if _, err := repo.CreateStepWithDemotedStartStepsIfWorkflowUnchanged(ctx, &models.WorkflowStep{
+		ID: "stale-create-step", WorkflowID: "wf-test", Name: "Stale", Position: 0, IsStartStep: true,
+	}, staleWorkflowVersion); !errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+		t.Fatalf("stale step creation error = %v, want version conflict", err)
+	}
+	var staleCount int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM workflow_steps WHERE id = ?`, "stale-create-step").Scan(&staleCount); err != nil {
+		t.Fatal(err)
+	}
+	if staleCount != 0 {
+		t.Fatal("stale step creation inserted a row")
+	}
+
+	stepA := &models.WorkflowStep{ID: "exact-step-a", WorkflowID: "wf-test", Name: "A", Position: 0}
+	stepB := &models.WorkflowStep{ID: "exact-step-b", WorkflowID: "wf-test", Name: "B", Position: 1}
+	if err := repo.CreateStep(ctx, stepA); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateStep(ctx, stepB); err != nil {
+		t.Fatal(err)
+	}
+	staleStepVersion := stepB.UpdatedAt
+	newerStepVersion := staleStepVersion.Add(time.Hour)
+	if _, err := database.ExecContext(ctx, `UPDATE workflow_steps SET updated_at = ? WHERE id = ?`, newerStepVersion, stepB.ID); err != nil {
+		t.Fatal(err)
+	}
+	stepB.Name = "Rejected stale update"
+	if _, err := repo.UpdateStepWithDemotedStartStepsIfUnchanged(ctx, stepB, workflowVersion, staleStepVersion); !errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+		t.Fatalf("stale step update error = %v, want version conflict", err)
+	}
+	orderedBefore, err := repo.ListStepsByWorkflow(ctx, "wf-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepIDs := make([]string, 0, len(orderedBefore))
+	expectedByID := make(map[string]time.Time, len(orderedBefore))
+	for _, step := range orderedBefore {
+		stepIDs = append(stepIDs, step.ID)
+		expectedByID[step.ID] = step.UpdatedAt
+	}
+	expectedByID[stepB.ID] = staleStepVersion
+	if err := repo.ReorderStepsIfUnchanged(ctx, "wf-test", stepIDs, workflowVersion, expectedByID); !errors.Is(err, repoerrors.ErrTaskVersionConflict) {
+		t.Fatalf("stale step reorder error = %v, want version conflict", err)
+	}
+	ordered, err := repo.ListStepsByWorkflow(ctx, "wf-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ordered) != len(orderedBefore) {
+		t.Fatalf("failed exact reorder changed step count: got %d, want %d", len(ordered), len(orderedBefore))
+	}
+	for index := range orderedBefore {
+		if ordered[index].ID != orderedBefore[index].ID || ordered[index].Position != orderedBefore[index].Position {
+			t.Fatalf("failed exact reorder changed step positions: before=%+v after=%+v", orderedBefore, ordered)
+		}
+	}
 }
 
 func TestStepAgentProfileID_CreateAndGet(t *testing.T) {

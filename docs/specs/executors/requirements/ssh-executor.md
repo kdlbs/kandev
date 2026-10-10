@@ -31,6 +31,11 @@ Today the only ways to run an agent are: (1) locally on the user's own machine (
 - **AC-EXECUTORS-SSH-EXECUTOR-001.10:** When the system cannot determine whether a prior remote controller is alive because the SSH probe fails, resume shall fail without starting a replacement controller.
 - **AC-EXECUTORS-SSH-EXECUTOR-001.11:** When Kandev copies OpenCode `auth.json` to an SSH host, it shall preserve target-only providers and copy source providers. The source entry shall replace the target entry when both files contain the same provider.
 - **AC-EXECUTORS-SSH-EXECUTOR-001.12:** When the source or existing target is unreadable or is not a JSON object, Kandev shall leave the target unchanged. Kandev shall report the credential-copy error.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.13:** When an SSH executor becomes reachable, and at a fixed interval while it stays reachable, the system shall list the remote `agentctl` processes whose `--workdir` is a task directory under that executor's workdir root, and stop each one that is orphaned.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.14:** An `agentctl` process shall count as orphaned only when its task exists in Kandev and either (a) the session named by the session runtime directory whose `agentctl.pid` holds its pid is in a terminal state, or (b) no session runtime directory claims it and the task is archived or every session of the task is terminal.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.15:** The sweep shall never stop an `agentctl` process that backs a non-terminal session, that belongs to a task unknown to Kandev, or whose ownership it cannot prove; an unreadable inventory or pidfile shall preserve the process.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.16:** The sweep shall stop an orphan with SIGTERM, then SIGKILL after a bounded grace period, and shall also signal the process groups of that `agentctl`'s direct children when SIGKILL is needed. It shall report per-run counts (found, stopped, preserved, failed) without logging credentials or environment values.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.17:** On a remote host whose `ps` supports `-p` but has no `/proc` (macOS), a stop of a persisted `agentctl` whose pid has exited shall treat the pid as absent rather than failing the stop.
 
 ## System design
 

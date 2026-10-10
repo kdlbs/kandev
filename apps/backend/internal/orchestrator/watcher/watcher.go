@@ -32,23 +32,36 @@ type TaskEventData struct {
 
 // AgentEventData contains data from agent events
 type AgentEventData struct {
-	TaskID             string                   `json:"task_id"`
-	SessionID          string                   `json:"session_id"`
-	TaskEnvironmentID  string                   `json:"task_environment_id,omitempty"`
-	AgentExecutionID   string                   `json:"agent_execution_id"`
-	AgentID            string                   `json:"agent_id,omitempty"`
-	AgentProfileID     string                   `json:"agent_profile_id"`
-	ExecutionProfileID string                   `json:"execution_profile_id,omitempty"`
-	ExitCode           *int                     `json:"exit_code,omitempty"`
-	ErrorMessage       string                   `json:"error_message,omitempty"`
-	FailureCode        string                   `json:"failure_code,omitempty"`
-	FailureDetails     string                   `json:"failure_details,omitempty"`
-	Phase              string                   `json:"phase,omitempty"`
-	AttemptID          string                   `json:"attempt_id,omitempty"`
-	ErrorStamp         string                   `json:"error_stamp,omitempty"`
-	Causes             []models.AgentErrorCause `json:"causes,omitempty"`
-	ProviderError      *streams.ProviderError   `json:"provider_error,omitempty"`
-	PromptGeneration   uint64                   `json:"prompt_generation,omitempty"`
+	RecoveryMode             string                                `json:"-"`
+	RecoveryAttemptsStarted  int                                   `json:"-"`
+	RecoveryDisposition      string                                `json:"-"`
+	RecoveryPhase            string                                `json:"-"`
+	ContinuationSafety       *streams.ContinuationSafetySnapshot   `json:"continuation_safety,omitempty"`
+	CapacityContinuation     *streams.CapacityContinuationSnapshot `json:"capacity_continuation,omitempty"`
+	TaskID                   string                                `json:"task_id"`
+	SessionID                string                                `json:"session_id"`
+	OwnerKind                string                                `json:"owner_kind,omitempty"`
+	TaskEnvironmentID        string                                `json:"task_environment_id,omitempty"`
+	AgentExecutionID         string                                `json:"agent_execution_id"`
+	AgentID                  string                                `json:"agent_id,omitempty"`
+	AgentProfileID           string                                `json:"agent_profile_id"`
+	ExecutionProfileID       string                                `json:"execution_profile_id,omitempty"`
+	TurnID                   string                                `json:"turn_id,omitempty"`
+	ExitCode                 *int                                  `json:"exit_code,omitempty"`
+	ErrorMessage             string                                `json:"error_message,omitempty"`
+	FailureCode              string                                `json:"failure_code,omitempty"`
+	FailureDetails           string                                `json:"failure_details,omitempty"`
+	StartupFailureReason     string                                `json:"startup_reason,omitempty"`
+	StartupFailureAttempts   int                                   `json:"startup_attempts,omitempty"`
+	StartupFailureNPMCode    string                                `json:"startup_npm_code,omitempty"`
+	Phase                    string                                `json:"phase,omitempty"`
+	AttemptID                string                                `json:"attempt_id,omitempty"`
+	ErrorStamp               string                                `json:"error_stamp,omitempty"`
+	Causes                   []models.AgentErrorCause              `json:"causes,omitempty"`
+	ProviderError            *streams.ProviderError                `json:"provider_error,omitempty"`
+	PromptFailureDisposition streams.PromptFailureDisposition      `json:"prompt_failure_disposition,omitempty"`
+	SessionSettingsPolicy    streams.SessionSettingsPolicy         `json:"session_settings_policy,omitempty"`
+	PromptGeneration         uint64                                `json:"prompt_generation,omitempty"`
 	// DynamicRouteAttempt marks failures and stream evidence that belong to a
 	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
 	// explicitly known to contain no output or effects.
@@ -70,11 +83,14 @@ type AgentEventData struct {
 
 // ACPSessionEventData contains data from ACP session events
 type ACPSessionEventData struct {
-	TaskID           string `json:"task_id"`
-	SessionID        string `json:"session_id"`
-	AgentExecutionID string `json:"agent_execution_id"`
-	AttemptID        string `json:"attempt_id,omitempty"`
-	ACPSessionID     string `json:"acp_session_id"`
+	TaskID                    string `json:"task_id"`
+	SessionID                 string `json:"session_id"`
+	AgentExecutionID          string `json:"agent_execution_id"`
+	AttemptID                 string `json:"attempt_id,omitempty"`
+	ACPSessionID              string `json:"acp_session_id"`
+	DeliveryStreamID          string `json:"delivery_stream_id,omitempty"`
+	DeliveryIncarnationID     string `json:"delivery_incarnation_id,omitempty"`
+	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
 }
 
 // PermissionRequestData contains data from permission_request events
@@ -89,6 +105,12 @@ type PermissionRequestData struct {
 	Options       []map[string]interface{} `json:"options"`
 	ActionType    string                   `json:"action_type"`
 	ActionDetails map[string]interface{}   `json:"action_details"`
+	// AutoApprovedOptionID names the option agentctl already selected on the
+	// user's behalf. Nonempty means the request is recorded, not pending.
+	AutoApprovedOptionID   string `json:"auto_approved_option_id,omitempty"`
+	AutoApprovalPending    bool   `json:"auto_approval_pending,omitempty"`
+	AutoApprovedOptionKind string `json:"auto_approved_option_kind,omitempty"`
+	AutoApprovalSource     string `json:"auto_approval_source,omitempty"`
 }
 
 // GitEventData is an alias for lifecycle.GitEventPayload.
@@ -140,8 +162,10 @@ type EventHandlers struct {
 	OnAgentReady        func(ctx context.Context, data AgentEventData) // Turn ended; agent idle waiting for follow-up
 	OnAgentCompleted    func(ctx context.Context, data AgentEventData)
 	OnAgentFailed       func(ctx context.Context, data AgentEventData)
+	OnAgentTurnFailed   func(ctx context.Context, data AgentEventData)
 	OnAgentStalled      func(ctx context.Context, payload lifecycle.AgentStalledPayload)
 	OnAgentStopped      func(ctx context.Context, data AgentEventData)
+	OnAgentctlError     func(ctx context.Context, payload lifecycle.AgentctlEventPayload)
 	OnACPSessionCreated func(ctx context.Context, data ACPSessionEventData)
 
 	// Agent stream events (tool calls, message chunks, complete, etc.)
@@ -345,6 +369,7 @@ func (w *Watcher) subscribeToAgentEvents() error {
 		{events.AgentReady, w.handlers.OnAgentReady},
 		{events.AgentCompleted, w.handlers.OnAgentCompleted},
 		{events.AgentFailed, w.handlers.OnAgentFailed},
+		{events.AgentTurnFailed, w.handlers.OnAgentTurnFailed},
 		{events.AgentStopped, w.handlers.OnAgentStopped},
 	}
 
@@ -363,7 +388,28 @@ func (w *Watcher) subscribeToAgentEvents() error {
 		}
 		w.subscriptions = append(w.subscriptions, sub)
 	}
+	if w.handlers.OnAgentctlError != nil {
+		sub, err := w.eventBus.QueueSubscribe(events.AgentctlError, w.queue, w.createAgentctlErrorEventHandler())
+		if err != nil {
+			w.logger.Error("Failed to subscribe to agentctl error event",
+				zap.String("subject", events.AgentctlError), zap.String("queue", w.queue), zap.Error(err))
+			return err
+		}
+		w.subscriptions = append(w.subscriptions, sub)
+	}
 	return nil
+}
+
+func (w *Watcher) createAgentctlErrorEventHandler() bus.EventHandler {
+	return func(ctx context.Context, event *bus.Event) error {
+		var payload lifecycle.AgentctlEventPayload
+		if err := w.parseEventData(event.Data, &payload); err != nil {
+			w.logger.Error("Failed to parse agentctl error event", zap.Error(err))
+			return nil
+		}
+		w.handlers.OnAgentctlError(ctx, payload)
+		return nil
+	}
 }
 
 func (w *Watcher) subscribeToAgentStallEvents() error {

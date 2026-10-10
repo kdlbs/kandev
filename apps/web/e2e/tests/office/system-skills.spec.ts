@@ -14,6 +14,8 @@ import { test, expect } from "../../fixtures/office-fixture";
  * edit / sync-wiring regression surfaces immediately.
  */
 test.describe("Office system skills", () => {
+  test.describe.configure({ timeout: 240_000 });
+
   test("bundled system skills land in the workspace's skill list with is_system=true", async ({
     officeApi,
     officeSeed,
@@ -49,11 +51,41 @@ test.describe("Office system skills", () => {
     officeApi,
     officeSeed,
   }) => {
-    const agent = (await officeApi.getAgent(officeSeed.agentId)) as {
+    // Onboarding returns before the asynchronous role-default backfill can
+    // finish. Prime the lazy system-skill sync, then read the agent until both
+    // persisted skill lists are populated.
+    await officeApi.listSkills(officeSeed.workspaceId);
+    const expectedDefaultSlugs = [
+      "kandev-protocol",
+      "memory",
+      "kandev-team-admin",
+      "kandev-task-ops",
+    ];
+    let agent: {
       desired_skills?: string;
       skill_ids?: string;
       role?: string;
-    };
+    } = {};
+    await expect
+      .poll(
+        async () => {
+          agent = (await officeApi.getAgent(officeSeed.agentId)) as typeof agent;
+          try {
+            const desiredSlugs = JSON.parse(agent.desired_skills ?? "[]");
+            const desiredIds = JSON.parse(agent.skill_ids ?? "[]");
+            return (
+              Array.isArray(desiredIds) &&
+              desiredIds.length > 0 &&
+              Array.isArray(desiredSlugs) &&
+              expectedDefaultSlugs.every((slug) => desiredSlugs.includes(slug))
+            );
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 180_000, message: "CEO role-default skills were not backfilled" },
+      )
+      .toBe(true);
     expect(agent.role).toBe("ceo");
 
     // After onboarding both `desired_skills` (legacy: slug array,
@@ -65,7 +97,7 @@ test.describe("Office system skills", () => {
     expect(desiredSlugs.length, "desired_skills").toBeGreaterThan(0);
     expect(desiredIds.length, "skill_ids").toBeGreaterThan(0);
 
-    for (const slug of ["kandev-protocol", "memory", "kandev-team-admin", "kandev-task-ops"]) {
+    for (const slug of expectedDefaultSlugs) {
       expect(desiredSlugs, `${slug} must be auto-attached to the CEO`).toContain(slug);
     }
   });
@@ -88,34 +120,15 @@ test.describe("Office system skills", () => {
 
     await testPage.goto("/office/workspace/skills");
 
-    // The count badge shows N≥3 available (3 pre-existing v1 bundled
-    // slugs at minimum). Wait specifically for ≥8 — anything lower
-    // means the SSR didn't see the synced set.
-    await expect
-      .poll(
-        async () => {
-          const badge = await testPage
-            .getByText(/\d+ available/)
-            .first()
-            .textContent();
-          const match = badge?.match(/(\d+)/);
-          return match ? Number(match[1]) : 0;
-        },
-        { timeout: 10_000 },
-      )
-      .toBeGreaterThanOrEqual(8);
-
-    // Expand the System group. With the heading rendered inside a
-    // button containing "System" + a count badge as separate spans,
-    // we locate the button via its testable text content (chevron
-    // + heading + count) — `hasText` matches against a regex that
-    // tolerates whitespace and a trailing count of any width.
+    // The System group is rendered only after the workspace skill list is
+    // available. Wait for that state instead of polling a translated count
+    // badge, which can be briefly absent while the client store hydrates.
     const systemToggle = testPage.locator('button:has(span:text-is("System"))').first();
-    await expect(systemToggle).toBeVisible({ timeout: 5_000 });
+    await expect(systemToggle).toBeVisible({ timeout: 15_000 });
     await systemToggle.click();
 
     await expect(testPage.getByText("kandev-team-admin").first()).toBeVisible({
-      timeout: 5_000,
+      timeout: 15_000,
     });
     await expect(testPage.getByText("kandev-task-ops").first()).toBeVisible();
   });

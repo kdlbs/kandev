@@ -11,25 +11,21 @@ owners:
 ## Overview
 
 The kanban preview panel opens beside the board and shows one task's sessions.
-Its header shows the task title, an open-full-page control, and a close
-control. It does not show which workflow step the task is on, and it offers no
-way to move the task.
+Its header shows the task title and the panel controls, but not the task's
+workflow step, and it offers no way to move the task.
 
-Today the only in-board way to change a task's step is dragging its card to
-another column. That path is not always available. The per-workflow column
-visibility filter
+Dragging a card to another column is the only in-board way to change a task's
+step, and it is not always available: the per-workflow column visibility
+filter
 ([REQ-UI-BOARD-STEP-VISIBILITY-FILTER-001](board-step-visibility-filter.md))
-lets a user hide any step, including the one a task should move to, and the
-preview panel narrows the board so remaining columns can sit off-screen. In
-both cases the drop target does not exist on screen and the task cannot be
-moved without leaving the preview.
+can hide the target step, and the preview narrows the board so columns can sit
+off-screen.
 
-The task top bar already solves the same problem in a narrow space
-([REQ-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001](compact-workflow-step-navigation.md)):
-a compact current-step indicator that discloses every step with a move control
-for each eligible target. This requirement puts that same indicator in the
-preview header and constrains its footprint so the header's existing title and
-controls keep their space.
+The task top bar already solves this in a narrow space
+([REQ-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001](compact-workflow-step-navigation.md))
+with a compact current-step indicator that discloses every step with a move
+control for each eligible target. This requirement puts that indicator in the
+preview header, constrains its footprint, and adds a copy-task-link control.
 
 The UI system owns this presentation and its containment. The task system
 continues to own workflow order, move eligibility, and task transitions.
@@ -50,8 +46,16 @@ continues to own workflow order, move eligibility, and task transitions.
 - **Eligible step:** A step that the existing task-move policy permits as a
   manual target: the step adjacent to the current step, or a step whose
   `allow_manual_move` is set.
-- **Panel controls:** The open-full-page control and the close control in the
-  preview header.
+- **Panel controls:** The copy-task-link, open-full-page, and close controls:
+  the three fixed-width icon buttons in the preview header.
+- **Control cluster:** The panel controls plus the task actions menu trigger,
+  which renders ahead of them when the task offers actions.
+- **Pointer mode:** Fine (mouse, trackpad) or coarse (touch), read live.
+- **Minimum panel width:** 320px at a fine pointer, 380px at a coarse pointer
+  (AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.7).
+- **Indicator floor:** The step indicator's width with its step name truncated
+  to nothing: padding, marker, position count, and at a coarse pointer the
+  disclosure cue.
 
 ## Requirements
 
@@ -162,20 +166,19 @@ the task even when its target column is not on the board.
   that shows the preview panel, the step indicator shall open the same step list
   in the touch surface used by the task top bar, with a minimum 44px hit area
   for the indicator and for each move control, and a visible disclosure cue.
+  The indicator's 44px applies to width and height at every panel width
+  (AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.4).
 - **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.18:** The step indicator shall
   expose an accessible name carrying the current step name, its step number, and
   the total step count, and the disclosure surface shall expose the same dialog
   semantics and keyboard path as the task top bar's disclosure. In the
-  AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.14 fallback there is no current step,
-  so the accessible name shall instead carry the name and list position of the
-  step the indicator is showing, which is the first step in order, together with
-  the total. It shall use the same wording as the resolved case, because that is
-  exactly what the indicator renders visually in that case: the marker is
-  suppressed and the visible position count follows the single-step rule, so it
-  is omitted. The absence of a current step shall be conveyed by withholding the
-  current-step semantics from the indicator, not by different text, so the
-  accessible name and the visible content never disagree about which step is
-  shown or about whether the task is on it.
+  AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.14 fallback, the accessible name
+  shall carry, in the same wording, the name and list position of the step the
+  indicator shows (the first step) and the total, matching what it renders
+  visually. The absence of a current step shall be conveyed by withholding the
+  current-step semantics, not by different text, so the accessible name and
+  the visible content never disagree about which step is shown or whether the
+  task is on it.
 - **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.19:** When the preview panel closes
   or switches to a different task while the step disclosure is open, the disclosure
   shall close with it and shall not reopen on the next preview until the user opens
@@ -192,36 +195,78 @@ the task even when its target column is not on the board.
 
 **Intent:** The preview panel is user-resizable down to a narrow width. The new
 step indicator must take its space from the title, not from the panel controls,
-and must never turn the header into a second row or a scrolling surface.
+and must never turn the header into a second row or a scrolling surface. The
+panel's minimum width is set by what the header must fit.
 
 #### Acceptance criteria
 
 - **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.1:** At every preview panel width
-  from its 300px minimum to its maximum, the preview header shall stay a single
-  row. No header element shall wrap to a second line.
-- **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.2:** At the 300px minimum width,
-  both panel controls shall stay fully inside the panel and shall stay
-  clickable.
-- **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3:** At the 300px minimum width,
-  the task title shall keep at least 88px of rendered width and shall truncate
-  with an ellipsis rather than wrap or displace any other header element.
-- **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.4:** After the panel controls and
-  the header row's inter-element gaps take their fixed width, the step indicator
-  shall claim no more than half of the width that remains, at every panel width.
-  When the step name is too long for the space that leaves it, the step name
-  shall truncate while the current-step marker and the position count stay
-  visible. This cap is a maximum, not a reservation: when a header row cannot
-  satisfy both this cap and the task title floor
-  AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3 sets, the title floor wins and the
-  step indicator shall shrink below its cap. The two bounds never conflict while
-  the header row's inter-element gaps total 18px or less, which the system design
-  derives from the narrower of the two preview layouts and which the header shall
-  respect.
+  from the minimum panel width for the current pointer mode to its maximum, the
+  preview header shall stay a single row. No header element shall wrap to a
+  second line.
+- **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.2:** At the minimum panel width
+  for the current pointer mode, every element of the control cluster
+  (task actions menu trigger when present, copy-task-link, open-full-page,
+  close) shall stay fully inside the panel and shall stay clickable.
+- **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.3:** At the minimum panel width
+  for the current pointer mode, the task title shall keep at least 88px of
+  rendered width and shall truncate with an ellipsis rather than wrap or
+  displace any other header element.
+- **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.4:** After the control cluster
+  and the row's inter-element gaps, the step indicator shall claim at most half
+  of the remaining width. The cap is a maximum, not a reservation: when it
+  conflicts with the title floor, the title floor wins and the indicator
+  shrinks below its cap. The indicator shall never shrink below its indicator
+  floor: only the step name truncates, down to nothing, while the marker, the
+  count, and the disclosure cue stay fully inside it. At a coarse pointer the
+  indicator floor shall be at least 44px. At the minimum panel width, the
+  control cluster, the 88px title floor, and the indicator floor shall fit
+  together for every workflow of at most 99 steps, while the row's gaps total
+  6px or less, as the system design derives.
 - **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.5:** The preview header shall not
   introduce horizontal scrolling in the preview panel at any supported width.
 - **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.6:** Truncated header text shall
   keep its full value available to assistive technology and shall not be the
   only carrier of the step name, step number, or total.
+- **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.7:** The minimum panel width
+  shall be 320px at a fine pointer and 380px at a coarse pointer, in both
+  layouts. The panel shall render at the larger of the user's chosen width and
+  the current minimum, re-evaluated without a reload when the pointer mode
+  changes. The chosen width shall never be stored below 320px; a stored value
+  below that reads as 320px. Rendering at a larger minimum shall not overwrite
+  the stored chosen width, so a 320px choice renders at 380px while the pointer
+  is coarse and at 320px again once it is fine. A resize drag shall not choose
+  a width below the minimum in effect during the drag. The inline-or-floating
+  layout choice shall use the rendered width. The 500px default and the maximum
+  width are unchanged.
+
+### REQ-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003: Copy task link control in the preview header
+
+**Intent:** Copying a task's link today means opening the task detail view and
+copying the address bar. The preview header should copy it in one click.
+
+**User story:** As a board user with the preview open, I want to copy the
+previewed task's link from the preview header without opening the full page.
+
+#### Acceptance criteria
+
+- **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003.1:** When the preview panel is
+  open on a task, the preview header shall show a copy-task-link control among
+  the panel controls, before the open-full-page control. With no selected task
+  it shall not render, like the other panel controls.
+- **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003.2:** Selecting the control shall
+  copy the task's canonical detail URL (the page origin joined with its
+  task-detail path) using the product's shared clipboard-write utility,
+  including its non-secure-context fallback.
+- **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003.3:** The control's icon shall
+  differ from the Link submenu's icon, which links an external pull request,
+  issue, or tracker resource, so the two actions cannot be mistaken.
+- **AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-003.4:** The control shall expose an
+  accessible name and tooltip identifying it as copying the task's link,
+  worded distinctly from the Link submenu, and shall show a brief visual
+  confirmation after a successful copy, like the product's other
+  copy-to-clipboard affordances, which clears on its own after a bounded
+  duration.
 
 ## Decisions
 
@@ -240,6 +285,11 @@ and must never turn the header into a second row or a scrolling surface.
 - Concurrent moves from two clients are resolved by the backend. The preview
   shows whatever task state it then receives and does not attempt to reconcile
   or warn.
+- The minimum panel width is derived per pointer mode from what the header
+  must fit. At 300px the copy-task-link control left no room for a 44px
+  indicator at a coarse pointer, or for a two-digit count at a fine one.
+  Rejected: exempting this surface from the 44px floor, a title below 88px,
+  and a narrow-width overflow menu. Cost: at most 80px of board width.
 
 ## Out of scope
 
@@ -248,23 +298,16 @@ and must never turn the header into a second row or a scrolling surface.
   [REQ-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001](compact-workflow-step-navigation.md).
 - Any change to per-workflow column visibility, to board drag and drop, or to
   which columns the board renders.
-- Any change to the task top bar's full or compact stepper, in presentation or
-  in behavior, other than the three corrections this requirement makes to shared
-  code deliberately. The first two are presentation: the ordering tiebreak in
-  AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.4 and the current-step marker fix in
-  AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.14. The third is behavior: the shared
-  move hook scopes a late move failure, and the in-flight step id, to the
-  presentation that issued the request, per
-  AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.11 and the system design's failure and
-  recovery rules. On the top bar that means a move failure arriving after the user
-  has navigated away from the task, or away and back to it, no longer raises the
-  move-failure message, where today it can. All three live in code the top bar
-  shares, and the requirement's own Decisions section forbids a second copy of
-  that code, so the top bar inherits all three by construction rather than by
-  choice. The third is deliberate and not incidental: a failure that outlives the
-  presentation which issued it is wrong on both surfaces, and shipping the fix on
-  the preview alone would leave the identical defect on its sibling. No other top
-  bar change is in scope.
+- Any change to the task top bar's full or compact stepper other than three
+  deliberate corrections to shared code, which the top bar inherits by
+  construction because the Decisions section forbids a second copy: the
+  ordering tiebreak (AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.4), the
+  current-step marker fix (AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.14), and
+  scoping a late move failure and the in-flight step id to the presentation
+  that issued the request (AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-001.11). On the
+  top bar, a failure arriving after the user navigated away from the task, or
+  away and back, no longer shows the move-failure message. That is intended: a
+  failure outliving its presentation is wrong on both surfaces.
 - An archived-task presentation in the preview header. The board excludes
   archived tasks and the preview closes when its task leaves the board, so the
   archived indicator path is not reachable from this surface. A future change
@@ -277,5 +320,13 @@ and must never turn the header into a second row or a scrolling surface.
 - Any change to what entering a step triggers. Step `on_enter` actions,
   including agent auto-start, behave exactly as they do for a board drag or a
   task top bar move.
-- New user-facing copy. This surface reuses the existing translated strings for
-  the step indicator, the disclosure, and the move-failure message.
+- Workflows of 100 or more steps: their wider indicator floor overflows onto
+  the control cluster at the minimum panel width, so
+  AC-UI-KANBAN-PREVIEW-STEP-NAVIGATION-002.2 and the half-share cap of 002.4
+  are not guaranteed for them.
+- The task actions menu trigger's own touch hit area, owned by the task actions
+  menu requirements; this surface only counts its row width.
+- Resizing the panel by touch. The resize handle stays mouse-only.
+- New user-facing copy for the step indicator, the disclosure, and the
+  move-failure message, which reuse existing strings. Only the copy-task-link
+  control adds translated copy.

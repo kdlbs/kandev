@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "../fixtures/test-base";
 import type { ApiClient } from "../helpers/api-client";
+import { expectControlHeight } from "../helpers/control-sizing";
 import { AutomationsPage } from "../pages/automations-page";
 
 /**
@@ -130,12 +131,19 @@ test.describe("Automation exact-run controls", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const { automation } = await seedOpenRun(apiClient, seedData, "Exact Stop");
     await openRunView(testPage, automation.id);
 
     const stop = testPage.getByRole("button", { name: "Stop current run" });
     await expect(stop).toBeVisible({ timeout: 15_000 });
+    expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+    // @covers AC-UI-CONTROL-SIZING-001.2
+    await expectControlHeight(stop, 24);
+    await prCapture.screenshot("desktop-compact-stop", {
+      caption: "Automation Stop action with compact desktop sizing",
+    });
     await stop.click();
 
     await expect(testPage.getByTestId("run-group-completed")).toBeVisible({ timeout: 15_000 });

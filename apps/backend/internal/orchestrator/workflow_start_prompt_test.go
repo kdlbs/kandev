@@ -154,6 +154,7 @@ func TestWorkflowAsyncStartFailure_PreservesPromptThroughRecovery(t *testing.T) 
 	if got := svc.messageQueue.GetStatus(ctx, sessionID).Count; got != 1 {
 		t.Fatalf("expected one preserved workflow prompt after asynchronous failure, queue count = %d", got)
 	}
+	seedWorkflowRecoveryEnvironment(t, repo, taskID, sessionID)
 
 	recoveryDone := make(chan error, 1)
 	go func() {
@@ -162,6 +163,8 @@ func TestWorkflowAsyncStartFailure_PreservesPromptThroughRecovery(t *testing.T) 
 	}()
 	select {
 	case <-secondStartEntered:
+	case recoverErr := <-recoveryDone:
+		t.Fatalf("explicit recovery failed before agent startup: %v", recoverErr)
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for explicit recovery startup")
 	}
@@ -335,6 +338,7 @@ func TestWorkflowAsyncStartFailure_QueueFullKeepsLaunchError(t *testing.T) {
 		t.Fatal("timed out waiting for startup failure callback")
 	}
 	waitForSessionState(t, fixture.repo, fixture.sessionID, models.TaskSessionStateFailed)
+	seedWorkflowRecoveryEnvironment(t, fixture.repo, fixture.taskID, fixture.sessionID)
 
 	status := fixture.svc.messageQueue.GetStatus(ctx, fixture.sessionID)
 	if status.Count != 1 || status.Entries[0].Content != "existing queued prompt" {
@@ -662,6 +666,23 @@ type workflowAsyncStartFailureFixture struct {
 	startReturned      chan struct{}
 	secondStartEntered chan struct{}
 	processStarted     chan struct{}
+}
+
+func seedWorkflowRecoveryEnvironment(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string) {
+	t.Helper()
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("load session for recovery environment: %v", err)
+	}
+	if session.TaskEnvironmentID == "" {
+		t.Fatal("session has no selected task environment for recovery")
+	}
+	if err := repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+		ID: session.TaskEnvironmentID, TaskID: taskID,
+		ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("seed recovery environment: %v", err)
+	}
 }
 
 func newWorkflowAsyncStartFailureFixture(

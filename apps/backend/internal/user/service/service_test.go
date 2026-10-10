@@ -642,6 +642,18 @@ func TestApplyBasicSettingsTranscriptNavigation(t *testing.T) {
 
 // TestApplyBasicSettings_TasksListPreferences verifies tasks list sort and group are applied and invalid values rejected.
 func TestApplyBasicSettings_TasksListPreferences(t *testing.T) {
+	t.Run("canonicalizes legacy and current workflow step groups", func(t *testing.T) {
+		for _, value := range []string{"state", "workflow_step", " state "} {
+			settings := &models.UserSettings{TasksListSort: "created_asc"}
+			if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{TasksListGroup: ptr(value)}); err != nil {
+				t.Fatalf("apply group %q: %v", value, err)
+			}
+			if settings.TasksListGroup != "workflow_step" || settings.TasksListSort != "created_asc" {
+				t.Fatalf("settings = (%q, %q), want (workflow_step, created_asc)", settings.TasksListGroup, settings.TasksListSort)
+			}
+		}
+	})
+
 	t.Run("sets valid sort and group", func(t *testing.T) {
 		settings := &models.UserSettings{}
 		req := &UpdateUserSettingsRequest{
@@ -1920,6 +1932,36 @@ func TestUpdateUserSettingsRejectsInvalidMCPTaskAgentProfileDefaultWithoutPersis
 	}
 	if repo.getSettings.MCPTaskAgentProfileDefault != models.MCPTaskAgentProfileDefaultWorkspaceDefault {
 		t.Fatalf("saved preference = %q, want workspace_default", repo.getSettings.MCPTaskAgentProfileDefault)
+	}
+	if len(eventBus.publishedEvents) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventBus.publishedEvents))
+	}
+}
+
+// TestUpdateUserSettingsRejectsInvalidAgentTabCloseBehaviorWithoutPersisting
+// documents the reviewer-requested settings API contract.
+func TestUpdateUserSettingsRejectsInvalidAgentTabCloseBehaviorWithoutPersisting(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo := &recordingUserRepository{getSettings: &models.UserSettings{
+		AgentTabCloseBehavior: models.AgentTabCloseBehaviorHidePanel,
+	}}
+	eventBus := &recordingEventBus{}
+	svc := NewService(repo, eventBus, log)
+
+	_, err = svc.UpdateUserSettings(context.Background(), &UpdateUserSettingsRequest{
+		AgentTabCloseBehavior: ptr("close_everything"),
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("UpdateUserSettings error = %v, want validation error", err)
+	}
+	if repo.upsertUserSettingsPreservingLastUsedCalls != 0 {
+		t.Fatalf("persist calls = %d, want 0", repo.upsertUserSettingsPreservingLastUsedCalls)
+	}
+	if repo.getSettings.AgentTabCloseBehavior != models.AgentTabCloseBehaviorHidePanel {
+		t.Fatalf("saved behavior = %q, want hide_panel", repo.getSettings.AgentTabCloseBehavior)
 	}
 	if len(eventBus.publishedEvents) != 0 {
 		t.Fatalf("published events = %d, want 0", len(eventBus.publishedEvents))

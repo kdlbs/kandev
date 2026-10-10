@@ -10,6 +10,7 @@ import {
 import { normalizeWorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
 const PREVIEW_DEBOUNCE_MS = 150;
+const PREVIEW_RESULT_RETENTION_MS = 1_000;
 export const MAX_PREVIEW_CONCURRENT_REQUESTS = 2;
 
 export type WorkflowMovePreviewStatus = "idle" | "loading" | "success" | "error";
@@ -40,6 +41,7 @@ type PreviewRequestEntry = {
   reject: (error?: unknown) => void;
   started: boolean;
   finished: boolean;
+  cleanupTimer: number | null;
 };
 
 type QueuedPreview = {
@@ -55,6 +57,16 @@ type QueuedPreview = {
 const inFlightPreviews = new Map<string, PreviewRequestEntry>();
 const previewQueue: QueuedPreview[] = [];
 let activePreviewCount = 0;
+
+function scheduleFinishedPreviewCleanup(key: string, entry: PreviewRequestEntry): void {
+  if (entry.cleanupTimer !== null) window.clearTimeout(entry.cleanupTimer);
+  entry.cleanupTimer = window.setTimeout(() => {
+    entry.cleanupTimer = null;
+    if (entry.consumers === 0 && inFlightPreviews.get(key) === entry) {
+      inFlightPreviews.delete(key);
+    }
+  }, PREVIEW_RESULT_RETENTION_MS);
+}
 
 function previewOptionKey(options: WorkflowMoveEntryOptions | null | undefined): string {
   const normalized = normalizeWorkflowMoveEntryOptions(options);
@@ -116,11 +128,15 @@ function previewAbortError(): Error {
   return error;
 }
 
-function finishPreview(key: string, entry: PreviewRequestEntry): void {
+function finishPreview(key: string, entry: PreviewRequestEntry, retainForConsumers = false): void {
   if (entry.finished) return;
   entry.finished = true;
   if (entry.started) activePreviewCount -= 1;
-  if (inFlightPreviews.get(key) === entry) inFlightPreviews.delete(key);
+  if (!retainForConsumers && inFlightPreviews.get(key) === entry) {
+    inFlightPreviews.delete(key);
+  } else if (retainForConsumers && entry.consumers === 0) {
+    scheduleFinishedPreviewCleanup(key, entry);
+  }
   pumpPreviewQueue();
 }
 
@@ -155,7 +171,7 @@ function pumpPreviewQueue(): void {
     request.then(
       (preview) => {
         entry.resolve(preview);
-        finishPreview(key, entry);
+        finishPreview(key, entry, true);
       },
       (error: unknown) => {
         entry.reject(error);
@@ -193,6 +209,7 @@ function acquirePreview({
       reject: rejectPromise,
       started: false,
       finished: false,
+      cleanupTimer: null,
     };
     inFlightPreviews.set(key, entry);
     // A queued request can be cancelled before its consumer attaches a
@@ -212,6 +229,10 @@ function acquirePreview({
   }
 
   const acquiredEntry = entry;
+  if (acquiredEntry.cleanupTimer !== null) {
+    window.clearTimeout(acquiredEntry.cleanupTimer);
+    acquiredEntry.cleanupTimer = null;
+  }
   acquiredEntry.consumers += 1;
   let released = false;
   return {
@@ -221,6 +242,10 @@ function acquirePreview({
       released = true;
       acquiredEntry.consumers -= 1;
       if (acquiredEntry.consumers === 0 && inFlightPreviews.get(key) === acquiredEntry) {
+        if (acquiredEntry.finished) {
+          scheduleFinishedPreviewCleanup(key, acquiredEntry);
+          return;
+        }
         acquiredEntry.reject(previewAbortError());
         acquiredEntry.controller.abort();
         finishPreview(key, acquiredEntry);

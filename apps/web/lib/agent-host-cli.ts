@@ -20,7 +20,7 @@ export function presentHostCLIVersion(
 export type ModelDiscoveryPresentation =
   | { kind: "cli"; executable: string; version?: string }
   | { kind: "no_listing"; executable: string }
-  | { kind: "failed"; reason: string };
+  | { kind: "failed"; status: ModelDiscovery["status"]; reason: string };
 
 /**
  * Reduces a model-discovery block to what the note under the profile model
@@ -38,5 +38,5 @@ export function presentModelDiscovery(
   if (discovery.status === "ok" || discovery.status === "skipped") {
     return { kind: "no_listing", executable: discovery.executable ?? "" };
   }
-  return { kind: "failed", reason: discovery.error || discovery.status };
+  return { kind: "failed", status: discovery.status, reason: discovery.error || discovery.status };
 }

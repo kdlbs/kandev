@@ -17,7 +17,12 @@ artifact set.
 - Git tag: `vX.Y.Z` (three-part; legacy `vM.m` tags normalize to `M.m.0`)
 - Homebrew formula: `kdlbs/homebrew-kandev` `Formula/kandev.rb` `version "X.Y.Z"`
 - Scoop bucket: `kdlbs/scoop-kandev` `bucket/kandev.json` version, URL, and hash
-- GitHub release: `vX.Y.Z` with platform tarballs `kandev-{platform}.tar.gz` + `.sha256`
+- GitHub release: `vX.Y.Z` with standard platform archives `kandev-{platform}.tar.gz`, full offline archives `kandev-{platform}-full.tar.gz`, checksums, Windows ZIP equivalents, remote helper assets, and `runtime-size-report.md`
+
+Stable default archive names contain the standard runtime: host `kandev`, host `agentctl`, and
+`remote-helpers.json`. The `-full` archives also contain all four remote helper executables. Stable
+npm packages, Homebrew, Scoop, winget, Chocolatey, and Desktop use standard archives. Containers
+and npm Nightlies stay full. Desktop keeps one standard installer and updater track.
 
 **npm, Homebrew, and Scoop are sibling channels**, not chained. All three consume the same GitHub release artifacts; none depends on another package-manager channel.
 
@@ -32,11 +37,21 @@ Stable runs entirely in CI via `.github/workflows/release.yml`, triggered by a m
 
 1. Maintainer clicks "Run workflow" → keeps `channel=stable` → picks `bump` (patch/minor/major) → optional `dry_run` or `desktop_validation_only`.
 2. `prepare` job bumps version + regenerates CHANGELOG, opens release PR, squash-merges, tags `vX.Y.Z`.
-3. `build-web` + `build-cli` + `build-bundles` (5 platforms) build the release artifacts.
-4. `publish-release` creates the GitHub release with platform tarballs + sha256 + auto-generated notes.
+3. `build-web`, `build-bundles`, `build-remote-helpers`, `build-desktop`, and both Docker builds create the channel inputs.
+4. `publish-release` promotes staged standard archives to the existing default names, publishes full archives and helper assets, then attaches checksums, the size report, desktop artifacts, and notes.
 5. `publish-npm` publishes 5 `@kdlbs/runtime-*` packages + main `kandev` package to npmjs.
 6. `update-homebrew-tap` pushes updated `Formula/kandev.rb` to `kdlbs/homebrew-kandev` via SSH deploy key.
 7. `update-scoop-bucket` pushes updated `bucket/kandev.json` to `kdlbs/scoop-kandev` via its SSH deploy key.
+
+## Contributor notices
+
+The `Release` workflow has a `notify_contributors` checkbox. It defaults to false. When selected, the workflow calls the reusable notification workflow after GitHub Release, npm, Homebrew, and Scoop publication all succeed. Dry runs, desktop validation, Nightly, cancellation before the notification job starts, and publication errors skip the call. Cancellation after posting starts can leave partial notices; rerun with the exact tag to complete safely.
+
+For manual notices or recovery, run **Notify release contributors** from the `main` ref. Leave `release_tag` empty to select the latest published Stable release. Enter an exact tag to select another release. The `dry_run` checkbox previews the same PR selection and comment text without posting.
+
+The helper reads PR links from the release notes. It posts only to merged PRs from this repository that belong to the selected release tag. It excludes bots and maintainers from `cliff.toml`. The job token posts as `github-actions[bot]`. Only notices from that bot or a listed maintainer count as already sent.
+
+Each comment includes a hidden release ID marker. Repeat runs skip comments with that marker and the exact unmarked notice used for `v0.97.0`. After a partial run, use the separate workflow with the exact tag. It skips confirmed notices and retries only missing notices. Wait for GitHub rate limits to clear before retrying.
 
 ## Release PR ruleset bypass
 
@@ -130,6 +145,8 @@ When adding, renaming, or removing bundled helper binaries such as `agentctl-<go
 - `.github/workflows/release.yml` bundle, macOS signing, and notarization loops
 - `scripts/release/prepare-desktop-runtime.sh`
 - `scripts/release/verify-desktop-runtime.sh`
+- `scripts/release/remote-helper-assets.mjs`
+- `apps/backend/internal/agent/runtime/lifecycle/remote_helper_manifest.go` and the cache resolver
 - `scripts/release-desktop.test.sh`
 - `apps/desktop/AGENTS.md` runtime resource list
 

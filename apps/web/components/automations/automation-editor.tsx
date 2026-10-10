@@ -73,6 +73,7 @@ const defaultForm: FormState = {
   maxConcurrentRuns: 1,
   continuationPolicy: "new_task",
   taskMode: "automation_run",
+  managedDestination: undefined,
   repositoryMode: "none",
 };
 
@@ -85,6 +86,7 @@ function formFromAutomation(a: Automation): FormState {
     agentProfileId: a.agent_profile_id,
     executorProfileId: a.executor_profile_id,
     taskMode: a.task_mode ?? "automation_run",
+    managedDestination: a.managed_destination,
     repositoryMode: (a.repositories?.length ?? a.repository_ids.length) > 0 ? "selected" : "none",
     repositorySelections: (
       a.repositories ?? a.repository_ids.map((id) => ({ repository_id: id, base_branch: "" }))
@@ -150,10 +152,12 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
       // executor stops supporting multi-repo. It doesn't truncate the
       // underlying array, so resolveNormalizedRepositoryIds re-enforces the
       // same invariant right before persisting.
+      const repositoryMode =
+        form.taskMode === "managed_conversation" ? "none" : form.repositoryMode;
       const { repositories, selections: promotedSelections } = await resolveRepositoryIdsForMode(
         workspaceId,
         form.repositorySelections,
-        form.repositorySelections.length > 0 ? "selected" : "none",
+        repositoryMode,
         {
           supportsMultiRepo,
         },
@@ -350,9 +354,14 @@ function useAutomationPersistence(options: AutomationPersistenceOptions) {
   const canSave =
     options.form.name.trim().length > 0 &&
     (options.form.taskMode !== "normal_task" || options.form.workflowId.trim().length > 0) &&
-    options.form.repositorySelections.every(
-      (selection) => selection.kind !== "none" && Boolean(selection.branch?.trim()),
-    );
+    (options.form.taskMode !== "managed_conversation" ||
+      Boolean(
+        options.form.managedDestination?.plugin_id && options.form.managedDestination?.instance_key,
+      )) &&
+    (options.form.taskMode === "managed_conversation" ||
+      options.form.repositorySelections.every(
+        (selection) => selection.kind !== "none" && Boolean(selection.branch?.trim()),
+      ));
   useAutomationSaveContributor({
     isNew: options.isNew,
     currentId: options.currentId,
@@ -423,6 +432,7 @@ function AutomationDeleteControls({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- The editor coordinates its form, trigger, settings-save, and deletion lifecycles.
 export function AutomationEditor({ workspaceId, automationId }: AutomationEditorProps) {
   const router = useRouter();
   const { create, update, remove } = useAutomations(workspaceId);
@@ -506,7 +516,12 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         updateField={updateField}
       />
       <Separator />
-      <SettingsSection form={form} savedForm={dirtyBaseline} updateField={updateField} />
+      <SettingsSection
+        form={form}
+        savedForm={dirtyBaseline}
+        workspaceId={workspaceId}
+        updateField={updateField}
+      />
       <Separator />
       <RunsSection automationId={currentId} workspaceId={workspaceId} />
       <AutomationDeleteControls

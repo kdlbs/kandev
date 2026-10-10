@@ -179,6 +179,8 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn("options: --ipc=host", desktop_job)
         self.assertIn("git config --global --add safe.directory", desktop_job)
         self.assertIn("path: ~/.local/share/pnpm/store", desktop_job)
+        self.assertIn("actions/setup-go@", desktop_job)
+        self.assertIn("go-version-file: apps/backend/go.mod", desktop_job)
         self.assertIn("pnpm install --frozen-lockfile", desktop_job)
         self.assertIn("pnpm --filter @kandev/desktop e2e", desktop_job)
 
@@ -204,10 +206,10 @@ cat "${FAKE_DOCKER_MANIFEST}"
         normal_job = job_block(workflow, "e2e", "playwright_image")
 
         self.assertIn(
-            "# 35 min covers the serial count-fallback tail and setup overhead",
+            "# 45 min covers the serial count-fallback tail and setup overhead",
             normal_job,
         )
-        self.assertIn("timeout-minutes: 35", normal_job)
+        self.assertIn("timeout-minutes: 45", normal_job)
         self.assertNotIn("timeout-minutes: 25", normal_job)
 
     # @covers AC-PLATFORM-EXTERNAL-E2E-RUNNER-CAPACITY-001.1

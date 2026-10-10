@@ -58,19 +58,53 @@ describe("toSheetItem repository projection", () => {
   it("marks active rows covered by a pending archive", () => {
     const item = toSheetItem(task(), {
       ...emptyCtx(),
-      pendingArchiveTaskIds: new Set(["t1"]),
+      pendingRemovalTaskIds: new Set(["t1"]),
     });
 
-    expect(item.isPendingArchive).toBe(true);
+    expect(item.isPendingRemoval).toBe(true);
   });
 
-  it("does not mark confirmed archived rows as pending", () => {
+  it("marks archived rows when deletion includes them", () => {
     const item = toSheetItem(task({ isArchived: true }), {
       ...emptyCtx(),
-      pendingArchiveTaskIds: new Set(["t1"]),
+      pendingRemovalTaskIds: new Set(["t1"]),
     });
 
-    expect(item.isPendingArchive).toBe(false);
+    expect(item.isPendingRemoval).toBe(true);
+  });
+});
+
+describe("toSheetItem activity projection", () => {
+  it("preserves task activity and its task-local fallbacks on the phone row", () => {
+    const item = toSheetItem(
+      task({
+        updatedAt: "task-updated",
+        createdAt: "task-created",
+        statusSummary: {
+          revision: 3,
+          updated_at: "summary-refreshed",
+          last_activity_at: "task-activity",
+        },
+      }),
+      emptyCtx(),
+    );
+
+    expect(item.lastActivityAt).toBe("task-activity");
+    expect(item.updatedAt).toBe("summary-refreshed");
+    expect(item.createdAt).toBe("task-created");
+  });
+
+  it("falls back to the task update time instead of summary freshness", () => {
+    const item = toSheetItem(
+      task({
+        updatedAt: "task-updated",
+        createdAt: "task-created",
+        statusSummary: { revision: 3, updated_at: "summary-refreshed" },
+      }),
+      emptyCtx(),
+    );
+
+    expect(item.lastActivityAt).toBe("task-updated");
   });
 });
 

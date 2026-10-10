@@ -87,7 +87,7 @@ export function MobileTasksListOptions({ options }: { options: TasksListDisplayO
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            {t("kanban:groupTasksIntoSectionsByState")}
+            {t("kanban:groupTasksIntoSectionsByWorkflowStep")}
           </p>
         </div>
         <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium">

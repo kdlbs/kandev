@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { lspClientManager, toLspLanguage, type LspStatus } from "@/lib/lsp/lsp-client-manager";
@@ -107,12 +107,23 @@ export function useLsp(
     (callback) => subscribeToLspKey(key, callback),
     () => (key ? (startRequestGenerations.get(key) ?? 0) : 0),
   );
+  const handledStartRequest = useRef({ key, generation: startRequestGeneration });
   const { status, progress, toggle } = useLspStatus(sessionId, lspLanguage);
+  const statusState = useRef(status.state);
+  statusState.current = status.state;
 
   // Each mounted matching editor owns one connection lease. An explicit Stop
   // suppresses global auto-start for this session/language until Start clears
   // the override; later settings/configuration renders must not reacquire it.
   useEffect(() => {
+    const previousStartRequest = handledStartRequest.current;
+    const explicitRetry =
+      previousStartRequest.key === key &&
+      previousStartRequest.generation !== startRequestGeneration;
+    handledStartRequest.current = { key, generation: startRequestGeneration };
+    if (statusState.current === "error" || statusState.current === "unavailable") {
+      if (!explicitRetry) return;
+    }
     const autoStartEnabled = shouldAutoStart && !hasManualStopOverride;
     if ((!autoStartEnabled && !isManuallyEnabled && !hasLeaseHint) || !sessionId || !lspLanguage) {
       return;

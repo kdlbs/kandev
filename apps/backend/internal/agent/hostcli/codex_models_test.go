@@ -18,6 +18,8 @@ type scriptedProcess struct {
 	stdoutReader *io.PipeReader
 	stdoutWriter *io.PipeWriter
 	killed       chan struct{}
+	waits        int
+	finished     chan struct{}
 	requests     []string
 }
 
@@ -27,9 +29,10 @@ func newScriptedProcess(handle func(method string, id *int) (string, bool)) *scr
 	p := &scriptedProcess{
 		stdinReader: stdinReader, stdinWriter: stdinWriter,
 		stdoutReader: stdoutReader, stdoutWriter: stdoutWriter,
-		killed: make(chan struct{}),
+		killed: make(chan struct{}), finished: make(chan struct{}),
 	}
 	go func() {
+		defer close(p.finished)
 		scanner := bufio.NewScanner(stdinReader)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -51,7 +54,7 @@ func newScriptedProcess(handle func(method string, id *int) (string, bool)) *scr
 
 func (p *scriptedProcess) Stdin() io.Writer  { return p.stdinWriter }
 func (p *scriptedProcess) Stdout() io.Reader { return p.stdoutReader }
-func (p *scriptedProcess) Wait() error       { <-p.killed; return nil }
+func (p *scriptedProcess) Wait() error       { <-p.killed; <-p.finished; p.waits++; return nil }
 func (p *scriptedProcess) Kill() error {
 	select {
 	case <-p.killed:
@@ -181,4 +184,54 @@ func TestListCodexModelsFailures(t *testing.T) {
 			t.Fatalf("err = %v, want ErrTimeout", err)
 		}
 	})
+}
+
+func TestListCodexModelsReapsProcess(t *testing.T) {
+	for _, response := range []string{sampleModelList, `{"id":2,"error":{"code":-32000,"message":"denied"}}`} {
+		p := newScriptedProcess(codexLikeHandler(t, response))
+		runner := &fakeRunner{startFunc: func(context.Context, []string) (Process, error) { return p, nil }}
+		_, _ = ListCodexModels(context.Background(), runner, "/fake/codex")
+		if p.waits != 1 {
+			t.Fatalf("Wait calls = %d, want exactly one", p.waits)
+		}
+	}
+}
+
+func TestListCodexModelsInitializationFailure(t *testing.T) {
+	p := newScriptedProcess(func(method string, id *int) (string, bool) {
+		if method == "initialize" {
+			return `{"id":1,"error":{"code":-32600,"message":"initialization refused"}}`, true
+		}
+		return sampleModelList, true
+	})
+	runner := &fakeRunner{startFunc: func(context.Context, []string) (Process, error) { return p, nil }}
+	_, err := ListCodexModels(context.Background(), runner, "/fake/codex")
+	if err == nil || !strings.Contains(err.Error(), "initialization refused") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestListCodexModelsPagination(t *testing.T) {
+	pages := 0
+	p := newScriptedProcess(func(method string, id *int) (string, bool) {
+		if method == "initialize" {
+			return `{"id":1,"result":{}}`, true
+		}
+		if method != "model/list" {
+			return "", false
+		}
+		pages++
+		if pages == 1 {
+			return `{"id":2,"result":{"data":[{"model":"first"}],"nextCursor":"page2"}}`, true
+		}
+		return `{"id":3,"result":{"data":[{"model":"second"}],"nextCursor":null}}`, true
+	})
+	runner := &fakeRunner{startFunc: func(context.Context, []string) (Process, error) { return p, nil }}
+	models, err := ListCodexModels(context.Background(), runner, "/fake/codex")
+	if err != nil || len(models) != 2 || models[1].ID != "second" {
+		t.Fatalf("models=%+v err=%v", models, err)
+	}
+	if !strings.Contains(p.requests[len(p.requests)-1], `"cursor":"page2"`) {
+		t.Fatalf("requests=%v", p.requests)
+	}
 }

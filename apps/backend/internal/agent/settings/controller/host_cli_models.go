@@ -3,7 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
-	"strings"
+	"github.com/kandev/kandev/internal/agent/discovery"
 	"sync"
 	"time"
 
@@ -58,6 +58,9 @@ func (c *Controller) SetHostCLIRunner(runner hostcli.Runner) {
 	} else {
 		c.hostCLIRunner = runner
 	}
+	for agentName := range c.hostCLIGeneration {
+		c.hostCLIGeneration[agentName]++
+	}
 	c.hostCLIModels = make(map[string]hostCLIModelEntry)
 	c.hostCLIMu.Unlock()
 	c.discovery.SetHostCLIRunner(runner)
@@ -96,6 +99,10 @@ func (c *Controller) hostCLISpec(agentName string) (hostcli.Spec, bool) {
 // next refresh re-reads the CLI. Called after a successful agent install.
 func (c *Controller) InvalidateHostCLIModels(agentName string) {
 	c.hostCLIMu.Lock()
+	if c.hostCLIGeneration == nil {
+		c.hostCLIGeneration = make(map[string]uint64)
+	}
+	c.hostCLIGeneration[agentName]++
 	delete(c.hostCLIModels, agentName)
 	c.hostCLIMu.Unlock()
 }
@@ -108,7 +115,6 @@ func (c *Controller) WarmHostCLIModels(ctx context.Context) {
 	if c.agentRegistry == nil {
 		return
 	}
-	slots := make(chan struct{}, hostCLIWarmupMaxConcurrent)
 	var wg sync.WaitGroup
 	for _, ag := range c.agentRegistry.ListEnabled() {
 		spec, ok := c.hostCLISpec(ag.ID())
@@ -118,8 +124,6 @@ func (c *Controller) WarmHostCLIModels(ctx context.Context) {
 		wg.Add(1)
 		go func(agentName string) {
 			defer wg.Done()
-			slots <- struct{}{}
-			defer func() { <-slots }()
 			c.refreshHostCLIModels(ctx, agentName)
 		}(ag.ID())
 	}
@@ -158,11 +162,18 @@ func (c *Controller) refreshHostCLIModels(ctx context.Context, agentName string)
 	if !ok {
 		return hostCLIModelEntry{}
 	}
+	generation, slots := c.beginHostCLIRefresh(agentName)
 	if !spec.HasModelSource() {
 		entry := hostCLIModelEntry{status: hostCLIModelStatusSkipped, checkedAt: time.Now().UTC()}
-		c.storeHostCLIModels(agentName, entry)
+		c.storeHostCLIModels(agentName, entry, generation)
 		return entry
 	}
+	select {
+	case slots <- struct{}{}:
+	case <-ctx.Done():
+		return hostCLIModelEntry{status: hostCLIModelStatusTimeout}
+	}
+	defer func() { <-slots }()
 	models, err := hostcli.ListCodexModels(ctx, c.hostCLIProcessRunner(), c.hostCLIPath(ctx, agentName, spec))
 	entry := hostCLIModelEntry{checkedAt: time.Now().UTC()}
 	if err != nil {
@@ -175,16 +186,20 @@ func (c *Controller) refreshHostCLIModels(ctx context.Context, agentName string)
 		c.logger.Info("host cli models discovered",
 			zap.String("agent", agentName), zap.Int("models", len(models)))
 	}
-	c.storeHostCLIModels(agentName, entry)
+	if ctx.Err() == nil {
+		c.storeHostCLIModels(agentName, entry, generation)
+	}
 	return entry
 }
 
-func (c *Controller) storeHostCLIModels(agentName string, entry hostCLIModelEntry) {
+func (c *Controller) storeHostCLIModels(agentName string, entry hostCLIModelEntry, generation uint64) {
 	c.hostCLIMu.Lock()
 	if c.hostCLIModels == nil {
 		c.hostCLIModels = make(map[string]hostCLIModelEntry)
 	}
-	c.hostCLIModels[agentName] = entry
+	if c.hostCLIGeneration[agentName] == generation {
+		c.hostCLIModels[agentName] = entry
+	}
 	c.hostCLIMu.Unlock()
 }
 
@@ -203,22 +218,22 @@ func (c *Controller) cachedHostCLIModels(agentName string, spec hostcli.Spec) ho
 	return hostCLIModelEntry{status: hostCLIModelStatusPending}
 }
 
-// hostCLIPath returns the detected executable path for an agent type, falling
-// back to the bare executable name resolved through PATH at launch.
-func (c *Controller) hostCLIPath(ctx context.Context, agentName string, spec hostcli.Spec) string {
-	if c.discovery == nil {
-		return spec.Executable
-	}
-	results, err := c.detectAgents(ctx)
-	if err != nil {
-		return spec.Executable
-	}
-	for _, result := range results {
-		if result.Name == agentName && strings.TrimSpace(result.MatchedPath) != "" {
-			return result.MatchedPath
-		}
-	}
+// hostCLIPath uses the vendor identity, independently of ACP bridge availability.
+func (c *Controller) hostCLIPath(_ context.Context, _ string, spec hostcli.Spec) string {
 	return spec.Executable
+}
+
+func (c *Controller) beginHostCLIRefresh(agentName string) (uint64, chan struct{}) {
+	c.hostCLIMu.Lock()
+	defer c.hostCLIMu.Unlock()
+	if c.hostCLIGeneration == nil {
+		c.hostCLIGeneration = make(map[string]uint64)
+	}
+	if c.hostCLISlots == nil {
+		c.hostCLISlots = make(chan struct{}, hostCLIWarmupMaxConcurrent)
+	}
+	c.hostCLIGeneration[agentName]++
+	return c.hostCLIGeneration[agentName], c.hostCLISlots
 }
 
 func classifyHostCLIModelError(err error) (status, message string) {
@@ -252,10 +267,11 @@ func (c *Controller) hostCLIModelProjection(
 		entry = c.refreshHostCLIModels(ctx, agentName)
 	}
 	merged := mergeHostCLIModels(entry.models, bridge)
-	return merged, c.hostCLIDiscoveryDTO(agentName, spec, entry)
+	return merged, c.hostCLIDiscoveryDTO(ctx, agentName, spec, entry)
 }
 
 func (c *Controller) hostCLIDiscoveryDTO(
+	ctx context.Context,
 	agentName string,
 	spec hostcli.Spec,
 	entry hostCLIModelEntry,
@@ -266,7 +282,7 @@ func (c *Controller) hostCLIDiscoveryDTO(
 		Status:            entry.status,
 		Error:             entry.errMsg,
 		AllowsCustomModel: true,
-		CLIVersion:        c.hostCLIVersion(agentName),
+		CLIVersion:        c.hostCLIVersion(ctx, agentName),
 	}
 	if entry.status == hostCLIModelStatusOK && len(entry.models) > 0 {
 		item.Source = modelDiscoverySourceCLI
@@ -280,11 +296,15 @@ func (c *Controller) hostCLIDiscoveryDTO(
 
 // hostCLIVersion reads the version discovery already detected. It never
 // spawns a process of its own.
-func (c *Controller) hostCLIVersion(agentName string) string {
+func (c *Controller) hostCLIVersion(ctx context.Context, agentName string) string {
 	if c.discovery == nil {
 		return ""
 	}
-	results, err := c.detectAgents(context.Background())
+	results, ok := ctx.Value(hostCLIAvailabilityKey{}).([]discovery.Availability)
+	var err error
+	if !ok {
+		results, err = c.detectAgents(ctx)
+	}
 	if err != nil {
 		return ""
 	}
@@ -326,3 +346,5 @@ func mergeHostCLIModels(cliModels []hostcli.Model, bridge []dto.ModelEntryDTO) [
 	}
 	return merged
 }
+
+type hostCLIAvailabilityKey struct{}

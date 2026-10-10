@@ -2,6 +2,9 @@
 
 High-level direction for the project. This is not a commitment - priorities shift as we learn more.
 
+For internal migration status, architecture boundaries, and cleanup priorities, see the
+[architecture maintenance roadmap](architecture-maintenance/README.md).
+
 ## Now
 
 - Stability and bug fixes across all agent integrations - current primary focus

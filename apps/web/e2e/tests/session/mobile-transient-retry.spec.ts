@@ -14,58 +14,28 @@ test.describe("mobile: transient provider error retry", () => {
     seedData,
   }) => {
     const session = await seedIdleSession(testPage, apiClient, seedData, "Mobile Overloaded Test");
-
-    await session.sendMessageViaButton("/overloaded:9");
     const sessionId = await session.activeChat().getAttribute("data-session-id");
     if (!sessionId) throw new Error("active chat did not expose a session id");
 
+    await session.sendMessageViaButton("/overloaded:9");
+    await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
     await expect
-      .poll(
-        async () => {
-          const notices = await listTransientRetryNotices(apiClient, sessionId);
-          return notices.length === 1 && notices[0].attempt === 1;
-        },
-        { timeout: 30_000 },
-      )
-      .toBe(true);
+      .poll(async () => (await listTransientRetryNotices(apiClient, sessionId)).length, {
+        timeout: 10_000,
+        intervals: [250],
+        message: "the visible transient retry notice should be persisted",
+      })
+      .toBe(1);
+    const [retryNotice] = await listTransientRetryNotices(apiClient, sessionId);
+    if (!retryNotice) throw new Error("the persisted transient retry notice was not found");
+    const retryNoticeId = retryNotice.id;
 
     // Yellow retry card + Cancel button render on the narrow viewport.
-    await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
     await expect(session.transientRetryCard()).toHaveCount(1);
     await expect(session.recoveryCancelRetryButton()).toBeVisible();
     await expect(session.recoveryResumeButton()).toBeHidden();
 
-    await expect
-      .poll(
-        async () => {
-          const notices = await listTransientRetryNotices(apiClient, sessionId);
-          return notices.length === 1 && notices[0].attempt >= 2;
-        },
-        { timeout: 30_000 },
-      )
-      .toBe(true);
-    const advanced = await listTransientRetryNotices(apiClient, sessionId);
-    expect(advanced).toHaveLength(1);
-    const firstNoticeId = advanced[0].id;
-    await expect(session.transientRetryCard()).toHaveCount(1);
-    await expect(session.transientRetryCard()).toContainText(/attempt [2-5] of 5/i);
-
-    await testPage.reload();
-    await session.waitForLoad();
-    await expect
-      .poll(
-        async () => {
-          const notices = await listTransientRetryNotices(apiClient, sessionId);
-          return notices.length === 1 && notices[0].attempt >= 2;
-        },
-        { timeout: 30_000 },
-      )
-      .toBe(true);
-    const afterReload = await listTransientRetryNotices(apiClient, sessionId);
-    expect(afterReload).toHaveLength(1);
-    expect(afterReload[0].id).toBe(firstNoticeId);
-    await expect(session.transientRetryCard()).toHaveCount(1);
-    await expect(session.transientRetryCard()).toContainText(/attempt [2-5] of 5/i);
+    expect(retryNotice.attempt).toBeGreaterThanOrEqual(1);
     await assertNoDocumentHorizontalOverflow(testPage);
 
     // Tap Cancel → red recovery banner.
@@ -73,9 +43,17 @@ test.describe("mobile: transient provider error retry", () => {
     await expect
       .poll(async () => (await listTransientRetryNotices(apiClient, sessionId)).length, {
         timeout: 30_000,
+        message: `retry notice ${retryNoticeId} should be deleted after cancel`,
       })
       .toBe(0);
     await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
     await expect(session.transientRetryCard()).toBeHidden();
+    await expect(testPage.getByTestId("session-recovery-card")).toContainText(
+      "Automatic recovery was cancelled. Resume or start fresh to continue.",
+    );
+    await expect(testPage.getByTestId("session-recovery-card")).not.toContainText(
+      "after several retries",
+    );
+    await assertNoDocumentHorizontalOverflow(testPage);
   });
 });

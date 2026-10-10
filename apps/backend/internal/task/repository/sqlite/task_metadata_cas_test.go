@@ -9,6 +9,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/testutil"
 )
@@ -223,12 +224,48 @@ func runRecoveryMarkerCASContract(t *testing.T, repo *Repository) {
 func runManualMoveLifecycleMarkerContract(t *testing.T, repo *Repository) {
 	t.Helper()
 	ctx := context.Background()
+	if _, err := messagequeue.NewSQLiteRepository(repo.db, repo.db); err != nil {
+		t.Fatalf("initialize queued message schema: %v", err)
+	}
+	activityAt := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Microsecond)
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = ?
+	`), activityAt, activityAt, casTaskID); err != nil {
+		t.Fatalf("seed stable task activity: %v", err)
+	}
 	task, err := repo.GetTask(ctx, casTaskID)
 	if err != nil {
 		t.Fatalf("load task generation: %v", err)
 	}
+	if !task.UpdatedAt.Equal(activityAt) {
+		t.Fatalf("task updated_at before clear = %s, want %s", task.UpdatedAt, activityAt)
+	}
+	assertManualMoveActivityReconstruction(t, ctx, repo, activityAt, "before clear")
+	assertCompletedMarkerClearPreservesActivity(t, ctx, repo, activityAt)
+	assertTaskEditAfterRecoveryAdvancesActivity(t, ctx, repo, activityAt)
+	assertStaleManualMoveClearRefused(t, ctx, repo, activityAt)
+	if _, err := repo.RemoveTaskMetadataKey(ctx, casTaskID, models.MetaKeyManualMoveLifecycleCompleted); err != nil {
+		t.Fatalf("remove newer completed marker: %v", err)
+	}
+	assertPendingOnlyMarkerRetained(t, ctx, repo)
+}
 
-	cleared, err := repo.ClearManualMoveLifecycleMarkersIfCompleted(ctx, casTaskID, task.UpdatedAt)
+func assertManualMoveActivityReconstruction(t *testing.T, ctx context.Context, repo *Repository, expected time.Time, when string) {
+	t.Helper()
+	activityByTask, err := repo.LoadTaskLastActivity(ctx, []string{casTaskID})
+	if err != nil {
+		t.Fatalf("load task activity %s: %v", when, err)
+	}
+	if !activityByTask[casTaskID].Equal(expected) {
+		t.Fatalf("reconstructed activity %s = %s, want %s", when, activityByTask[casTaskID], expected)
+	}
+}
+
+// A completed marker is internal recovery state, so clearing it must leave
+// both the task activity source and its reconstruction input unchanged.
+func assertCompletedMarkerClearPreservesActivity(t *testing.T, ctx context.Context, repo *Repository, activityAt time.Time) {
+	t.Helper()
+	cleared, err := repo.ClearManualMoveLifecycleMarkersIfCompleted(ctx, casTaskID, activityAt)
 	if err != nil {
 		t.Fatalf("clear manual move markers: %v", err)
 	}
@@ -244,12 +281,80 @@ func runManualMoveLifecycleMarkerContract(t *testing.T, repo *Repository) {
 	if _, preserved := metadataValue(t, repo, "other_key"); !preserved {
 		t.Fatal("atomic clear removed unrelated task metadata")
 	}
+	afterClear, err := repo.GetTask(ctx, casTaskID)
+	if err != nil {
+		t.Fatalf("reload task after marker clear: %v", err)
+	}
+	if !afterClear.UpdatedAt.Equal(activityAt) {
+		t.Fatalf("task updated_at after marker clear = %s, want unchanged %s", afterClear.UpdatedAt, activityAt)
+	}
+	assertManualMoveActivityReconstruction(t, ctx, repo, activityAt, "after marker clear")
+	cleared, err = repo.ClearManualMoveLifecycleMarkersIfCompleted(ctx, casTaskID, activityAt)
+	if err != nil {
+		t.Fatalf("repeat clear without completion marker: %v", err)
+	}
+	if cleared {
+		t.Fatal("completed marker clear succeeded after the marker was absent")
+	}
+}
 
+func assertTaskEditAfterRecoveryAdvancesActivity(t *testing.T, ctx context.Context, repo *Repository, activityAt time.Time) {
+	t.Helper()
+	task, err := repo.GetTask(ctx, casTaskID)
+	if err != nil {
+		t.Fatalf("load task before genuine edit: %v", err)
+	}
+	task.Title = "genuine task edit"
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("update task after recovery: %v", err)
+	}
+	editedTask, err := repo.GetTask(ctx, casTaskID)
+	if err != nil {
+		t.Fatalf("reload edited task: %v", err)
+	}
+	if !editedTask.UpdatedAt.After(activityAt) {
+		t.Fatalf("task updated_at after a genuine edit = %s, want later than %s", editedTask.UpdatedAt, activityAt)
+	}
+	assertManualMoveActivityAdvanced(t, ctx, repo, activityAt, "after genuine edit")
+}
+
+func assertManualMoveActivityAdvanced(t *testing.T, ctx context.Context, repo *Repository, previous time.Time, when string) {
+	t.Helper()
+	activityByTask, err := repo.LoadTaskLastActivity(ctx, []string{casTaskID})
+	if err != nil {
+		t.Fatalf("reconstruct task activity %s: %v", when, err)
+	}
+	if !activityByTask[casTaskID].After(previous) {
+		t.Fatalf("reconstructed activity %s = %s, want later than %s", when, activityByTask[casTaskID], previous)
+	}
+}
+
+// The timestamp remains the generation guard when a newer move reuses the
+// completed marker's boolean value.
+func assertStaleManualMoveClearRefused(t *testing.T, ctx context.Context, repo *Repository, oldGeneration time.Time) {
+	t.Helper()
+	if err := repo.SetTaskMetadataKey(ctx, casTaskID, models.MetaKeyManualMoveLifecycleCompleted, true); err != nil {
+		t.Fatalf("seed newer completed marker: %v", err)
+	}
+	cleared, err := repo.ClearManualMoveLifecycleMarkersIfCompleted(ctx, casTaskID, oldGeneration)
+	if err != nil {
+		t.Fatalf("clear newer generation with stale snapshot: %v", err)
+	}
+	if cleared {
+		t.Fatal("stale recovery generation cleared a newer completed marker")
+	}
+	if _, present := metadataValue(t, repo, models.MetaKeyManualMoveLifecycleCompleted); !present {
+		t.Fatal("stale recovery generation removed the newer completed marker")
+	}
+}
+
+func assertPendingOnlyMarkerRetained(t *testing.T, ctx context.Context, repo *Repository) {
+	t.Helper()
 	if err := repo.SetTaskMetadataKey(ctx, casTaskID, models.MetaKeyManualMoveLifecyclePending,
 		map[string]interface{}{"from_step_id": "new-source"}); err != nil {
 		t.Fatalf("seed pending-only marker: %v", err)
 	}
-	cleared, err = repo.ClearManualMoveLifecycleMarkersIfCompleted(ctx, casTaskID, time.Now().UTC())
+	cleared, err := repo.ClearManualMoveLifecycleMarkersIfCompleted(ctx, casTaskID, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("clear pending-only markers: %v", err)
 	}
@@ -288,7 +393,6 @@ func TestSetTaskMetadataKeyIfPresentSQLite(t *testing.T) {
 	runMetadataNoActiveSessionContract(t, repo)
 	runInterruptedMarkerCASContract(t, repo)
 	runRecoveryMarkerCASContract(t, repo)
-	runManualMoveLifecycleMarkerContract(t, repo)
 }
 
 // The JSON patch and its presence predicate are written per dialect, so SQLite
@@ -307,6 +411,30 @@ func TestPostgresSetTaskMetadataKeyIfPresent(t *testing.T) {
 	runMetadataNoActiveSessionContract(t, repo)
 	runInterruptedMarkerCASContract(t, repo)
 	runRecoveryMarkerCASContract(t, repo)
+}
+
+// TestClearManualMoveLifecycleMarkersPreservesActivitySQLite covers
+// AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-001.9 for SQLite.
+func TestClearManualMoveLifecycleMarkersPreservesActivitySQLite(t *testing.T) {
+	repo := newRepoForMetadataCASTests(t)
+	seedMetadataCASTask(t, repo, map[string]interface{}{
+		models.MetaKeyManualMoveLifecyclePending:   map[string]interface{}{"from_step_id": "source"},
+		models.MetaKeyManualMoveLifecycleCompleted: true,
+		"other_key": "keep me",
+	})
+	runManualMoveLifecycleMarkerContract(t, repo)
+}
+
+// TestClearManualMoveLifecycleMarkersPreservesActivityPostgres covers
+// AC-UI-SIDEBAR-LAST-ACTIVITY-SORT-001.9 for PostgreSQL.
+func TestClearManualMoveLifecycleMarkersPreservesActivityPostgres(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo := newPostgresMetadataCASRepo(t, db)
+	seedMetadataCASTask(t, repo, map[string]interface{}{
+		models.MetaKeyManualMoveLifecyclePending:   map[string]interface{}{"from_step_id": "source"},
+		models.MetaKeyManualMoveLifecycleCompleted: true,
+		"other_key": "keep me",
+	})
 	runManualMoveLifecycleMarkerContract(t, repo)
 }
 

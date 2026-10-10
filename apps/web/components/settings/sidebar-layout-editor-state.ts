@@ -16,7 +16,7 @@ import {
 import type { DraftOperation } from "./sidebar-layout-editor-types";
 
 export function layoutValue(layout: SidebarLayout): string {
-  return JSON.stringify(layout.nodes);
+  return JSON.stringify([layout.nodes, layout.navigationHeight, layout.navigationExpanded]);
 }
 
 export function validationCopy(code: string, t: (key: string) => string): string {

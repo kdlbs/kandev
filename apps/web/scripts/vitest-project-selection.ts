@@ -25,6 +25,8 @@ const SKIPPED_DIRECTORIES = new Set([".git", "dist", "node_modules"]);
  * they are added here explicitly.
  */
 export const REVIEWED_NODE_TEST_FILES: readonly string[] = [
+  "lib/github/ci-automation.test.ts",
+  "lib/gitlab/mr-automation.test.ts",
   "scripts/check-i18n-keys.test.ts",
   "scripts/check-no-em-dash-ui.test.ts",
   "scripts/convert-zh-cn-to-zh-hant.test.mjs",

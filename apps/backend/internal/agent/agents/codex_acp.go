@@ -43,9 +43,9 @@ type CodexACP struct {
 }
 
 // codexPassthroughPermSettings maps passthrough-only toggles to @openai/codex CLI
-// flags. Not returned from PermissionSettings(): ACP auto-approve uses agentctl
-// approval_policy. The legacy --full-auto flag was removed; auto_approve uses
-// --ask-for-approval never.
+// flags. Not returned from PermissionSettings(): ACP auto-approve is handled by
+// agentctl's permission flow, not by a subprocess flag. The legacy --full-auto
+// flag was removed; auto_approve uses --ask-for-approval never.
 var codexPassthroughPermSettings = map[string]PermissionSetting{
 	PermissionKeyAutoApprove: {
 		Supported:    true,
@@ -111,6 +111,17 @@ func (a *CodexACP) BuildCommand(opts CommandOptions) Command {
 
 func (a *CodexACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
 	return newManagedNPMRuntimeSpec(codexACPPackage)
+}
+
+func (a *CodexACP) RuntimeProviderObservation() RuntimeComponentDescriptor {
+	return RuntimeComponentDescriptor{
+		Name:               "Codex CLI",
+		Package:            "@openai/codex",
+		Source:             RuntimeComponentBundled,
+		Owner:              RuntimeComponentOwnerKandev,
+		ExternalVersionEnv: "CODEX_PATH",
+		GuidanceURL:        "https://github.com/openai/codex",
+	}
 }
 
 func (a *CodexACP) Runtime() *RuntimeConfig {

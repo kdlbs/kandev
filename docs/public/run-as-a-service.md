@@ -7,6 +7,10 @@ description: "Install Kandev under systemd or launchd and operate it safely."
 
 The native Kandev launcher can install itself as a systemd service on Linux or a launchd service on macOS. Use this for a persistent workstation or server. Windows Service Control Manager, OpenRC, and SysV init are not supported.
 
+A Stable standard install downloads a verified remote helper the first time a remote task needs one.
+The service account needs outbound HTTPS to `github.com` and `release-assets.githubusercontent.com`.
+Use a full CLI archive when that account cannot reach those hosts. See [Stable remote helpers](executors.md#stable-remote-helpers).
+
 For the simplest path, install Kandev persistently before creating the service; see [CLI installation](cli.md#install). A plain `npx -y kandev@...` launch is ephemeral, but `npx -y kandev@latest service install` can create a managed npx user service. That service depends on the cached npx package remaining present: reinstall it after upgrades, and expect npm cache cleanup to invalidate its recorded absolute paths. Prefer global npm for a durable service. Do not hand-write a long-lived service around an npx command.
 
 Stable is the default release channel. A verified Kandev-managed npm/npx user service can opt into
@@ -24,15 +28,15 @@ remain Stable-only.
 
 ## Choose a service mode
 
-| | User service (default) | System service (`--system`) |
-| --- | --- | --- |
-| Manager | `systemctl --user` or the user's launchd domain | system systemd or launchd domain |
-| Privilege to install | Normal user | Root; normally invoke through `sudo` |
-| Linux unit | `~/.config/systemd/user/kandev.service` | `/etc/systemd/system/kandev.service` |
-| macOS plist | `~/Library/LaunchAgents/com.kdlbs.kandev.plist` | `/Library/LaunchDaemons/com.kdlbs.kandev.plist` |
-| Default Kandev home | The installer process's `KANDEV_HOME_DIR` when set; otherwise `~/.kandev` | `/var/lib/kandev` |
-| Process user | Current user | Existing Kandev-managed unit/plist account on reinstall; otherwise non-root `$SUDO_USER` when installed through `sudo`. A root login must choose `--run-as` explicitly. |
-| Best fit | Personal workstation; single-user Linux host with lingering enabled | Boot-time service independent of a login session |
+|                      | User service (default)                                                    | System service (`--system`)                                                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Manager              | `systemctl --user` or the user's launchd domain                           | system systemd or launchd domain                                                                                                                                        |
+| Privilege to install | Normal user                                                               | Root; normally invoke through `sudo`                                                                                                                                    |
+| Linux unit           | `~/.config/systemd/user/kandev.service`                                   | `/etc/systemd/system/kandev.service`                                                                                                                                    |
+| macOS plist          | `~/Library/LaunchAgents/com.kdlbs.kandev.plist`                           | `/Library/LaunchDaemons/com.kdlbs.kandev.plist`                                                                                                                         |
+| Default Kandev home  | The installer process's `KANDEV_HOME_DIR` when set; otherwise `~/.kandev` | `/var/lib/kandev`                                                                                                                                                       |
+| Process user         | Current user                                                              | Existing Kandev-managed unit/plist account on reinstall; otherwise non-root `$SUDO_USER` when installed through `sudo`. A root login must choose `--run-as` explicitly. |
+| Best fit             | Personal workstation; single-user Linux host with lingering enabled       | Boot-time service independent of a login session                                                                                                                        |
 
 On Linux, an enabled user service starts at boot only if that user's systemd manager runs at boot. Enable lingering once if that is the desired lifecycle:
 
@@ -340,6 +344,10 @@ Reinstall using the upgraded `kandev` binary, preserve the original `--system` a
 ### Service starts but agents fail
 
 Read service logs first. A service has a smaller `PATH` and no interactive shell environment, so tools or credentials visible in a terminal may be absent. Configure executor credentials through Kandev's profile/settings paths, use stable executable paths, and verify Docker/SSH/Sprites connectivity as described in [Executors](executors.md#troubleshooting).
+
+If a remote task cannot download its helper, allow outbound HTTPS to `github.com` and
+`release-assets.githubusercontent.com` for the service account. Use a full CLI archive when the
+service host cannot reach those sites.
 
 Linux user services include `~/.npm-global/bin` in their generated `PATH` for
 agent CLIs installed with that npm prefix. After upgrading an existing user

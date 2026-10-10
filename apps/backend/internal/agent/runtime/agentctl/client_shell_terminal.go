@@ -69,8 +69,8 @@ func isTransientConnError(err error) bool {
 // StreamShellTerminal opens a binary WebSocket connection to a per-terminal shell.
 // The caller is responsible for closing the returned connection.
 func (c *Client) StreamShellTerminal(ctx context.Context, terminalID string) (*websocket.Conn, error) {
-	wsURL := "ws" + c.baseURL[4:] + "/api/v1/shell/terminal/" + terminalID + "/stream"
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, c.wsAuthHeaders())
+	wsRoute := "/api/v1/shell/terminal/" + terminalID + "/stream"
+	conn, _, err := c.dialWebSocket(ctx, wsRoute, c.wsAuthHeaders())
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to shell terminal stream: %w", err)
 	}

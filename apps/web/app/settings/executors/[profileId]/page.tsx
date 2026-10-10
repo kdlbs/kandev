@@ -6,13 +6,12 @@ import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
   updateExecutorProfile,
   deleteExecutorProfile,
   removeDockerContainer,
-  fetchLocalGitIdentity,
   listScriptPlaceholders,
 } from "@/lib/api/domains/settings-api";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
@@ -28,12 +27,9 @@ import {
   envVarsToRows,
 } from "@/components/settings/profile-edit/env-vars-card";
 import { ProfileScriptCards } from "@/components/settings/profile-edit/profile-script-cards";
+import { RemoteDockerConnectionSection } from "@/components/settings/remote-docker-connection-section";
 import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness-card";
 import { SSHTaskDirReclamationCard } from "@/components/settings/ssh-task-dir-reclamation-card";
-import {
-  type GitIdentityMode,
-  type GitIdentityState,
-} from "@/components/settings/profile-edit/remote-credentials-card";
 import { SpritesApiKeyCard } from "@/components/settings/profile-edit/sprites-api-key-card";
 import {
   DockerSections,
@@ -71,7 +67,9 @@ import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import { executorProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { buildSaveConfig } from "@/components/settings/profile-edit/serialize-executor-config";
 import { useUserNamespacesFormState } from "@/components/settings/profile-edit/use-user-namespaces-form-state";
+import { useDockerNetworksFormState } from "@/components/settings/profile-edit/use-docker-networks-form-state";
 import { useProfileRuntimeFormState } from "@/components/settings/profile-edit/use-profile-runtime-form-state";
+import { useGitIdentityState } from "@/components/settings/profile-edit/use-git-identity-state";
 import { KubernetesProfileSections } from "@/components/settings/kubernetes-profile-sections";
 import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
 import { KubernetesProfileClusterSection } from "@/components/settings/kubernetes-profile-cluster-section";
@@ -80,6 +78,7 @@ import {
   replaceKubernetesProfileConfig,
 } from "@/components/settings/kubernetes-config";
 import { kubernetesExecutorInvalidReason } from "@/components/settings/kubernetes-validation";
+import { PluginExecutorProfilePage } from "@/components/settings/plugin-executor-profile-page";
 import {
   useKubernetesAdminAccess,
   useKubernetesDiagnostics,
@@ -136,71 +135,6 @@ function useRemoteAuthState(profile: ExecutorProfile) {
   };
 }
 
-function useGitIdentityState(isRemote: boolean, profile: ExecutorProfile) {
-  const [localGitIdentity, setLocalGitIdentity] = useState<GitIdentityState>({
-    userName: "",
-    userEmail: "",
-    detected: false,
-  });
-  const [gitIdentityMode, setGitIdentityMode] = useState<GitIdentityMode>("override");
-  const [gitUserName, setGitUserName] = useState(profile.config?.git_user_name ?? "");
-  const [gitUserEmail, setGitUserEmail] = useState(profile.config?.git_user_email ?? "");
-  const [loaded, setLoaded] = useState(!isRemote);
-
-  useEffect(() => {
-    if (!isRemote) {
-      setLoaded(true);
-      return;
-    }
-    setLoaded(false);
-    fetchLocalGitIdentity()
-      .then((identity) => {
-        const local: GitIdentityState = {
-          userName: identity.user_name ?? "",
-          userEmail: identity.user_email ?? "",
-          detected: Boolean(identity.detected),
-        };
-        setLocalGitIdentity(local);
-
-        const hasStoredOverride = Boolean(
-          profile.config?.git_user_name?.trim() || profile.config?.git_user_email?.trim(),
-        );
-        if (hasStoredOverride) {
-          setGitIdentityMode("override");
-          return;
-        }
-        if (local.detected) {
-          setGitIdentityMode("local");
-          setGitUserName(local.userName);
-          setGitUserEmail(local.userEmail);
-          return;
-        }
-        setGitIdentityMode("override");
-      })
-      .catch(() => {})
-      .finally(() => setLoaded(true));
-  }, [isRemote, profile.config?.git_user_email, profile.config?.git_user_name]);
-
-  const reset = useCallback(() => {
-    const baseline = getGitIdentityBaseline(profile, localGitIdentity);
-    setGitIdentityMode(baseline.mode);
-    setGitUserName(baseline.userName);
-    setGitUserEmail(baseline.userEmail);
-  }, [localGitIdentity, profile]);
-
-  return {
-    localGitIdentity,
-    gitIdentityMode,
-    setGitIdentityMode,
-    gitUserName,
-    setGitUserName,
-    gitUserEmail,
-    setGitUserEmail,
-    loaded,
-    reset,
-  };
-}
-
 export default function ProfileEditPage({ profileId }: { profileId: string }) {
   const { t } = useTranslation();
   const router = useRouter();
@@ -219,7 +153,13 @@ export default function ProfileEditPage({ profileId }: { profileId: string }) {
     );
   }
 
-  return (
+  return result.executor.type === "plugin_remote" ? (
+    <PluginExecutorProfilePage
+      key={result.profile.id}
+      executor={result.executor}
+      profile={result.profile}
+    />
+  ) : (
     <ProfileEditForm key={result.profile.id} executor={result.executor} profile={result.profile} />
   );
 }
@@ -228,7 +168,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
   const { t } = useTranslation();
   const router = useRouter();
   const { toast } = useToast();
-  const executors = useAppStore((state) => state.executors.items);
+  const appStore = useAppStoreApi();
   const setExecutors = useAppStore((state) => state.setExecutors);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -243,7 +183,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
         const updated = await updateExecutorProfile(executor.id, profile.id, data);
         setSaveStatus("success");
         toast({ title: t("executors:profileSaved"), variant: "success" });
-        setExecutors(upsertExecutorProfile(executors, executor, updated));
+        setExecutors(upsertExecutorProfile(appStore.getState().executors.items, executor, updated));
         window.setTimeout(() => setSaveStatus("idle"), 1500);
       } catch (err) {
         const message = err instanceof Error ? err.message : t("executors:failedToSaveProfile");
@@ -257,7 +197,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
         throw err;
       }
     },
-    [executor, profile.id, executors, setExecutors, toast, t],
+    [executor, profile.id, appStore, setExecutors, toast, t],
   );
 
   const remove = useCallback(
@@ -267,11 +207,13 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
         await beforeDelete?.();
         await deleteExecutorProfile(executor.id, profile.id);
         setExecutors(
-          executors.map((e: Executor) =>
-            e.id === executor.id
-              ? { ...e, profiles: e.profiles?.filter((p) => p.id !== profile.id) }
-              : e,
-          ),
+          appStore
+            .getState()
+            .executors.items.map((e: Executor) =>
+              e.id === executor.id
+                ? { ...e, profiles: e.profiles?.filter((p) => p.id !== profile.id) }
+                : e,
+            ),
         );
         runWithNavigationBlockerBypassed(() => router.push(EXECUTORS_ROUTE));
       } catch {
@@ -279,7 +221,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
         setDeleteDialogOpen(false);
       }
     },
-    [executor.id, profile.id, executors, setExecutors, router],
+    [executor.id, profile.id, appStore, setExecutors, router],
   );
 
   return { saveStatus, error, deleting, deleteDialogOpen, setDeleteDialogOpen, save, remove };
@@ -293,6 +235,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
   const [cleanupScript, setCleanupScript] = useState(profile.cleanup_script ?? "");
   const runtime = useProfileRuntimeFormState(executor, profile);
   const userNamespaces = useUserNamespacesFormState(profile.config);
+  const dockerNetworks = useDockerNetworksFormState(profile.config);
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar, resetEnvVars } = useEnvVarRows(
     profile.env_vars,
   );
@@ -330,7 +273,8 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     setSpritesSecretId(deriveSpritesSecretId(profile.env_vars));
     remoteAuth.reset();
     gitIdentity.reset();
-  }, [gitIdentity, profile, remoteAuth, resetEnvVars, runtime, userNamespaces]);
+    dockerNetworks.resetDockerNetworks();
+  }, [dockerNetworks, gitIdentity, profile, remoteAuth, resetEnvVars, runtime, userNamespaces]);
 
   return {
     ...runtime,
@@ -345,6 +289,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     allowUserNamespaces: userNamespaces.allowUserNamespaces,
     setAllowUserNamespaces: userNamespaces.setAllowUserNamespaces,
     resetUserNamespaces: userNamespaces.resetUserNamespaces,
+    ...dockerNetworks,
     isLocalDocker: executor.type === "local_docker",
     envVarRows,
     addEnvVar,
@@ -388,6 +333,7 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
   const canManageKubernetes = useKubernetesAdminAccess();
   return (
     <>
+      {executor.type === "remote_docker" && <RemoteDockerConnectionSection executor={executor} />}
       {executor.type === "ssh" && (
         <SSHAgentReadinessCard
           executorId={executor.id}
@@ -419,9 +365,11 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           onDockerfileChange={form.setDockerfile}
           imageTag={form.imageTag}
           onImageTagChange={form.setImageTag}
+          remoteExecutorId={executor.type === "remote_docker" ? executor.id : undefined}
           allowsUserNamespaces={form.isLocalDocker}
           allowUserNamespaces={form.allowUserNamespaces}
           onAllowUserNamespacesChange={form.setAllowUserNamespaces}
+          networks={form}
         />
       )}
       {form.isKubernetes && (

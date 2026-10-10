@@ -24,6 +24,7 @@ type handoffFakeAgent struct {
 	release       chan struct{}
 	releaseOnce   sync.Once
 	promptCount   atomic.Int32
+	promptFailure error
 }
 
 type handoffPromptCall struct {
@@ -52,7 +53,7 @@ func (f *handoffFakeAgent) Prompt(_ context.Context, request sdk.PromptRequest) 
 		close(f.replacementIn)
 		<-f.release
 	}
-	return sdk.PromptResponse{StopReason: sdk.StopReasonEndTurn}, nil
+	return sdk.PromptResponse{StopReason: sdk.StopReasonEndTurn}, f.promptFailure
 }
 
 func (*handoffFakeAgent) NewSession(

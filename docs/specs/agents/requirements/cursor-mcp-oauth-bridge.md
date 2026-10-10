@@ -22,7 +22,7 @@ The agent system owns this capability because it owns profile preferences and pr
 #### Acceptance criteria
 
 - **AC-AGENTS-CURSOR-AUTH-001.1:** With sharing enabled, a new local Cursor execution shall inherit credentials from eligible non-task projects. Different server identities shall coexist.
-- **AC-AGENTS-CURSOR-AUTH-001.2:** For duplicate server identities, the most recently modified source auth file shall win. Equal timestamps shall use ascending project-path order, with the first path winning.
+- **AC-AGENTS-CURSOR-AUTH-001.2:** For duplicate server identities, entries containing a non-empty access token or refresh token shall take precedence over registration-only entries. Within each class, the most recently modified source auth file shall win. Equal timestamps shall use ascending project-path order, with the first path winning. The complete winning server object shall be copied without merging accounts or client registration data.
 - **AC-AGENTS-CURSOR-AUTH-001.3:** Both Cursor ACP and terminal profiles with the Cursor MCP strategy shall support sharing. Sharing shall work without profile-configured MCP servers.
 - **AC-AGENTS-CURSOR-AUTH-001.4:** A workspace and its canonical filesystem path shall resolve to the same Cursor project identity.
 - **AC-AGENTS-CURSOR-AUTH-001.5:** Absent Cursor data or absent eligible auth files shall produce a silent no-op. Other agents and remote executions shall not receive host credentials.
@@ -66,7 +66,7 @@ Profile choices share a filesystem destination when they use the same canonical 
 
 The bridge uses the exact MCP server name as the credential identity. It does not compare server URLs or OAuth issuers between projects. A trusted local project configuration with a matching name can therefore use a copied credential at a different endpoint. This is an accepted consequence of the default-enabled cross-project sharing behavior. Users are responsible for trusting project configurations launched with sharing enabled and for revoking provider credentials if an unintended endpoint may have received them.
 
-The user chose newest-file conflict precedence and removal of the bridge link on the next disabled launch.
+The original newest-file-only precedence is superseded by credential-bearing-first selection in the discovery/auth repair. Newest-file and path ordering remain tie-breakers within each class. Removal of the bridge link still occurs on the next disabled launch.
 File modification time does not prove credential freshness or token validity.
 
 ## Out of scope
@@ -78,5 +78,6 @@ File modification time does not prove credential freshness or token validity.
 
 ## Implementation plans
 
+- [Discovery and authenticated-source repair](../../../plans/cursor-mcp-discovery-auth-repair/plan.md)
 - [Cursor auth bridge plan](../../../plans/cursor-mcp-oauth-bridge/plan.md)
 - [Cursor slug normalization repair](../../../plans/cursor-mcp-slug-normalization/plan.md)

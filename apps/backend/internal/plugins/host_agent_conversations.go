@@ -39,6 +39,31 @@ type AgentConversationService interface {
 	DeleteAllForPlugin(ctx context.Context, pluginID string) (int32, error)
 }
 
+// ManagedAgentConversationService is the lifecycle-aware service slice used
+// by Host v2. Installation identity is supplied by the host, never by the
+// plugin request.
+type ManagedAgentConversationService interface {
+	EnsureManaged(ctx context.Context, pluginID, installationID string, spec pluginsdk.ManagedAgentConversationSpec, operationID, payloadDigest string) (pluginsdk.ManagedAgentConversationDescriptor, string, error)
+	GetManaged(ctx context.Context, installationID, workspaceID, instanceKey string) (pluginsdk.ManagedAgentConversationDescriptor, error)
+	ListManaged(ctx context.Context, installationID, workspaceID string) ([]pluginsdk.ManagedAgentConversationDescriptor, error)
+	SetManagedPaused(ctx context.Context, installationID, workspaceID, instanceKey string, expectedRevision uint64, paused bool, operationID, payloadDigest string) (pluginsdk.ManagedAgentConversationDescriptor, error)
+	DeleteManaged(ctx context.Context, installationID, workspaceID, instanceKey string, expectedRevision uint64, operationID, payloadDigest string) error
+	PauseManagedForInstallation(ctx context.Context, installationID string) error
+	InvalidateManagedForInstallationWorkspace(ctx context.Context, installationID, workspaceID string) error
+	DetachManagedForInstallation(ctx context.Context, installationID string) error
+}
+
+// ManagedAgentInputService is the optional durable-input slice of the task
+// service used by Host v2. Keeping it separate preserves existing managed
+// conversation service fakes and makes unsupported input operations explicit.
+type ManagedAgentInputService interface {
+	EnqueueManagedInput(ctx context.Context, installationID, hostInputID string, input pluginsdk.ManagedAgentInputEnqueue, operationID, payloadDigest string) (pluginsdk.ManagedAgentInputReceipt, bool, error)
+	GetManagedInput(ctx context.Context, installationID string, query pluginsdk.ManagedAgentInputQuery) (pluginsdk.ManagedAgentInputReceipt, error)
+	ListManagedInputs(ctx context.Context, installationID string, query pluginsdk.ManagedAgentInputListQuery) (pluginsdk.ManagedAgentInputPage, error)
+	CancelManagedInput(ctx context.Context, installationID string, input pluginsdk.ManagedAgentInputCancel, operationID, payloadDigest string) (pluginsdk.ManagedAgentInputReceipt, bool, error)
+	DispatchManagedInput(ctx context.Context, installationID string, input pluginsdk.ManagedAgentConversationDispatch, operationID, payloadDigest string) (pluginsdk.ManagedAgentDispatchStatus, pluginsdk.ManagedAgentConversationDescriptor, error)
+}
+
 // pluginHostAgentConversationManager implements pluginsdk.AgentConversationManager,
 // wrapping the service layer with the plugin's identity for ownership checks.
 // Every method re-checks the agent_conversation capability and the live

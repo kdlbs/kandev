@@ -58,4 +58,20 @@ test.describe("System Logs mobile", () => {
       ),
     ).toBe(false);
   });
+
+  test("downloads the diagnostic ZIP through the browser on mobile", async ({ testPage }) => {
+    test.setTimeout(45_000);
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await testPage.goto("/settings/system/data-storage?tab=logs");
+    await testPage.getByTestId("customize-diagnostic-bundle").tap();
+    const drawer = testPage.getByTestId("diagnostic-bundle-drawer");
+    await expect(drawer).toBeVisible();
+
+    const downloadPromise = testPage.waitForEvent("download");
+    await drawer.getByTestId("create-custom-diagnostic-bundle").tap();
+    const download = await downloadPromise;
+
+    expect(download.suggestedFilename()).toBe("kandev-diagnostic-logs.zip");
+    expect(await download.path()).not.toBeNull();
+  });
 });

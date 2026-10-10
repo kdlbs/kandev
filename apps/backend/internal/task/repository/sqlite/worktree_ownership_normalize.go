@@ -64,6 +64,7 @@ type legacyEnvRepo struct {
 	id, envID, repositoryID, branchSlug                                  string
 	worktreeID, worktreePath, worktreeBranch                             string
 	worktreeBranchOwner, worktreeIntegrationRef, worktreeRecoveryHeadSHA string
+	worktreeSourceClonePath, worktreeSourceCommonDir                     string
 	worktreeBranchCompactedAt                                            *time.Time
 	position                                                             int
 	errorMessage, status                                                 string
@@ -193,12 +194,14 @@ func (c *worktreeCutover) loadLegacyEnvRepos(tx *sqlx.Tx, columns map[string]boo
 	rows, err := tx.QueryContext(c.ctx, fmt.Sprintf(`
 		SELECT id, task_environment_id, repository_id, COALESCE(branch_slug, ''),
 			COALESCE(worktree_id, ''), COALESCE(worktree_path, ''),
-		COALESCE(worktree_branch, ''), %s, %s, %s, %s, position, COALESCE(error_message, ''),
+		COALESCE(worktree_branch, ''), %s, %s, %s, %s, %s, %s, position, COALESCE(error_message, ''),
 		%s, created_at, updated_at, %s, %s
 		FROM task_environment_repos`,
 		legacyRepoColumnExpr(columns, "worktree_branch_owner", "CAST('unknown' AS TEXT)"),
 		legacyRepoColumnExpr(columns, "worktree_integration_ref", "CAST('' AS TEXT)"),
 		legacyRepoColumnExpr(columns, "worktree_recovery_head_sha", "CAST('' AS TEXT)"),
+		legacyRepoColumnExpr(columns, "worktree_source_clone_path", "CAST('' AS TEXT)"),
+		legacyRepoColumnExpr(columns, "worktree_source_common_dir", "CAST('' AS TEXT)"),
 		legacyRepoColumnExpr(columns, "worktree_branch_compacted_at", "NULL"),
 		legacyRepoColumnExpr(columns, "status", "CAST('active' AS TEXT)"),
 		legacyRepoColumnExpr(columns, "merged_at", "NULL"),
@@ -213,6 +216,7 @@ func (c *worktreeCutover) loadLegacyEnvRepos(tx *sqlx.Tx, columns map[string]boo
 		if err := rows.Scan(&row.id, &row.envID, &row.repositoryID, &row.branchSlug,
 			&row.worktreeID, &row.worktreePath, &row.worktreeBranch,
 			&row.worktreeBranchOwner, &row.worktreeIntegrationRef, &row.worktreeRecoveryHeadSHA,
+			&row.worktreeSourceClonePath, &row.worktreeSourceCommonDir,
 			&compactedAt, &row.position, &row.errorMessage, &row.status, &row.createdAt, &row.updatedAt, &mergedAt, &deletedAt); err != nil {
 			return fmt.Errorf("cutover: scan legacy environment repo: %w", err)
 		}
@@ -294,6 +298,8 @@ type envRepoTarget struct {
 	worktreeBranchOwner       string
 	worktreeIntegrationRef    string
 	worktreeRecoveryHeadSHA   string
+	worktreeSourceClonePath   string
+	worktreeSourceCommonDir   string
 	worktreeBranchCompactedAt *time.Time
 	position                  int
 	errorMessage              string

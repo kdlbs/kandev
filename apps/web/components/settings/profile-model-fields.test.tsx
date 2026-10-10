@@ -149,3 +149,33 @@ describe("ModelPicker with host CLI discovery", () => {
     expect(screen.queryByTestId("model-config-custom-row")).toBeNull();
   });
 });
+
+it("keeps CLI models selectable alongside ACP model config options", () => {
+  const onChange = vi.fn();
+  render(
+    <TooltipProvider>
+      <ModelPicker
+        profile={formData()}
+        models={[...models, { id: "new-cli-model", name: "New CLI model", source: "cli" }]}
+        currentModelId="mock-fast"
+        configOptions={[
+          {
+            id: "model",
+            type: "select",
+            name: "Model",
+            category: "model",
+            currentValue: "mock-fast",
+            options: [{ value: "mock-fast", name: "Mock Fast" }],
+          },
+        ]}
+        onChange={onChange}
+        ariaLabel={startModelAria}
+        goneModelLabel={goneLabel}
+        discovery={cliDiscovery}
+      />
+    </TooltipProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: startModelAria }));
+  fireEvent.click(screen.getByRole("option", { name: "New CLI model" }));
+  expect(onChange).toHaveBeenCalledWith({ model: "new-cli-model" });
+});

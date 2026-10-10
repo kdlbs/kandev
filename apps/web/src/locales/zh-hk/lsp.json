@@ -65,7 +65,7 @@
   "startLanguageServer": "啓動語言伺服器",
   "startServerForProgress": "啓動語言伺服器以接收項目進度。",
   "startingLanguageServer": "正在啓動語言伺服器",
-  "syncFailed": "語言伺服器未確認文件同步。",
+  "syncFailed": "語言伺服器未確認文檔同步。",
   "statusLocation": "狀態位置",
   "statusLocationAria": "LSP 狀態位置",
   "stopLanguageServer": "停止語言伺服器",

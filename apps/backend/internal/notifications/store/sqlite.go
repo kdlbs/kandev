@@ -292,46 +292,12 @@ func (r *sqliteRepository) migrateLegacySubscriptions() error {
 }
 
 func (r *sqliteRepository) CreateProvider(ctx context.Context, provider *models.Provider) error {
-	if provider.ID == "" {
-		provider.ID = uuid.New().String()
-	}
-	now := time.Now().UTC()
-	provider.CreatedAt = now
-	provider.UpdatedAt = now
-	if provider.Config == nil {
-		provider.Config = map[string]interface{}{}
-	}
-	configJSON, err := json.Marshal(provider.Config)
-	if err != nil {
-		return fmt.Errorf("failed to serialize provider config: %w", err)
-	}
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO notification_providers (id, user_id, name, type, config, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`), provider.ID, provider.UserID, provider.Name, provider.Type, string(configJSON), dialect.BoolToInt(provider.Enabled), provider.CreatedAt, provider.UpdatedAt)
-	return err
+	return r.createProvider(ctx, r.db, provider)
 }
 
-// UpdateProvider writes the provider back, scoped to provider.UserID. A row
-// owned by someone else is reported as ErrProviderNotFound and left untouched.
+// UpdateProvider writes the provider back, scoped to provider.UserID.
 func (r *sqliteRepository) UpdateProvider(ctx context.Context, provider *models.Provider) error {
-	provider.UpdatedAt = time.Now().UTC()
-	if provider.Config == nil {
-		provider.Config = map[string]interface{}{}
-	}
-	configJSON, err := json.Marshal(provider.Config)
-	if err != nil {
-		return fmt.Errorf("failed to serialize provider config: %w", err)
-	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE notification_providers
-		SET name = ?, type = ?, config = ?, enabled = ?, updated_at = ?
-		WHERE id = ? AND user_id = ?
-	`), provider.Name, provider.Type, string(configJSON), dialect.BoolToInt(provider.Enabled), provider.UpdatedAt, provider.ID, provider.UserID)
-	if err != nil {
-		return err
-	}
-	return errIfNoRows(result)
+	return r.updateProvider(ctx, r.db, provider)
 }
 
 // GetProvider reads one provider owned by userID. A provider ID belonging to
@@ -465,26 +431,11 @@ func (r *sqliteRepository) ReplaceSubscriptions(ctx context.Context, providerID,
 	if err != nil {
 		return err
 	}
-
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM notification_subscriptions WHERE provider_id = ?`), providerID); err != nil {
-		_ = tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
+	if err := r.replaceSubscriptions(ctx, tx, providerID, userID, events); err != nil {
 		return err
 	}
-	now := time.Now().UTC()
-	for _, eventType := range events {
-		subID := uuid.New().String()
-		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-			INSERT INTO notification_subscriptions (id, user_id, provider_id, event_type, enabled, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`), subID, userID, providerID, eventType, dialect.BoolToInt(true), now, now); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	return nil
+	return tx.Commit()
 }
 
 func (r *sqliteRepository) InsertDelivery(ctx context.Context, delivery *models.Delivery) (bool, error) {

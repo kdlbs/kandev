@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -94,9 +95,13 @@ func NewKubernetesExecutor(agentctlResolver *AgentctlResolver, log *logger.Logge
 		locks:             make(map[string]*kubernetesInstanceLock),
 	}
 	if agentctlResolver != nil {
-		runtime.resolveBinary = func(platform kubeexecutor.Platform) ([]byte, error) {
+		runtime.resolveBinary = func(ctx context.Context, req *ExecutorCreateRequest, platform kubeexecutor.Platform) ([]byte, error) {
 			arch := strings.TrimPrefix(string(platform), "linux/")
-			path, err := agentctlResolver.ResolveRemoteBinary(SSHRemotePlatform{GOOS: "linux", GOARCH: arch})
+			var onProgress PrepareProgressCallback
+			if req != nil {
+				onProgress = req.OnProgress
+			}
+			path, err := agentctlResolver.ResolveRemoteBinaryContext(ctx, SSHRemotePlatform{GOOS: "linux", GOARCH: arch}, onProgress)
 			if err != nil {
 				return nil, err
 			}
@@ -195,7 +200,7 @@ func (r *KubernetesExecutor) createFresh(
 		if stageErr != nil {
 			return stageErr
 		}
-		binary, stageErr = r.resolveBinary(profile.Platform)
+		binary, stageErr = r.resolveBinary(ctx, req, profile.Platform)
 		if stageErr != nil {
 			return fmt.Errorf("kubernetes lifecycle: resolve agentctl for %s: %w", profile.Platform, stageErr)
 		}
@@ -408,6 +413,7 @@ func (r *KubernetesExecutor) connectNewAgentctl(
 		return nil, nil, "", 0, fmt.Errorf("kubernetes lifecycle: nonce handshake: %w", err)
 	}
 	createRequest := buildReconnectCreateInstanceRequest(req, req.InstanceID)
+	applyKubernetesDurableJournalPath(createRequest, req)
 	createResponse, err := createOrReconcileKubernetesAgentctlInstance(ctx, control, createRequest)
 	if err != nil {
 		return nil, nil, "", 0, fmt.Errorf("kubernetes lifecycle: create agentctl instance: %w", err)
@@ -427,6 +433,31 @@ func (r *KubernetesExecutor) connectNewAgentctl(
 		return nil, nil, "", 0, fmt.Errorf("kubernetes lifecycle: instance health: %w", err)
 	}
 	return client, forward, token, createResponse.Port, nil
+}
+
+// applyKubernetesDurableJournalPath places delivery state on the workspace
+// volume only when that volume survives Pod replacement. EmptyDir is an
+// intentional legacy-delivery runtime because it cannot satisfy that
+// continuity contract.
+func applyKubernetesDurableJournalPath(createRequest *agentctl.CreateInstanceRequest, req *ExecutorCreateRequest) {
+	if createRequest == nil || req == nil {
+		return
+	}
+	mode := getMetadataString(req.Metadata, MetadataKeyKubernetesRuntimeWorkspaceMode)
+	if mode == "" {
+		mode = getMetadataString(req.Metadata, MetadataKeyKubernetesWorkspaceMode)
+	}
+	if mode != string(kubeexecutor.WorkspaceModeManagedPVC) && mode != string(kubeexecutor.WorkspaceModeExistingClaim) {
+		createRequest.DurableJournalPath = ""
+		return
+	}
+	if req.DurableJournalOwnerID == "" {
+		createRequest.DurableJournalPath = ""
+		return
+	}
+	createRequest.DurableJournalPath = filepath.Join(
+		kubernetesWorkspacePath, ".kandev", "agentctl-journals", req.DurableJournalOwnerID, "delivery.bbolt",
+	)
 }
 
 type kubernetesAgentctlInstanceControl interface {

@@ -159,6 +159,8 @@ test("opens the shared change workflow form from the command palette", async ({
   const destination = await apiClient.createWorkflow(seedData.workspaceId, "Keyboard destination");
   const destinationStep = await apiClient.createWorkflowStep(destination.id, "Incoming", 0);
   await testPage.reload();
+  await fixture.session.waitForLoad();
+  await fixture.session.waitForChatIdle({ timeout: 30_000 });
 
   await chooseCommand(testPage, "Change workflow...");
   const form = new ChangeWorkflowPage(testPage);

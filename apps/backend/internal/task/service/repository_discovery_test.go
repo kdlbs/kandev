@@ -156,7 +156,7 @@ func TestRepositoryDiscoveryScanUsesValidatedTrigger(t *testing.T) {
 }
 
 func TestDesktopDiscoveryRootPersistsAcrossServiceRestart(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	makeRepo(t, filepath.Join(root, "project"))
 	svc, _, repo := createTestService(t)
 	config := RepositoryDiscoveryConfig{DesktopRuntime: true, MaxDepth: 6}
@@ -354,7 +354,7 @@ func TestReconnectDesktopDiscoveryRootNormalizesOldPath(t *testing.T) {
 }
 
 func TestDesktopDiscoveryFailurePreservesCachedRepositories(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	repositoryPath := filepath.Join(root, "project")
 	makeRepo(t, repositoryPath)
 	svc := newDiscoveryService(t, root)
@@ -1377,6 +1377,37 @@ func TestDiscoveryRoots_IncludesCloneBasePath(t *testing.T) {
 		}
 	}
 	t.Fatalf("clone base path %q missing from discoveryRoots %v", normalizedClone, roots)
+}
+
+func TestDesktopDiscoveryAddTildeResolvesHome(t *testing.T) {
+	home, err := filepath.EvalSymlinks(trustedTempDir(t))
+	if err != nil {
+		t.Fatalf("resolve Home path: %v", err)
+	}
+	t.Setenv("HOME", home)
+	svc, _, repo := createTestService(t)
+	svc.discoveryConfig = RepositoryDiscoveryConfig{DesktopRuntime: true, MaxDepth: 6}
+	svc.desktopRootStore = repo
+
+	selected, err := svc.AddDesktopDiscoveryRoot(context.Background(), "~")
+	if err != nil {
+		t.Fatalf("add tilde desktop discovery root: %v", err)
+	}
+	if selected.Path != home || selected.DisplayPath != "~" {
+		t.Fatalf("selected root = %+v, want path %q and display_path '~'", selected, home)
+	}
+
+	codeDir := filepath.Join(home, "Code")
+	if err := os.MkdirAll(codeDir, 0o755); err != nil {
+		t.Fatalf("create code subpath: %v", err)
+	}
+	selectedSub, err := svc.AddDesktopDiscoveryRoot(context.Background(), "~/Code")
+	if err != nil {
+		t.Fatalf("add tilde-subpath desktop discovery root: %v", err)
+	}
+	if selectedSub.Path != codeDir || selectedSub.DisplayPath != "~/Code" {
+		t.Fatalf("selected subpath root = %+v, want path %q and display_path '~/Code'", selectedSub, codeDir)
+	}
 }
 
 func mustCreateRepo(t *testing.T, repo repository.RepositoryEntityRepository, r *models.Repository) {

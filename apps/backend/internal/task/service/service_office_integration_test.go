@@ -69,6 +69,9 @@ func createOfficeIntegrationServiceWithDB(t *testing.T) (*Service, *sqlx.DB) {
 		TaskEnvironments: repo,
 		Reviews:          repo,
 	}, NewMockEventBus(), log, RepositoryDiscoveryConfig{})
+	svc.SetProjectRepositorySourceReader(projectRepositorySourceReaderFunc(func(context.Context, string) (ProjectRepositorySources, error) {
+		return ProjectRepositorySources{WorkspaceID: "ws-1"}, nil
+	}))
 	return svc, sqlxDB
 }
 

@@ -13,7 +13,35 @@ Playwright-based end-to-end tests. Each Playwright worker spawns its own real Go
 | `playwright.config.ts` | Project definitions, timeouts, sharding config.                                                                                              |
 | `global-setup.ts`      | Pre-flight checks for required backend artifacts, the Vite web build, and backend artifact freshness.                                        |
 
-## Prerequisites
+## Quick start for a fresh checkout
+
+Install the toolchain described in the [contributor setup guide](../../../docs/public/contributing.md#set-up-the-repository).
+Run these commands from the repository root:
+
+```sh
+pnpm --dir apps install --frozen-lockfile
+pnpm --dir apps/web exec playwright install --with-deps chromium
+pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/task/task-create-workflow-step-previews.spec.ts
+pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-task-create-workflow-step-previews.spec.ts
+```
+
+On Linux, `--with-deps` also installs Chromium's required system libraries and
+may request administrator privileges.
+
+Run the two test commands sequentially. The managed runner builds the backend,
+Vite assets, and fixture plugin, then starts and cleans up isolated test instances.
+`--host` uses the local toolchain; these two projects do not need Docker or
+provider API keys. The mobile project uses Chromium with Pixel-5 emulation,
+so the same browser installation serves both commands.
+
+Select the project before the spec path. The default `chromium` project excludes
+`mobile-*.spec.ts`, auth, routing, and container suites. If a file reports
+`No tests found`, check its owning project before changing the file or filters.
+Pass runner options such as `--project` before any `--` separator; options after
+the separator are forwarded to Playwright and do not select the managed runner's
+project. See [Playwright projects](#playwright-projects) for the other suites.
+
+## Prerequisites for raw runs
 
 E2E runs the **prebuilt** backend, not a live rebuild — `fixtures/backend.ts` spawns
 `apps/backend/bin/kandev`, and `pnpm run build:e2e` only rebuilds the Vite bundle.
@@ -22,10 +50,15 @@ build in this order:
 
 ```sh
 make -C apps/backend build
-cd apps/web && pnpm run build:e2e
+pnpm --dir apps/web run build:e2e
 make -C apps/backend e2e-plugin-ui
 make -C apps/backend e2e-plugin-package
 ```
+
+The E2E web build sets `KANDEV_VERSION=e2e` so release-note generation falls back
+to the latest entry in `CHANGELOG.md` even in a checkout without Git tags. This
+keeps release-note browser scenarios independent of the runner's tag cache.
+Production builds retain normal version resolution.
 
 `e2e-plugin-ui` deletes generated UI and rebuilds it from
 `apps/web/e2e/fixtures/plugins/prompt-history-plugin/`. Packaging depends on
@@ -258,9 +291,11 @@ every report, but only a successful `main` workflow run is eligible to seed a
 future plan. Manifests are retained for 3 days; timing profiles for 30 days;
 retry diagnostics for 14 days.
 
-Dispatch the workflow with `fail_on_flaky=true` to set
-`failOnFlakyTests: true` for a diagnostic run. Normal PR runs retain the
-existing two-retry policy while the summary makes retry groups visible.
+The standard, container-backed, and Kubernetes compatibility CI runs accept
+passes after a retry. The shared CI default allows three retries after the initial
+attempt (four attempts total); tests that exhaust their retries still fail the run.
+Set `E2E_FAIL_ON_FLAKY=1` to opt into failing on retry passes for diagnostics.
+Local Playwright runs keep zero retries and fail on retry passes by default.
 
 Container-backed CI jobs also cache the browser directory used by the host
 runner. The workflow resolves the `runtime-latest` convenience tag once to a
@@ -281,7 +316,7 @@ baseline.
 
 ### Flake rate and trend
 
-CI retries hide flakes: with `retries: 2` and `failOnFlakyTests: false`, a test
+CI retries hide flakes: with `retries: 3` and `failOnFlakyTests: false`, a test
 that fails and then passes never fails the build. The **E2E flake rate** section
 of the `e2e-report` job summary makes that number visible without downloading
 anything. It reports, for the run:
@@ -342,6 +377,8 @@ Why a script instead of raw `docker run`: in docker mode it builds the CGO/`fts5
 > This used to break when e2e was launched from a shell that had inherited `KANDEV_FEATURES_OFFICE=false` (e.g. from a host kandev backend running the prod profile): `profiles.ApplyProfile` only sets vars that are **unset** (so launchers/shells win — see `docs/decisions/0007-runtime-feature-flags.md`), and the fixture spreads `process.env` into the spawned backend, so the stale prod value won and 404'd every office spec. Fixed at the source: `sanitizeInheritedEnv` in `e2e/fixtures/backend.ts` strips all inherited `KANDEV_FEATURES_*` before spawn, so the e2e profile — not whatever the host exported — decides feature flags. No `unset` needed.
 
 > **Profile-managed environment variables:** when adding an environment variable with an `e2e:` or `dev:` profile default, add it to `sanitizeInheritedEnv` in `e2e/fixtures/backend.ts` so inherited shell/task values cannot override the selected profile. Keep explicit `backend.restart({ ... })` overrides applied after baseline sanitization, so a spec can still opt into a deliberate per-test value.
+
+> **Service install identity:** the fixture strips `KANDEV_RUNNING_AS_SERVICE`, `KANDEV_SERVICE_MODE`, `KANDEV_SERVICE_MANAGER`, `KANDEV_INSTALL_KIND`, and `KANDEV_SERVICE_METADATA` from the host environment. Inheriting a managed-service identity makes the source-built E2E backend appear eligible for Nightly updates. A spec that exercises a managed service can set these values through `backend.restart({ ... })`.
 
 > **Host oversubscription:** running >=5 heavy shards concurrently on one machine (each = Go backend + Vite-served SPA assets + Chromium + mock agent) starves CPU/IO and induces timing flakes that CI's isolated runners never see. The managed runner allows at most three local shards and one Playwright worker per shard, with a lower shard limit on hosts with less available memory. Use the default single shard or two to three concurrent shards locally for a clean signal. A deliberate pressure experiment must set `KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM=1`.
 

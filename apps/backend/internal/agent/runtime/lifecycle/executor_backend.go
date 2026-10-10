@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentkubernetes "github.com/kandev/kandev/internal/agent/kubernetes"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -18,6 +19,7 @@ import (
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
+	agenttypes "github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -171,6 +173,21 @@ type ExecutorBackend interface {
 	IsAlwaysResumable() bool
 }
 
+// RecoveryCandidateOutcome represents the classified recovery outcome for one candidate record.
+type RecoveryCandidateOutcome string
+
+const (
+	RecoveryOutcomeNoMatchingInstance RecoveryCandidateOutcome = "no_matching_instance"
+	RecoveryOutcomeEnumerationFailed  RecoveryCandidateOutcome = "enumeration_failed"
+	RecoveryOutcomeUnknown            RecoveryCandidateOutcome = "unknown"
+)
+
+// DetailedRecoveryBackend is an optional extension for ExecutorBackend implementations
+// that report detailed per-candidate recovery outcomes.
+type DetailedRecoveryBackend interface {
+	RecoverInstancesDetailed(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, map[string]RecoveryCandidateOutcome, error)
+}
+
 // McpServerConfig holds configuration for an MCP server.
 // Type alias for agentctl.McpServerConfig to avoid conversion boilerplate.
 type McpServerConfig = agentctl.McpServerConfig
@@ -182,11 +199,13 @@ const (
 	MetadataKeyWorktreeBranch = "worktree_branch"
 
 	// Remote executor metadata keys
-	MetadataKeyRepositoryPath  = "repository_path"
-	MetadataKeySetupScript     = "setup_script"
-	MetadataKeyCleanupScript   = "cleanup_script"
-	MetadataKeyRepoSetupScript = "repository_setup_script"
-	MetadataKeyBaseBranch      = "base_branch"
+	MetadataKeyRepositoryPath = "repository_path"
+	// MetadataKeyRepositoryConfigured is set by launch from RepoSpecs, not task metadata.
+	MetadataKeyRepositoryConfigured = "repository_configured"
+	MetadataKeySetupScript          = "setup_script"
+	MetadataKeyCleanupScript        = "cleanup_script"
+	MetadataKeyRepoSetupScript      = "repository_setup_script"
+	MetadataKeyBaseBranch           = "base_branch"
 	// MetadataKeyBaseBranches stores a map[string]string (RepositoryName →
 	// base branch ref) for per-repo diff-stat resolution inside agentctl.
 	// The empty key "" applies to the root / single-repo tracker.
@@ -199,10 +218,14 @@ const (
 	MetadataKeyRemoteAuthHome           = "remote_auth_target_home"
 	MetadataKeyAgentConfigBundles       = "agent_config_bundles"
 	MetadataKeyExecutorProfileID        = "executor_profile_id"
+	MetadataKeyPluginExecutor           = "plugin_executor"
 	MetadataKeyGitUserName              = "git_user_name"
 	MetadataKeyGitUserEmail             = "git_user_email"
 	MetadataKeyImageTagOverride         = "image_tag_override"
 	MetadataKeyAllowUserNamespaces      = "allow_user_namespaces"
+	MetadataKeyDockerNetwork            = "docker_network"
+	MetadataKeyDockerNetworkGwPriority  = "docker_network_gw_priority"
+	MetadataKeyDockerAdditionalNetworks = "docker_additional_networks"
 	MetadataKeyContainerID              = "container_id"
 	MetadataKeySpriteName               = "sprite_name"
 	MetadataKeySpriteState              = "sprite_state"
@@ -268,6 +291,10 @@ const (
 	// change. Empty for every non-Office launch, which is legitimate, not
 	// missing.
 	MetadataKeyOfficeAgentProfileID = "office_agent_profile_id"
+	// MetadataKeyOriginalWorkspacePath preserves the first agent-visible CWD
+	// across runtime and backend restarts so restore policy can distinguish a
+	// relocation from an unchanged workspace.
+	MetadataKeyOriginalWorkspacePath = "original_workspace_path"
 
 	// SSH runtime metadata keys (per-session, except SSHWorkdirRoot which is per-profile).
 	MetadataKeySSHHostAlias            = "ssh_host_alias"
@@ -391,8 +418,12 @@ var persistentMetadataKeys = map[string]bool{
 	"executor_mcp_policy":               true,
 	"sprites_network_policy_rules":      true,
 	MetadataKeyExecutorProfileID:        true,
+	MetadataKeyPluginExecutor:           true,
 	MetadataKeyImageTagOverride:         true,
 	MetadataKeyAllowUserNamespaces:      true,
+	MetadataKeyDockerNetwork:            true,
+	MetadataKeyDockerNetworkGwPriority:  true,
+	MetadataKeyDockerAdditionalNetworks: true,
 	MetadataKeyContainerID:              true,
 	MetadataKeyWorktreeBranch:           true,
 	metadataCheckoutBranch:              true,
@@ -400,6 +431,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyRemoteContributions:      true,
 	MetadataKeyContributionDestinations: true,
 	MetadataKeyOfficeAgentProfileID:     true,
+	MetadataKeyOriginalWorkspacePath:    true,
 }
 
 // persistentMetadataPrefixes lists key prefixes that should persist.
@@ -419,7 +451,8 @@ var persistentMetadataPrefixes = []string{
 var sessionScopedMetadataKeys = map[string]bool{
 	// Office identity belongs to the session that produced the runtime row and
 	// must not be inherited by a sibling session sharing the environment.
-	MetadataKeyOfficeAgentProfileID: true,
+	MetadataKeyOfficeAgentProfileID:  true,
+	MetadataKeyOriginalWorkspacePath: true,
 
 	MetadataKeySSHRemoteSessionDir:              true,
 	MetadataKeySSHRemoteAgentctlPort:            true,
@@ -604,13 +637,27 @@ type ExecutorCreateRequest struct {
 	// WorkspaceReuseRequired means this runtime must attach to the supplied
 	// environment handle and must never fall back to provisioning a replacement.
 	WorkspaceReuseRequired bool
-	AgentProfileID         string
-	OfficeAgentProfileID   string
-	PromptTurnID           string
-	WorkspacePath          string
-	WorkspaceSourceRoots   []string
-	Protocol               string
-	Env                    map[string]string
+	// ForceContextContinuation records that the explicit recovery path started
+	// a new native conversation from a bounded Kandev context snapshot.
+	ForceContextContinuation bool
+	AgentProfileID           string
+	OfficeAgentProfileID     string
+	PromptTurnID             string
+	WorkspacePath            string
+	OriginalWorkspacePath    string
+	// DurableJournalHostRoot is the retained storage root owned by the
+	// executor. Providers map it to their own stable environment path.
+	DurableJournalHostRoot string
+	DurableJournalOwnerID  string
+	// DeliveryStreamID is stable across agentctl replacement within one
+	// harness generation. The incarnation and generation fence stale events.
+	DeliveryStreamID          string
+	DeliveryIncarnationID     string
+	DeliveryHarnessGeneration uint64
+	WorkspaceSourceRoots      []string
+	Protocol                  string
+	CodexAppServerEnabled     bool
+	Env                       map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
 	ApprovedSecretEnvKeys  []string
@@ -635,6 +682,9 @@ type ExecutorCreateRequest struct {
 	// launch. Remote executors use it during preflight before agentctl receives
 	// the final command.
 	ManagedRuntimeVersion string
+	ManagedRuntimeFamily  managedruntime.OpenCodeFamily
+	ManagedRuntimeSource  managedruntime.OpenCodeSource
+	NativeRuntimeVersion  string
 	PreviousExecutionID   string   // Non-empty when reconnecting to a previous execution
 	McpMode               string   // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
 	McpProviders          []string // Normalized provider capabilities attached to the task
@@ -655,6 +705,24 @@ type ExecutorCreateRequest struct {
 	// ReleaseRuntimeInventory removes this launch's provisional row after every
 	// created resource was rolled back. Implementations must use execution CAS.
 	ReleaseRuntimeInventory func(context.Context) error
+	// PluginExecutor contains a host-authorized provider/profile snapshot. Secret
+	// values are transient and must never be copied to runtime metadata.
+	PluginExecutor *PluginExecutorLaunch
+}
+
+func codexAppServerEnabledForAgent(agentConfig agents.Agent) bool {
+	if agentConfig == nil || !agentConfig.Enabled() {
+		return false
+	}
+	runtime := agentConfig.Runtime()
+	return runtime != nil && runtime.Protocol == agenttypes.ProtocolCodexAppServer
+}
+
+func protocolForAgent(agentConfig agents.Agent) string {
+	if agentConfig == nil || agentConfig.Runtime() == nil {
+		return ""
+	}
+	return string(agentConfig.Runtime().Protocol)
 }
 
 // ExecutorInstance represents an agentctl instance created by a runtime.
@@ -701,6 +769,21 @@ type ExecutorInstance struct {
 	// "provider session identity" row). Same recovery-only shape as Env above.
 	ProviderSessionID string
 
+	// DeliveryStatus is the authenticated recovery descriptor captured from the
+	// surviving instance before lifecycle re-tracking. It is nil for legacy
+	// runtimes and isolated recovery callers that do not advertise the durable
+	// delivery capability.
+	DeliveryStatus *agentctl.DeliveryStatus
+	// DeliveryLegacyEvidence is true only when an authenticated old peer
+	// positively lacks the durable-delivery capability and explicitly does not
+	// implement the status route. It is distinct from an undiscovered or failed
+	// status request, both of which block durable recovery.
+	DeliveryLegacyEvidence bool
+	// DeliveryRecoveryError carries an adoption evidence failure back to the
+	// lifecycle manager. The instance remains attached so the manager can use
+	// its existing bounded stop and recovery-guard path.
+	DeliveryRecoveryError error
+
 	// AgentProfileID is a recovery-only carrier for
 	// AC-EXECUTORS-SURVIVAL-002.14's "agent profile identity" row: the
 	// recovery-inventory record's execution-profile column, read by
@@ -713,8 +796,8 @@ type ExecutorInstance struct {
 
 	// AuthToken is the agentctl auth token retrieved via handshake.
 	// Populated by authenticated container/remote executors for encrypted storage in SecretStore.
-	// Empty for standalone (launcher-owned token wired via cfg.Agent.StandaloneAuthToken)
-	// and Sprites (no agentctl auth).
+	// Empty for standalone, where the shared local runtime owner supplies the
+	// credential to each bound instance client, and Sprites (no agentctl auth).
 	AuthToken string
 
 	// BootstrapNonce is the one-time nonce injected into the remote agentctl environment.
@@ -729,9 +812,9 @@ type ExecutorInstance struct {
 
 // ToAgentExecution converts a ExecutorInstance to an AgentExecution.
 func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentExecution {
-	metadata := req.Metadata
-	if metadata == nil {
-		metadata = make(map[string]interface{})
+	metadata := make(map[string]interface{}, len(req.Metadata)+len(ri.Metadata)+1)
+	for k, v := range req.Metadata {
+		metadata[k] = v
 	}
 	// Merge runtime metadata
 	for k, v := range ri.Metadata {
@@ -748,6 +831,11 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	if workspacePath == "" {
 		workspacePath = req.WorkspacePath
 	}
+	originalWorkspacePath := req.OriginalWorkspacePath
+	if originalWorkspacePath == "" {
+		originalWorkspacePath = workspacePath
+	}
+	metadata[MetadataKeyOriginalWorkspacePath] = originalWorkspacePath
 
 	var historyEnabled bool
 	var agentID string
@@ -758,32 +846,55 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 				rt.SessionConfig.NewSessionOnWorkspaceRebind
 		}
 	}
+	historyEnabled = historyEnabled || req.ForceContextContinuation
 
 	execution := &AgentExecution{
-		ID:                   ri.InstanceID,
-		ExecutorType:         executorType,
-		RunID:                req.Env["KANDEV_RUN_ID"],
-		TaskID:               req.TaskID,
-		SessionID:            req.SessionID,
-		TaskEnvironmentID:    req.TaskEnvironmentID,
-		AgentProfileID:       req.AgentProfileID,
-		OfficeAgentProfileID: req.OfficeAgentProfileID,
-		promptTurnID:         req.PromptTurnID,
-		AgentID:              agentID,
-		ContainerID:          ri.ContainerID,
-		ContainerIP:          ri.ContainerIP,
-		WorkspacePath:        workspacePath,
-		WorkspaceSourceRoots: append([]string(nil), req.WorkspaceSourceRoots...),
-		RuntimeName:          ri.RuntimeName,
-		Status:               v1.AgentStatusRunning,
-		StartedAt:            time.Now(),
-		metadata:             metadata,
-		agentctl:             ri.Client,
-		standaloneInstanceID: ri.StandaloneInstanceID,
-		standalonePort:       ri.StandalonePort,
-		historyEnabled:       historyEnabled,
-		promptDoneCh:         make(chan PromptCompletionSignal, 1),
+		startupDisposition:        startupDispositionFromMetadata(metadata),
+		ID:                        ri.InstanceID,
+		ExecutorType:              executorType,
+		RunID:                     req.Env["KANDEV_RUN_ID"],
+		TaskID:                    req.TaskID,
+		SessionID:                 req.SessionID,
+		TaskEnvironmentID:         req.TaskEnvironmentID,
+		AgentProfileID:            req.AgentProfileID,
+		OfficeAgentProfileID:      req.OfficeAgentProfileID,
+		promptTurnID:              req.PromptTurnID,
+		AgentID:                   agentID,
+		ContainerID:               ri.ContainerID,
+		ContainerIP:               ri.ContainerIP,
+		WorkspacePath:             workspacePath,
+		OriginalWorkspacePath:     originalWorkspacePath,
+		WorkspaceSourceRoots:      append([]string(nil), req.WorkspaceSourceRoots...),
+		DeliveryStreamID:          req.DeliveryStreamID,
+		DeliveryIncarnationID:     req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration: req.DeliveryHarnessGeneration,
+		ForceContextContinuation:  req.ForceContextContinuation,
+		RuntimeName:               ri.RuntimeName,
+		Status:                    v1.AgentStatusRunning,
+		StartedAt:                 time.Now(),
+		metadata:                  metadata,
+		agentctl:                  ri.Client,
+		standaloneInstanceID:      ri.StandaloneInstanceID,
+		standalonePort:            ri.StandalonePort,
+		runtimeEpoch:              runtimeEpochFromClient(ri.Client),
+		standaloneHostPID:         runtimeProcessIDFromClient(ri.Client),
+		historyEnabled:            historyEnabled,
+		promptDoneCh:              make(chan PromptCompletionSignal, 1),
 	}
 	execution.setRuntimeEnvironment(req.Env)
 	return execution
+}
+
+func runtimeEpochFromClient(client *agentctl.Client) uint64 {
+	if client == nil {
+		return 0
+	}
+	return client.RuntimeEpoch()
+}
+
+func runtimeProcessIDFromClient(client *agentctl.Client) int {
+	if client == nil {
+		return 0
+	}
+	return client.RuntimeProcessID()
 }

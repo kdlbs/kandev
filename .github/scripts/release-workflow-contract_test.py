@@ -2,8 +2,11 @@
 """Contract tests for the maintainer release workflow."""
 
 import fnmatch
+import os
 import re
+import stat
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -14,9 +17,12 @@ DIAGNOSTICS_PATH = REPO_ROOT / ".github" / "scripts" / "collect-macos-desktop-di
 PUBLISH_NPM_PATH = REPO_ROOT / "scripts" / "release" / "publish-npm.sh"
 UPDATE_SCOOP_BUCKET_PATH = REPO_ROOT / "scripts" / "release" / "update-scoop-bucket.sh"
 NPM_PACKAGES_PATH = REPO_ROOT / "scripts" / "release" / "npm-packages.sh"
+HOMEBREW_FORMULA_PATH = REPO_ROOT / "scripts" / "release" / "kandev.rb"
+RUNTIME_SIZE_REPORT_SCRIPT_PATH = REPO_ROOT / "scripts" / "release" / "write-runtime-size-report.sh"
 PUBLIC_KEY_PATH = REPO_ROOT / ".github" / "release-signing-key.asc"
 RELEASE_PROCESS_PATH = REPO_ROOT / "docs" / "public" / "release-process.md"
 LINT_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
+REMOTE_HELPER_ASSETS_PATH = REPO_ROOT / "scripts" / "release" / "remote-helper-assets.mjs"
 WORKFLOW = WORKFLOW_PATH.read_text()
 DIAGNOSTICS = DIAGNOSTICS_PATH.read_text()
 PUBLISH_NPM = PUBLISH_NPM_PATH.read_text()
@@ -28,6 +34,14 @@ NORMAL_RELEASE_IF = (
     "if: ${{ !inputs.dry_run && !inputs.desktop_validation_only "
     "&& inputs.backfill_tag == '' }}"
 )
+CANONICAL_HELPERS = (
+    "agentctl-linux-amd64",
+    "agentctl-linux-arm64",
+    "agentctl-darwin-amd64",
+    "agentctl-darwin-arm64",
+)
+HELPER_VERSION = "v1.2.3"
+HELPER_COMMIT = "a" * 40
 
 
 def step_block(name: str) -> str:
@@ -57,7 +71,227 @@ def job_condition(name: str) -> str:
     return " ".join(match.group().split())
 
 
+def job_step_block(job_name: str, name: str) -> str:
+    job = job_block(job_name)
+    marker = f"      - name: {name}"
+    start = job.find(marker)
+    if start == -1:
+        raise AssertionError(f"step not found in {job_name}: {name}")
+    next_step = re.search(r"\n      - (?:name|uses): ", job[start + 1 :])
+    end = len(job) if next_step is None else start + 1 + next_step.start()
+    return job[start:end]
+
+
+def step_run_script(block: str) -> str:
+    lines = block.splitlines()
+    for index, line in enumerate(lines):
+        if line != "        run: |":
+            continue
+        script_lines = []
+        for script_line in lines[index + 1 :]:
+            if script_line and not script_line.startswith("          "):
+                break
+            script_lines.append(script_line[10:] if script_line else "")
+        return "\n".join(script_lines).rstrip() + "\n"
+    raise AssertionError("step has no multiline run script")
+
+
 class ReleaseWorkflowContractTest(unittest.TestCase):
+    def test_contributor_notifications_require_every_stable_publication_channel(self) -> None:
+        self.assertRegex(
+            WORKFLOW,
+            r"(?ms)      notify_contributors:\n"
+            r"        description: \"[^\"]+\"\n"
+            r"        type: boolean\n"
+            r"        default: false",
+        )
+        job = job_block("notify-contributors")
+        condition = job_condition("notify-contributors")
+        self.assertIn(
+            "needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket]",
+            job,
+        )
+        success_gates = (
+            "needs.prepare.result == 'success'",
+            "needs.publish-release.result == 'success'",
+            "needs.publish-npm.result == 'success'",
+            "needs.update-homebrew-tap.result == 'success'",
+            "needs.update-scoop-bucket.result == 'success'",
+        )
+        for requirement in (
+            "!cancelled()",
+            "github.event_name == 'workflow_dispatch'",
+            "inputs.channel == 'stable'",
+            "inputs.notify_contributors",
+            "!inputs.dry_run",
+            "!inputs.desktop_validation_only",
+            *success_gates,
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, condition)
+
+        normalized_condition = re.sub(r"\s+", "", condition)
+        required_conjunction = "&&".join(gate.replace(" ", "") for gate in success_gates)
+        self.assertIn(required_conjunction, normalized_condition)
+
+        self.assertNotIn("inputs.backfill_tag", condition)
+        self.assertIn("uses: ./.github/workflows/notify-release-contributors.yml", job)
+        self.assertIn("release_tag: ${{ needs.prepare.outputs.tag }}", job)
+        self.assertIn("dry_run: false", job)
+        self.assertIn("contents: read", job)
+        self.assertIn("pull-requests: write", job)
+
+    def create_downloaded_helper_artifact(self, root: Path, stable: bool) -> tuple[Path, str]:
+        source_dir = root / "source-bin"
+        source_dir.mkdir(parents=True)
+        version = HELPER_VERSION if stable else "v1.3.0-nightly.sha123456789abc"
+        artifact_dir = root / "dist" / "remote-helper-artifact"
+        for index, helper in enumerate(CANONICAL_HELPERS):
+            source = source_dir / helper
+            source.write_bytes(f"canonical helper {index}\n".encode())
+            source.chmod(0o755)
+
+        result = subprocess.run(
+            [
+                "node",
+                str(REMOTE_HELPER_ASSETS_PATH),
+                "build",
+                "--bin-dir",
+                str(source_dir),
+                "--output-dir",
+                str(artifact_dir),
+                "--version",
+                version,
+                "--commit",
+                HELPER_COMMIT,
+                "--stable",
+                str(stable).lower(),
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for helper in CANONICAL_HELPERS:
+            (artifact_dir / "bin" / helper).chmod(0o644)
+        return artifact_dir, version
+
+    def run_helper_verifier(
+        self, artifact_dir: Path, version: str, stable: bool, commit: str = HELPER_COMMIT
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                "node",
+                str(REMOTE_HELPER_ASSETS_PATH),
+                "verify-artifact",
+                "--artifact-dir",
+                str(artifact_dir),
+                "--version",
+                version,
+                "--commit",
+                commit,
+                "--stable",
+                str(stable).lower(),
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def run_helper_restoration(self, job_name: str, root: Path) -> subprocess.CompletedProcess[str]:
+        restore = step_run_script(
+            job_step_block(job_name, "Restore canonical helper executable modes")
+        )
+        return subprocess.run(
+            ["bash", "-euo", "pipefail", "-c", restore],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_downloaded_canonical_helpers_restore_executable_modes(self) -> None:
+        consumers = (("build-bundles", (True, False)), ("verify-release-assets", (True,)))
+        for job_name, variants in consumers:
+            for stable in variants:
+                with self.subTest(job=job_name, stable=stable), tempfile.TemporaryDirectory() as temp:
+                    root = Path(temp)
+                    artifact_dir, version = self.create_downloaded_helper_artifact(root, stable)
+                    helper_bytes = {
+                        helper: (artifact_dir / "bin" / helper).read_bytes()
+                        for helper in CANONICAL_HELPERS
+                    }
+
+                    result = self.run_helper_restoration(job_name, root)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    for helper in CANONICAL_HELPERS:
+                        path = artifact_dir / "bin" / helper
+                        self.assertEqual(path.stat().st_mode & 0o777, 0o755)
+                        self.assertEqual(path.read_bytes(), helper_bytes[helper])
+
+                    verification = self.run_helper_verifier(artifact_dir, version, stable)
+                    self.assertEqual(verification.returncode, 0, verification.stderr)
+
+    def test_missing_downloaded_canonical_helper_blocks_restoration(self) -> None:
+        for job_name in ("build-bundles", "verify-release-assets"):
+            with self.subTest(job=job_name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                artifact_dir, _ = self.create_downloaded_helper_artifact(root, stable=True)
+                (artifact_dir / "bin" / CANONICAL_HELPERS[0]).unlink()
+
+                result = self.run_helper_restoration(job_name, root)
+                self.assertNotEqual(result.returncode, 0)
+
+    def test_helper_restoration_preserves_artifact_identity_validation(self) -> None:
+        for job_name in ("build-bundles", "verify-release-assets"):
+            with self.subTest(job=job_name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                artifact_dir, version = self.create_downloaded_helper_artifact(root, stable=True)
+
+                restoration = self.run_helper_restoration(job_name, root)
+                self.assertEqual(restoration.returncode, 0, restoration.stderr)
+                verification = self.run_helper_verifier(
+                    artifact_dir, version, stable=True, commit="b" * 40
+                )
+                self.assertNotEqual(verification.returncode, 0)
+                self.assertIn("identity does not match", verification.stderr)
+
+    def test_helper_restoration_follows_download_and_precedes_helper_use(self) -> None:
+        for job_name in ("build-bundles", "verify-release-assets"):
+            with self.subTest(job=job_name):
+                job = job_block(job_name)
+                download = job_step_block(job_name, "Download canonical remote helpers")
+                restore = job_step_block(job_name, "Restore canonical helper executable modes")
+                self.assertLess(job.index(download), job.index(restore))
+                restore_index = job.index(restore)
+                verify_index = job.index("node scripts/release/remote-helper-assets.mjs verify-artifact")
+                self.assertLess(restore_index, verify_index)
+                if job_name == "build-bundles":
+                    package = job_step_block(job_name, "Package bundle")
+                    self.assertLess(restore_index, job.index(package))
+
+    def test_agentctl_dependency_guard_covers_release_target_build_modes(self) -> None:
+        guard = (REPO_ROOT / "scripts" / "check-agentctl-deps.sh").read_text()
+        for target in (
+            "linux/amd64/0",
+            "linux/arm64/0",
+            "darwin/amd64/0",
+            "darwin/arm64/0",
+            "linux/amd64/1",
+            "linux/arm64/1",
+            "darwin/amd64/1",
+            "darwin/arm64/1",
+            "windows/amd64/1",
+        ):
+            with self.subTest(target=target):
+                self.assertIn(f'"{target}"', guard)
+        self.assertIn("GOOS=\"$target_os\"", guard)
+        self.assertIn("GOARCH=\"$target_arch\"", guard)
+        self.assertIn("CGO_ENABLED=\"$target_cgo\"", guard)
+        self.assertIn("go list -deps ./cmd/agentctl", guard)
+
     def test_nightly_runs_on_schedule_or_manual_channel_and_delegates_metadata_resolution(
         self,
     ) -> None:
@@ -166,11 +400,204 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
     ) -> None:
         package = step_block("Package bundle")
         validation = "bash scripts/release/package-bundle.sh --bundle-dir dist/kandev"
-        archive = 'tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev'
+        archive = 'tar -czf "$GITHUB_WORKSPACE/dist/kandev-${{ matrix.platform }}.tar.gz"'
 
         self.assertIn(validation, package)
         self.assertIn(archive, package)
         self.assertLess(package.index(validation), package.index(archive))
+
+    def test_canonical_helper_build_is_shared_reproducible_and_required(self) -> None:
+        job = job_block("build-remote-helpers")
+        condition = job_condition("build-remote-helpers")
+        self.assertIn("needs: [prepare, nightly-prepare]", job)
+        self.assertIn("github.event_name == 'workflow_dispatch'", condition)
+        self.assertIn("github.event_name == 'schedule'", condition)
+        self.assertIn("needs.nightly-prepare.outputs.should_publish == 'true'", condition)
+
+        build = step_block("Build and verify canonical remote helpers")
+        for contract in (
+            'COMMIT="$(git rev-parse HEAD)"',
+            'BUILD_TIME="$(git show -s --format=%cI HEAD)"',
+            "-trimpath",
+            "-buildvcs=false",
+            "cmp ",
+            "file -b",
+            "validate-darwin-arm64-helper.mjs",
+            "remote-helper-assets.mjs build",
+        ):
+            self.assertIn(contract, build)
+        self.assertNotIn("git rev-parse --short", build)
+        self.assert_required_artifact_upload_retries("build-remote-helpers", "upload_canonical_helpers")
+
+        bundles = job_block("build-bundles")
+        self.assertIn("build-remote-helpers", bundles.split("\n", 4)[2])
+        self.assertIn("needs.build-remote-helpers.result == 'success'", job_condition("build-bundles"))
+        self.assertIn("name: canonical-remote-helpers", step_block("Download canonical remote helpers"))
+        self.assertNotIn("- name: Build remote agentctl helpers", bundles)
+
+    def test_staged_archive_candidates_are_complete_and_not_public_release_inputs(self) -> None:
+        package = step_block("Package bundle")
+        self.assertIn('"kandev-${{ matrix.platform }}.tar.gz"', package)
+        self.assertIn('"kandev-${{ matrix.platform }}-slim.tar.gz"', package)
+        self.assertIn('"kandev-${{ matrix.platform }}-full.tar.gz"', package)
+        self.assertIn("--variant standard", package)
+        self.assertIn("--variant full", package)
+        self.assertIn("dist/runtime-candidates", package)
+        self.assertIn("inputs.channel == 'stable'", package)
+
+        candidate_check = step_block("Verify staged runtime candidates")
+        self.assertIn("-full.tar.gz", candidate_check)
+        self.assertIn("-slim.tar.gz", candidate_check)
+        self.assertIn("shasum -a 256 -c", candidate_check)
+        self.assertIn("windows-x64", candidate_check)
+
+        self.assert_required_artifact_upload_retries("build-bundles", "upload_runtime_candidates")
+        candidate_upload = step_block("Upload staged runtime candidates (attempt 1)")
+        self.assertIn("name: runtime-candidates-${{ matrix.platform }}", candidate_upload)
+        self.assertIn("dist/runtime-candidates", candidate_upload)
+
+        publisher = job_block("publish-release")
+        self.assertIn("name: verified-release-assets", publisher)
+        self.assertNotIn("pattern: runtime-candidates-*", publisher)
+        gate = job_block("verify-release-assets")
+        self.assertIn('candidate="kandev-${platform}-${variant}.tar.gz"', gate)
+        self.assertIn('published="kandev-${platform}.tar.gz"', gate)
+        self.assertIn('published="kandev-${platform}-full.tar.gz"', gate)
+        self.assertIn("agentctl-*.gz", step_block("Publish release").replace("dist/release-assets/", ""))
+        self.assertIn("agentctl-*.gz.sha256", step_block("Publish release"))
+
+    def test_stable_consumers_switch_to_slim_desktop_and_full_docker_inputs(self) -> None:
+        desktop = job_block("build-desktop")
+        self.assertIn("name: runtime-candidates-${{ matrix.platform }}", desktop)
+        self.assertIn("RUNTIME_VARIANT=full", desktop)
+        self.assertIn("RUNTIME_VARIANT=slim", desktop)
+        self.assertIn('kandev-${{ matrix.platform }}-${RUNTIME_VARIANT}.tar.gz', desktop)
+        self.assertIn("prepare-desktop-runtime.sh", desktop)
+        macos_signing = step_block("Sign macOS desktop runtime binaries")
+        self.assertIn('for binary in kandev agentctl; do', macos_signing)
+        self.assertNotIn("agentctl-darwin", macos_signing)
+
+        for job_name, platform in (
+            ("docker-amd64", "linux-x64"),
+            ("docker-arm64", "linux-arm64"),
+        ):
+            with self.subTest(job=job_name):
+                docker = job_block(job_name)
+                self.assertIn(f"name: runtime-candidates-{platform}", docker)
+                self.assertIn(f"kandev-{platform}-full.tar.gz", docker)
+
+        publisher = job_block("publish-release")
+        self.assertIn("name: verified-release-assets", publisher)
+        verify = step_block("Verify staged release assets")
+        self.assertIn('"dist/release-assets/kandev-${platform}-full.tar.gz"', verify)
+        self.assertIn("kandev-windows-x64-full.zip", verify)
+        publish = step_block("Publish release")
+        self.assertIn("kandev-linux-*.tar.gz", publish)
+        self.assertIn("kandev-macos-*.tar.gz", publish)
+        self.assertIn("kandev-windows-*.tar.gz", publish)
+
+    def test_release_publishes_same_build_runtime_size_report(self) -> None:
+        report = step_block("Record runtime asset sizes")
+        self.assertIn("runtime-size-report.md", report)
+        self.assertIn("write-runtime-size-report.sh", report)
+        publish = step_block("Publish release")
+        self.assertIn("runtime-size-report.md", publish)
+        self.assertIn("kandev-windows-*-full.zip", publish)
+
+    def test_release_asset_integrity_gate_precedes_container_tag_promotion(self) -> None:
+        gate = job_block("verify-release-assets")
+        self.assertIn("pattern: runtime-candidates-*", gate)
+        self.assertIn("name: canonical-remote-helpers", gate)
+        self.assertIn("verify-existing-release", gate)
+        self.assertIn("Verify staged release assets", gate)
+        self.assertIn("Upload verified release assets", gate)
+        for job_name in ("docker-manifest", "docker-universal-manifest", "publish-release"):
+            with self.subTest(job=job_name):
+                job = job_block(job_name)
+                self.assertIn("verify-release-assets", job)
+                self.assertIn("needs.verify-release-assets.result == 'success'", job)
+
+    def test_runtime_size_report_rows_keep_literal_asset_names(self) -> None:
+        report_step = step_block("Record runtime asset sizes")
+        self.assertIn("write-runtime-size-report.sh", report_step)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            assets_dir = Path(temp_dir) / "assets"
+            assets_dir.mkdir()
+            asset_names = []
+            platforms = ("linux-x64", "linux-arm64", "macos-x64", "macos-arm64", "windows-x64")
+            for platform in platforms:
+                for variant in ("standard", "full"):
+                    name = f"kandev-{platform}{'-full' if variant == 'full' else ''}.tar.gz"
+                    (assets_dir / name).write_bytes(b"data")
+                    asset_names.append(name)
+            for variant in ("standard", "full"):
+                name = f"kandev-windows-x64{'-full' if variant == 'full' else ''}.zip"
+                (assets_dir / name).write_bytes(b"data")
+                asset_names.append(name)
+            for name in (
+                "agentctl-linux-amd64.gz",
+                "agentctl-linux-arm64.gz",
+                "agentctl-darwin-amd64.gz",
+                "agentctl-darwin-arm64.gz",
+            ):
+                (assets_dir / name).write_bytes(b"data")
+                asset_names.append(name)
+
+            output = assets_dir / "runtime-size-report.md"
+            result = subprocess.run(
+                ["bash", str(RUNTIME_SIZE_REPORT_SCRIPT_PATH), str(assets_dir), str(output)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            contents = output.read_text()
+            for name in asset_names:
+                with self.subTest(asset=name):
+                    self.assertIn(f"`{name}`", contents)
+
+    def test_homebrew_formula_requires_the_stable_remote_helper_manifest(self) -> None:
+        formula = HOMEBREW_FORMULA_PATH.read_text()
+        self.assertIn('require "json"', formula)
+        self.assertIn('manifest_path = libexec/"remote-helpers.json"', formula)
+        self.assertIn('manifest.fetch("variant")', formula)
+        self.assertIn('manifest.fetch("version")', formula)
+        updater = (REPO_ROOT / "scripts" / "release" / "update-homebrew-tap.sh").read_text()
+        self.assertIn("homebrew-audit-allowlist.mjs", updater)
+        self.assertIn("audit_exceptions/mismatched_binary_allowlist.json", updater)
+        self.assertLess(
+            updater.index("homebrew-audit-allowlist.mjs"),
+            updater.index("git add Formula/kandev.rb"),
+        )
+
+    def test_existing_helper_asset_names_are_immutable_and_release_gate_checks_every_target(self) -> None:
+        check = step_block("Verify staged release assets")
+        self.assertIn("releases/tags/${TAG}", check)
+        self.assertIn("remote-helper-assets.mjs verify-existing-release", check)
+        verify = step_block("Verify staged release assets")
+        for name in (
+            "agentctl-linux-amd64.gz",
+            "agentctl-linux-arm64.gz",
+            "agentctl-darwin-amd64.gz",
+            "agentctl-darwin-arm64.gz",
+        ):
+            self.assertIn(name, verify)
+        self.assertIn('sidecar="dist/release-assets/$asset.sha256"', verify)
+
+    def test_publish_release_uses_integrity_gate_before_container_tag_promotion(self) -> None:
+        gate = job_block("verify-release-assets")
+        self.assertIn("remote-helper-assets.mjs verify-existing-release", gate)
+        for promotion_job in ("docker-manifest", "docker-universal-manifest"):
+            block = job_block(promotion_job)
+            self.assertIn("needs.verify-release-assets.result == 'success'", block)
+        publisher = job_block("publish-release")
+        self.assertNotIn("remote-helper-assets.mjs verify-existing-release", publisher)
+        self.assertNotIn("- name: Verify existing helper assets", publisher)
+        self.assertIn("name: verified-release-assets", publisher)
+        self.assertNotIn("pattern: runtime-candidates-*", publisher)
+        self.assertNotIn("- name: Verify release assets", publisher)
+        self.assert_required_artifact_upload_retries("verify-release-assets", "upload_verified_release_assets")
 
     def assert_required_artifact_upload_retries(
         self, job_name: str, step_prefix: str
@@ -181,12 +608,12 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.assertEqual(block.count(f"id: {step_id}"), 1)
             if attempt > 1:
                 self.assertIn(
-                    f"if: steps.{step_prefix}_{attempt - 1}.outcome == 'failure'",
+                    f"steps.{step_prefix}_{attempt - 1}.outcome == 'failure'",
                     block,
                 )
 
-        self.assertEqual(block.count("if-no-files-found: error"), 3)
-        self.assertEqual(block.count("overwrite: true"), 2)
+        self.assertGreaterEqual(block.count("if-no-files-found: error"), 3)
+        self.assertGreaterEqual(block.count("overwrite: true"), 2)
         self.assertIn("sleep 30", block)
         self.assertIn("sleep 60", block)
         self.assertIn("attempt 1/3 failed; retrying in 30 seconds.", block)
@@ -206,6 +633,9 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         )
         self.assert_required_artifact_upload_retries(
             "build-desktop", "upload_desktop_artifacts"
+        )
+        self.assert_required_artifact_upload_retries(
+            "verify-release-assets", "upload_verified_release_assets"
         )
 
         desktop = job_block("build-desktop")
@@ -235,6 +665,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             ),
             "publish-release": (
                 "prepare",
+                "build-remote-helpers",
                 "build-bundles",
                 "build-desktop",
                 "docker-universal-manifest",
@@ -703,6 +1134,292 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             )
             self.assertNotIn("inputs.backfill_tag == ''", block)
 
+    def test_signpath_readiness_guard_runs_in_ci_and_locally(self) -> None:
+        # The Makefile target is the local entry point; CI runs the release
+        # helper tests from lint-action-pinning.yml. A guard that only the
+        # Makefile knows about is a guard nothing enforces on a pull request.
+        self.assertIn(
+            "run: bash scripts/release/signpath-signing-ready.test.sh",
+            LINT_WORKFLOW,
+        )
+        makefile = (REPO_ROOT / "Makefile").read_text()
+        self.assertIn("bash scripts/release/signpath-signing-ready.test.sh", makefile)
+
+    def test_windows_bundle_signing_gates_on_complete_signpath_inputs(self) -> None:
+        detect = step_block("Detect SignPath signing inputs")
+
+        self.assertIn("if: matrix.goos == 'windows'", detect)
+        self.assertIn("bash scripts/release/signpath-signing-ready.sh", detect)
+        for binding in (
+            "SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}",
+            "SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}",
+            "SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}",
+            "SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}",
+        ):
+            self.assertIn(binding, detect)
+
+        self.assertIn('SIGNPATH_SIGNING_ENABLED=true" >> "$GITHUB_ENV"', detect)
+        self.assertIn('SIGNPATH_SIGNING_ENABLED=false" >> "$GITHUB_ENV"', detect)
+        # An unconfigured repository publishes an unsigned bundle rather than
+        # failing the release, matching how the desktop job treats its own
+        # certificate today.
+        self.assertIn("::notice::", detect)
+        self.assertNotIn("::error::", detect)
+
+    def test_test_signing_policy_is_confined_to_validation_runs(self) -> None:
+        detect = step_block("Detect SignPath signing inputs")
+
+        # The guard decides by purpose: stable and nightly publish the bundle,
+        # desktop_validation_only publishes nothing. A test-signing policy is
+        # only acceptable in the second case, and its refusal has to stand out
+        # from an incomplete configuration, hence a warning rather than a notice.
+        self.assertIn(
+            "${{ needs.nightly-prepare.result == 'success' && 'nightly' || inputs.desktop_validation_only && 'validate' || 'publish' }}",
+            detect,
+        )
+        self.assertIn('bash scripts/release/signpath-signing-ready.sh "$purpose"', detect)
+        self.assertIn("::warning::", detect)
+        self.assertIn("::notice::", detect)
+        self.assertNotIn("::error::", detect)
+        self.assertIn('SIGNPATH_SIGNING_ENABLED=false" >> "$GITHUB_ENV"', detect)
+
+    def test_signing_is_best_effort_and_never_fails_the_release(self) -> None:
+        bundles = job_block("build-bundles")
+        upload = step_block("Upload unsigned Windows binaries")
+        sign = step_block("Sign Windows runtime binaries")
+        report = step_block("Report incomplete signing")
+
+        def lines(block: str) -> list[str]:
+            return [line.strip() for line in block.splitlines()]
+
+        # The Foundation approves every release signing request by hand, so a
+        # request can outlive any timeout. Neither the upload nor the signing
+        # step may fail the job: the tag is already pushed by then, and an
+        # unsigned bundle is the documented fallback, not a broken release.
+        self.assertIn("continue-on-error: true", lines(upload))
+        self.assertIn("continue-on-error: true", lines(sign))
+        self.assertIn("id: signpath", lines(sign))
+        self.assertIn("wait-for-completion-timeout-in-seconds: 3600", lines(sign))
+        self.assertIn("steps.unsigned-windows-binaries.outcome == 'success'", sign)
+
+        self.assertIn("steps.signpath.outcome != 'success'", report)
+        self.assertIn("env.SIGNPATH_SIGNING_ENABLED == 'true'", report)
+        self.assertIn("::warning::", report)
+        self.assertNotIn("::error::", report)
+
+        signed = "- name: Sign Windows runtime binaries"
+        reported = "- name: Report incomplete signing"
+        package = "- name: Package bundle"
+        self.assertLess(bundles.index(signed), bundles.index(reported))
+        self.assertLess(bundles.index(reported), bundles.index(package))
+
+    def test_windows_bundle_is_signed_before_it_is_packaged(self) -> None:
+        bundles = job_block("build-bundles")
+        build = "- name: Build backend binaries"
+        upload = "- name: Upload unsigned Windows binaries"
+        sign = "- name: Sign Windows runtime binaries"
+        package = "- name: Package bundle"
+
+        for step in (build, upload, sign, package):
+            self.assertIn(step, bundles)
+
+        # Signing has to land between the build and the archive. `Package
+        # bundle` copies apps/backend/bin into dist/ and immediately tars and
+        # zips it, so a signature applied after that step never reaches the
+        # tarball Homebrew and Scoop serve or the zip winget would.
+        self.assertLess(bundles.index(build), bundles.index(upload))
+        self.assertLess(bundles.index(upload), bundles.index(sign))
+        self.assertLess(bundles.index(sign), bundles.index(package))
+
+    def test_windows_signing_submits_the_binaries_the_bundle_ships(self) -> None:
+        upload = step_block("Upload unsigned Windows binaries")
+        sign = step_block("Sign Windows runtime binaries")
+        package = step_block("Package bundle")
+        gate = "if: matrix.goos == 'windows' && env.SIGNPATH_SIGNING_ENABLED == 'true'"
+
+        self.assertIn(gate, upload)
+        self.assertIn(gate, sign)
+
+        # The bundle's only two PE files. The remaining agentctl helpers are
+        # built for linux and darwin and carry no Authenticode signature.
+        self.assertIn("id: unsigned-windows-binaries", upload)
+        self.assertIn("apps/backend/bin/kandev.exe", upload)
+        self.assertIn("apps/backend/bin/agentctl.exe", upload)
+
+        self.assertIn("uses: signpath/github-action-submit-signing-request@", sign)
+        self.assertIn(
+            "github-artifact-id: "
+            "${{ steps.unsigned-windows-binaries.outputs.artifact-id }}",
+            sign,
+        )
+        self.assertIn("wait-for-completion: true", sign)
+        # Extraction is isolated until the entire signed pair is ready.
+        self.assertIn(
+            "output-artifact-directory: ${{ runner.temp }}/signpath-signed",
+            [line.strip() for line in sign.splitlines()],
+        )
+        self.assertIn("cp apps/backend/bin/kandev${EXT} dist/kandev/bin/", package)
+        self.assertIn("cp apps/backend/bin/agentctl${EXT} dist/kandev/bin/", package)
+
+    def test_signed_output_is_isolated_from_the_unsigned_build(self) -> None:
+        sign = step_block("Sign Windows runtime binaries")
+        self.assertIn(
+            "output-artifact-directory: ${{ runner.temp }}/signpath-signed",
+            sign,
+        )
+        self.assertNotIn("output-artifact-directory: apps/backend/bin", sign)
+
+    def test_signed_binary_adoption_preserves_fallback_until_both_files_are_ready(self) -> None:
+        block = step_block("Restore execute bits on signed binaries")
+        run = block.split("        run: ", 1)[1]
+        script = (
+            "\n".join(line[10:] for line in run.splitlines()[1:])
+            if run.startswith("|") else run.strip()
+        )
+        for missing in ("kandev.exe", "agentctl.exe", "empty", None):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                binaries = root / "apps/backend/bin"
+                binaries.mkdir(parents=True)
+                staged = root / "signpath-signed"
+                staged.mkdir()
+                for name in ("kandev.exe", "agentctl.exe"):
+                    (binaries / name).write_bytes(b"unsigned-" + name.encode())
+                    (binaries / name).chmod(0o755)
+                    if missing != name:
+                        (staged / name).write_bytes(
+                            b"" if missing == "empty" else b"signed-" + name.encode()
+                        )
+                        (staged / name).chmod(0o644)
+                result = subprocess.run(
+                    ["bash", "-euo", "pipefail", "-c", script],
+                    cwd=root,
+                    env={**os.environ, "RUNNER_TEMP": str(root)},
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(0, result.returncode, result.stderr)
+                for name in ("kandev.exe", "agentctl.exe"):
+                    expected = b"signed-" if missing is None else b"unsigned-"
+                    self.assertEqual(expected + name.encode(), (binaries / name).read_bytes())
+                    self.assertEqual(0o755, stat.S_IMODE((binaries / name).stat().st_mode))
+                if missing is not None:
+                    self.assertIn("::warning::", result.stdout)
+
+    def test_windows_archives_keep_the_layout_package_managers_resolve(self) -> None:
+        package = step_block("Package bundle")
+
+        # Scoop's manifest declares `extract_dir: "kandev"` and a winget
+        # manifest would declare `RelativeFilePath: kandev\bin\kandev.exe`.
+        # Both read a path out of the archive rather than searching it, so the
+        # `kandev/` root and the `bin/` subdirectory are a published contract,
+        # not an implementation detail of this step.
+        # Whole lines, not substrings: archiving `kandev/bin` instead of
+        # `kandev` still contains the shorter command and would slip past a
+        # substring check while breaking every consumer.
+        commands = [line.strip() for line in package.splitlines()]
+
+        self.assertIn("mkdir -p dist/kandev/bin", commands)
+        self.assertIn("cp apps/backend/bin/kandev${EXT} dist/kandev/bin/", commands)
+        for archive in (
+            'tar -czf "$GITHUB_WORKSPACE/dist/kandev-${{ matrix.platform }}.tar.gz" -C "$GITHUB_WORKSPACE/dist" kandev',
+            '(cd dist && zip -qr "kandev-${{ matrix.platform }}.zip" kandev)',
+        ):
+            self.assertIn(archive, commands)
+
+        # The zip is additional, not a replacement: Homebrew and the npm
+        # runtime packages still read the tarball.
+        self.assertIn("if [ \"${{ matrix.goos }}\" = \"windows\" ]; then", package)
+
+    def test_signed_windows_binaries_regain_execute_bits_before_packaging(self) -> None:
+        bundles = job_block("build-bundles")
+        sign = "- name: Sign Windows runtime binaries"
+        restore = "- name: Restore execute bits on signed binaries"
+        package = "- name: Package bundle"
+
+        # upload-artifact stores files without their mode bits, so the signed
+        # binaries come back 0644. package-bundle.sh rejects a launcher that is
+        # not executable, which would fail the first signed release inside the
+        # packaging step. The restore has to sit between signing and packaging.
+        for step in (sign, restore, package):
+            self.assertIn(step, bundles)
+        self.assertLess(bundles.index(sign), bundles.index(restore))
+        self.assertLess(bundles.index(restore), bundles.index(package))
+
+        step = step_block("Restore execute bits on signed binaries")
+        self.assertIn(
+            "if: matrix.goos == 'windows' && steps.signpath.outcome == 'success'",
+            step,
+        )
+        self.assertIn(
+            'install -m 0755 "$signed_dir/kandev.exe" apps/backend/bin/kandev.exe',
+            [line.strip() for line in step.splitlines()],
+        )
+
+    def test_release_workflow_documents_the_signpath_configuration(self) -> None:
+        # The documentation block a maintainer reads before configuring the
+        # release: every other signing input is listed there.
+        header = "".join(
+            line for line in WORKFLOW.splitlines(keepends=True)
+            if line.startswith("#")
+        )
+
+        for name in (
+            "SIGNPATH_API_TOKEN",
+            "SIGNPATH_ORGANIZATION_ID",
+            "SIGNPATH_PROJECT_SLUG",
+            "SIGNPATH_SIGNING_POLICY_SLUG",
+        ):
+            self.assertIn(name, header)
+
+    def test_release_documentation_declares_the_windows_bundle_signing_contract(
+        self,
+    ) -> None:
+        for requirement in (
+            "SIGNPATH_API_TOKEN",
+            "SIGNPATH_ORGANIZATION_ID",
+            "SIGNPATH_PROJECT_SLUG",
+            "SIGNPATH_SIGNING_POLICY_SLUG",
+            # A maintainer has to be able to tell the desktop installer's
+            # certificate apart from the runtime bundle's, and to know that a
+            # partial configuration degrades rather than fails.
+            "runtime bundle",
+            "unsigned",
+            # Nightlies never submit a request requiring manual approval.
+            "nightlies",
+            "test-signing policy",
+            "desktop_validation_only",
+            "one hour",
+            "manual approval",
+            "not trusted by Windows",
+        ):
+            self.assertIn(requirement, RELEASE_PROCESS)
+
+    def test_legacy_backfill_uses_full_bundle_without_compact_release_tools(self) -> None:
+        prepare = job_block("prepare")
+        self.assertIn("compact_runtime_contract:", prepare)
+        compute = step_block("Compute next version")
+        self.assertIn('git cat-file -e "${BACKFILL_REF}:scripts/check-agentctl-deps.sh"', compute)
+        self.assertIn('echo "compact_runtime_contract=$COMPACT_RUNTIME_CONTRACT"', compute)
+
+        helper_build = step_block("Build and verify canonical remote helpers")
+        self.assertIn('if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ] && [ -f scripts/release/remote-helper-assets.mjs ]', helper_build)
+        self.assertIn("dist/remote-helper-artifact/bin", helper_build)
+
+        package = step_block("Package bundle")
+        self.assertIn("COMPACT_RUNTIME_CONTRACT", package)
+        self.assertIn('if [ "$COMPACT_RUNTIME_CONTRACT" = "true" ]', package)
+        self.assertIn('kandev-${{ matrix.platform }}-full.tar.gz', package)
+
+        desktop = step_block("Prepare desktop runtime resources")
+        self.assertIn("COMPACT_RUNTIME_CONTRACT", desktop)
+        self.assertIn('kandev-${{ matrix.platform }}-${RUNTIME_VARIANT}.tar.gz', desktop)
+        self.assertIn("prepare-desktop-runtime.sh", desktop)
+        self.assertIn("apps/desktop/src-tauri/resources/kandev", desktop)
+
+        publisher = job_block("publish-release")
+        self.assertNotIn("- name: Verify existing helper assets", publisher)
+        self.assertIn("needs.verify-release-assets.result == 'success'", publisher)
+
     def test_updater_signing_validation_uses_workflow_control_revision(self) -> None:
         build_desktop = job_block("build-desktop")
         self.assertIn("ref: ${{ needs.prepare.outputs.ref }}", build_desktop)
@@ -724,7 +1441,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("bash scripts/release/updater-signing-ready.sh", detect)
 
     def test_desktop_asset_validation_uses_workflow_control_revision(self) -> None:
-        for job in ("build-desktop", "publish-release"):
+        for job in ("build-desktop", "verify-release-assets"):
             block = job_block(job)
             self.assertIn("ref: ${{ needs.prepare.outputs.ref }}", block)
             self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", block)

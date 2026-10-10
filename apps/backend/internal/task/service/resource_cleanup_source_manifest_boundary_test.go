@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -30,11 +31,13 @@ type manifestBoundaryCleanup struct {
 	repo interface {
 		GetTaskResourceCleanupJob(context.Context, string) (*models.TaskResourceCleanupJob, error)
 	}
-	stopper       *manifestBoundaryStopper
-	captureErr    error
-	captureCount  int
-	cleanupErr    error
-	cleanupCalled bool
+	stopper           *manifestBoundaryStopper
+	captureErr        error
+	captureCount      int
+	captureStarted    chan struct{}
+	waitCaptureCancel bool
+	cleanupErr        error
+	cleanupCalled     bool
 }
 
 func TestCaptureManifestDefersOnRuntimeStopFailureWithStableReason(t *testing.T) {
@@ -59,11 +62,16 @@ func (c *manifestBoundaryCleanup) GetAllByTaskID(context.Context, string) ([]*wo
 }
 
 func (c *manifestBoundaryCleanup) CaptureArchiveSourceManifests(
-	_ context.Context, worktrees []*worktree.Worktree,
+	ctx context.Context, worktrees []*worktree.Worktree,
 ) (map[string]worktree.ArchiveSourceManifest, error) {
 	c.captureCount++
 	if !c.stopper.stopped {
 		return nil, errors.New("capture ran before runtime stop")
+	}
+	if c.waitCaptureCancel {
+		close(c.captureStarted)
+		<-ctx.Done()
+		return nil, ctx.Err()
 	}
 	if c.captureErr != nil {
 		return nil, c.captureErr
@@ -234,5 +242,133 @@ func TestCleanupCaptureFailureBlocksWorktreeRemoval(t *testing.T) {
 	}
 	if cleanup.cleanupCalled {
 		t.Fatal("worktree cleanup ran after source capture failed")
+	}
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.8
+func TestCleanupManifestCancellationBlocksRemoval(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc, repo := setupOfficeTest(t)
+	svc.StopTaskResourceCleanupWorker()
+	stopper := &manifestBoundaryStopper{}
+	captureStarted := make(chan struct{})
+	cleanup := &manifestBoundaryCleanup{
+		repo: repo, stopper: stopper, captureStarted: captureStarted, waitCaptureCancel: true,
+	}
+	svc.SetWorktreeCleanup(cleanup)
+	svc.SetExecutionStopper(stopper)
+
+	snapshot, err := json.Marshal(taskResourceCleanupSnapshot{
+		Worktrees:   []*worktree.Worktree{{ID: "wt", TaskID: "task", RepositoryID: "repo"}},
+		StopTargets: []persistedTaskStopTarget{{SessionID: "session", ExecutionID: "execution"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := &models.TaskResourceCleanupJob{
+		ID: "manifest-boundary-job", OperationID: "delete:manifest-cancel",
+		TaskID: "task", Trigger: models.TaskResourceCleanupTriggerDelete,
+		State: models.TaskResourceCleanupStatePending, ResourceSnapshot: string(snapshot),
+	}
+	if err := repo.CreateTaskResourceCleanupJob(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	processDone := make(chan error, 1)
+	go func() { processDone <- svc.processTaskResourceCleanupJob(ctx, job.ID) }()
+	select {
+	case <-captureStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cleanup did not reach source capture")
+	}
+	cancel()
+	select {
+	case err := <-processDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cleanup error = %v, want cancellation", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cleanup did not finish its canceled attempt")
+	}
+	if cleanup.cleanupCalled {
+		t.Fatal("worktree removal ran after manifest capture was canceled")
+	}
+	job, err = repo.GetTaskResourceCleanupJob(context.Background(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.State != models.TaskResourceCleanupStateRetryWait || !strings.Contains(job.LastError, context.Canceled.Error()) {
+		t.Fatalf("cleanup retry state=%q last_error=%q, want retained cancellation diagnostics", job.State, job.LastError)
+	}
+	var persisted taskResourceCleanupSnapshot
+	if err := json.Unmarshal([]byte(job.ResourceSnapshot), &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.ArchiveSourceManifestCaptured || len(persisted.ArchiveSourceManifest) != 0 {
+		t.Fatalf("canceled attempt persisted partial manifest: %+v", persisted)
+	}
+}
+
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.8
+func TestStopTaskResourceCleanupWorkerCancelsManifestCapture(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := setupOfficeTest(t)
+	svc.StopTaskResourceCleanupWorker()
+	stopper := &manifestBoundaryStopper{}
+	captureStarted := make(chan struct{})
+	cleanup := &manifestBoundaryCleanup{
+		repo: repo, stopper: stopper, captureStarted: captureStarted, waitCaptureCancel: true,
+	}
+	svc.SetWorktreeCleanup(cleanup)
+	svc.SetExecutionStopper(stopper)
+	snapshot, err := json.Marshal(taskResourceCleanupSnapshot{
+		Worktrees:   []*worktree.Worktree{{ID: "wt", TaskID: "task", RepositoryID: "repo"}},
+		StopTargets: []persistedTaskStopTarget{{SessionID: "session", ExecutionID: "execution"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := &models.TaskResourceCleanupJob{
+		ID: "manifest-boundary-job", OperationID: "delete:manifest-stop-worker",
+		TaskID: "task", Trigger: models.TaskResourceCleanupTriggerDelete,
+		State: models.TaskResourceCleanupStatePending, ResourceSnapshot: string(snapshot),
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.StartTaskResourceCleanupWorker(ctx); err != nil {
+		t.Fatalf("StartTaskResourceCleanupWorker: %v", err)
+	}
+	select {
+	case <-captureStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cleanup worker did not reach manifest capture")
+	}
+	stopDone := make(chan struct{})
+	go func() {
+		svc.StopTaskResourceCleanupWorker()
+		close(stopDone)
+	}()
+	select {
+	case <-stopDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("StopTaskResourceCleanupWorker did not join canceled capture")
+	}
+	if cleanup.cleanupCalled {
+		t.Fatal("worktree removal ran after worker canceled manifest capture")
+	}
+	job, err = repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.State != models.TaskResourceCleanupStateRetryWait || !strings.Contains(job.LastError, context.Canceled.Error()) {
+		t.Fatalf("cleanup retry state=%q last_error=%q, want retained cancellation diagnostics", job.State, job.LastError)
+	}
+	var persisted taskResourceCleanupSnapshot
+	if err := json.Unmarshal([]byte(job.ResourceSnapshot), &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.ArchiveSourceManifestCaptured || len(persisted.ArchiveSourceManifest) != 0 {
+		t.Fatalf("worker stop persisted a partial manifest: %+v", persisted)
 	}
 }

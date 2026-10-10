@@ -56,7 +56,7 @@ test("renders the allowlisted OpenCode recovery link without leaking it into the
   const session = new SessionPage(testPage);
   await session.waitForLoad();
 
-  const recovery = session.activeChat().getByTestId("provider-quota-recovery");
+  const recovery = session.activeChat().getByTestId("session-recovery-card");
   await expect(recovery).toBeVisible();
 
   const link = recovery.getByTestId("remediation-link");
@@ -83,9 +83,9 @@ test("renders the allowlisted OpenCode recovery link without leaking it into the
   await expect(technicalOutput).not.toContainText("wrk_");
   await expect(technicalOutput).not.toContainText("ses_");
 
-  // Existing recovery actions stay intact beside the link.
-  await expect(recovery.getByTestId("provider-quota-archive-button")).toBeVisible();
-  await expect(recovery.getByTestId("provider-quota-delete-button")).toBeVisible();
+  // Destructive task actions stay in the task menu, outside the recovery card.
+  await expect(recovery.getByTestId("provider-quota-archive-button")).toHaveCount(0);
+  await expect(recovery.getByTestId("provider-quota-delete-button")).toHaveCount(0);
 
   await assertNoDocumentHorizontalOverflow(testPage, "provider remediation link");
   await testPage.screenshot({
@@ -135,7 +135,7 @@ test("keeps the short-error fallback when no remediation URL is present", async 
   // The generic recovery card keeps the short message and offers no link.
   await expect(session.activeChat()).toContainText("AI_APICallError");
   await expect(session.activeChat().getByTestId("remediation-link")).toHaveCount(0);
-  await expect(session.activeChat().getByTestId("provider-quota-archive-button")).toBeVisible();
+  await expect(session.activeChat().getByTestId("provider-quota-archive-button")).toHaveCount(0);
 });
 
 test("renders the remediation link inside the persistent last-agent-error notice", async ({

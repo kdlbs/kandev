@@ -194,6 +194,9 @@ func (r *Repository) createCoreTables() error {
 	if err := r.createWorkspacePauseTable(); err != nil {
 		return err
 	}
+	if err := r.createDeferredAssignmentsTable(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -437,6 +440,8 @@ func (r *Repository) createRunTables() error {
 		resolved_model TEXT,
 		current_route_attempt_seq INTEGER NOT NULL DEFAULT 0,
 		routing_blocked_status TEXT,
+		session_recovery_block_id TEXT,
+		session_recovery_reason TEXT,
 		earliest_retry_at TIMESTAMP,
 		-- route_cycle_baseline_seq marks the floor at which the current
 		-- retry cycle began. excludedFromAttempts filters prior attempt

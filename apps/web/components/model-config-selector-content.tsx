@@ -38,6 +38,7 @@ function ModelRow({
   loading: boolean;
   onSelect: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   const item = (
     <CommandItem
       value={model.id}
@@ -50,7 +51,14 @@ function ModelRow({
     >
       <div className="flex min-w-0 flex-1 items-center">
         <div className="min-w-0 flex-1">
-          <div className="truncate">{model.name}</div>
+          <div className="flex items-center gap-2">
+            <span className="truncate">{model.name}</span>
+            {(model.source === "cli" || model.source === "acp") && (
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {t(model.source === "cli" ? "agents:modelSourceCli" : "agents:modelSourceAcp")}
+              </span>
+            )}
+          </div>
           {model.description && (
             <div className="truncate text-xs text-muted-foreground" title={model.description}>
               {model.description}
@@ -102,7 +110,7 @@ function CustomModelRow({ value, onSelect }: { value: string; onSelect: (value: 
       value={value}
       data-testid="model-config-custom-row"
       onSelect={() => onSelect(value)}
-      className="cursor-pointer"
+      className={selectorOptions.selectorOptionClassName(false, false)}
     >
       <div className="min-w-0 flex-1 truncate">
         {t("agents:useCustomModelId", { model: value })}

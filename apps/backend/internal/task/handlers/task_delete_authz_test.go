@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/worktree"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -39,6 +40,16 @@ type authzDeleteRepo struct {
 	deleted   []string
 	deleteErr []error
 	archived  []string
+}
+
+type authzDeleteCleanup struct{}
+
+func (authzDeleteCleanup) OnTaskDeleted(context.Context, string) error { return nil }
+func (authzDeleteCleanup) GetAllByTaskID(context.Context, string) ([]*worktree.Worktree, error) {
+	return nil, nil
+}
+func (authzDeleteCleanup) InspectDirtyWorktrees(context.Context, []*worktree.Worktree) ([]worktree.DirtyWorktree, error) {
+	return nil, nil
 }
 
 func (r *authzDeleteRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
@@ -125,6 +136,7 @@ func newAuthzTaskHandlers(t *testing.T, repo *authzDeleteRepo) *TaskHandlers {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorktreeCleanup(authzDeleteCleanup{})
 	return &TaskHandlers{service: svc, repo: repo, logger: log}
 }
 
@@ -140,6 +152,15 @@ func authzDeleteRequest(t *testing.T, userID, taskID string) (*gin.Context, *htt
 	c.Request = req
 	c.Params = gin.Params{{Key: "id", Value: taskID}}
 	return c, rec
+}
+
+func authorizeTaskDeletePreview(t *testing.T, h *TaskHandlers, c *gin.Context, taskID string) {
+	t.Helper()
+	preview, err := h.service.TaskDeletePreflight(c.Request.Context(), []string{taskID}, false, false)
+	if err != nil {
+		t.Fatalf("TaskDeletePreflight: %v", err)
+	}
+	c.Request.Header.Set(taskDeleteConfirmationHeader, preview.ConfirmationID)
 }
 
 func TestHTTPDeleteTaskDeniesForeignTask(t *testing.T) {
@@ -159,6 +180,7 @@ func TestHTTPDeleteTaskDeniesForeignTask(t *testing.T) {
 	// The owner must still be able to delete, otherwise a 404 for everyone
 	// would pass this test just as well.
 	ownerCtx, ownerRec := authzDeleteRequest(t, "user-b", "task-b")
+	authorizeTaskDeletePreview(t, h, ownerCtx, "task-b")
 	h.httpDeleteTask(ownerCtx)
 
 	if ownerRec.Code != http.StatusOK {
@@ -191,6 +213,7 @@ func TestHTTPDeleteTaskDeniesForeignTaskThroughCascade(t *testing.T) {
 	}
 
 	ownerCtx, ownerRec := authzDeleteRequest(t, "user-b", "task-b")
+	authorizeTaskDeletePreview(t, h, ownerCtx, "task-b")
 	h.httpDeleteTask(ownerCtx)
 
 	if ownerRec.Code != http.StatusOK {
@@ -247,6 +270,7 @@ func TestHTTPDeleteTaskSurvivesClientDisconnect(t *testing.T) {
 	h := newAuthzTaskHandlers(t, repo)
 
 	c, rec := authzDeleteRequest(t, "user-b", "task-b")
+	authorizeTaskDeletePreview(t, h, c, "task-b")
 	gone, disconnect := context.WithCancel(c.Request.Context())
 	c.Request = c.Request.WithContext(gone)
 	disconnect()

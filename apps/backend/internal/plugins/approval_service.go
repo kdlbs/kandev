@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -18,18 +19,38 @@ func (s *Service) approvalLedger() *approvalLedger {
 }
 
 func (s *Service) approvalGrant(installationID, workspaceID string, revision uint64, manifestDigest string, capabilityIDs []string, actor, reason, auditID string) (CapabilityApproval, error) {
+	s.approvalEffectMu.Lock()
 	ledger := s.approvalLedger()
 	if ledger == nil {
-		return CapabilityApproval{}, fmt.Errorf("plugins: approval ledger not configured")
+		s.approvalEffectMu.Unlock()
+		return CapabilityApproval{}, ErrApprovalLedgerUnavailable
 	}
 	canonical, err := CanonicalCapabilityList(capabilityIDs)
 	if err != nil {
+		s.approvalEffectMu.Unlock()
 		return CapabilityApproval{}, err
 	}
 	if err := s.validateApprovalManifest(installationID, manifestDigest, canonical); err != nil {
+		s.approvalEffectMu.Unlock()
 		return CapabilityApproval{}, err
 	}
-	return ledger.grant(installationID, workspaceID, revision, manifestDigest, canonical, actor, reason, auditID, time.Now().UTC())
+	previous, found, err := ledger.get(installationID, workspaceID)
+	if err != nil {
+		s.approvalEffectMu.Unlock()
+		return CapabilityApproval{}, err
+	}
+	row, err := ledger.grant(installationID, workspaceID, revision, manifestDigest, canonical, actor, reason, auditID, time.Now().UTC())
+	changed := err == nil && (!found || row.Revision != previous.Revision)
+	s.approvalEffectMu.Unlock()
+	if err != nil {
+		return CapabilityApproval{}, err
+	}
+	if changed {
+		if err := s.invalidateManagedConversationPolicy(installationID, workspaceID); err != nil {
+			return row, fmt.Errorf("plugins: approval changed but managed conversation cancellation failed: %w", err)
+		}
+	}
+	return row, nil
 }
 
 func (s *Service) validateApprovalManifest(installationID, manifestDigest string, capabilityIDs []string) error {
@@ -60,21 +81,45 @@ func (s *Service) validateApprovalManifest(installationID, manifestDigest string
 }
 
 func (s *Service) approvalRevoke(installationID, workspaceID, actor, reason, auditID string) (CapabilityApproval, error) {
+	s.approvalEffectMu.Lock()
 	ledger := s.approvalLedger()
 	if ledger == nil {
-		return CapabilityApproval{}, fmt.Errorf("plugins: approval ledger not configured")
+		s.approvalEffectMu.Unlock()
+		return CapabilityApproval{}, ErrApprovalLedgerUnavailable
 	}
 	current, ok, err := ledger.get(installationID, workspaceID)
 	if err != nil || !ok {
+		s.approvalEffectMu.Unlock()
 		if err != nil {
 			return CapabilityApproval{}, err
 		}
-		return CapabilityApproval{}, fmt.Errorf("plugins: approval not found")
+		return CapabilityApproval{}, ErrApprovalNotFound
 	}
-	return ledger.revokeIfRevision(installationID, workspaceID, current.Revision, actor, reason, auditID, time.Now().UTC(), true)
+	row, err := ledger.revokeIfRevision(installationID, workspaceID, current.Revision, actor, reason, auditID, time.Now().UTC(), true)
+	changed := err == nil && (row.Revision != current.Revision || row.State != current.State)
+	s.approvalEffectMu.Unlock()
+	if err != nil {
+		return CapabilityApproval{}, err
+	}
+	if changed {
+		if err := s.invalidateManagedConversationPolicy(installationID, workspaceID); err != nil {
+			return row, fmt.Errorf("plugins: approval revoked but managed conversation cancellation failed: %w", err)
+		}
+	}
+	return row, nil
+}
+
+func (s *Service) invalidateManagedConversationPolicy(installationID, workspaceID string) error {
+	managed := s.managedAgentConversationDeps()
+	if managed == nil {
+		return nil
+	}
+	return managed.InvalidateManagedForInstallationWorkspace(context.Background(), installationID, workspaceID)
 }
 
 func (s *Service) approvalTombstoneInstallation(installationID string) error {
+	s.approvalEffectMu.Lock()
+	defer s.approvalEffectMu.Unlock()
 	ledger := s.approvalLedger()
 	if ledger == nil {
 		return nil

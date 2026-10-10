@@ -1,8 +1,9 @@
 # ADR-2026-08-05-homebrew-remote-helper-audit: Preserve Remote Helpers in Homebrew Installs
 
-**Status:** accepted
+**Status:** superseded
 **Date:** 2026-08-05
 **Area:** infra, workflow
+**Superseded by:** [ADR-2026-09-23-compact-runtime-and-remote-helper-assets](2026-09-23-compact-runtime-and-remote-helper-assets.md)
 
 ## Context
 
@@ -14,7 +15,7 @@ remote execution on the omitted platforms.
 
 ## Decision
 
-The `kdlbs/homebrew-kandev` tap preserves the complete validated release bundle. The tap owns an
+Until the compact runtime distribution cutover, the `kdlbs/homebrew-kandev` tap preserved the complete validated release bundle. The tap owned an
 `audit_exceptions/mismatched_binary_allowlist.json` entry for `kandev` that names only these paths:
 
 - `libexec/bin/agentctl-darwin-amd64`
@@ -28,10 +29,10 @@ before release publication.
 
 ## Consequences
 
-Homebrew installations retain Docker and SSH support across the release bundle's supported remote
-platforms. The tap uses Homebrew's supported, path-scoped audit mechanism for intentional foreign
-binaries. Any helper rename, relocation, addition, or removal requires coordinated updates to the
-release-bundle contract, the tap allowlist, and tap CI.
+This decision describes the historical complete-bundle behavior before the compact runtime
+distribution cutover. Stable tap installations now use the standard bundle and fetch a verified
+remote helper when needed. The tap's mismatched-binary audit exception must be removed with its
+first compact formula.
 
 ## Alternatives Considered
 

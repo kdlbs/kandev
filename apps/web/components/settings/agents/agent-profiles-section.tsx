@@ -24,7 +24,6 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
 import { useRouter } from "@/lib/routing/client-router";
 import { classifyAgentProfileFallback } from "@/lib/agent-profile-fallback";
-import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 import { RecordDot } from "@/components/settings/record-dot";
 import { DisabledBadge } from "@/components/settings/record-badges";
@@ -73,11 +72,13 @@ function ProfileRowActions({
   deleteAnchorRef,
   onDuplicate,
   onConfirmDelete,
+  duplicateDisabled,
 }: {
   profile: AgentProfile;
   deleteAnchorRef: RefObject<HTMLButtonElement | null>;
   onDuplicate: () => void;
   onConfirmDelete: () => void;
+  duplicateDisabled: boolean;
 }) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
@@ -120,6 +121,7 @@ function ProfileRowActions({
           <DropdownMenuItem
             className="cursor-pointer"
             data-testid={`duplicate-profile-${profile.id}`}
+            disabled={duplicateDisabled}
             onSelect={onDuplicate}
           >
             <IconCopy className="h-4 w-4 mr-2" />
@@ -147,11 +149,13 @@ function ProfileRowInlineActions({
   deleteAnchorRef,
   onDuplicate,
   onConfirmDelete,
+  duplicateDisabled,
 }: {
   profile: AgentProfile;
   deleteAnchorRef: RefObject<HTMLButtonElement | null>;
   onDuplicate: () => void;
   onConfirmDelete: () => void;
+  duplicateDisabled: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -164,6 +168,7 @@ function ProfileRowInlineActions({
             size="icon"
             className="cursor-pointer"
             data-testid={`duplicate-profile-inline-${profile.id}`}
+            disabled={duplicateDisabled}
             onClick={onDuplicate}
             aria-label={t("agents:duplicate")}
           >
@@ -251,6 +256,7 @@ type ProfileRowCardProps = {
   onDuplicate: () => void;
   onConfirmDelete: () => void;
   confirmationProps: ProfileRowDeleteConfirmationBaseProps;
+  duplicateDisabled: boolean;
 };
 
 function ProfileRowCard({
@@ -264,6 +270,7 @@ function ProfileRowCard({
   onDuplicate,
   onConfirmDelete,
   confirmationProps,
+  duplicateDisabled,
 }: ProfileRowCardProps) {
   const { isMobile } = useResponsiveBreakpoint();
   const { t } = useTranslation();
@@ -316,6 +323,7 @@ function ProfileRowCard({
                 deleteAnchorRef={deleteAnchorRef}
                 onDuplicate={onDuplicate}
                 onConfirmDelete={onConfirmDelete}
+                duplicateDisabled={duplicateDisabled}
               />
             ) : (
               <ProfileRowActions
@@ -323,6 +331,7 @@ function ProfileRowCard({
                 deleteAnchorRef={deleteAnchorRef}
                 onDuplicate={onDuplicate}
                 onConfirmDelete={onConfirmDelete}
+                duplicateDisabled={duplicateDisabled}
               />
             ))}
         </div>
@@ -347,6 +356,7 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
   const store = useAppStoreApi();
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
+  const nativeCodexAvailable = useAppStore((state) => state.features?.codexAppServer ?? false);
   const href = profileHref(agent.name, profile.id);
   const closeDeleteConfirmation = () => {
     setConfirmOpen(false);
@@ -364,13 +374,9 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
         profiles: item.profiles.filter((p) => p.id !== profile.id),
       }));
       setSettingsAgents(nextAgents);
-      // `agentProfiles` is the flattened picker list over the same data. Every
-      // other writer updates the pair together, and its only refetch is a
-      // one-shot guarded by `agentsLoaded`, so skipping it here left the
-      // deleted profile selectable until a reload.
-      setAgentProfiles(
-        nextAgents.flatMap((item) => item.profiles.map((p) => toAgentProfileOption(item, p))),
-      );
+      // Picker options can exist without a settings owner row. Deletion owns
+      // only the accepted profile ID, so preserve every other current option.
+      setAgentProfiles(store.getState().agentProfiles.items.filter((p) => p.id !== profile.id));
       return;
     }
     // Conflicts (active sessions, watchers, routing tiers) carry a guided
@@ -413,6 +419,7 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
       onDuplicate={() => void handleDuplicate(agent, profile)}
       onConfirmDelete={() => setConfirmOpen(true)}
       confirmationProps={confirmationProps}
+      duplicateDisabled={agent.name === "codex-app-server" && !nativeCodexAvailable}
     />
   );
 }

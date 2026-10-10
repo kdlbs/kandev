@@ -91,8 +91,44 @@ async function expectRelativeOrder(panel: Locator, ...contents: string[]): Promi
     .toEqual({ positions: contents.map((_, index) => index), slowHead: true });
 }
 
+async function startKeyboardDrag(page: Page, handle: Locator, row: Locator): Promise<void> {
+  const sensor = await page.evaluateHandle(() => {
+    const state = { attached: false };
+    const original = document.addEventListener;
+    const observe = ((...args: Parameters<typeof original>) => {
+      original.apply(document, args);
+      const [type, listener] = args;
+      if (
+        type === "keydown" &&
+        typeof listener === "function" &&
+        listener.name === "bound handleKeyDown"
+      ) {
+        state.attached = true;
+      }
+    }) as typeof original;
+    document.addEventListener = observe;
+    return {
+      state,
+      restore: () => {
+        if (document.addEventListener === observe) document.addEventListener = original;
+      },
+    };
+  });
+  try {
+    await handle.focus();
+    await expect(handle).toBeFocused();
+    await handle.press("Space");
+    await expect(row).toHaveClass(/opacity-40/, { timeout: 5_000 });
+    // dnd-kit defers its document key listener after announcing drag start.
+    await expect.poll(() => sensor.evaluate(({ state }) => state.attached)).toBe(true);
+  } finally {
+    await sensor.evaluate(({ restore }) => restore());
+    await sensor.dispose();
+  }
+}
+
 test.describe("Queue reorder", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test("drag-and-drop reorders queued messages and persists the order", async ({
     testPage,
@@ -165,8 +201,7 @@ test.describe("Queue reorder", () => {
 
     const session = await seedIdleTask(testPage, apiClient, seedData, "Queue reorder keyboard");
     await session.sendMessage("/slow 30s");
-    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await waitForComposerQueueMode(testPage);
+    await waitForComposerQueueMode(testPage, 30_000);
 
     const editor = session.activeChat().locator(".tiptap.ProseMirror:visible").first();
     await queueMessagesWhileBusy(testPage, editor, [
@@ -182,9 +217,7 @@ test.describe("Queue reorder", () => {
     // drops. Wait for the drag to actually start (the row dims) before moving.
     const handle = rowHandle(panel, "reorder first");
     const row = handle.locator("xpath=..");
-    await handle.focus();
-    await testPage.keyboard.press("Space");
-    await expect(row).toHaveClass(/opacity-40/, { timeout: 5_000 });
+    await startKeyboardDrag(testPage, handle, row);
     // dnd-kit announces every resolved drag target in its accessibility live
     // region. That makes the two internal steps below observable rather than
     // guessed at: droppable measuring after the drag starts, and target
@@ -200,11 +233,11 @@ test.describe("Queue reorder", () => {
     await expect.poll(announcedTarget, { timeout: 5_000 }).toContain(MOVED_OVER);
     const targetBeforeArrow = await announcedTarget();
 
-    await testPage.keyboard.press("ArrowDown");
+    await handle.press("ArrowDown");
     // The arrow has resolved the next droppable once the announced target changes.
     await expect.poll(announcedTarget, { timeout: 5_000 }).not.toBe(targetBeforeArrow);
 
-    await testPage.keyboard.press("Space");
+    await handle.press("Space");
     await expect(row).not.toHaveClass(/opacity-40/, { timeout: 5_000 });
 
     await expectRelativeOrder(panel, "reorder second", "reorder first");

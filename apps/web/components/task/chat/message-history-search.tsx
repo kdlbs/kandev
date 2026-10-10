@@ -21,6 +21,7 @@ type MessageHistorySearchProps = {
    *  trap reverts focus away from this overlay's input on every render. */
   container: Element;
   onClose: () => void;
+  onEscapeDismiss: () => void;
   /** Invoked when the user picks a result. `index` is the position in
    *  `history` so the editor's history navigation can resume from there. */
   onSelect: (index: number) => void;
@@ -59,11 +60,11 @@ type OverlayKeyArgs = {
   selectedIndex: number;
   setSelectedIndex: React.Dispatch<React.SetStateAction<number>>;
   onSelect: (index: number) => void;
-  onClose: () => void;
+  onEscapeDismiss: () => void;
 };
 
 function handleOverlayKeyDown(event: React.KeyboardEvent, args: OverlayKeyArgs) {
-  const { hits, selectedIndex, setSelectedIndex, onSelect, onClose } = args;
+  const { hits, selectedIndex, setSelectedIndex, onSelect, onEscapeDismiss } = args;
   if (event.key === "ArrowDown") {
     event.preventDefault();
     setSelectedIndex((i) => Math.min(i + 1, hits.length - 1));
@@ -86,7 +87,7 @@ function handleOverlayKeyDown(event: React.KeyboardEvent, args: OverlayKeyArgs) 
     // further up the tree (e.g. a clarification panel's own
     // Escape-collapses handler) should also react to the same keypress.
     event.stopPropagation();
-    onClose();
+    onEscapeDismiss();
   }
 }
 
@@ -200,7 +201,7 @@ export function computeStyle(
 function useReverseSearchEscapeFallback(
   containerRef: React.RefObject<HTMLDivElement | null>,
   container: Element,
-  onClose: () => void,
+  onEscapeDismiss: () => void,
 ) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -216,11 +217,11 @@ function useReverseSearchEscapeFallback(
       if (!ownedByPopup && !ownedByDialog) return;
       event.preventDefault();
       event.stopPropagation();
-      onClose();
+      onEscapeDismiss();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose, container, containerRef]);
+  }, [onEscapeDismiss, container, containerRef]);
 }
 
 export function MessageHistorySearch({
@@ -229,6 +230,7 @@ export function MessageHistorySearch({
   anchorRect,
   container,
   onClose,
+  onEscapeDismiss,
   onSelect,
 }: MessageHistorySearchProps) {
   const { t } = useTranslation();
@@ -253,7 +255,7 @@ export function MessageHistorySearch({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onClose]);
 
-  useReverseSearchEscapeFallback(containerRef, container, onClose);
+  useReverseSearchEscapeFallback(containerRef, container, onEscapeDismiss);
   useScrollSelectedIntoView(selectedIndex, listRef);
 
   if (typeof document === "undefined") return null;
@@ -278,7 +280,13 @@ export function MessageHistorySearch({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) =>
-            handleOverlayKeyDown(e, { hits, selectedIndex, setSelectedIndex, onSelect, onClose })
+            handleOverlayKeyDown(e, {
+              hits,
+              selectedIndex,
+              setSelectedIndex,
+              onSelect,
+              onEscapeDismiss,
+            })
           }
           placeholder={t("task:typeToSearchPreviousMessages")}
           className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"

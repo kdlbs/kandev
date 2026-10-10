@@ -16,6 +16,7 @@ function makeStore() {
 
 function updateJob(overrides: Record<string, unknown> = {}) {
   return {
+    update_mode: "pinned",
     job_id: "update-1",
     agent_name: AGENT_NAME,
     status: "updating",
@@ -81,6 +82,38 @@ describe("notification provider availability", () => {
     });
 
     expect(store.getState().notificationProviders.appriseAvailable).toBe(true);
+  });
+});
+
+describe("settings update job identity", () => {
+  // @covers AC-AGENTS-RUNTIME-NOTIFY-002.6
+  it("preserves immutable automatic origin through partial updates and same-job readiness snapshots", () => {
+    const store = makeStore();
+    const actions = store.getState() as SettingsSlice & {
+      upsertAgentUpdateJob: (job: ReturnType<typeof updateJob>) => void;
+      setAgentUpdateJobs: (jobs: ReturnType<typeof updateJob>[]) => void;
+    };
+    actions.upsertAgentUpdateJob(
+      updateJob({ automatic: true, runtime_id: "npm:claude-runtime", previous_version: "0.9.0" }),
+    );
+    actions.upsertAgentUpdateJob(updateJob({ status: "refreshing" }));
+    expect(store.getState().updateJobs.byAgent[AGENT_NAME]).toMatchObject({
+      automatic: true,
+      runtime_id: "npm:claude-runtime",
+      previous_version: "0.9.0",
+    });
+    actions.setAgentUpdateJobs([updateJob({ status: "succeeded" })]);
+    expect(store.getState().updateJobs.byAgent[AGENT_NAME]).toMatchObject({
+      automatic: true,
+      runtime_id: "npm:claude-runtime",
+      previous_version: "0.9.0",
+    });
+    actions.setAgentUpdateJobs([
+      updateJob({ job_id: "manual-retry", started_at: NEWER_TIMESTAMP }),
+    ]);
+    expect(store.getState().updateJobs.byAgent[AGENT_NAME].automatic).toBeUndefined();
+    expect(store.getState().updateJobs.byAgent[AGENT_NAME].runtime_id).toBeUndefined();
+    expect(store.getState().updateJobs.byAgent[AGENT_NAME].previous_version).toBeUndefined();
   });
 });
 

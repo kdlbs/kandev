@@ -493,8 +493,11 @@ type SubagentTaskPayload struct {
 	AgentID        string `json:"agent_id,omitempty"`
 	Model          string `json:"model,omitempty"`
 	ChildSessionID string `json:"child_session_id,omitempty"`
-	DurationMs     int64  `json:"duration_ms,omitempty"`
-	TotalTokens    int64  `json:"total_tokens,omitempty"`
+	// ProviderThreadID is an agent-native child conversation identity. It is
+	// kept separate from Kandev session IDs because Codex threads are not tasks.
+	ProviderThreadID string `json:"provider_thread_id,omitempty"`
+	DurationMs       int64  `json:"duration_ms,omitempty"`
+	TotalTokens      int64  `json:"total_tokens,omitempty"`
 	// ToolUseCount is a pointer so a genuine zero ("0 tools" for a completed
 	// subagent) serializes, while agents that don't report it (OpenCode,
 	// Cursor) stay omitted rather than surfacing a misleading "0 tools" chip.

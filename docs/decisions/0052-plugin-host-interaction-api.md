@@ -41,6 +41,17 @@ SQLite file directly — is the exact failure ADR 0043 exists to close.
 
 ## Decision
 
+**Implementation update (2026-09-26):** The v1 write behavior described below
+is superseded for plugin-originated responses by [the coordination platform
+decision](2026-09-25-plugin-coordination-platform.md) and WO08. The v1
+`RespondToPermission`, `AnswerClarification`, and `CancelClarification` RPCs
+remain in the wire schema for source compatibility, but the current Host
+returns `PermissionDenied` because those requests cannot prove a current human
+decision or bind it to an observed interaction revision. Plugins must use the
+exact response methods with a single-use receipt issued by the authenticated
+native UI. The pending-interaction read contract and native UI response paths
+in this decision remain unchanged.
+
 Add a dedicated **interaction** contract to `service Host`, gated by its own
 `api_read:interactions` / `api_write:interactions` capabilities.
 

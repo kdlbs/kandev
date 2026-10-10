@@ -80,12 +80,17 @@ describe("presentModelDiscovery", () => {
       presentModelDiscovery(
         makeDiscovery({ status: "not_logged_in", error: "the command-line tool is not signed in" }),
       ),
-    ).toEqual({ kind: "failed", reason: "the command-line tool is not signed in" });
+    ).toEqual({
+      kind: "failed",
+      status: "not_logged_in",
+      reason: "the command-line tool is not signed in",
+    });
   });
 
   it("falls back to the status string when a failure carries no error message", () => {
     expect(presentModelDiscovery(makeDiscovery({ status: "failed", error: undefined }))).toEqual({
       kind: "failed",
+      status: "failed",
       reason: "failed",
     });
   });

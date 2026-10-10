@@ -428,6 +428,7 @@ describe("useAllWorkflowSnapshots — snapshot mapping", () => {
           color: "bg-blue-500",
           wip_limit: 2,
           pull_from_step_id: "step-0",
+          complete_task_on_enter: true,
         },
       ],
       tasks: [],
@@ -442,6 +443,7 @@ describe("useAllWorkflowSnapshots — snapshot mapping", () => {
     expect(mockSetWorkflowSnapshot.mock.calls[0][1].steps[0]).toMatchObject({
       wip_limit: 2,
       pull_from_step_id: "step-0",
+      complete_task_on_enter: true,
     });
   });
 

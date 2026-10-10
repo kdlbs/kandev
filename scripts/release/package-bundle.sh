@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Validate a release layout assembled from already-built pieces.
-# Usage: package-bundle.sh [--bundle-dir DIR]
+# Usage: package-bundle.sh [--bundle-dir DIR] [--variant standard|full]
 # Caller must have run, in this order:
 #   - Vite assets synced into apps/backend/internal/webapp/embedded/generated
 #   - go build ./cmd/{kandev,agentctl} plus remote agentctl helpers into the bundle's bin directory
@@ -10,6 +10,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUNDLE="$ROOT_DIR/dist/kandev"
 DARWIN_HELPER_VALIDATOR="$ROOT_DIR/scripts/release/validate-darwin-arm64-helper.mjs"
+REMOTE_HELPER_ASSET_VALIDATOR="$ROOT_DIR/scripts/release/remote-helper-assets.mjs"
+VARIANT="full"
 REMOTE_AGENTCTL_HELPERS=(
   agentctl-linux-amd64
   agentctl-linux-arm64
@@ -18,23 +20,38 @@ REMOTE_AGENTCTL_HELPERS=(
 )
 
 usage() {
-  echo "usage: $0 [--bundle-dir DIR]" >&2
+  echo "usage: $0 [--bundle-dir DIR] [--variant standard|full]" >&2
 }
 
-case "$#" in
-  0) ;;
-  2)
-    if [ "$1" != "--bundle-dir" ] || [ -z "$2" ]; then
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --bundle-dir)
+      if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+        usage
+        exit 2
+      fi
+      BUNDLE="$2"
+      shift 2
+      ;;
+    --variant)
+      if [ "$#" -lt 2 ]; then
+        usage
+        exit 2
+      fi
+      VARIANT="$2"
+      shift 2
+      ;;
+    *)
       usage
       exit 2
-    fi
-    BUNDLE="$2"
-    ;;
-  *)
-    usage
-    exit 2
-    ;;
-esac
+      ;;
+  esac
+done
+
+if [ "$VARIANT" != "standard" ] && [ "$VARIANT" != "full" ]; then
+  usage
+  exit 2
+fi
 
 if [ "$BUNDLE" = "/" ]; then
   echo "bundle directory must not be /" >&2
@@ -67,28 +84,40 @@ if [ ! -x "$BUNDLE/bin/$agentctl" ]; then
   exit 1
 fi
 
-for helper in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
-  if [ ! -f "$BUNDLE/bin/$helper" ]; then
-    echo "Missing remote agentctl helper $helper in $BUNDLE/bin; run make -C apps/backend build-agentctl-remote first" >&2
-    exit 1
-  fi
-  if [ ! -x "$BUNDLE/bin/$helper" ]; then
-    echo "Runtime binary $helper is not executable in $BUNDLE/bin" >&2
-    exit 1
-  fi
-  if [ "$helper" = "agentctl-darwin-arm64" ]; then
-    if ! command -v node >/dev/null 2>&1; then
-      echo "Node.js is required to validate $helper" >&2
+if [ "$VARIANT" = "full" ]; then
+  for helper in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
+    if [ ! -f "$BUNDLE/bin/$helper" ]; then
+      echo "Missing remote agentctl helper $helper in $BUNDLE/bin; run make -C apps/backend build-agentctl-remote first" >&2
       exit 1
     fi
-    node "$DARWIN_HELPER_VALIDATOR" "$BUNDLE/bin/$helper"
-  fi
-done
+    if [ ! -x "$BUNDLE/bin/$helper" ]; then
+      echo "Runtime binary $helper is not executable in $BUNDLE/bin" >&2
+      exit 1
+    fi
+    if [ "$helper" = "agentctl-darwin-arm64" ]; then
+      if ! command -v node >/dev/null 2>&1; then
+        echo "Node.js is required to validate $helper" >&2
+        exit 1
+      fi
+      node "$DARWIN_HELPER_VALIDATOR" "$BUNDLE/bin/$helper"
+    fi
+  done
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "Node.js is required to validate runtime bundle metadata" >&2
+  exit 1
+fi
+node "$REMOTE_HELPER_ASSET_VALIDATOR" verify-bundle --bundle-dir "$BUNDLE" --variant "$VARIANT"
 
 while IFS= read -r -d '' entry; do
   artifact="${entry##*/}"
   expected=false
-  for required in "$launcher" "$agentctl" "${REMOTE_AGENTCTL_HELPERS[@]}"; do
+  expected_artifacts=("$launcher" "$agentctl")
+  if [ "$VARIANT" = "full" ]; then
+    expected_artifacts+=("${REMOTE_AGENTCTL_HELPERS[@]}")
+  fi
+  for required in "${expected_artifacts[@]}"; do
     if [ "$artifact" = "$required" ]; then
       expected=true
       break

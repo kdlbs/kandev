@@ -27,22 +27,34 @@ const (
 	// writeProbeWebhookKey triggers the Host data API write round-trip
 	// (CreateTask + CreateComment). Gated on this key so unrelated webhook
 	// deliveries don't attempt writes.
-	writeProbeWebhookKey        = "write"
-	fixtureReferenceSource      = "fixture-pull-requests"
-	fixturePullRequestID        = "pull-request-42"
-	revokedPullRequestID        = "pull-request-revoked"
-	fixtureProviderID           = "fixture-source-control"
-	fixtureCredentialHost       = "bitbucket.example.test"
-	fixtureCredentialPath       = "/scm/TEAM/fixture"
-	connectionStatusAction      = "connection-status"
-	utilityDefaultAction        = "utility-default"
-	utilityPreferenceAction     = "utility-preference"
-	utilityProfilePrompt        = "/e2e:utility-profile"
-	repositoryInspectActionKey  = "repositories.inspect"
-	repositoryBranchesActionKey = "repositories.branches"
-	searchPurpose               = "search"
-	submissionPurpose           = "submission"
-	fixtureTaskIDKey            = "task_id"
+	writeProbeWebhookKey                           = "write"
+	fixtureReferenceSource                         = "fixture-pull-requests"
+	fixturePullRequestID                           = "pull-request-42"
+	revokedPullRequestID                           = "pull-request-revoked"
+	fixtureProviderID                              = "fixture-source-control"
+	fixtureCredentialHost                          = "bitbucket.example.test"
+	fixtureCredentialPath                          = "/scm/TEAM/fixture"
+	connectionStatusAction                         = "connection-status"
+	utilityDefaultAction                           = "utility-default"
+	utilityPreferenceAction                        = "utility-preference"
+	utilityProfilePrompt                           = "/e2e:utility-profile"
+	repositoryInspectActionKey                     = "repositories.inspect"
+	repositoryBranchesActionKey                    = "repositories.branches"
+	searchPurpose                                  = "search"
+	submissionPurpose                              = "submission"
+	fixtureTaskIDKey                               = "task_id"
+	exactTaskCreateAction                          = "exact-task-create"
+	taskTreeDeleteAction                           = "task-tree-delete"
+	managedConversationEnsureAction                = "managed-conversation-ensure"
+	managedConversationStatusAction                = "managed-conversation-status"
+	managedConversationInputsAction                = "managed-conversation-inputs"
+	managedConversationEnqueueAction               = "managed-conversation-enqueue"
+	managedConversationCancelAction                = "managed-conversation-cancel"
+	managedConversationPauseAction                 = "managed-conversation-pause"
+	managedConversationResumeAction                = "managed-conversation-resume"
+	managedConversationRecoverAction               = "managed-conversation-recover"
+	managedConversationPermissionResponseAction    = "managed-conversation-permission-response"
+	managedConversationClarificationResponseAction = "managed-conversation-clarification-response"
 )
 
 // deliveryRecord is one recorded OnEvent delivery, appended as a JSON line
@@ -72,6 +84,10 @@ type fixturePlugin struct {
 	mu                   sync.Mutex
 	sawFirstEvent        bool
 	revokedByWorkspaceID map[string]bool
+	executorMu           sync.Mutex
+	executorState        fixtureExecutorState
+	executorTransports   map[string]*fixtureExecutorTransport
+	executorStateErr     error
 }
 
 var _ pluginsdk.Plugin = (*fixturePlugin)(nil)
@@ -92,7 +108,27 @@ func (p *fixturePlugin) InvokeAgentTool(_ context.Context, req *pluginsdk.AgentT
 // from KANDEV_PLUGIN_DATA_DIR (falling back to the current working
 // directory), per §2 of docs/plans/plugins/GRPC-CONTRACT.md.
 func newFixturePlugin() *fixturePlugin {
-	return &fixturePlugin{dataDir: resolveDataDir()}
+	return newFixturePluginAt(resolveDataDir())
+}
+
+func newFixturePluginAt(dataDir string) *fixturePlugin {
+	plugin := &fixturePlugin{
+		dataDir: dataDir, revokedByWorkspaceID: make(map[string]bool),
+		executorTransports: make(map[string]*fixtureExecutorTransport),
+		executorState:      fixtureExecutorState{Environments: make(map[string]fixtureExecutorResource)},
+	}
+	data, err := os.ReadFile(filepath.Join(dataDir, fixtureExecutorStateFileName))
+	if err == nil {
+		if err := json.Unmarshal(data, &plugin.executorState); err != nil {
+			plugin.executorStateErr = fmt.Errorf("plugin-fixture: decode provider inventory: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		plugin.executorStateErr = fmt.Errorf("plugin-fixture: read provider inventory: %w", err)
+	}
+	if plugin.executorState.Environments == nil {
+		plugin.executorState.Environments = make(map[string]fixtureExecutorResource)
+	}
+	return plugin
 }
 
 // resolveDataDir returns KANDEV_PLUGIN_DATA_DIR if set, otherwise the
@@ -194,6 +230,30 @@ func (p *fixturePlugin) HandleAction(ctx context.Context, req *pluginsdk.PluginA
 		response["pull_request_id"] = fixturePullRequestID
 	case "watch-create-task":
 		return p.createWatchTask(ctx, req.Context.WorkspaceID)
+	case exactTaskCreateAction:
+		return p.createExactTask(ctx, req)
+	case taskTreeDeleteAction:
+		return p.deleteTaskTree(ctx, req)
+	case managedConversationEnsureAction:
+		return p.ensureManagedConversation(ctx, req)
+	case managedConversationStatusAction:
+		return p.managedConversationStatus(ctx, req)
+	case managedConversationInputsAction:
+		return p.managedConversationInputs(ctx, req)
+	case managedConversationEnqueueAction:
+		return p.enqueueManagedConversationInput(ctx, req)
+	case managedConversationCancelAction:
+		return p.cancelManagedConversationInput(ctx, req)
+	case managedConversationPauseAction:
+		return p.setManagedConversationPaused(ctx, req, true)
+	case managedConversationResumeAction:
+		return p.setManagedConversationPaused(ctx, req, false)
+	case managedConversationRecoverAction:
+		return p.recoverManagedConversationSession(ctx, req)
+	case managedConversationPermissionResponseAction:
+		return p.respondManagedConversationPermission(ctx, req)
+	case managedConversationClarificationResponseAction:
+		return p.answerManagedConversationClarification(ctx, req)
 	case repositoryInspectActionKey:
 		return p.inspectRepository(req.Body)
 	case repositoryBranchesActionKey:
@@ -206,6 +266,121 @@ func (p *fixturePlugin) HandleAction(ctx context.Context, req *pluginsdk.PluginA
 		return nil, fmt.Errorf("plugin-fixture: marshaling action response: %w", err)
 	}
 	return &pluginsdk.PluginActionResponse{Body: body}, nil
+}
+
+func (p *fixturePlugin) createExactTask(ctx context.Context, req *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
+	var input struct {
+		IdempotencyKey string `json:"idempotency_key"`
+		ExternalID     string `json:"external_id"`
+		Title          string `json:"title"`
+		WorkflowID     string `json:"workflow_id"`
+		WorkflowStepID string `json:"workflow_step_id"`
+	}
+	if err := json.Unmarshal(req.Body, &input); err != nil {
+		return nil, fmt.Errorf("plugin-fixture: decode exact task create: %w", err)
+	}
+	host := p.Host()
+	if host == nil {
+		return nil, fmt.Errorf("plugin-fixture: host unavailable")
+	}
+	exact, ok := pluginsdk.HostV2(host)
+	if !ok {
+		return nil, fmt.Errorf("plugin-fixture: exact Host v2 unavailable")
+	}
+	capability, err := exact.GetCapabilityContext(ctx, req.Context.WorkspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: read task command capability: %w", err)
+	}
+	commands, ok := pluginsdk.HostTaskCommands(host)
+	if !ok {
+		return nil, fmt.Errorf("plugin-fixture: exact task commands unavailable")
+	}
+	result, task, err := commands.CreateTask(ctx, pluginsdk.ExactTaskCreate{
+		RequestID: input.IdempotencyKey, WorkspaceID: req.Context.WorkspaceID,
+		IdempotencyKey: input.IdempotencyKey, ExternalID: input.ExternalID,
+		ApprovalRevision: capability.ApprovalRevision, ManifestDigest: capability.ManifestDigest,
+		Task: pluginsdk.CreateTaskInput{
+			WorkspaceID: req.Context.WorkspaceID, WorkflowID: input.WorkflowID,
+			WorkflowStepID: &input.WorkflowStepID, Title: input.Title,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: create exact task: %w", err)
+	}
+	response := map[string]any{}
+	if result != nil {
+		response["status"] = result.Status
+		response["reason"] = result.Reason
+	}
+	if task != nil {
+		response[fixtureTaskIDKey] = task.ID
+		response["resource_version"] = task.ResourceVersion
+	}
+	body, err := json.Marshal(response)
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: encode exact task create result: %w", err)
+	}
+	return &pluginsdk.PluginActionResponse{Body: body}, nil
+}
+
+func (p *fixturePlugin) ensureManagedConversation(ctx context.Context, req *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
+	var input struct {
+		InstanceKey    string `json:"instance_key"`
+		AgentProfileID string `json:"agent_profile_id"`
+	}
+	if err := decodeFixtureActionBody(req.Body, &input); err != nil || input.InstanceKey == "" {
+		return nil, fmt.Errorf("plugin-fixture: managed conversation instance_key is required")
+	}
+	_, capability, manager, err := p.managedConversationActionContext(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	result, descriptor, err := manager.Ensure(ctx, pluginsdk.ManagedAgentConversationSpec{
+		RequestID: "fixture-managed-" + input.InstanceKey, IdempotencyKey: "fixture-managed-" + input.InstanceKey,
+		WorkspaceID: req.Context.WorkspaceID, InstanceKey: input.InstanceKey,
+		ApprovalRevision: capability.ApprovalRevision, ManifestDigest: capability.ManifestDigest,
+		AgentProfileID: input.AgentProfileID, BasePrompt: "Fixture managed conversation",
+		InstructionVersion: "1",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: ensure managed conversation: %w", err)
+	}
+	if result == nil || (result.Status != pluginsdk.CommandApplied && result.Status != pluginsdk.CommandAlreadyApplied && result.Status != pluginsdk.CommandNoChange) {
+		return nil, fmt.Errorf("plugin-fixture: ensure managed conversation returned %v", result)
+	}
+	if descriptor.WorkspaceID != req.Context.WorkspaceID || descriptor.InstanceKey != input.InstanceKey || descriptor.TaskID == "" || descriptor.SessionID == "" {
+		return nil, fmt.Errorf("plugin-fixture: ensure returned an incomplete or out-of-scope managed conversation")
+	}
+	body, err := json.Marshal(map[string]any{
+		"plugin_id": "kandev-plugin-e2e", "instance_key": descriptor.InstanceKey,
+		"task_id": descriptor.TaskID, "session_id": descriptor.SessionID,
+		"revision": descriptor.Revision, "created": result.Status == pluginsdk.CommandApplied,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: marshal managed conversation result: %w", err)
+	}
+	return &pluginsdk.PluginActionResponse{Body: body}, nil
+}
+
+func (p *fixturePlugin) deleteTaskTree(ctx context.Context, req *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
+	var input struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(req.Body, &input); err != nil {
+		return nil, fmt.Errorf("plugin-fixture: decode task tree delete: %w", err)
+	}
+	host := p.Host()
+	if host == nil {
+		return nil, fmt.Errorf("plugin-fixture: host unavailable")
+	}
+	trees, ok := pluginsdk.PluginOwnedTaskTrees(host)
+	if !ok {
+		return nil, fmt.Errorf("plugin-fixture: task tree manager unavailable")
+	}
+	if _, err := trees.Delete(ctx, input.TaskID); err != nil {
+		return nil, fmt.Errorf("plugin-fixture: task tree delete: %w", err)
+	}
+	return &pluginsdk.PluginActionResponse{Body: []byte(`{"deleted":true}`)}, nil
 }
 
 func (p *fixturePlugin) invokeUtilityAgent(ctx context.Context, usePreference bool) (*pluginsdk.PluginActionResponse, error) {

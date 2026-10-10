@@ -11,6 +11,7 @@ import (
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // newTestRepoWithDB returns both the repo and the underlying *sqlx.DB
@@ -53,7 +54,7 @@ func seedAgentProfile(t *testing.T, db *sqlx.DB, id, workspaceID string) {
 func TestSetRunResolvedRoute_PersistsExecutionProfileAndSnapshots(t *testing.T) {
 	repo, _ := newTestRepoWithDB(t)
 	ctx := context.Background()
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "office-cto",
 		Reason:         "task_assigned",
 		Payload:        `{}`,
@@ -93,14 +94,14 @@ func TestClearAllParkedRoutingForWorkspace_ClearsOnlyTargetWorkspace(t *testing.
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 	seedAgentProfile(t, db, "agent-b", "ws-b")
 
-	runA := &models.Run{
+	runA := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
 		Status:         "queued",
 		CoalescedCount: 1,
 	}
-	runB := &models.Run{
+	runB := &runsmodels.Run{
 		AgentProfileID: "agent-b",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t2"}`,
@@ -167,7 +168,7 @@ func TestClearAllParkedRoutingForWorkspace_NoParkedRuns(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        "{}",
@@ -186,6 +187,80 @@ func TestClearAllParkedRoutingForWorkspace_NoParkedRuns(t *testing.T) {
 	}
 }
 
+// @covers AC-AGENTS-HARNESS-SESSION-CONTINUITY-006.1
+func TestParkRunForSessionRecoveryPreservesPendingWork(t *testing.T) {
+	repo, db := newTestRepoWithDB(t)
+	ctx := context.Background()
+
+	seedAgentProfile(t, db, "agent-recovery", "ws-recovery")
+	run := &runsmodels.Run{
+		AgentProfileID: "agent-recovery",
+		Reason:         "task_assigned",
+		Payload:        `{"task_id":"task-recovery"}`,
+		Status:         "claimed",
+		CoalescedCount: 1,
+	}
+	if err := repo.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if err := repo.ParkRunForSessionRecovery(
+		ctx, run.ID, "block-recovery", "native_state_missing",
+	); err != nil {
+		t.Fatalf("park run: %v", err)
+	}
+
+	got, err := repo.GetRunByID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.Status != "queued" {
+		t.Fatalf("status = %q, want queued", got.Status)
+	}
+	if got.RoutingBlockedStatus == nil ||
+		*got.RoutingBlockedStatus != runsmodels.RoutingBlockedSessionRecoveryRequired {
+		t.Fatalf("routing block = %v, want session recovery", got.RoutingBlockedStatus)
+	}
+	if got.SessionRecoveryBlockID == nil || *got.SessionRecoveryBlockID != "block-recovery" {
+		t.Fatalf("recovery block id = %v, want block-recovery", got.SessionRecoveryBlockID)
+	}
+	if got.SessionRecoveryReason == nil || *got.SessionRecoveryReason != "native_state_missing" {
+		t.Fatalf("recovery reason = %v, want native_state_missing", got.SessionRecoveryReason)
+	}
+	if got.EarliestRetryAt != nil || got.ScheduledRetryAt != nil {
+		t.Fatalf("recovery run has retry schedule: earliest=%v scheduled=%v", got.EarliestRetryAt, got.ScheduledRetryAt)
+	}
+
+	pending, err := repo.ListPendingProviderCapacityRuns(ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("list timed provider runs: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("recovery run was eligible for timed unpark: %#v", pending)
+	}
+	if err := repo.ClearRoutingBlock(ctx, run.ID); err != nil {
+		t.Fatalf("clear generic routing block: %v", err)
+	}
+	stillBlocked, err := repo.GetRunByID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("reload after generic clear: %v", err)
+	}
+	if stillBlocked.RoutingBlockedStatus == nil ||
+		*stillBlocked.RoutingBlockedStatus != runsmodels.RoutingBlockedSessionRecoveryRequired {
+		t.Fatalf("generic clear released recovery run: %v", stillBlocked.RoutingBlockedStatus)
+	}
+	if err := repo.ClearSessionRecoveryPark(ctx, run.ID, "block-recovery"); err != nil {
+		t.Fatalf("clear resolved recovery park: %v", err)
+	}
+	released, err := repo.GetRunByID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("reload after recovery clear: %v", err)
+	}
+	if released.RoutingBlockedStatus != nil || released.SessionRecoveryBlockID != nil || released.Status != "queued" {
+		t.Fatalf("resolved recovery park = %+v", released)
+	}
+}
+
 // TestListRunsWaitingOnProvider_MatchesParkedRunForProvider is the
 // happy-path sanity check that the LIKE join over logical_provider_order
 // still finds parked runs after the wildcard escape was added — without
@@ -196,7 +271,7 @@ func TestListRunsWaitingOnProvider_MatchesParkedRunForProvider(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
@@ -234,7 +309,7 @@ func TestListRunsWaitingOnProvider_WildcardProviderIDMatchesNone(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
@@ -279,7 +354,7 @@ func TestClaimNextEligibleRun_SkipsRoutingBlocked(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
@@ -322,7 +397,7 @@ func TestClearRoutingBlock_ClearsScheduledRetryAt(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
@@ -372,7 +447,7 @@ func TestParkRunForProviderCapacity_RestampsPriorityClassToRecoveryUnlessAlready
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 
-	periodic := &models.Run{
+	periodic := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{}`,
@@ -380,7 +455,7 @@ func TestParkRunForProviderCapacity_RestampsPriorityClassToRecoveryUnlessAlready
 		CoalescedCount: 1,
 		PriorityClass:  models.PriorityClassPeriodic,
 	}
-	human := &models.Run{
+	human := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{}`,
@@ -430,7 +505,7 @@ func TestRequeueRunForNextCandidate_RestampsPriorityClassToRecoveryUnlessAlready
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 
-	periodic := &models.Run{
+	periodic := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{}`,
@@ -438,7 +513,7 @@ func TestRequeueRunForNextCandidate_RestampsPriorityClassToRecoveryUnlessAlready
 		CoalescedCount: 1,
 		PriorityClass:  models.PriorityClassPeriodic,
 	}
-	human := &models.Run{
+	human := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{}`,
@@ -488,7 +563,7 @@ func TestClearAllParkedRoutingForWorkspace_RestampsPriorityClassToRecoveryUnless
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 
-	periodic := &models.Run{
+	periodic := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{}`,
@@ -496,7 +571,7 @@ func TestClearAllParkedRoutingForWorkspace_RestampsPriorityClassToRecoveryUnless
 		CoalescedCount: 1,
 		PriorityClass:  models.PriorityClassPeriodic,
 	}
-	human := &models.Run{
+	human := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{}`,

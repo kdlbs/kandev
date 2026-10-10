@@ -9,7 +9,10 @@
 // flow; see docs/specs/agents/system-design/host-cli-model-discovery.md.
 package hostcli
 
-import "strings"
+import (
+	"path/filepath"
+	"strings"
+)
 
 // ModelSource names the documented programmatic listing a host CLI offers.
 type ModelSource string
@@ -58,4 +61,14 @@ type Model struct {
 	// Meta carries vendor extras that the UI may show generically, for
 	// example Codex reasoning efforts.
 	Meta map[string]any
+}
+
+// ExecutablePath accepts a discovery path only when it names the vendor CLI.
+// Agent availability can instead match an ACP bridge or an npx launcher.
+func ExecutablePath(spec Spec, matchedPath string) string {
+	base := func(path string) string { return strings.TrimSuffix(strings.ToLower(filepath.Base(path)), ".exe") }
+	if matchedPath != "" && base(matchedPath) == base(spec.Executable) {
+		return matchedPath
+	}
+	return spec.Executable
 }

@@ -57,6 +57,46 @@ import {
 } from "./markdown-components";
 import { MemoizedMarkdown } from "./memoized-markdown";
 
+describe("cached transcript Markdown ownership", () => {
+  afterEach(resetMarkdownComponentTestState);
+
+  it("resolves cached file links through the returning task's current context", () => {
+    const content = "[Open delivery route](src/delivery-route.ts)";
+    const firstOpen = vi.fn();
+    const secondOpen = vi.fn();
+    const first = render(
+      <MemoizedMarkdown content={content} worktreePath="/workspace/first" onOpenFile={firstOpen} />,
+    );
+    fireEvent.click(first.getByText("Open delivery route"));
+    expect(firstOpen).toHaveBeenCalledWith("src/delivery-route.ts");
+    first.unmount();
+
+    const second = render(
+      <MemoizedMarkdown
+        content={content}
+        worktreePath="/workspace/second"
+        onOpenFile={secondOpen}
+      />,
+    );
+    fireEvent.click(second.getByText("Open delivery route"));
+    expect(secondOpen).toHaveBeenCalledWith("src/delivery-route.ts");
+    expect(firstOpen).toHaveBeenCalledOnce();
+  });
+
+  it("binds cached diagram elements to the current task", () => {
+    const content = "```mermaid\ngraph LR\nShipment-->Delivered\n```";
+    const first = render(<MemoizedMarkdown content={content} taskId="task-a" />);
+    expect(first.container.querySelector("[data-task-id]")?.getAttribute("data-task-id")).toBe(
+      "task-a",
+    );
+    first.unmount();
+    const second = render(<MemoizedMarkdown content={content} taskId="task-b" />);
+    expect(second.container.querySelector("[data-task-id]")?.getAttribute("data-task-id")).toBe(
+      "task-b",
+    );
+  });
+});
+
 function renderMarkdown(source: string): string {
   return renderToStaticMarkup(
     <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>

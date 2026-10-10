@@ -20,6 +20,96 @@ var canonicalReleaseAgeNotargetPattern = regexp.MustCompile(
 
 const ReleaseDateMarker = "<release-date>"
 
+const maxManagedStartupDiagnosticBytes = 16 << 10
+
+var managedStartupCodePattern = regexp.MustCompile(`(?i)^\s*npm\s+(?:ERR!|error)\s+code\s+([A-Z][A-Z0-9_]*)\s*$`)
+var managedStartupIncompleteMarkerPattern = regexp.MustCompile(`(?i)^\s*npm\s+(?:ERR!|error)\s+diagnostic incomplete\s*$`)
+
+var transientManagedStartupCodes = map[string]struct{}{
+	"ECONNRESET": {}, "ECONNREFUSED": {}, "ETIMEDOUT": {}, "EAI_AGAIN": {},
+	"E502": {}, "E503": {}, "E504": {}, "EBUSY": {}, "ENOTEMPTY": {}, "EINTEGRITY": {},
+}
+
+var permanentManagedStartupCodes = map[string]struct{}{
+	"EACCES": {}, "EPERM": {}, "ENOSPC": {}, "EROFS": {}, "E401": {}, "E403": {},
+	"E404": {}, "EAUTH": {}, "ENEEDAUTH": {}, "EBADENGINE": {},
+}
+
+// ManagedStartupDiagnosticSummary distinguishes absent npm evidence from
+// diagnostics that cannot be safely classified within the evidence bound.
+type ManagedStartupDiagnosticSummary struct {
+	Codes            []string
+	Present          bool
+	Complete         bool
+	UnclassifiedCode bool
+}
+
+// ManagedStartupDiagnosticCodes extracts the closed set of npm codes that
+// can inform managed-runtime startup recovery. It ignores arbitrary prose and
+// rejects diagnostics beyond the collection bound.
+func ManagedStartupDiagnosticCodes(stderr string) []string {
+	summary := AnalyzeManagedStartupDiagnostics(stderr)
+	if !summary.Complete {
+		return nil
+	}
+	return summary.Codes
+}
+
+// AnalyzeManagedStartupDiagnostics reports whether canonical npm code
+// diagnostics were present, whether the bounded diagnostic set is complete,
+// and which codes belong to the closed recovery allowlist.
+func AnalyzeManagedStartupDiagnostics(stderr string) ManagedStartupDiagnosticSummary {
+	summary := ManagedStartupDiagnosticSummary{Complete: len(stderr) <= maxManagedStartupDiagnosticBytes}
+	seen := make(map[string]struct{})
+	for _, line := range strings.Split(stderr, "\n") {
+		if managedStartupIncompleteMarkerPattern.MatchString(line) {
+			summary.Present = true
+			summary.Complete = false
+			continue
+		}
+		match := managedStartupCodePattern.FindStringSubmatch(line)
+		if len(match) != 2 {
+			continue
+		}
+		summary.Present = true
+		code := strings.ToUpper(match[1])
+		if !isManagedStartupCode(code) {
+			summary.UnclassifiedCode = true
+			continue
+		}
+		if _, exists := seen[code]; exists {
+			continue
+		}
+		seen[code] = struct{}{}
+		summary.Codes = append(summary.Codes, code)
+	}
+	if !summary.Complete {
+		summary.Codes = nil
+	}
+	return summary
+}
+
+// IsTransientManagedStartupCode reports whether an npm code is safe to retry
+// once during managed-runtime initialization.
+func IsTransientManagedStartupCode(code string) bool {
+	_, ok := transientManagedStartupCodes[strings.ToUpper(code)]
+	return ok
+}
+
+// IsPermanentManagedStartupCode reports whether an npm code blocks automatic
+// startup recovery.
+func IsPermanentManagedStartupCode(code string) bool {
+	_, ok := permanentManagedStartupCodes[strings.ToUpper(code)]
+	return ok
+}
+
+func isManagedStartupCode(code string) bool {
+	if code == "ETARGET" {
+		return true
+	}
+	return IsTransientManagedStartupCode(code) || IsPermanentManagedStartupCode(code)
+}
+
 // MatchesExactPackage reports whether stderr contains npm ETARGET evidence for
 // the exact top-level package specification supplied by a trusted caller.
 func MatchesExactPackage(stderr, packageSpec string) bool {

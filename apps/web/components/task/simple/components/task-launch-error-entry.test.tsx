@@ -135,7 +135,7 @@ describe("TaskLaunchErrorEntry", () => {
     );
 
     expect(screen.getByText(checkoutError.preview)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /show details/i }));
+    fireEvent.click(screen.getByText("Show details", { exact: true }));
     expect(screen.getByText(checkoutError.details!)).toBeTruthy();
     expect(screen.getByTestId(RETRY_LAUNCH_BUTTON_TEST_ID)).toBeTruthy();
     fireEvent.click(screen.getByTestId(RETRY_LAUNCH_BUTTON_TEST_ID));

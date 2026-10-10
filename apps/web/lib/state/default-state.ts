@@ -15,6 +15,7 @@ import {
   defaultFeaturesState,
   defaultAuthState,
   defaultAutomationsState,
+  defaultCoordinatorsState,
   defaultSystemState,
   defaultReviewState,
   defaultNeedsYouInboxState,
@@ -72,6 +73,7 @@ export const defaultState = {
   userSettings: defaultSettingsState.userSettings,
   agentProfileRecentUse: defaultSettingsState.agentProfileRecentUse,
   messages: defaultSessionState.messages,
+  messagePrompts: defaultSessionState.messagePrompts,
   turns: defaultSessionState.turns,
   taskSessions: defaultSessionState.taskSessions,
   taskSessionsByTask: defaultSessionState.taskSessionsByTask,
@@ -81,7 +83,6 @@ export const defaultState = {
   sessionWorktreesBySessionId: defaultSessionState.sessionWorktreesBySessionId,
   pendingModel: defaultSessionState.pendingModel,
   activeModel: defaultSessionState.activeModel,
-  messagePrompts: defaultSessionState.messagePrompts,
   taskPlans: defaultSessionState.taskPlans,
   walkthroughs: defaultSessionState.walkthroughs,
   taskReview: defaultReviewState.taskReview,
@@ -94,6 +95,7 @@ export const defaultState = {
   shell: defaultSessionRuntimeState.shell,
   processes: defaultSessionRuntimeState.processes,
   gitStatus: defaultSessionRuntimeState.gitStatus,
+  gitStatusDisplay: defaultSessionRuntimeState.gitStatusDisplay,
   environmentIdBySessionId: defaultSessionRuntimeState.environmentIdBySessionId,
   sessionCommits: defaultSessionRuntimeState.sessionCommits,
   gitCheckoutGeneration: defaultSessionRuntimeState.gitCheckoutGeneration,
@@ -109,9 +111,11 @@ export const defaultState = {
   sessionModels: defaultSessionRuntimeState.sessionModels,
   sessionMcpStatus: defaultSessionRuntimeState.sessionMcpStatus,
   promptUsage: defaultSessionRuntimeState.promptUsage,
+  usageInvalidation: defaultSessionRuntimeState.usageInvalidation,
   sessionPollMode: defaultSessionRuntimeState.sessionPollMode,
   embeddedVscodeSupport: defaultSessionRuntimeState.embeddedVscodeSupport,
   workspaceRestoration: defaultSessionRuntimeState.workspaceRestoration,
+  backgroundWork: defaultSessionRuntimeState.backgroundWork,
   githubStatus: defaultGitHubState.githubStatus,
   githubAppRegistrations: defaultGitHubState.githubAppRegistrations,
   taskPRs: defaultGitHubState.taskPRs,
@@ -142,6 +146,7 @@ export const defaultState = {
   sessionHostnamesEpoch: defaultAuthState.sessionHostnamesEpoch,
   automations: defaultAutomationsState.automations,
   automationRuns: defaultAutomationsState.automationRuns,
+  coordinators: defaultCoordinatorsState.coordinators,
   system: defaultSystemState.system,
   agentRuntime: null as AgentRuntimeAvailability | null,
   previewPanel: defaultUIState.previewPanel,
@@ -323,11 +328,13 @@ function mergeAgentReviewArtifacts(initialState: HydrationState) {
   };
 }
 
-/** Merges the independently hydrated Prompt History projection. */
+/** Merges the latest-prompt projection and resets its client-only authority. */
 function mergePromptHistoryState(initialState: HydrationState) {
   return {
     ...defaultState.messagePrompts,
-    ...initialState.messagePrompts,
+    bySession: initialState.messagePrompts?.bySession ?? defaultState.messagePrompts.bySession,
+    metaBySession:
+      initialState.messagePrompts?.metaBySession ?? defaultState.messagePrompts.metaBySession,
     generationBySession: {
       ...defaultState.messagePrompts.generationBySession,
       ...initialState.messagePrompts?.generationBySession,
@@ -336,9 +343,11 @@ function mergePromptHistoryState(initialState: HydrationState) {
       ...defaultState.messagePrompts.refreshGenerationBySession,
       ...initialState.messagePrompts?.refreshGenerationBySession,
     },
+    authoritativeBySession: {},
+    observedBySession: {},
+    deletedIdsBySession: {},
   };
 }
-
 /** Merges the GitHub slices for initial (SSR/boot) hydration. */
 /** Merges the GitHub slices for initial (SSR/boot) hydration. */
 function mergeGitHubState(initialState: HydrationState) {
@@ -445,6 +454,8 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     workflows: { ...defaultState.workflows, ...initialState.workflows },
     workspaceContextRead: {
       ...defaultState.workspaceContextRead,
+      workspaceId: initialState.workspaces?.activeId ?? null,
+      generation: mergeWorkspaceContextGeneration(initialState),
       ...initialState.workspaceContextRead,
       pending: {
         ...defaultState.workspaceContextRead.pending,
@@ -524,10 +535,15 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     sessionModels: { ...defaultState.sessionModels, ...initialState.sessionModels },
     sessionMcpStatus: { ...defaultState.sessionMcpStatus, ...initialState.sessionMcpStatus },
     promptUsage: { ...defaultState.promptUsage, ...initialState.promptUsage },
+    usageInvalidation: { ...defaultState.usageInvalidation, ...initialState.usageInvalidation },
     sessionPollMode: { ...defaultState.sessionPollMode, ...initialState.sessionPollMode },
     embeddedVscodeSupport: {
       ...defaultState.embeddedVscodeSupport,
       ...initialState.embeddedVscodeSupport,
+    },
+    backgroundWork: {
+      ...defaultState.backgroundWork,
+      ...initialState.backgroundWork,
     },
     ...mergeGitHubState(initialState),
     taskIssues: { ...defaultState.taskIssues, ...initialState.taskIssues },

@@ -35,6 +35,23 @@ describe("readLastAgentError", () => {
     });
   });
 
+  it("reads typed managed runtime startup metadata", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: "Agent stopped during startup",
+          failure_code: "managed_runtime_startup",
+          startup_reason: "early_exit",
+          startup_attempts: 2,
+        },
+      }),
+    ).toMatchObject({
+      code: "managed_runtime_startup",
+      startupReason: "early_exit",
+      startupAttempts: 2,
+    });
+  });
+
   it("reads structured failure fields in camelCase", () => {
     expect(
       readLastAgentError({
@@ -42,11 +59,13 @@ describe("readLastAgentError", () => {
           message: AGENT_ERROR_MESSAGE,
           code: MANAGED_RUNTIME_NPM_FAILURE,
           details: NPM_ERROR_CODE_ETARGET,
+          startupAttempts: 2,
         },
       }),
     ).toMatchObject({
       code: MANAGED_RUNTIME_NPM_FAILURE,
       details: NPM_ERROR_CODE_ETARGET,
+      startupAttempts: 2,
     });
   });
 });
@@ -82,6 +101,68 @@ describe("readLastAgentError optional metadata", () => {
         },
       ],
     });
+  });
+
+  it("reads safe typed selection evidence and drops malformed optional fields", () => {
+    const error = readLastAgentError({
+      last_agent_error: {
+        message: "The agent could not start.",
+        causes: [
+          {
+            operation: "start",
+            code: "model_unavailable",
+            reason: "requested_not_advertised",
+            requested_model: "vendor/opus-5",
+            effective_model: "gpt-5.2",
+            prompt_not_sent: true,
+          },
+          {
+            operation: "resume",
+            code: "permission_mode_mismatch",
+            reason: "effective_mismatch",
+            requested_mode: "default",
+            effective_mode: "plan",
+            prompt_not_sent: false,
+          },
+        ],
+      },
+    });
+
+    expect(error?.causes).toEqual([
+      {
+        operation: "start",
+        code: "model_unavailable",
+        reason: "requested_not_advertised",
+        requested_model: "vendor/opus-5",
+        effective_model: "gpt-5.2",
+        prompt_not_sent: true,
+      },
+      {
+        operation: "resume",
+        code: "permission_mode_mismatch",
+        reason: "effective_mismatch",
+        requested_mode: "default",
+        effective_mode: "plan",
+        prompt_not_sent: false,
+      },
+    ]);
+
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: "The agent could not start.",
+          causes: [
+            {
+              operation: "resume",
+              code: "model_selection_failed",
+              reason: "not_a_reason",
+              requested_model: "/home/user/private-model",
+              prompt_not_sent: "false",
+            },
+          ],
+        },
+      })?.causes,
+    ).toEqual([{ operation: "resume", code: "model_selection_failed" }]);
   });
 
   it("reads typed launch recovery fields and keeps action order bounded", () => {

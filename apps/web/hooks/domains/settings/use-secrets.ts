@@ -30,15 +30,16 @@ export function useSecrets(
   const [loadedScopedKey, setLoadedScopedKey] = useState(scopedKey);
 
   useEffect(() => {
-    if (scope === "global") {
-      if (globalLoaded || globalLoading) return;
-      setSecretsLoading(true);
-      listSecrets({ cache: "no-store" })
-        .then((response) => setSecrets(response ?? []))
-        .catch(() => setSecrets([]))
-        .finally(() => setSecretsLoading(false));
-      return;
-    }
+    if (scope !== "global" || globalLoaded || globalLoading) return;
+    setSecretsLoading(true);
+    listSecrets({ cache: "no-store" })
+      .then((response) => setSecrets(response ?? []))
+      .catch(() => setSecrets([]))
+      .finally(() => setSecretsLoading(false));
+  }, [scope, globalLoaded, globalLoading, setSecrets, setSecretsLoading]);
+
+  useEffect(() => {
+    if (scope === "global") return;
 
     const controller = new AbortController();
     let cancelled = false;
@@ -71,16 +72,7 @@ export function useSecrets(
       cancelled = true;
       controller.abort();
     };
-  }, [
-    globalLoaded,
-    globalLoading,
-    initialItems,
-    scope,
-    setSecrets,
-    setSecretsLoading,
-    scopedKey,
-    workspaceId,
-  ]);
+  }, [initialItems, scope, scopedKey, workspaceId]);
 
   const scopedCurrent = loadedScopedKey === scopedKey;
   let items: SecretListItem[] = [];

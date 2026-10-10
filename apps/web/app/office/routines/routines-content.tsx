@@ -14,7 +14,6 @@ import {
   deleteRoutine,
   runRoutine,
   listAllRoutineRuns,
-  createRoutineTrigger,
   listRoutineTriggers,
 } from "@/lib/api/domains/office-api";
 import type {
@@ -100,39 +99,24 @@ function useRoutineActions(workspaceId: string | null, fetchRoutines: () => Prom
     [fetchRoutines],
   );
 
-  // Returns whether the routine itself was created, which is also whether
-  // the create dialog should close and reset its form: true covers both the
-  // full-success and trigger-create-failed cases (a real routine now
-  // exists), false only when createRoutine itself rejected (nothing to
-  // close or reset — the user's input needs to stay for a retry).
+  // The routine and its optional cron trigger are created in one request, so
+  // a rejected trigger creates no routine. Returns whether the create
+  // succeeded, which is also whether the dialog should close and reset its
+  // form: false leaves the user's input in place for a retry.
   const handleCreate = useCallback(
     async (data: RoutineFormData): Promise<boolean> => {
       if (!workspaceId) return false;
-      let routine: Routine;
+      const input = buildCreateRoutineInput(data);
+      const cronExpression = data.cronExpression.trim();
+      if (data.triggerKind === "cron" && cronExpression) {
+        input.trigger = { kind: "cron", cronExpression, timezone: data.timezone };
+      }
+
       try {
-        routine = await createRoutine(workspaceId, buildCreateRoutineInput(data));
+        await createRoutine(workspaceId, input);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("office:failedToCreateRoutine"));
         return false;
-      }
-
-      const cronExpression = data.cronExpression.trim();
-      if (data.triggerKind === "cron" && cronExpression) {
-        try {
-          await createRoutineTrigger(routine.id, {
-            kind: "cron",
-            cronExpression,
-            timezone: data.timezone,
-          });
-        } catch (err) {
-          await refreshRoutinesOrReportFailure(fetchRoutines, t);
-          toast.error(
-            t("office:routineCreatedWithoutSchedule", {
-              error: err instanceof Error ? err.message : t("office:failedToCreateRoutine"),
-            }),
-          );
-          return true;
-        }
       }
 
       await refreshRoutinesOrReportFailure(fetchRoutines, t);

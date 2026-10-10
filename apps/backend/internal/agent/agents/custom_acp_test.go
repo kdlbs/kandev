@@ -105,3 +105,16 @@ func TestBuiltinACPAgentDoesNotClaimOperatorDefined(t *testing.T) {
 		t.Error("OperatorDefined = true for a built-in agent")
 	}
 }
+
+// The ACP adapter only restores a session the CLI advertises it can restore,
+// so declaring restore is safe for any operator's command. Without it every
+// reconnect replaced the provider conversation with session/new.
+//
+// @covers AC-AGENTS-CUSTOM-ACP-002.4
+func TestCustomACPAgentDeclaresNativeSessionRestore(t *testing.T) {
+	sc := newTestCustomACPAgent().Runtime().SessionConfig
+
+	if !sc.NativeSessionResume {
+		t.Error("NativeSessionResume = false; every reconnect would send session/new")
+	}
+}

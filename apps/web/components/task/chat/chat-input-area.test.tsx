@@ -6,6 +6,7 @@ import { QueueAdmissionError, QueueFullError } from "@/lib/api/domains/queue-api
 
 const toastMock = vi.fn();
 const handleSendMessageMock = vi.fn();
+const fetchTaskMock = vi.hoisted(() => vi.fn());
 const useKeyboardShortcutMock = vi.hoisted(() => vi.fn());
 const MESSAGE_NOT_SENT_TITLE = "Message not sent";
 let mockProceedStepName: string | null = null;
@@ -17,6 +18,7 @@ const mockState = {
   kanban: { workflowId: null, tasks: [], steps: [] },
   kanbanMulti: { snapshots: {} },
   workflows: { items: [] },
+  office: { tasks: { items: [] } },
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -51,6 +53,11 @@ vi.mock("@/components/task/share/share-button", () => ({
 
 vi.mock("@/components/task/chat/chat-input-container", () => ({
   ChatInputContainer: () => <textarea aria-label="Draft" />,
+}));
+
+vi.mock("@/lib/api/domains/kanban-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/domains/kanban-api")>()),
+  fetchTask: fetchTaskMock,
 }));
 
 vi.mock("@/components/task/chat/queued-ghost-list", () => ({
@@ -147,6 +154,7 @@ beforeEach(() => {
   handleSendMessageMock.mockReset();
   handleSendMessageMock.mockResolvedValue(undefined);
   useKeyboardShortcutMock.mockReset();
+  fetchTaskMock.mockReset().mockResolvedValue({ workspace_id: "task-workspace" });
 });
 
 afterEach(() => {
@@ -177,6 +185,7 @@ function panelState(overrides = {}) {
     handleClearPRFeedback: vi.fn(),
     handleClearWalkthroughComments: vi.fn(),
     clearEphemeral: vi.fn(),
+    consumeSubmittedEphemeral: vi.fn(),
     addContextFile: vi.fn(),
     planModeEnabled: false,
     planCommentMigration: {
@@ -365,13 +374,13 @@ describe("useSubmitHandler routing", () => {
   });
 
   it("does not clear composer side effects when admission reports unsuccessful", async () => {
-    const clearEphemeral = vi.fn();
+    const consumeSubmittedEphemeral = vi.fn();
     handleSendMessageMock.mockResolvedValueOnce(false);
     const { result } = renderHook(() =>
       useSubmitHandler(
         panelState({
           contextFiles: [{ path: "src", name: "src", isDirectory: true }],
-          clearEphemeral,
+          consumeSubmittedEphemeral,
         }),
       ),
     );
@@ -380,7 +389,7 @@ describe("useSubmitHandler routing", () => {
       await result.current.handleSubmit({ message: "keep this draft" });
     });
 
-    expect(clearEphemeral).not.toHaveBeenCalled();
+    expect(consumeSubmittedEphemeral).not.toHaveBeenCalled();
   });
 });
 
@@ -632,13 +641,13 @@ describe("useSubmitHandler message comments", () => {
 describe("context file send retention", () => {
   it("keeps ephemeral context files when sending fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const clearEphemeral = vi.fn();
+    const consumeSubmittedEphemeral = vi.fn();
     handleSendMessageMock.mockRejectedValueOnce(new Error("send failed"));
     const { result } = renderHook(() =>
       useSubmitHandler(
         panelState({
           contextFiles: [{ path: "src", name: "src", isDirectory: true }],
-          clearEphemeral,
+          consumeSubmittedEphemeral,
         }),
       ),
     );
@@ -647,17 +656,17 @@ describe("context file send retention", () => {
       await result.current.handleSubmit({ message: "hello" });
     });
 
-    expect(clearEphemeral).not.toHaveBeenCalled();
+    expect(consumeSubmittedEphemeral).not.toHaveBeenCalled();
   });
 
   it("clears ephemeral context files after a successful send", async () => {
-    const clearEphemeral = vi.fn();
+    const consumeSubmittedEphemeral = vi.fn();
     handleSendMessageMock.mockResolvedValueOnce(undefined);
     const { result } = renderHook(() =>
       useSubmitHandler(
         panelState({
           contextFiles: [{ path: "src", name: "src", isDirectory: true }],
-          clearEphemeral,
+          consumeSubmittedEphemeral,
         }),
       ),
     );
@@ -666,6 +675,8 @@ describe("context file send retention", () => {
       await result.current.handleSubmit({ message: "hello" });
     });
 
-    expect(clearEphemeral).toHaveBeenCalledWith("session-1");
+    expect(consumeSubmittedEphemeral).toHaveBeenCalledWith("session-1", [
+      { path: "src", name: "src", isDirectory: true },
+    ]);
   });
 });

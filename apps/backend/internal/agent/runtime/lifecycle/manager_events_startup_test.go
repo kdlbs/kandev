@@ -41,7 +41,7 @@ func TestHandleCompleteEventMarkState_DefersUninitializedStartupFailure(t *testi
 		t.Fatalf("add execution: %v", err)
 	}
 
-	mgr.handleCompleteEventMarkState(execution, &agentctl.AgentEvent{
+	callCompletionStateWithStartupLease(t, mgr, execution, &agentctl.AgentEvent{
 		Type:  streams.EventTypeComplete,
 		Error: "Agent process exited with code 1",
 		Data:  map[string]any{"is_error": true},
@@ -134,6 +134,10 @@ func TestStartupGenerationPublishesOriginatingAttemptIDOnReusedExecution(t *test
 	}
 	if streamEvents[0].AttemptID != "attempt-new" {
 		t.Fatalf("replacement stream attempt ID = %q, want attempt-new", streamEvents[0].AttemptID)
+	}
+	if streamEvents[0].SessionSettingsSourceGeneration != newGeneration {
+		t.Fatalf("replacement stream source generation = %d, want %d",
+			streamEvents[0].SessionSettingsSourceGeneration, newGeneration)
 	}
 }
 
@@ -328,10 +332,18 @@ func TestStartupGenerationCapturesAttemptIDForReusedExecutionMessageChunk(t *tes
 		Text: "replacement\n",
 	}, newGeneration)
 	streamEvents := eventBus.getStreamEvents()
-	if len(streamEvents) != 1 {
-		t.Fatalf("replacement message callback published %d stream events, want 1", len(streamEvents))
+	if len(streamEvents) != 2 {
+		t.Fatalf("replacement message callback published %d stream events, want original evidence and transcript projection", len(streamEvents))
 	}
-	if streamEvents[0].AttemptID != "attempt-new" {
-		t.Fatalf("message stream attempt ID = %q, want attempt-new", streamEvents[0].AttemptID)
+	if streamEvents[0].Data.Type != streams.EventTypeMessageChunk || streamEvents[0].Data.Text != "replacement\n" {
+		t.Fatalf("original evidence = %+v, want replacement message_chunk", streamEvents[0].Data)
+	}
+	if streamEvents[1].Data.Type != "message_streaming" {
+		t.Fatalf("transcript projection = %+v, want message_streaming", streamEvents[1].Data)
+	}
+	for _, event := range streamEvents {
+		if event.AttemptID != "attempt-new" {
+			t.Fatalf("message stream attempt ID = %q, want attempt-new", event.AttemptID)
+		}
 	}
 }

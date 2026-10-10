@@ -43,6 +43,9 @@ const (
 	// ceilingReplaySuperseded is a terminal disposition for a claimed launch
 	// whose workflow entry or destination changed before dispatch.
 	ceilingReplaySuperseded
+	// ceilingReplayRunClosed is a terminal disposition for a claimed start
+	// whose automation run closed before dispatch: nothing was launched.
+	ceilingReplayRunClosed
 )
 
 // drainDeferredCeilingLaunches is AC-15c's pass driver: one sweep tick walks
@@ -201,13 +204,24 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 		return
 	}
 
-	switch s.replayCeilingDeferral(ctx, currentTask, deferral) {
+	s.settleCeilingReplay(ctx, task, claim, deferral, s.replayCeilingDeferral(ctx, currentTask, deferral))
+}
+
+// settleCeilingReplay applies a claimed replay's outcome to its record.
+func (s *Service) settleCeilingReplay(
+	ctx context.Context, task *models.Task, claim *ceilingDeferredLaunchClaim,
+	deferral models.CeilingDeferral, outcome ceilingReplayOutcome,
+) {
+	switch outcome {
 	case ceilingReplaySucceeded:
 		claim.settle(ctx)
 		s.publishTaskUpdatedByID(ctx, task.ID)
 	case ceilingReplaySuperseded:
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral,
 			ceilingReasonSuperseded, "workflow destination changed before dispatch")
+	case ceilingReplayRunClosed:
+		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral,
+			ceilingReasonDroppedTaskIneligible, ceilingDetailAutomationRunClosed)
 	case ceilingReplayFailed:
 		s.logger.Zap().Warn("ceiling retry replay failed for a non-ceiling reason; will retry on a later sweep",
 			zap.String("task_id", task.ID), zap.String("kind", string(deferral.Kind)))
@@ -269,11 +283,8 @@ func (s *Service) evaluateCeilingDropReasons(
 		}
 	}
 	if deferral.Kind == models.CeilingLaunchStart {
-		if !task.IsFromOffice && !s.shouldAutoStartStep(ctx, task.WorkflowStepID) {
-			return ceilingReasonDroppedTaskIneligible, "workflow step no longer auto-starts", true
-		}
-		if s.shouldSkipTerminalPRAutoStart(ctx, task) {
-			return ceilingReasonDroppedLaunchGateDeclined, "terminal PR auto-start gate declined the launch", true
+		if reasonCode, detail, drop := s.evaluateCeilingStartDropReasons(ctx, task, deferral.Payload); drop {
+			return reasonCode, detail, true
 		}
 	}
 	if disposition, detail, validationErr := s.validateCeilingEntry(ctx, task, deferral); validationErr != nil {
@@ -290,14 +301,38 @@ func (s *Service) evaluateCeilingDropReasons(
 	return "", "", false
 }
 
-// dropCeilingDeferral is AC-17b/AC-17c's disposition: clear the record, log
-// the drop (AC-22/22a) and, where a session exists to attach it to, write a
-// minimal one-shot drop note. The full AC-49 suppression-and-bounded-retry
-// card surface for an ONGOING refusal is separate, later scope; this is only
-// the terminal "this will never be retried again" notice.
+// evaluateCeilingStartDropReasons applies the drop reasons scoped to the
+// "start" kind. An automation run's trigger is its start signal, so a start
+// serving a run is not governed by workflow-step auto-start eligibility, as
+// Office starts are not; it is dropped instead once its run is no longer open.
+func (s *Service) evaluateCeilingStartDropReasons(
+	ctx context.Context, task *models.Task, payload map[string]interface{},
+) (reasonCode, detail string, drop bool) {
+	run := automationRunFromCeilingPayload(payload)
+	if run != nil && !s.automationRunAwaitsLaunch(ctx, run.RunID) {
+		return ceilingReasonDroppedTaskIneligible, ceilingDetailAutomationRunClosed, true
+	}
+	if run == nil && !task.IsFromOffice && !s.shouldAutoStartStep(ctx, task.WorkflowStepID) {
+		return ceilingReasonDroppedTaskIneligible, "workflow step no longer auto-starts", true
+	}
+	if s.shouldSkipTerminalPRAutoStart(ctx, task) {
+		return ceilingReasonDroppedLaunchGateDeclined, "terminal PR auto-start gate declined the launch", true
+	}
+	return "", "", false
+}
+
+// dropCeilingDeferral terminally disposes of a deferred launch that will never
+// be retried. It first fails the automation run the launch serves, if that run
+// still waits, and keeps the record when the run cannot be failed, so a later
+// sweep drops it again instead of leaving the run open with nothing to settle
+// it. It then logs the drop, writes a one-shot drop note where a session
+// exists to carry it, and clears the record.
 func (s *Service) dropCeilingDeferral(
 	ctx context.Context, task *models.Task, sessionID string, deferral models.CeilingDeferral, reasonCode, detail string,
 ) {
+	if !s.failQueuedAutomationRun(ctx, deferral.Payload, fmt.Sprintf("the queued launch was dropped: %s", detail)) {
+		return
+	}
 	s.logger.Zap().Warn("dropping a ceiling-deferred launch",
 		zap.String("task_id", task.ID),
 		zap.String("kind", string(deferral.Kind)),
@@ -533,8 +568,11 @@ func decodeCeilingPayloadField(raw interface{}, target interface{}) {
 	_ = json.Unmarshal(data, target)
 }
 
-// replayCeilingLaunchStart replays an AC-42 "start" record by calling
-// startTask with the payload seam1StartPayload originally captured.
+// replayCeilingLaunchStart replays a "start" record by calling startTask with
+// the payload seam1StartPayload captured. A start that serves an automation
+// run is launched inside that run's dispatch, so the launch binds the run or
+// fails it, and a run that closed first yields ceilingReplayRunClosed without
+// a launch.
 func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Task, payload map[string]interface{}) ceilingReplayOutcome {
 	var attachments []v1.MessageAttachment
 	decodeCeilingPayloadField(payload[metaKeyAttachments], &attachments)
@@ -552,6 +590,7 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 	}
 
 	env = s.remintCeilingLaunchCredentials(ctx, task.ID, env)
+	automationRun := automationRunFromCeilingPayload(payload)
 
 	opts := startTaskOptions{
 		ProfileExplicit:      boolField(payload, "profile_explicit"),
@@ -566,6 +605,7 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 		// auto_start alone would replay it as a manual override that bypasses
 		// the ceiling.
 		Origin:              launchOrigin(stringField(payload, "origin")),
+		AutomationRun:       automationRun,
 		ceilingEntryBinding: entryBinding,
 	}
 	if spawnRaw, ok := payload["spawn_origin"].(map[string]interface{}); ok {
@@ -576,19 +616,21 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 		}
 	}
 
-	execution, err := s.startTask(
-		ctx, task.ID,
-		stringField(payload, metaKeyAgentProfileID),
-		stringField(payload, "executor_id"),
-		stringField(payload, metaKeyExecutorProfile),
-		stringField(payload, "priority"),
-		stringField(payload, metaKeyPrompt),
-		stringField(payload, metaKeyWorkflowStepID),
-		boolField(payload, metaKeyPlanMode),
-		boolField(payload, "auto_start"),
-		attachments,
-		opts,
-	)
+	execution, err := s.startQueuedAutomationRun(ctx, task.ID, automationRun, func() (*executor.TaskExecution, error) {
+		return s.startTask(
+			ctx, task.ID,
+			stringField(payload, metaKeyAgentProfileID),
+			stringField(payload, "executor_id"),
+			stringField(payload, metaKeyExecutorProfile),
+			stringField(payload, "priority"),
+			stringField(payload, metaKeyPrompt),
+			stringField(payload, metaKeyWorkflowStepID),
+			boolField(payload, metaKeyPlanMode),
+			boolField(payload, "auto_start"),
+			attachments,
+			opts,
+		)
+	})
 	// startTask reports a repeat refusal as ErrCeilingLaunchDeferred, not as
 	// (nil, nil) — ceilingReplayOutcomeFromExecution's execution==nil case
 	// would otherwise never fire and a still-refused replay would be
@@ -596,6 +638,9 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 	// the AC-49g card-surface retry and logging a misleading warning.
 	if errors.Is(err, ErrCeilingLaunchDeferred) {
 		return ceilingReplayStillDeferred
+	}
+	if errors.Is(err, errCeilingAutomationRunClosed) {
+		return ceilingReplayRunClosed
 	}
 	return ceilingReplayOutcomeFromExecution(execution, err)
 }
@@ -655,6 +700,7 @@ func (s *Service) replayCeilingLaunchPromptEnsure(ctx context.Context, task *mod
 		promptAlreadyComposed:     boolField(payload, "prompt_already_composed"),
 		fallbackLaunchPrompt:      stringField(payload, "fallback_launch_prompt"),
 		fallbackRetryPrompt:       stringField(payload, "fallback_retry_prompt"),
+		promptReferenceContext:    stringField(payload, "prompt_reference_context"),
 	}
 	if binding, present, bindingErr := models.ReadCeilingWorkflowEntryBinding(payload); bindingErr == nil && present {
 		options.ceilingEntryBinding = &binding

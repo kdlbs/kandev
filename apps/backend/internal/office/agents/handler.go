@@ -231,10 +231,10 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		}
 	}
 	if req.AgentProfileID != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "agent_profile_id no longer selects an Office runtime; update the agent routing override or workspace tier profiles",
-		})
-		return
+		if err := h.svc.ApplyProfileConfiguration(ctx, agent, *req.AgentProfileID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	applyAgentUpdates(agent, req)
 	if err := h.svc.UpdateAgentInstance(ctx, agent); err != nil {

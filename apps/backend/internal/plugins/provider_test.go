@@ -222,6 +222,7 @@ func TestProvideWithStoreErrorsKeepsRequiredStoreResultsIndependent(t *testing.T
 	wantIDs := []string{
 		"plugin-instances", "plugin-marketplace", "plugin-settings",
 		"plugin-state", "plugin-instance-state", "plugin-user-state",
+		"plugin-command-receipts",
 	}
 	if len(storeErrors) != len(wantIDs) {
 		t.Fatalf("store error set has %d entries, want %d: %v", len(storeErrors), len(wantIDs), storeErrors)

@@ -3,6 +3,8 @@ package hostcli
 import (
 	"context"
 	"errors"
+	"io"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -116,4 +118,60 @@ func TestDetectVersion(t *testing.T) {
 			t.Fatalf("err = %v, want timeout", err)
 		}
 	})
+}
+
+func TestExecutablePathNeverUsesBridge(t *testing.T) {
+	spec := Spec{Executable: "codex"}
+	for _, path := range []string{"/bin/codex-acp", "npx @agentclientprotocol/codex-acp", ""} {
+		if got := ExecutablePath(spec, path); got != "codex" {
+			t.Fatalf("path=%q got=%q", path, got)
+		}
+	}
+	if got := ExecutablePath(spec, "/bin/codex"); got != "/bin/codex" {
+		t.Fatalf("got=%q", got)
+	}
+}
+func TestVersionOutputIsBounded(t *testing.T) {
+	b := &boundedOutput{}
+	chunk := []byte(strings.Repeat("x", 100000))
+	for i := 0; i < 3; i++ {
+		if n, err := b.Write(chunk); n != len(chunk) || err != nil {
+			t.Fatalf("write=%d,%v", n, err)
+		}
+	}
+	if b.Len() != 65536 {
+		t.Fatalf("retained %d bytes", b.Len())
+	}
+}
+
+func TestExecProcessKillReleasesBlockedProtocolRead(t *testing.T) {
+	inReader, inWriter := io.Pipe()
+	outReader, outWriter := io.Pipe()
+	defer inReader.Close()
+	defer inWriter.Close()
+	defer outReader.Close()
+	defer outWriter.Close()
+	readStarted := make(chan struct{})
+	readDone := make(chan error, 1)
+	go func() {
+		close(readStarted)
+		_, err := outReader.Read(make([]byte, 1))
+		readDone <- err
+	}()
+	<-readStarted
+	p := &execProcess{cmd: &exec.Cmd{}, stdin: inWriter, stdout: outReader}
+	if err := p.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-readDone:
+		if !errors.Is(err, io.ErrClosedPipe) {
+			t.Fatalf("read error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Kill did not release the protocol reader")
+	}
+	if _, err := inWriter.Write([]byte("request")); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("stdin remains open: %v", err)
+	}
 }

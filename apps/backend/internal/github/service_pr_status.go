@@ -15,8 +15,9 @@ func findLatestCommentTime(comments []PRComment) *time.Time {
 
 // computeOverallCheckStatus reduces per-check runs to a single PR-level status.
 // Mirrors GitHub's own UI: skipped/neutral conclusions are ignored; any failing
-// terminal state (failure, timed_out, cancelled, action_required) makes the PR
-// failed; non-completed checks keep the PR pending.
+// terminal state (failure, timed_out, action_required) makes the PR failed;
+// cancelled checks are ignored because GitHub may cancel superseded runs.
+// Non-completed checks keep the PR pending.
 func computeOverallCheckStatus(checks []CheckRun) string {
 	if len(checks) == 0 {
 		return ""
@@ -29,11 +30,10 @@ func computeOverallCheckStatus(checks []CheckRun) string {
 			continue
 		}
 		switch c.Conclusion {
-		case checkConclusionFail, checkConclusionTimedOut,
-			checkConclusionCancelled, checkConclusionActionRequired:
+		case checkConclusionFail, checkConclusionTimedOut, checkConclusionActionRequired:
 			return checkConclusionFail
-		case checkConclusionSkipped, checkConclusionNeutral:
-			// ignore — GitHub's UI does
+		case checkConclusionCancelled, checkConclusionSkipped, checkConclusionNeutral:
+			// Ignore superseded, skipped, and neutral checks.
 		default:
 			// Treat success and any future unknown terminal conclusion as passing.
 			// Being permissive preserves the success signal if GitHub introduces

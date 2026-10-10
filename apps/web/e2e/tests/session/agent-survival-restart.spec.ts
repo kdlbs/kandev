@@ -1,6 +1,17 @@
 import { test, expect } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+
+async function localExecutorProfileId(apiClient: {
+  listExecutors: () => Promise<{
+    executors: Array<{ type: string; profiles?: Array<{ id: string }> }>;
+  }>;
+}): Promise<string> {
+  const { executors } = await apiClient.listExecutors();
+  const executor = executors.find((candidate) => ["local", "local_pc"].includes(candidate.type));
+  const profile = executor?.profiles?.[0];
+  if (!profile) throw new Error("E2E survival test requires a local_pc executor profile");
+  return profile.id;
+}
 
 // AC-EXECUTORS-SURVIVAL-001..003: with the capability enabled, a worktree
 // executor's agent process is never stopped as part of a graceful backend
@@ -58,6 +69,10 @@ test.describe("Agent survival across backend restart", () => {
         timeout: 30_000,
       });
       await expect(apiClient.getTask(task.id)).resolves.toMatchObject({ state: "IN_PROGRESS" });
+      const liveSessionID = (await apiClient.listTaskSessions(task.id)).sessions.find(
+        (item) => item.is_primary,
+      )?.id;
+      expect(liveSessionID).toBeTruthy();
 
       // Restart the backend while the turn is still running.
       await backend.restart();
@@ -67,6 +82,13 @@ test.describe("Agent survival across backend restart", () => {
       // receive.
       await testPage.reload();
       await session.waitForLoad();
+
+      const reattachedTask = await apiClient.getTask(task.id);
+      expect(reattachedTask.state).toBe("IN_PROGRESS");
+      const reattachedSessions = await apiClient.listTaskSessions(task.id);
+      const reattachedSession = reattachedSessions.sessions.find((item) => item.is_primary);
+      expect(reattachedSession?.id).toBe(liveSessionID);
+      expect(reattachedSession?.state).toBe("RUNNING");
 
       // The instance was re-tracked, not relaunched: exactly the one boot
       // message from the original launch, no second "Started agent" and no
@@ -85,6 +107,9 @@ test.describe("Agent survival across backend restart", () => {
         timeout: 30_000,
       });
       await session.waitForChatIdle({ timeout: 15_000 });
+      await expect(session.chat.getByText("Slow response complete", { exact: false })).toHaveCount(
+        1,
+      );
 
       // The turn genuinely finished, so the workflow engine's own
       // on_turn_complete transition moves the task to REVIEW exactly as it
@@ -106,12 +131,80 @@ test.describe("Agent survival across backend restart", () => {
       await session.sendMessage("/e2e:simple-message");
       await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
 
-      // Board view: the card must not show the interrupted affordance either.
-      const kanban = new KanbanPage(testPage);
-      await kanban.goto();
-      const card = kanban.taskCard(task.id);
-      await expect(card).toBeVisible({ timeout: 20_000 });
-      await expect(card.getByTestId("task-state-interrupted")).toHaveCount(0);
+      // The completed Review task remains in the sidebar even when it has no
+      // active board column. Its row must not advertise an interrupted turn.
+      const taskRow = session.sidebarTaskItem("Agent Survival Restart Task");
+      await expect(taskRow).toBeVisible();
+      await expect(taskRow.getByTestId("task-state-interrupted")).toHaveCount(0);
+    } finally {
+      await releaseFeature();
+    }
+  });
+
+  test("a local_pc session's in-flight turn survives a graceful backend restart", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const releaseFeature = await backend.useEnv({
+      KANDEV_FEATURES_AGENT_SURVIVAL: "true",
+    });
+
+    try {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Local PC Agent Survival Restart Task",
+        seedData.agentProfileId,
+        {
+          description: "/slow 12",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+          executor_profile_id: await localExecutorProfileId(apiClient),
+        },
+      );
+
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.chat.getByText(/Started agent|Resumed agent/i)).toBeVisible({
+        timeout: 30_000,
+      });
+      await expect(session.chat.getByText("Running slow response", { exact: false })).toBeVisible({
+        timeout: 30_000,
+      });
+      const liveSessionID = (await apiClient.listTaskSessions(task.id)).sessions.find(
+        (item) => item.is_primary,
+      )?.id;
+      expect(liveSessionID).toBeTruthy();
+
+      await backend.restart();
+      await testPage.reload();
+      await session.waitForLoad();
+
+      const reattachedTask = await apiClient.getTask(task.id);
+      expect(reattachedTask.state).toBe("IN_PROGRESS");
+      const reattachedSessions = await apiClient.listTaskSessions(task.id);
+      const reattachedSession = reattachedSessions.sessions.find((item) => item.is_primary);
+      expect(reattachedSession?.id).toBe(liveSessionID);
+      expect(reattachedSession?.state).toBe("RUNNING");
+
+      await expect(session.chat.getByText(/Started agent|Resumed agent/i)).toHaveCount(1);
+      await expect(session.recoveryFreshButton()).toHaveCount(0);
+      await expect(session.recoveryResumeButton()).toHaveCount(0);
+      await expect(session.chat.getByText("Slow response complete", { exact: false })).toBeVisible({
+        timeout: 30_000,
+      });
+      await session.waitForChatIdle({ timeout: 15_000 });
+      await expect(session.chat.getByText("Slow response complete", { exact: false })).toHaveCount(
+        1,
+      );
+
+      await session.sendMessage("/e2e:simple-message");
+      await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
     } finally {
       await releaseFeature();
     }

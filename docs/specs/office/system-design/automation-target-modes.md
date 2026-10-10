@@ -205,3 +205,8 @@ visible task state.
 - [User-configured automation continuity](../../../decisions/2026-08-22-user-configured-automation-continuity.md)
 - [Automation self-archive](../../../decisions/2026-09-02-automation-self-archive.md)
 - [Automation target modes](../../../decisions/2026-08-23-automation-target-modes.md)
+
+## Proposed coordination extension
+
+A proposed managed-conversation destination stores a reference to shared conversation input. It does not acquire ownership of conversation cleanup.
+See the [managed-conversation destination design](plugin-conversation-targets.md).

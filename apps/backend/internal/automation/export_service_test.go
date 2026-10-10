@@ -74,6 +74,35 @@ func TestExportAutomationsDocument_NoAutomations_EmptyListAC32(t *testing.T) {
 	}
 }
 
+func TestExportManagedConversationDestinationContainsOnlyPortableBinding(t *testing.T) {
+	svc, wsLookup := exportServiceTestFixture(t)
+	svc.SetManagedConversationDestinationResolver(managedScheduleResolverFake{})
+	wsLookup.exists["ws-managed"] = true
+	createExportTestAutomation(t, svc, &CreateAutomationRequest{
+		WorkspaceID: "ws-managed", Name: "Daily brief", TaskMode: TaskModeManagedConversation,
+		ManagedDestination: &ManagedConversationDestination{
+			PluginID: "coordinator", InstanceKey: "daily-brief", Revision: 7,
+		},
+	})
+
+	body, err := svc.ExportAutomationsDocument(context.Background(), "ws-managed")
+	if err != nil {
+		t.Fatalf("ExportAutomationsDocument: %v", err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	automations := doc["automations"].([]any)
+	destination, ok := automations[0].(map[string]any)["managed_destination"].(map[string]any)
+	if !ok {
+		t.Fatalf("managed_destination missing from export: %s", body)
+	}
+	if len(destination) != 2 || destination["plugin_id"] != "coordinator" || destination["instance_key"] != "daily-brief" {
+		t.Fatalf("portable destination = %#v, want only plugin_id and instance_key", destination)
+	}
+}
+
 // AC-8: automations are ordered by name ascending, tiebroken by id
 // ascending — independent of creation order or the store's own ordering.
 

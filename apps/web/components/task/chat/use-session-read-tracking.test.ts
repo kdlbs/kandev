@@ -1,6 +1,8 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { createElement, useState, type PropsWithChildren } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSession } from "@/lib/types/http";
+import { TaskRouteSessionHydrationProvider } from "@/components/task/task-route-session-hydration";
 
 const mockMarkSessionRead = vi.fn();
 const mockUpdateSessionReadCursor = vi.fn();
@@ -47,6 +49,31 @@ beforeEach(() => {
     updateSessionReadCursor: mockUpdateSessionReadCursor,
   };
   mockMarkSessionRead.mockResolvedValue({ session_id: "session-1", last_read_message_id: "m2" });
+});
+
+describe("useSessionReadTracking route hydration", () => {
+  it("waits for route session hydration before capturing or marking a read cursor", async () => {
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+    let setRouteReady!: (ready: boolean) => void;
+    function Wrapper({ children }: PropsWithChildren) {
+      const [isReady, setReady] = useState(false);
+      setRouteReady = setReady;
+      return createElement(TaskRouteSessionHydrationProvider, { isReady, children });
+    }
+
+    const { result } = renderHook(() => useSessionReadTracking("session-1", true, "m3"), {
+      wrapper: Wrapper,
+    });
+    expect(result.current).toBeNull();
+    expect(mockMarkSessionRead).not.toHaveBeenCalled();
+
+    act(() => setRouteReady(true));
+
+    await waitFor(() => {
+      expect(result.current).toBe("m1");
+      expect(mockMarkSessionRead).toHaveBeenCalledWith("session-1", "m3");
+    });
+  });
 });
 
 describe("useSessionReadTracking", () => {

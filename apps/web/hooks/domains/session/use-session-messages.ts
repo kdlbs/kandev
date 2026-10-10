@@ -1,6 +1,13 @@
 /* eslint-disable max-lines -- session hydration and lifecycle hooks share one transcript contract. */
 
-import { useCallback, useEffect, useLayoutEffect, useRef, type MutableRefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import {
   isWebSocketRequestTimeoutError,
@@ -425,6 +432,8 @@ function useTerminalStateFetch(
       fetchAndStoreMessages,
       isActive,
       canFinalizeLoading: isCurrentGeneration,
+      // The transcript already streamed over WS; this only reconciles it.
+      background: true,
       onError: (error) => console.error("Failed to fetch messages after state change:", error),
     });
     return deactivate;
@@ -618,7 +627,7 @@ function useRunningMessageBackfill(
     const generation = sessionFetchGenerationRef.current;
     let inFlight = false;
     const sync = () => {
-      if (inFlight) return;
+      if (inFlight || document.visibilityState === "hidden") return;
       inFlight = true;
       debug("running backfill", { sessionId: taskSessionId });
       fetchAndStoreMessages(
@@ -726,6 +735,7 @@ type SessionEntryFetchParams = {
   connectionStatus: string;
   messagesLength: number;
   historyInitialized: boolean;
+  historyStatus: MessageHistoryStatus;
   store: ReturnType<typeof useAppStoreApi>;
   prevSessionIdRef: MutableRefObject<string | null>;
   fetchState: ReturnType<typeof useMessageFetchState>;
@@ -734,7 +744,7 @@ type SessionEntryFetchParams = {
   sessionFetchGenerationRef: MutableRefObject<number>;
 };
 function useInitialMessagesWait(params: SessionEntryFetchParams): void {
-  const { taskSessionId, messagesLength, historyInitialized, fetchState } = params;
+  const { taskSessionId, messagesLength, historyInitialized, historyStatus, fetchState } = params;
   const {
     initialFetchStartRef,
     lastFetchedSessionIdRef,
@@ -755,7 +765,7 @@ function useInitialMessagesWait(params: SessionEntryFetchParams): void {
     }
     if (messagesLength > 0) {
       setIsWaitingForInitialMessages(false);
-      if (historyInitialized) {
+      if (historyInitialized && historyStatus === "loading") {
         setHistoryStatus("ready");
         setHistoryError(null);
       }
@@ -775,6 +785,7 @@ function useInitialMessagesWait(params: SessionEntryFetchParams): void {
     setHistoryStatus,
     setHistoryError,
     historyInitialized,
+    historyStatus,
   ]);
 }
 function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
@@ -782,7 +793,6 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
     taskSessionId,
     connectionStatus,
     messagesLength,
-    historyInitialized,
     store,
     prevSessionIdRef,
     fetchState,
@@ -813,7 +823,6 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
     if (messagesLength > 0 && !sessionChanged && !isFreshMount) {
       lastFetchedSessionIdRef.current = taskSessionId;
       setIsWaitingForInitialMessages(false);
-      if (historyInitialized) fetchRefs.setHistoryStatus("ready");
       return;
     }
     if (isFreshMount && messagesLength > 0) {
@@ -853,7 +862,6 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
     taskSessionId,
     connectionStatus,
     messagesLength,
-    historyInitialized,
     store,
     prevSessionIdRef,
     lastFetchedSessionIdRef,
@@ -864,6 +872,67 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
     hydrationKey,
     sessionFetchGenerationRef,
   ]);
+}
+
+function useCoreRecoveryRetryState() {
+  const tokenRef = useRef<symbol | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const startRetry = useCallback(
+    (clientRecovery: Promise<boolean>, isCurrentGeneration: () => boolean) => {
+      const retryToken = Symbol();
+      tokenRef.current = retryToken;
+      setIsRetrying(true);
+      const finishRetry = () => {
+        if (tokenRef.current !== retryToken || !isCurrentGeneration()) return;
+        tokenRef.current = null;
+        setIsRetrying(false);
+      };
+      void clientRecovery.then(finishRetry, finishRetry);
+    },
+    [],
+  );
+  const cancelRetry = useCallback(() => {
+    tokenRef.current = null;
+    setIsRetrying(false);
+  }, []);
+  return { tokenRef, isRetrying, startRetry, cancelRetry };
+}
+
+function useSessionHistoryRecoveryGeneration({
+  taskSessionId,
+  connectionStatus,
+  fetchRefs,
+  cancelRetry,
+}: {
+  taskSessionId: string | null;
+  connectionStatus: string;
+  fetchRefs: ReturnType<typeof useMessageFetchState>["refs"];
+  cancelRetry: () => void;
+}) {
+  const activeSessionIdRef = useRef(taskSessionId);
+  const historySessionIdRef = useRef(taskSessionId);
+  const previousConnectionStatusRef = useRef(connectionStatus);
+  const sessionFetchGenerationRef = useRef(0);
+
+  useLayoutEffect(() => {
+    sessionFetchGenerationRef.current += 1;
+    activeSessionIdRef.current = taskSessionId;
+    const sessionChanged = historySessionIdRef.current !== taskSessionId;
+    const connectionChanged = previousConnectionStatusRef.current !== connectionStatus;
+    previousConnectionStatusRef.current = connectionStatus;
+    if (sessionChanged || connectionChanged) cancelRetry();
+    if (sessionChanged || connectionChanged) fetchRefs.setIsLoading(false);
+    if (sessionChanged) {
+      historySessionIdRef.current = taskSessionId;
+      fetchRefs.setHistoryStatus(taskSessionId ? "loading" : "ready");
+      fetchRefs.setHistoryError(null);
+    }
+    return () => {
+      sessionFetchGenerationRef.current += 1;
+    };
+  }, [cancelRetry, connectionStatus, fetchRefs, taskSessionId]);
+
+  return { activeSessionIdRef, sessionFetchGenerationRef };
 }
 
 function useSessionHistoryRecoveryState({
@@ -887,32 +956,19 @@ function useSessionHistoryRecoveryState({
   hydrationRef: SessionHydrationRef;
   hydrationKey: string;
 }) {
-  const activeSessionIdRef = useRef(taskSessionId);
-  const historySessionIdRef = useRef(taskSessionId);
-  const previousConnectionStatusRef = useRef(connectionStatus);
-  const sessionFetchGenerationRef = useRef(0);
+  const { tokenRef, isRetrying, startRetry, cancelRetry } = useCoreRecoveryRetryState();
   const { refs: fetchRefs } = fetchState;
-
-  useLayoutEffect(() => {
-    sessionFetchGenerationRef.current += 1;
-    activeSessionIdRef.current = taskSessionId;
-    const sessionChanged = historySessionIdRef.current !== taskSessionId;
-    const connectionChanged = previousConnectionStatusRef.current !== connectionStatus;
-    previousConnectionStatusRef.current = connectionStatus;
-    if (sessionChanged || connectionChanged) fetchRefs.setIsLoading(false);
-    if (sessionChanged) {
-      historySessionIdRef.current = taskSessionId;
-      fetchRefs.setHistoryStatus(taskSessionId ? "loading" : "ready");
-      fetchRefs.setHistoryError(null);
-    }
-    return () => {
-      sessionFetchGenerationRef.current += 1;
-    };
-  }, [connectionStatus, fetchRefs, taskSessionId]);
+  const { activeSessionIdRef, sessionFetchGenerationRef } = useSessionHistoryRecoveryGeneration({
+    taskSessionId,
+    connectionStatus,
+    fetchRefs,
+    cancelRetry,
+  });
 
   const retryHistory = useCallback(() => {
     const retrySessionId = taskSessionId;
     if (
+      tokenRef.current ||
       !retrySessionId ||
       connectionStatus !== "connected" ||
       messagesLoading ||
@@ -924,9 +980,14 @@ function useSessionHistoryRecoveryState({
     const generation = sessionFetchGenerationRef.current;
     const clientRecovery = getWebSocketClient()?.retryCoreSessionRecovery(retrySessionId);
     if (clientRecovery) {
+      startRetry(
+        clientRecovery,
+        () =>
+          activeSessionIdRef.current === retrySessionId &&
+          sessionFetchGenerationRef.current === generation,
+      );
       hydrationRef.current = null;
       fetchState.lastFetchedSessionIdRef.current = null;
-      void clientRecovery;
       return;
     }
     fetchState.lastFetchedSessionIdRef.current = null;
@@ -955,10 +1016,19 @@ function useSessionHistoryRecoveryState({
     messages.length,
     messagesLoading,
     messagesMetaLoading,
+    cancelRetry,
+    startRetry,
+    tokenRef,
+    sessionFetchGenerationRef,
     taskSessionId,
   ]);
 
-  return { retryHistory, sessionFetchGenerationRef };
+  return {
+    retryHistory,
+    sessionFetchGenerationRef,
+    coreRecoveryRetryTokenRef: tokenRef,
+    isCoreRecoveryRetrying: isRetrying,
+  };
 }
 
 function useCoreSessionRecovery({
@@ -969,6 +1039,7 @@ function useCoreSessionRecovery({
   hydrationRef,
   hydrationKey,
   sessionFetchGenerationRef,
+  coreRecoveryRetryTokenRef,
 }: {
   taskSessionId: string | null;
   connectionStatus: string;
@@ -977,6 +1048,7 @@ function useCoreSessionRecovery({
   hydrationRef: SessionHydrationRef;
   hydrationKey: string;
   sessionFetchGenerationRef: MutableRefObject<number>;
+  coreRecoveryRetryTokenRef: MutableRefObject<symbol | null>;
 }): void {
   useEffect(() => {
     if (!taskSessionId || connectionStatus !== "connected") return;
@@ -1004,6 +1076,8 @@ function useCoreSessionRecovery({
           hydrationRef,
           hydrationKey,
           options: { force: true, authoritative: true },
+          // Gap recovery replaces the transcript in place; what is on screen stays visible.
+          background: coreRecoveryRetryTokenRef.current === null,
         }),
         ensureSessionTurnsLoaded(taskSessionId, store, {
           readiness,
@@ -1024,6 +1098,7 @@ function useCoreSessionRecovery({
     hydrationKey,
     hydrationRef,
     sessionFetchGenerationRef,
+    coreRecoveryRetryTokenRef,
     store,
     taskSessionId,
   ]);
@@ -1052,7 +1127,7 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     historyError,
     refs: fetchRefs,
   } = fetchState;
-  const { retryHistory, sessionFetchGenerationRef } = useSessionHistoryRecoveryState({
+  const historyRecovery = useSessionHistoryRecoveryState({
     taskSessionId,
     connectionStatus,
     messages,
@@ -1063,6 +1138,7 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     hydrationRef,
     hydrationKey,
   });
+  const { sessionFetchGenerationRef, coreRecoveryRetryTokenRef } = historyRecovery;
   useCoreSessionRecovery({
     taskSessionId,
     connectionStatus,
@@ -1071,6 +1147,7 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     hydrationRef,
     hydrationKey,
     sessionFetchGenerationRef,
+    coreRecoveryRetryTokenRef,
   });
   useSessionLifecycleSubscriptions({
     taskSessionId,
@@ -1089,6 +1166,7 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     connectionStatus,
     messagesLength: messages.length,
     historyInitialized: messagesMeta.historyInitialized,
+    historyStatus,
     store,
     prevSessionIdRef,
     fetchState,
@@ -1107,21 +1185,22 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     fetchRefs,
   );
 
+  const isHistoryLoading =
+    isLoading ||
+    isWaitingForInitialMessages ||
+    messagesMeta.isLoading ||
+    historyRecovery.isCoreRecoveryRetrying;
   return {
-    isLoading: isLoading || isWaitingForInitialMessages || messagesMeta.isLoading,
+    isLoading: isHistoryLoading,
     isInitialMessagesLoading: isWaitingForInitialMessages,
     historyRefreshPending:
-      isLoading ||
-      isWaitingForInitialMessages ||
-      messagesMeta.isLoading ||
-      isCachedHistoryRefreshPending ||
-      isSessionEntryRefreshPending,
+      isHistoryLoading || isCachedHistoryRefreshPending || isSessionEntryRefreshPending,
     messages,
     historyInitialized: messagesMeta.historyInitialized,
     hasMore: messagesMeta.hasMore,
     oldestCursor: messagesMeta.oldestCursor,
-    historyStatus,
+    historyStatus: historyRecovery.isCoreRecoveryRetrying ? "loading" : historyStatus,
     historyError,
-    retryHistory,
+    retryHistory: historyRecovery.retryHistory,
   };
 }

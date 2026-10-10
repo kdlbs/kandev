@@ -9,6 +9,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -35,20 +36,28 @@ type MCPPrincipalScoper func(ctx context.Context, taskID, sessionID string) (con
 // payload session_id would let it name another user's session and inherit
 // their identity — turning the scoping fix into a privilege escalation.
 type taskScopedMCPHandler struct {
-	inner       agentctl.MCPHandler
-	scope       MCPIdentityScoper
-	principal   MCPPrincipalScoper
-	executionID string
-	taskID      string
-	sessionID   string
-	logger      *logger.Logger
+	inner                     agentctl.MCPHandler
+	scope                     MCPIdentityScoper
+	principal                 MCPPrincipalScoper
+	executionID               string
+	taskID                    string
+	sessionID                 string
+	managedToolPolicy         *mcpprofile.ManagedToolPolicy
+	managedToolPolicyRequired bool
+	coordinatorToolPolicy     *mcpprofile.CoordinatorToolPolicy
+	coordinatorPolicyRequired bool
+	logger                    *logger.Logger
 }
 
 type currentMCPHandler struct {
-	streamManager *StreamManager
-	executionID   string
-	taskID        string
-	sessionID     string
+	streamManager             *StreamManager
+	executionID               string
+	taskID                    string
+	sessionID                 string
+	managedToolPolicy         *mcpprofile.ManagedToolPolicy
+	managedToolPolicyRequired bool
+	coordinatorToolPolicy     *mcpprofile.CoordinatorToolPolicy
+	coordinatorPolicyRequired bool
 }
 
 func (h *currentMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -60,21 +69,30 @@ func (h *currentMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.
 		return inner.Dispatch(ctx, msg)
 	}
 	return (&taskScopedMCPHandler{
-		inner:       inner,
-		scope:       scope,
-		principal:   principal,
-		executionID: h.executionID,
-		taskID:      h.taskID,
-		sessionID:   h.sessionID,
-		logger:      h.streamManager.logger,
+		inner:                     inner,
+		scope:                     scope,
+		principal:                 principal,
+		executionID:               h.executionID,
+		taskID:                    h.taskID,
+		sessionID:                 h.sessionID,
+		managedToolPolicy:         h.managedToolPolicy,
+		managedToolPolicyRequired: h.managedToolPolicyRequired,
+		coordinatorToolPolicy:     h.coordinatorToolPolicy,
+		coordinatorPolicyRequired: h.coordinatorPolicyRequired,
+		logger:                    h.streamManager.logger,
 	}).Dispatch(ctx, msg)
 }
 
 func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	ctx = streams.WithMCPExecutionContext(ctx, streams.MCPExecutionContext{
-		ExecutionID: h.executionID,
-		TaskID:      h.taskID,
-		SessionID:   h.sessionID,
+		ExecutionID:               h.executionID,
+		TaskID:                    h.taskID,
+		SessionID:                 h.sessionID,
+		ManagedToolPolicy:         h.managedToolPolicy,
+		ManagedToolPolicyRequired: h.managedToolPolicyRequired,
+
+		CoordinatorToolPolicy:         h.coordinatorToolPolicy,
+		CoordinatorToolPolicyRequired: h.coordinatorPolicyRequired,
 	})
 	scoped := ctx
 	if h.scope != nil {
@@ -109,11 +127,37 @@ func (h *taskScopedMCPHandler) Dispatch(ctx context.Context, msg *ws.Message) (*
 // backend-owned execution identity is always attached; user identity is also
 // attached when per-user scoping has been wired.
 func (sm *StreamManager) mcpHandlerFor(execution *AgentExecution) agentctl.MCPHandler {
+	var managedToolPolicy *mcpprofile.ManagedToolPolicy
+	managedToolPolicyRequired := false
+	if value, present := execution.metadataValue(mcpprofile.ManagedToolPolicyMetadataKey); present {
+		managedToolPolicyRequired = true
+		var err error
+		managedToolPolicy, err = mcpprofile.ParseManagedToolPolicyMetadata(value)
+		if err != nil {
+			sm.logger.Warn("managed agent execution has invalid tool policy metadata",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		}
+	}
+	var coordinatorToolPolicy *mcpprofile.CoordinatorToolPolicy
+	coordinatorPolicyRequired := false
+	if value, present := execution.metadataValue(mcpprofile.CoordinatorToolPolicyMetadataKey); present {
+		coordinatorPolicyRequired = true
+		var err error
+		coordinatorToolPolicy, err = mcpprofile.ParseCoordinatorToolPolicyMetadata(value)
+		if err != nil {
+			sm.logger.Warn("coordinator agent execution has invalid tool policy metadata",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		}
+	}
 	return &currentMCPHandler{
-		streamManager: sm,
-		executionID:   execution.ID,
-		taskID:        execution.TaskID,
-		sessionID:     execution.SessionID,
+		streamManager:             sm,
+		executionID:               execution.ID,
+		taskID:                    execution.TaskID,
+		sessionID:                 execution.SessionID,
+		managedToolPolicy:         managedToolPolicy,
+		managedToolPolicyRequired: managedToolPolicyRequired,
+		coordinatorToolPolicy:     coordinatorToolPolicy,
+		coordinatorPolicyRequired: coordinatorPolicyRequired,
 	}
 }
 

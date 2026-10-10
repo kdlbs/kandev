@@ -1,9 +1,11 @@
 import {
   displayModelName,
   isModelConfigOption,
+  usableConfigOptions,
   type DynamicConfigOption,
   type ModelSelectorOption,
 } from "@/components/model-config-selector";
+import type { AppState } from "@/lib/state/store";
 
 type ResolveSessionTabTitleArgs = {
   /** User-supplied session name; wins over every derived title when set. */
@@ -46,4 +48,42 @@ export function resolveSessionTabTitle(args: ResolveSessionTabTitleArgs): string
     args.agentLabel ??
     resolveModelTitle(args, args.snapshotModel)
   );
+}
+
+function resolveAgentLabel(state: AppState, agentProfileId?: string): string | null {
+  if (!agentProfileId) return null;
+  const profile = state.agentProfiles.items.find((item) => item.id === agentProfileId);
+  if (!profile) return null;
+  const parts = profile.label.split(" \u2022 ");
+  return parts[1] || parts[0] || profile.label;
+}
+
+function profileSnapshotModel(session: AppState["taskSessions"]["items"][string]): string | null {
+  return typeof session?.agent_profile_snapshot?.model === "string"
+    ? session.agent_profile_snapshot.model
+    : null;
+}
+
+/** Selects the same live label used by task session tabs for one loaded session. */
+export function selectSessionTabTitle(state: AppState, sessionId: string): string | null {
+  const session = state.taskSessions.items[sessionId];
+  if (!session) return null;
+
+  const sessionModels = state.sessionModels.bySessionId[sessionId];
+
+  return resolveSessionTabTitle({
+    customName: session.name ?? null,
+    agentLabel: resolveAgentLabel(state, session.agent_profile_id),
+    activeModelId: state.activeModel.bySessionId[sessionId] || null,
+    currentModelId: sessionModels?.currentModelId || null,
+    snapshotModel: profileSnapshotModel(session),
+    modelOptions:
+      sessionModels?.models.map((model) => ({
+        id: model.modelId,
+        name: model.name,
+        description: model.description,
+        usageMultiplier: model.usageMultiplier,
+      })) ?? [],
+    configOptions: usableConfigOptions(sessionModels?.configOptions),
+  });
 }

@@ -34,6 +34,7 @@ export type TaskLike = {
   workflow_step_id?: string;
   workflow_agent_overrides?: WorkflowAgentOverrides;
   title?: string;
+  identifier?: string;
   description?: string | null;
   autopilot?: boolean;
   position?: number;
@@ -280,6 +281,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     workflowStepId: source.workflow_step_id ?? "",
     workflowAgentOverrides: source.workflow_agent_overrides,
     title: source.title ?? "",
+    identifier: source.identifier ?? undefined,
     description: source.description ?? undefined,
     autopilot: source.autopilot,
     priority: source.priority,

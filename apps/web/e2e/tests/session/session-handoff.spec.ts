@@ -1,6 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
@@ -75,11 +74,11 @@ test.describe("Session handoff", () => {
     const { sessions } = await apiClient.listTaskSessions(task.id);
     const session1Id = sessions[0].id;
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.taskCardByTitle("Session Handoff Task").click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+    // The task is already known by id. Open it directly instead of waiting for
+    // the Kanban WebSocket projection to refresh after the session becomes
+    // idle. The direct route has the same user-facing session entry point and
+    // avoids a virtualized board refresh race.
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({

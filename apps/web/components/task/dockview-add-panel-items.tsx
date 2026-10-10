@@ -7,7 +7,6 @@ import {
   IconFolder,
   IconGitBranch,
   IconGitPullRequest,
-  IconHistory,
   IconLayoutGrid,
   IconListCheck,
   IconNetwork,
@@ -288,22 +287,6 @@ function TaskCanvasMenuItems({ groupId, taskId }: { groupId: string; taskId: str
   );
 }
 
-/** "+" menu row that opens a prompt-history panel in the given group. */
-function PromptHistoryPanelMenuItem({ groupId }: { groupId: string }) {
-  const { t } = useTranslation();
-  const addPromptHistoryPanel = useDockviewStore((s) => s.addPromptHistoryPanel);
-  return (
-    <DropdownMenuItem
-      data-testid="add-panel-prompt-history-item"
-      onClick={() => addPromptHistoryPanel({ groupId })}
-      className={MENU_ITEM_CLASS}
-    >
-      <IconHistory className={MENU_ICON_CLASS} />
-      {t("task:promptHistory")}
-    </DropdownMenuItem>
-  );
-}
-
 /** Filters the linked PRs/MRs down to those whose review panel isn't already
  * open, so the "+" menu doesn't offer duplicates. */
 function missingBuiltInReviews(
@@ -322,7 +305,7 @@ function missingBuiltInReviews(
 
 /** Renders the dockview "+" menu: session/terminal reopen entries, browser,
  * VS Code, plan, port-forwarding toggle, plugin task panels, task canvases,
- * todos, prompt history, changes/files, review panels, and repository scripts. */
+ * todos, changes/files, review panels, and repository scripts. */
 export function AddPanelMenuItems({
   groupId,
   state,
@@ -388,7 +371,6 @@ export function AddPanelMenuItems({
           {t("common:todos")}
         </DropdownMenuItem>
       )}
-      {!state.isPassthrough && <PromptHistoryPanelMenuItem groupId={groupId} />}
       {!state.hasChanges && (
         <DropdownMenuItem onClick={() => addChangesPanel(groupId)} className={MENU_ITEM_CLASS}>
           <IconGitBranch className={MENU_ICON_CLASS} />

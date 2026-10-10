@@ -578,6 +578,33 @@ func TestGetInstance_DecodesEveryField(t *testing.T) {
 	if !info.CreatedAt.Equal(wantCreated) {
 		t.Errorf("CreatedAt = %v, want %v", info.CreatedAt, wantCreated)
 	}
+	if info.LeaseGeneration != 0 || info.ListenerActive {
+		t.Errorf("missing lease diagnostics = generation %d, active %t; want zero values for an older server", info.LeaseGeneration, info.ListenerActive)
+	}
+}
+
+func TestControlClientInstanceLeaseDiagnostics(t *testing.T) {
+	srv := httptest.NewServer(jsonResponder(http.StatusOK, `{
+		"id":"inst-lease","port":41001,"status":"running",
+		"workspace_path":"/workspace/lease","task_id":"task-lease",
+		"session_id":"session-lease","workspace_source_roots":["/workspace/lease"],
+		"provider_session_id":"provider-session-lease",
+		"lease_generation":17,"listener_active":true
+	}`))
+	t.Cleanup(srv.Close)
+
+	info, err := newTestControlClient(t, srv).GetInstance(context.Background(), "inst-lease")
+	if err != nil {
+		t.Fatalf("GetInstance: %v", err)
+	}
+	if info.LeaseGeneration != 17 || !info.ListenerActive {
+		t.Fatalf("lease diagnostics = generation %d, active %t; want 17 and true", info.LeaseGeneration, info.ListenerActive)
+	}
+	if info.TaskID != "task-lease" || info.SessionID != "session-lease" ||
+		len(info.WorkspaceSourceRoots) != 1 || info.WorkspaceSourceRoots[0] != "/workspace/lease" ||
+		info.ProviderSessionID != "provider-session-lease" {
+		t.Fatalf("existing instance metadata was lost: %+v", info)
+	}
 }
 
 func TestGetInstance_FailureModes(t *testing.T) {

@@ -13,6 +13,7 @@ vi.mock("@/components/confirmation/action-confirm-popover", () => ({
 }));
 
 import { DiscardDialog } from "./changes-panel-dialogs";
+import type { ChangedFileTarget } from "./changes-timeline-selection";
 
 afterEach(cleanup);
 
@@ -21,7 +22,7 @@ function DiscardHarness({
   filesToDiscard,
 }: {
   fileToDiscard: string | null;
-  filesToDiscard: string[] | null;
+  filesToDiscard: ChangedFileTarget[] | null;
 }) {
   const [open, setOpen] = useState(true);
   const anchorRef = useRef<HTMLButtonElement>(null);
@@ -45,7 +46,7 @@ function DiscardHarness({
 describe("DiscardDialog target scope", () => {
   it.each([
     ["direct file", "src/one.ts", null],
-    ["one selected file", null, ["src/one.ts"]],
+    ["one selected file", null, [{ path: "src/one.ts" }]],
   ] as const)("uses local confirmation for a %s", (_kind, fileToDiscard, filesToDiscard) => {
     render(
       <DiscardHarness
@@ -59,7 +60,12 @@ describe("DiscardDialog target scope", () => {
   });
 
   it("keeps discard-all scope in the existing modal", () => {
-    render(<DiscardHarness fileToDiscard={null} filesToDiscard={["src/one.ts", "src/two.ts"]} />);
+    render(
+      <DiscardHarness
+        fileToDiscard={null}
+        filesToDiscard={[{ path: "src/one.ts" }, { path: "src/two.ts" }]}
+      />,
+    );
 
     expect(screen.getByRole("alertdialog")).toBeTruthy();
     expect(screen.queryByTestId("discard-local-confirmation")).toBeNull();

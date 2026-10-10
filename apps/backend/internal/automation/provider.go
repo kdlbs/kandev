@@ -2,6 +2,7 @@ package automation
 
 import (
 	"context"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
@@ -15,6 +16,8 @@ import (
 type Components struct {
 	webhookCancel      context.CancelFunc
 	webhookDone        chan struct{}
+	managedCancel      context.CancelFunc
+	managedDone        chan struct{}
 	Service            *Service
 	Scheduler          *CronScheduler
 	Evaluator          *GitHubEvaluator
@@ -30,6 +33,9 @@ func (c *Components) Start(ctx context.Context) {
 	if err := c.Service.ReconcileOpenRuns(ctx); err != nil {
 		c.Service.logger.Warn("automation open-run reconciliation failed", zap.Error(err))
 	}
+	if err := c.Service.ReconcileManagedConversationDeliveries(ctx); err != nil {
+		c.Service.logger.Warn("managed automation delivery recovery failed", zap.Error(err))
+	}
 	if err := c.Service.ReconcileCleanupJobs(ctx); err != nil {
 		c.Service.logger.Warn("automation cleanup-job reconciliation failed", zap.Error(err))
 	}
@@ -37,6 +43,10 @@ func (c *Components) Start(ctx context.Context) {
 	c.webhookCancel = cancel
 	c.webhookDone = make(chan struct{})
 	go func() { defer close(c.webhookDone); c.Service.runWebhookWorker(workerCtx) }()
+	managedCtx, managedCancel := context.WithCancel(ctx)
+	c.managedCancel = managedCancel
+	c.managedDone = make(chan struct{})
+	go func() { defer close(c.managedDone); c.Service.runManagedAutomationDeliveryWorker(managedCtx) }()
 	c.Scheduler.Start(ctx)
 	c.Evaluator.Start(ctx)
 	c.WebhookSubscriber.Start(ctx)
@@ -49,10 +59,29 @@ func (c *Components) Stop() {
 		c.webhookCancel()
 		<-c.webhookDone
 	}
+	if c.managedCancel != nil {
+		c.managedCancel()
+		<-c.managedDone
+	}
 	c.Scheduler.Stop()
 	c.Evaluator.Stop()
 	c.WebhookSubscriber.Stop()
 	c.PRMergedSubscriber.Stop()
+}
+
+func (s *Service) runManagedAutomationDeliveryWorker(ctx context.Context) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.ReconcileManagedConversationDeliveries(ctx); err != nil {
+				s.logger.Warn("managed automation delivery reconciliation failed", zap.Error(err))
+			}
+		}
+	}
 }
 
 // Provide creates the full automation stack: store, service, scheduler, evaluator,

@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { moveTask } from "@/lib/api";
-import type { WorkflowMoveEntryOptions, WorkflowMoveResponse } from "@/lib/api/domains/kanban-api";
+import type {
+  TaskCompletionMoveOverride,
+  WorkflowMoveEntryOptions,
+  WorkflowMoveResponse,
+} from "@/lib/api/domains/kanban-api";
 import { useAppStore } from "@/components/state-provider";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { useLayoutStore } from "@/lib/state/layout-store";
@@ -74,7 +78,11 @@ type UseWorkflowStepMoveResult = {
   movingToStepId: string | null;
   /** Accepted destination retained until the task projection reaches it. */
   progressingToStepId: string | null;
-  handleMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
+  handleMove: (
+    stepId: string,
+    entryOptions?: WorkflowMoveEntryOptions,
+    completionOverride?: TaskCompletionMoveOverride,
+  ) => Promise<boolean>;
 };
 
 type ProgressMove = {
@@ -244,7 +252,11 @@ export function useWorkflowStepMove({
   }
 
   const handleMove = useCallback(
-    async (stepId: string, entryOptions?: WorkflowMoveEntryOptions): Promise<boolean> => {
+    async (
+      stepId: string,
+      entryOptions?: WorkflowMoveEntryOptions,
+      completionOverride?: TaskCompletionMoveOverride,
+    ): Promise<boolean> => {
       if (!taskId || !workflowId) return false;
       const focusRequestId = focus.beginFocus(stepId);
       onMoveStart?.();
@@ -269,6 +281,7 @@ export function useWorkflowStepMove({
           workflow_step_id: stepId,
           position: 0,
           entry_options: entryOptions,
+          completion_override: completionOverride,
         });
         if (requestId === moveRequestRef.current) focus.commitFocus(focusRequestId, response);
         return true;

@@ -18,10 +18,10 @@ Two controls are absent: no ceiling on how many Office agent processes may run a
 once, and no way to tell that one launch descends from another, so a chain of
 agent-triggered launches cannot be detected, bounded, or attributed.
 
-Office owns this contract because Office owns the decision to start an agent: the
-queue row, the claim transition, the wake reason, and the runtime capability
-envelope are all Office concepts. The task system owns task rows and the agent
-system owns agent profiles, but neither decides when a process starts.
+Office owns the decision to start an agent and the safety policy applied to that
+decision. The shared run row and lifecycle-event data contracts belong to the
+runs system. The task system owns task rows and the agent system owns agent
+profiles; neither decides when an Office process starts.
 
 This document bounds concurrency **at an instant**: how many Office agent processes
 may run at once, and how deep a chain of agent-caused launches may go. Sibling

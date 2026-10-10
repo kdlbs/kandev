@@ -157,6 +157,32 @@ func TestStreamCoalescerDoesNotMergeChunksFromDifferentPromptGenerations(t *test
 	}
 }
 
+func TestStreamCoalescerPreservesCanonicalProjectionAcrossMergedChunks(t *testing.T) {
+	var got []coalescedStreamChunk
+	coalescer := newStreamCoalescer(time.Hour, func(chunk coalescedStreamChunk) {
+		got = append(got, chunk)
+	})
+
+	coalescer.add(coalescedStreamChunk{
+		eventType:           "thinking_streaming",
+		messageID:           "canonical-thinking",
+		content:             "first",
+		canonicalProjection: true,
+	})
+	coalescer.add(coalescedStreamChunk{
+		eventType:           "thinking_streaming",
+		messageID:           "canonical-thinking",
+		content:             " second",
+		isAppend:            true,
+		canonicalProjection: true,
+	})
+	coalescer.flush()
+
+	if len(got) != 2 || got[1].content != " second" || !got[1].canonicalProjection {
+		t.Fatalf("canonical output = %#v, want immediate first plus canonical append", got)
+	}
+}
+
 func TestStreamCoalescerStatsCountReceivedMergedAndFlushedSegments(t *testing.T) {
 	coalescer := newStreamCoalescer(time.Hour, func(coalescedStreamChunk) {})
 	coalescer.add(coalescedStreamChunk{eventType: "thinking_streaming", messageID: "m1", content: "a"})

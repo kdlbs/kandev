@@ -2,10 +2,10 @@ import {
   buildArchiveEntry,
   buildGroupedMenuEntries,
   buildDeleteEntry,
-  buildKanbanCardMenuEntries,
   resolvePluginMenuContext,
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
+import { buildKanbanCardMenuEntries } from "@/components/kanban-card-menu-builder";
 import { buildPrimaryPluginEntries } from "@/components/plugins/task-menu-actions";
 import type { BuildKanbanCardMenuEntriesArgs } from "@/components/kanban-card-menu-items";
 

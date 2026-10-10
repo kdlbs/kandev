@@ -2,6 +2,7 @@
 status: active
 system: office
 created: 2026-08-23
+updated: 2026-09-27
 owners:
   - Kandev
 ---
@@ -10,8 +11,8 @@ owners:
 
 ## Overview
 
-An automation can run as hidden coordinator work or create an ordinary task
-for each firing. Hidden work is useful for scheduled reports and background
+An automation can run as hidden coordinator work, create an ordinary task, or
+deliver input to a selected managed conversation. Hidden work is useful for scheduled reports and background
 coordination. Visible work is useful when a firing should enter a selected
 workflow and be handled like a normal task by a person. Both modes can use a
 repository-backed execution or a task-owned scratch workspace when no
@@ -80,6 +81,27 @@ background coordination or ordinary workflow work.
   task in that workflow's configured start step. The editor shall not ask the
   person to select a workflow step.
 
+#### Managed-conversation destination amendment (September 27)
+
+**Intent:** Deliver scheduled prompts to existing plugin conversations.
+
+- **AC-OFFICE-AUTOMATION-TARGETS-001.12:** An automation shall support an
+  explicitly selected managed conversation in its workspace. Firing shall
+  snapshot that destination for the occurrence, enqueue one input per
+  occurrence, and distinguish accepted delivery from completed agent work.
+- **AC-OFFICE-AUTOMATION-TARGETS-001.13:** A disabled, missing, revoked, or
+  paused destination shall produce a visible delivery state. Automation
+  cleanup shall never delete the destination conversation or its shared
+  transcript.
+- **AC-OFFICE-AUTOMATION-TARGETS-001.14:** The automation editor and portable
+  import/export shall preserve destination intent through explicit instance
+  rebinding, with desktop and phone parity and unchanged defaults for existing
+  task modes.
+- **AC-OFFICE-AUTOMATION-TARGETS-001.15:** Authorized plugins shall read,
+  create, update, pause, and delete their own managed-conversation schedules
+  through exact commands. Changing another installation's schedule or
+  selecting a foreign destination shall be denied.
+
 ### REQ-OFFICE-AUTOMATION-TARGETS-002: Create and continue visible tasks
 
 **Intent:** Make a selected normal-task automation participate in ordinary
@@ -141,3 +163,9 @@ clear before a person saves an automation.
 - Converting an existing hidden task into a visible task in place. A target
   change takes effect on the next firing and may replace the continuation.
 - Deleting visible tasks as part of automation deletion.
+
+## Managed-conversation destination
+
+The [managed-conversation destination design](../system-design/plugin-conversation-targets.md)
+extends the available target choices. Existing task-mode defaults and cleanup
+ownership remain unchanged.

@@ -200,7 +200,7 @@ export function MobileRemoteExecutorIndicator({
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
 }) {
-  if (remoteExecutorType === "k8s") {
+  if (remoteExecutorType === "k8s" || remoteExecutorType === "plugin_remote") {
     return <ExecutorSettingsButton taskId={taskId} sessionId={sessionId} />;
   }
   return (

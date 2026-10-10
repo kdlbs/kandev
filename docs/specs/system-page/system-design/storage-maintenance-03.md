@@ -20,6 +20,13 @@ This design preserves the technical source detail for `REQ-SYSTEM-PAGE-STORAGE-M
 | --- | --- |
 | `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001` | [Migrated source detail](#migrated-source-detail) |
 
+## Current Go-cache policy
+
+The [Go cache reclamation package](../../../plans/go-cache-reclamation/plan.md)
+replaces new managed-cache quarantine scenarios. Historical quarantine and `active_quarantine`
+rotation scenarios are legacy compatibility coverage. Adopted-path safety and non-Go scenarios
+remain current regression coverage.
+
 ## Migrated source detail
 
 The [temporary storage visibility and cleanup design](storage-temporary-folders.md) supersedes the
@@ -66,10 +73,14 @@ temporary-storage passages below where its implemented policy differs.
   candidate, or unused-image subset bytes again.
 - **GIVEN** one top-level analysis measurement is unavailable, **WHEN** Storage analysis renders its
   total, **THEN** it sums the available measurements and identifies the result as partial.
-- **GIVEN** archived or deleted tasks retain ready environment or active worktree rows for recovery,
-  **WHEN** storage analysis or cleanup classifies their old directories, **THEN** those historical
-  rows do not protect the directories from normal orphan grace and quarantine rules unless a live
-  session of an unarchived task still borrows the environment.
+- **GIVEN** an archived task has an active worktree row, **WHEN** storage
+  analysis or cleanup classifies its task root, **THEN** the recorded physical
+  checkout protects that root from orphan quarantine; a deleted worktree row
+  retained only for branch recovery does not protect an absent checkout.
+- **GIVEN** a previously quarantined task root contains a checkout still owned
+  by an active worktree row, **WHEN** eligible or forced permanent deletion is
+  requested, **THEN** the entry remains restorable and the action reports it as
+  protected; an incomplete inventory fails closed.
 - **GIVEN** the worktree inventory query fails, **WHEN** workspace cleanup runs, **THEN** no task
   directory moves and the run reports the inventory error.
 - **GIVEN** a multi-repository task has one active descendant worktree, **WHEN** workspace cleanup

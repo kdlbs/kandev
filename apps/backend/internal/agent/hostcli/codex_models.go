@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 )
@@ -57,7 +58,8 @@ type codexModel struct {
 }
 
 type codexModelListResult struct {
-	Data []codexModel `json:"data"`
+	Data       []codexModel `json:"data"`
+	NextCursor *string      `json:"nextCursor"`
 }
 
 // ListCodexModels asks the installed Codex CLI for its model catalogue through
@@ -74,32 +76,16 @@ func ListCodexModels(ctx context.Context, runner Runner, path string) ([]Model, 
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = proc.Kill() }()
+	defer func() { _ = proc.Kill(); _ = proc.Wait() }()
 
-	initID, listID := 1, 2
-	requests := []jsonRPCRequest{
-		{JSONRPC: "2.0", ID: &initID, Method: "initialize", Params: map[string]any{
-			"clientInfo": map[string]any{"name": "kandev", "title": "Kandev", "version": "0"},
-		}},
-		{JSONRPC: "2.0", Method: "initialized"},
-		{JSONRPC: "2.0", ID: &listID, Method: "model/list", Params: map[string]any{
-			"limit": codexModelListLimit,
-		}},
-	}
-
-	// Read before writing. The peer answers `initialize` before we finish
-	// writing `model/list`, so a reader started afterwards deadlocks: it would
-	// block on stdin while the peer blocks on stdout.
 	done := make(chan responseOutcome, 1)
-	go func() { done <- readResponse(proc, listID) }()
-
-	for _, request := range requests {
-		if err := writeJSONLine(proc, request); err != nil {
-			return nil, fmt.Errorf("write %s: %w", request.Method, err)
-		}
-	}
-
+	finished := make(chan struct{})
+	go func() { defer close(finished); done <- exchangeModels(proc) }()
 	result, err := awaitResponse(ctx, done)
+	// Closing the pipes releases both reads and writes, including a peer that
+	// stops accepting requests. Join the exchange before releasing the process.
+	_ = proc.Kill()
+	<-finished
 	if err != nil {
 		return nil, err
 	}
@@ -132,34 +118,76 @@ func awaitResponse(ctx context.Context, done <-chan responseOutcome) (codexModel
 	}
 }
 
-func readResponse(proc Process, wantID int) responseOutcome {
-	scanner := bufio.NewScanner(proc.Stdout())
+// exchangeModels performs initialization before requesting a bounded catalogue.
+func exchangeModels(proc Process) responseOutcome {
+	scanner := bufio.NewScanner(io.LimitReader(proc.Stdout(), 8*1024*1024))
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
+	initID := 1
+	if err := writeJSONLine(proc, jsonRPCRequest{JSONRPC: "2.0", ID: &initID, Method: "initialize", Params: map[string]any{
+		"clientInfo": map[string]any{"name": "kandev", "title": "Kandev", "version": "0"},
+	}}); err != nil {
+		return responseOutcome{err: err}
+	}
+	if _, err := readRPCResponse(scanner, initID); err != nil {
+		return responseOutcome{err: err}
+	}
+	if err := writeJSONLine(proc, jsonRPCRequest{JSONRPC: "2.0", Method: "initialized"}); err != nil {
+		return responseOutcome{err: err}
+	}
+	return readModelPages(proc, scanner)
+}
+
+func readModelPages(proc Process, scanner *bufio.Scanner) responseOutcome {
+	var result codexModelListResult
+	var cursor string
+	seen := make(map[string]bool)
+	for id := 2; id < 12; id++ {
+		params := map[string]any{"limit": codexModelListLimit}
+		if cursor != "" {
+			params["cursor"] = cursor
 		}
+		if err := writeJSONLine(proc, jsonRPCRequest{JSONRPC: "2.0", ID: &id, Method: "model/list", Params: params}); err != nil {
+			return responseOutcome{err: err}
+		}
+		data, err := readRPCResponse(scanner, id)
+		if err != nil {
+			return responseOutcome{err: err}
+		}
+		var page codexModelListResult
+		if err := json.Unmarshal(data, &page); err != nil {
+			return responseOutcome{err: fmt.Errorf("parse model list: %w", err)}
+		}
+		result.Data = append(result.Data, page.Data...)
+		if page.NextCursor == nil || *page.NextCursor == "" {
+			return responseOutcome{result: result}
+		}
+		cursor = *page.NextCursor
+		if seen[cursor] {
+			return responseOutcome{err: errors.New("model/list repeated pagination cursor")}
+		}
+		seen[cursor] = true
+	}
+	return responseOutcome{err: errors.New("model/list exceeded pagination limit")}
+}
+
+func readRPCResponse(scanner *bufio.Scanner, wantID int) (json.RawMessage, error) {
+	for scanner.Scan() {
 		var msg jsonRPCMessage
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
 			continue
 		}
 		if msg.ID == nil || *msg.ID != wantID {
 			continue
 		}
 		if msg.Error != nil {
-			return responseOutcome{err: classifyRPCError(msg.Error.Message)}
+			return nil, classifyRPCError(msg.Error.Message)
 		}
-		var result codexModelListResult
-		if err := json.Unmarshal(msg.Result, &result); err != nil {
-			return responseOutcome{err: fmt.Errorf("parse model list: %w", err)}
-		}
-		return responseOutcome{result: result}
+		return msg.Result, nil
 	}
 	if err := scanner.Err(); err != nil {
-		return responseOutcome{err: fmt.Errorf("read app-server output: %w", err)}
+		return nil, fmt.Errorf("read app-server output: %w", err)
 	}
-	return responseOutcome{err: errors.New("app-server exited before answering model/list")}
+	return nil, errors.New("app-server exited before answering request")
 }
 
 func containsAny(haystack string, needles ...string) bool {
@@ -174,9 +202,9 @@ func containsAny(haystack string, needles ...string) bool {
 func classifyRPCError(message string) error {
 	lower := strings.ToLower(message)
 	if containsAny(lower, "auth", "login", "logged in", "unauthorized", "401", "sign in") {
-		return fmt.Errorf("%w: %s", ErrNotLoggedIn, message)
+		return fmt.Errorf("%w: %s", ErrNotLoggedIn, summarizeOutput(message, nil))
 	}
-	return fmt.Errorf("model/list failed: %s", message)
+	return fmt.Errorf("model/list failed: %s", summarizeOutput(message, nil))
 }
 
 func convertCodexModels(result codexModelListResult) []Model {

@@ -10,11 +10,11 @@ import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import {
   buildCardPluginEntries,
-  buildKanbanCardMenuEntries,
   KanbanCardDropdownMenuItems,
   useKanbanCardMoveTargets,
   type KanbanCardMenuEntry,
 } from "./kanban-card-menu-items";
+import { buildKanbanCardMenuEntries } from "./kanban-card-menu-builder";
 
 function renderNodeText(node: ReactNode): string {
   return render(<>{node}</>).container.textContent ?? "";

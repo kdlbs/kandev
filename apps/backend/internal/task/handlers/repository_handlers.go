@@ -47,6 +47,7 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/workspaces/:id/repositories/discovery/refresh", h.httpRefreshDiscovery)
 	api.GET("/repositories/discovery/roots", h.httpListDiscoveryRoots)
 	api.POST("/repositories/discovery/roots", h.httpAddDiscoveryRoot)
+	api.POST("/repositories/discovery/roots/confirm-home", h.httpConfirmHomeDiscovery)
 	api.POST("/repositories/discovery/roots/reconnect", h.httpReconnectDiscoveryRoot)
 	api.DELETE("/repositories/discovery/roots", h.httpRemoveDiscoveryRoot)
 	// Unified branch listing — accepts either ?repository_id= for an imported
@@ -195,6 +196,8 @@ func (h *RepositoryHandlers) writeDiscoveryError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, service.ErrDesktopDiscoveryUnavailable):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	case errors.Is(err, service.ErrHomeDiscoveryConfirmationStale):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	default:
 		h.logger.Error("failed to load repository discovery", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load repository discovery"})
@@ -240,6 +243,20 @@ func (h *RepositoryHandlers) httpAddDiscoveryRoot(c *gin.Context) {
 	c.JSON(http.StatusCreated, dto.FromDesktopDiscoveryRoot(*root))
 }
 
+func (h *RepositoryHandlers) httpConfirmHomeDiscovery(c *gin.Context) {
+	root, err := h.service.ConfirmHomeDesktopDiscovery(c.Request.Context())
+	if err != nil {
+		h.writeDiscoveryError(c, err)
+		return
+	}
+	if root == nil {
+		h.logger.Error("desktop Home discovery root was not returned after confirmation")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to confirm Home discovery"})
+		return
+	}
+	c.JSON(http.StatusOK, dto.FromDesktopDiscoveryRoot(*root))
+}
+
 func (h *RepositoryHandlers) httpReconnectDiscoveryRoot(c *gin.Context) {
 	var body discoveryRootRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -271,10 +288,12 @@ func (h *RepositoryHandlers) httpRemoveDiscoveryRoot(c *gin.Context) {
 // to $HOME). The picker deliberately allows browsing any directory the
 // kandev process has read access to — kandev runs locally on the user's
 // own machine, and the repo-less starting-folder flow legitimately wants
-// /tmp, /var/log/foo, etc. Hidden (dotfile) directories are excluded.
+// /tmp, /var/log/foo, etc. Hidden (dotfile) directories are excluded unless
+// ?include_hidden is exactly "true"; any other value keeps the current
+// contract, so a display-only setting can never turn into a request error.
 func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
 	path := c.Query("path")
-	result, err := h.service.ListDirectory(c.Request.Context(), path)
+	result, err := h.service.ListDirectory(c.Request.Context(), path, includeHiddenRequested(c))
 	if err != nil {
 		// Log the raw OS error for debugging but return a generic message —
 		// otherwise we leak host paths and access patterns to the client (e.g.
@@ -289,6 +308,14 @@ func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
 		"entries":   directoryEntriesResponse(result.Entries),
 		"choosable": result.Choosable,
 	})
+}
+
+// includeHiddenRequested reports whether the caller asked to reveal hidden
+// (".") directories. Only the exact value "true" activates it: a total
+// comparison cannot fail, so an absent or mis-spelled value falls back to the
+// default listing instead of rejecting a display-only request.
+func includeHiddenRequested(c *gin.Context) bool {
+	return c.Query("include_hidden") == "true"
 }
 
 func directoryEntriesResponse(entries []service.DirectoryEntry) []gin.H {

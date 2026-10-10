@@ -222,6 +222,31 @@ func TestGraphQLClient_SetIssueState_FailureFlag(t *testing.T) {
 	}
 }
 
+func TestGraphQLClient_AddComment(t *testing.T) {
+	var bodyText, issueID string
+	ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		request := readReq(t, r)
+		query, _ := request["query"].(string)
+		if !strings.Contains(query, "commentCreate(input: $input)") {
+			t.Errorf("unexpected mutation: %q", query)
+		}
+		variables, _ := request["variables"].(map[string]interface{})
+		input, _ := variables["input"].(map[string]interface{})
+		bodyText, _ = input["body"].(string)
+		issueID, _ = input["issueId"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"commentCreate":{"success":true,"comment":{"id":"comment-9"}}}}`))
+	})
+	c := pointTo(NewGraphQLClient(&LinearConfig{}, "x"), ts.URL)
+	id, err := c.AddComment(context.Background(), "issue-uuid-9", "Ready for review")
+	if err != nil {
+		t.Fatalf("AddComment: %v", err)
+	}
+	if id != "comment-9" || issueID != "issue-uuid-9" || bodyText != "Ready for review" {
+		t.Fatalf("comment result/input = id:%q issue:%q body:%q", id, issueID, bodyText)
+	}
+}
+
 func TestStateCategoryMapping(t *testing.T) {
 	cases := map[string]string{
 		"backlog":   "new",

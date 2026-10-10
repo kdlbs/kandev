@@ -22,6 +22,7 @@ describe("ApiClient.createAgentProfile", () => {
           cli_passthrough: true,
         });
         expect(init?.headers).toMatchObject({
+          Connection: "close",
           "Content-Type": "application/json",
           "X-Kandev-Interim-Settings-Interlock": "test-token",
         });
@@ -84,6 +85,81 @@ describe("ApiClient user settings", () => {
       workflow_filter_id: settings.workflow_filter_id,
     });
     expect(saved).toEqual(baseline);
+  });
+});
+
+describe("ApiClient.deleteTask", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("refreshes the preview when the task changes before deletion", async () => {
+    let preflightCount = 0;
+    let deleteCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
+          return Response.json({ interimSettingsInterlockToken: "test-token" });
+        }
+        if (url.endsWith("/api/v1/tasks/delete-preflight")) {
+          preflightCount += 1;
+          return Response.json({ confirmation_id: `confirmation-${preflightCount}` });
+        }
+        if (url.endsWith("/api/v1/tasks/task-1")) {
+          deleteCount += 1;
+          if (deleteCount === 1) {
+            return Response.json(
+              { error: "task deletion preview is no longer current" },
+              { status: 409 },
+            );
+          }
+          expect(init?.headers).toMatchObject({
+            "X-Kandev-Task-Delete-Confirmation": "confirmation-2",
+          });
+          return Response.json({ success: true });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    await expect(
+      new ApiClient("http://backend.test").deleteTask("task-1"),
+    ).resolves.toBeUndefined();
+
+    expect(preflightCount).toBe(2);
+    expect(deleteCount).toBe(2);
+  });
+
+  it("does not retry deletion for an unrelated conflict", async () => {
+    let preflightCount = 0;
+    let deleteCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
+          return Response.json({ interimSettingsInterlockToken: "test-token" });
+        }
+        if (url.endsWith("/api/v1/tasks/delete-preflight")) {
+          preflightCount += 1;
+          return Response.json({ confirmation_id: "confirmation-1" });
+        }
+        if (url.endsWith("/api/v1/tasks/task-1")) {
+          deleteCount += 1;
+          return Response.json({ error: "task cannot be deleted" }, { status: 409 });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    await expect(new ApiClient("http://backend.test").deleteTask("task-1")).rejects.toThrow(
+      'API DELETE /api/v1/tasks/task-1 failed (409): {"error":"task cannot be deleted"}',
+    );
+
+    expect(preflightCount).toBe(1);
+    expect(deleteCount).toBe(1);
   });
 });
 
@@ -155,5 +231,87 @@ describe("removeRoutingProfileReferences", () => {
     );
 
     expect(updated?.role_tiers).toEqual({});
+  });
+});
+
+describe("ApiClient.cleanupTestProfiles", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("preserves Office-owned and seed profiles while deleting test profiles", async () => {
+    const deleted: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/api/v1/app-state") {
+          return Response.json({ interimSettingsInterlockToken: "test-token" });
+        }
+        if (url.pathname === "/api/v1/agents") {
+          return Response.json({
+            agents: [
+              {
+                id: "mock-agent",
+                name: "Mock Agent",
+                profiles: [
+                  { id: "office-snake", workspace_id: "office-workspace" },
+                  { id: "office-camel", workspaceId: "office-workspace" },
+                  { id: "seed" },
+                  { id: "test-profile" },
+                ],
+              },
+            ],
+            total: 1,
+          });
+        }
+        if (init?.method === "DELETE") {
+          deleted.push(url.pathname);
+          return Response.json({ success: true });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    await new ApiClient("http://backend.test").cleanupTestProfiles(["seed"]);
+    expect(deleted).toEqual(["/api/v1/agent-profiles/test-profile"]);
+  });
+});
+
+describe("ApiClient.e2eReset", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("repeats an idempotent reset while a session transfer owns cleanup", async () => {
+    const client = new ApiClient("http://backend.test");
+    const request = vi
+      .spyOn(client, "rawRequest")
+      .mockResolvedValueOnce(
+        Response.json({ error: "session transfer in progress" }, { status: 500 }),
+      )
+      .mockResolvedValueOnce(Response.json({ success: true }));
+    await expect(client.e2eReset("workspace-1", ["workflow-1"])).resolves.toBeUndefined();
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenLastCalledWith(
+      "DELETE",
+      "/api/v1/e2e/reset/workspace-1?keep_workflows=workflow-1",
+    );
+  });
+
+  it("does not repeat reset for an unrelated server failure", async () => {
+    const client = new ApiClient("http://backend.test");
+    const request = vi
+      .spyOn(client, "rawRequest")
+      .mockResolvedValue(Response.json({ error: "database unavailable" }, { status: 500 }));
+    await expect(client.e2eReset("workspace-1")).rejects.toThrow("database unavailable");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the existing four-attempt reset bound for a persistent transfer", async () => {
+    const client = new ApiClient("http://backend.test");
+    const request = vi
+      .spyOn(client, "rawRequest")
+      .mockImplementation(async () =>
+        Response.json({ error: "session transfer in progress" }, { status: 500 }),
+      );
+    await expect(client.e2eReset("workspace-1")).rejects.toThrow("session transfer in progress");
+    expect(request).toHaveBeenCalledTimes(4);
   });
 });

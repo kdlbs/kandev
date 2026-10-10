@@ -100,10 +100,16 @@ type WebhookResponse struct {
 }
 
 type AgentToolContext struct {
-	TaskID      string
-	SessionID   string
-	WorkspaceID string
-	Surface     string
+	TaskID               string
+	SessionID            string
+	WorkspaceID          string
+	Surface              string
+	ExecutionID          string
+	InstallationID       string
+	ConversationRevision uint64
+	ApprovalRevision     uint64
+	ManifestDigest       string
+	AgentToolNames       []string
 }
 
 type AgentToolRequest struct {
@@ -131,6 +137,9 @@ func (r *AgentToolRequest) toProto() (*pluginv1.AgentToolRequest, error) {
 		Context: &pluginv1.AgentToolContext{
 			TaskId: r.Context.TaskID, SessionId: r.Context.SessionID,
 			WorkspaceId: r.Context.WorkspaceID, Surface: r.Context.Surface,
+			ExecutionId: r.Context.ExecutionID, InstallationId: r.Context.InstallationID,
+			ConversationRevision: r.Context.ConversationRevision, ApprovalRevision: r.Context.ApprovalRevision,
+			ManifestDigest: r.Context.ManifestDigest, AgentToolNames: append([]string(nil), r.Context.AgentToolNames...),
 		},
 	}, nil
 }
@@ -144,7 +153,10 @@ func agentToolRequestFromProto(p *pluginv1.AgentToolRequest) (*AgentToolRequest,
 	return &AgentToolRequest{
 		InvocationID: p.GetInvocationId(), Name: p.GetName(), Arguments: arguments,
 		Context: AgentToolContext{TaskID: ctx.GetTaskId(), SessionID: ctx.GetSessionId(),
-			WorkspaceID: ctx.GetWorkspaceId(), Surface: ctx.GetSurface()},
+			WorkspaceID: ctx.GetWorkspaceId(), Surface: ctx.GetSurface(),
+			ExecutionID: ctx.GetExecutionId(), InstallationID: ctx.GetInstallationId(),
+			ConversationRevision: ctx.GetConversationRevision(), ApprovalRevision: ctx.GetApprovalRevision(),
+			ManifestDigest: ctx.GetManifestDigest(), AgentToolNames: append([]string(nil), ctx.GetAgentToolNames()...)},
 	}, nil
 }
 

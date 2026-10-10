@@ -415,7 +415,11 @@ the user's own agent picks up immediately — turning every report into a contri
   the GitHub connection and configuration are never re-copied or synced, and
   new improve tasks land in the dedicated workspace systematically.
 
+The locked task form preserves its draft when bootstrap resolves both its workspace and workflow.
+It resets the draft on other workspace changes, including changes while the workflow remains unresolved.
+
 ## Out of scope
+
 
 - Automatic transitions between workflow steps (user moves manually).
 - Rate limiting, quotas, or one-task-at-a-time guards.

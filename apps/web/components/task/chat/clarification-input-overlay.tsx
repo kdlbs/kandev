@@ -215,15 +215,17 @@ function ClarificationCard(props: CardProps) {
           {t("task:theAgentHasMovedOn")}
         </div>
       )}
-      <ClarificationCustomInput
-        draft={customDraft}
-        isSubmitting={isSubmitting}
-        committedText={customCommittedText}
-        active={customActive}
-        onChange={onCustomDraftChange}
-        onSubmit={onSubmitCustom}
-        onRequestFinalSubmit={onRequestFinalSubmit}
-      />
+      {question.allow_custom_text !== false && (
+        <ClarificationCustomInput
+          draft={customDraft}
+          isSubmitting={isSubmitting}
+          committedText={customCommittedText}
+          active={customActive}
+          onChange={onCustomDraftChange}
+          onSubmit={onSubmitCustom}
+          onRequestFinalSubmit={onRequestFinalSubmit}
+        />
+      )}
     </div>
   );
 }

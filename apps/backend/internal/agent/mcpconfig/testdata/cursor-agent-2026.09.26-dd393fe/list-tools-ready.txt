@@ -1,0 +1,2 @@
+Tools for plugin-kandevfixture-fixture (1):
+- fixture_ping ()

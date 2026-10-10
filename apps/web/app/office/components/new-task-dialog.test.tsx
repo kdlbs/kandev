@@ -12,10 +12,6 @@ const BASE_DRAFT: IssueDraft = {
   projectId: "",
   status: "todo",
   priority: "medium",
-  showReviewer: false,
-  showApprover: false,
-  reviewerIds: [],
-  approverIds: [],
 };
 
 function renderButton(draft: Partial<IssueDraft>) {

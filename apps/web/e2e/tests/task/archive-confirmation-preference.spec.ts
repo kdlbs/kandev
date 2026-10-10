@@ -112,6 +112,7 @@ test.describe("Archive confirmation preference", () => {
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
       },
     );
     await apiClient.seedTask(seedData.workspaceId, "Full archive warning child", {
@@ -138,6 +139,8 @@ test.describe("Archive confirmation preference", () => {
     await archiveMenuItem.click();
     const dialog = testPage.getByRole("alertdialog");
     await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("Clean Git worktrees are removed.");
+    await expect(dialog).toContainText("Unpublished local branches remain available.");
     const warning = dialog.getByTestId("still-working-warning");
     await expect(warning).toBeVisible();
     await prCapture.screenshot("full-archive-dialog-warning", {

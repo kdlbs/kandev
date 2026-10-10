@@ -37,7 +37,7 @@ An agent turn can remain `RUNNING` after it stops emitting events. Silence alone
 - **AC-AGENTS-AGENT-STALL-RECOVERY-001.3:** The notice says Kandev is still waiting and includes the active top-level tool's display title or name when available. It does not assert that the tool failed and does not include raw command arguments.
 - **AC-AGENTS-AGENT-STALL-RECOVERY-001.4:** The notice is a single compact inline row with muted neutral copy and a neutral **Cancel turn** action. It has no warning/error colors, alert icon, tinted background, or alert-card treatment.
 - **AC-AGENTS-AGENT-STALL-RECOVERY-001.5:** On phones, **Cancel turn** remains inline and content-width rather than becoming a full-width row, while retaining a minimum 44px touch height. Activating it uses the existing `agent.cancel` request.
-- **AC-AGENTS-AGENT-STALL-RECOVERY-001.6:** The notice remains visible and actionable while the affected prompt's `turn_id` is the active turn in a `RUNNING` session, including after a page reload. It is hidden when that turn settles or a later turn becomes active.
+- **AC-AGENTS-AGENT-STALL-RECOVERY-001.6:** The notice remains visible and actionable while the affected prompt's `turn_id` is the active turn in a `RUNNING` session and no subsequent agent turn activity has been observed, including after a page reload. It is hidden when that turn resumes producing agent content, reasoning, tool calls or updates, plan updates, or permission requests, when it settles, or when a later turn becomes active. Queued user input and system status messages do not resolve an advisory notice.
 - **AC-AGENTS-AGENT-STALL-RECOVERY-001.7:** Detection after genuine agent activity does not change task state, session state, prompt admission, or process liveness. A current five-minute snapshot with no genuine event since prompt dispatch is a launch failure and moves the session and task to `FAILED`.
 - **AC-AGENTS-AGENT-STALL-RECOVERY-001.8:** The backend logs the first stall detected for a prompt generation and does not emit another notice or log entry on every watchdog check.
 - **AC-AGENTS-AGENT-STALL-RECOVERY-001.9:** When an execution emits only metadata frames after a prompt is dispatched, the system shall not extend the five-minute inactivity threshold; only a turn event or newly delivered user input for the current prompt shall restart it.
@@ -59,6 +59,7 @@ Implementation plans:
 
 - [Agent stall recovery](../../../plans/agent-stall-recovery/plan.md)
 - [Never-started stall teardown](../../../plans/never-started-stall-teardown/plan.md)
+- [Stale stall notice](../../../plans/stale-stall-notice/plan.md)
 - [Lost turn-completion cancel recovery](../../../plans/lost-turn-completion-cancel-recovery/plan.md)
 - [OpenCode terminal error surfacing](../../../plans/opencode-terminal-error-surfacing/plan.md)
 - [OpenCode actionable error links](../../../plans/opencode-actionable-error-links/plan.md)
@@ -201,6 +202,7 @@ sanitized diagnostic message for the collapsed technical-details surface.
 ## Persistence guarantees
 
 - Advisory stall notices retain their existing persisted-message behavior.
+  Later same-turn agent activity hides them, including updates to earlier tool rows.
 - Sanitized provider failures use the existing session error and recovery
   message persistence. They survive reloads like other recoverable failures.
 - A validated `remediation_url` is persisted only in the structured recovery

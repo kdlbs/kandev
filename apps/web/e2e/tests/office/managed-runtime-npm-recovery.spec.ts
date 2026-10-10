@@ -1,17 +1,51 @@
+import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/office-fixture";
+
+async function interceptSessionRecovery(page: Page): Promise<string[]> {
+  const sentFrames: string[] = [];
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+
+    ws.onMessage((message) => {
+      if (typeof message !== "string") {
+        server.send(message);
+        return;
+      }
+
+      for (const part of message.split("\n")) {
+        const frameText = part.trim();
+        if (!frameText) continue;
+
+        let frame: { action?: unknown } | null = null;
+        try {
+          frame = JSON.parse(frameText) as { action?: unknown };
+        } catch {
+          server.send(frameText);
+          continue;
+        }
+
+        if (frame?.action === "session.recover") {
+          // This spec verifies the recovery request shape; forwarding it would
+          // start an agent run that outlives the test's seeded failed session.
+          sentFrames.push(frameText);
+          continue;
+        }
+
+        server.send(frameText);
+      }
+    });
+
+    server.onMessage((message) => ws.send(message));
+  });
+  return sentFrames;
+}
 
 test("keeps managed npm recovery visible in Office chat", async ({
   testPage,
   apiClient,
   officeSeed,
 }) => {
-  const sentFrames: string[] = [];
-  testPage.on("websocket", (ws) => {
-    if (!ws.url().endsWith("/ws")) return;
-    ws.on("framesent", (event) => {
-      if (typeof event.payload === "string") sentFrames.push(event.payload);
-    });
-  });
+  const sentFrames = await interceptSessionRecovery(testPage);
 
   const task = await apiClient.createTask(officeSeed.workspaceId, "Office managed npm recovery", {
     workflow_id: officeSeed.workflowId,
@@ -59,13 +93,7 @@ test("explains release-age policy failures in Office chat", async ({
   apiClient,
   officeSeed,
 }) => {
-  const sentFrames: string[] = [];
-  testPage.on("websocket", (ws) => {
-    if (!ws.url().endsWith("/ws")) return;
-    ws.on("framesent", (event) => {
-      if (typeof event.payload === "string") sentFrames.push(event.payload);
-    });
-  });
+  const sentFrames = await interceptSessionRecovery(testPage);
 
   const task = await apiClient.createTask(officeSeed.workspaceId, "Office npm policy recovery", {
     workflow_id: officeSeed.workflowId,

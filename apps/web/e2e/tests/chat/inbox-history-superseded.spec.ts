@@ -15,10 +15,18 @@ test.describe("Inbox History tab", () => {
     apiClient,
     seedData,
   }) => {
+    // Keep the extra step in a temporary workflow. The seeded workflow is
+    // shared by later tests in this worker, so mutating it would leak an
+    // additional row into workflow-stepper assertions.
+    const historyWorkflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      `Inbox History Workflow ${Date.now()}`,
+    );
+
     // A step whose on_enter carries no auto_start_agent entry, so the row
     // must render the AC .11 step-starts-no-agent label.
     const noAgentStep = await apiClient.createWorkflowStep(
-      seedData.workflowId,
+      historyWorkflow.id,
       "Inbox History No-Agent Step",
       9,
       { events: { on_enter: [] } },
@@ -26,7 +34,7 @@ test.describe("Inbox History tab", () => {
 
     const title = "Inbox History Superseded Flow";
     const task = await apiClient.createTask(seedData.workspaceId, title, {
-      workflow_id: seedData.workflowId,
+      workflow_id: historyWorkflow.id,
       workflow_step_id: noAgentStep.id,
     });
     const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {

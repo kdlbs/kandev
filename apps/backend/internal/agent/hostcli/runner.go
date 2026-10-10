@@ -1,11 +1,13 @@
 package hostcli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Runner starts host processes. Tests provide a fake; production uses
@@ -41,11 +43,14 @@ func (ExecRunner) Output(ctx context.Context, argv []string) (string, error) {
 		return "", errors.New("host cli command is empty")
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	out, err := cmd.CombinedOutput()
+	cmd.WaitDelay = time.Second
+	out := &boundedOutput{}
+	cmd.Stdout, cmd.Stderr = out, out
+	err := cmd.Run()
 	if err != nil && isExecNotFound(err) {
-		return string(out), ErrNotInstalled
+		return out.String(), ErrNotInstalled
 	}
-	return string(out), err
+	return out.String(), err
 }
 
 type execProcess struct {
@@ -59,6 +64,7 @@ func (p *execProcess) Stdout() io.Reader { return p.stdout }
 func (p *execProcess) Wait() error       { return p.cmd.Wait() }
 func (p *execProcess) Kill() error {
 	_ = p.stdin.Close()
+	_ = p.stdout.Close()
 	if p.cmd.Process == nil {
 		return nil
 	}
@@ -71,6 +77,7 @@ func (ExecRunner) Start(ctx context.Context, argv []string) (Process, error) {
 		return nil, errors.New("host cli command is empty")
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.WaitDelay = time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -97,4 +104,18 @@ func isExecNotFound(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "executable file not found") ||
 		strings.Contains(msg, "no such file or directory")
+}
+
+// boundedOutput drains version output while retaining at most 64 KiB.
+type boundedOutput struct{ bytes.Buffer }
+
+func (b *boundedOutput) Write(p []byte) (int, error) {
+	n := len(p)
+	if remaining := 64*1024 - b.Len(); remaining > 0 {
+		if len(p) > remaining {
+			p = p[:remaining]
+		}
+		_, _ = b.Buffer.Write(p)
+	}
+	return n, nil
 }

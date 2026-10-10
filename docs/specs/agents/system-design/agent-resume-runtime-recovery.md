@@ -10,6 +10,8 @@ requirements:
 
 # Agent resume and runtime recovery system design
 
+[Explicit Auggie recovery settings](explicit-resume-settings.md) adds an optional attempt policy to Resume recovery; the identity and state-ownership guarantees below still apply.
+
 ## Purpose and boundaries
 
 This design preserves a provider conversation when session launch fails. It
@@ -107,6 +109,14 @@ at the configured remote. Authentication, network, timeout, and other fetch
 failures remain their original failure class and cannot authorize replacement.
 The wrapped error already reaches `Service.RecoverSession` and the
 `session.recover` WebSocket handler.
+
+During ordinary recreation after a successful managed refresh, an existing
+local task branch remains usable when `refs/remotes/origin/<branch>` is absent.
+The worktree is restored from that local branch without changing its head or
+requiring publication. If the tracking ref exists, normal refreshed-history
+selection still applies. Explicit checkout-branch and PR-snapshot selection
+continue to require their refreshed remote source. Missing local branches retain
+the existing recovery and explicit replacement rules.
 
 Attach-only reuse has one additional evidence boundary. If the local branch and
 `refs/remotes/origin/<branch>` are both absent, the manager runs a bounded,

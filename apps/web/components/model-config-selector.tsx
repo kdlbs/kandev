@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 
 export type ModelSelectorOption = {
+  source?: "static" | "dynamic" | "cli" | "acp";
   id: string;
   name: string;
   description?: string;

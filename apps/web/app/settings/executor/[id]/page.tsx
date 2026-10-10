@@ -19,7 +19,7 @@ import {
 } from "@kandev/ui/dialog";
 import { updateExecutorAction, deleteExecutorAction } from "@/app/actions/executors";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { ExecutorProfilesCard } from "@/components/settings/executor-profiles-card";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
@@ -296,7 +296,7 @@ function DeleteExecutorSection({ executor }: { executor: Executor }) {
 function ExecutorEditForm({ executor }: { executor: Executor }) {
   const { t } = useTranslation();
   const router = useRouter();
-  const executors = useAppStore((state) => state.executors.items);
+  const appStore = useAppStoreApi();
   const setExecutors = useAppStore((state) => state.setExecutors);
   const [mcpPolicy, setMcpPolicy] = useState(executor.config?.mcp_policy ?? "");
   const [savedMcpPolicy, setSavedMcpPolicy] = useState(executor.config?.mcp_policy ?? "");
@@ -315,7 +315,11 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
       : await updateExecutorAction(executor.id, payload);
     setSavedMcpPolicy(updated.config?.mcp_policy ?? "");
     setExecutors(
-      executors.map((item: Executor) => (item.id === updated.id ? { ...item, ...updated } : item)),
+      appStore
+        .getState()
+        .executors.items.map((item: Executor) =>
+          item.id === updated.id ? { ...item, ...updated } : item,
+        ),
     );
   };
   useSettingsSaveContributor({

@@ -30,8 +30,19 @@ const (
 )
 
 var ErrMessageIDConflict = errors.New("client message id is already used")
+var ErrNotGitPushErrorMessage = errors.New("message is not a Git push error")
 
 var agentPlanMessageIDNamespace = uuid.MustParse("138966de-88bc-49c0-b65f-cbfbac17f729")
+
+type messageMetadataFirstWriter interface {
+	SetMessageMetadataStringIfEmptyWithConversationReceipt(
+		context.Context,
+		string,
+		string,
+		string,
+		string,
+	) (*models.Message, *models.ConversationMutationReceipt, bool, error)
+}
 
 type planCommentMessageWriter interface {
 	CreateMessageWithPlanComments(
@@ -659,12 +670,21 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 	return message, nil
 }
 
+// authorizeMessageCreate enforces session.prompt for an ordinary task, and
+// workspace.manage instead for a coordinator conversation task
+// (docs/specs/coordinator/system-design/copilot.md#attended-only,
+// AC-COORDINATOR-COPILOT-002.3): a reader may see the conversation but only a
+// manager may message the coordinator and start a turn.
 func (s *Service) authorizeMessageCreate(ctx context.Context, req *CreateMessageRequest) error {
 	if req == nil || req.AuthorType == createdByAgent {
 		return nil
 	}
 	if req.TaskID != "" {
-		return s.AuthorizeTaskSessionPromptAccess(ctx, req.TaskID, req.TaskSessionID)
+		scope, err := s.coordinatorPromptScope(ctx, req.TaskID)
+		if err != nil {
+			return err
+		}
+		return s.authorizeTaskSessionScope(ctx, req.TaskID, req.TaskSessionID, scope)
 	}
 	return s.AuthorizeSessionScope(ctx, req.TaskSessionID, authz.ScopeSessionPrompt)
 }
@@ -993,6 +1013,63 @@ func (s *Service) GetMessage(ctx context.Context, id string) (*models.Message, e
 	return message, nil
 }
 
+// DismissGitPushErrorMessage records a shared acknowledgment on one eligible
+// Git push failure. The message's stored session determines read access.
+func (s *Service) DismissGitPushErrorMessage(ctx context.Context, messageID string) (string, error) {
+	message, err := s.messages.GetMessage(ctx, messageID)
+	if err != nil {
+		return "", err
+	}
+	if message == nil {
+		return "", repoerrors.ErrTaskNotFound
+	}
+	if message.TaskSessionID == "" {
+		return "", repoerrors.ErrTaskNotFound
+	}
+	if err := s.AuthorizeSessionAccess(ctx, message.TaskSessionID); err != nil {
+		return "", err
+	}
+	if message.Type != models.MessageTypeError || message.Metadata["git_operation_error"] != true || message.Metadata["operation"] != "push" {
+		return "", ErrNotGitPushErrorMessage
+	}
+	if dismissedAt, ok := message.Metadata["git_operation_error_dismissed_at"].(string); ok && dismissedAt != "" {
+		return dismissedAt, nil
+	}
+
+	writer, ok := s.messages.(messageMetadataFirstWriter)
+	if !ok {
+		return "", errors.New("atomic message metadata updates are unavailable")
+	}
+	candidate := time.Now().UTC().Format(time.RFC3339Nano)
+	stored, receipt, changed, err := writer.SetMessageMetadataStringIfEmptyWithConversationReceipt(
+		ctx,
+		message.ID,
+		message.TaskSessionID,
+		"git_operation_error_dismissed_at",
+		candidate,
+	)
+	if err != nil {
+		return "", err
+	}
+	dismissedAt, ok := stored.Metadata["git_operation_error_dismissed_at"].(string)
+	if !ok || dismissedAt == "" {
+		return "", errors.New("dismissed message is missing its acknowledgment timestamp")
+	}
+	if changed {
+		_ = s.publishMessageEvent(ctx, events.MessageUpdated, stored, receipt)
+	}
+	return dismissedAt, nil
+}
+
+// HasUserPromptHistory reports whether a session has accepted or reserved a
+// user prompt. The prompt sequence survives message deletion and restart.
+func (s *Service) HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error) {
+	if err := s.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionPrompt); err != nil {
+		return false, err
+	}
+	return s.messages.HasUserPromptHistory(ctx, sessionID)
+}
+
 // RehydrateMessagePayload resolves an externalized large tool-output
 // payload (see PayloadDigest) back into message.Metadata for the explicit,
 // single-message lazy-detail routes (e.g. httpGetShellOutput). Callers must
@@ -1024,7 +1101,11 @@ func (s *Service) ListMessages(ctx context.Context, sessionID string) ([]*models
 	if err := s.AuthorizeSessionAccess(ctx, sessionID); err != nil {
 		return nil, err
 	}
-	return s.messages.ListMessages(ctx, sessionID)
+	messages, err := s.messages.ListMessages(ctx, sessionID)
+	if err == nil {
+		err = s.projectRunningNotices(ctx, messages)
+	}
+	return messages, err
 }
 
 // ListMessagesPaginated returns messages for a session with pagination options.
@@ -1040,7 +1121,7 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 	if limit > MaxMessagesPageSize {
 		limit = MaxMessagesPageSize
 	}
-	return s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
+	messages, hasMore, err := s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
 		Limit:       limit,
 		Before:      req.Before,
 		After:       req.After,
@@ -1050,6 +1131,10 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 		TaskID:      req.TaskID,
 		Around:      req.Around,
 	})
+	if err == nil {
+		err = s.projectRunningNotices(ctx, messages)
+	}
+	return messages, hasMore, err
 }
 
 // ListMessagesForPlugin returns messages matching the plugin Host data API

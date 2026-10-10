@@ -13,6 +13,7 @@ package planws
 import (
 	"errors"
 
+	"github.com/kandev/kandev/internal/task/contract"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -48,7 +49,7 @@ func safePlanErrorResponse(msg *ws.Message, err error) (*ws.Message, bool, error
 	case service.PlanErrorVersionRequired, service.PlanErrorTruncationRejected,
 		service.PlanErrorAppendTruncationFlag,
 		service.PlanErrorContentRequired, service.PlanErrorEditTextRequired, service.PlanErrorEditNotFound,
-		service.PlanErrorEditAmbiguous, service.PlanErrorRevisionVersionRequired:
+		service.PlanErrorEditAmbiguous, service.PlanErrorRevisionVersionRequired, service.PlanErrorReadOffsetOutOfRange:
 		code = ws.ErrorCodeValidation
 	case service.PlanErrorVersionConflict, service.PlanErrorRevisionChanged:
 		code = ws.ErrorCodeConflict
@@ -212,6 +213,13 @@ func CreateError(msg *ws.Message, err error) (*ws.Message, error) {
 // because a read that fails below the sentinels is a storage fault with nothing
 // actionable for the caller.
 func GetError(msg *ws.Message, err error) (*ws.Message, error) {
+	if out, matched, mapErr := safePlanErrorResponse(msg, err); matched {
+		return out, mapErr
+	}
+	var invalid *contract.PlanReadValidationError
+	if errors.As(err, &invalid) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, invalid.Message, nil)
+	}
 	return errorResponse(msg, err, "Failed to get task plan", []mapping{taskIDRequired})
 }
 

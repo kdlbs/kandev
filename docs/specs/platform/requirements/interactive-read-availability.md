@@ -49,13 +49,42 @@ Task and workspace systems retain authority over their records and permissions.
 - **AC-PLATFORM-INTERACTIVE-READS-003.4:** Desktop and phone users shall be able to retry by keyboard or touch. Loading, failure, and retry status shall be accessible.
 - **AC-PLATFORM-INTERACTIVE-READS-003.5:** Copy Stats shall remain unavailable while any required section lacks current-selection data.
 
+### REQ-PLATFORM-INTERACTIVE-READS-004: Bounded clarification reads
+
+**Intent:** Background inbox refreshes preserve capacity for navigation and persistence checks.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-INTERACTIVE-READS-004.1:** Concurrent clarification listing and count requests shall execute within a shared capacity limit. Excess requests shall wait outside database execution and respect cancellation.
+- **AC-PLATFORM-INTERACTIVE-READS-004.2:** With healthy storage and clarification reads alone, task reads and persistence probes shall continue to succeed.
+- **AC-PLATFORM-INTERACTIVE-READS-004.3:** Equivalent clarification records shall retain visibility, ordering, pagination, current-turn ownership, and hidden-count results on SQLite and PostgreSQL.
+- **AC-PLATFORM-INTERACTIVE-READS-004.4:** Within one active browser workspace, all inbox refresh triggers shall share one request. Events during that request shall schedule at most one subsequent refresh.
+- **AC-PLATFORM-INTERACTIVE-READS-004.5:** Temporary inbox failures shall impose a retry delay on every trigger. Repeated events shall not bypass that delay.
+- **AC-PLATFORM-INTERACTIVE-READS-004.6:** Changing workspace or authentication shall cancel obsolete inbox requests and timers. Obsolete results shall not update the new selection.
+
+### REQ-PLATFORM-INTERACTIVE-READS-005: Task navigation recovery
+
+**Intent:** Users can recover a task read after a temporary backend failure without reloading the application.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-INTERACTIVE-READS-005.1:** Temporary task-read failures shall show localized availability copy and Retry. They shall not imply deletion or lost access.
+- **AC-PLATFORM-INTERACTIVE-READS-005.2:** Each task-navigation read attempt shall finish within ten seconds. A timeout shall be classified as temporary and use the same retry budget. A recovery cycle shall perform at most two automatic retries; exhausted recovery shall retain manual Retry and the task-overview link.
+- **AC-PLATFORM-INTERACTIVE-READS-005.3:** Concurrent recovery triggers shall share one read. Navigation, authentication changes, and unmount shall invalidate obsolete recovery work.
+- **AC-PLATFORM-INTERACTIVE-READS-005.4:** Successful recovery shall open the selected task and retain its valid selected session. It shall not select a task from an earlier request.
+- **AC-PLATFORM-INTERACTIVE-READS-005.5:** Missing or inaccessible tasks shall retain the existing generic unavailable state. Authorization errors shall not receive automatic retries.
+- **AC-PLATFORM-INTERACTIVE-READS-005.6:** Desktop and phone users shall have equivalent keyboard and touch recovery actions. Phone targets shall measure at least 44px without horizontal overflow.
+- **AC-PLATFORM-INTERACTIVE-READS-005.7:** When a refresh fails after task details load, those details shall remain visible. The page shall identify the failed refresh without presenting stale data as newly verified.
+
 ## Related contracts
 
 - [Required-store health](postgres-domain-store-parity.md), REQ-PLATFORM-POSTGRES-DOMAIN-STORE-PARITY-007.
 - [Workspace read recovery](../../workspaces/requirements/workspace-read-recovery.md).
+- [Missing task routes](../../tasks/requirements/missing-task-route-recovery.md) remain authoritative for permanent lookup failures.
 
 ## Out of scope
 
 - New statistics, historical rollup storage, approximate counts, or cross-user caches.
 - New database pools, health-state semantics, public configuration, or feature flags.
 - Guaranteed latency under unrelated write saturation, failed disks, or remote database outages.
+- Attribution of every incident to inbox queries without query-level evidence.

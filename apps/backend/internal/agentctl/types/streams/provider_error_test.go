@@ -5,6 +5,29 @@ import (
 	"testing"
 )
 
+func TestDiagnosticIdentityCompleteRequiresUnchangedBoundedUTF8(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+		want bool
+	}{
+		{name: "unchanged", text: "provider overloaded", want: true},
+		{name: "empty", text: "", want: false},
+		{name: "exact byte limit", text: strings.Repeat("é", 512), want: true},
+		{name: "over byte limit", text: strings.Repeat("é", 513), want: false},
+		{name: "invalid UTF-8", text: string([]byte{0xff}), want: false},
+		{name: "sanitizer changes URL", text: "provider failed https://private.example/token", want: false},
+		{name: "sanitizer changes whitespace", text: "provider  overloaded", want: false},
+		{name: "sanitizer changes trailing punctuation", text: "provider overloaded.", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsCompleteProviderDiagnostic(tc.text); got != tc.want {
+				t.Fatalf("IsCompleteProviderDiagnostic() = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestSanitizeProviderMessageRedactsMixedCaseURLsAndIdentifiers pins the
 // case-insensitivity gap closed alongside sanitisation.go's fixture-lint
 // regexes (commit d816b55c4): a gateway that emits an upper- or mixed-case

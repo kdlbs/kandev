@@ -52,11 +52,12 @@ func bundleQuestions(msgs []*taskmodels.Message) []Question {
 // question_id (not id, which list_pending_questions_kandev callers never
 // see), plus the question's D3 effective status. Options is never nil (L4a).
 type QuestionStatus struct {
-	QuestionID string   `json:"question_id"`
-	Title      string   `json:"title"`
-	Prompt     string   `json:"prompt"`
-	Status     string   `json:"status"`
-	Options    []Option `json:"options"`
+	QuestionID      string   `json:"question_id"`
+	Title           string   `json:"title"`
+	Prompt          string   `json:"prompt"`
+	Status          string   `json:"status"`
+	Options         []Option `json:"options"`
+	AllowCustomText *bool    `json:"allow_custom_text,omitempty"`
 }
 
 // BundleQuestionStatuses builds the D2/L5-ordered, L4-shaped question list
@@ -75,11 +76,12 @@ func BundleQuestionStatuses(msgs []*taskmodels.Message) []QuestionStatus {
 			options = []Option{}
 		}
 		out = append(out, QuestionStatus{
-			QuestionID: q.ID,
-			Title:      q.Title,
-			Prompt:     q.Prompt,
-			Status:     effectiveMessageStatus(m),
-			Options:    options,
+			QuestionID:      q.ID,
+			Title:           q.Title,
+			Prompt:          q.Prompt,
+			Status:          effectiveMessageStatus(m),
+			Options:         options,
+			AllowCustomText: q.AllowCustomText,
 		})
 	}
 	return out
@@ -109,6 +111,9 @@ func questionFromMessageMetadataFull(meta map[string]any) Question {
 	}
 	if v, ok := qData["title"].(string); ok {
 		q.Title = v
+	}
+	if v, ok := qData["allow_custom_text"].(bool); ok {
+		q.AllowCustomText = &v
 	}
 	q.Options = optionsFromQuestionData(qData)
 	return q

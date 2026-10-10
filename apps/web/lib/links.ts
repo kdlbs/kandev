@@ -59,9 +59,9 @@ export function isTaskDetailPath(pathname: string, taskId: string): boolean {
 }
 
 /** Replace the browser URL to reflect the active task (no navigation). */
-export function replaceTaskUrl(taskId: string): void {
+export function replaceTaskUrl(taskId: string, sessionId?: string): void {
   if (typeof window === "undefined") return;
-  window.history.replaceState({}, "", linkToTask(taskId));
+  window.history.replaceState({}, "", linkToTask(taskId, { sessionId }));
 }
 
 export function linkToTasks(workspaceId?: string): string {

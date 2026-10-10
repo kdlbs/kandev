@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/contract"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -697,15 +698,11 @@ func (s *PlanService) GetPlan(ctx context.Context, taskID string) (*models.TaskP
 // lock used by plan writers. The repository query returns title, content, and
 // write version from that row, so agent callers receive one coherent snapshot.
 func (s *PlanService) GetPlanSnapshot(ctx context.Context, taskID string) (*models.TaskPlan, error) {
-	if taskID == "" {
-		return nil, ErrTaskIDRequired
-	}
-	if err := s.authorize(ctx, taskID); err != nil {
+	result, err := s.GetPlanRead(ctx, taskID, contract.PlanReadOptions{})
+	if err != nil || result == nil {
 		return nil, err
 	}
-	release := s.locks.acquire(taskID)
-	defer release()
-	return s.repo.GetTaskPlan(ctx, taskID)
+	return result.Plan, nil
 }
 
 type MarkImplementationStartedRequest struct {

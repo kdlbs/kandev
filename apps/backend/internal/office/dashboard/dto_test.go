@@ -76,3 +76,13 @@ func TestNewDashboardResponseUsesPublicJSONShape(t *testing.T) {
 		t.Fatal("agent_summaries should encode as an empty array, not null")
 	}
 }
+
+func TestRunToListItemPreservesCausationID(t *testing.T) {
+	item := runToListItem(&models.Run{
+		ID:          "run-1",
+		CausationID: "routine-fire-1",
+	})
+	if item.CausationID != "routine-fire-1" {
+		t.Fatalf("causation_id = %q, want routine-fire-1", item.CausationID)
+	}
+}

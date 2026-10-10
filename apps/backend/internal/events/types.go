@@ -1,6 +1,9 @@
 // Package events provides event types and utilities for the Kandev event system.
 package events
 
+// PromptsChanged invalidates instance-wide saved prompt caches without carrying content.
+const PromptsChanged = "prompts.changed"
+
 // Event types for tasks
 const (
 	TaskCreated       = "task.created"
@@ -46,6 +49,13 @@ const (
 	CanvasRestored                  = "canvas.restored"
 	CanvasRemoved                   = "canvas.removed"
 )
+
+// CoordinatorUpdated fires after a proposal write (insert, claim, reclaim,
+// complete, fail or reject) or a stall upsert, never plain coordinator CRUD.
+// Payload: {workspace_id, coordinator_id, open_proposals}
+// (docs/specs/coordinator/system-design/proposals.md#events, Build decision
+// 13). Publishing sites land with tasks 03, 04 and 07.
+const CoordinatorUpdated = "coordinator.updated"
 
 // Event types for office task tree controls.
 const (
@@ -100,6 +110,9 @@ const (
 	// pending-action projection for one session. It contains no transcript
 	// content and lets inactive session selectors stay current.
 	SessionPendingActionChanged = "session.pending_action_changed"
+	// SessionWorkspaceRecoveryChanged carries the path-free recovery projection
+	// to every subscribed conversation bound to the same task environment.
+	SessionWorkspaceRecoveryChanged = "session.workspace_recovery.changed"
 	// TaskSessionActivityChanged fires when a session's fine-grained activity
 	// flips — a RUNNING foreground turn moving between actively generating and
 	// idle-on-background-work, or detached background work starting/finishing
@@ -256,8 +269,9 @@ const (
 const (
 	AgentStarted           = "agent.started"
 	AgentRunning           = "agent.running"
-	AgentBootReady         = "agent.boot_ready" // Agent's ACP session initialized, ready to receive its first prompt. Distinct from AgentReady so the orchestrator can tell a boot signal apart from a turn-end without flag-based disambiguation.
-	AgentReady             = "agent.ready"      // Agent finished a prompt turn, ready for follow-up
+	AgentBootReady         = "agent.boot_ready"  // Agent's ACP session initialized, ready to receive its first prompt. Distinct from AgentReady so the orchestrator can tell a boot signal apart from a turn-end without flag-based disambiguation.
+	AgentReady             = "agent.ready"       // Agent finished a prompt turn, ready for follow-up
+	AgentTurnFailed        = "agent.turn_failed" // Prompt failed while the execution remains usable
 	AgentCompleted         = "agent.completed"
 	AgentFailed            = "agent.failed"
 	AgentStalled           = "agent.stalled"
@@ -340,6 +354,8 @@ const (
 	SessionModelSelectionWarningUpdated = "session_model_selection_warning.updated" // Executor-authoritative model decision warning
 	SessionInfoUpdated                  = "session_info.updated"                    // ACP session info received
 	SessionMCPStatusUpdated             = "session_mcp_status.updated"              // MCP attachment evidence changed
+	BackgroundWorkUpdated               = "background_work.updated"                 // Background workload updated
+	BackgroundWorkOutput                = "background_work.output"                  // Background workload output streamed
 )
 
 // Event types for session todos (ACP plan entries)
@@ -349,6 +365,7 @@ const (
 
 const (
 	SessionPromptUsageUpdated = "session_prompt_usage.updated" // Prompt token usage updated
+	SessionUsageUpdated       = "session.usage_updated"        // A committed usage row changed session projections
 )
 
 // Event types for automations
@@ -554,6 +571,26 @@ func BuildSessionModelsWildcardSubject() string {
 	return SessionModelsUpdated + ".*"
 }
 
+// BuildBackgroundWorkUpdatedSubject creates a subject for background work update events for a session
+func BuildBackgroundWorkUpdatedSubject(sessionID string) string {
+	return BackgroundWorkUpdated + "." + sessionID
+}
+
+// BuildBackgroundWorkUpdatedWildcardSubject creates a wildcard subscription for background work update events
+func BuildBackgroundWorkUpdatedWildcardSubject() string {
+	return BackgroundWorkUpdated + ".*"
+}
+
+// BuildBackgroundWorkOutputSubject creates a subject for background work output events for a session
+func BuildBackgroundWorkOutputSubject(sessionID string) string {
+	return BackgroundWorkOutput + "." + sessionID
+}
+
+// BuildBackgroundWorkOutputWildcardSubject creates a wildcard subscription for background work output events
+func BuildBackgroundWorkOutputWildcardSubject() string {
+	return BackgroundWorkOutput + ".*"
+}
+
 // BuildSessionModelFallbackSubject creates a session-specific fallback-model
 // subject.
 func BuildSessionModelFallbackSubject(sessionID string) string {
@@ -616,6 +653,14 @@ func BuildSessionPromptUsageSubject(sessionID string) string {
 // BuildSessionPromptUsageWildcardSubject creates a wildcard subscription for all prompt usage events
 func BuildSessionPromptUsageWildcardSubject() string {
 	return SessionPromptUsageUpdated + ".*"
+}
+
+func BuildSessionUsageUpdatedSubject(sessionID string) string {
+	return SessionUsageUpdated + "." + sessionID
+}
+
+func BuildSessionUsageUpdatedWildcardSubject() string {
+	return SessionUsageUpdated + ".*"
 }
 
 // BuildOfficeRunEventSubject creates a per-run subject for run event

@@ -31,21 +31,23 @@ const (
 	lspCloseStartFailed            = 4008
 	lspCloseTransportFailed        = 4009
 
-	lspLanguageTypeScript    = "typescript"
-	lspLanguagePython        = "python"
-	lspLanguageGo            = "go"
-	lspLanguageRust          = "rust"
-	lspLanguageKey           = "language"
-	lspStatusKey             = "status"
-	lspStatusInstalling      = "installing"
-	lspStatusInstalled       = "installed"
-	lspStatusInstallFailed   = "install_failed"
-	lspStatusReady           = "ready"
-	lspWorkspacePathJSONKey  = "workspacePath"
-	lspWorkspaceURIJSONKey   = "workspaceUri"
-	lspRepoSubpathsJSONKey   = "repoSubpaths"
-	lspStdinWriteTimeout     = 30 * time.Second
-	lspWebSocketWriteTimeout = 5 * time.Second
+	lspLanguageTypeScript  = "typescript"
+	lspLanguagePython      = "python"
+	lspLanguageGo          = "go"
+	lspLanguageRust        = "rust"
+	lspLanguageKey         = "language"
+	lspStatusKey           = "status"
+	lspStatusInstalling    = "installing"
+	lspStatusInstalled     = "installed"
+	lspStatusInstallFailed = "install_failed"
+	lspStatusReady         = "ready"
+	// Process completion can follow stdout EOF while agentctl drains stderr.
+	lspProcessExitConfirmationTimeout = time.Second
+	lspWorkspacePathJSONKey           = "workspacePath"
+	lspWorkspaceURIJSONKey            = "workspaceUri"
+	lspRepoSubpathsJSONKey            = "repoSubpaths"
+	lspStdinWriteTimeout              = 30 * time.Second
+	lspWebSocketWriteTimeout          = 5 * time.Second
 )
 
 var errLSPStdinWriteTimeout = errors.New("LSP stdin write timed out")
@@ -54,6 +56,7 @@ type lspServerProcess struct {
 	id     string
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
+	exited <-chan struct{}
 	done   <-chan struct{}
 	// forwarderDone keeps caller-owned stdout open until its sole reader exits.
 	forwarderDone <-chan struct{}
@@ -344,7 +347,13 @@ func (s *Server) startLSPServer(language, binaryPath string) (*lspServerProcess,
 		return nil, fmt.Errorf("failed to start %s: %w", binary, err)
 	}
 
-	return &lspServerProcess{id: proc.ID, stdin: proc.Stdin, stdout: proc.Stdout, done: proc.Done}, nil
+	return &lspServerProcess{
+		id:     proc.ID,
+		stdin:  proc.Stdin,
+		stdout: proc.Stdout,
+		exited: proc.Exited,
+		done:   proc.Done,
+	}, nil
 }
 
 func (s *Server) stopLSPServer(server *lspServerProcess) {
@@ -398,9 +407,9 @@ func (s *Server) runLSPBridge(
 				}
 				closeCode := lspCloseTransportFailed
 				select {
-				case <-server.done:
+				case <-server.exited:
 					closeCode = lspCloseServerExited
-				case <-time.After(100 * time.Millisecond):
+				case <-time.After(lspProcessExitConfirmationTimeout):
 				}
 				_ = writeLSPMessage(
 					conn,

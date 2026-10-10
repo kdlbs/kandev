@@ -177,6 +177,13 @@ func TestGetLatestTaskStepTransitionID(t *testing.T) {
 	if genesisID == 0 {
 		t.Fatal("GetLatestTaskStepTransitionID after create = 0, want genesis row")
 	}
+	workflowID, stepID, entryID, err := repo.GetTaskWorkflowStepEntry(ctx, "task-latest-transition")
+	if err != nil {
+		t.Fatalf("GetTaskWorkflowStepEntry after create: %v", err)
+	}
+	if workflowID != "wf-1" || stepID != "step-a" || entryID != genesisID {
+		t.Fatalf("entry = (%q, %q, %d), want (wf-1, step-a, %d)", workflowID, stepID, entryID, genesisID)
+	}
 
 	task, err := repo.GetTask(ctx, "task-latest-transition")
 	if err != nil {
@@ -193,6 +200,13 @@ func TestGetLatestTaskStepTransitionID(t *testing.T) {
 	}
 	if latestID <= genesisID {
 		t.Fatalf("latest transition id = %d, want greater than genesis %d", latestID, genesisID)
+	}
+	workflowID, stepID, entryID, err = repo.GetTaskWorkflowStepEntry(ctx, "task-latest-transition")
+	if err != nil {
+		t.Fatalf("GetTaskWorkflowStepEntry after move: %v", err)
+	}
+	if workflowID != "wf-1" || stepID != "step-b" || entryID != latestID {
+		t.Fatalf("entry after move = (%q, %q, %d), want (wf-1, step-b, %d)", workflowID, stepID, entryID, latestID)
 	}
 
 	missingID, err := repo.GetLatestTaskStepTransitionID(ctx, "missing-task")
@@ -599,7 +613,9 @@ func TestRestoreTaskMessageRollbackWritesUnarchiveRestoreRow(t *testing.T) {
 	}
 
 	task.WorkflowStepID = "step-restored"
-	restored, err := repo.RestoreTaskMessageRollbackIfSessionState(ctx, task, "session-rollback", models.TaskSessionStateRunning)
+	restored, err := repo.RestoreTaskMessageRollbackIfSessionState(
+		ctx, task, "session-rollback", models.TaskSessionStateRunning, task.State, "step-a",
+	)
 	if err != nil {
 		t.Fatalf("RestoreTaskMessageRollbackIfSessionState: %v", err)
 	}
@@ -631,7 +647,9 @@ func TestRestoreTaskMessageRollbackWrongSessionStateWritesNoRow(t *testing.T) {
 
 	before := stepTransitionRowsForTask(t, repo, "task-rollback-mismatch")
 	task.WorkflowStepID = "step-restored"
-	restored, err := repo.RestoreTaskMessageRollbackIfSessionState(ctx, task, "session-mismatch", models.TaskSessionStateRunning)
+	restored, err := repo.RestoreTaskMessageRollbackIfSessionState(
+		ctx, task, "session-mismatch", models.TaskSessionStateRunning, task.State, "step-a",
+	)
 	if err != nil {
 		t.Fatalf("RestoreTaskMessageRollbackIfSessionState: %v", err)
 	}

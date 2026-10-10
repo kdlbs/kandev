@@ -66,6 +66,11 @@ func (h *TaskHandlers) httpGetTaskEnvironmentLive(c *gin.Context) {
 	} else if ssh != nil {
 		resp["ssh"] = ssh
 	}
+	if pluginExecutor, err := h.service.GetPluginExecutorEnvironmentStatus(c.Request.Context(), taskID); err != nil {
+		h.logger.Warn("failed to fetch live plugin executor status", zap.String("task_id", taskID), zap.Error(err))
+	} else if pluginExecutor != nil {
+		resp["plugin_executor"] = pluginExecutor
+	}
 	c.JSON(http.StatusOK, resp)
 }
 

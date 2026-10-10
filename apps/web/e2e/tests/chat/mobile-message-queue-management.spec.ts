@@ -8,8 +8,8 @@ import { waitForSessionDone } from "../../helpers/session";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
-import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
 import { watchWs } from "../../helpers/causal-waits";
+import { seedRunningGeneratingSession } from "../../helpers/generating-session";
 import {
   expectSendNowInterruptsRunningFIFOTurn,
   expectSendNowWorkflowRunning,
@@ -86,6 +86,7 @@ async function seedBusyQueueTask(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
+  activePrompt = "/slow 30s",
 ): Promise<{ session: SessionPage; taskId: string; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -102,7 +103,7 @@ async function seedBusyQueueTask(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
-  await session.sendMessageViaButton("/slow 30s");
+  await session.sendMessageViaButton(activePrompt);
   await session.agentStatus().waitFor({ state: "visible", timeout: 15_000 });
   await waitForComposerQueueMode(testPage);
   const loadedTask = await apiClient.getTask(task.id);
@@ -279,12 +280,14 @@ test("mobile full queue stays usable while removing and clearing messages", asyn
   apiClient,
   seedData,
 }) => {
-  const { session } = await seedFullQueueTask(
+  const queueEvents = watchWs(testPage);
+  const { session, taskId, sessionId } = await seedFullQueueTask(
     testPage,
     apiClient,
     seedData,
     "Mobile queue management",
   );
+  const queueIdentity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
 
   await expectFullQueueScrolls(session);
 
@@ -312,8 +315,17 @@ test("mobile full queue stays usable while removing and clearing messages", asyn
     "Position #9",
   );
   await expect(chat.getByTestId("chat-input-editor-shell")).toBeVisible();
+  await expect
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count))
+    .toBe(9);
+  await expect(clear).toBeEnabled();
 
+  const clearResponse = queueEvents.waitForResponse("message.queue.cancel");
   await clear.tap();
+  expect((await clearResponse).payload.removed).toBe(9);
+  await expect
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count))
+    .toBe(0);
   await expect(panel).not.toBeVisible({ timeout: 10_000 });
   await expect(chat.getByTestId("queue-chip")).not.toBeVisible();
   await expect(chat.getByTestId("chat-input-editor-shell")).toBeVisible();
@@ -327,7 +339,12 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   test.setTimeout(120_000);
 
   const gateway = watchWs(testPage);
-  const { session, taskId, sessionId } = await seedBusyQueueTask(testPage, apiClient, seedData);
+  const { session, taskId, sessionId } = await seedBusyQueueTask(
+    testPage,
+    apiClient,
+    seedData,
+    'e2e:message("busy turn")\ne2e:delay(30000)',
+  );
   const chat = session.activeChat();
   const markerA = "mobile targeted A response";
   const markerB = "mobile targeted B response";
@@ -355,6 +372,9 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   await expect(autoRun).toHaveAttribute("data-state", "unchecked");
   await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
   await expect(autoMerge).toBeEnabled();
+  await expect
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.auto_run))
+    .toBe(false);
   await autoMerge.tap();
   await expect
     .poll(async () => (await apiClient.getQueueStatus(queueIdentity)).auto_merge_enabled)
@@ -363,6 +383,9 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   await expect(autoMerge).toBeEnabled();
   await autoMerge.tap();
   await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
+  await expect
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.auto_merge_enabled))
+    .toBe(false);
 
   await assertNoDocumentHorizontalOverflow(testPage);
 
@@ -370,7 +393,9 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   await rowSendNow.tap();
   await sendNowResponse;
   await expect
-    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count))
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count), {
+      timeout: 15_000,
+    })
     .toBe(2);
   await expect(panel.getByTestId("queue-entry-text")).toHaveCount(2, { timeout: 10_000 });
   await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText(markerA);
@@ -424,29 +449,16 @@ test.describe("Mobile queued row controls", () => {
     prCapture,
   }) => {
     const fixture = "mobile-overflow-probe ".repeat(24).trim();
-    const task = await apiClient.createTaskWithAgent(
-      seedData.workspaceId,
+    const { session, taskId, sessionId } = await seedRunningGeneratingSession(
+      testPage,
+      apiClient,
+      seedData,
       "Mobile queued row controls",
-      seedData.agentProfileId,
-      {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      },
     );
-    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-    await testPage.goto(`/t/${task.id}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 30_000 });
-    await session.sendMessageViaButton("/sleep 60");
-    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
-    await waitForActiveSessionForegroundActivity(testPage, "generating");
-    const identity = await apiClient.getQueueSessionIdentity(task.id, task.session_id);
+    const identity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
     const autoRunResponse = await apiClient.setQueueAutoRun(identity, false);
     expect(autoRunResponse).toMatchObject({
-      session_id: task.session_id,
+      session_id: sessionId,
       auto_run: false,
     });
     await waitForComposerQueueMode(testPage);

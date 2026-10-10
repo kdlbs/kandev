@@ -5,6 +5,7 @@ requirements:
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-001
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-003
+  - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-004
 ---
 
 # Managed npm runtime recovery system design
@@ -26,13 +27,14 @@ Kandev backend.
 | --- | --- |
 | `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-001` | [Recovery flow](#recovery-flow) |
 | `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002` | [Executor-local cache contract](#executor-local-cache-contract) |
+| `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-004` | [Bounded setup retry](#bounded-setup-retry) |
 | `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-003` | [Project-independent npm configuration](#project-independent-npm-configuration); [Release-date policy failure](#release-date-policy-failure) |
 
 ## Components and responsibilities
 
 - `runtime/lifecycle.Manager` classifies bounded startup evidence and limits recovery to one retry.
-- `agent/hostutility.Manager` classifies a structured probe failure, repairs through its warm agentctl instance, and limits each probe operation to one retry.
-- The host utility instance admits ordinary probes and one-shot prompts concurrently, but cache repair and its retry take exclusive admission so no process can use the execution tree while it is replaced.
+- `agent/hostutility.Manager` classifies a structured probe failure and retries through its warm agentctl instance once without deleting shared files.
+- The host utility instance retains its existing admission gates. Automatic probe recovery no longer deletes shared cache trees.
 - `backendapp` starts the host utility manager once, after temporary-artifact ownership is available, and runs profile and utility reconciliation after that bootstrap.
 - `runtime/agentctl.Client` calls the authenticated cache-repair endpoint on the session-scoped `agentctl` instance.
 - `agentctl/server/api.Server` validates the request and coordinates the local repair operation.
@@ -114,47 +116,56 @@ raw npm output.
 1. Kandev starts the exact managed runtime with `--prefer-offline`.
 2. The process exits before ACP initialization.
 3. The lifecycle manager reads bounded sanitized stderr from `agentctl`.
-4. Recovery requires npm `ETARGET` and a matching missing `package@version` message.
+4. Recovery uses the bounded setup classification below; exact-package `ETARGET` remains supported.
 5. The lifecycle manager stops the failed child process.
-6. The same `agentctl` instance resolves its npm cache and removes one execution tree.
-7. Kandev changes only `--prefer-offline` to `--prefer-online`.
+6. Kandev preserves the shared execution tree and waits for the bounded retry delay.
+7. For npm-classified failures, Kandev changes `--prefer-offline` to `--prefer-online`; unexplained early exit preserves the original preference.
 8. Kandev starts the replacement child and initializes the original ACP session.
 
 The startup generation rejects delayed events from the first child. The
-existing cancellation and shutdown gates remain authoritative during repair.
+existing cancellation and shutdown gates remain authoritative during recovery.
 
 For a host capability probe, the equivalent flow is:
 
 1. Backend startup creates one host utility lifecycle and the manager runs the exact managed runtime with `--prefer-offline`.
 2. Agentctl reports the stable managed-runtime npm-resolution failure code.
-3. The host utility manager asks the same warm agentctl instance to repair the exact execution tree.
+3. The host utility manager preserves the execution tree and the original probe environment.
 4. The host utility manager rebuilds the same effective package version with `--prefer-online` and retries once.
-5. A successful retry becomes the live capability or model-configuration catalogue. A repair, retry-preparation, or final probe failure becomes the published failed status.
+5. A successful retry becomes the live capability or model-configuration catalogue. Retry-preparation or final probe failure becomes the published failed status.
 
-Normal host utility probes and prompts finish before an exclusive cache repair
-can start. New operations wait until repair and its online retry complete.
+Retain current host utility admission ordering while removing automatic cache deletion.
+No backend-wide launch mutex or cache lease is introduced.
 The probe retry does not run profile reconciliation between attempts. Persisted
 profile model, fallback model, mode, enabled state, and active runtime version
 remain unchanged on both success and failure.
 
 ## Failure behavior
 
-If cache discovery or repair fails, Kandev emits `agent_runtime`. If the
-second npm attempt fails, Kandev emits `managed_runtime_npm_resolution`.
+If Kandev cannot stop and reap the failed process, it emits
+`managed_runtime_startup` with `reason=cleanup_failed`. Replacement configure
+or start failures keep their normal `agent_runtime` classification. An
+exhausted exact-version resolution failure retains
+`managed_runtime_npm_resolution`. Other exhausted eligible setup failures use
+`managed_runtime_startup` with a bounded reason.
 
-Both errors contain bounded sanitized details. The UI keeps the existing
+These errors contain bounded sanitized details. The UI keeps the existing
 single **Retry runtime** action. Kandev does not change the active version.
 
 Unsupported runtime types do not call the repair endpoint for ordinary npm
 resolution failures. Kandev classifies an exact release-date policy failure
 before checking repair support when the bounded diagnostic is available.
-Native commands, passthrough commands, unrelated npm errors, and repeated
-failures remain on the normal terminal error path.
+Native commands, passthrough commands, ineligible setup failures, and exhausted
+retries remain on the normal terminal error path.
 
-A host capability probe that cannot repair or fails its online retry publishes
-the final failure normally. Kandev does not hide a runtime that still cannot
-start, change its version, or substitute a stale capability catalogue from a
-different runtime generation.
+A host capability probe that cannot prepare or fails its online retry publishes
+the final failure normally. The task retry also retains the final replacement
+cause as bounded sanitized detail and keeps its attempt metadata. Authentication
+refusal is classified before generic managed-runtime recovery so existing login
+recovery remains available. Configure/start and session creation/restoration
+failures retain their ordinary runtime-error path; they are not relabeled as
+post-initialize failures or retried. Kandev does not hide a runtime that still
+cannot start, change its version, or substitute a stale capability catalogue
+from a different runtime generation.
 
 ## Release-date policy failure
 
@@ -170,7 +181,7 @@ the bounded diagnostic to `routingerr`. Classification checks the raw line
 against that exact spec before generic diagnostic redaction can treat the
 scoped package or locale-formatted date as a path or opaque token. The persisted
 excerpt contains only a fixed policy message and the canonical date marker.
-Ordinary exact-version `ETARGET` retains the stale metadata repair path. The
+Ordinary exact-version `ETARGET` retains one online-preferred retry without deleting shared files. The
 same distinction applies to host capability probes.
 
 Settings update jobs classify bounded output against the trusted exact package
@@ -179,8 +190,7 @@ updates fail with a safe policy error when the diagnostic matches; they do not
 retry or expose the raw locale-formatted date in the job error. Ordinary update
 failures retain the existing cache-repair path.
 
-The lifecycle manager publishes a stable policy failure code before cache
-repair. The orchestrator persists one sanitized recovery entry with a localized
+The lifecycle manager publishes a stable policy failure code without retrying. The orchestrator persists one sanitized recovery entry with a localized
 policy explanation and an ordinary retry action. The entry must not use the
 existing stale-metadata card, whose copy says Kandev repaired the cache.
 Office consumes the same code and explanation. Desktop and phone reuse the
@@ -203,3 +213,112 @@ No database migration is necessary.
 - [Run cache repair where npm runs](../../../decisions/2026-08-24-agentctl-local-managed-runtime-cache-repair.md)
 - [Recover host capability probes before publishing failure](../../../decisions/2026-09-07-host-utility-managed-runtime-recovery.md)
 - [Isolate managed npm runtime project configuration](../../../decisions/2026-09-24-isolate-managed-npm-project-config.md)
+
+## Bounded setup retry
+
+This section implements REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-004 and qualifies
+the earlier cache-repair flow. See the [decision](../../../decisions/2026-10-02-bounded-managed-npm-startup-retry.md)
+and [delivery package](../../../plans/managed-npm-startup-resilience/plan.md).
+The extension targets task launches on standalone, local Docker, and SSH.
+Host capability probes keep their strict ETARGET-only retry eligibility; their
+retry also stops deleting the shared cache tree.
+
+### Evidence and classification
+
+Add a shared typed startup-evidence structure under `agentctl/types`.
+Agentctl attaches it to `agent.initialize` error details. It contains the process
+generation, exit disposition, optional exit code, canonical npm code, and
+whether evidence collection completed. It also distinguishes whether npm code
+diagnostics were present, whether their bounded collection was complete, and
+whether a canonical npm code fell outside the recovery allowlist. Ring-buffer
+eviction, oversized joined diagnostics, and a failed stderr drain make npm
+diagnostics incomplete. No raw stderr, path, or URL is required.
+Process generations advance on successful process start. Include the generation
+in the start response, retain it in `runtime/agentctl.Client`, and send it with
+initialize. Reject stale generations before touching an adapter. Legacy peers
+without these fields retain existing strict ETARGET recovery; they do not gain
+heuristic early-exit retries.
+
+`process.Manager` records exit evidence for the exact child generation before
+publishing its exit event. Capture intentional stop separately from process
+status. Report signal termination separately from an ordinary exit. A missing
+or unsettled exit observation is unknown, not proof of a dead child. Collection
+may await the process-exit record for at most the existing two-second diagnostic
+budget, outside manager locks, and must obey cancellation.
+
+Wrap failures from `Client.Initialize` in a typed phase error in
+`SessionManager.InitializeSessionWithSettingsPolicy`. Do not wrap errors from
+`createOrLoadSession`, settings, session restoration, or prompting as pre-handshake
+failures. The retry owner checks that phase before accepting evidence.
+
+Extend `common/npmresolution` and the agentctl safe diagnostic projection with
+a closed allowlist of npm-prefixed codes: ECONNRESET, ECONNREFUSED, ETIMEDOUT,
+EAI_AGAIN, E502, E503, E504, EBUSY, ENOTEMPTY, and EINTEGRITY. Accept these only
+for the trusted managed command and its matching process generation. Do not
+classify arbitrary prose or another operation's stderr as npm setup evidence.
+Known permanent conditions take priority over transient or early-exit fallback:
+EACCES, EPERM, ENOSPC, EROFS, E401, E403, E404, EAUTH, ENEEDAUTH, EBADENGINE,
+release-age policy, invalid command/configuration, and structured auth refusal.
+Retain exact top-level-package matching for ETARGET; a transitive ETARGET must
+not fall through to generic early-exit retry.
+
+Without npm evidence, allow one retry only for an observed non-intentional
+ordinary process exit during the typed initialize phase when stderr collection
+is complete and no canonical npm code diagnostic was present. Unknown npm
+codes receive a bounded marker and are not equivalent to empty stderr. An
+oversized or otherwise incomplete diagnostic set fails closed, including when
+it contains an allowlisted permanent code. A signal exit, a live process,
+unknown ownership, malformed evidence, cancelled operation, or expired
+deadline is ineligible. This path is `early_exit`, not a claimed npm diagnosis.
+
+### Retry lifecycle
+
+Reuse `beginStartupRecovery` and its existing one-replacement generation fence.
+All categories, including ETARGET, consume that same budget. Never stack an
+npm retry and a generic retry. Delay replacement by two seconds plus independent
+jitter in the range zero to one second. Use a context-aware timer with injected
+delay selection in tests. Healthy launches have no delay or global serialization.
+
+Stop and reap the old process tree through agentctl. Unlike the current
+`stopAndRepairManagedRuntime`, a stop failure cannot be logged and ignored.
+Retain cancellation checks before cleanup, after delay, and immediately before
+replacement. Bound recovery, including cleanup and replacement initialization,
+to 90 seconds or the caller's earlier deadline. Cancellation follows the existing
+owned teardown path rather than reporting a runtime failure.
+
+Do not call `RepairManagedRuntimeCache` from automatic task or probe recovery.
+ETARGET and classified transient npm failures retry the trusted exact command
+with `--prefer-online`. Unexplained early exit retries the same command without
+changing its offline/online preference. Preserve registry, environment, version,
+workspace, executor, model, permissions, and session identity. Explicit Settings
+maintenance retains the scoped repair endpoint and its existing behavior.
+
+The startup owner retains error handling while retry is possible. Existing
+uninitialized-event suppression and startup-generation fences must prevent the
+first exit from publishing FAILED or releasing a waiting prompt. A successful
+replacement continues the original initialization once. No recovery path may
+resend a prompt after session/new, session/load, or prompt admission began.
+
+### Presentation and diagnostics
+
+Use existing boot progress for `Retrying agent startup (attempt 2 of 2)`.
+No modal, new page, or recovery button appears while automatic recovery runs.
+On exhaustion use the existing inline recovery card and one Retry runtime action.
+Add the stable `managed_runtime_startup` kind through routing, orchestrator failure
+persistence, and desktop/phone recovery renderers. Its reason distinguishes
+`npm_transient` from `early_exit`; its attempt count distinguishes attempted retry
+from blocked cleanup. Preserve exact ETARGET and policy failure kinds.
+Do not change `routingerr` policy to retry post-prompt failures or enable provider
+fallback merely because this new startup kind exists.
+
+Copy must reflect the actual final failure and whether a retry occurred.
+An unexplained exit must not say npm failed. A cleanup failure must not say two
+attempts ran. Keep technical details sanitized and collapsed. Translate all new
+copy in seven locales and generate Traditional Chinese with the existing script.
+Desktop and phone retain the existing recovery card and chat scroll owner.
+
+Structured logs record attempt, generation, code, exit disposition, backoff, and
+outcome. No new metric or storage table is needed. Tests cover mixed concurrent
+outcomes, delayed events, cancellation, cleanup failure, missing evidence, and
+single prompt delivery after recovery. Real subprocess fixtures provide exit
+and stderr evidence; API-only seeded cards are not startup-recovery proof.

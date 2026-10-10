@@ -64,6 +64,7 @@ const agentInstanceColumns = `
 	COALESCE(skill_ids, '[]')               AS skill_ids,
 	COALESCE(desired_skills, '[]')          AS desired_skills,
 	COALESCE(executor_preference, '')       AS executor_preference,
+	COALESCE(execution_agent_profile_id, '') AS execution_agent_profile_id,
 	COALESCE(pause_reason, '')              AS pause_reason,
 	COALESCE(consecutive_failures, 0)       AS consecutive_failures,
 	NULLIF(failure_threshold, 0)            AS failure_threshold,
@@ -160,7 +161,7 @@ func (r *Repository) insertAgentInstance(
 			max_concurrent_sessions, cooldown_sec, skip_idle_runs,
 			consecutive_failures, failure_threshold,
 			executor_preference, budget_monthly_cents,
-			settings, permissions
+			settings, permissions, execution_agent_profile_id
 		) VALUES (
 			?, ?, ?, ?, ?, ?,
 			?, ?, ?,
@@ -172,7 +173,7 @@ func (r *Repository) insertAgentInstance(
 			?, ?, ?,
 			?, ?,
 			?, ?,
-			'{}', ?
+			'{}', ?, ?
 		)
 	`),
 		agent.ID, agent.AgentID, agent.Name, displayName, agent.Model, agent.Mode,
@@ -185,7 +186,7 @@ func (r *Repository) insertAgentInstance(
 		agent.MaxConcurrentSessions, agent.CooldownSec, boolToInt(agent.SkipIdleRuns),
 		agent.ConsecutiveFailures, threshold,
 		agent.ExecutorPreference, agent.BudgetMonthlyCents,
-		permissions,
+		permissions, agent.ExecutionAgentProfileID,
 	)
 	return err
 }
@@ -310,6 +311,7 @@ func (r *Repository) UpdateAgentInstance(ctx context.Context, agent *models.Agen
 			END,
 			failure_threshold = ?, settings = ?,
 			auto_approve = ?, allow_indexing = ?, cli_passthrough = ?,
+			execution_agent_profile_id = ?,
 			updated_at = ?
 		WHERE id = ? AND `+agentInstanceFilter+`
 	`), agent.Name, string(agent.Role), agent.Icon, status, status,
@@ -319,6 +321,7 @@ func (r *Repository) UpdateAgentInstance(ctx context.Context, agent *models.Agen
 		skillIDs, desiredSkills, agent.ExecutorPreference,
 		status, agent.PauseReason, threshold, settings,
 		boolToInt(agent.AutoApprove), boolToInt(agent.AllowIndexing), boolToInt(agent.CLIPassthrough),
+		agent.ExecutionAgentProfileID,
 		agent.UpdatedAt, agent.ID)
 	return err
 }

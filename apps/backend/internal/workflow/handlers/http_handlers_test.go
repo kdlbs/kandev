@@ -402,6 +402,7 @@ func TestStepMutationsBlockedOnReadOnlyWorkflows(t *testing.T) {
 // tell a working reorder from a no-op.
 func TestReorderStepsEndpoint(t *testing.T) {
 	h := setupStepRouter(t)
+	seedReorderWorkflow(t, h)
 	first := createStepViaHTTP(t, h.router, map[string]interface{}{
 		"workflow_id": "workflow-1", "name": "First", "position": 0,
 	})

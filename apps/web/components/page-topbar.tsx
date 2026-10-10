@@ -23,6 +23,7 @@ export type { ParentCrumb } from "@/components/page-topbar-parent-crumb";
 import { AppStatusDrawerTrigger } from "@/components/app-status-bar/app-status-surface-provider";
 import { useTopbarPressure } from "@/hooks/use-topbar-pressure";
 import { linkToTaskOverview } from "@/lib/links";
+import { macTauriDragRegionProps } from "@/lib/desktop/window-chrome";
 
 /** The one bar height. Bespoke bars adopt this token instead of redeclaring it. */
 export const TOPBAR_HEIGHT_CLASSNAME = "h-10 min-h-11 md:min-h-10";
@@ -100,6 +101,14 @@ type PageTopbarProps = {
   /** Optional `data-testid` on the header element. */
   testId?: string;
 };
+
+function shouldMeasureTopbarPressure({
+  parents,
+  overflowActions,
+  overflowMenuItems,
+}: Pick<PageTopbarProps, "parents" | "overflowActions" | "overflowMenuItems">): boolean {
+  return (parents?.length ?? 0) > 0 || overflowActions != null || overflowMenuItems != null;
+}
 
 function BackLink({
   href,
@@ -574,15 +583,14 @@ export const PageTopbar = forwardRef<HTMLElement, PageTopbarProps>(function Page
   const ghostRef = useRef<HTMLDivElement>(null);
   const rightZoneRef = useRef<HTMLDivElement>(null);
   const actionsClaimFreeWidth = freeWidth === "actions";
-  // Measurement only matters once there is something that can fold.
-  const measured =
-    (parents?.length ?? 0) > 0 || overflowActions != null || overflowMenuItems != null;
+  const measured = shouldMeasureTopbarPressure({ parents, overflowActions, overflowMenuItems });
   const pressure = useTopbarPressure(
     { leadZone: leadZoneRef, ghost: ghostRef, rightZone: rightZoneRef },
     measured,
   );
   return (
     <header
+      {...macTauriDragRegionProps()}
       ref={ref}
       data-testid={testId}
       data-window-controls-overlay-region="content"

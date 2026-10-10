@@ -493,6 +493,34 @@ describe("addCommitDetailPanel — preview behavior", () => {
     expect((secondPanel as unknown as MockPanel).params.target).toEqual(second);
     expect((secondPanel as unknown as MockPanel).params.commitSha).toBe(SHA_A);
   });
+
+  it("updates the existing preview with repeated file-navigation requests", () => {
+    actions.addCommitDetailPanel(SHA_A);
+    actions.addCommitDetailPanel(SHA_A, {
+      fileNavigation: { path: "src/app.ts", token: 1 },
+    });
+    actions.addCommitDetailPanel(SHA_A, {
+      fileNavigation: { path: "src/app.ts", token: 2 },
+    });
+
+    const preview = api.getPanel(PREVIEW_COMMIT_ID) as unknown as MockPanel;
+    expect(preview.params.fileNavigation).toEqual({ path: "src/app.ts", token: 2 });
+  });
+
+  it("updates an existing pinned commit with a selected file", () => {
+    const target = {
+      source: "local" as const,
+      sha: SHA_A,
+      repo: "frontend",
+    };
+    actions.addCommitDetailPanel(target, { pin: true });
+    actions.addCommitDetailPanel(target, {
+      fileNavigation: { path: "README.md", token: 4 },
+    });
+
+    const pinned = api.getPanel(`commit:local:frontend:${SHA_A}`) as unknown as MockPanel;
+    expect(pinned.params.fileNavigation).toEqual({ path: "README.md", token: 4 });
+  });
 });
 
 describe("preview slots are independent across types", () => {
