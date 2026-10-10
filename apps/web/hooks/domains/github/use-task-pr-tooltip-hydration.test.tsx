@@ -197,7 +197,10 @@ describe("useTaskPRTooltipHydration automation details", () => {
     });
 
     expect(listTaskPRsMock).toHaveBeenCalledWith(["task-1"], { cache: "no-store" });
-    expect(getTaskCIAutomationOptionsMock).toHaveBeenCalledWith("task-1", { cache: "no-store" });
+    expect(getTaskCIAutomationOptionsMock).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ cache: "no-store" }),
+    );
     expect(result.current.automationOptions).toEqual(options);
   });
 

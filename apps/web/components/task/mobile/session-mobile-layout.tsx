@@ -169,6 +169,7 @@ function MobileChatPanelContent({
           onOpenFile={onOpenFile}
           pendingScrollTarget={scrollTarget}
           isVisible={isVisible}
+          detailActive={isVisible}
           onPendingScrollConsumed={onScrollTargetConsumed}
           hideLaunchQueueStatus
           hideWipQueueStatus

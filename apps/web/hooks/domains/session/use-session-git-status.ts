@@ -18,7 +18,11 @@ const debugSub = createDebugLogger("git-status:subscribe");
  * For multi-repo workspaces this returns whichever repo's status arrived last;
  * use useSessionGitStatusByRepo when the caller needs all repos at once.
  */
-export function useSessionGitStatus(sessionId: string | null) {
+export function useSessionGitStatus(
+  sessionId: string | null,
+  options: { detailActive?: boolean } = {},
+) {
+  const detailActive = options.detailActive ?? true;
   const gitStatus = useAppStore(
     useShallow((state) => {
       if (!sessionId) return undefined;
@@ -31,8 +35,11 @@ export function useSessionGitStatus(sessionId: string | null) {
   // Subscribe to session updates to receive git status via WebSocket
   // The workspace stream sends current git status immediately on subscription
   useEffect(() => {
-    if (!sessionId) {
-      debugSub("skip", { reason: "no-session-id", connectionStatus });
+    if (!detailActive || !sessionId) {
+      debugSub("skip", {
+        reason: detailActive ? "no-session-id" : "detail-inactive",
+        connectionStatus,
+      });
       return;
     }
 
@@ -54,7 +61,7 @@ export function useSessionGitStatus(sessionId: string | null) {
       unsubscribe();
       // Don't clear git status on cleanup - keep it cached for when user switches back
     };
-  }, [sessionId, connectionStatus]);
+  }, [detailActive, sessionId, connectionStatus]);
 
   return gitStatus;
 }

@@ -380,3 +380,69 @@ describe("hydrateState — turns loadedBySession marker predicates", () => {
     expect(result.turns.activeBySession[SESSION_ID]).toBe(FRESH_TURN);
   });
 });
+
+describe("window hydration active marker recovery", () => {
+  it.each(["completed", "missing-active"])("clears a %s marker from an accepted window", (kind) => {
+    const result = produce(makeAppDraft(), (draft) => {
+      draft.turns.bySession[SESSION_ID] = [
+        { id: OLD_TURN, started_at: TURN_STARTED_AT, updated_at: TURN_STARTED_AT },
+      ] as never;
+      draft.turns.activeBySession[SESSION_ID] = OLD_TURN;
+      hydrateState(
+        draft,
+        {
+          turns: {
+            bySession: {
+              [SESSION_ID]:
+                kind === "completed"
+                  ? [
+                      {
+                        id: OLD_TURN,
+                        started_at: TURN_STARTED_AT,
+                        updated_at: TURN_COMPLETED_AT,
+                        completed_at: TURN_COMPLETED_AT,
+                      },
+                    ]
+                  : [],
+            },
+            activeBySession: { [SESSION_ID]: null },
+            windowCoverageBySession: { [SESSION_ID]: { messageIds: [], activeTurnObserved: true } },
+          },
+        } as unknown as Partial<AppState>,
+        {
+          forceMergeSessionId: SESSION_ID,
+          turnWindowObservationsAtRequestStart: {
+            [SESSION_ID]: { activeTurnId: OLD_TURN, reconcileEpoch: 0, updatedAt: TURN_STARTED_AT },
+          },
+        },
+      );
+    });
+    expect(result.turns.activeBySession[SESSION_ID]).toBeNull();
+  });
+
+  it("keeps a newer live turn when a delayed hydration window reports no active turn", () => {
+    const result = produce(makeAppDraft(), (draft) => {
+      draft.turns.bySession[SESSION_ID] = [
+        { id: FRESH_TURN, started_at: TURN_COMPLETED_AT, updated_at: TURN_COMPLETED_AT },
+      ] as never;
+      draft.turns.activeBySession[SESSION_ID] = FRESH_TURN;
+      hydrateState(
+        draft,
+        {
+          turns: {
+            bySession: { [SESSION_ID]: [] },
+            activeBySession: { [SESSION_ID]: null },
+            windowCoverageBySession: { [SESSION_ID]: { messageIds: [], activeTurnObserved: true } },
+          },
+        } as unknown as Partial<AppState>,
+        {
+          forceMergeSessionId: SESSION_ID,
+          turnWindowObservationsAtRequestStart: {
+            [SESSION_ID]: { activeTurnId: OLD_TURN, reconcileEpoch: 0, updatedAt: TURN_STARTED_AT },
+          },
+        },
+      );
+    });
+    expect(result.turns.activeBySession[SESSION_ID]).toBe(FRESH_TURN);
+  });
+});

@@ -60,7 +60,7 @@
     },
     {
       "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
-      "path": "apps/backend/internal/backendapp/boot_state.go"
+      "path": "apps/backend/internal/backendapp/boot_state_task_detail.go"
     },
     {
       "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",

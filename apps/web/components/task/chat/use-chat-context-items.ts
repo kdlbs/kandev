@@ -8,6 +8,7 @@ import { buildContextItems } from "../chat-context-items";
 import type { CommentsState } from "./use-chat-panel-state";
 
 type ChatContextItemsOptions = {
+  detailActive: boolean;
   planContextEnabled: boolean;
   contextFiles: ContextFile[];
   resolvedSessionId: string | null;
@@ -23,6 +24,7 @@ type ChatContextItemsOptions = {
 
 export function useChatContextItems(opts: ChatContextItemsOptions) {
   const {
+    detailActive,
     planContextEnabled,
     contextFiles,
     resolvedSessionId,
@@ -35,7 +37,7 @@ export function useChatContextItems(opts: ChatContextItemsOptions) {
     onOpenFileAtLine,
     onOpenPreviewFeedback,
   } = opts;
-  const { addPlan } = usePanelActions();
+  const { addPlan } = usePanelActions({ detailActive });
   const { prompts } = useCustomPrompts();
 
   const promptsMap = useMemo(() => {

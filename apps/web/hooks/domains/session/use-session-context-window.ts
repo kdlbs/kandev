@@ -4,7 +4,10 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import type { ContextWindowEntry } from "@/lib/state/store";
 import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
 
-export function useSessionContextWindow(sessionId: string | null): ContextWindowEntry | undefined {
+export function useSessionContextWindow(
+  sessionId: string | null,
+  detailActive = true,
+): ContextWindowEntry | undefined {
   // Subscribe to individual primitive values to ensure reactivity
   const size = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.size : undefined,
@@ -69,6 +72,7 @@ export function useSessionContextWindow(sessionId: string | null): ContextWindow
 
   // Subscribe to session updates via WebSocket
   useEffect(() => {
+    if (!detailActive) return;
     if (!sessionId) return;
     if (connectionStatus !== "connected") return;
     const client = getWebSocketClient();
@@ -79,7 +83,7 @@ export function useSessionContextWindow(sessionId: string | null): ContextWindow
         // Don't clear context window on cleanup - keep it cached
       };
     }
-  }, [sessionId, connectionStatus]);
+  }, [detailActive, sessionId, connectionStatus]);
 
   return contextWindow;
 }

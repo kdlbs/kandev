@@ -15,6 +15,25 @@ describe("turn hydration state", () => {
     expect(defaultState.turns.loadedBySession).toEqual({});
     expect(state.turns.loadedBySession).toEqual({ "session-1": true });
   });
+
+  it("keeps a bounded turn window separate from full-history completion", () => {
+    const state = mergeInitialState({
+      turns: {
+        bySession: { "session-1": [{ id: "turn-window" }] },
+        activeBySession: { "session-1": "turn-window" },
+        loadedBySession: {},
+        windowCoverageBySession: {
+          "session-1": { messageIds: ["message-1"], activeTurnObserved: true },
+        },
+      },
+    } as unknown as HydrationState);
+
+    expect(state.turns.loadedBySession).toEqual({});
+    expect(state.turns.windowCoverageBySession?.["session-1"]).toEqual({
+      messageIds: ["message-1"],
+      activeTurnObserved: true,
+    });
+  });
 });
 
 describe("prompt hydration authority (AC-UI-PINNED-PROMPT-AVAILABILITY-001.6)", () => {

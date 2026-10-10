@@ -388,12 +388,10 @@ function mergeTaskPRState(initialState: HydrationState) {
 }
 
 /**
- * Merges the turns slice for initial (SSR/boot) hydration. The server-side
- * turn lists are complete per-session snapshots, so every session the payload
- * installs is marked `loadedBySession`; without the marker, turn-derived UI
- * would mistake WS-seeded live turns for the full history (the debug
- * metadata dialog's `turn_metadata` regression). Settled sessions also seed
- * their settled boundary from `updated_at` (monotonically) so an
+ * Merges the turns slice for initial (SSR/boot) hydration. Full per-session
+ * snapshots are marked loaded; bounded message-window snapshots keep their
+ * explicit coverage and do not claim complete history. Settled sessions also
+ * seed their settled boundary from `updated_at` (monotonically) so an
  * old/unknown delayed WS start arriving before any session-list refresh is
  * rejected.
  */
@@ -402,15 +400,23 @@ function mergeTurnsState(
   incoming: HydrationState["turns"],
   sessions: HydrationState["taskSessions"],
 ): DefaultState["turns"] {
-  const merged = { ...current, ...incoming };
+  const merged = {
+    ...current,
+    ...incoming,
+    loadedBySession: { ...current.loadedBySession, ...incoming?.loadedBySession },
+    windowCoverageBySession: {
+      ...current.windowCoverageBySession,
+      ...incoming?.windowCoverageBySession,
+    },
+  };
   const settledBoundaryBySession = { ...merged.settledBoundaryBySession };
   // One shared seeding invariant (turn-actions) with the production
   // StateHydrator path, so the SSR and hydration boundary rules cannot drift.
   seedSettledSessionBoundaries(settledBoundaryBySession, Object.values(sessions?.items ?? {}));
   if (!incoming?.bySession) return { ...merged, settledBoundaryBySession };
-  const loadedBySession: Record<string, boolean> = {};
+  const loadedBySession: Record<string, boolean> = { ...merged.loadedBySession };
   for (const sessionId of Object.keys(incoming.bySession)) {
-    loadedBySession[sessionId] = true;
+    if (!incoming.windowCoverageBySession?.[sessionId]) loadedBySession[sessionId] = true;
   }
   return { ...merged, loadedBySession, settledBoundaryBySession };
 }

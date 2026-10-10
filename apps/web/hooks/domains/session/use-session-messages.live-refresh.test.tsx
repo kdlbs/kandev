@@ -7,13 +7,14 @@ import { ToolCallMessage } from "@/components/task/chat/messages/tool-call-messa
 import { defaultSessionState } from "@/lib/state/slices/session/session-slice";
 import type { HydrationState } from "@/lib/state/store";
 import { sessionId, taskId } from "@/lib/types/ids";
-import type { Message } from "@/lib/types/http";
+import type { Message, Turn } from "@/lib/types/http";
 import { useSessionMessages } from "./use-session-messages";
 
 const transport = vi.hoisted(() => ({
   readiness: Promise.resolve(),
   request: vi.fn(),
   registerCoreSessionRecovery: vi.fn(),
+  listTurns: vi.fn(async () => ({ turns: [], total: 0 })),
 }));
 
 vi.mock("@/lib/ws/connection", async (importOriginal) => ({
@@ -29,10 +30,15 @@ vi.mock("@/lib/ws/connection", async (importOriginal) => ({
 
 vi.mock("@/lib/api/domains/session-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/domains/session-api")>()),
-  listSessionTurns: async () => ({ turns: [], total: 0 }),
+  listSessionTurns: transport.listTurns,
 }));
 
-type HistoryResponse = { messages: Message[]; has_more: boolean };
+type HistoryResponse = {
+  messages: Message[];
+  has_more: boolean;
+  turns?: Turn[];
+  turn_coverage?: { message_ids: string[]; active_turn_id: null };
+};
 type TranscriptSnapshot = {
   store: ReturnType<typeof useAppStoreApi>;
   history: ReturnType<typeof useSessionMessages>;
@@ -230,6 +236,7 @@ it("keeps the rendered completion through the registered authoritative recovery 
     -1,
   )?.[1] as () => Promise<boolean>;
   expect(recovery).toBeTypeOf("function");
+  const fullTurnReadsBeforeRecovery = transport.listTurns.mock.calls.length;
   const response = deferHistory();
   transport.request.mockReturnValue(response.promise);
   let recovered!: Promise<boolean>;
@@ -241,12 +248,88 @@ it("keeps the rendered completion through the registered authoritative recovery 
   act(() => transcript.read().store.getState().updateMessage(completed));
   expect(screen.getByText("recovery retained all 42 checks")).toBeTruthy();
   await act(async () => {
-    response.resolve({ messages: [transcript.initial], has_more: false });
+    response.resolve({
+      messages: [transcript.initial],
+      has_more: false,
+      turns: [],
+      turn_coverage: { message_ids: [transcript.initial.id], active_turn_id: null },
+    });
     await recovered;
   });
   await waitFor(() => expect(transcript.read().history.historyRefreshPending).toBe(false));
   expect(screen.getByText("recovery retained all 42 checks")).toBeTruthy();
   expect(screen.queryByText("tool is running")).toBeNull();
   expect(await recovered).toBe(true);
+  expect(transport.listTurns.mock.calls.length).toBe(fullTurnReadsBeforeRecovery);
   expect(transcript.read().history.messages[0]).toMatchObject(completed);
+});
+
+it.each([
+  "initial-completion",
+  "initial-newer",
+  "recovery-completion",
+  "recovery-null",
+  "recovery-newer",
+])("reconciles an authoritative %s window without stale active work", async (scenario) => {
+  const transcript = await openTranscript();
+  const store = transcript.read().store;
+  if (!scenario.startsWith("initial-")) await settleHistory(transcript, [transcript.initial]);
+  const oldTurn: Turn = {
+    id: "missed-completion",
+    session_id: sessionId(transcript.sid),
+    task_id: taskId("refresh-task"),
+    started_at: LIVE_REVISION,
+    created_at: LIVE_REVISION,
+    updated_at: LIVE_REVISION,
+  };
+  act(() => {
+    store.getState().addTurn(oldTurn);
+    store.getState().setActiveTurn(transcript.sid, oldTurn.id);
+  });
+  let response = transcript.response;
+  let recovered: Promise<boolean> | undefined;
+  if (!scenario.startsWith("initial-")) {
+    response = deferHistory();
+    transport.request.mockReturnValue(response.promise);
+    const recovery = transport.registerCoreSessionRecovery.mock.calls.at(
+      -1,
+    )?.[1] as () => Promise<boolean>;
+    act(() => {
+      recovered = recovery();
+    });
+    await waitFor(() => expect(transport.request).toHaveBeenCalledTimes(2));
+  }
+  if (scenario.endsWith("newer")) {
+    const newTurn = {
+      ...oldTurn,
+      id: "new-live-turn",
+      started_at: "2026-10-07T05:00:03Z",
+      updated_at: "2026-10-07T05:00:03Z",
+    };
+    act(() => {
+      store.getState().addTurn(newTurn);
+      store.getState().setActiveTurn(transcript.sid, newTurn.id);
+    });
+  }
+  await act(async () => {
+    response.resolve({
+      messages: [transcript.initial],
+      has_more: false,
+      turns: scenario.endsWith("completion")
+        ? [
+            {
+              ...oldTurn,
+              completed_at: "2026-10-07T05:00:02Z",
+              updated_at: "2026-10-07T05:00:02Z",
+            },
+          ]
+        : [],
+      turn_coverage: { message_ids: [transcript.initial.id], active_turn_id: null },
+    });
+    if (recovered) await recovered;
+  });
+  await waitFor(() => expect(transcript.read().history.historyRefreshPending).toBe(false));
+  expect(store.getState().turns.activeBySession[transcript.sid]).toBe(
+    scenario.endsWith("newer") ? "new-live-turn" : null,
+  );
 });

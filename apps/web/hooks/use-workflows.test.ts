@@ -62,9 +62,11 @@ function initialMockState(activeId: string | null = "ws-A"): MockState {
 }
 let mockState = initialMockState(null);
 
+const mockStore = { getState: () => mockState };
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
-  useAppStoreApi: () => ({ getState: () => mockState }),
+  useAppStoreApi: () => mockStore,
 }));
 
 vi.mock("@/lib/api", () => ({

@@ -1,0 +1,158 @@
+{
+  "frames": [
+    {
+      "direction": "out",
+      "action": "user.subscribe",
+      "bytes": 101
+    },
+    {
+      "direction": "out",
+      "action": "session.subscribe",
+      "session_id": "journey-task-0001-session-3",
+      "bytes": 146
+    },
+    {
+      "direction": "out",
+      "action": "session.conversation.subscribe",
+      "session_id": "journey-task-0001-session-3",
+      "bytes": 241
+    },
+    {
+      "direction": "out",
+      "action": "task.subscribe",
+      "task_id": "journey-task-0001",
+      "bytes": 130
+    },
+    {
+      "direction": "out",
+      "action": "session.subscribe",
+      "session_id": "journey-task-0001-session-7",
+      "bytes": 146
+    },
+    {
+      "direction": "out",
+      "action": "session.conversation.subscribe",
+      "session_id": "journey-task-0001-session-7",
+      "bytes": 241
+    },
+    {
+      "direction": "out",
+      "action": "session.subscribe",
+      "session_id": "journey-task-0001-session-6",
+      "bytes": 146
+    },
+    {
+      "direction": "out",
+      "action": "session.conversation.subscribe",
+      "session_id": "journey-task-0001-session-6",
+      "bytes": 241
+    },
+    {
+      "direction": "out",
+      "action": "session.subscribe",
+      "session_id": "journey-task-0001-session-5",
+      "bytes": 146
+    },
+    {
+      "direction": "out",
+      "action": "session.conversation.subscribe",
+      "session_id": "journey-task-0001-session-5",
+      "bytes": 241
+    },
+    {
+      "direction": "out",
+      "action": "session.subscribe",
+      "session_id": "journey-task-0001-session-4",
+      "bytes": 146
+    },
+    {
+      "direction": "out",
+      "action": "session.conversation.subscribe",
+      "session_id": "journey-task-0001-session-4",
+      "bytes": 241
+    },
+    {
+      "direction": "out",
+      "action": "session.subscribe",
+      "session_id": "journey-task-0001-session-2",
+      "bytes": 146
+    },
+    {
+      "direction": "out",
+      "action": "session.conversation.subscribe",
+      "session_id": "journey-task-0001-session-2",
+      "bytes": 241
+    },
+    {
+      "direction": "out",
+      "action": "session.subscribe",
+      "session_id": "journey-task-0001-session-1",
+      "bytes": 146
+    },
+    {
+      "direction": "out",
+      "action": "session.conversation.subscribe",
+      "session_id": "journey-task-0001-session-1",
+      "bytes": 241
+    },
+    {
+      "direction": "out",
+      "action": "session.subscribe",
+      "session_id": "journey-task-0001-session-0",
+      "bytes": 146
+    },
+    {
+      "direction": "out",
+      "action": "session.conversation.subscribe",
+      "session_id": "journey-task-0001-session-0",
+      "bytes": 241
+    }
+  ],
+  "chatTabs": [
+    {
+      "text": "5\nAgent 4",
+      "active": "dv-tab dv-active-tab"
+    },
+    {
+      "text": "1\nAgent 8",
+      "active": "dv-tab dv-inactive-tab"
+    },
+    {
+      "text": "2\nAgent 7",
+      "active": "dv-tab dv-inactive-tab"
+    },
+    {
+      "text": "3\nAgent 6",
+      "active": "dv-tab dv-inactive-tab"
+    },
+    {
+      "text": "4\nAgent 5",
+      "active": "dv-tab dv-inactive-tab"
+    },
+    {
+      "text": "6\nAgent 3",
+      "active": "dv-tab dv-inactive-tab"
+    },
+    {
+      "text": "7\nAgent 2",
+      "active": "dv-tab dv-inactive-tab"
+    },
+    {
+      "text": "8\nAgent 1",
+      "active": "dv-tab dv-inactive-tab"
+    },
+    {
+      "text": "Files",
+      "active": "dv-tab dv-active-tab"
+    },
+    {
+      "text": "Changes",
+      "active": "dv-tab dv-inactive-tab"
+    },
+    {
+      "text": "Terminal",
+      "active": "dv-tab dv-active-tab"
+    }
+  ],
+  "chatNodes": 3
+}

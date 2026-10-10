@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StoreApi } from "zustand";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getTaskCIAutomationOptions, listTaskPRs } from "@/lib/api/domains/github-api";
+import { readJourneyCIOptions } from "@/hooks/journey-metadata-resources";
 import type { AppState } from "@/lib/state/store";
 import { isCurrentWorkspaceContext } from "@/lib/state/workspace-context";
 import type { TaskPRScope } from "@/lib/state/slices/github/types";
@@ -12,13 +13,8 @@ import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 export type TaskPRTooltipHydrationStatus = "idle" | "loading" | "unavailable";
 
 type TaskPRRequestRegistry = Map<string, Promise<TaskPR[]>>;
-type TaskAutomationRequestRegistry = Map<string, Promise<TaskCIAutomationOptions | null>>;
 
 const requestRegistryByStore = new WeakMap<StoreApi<AppState>, TaskPRRequestRegistry>();
-const automationRequestRegistryByStore = new WeakMap<
-  StoreApi<AppState>,
-  TaskAutomationRequestRegistry
->();
 
 function hasTaskPRs(value: unknown): value is TaskPR[] {
   return Array.isArray(value) && value.length > 0;
@@ -39,14 +35,6 @@ function getRequestRegistry(store: StoreApi<AppState>): TaskPRRequestRegistry {
   if (existing) return existing;
   const registry: TaskPRRequestRegistry = new Map();
   requestRegistryByStore.set(store, registry);
-  return registry;
-}
-
-function getAutomationRequestRegistry(store: StoreApi<AppState>): TaskAutomationRequestRegistry {
-  const existing = automationRequestRegistryByStore.get(store);
-  if (existing) return existing;
-  const registry: TaskAutomationRequestRegistry = new Map();
-  automationRequestRegistryByStore.set(store, registry);
   return registry;
 }
 
@@ -128,26 +116,11 @@ function requestTaskPRs(
 
 function requestTaskAutomationOptions(
   store: StoreApi<AppState>,
-  scope: TaskPRScope & { workspaceId: string },
+  _scope: TaskPRScope & { workspaceId: string },
   taskId: string,
 ): Promise<TaskCIAutomationOptions | null> {
   if (typeof getTaskCIAutomationOptions !== "function") return Promise.resolve(null);
-  const registry = getAutomationRequestRegistry(store);
-  const key = requestKey(scope.workspaceId, scope.workspaceContextGeneration, taskId);
-  const existing = registry.get(key);
-  if (existing) return existing;
-
-  const request = Promise.resolve(getTaskCIAutomationOptions(taskId, { cache: "no-store" }));
-  registry.set(key, request);
-  request.then(
-    () => {
-      if (registry.get(key) === request) registry.delete(key);
-    },
-    () => {
-      if (registry.get(key) === request) registry.delete(key);
-    },
-  );
-  return request;
+  return readJourneyCIOptions(store, taskId);
 }
 
 function automationOptionsForScope(

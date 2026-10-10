@@ -27,17 +27,25 @@ let mockState: MockState = {
   hydrate: mockHydrate,
 };
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
-  useAppStoreApi: () => ({
+function createMockStoreApi() {
+  return {
     getState: () => mockState,
     setState: (updater: (s: MockState) => MockState) => {
       const next = updater(mockState);
       mockSetState(next);
       mockState = next;
     },
-  }),
-}));
+  };
+}
+
+let mockStoreApi = createMockStoreApi();
+
+vi.mock("@/components/state-provider", () => {
+  return {
+    useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
+    useAppStoreApi: () => mockStoreApi,
+  };
+});
 
 vi.mock("@/lib/api", () => ({
   fetchWorkflowSnapshot: (...args: unknown[]) => mockFetchWorkflowSnapshot(...args),
@@ -73,6 +81,8 @@ import { useWorkflowSnapshot } from "./use-workflow-snapshot";
 
 function resetState(kanban: Partial<MockKanban> = {}) {
   vi.clearAllMocks();
+  mockFetchWorkflowSnapshot.mockReset();
+  mockFetchWorkflowSnapshot.mockResolvedValue({ steps: [], tasks: [] });
   mockState = {
     connection: { status: "connected" },
     kanban: {
@@ -86,6 +96,7 @@ function resetState(kanban: Partial<MockKanban> = {}) {
     workspaceContextGeneration: 0,
     hydrate: mockHydrate,
   };
+  mockStoreApi = createMockStoreApi();
 }
 
 describe("useWorkflowSnapshot — kanban.isLoading", () => {

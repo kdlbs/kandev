@@ -94,6 +94,59 @@ describe("readBootPayload", () => {
   });
 });
 
+describe("version-2 boot entity graph", () => {
+  it("expands entity IDs before store hydration", () => {
+    const task = { id: "task-1", title: "Task" };
+    const session = { id: "session-1", task_id: "task-1", state: "WAITING_FOR_INPUT" };
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        version: 2,
+        initialState: {
+          kanban: { workflowId: "workflow-1", taskIds: ["task-1"] },
+          taskSessions: { sessionIds: ["session-1"] },
+          taskSessionsByTask: { sessionIdsByTask: { "task-1": ["session-1"] } },
+        },
+        routeData: {
+          taskDetail: {
+            taskId: "task-1",
+            sessionId: "session-1",
+            sidebarTaskPage: { entries: [{ kind: "task", taskId: "task-1" }] },
+          },
+        },
+        entities: { tasks: { "task-1": task }, sessions: { "session-1": session } },
+      },
+    } as unknown as Window;
+
+    expect(readBootPayload(win)).toMatchObject({
+      initialState: {
+        kanban: { tasks: [task] },
+        taskSessions: { items: { "session-1": session } },
+        taskSessionsByTask: { itemsByTaskId: { "task-1": [session] } },
+      },
+      routeData: {
+        taskDetail: {
+          task,
+          sessionId: "session-1",
+          sidebarTaskPage: { entries: [{ kind: "task", task }] },
+        },
+      },
+    });
+  });
+
+  it("preserves optional-data failures", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        version: 2,
+        initialState: { features: { office: true } },
+        entities: { tasks: {}, sessions: {} },
+      },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).initialState).toEqual({ features: { office: true } });
+    expect(readBootPayload(win).routeData).toBeUndefined();
+  });
+});
+
 describe("readBootPayload runtime metadata", () => {
   it("reads the native folder picker capability from the runtime block", () => {
     const win = {

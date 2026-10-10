@@ -34,7 +34,11 @@ const emptySummary = (key: string): UsageSummaryState => ({
   error: false,
 });
 
-export function useConversationUsage(taskId: string | null, sessionId: string | null) {
+export function useConversationUsage(
+  taskId: string | null,
+  sessionId: string | null,
+  detailActive = true,
+) {
   const connectionStatus = useAppStore((state) => state.connection.status);
   const invalidation = useAppStore((state) =>
     sessionId ? (state.usageInvalidation.bySessionId[sessionId] ?? 0) : 0,
@@ -46,7 +50,7 @@ export function useConversationUsage(taskId: string | null, sessionId: string | 
   const key = taskId && sessionId ? `${taskId}\u0000${sessionId}` : "";
 
   const refresh = useCallback(async () => {
-    if (!taskId || !sessionId) return;
+    if (!detailActive || !taskId || !sessionId) return;
     const request = ++summaryRequest.current;
     const requestKey = `${taskId}\u0000${sessionId}`;
     setSummary((current) =>
@@ -75,19 +79,19 @@ export function useConversationUsage(taskId: string | null, sessionId: string | 
           : { ...emptySummary(requestKey), error: true },
       );
     }
-  }, [taskId, sessionId]);
+  }, [detailActive, taskId, sessionId]);
 
   useEffect(() => {
-    if (!taskId || !sessionId || connectionStatus !== "connected") return;
+    if (!detailActive || !taskId || !sessionId || connectionStatus !== "connected") return;
     void refresh();
     return () => {
       summaryRequest.current += 1;
     };
-  }, [connectionStatus, invalidation, refresh, sessionId, taskId]);
+  }, [connectionStatus, detailActive, invalidation, refresh, sessionId, taskId]);
 
   const loadTurnDetail = useCallback(
     async (turnId: string) => {
-      if (!taskId || !sessionId) return;
+      if (!detailActive || !taskId || !sessionId) return;
       const request = ++detailRequest.current;
       const requestKey = `${taskId}\u0000${sessionId}`;
       setDetail({ key: requestKey, turnId, turn: null, loading: true, error: false });
@@ -100,7 +104,7 @@ export function useConversationUsage(taskId: string | null, sessionId: string | 
         setDetail({ key: requestKey, turnId, turn: null, loading: false, error: true });
       }
     },
-    [taskId, sessionId],
+    [detailActive, taskId, sessionId],
   );
 
   const currentSummary = summary.key === key ? summary : emptySummary(key);

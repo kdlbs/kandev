@@ -17,6 +17,16 @@ describe("selectWorkflowSwimlanes — hidden workflow filter resolution", () => 
     improve: { workflowName: IMPROVE_WORKFLOW_NAME },
   };
 
+  it("retains unloaded boards as demand candidates", () => {
+    expect(
+      selectWorkflowSwimlanes(null, workflows, {}, true).map((workflow) => workflow.id),
+    ).toEqual(["dev"]);
+    expect(
+      selectWorkflowSwimlanes("improve", workflows, {}, true).map((workflow) => workflow.id),
+    ).toEqual(["improve"]);
+    expect(selectWorkflowSwimlanes("missing", workflows, {}, true)).toEqual([]);
+  });
+
   it("keeps hidden workflows off the All Workflows board", () => {
     expect(selectWorkflowSwimlanes(null, workflows, snapshots).map((w) => w.id)).toEqual(["dev"]);
   });

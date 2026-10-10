@@ -630,10 +630,17 @@ type WorkflowSnapshotDTO struct {
 }
 
 type ListMessagesResponse struct {
-	Messages []*v1.Message `json:"messages"`
-	Total    int           `json:"total"`
-	HasMore  bool          `json:"has_more"`
-	Cursor   string        `json:"cursor"`
+	Messages     []*v1.Message           `json:"messages"`
+	Total        int                     `json:"total"`
+	HasMore      bool                    `json:"has_more"`
+	Cursor       string                  `json:"cursor"`
+	Turns        []TurnDTO               `json:"turns,omitempty"`
+	TurnCoverage *MessageTurnCoverageDTO `json:"turn_coverage,omitempty"`
+}
+
+type MessageTurnCoverageDTO struct {
+	MessageIDs   []string `json:"message_ids"`
+	ActiveTurnID *string  `json:"active_turn_id"`
 }
 
 // MessageSearchHit is a lightweight match returned by a session message search.
@@ -1164,6 +1171,12 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		result.Worktrees = worktrees
 	}
 	return result
+}
+
+// FromTaskSessionSummaryObservation converts a bounded repository projection
+// to the existing compact session DTO without widening it with rich fields.
+func FromTaskSessionSummaryObservation(observation *models.TaskSessionSummaryObservation) TaskSessionSummaryDTO {
+	return FromTaskSessionSummary(observation.ToTaskSession())
 }
 
 func FromTaskSession(session *models.TaskSession) TaskSessionDTO {

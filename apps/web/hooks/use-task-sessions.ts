@@ -5,6 +5,8 @@ import type { AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { captureTaskSessionHydrationEpochs } from "@/lib/state/slices/session/hydration-epochs";
+import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
+import { getTaskSessionReads, type TaskSessionReads } from "@/lib/state/task-session-reads";
 
 const EMPTY_SESSIONS: TaskSession[] = [];
 
@@ -20,12 +22,16 @@ function resolveForcedReloadWaiters(waitersRef: { current: Array<() => void> }) 
 async function hydrateTaskSessions({
   taskId,
   force,
+  isCurrent,
+  reads,
   getStoreState,
   setTaskSessionsForTask,
   setTaskSessionsError,
 }: {
   taskId: string;
   force: boolean;
+  isCurrent: () => boolean;
+  reads: TaskSessionReads;
   getStoreState: () => AppState;
   setTaskSessionsForTask: AppState["setTaskSessionsForTask"];
   setTaskSessionsError: AppState["setTaskSessionsError"];
@@ -38,7 +44,16 @@ async function hydrateTaskSessions({
     taskId,
   );
   try {
-    const response = await listTaskSessions(taskId, { cache: "no-store" });
+    const response = await reads.read(
+      taskId,
+      (signal) =>
+        listTaskSessions(taskId, {
+          cache: "no-store",
+          init: { signal },
+        }),
+      { refresh: force },
+    );
+    if (!isCurrent()) return false;
     const fetchedSessions = response.sessions ?? [];
     const fetchedSessionIds = new Set(fetchedSessions.map((session) => session.id));
     const sessionsAddedDuringLoad = storedTaskSessions(getStoreState, taskId).filter(
@@ -52,6 +67,7 @@ async function hydrateTaskSessions({
     getStoreState().reconcileWorkflowSessionFocus?.(taskId);
     return sessionsAddedDuringLoad.length > 0;
   } catch (error) {
+    if (!isCurrent() || isAbortError(error)) return false;
     console.error("Failed to load task sessions:", error);
     // A failed initial request must not turn an empty list into an
     // authoritative snapshot. Reconcile existing live rows when available so
@@ -64,6 +80,10 @@ async function hydrateTaskSessions({
     setTaskSessionsError(taskId, error instanceof Error ? error.message : String(error));
     return false;
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function useTaskSessionState(taskId: string | null) {
@@ -83,8 +103,71 @@ function useTaskSessionState(taskId: string | null) {
   return { sessions, isLoading, isLoaded, error, connectionStatus };
 }
 
+function useTaskSessionReadOwnership({
+  store,
+  reads,
+  taskId,
+  setTaskSessionsLoading,
+  requestInFlightRef,
+  pendingForcedReloadRef,
+  pendingForcedReloadWaitersRef,
+}: {
+  store: ReturnType<typeof useAppStoreApi>;
+  reads: TaskSessionReads;
+  taskId: string | null;
+  setTaskSessionsLoading: AppState["setTaskSessionsLoading"];
+  requestInFlightRef: { current: boolean };
+  pendingForcedReloadRef: { current: boolean };
+  pendingForcedReloadWaitersRef: { current: Array<() => void> };
+}) {
+  const ownershipGenerationRef = useRef(0);
+
+  useEffect(() => {
+    if (!taskId) return;
+    const release = reads.retain(taskId);
+    return () => {
+      ownershipGenerationRef.current++;
+      requestInFlightRef.current = false;
+      pendingForcedReloadRef.current = false;
+      resolveForcedReloadWaiters(pendingForcedReloadWaitersRef);
+      release();
+      if (!getTaskSessionReads(store).isReading(taskId)) {
+        setTaskSessionsLoading(taskId, false);
+      }
+    };
+  }, [
+    pendingForcedReloadRef,
+    pendingForcedReloadWaitersRef,
+    reads,
+    requestInFlightRef,
+    setTaskSessionsLoading,
+    store,
+    taskId,
+  ]);
+
+  return ownershipGenerationRef;
+}
+
+function useTaskSessionReconnect(
+  taskId: string | null,
+  connectionStatus: string,
+  loadSessions: (force?: boolean) => Promise<void>,
+) {
+  const previousConnectionStatusRef = useRef(connectionStatus);
+  useEffect(() => {
+    const previous = previousConnectionStatusRef.current;
+    previousConnectionStatusRef.current = connectionStatus;
+    if (!taskId) return;
+    if (connectionStatus !== "connected" || previous === "connected") return;
+    void loadSessions(true);
+  }, [connectionStatus, loadSessions, taskId]);
+}
+
 export function useTaskSessions(taskId: string | null) {
-  const getStoreState = useAppStoreApi().getState;
+  const store = useAppStoreApi();
+  useAppStore(stateReadScopeIdentity);
+  const getStoreState = store.getState;
+  const reads = getTaskSessionReads(store);
   const { sessions, isLoading, isLoaded, error, connectionStatus } = useTaskSessionState(taskId);
   const setTaskSessionsForTask = useAppStore((state) => state.setTaskSessionsForTask);
   const setTaskSessionsError = useAppStore((state) => state.setTaskSessionsError);
@@ -92,6 +175,15 @@ export function useTaskSessions(taskId: string | null) {
   const pendingForcedReloadRef = useRef(false);
   const pendingForcedReloadWaitersRef = useRef<Array<() => void>>([]);
   const requestInFlightRef = useRef(false);
+  const ownershipGenerationRef = useTaskSessionReadOwnership({
+    store,
+    reads,
+    taskId,
+    setTaskSessionsLoading,
+    requestInFlightRef,
+    pendingForcedReloadRef,
+    pendingForcedReloadWaitersRef,
+  });
 
   const loadSessions = useCallback(
     async (force = false) => {
@@ -106,22 +198,29 @@ export function useTaskSessions(taskId: string | null) {
         return;
       }
       if (!force && isLoaded) return;
+      const generation = ownershipGenerationRef.current;
+      const isCurrent = () =>
+        generation === ownershipGenerationRef.current && reads.isCurrent(taskId);
       requestInFlightRef.current = true;
       setTaskSessionsLoading(taskId, true);
       try {
         const needsFollowUp = await hydrateTaskSessions({
           taskId,
           force,
+          isCurrent,
+          reads,
           getStoreState,
           setTaskSessionsForTask,
           setTaskSessionsError,
         });
-        if (needsFollowUp) pendingForcedReloadRef.current = true;
+        if (isCurrent() && needsFollowUp) pendingForcedReloadRef.current = true;
       } finally {
-        requestInFlightRef.current = false;
-        setTaskSessionsLoading(taskId, false);
-        if (force && !pendingForcedReloadRef.current) {
-          resolveForcedReloadWaiters(pendingForcedReloadWaitersRef);
+        if (isCurrent()) {
+          requestInFlightRef.current = false;
+          setTaskSessionsLoading(taskId, false);
+          if (force && !pendingForcedReloadRef.current) {
+            resolveForcedReloadWaiters(pendingForcedReloadWaitersRef);
+          }
         }
       }
     },
@@ -129,6 +228,7 @@ export function useTaskSessions(taskId: string | null) {
       getStoreState,
       isLoaded,
       isLoading,
+      reads,
       setTaskSessionsError,
       setTaskSessionsForTask,
       setTaskSessionsLoading,
@@ -154,14 +254,7 @@ export function useTaskSessions(taskId: string | null) {
     void loadSessions(true);
   }, [isLoading, loadSessions, taskId]);
 
-  const previousConnectionStatusRef = useRef(connectionStatus);
-  useEffect(() => {
-    const previous = previousConnectionStatusRef.current;
-    previousConnectionStatusRef.current = connectionStatus;
-    if (!taskId) return;
-    if (connectionStatus !== "connected" || previous === "connected") return;
-    void loadSessions(true);
-  }, [connectionStatus, isLoaded, isLoading, loadSessions, taskId]);
+  useTaskSessionReconnect(taskId, connectionStatus, loadSessions);
 
   useForegroundRefresh(
     () => {

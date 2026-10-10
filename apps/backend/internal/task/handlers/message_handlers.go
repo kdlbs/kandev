@@ -394,12 +394,13 @@ func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {
 }
 
 type listMessagesParams struct {
-	before     string
-	after      string
-	around     string
-	sort       string
-	authorType string
-	limit      int
+	before       string
+	after        string
+	around       string
+	sort         string
+	authorType   string
+	limit        int
+	includeTurns bool
 }
 
 const (
@@ -417,6 +418,15 @@ func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesPa
 	authorType, authorTypeProvided := c.GetQuery("author_type")
 	authorType = strings.TrimSpace(authorType)
 	rawLimit, limitProvided := c.GetQuery("limit")
+	includeTurns := false
+	if raw, provided := c.GetQuery("include_turns"); provided {
+		parsed, err := strconv.ParseBool(strings.TrimSpace(raw))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "include_turns must be a boolean"})
+			return listMessagesParams{}, false
+		}
+		includeTurns = parsed
+	}
 	if before != "" && after != "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "only one of before or after can be set"})
 		return listMessagesParams{}, false
@@ -462,12 +472,13 @@ func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesPa
 		limit = service.DefaultMessagesPageSize
 	}
 	return listMessagesParams{
-		before:     before,
-		after:      after,
-		around:     around,
-		sort:       sort,
-		authorType: authorType,
-		limit:      limit,
+		before:       before,
+		after:        after,
+		around:       around,
+		sort:         sort,
+		authorType:   authorType,
+		limit:        limit,
+		includeTurns: includeTurns,
 	}, true
 }
 
@@ -485,6 +496,25 @@ func (h *MessageHandlers) fetchMessagesPaginated(
 	sessionID string,
 	params listMessagesParams,
 ) (dto.ListMessagesResponse, error) {
+	if params.includeTurns {
+		window, err := h.service.ListMessagesWithTurnWindow(ctx, service.ListMessagesRequest{
+			TaskSessionID: sessionID,
+			Limit:         params.limit,
+			Before:        params.before,
+			After:         params.after,
+			Around:        params.around,
+			Sort:          params.sort,
+			AuthorType:    params.authorType,
+			IncludeTurns:  true,
+		})
+		if err != nil {
+			return dto.ListMessagesResponse{}, err
+		}
+		if params.around != "" {
+			window.HasMore = false
+		}
+		return messageTurnWindowResponse(window), nil
+	}
 	messages, hasMore, err := h.service.ListMessagesPaginated(ctx, service.ListMessagesRequest{
 		TaskSessionID: sessionID,
 		Limit:         params.limit,
@@ -511,6 +541,39 @@ func (h *MessageHandlers) fetchMessagesPaginated(
 		HasMore:  hasMore,
 		Cursor:   cursor,
 	}, nil
+}
+
+func messageTurnWindowResponse(window models.MessageTurnWindow) dto.ListMessagesResponse {
+	messages := messagesToAPI(window.Messages)
+	cursor := ""
+	if len(messages) > 0 {
+		cursor = messages[len(messages)-1].ID
+	}
+	response := dto.ListMessagesResponse{
+		Messages: messages,
+		Total:    len(messages),
+		HasMore:  window.HasMore,
+		Cursor:   cursor,
+	}
+	if window.Coverage == nil {
+		return response
+	}
+	response.Turns = make([]dto.TurnDTO, 0, len(window.Turns))
+	for _, turn := range window.Turns {
+		if turn != nil {
+			response.Turns = append(response.Turns, dto.FromTurn(turn))
+		}
+	}
+	var activeTurnID *string
+	if window.Coverage.ActiveTurnID != "" {
+		activeID := window.Coverage.ActiveTurnID
+		activeTurnID = &activeID
+	}
+	response.TurnCoverage = &dto.MessageTurnCoverageDTO{
+		MessageIDs:   append([]string{}, window.Coverage.MessageIDs...),
+		ActiveTurnID: activeTurnID,
+	}
+	return response
 }
 
 func messagesToAPI(messages []*models.Message) []*v1.Message {
@@ -2075,6 +2138,7 @@ type wsListMessagesRequest struct {
 	Before        string `json:"before"`
 	After         string `json:"after"`
 	Sort          string `json:"sort"`
+	IncludeTurns  bool   `json:"include_turns"`
 }
 
 type wsSearchMessagesRequest struct {
@@ -2244,30 +2308,38 @@ func (h *MessageHandlers) wsListMessages(ctx context.Context, msg *ws.Message) (
 		req.Limit = service.DefaultMessagesPageSize
 	}
 
-	messages, hasMore, err := h.service.ListMessagesPaginated(ctx, service.ListMessagesRequest{
+	request := service.ListMessagesRequest{
 		TaskSessionID: req.TaskSessionID,
 		Limit:         req.Limit,
 		Before:        req.Before,
 		After:         req.After,
 		Sort:          req.Sort,
-	})
+	}
+	request.IncludeTurns = req.IncludeTurns
+	resp, err := h.listMessagesResponse(ctx, request)
 	if err != nil {
 		h.logger.Error("failed to list messages", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list messages", nil)
 	}
-	result := make([]*v1.Message, 0, len(messages))
-	for _, message := range messages {
-		result = append(result, message.ToAPI())
+	return ws.NewResponse(msg.ID, msg.Action, resp)
+}
+
+func (h *MessageHandlers) listMessagesResponse(ctx context.Context, request service.ListMessagesRequest) (dto.ListMessagesResponse, error) {
+	if request.IncludeTurns {
+		window, err := h.service.ListMessagesWithTurnWindow(ctx, request)
+		if err != nil {
+			return dto.ListMessagesResponse{}, err
+		}
+		return messageTurnWindowResponse(window), nil
 	}
+	messages, hasMore, err := h.service.ListMessagesPaginated(ctx, request)
+	if err != nil {
+		return dto.ListMessagesResponse{}, err
+	}
+	result := messagesToAPI(messages)
 	cursor := ""
 	if len(result) > 0 {
 		cursor = result[len(result)-1].ID
 	}
-	resp := dto.ListMessagesResponse{
-		Messages: result,
-		Total:    len(result),
-		HasMore:  hasMore,
-		Cursor:   cursor,
-	}
-	return ws.NewResponse(msg.ID, msg.Action, resp)
+	return dto.ListMessagesResponse{Messages: result, Total: len(result), HasMore: hasMore, Cursor: cursor}, nil
 }

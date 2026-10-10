@@ -1,3 +1,4 @@
+import { captureActiveTurnWindowObservation } from "@/lib/state/slices/session/turn-actions";
 import type { useAppStoreApi } from "@/components/state-provider";
 import { listTaskSessionMessages } from "@/lib/api";
 import { createDebugLogger } from "@/lib/debug/log";
@@ -105,10 +106,13 @@ async function performRequest(
   store: SessionMessageStore,
 ): Promise<OlderPageResult> {
   debug("older page: requesting", { sessionId, before: cursor, limit });
+  const turnWindowObservation = captureActiveTurnWindowObservation(store.getState(), sessionId);
+  const turnHydrationEpoch = turnWindowObservation.reconcileEpoch;
   const response = await listTaskSessionMessages(sessionId, {
     limit,
     before: cursor,
     sort: "desc",
+    include_turns: true,
   });
   const ordered = [...(response.messages ?? [])].reverse();
   // After reversing, ordered[0] is the oldest message in this batch. A
@@ -137,6 +141,17 @@ async function performRequest(
       hasMore,
       oldestCursor: newOldestCursor,
     });
+    if (response.turn_coverage) {
+      store
+        .getState()
+        .mergeTurnsWindow(
+          sessionId,
+          response.turns ?? [],
+          response.turn_coverage,
+          turnHydrationEpoch,
+          turnWindowObservation,
+        );
+    }
   }
   return {
     count: ordered.length,

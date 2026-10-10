@@ -62,6 +62,24 @@ type TaskCompletionGateSnapshot struct {
 	Blocked     bool                      `json:"blocked"`
 }
 
+// TaskCompletionGateSummaryObservation is the compact, keyed status view of
+// one task's gate. It carries counts only, without criterion text or evidence.
+type TaskCompletionGateSummaryObservation struct {
+	Revision      int64 `json:"revision"`
+	CriteriaCount int   `json:"criteria_count"`
+	VerifiedCount int   `json:"verified_count"`
+	BlockerCount  int   `json:"blocker_count"`
+	Blocked       bool  `json:"blocked"`
+}
+
+// TaskCompletionGateSummaryBatch includes every requested task that still
+// exists, even when its observation is nil because no gate is configured.
+// MissingTaskIDs identifies requested tasks that no longer exist.
+type TaskCompletionGateSummaryBatch struct {
+	ByTaskID       map[string]*TaskCompletionGateSummaryObservation `json:"by_task_id"`
+	MissingTaskIDs []string                                         `json:"missing_task_ids"`
+}
+
 // TaskCompletionGateHistory is an immutable criteria, evidence, or override
 // audit event.
 type TaskCompletionGateHistory struct {

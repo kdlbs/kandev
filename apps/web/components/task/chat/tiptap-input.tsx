@@ -66,6 +66,7 @@ type TipTapInputProps = {
   onBlur?: () => void;
   // TipTap-specific
   sessionId: string | null;
+  detailActive?: boolean;
   taskId?: string | null;
   workspaceId?: string | null;
   entityReferencesEnabled?: boolean;
@@ -409,6 +410,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     onFocus,
     onBlur,
     sessionId,
+    detailActive = true,
     taskId,
     workspaceId = null,
     entityReferencesEnabled = false,
@@ -484,17 +486,37 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
         onReverseSearchSelect={handleReverseSearchSelect}
         onEntityReferenceClose={closeEntityReferenceMenu}
       />
-      <EditorContextProvider value={{ sessionId, taskId: taskId ?? null }}>
-        <div ref={editorWrapperRef} className="h-full">
-          <EditorContent
-            editor={editor}
-            className="h-full [&_.tiptap]:h-full [&_.tiptap]:outline-none"
-          />
-        </div>
-      </EditorContextProvider>
+      <TipTapEditorArea
+        editor={editor}
+        editorWrapperRef={editorWrapperRef}
+        sessionId={sessionId}
+        taskId={taskId ?? null}
+        detailActive={detailActive}
+      />
     </>
   );
 });
+
+function TipTapEditorArea(p: {
+  editor: Editor | null;
+  editorWrapperRef: RefObject<HTMLDivElement | null>;
+  sessionId: string | null;
+  taskId: string | null;
+  detailActive: boolean;
+}) {
+  return (
+    <EditorContextProvider
+      value={{ sessionId: p.sessionId, taskId: p.taskId, detailActive: p.detailActive }}
+    >
+      <div ref={p.editorWrapperRef} className="h-full">
+        <EditorContent
+          editor={p.editor}
+          className="h-full [&_.tiptap]:h-full [&_.tiptap]:outline-none"
+        />
+      </div>
+    </EditorContextProvider>
+  );
+}
 
 export type MenuHandlers = ReturnType<typeof useMenuHandlers>;
 export type ReverseSearchOverlay = Omit<

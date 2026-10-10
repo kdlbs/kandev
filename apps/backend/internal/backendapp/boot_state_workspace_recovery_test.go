@@ -56,14 +56,17 @@ func TestTaskDetailBootHydratesWorkspaceRecoveryProjection(t *testing.T) {
 
 	state := map[string]any{}
 	builder := bootStateBuilder{p: routeParams{taskSvc: harness.taskSvc}}
-	builder.addTaskDetailSessionsState(ctx, state, "task-boot-recovery", sessions, "session-boot-recovery")
+	activeSession, err := harness.taskSvc.GetTaskSession(ctx, "session-boot-recovery")
+	require.NoError(t, err)
+	builder.addTaskDetailSessionsState(ctx, state, "task-boot-recovery", sessions, activeSession, "session-boot-recovery", nil)
 	taskSessions := state["taskSessions"].(map[string]any)
-	items := taskSessions["items"].(map[string]taskdto.TaskSessionDTO)
-	for _, sessionID := range []string{"session-boot-recovery", "session-boot-recovery-sibling"} {
-		projection := items[sessionID].WorkspaceRecovery
-		require.NotNil(t, projection)
-		require.Equal(t, "environment-boot-recovery", projection.EnvironmentID)
-		require.Equal(t, "snapshotting", projection.Phase)
-		require.False(t, projection.RunnerLive, "a boot read does not invent an in-process runner")
-	}
+	items := taskSessions["items"].(map[string]any)
+	active, ok := items["session-boot-recovery"].(taskdto.TaskSessionDTO)
+	require.True(t, ok, "active session keeps its full boot projection")
+	require.NotNil(t, active.WorkspaceRecovery)
+	require.Equal(t, "environment-boot-recovery", active.WorkspaceRecovery.EnvironmentID)
+	require.Equal(t, "snapshotting", active.WorkspaceRecovery.Phase)
+	require.False(t, active.WorkspaceRecovery.RunnerLive, "a boot read does not invent an in-process runner")
+	_, ok = items["session-boot-recovery-sibling"].(taskdto.TaskSessionSummaryDTO)
+	require.True(t, ok, "sibling session uses the compact projection")
 }

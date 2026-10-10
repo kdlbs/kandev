@@ -1,0 +1,580 @@
+# Journey data-efficiency implementation evidence
+
+This file records implementation results separately from the completed journey
+investigation in [`evidence.md`](evidence.md). The investigation and its seed,
+captures, and measurements remain historical evidence and were not rewritten.
+
+## Task 01: Completion-gate reader isolation
+
+### Change and correctness evidence
+
+`GetTaskCompletionGate` now reads through the repository's separate reader
+handle. SQLite uses a native reader transaction. PostgreSQL uses a read-only,
+repeatable-read transaction so the task, criteria, and evidence observations
+remain one snapshot. Mutation-owned completion checks, their writer
+transactions, and lock ordering are unchanged.
+
+The held-writer tests failed before the production change: a standalone gate
+read and a warm homepage/board snapshot did not finish before the two-second
+barrier. After the change, both completed while a separate SQLite writer
+transaction remained open. The gate error/cancellation lifecycle test also
+passed. The PostgreSQL test inspected the actual transaction settings and
+passed against disposable PostgreSQL 17.
+
+Race-enabled SQLite, task-service, and backend-app tests passed:
+
+```text
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite ./internal/task/service ./internal/backendapp -run 'Test(CompletionGate|JourneyRead)' -count=1)
+```
+
+The PostgreSQL snapshot test passed:
+
+```text
+(cd apps/backend && KANDEV_TEST_POSTGRES_DSN='<disposable PostgreSQL DSN>' go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run '^TestCompletionGateReadPostgres$' -count=1 -v)
+```
+
+### Matched route measurements
+
+The two raw logs below are new implementation measurements. Both runs used the
+same `BenchmarkJourneyReadLoad`, seeded route fixture, Go 1.26.0, and host. The
+baseline ran before the gate-read change; the candidate ran after it. Both runs
+include the separately completed message-update optimization. The idle route
+contains 100 tasks. The write-loaded route contains one visible task and eight
+concurrent writers alternating 16 MiB message bodies. Each workload has ten
+warm samples. The fixture uses a fresh temporary SQLite database per sample.
+
+| Workload | Samples | Baseline latency p50 / p95 | Candidate latency p50 / p95 | Response bytes, baseline / candidate (median) |
+| --- | ---: | ---: | ---: | ---: |
+| Idle, 100 tasks | 10 | 5.117 / 7.390 ms | 7.773 / 20.371 ms | 261,393 / 261,406 |
+| Eight 16 MiB writers, one visible task | 10 | 858.458 / 2,898.051 ms | 1.482 / 1.987 ms | 9,608 / 9,609 |
+
+All 20 candidate route requests completed and all background writers exited
+without an error. The held-writer tests provide the structural isolation gate;
+these timings do not replace it. No health-probe deadline or connection
+wait/occupancy metric was collected by this route benchmark. The separate
+integrated measurements in Task 08 own those signals.
+
+The comparison ran on Linux x86_64, AMD Ryzen 5 7640HS, with 11 online logical
+CPUs. Other Kandev and browser processes were active on the shared host during
+the runs. Idle p95 was higher in the candidate run, and shared-host variance
+limits absolute latency claims. The write-loaded route result is consistent
+with moving inspection away from the single SQLite writer, but does not
+establish a general availability guarantee.
+
+Raw outputs:
+
+- [`runs/01-gate-baseline.log`](runs/01-gate-baseline.log)
+- [`runs/02-gate-candidate.log`](runs/02-gate-candidate.log)
+
+## Task 02: Batched completion-gate summary observations
+
+`GetTaskCompletionGateSummaries` reads unique task IDs in chunks of at most
+100. Each chunk uses one native reader snapshot and no more than six data
+queries for task identity, gate revision, criteria, pull-request heads, and
+completed execution evidence. Immutable artifact revisions are checked
+locally. The service passes each keyed observation to both existing-summary
+comparison and missing-summary repair, so it does not repeat a standalone
+gate read per task. Missing task IDs are explicit; an existing task with no
+gate has a present nil observation.
+
+The expected-red repository test started with no batch reader and failed as
+expected. The completed fixture seeds 1,000 tasks with ten verified artifact
+criteria each. The green result used ten reader transactions and at most sixty
+data queries. A parity fixture compares all supported evidence behavior with
+standalone gate snapshots, including stale evidence, missing tasks, and
+tasks without a gate. The service test also started red because reconciliation
+made zero batch calls. It then passed for 130 tasks: missing summaries
+converged from one service batch read, and warm reconciliation kept stored
+revisions unchanged with no published events.
+
+Race-enabled SQLite, service, and backend-app tests passed:
+
+```text
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite ./internal/task/service ./internal/backendapp -run 'Test(CompletionGate|TaskStatusSummary|JourneyRead)' -count=1)
+```
+
+The PostgreSQL 17 parity test passed on the disposable test database:
+
+```text
+(cd apps/backend && KANDEV_TEST_POSTGRES_DSN='<disposable PostgreSQL DSN>' go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run '^TestCompletionGateBatchPostgres$' -count=1 -v)
+```
+
+The documentation catalog, full specification lint, and `git diff --check`
+passed. This order establishes bounded query structure rather than latency;
+Task 08 owns the integrated measurements.
+
+## Task 03: Narrow session summary projections
+
+Navigation now reads a typed session observation that excludes metadata and
+configuration snapshots. SQLite and PostgreSQL queries extract only the
+visible agent/repository labels, the live executor label, and
+`last_agent_error`; batch reads use the reader pool. The compact list adds
+worktree associations with one batched read. Full selected-session and
+mutation methods retain their complete model. Primary-session info and compact
+session lists now share one observation batch in task/workflow enrichment and
+boot.
+
+The initial size comparison correctly rejected fixtures with different
+session labels, exposing a test-fixture issue rather than payload leakage.
+After aligning unrelated fields, a comparison of 4 KiB and 1 MiB metadata and
+configuration padding passed with equal normalized projection bytes; both
+encoded observations stayed below 16 KiB. The query-shape assertion rejects
+selecting any full metadata or snapshot column. The full selected-session
+control retained its 1 MiB metadata and profile snapshot. DTO coverage checks
+all existing compact fields and keeps an explicit null for `last_agent_error`
+so retained UI errors clear. Handler and boot coverage includes mixed states
+and a task with a session but no primary.
+
+The service projection tests were first run before the service capability was
+implemented and failed on the missing methods; they passed after the bounded
+repository/service path and fallback were added. Race-enabled SQLite,
+service, handler, and backend-app coverage passed:
+
+```text
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite ./internal/task/service ./internal/task/handlers ./internal/backendapp -run 'Test(SessionSummaryProjection|TaskSummaryProjection|TaskStatusSummary|.*PendingAction|.*RunnerMutability|.*PrimarySession|.*StatusSummary.*Boot|JourneyRead)' -count=1)
+```
+
+The same large-padding projection and compact list assertions passed on
+disposable PostgreSQL 17:
+
+```text
+(cd apps/backend && KANDEV_TEST_POSTGRES_DSN='<disposable PostgreSQL 17 DSN>' go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run '^TestSessionSummaryProjectionPostgres$' -count=1 -v)
+```
+
+The documentation catalog, full specification lint, and `git diff --check`
+passed. This order records a structural payload-size bound; route-level
+latency and health comparisons remain assigned to Task 08.
+
+## Task 04: Visible session detail demand
+
+The initial Chromium capture showed eight rich subscriptions for eight mounted
+sibling chats. Hook-level render tracing identified the remaining hidden-tab
+consumer in `useUtilityAgentGenerator`, which called the session git-status
+hook without the panel's `detailActive` value. The expected-red hook test
+observed that omission; after propagation, the compact siblings retained one
+rich stream for the visible chat.
+
+The first keyboard-tab E2E attempt exposed a second gap. Dockview activated the
+next panel, but session-tab synchronization restored the old selection because
+the compact task-session row existed before its environment mapping. A new
+resolver regression failed on that state before the change. The guard now
+accepts a session row owned by the active task as sufficient evidence while
+retaining the environment mapping as the early-event path. Deleted sessions
+are still rejected because their task membership and environment mapping are
+removed together; cross-task sessions remain rejected.
+
+Verification passed:
+
+```text
+(cd apps/web && pnpm exec vitest run components/task/visible-session-demand.test.tsx components/task/dockview-session-tabs.test.ts components/task/dockview-session-tabs.hook.test.tsx hooks/domains/session/use-session-messages.test.ts lib/ws/handlers/session-pending-action.test.ts)
+  5 files, 81 tests passed
+(cd apps/web && pnpm exec vitest run hooks/use-utility-agent-generator.test.tsx hooks/domains/session/use-session-git-status.test.tsx components/task/visible-session-demand.test.tsx components/task/chat/chat-input-area.test.tsx)
+  4 files, 49 tests passed
+(cd apps/web && pnpm e2e:run --project chromium tests/session/visible-session-demand.spec.ts)
+  1 test passed; one visible stream among eight tabs, keyboard selection, retained draft
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/session/mobile-visible-session-demand.spec.ts)
+  1 test passed; phone picker released the prior stream and acquired the selected session
+(cd apps/web && pnpm run typecheck)
+  passed
+(cd apps/web && pnpm exec eslint --max-warnings 0 <Task 04 changed source and test files>)
+  passed
+git diff --check
+  passed
+```
+
+The E2E traces ran against the managed production bundle. They establish the
+initial desktop and phone subscription behavior and draft/selection flow; the
+integration E2E does not measure historical writer health or database latency.
+
+## Task 05: Normalized, route-scoped boot
+
+Boot version 2 stores unique task/session records in entity tables and uses ID
+membership in initial state and route data. The browser still decodes version
+1. A selected board boots only that snapshot; other board containers fetch
+their own snapshots when needed. Task detail carries the requested authorized
+session, compact siblings, a single saved-view sidebar page, and no complete
+workflow snapshot. The phone workflow picker lists active-workspace workflows
+even when their snapshots are not loaded; an unloaded task count is omitted
+until its board is selected and read.
+
+The first mobile E2E run caught that the picker only listed workflows with a
+loaded snapshot. The regression failed in the new test before the fix. A
+focused hook test then failed before and passed after including unloaded
+workflows. The final managed production-build tests passed: Chromium, two tests
+for selected/all-workflow boot and task detail; mobile-Chrome, one test for
+single-board payload and on-demand selection. The mobile selector retains
+unknown counts for unloaded snapshots rather than displaying zero.
+
+Race-enabled backend boot tests passed:
+
+```text
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/webapp ./internal/backendapp -run 'Test(Boot|.*Boot|HandlerInjects|DevHandler|Journey|NormalizeBootPayloadGraph|TaskDetailSidebarQuery)' -count=1)
+  internal/webapp and internal/backendapp passed
+```
+
+The focused browser tests passed in five files (92 tests), web typecheck and
+targeted ESLint passed, and the measurement parser's two v1/v2 tests passed.
+The parser preserves the historical v1 data and emits boot version, normalized
+entity counts, route membership counts, bytes, and response time for v2.
+
+An isolated `dev-isolated --web` instance captured three samples per route.
+It used the repository's synthetic seed only. At 1,000 tasks, the selected
+workflow held 495 tasks; its boot was 1,025,986 bytes. Task detail held 101
+task entities and one or eight session entities, depending on the target, and
+measured 315,817–320,269 bytes. All were below the 1.25 MiB board and 512 KiB
+detail limits.
+
+The 10,000-task fixture appended 9,000 tasks to another workflow and retained
+the selected board's 495-task membership. The selected-board payload remained
+1,025,986 bytes with 495 task entities. Task detail retained 101 task entities
+and one or eight session entities; payload sizes were 315,821–320,273 bytes.
+The four-byte increase reflects changed aggregate page metadata, not additional
+task/session records. SQLite backup `.kandev/diagnostics/journey-data-efficiency/seed-10000.db`
+passed `integrity_check` and had no foreign-key violations. The owned isolated
+backend and temporary directory were removed after the SQLite backup.
+
+At 10,000 tasks, the three detail-route samples took 6.7–7.3 seconds for the
+one-session task, 11.2–12.6 seconds for the eight-session task, and 8.3–9.1
+seconds for its requested-session route. At 1,000 tasks, corresponding medians
+were 230, 261, and 307 ms. This reproducible scale observation is not explained
+by payload growth. Other build/test processes were active on the shared host,
+so it is recorded as an unresolved route-latency observation for Task 08's
+integrated comparison and query-source investigation. No availability or
+latency improvement is claimed from the boot-size result alone.
+
+Raw captures: [`boot-10-v2.json`](evidence/boot-10-v2.json),
+[`boot-1000-v2.json`](evidence/boot-1000-v2.json), and
+[`boot-10000-v2.json`](evidence/boot-10000-v2.json).
+
+
+## Task 06: Message-window turn context
+
+HTTP and WebSocket message listing accept `include_turns`. One reader snapshot
+returns the requested message window, its referenced turns, the active turn,
+and explicit coverage. Boot uses the same builder with 50 messages. Client cold
+and reconnect reads keep their existing 100-message window. Older paging and
+search merge covered turns without marking the full session history loaded.
+The full-turn endpoint and older-backend fallback remain available.
+
+The repository test expands unrelated history from 200 to 2,000 older turns.
+The 50-message read still returns exactly 51 turns, including the active turn.
+SQLite and disposable PostgreSQL 18 tests passed. Handler tests cover the
+additive option and existing message/turn behavior. Client tests cover coverage,
+legacy fallback, pagination, stale response protection, active-turn completion,
+and authoritative reconnect repair. The core recovery callback now reuses the
+message-window read instead of separately loading all turns.
+
+Production-build desktop and phone tests passed. They check the 50-message boot,
+100-message client recovery window, older-history paging, one covered turn in
+the one-turn fixture, and complete access to the oldest message. The desktop
+trace checks that no full-turn HTTP read occurs. A first test fixture had only
+55 messages and could not exercise paging after a 100-message client read. The
+final fixture contains 105 distinct messages. The recorder covers both WebSocket
+initial reads and HTTP older-history requests.
+
+## Task 07: Shared navigation and board reads
+
+Task session lists and workflow snapshots now use store-scoped resource owners.
+Route and hook consumers share an in-flight request and a bounded trailing
+refresh. Final release cancels obsolete work. Another consumer keeps its lease.
+Authorization/workspace generation changes retire old owners. Existing task
+navigation tombstones, revision merges, saved views, boot-to-live repair, retry,
+and archive behavior remain covered by deferred-response tests.
+
+The required navigation, task-session, workflow snapshot, concurrent all-board,
+and route-state tests passed. The final combined browser unit run passed in 45
+files with 665 tests. The route recovery and startup tests are included. Desktop
+and phone boot tests preserve selected-board loading and on-demand workflows.
+
+## Task 08: Shared metadata and integrated evidence
+
+Repository projections, workspace/workflow lists, user settings, CI options,
+and MCP configuration share store-scoped owners. Resource keys preserve
+`includeScripts` and `includeHidden`. Existing agent-list and environment owners
+remain in use. Both route bootstraps and route enrichment use the same owners.
+Route repository failures retain their existing immediate error handling;
+compact picker consumers retain bounded transient retries.
+
+A cancellation regression failed before and passed after synchronous final
+release. Without it, a replacement consumer joined an obsolete request in
+the microtask before release. Two-consumer tests prove that one departing panel
+does not cancel the other panel's CI, repository, or MCP read. Tests also cover
+different stores/projections, retired authorization generations, bounded
+refreshes, retry, and settings overlays.
+
+The integration rerun found two additional contract defects. A newly rebased
+prompt hook subscribed for hidden panels; its detail visibility guard and
+regression test now match the other rich subscribers. Compact sibling boot DTOs
+copied into an interface before adding `pending_action` lost a pending
+permission. The actual boot-response regression fails with the old copy in a
+source overlay and passes with the final DTO. These fixes preserve visibility
+and permission freshness required by this package.
+
+The final traces in [desktop evidence](evidence/final-browser-desktop.json) and
+[phone evidence](evidence/final-browser-phone.json) record resource counts by
+actual authorization/workspace generation and response projection. The recorder
+observes pending fetches until response headers or synchronous abort. Unit tests
+cover the shared owner's longer response-processing lifetime. It does not count
+an aborted request as active until Playwright later emits `requestfailed`.
+All captured metadata resource peaks are one. No captured metadata response is
+503. Four repeated selection generations each start at most one read per
+resource. Real gateway reconnect retains the selected chat and draft. Desktop
+also checks two visible split chats, collapse to one, eight mounted sibling
+tabs, keyboard selection, responsive transitions, and old-stream unsubscribe.
+Phone checks one stream through repeated picker navigation and reconnect.
+
+### Bounded payloads and the scale regression
+
+At 10,000 tasks, final boot captures carry 495 task entities for the selected
+board and 101 for task detail. Detail has one or eight compact session entities.
+The board payload is 1,025,986 bytes. Detail payloads are 265,602–270,306 bytes
+with 50 messages and 25 referenced turns. All satisfy the 1.25 MiB board and
+512 KiB task-detail gates. The original 1,000-task task-detail payload was
+2.11–2.17 MB. The new wire graph removes duplicate and unrelated collections.
+
+The Task 05 latency observation was repeatable and resolved here. Scratch-table
+`ANALYZE` saw 10,000 empty parent IDs and estimated that parent lookups matched
+the entire relation. SQLite then scanned the scratch table for every recursive
+root. Candidate staging took about 94 ms, while page execution took 13.7 s in
+the instrumented sample. A flat-forest query-plan test failed before the fix.
+Default estimates now retain indexed parent lookups. No main-database index or
+migration changed. PostgreSQL query behavior is unchanged. The fixed diagnostic
+query completed in about 0.7 s. Native reader snapshot, scratch cleanup,
+cancellation, queue hydration, and workspace isolation regressions passed.
+The existing hierarchical 100,000-task benchmark passed too. It did not expose
+the flat-tree planner choice.
+
+The isolated production route captures in
+[final scale evidence](evidence/boot-10000-verified.json) have task-detail medians
+of 481, 456, and 380 ms. Before the planner fix, the same integrated fixture
+took roughly 5.4–8.0 s. Home has a 190 ms median. Shared-host variance limits
+these timing comparisons. The indexed query-plan regression is deterministic.
+
+The [1,000-task capture](evidence/boot-1000-verified.json) and final scale capture
+retain three samples per route. Selected-board membership stays at 495 tasks.
+Detail stays at 101 task entities and one or eight compact session entities.
+Each detail response carries 50 messages and 25 referenced turns. Additional
+unrelated tasks add no boot entities. With three samples, nearest-rank p95 is
+the largest sample.
+
+| Route | 1,000 tasks: bytes / median / p95 (ms) | 10,000 tasks: bytes / median / p95 (ms) |
+| --- | --- | --- |
+| Selected board | 1,025,986 / 215.5 / 234.9 | 1,025,986 / 190.3 / 240.8 |
+| Primary session | 265,601 / 438.4 / 469.7 | 265,602 / 481.1 / 537.4 |
+| Eight-session task | 270,305 / 324.2 / 329.5 | 270,306 / 456.1 / 492.0 |
+| Selected sibling | 270,305 / 322.0 / 323.2 | 270,306 / 379.7 / 390.8 |
+
+### Matched route workload and remaining health limits
+
+[Integrated benchmark data](evidence/integrated-benchmarks.json) retains ten
+warm HTTP route samples per mode and the Task 01 baseline/candidate samples.
+The fixture and eight 16 MiB message writers are unchanged. This fixture
+measures the original board HTTP builder, rather than the complete browser
+journey or route boot payload above. Nearest-rank p95 for ten samples is the
+largest sample.
+
+| HTTP fixture | Baseline p50 / p95 (ms) | Final p50 / p95 (ms) |
+| --- | --- | --- |
+| Idle, 100 tasks | 5.117 / 7.390 | 3.763 / 5.276 |
+| Eight writers, one task | 858.458 / 2,898.051 | 1.460 / 3.244 |
+
+A separate benchmark runs the actual persistence health checker concurrently
+with route reads, checking two real required fixture tables. All ten idle
+probes passed. Eight of ten final write-loaded probes hit their two-second
+deadline, while all ten route reads succeeded (route median 1.426 ms). Their
+writer-pool deltas sum to 148 waits and 149,286 aggregate waiter milliseconds.
+These are totals across waiters, not one transaction's duration or identity.
+An earlier corrected run had ten deadline failures. An initial invalid health
+fixture referenced absent tables and is excluded from comparisons. Setup now
+checks healthy persistence before starting writers. Calibration samples are
+marked separately and excluded from the ten measured samples.
+
+Warm isolated route captures completed with HTTP 200. Both fixture sizes passed
+`/ready`, and persistence diagnostics reported `healthy`. The separate `/health`
+response confirms liveness only. Retained checks are in
+[10,000-task readiness](evidence/final-warm-health-http.json) and
+[1,000-task readiness](evidence/final-warm-health-1000-http.json).
+These observations do not establish
+universal 503 recovery: saturated writer health can still reject admission.
+Health checks, writer pool size, admission guards, and live configuration remain
+unchanged. Historical incident ownership and the separate agentctl filesystem
+failure remain unresolved.
+
+### Reproduction and final verification
+
+Run from the repository root. Each subshell owns its working directory:
+
+```sh
+(cd apps/web && pnpm exec vitest run hooks/domains/session/use-session-turns-hydration.test.ts hooks/domains/session/use-session-turns.test.ts hooks/domains/session/use-session-messages.test.ts hooks/domains/session/use-session-messages.live-refresh.test.tsx hooks/domains/session/load-message-window.test.ts hooks/domains/session/older-message-pagination.test.ts lib/state/slices/session/turn-actions.test.ts lib/api/domains/session-api.test.ts lib/state/hydration/hydrator.test.ts)
+(cd apps/web && pnpm exec vitest run lib/state/task-navigation-reads.test.ts lib/state/task-session-reads.test.ts hooks/use-task-sessions.test.ts hooks/use-workflow-snapshot.test.ts hooks/domains/kanban/use-all-workflow-snapshots-inflight.test.ts lib/ssr/session-page-state.test.ts)
+(cd apps/web && pnpm exec vitest run hooks/journey-metadata-resources.test.ts hooks/domains/settings/agent-list-resource.test.ts hooks/domains/session/environment-live-resource.test.ts hooks/domains/github/use-task-ci-options.test.tsx hooks/domains/session/use-session-mcp.test.ts hooks/domains/workspace/use-repositories.test.ts hooks/use-ensure-user-settings.test.ts hooks/use-workflows.test.ts src/kanban-route-startup.test.tsx src/spa-routes.workspace.test.tsx)
+(cd apps/web && pnpm e2e:run --host --project chromium tests/task/journey-boot-loading.spec.ts tests/session/visible-session-demand.spec.ts tests/session/message-turn-window.spec.ts)
+(cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/task/mobile-journey-boot-loading.spec.ts tests/session/mobile-visible-session-demand.spec.ts tests/session/mobile-message-turn-window.spec.ts)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite ./internal/task/service ./internal/task/handlers ./internal/backendapp ./internal/webapp -run 'Test(MessageTurnWindow|.*ListMessages|.*ListTurns|.*CompletionGate|.*StatusSummary|.*SessionSummary|Boot|.*Boot|NormalizeBoot|WriterWorkloadObserver)' -count=1)
+(cd apps/backend && KANDEV_TEST_POSTGRES_DSN='<disposable PostgreSQL 18 DSN>' go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run '^(TestMessageTurnWindowPostgres|TestCompletionGateReadPostgres|TestCompletionGateBatchPostgres|TestSessionSummaryProjectionPostgres)$' -count=1 -v)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run 'TestSidebar' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/backendapp -run '^$' -bench '^BenchmarkJourneyReadLoad$' -benchtime=1x -count=10)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/backendapp -run '^$' -bench '^BenchmarkJourneyReadHealthLoad$' -benchtime=10x -count=1)
+(cd apps/web && pnpm run typecheck)
+(cd apps/backend && make build)
+(cd apps/backend && golangci-lint run ./internal/task/repository/sqlite ./internal/task/service ./internal/task/handlers ./internal/task/dto ./internal/backendapp ./internal/webapp --allow-serial-runners --new-from-rev=HEAD --timeout=5m)
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+node docs/plans/journey-data-efficiency/validate-package.cjs
+node scripts/validate-public-docs.mjs
+node --test scripts/validate-public-docs.test.mjs
+python3 docs/plans/journey-data-efficiency/measure_boot_test.py
+git diff --check
+```
+
+Task-defined suites and their adjacent regressions are included in the combined
+665-test run. Targeted ESLint passed across all 120 changed TS/TSX files. TypeScript passed.
+The i18n ratchet passed. Backend cleanup splits boot task detail/projection and summary
+reconciliation into files below the configured limit. Targeted backend lint
+passed after helper extraction. The final backend build and affected race suites
+passed. PostgreSQL 18 parity and persistence health/admission regressions passed.
+Raw run logs are in `runs/`. Normalized route, browser, and health evidence is retained above.
+[Verification context](evidence/final-verification-context.json) records the source,
+platform, and retained fixture fingerprints. Final lint helper extraction followed
+the route captures. Boot and summary race tests passed again after extraction.
+Reader wait and transaction occupancy were not measured by these route or health benchmarks.
+Managed E2E runs build the backend, Vite assets, and fixture plugins afresh.
+Follow-up capture runs use the guarded raw runner with those built artifacts.
+
+Owned isolated runtimes, browsers, and diagnostic instrumentation were removed
+after verification. Synthetic backup databases remain available for reproduction.
+No commit, push, deployment, pool increase, or live-data mutation is included.
+
+
+## Review remediation
+
+A source review after handoff identified six correctness gaps. This follow-up
+keeps the original evidence and its measured limitations intact.
+
+Compact session lists now authorize the task before either repository branch.
+Real scoped service, HTTP, and WebSocket tests cover foreign users and
+organizations, owner access, internal callers, and missing tasks. Both narrow
+and full-model fallback paths retain the prior denial behavior.
+
+Client task entry reads lightweight workflow steps and its bounded sidebar page.
+It never acquires a full board snapshot for enrichment. Partial task coverage
+remains incomplete. Board consumers own snapshots for visible desktop lanes,
+the 300 px adjacent preload region, and the focused phone board. Collapsed
+lanes release demand. Disconnected observer callbacks cannot restore it.
+Unloaded lanes retain placeholders so scrolling can activate them. Cold All
+mode seeds the first displayed board using existing lightweight coverage.
+Known-empty boards are skipped while saved column preferences remain respected.
+The former independent `useKanbanData` snapshot owner was removed.
+
+Window reconciliation retires demonstrably completed or retired active markers.
+Authoritative null observations carry request-start identity, epoch, and row
+freshness. Delayed null responses cannot clear newer WebSocket turns. HTTP
+pagination, latest/gap reads, route enrichment, and hydration use those guards.
+
+Compact sibling boot rows retain foreground activity, cancellation state and
+revision, and parked state, epoch, and revision. They use the existing runtime
+summary enrichers and do not load unrelated rich metadata.
+
+Shared reads reject results after scope retirement, disposal, or final release,
+even when transport ignores cancellation. Task-session consumers fence data,
+error, and loading commits against retired hook ownership. A live consumer keeps
+its attempt, and trailing refresh remains bounded.
+
+The regression logs retain failing pre-fix checks. The browser control used
+preserved pre-review artifacts with freshness checks deliberately disabled.
+It reproduced a full workflow request after actual sidebar navigation and zero
+cold All-mode snapshots. The navigation assertion waits for its enrichment
+response before checking traffic. Sidebar budgets count task entries and exclude
+group headers. The final browser runs use fresh managed production builds.
+
+### Corrected-tree verification
+
+All six findings are fixed. The combined frontend run passed 728 tests across
+52 files. TypeScript passed. ESLint passed for all 140 changed TS/TSX files,
+and the final browser-assertion edit passed separately. The i18n ratchet passed.
+Focused worker suites retained pre-fix failures and passed after correction:
+154 board/navigation tests and 260 turn/read-owner tests.
+
+The affected five-package Go race run passed after two old All-mode boot
+assertions were updated to the approved first-board seed. Real service and
+HTTP/WS authorization regressions exercised both repository branches.
+Runtime boot tests verified sibling fields and a compact payload below 32 KiB
+with large unrelated metadata. Backend lint passed across six affected packages
+with zero issues. The final `make build` passed.
+
+Six desktop and five phone production-build browser cases passed. The first
+managed desktop run built fresh artifacts. Its last case used a nonexistent
+diagnostic attribute, so the test was corrected to inspect actual geometry,
+collapsed content, and traffic. The corrected desktop rerun reused those fresh
+frontend artifacts. The phone run rebuilt the final tree after the Go helper
+extraction. Every E2E run used one isolated worker and disposed its fixture.
+
+The [desktop capture](evidence/review-browser-desktop.json) and
+[phone capture](evidence/review-browser-phone.json) retain the assertions and
+JSON attachments. Actual SPA navigation between two tasks in a workflow with
+205 unrelated tasks kept 100 task entities and incomplete board coverage.
+Both devices issued zero complete workflow snapshot reads for task entry.
+Sidebar responses contained at most 100 task entries. The twenty-workflow
+cases exercised offscreen and collapsed desktop lanes, expansion after scroll,
+phone focus changes, and a persisted desktop collapse preference on phone.
+Cold All mode seeded one board. Phone subsequently requested only the newly
+selected board in that case.
+
+Documentation checks passed: 370 decisions and 1,521 specifications; all spec
+lint; eight-work-order coverage preflight; 47 public documentation pages and
+validator unit tests; two measurement-script unit tests; relative links and
+owned source paths; changed-Go formatting; and `git diff --check`.
+The manifest now checks Tasks 06–08 and records completed implementation.
+
+[Corrected verification context](evidence/review-verification-context.json)
+records 194 changed source files and their individual SHA-256 values. The
+combined digest is
+`6a7f7e590698816b71623ffe8dcb2f3a808753bd47fe9910e30dc1ead4c0c500`.
+The retained 1,000- and 10,000-task seed fingerprints are unchanged.
+The earlier verification context and benchmark/route captures remain historical;
+this follow-up did not regenerate their timing or health observations.
+
+Representative final commands (run from the repository root):
+
+```sh
+(cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm run i18n:ratchet)
+(cd apps/web && pnpm e2e:run --host --project chromium tests/task/journey-boot-loading.spec.ts tests/task/journey-review-loading.spec.ts tests/session/visible-session-demand.spec.ts tests/session/message-turn-window.spec.ts)
+(cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/task/mobile-journey-boot-loading.spec.ts tests/task/mobile-journey-review-loading.spec.ts tests/session/mobile-visible-session-demand.spec.ts tests/session/mobile-message-turn-window.spec.ts)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite ./internal/task/service ./internal/task/handlers ./internal/backendapp ./internal/webapp -run 'Test(MessageTurnWindow|.*ListMessages|.*ListTurns|.*CompletionGate|.*StatusSummary|.*SessionSummary|.*CompactSession.*|.*Session.*Authorization.*|Boot|.*Boot|NormalizeBoot|WriterWorkloadObserver)' -count=1)
+(cd apps/backend && golangci-lint run ./internal/task/repository/sqlite ./internal/task/service ./internal/task/handlers ./internal/task/dto ./internal/backendapp ./internal/webapp --allow-serial-runners --new-from-rev=HEAD --timeout=5m)
+(cd apps/backend && make build)
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+node docs/plans/journey-data-efficiency/validate-package.cjs
+node scripts/validate-public-docs.mjs
+node --test scripts/validate-public-docs.test.mjs
+python3 docs/plans/journey-data-efficiency/measure_boot_test.py
+git diff --check
+```
+
+Final logs are `runs/review-final-frontend.log`, `review-final-typecheck.log`,
+`review-final-eslint.log`, `review-e2e-eslint-final.log`,
+`review-final-i18n-ratchet.log`, `review-final-backend-race-corrected.log`,
+`review-final-backend-lint-corrected.log`, `review-final-backend-build.log`,
+`review-final-browser-desktop.log`, and `review-final-browser-phone.log`.
+The shared host remains a limit for historical timing comparisons.
+Eight of ten write-loaded probes reached their two-second deadline. Historical
+writer ownership and separate agentctl filesystem failures remain unresolved.
+This follow-up does not claim universal health recovery.
+
+## PR delivery
+
+After review correction, the user authorized commit, push, and PR publication.
+Prettier normalized ten source/test files before delivery. Their emitted
+JavaScript syntax is unchanged. The corrected verification context records
+these formatted bytes; earlier runtime captures remain valid. Normal commit
+hooks run without a bypass. No deployment or live data mutation is included.
+
+Delivery hooks also exposed the approved lifecycle import baseline still pointing
+to `boot_state.go`; its entry now follows the extracted task-detail boot file.
+Formatted source pushed three functions to 101 lines. Redundant aliases were
+removed from chat input/panel state, and unchanged TipTap editor/context markup
+was extracted. Seven affected test files passed 141 tests. TypeScript and fresh desktop and phone
+visible-chat browser cases passed before publication. Document whitespace from
+previously untracked work orders was normalized.
