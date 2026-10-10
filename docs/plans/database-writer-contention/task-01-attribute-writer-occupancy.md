@@ -59,10 +59,14 @@ The fixture must reject any externally supplied database path and create its own
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^$' -bench '^BenchmarkWriterWorkload$' -benchtime=512x -count=3)
 (cd apps/backend && go test -trimpath -tags fts5 -race ./internal/persistence/requiredstores ./internal/backendapp ./internal/db -run 'Test(PersistenceContentionFixture|RuntimeHealth|StartupHealth|HealthCheck|ProbeTables|RequiredPersistence|PersistenceMiddleware|SQLiteWriterTransactionAdmission)' -count=1)
 python3 docs/plans/database-writer-contention/measure.py -- go test -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^TestWriterWorkload' -bench '^BenchmarkWriterWorkload$' -benchtime=512x -count=3
+# Fixed production path: no redundant reservation UPDATE.
 python3 docs/plans/database-writer-contention/measure.py -- go test -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^$' -bench '^BenchmarkWriterMessageUpdate$' -benchtime=128x -count=3
-python3 docs/plans/database-writer-contention/measure.py --omit-message-reservation -- go test -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^$' -bench '^BenchmarkWriterMessageUpdate$' -benchtime=128x -count=3
+# Historical comparison: restore the reservation UPDATE in a disposable overlay.
+python3 docs/plans/database-writer-contention/measure.py --restore-message-reservation -- go test -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^$' -bench '^BenchmarkWriterMessageUpdate$' -benchtime=128x -count=3
 python3 docs/plans/database-writer-contention/measure.py -- go test -trimpath -tags fts5 ./internal/task/repository/sqlite -run '^TestWriterWorkload' -count=1 -v
-python3 docs/plans/database-writer-contention/measure.py --omit-message-reservation -- go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run 'Test(UpdateMessage|CreateMessage|.*Payload|.*ConversationSource)' -count=1
+# Check correctness on both the fixed path and the restored comparison.
+python3 docs/plans/database-writer-contention/measure.py -- go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run 'Test(UpdateMessage|CreateMessage|.*Payload|.*ConversationSource)' -count=1
+python3 docs/plans/database-writer-contention/measure.py --restore-message-reservation -- go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run 'Test(UpdateMessage|CreateMessage|.*Payload|.*ConversationSource)' -count=1
 git diff --check -- docs/plans/database-writer-contention apps/backend/internal/task/repository/sqlite
 ```
 
@@ -70,7 +74,7 @@ The benchmark logs its synthetic sizes and concurrency cases.
 Fixed iteration counts replace the original ten-second calibration because fixture growth changes cost during a run.
 The 512-round comparison uses identical operation counts with and without the transaction overlay.
 The additional message-update benchmark uses 128 updates at each fixed content size.
-The message-update implementation matches the incident build. Durable-delivery methods were added after that build.
+The restored-reservation overlay represents the earlier message-update path. Durable-delivery methods were added after the incident build.
 The extra case therefore separates current-checkout capacity evidence from paths present during the incident.
 Run cases sequentially to avoid overlapping load. Report thresholds as observations, not universal performance guarantees.
 Use barriers for correctness assertions. Do not substitute sleeps for proof of writer admission.

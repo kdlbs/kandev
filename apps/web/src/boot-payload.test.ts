@@ -103,10 +103,12 @@ describe("version-2 boot entity graph", () => {
         version: 2,
         initialState: {
           kanban: { workflowId: "workflow-1", taskIds: ["task-1"] },
+          kanbanMulti: { snapshots: { "workflow-1": { taskIds: ["task-1"] } } },
           taskSessions: { sessionIds: ["session-1"] },
           taskSessionsByTask: { sessionIdsByTask: { "task-1": ["session-1"] } },
         },
         routeData: {
+          tasksPage: { taskIds: ["task-1"] },
           taskDetail: {
             taskId: "task-1",
             sessionId: "session-1",
@@ -120,10 +122,12 @@ describe("version-2 boot entity graph", () => {
     expect(readBootPayload(win)).toMatchObject({
       initialState: {
         kanban: { tasks: [task] },
+        kanbanMulti: { snapshots: { "workflow-1": { tasks: [task] } } },
         taskSessions: { items: { "session-1": session } },
         taskSessionsByTask: { itemsByTaskId: { "task-1": [session] } },
       },
       routeData: {
+        tasksPage: { tasks: [task] },
         taskDetail: {
           task,
           sessionId: "session-1",
@@ -131,6 +135,23 @@ describe("version-2 boot entity graph", () => {
         },
       },
     });
+  });
+
+  it("preserves saved selected-task views, drafts, and unrelated task identities", () => {
+    const scope = { mode: "selected", taskIds: ["task-1", "missing-task"] };
+    const settings = {
+      threadViews: [{ id: "saved", taskScope: scope }],
+      threadViewDraft: { taskScope: scope },
+      lastSelection: { taskId: "task-1" },
+    };
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        version: 2,
+        initialState: { settings },
+        entities: { tasks: { "task-1": { id: "task-1", title: "Task" } }, sessions: {} },
+      },
+    } as unknown as Window;
+    expect(readBootPayload(win).initialState).toEqual({ settings });
   });
 
   it("preserves optional-data failures", () => {

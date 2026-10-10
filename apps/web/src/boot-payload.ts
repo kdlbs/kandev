@@ -135,22 +135,25 @@ function expandBootEntityGraph(
   entities: BootEntityGraph,
 ) {
   return {
-    initialState: expandBootNode(initialState, entities) as Record<string, unknown>,
+    initialState: expandBootNode(initialState, entities, ["initialState"]) as Record<
+      string,
+      unknown
+    >,
     routeData: routeData
-      ? (expandBootNode(routeData, entities) as Record<string, unknown>)
+      ? (expandBootNode(routeData, entities, ["routeData"]) as Record<string, unknown>)
       : undefined,
   };
 }
 
-function expandBootNode(value: unknown, entities: BootEntityGraph, parentKey = ""): unknown {
-  if (Array.isArray(value)) return value.map((entry) => expandBootNode(entry, entities, parentKey));
+function expandBootNode(value: unknown, entities: BootEntityGraph, path: string[] = []): unknown {
+  if (Array.isArray(value)) return value.map((entry) => expandBootNode(entry, entities, path));
   if (!isRecord(value)) return value;
 
   const result: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value)) {
-    const reference = expandBootReference(key, child, parentKey, entities);
+    const reference = expandBootReference(key, child, path, entities);
     if (reference) result[reference.key] = reference.value;
-    else result[key] = expandBootNode(child, entities, key);
+    else result[key] = expandBootNode(child, entities, [...path, key]);
   }
   return result;
 }
@@ -158,27 +161,43 @@ function expandBootNode(value: unknown, entities: BootEntityGraph, parentKey = "
 function expandBootReference(
   key: string,
   value: unknown,
-  parentKey: string,
+  path: string[],
   entities: BootEntityGraph,
 ): { key: string; value: unknown } | undefined {
   return (
-    expandTaskReference(key, value, entities.tasks ?? {}) ??
-    expandSessionReference(key, value, parentKey, entities.sessions ?? {})
+    expandTaskReference(key, value, path, entities.tasks ?? {}) ??
+    expandSessionReference(key, value, path.at(-1) ?? "", entities.sessions ?? {})
   );
 }
 
 function expandTaskReference(
   key: string,
   value: unknown,
+  path: string[],
   tasks: Record<string, unknown>,
 ): { key: string; value: unknown } | undefined {
-  if (key === "taskIds" && Array.isArray(value)) {
+  if (key === "taskIds" && isBootTaskListPath(path) && Array.isArray(value)) {
     return { key: "tasks", value: expandTaskIDs(value, tasks) };
   }
-  if (key === "taskId" && typeof value === "string" && tasks[value]) {
+  if (key === "taskId" && isBootTaskDetailPath(path) && typeof value === "string" && tasks[value]) {
     return { key: "task", value: tasks[value] };
   }
   return undefined;
+}
+
+function isBootTaskListPath(path: string[]): boolean {
+  return (
+    path.join(".") === "initialState.kanban" ||
+    path.join(".") === "routeData.tasksPage" ||
+    (path.length === 4 && path.slice(0, 3).join(".") === "initialState.kanbanMulti.snapshots")
+  );
+}
+
+function isBootTaskDetailPath(path: string[]): boolean {
+  return (
+    path.join(".") === "routeData.taskDetail" ||
+    path.join(".") === "routeData.taskDetail.sidebarTaskPage.entries"
+  );
 }
 
 function expandSessionReference(

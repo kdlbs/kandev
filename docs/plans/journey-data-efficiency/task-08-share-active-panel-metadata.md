@@ -148,3 +148,7 @@ validation passed. Owned temporary runtimes and data were removed.
 ### Review correction
 
 Review corrections retain the metadata owner and its post-response scope checks. Combined regression and browser validation now also covers task-session scope retirement, turn-window races, bounded client navigation, and board visibility ownership. Corrected source fingerprints are recorded separately from historical benchmark captures. The eight write-loaded probe deadlines, unresolved historical writer ownership, and separate agentctl filesystem failures remain limitations. See the [review correction results](implementation-evidence.md#review-remediation).
+
+### PR fixup
+
+PR #4404 fixup reran shared-read and task-session regressions on current main. Updated source fingerprints distinguish the corrected tree from historical browser and timing captures. The historical persistence deadlines and unresolved incident attribution remain unchanged. See [fixup results](implementation-evidence.md#pr-4404-fixup).

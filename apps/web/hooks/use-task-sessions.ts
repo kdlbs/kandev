@@ -207,7 +207,7 @@ export function useTaskSessions(taskId: string | null) {
         const needsFollowUp = await hydrateTaskSessions({
           taskId,
           force,
-          isCurrent,
+          isCurrent: () => reads.isCurrent(taskId),
           reads,
           getStoreState,
           setTaskSessionsForTask,
@@ -217,10 +217,12 @@ export function useTaskSessions(taskId: string | null) {
       } finally {
         if (isCurrent()) {
           requestInFlightRef.current = false;
-          setTaskSessionsLoading(taskId, false);
           if (force && !pendingForcedReloadRef.current) {
             resolveForcedReloadWaiters(pendingForcedReloadWaitersRef);
           }
+        }
+        if (reads.isCurrent(taskId) && !reads.isReading(taskId)) {
+          setTaskSessionsLoading(taskId, false);
         }
       }
     },

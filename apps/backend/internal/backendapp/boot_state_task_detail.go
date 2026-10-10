@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
-	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/i18n"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -535,77 +533,6 @@ func enrichBootSessionRuntime(summary *taskdto.TaskSessionSummaryDTO, projection
 	taskdto.EnrichForegroundActivitySummary(summary, projections)
 	taskdto.EnrichCancellationPendingSummary(summary, projections)
 	taskdto.EnrichParkedProjectionSummary(summary, projections)
-}
-
-func addTaskDetailSessionMetadata(
-	session *taskmodels.TaskSession,
-	sessionModelsByID, sessionModeByID, sessionMCPStatusByID map[string]any,
-) {
-	if snapshot, ok := lifecycle.LoadSessionModelsSnapshot(
-		session.Metadata[taskmodels.SessionMetaKeyACPModelState],
-	); ok {
-		sessionModelsByID[session.ID] = taskSessionModelsBootState(
-			snapshot, sessionACPConfigBaseline(session),
-		)
-		if snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored {
-			sessionModeByID[session.ID] = taskSessionModeBootState(snapshot)
-		}
-	}
-	if history, ok := lifecycle.LoadMCPAttachmentHistory(
-		session.Metadata[taskmodels.SessionMetaKeyMCPAttachmentState],
-	); ok {
-		sessionMCPStatusByID[session.ID] = history
-	}
-}
-
-func taskSessionModelsBootState(
-	snapshot lifecycle.SessionModelsSnapshot,
-	baseline map[string]string,
-) map[string]any {
-	models := make([]map[string]any, 0, len(snapshot.Models))
-	for _, model := range snapshot.Models {
-		models = append(models, map[string]any{
-			"modelId":         model.ModelID,
-			"name":            model.Name,
-			"description":     model.Description,
-			"usageMultiplier": model.UsageMultiplier,
-		})
-	}
-	options := make([]map[string]any, 0, len(snapshot.ConfigOptions))
-	for _, option := range snapshot.ConfigOptions {
-		options = append(options, map[string]any{
-			"type":         option.Type,
-			"id":           option.ID,
-			"name":         option.Name,
-			"description":  option.Description,
-			"currentValue": option.CurrentValue,
-			"category":     option.Category,
-			"options":      option.Options,
-		})
-	}
-	state := map[string]any{
-		"currentModelId": snapshot.CurrentModelID,
-		"models":         models,
-		"configOptions":  options,
-	}
-	if snapshot.ConfigOptionsSettled {
-		state["configOptionsSettled"] = true
-	}
-	if snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored {
-		state["settingsPolicy"] = string(snapshot.SettingsPolicy)
-	}
-	if len(baseline) > 0 {
-		state["configBaseline"] = baseline
-	}
-	return state
-}
-
-func taskSessionModeBootState(snapshot lifecycle.SessionModelsSnapshot) map[string]any {
-	return map[string]any{
-		"currentModeId":  snapshot.CurrentModeID,
-		"availableModes": []any{},
-		"settingsPolicy": string(snapshot.SettingsPolicy),
-	}
 }
 
 func activeTurnBySessionState(sessionID string) map[string]any {

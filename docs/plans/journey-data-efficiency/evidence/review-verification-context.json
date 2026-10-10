@@ -1,9 +1,9 @@
 {
-  "recorded_at_utc": "2026-10-10T13:50:49.694041+00:00",
-  "head": "02ff0578357040b0546ea17cd9a00dff9ca9ee3b",
+  "recorded_at_utc": "2026-10-10T14:14:00.567390+00:00",
+  "head": "2fb668543d9e7fbe28b1211be97c1d94ec0964fd",
   "branch": "feature/investigate-sidebar-8ce",
-  "working_tree": "uncommitted implementation with all six review corrections",
-  "changed_code_sha256": "6a7f7e590698816b71623ffe8dcb2f3a808753bd47fe9910e30dc1ead4c0c500",
+  "working_tree": "rebased implementation with PR 4404 review and CI corrections pending the fixup commit",
+  "changed_code_sha256": "b6d635ffdf3763734c0173ae50981a0eca9011859d1288271c2058759f6246f1",
   "digest_method": "sorted UTF-8 path + NUL + file bytes + NUL for each changed/untracked Go, TS, or TSX file under apps/",
   "changed_code_files": [
     "apps/backend/internal/backendapp/boot_board_demand_test.go",
@@ -205,9 +205,9 @@
     "apps/backend/internal/backendapp/boot_board_demand_test.go": "31f3c784152dfe097ae850fa87e01a89386c042cf5e9501ce897a2f6c24c0c6a",
     "apps/backend/internal/backendapp/boot_journey_test.go": "6bd4f62b7df9eac5cac3500954d8315dd4885a0ca4d009e724a5ccf5175ba692",
     "apps/backend/internal/backendapp/boot_session_runtime_test.go": "ce34d8534ee69486e094a1d95e3b543d33df47f2c0ba58f720a871988ffaa40a",
-    "apps/backend/internal/backendapp/boot_state.go": "184870e8612ef8718870de6672178e27ee2fea82fbb3ba608d4b7d3f33805083",
+    "apps/backend/internal/backendapp/boot_state.go": "edf65c7cdab21bc2ad9d31dc1c47b79cf1dc5e06580ca1b6057936814be4448b",
     "apps/backend/internal/backendapp/boot_state_runner_mutability_test.go": "0144c4ca7b14d2f0e7e851c2e44730f06803f9920e8fda0d460f038d41747628",
-    "apps/backend/internal/backendapp/boot_state_task_detail.go": "cdf48a0900da7c1a568f6dca3ba1ba9d5a0842091f3ab4a23f88a5d7afb30d38",
+    "apps/backend/internal/backendapp/boot_state_task_detail.go": "e99f142a9f19d37aafbc04d02bdc3bf0a41aadda839837b24bf119243f5e9de6",
     "apps/backend/internal/backendapp/boot_state_task_projection.go": "3368cb6374c736f0d57f50febf2a83491fe265b36f3a5ce100c49ca1cb023a96",
     "apps/backend/internal/backendapp/boot_state_workspace_recovery_test.go": "b0fba6f8abba6b41207de6654e320a86e114e86fd6a7827d789e7ab0ad94a577",
     "apps/backend/internal/backendapp/helpers.go": "a5519cf852b886306c9b40d83ff274e8c20be0005f9f22464d684bae5ae4e936",
@@ -350,9 +350,9 @@
     "apps/web/hooks/use-file-editors.ts": "9b5aab3e091960ac042bdc7e0bd5ee63eaa5b3800e751aca9a3f2508017907bd",
     "apps/web/hooks/use-panel-actions.ts": "bf226e56953ec6ea5cf5c08493d2020f11cf4f07c8185f29d2471f205ec83c07",
     "apps/web/hooks/use-task-sessions.foreground.test.ts": "f2f411e99a8064e6c165ee325b99f3b48e0630cd8d7e4945e72ba8a128d7896c",
-    "apps/web/hooks/use-task-sessions.stale-reads.test.ts": "54623d9e1a256159e3ace3bb3bb743f523d649dd78cc9eb17d7520551b3be275",
+    "apps/web/hooks/use-task-sessions.stale-reads.test.ts": "8413dceee1cad36d4e6228952f5c82d2b2e6157b08902aa286933dff9cd7383a",
     "apps/web/hooks/use-task-sessions.test.ts": "f8e9c84300f68f231cf005a05f28dbac9a30439f9ff0b45e258ea652fb7a967d",
-    "apps/web/hooks/use-task-sessions.ts": "e1aabf88f77ea5f675788791a1a76e7f60df8de20b6d95185e0d913d5adde1a9",
+    "apps/web/hooks/use-task-sessions.ts": "84402dd266d7d642a4673cc784ce8e16b23c4a382817bc50ab5cf72521445057",
     "apps/web/hooks/use-task.ts": "5fde933010757e375064d22f26ff8275c9f1d683f4cdc18fe2c7f2c73cedf221",
     "apps/web/hooks/use-utility-agent-generator.test.tsx": "9497c225a7fb511e243c4db95c718c1abb3413651a96dd75bdf638c5f1f9ee6b",
     "apps/web/hooks/use-utility-agent-generator.ts": "af1004c8569375667be5205c24d1982989bed76e8ca039dd426a7aa44856ffe1",
@@ -377,19 +377,19 @@
     "apps/web/lib/state/default-state.ts": "c8cb39c9e2c5e62ca0ddf796f6d0289e6442e6c9a5c31e137b7d49ec614b7cb0",
     "apps/web/lib/state/hydration/hydrator-turns-marker.test.ts": "3dc2c5e86ac0a593fa3e9abfe21e93300496061a3bbeec9473310ee72fdfd6de",
     "apps/web/lib/state/hydration/hydrator.ts": "a7fff28c3cba52ecf2323b020e35bbb2e73d78b61e03571c5a867600a1f8b1b5",
-    "apps/web/lib/state/shared-resource-reads.ts": "6f50b718d7a82df076a7578a8e756feb2fa0e97aa11f47d1c9eabd1735b23724",
+    "apps/web/lib/state/shared-resource-reads.ts": "d4a5b7be73a0bae999daea0ecb59c0d2ef789e5c6a18ebe361d111ff1c86b21d",
     "apps/web/lib/state/slices/session/session-slice.ts": "402561465f1746d5bf43c445bde98babd8a58a06ce78e952605bcf62a2b1d453",
     "apps/web/lib/state/slices/session/turn-actions.test.ts": "a7d304418cbe0517f409840e24dbcece25b0f57a69f6733160cff2e823310f56",
     "apps/web/lib/state/slices/session/turn-actions.ts": "c815d500147dbaa62ea753edcc22e3a84178a7de37e6970ff9803640c9ebab93",
     "apps/web/lib/state/slices/session/types.ts": "44b9a06a656705a5553facb549d15c77971d9db748e09c8fb66a47c9a0950087",
     "apps/web/lib/state/task-navigation-reads.test.ts": "a7de7c15629a272e31a406c5c344d025af012b2e2d1abe2642be47f8a73b57f3",
     "apps/web/lib/state/task-navigation-reads.ts": "c4038b392ed4eed561ce2ab5b4df47b5f11b09766c0422b940566bcbda2f1e4b",
-    "apps/web/lib/state/task-session-reads.test.ts": "54edb0c5b100558dd1aa1f8062fa7b55ef05b37194bd3ca985fc3fd33806ce75",
+    "apps/web/lib/state/task-session-reads.test.ts": "c81df88c1f5b99b90c0e5cc4f479f812c9354123ad7605b6d4739fc659fa8248",
     "apps/web/lib/state/task-session-reads.ts": "d6bb3030323b7a668b913175765b47b134a48bb88885c9c1f89b2863206f4c29",
     "apps/web/lib/state/workflow-snapshot-reads.ts": "c84acbc91889bfdd4c7cb0a92b2af46deb76f135f1dc88bd0571eb6fe5f425f9",
     "apps/web/lib/types/http.ts": "6161f6b36c955317d3d7f31b8c243cc49a3ef0574d7e418dc6a15514534abf6f",
-    "apps/web/src/boot-payload.test.ts": "649eca2cf5d03ddcb86a177113fa5d6061dfc9ad6c4857427f35a16cbc51f0f6",
-    "apps/web/src/boot-payload.ts": "517efc09336a1c341228f13eb8f23e99b26d428f870c688ef8abde421d6c7e1f",
+    "apps/web/src/boot-payload.test.ts": "9842c25a40106f08657d6a61dd23ee61936dcfac1b1635e2f0c717673369eed5",
+    "apps/web/src/boot-payload.ts": "df729f60588a93d5b5b044bdaceb4eb56ea2bc6e892c5b4274856de9d2820893",
     "apps/web/src/kanban-route.tsx": "3a529d3667a7b33644f07bf0ca9f39025f4c5db7ae614cd2d5c83416243a26f9",
     "apps/web/src/spa-routes.tsx": "5ca13454d9083740a9ceda99dcb276c467b6fae7126bd530413e2d340fb127f8",
     "apps/web/src/spa-routes.workspace.test.tsx": "c830fa55d0ef5572f7588f32860f6cd49419d9bcb4179b23bc001f26c7608daa",
@@ -494,6 +494,29 @@
   "delivery_formatting": "Prettier normalized ten files before the delivery commit; emitted JavaScript syntax is unchanged.",
   "delivery_refactor": "Removed redundant aliases in chat input/panel state and extracted unchanged TipTap editor/context markup to satisfy function size limits. Seven affected test files passed 141 tests. TypeScript, architecture lint, and fresh desktop/phone visible-chat browser cases passed.",
   "delivery_config_sha256": {
-    "config/architecture-lint/runtime_import.json": "a4ed0aa97ea5d79353d00e8ef821532c156133efdfcae27417ba431ce65168c2"
+    "config/architecture-lint/runtime_import.json": "828a1af90b616b6d3a358533c69777b4f9429140ddd44464b3f6df28e157948c"
+  },
+  "review_remediation_source_sha256": "6a7f7e590698816b71623ffe8dcb2f3a808753bd47fe9910e30dc1ead4c0c500",
+  "pr_fixup": {
+    "base_sha": "d92d40b67bf3ecabf74072c95325f3f86cdd5e30",
+    "reviewed_head": "f68dc6bc4fa865e22890656f45bca61f143df361",
+    "frontend_tests": 114,
+    "frontend_test_files": 8,
+    "red_regressions": 4,
+    "architecture_ci_command": "python3 scripts/lint-architecture.py --all --baseline-base-ref d92d40b67bf3ecabf74072c95325f3f86cdd5e30 --allow-missing-base-baseline",
+    "runtime_capture_scope": "Desktop and phone captures remain historical. Fixup changes data normalization and read ownership, without rendered layout or input changes.",
+    "builds": [
+      "pnpm run build:vite",
+      "make -C apps/backend build"
+    ],
+    "checks": [
+      "114 frontend tests in eight files",
+      "six changed web files: ESLint zero warnings",
+      "TypeScript",
+      "two race-enabled boot/webapp packages",
+      "fixed and restored-reservation correctness controls",
+      "CI-equivalent architecture lint",
+      "all specification lint and documentation catalog"
+    ]
   }
 }

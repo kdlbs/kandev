@@ -209,9 +209,52 @@ describe("useTaskSessions retained and successor consumers", () => {
     successor.unmount();
   });
 
+  it.each(["success", "failure"])(
+    "settles a retained load after the initiator leaves (%s)",
+    async (outcome) => {
+      const response = deferred<{ sessions: TaskSession[] }>();
+      apiMock.listTaskSessions.mockReturnValueOnce(response.promise);
+      mockState.setTaskSessionsLoading.mockImplementation((id: string, loading: boolean) => {
+        mockState.taskSessionsByTask.loadingByTaskId[id] = loading;
+      });
+      mockState.setTaskSessionsForTask.mockImplementation((id: string) => {
+        mockState.taskSessionsByTask.loadedByTaskId[id] = true;
+      });
+      mockState.setTaskSessionsError.mockImplementation((id: string, error: string) => {
+        mockState.taskSessionsByTask.errorByTaskId[id] = error;
+      });
+      const first = renderHook(() => useTaskSessions(TASK_ID));
+      await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));
+      const survivor = renderHook(() => useTaskSessions(TASK_ID));
+      first.unmount();
+      expect(mockState.taskSessionsByTask.loadingByTaskId[TASK_ID]).toBe(true);
+      await act(async () => {
+        if (outcome === "success") response.resolve({ sessions: [session("retained")] });
+        else response.reject(new Error(SERVICE_UNAVAILABLE));
+      });
+      expect(mockState.taskSessionsByTask.loadingByTaskId[TASK_ID]).toBe(false);
+      if (outcome === "success") {
+        expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(
+          TASK_ID,
+          [session("retained")],
+          {},
+        );
+      } else {
+        expect(mockState.setTaskSessionsError).toHaveBeenCalledWith(TASK_ID, SERVICE_UNAVAILABLE);
+      }
+      survivor.rerender();
+      await act(async () => survivor.result.current.loadSessions(true));
+      expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(2);
+      survivor.unmount();
+    },
+  );
+
   it("keeps the shared read live after only one consumer unmounts", async () => {
     const response = deferred<{ sessions: TaskSession[] }>();
     apiMock.listTaskSessions.mockReturnValueOnce(response.promise);
+    mockState.setTaskSessionsLoading.mockImplementation((id: string, loading: boolean) => {
+      mockState.taskSessionsByTask.loadingByTaskId[id] = loading;
+    });
     const first = renderHook(() => useTaskSessions(TASK_ID));
     const second = renderHook(() => useTaskSessions(TASK_ID));
     await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));

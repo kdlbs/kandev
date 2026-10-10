@@ -129,8 +129,8 @@ export class SharedResourceReads<T> {
           }
         }
         if (!this.scopeIsCurrent() || this.records.get(key) !== record) throw abortError();
-        if (latest !== undefined) return latest;
         if (lastError !== undefined) throw lastError;
+        if (latest !== undefined) return latest;
         throw abortError();
       })
       .finally(() => {

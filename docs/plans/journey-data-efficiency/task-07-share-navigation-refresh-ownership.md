@@ -117,3 +117,7 @@ for commands and results.
 ### Review correction
 
 Shared reads reject obsolete success and error responses after scope changes, disposal, or final release, including loaders that ignore cancellation. Mounted task-session owners guard state, error, and loading commits, preserving successor attempts and live joined consumers. Task-entry enrichment requests lightweight workflow steps instead of a complete snapshot. Board ownership follows visible or adjacent expanded desktop lanes and the focused phone board. New browser cases use real client navigation through a large workflow and twenty-board demand controls. See the [review correction results](implementation-evidence.md#review-remediation).
+
+### PR fixup
+
+PR #4404 fixup keeps response publication and loading settlement under the retained shared-read scope when the initiating hook leaves. Success, failure, retry, final release, and scope-retirement regressions passed. Waiting callers now receive the final queued refresh failure instead of an earlier successful value. See [fixup results](implementation-evidence.md#pr-4404-fixup).

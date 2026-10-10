@@ -528,8 +528,8 @@ The manifest now checks Tasks 06–08 and records completed implementation.
 
 [Corrected verification context](evidence/review-verification-context.json)
 records 194 changed source files and their individual SHA-256 values. The
-combined digest is
-`6a7f7e590698816b71623ffe8dcb2f3a808753bd47fe9910e30dc1ead4c0c500`.
+PR-delivery digest was
+`6a7f7e590698816b71623ffe8dcb2f3a808753bd47fe9910e30dc1ead4c0c500`. The verification context now records the corrected PR fixup source separately.
 The retained 1,000- and 10,000-task seed fingerprints are unchanged.
 The earlier verification context and benchmark/route captures remain historical;
 this follow-up did not regenerate their timing or health observations.
@@ -578,3 +578,51 @@ removed from chat input/panel state, and unchanged TipTap editor/context markup
 was extracted. Seven affected test files passed 141 tests. TypeScript and fresh desktop and phone
 visible-chat browser cases passed before publication. Document whitespace from
 previously untracked work orders was normalized.
+
+## PR #4404 fixup
+
+The review at `f68dc6bc4fa865e22890656f45bca61f143df361` identified four valid findings.
+Task entity expansion now applies only to normalized boot collection/detail paths.
+Saved selected-task views, drafts, and ordinary task identities retain their IDs.
+A retained session consumer receives data or errors and settles loading after
+its initiating hook unmounts. Retry remains available. Scope retirement and final
+release still reject obsolete results. Queued refresh callers receive the last
+attempt's failure instead of an earlier successful value.
+
+The reproduction work order now labels the fixed default and the historical
+`--restore-message-reservation` comparison. Both correctness controls passed.
+CI's architecture check rejected the relocated runtime-import exception because
+baselines may only shrink. Metadata decoding helpers now remain in the already
+approved `boot_state.go` file; no new exception is added.
+
+The branch was rebased onto main `d92d40b67bf3ecabf74072c95325f3f86cdd5e30`.
+Both incoming commits remain intact, including profile catalogue and Quick Chat
+recovery behavior. The rebase required no conflict resolution.
+
+Four new regression cases failed before the fixes. After correction and rebase,
+eight frontend files passed 114 tests, including existing Quick Chat recovery
+coverage. Changed web files passed ESLint with zero warnings. TypeScript passed.
+Two boot/webapp packages passed focused race tests. Backend `make build` and
+frontend `pnpm run build:vite` passed. The CI-equivalent architecture command,
+all specification lint, and documentation catalog checks passed.
+
+Representative commands, from the repository root:
+
+```sh
+(cd apps/web && pnpm exec vitest run src/boot-payload.test.ts hooks/use-task-sessions.test.ts hooks/use-task-sessions.foreground.test.ts hooks/use-task-sessions.stale-reads.test.ts lib/state/task-session-reads.test.ts lib/state/task-navigation-reads.test.ts hooks/domains/session/use-session-resumption.test.ts hooks/domains/session/use-session-resumption-manual-recovery.test.ts)
+(cd apps/web && pnpm run typecheck && pnpm run build:vite)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/backendapp ./internal/webapp -run 'Test.*(Boot|TaskDetail|Normalize)' -count=1)
+make -C apps/backend build
+python3 scripts/lint-architecture.py --all --baseline-base-ref d92d40b67bf3ecabf74072c95325f3f86cdd5e30 --allow-missing-base-baseline
+python3 docs/plans/database-writer-contention/measure.py -- go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run 'Test(UpdateMessage|CreateMessage|.*Payload|.*ConversationSource)' -count=1
+python3 docs/plans/database-writer-contention/measure.py --restore-message-reservation -- go test -trimpath -tags fts5 -race ./internal/task/repository/sqlite -run 'Test(UpdateMessage|CreateMessage|.*Payload|.*ConversationSource)' -count=1
+```
+
+The corrected source digest is recorded in
+[verification context](evidence/review-verification-context.json).
+Earlier browser captures and probe timings remain historical. These fixes only
+change data normalization and request ownership, so shared unit/hook regressions
+cover both viewport consumers without changing layout or touch interaction.
+Eight of ten historical write-loaded probes exceeded two seconds. Historical
+writer ownership and separate agentctl filesystem failures remain unresolved.
+This fixup does not establish universal health recovery.

@@ -114,6 +114,33 @@ describe("task session read owner", () => {
     await expect(newRead).resolves.toEqual({ sessions: [], total: 2 });
     releaseNew();
   });
+});
+
+describe("task session trailing refresh outcomes", () => {
+  it("rejects the last queued refresh failure after an earlier refresh succeeds", async () => {
+    const owner = getTaskSessionReads(storeFor("refresh-user"));
+    const release = owner.retain(TASK_ID);
+    const initial = deferred<{ sessions: never[]; total: number }>();
+    const refreshed = deferred<{ sessions: never[]; total: number }>();
+    const failed = new Error("latest refresh failed");
+    const calls = vi
+      .fn()
+      .mockReturnValueOnce(initial.promise)
+      .mockReturnValueOnce(refreshed.promise)
+      .mockRejectedValueOnce(failed);
+    const first = owner.read(TASK_ID, calls);
+    const trailing = owner.read(TASK_ID, calls, { refresh: true });
+    const rejection = expect(trailing).rejects.toBe(failed);
+    initial.resolve({ sessions: [], total: 1 });
+    await first;
+    // Drain the initial request and start its queued refresh before queuing another.
+    await vi.waitFor(() => expect(calls).toHaveBeenCalledTimes(2));
+    expect(owner.read(TASK_ID, calls, { refresh: true })).toBe(trailing);
+    refreshed.resolve({ sessions: [], total: 2 });
+    await rejection;
+    expect(calls).toHaveBeenCalledTimes(3);
+    release();
+  });
 
   it("keeps caches isolated by store", () => {
     const firstStore = storeFor("account-a");

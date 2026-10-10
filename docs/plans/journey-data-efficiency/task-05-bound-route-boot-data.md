@@ -120,3 +120,7 @@ Measurements are in [`implementation-evidence.md`](implementation-evidence.md) a
 ### Review correction
 
 All-workflow cold boot seeds exactly the first displayed board. Existing complete workflow coverage skips known-empty candidates, while saved column preferences and the phone picker retain their semantics. Compact sibling boot rows preserve runtime status without rich session metadata. New boot and desktop/phone browser regressions cover these corrections. Historical boot measurements above remain unchanged. See the [review correction results](implementation-evidence.md#review-remediation).
+
+### PR fixup
+
+PR #4404 fixup restricts task entity expansion to normalized board, task-page, detail, and sidebar fields. Saved selected-task views, drafts, and ordinary task identities retain their ID fields. The boot parser regression passed with positive controls for normalized collections. See [fixup results](implementation-evidence.md#pr-4404-fixup).
