@@ -311,6 +311,45 @@ user prompt newer than the target that then resolves as the last prompt, re-targ
 so the scroll and the single consumption stay bound to the activated prompt and the pin
 follows the window afterwards.
 
+### Retaining start alignment through automatic prepend
+
+`AC-UI-PINNED-PROMPT-AVAILABILITY-001.2` includes pagination commits that follow
+the around-window landing. Consuming the panel's pending target, completing its
+250 ms reassertion, or receiving native `scrollend` does not relinquish the
+reader's selected start position. An early scroll can be clamped while the around
+window is small; a subsequent older-page commit must use the selected row's
+current own scroll margin when the larger scroll range makes that position reachable.
+
+`components/task/chat/message-list-native-scroll.ts` retains one instance-local
+start-aligned message id alongside the existing reader-position claim. The native
+scroll-management composition shares that reference with `useScrollToMessage`
+and `useScrollPositionOnPrepend`; no store, public handle, or history owner is added.
+A successful explicit start request establishes the id. Each automatic prepend
+with that row present re-lands it at viewport top plus its computed scroll margin,
+independently of the short programmatic motion lock. It captures the resulting
+ordinary prepend baseline afterwards. Browser range clamping remains valid; there
+is no timer loop or additional history request to obtain more scroll range.
+
+The existing real reader-intent callback clears the id before claiming the new
+reader position, including the existing wheel, keyboard, touch, and scrollbar
+intent routes. Keep the programmatic position claim separate so establishing a
+jump does not clear its own target. Explicit cancellation, a superseding request
+(even an absent or center-aligned target), scroll-to-latest, and the existing
+session/placement boundary clear it too. A remounted list starts empty, and lists
+share no reference. Reset before a new session's layout work can apply an old id.
+Existing motion cancellation and reduced-motion behavior remain authoritative.
+
+Without an active rendered target, retain the existing motion-lock and ordinary
+visual-anchor/height-delta prepend paths. A plain programmatic `scroll` event is
+not reader intent. Do not extend the programmatic guard, repeat the panel's
+around request, change target consumption, or change pagination cursors/window
+composition (`AC-UI-PINNED-PROMPT-AVAILABILITY-001.7`). Desktop's two controls and
+phone's existing compact status control share this correction; the phone still
+mounts no anchored bar (`AC-UI-PINNED-PROMPT-AVAILABILITY-001.8`).
+
+The bounded correction is delivered by
+[Preserve prompt jump alignment](../../../plans/preserve-prompt-jump-alignment/plan.md).
+
 ## Failure and recovery
 
 - Prompt projection read fails, is still loading, or is unavailable: resolution falls back
