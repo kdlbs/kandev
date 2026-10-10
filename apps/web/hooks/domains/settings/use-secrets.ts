@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listSecrets } from "@/lib/api/domains/secrets-api";
 import { useAppStore } from "@/components/state-provider";
 import type { SecretListItem, SecretScope } from "@/lib/types/http-secrets";
@@ -28,6 +28,7 @@ export function useSecrets(
   const [scopedLoading, setScopedLoading] = useState(false);
   const scopedKey = `${scope}:${workspaceId ?? ""}`;
   const [loadedScopedKey, setLoadedScopedKey] = useState(scopedKey);
+  const scopedMutationGeneration = useRef(0);
 
   useEffect(() => {
     if (scope !== "global" || globalLoaded || globalLoading) return;
@@ -53,10 +54,13 @@ export function useSecrets(
       return () => controller.abort();
     }
 
+    const mutationGeneration = scopedMutationGeneration.current;
     listSecrets({ scope, workspaceId, cache: "no-store", init: { signal: controller.signal } })
       .then((response) => {
         if (cancelled) return;
-        setScopedItems(response ?? []);
+        if (scopedMutationGeneration.current === mutationGeneration) {
+          setScopedItems(response ?? []);
+        }
         setScopedLoaded(true);
       })
       .catch(() => {
@@ -89,6 +93,7 @@ export function useSecrets(
       addGlobalSecret(item);
       return;
     }
+    scopedMutationGeneration.current += 1;
     setScopedItems((current) => [...current, item]);
   };
 
@@ -97,6 +102,7 @@ export function useSecrets(
       updateGlobalSecret(item);
       return;
     }
+    scopedMutationGeneration.current += 1;
     setScopedItems((current) =>
       current.map((value) => (value.id === item.id ? { ...value, ...item } : value)),
     );
@@ -107,6 +113,7 @@ export function useSecrets(
       removeGlobalSecret(id);
       return;
     }
+    scopedMutationGeneration.current += 1;
     setScopedItems((current) => current.filter((item) => item.id !== id));
   };
 
