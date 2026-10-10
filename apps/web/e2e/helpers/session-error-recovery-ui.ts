@@ -66,6 +66,7 @@ export function runtimeCleanupFailureScenario() {
       },
     });
     let rejectRetry: (() => void) | undefined;
+    let retryCount = 0;
     await testPage.routeWebSocket(/\/ws$/, (socket) => {
       const server = socket.connectToServer();
       socket.onMessage((data) => {
@@ -77,6 +78,8 @@ export function runtimeCleanupFailureScenario() {
             frame.action === "session.recover" &&
             frame.payload?.session_id === sessionId
           ) {
+            retryCount += 1;
+            const inspectionBusy = retryCount > 1;
             rejectRetry = () =>
               socket.send(
                 JSON.stringify({
@@ -84,15 +87,17 @@ export function runtimeCleanupFailureScenario() {
                   type: "error",
                   action: frame.action,
                   payload: {
-                    code: "INTERNAL_ERROR",
-                    message,
-                    details: {
-                      kind: "runtime_cleanup_failed",
-                      session_id: sessionId,
-                      error_stamp: stamp,
-                      attempt_id: "resume-2",
-                      causes,
-                    },
+                    code: inspectionBusy ? "CONFLICT" : "INTERNAL_ERROR",
+                    message: inspectionBusy ? "Recovery inspection is busy" : message,
+                    details: inspectionBusy
+                      ? { kind: "recovery_inspection_busy" }
+                      : {
+                          kind: "runtime_cleanup_failed",
+                          session_id: sessionId,
+                          error_stamp: stamp,
+                          attempt_id: "resume-2",
+                          causes,
+                        },
                   },
                 }),
               );
@@ -126,6 +131,21 @@ export function runtimeCleanupFailureScenario() {
     await card.getByText("Technical details", { exact: true }).click();
     await expect(card.locator("pre")).toContainText("runtime_cleanup_failed");
     await expect(card).not.toContainText("already has an agent running");
+    rejectRetry = undefined;
+    await resume.click();
+    await expect(resume).toBeDisabled();
+    await expect.poll(() => Boolean(rejectRetry)).toBe(true);
+    rejectRetry!();
+    await expect(resume).toBeEnabled();
+    await expect(card).toContainText(
+      "This workspace is still being checked. Try resuming the session again.",
+    );
+    await expect(card.locator("pre")).toContainText("runtime_cleanup_failed");
+    await waitForFiniteAnimations(card);
+    await prCapture.screenshot("runtime-cleanup-inspection", {
+      caption:
+        "Current inspection contention takes precedence while cleanup evidence remains available.",
+    });
     await testPage.reload();
     await expect(card.getByRole("heading", { name: "Resume could not finish" })).toBeVisible();
     await expect(card).toHaveCount(1);

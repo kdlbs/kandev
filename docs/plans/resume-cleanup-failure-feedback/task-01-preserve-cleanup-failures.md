@@ -79,6 +79,7 @@ coverage using the existing fixture; no database dialect query changes are inten
 - `apps/backend/internal/orchestrator/task_operations.go`
 - `apps/backend/internal/orchestrator/session_cleanup_failure.go` (new)
 - `apps/backend/internal/orchestrator/session_cleanup_failure_test.go` (new)
+- `apps/backend/internal/orchestrator/session_launch_test.go` (continuation cleanup fixture)
 - `apps/backend/internal/orchestrator/handlers/handlers.go`
 - `apps/backend/internal/orchestrator/handlers/session_cleanup_failure.go` (new)
 - `apps/backend/internal/orchestrator/handlers/session_cleanup_failure_test.go` (new)
@@ -123,3 +124,11 @@ Implemented and verified on October 10.
   nonterminal fallback cases. Existing retained-cleanup lifecycle checks passed.
 - Changed Go packages: pinned golangci-lint v2.9.0, zero issues. The first cold
   five-minute package load timed out; the longer run completed successfully.
+- CI exposed a continuation test fake that returned a deletion error when no
+  runtime existed. Cleanup now treats that absence as success, matching the
+  lifecycle manager's idempotent contract. The existing generation-commit
+  admission test reproduced the failure and passed after this fixture correction
+  with `go test -race ./internal/orchestrator -run '^TestRecoverSession_ContextContinuationCommitsBeforePromptAdmission$' -count=1`.
+- The complete orchestrator package then passed
+  `go test -race -json ./internal/orchestrator -count=1` in an isolated process
+  after the browser suites, with no failed tests.

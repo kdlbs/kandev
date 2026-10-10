@@ -415,6 +415,9 @@ composer region; its chronological transcript entry retains history without
 duplicate mutation controls. Request-local failures must preserve the same
 typed cause rather than reducing it to an uncorrelated plain string. Independent
 task-owned errors keep the existing shared strip, dialog, and phone drawer.
+An owned `inspection_busy` notice from the current manual or automatic retry
+takes precedence in the summary over retained cleanup guidance. The cleanup
+cause remains in Details; unrelated informational notices do not replace it.
 This session-instance cleanup failure does not acquire task scope merely because
 its runtime shares a Kubernetes Pod.
 

@@ -389,10 +389,11 @@ function withAutomaticNotice(
   actions: SessionRecoveryActions,
 ) {
   const notice = actions.recoveryNotice ?? automatic?.notice;
+  const noticeKind = actions.recoveryNotice ? actions.recoveryNoticeKind : automatic?.noticeKind;
   return notice &&
     !actions.recoveryError &&
     !copy.hasTypedSelectionCause &&
-    !copy.hasTypedCleanupCause
+    (!copy.hasTypedCleanupCause || noticeKind === "inspection_busy")
     ? { ...copy, summary: notice }
     : copy;
 }

@@ -116,6 +116,7 @@ Update this command list if implementation adds a distinct test boundary.
 - `apps/web/components/task/chat/session-bootstrap-recovery-model.ts` and its tests
 - `apps/web/components/task/chat/session-recovery-model.ts` and its tests
 - `apps/web/components/task/chat/session-recovery-card.tsx` and existing safe-details tests
+- `apps/web/components/task/chat/session-recovery-card-inspection-retry.test.tsx`
 - `apps/web/components/task/chat/session-bootstrap-recovery-content.tsx`
 - `apps/web/components/task/chat/messages/action-message-recovery-history.tsx` and cleanup history regression
 - `apps/web/src/locales/{en,pt-pt,zh-cn,zh-hk,zh-tw,ja,ko}/task.json` and generated pseudo catalog
@@ -154,19 +155,28 @@ Implemented and verified on October 10.
 - Manual and automatic failures preserve the host-owned cleanup cause. The
   existing recovery card uses localized title/body copy in seven shipped
   languages and generated pseudo, safe details and matching-stamp history.
+- Current manual and automatic `inspection_busy` notices take precedence over
+  retained cleanup guidance while the cleanup code remains in Details. Ordinary
+  informational notices preserve the cleanup fallback. Hook regressions and the
+  actual desktop retry path reproduced the hidden notice before this correction.
 - Cancelled and completed sessions can present a current cleanup failure
   without changing their lifecycle state. Matching resolution removes the
   active controls while retaining localized history and the composer draft.
 - A baseline failure reproduced at `19237eb23` exposed a lost Files-to-Chat
   link when workspace readiness superseded a restore attempt. The matching
   automatic session owner now remains reachable; unrelated sessions and
-  restoration attempts keep their independent controls. The E2E fixture is
-  unchanged.
+  restoration attempts keep their independent controls. That automatic-recovery
+  E2E fixture is unchanged.
 - Model, service, hook, history and owner-correlation unit regressions passed,
   including automatic resume with both successful and failed workspace restore.
   Typecheck, changed-file ESLint, localization check and new-copy ratchet passed.
+- Full frontend CI exposed an older recovery-card test mock that omitted the
+  new cleanup parser export. The three failures reproduced locally; changing
+  that mock to preserve real service exports passed all four inspection-retry
+  cases and eight presentation-model cases together.
 - Final guarded desktop and phone suites each passed all ten scenarios with
-  zero retries. Cleanup coverage includes pending disablement, failed retry,
+  zero retries. Cleanup coverage includes pending disablement, failed cleanup
+  retry, a subsequent inspection-contention notice with retained cleanup details,
   collapsed/expanded details, reload and retained history. The successful
   resolution fixture uses the authoritative matching error stamp, not a live
   Kubernetes repair. Existing cases cover clipboard safety and draft retention.
