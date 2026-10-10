@@ -7,7 +7,7 @@ import { GridSpinner } from "@/components/grid-spinner";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { TurnChangeSetSummary } from "@/lib/types/turn-changes";
 import type { HistoricalTurnDiffTarget } from "@/lib/state/diff-target-types";
-import { TASK_DESCRIPTION_SYNTHETIC_ID, type RenderItem } from "@/hooks/use-processed-messages";
+import type { RenderItem } from "@/hooks/use-processed-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { ActivityChip } from "@/app/coordinator/copilot/activity-chip";
 import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-message";
