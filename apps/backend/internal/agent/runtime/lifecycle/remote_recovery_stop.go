@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
@@ -170,13 +171,13 @@ func (m *Manager) stopPersistedPendingRemoteOwner(
 	var err error
 	switch entry.record.Runtime {
 	case agentruntime.RuntimeSSH:
-		if err = m.validatePendingRemoteStopOwner(ctx, entry); err == nil {
-			handled, err = m.stopPersistedSSHExecution(ctx, entry.record.AgentExecutionID, reason, force)
-		}
+		handled, err = m.stopPersistedRemoteOwnerForRuntime(
+			ctx, entry, reason, force, m.stopPersistedSSHExecution, m.stopPersistedSSHRecord,
+		)
 	case agentruntime.RuntimeKubernetes:
-		if err = m.validatePendingRemoteStopOwner(ctx, entry); err == nil {
-			handled, err = m.stopPersistedKubernetesExecution(ctx, entry.record.AgentExecutionID, reason, force)
-		}
+		handled, err = m.stopPersistedRemoteOwnerForRuntime(
+			ctx, entry, reason, force, m.stopPersistedKubernetesExecution, m.stopPersistedKubernetesRecord,
+		)
 	default:
 		return false, nil
 	}
@@ -186,6 +187,66 @@ func (m *Manager) stopPersistedPendingRemoteOwner(
 	entry.stopRuntimeCompleted = true
 	m.deleteExecutorRunning(ctx, entry.record.SessionID, entry.record.AgentExecutionID)
 	return true, nil
+}
+
+func (m *Manager) stopPersistedRemoteOwnerForRuntime(
+	ctx context.Context,
+	entry *remoteRecoveryRetry,
+	reason string,
+	force bool,
+	stopExecution func(context.Context, string, string, bool) (bool, error),
+	stopRecord func(context.Context, *models.ExecutorRunning, string, bool) (bool, error),
+) (bool, error) {
+	err := m.validatePendingRemoteStopOwner(ctx, entry)
+	if err == nil {
+		return stopExecution(ctx, entry.record.AgentExecutionID, reason, force)
+	}
+	if reason != StopReasonTaskDeleted || !errors.Is(err, models.ErrTaskSessionNotFound) {
+		return false, err
+	}
+	persisted, loadErr := m.loadPersistedRemoteStopOwner(ctx, entry)
+	if loadErr != nil {
+		return true, loadErr
+	}
+	return stopRecord(ctx, persisted, reason, force)
+}
+
+func (m *Manager) loadPersistedRemoteStopOwner(
+	ctx context.Context,
+	entry *remoteRecoveryRetry,
+) (*models.ExecutorRunning, error) {
+	store, ok := m.runningWriter.(persistedSSHCleanupStore)
+	if !ok {
+		return nil, errors.New("persisted remote runtime inventory is unavailable")
+	}
+	rows, err := store.ListExecutorsRunning(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load persisted remote runtime inventory: %w", err)
+	}
+	var found *models.ExecutorRunning
+	for _, row := range rows {
+		if row == nil || row.AgentExecutionID != entry.record.AgentExecutionID {
+			continue
+		}
+		if found != nil {
+			return nil, fmt.Errorf("multiple persisted runtime rows match execution %q", entry.record.AgentExecutionID)
+		}
+		found = row
+	}
+	if !samePersistedRemoteStopOwner(entry.record, found) {
+		return nil, fmt.Errorf("persisted remote runtime owner changed before task-deletion stop: %w", errRemoteRecoveryFenced)
+	}
+	return cloneRemoteRecoveryRecord(found), nil
+}
+
+func samePersistedRemoteStopOwner(expected, current *models.ExecutorRunning) bool {
+	return expected != nil && current != nil &&
+		expected.AgentExecutionID == current.AgentExecutionID &&
+		expected.TaskID == current.TaskID &&
+		expected.SessionID == current.SessionID &&
+		expected.ExecutorID == current.ExecutorID &&
+		expected.Runtime == current.Runtime &&
+		reflect.DeepEqual(expected.Metadata, current.Metadata)
 }
 
 func (m *Manager) settlePendingRemoteStop(

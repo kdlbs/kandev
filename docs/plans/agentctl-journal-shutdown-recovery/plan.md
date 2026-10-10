@@ -21,11 +21,10 @@ legacy_specs: []
 
 ## Overview
 
-Prevent one instance shutdown from crashing the shared agentctl process.
-Recover retained delivery evidence after execution removal, then provide useful recovery controls on desktop and phone.
-Platform owns this repair because it owns the journal lifetime and session recovery contract.
-Work proceeds sequentially: journal safety, ACK/capacity repair, recovery authority, then UI and end-to-end evidence.
-Tasks 01 through 04 record the prior implementation. The user rejected its manual interruption form and revised retention and remote lifetime requirements. Tasks 05 and 08 are complete; Task 07's retention implementation and checks are complete. Task 06 covers final integration and delivery and is in progress. Earlier validation does not cover the revised behavior.
+Prevent one instance shutdown from crashing the shared agentctl process, then restore eligible retained agents silently after a backend restart.
+Platform owns this repair because it owns journal lifetime, runtime ownership, and session recovery.
+The first proposal's manual continuation controls, batch UI, and fixed-quota test flow are historical and superseded by the restart-recovery revision below.
+Tasks 01 through 04 record that earlier implementation. The user rejected its manual interruption form and revised retention and remote lifetime requirements. Tasks 05 and 08 are complete; Task 07's retention implementation and checks are complete. Task 06 covers final integration and delivery and is in progress. Earlier validation does not cover the revised behavior.
 
 On 2026-10-10 the user clarified executor lifetime and extended disconnected operation.
 Local/worktree agents stop with Kandev by default; local survival remains an explicit opt-in.
@@ -130,6 +129,8 @@ Task 04 is numbered after the existing files but executes between Tasks 01 and 0
 - Deployment, production publication, or changes to the user's live database. The user separately authorized commit, push, and PR creation.
 
 ## Technical approach
+
+This section records the historical first proposal. Its manual resume, batch recovery, and fixed-quota behavior do not describe the revised implementation below.
 
 Task 01 adds closed-state handling to every exported journal database operation and coordinates instance stream shutdown.
 Task 04 repairs ACK ownership and quiet-stream catch-up, then adds pressure recovery and liveness safeguards.
@@ -251,7 +252,7 @@ Show paused only when flow is actually paused. Otherwise show cancellation pendi
 Copy is illustrative and localized during implementation. Use the same accessible controls and scroll owner as UI-01.
 This view covers delivery criterion 001.4.
 
-## Tests
+## Historical tests proposal (superseded)
 
 | Acceptance criteria | Proposed regression evidence |
 | --- | --- |
@@ -262,7 +263,7 @@ This view covers delivery criterion 001.4.
 | Delivery 006.10 | Batch partial failure, retry/reload idempotency, same native identity, queue ordering, and accepted continuation per eligible item |
 | Delivery 001.4, 005.4-005.5 | Same-stream client replacement, quiet ACK catch-up, quota-pressure control, projected-but-unacknowledged recovery, and live-harness cleanup refusal |
 
-## E2E tests
+## Historical E2E proposal (superseded)
 
 Task 03 extends `tests/layout/agent-runtime-replacement.spec.ts` and its mobile counterpart.
 The flow kills an isolated child, waits for replacement, clicks retry, observes a typed outcome, and checks dispatch count.
@@ -278,7 +279,7 @@ Existing durable stream-recovery suites remain regression inputs.
 
 The user requires silent recovery after restart, without a new prompt or a resume form.
 Platform owns this revision because it changes durable runtime recovery, not only presentation.
-The spec and design revision supersede the original manual continuation and batch UI sections below.
+The spec and design revision supersede the original manual continuation and batch UI sections above, including their fixed-quota E2E proposal.
 Historical test results remain evidence for the prior implementation only.
 
 Source evidence: the global component selects `uncertain`, `reconnecting`, and `continued` metadata.

@@ -1547,14 +1547,16 @@ func (e *Executor) resumeSession(
 	if startAgent {
 		if options.StartAgentSynchronously && options.RequiredNativeConversationID == "" {
 			if err := e.agentManager.StartAgentProcess(ctx, resp.AgentExecutionID); err != nil {
-				e.cleanupUnstartedExecutionAfterPersistError(ctx, session.ID, resp.AgentExecutionID, err)
+				if e.claimForcedExecutionCleanup(session.ID, resp.AgentExecutionID) {
+					e.stopUnstartedExecution(ctx, session.ID, resp.AgentExecutionID)
+				}
 				if rollbackErr := e.rollbackResumeStateAfterFailure(
 					ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
 					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
 				); rollbackErr != nil {
 					err = errors.Join(err, rollbackErr)
 				}
-				return nil, err
+				return execution, err
 			}
 			if terminalState, terminal := e.stopStartedExecutionIfSessionTerminal(
 				ctx, session.ID, resp.AgentExecutionID, "terminal continuation start race",

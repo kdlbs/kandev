@@ -195,6 +195,51 @@ func (sm *StreamManager) ConnectAll(execution *AgentExecution, ready chan<- stru
 	sm.ConnectWorkspaceStream(execution, nil)
 }
 
+// ConnectAllAndWait waits until the updates stream connection attempt has
+// finished and verifies the stream is attached before callers admit prompts.
+// The stream itself keeps the execution and manager lifetime, not this waiter's
+// shorter recovery-attempt context.
+func (sm *StreamManager) ConnectAllAndWait(ctx context.Context, execution *AgentExecution) error {
+	if sm == nil || execution == nil {
+		return errors.New("stream manager or execution is unavailable")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if client, releaseClient := execution.AcquireAgentCtlClient(); client != nil {
+		connected := client.HasAgentStream()
+		releaseClient()
+		if connected {
+			return nil
+		}
+	} else {
+		return errors.New("agentctl client is unavailable")
+	}
+
+	ready := make(chan struct{})
+	sm.ConnectAll(execution, ready)
+	select {
+	case <-ready:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-sm.waitCh:
+		return errors.New("stream manager stopped before updates stream connected")
+	case <-sm.stopCh:
+		return errors.New("stream manager stopped before updates stream connected")
+	}
+
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		return errors.New("agentctl client became unavailable before updates stream connected")
+	}
+	connected := client.HasAgentStream()
+	releaseClient()
+	if !connected {
+		return errors.New("agent updates stream did not connect")
+	}
+	return nil
+}
+
 func (sm *StreamManager) connectUpdatesStreamAsync(execution *AgentExecution, ready chan<- struct{}) {
 	if !sm.start(func() {
 		sm.connectUpdatesStream(execution, ready)

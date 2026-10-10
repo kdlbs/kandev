@@ -258,6 +258,98 @@ func TestPluginExecutorEndpointBootstrapHandshake(t *testing.T) {
 	}
 }
 
+func TestEndpointUpdatesDialCanBeCancelledAndReconnected(t *testing.T) {
+	dialStarted := make(chan struct{})
+	requestCanceled := make(chan struct{})
+	upgraded := make(chan struct{}, 1)
+	mcpContextErr := make(chan error, 1)
+	var requests atomic.Int32
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	_, dependencies, endpoint := newPluginExecutorTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			close(dialStarted)
+			<-r.Context().Done()
+			close(requestCanceled)
+			return
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		upgraded <- struct{}{}
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"id":"live-context","type":"request","action":"mcp.context","payload":{}}`))
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				_ = conn.Close()
+				return
+			}
+		}
+	}))
+	now := time.Now()
+	resolver := func(context.Context) (*ConnectionLease, error) {
+		return &ConnectionLease{
+			BaseURL:    endpoint,
+			ExpiresAt:  now.Add(2 * time.Minute),
+			Generation: "g1",
+		}, nil
+	}
+	client, err := newEndpointClient(context.Background(), resolver, newTestLogger(), dependencies, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("newEndpointClient: %v", err)
+	}
+	t.Cleanup(client.Close)
+	mcpHandler := streamContextMCPHandler{observed: mcpContextErr}
+
+	streamResult := make(chan error, 1)
+	go func() {
+		streamResult <- client.StreamUpdates(context.Background(), func(AgentEvent) {}, mcpHandler, nil)
+	}()
+	select {
+	case <-dialStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("endpoint did not receive the pending updates-stream upgrade")
+	}
+
+	client.CloseUpdatesStream()
+	select {
+	case <-requestCanceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("CloseUpdatesStream did not cancel the endpoint HTTP upgrade")
+	}
+	select {
+	case err := <-streamResult:
+		if err == nil {
+			t.Fatal("pending endpoint StreamUpdates succeeded after close")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pending endpoint updates dial did not stop after close")
+	}
+	if client.HasAgentStream() {
+		t.Fatal("canceled endpoint dial registered a stale stream")
+	}
+
+	if err := client.StreamUpdates(context.Background(), func(AgentEvent) {}, mcpHandler, nil); err != nil {
+		t.Fatalf("endpoint StreamUpdates should reconnect: %v", err)
+	}
+	select {
+	case <-upgraded:
+	case <-time.After(2 * time.Second):
+		t.Fatal("fresh endpoint updates dial did not upgrade")
+	}
+	if !client.HasAgentStream() {
+		t.Fatal("fresh endpoint updates stream was not registered")
+	}
+	select {
+	case err := <-mcpContextErr:
+		if err != nil {
+			t.Fatalf("MCP handler received canceled endpoint stream context after reconnect: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("fresh endpoint stream did not dispatch MCP request")
+	}
+	client.CloseUpdatesStream()
+}
+
 func TestPluginExecutorLeasedControlHandshakeAndInstanceCreation(t *testing.T) {
 	type observedCall struct {
 		path          string

@@ -32,14 +32,18 @@ Own PR delivery, conflict resolutions, CI remediation, screenshots, and package 
 Use the commit, push, PR, and PR-fixup skills for their respective operations.
 Do not merge the PR or mutate the user's live sessions.
 
-## Current evidence
+## Historical evidence for previously pushed revisions
+
+The following snapshots concern earlier pushed heads and are retained as remediation history. They
+do not describe the current local source or a green PR. The later terminal waiter result and
+subsequent local gates are recorded under Results.
 
 The revised implementation passed normal commit hooks before rebasing onto current main.
 The rebase reconciled upstream closed-journal transaction helpers with physical-capacity reservations and retained both sets of shutdown tests.
 The frontend recovery-service conflict preserves upstream native-resume behavior and the revised recovery tests.
 The six-package backend race gate, six desktop browser cases, and both SSH scenarios passed before the second base advance. The second rebase completed onto `43f55a6aad38c7f53c4b7eb56682016639f74405` at `1135b58f77913035aebf2b35fefbf3fee2d595ab`. It preserves main's same-generation acknowledgment for already interrupted-unknown submissions, idle-dispatch guard, and requirement identities alongside physical-capacity accounting, exact ownership, and payload retention. Final post-rebase browser gates passed four phone, three focused desktop, and two real SSH cases with retries disabled. The merged frontend recovery contracts passed 358 tests and type checking. Journal and process package race suites, focused lifecycle adoption/native Resume checks, and the SQLite/PostgreSQL silent-restore identity matrix passed. Commit `78065a90aa8f25aaaed4486225ee2b689b636d53` passed normal hooks and was pushed with an explicit lease; the local branch, remote branch, and PR head match. The catalog validated 370 decisions and 1,520 specifications, and full specification lint passed.
 
-Current-head CI run `38066667357` failed the `PR documentation coverage` check. The trusted validator at base `43f55a6aad38c7f53c4b7eb56682016639f74405` identified missing plan links for requirements 002 and 004 and a missing Task 08 design reference for requirement 002. The plan and Task 08 now reference the existing durable-agent-delivery design and requirements. The same trusted validator's local preflight reports `covered` with no errors; the updated exact-head GitHub result remains pending.
+The then-current CI run `38066667357` failed the `PR documentation coverage` check. The trusted validator at base `43f55a6aad38c7f53c4b7eb56682016639f74405` identified missing plan links for requirements 002 and 004 and a missing Task 08 design reference for requirement 002. The plan and Task 08 now reference the existing durable-agent-delivery design and requirements. The same trusted validator's local preflight reports `covered` with no errors. The later bounded waiter result below supersedes the pending status recorded at that time.
 
 The first remote snapshot listed these failed jobs in E2E run `37988372921`:
 
@@ -99,3 +103,69 @@ The primary coordinator reviewed that fixture change. Current-head CI and final 
 The second base review found native Resume launching current reattachment asynchronously while acknowledgement trusted an initialized flag retained from inventory. The regression reproduced a startup failure being swallowed by recovery. Native Resume now waits for current startup and authenticated adoption before acknowledgment. The failed-start regression preserves the open block, interrupted submission, and payload with zero acknowledgment calls. Focused successful Resume and context-continuation controls passed with race instrumentation (4.000 seconds); changed-package lint reported zero issues. The coordinator reviewed the two-file correction.
 
 The coordinator reviewed fresh desktop and phone restoration captures. They show the original conversation and normal composer without the rejected restart-resume form. The interrupted turn remains historical. The process native-resume fixture required a logger after integration with pressure-state logging; only test setup changed. The journal terminal-state fixture now distinguishes malformed retired active work (still unresolved) from acknowledged retired interrupted-unknown history. The full process race gate passed after the fixture correction. Normal commit hooks and remote delivery remain pending.
+
+The bounded waiter `24039` completed after 43m54s for pushed head
+`78065a90aa8f25aaaed4486225ee2b689b636d53`: 44 checks passed, 11 skipped, 1 neutral, 14 failed,
+and none pending. This is a terminal red result, not a green result. The failed checks were:
+`PR documentation coverage`; Backend Postgres (`38066670282/114255674435`); Backend Tests (2/2)
+(`38066670282/114255674378`); aggregate Run Backend Tests (`38066670282/114260119276`); E2E
+Containers Shards 4/6, 5/6, and 6/6 (`38066670301/114256734487`, `/114256734536`, and
+`/114256734610`); E2E browser Shards 2/14, 4/14, 6/14, 7/14, and 12/14
+(`38066670301/114256734603`, `/114256734656`, `/114256734577`, `/114256734693`, and
+`/114256734688`); aggregate E2E Tests Passed (`38066670301/114264505519`); and Publish PR
+documentation coverage status (`38066667357/114255591383`). The two aggregate checks are not
+additional failing leaves. The local documentation correction is committed as `d36222a8b3d00ee4d6c7d476c11742d25b5b94eb` but remains unpushed; its trusted-base preflight was run against `43f55a6aad38c7f53c4b7eb56682016639f74405`, so it must be refreshed against current main before delivery.
+
+The browser leaves currently classify as follows: Shards 2 and 6 timed out waiting for the read-only
+recovery notice; Shards 7 and 12 rejected Quick Chat `session.launch` with
+`unknown_prompt_outcome`; Shards 4 and 12 timed out waiting for the rejected Auggie provider load to
+settle before retry. Container Shard 5 timed out waiting for `Sibling survived restart` while the
+task pod remained Running and its PVC stayed Bound; artifact diagnostics contain no post-restart
+WS/API timeline. Container Shard 6 failed its next-test fixture check because prior SSH runtime rows
+remained after the dead-agentctl restart case. Container Shard 4 has a reproduced restart-then-delete
+cleanup failure with its remote process still live; the SSH owner is tracing the retained cleanup
+row. These leaf failures remain under investigation.
+
+The storage cancellation failure was reproduced with a real SQLite writer wait; the minimal fix
+returns the canceled context error when `BeginTxx` fails after cancellation, while preserving
+unrelated database errors. The focused SQLite serialization/cancellation race tests passed
+(package 6.409s). A real PostgreSQL run passed replacement rollback plus serialization for a
+committed predecessor and a canceled waiter (package 3.166s; log
+`/tmp/kandev-task05-replacement-postgres-actual.log`). These are local focused gates, not a claim
+that hosted CI passed.
+
+The executor startup-cleanup regression was reproduced against the pushed head: cleanup made no
+exact-owner claim, changed the failed state to cancelled, and duplicated a stop already owned by a
+different cancellation. The fix claims cleanup for the exact execution owner before stopping it.
+These three focused executor regressions passed with race instrumentation, along with
+`TestManagedGoCacheRecoveryFlows` in normal and race runs. The exact executor command was
+`GOMAXPROCS=2 GOGC=50 GOCACHE=/tmp/kandev-task05-gocache go test -race -p=1 -trimpath ./internal/orchestrator/executor -run '^TestResumeSessionSynchronousStartFailure' -count=1`;
+the backend app command was
+`GOMAXPROCS=2 GOGC=50 GOCACHE=/tmp/kandev-task05-gocache go test -race -p=1 -trimpath ./internal/backendapp -run '^TestManagedGoCacheRecoveryFlows$' -count=1`.
+Current-head PR review state and required CI remain unresolved. Current main advanced to
+`3fb026365239bbc893fa4a5272d926640c7ef1f9`; the pushed branch is conflicting with it and requires
+semantic reconciliation after worker fixes are frozen.
+
+### Focused local recovery gates before the next rebase
+
+On the shared local source snapshot, the lifecycle race selection passed in 1.098 seconds and the
+orchestrator selection passed in 1.516 seconds. The selection covered
+`TestRemoteRecoveryRetriesAfterPartialReplayTimeout`, bounded recovered-availability publication
+after attempt cancellation and manager shutdown, retained persisted turn/message identity after a
+retryable recovery guard, non-retryable guard visibility, and marked availability owner,
+generation, paused-queue, and running-prompt controls. It also exercised the wait for an authenticated
+remote updates stream before releasing the recovery guard.
+
+The exact command was:
+
+```bash
+GOMAXPROCS=2 GOGC=50 GOCACHE=/tmp/kandev-task05-gocache go test -race -p=1 -trimpath \
+  ./internal/agent/runtime/lifecycle ./internal/orchestrator \
+  -run '^(TestRemoteRecoveryRetriesAfterPartialReplayTimeout|TestRecoveredAvailabilityPublicationSurvivesAttemptCancellation|TestRecoveredAvailabilityPublicationStopsWithManager|TestQueueUserPrompt_RetryableRecoveryGuardRetainsPersistedTurnAndMessage|TestPromptTask_NonRetryableRecoveryGuardRemainsVisible|TestRecoveredAvailabilityBootReadyDoesNotDowngradeRunningPrompt|TestRecoveredAvailabilityBootReadyRequiresCurrentOwnerAndGeneration|TestRecoveredAvailabilityBootReadyPreservesPausedQueue|TestRecoveredAvailabilityBootReadyRejectsTaggedWrongAttempt)$' \
+  -count=1
+```
+
+Changed-scope Go lint passed with zero issues using
+`golangci-lint run ./internal/agent/runtime/lifecycle ./internal/orchestrator --new-from-rev=HEAD --timeout=5m`,
+and `git diff --check` passed. These are local focused results before the pending base reconciliation;
+they do not replace the required post-rebase lifecycle/browser checks or hosted current-head CI.

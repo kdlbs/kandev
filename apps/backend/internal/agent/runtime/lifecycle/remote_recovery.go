@@ -434,17 +434,59 @@ func (m *Manager) trackRecoveredRemoteExecution(
 		return err
 	}
 	execution.remoteInstanceLifecycleMu.Lock()
-	defer execution.remoteInstanceLifecycleMu.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			execution.remoteInstanceLifecycleMu.Unlock()
+		}
+	}()
 	if err := m.registerRecoveredRemoteExecution(entry, execution); err != nil {
 		return err
 	}
 	endInitSpan := m.initializeTrackedRemoteExecution(execution)
 	defer endInitSpan()
-	if err := m.replayAndPublishRecoveredRemoteExecution(ctx, entry, execution); err != nil {
+	availability, err := m.replayRecoveredRemoteExecution(ctx, entry, execution)
+	if err != nil {
 		return err
 	}
-	m.finishTrackedRemoteExecution(ctx, entry, execution)
+	if availability != nil {
+		if m.streamManager == nil {
+			m.removeFailedRemoteReplay(entry, execution)
+			return errors.New("stream manager is unavailable for recovered remote availability")
+		}
+		if err := m.streamManager.ConnectAllAndWait(ctx, execution); err != nil {
+			m.removeFailedRemoteReplay(entry, execution)
+			return fmt.Errorf("connect recovered remote updates stream: %w", err)
+		}
+	}
+	m.finishTrackedRemoteExecution(ctx, entry, execution, availability == nil)
+	execution.remoteInstanceLifecycleMu.Unlock()
+	locked = false
+	m.publishRecoveredAvailabilityAfterTransfer(ctx, execution, availability)
 	return nil
+}
+
+func (m *Manager) publishRecoveredAvailabilityAfterTransfer(
+	ctx context.Context,
+	execution *AgentExecution,
+	payload *AgentEventPayload,
+) {
+	if payload == nil || m.recoveredAvailabilityPublicationStopped() {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	publishCtx, cancel := m.remoteAttemptContext(context.WithoutCancel(ctx))
+	defer cancel()
+	if publishCtx.Err() != nil || m.recoveredAvailabilityPublicationStopped() {
+		return
+	}
+	m.publishRecoveredAvailabilityIfCurrent(publishCtx, execution, payload)
+}
+
+func (m *Manager) recoveredAvailabilityPublicationStopped() bool {
+	return m.shuttingDown.Load() || m.stopContext != nil && m.stopContext.Err() != nil
 }
 
 func (m *Manager) validateCurrentRemoteRecoveryOwner(ctx context.Context, entry *remoteRecoveryRetry) error {
@@ -497,26 +539,26 @@ func (m *Manager) initializeTrackedRemoteExecution(execution *AgentExecution) fu
 	return func() { initSpan.End() }
 }
 
-func (m *Manager) replayAndPublishRecoveredRemoteExecution(
+func (m *Manager) replayRecoveredRemoteExecution(
 	ctx context.Context,
 	entry *remoteRecoveryRetry,
 	execution *AgentExecution,
-) error {
+) (*AgentEventPayload, error) {
 	if execution.DeliveryMode != DurableDeliveryV1 {
 		m.publishRecoveredExecutionRunning(ctx, execution)
-		return nil
+		return nil, nil
 	}
 	if durableRecoveryHasPendingWork(execution) {
 		m.publishRecoveredExecutionRunning(ctx, execution)
 	}
 	if err := m.streamManager.ReplayRecoveredDelivery(ctx, execution); err != nil {
 		m.removeFailedRemoteReplay(entry, execution)
-		return fmt.Errorf("replay recovered remote delivery: %w", err)
+		return nil, fmt.Errorf("replay recovered remote delivery: %w", err)
 	}
-	if !durableRecoveryHasPendingWork(execution) && execution.Status != v1.AgentStatusReady {
-		m.publishRecoveredExecutionReady(ctx, execution)
+	if !durableRecoveryHasPendingWork(execution) {
+		return m.prepareRecoveredAvailability(ctx, execution)
 	}
-	return nil
+	return nil, nil
 }
 
 func (m *Manager) removeFailedRemoteReplay(entry *remoteRecoveryRetry, execution *AgentExecution) {
@@ -531,14 +573,19 @@ func (m *Manager) removeFailedRemoteReplay(entry *remoteRecoveryRetry, execution
 	}
 }
 
-func (m *Manager) finishTrackedRemoteExecution(ctx context.Context, entry *remoteRecoveryRetry, execution *AgentExecution) {
+func (m *Manager) finishTrackedRemoteExecution(
+	ctx context.Context,
+	entry *remoteRecoveryRetry,
+	execution *AgentExecution,
+	reconnectStreams bool,
+) {
 	if client, releaseClient := execution.AcquireAgentCtlClient(); client != nil {
 		m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
 		m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
 		releaseClient()
 	}
 	m.completeRemoteRecovery(entry)
-	if m.streamManager != nil {
+	if reconnectStreams && m.streamManager != nil {
 		go m.streamManager.ReconnectAll(execution)
 	}
 }

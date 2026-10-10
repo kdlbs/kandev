@@ -4519,6 +4519,9 @@ func (s *Service) attemptColdResume(
 		return false, attemptErr
 	}
 	if launchErr != nil {
+		if isRetryableSessionRecoveryGuardError(launchErr) {
+			return false, launchErr
+		}
 		if errors.Is(launchErr, executor.ErrExecutionAlreadyRunning) {
 			s.recoverAgentPromptStreamIfNeeded(resumeCtx, sessionID)
 			if readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID); readyErr != nil {

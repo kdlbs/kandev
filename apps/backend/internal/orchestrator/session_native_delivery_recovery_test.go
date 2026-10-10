@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 )
@@ -72,10 +74,27 @@ func TestNativeResumeStartFailureLeavesUnknownDeliveryUnacknowledged(t *testing.
 		return originalAcknowledge(ctx, sessionID)
 	}
 	manager.startAgentProcess = func(ctx context.Context, executionID string) error {
-		if err := manager.sessionUpdatingAgentManager.StartAgentProcess(ctx, executionID); err != nil {
-			return err
-		}
 		defer close(startupFinished)
+		repo := service.repo.(nativeResumeTestRepository)
+		running, err := repo.GetExecutorRunningBySessionID(ctx, submission.SessionID)
+		require.NoError(t, err)
+		running.AgentExecutionID = executionID
+		require.NoError(t, repo.UpsertExecutorRunning(ctx, running))
+		beforeStop, err := service.repo.GetTaskSession(ctx, submission.SessionID)
+		require.NoError(t, err)
+		require.Equal(t, models.TaskSessionStateStarting, beforeStop.State)
+		attemptID := executor.ResumeAttemptIDFromContext(ctx)
+		require.NotEmpty(t, attemptID, "native startup must carry the active resume attempt identity")
+		service.handleAgentStopped(ctx, watcher.AgentEventData{
+			TaskID:           "task1",
+			SessionID:        submission.SessionID,
+			AgentExecutionID: executionID,
+			AttemptID:        attemptID,
+		})
+		stopped, err := service.repo.GetTaskSession(ctx, submission.SessionID)
+		require.NoError(t, err)
+		require.Equal(t, models.TaskSessionStateStarting, stopped.State,
+			"the current native startup waiter owns failure classification")
 		return startupErr
 	}
 
@@ -88,6 +107,9 @@ func TestNativeResumeStartFailureLeavesUnknownDeliveryUnacknowledged(t *testing.
 	require.ErrorIs(t, err, startupErr)
 	require.Nil(t, response)
 	require.Zero(t, acknowledgeCalls.Load(), "native history must not be acknowledged after a failed start")
+	failedSession, err := service.repo.GetTaskSession(context.Background(), submission.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateFailed, failedSession.State)
 	require.NotNil(t, *launched)
 	require.Equal(t, "native-conversation", (*launched).ACPSessionID)
 
@@ -99,6 +121,259 @@ func TestNativeResumeStartFailureLeavesUnknownDeliveryUnacknowledged(t *testing.
 	recovery, err := repo.GetSessionRecoveryBlock(context.Background(), block.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.RecoveryBlockOpen, recovery.State)
+}
+
+func TestAgentStoppedAfterNativeResumeStartFailureDoesNotCompleteTurn(t *testing.T) {
+	service, manager, block, submission, launched, _ := nativeResumeFixture(
+		t, "unknown_prompt_outcome", false, false,
+	)
+	repo := service.repo.(nativeResumeTestRepository)
+	var attemptID string
+	var executionID string
+	var acknowledgeCalls atomic.Int32
+	originalAcknowledge := manager.acknowledge
+	manager.acknowledge = func(ctx context.Context, sessionID string) error {
+		acknowledgeCalls.Add(1)
+		return originalAcknowledge(ctx, sessionID)
+	}
+	turnRepo := service.repo.(*sqliterepo.Repository)
+	turns := &nativeResumeTurnServiceSpy{TurnService: &repoTurnService{repo: turnRepo}}
+	service.turnService = turns
+	manager.startAgentProcess = func(ctx context.Context, currentExecutionID string) error {
+		executionID = currentExecutionID
+		attemptID = executor.ResumeAttemptIDFromContext(ctx)
+		running, err := repo.GetExecutorRunningBySessionID(ctx, submission.SessionID)
+		require.NoError(t, err)
+		running.AgentExecutionID = currentExecutionID
+		require.NoError(t, repo.UpsertExecutorRunning(ctx, running))
+		now := time.Now().UTC()
+		require.NoError(t, turnRepo.CreateTurn(ctx, &models.Turn{
+			ID: "turn-native-resume-startup-failure", TaskID: "task1",
+			TaskSessionID: submission.SessionID, StartedAt: now,
+		}))
+		return errors.New("native agent did not become ready")
+	}
+
+	response, err := service.RecoverSession(context.Background(), "task1", submission.SessionID, "resume")
+	require.Error(t, err)
+	require.Nil(t, response)
+	require.NotEmpty(t, attemptID)
+	require.NotEmpty(t, executionID)
+	require.False(t, service.activeResumeAttemptOwnsStartup(submission.SessionID, executionID, attemptID),
+		"the failed attempt must have left the active registry")
+	require.True(t, service.resumeAttemptAllowsExecution(submission.SessionID, executionID, attemptID),
+		"the exact failed attempt remains in the callback tombstone")
+	attemptNumber, _ := parseResumeAttemptIdentity(attemptID)
+	registry := service.resumeAttemptStore()
+	registry.mu.Lock()
+	current := registry.attempts[submission.SessionID]
+	tombstone, tombstoneFound := registry.tombstoneLocked(submission.SessionID, attemptNumber)
+	registry.mu.Unlock()
+	require.Nil(t, current, "the failed attempt must have left the active registry")
+	require.True(t, tombstoneFound)
+	require.Equal(t, executionID, tombstone.executionID,
+		"the allocated execution identity must survive the startup error")
+	require.False(t, tombstone.accepted)
+	require.False(t, tombstone.cancelled)
+	require.True(t, service.resumeAttemptOwnsUnacceptedStartupStop(submission.SessionID, executionID, attemptID),
+		"the exact latest failed startup remains an unaccepted stop owner")
+
+	activeTurn, err := turns.TurnService.GetActiveTurn(context.Background(), submission.SessionID)
+	require.NoError(t, err)
+	require.NotNil(t, activeTurn, "the failed startup's unresolved turn must remain open")
+	require.Equal(t, "turn-native-resume-startup-failure", activeTurn.ID)
+	require.Nil(t, activeTurn.CompletedAt)
+	failedSession, err := service.repo.GetTaskSession(context.Background(), submission.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateFailed, failedSession.State)
+	turns.completed = 0
+	service.handleAgentStopped(context.Background(), watcher.AgentEventData{
+		TaskID: "task1", SessionID: submission.SessionID,
+		AgentExecutionID: executionID, AttemptID: attemptID,
+	})
+	require.Zero(t, turns.completed, "a delayed stop from failed native startup must not complete its unresolved turn")
+	require.Zero(t, acknowledgeCalls.Load(), "native history must not be acknowledged after a failed start")
+	activeTurn, err = turns.TurnService.GetActiveTurn(context.Background(), submission.SessionID)
+	require.NoError(t, err)
+	require.NotNil(t, activeTurn, "delayed startup cleanup must leave the unresolved turn open")
+	require.Equal(t, "turn-native-resume-startup-failure", activeTurn.ID)
+	require.Nil(t, activeTurn.CompletedAt)
+
+	failedSession, err = service.repo.GetTaskSession(context.Background(), submission.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateFailed, failedSession.State)
+	require.NotNil(t, *launched)
+	require.Equal(t, "native-conversation", (*launched).ACPSessionID)
+	stored, err := repo.GetAgentDeliverySubmission(context.Background(), submission.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.DeliverySubmissionInterruptedUnknown, stored.State)
+	require.Equal(t, submission.Payload, stored.Payload)
+	recovery, err := repo.GetSessionRecoveryBlock(context.Background(), block.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RecoveryBlockOpen, recovery.State)
+}
+
+func TestAgentStoppedOnlyDefersForActiveNativeStartup(t *testing.T) {
+	for _, scenario := range []struct {
+		name      string
+		state     models.TaskSessionState
+		attemptID bool
+		accepted  bool
+		finished  bool
+		wantState models.TaskSessionState
+	}{
+		{name: "active attempt while starting", state: models.TaskSessionStateStarting, attemptID: true, wantState: models.TaskSessionStateStarting},
+		{name: "active attempt after running", state: models.TaskSessionStateRunning, attemptID: true, wantState: models.TaskSessionStateCancelled},
+		{name: "accepted attempt while starting", state: models.TaskSessionStateStarting, attemptID: true, accepted: true, wantState: models.TaskSessionStateCancelled},
+		{name: "finished accepted attempt while starting", state: models.TaskSessionStateStarting, attemptID: true, accepted: true, finished: true, wantState: models.TaskSessionStateCancelled},
+		{name: "untagged stop while starting", state: models.TaskSessionStateStarting, wantState: models.TaskSessionStateCancelled},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			service, _, _, submission, _, _ := nativeResumeFixture(t, "unknown_prompt_outcome", false, false)
+			setNativeResumeSessionState(t, service, submission.SessionID, scenario.state)
+			var attemptID string
+			if scenario.attemptID {
+				attempt := beginNativeResumeTestAttempt(t, service, submission.SessionID, "old-execution")
+				attemptID = attempt.identity()
+				if scenario.accepted {
+					require.True(t, service.resumeAttemptStore().accept(attempt, "old-execution"))
+				}
+				if scenario.finished {
+					attempt.finish(service.resumeAttemptStore())
+				}
+			}
+
+			service.handleAgentStopped(context.Background(), watcher.AgentEventData{
+				TaskID: "task1", SessionID: submission.SessionID,
+				AgentExecutionID: "old-execution", AttemptID: attemptID,
+			})
+
+			stored, err := service.repo.GetTaskSession(context.Background(), submission.SessionID)
+			require.NoError(t, err)
+			require.Equal(t, scenario.wantState, stored.State)
+		})
+	}
+}
+
+type nativeResumeTurnServiceSpy struct {
+	TurnService
+	completed int
+}
+
+func (spy *nativeResumeTurnServiceSpy) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	return spy.TurnService.GetActiveTurn(ctx, sessionID)
+}
+
+func (spy *nativeResumeTurnServiceSpy) CompleteTurn(ctx context.Context, turnID string) error {
+	spy.completed++
+	return spy.TurnService.CompleteTurn(ctx, turnID)
+}
+
+func TestAgentStoppedFromSupersededResumeAttemptCannotCancelSuccessor(t *testing.T) {
+	service, _, _, submission, _, _ := nativeResumeFixture(t, "unknown_prompt_outcome", false, false)
+	setNativeResumeSessionState(t, service, submission.SessionID, models.TaskSessionStateStarting)
+	registry := service.resumeAttemptStore()
+	previous, owner := registry.begin(context.Background(), "task1", submission.SessionID)
+	require.True(t, owner)
+	previous.setExecutionID("old-execution")
+	require.True(t, registry.invalidate(submission.SessionID))
+	current, owner := registry.begin(context.Background(), "task1", submission.SessionID)
+	require.True(t, owner)
+	current.setExecutionID("new-execution")
+	setNativeResumeExecution(t, service, submission.SessionID, "new-execution")
+
+	service.handleAgentStopped(context.Background(), watcher.AgentEventData{
+		TaskID: "task1", SessionID: submission.SessionID,
+		AgentExecutionID: "old-execution", AttemptID: previous.identity(),
+	})
+
+	stored, err := service.repo.GetTaskSession(context.Background(), submission.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateStarting, stored.State)
+}
+
+func TestAgentStoppedFromOldExecutionCannotCancelCurrentResumeAttempt(t *testing.T) {
+	service, _, _, submission, _, _ := nativeResumeFixture(t, "unknown_prompt_outcome", false, false)
+	setNativeResumeSessionState(t, service, submission.SessionID, models.TaskSessionStateStarting)
+	current := beginNativeResumeTestAttempt(t, service, submission.SessionID, "new-execution")
+	setNativeResumeExecution(t, service, submission.SessionID, "new-execution")
+
+	service.handleAgentStopped(context.Background(), watcher.AgentEventData{
+		TaskID: "task1", SessionID: submission.SessionID,
+		AgentExecutionID: "old-execution", AttemptID: current.identity(),
+	})
+
+	stored, err := service.repo.GetTaskSession(context.Background(), submission.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateStarting, stored.State)
+}
+
+func TestAgentStoppedFromCancelledResumeAttemptCannotOverrideExplicitCancel(t *testing.T) {
+	service, _, _, submission, _, _ := nativeResumeFixture(t, "unknown_prompt_outcome", false, false)
+	attempt := beginNativeResumeTestAttempt(t, service, submission.SessionID, "old-execution")
+	require.True(t, service.resumeAttemptStore().invalidate(submission.SessionID))
+	setNativeResumeSessionState(t, service, submission.SessionID, models.TaskSessionStateCancelled)
+
+	service.handleAgentStopped(context.Background(), watcher.AgentEventData{
+		TaskID: "task1", SessionID: submission.SessionID,
+		AgentExecutionID: "old-execution", AttemptID: attempt.identity(),
+	})
+
+	stored, err := service.repo.GetTaskSession(context.Background(), submission.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, stored.State)
+}
+
+func TestResumeAttemptTombstoneRejectsOlderAttemptWithReusedExecution(t *testing.T) {
+	const sessionID = "session-latest-resume-tombstone"
+	service := &Service{resumeAttempts: newResumeAttemptRegistry()}
+	registry := service.resumeAttemptStore()
+	older, owner := registry.begin(context.Background(), "task1", sessionID)
+	require.True(t, owner)
+	older.setExecutionID("execution-reused")
+	olderID := older.identity()
+	older.finish(registry)
+
+	latest, owner := registry.begin(context.Background(), "task1", sessionID)
+	require.True(t, owner)
+	latest.setExecutionID("execution-reused")
+	latestID := latest.identity()
+	latest.finish(registry)
+
+	require.False(t, service.resumeAttemptAllowsExecution(sessionID, "execution-reused", olderID),
+		"a later attempt supersedes an older tag even when the runtime reuses its execution ID")
+	require.True(t, service.resumeAttemptAllowsExecution(sessionID, "execution-reused", latestID))
+	require.False(t, service.resumeAttemptOwnsUnacceptedStartupStop(sessionID, "execution-reused", olderID))
+	require.True(t, service.resumeAttemptOwnsUnacceptedStartupStop(sessionID, "execution-reused", latestID))
+}
+
+func beginNativeResumeTestAttempt(t *testing.T, service *Service, sessionID, executionID string) *resumeAttempt {
+	t.Helper()
+	attempt, owner := service.resumeAttemptStore().begin(context.Background(), "task1", sessionID)
+	require.True(t, owner)
+	attempt.setExecutionID(executionID)
+	return attempt
+}
+
+func setNativeResumeSessionState(t *testing.T, service *Service, sessionID string, state models.TaskSessionState) {
+	t.Helper()
+	repo := service.repo.(interface {
+		GetTaskSession(context.Context, string) (*models.TaskSession, error)
+		UpdateTaskSession(context.Context, *models.TaskSession) error
+	})
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	require.NoError(t, err)
+	session.State = state
+	require.NoError(t, repo.UpdateTaskSession(context.Background(), session))
+}
+
+func setNativeResumeExecution(t *testing.T, service *Service, sessionID, executionID string) {
+	t.Helper()
+	repo := service.repo.(nativeResumeTestRepository)
+	running, err := repo.GetExecutorRunningBySessionID(context.Background(), sessionID)
+	require.NoError(t, err)
+	running.AgentExecutionID = executionID
+	require.NoError(t, repo.UpsertExecutorRunning(context.Background(), running))
 }
 
 // The optional capability is present on the production lifecycle adapter.
@@ -122,6 +397,8 @@ func (m *nativeResumeTestManager) AcknowledgeNativeResumeDelivery(ctx context.Co
 type nativeResumeTestRepository interface {
 	GetAgentDeliverySubmission(context.Context, string) (*models.AgentDeliverySubmission, error)
 	GetSessionRecoveryBlock(context.Context, string) (*models.SessionRecoveryBlock, error)
+	GetExecutorRunningBySessionID(context.Context, string) (*models.ExecutorRunning, error)
+	UpsertExecutorRunning(context.Context, *models.ExecutorRunning) error
 	PrepareAgentDeliverySubmission(context.Context, *models.AgentDeliverySubmission) (bool, error)
 }
 

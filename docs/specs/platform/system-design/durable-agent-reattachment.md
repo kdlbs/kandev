@@ -126,12 +126,27 @@ The lifecycle manager retains unresolved remote records behind a retryable recov
 The existing remote-status loop retries a bounded, rotating set of records on its normal tick, with a deadline for each attempt. Shutdown cancels and joins the loop.
 Each attempt validates the durable execution, task, session, and environment before attachment and again before tracking. Stop, archive, cleanup, and ownership changes fence a stale attempt.
 Successful attachment shares startup's authenticated evidence and replay path. It clears pending recovery only after tracking succeeds.
+An idle peer also requires a bounded, cancellable updates-stream connection before recovery-guard release and availability publication.
+A connection-attempt signal alone does not prove readiness; the idle adopted client must have its updates socket connected.
+An ordinary user message accepted during retryable reconciliation enters the existing durable queue with its recorded message and turn identity.
+Retryable admission refusal does not fail the session or create a delivery submission. Nonretryable ownership failures remain visible.
+An idle adopted remote peer announces runtime availability only after replay, tracking, and recovery-guard release.
+This notification is distinct from turn completion. Its consumer drains only a still-waiting session through ordinary guarded queue admission.
+It never completes a turn, changes session state, or resolves recovery metadata. Paused queues remain paused.
+The producer captures immutable execution evidence and rejects stopped, replaced, or newly active executions before publication.
+A committed availability notification uses a bounded manager-owned context, independent of the completed attachment attempt's deadline.
+A delayed notification cannot downgrade a newer running turn; queue dispatch rechecks readiness and admission under the session guard.
 Failed attachment closes temporary host clients without stopping remote processes or deleting their environments. Pending records remain eligible for later attempts without a new prompt.
+Rejected attachment preserves the retained process's durable MCP claims and owned configuration. Removing temporary host tracking does not revoke that ownership.
 Each adapter supplies cleanup for the local transport created by that attempt. Rejected adoption invokes that cleanup without calling remote Stop.
 Cleanup checks the exact transport identity before removing adapter state, so a stale attempt cannot close its successor.
 Final ownership validation and execution registration serialize with explicit Stop. A changed durable execution ID blocks adoption instead of repairing the row to match an older runtime.
 Plugin attempts reload the current durable checkpoint for that same owner. They preserve provider, environment, operation, and execution identity while accepting checkpoint revisions saved by an earlier attempt.
 This applies to both reconnect and pending Stop, so a transient failure after checkpoint persistence does not make later attempts stale.
+Task deletion can remove the session before asynchronous remote cleanup runs.
+Only deletion cleanup may handle a missing session through a fresh, unique persisted executor record matching the pending owner's task, session, execution, executor, runtime, and full metadata.
+The stop operation consumes that same validated record. Changed, duplicate, unavailable, or missing records retain the guard and fail closed.
+Ordinary Stop and backend shutdown do not use this deletion-specific fallback.
 
 This revision supersedes the manual interruption form and batch continuation design.
 It implements AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.20 through 006.24.

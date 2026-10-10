@@ -3,31 +3,183 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { watchWs } from "../../helpers/causal-waits";
-import { createSettledHistoryTask } from "../../helpers/session-entry-recovery";
-import {
-  seedInterruptedPrompt,
-  expectJournalRetirement,
-  readRecovery,
-  withDatabase,
-} from "../../helpers/interrupted-prompt-recovery";
+import { withDatabase } from "../../helpers/interrupted-prompt-recovery";
 import { waitForSessionDone } from "../../helpers/session";
+import {
+  createFailOnResumeProfile,
+  readSessionRuntimeIdentity,
+} from "../../helpers/session-resume-prompt-queue";
 import { SessionPage } from "../../pages/session-page";
 
-// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.11
-export async function verifyReadOnlyResume(
-  page: Page,
+type GatewayFrame = {
+  id?: string;
+  type?: string;
+  action?: string;
+  payload?: unknown;
+};
+
+type LaunchOutcome = {
+  intent: string;
+  responseType: "response" | "error";
+  payload?: unknown;
+};
+
+type SessionLaunchObserver = {
+  waitForIntent: (intent: string, timeoutMs?: number) => Promise<LaunchOutcome>;
+};
+
+function parseGatewayFrame(payload: unknown): GatewayFrame | undefined {
+  try {
+    const value = JSON.parse(String(payload)) as unknown;
+    return value && typeof value === "object" ? (value as GatewayFrame) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function observeSessionLaunches(page: Page, sessionId: string): SessionLaunchObserver {
+  const requests = new Map<string, string>();
+  const outcomes: LaunchOutcome[] = [];
+  const waiters = new Map<string, Set<(outcome: LaunchOutcome) => void>>();
+
+  const observe = (direction: "sent" | "received", payload: unknown) => {
+    const frame = parseGatewayFrame(payload);
+    if (!frame || !frame.id) return;
+
+    if (direction === "sent" && frame.type === "request") {
+      if (frame.action !== "session.launch") return;
+      const body = frame.payload as { session_id?: unknown; intent?: unknown } | undefined;
+      if (body?.session_id === sessionId && typeof body.intent === "string") {
+        requests.set(frame.id, body.intent);
+      }
+      return;
+    }
+
+    if (direction !== "received" || (frame.type !== "response" && frame.type !== "error")) {
+      return;
+    }
+    const intent = requests.get(frame.id);
+    if (!intent) return;
+    requests.delete(frame.id);
+    const outcome: LaunchOutcome = {
+      intent,
+      responseType: frame.type,
+      payload: frame.payload,
+    };
+    outcomes.push(outcome);
+    for (const resolve of waiters.get(intent) ?? []) resolve(outcome);
+    waiters.delete(intent);
+  };
+
+  page.on("websocket", (socket) => {
+    if (!socket.url().endsWith("/ws")) return;
+    socket.on("framesent", ({ payload }) => observe("sent", payload));
+    socket.on("framereceived", ({ payload }) => observe("received", payload));
+  });
+
+  return {
+    waitForIntent: (intent, timeoutMs = 60_000) => {
+      const existing = outcomes.find((outcome) => outcome.intent === intent);
+      if (existing) return Promise.resolve(existing);
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          const listeners = waiters.get(intent);
+          listeners?.delete(onOutcome);
+          if (!listeners?.size) waiters.delete(intent);
+          reject(new Error(`Timed out waiting for session.launch intent ${intent}`));
+        }, timeoutMs);
+        const onOutcome = (outcome: LaunchOutcome) => {
+          clearTimeout(timeout);
+          resolve(outcome);
+        };
+        const listeners = waiters.get(intent) ?? new Set<(outcome: LaunchOutcome) => void>();
+        listeners.add(onOutcome);
+        waiters.set(intent, listeners);
+      });
+    },
+  };
+}
+
+function readPromptEvidence(tmpDir: string, sessionId: string) {
+  return withDatabase(tmpDir, (db) => {
+    const activeSubmissions = db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM agent_delivery_submissions
+         WHERE session_id = ? AND state IN ('prepared', 'accepted', 'dispatching', 'interrupted_unknown')`,
+      )
+      .get(sessionId) as { count: number };
+    const unknownPromptBlocks = db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM session_recovery_blocks
+         WHERE session_id = ? AND reason = 'unknown_prompt_outcome'`,
+      )
+      .get(sessionId) as { count: number };
+    const submissionCount = db
+      .prepare("SELECT COUNT(*) AS count FROM agent_delivery_submissions WHERE session_id = ?")
+      .get(sessionId) as { count: number };
+    const execution = db
+      .prepare(
+        "SELECT agent_execution_id, resume_token, resumable FROM executors_running WHERE session_id = ?",
+      )
+      .get(sessionId) as
+      | { agent_execution_id: string; resume_token: string; resumable: number }
+      | undefined;
+    return {
+      activeSubmissions: activeSubmissions.count,
+      unknownPromptBlocks: unknownPromptBlocks.count,
+      submissionCount: submissionCount.count,
+      execution,
+    };
+  });
+}
+
+async function createSettledHistoryTask(
   api: ApiClient,
   seed: SeedData,
+  title: string,
+  agentProfileId: string,
+) {
+  const task = await api.createTaskWithAgent(seed.workspaceId, title, agentProfileId, {
+    description: "/e2e:simple-message",
+    workflow_id: seed.workflowId,
+    workflow_step_id: seed.startStepId,
+    repository_ids: [seed.repositoryId],
+  });
+  if (!task.session_id) throw new Error("history recovery task has no session_id");
+  await waitForSessionDone(
+    api,
+    task.id,
+    task.session_id,
+    "Waiting for the history recovery task's initial prompt to finish",
+    60_000,
+  );
+  return task;
+}
+
+async function runReadOnlyResumeScenario(input: {
+  page: Page;
+  api: ApiClient;
+  seed: SeedData;
   options: {
     tmpDir: string;
     capture: PrAssetCapture;
     mobile: boolean;
     restart: () => Promise<void>;
-  },
-) {
+  };
+  failOnResumeProfileId: string;
+  setSessionId: (sessionId: string) => void;
+}) {
+  const { page, api, seed, options, failOnResumeProfileId, setSessionId } = input;
   const { tmpDir, capture, mobile } = options;
-  const task = await createSettledHistoryTask(api, seed, "Resume restored workspace");
+  const task = await createSettledHistoryTask(
+    api,
+    seed,
+    "Resume restored workspace",
+    failOnResumeProfileId,
+  );
   const sessionId = task.session_id!;
+  setSessionId(sessionId);
+
   await api.addUserMessage(task.id, sessionId, "/e2e:bulk:1");
   await expect
     .poll(
@@ -39,8 +191,14 @@ export async function verifyReadOnlyResume(
     )
     .toBe(true);
   await waitForSessionDone(api, task.id, sessionId, "Seeded user turn did not settle", 30_000);
+
   const original = (await api.listTaskSessions(task.id)).sessions.find((s) => s.id === sessionId)!;
   expect(original.metadata?.acp).toBeTruthy();
+  const originalIdentity = await readSessionRuntimeIdentity(api, task.id, sessionId);
+  const historyUserMessageIds = (await api.listSessionMessages(sessionId)).messages
+    .filter((message) => message.author_type === "user")
+    .map((message) => message.id);
+
   await api.stopSession({ session_id: sessionId, force: true });
   await expect
     .poll(
@@ -54,27 +212,84 @@ export async function verifyReadOnlyResume(
       { timeout: 30_000 },
     )
     .toBe(false);
-  const { blockId, submissionId, journalPath, submission } = seedInterruptedPrompt(
-    tmpDir,
-    sessionId,
-  );
+
   withDatabase(tmpDir, (db) => {
     db.prepare(
-      "UPDATE task_sessions SET state = 'WAITING_FOR_INPUT', error_message = '', metadata = json_remove(metadata, '$.last_agent_error', '$.agent_delivery_recovery') WHERE id = ?",
+      `UPDATE task_sessions SET state = 'WAITING_FOR_INPUT', error_message = '',
+       metadata = json_remove(metadata, '$.last_agent_error', '$.agent_delivery_recovery')
+       WHERE id = ?`,
     ).run(sessionId);
   });
-  const seeded = (await api.listTaskSessions(task.id)).sessions.find((s) => s.id === sessionId)!;
-  expect(seeded.state).toBe("WAITING_FOR_INPUT");
-  expect(seeded.error_message).toBeFalsy();
+
+  const promptEvidence = readPromptEvidence(tmpDir, sessionId);
+  expect(promptEvidence).toMatchObject({
+    activeSubmissions: 0,
+    unknownPromptBlocks: 0,
+    execution: {
+      agent_execution_id: originalIdentity.executionId,
+      resume_token: originalIdentity.acpSessionId,
+      resumable: 1,
+    },
+  });
+  const beforeNavigation = await api.wsRequest<{
+    state: string;
+    is_agent_running: boolean;
+    is_resumable: boolean;
+    needs_resume: boolean;
+    needs_workspace_restore: boolean;
+    acp_session_id?: string;
+  }>("task.session.status", {
+    task_id: task.id,
+    session_id: sessionId,
+  });
+  expect(beforeNavigation).toMatchObject({
+    state: "WAITING_FOR_INPUT",
+    is_agent_running: false,
+    is_resumable: true,
+    needs_resume: true,
+    needs_workspace_restore: false,
+    acp_session_id: originalIdentity.acpSessionId,
+  });
+
+  const launches = observeSessionLaunches(page, sessionId);
+  const failedResume = launches.waitForIntent("resume");
+  const restoredWorkspace = launches.waitForIntent("restore_workspace");
   const ws = watchWs(page);
-  await page.goto(`/t/${task.id}`);
+  const [, resumeOutcome, restoreOutcome] = await Promise.all([
+    page.goto(`/t/${task.id}`),
+    failedResume,
+    restoredWorkspace,
+  ]);
+  expect(
+    resumeOutcome.responseType === "error" ||
+      (resumeOutcome.payload as { success?: unknown } | undefined)?.success === false,
+  ).toBe(true);
+  expect(restoreOutcome.responseType).toBe("response");
+  expect((restoreOutcome.payload as { success?: unknown } | undefined)?.success).toBe(true);
+
   const notice = page.getByTestId("session-recovery-notice");
-  await expect(notice).toBeVisible({ timeout: 45_000 });
+  await expect(notice).toBeVisible();
   await expect(notice).toContainText("Workspace restored in read-only mode");
   await expect(page.getByTestId("recovery-resume-button")).toHaveCount(0);
   const resume = notice.getByTestId("session-recovery-notice-resume");
   await expect(resume).toBeEnabled();
   await expect(page.getByTestId("session-recovery-details")).not.toHaveAttribute("open", "");
+  expect(readPromptEvidence(tmpDir, sessionId)).toMatchObject({
+    activeSubmissions: 0,
+    unknownPromptBlocks: 0,
+    submissionCount: promptEvidence.submissionCount,
+  });
+  const restoredStatus = await api.wsRequest<{ is_agent_running: boolean }>("task.session.status", {
+    task_id: task.id,
+    session_id: sessionId,
+  });
+  expect(restoredStatus.is_agent_running).toBe(false);
+  expect(
+    (await api.listSessionMessages(sessionId)).messages
+      .filter((message) => message.author_type === "user")
+      .map((message) => message.id),
+  ).toEqual(historyUserMessageIds);
+
   if (mobile) {
     const bounds = await resume.boundingBox();
     expect(bounds?.height).toBeGreaterThanOrEqual(44);
@@ -82,18 +297,29 @@ export async function verifyReadOnlyResume(
   await capture.screenshot("resume-action", {
     caption: "Resume remains available after workspace-only restoration.",
   });
+
+  await api.updateAgentProfile(failOnResumeProfileId, { cli_flags: [] });
   const recovered = ws.waitForResponse("session.recover", { timeout: 60_000 });
   if (mobile) await resume.tap();
   else await resume.click();
   await recovered;
   await expect(notice).toHaveCount(0);
-  expect(readRecovery(tmpDir, blockId, submissionId)).toMatchObject({
-    block: { state: "resolved", authorized_action: "resume" },
-    submission: { state: "interrupted_unknown" },
-  });
-  await expectJournalRetirement(journalPath, submission);
   const resumed = (await api.listTaskSessions(task.id)).sessions.find((s) => s.id === sessionId)!;
   expect(resumed.metadata?.acp).toEqual(original.metadata?.acp);
+  expect(await readSessionRuntimeIdentity(api, task.id, sessionId)).toMatchObject({
+    acpSessionId: originalIdentity.acpSessionId,
+  });
+  expect(
+    (await api.listSessionMessages(sessionId)).messages
+      .filter((message) => message.author_type === "user")
+      .map((message) => message.id),
+  ).toEqual(historyUserMessageIds);
+  expect(readPromptEvidence(tmpDir, sessionId)).toMatchObject({
+    activeSubmissions: 0,
+    unknownPromptBlocks: 0,
+    submissionCount: promptEvidence.submissionCount,
+  });
+
   await options.restart();
   await page.reload();
   await expect(notice).toHaveCount(0);
@@ -109,4 +335,37 @@ export async function verifyReadOnlyResume(
   await expect(
     session.activeChat().getByText("simple mock response", { exact: false }),
   ).toHaveCount(1);
+}
+
+// @covers AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.11
+export async function verifyReadOnlyResume(
+  page: Page,
+  api: ApiClient,
+  seed: SeedData,
+  options: {
+    tmpDir: string;
+    capture: PrAssetCapture;
+    mobile: boolean;
+    restart: () => Promise<void>;
+  },
+) {
+  const profile = await createFailOnResumeProfile(api, `Read-only fallback ${Date.now()}`);
+  let sessionId: string | undefined;
+  try {
+    await runReadOnlyResumeScenario({
+      page,
+      api,
+      seed,
+      options,
+      failOnResumeProfileId: profile.id,
+      setSessionId: (id) => {
+        sessionId = id;
+      },
+    });
+  } finally {
+    if (sessionId) {
+      await api.stopSession({ session_id: sessionId, force: true }).catch(() => undefined);
+    }
+    await api.deleteAgentProfile(profile.id, true).catch(() => undefined);
+  }
 }
