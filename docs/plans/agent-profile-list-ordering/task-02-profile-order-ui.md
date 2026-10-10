@@ -310,3 +310,16 @@ an independent event. The creation publisher now explicitly distinguishes a
 new owner from an existing-owner profile creation. The existing missing-owner
 protection remains covered. The creation work order records that repair;
 combined validation is recorded in the workspace-source QA report.
+
+
+The first rebased E2E shard exposed a stale Quick Chat Cancel-button locator in
+`agent-profile-order-selectors.spec.ts`. Its trace and screenshot showed the
+current setup surface while the obsolete click waited until the test deadline;
+a page-bound cleanup request then masked that action. The same test failed
+locally with retries disabled. It now uses the existing Escape dismissal and
+still checks the closed surface before proceeding. All selector ordering,
+default, handoff and recent-use assertions remain unchanged.
+
+After fresh backend, web and fixture-plugin builds, the corrected Chromium
+selector regression passed with retries disabled (54.4 seconds). This changes
+only the test interaction and restores coverage of the current Quick Chat UI.
