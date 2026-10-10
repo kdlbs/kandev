@@ -35,6 +35,15 @@ func repositoryUpdateQuery(row *models.Repository, intent models.RepositoryCheck
 	return "UPDATE repositories SET " + strings.Join(assignments, ", ") + " WHERE id = ? AND deleted_at IS NULL", args
 }
 
+func nextRepositoryUpdatedAt(previous time.Time) time.Time {
+	now := time.Now().UTC()
+	minimum := previous.Add(time.Microsecond)
+	if now.After(minimum) {
+		return now
+	}
+	return minimum
+}
+
 // UpdateRepositoryWithCheckoutIntent preserves omitted checkout columns and
 // captures both choices from the successful mutation.
 func (r *Repository) UpdateRepositoryWithCheckoutIntent(ctx context.Context, row *models.Repository, intent models.RepositoryCheckoutIntent) error {
@@ -54,7 +63,7 @@ func (r *Repository) writeRepositoryCheckout(ctx context.Context, row *models.Re
 	}
 	defer func() { _ = tx.Rollback() }()
 	proposed := *row
-	proposed.UpdatedAt = time.Now().UTC()
+	proposed.UpdatedAt = nextRepositoryUpdatedAt(row.UpdatedAt)
 	query, args := repositoryUpdateQuery(&proposed, intent)
 	var branch string
 	var pull bool

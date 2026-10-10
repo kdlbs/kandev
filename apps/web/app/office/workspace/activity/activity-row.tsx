@@ -160,7 +160,8 @@ function runHref(entry: ActivityEntry): string | null {
   if (!entry.runId) return null;
   const agentID = resolveAgentId(entry);
   if (!agentID) return null;
-  return `/office/agents/${encodeURIComponent(agentID)}/runs/${encodeURIComponent(entry.runId)}`;
+  const href = `/office/agents/${encodeURIComponent(agentID)}/runs/${encodeURIComponent(entry.runId)}`;
+  return entry.workspaceId ? `${href}?workspaceId=${encodeURIComponent(entry.workspaceId)}` : href;
 }
 
 function resolveAgentId(entry: ActivityEntry): string | null {
@@ -188,7 +189,7 @@ export function ActivityRow({ entry }: Props) {
       {href && (
         <Link
           href={href}
-          className="text-xs text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+          className="inline-flex min-h-11 min-w-11 items-center justify-center px-2 text-xs text-muted-foreground hover:text-foreground shrink-0 cursor-pointer sm:min-h-0 sm:min-w-0 sm:px-0"
         >
           {t("office:run")}
         </Link>

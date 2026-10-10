@@ -64,6 +64,7 @@
   "office": "Office",
   "offline": "Offline",
   "openStatus": "Open status",
+  "overview": "Overview",
   "pausedBadge": "paused",
   "pollModeFastLabel": "focused, 2s polling",
   "pollModePausedLabel": "no subscribers",

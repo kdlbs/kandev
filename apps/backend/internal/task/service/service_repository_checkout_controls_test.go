@@ -22,6 +22,9 @@ func TestRepositoryCheckoutDefaultsPresence(t *testing.T) {
 	created, err := f[0].api.CreateRepository(t.Context(), &CreateRepositoryRequest{WorkspaceID: "checkout-ws", Name: "Created"})
 	require.NoError(t, err)
 	require.True(t, created.PullBeforeWorktree)
+	futureVersion := time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC)
+	_, err = f[0].db.ExecContext(t.Context(), `UPDATE repositories SET updated_at = ? WHERE id = ?`, futureVersion, "checkout-repo")
+	require.NoError(t, err)
 	f[0].bus.ClearEvents()
 	for _, payload := range []string{`{}`, `{"default_branch":null,"pull_before_worktree":null}`, `{"default_branch":"","pull_before_worktree":false}`, `{"default_branch":"topic","pull_before_worktree":true}`, `{"pull_before_worktree":false}`} {
 		// A historical baseline keeps timestamp advancement independent of clock resolution.
@@ -47,7 +50,7 @@ func TestRepositoryCheckoutDefaultsPresence(t *testing.T) {
 		}
 		require.Equal(t, expectedBranch, row.DefaultBranch)
 		require.Equal(t, expectedPull, row.PullBeforeWorktree)
-		require.True(t, row.UpdatedAt.After(before.UpdatedAt))
+		require.True(t, row.UpdatedAt.After(before.UpdatedAt), "updated_at must advance: before=%s after=%s", before.UpdatedAt.Format(time.RFC3339Nano), row.UpdatedAt.Format(time.RFC3339Nano))
 		checkoutAssertEvent(t, f[0], row)
 		f[0].bus.ClearEvents()
 	}

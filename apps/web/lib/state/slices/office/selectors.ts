@@ -1,5 +1,5 @@
 import type { AppState } from "@/lib/state/store";
-import type { AgentProfile, DashboardData, InboxItem, Project } from "./types";
+import type { AgentProfile, DashboardData, InboxItem, Project, WorkspaceAggregate } from "./types";
 
 /**
  * Reads for the workspace-keyed office collections.
@@ -46,6 +46,11 @@ export function selectOfficeDashboard(state: AppState): DashboardData | null {
   const workspaceId = state.workspaces.activeId;
   if (!workspaceId) return null;
   return state.office.dashboardByWorkspaceId[workspaceId] ?? null;
+}
+
+/** The read-only multi-workspace overview, independent of the active workspace. */
+export function selectWorkspaceAggregate(state: AppState): WorkspaceAggregate | null {
+  return state.office.workspaceAggregate;
 }
 
 /** The active agent profile by id, scoped to the active workspace. */

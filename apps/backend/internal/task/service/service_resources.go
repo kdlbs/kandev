@@ -1424,8 +1424,6 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 		}
 		repository.SecretBindings = replacement
 	}
-	repository.UpdatedAt = time.Now().UTC()
-
 	if req.SecretBindings != nil {
 		mutator, ok := s.repoEntities.(taskrepo.RepositorySecretBindingMutator)
 		if !ok {

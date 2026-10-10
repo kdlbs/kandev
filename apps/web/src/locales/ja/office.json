@@ -539,6 +539,7 @@
   "noTasksInThisProjectYet": "このプロジェクトにまだタスクなし。",
   "noTasksTouchedYet": "まだタスク未着手。",
   "noTasksWereModifiedDuringThis": "この実行中にタスク変更なし。",
+  "noWorkspaces": "ワークスペースはまだありません。",
   "notConfigured": "未設定",
   "notifyOnly": "通知のみ",
   "noUtilizationDataAvailable": "利用状況データなし。",

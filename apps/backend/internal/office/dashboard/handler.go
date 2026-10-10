@@ -89,6 +89,7 @@ func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo label
 	h := NewHandler(svc, labelRepo, gitMgr, handoff, guard, log)
 
 	api.GET("/meta", h.getMeta)
+	api.GET("/workspaces/aggregate", h.getWorkspacesAggregate)
 	api.GET("/workspaces/:wsId/dashboard", h.getDashboard)
 	api.GET("/workspaces/:wsId/live-runs", h.getLiveRuns)
 	api.GET("/workspaces/:wsId/agent-summaries", h.getAgentSummaries)

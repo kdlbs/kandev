@@ -70,7 +70,7 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 	cleanup := func() { cleanupOnce.Do(cleanupCommand) }
 	defer cleanup()
 	if err := initializeCodexAppServer(ctx, client); err != nil {
-		// Join the process and stderr copier before classifying its failure.
+		// Stop the process before reading stderr so its final diagnostic is included.
 		cleanup()
 		stderrTail := stderr.tail()
 		failureMessage := utilityUpstreamError(err, stderrTail)
