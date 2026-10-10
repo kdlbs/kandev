@@ -434,8 +434,10 @@ A successful new-agent POST identifies an accepted new owner independently of
 unrelated catalogue epoch changes. Both successful and partial MCP continuations
 publish through the creation boundary with that explicit new-owner intent; they
 retain current independent options and current target capability metadata.
-Existing-owner creation never recreates a missing owner. While the creation
-page is mounted, its store subscription records identities actually removed
-from the current catalogue. A later new-owner callback cannot reinsert one of
-those observed removals. An identity never present in that catalogue is not
+Existing-owner creation never recreates a missing owner. While the app store
+lives, its subscription records identities actually removed from the current
+catalogue, including after an editor unmounts while its save is pending. The
+observation belongs to that store instance and does not cross providers. A
+later new-owner callback cannot reinsert one of those observed removals. An
+identity never present in that catalogue is not
 classified as deleted merely because another profile advanced the epoch.

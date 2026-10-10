@@ -216,3 +216,31 @@ it("keeps an observed owner removal when a late creation result publishes", () =
   expect(result.current.store.getState().settingsAgents.items).toEqual([]);
   expect(result.current.store.getState().agentProfiles).toBe(removed.agentProfiles);
 });
+
+it("keeps owner removal after the editor unmounts during pending creation", () => {
+  const { result, unmount } = setup();
+  const { store, upsertAgent, getAgentProfilesVersion } = result.current;
+  const startVersion = getAgentProfilesVersion();
+  unmount();
+  act(() => {
+    store.getState().setSettingsAgents([]);
+    store.getState().setAgentProfiles([]);
+    store.getState().bumpAgentProfilesVersion();
+  });
+  const removed = store.getState();
+  act(() => upsertAgent(owner, { profiles: [profile], ownerCreated: true }, startVersion));
+  expect(store.getState().settingsAgents.items).toEqual([]);
+  expect(store.getState().agentProfiles).toBe(removed.agentProfiles);
+});
+
+it("keeps observed removals scoped to their owning store", () => {
+  const removed = setup();
+  act(() => removed.result.current.store.getState().setSettingsAgents([]));
+  const independent = setup({ ...owner, id: "independent", profiles: [] });
+  act(() =>
+    independent.result.current.upsertAgent(owner, { profiles: [profile], ownerCreated: true }),
+  );
+  expect(
+    independent.result.current.store.getState().settingsAgents.items.map((agent) => agent.id),
+  ).toEqual(["independent", owner.id]);
+});

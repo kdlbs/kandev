@@ -67,8 +67,8 @@ Paths in this table are relative to `apps/web/`.
 
 ## Current-store publication
 
-Only the creation page's `useAgentStoreSync` needs a production change. Bind
-`useAppStoreApi()` to this mounted provider's store. Inside `upsertAgent`, obtain
+Creation publication uses `useAgentStoreSync`, bound through `useAppStoreApi()`
+to this provider's store. Inside `upsertAgent`, obtain
 `storeApi.getState().settingsAgents.items` immediately before deciding whether
 to replace the accepted target by ID or append it. Do not read the catalogue at
 render, save admission or before the awaited request. Remove the captured
@@ -79,6 +79,12 @@ Pass the resulting list to the existing synchronous `syncAgentsToStore` pair
 of setters. There is no asynchronous gap inside publication and no new global
 atomic-publication promise. Retain `setSettingsAgents` and `setAgentProfiles`
 action behavior; do not change slice metadata, versions or WS handling.
+
+The app-store factory observes Settings owner removals once for that store's
+lifetime. Pending new-owner callbacks consult this observation even after their
+editor unmounts. Store instances have independent observations; a never-observed
+absent identity remains eligible for accepted new-owner publication. This adds
+no persisted field or server catalogue contract.
 
 The narrow precedent is `ProfileRow.handleDelete` in
 `components/settings/agents/agent-profiles-section.tsx:374` and standalone

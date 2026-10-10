@@ -8,6 +8,7 @@ import { getQuickChatSelectionIdentity } from "@/lib/quick-chat/selection-storag
 import { newerAgentRuntimeSnapshot } from "@/lib/types/agent-runtime";
 import { createTaskOverviewSlice } from "./slices/task-overview";
 import { withTaskOverviewNormalization } from "./slices/task-overview-normalize";
+import { observeSettingsAgentRemovals } from "./settings-agent-removals";
 
 import {
   createKanbanSlice,
@@ -101,6 +102,7 @@ export function createAppStore(initialState?: HydrationState) {
       })),
     ),
   );
+  observeSettingsAgentRemovals(store);
   let previousAuth = store.getState().auth;
   const syncQuickChatSelectionIdentity = (auth: AppState["auth"]) => {
     const identity = getQuickChatSelectionIdentity(auth);
