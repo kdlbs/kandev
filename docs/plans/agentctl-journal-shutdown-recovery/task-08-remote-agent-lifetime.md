@@ -1,7 +1,7 @@
 ---
 id: "08-remote-agent-lifetime"
 title: "Preserve remote agents across backend shutdown"
-status: in_progress
+status: completed
 wave: 6
 depends_on:
   - "05-silent-restart-recovery"
@@ -96,3 +96,5 @@ The lifecycle manager owns pending remote adoption. The existing remote-status l
 Each retry checks the saved execution, task, session, and environment identity before attachment and before tracking. Stop, archive, cleanup, or ownership changes fence stale retries. Successful adoption shares the startup replay path and releases the guard only after tracking succeeds. Failed attachment closes temporary host-side clients and preserves remote resources.
 
 A narrow read-only task-service snapshot supplies current session, workspace authorization, archive, cleanup, and environment ownership fields. This projection uses existing durable records and introduces no schema. Missing snapshot support blocks adoption rather than assuming ownership.
+
+Final current-base validation after rebasing onto `43f55a6` passed both SSH scenarios with retries disabled: hard backend outage and graceful restart. The same fresh source also passed four phone and three focused desktop recovery cases. An initial SSH invocation stopped in global setup because the Linux mock-agent helper was stale; no tests ran. Rebuilding that helper through `build-mock-agent-linux` restored freshness, and the subsequent SSH run passed both cases without changing source or weakening the guard. Linux SSH process survival and authenticated replay were exercised; live Sprites, remote Docker, Kubernetes, plugin service infrastructure, and real provider CLIs remain outside local coverage. Task 06 owns current-head CI and delivery.
