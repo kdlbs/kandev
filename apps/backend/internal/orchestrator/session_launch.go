@@ -252,8 +252,8 @@ type LaunchSessionRequest struct {
 	// after a successful launch, so a failed recovery remains blocked.
 	RecoveryAction string `json:"-"`
 	// DeferRecoveryResolution keeps the existing recovery block and parked
-	// work in place until an explicit continuation prompt has crossed the
-	// durable admission boundary. It is set only by RecoverSession.
+	// work in place until explicit continuation admission or native-resume
+	// journal acknowledgement succeeds. It is set only by RecoverSession.
 	DeferRecoveryResolution bool `json:"-"`
 	// AllowCompletedSessionResume is set only by explicit recovery or a pinned
 	// follow-up dispatcher. It is intentionally not part of the wire request:
@@ -975,7 +975,7 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		ContinuationPrompt:               req.ContinuationPrompt,
 		DeferInitialPrompt:               req.DeferRecoveryResolution,
 		RecoveryAction:                   req.RecoveryAction,
-		StartAgentSynchronously:          req.DeferRecoveryResolution,
+		StartAgentSynchronously:          req.DeferRecoveryResolution && req.ForceContextContinuation,
 	}
 	var execution *executor.TaskExecution
 	var err error
@@ -1317,12 +1317,8 @@ func (s *Service) RecoverSessionWithOptions(
 		return nil, err
 	}
 	if action == recoveryActionResume {
-		block, blockErr := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
-		if blockErr != nil {
-			return nil, blockErr
-		}
-		if block != nil && block.Reason == durableDeliveryUnresolvedReason {
-			return nil, &sessionRecoveryRequiredError{Block: block}
+		if err := s.checkNativeResumeDeliveryBlock(ctx, taskID, sessionID); err != nil {
+			return nil, err
 		}
 	}
 	if action == recoveryActionRepairWorkspaceInventory && strings.TrimSpace(options.IdempotencyKey) == "" {
@@ -1425,9 +1421,12 @@ func (s *Service) RecoverSessionWithOptions(
 		ForceContextContinuation:         resumeOptions.ForceContextContinuation,
 		ContinuationPrompt:               resumeOptions.ContinuationPrompt,
 		RecoveryAction:                   action,
-		DeferRecoveryResolution:          checkpoint != nil,
+		DeferRecoveryResolution:          checkpoint != nil || action == recoveryActionResume,
 		InitialPromptSubmission:          initialSubmission,
 	})
+	if err == nil && action == recoveryActionResume {
+		err = s.acknowledgeNativeResumeDelivery(launchCtx, sessionID)
+	}
 	if err != nil {
 		if recoveryAdmission != nil {
 			if persistErr := recoveryAdmission.CompleteRecoveryResume(launchCtx, false, "resume_failed"); persistErr != nil {
@@ -1440,6 +1439,11 @@ func (s *Service) RecoverSessionWithOptions(
 		return nil, err
 	}
 	if checkpoint == nil {
+		if action == recoveryActionResume {
+			if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
+				return nil, normalizeRecoverSessionError(err)
+			}
+		}
 		return resp, nil
 	}
 	checkpoint.candidateExecutionID = resp.AgentExecutionID

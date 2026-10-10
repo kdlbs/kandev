@@ -13,7 +13,8 @@ legacy_specs: []
 ## Overview
 
 The existing Resume control must recover an interrupted Quick Chat through native resume.
-Scope is workspace-only admission repair and manual recovery endpoint routing.
+Scope includes workspace-only admission, explicit manual recovery, actionable read-only notices,
+and acknowledgement of the retained delivery journal without replaying uncertain prompts.
 
 ## Evidence and scope
 
@@ -61,12 +62,13 @@ Repository-free Quick Chat: send an initial instruction, stop the runtime, seed 
 prompt block through isolated fixture SQL, reload, use the existing Resume, and send one
 new instruction. Confirm native identity is retained and old prompt is not resent. Add the
 scenario to shared desktop/mobile Quick Chat recovery helpers and thin spec files.
-No new rendered UI is planned, so no ASCII layout preview is required.
+Work order 03 adds the read-only notice action and owns its shared desktop/mobile ASCII preview.
 
 ## Work orders
 
 - [x] [01: Workspace-only access](task-01-workspace-access.md)
 - [x] [02: Existing Resume recovery](task-02-manual-resume.md)
+- [x] [03: Read-only workspace Resume](task-03-read-only-resume.md)
 
 Implement sequentially in the primary session using TDD. No subagents are authorized.
 
@@ -85,3 +87,11 @@ PR publication and remote check status belong to the external task handoff.
 - Do not turn automatic session open into explicit recovery authorization.
 - Keep ordinary native-state-loss and unresolved live-stream rules unchanged.
 - Failed recovery must preserve the block and token; late replies must preserve successor UI.
+
+## Follow-up after PR #4401
+
+The read-only notice omitted the Resume callback when no composer recovery owner
+was present. A successful native resume also left the peer journal interrupted unknown,
+causing subsequent prompts to fail with `unresolved_durable_work`. Work order 03 repairs
+both boundaries without replaying uncertain prompts. Existing verification above refers
+to work orders 01 and 02; follow-up results belong to work order 03.

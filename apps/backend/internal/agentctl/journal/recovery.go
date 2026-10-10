@@ -169,6 +169,9 @@ func submissionSummary(submission Submission) SubmissionSummary {
 }
 
 func submissionNeedsRecovery(submission Submission) bool {
+	if submission.Retired && submission.State == SubmissionInterruptedUnknown {
+		return false
+	}
 	switch submission.State {
 	case SubmissionPrepared, SubmissionAccepted, SubmissionDispatching, SubmissionInterruptedUnknown:
 		return true

@@ -741,12 +741,26 @@ func (m *Manager) DeliverySubmissionIdentity() (sessionID, incarnationID string,
 	return m.cfg.SessionID, m.DeliveryIncarnationID(), m.DeliveryHarnessGeneration()
 }
 
-// RetireDeliverySubmission seals one uncertain submission only after a newer
-// harness generation has been admitted by the explicit recovery path.
+// RetireDeliverySubmission seals explicitly recovered work. A native resume
+// acknowledgement requires an idle dispatcher and the current owner identity.
 func (m *Manager) RetireDeliverySubmission(ctx context.Context, id string, recoveryGeneration uint64) error {
 	deliveryJournal, err := m.DeliveryJournal()
 	if err != nil {
 		return err
+	}
+	if !m.deliverySubmissionMu.TryLock() {
+		return journal.ErrSubmissionState
+	}
+	defer m.deliverySubmissionMu.Unlock()
+	submission, err := deliveryJournal.GetSubmission(ctx, id)
+	if err != nil {
+		return err
+	}
+	if submission.State == journal.SubmissionInterruptedUnknown || recoveryGeneration == submission.HarnessGeneration {
+		sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+		if submission.SessionID != sessionID || submission.IncarnationID != incarnationID || recoveryGeneration != generation {
+			return journal.ErrOwnerMismatch
+		}
 	}
 	_, err = deliveryJournal.RetireSubmission(ctx, id, recoveryGeneration)
 	return err

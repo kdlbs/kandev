@@ -253,6 +253,10 @@ func (m *Manager) restoreRecoveredSubmission(
 	if err != nil {
 		return err
 	}
+	activeBackend, err = acknowledgedNativeResumeHistory(ctx, execution, status, peerReader, activeBackend)
+	if err != nil {
+		return err
+	}
 	if restored, err := restoreInitialPromptSubmission(execution, activePeer, activeBackend, delivery); restored || err != nil {
 		return err
 	}

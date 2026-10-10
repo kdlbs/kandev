@@ -158,7 +158,7 @@ func (c *Client) GetDeliverySubmission(ctx context.Context, id string) (*journal
 }
 
 // ListDeliverySubmissions returns the submissions retained for one session.
-// It is used only during an explicitly authorized harness-generation change.
+// Recovery uses the retained records to verify explicit acknowledgements.
 func (c *Client) ListDeliverySubmissions(ctx context.Context, sessionID string) ([]journal.Submission, error) {
 	var result []journal.Submission
 	path := "/api/v1/agent/submissions?" + url.Values{"session_id": []string{sessionID}}.Encode()
@@ -169,7 +169,7 @@ func (c *Client) ListDeliverySubmissions(ctx context.Context, sessionID string) 
 }
 
 // RetireDeliverySubmission seals an uncertain submission after an explicit
-// recovery has committed a newer harness generation.
+// recovery has restored native continuity or committed a newer generation.
 func (c *Client) RetireDeliverySubmission(ctx context.Context, id string) error {
 	path := "/api/v1/agent/submissions/" + url.PathEscape(id) + "/retire"
 	return c.doDeliveryRequest(ctx, http.MethodPost, path, nil, nil)

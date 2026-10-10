@@ -29,14 +29,7 @@ func (j *Journal) HasUnresolvedSubmissions(ctx context.Context) (bool, error) {
 			if err := json.Unmarshal(raw, &submission); err != nil {
 				return ErrJournalCorrupt
 			}
-			switch submission.State {
-			case SubmissionPrepared, SubmissionAccepted, SubmissionDispatching, SubmissionInterruptedUnknown:
-				unresolved = true
-			case SubmissionCompleted:
-				if !submission.TerminalEventRetained {
-					unresolved = true
-				}
-			}
+			unresolved = unresolved || submissionNeedsRecovery(submission)
 			return nil
 		})
 	})
@@ -77,9 +70,9 @@ func (j *Journal) ListSubmissions(ctx context.Context, sessionID string) ([]Subm
 	return submissions, err
 }
 
-// RetireSubmission removes one explicitly recovered submission. A newer
-// harness generation must authorize the removal, so an uncertain dispatch
-// cannot be silently retried by the same generation.
+// RetireSubmission seals an explicitly recovered submission. Native resume
+// may acknowledge an interrupted unknown outcome in the same generation;
+// retiring other work requires a newer generation.
 func (j *Journal) RetireSubmission(ctx context.Context, id string, recoveryGeneration uint64) (Submission, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
@@ -96,12 +89,15 @@ func (j *Journal) RetireSubmission(ctx context.Context, id string, recoveryGener
 		if err := json.Unmarshal(raw, &retired); err != nil {
 			return ErrJournalCorrupt
 		}
-		if recoveryGeneration == 0 || recoveryGeneration <= retired.HarnessGeneration {
+		if recoveryGeneration == 0 || recoveryGeneration < retired.HarnessGeneration ||
+			(recoveryGeneration == retired.HarnessGeneration && retired.State != SubmissionInterruptedUnknown) {
 			return ErrSubmissionGeneration
 		}
 		retired.Retired = true
-		retired.State = SubmissionCancelled
-		retired.Payload = nil
+		if retired.State != SubmissionInterruptedUnknown {
+			retired.State = SubmissionCancelled
+			retired.Payload = nil
+		}
 		retired.UpdatedAt = time.Now().UTC()
 		encoded, err := json.Marshal(retired)
 		if err != nil {
@@ -340,14 +336,7 @@ func (j *Journal) HasUnresolvedWork(ctx context.Context) (bool, error) {
 			if err := json.Unmarshal(raw, &submission); err != nil {
 				return ErrJournalCorrupt
 			}
-			switch submission.State {
-			case SubmissionPrepared, SubmissionAccepted, SubmissionDispatching, SubmissionInterruptedUnknown:
-				unresolved = true
-			case SubmissionCompleted:
-				if !submission.TerminalEventRetained {
-					unresolved = true
-				}
-			}
+			unresolved = unresolved || submissionNeedsRecovery(submission)
 			return nil
 		}); err != nil || unresolved {
 			return err

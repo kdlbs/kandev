@@ -102,6 +102,9 @@ This draft defines proposed behavior. It does not claim that the current impleme
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8:** When a user clicks the existing Resume action in Quick Chat or task chat, Kandev shall use explicit session recovery rather than an ordinary launch blocked by an interrupted prompt. Automatic opening and focus shall remain subject to recovery admission.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.9:** A successful explicit native resume shall preserve the native conversation and record its recovery action without resending the interrupted instruction or declaring its historical unknown outcome terminal. Failed recovery shall retain the recovery block.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.10:** Workspace-only restoration shall never resolve a prompt recovery block, including when a request carries a recovery action. Native-state loss and unresolved live durable work shall retain their existing distinct recovery rules.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.11:** A read-only workspace fallback without a composer recovery owner shall expose the existing explicit Resume action with details collapsed. The action shall honor busy state and remain reachable on desktop and phone.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.12:** Successful explicit native resume shall acknowledge only interrupted-unknown work from its authenticated journal owner before resolving the database recovery block. Acknowledged uncertainty shall retain its historical payload and outcome, remain non-replayable, and survive journal reopen and backend adoption. Live work, ownership mismatch, or unavailable journal evidence shall keep recovery blocked.
+
 
 ### REQ-PLATFORM-DURABLE-AGENT-DELIVERY-007: Compatible rollout
 

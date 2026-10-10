@@ -22,7 +22,7 @@ existing controls, recovery actions, and persistence.
 | Requirement | Section |
 | --- | --- |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .7 and .10 | Workspace-only access |
-| REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .8 and .9 | Manual resume |
+| REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .8, .9, .11 and .12 | Manual resume |
 | REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006, criteria .1 through .6 | Existing delivery and continuity designs |
 
 ## Workspace-only access
@@ -51,10 +51,33 @@ on an ordinary launch request to bypass the recovery coordinator.
 
 `RecoverSessionWithOptions` retains existing runtime control, workspace recovery preflight,
 configuration restoration, native-token preservation, Office dispatcher handoff, and
-`unresolved_durable_work` refusal. Its successful recovery resolves the matching current
-block with authorized action `resume`; the old submission remains `interrupted_unknown`.
+live durable-work refusal. An `unresolved_durable_work` block backed by interrupted-unknown
+SQL evidence can use explicit native Resume for ordinary chat sessions when the lifecycle adapter supports journal
+acknowledgement; Office retains its existing refusal because recovery delegates admission to its scheduler; prepared, accepted, and dispatching SQL work still blocks that path.
+Its successful recovery resolves the matching current block with authorized action `resume`;
+the old submission remains `interrupted_unknown`.
 No historical prompt is supplied to native resume. Preserve existing duplicate submission
 admission and accepted queue-claim handling. This repair adds no new dispatch authority.
+
+The read-only notice passes the existing guarded manual Resume callback to shared recovery
+actions when the composer does not own recovery. Details stay collapsed and busy state
+disables the action; pointer-aware shared button sizing preserves phone touch targets.
+
+Native Resume waits for existing runtime readiness and defers block resolution. After native initialization,
+the lifecycle owner reads authenticated journal status and the full session submission list.
+It validates session, incarnation, stream, generation, and healthy durable storage, rejects live
+or incomplete-terminal work before mutation, and retires only interrupted-unknown records
+from the current incarnation at or before the current generation. The process owner serializes
+retirement against prompt dispatch and checks the trusted owner. Retirement preserves unknown
+state and payload and makes duplicate admission or dispatch of that ID fail. Existing newer
+generation retirement still cancels other superseded work. A refreshed capability must be clear
+before SQL block resolution and parked queue release. Legacy peers retain ordinary compatibility;
+authentication and storage errors fail closed.
+
+On backend adoption, unknown SQL history is excluded from active work only when authenticated
+full peer records retain matching retirement, uncertain state, session/incarnation, generation,
+and payload hash. Missing or conflicting proof remains blocked. No recovery summary field,
+new endpoint, migration, native conversation replacement, or generation rotation is needed.
 
 ## Failure and compatibility
 
@@ -62,7 +85,7 @@ Native-state loss remains an existing typed history-continuation failure, not an
 fallback. Resume failure leaves the block open. Late replies must not update another active
 session. Workspace restoration remains usable while the original delivery block is open.
 Task chat and Quick Chat share the manual hook. Desktop and phone use existing controls and
-layouts; no rendered markup or localization change is required.
+layouts; the read-only notice reuses the localized Resume label and shared recovery actions.
 
 ## Persistence and verification
 
@@ -75,3 +98,8 @@ manual recovery with no automatic recovery grant and stale-result fencing. Real-
 orchestrator tests preserve the native ID and unknown submission through explicit recovery,
 retain blocks after failure, and show that no prompt dispatch occurs. Browser evidence covers
 repository-free Quick Chat, existing Resume, reload, and a distinct new follow-up instruction.
+
+Follow-up verification includes the no-composer-owner read-only browser state on desktop
+and phone, real bbolt acknowledgement, no replay and distinct new delivery, busy/foreign-owner
+rejection, failed journal acknowledgement retaining SQL blocks, journal reopen, and authenticated
+adoption of acknowledged unknown history.
