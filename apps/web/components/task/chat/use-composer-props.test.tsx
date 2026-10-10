@@ -162,7 +162,7 @@ describe("useComposerProps", () => {
 describe("canonical interrupted prompt recovery", () => {
   it("keeps existing Resume available for canonical interrupted work without a recovery record", () => {
     const args = composerArgs();
-    args.panelState.needsRecovery = true;
+    args.panelState.needsRecovery = false;
     args.panelState.session = {
       session_recovery_blocks: [
         {

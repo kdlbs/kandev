@@ -254,6 +254,13 @@ focused desktop/phone browser checks, four backend race-test packages, 54 fronte
 tests, typecheck, focused web lint, and documentation validators passed. Remote
 CI and review remain pending for the next pushed head.
 
+The terminal projection follow-up advances the block snapshot fence and publishes
+cleared blocks without requiring runtime metadata. Explicit Resume publishes the
+same state before queue restoration. Focused backend race tests, SQLite/PostgreSQL
+store conformance, SQL guard, changed-scope lint, frontend tests/typecheck/lint,
+and seven desktop/phone browser checks passed. Task 03 records the regressions
+and results. Remote delivery remains pending for the next pushed head.
+
 ## Risks
 
 - PR #4380 can change before implementation. Refresh its source and contracts.

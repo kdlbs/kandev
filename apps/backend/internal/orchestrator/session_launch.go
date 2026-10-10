@@ -561,6 +561,7 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 	if !resolved {
 		return fmt.Errorf("resolve session recovery block: block is no longer open")
 	}
+	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
 	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
 		return fmt.Errorf("release parked queue work after session recovery: %w", err)
 	}

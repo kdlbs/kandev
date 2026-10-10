@@ -2,11 +2,12 @@ package orchestrator
 
 import (
 	"context"
+	"testing"
+
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 func TestDeliveryBlockPublicationWithoutPriorError(t *testing.T) {
@@ -32,11 +33,15 @@ func TestDeliveryBlockPublicationWithoutPriorError(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, blockedSession.UpdatedAt.After(session.UpdatedAt), "block creation must advance the websocket snapshot fence")
 	require.Equal(t, "unresolved_durable_work", blocks[0].Reason)
-	_, err = repo.ResolveSessionRecoveryBlock(ctx, blocks[0].ID, "test", time.Now().UTC())
-	require.NoError(t, err)
-	svc.publishAgentDeliveryRecoveryState(ctx, session.ID)
-	data = eb.events[len(eb.events)-1].event.Data.(map[string]interface{})
-	require.Empty(t, data["session_recovery_blocks"])
+	beforeResolution := len(eb.events)
+	require.NoError(t, svc.resolveSessionRecoveryBlock(ctx, session.ID, "test"))
+	require.Greater(t, len(eb.events), beforeResolution)
+	require.Equal(t, events.TaskSessionStateChanged, eb.events[beforeResolution].subject)
+	data = eb.events[beforeResolution].event.Data.(map[string]interface{})
+	blocks, ok = data["session_recovery_blocks"].([]dto.SessionRecoveryBlockDTO)
+	require.True(t, ok, "resolution must publish the block projection")
+	require.NotNil(t, blocks)
+	require.Empty(t, blocks)
 	resolvedSession, err := repo.GetTaskSession(ctx, session.ID)
 	require.NoError(t, err)
 	require.True(t, resolvedSession.UpdatedAt.After(blockedSession.UpdatedAt), "resolution must fence older block snapshots")

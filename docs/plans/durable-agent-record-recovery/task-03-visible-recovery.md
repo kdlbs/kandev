@@ -263,3 +263,32 @@ Post-integration verification passed:
 - Documentation/specification validators and whitespace/conflict scans.
 
 Exact-head remote CI and review remain externally pending until after push.
+
+### Terminal projection follow-up
+
+The final integration audit reproduced a missing terminal projection with no
+runtime recovery metadata, and a stale session timestamp after terminal SQL block
+resolution. Regression tests failed before the correction. Terminal settlement
+now advances the session fence transactionally and publishes the cleared block
+array independently of runtime metadata. Open canonical blocks keep the composer
+in recovery mode without requiring a separate error message. Cancellation browser
+coverage now sends a new instruction afterward to verify fresh admission.
+
+The stricter native Resume regression also reproduced the missing block update.
+Explicit resolution now publishes the committed state before releasing queue
+work. The regression checks the session-state event and its non-null empty block
+array, separately from the queue-status event.
+
+Follow-up verification passed:
+
+- Focused orchestrator recovery and settlement tests with race detection.
+- SQLite and real PostgreSQL terminal revision tests, plus full store conformance
+  under race detection with both databases.
+- SQL guard and full backend changed-scope lint (zero issues).
+- Four frontend files with 54 tests, then six composer tests after extraction;
+  web typecheck and focused ESLint with zero warnings.
+- Three rebuilt desktop and four phone browser checks on their first attempts.
+  Coverage includes native Resume followed by a new instruction, cancellation
+  followed by a new instruction, and durable reattachment.
+
+Remote checks remain pending for the next pushed head.

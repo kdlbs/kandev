@@ -115,3 +115,12 @@ Retry-only controls. A runtime recovery record or legacy uncertain-delivery erro
 still selects state-only Retry and the separately guarded continuation flow.
 The browser tests prove the existing Resume target remains clickable on desktop
 and at a 320-pixel phone width, with a touch target of at least 44 pixels.
+
+An open delivery block keeps ordinary input disabled even without a coarse session
+error. Canonical interrupted work retains existing Resume; structured runtime
+recovery retains Retry and explicit continuation. Terminal SQL settlement advances
+the session snapshot timestamp in the block-resolution transaction. The backend
+publishes the cleared block array even when no runtime recovery metadata exists.
+Explicit Resume publishes the same projection after resolving the saved block,
+before releasing parked queue work. A later queue failure does not hide a
+committed block resolution from the browser.

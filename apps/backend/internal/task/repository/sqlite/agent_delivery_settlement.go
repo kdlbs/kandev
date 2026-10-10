@@ -282,6 +282,11 @@ func (r *Repository) resolveBoundDeliveryBlocksTx(
 	if err := rows.Close(); err != nil {
 		return err
 	}
+	if len(blocks) > 0 {
+		if err := r.advanceRecoverySessionRevisionTx(ctx, tx, effect.SessionID); err != nil {
+			return err
+		}
+	}
 	for _, block := range blocks {
 		result, err := tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE session_recovery_blocks
