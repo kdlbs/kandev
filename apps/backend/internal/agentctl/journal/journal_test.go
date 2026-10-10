@@ -68,8 +68,8 @@ func TestReplayAfterCloseReturnsError(t *testing.T) {
 			t.Fatalf("Replay panicked after Close: %v", recovered)
 		}
 	}()
-	if _, _, err := j.Replay(context.Background(), "stream", 0, 1); !errors.Is(err, ErrJournalClosed) {
-		t.Fatalf("Replay after Close error = %v, want %v", err, ErrJournalClosed)
+	if _, _, err := j.Replay(context.Background(), "stream", 0, 1); !errors.Is(err, bolt.ErrDatabaseNotOpen) {
+		t.Fatalf("Replay after Close error = %v, want %v", err, bolt.ErrDatabaseNotOpen)
 	}
 }
 

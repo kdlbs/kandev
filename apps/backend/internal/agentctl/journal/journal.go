@@ -39,7 +39,6 @@ var (
 	ErrSubmissionState      = errors.New("invalid agent delivery submission transition")
 	ErrSubmissionGeneration = errors.New("agent delivery submission requires a newer harness generation")
 	ErrOwnerMismatch        = errors.New("agent delivery owner mismatch")
-	ErrJournalClosed        = errors.New("journal is closed")
 )
 
 var (
@@ -345,7 +344,7 @@ func (j *Journal) CompactIfNeeded(ctx context.Context) error {
 	j.mu.RLock()
 	if j.db == nil {
 		j.mu.RUnlock()
-		return ErrJournalClosed
+		return errors.New("journal is closed")
 	}
 	var logicalBytes int64
 	err = j.db.View(func(tx *bolt.Tx) error {
@@ -542,9 +541,6 @@ func writeAppendedEvent(tx *bolt.Tx, stream Stream, event Event, encoded []byte,
 func (j *Journal) Replay(ctx context.Context, streamID string, after uint64, limit int) ([]Event, Stream, error) {
 	j.mu.RLock()
 	defer j.mu.RUnlock()
-	if j.db == nil {
-		return nil, Stream{}, ErrJournalClosed
-	}
 	if limit <= 0 {
 		limit = 1000
 	}
