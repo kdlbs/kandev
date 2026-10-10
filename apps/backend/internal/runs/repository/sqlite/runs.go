@@ -610,8 +610,8 @@ func (r *Repository) GetClaimedRunByTaskAndAgent(
 // GetClaimedRunByTaskID/GetClaimedRunByTaskAndAgent: a step-entry dispatch
 // resolving asynchronously can run after the causing run has already
 // finished, and a finished run is still the correct parent.
-func (r *Repository) GetRunBySessionAt(ctx context.Context, sessionID string, at time.Time) (*models.Run, error) {
-	var req models.Run
+func (r *Repository) GetRunBySessionAt(ctx context.Context, sessionID string, at time.Time) (*runmodels.Run, error) {
+	var req runmodels.Run
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT * FROM runs
 		WHERE session_id = ?

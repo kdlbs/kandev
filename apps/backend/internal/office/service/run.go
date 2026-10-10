@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/office/pause"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/steptelemetry"
 )
@@ -360,11 +361,11 @@ func (s *Service) TaskBoundaryCarrierForStepTransition(ctx context.Context, task
 	}
 	switch actor.ActorKind {
 	case steptelemetry.ActorHuman:
-		return TaskBoundaryCarrier{ActorKind: models.ActorKindUser, ActorID: actor.ActorID, HumanRooted: true}
+		return TaskBoundaryCarrier{ActorKind: runsmodels.ActorKindUser, ActorID: actor.ActorID, HumanRooted: true}
 	case steptelemetry.ActorAgent:
 		if actor.CausingRunID != "" {
 			if run, err := s.repo.GetRun(ctx, actor.CausingRunID); err == nil && run != nil {
-				return carrierFromRunWithActor(run, models.ActorKindAgent, run.AgentProfileID)
+				return carrierFromRunWithActor(run, runsmodels.ActorKindAgent, run.AgentProfileID)
 			}
 			return s.TaskBoundaryCarrier(ctx, taskID)
 		}
@@ -373,7 +374,7 @@ func (s *Service) TaskBoundaryCarrierForStepTransition(ctx context.Context, task
 		// immutable ID carried by their lifecycle event.
 		if actor.SessionID != "" {
 			if run, err := s.repo.GetRunBySessionAt(ctx, actor.SessionID, actor.OccurredAt); err == nil && run != nil {
-				return carrierFromRunWithActor(run, models.ActorKindAgent, run.AgentProfileID)
+				return carrierFromRunWithActor(run, runsmodels.ActorKindAgent, run.AgentProfileID)
 			}
 		}
 		return s.TaskBoundaryCarrier(ctx, taskID)

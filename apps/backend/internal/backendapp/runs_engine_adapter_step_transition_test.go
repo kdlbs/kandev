@@ -22,6 +22,7 @@ import (
 
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	runmodels "github.com/kandev/kandev/internal/runs/models"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 	workflowengine "github.com/kandev/kandev/internal/workflow/engine"
 )
@@ -91,13 +92,13 @@ func claimAndBindSession(t *testing.T, repo *officesqlite.Repository, runID, ses
 // findQueuedRunForAgent returns the run most recently queued against
 // agentProfileID, for tests that queue one run per step and need its id to
 // seed the next ledger row / assert its lineage.
-func findQueuedRunForAgent(t *testing.T, repo *officesqlite.Repository, agentProfileID string) *officemodels.Run {
+func findQueuedRunForAgent(t *testing.T, repo *officesqlite.Repository, agentProfileID string) *runmodels.Run {
 	t.Helper()
 	runs, err := repo.ListRuns(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	var found *officemodels.Run
+	var found *runmodels.Run
 	for _, r := range runs {
 		if r.AgentProfileID == agentProfileID {
 			found = r
@@ -149,7 +150,7 @@ func TestRunsServiceEngineAdapter_StepTransition_DepthAdvancesAcrossSuccessiveWa
 	// its own agent (distinct from reviewer/worker) so later lookups by
 	// agent profile id unambiguously find the freshly queued hop, not this
 	// root run.
-	rootRun := &officemodels.Run{
+	rootRun := &runmodels.Run{
 		ID: "run-root", AgentProfileID: initialAgent.ID, Reason: "task_assigned",
 		Payload: `{"task_id":"` + taskID + `"}`,
 	}
@@ -264,7 +265,7 @@ func TestRunsServiceEngineAdapter_StepTransition_HumanMoveRootsAsHumanRootedUser
 	}
 
 	run := findQueuedRunForAgent(t, officeRepo, agent.ID)
-	if run.ActorKind != officemodels.ActorKindUser || run.ActorID != "user-42" {
+	if run.ActorKind != runmodels.ActorKindUser || run.ActorID != "user-42" {
 		t.Fatalf("actor = %s/%s, want user/user-42", run.ActorKind, run.ActorID)
 	}
 	if !run.HumanRooted {

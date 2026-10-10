@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/office/models"
+	runmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // TestGetRunBySessionAt_MatchesTheRunClaimedAtOrBeforeTheGivenTime covers
@@ -20,7 +20,7 @@ func TestGetRunBySessionAt_MatchesTheRunClaimedAtOrBeforeTheGivenTime(t *testing
 	ctx := context.Background()
 	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runmodels.Run{
 		ID: "run-1", AgentProfileID: "a1", Reason: "task_assigned", SessionID: "sess-1",
 	})
 	setStatus(t, repo, run.ID, "claimed", timePtr(base), nil)
@@ -43,7 +43,7 @@ func TestGetRunBySessionAt_RaceCoverage_MatchesAFinishedRunToo(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runmodels.Run{
 		ID: "run-finished", AgentProfileID: "a1", Reason: "task_assigned", SessionID: "sess-2",
 	})
 	setStatus(t, repo, run.ID, "claimed", timePtr(base), nil)
@@ -66,7 +66,7 @@ func TestGetRunBySessionAt_ExcludesARunClaimedAfterTheGivenTime(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
-	run := mustCreateRun(t, repo, &models.Run{
+	run := mustCreateRun(t, repo, &runmodels.Run{
 		ID: "run-later", AgentProfileID: "a1", Reason: "task_assigned", SessionID: "sess-3",
 	})
 	setStatus(t, repo, run.ID, "claimed", timePtr(base), nil)
@@ -92,11 +92,11 @@ func TestGetRunBySessionAt_PrefersTheMostRecentlyClaimedMatch(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
-	older := mustCreateRun(t, repo, &models.Run{
+	older := mustCreateRun(t, repo, &runmodels.Run{
 		ID: "run-older", AgentProfileID: "a1", Reason: "task_assigned", SessionID: "sess-4",
 	})
 	setStatus(t, repo, older.ID, "claimed", timePtr(base), nil)
-	newer := mustCreateRun(t, repo, &models.Run{
+	newer := mustCreateRun(t, repo, &runmodels.Run{
 		ID: "run-newer", AgentProfileID: "a1", Reason: "task_assigned", SessionID: "sess-4",
 	})
 	setStatus(t, repo, newer.ID, "claimed", timePtr(base.Add(time.Minute)), nil)

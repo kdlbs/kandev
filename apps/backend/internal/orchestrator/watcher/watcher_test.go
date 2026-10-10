@@ -363,7 +363,7 @@ func TestAgentEventHandling(t *testing.T) {
 		if receivedData.AgentExecutionID != "agent-456" {
 			t.Errorf("expected agent_execution_id = 'agent-456', got %s", receivedData.AgentExecutionID)
 		}
-		if receivedData.OwnerKind != lifecycle.ExecutionOwnerTask {
+		if receivedData.OwnerKind != string(lifecycle.ExecutionOwnerTask) {
 			t.Errorf("owner_kind = %q, want %q", receivedData.OwnerKind, lifecycle.ExecutionOwnerTask)
 		}
 		if receivedData.CausingRunID != "run-cause-123" {

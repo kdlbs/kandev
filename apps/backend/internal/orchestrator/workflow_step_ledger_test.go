@@ -210,7 +210,7 @@ func TestApplyTransitionRecordsEngineTransitionFromSessionID(t *testing.T) {
 			repo := setupTestRepo(t)
 			seedSession(t, repo, "t1", "s1", "step1")
 			ctx = agentCompletionTransitionAttribution(ctx, watcher.AgentEventData{
-				OwnerKind: lifecycle.ExecutionOwnerRun,
+				OwnerKind: string(lifecycle.ExecutionOwnerRun),
 				RunID:     "run-cause-1",
 				SessionID: "s1",
 			})
@@ -246,7 +246,7 @@ func TestApplyTransitionRecordsCauseFromTaskOwnedOfficeExecution(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
 	ctx = agentCompletionTransitionAttribution(ctx, watcher.AgentEventData{
-		OwnerKind:    lifecycle.ExecutionOwnerTask,
+		OwnerKind:    string(lifecycle.ExecutionOwnerTask),
 		CausingRunID: "run-cause-task-owned",
 		SessionID:    "s1",
 	})
