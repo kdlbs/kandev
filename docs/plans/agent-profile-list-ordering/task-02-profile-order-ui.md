@@ -293,3 +293,20 @@ Additional corrective files:
 - `apps/web/e2e/tests/settings/agent-profile-order.spec.ts`
 - `apps/web/lib/state/store.ts`
 - `apps/web/lib/state/settings-agent-removals.ts`
+
+
+### PR #3680 CI fixup (2026-10-10)
+
+The rebased full frontend CI reported 12 failures across five agent settings
+files. Local reproduction with retries disabled confirmed all 12. Creation
+assertions now expect accepted profiles first; deletion assertions require one
+snapshot epoch increment. Rejected MCP strategy saves locate the retained live
+profile by ID. The runtime-update page tests use the real `StateProvider` rather
+than a mock missing the store API. These repairs preserve the current ordering,
+metadata, failure, navigation and selected-choice contracts.
+
+Two failures also exposed accepted new-agent publication being dropped after
+an independent event. The creation publisher now explicitly distinguishes a
+new owner from an existing-owner profile creation. The existing missing-owner
+protection remains covered. The creation work order records that repair;
+combined validation is recorded in the workspace-source QA report.

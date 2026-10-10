@@ -225,3 +225,21 @@ Ready PR association requires post-link canonical readback and all five flags
 false. The premature pre-link flag attempt failed with state_known=false and
 was not retried; ROOT disposition permits only necessary scoped post-link
 correction. Hosted CI/reviews and merge remain pending separate ROOT gates.
+
+
+### PR #3680 CI fixup (2026-10-10)
+
+The rebased frontend CI exposed two real-page new-agent failures after an
+independent profile event advanced the catalogue epoch. The general save
+snapshot guard discarded the accepted owner. `saveNewAgent` now marks accepted
+new-agent publication, including partial MCP results, so the publisher appends
+that owner to the current catalogue. Existing-owner creation retains its
+missing-owner guard. The existing success and partial-result regressions failed
+before the repair; their independent-choice, identity, draft and navigation
+assertions remain intact. Profile creation assertions now expect the current
+new-profile-first contract.
+
+This changes shared state publication only. Desktop and phone use the same
+publisher; layout, touch behavior and viewport composition are unchanged.
+The focused real-page tests satisfy the mobile-parity state-only exception.
+Validation results are recorded in the workspace-source QA report.
