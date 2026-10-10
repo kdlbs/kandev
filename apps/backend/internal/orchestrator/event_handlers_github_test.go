@@ -47,18 +47,19 @@ type mockGitHubService struct {
 	// lookups honour repository_id + branch instead of returning prWatch for
 	// every query, so tests can assert that a branch switch leaves another
 	// branch's found-PR watch alone.
-	sessionWatches      []*github.PRWatch
-	ensureWatchCalls    int
-	createWatchCalls    int
-	associateCalls      int
-	updateBranchCalls   int
-	updatePRNumberCalls int
-	resetWatchCalls     int
-	resetWatchBranch    string
-	ensureWatchBranch   string
-	createWatchBranch   string
-	updatedBranch       string
-	updatedPRNumber     int
+	sessionWatches        []*github.PRWatch
+	ensureWatchCalls      int
+	createWatchCalls      int
+	associateCalls        int
+	updateBranchCalls     int
+	updatePRNumberCalls   int
+	resetWatchCalls       int
+	resetWatchBranch      string
+	ensureWatchBranch     string
+	createWatchBranch     string
+	updatedBranch         string
+	updatedPRNumber       int
+	lastAssociatePRNumber int
 	// repository_id captured by the most recent CreatePRWatch /
 	// AssociatePRWithTask call. Used by the multi-repo push tests to assert
 	// the per-repo scoping (an empty value indicates the legacy single-repo
@@ -450,6 +451,7 @@ func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, taskID, repos
 	branch := ""
 	if pr != nil {
 		branch = pr.HeadBranch
+		m.lastAssociatePRNumber = pr.Number
 	}
 	m.associateLog = append(m.associateLog, repoBranchCall{TaskID: taskID, RepositoryID: repositoryID, Branch: branch})
 	return &github.TaskPR{}, nil

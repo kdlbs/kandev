@@ -13,21 +13,57 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"go.uber.org/zap/zaptest/observer"
-
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
+
+func TestAutomationExecutionTriggerDataUsesSafeProjection(t *testing.T) {
+	raw := json.RawMessage(`{"secret":"private"}`)
+	safe := json.RawMessage(`{"delivery_id":"delivery-1"}`)
+	evt := &automation.AutomationTriggeredEvent{
+		TriggerData:     raw,
+		SafeTriggerData: safe,
+	}
+
+	executionData := automationExecutionTriggerData(evt, nil)
+	require.Equal(t, safe, executionData)
+	prompt := automation.InterpolatePrompt("Review {{secret}}", automation.TriggerTypeWebhook, executionData)
+	require.NotContains(t, prompt, "private")
+}
+
+func TestRetryChildPreservesGitHubPRAssociationIdentity(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	require.NoError(t, err)
+	githubService := &mockGitHubService{}
+	svc := &Service{githubService: githubService, logger: log}
+	triggerData := automation.SafeRetryTriggerProjection(
+		automation.TriggerTypeGitHubPR,
+		"trigger-pr",
+		json.RawMessage(`{"repo":"acme/app","number":42,"html_url":"https://github.com/acme/app/pull/42"}`),
+		"pr-42",
+	)
+
+	svc.associateAutomationPR(context.Background(), "retry-child-task", "repo-1", triggerData)
+
+	require.Equal(t, 1, githubService.associateCalls)
+	require.Equal(t, 42, githubService.lastAssociatePRNumber)
+	require.Equal(t, "repo-1", githubService.lastAssociateRepositoryID)
+}
 
 // seedAutomationWorkspaceRepos creates a workspace with the given repository
 // IDs (each with a distinct default branch derived from its ID) for
@@ -278,6 +314,116 @@ func (s *stubReviewTaskCreator) CreateReviewTask(_ context.Context, req *ReviewT
 	return s.task, nil
 }
 
+type retryAutomationServiceStub struct {
+	*stubAutomationService
+	run                   *automation.AutomationRun
+	operation             *automation.RetryOperation
+	begun                 bool
+	committed             string
+	verifyErr             error
+	acknowledged          bool
+	boundTaskID           string
+	boundSessionID        string
+	boundTurnID           string
+	terminalized          bool
+	continuationCommitted bool
+	continuationDispatch  automation.RunDispatch
+	continuationCommitErr error
+	ambiguous             bool
+}
+
+func (s *retryAutomationServiceStub) GetRun(context.Context, string) (*automation.AutomationRun, error) {
+	return s.run, nil
+}
+
+func (s *retryAutomationServiceStub) BindRunTask(context.Context, string, string, string) error {
+	return nil
+}
+
+func (s *retryAutomationServiceStub) BindRun(
+	_ context.Context,
+	_ string,
+	taskID, sessionID, turnID string,
+	_ automation.ThreadAction,
+	_ string,
+) error {
+	s.boundTaskID, s.boundSessionID, s.boundTurnID = taskID, sessionID, turnID
+	return nil
+}
+
+func (s *retryAutomationServiceStub) BeginRetryTaskOperation(context.Context, string, int64) (*automation.RetryOperation, error) {
+	s.begun = true
+	return s.operation, nil
+}
+
+func (s *retryAutomationServiceStub) GetRetryTaskOperation(context.Context, string, int64) (*automation.RetryOperation, error) {
+	return s.operation, nil
+}
+
+func (s *retryAutomationServiceStub) MarkRunTerminal(context.Context, string, string, string, automation.RunStatus, string) error {
+	s.terminalized = true
+	return nil
+}
+
+func (s *retryAutomationServiceStub) MarkRunTerminalByBinding(context.Context, string, string, string, automation.RunStatus, string) error {
+	s.terminalized = true
+	return nil
+}
+func (s *retryAutomationServiceStub) CommitRetryTaskOperation(_ context.Context, _ string, _ int64, _, taskID string) error {
+	s.committed = taskID
+	return nil
+}
+func (s *retryAutomationServiceStub) CommitRetryContinuationOperation(
+	_ context.Context,
+	_ string,
+	_ int64,
+	_ string,
+	dispatch automation.RunDispatch,
+) error {
+	if s.continuationCommitErr != nil {
+		return s.continuationCommitErr
+	}
+	s.continuationCommitted = true
+	s.continuationDispatch = dispatch
+	return nil
+}
+
+func (s *retryAutomationServiceStub) MarkRetryOperationAmbiguous(
+	_ context.Context,
+	_ string,
+	_ int64,
+	_ string,
+	dispatch automation.RunDispatch,
+) error {
+	s.ambiguous = true
+	if s.operation != nil {
+		s.operation.ExternalTaskID = dispatch.TaskID
+		s.operation.ExternalSessionID = dispatch.SessionID
+		s.operation.ExternalTurnID = dispatch.TurnID
+	}
+	return nil
+}
+
+func (s *retryAutomationServiceStub) VerifyRetryTaskOperation(context.Context, string, int64, string) error {
+	return s.verifyErr
+}
+func (s *retryAutomationServiceStub) AcknowledgeRetryEvent(context.Context, string, string, string, int64) error {
+	s.acknowledged = true
+	return nil
+}
+func retryOwnedTask(taskID, workspaceID, automationID, runID string, generation int64) *models.Task {
+	now := time.Now().UTC()
+	return &models.Task{
+		ID: taskID, WorkspaceID: workspaceID, Origin: models.TaskOriginAutomationRun,
+		ExternalID: automation.RetryTaskExternalID(runID, generation),
+		Metadata: map[string]interface{}{
+			"automation_id":     automationID,
+			"automation_run_id": runID,
+		},
+		CreatedAt: now, UpdatedAt: now,
+	}
+}
+
 // stubAutomationService serves one automation and records the runs written.
 type stubAutomationService struct {
 	automation   *automation.Automation
@@ -415,6 +561,416 @@ func TestCreateAutomationTask_TagsOriginAndLeavesTaskNonEphemeral(t *testing.T) 
 	require.NotContains(t, creator.got.Metadata, "execution_mode",
 		"the execution mode is withdrawn and must not be stamped on the task")
 }
+func TestCreateAutomationTaskUsesStableRetryExternalID(t *testing.T) {
+	repo := setupTestRepo(t)
+	creator := &stubReviewTaskCreator{task: retryOwnedTask(
+		"retry-task", "retry-workspace", "retry-automation", "retry-run", 3,
+	)}
+	autoSvc := &retryAutomationServiceStub{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "retry-automation", WorkspaceID: "retry-workspace", Name: "retry", Prompt: "retry",
+			Enabled: true,
+		}},
+		run: &automation.AutomationRun{
+			ID: "retry-run", AutomationID: "retry-automation", TriggerType: automation.TriggerTypeManual,
+			RetryGroupID: "retry-group", RetryGroupGeneration: 3,
+			RetryState: automation.RetryStateTriggered, Status: automation.RunStatusTriggered,
+			RetryResolvedPrompt: "retry", DisplayTitle: "Retry 3: retry",
+		},
+		operation: &automation.RetryOperation{
+			LeaseToken: "retry-lease", State: "leased",
+		},
+	}
+	autoSvc.run.RetryLaunchConfigSnapshot = retrySnapshotForTest(autoSvc.run, autoSvc.automation)
+	autoSvc.run.RetryLaunchConfigVersion = automation.RetryLaunchConfigVersion
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+	svc.reviewTaskCreator = creator
+	require.Implements(t, (*automationRunBinding)(nil), autoSvc)
+	require.Implements(t, (*automationRetryOperation)(nil), autoSvc)
+
+	svc.createAutomationTask(context.Background(), &automation.AutomationTriggeredEvent{
+		RunID: "retry-run", RetryGroupGeneration: 3, TriggerType: automation.TriggerTypeManual,
+	})
+
+	require.True(t, autoSvc.begun)
+	require.Equal(t, "retry-task", autoSvc.committed)
+	require.Equal(t, automation.RetryTaskExternalID("retry-run", 3), creator.got.ExternalID)
+}
+func newRetryIntegrationStore(t *testing.T) *automation.Store {
+	t.Helper()
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	store, err := automation.NewStore(db, db)
+	require.NoError(t, err)
+	return store
+}
+
+func TestCreateAutomationTaskUsesRealRetryStoreLedger(t *testing.T) {
+	repo := setupTestRepo(t)
+	store := newRetryIntegrationStore(t)
+	log, err := logger.NewFromZap(zap.NewNop())
+	require.NoError(t, err)
+	autoSvc := automation.NewService(store, bus.NewMemoryEventBus(log), log)
+	a := &automation.Automation{
+		ID: "real-retry-automation", WorkspaceID: "real-retry-workspace",
+		Name: "real retry", Prompt: "retry", Enabled: true,
+	}
+	require.NoError(t, store.CreateAutomation(context.Background(), a))
+	group := &automation.RetryGroup{
+		ID: "real-retry-group", AutomationID: a.ID, Generation: 1,
+		State: automation.RetryGroupLive,
+	}
+	require.NoError(t, store.CreateRetryGroup(context.Background(), group))
+	run := &automation.AutomationRun{
+		ID: "real-retry-run", AutomationID: a.ID, TriggerType: automation.TriggerTypeManual,
+		TriggerID: "real-retry-trigger", Status: automation.RunStatusTriggered, RetryGroupID: group.ID,
+		RetryGroupGeneration: 1, RetryState: automation.RetryStateTriggered,
+	}
+	run.RetryLaunchConfigSnapshot = retrySnapshotForTest(run, a)
+	run.RetryLaunchConfigVersion = automation.RetryLaunchConfigVersion
+	require.NoError(t, store.CreateRun(context.Background(), run))
+	intent := &automation.RetryTaskIntent{
+		ID: "real-retry-intent", RunID: run.ID, GroupGeneration: 1,
+		State: "admitted",
+	}
+	require.NoError(t, store.CreateRetryIntent(context.Background(), intent))
+	require.NoError(t, store.CreateRetryOperation(context.Background(), &automation.RetryOperation{
+		ID: "real-retry-operation", IntentID: intent.ID, RunID: run.ID,
+		GroupGeneration: 1, Kind: "create_task", State: "requested",
+	}))
+	creator := &stubReviewTaskCreator{task: retryOwnedTask(
+		"real-retry-task", "real-retry-workspace", "real-retry-automation", "real-retry-run", 1,
+	)}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+	svc.reviewTaskCreator = creator
+
+	svc.createAutomationTask(context.Background(), &automation.AutomationTriggeredEvent{
+		RunID: run.ID, RetryGroupGeneration: 1, TriggerType: automation.TriggerTypeManual,
+	})
+
+	require.NotNil(t, creator.got)
+	require.Equal(t, automation.RetryTaskExternalID(run.ID, 1), creator.got.ExternalID)
+	operation, err := store.GetRetryTaskOperation(context.Background(), run.ID, 1)
+	require.NoError(t, err)
+	require.Equal(t, "committed", operation.State)
+	storedRun, err := store.GetRun(context.Background(), run.ID)
+	require.NoError(t, err)
+	require.Equal(t, "real-retry-task", storedRun.TaskID)
+}
+func TestCreateAutomationTaskAdoptsCommittedRetryTask(t *testing.T) {
+	repo := setupTestRepo(t)
+	require.NoError(t, repo.CreateTask(context.Background(),
+		retryOwnedTask("retry-task", "retry-workspace", "retry-automation", "retry-run", 3)))
+	creator := &stubReviewTaskCreator{}
+	autoSvc := &retryAutomationServiceStub{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "retry-automation", WorkspaceID: "retry-workspace", Name: "retry", Prompt: "retry",
+			Enabled: true,
+		}},
+		run: &automation.AutomationRun{
+			ID: "retry-run", AutomationID: "retry-automation", TriggerType: automation.TriggerTypeManual,
+			RetryGroupID: "retry-group", RetryGroupGeneration: 3,
+			RetryState: automation.RetryStateTriggered, Status: automation.RunStatusTaskCreated,
+			SessionID: "existing-session", TurnID: "existing-turn",
+		},
+		operation: &automation.RetryOperation{
+			State: "committed", ExternalTaskID: "retry-task",
+		},
+	}
+	autoSvc.run.RetryLaunchConfigSnapshot = retrySnapshotForTest(autoSvc.run, autoSvc.automation)
+	autoSvc.run.RetryLaunchConfigVersion = automation.RetryLaunchConfigVersion
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+	svc.reviewTaskCreator = creator
+
+	svc.createAutomationTask(context.Background(), &automation.AutomationTriggeredEvent{
+		RunID: "retry-run", RetryGroupGeneration: 3, TriggerType: automation.TriggerTypeManual,
+	})
+
+	require.True(t, autoSvc.begun)
+	require.Nil(t, creator.got)
+}
+
+func TestCreateAutomationTaskAdoptsCommittedRetryTaskByOperationIdentity(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateTask(ctx,
+		retryOwnedTask("provider-task-id", "retry-workspace", "retry-automation", "retry-run", 3)))
+	creator := &stubReviewTaskCreator{}
+	autoSvc := &retryAutomationServiceStub{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "retry-automation", WorkspaceID: "retry-workspace", Name: "retry",
+			Prompt: "retry", Enabled: true,
+		}},
+		run: &automation.AutomationRun{
+			ID: "retry-run", AutomationID: "retry-automation", TriggerType: automation.TriggerTypeManual,
+			RetryGroupID: "retry-group", RetryGroupGeneration: 3,
+			RetryState: automation.RetryStateTriggered, Status: automation.RunStatusTaskCreated,
+			SessionID: "existing-session", TurnID: "existing-turn",
+		},
+		operation: &automation.RetryOperation{
+			State: "committed", ExternalTaskID: "provider-task-id",
+		},
+	}
+	autoSvc.run.RetryLaunchConfigSnapshot = retrySnapshotForTest(autoSvc.run, autoSvc.automation)
+	autoSvc.run.RetryLaunchConfigVersion = automation.RetryLaunchConfigVersion
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+	svc.reviewTaskCreator = creator
+
+	svc.createAutomationTask(ctx, &automation.AutomationTriggeredEvent{
+		RunID: "retry-run", RetryGroupGeneration: 3,
+		RetryExternalID: automation.RetryTaskExternalID("retry-run", 3),
+		TriggerType:     automation.TriggerTypeManual,
+	})
+
+	require.Nil(t, creator.got)
+	require.Empty(t, autoSvc.runs)
+}
+
+func TestCreateAutomationTaskPreservesCommittedRetryOnTaskLookupFailure(t *testing.T) {
+	repo := setupTestRepo(t)
+	creator := &stubReviewTaskCreator{}
+	base := &retryAutomationServiceStub{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "retry-automation", WorkspaceID: "retry-workspace", Name: "retry",
+			Prompt: "retry", Enabled: true,
+		}},
+		run: &automation.AutomationRun{
+			ID: "retry-run", AutomationID: "retry-automation", TriggerType: automation.TriggerTypeManual,
+			RetryGroupID: "retry-group", RetryGroupGeneration: 3,
+			RetryState: automation.RetryStateTriggered, Status: automation.RunStatusTriggered,
+		},
+		operation: &automation.RetryOperation{
+			State: "committed", ExternalTaskID: "missing-provider-task",
+		},
+	}
+	base.run.RetryLaunchConfigSnapshot = retrySnapshotForTest(base.run, base.automation)
+	base.run.RetryLaunchConfigVersion = automation.RetryLaunchConfigVersion
+	autoSvc := &retryBindFailureServiceStub{
+		retryAutomationServiceStub: base,
+		bindErr:                    errors.New("binding must not be attempted"),
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+	svc.reviewTaskCreator = creator
+
+	svc.createAutomationTask(context.Background(), &automation.AutomationTriggeredEvent{
+		RunID: "retry-run", RetryGroupGeneration: 3,
+		RetryExternalID: automation.RetryTaskExternalID("retry-run", 3),
+		TriggerType:     automation.TriggerTypeManual,
+	})
+
+	require.True(t, autoSvc.finalized)
+	require.Empty(t, autoSvc.runs)
+}
+
+type retryTaskLookupErrorRepo struct {
+	sessionExecutorStore
+	err error
+}
+
+func (r retryTaskLookupErrorRepo) GetTask(context.Context, string) (*models.Task, error) {
+	return nil, r.err
+}
+
+func TestCreateAutomationTaskLeavesCommittedRetryOpenOnTransientTaskLookupFailure(t *testing.T) {
+	repo := setupTestRepo(t)
+	transientErr := errors.New("temporary task lookup failure")
+	base := &retryAutomationServiceStub{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "retry-automation", WorkspaceID: "retry-workspace", Name: "retry",
+			Prompt: "retry", Enabled: true,
+		}},
+		run: &automation.AutomationRun{
+			ID: "retry-run", AutomationID: "retry-automation", TriggerType: automation.TriggerTypeManual,
+			RetryGroupID: "retry-group", RetryGroupGeneration: 3,
+			RetryState: automation.RetryStateTriggered, Status: automation.RunStatusTriggered,
+		},
+		operation: &automation.RetryOperation{
+			State: "committed", ExternalTaskID: "retry-task",
+		},
+	}
+	base.run.RetryLaunchConfigSnapshot = retrySnapshotForTest(base.run, base.automation)
+	base.run.RetryLaunchConfigVersion = automation.RetryLaunchConfigVersion
+	autoSvc := &retryBindFailureServiceStub{retryAutomationServiceStub: base}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.repo = retryTaskLookupErrorRepo{sessionExecutorStore: repo, err: transientErr}
+	svc.SetAutomationService(autoSvc)
+	svc.reviewTaskCreator = &stubReviewTaskCreator{}
+
+	svc.createAutomationTask(context.Background(), &automation.AutomationTriggeredEvent{
+		RunID: "retry-run", RetryGroupGeneration: 3,
+		RetryExternalID: automation.RetryTaskExternalID("retry-run", 3),
+		TriggerType:     automation.TriggerTypeManual,
+	})
+
+	require.False(t, autoSvc.finalized)
+}
+
+func TestCreateAutomationTaskTerminalizesCommittedRetryOwnershipMismatch(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateTask(ctx,
+		retryOwnedTask("retry-task", "other-workspace", "retry-automation", "retry-run", 3)))
+	base := &retryAutomationServiceStub{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "retry-automation", WorkspaceID: "retry-workspace", Name: "retry",
+			Prompt: "retry", Enabled: true,
+		}},
+		run: &automation.AutomationRun{
+			ID: "retry-run", AutomationID: "retry-automation", TriggerType: automation.TriggerTypeManual,
+			RetryGroupID: "retry-group", RetryGroupGeneration: 3,
+			RetryState: automation.RetryStateTriggered, Status: automation.RunStatusTriggered,
+		},
+		operation: &automation.RetryOperation{
+			State: "committed", ExternalTaskID: "retry-task",
+		},
+	}
+	base.run.RetryLaunchConfigSnapshot = retrySnapshotForTest(base.run, base.automation)
+	base.run.RetryLaunchConfigVersion = automation.RetryLaunchConfigVersion
+	autoSvc := &retryBindFailureServiceStub{retryAutomationServiceStub: base}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+	svc.reviewTaskCreator = &stubReviewTaskCreator{}
+
+	svc.createAutomationTask(ctx, &automation.AutomationTriggeredEvent{
+		RunID: "retry-run", RetryGroupGeneration: 3,
+		RetryExternalID: automation.RetryTaskExternalID("retry-run", 3),
+		TriggerType:     automation.TriggerTypeManual,
+	})
+
+	require.True(t, autoSvc.finalized)
+}
+
+type retryBindFailureServiceStub struct {
+	*retryAutomationServiceStub
+	bindErr   error
+	bindCalls int
+	finalized bool
+}
+
+func (s *retryBindFailureServiceStub) BindRunTask(context.Context, string, string, string) error {
+	s.bindCalls++
+	return s.bindErr
+}
+
+func (s *retryBindFailureServiceStub) FinalizeAutomationRetryFailure(
+	context.Context, string, int64, error, string,
+) (*automation.AutomationRun, error) {
+	s.finalized = true
+	return nil, nil
+}
+
+func TestCreateAutomationTaskReconcilesCommittedRetryAfterBindingFailure(t *testing.T) {
+	repo := setupTestRepo(t)
+	bindErr := errors.New("retry binding temporarily unavailable")
+	base := &retryAutomationServiceStub{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "retry-binding-failure-automation", WorkspaceID: "retry-binding-failure-workspace",
+			Name: "retry binding failure", Prompt: "retry", Enabled: true,
+		}},
+		run: &automation.AutomationRun{
+			ID: "retry-binding-failure-run", AutomationID: "retry-binding-failure-automation",
+			TriggerType: automation.TriggerTypeManual, RetryGroupID: "retry-binding-failure-group",
+			RetryGroupGeneration: 1, RetryState: automation.RetryStateTriggered,
+			Status: automation.RunStatusTriggered,
+		},
+		operation: &automation.RetryOperation{
+			State: "leased", LeaseToken: "retry-lease-token",
+		},
+	}
+	base.run.RetryLaunchConfigSnapshot = retrySnapshotForTest(base.run, base.automation)
+	base.run.RetryLaunchConfigVersion = automation.RetryLaunchConfigVersion
+	autoSvc := &retryBindFailureServiceStub{retryAutomationServiceStub: base, bindErr: bindErr}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+	svc.reviewTaskCreator = &stubReviewTaskCreator{
+		task: retryOwnedTask("retry-binding-failure-task", "retry-binding-failure-workspace",
+			"retry-binding-failure-automation", "retry-binding-failure-run", 1),
+	}
+
+	svc.createAutomationTask(context.Background(), &automation.AutomationTriggeredEvent{
+		RunID: "retry-binding-failure-run", RetryGroupGeneration: 1,
+		RetryExternalID: automation.RetryTaskExternalID("retry-binding-failure-run", 1),
+		TriggerType:     automation.TriggerTypeManual,
+	})
+
+	require.Equal(t, "retry-binding-failure-task", autoSvc.committed)
+	require.Equal(t, 2, autoSvc.bindCalls)
+	require.False(t, autoSvc.finalized)
+}
+
+func TestCreateAutomationTaskRejectsForeignRetryExternalIDCollision(t *testing.T) {
+	repo := setupTestRepo(t)
+	foreign := &models.Task{
+		ID: "foreign-task", WorkspaceID: "retry-workspace", Origin: models.TaskOriginManual,
+		ExternalID: automation.RetryTaskExternalID("retry-run", 1),
+		Metadata:   map[string]interface{}{"automation_id": "other-automation", "automation_run_id": "other-run"},
+		CreatedAt:  time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	creator := &stubReviewTaskCreator{task: foreign}
+	autoSvc := &retryAutomationServiceStub{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "retry-automation", WorkspaceID: "retry-workspace", Name: "retry",
+			Prompt: "retry", Enabled: true,
+		}},
+		run: &automation.AutomationRun{
+			ID: "retry-run", AutomationID: "retry-automation", TriggerType: automation.TriggerTypeManual,
+			RetryGroupID: "retry-group", RetryGroupGeneration: 1,
+			RetryState: automation.RetryStateTriggered, Status: automation.RunStatusTriggered,
+		},
+		operation: &automation.RetryOperation{State: "leased", LeaseToken: "retry-lease"},
+	}
+	autoSvc.run.RetryLaunchConfigSnapshot = retrySnapshotForTest(autoSvc.run, autoSvc.automation)
+	autoSvc.run.RetryLaunchConfigVersion = automation.RetryLaunchConfigVersion
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+	svc.reviewTaskCreator = creator
+
+	svc.createAutomationTask(context.Background(), &automation.AutomationTriggeredEvent{
+		RunID: "retry-run", RetryGroupGeneration: 1,
+		RetryExternalID: automation.RetryTaskExternalID("retry-run", 1),
+		TriggerType:     automation.TriggerTypeManual,
+	})
+
+	require.Empty(t, autoSvc.committed)
+	require.NotNil(t, creator.got)
+}
+func TestCreateAutomationTaskAcknowledgesAlreadyBoundCommittedRetry(t *testing.T) {
+	repo := setupTestRepo(t)
+	require.NoError(t, repo.CreateTask(context.Background(),
+		retryOwnedTask("retry-task", "retry-workspace", "retry-automation", "retry-run", 3)))
+	creator := &stubReviewTaskCreator{}
+	autoSvc := &retryAutomationServiceStub{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "retry-automation", WorkspaceID: "retry-workspace", Name: "retry", Prompt: "retry", Enabled: true,
+		}},
+		run: &automation.AutomationRun{
+			ID: "retry-run", AutomationID: "retry-automation", TriggerType: automation.TriggerTypeManual,
+			RetryGroupID: "retry-group", RetryGroupGeneration: 3,
+			RetryState: automation.RetryStateTriggered, Status: automation.RunStatusTaskCreated,
+			SessionID: "session", TurnID: "turn",
+		},
+		operation: &automation.RetryOperation{State: "committed", ExternalTaskID: "retry-task"},
+	}
+	autoSvc.run.RetryLaunchConfigSnapshot = retrySnapshotForTest(autoSvc.run, autoSvc.automation)
+	autoSvc.run.RetryLaunchConfigVersion = automation.RetryLaunchConfigVersion
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+	svc.reviewTaskCreator = creator
+
+	svc.createAutomationTask(context.Background(), &automation.AutomationTriggeredEvent{
+		RunID: "retry-run", RetryGroupGeneration: 3, TriggerType: automation.TriggerTypeManual,
+	})
+
+	require.True(t, autoSvc.begun)
+	require.True(t, autoSvc.acknowledged)
+	require.Nil(t, creator.got)
+}
 
 func TestCreateAutomationTask_BindsMergedPRTarget(t *testing.T) {
 	repo := setupTestRepo(t)
@@ -435,6 +991,359 @@ func TestCreateAutomationTask_BindsMergedPRTarget(t *testing.T) {
 
 	require.NotNil(t, creator.got)
 	require.Equal(t, "target-task-1", creator.got.Metadata[models.MetaKeyAutomationTargetTaskID])
+}
+func TestCreateAutomationTaskDoesNotCreateAfterRetryFenceRejects(t *testing.T) {
+	repo := setupTestRepo(t)
+	creator := &stubReviewTaskCreator{task: &models.Task{ID: "must-not-create"}}
+	autoSvc := &retryAutomationServiceStub{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "retry-automation", WorkspaceID: "retry-workspace", Name: "retry", Prompt: "retry", Enabled: true,
+		}},
+		run: &automation.AutomationRun{
+			ID: "retry-run", AutomationID: "retry-automation", TriggerType: automation.TriggerTypeManual,
+			RetryGroupID: "retry-group", RetryGroupGeneration: 3,
+			RetryState: automation.RetryStateTriggered, Status: automation.RunStatusTriggered,
+		},
+		operation: &automation.RetryOperation{State: "leased", LeaseToken: "lease"},
+		verifyErr: automation.ErrRetryGenerationMismatch,
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+	svc.reviewTaskCreator = creator
+
+	svc.createAutomationTask(context.Background(), &automation.AutomationTriggeredEvent{
+		RunID: "retry-run", RetryGroupGeneration: 3, TriggerType: automation.TriggerTypeManual,
+	})
+
+	require.Nil(t, creator.got)
+}
+
+type retryContinuationRecoveryStub struct {
+	*retryAutomationServiceStub
+	boundTaskID    string
+	boundSessionID string
+	boundTurnID    string
+	boundAction    automation.ThreadAction
+	dispatchErr    error
+}
+
+func (s *retryContinuationRecoveryStub) BindRun(
+	_ context.Context,
+	_ string,
+	taskID, sessionID, turnID string,
+	action automation.ThreadAction,
+	_ string,
+) error {
+	s.boundTaskID, s.boundSessionID, s.boundTurnID = taskID, sessionID, turnID
+	s.boundAction = action
+	return nil
+}
+
+func (s *retryContinuationRecoveryStub) DispatchRun(
+	context.Context,
+	string,
+	automation.ThreadAction,
+	string,
+	func() (automation.RunDispatch, error),
+) error {
+	return s.dispatchErr
+}
+
+func TestCreateAutomationTaskAdoptsCommittedRetryContinuationWithOlderTaskExternalID(t *testing.T) {
+	repo := setupTestRepo(t)
+	require.NoError(t, repo.CreateTask(context.Background(),
+		retryOwnedTask("retry-task", "retry-workspace", "retry-automation", "retry-run", 2)))
+	base := &retryAutomationServiceStub{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "retry-automation", WorkspaceID: "retry-workspace", Name: "retry",
+			Prompt: "retry", Enabled: true, ContinuationPolicy: automation.ContinuationPolicyReuseThread,
+		}},
+		run: &automation.AutomationRun{
+			ID: "retry-run", AutomationID: "retry-automation", TriggerType: automation.TriggerTypeManual,
+			RetryGroupID: "retry-group", RetryGroupGeneration: 3,
+			RetryState: automation.RetryStateTriggered, Status: automation.RunStatusTriggered,
+		},
+		operation: &automation.RetryOperation{
+			State: "committed", ExternalTaskID: "retry-task",
+			ExternalSessionID: "retry-session", ExternalTurnID: "retry-turn",
+		},
+	}
+	base.run.RetryLaunchConfigSnapshot = retrySnapshotForTest(base.run, base.automation)
+	base.run.RetryLaunchConfigVersion = automation.RetryLaunchConfigVersion
+	autoSvc := &retryContinuationRecoveryStub{
+		retryAutomationServiceStub: base,
+		dispatchErr:                errors.New("recovery must not dispatch a second turn"),
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+	svc.reviewTaskCreator = &stubReviewTaskCreator{}
+
+	svc.createAutomationTask(context.Background(), &automation.AutomationTriggeredEvent{
+		RunID: "retry-run", RetryGroupGeneration: 3, TriggerType: automation.TriggerTypeManual,
+	})
+
+	require.Equal(t, "retry-task", autoSvc.boundTaskID)
+	require.Equal(t, "retry-session", autoSvc.boundSessionID)
+	require.Equal(t, "retry-turn", autoSvc.boundTurnID)
+	require.Equal(t, automation.ThreadActionResumed, autoSvc.boundAction)
+	require.True(t, autoSvc.acknowledged)
+}
+
+func TestCreateAutomationTaskPreservesCommittedRetryTaskAfterDispatchFailure(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	task := retryOwnedTask("retry-task", "retry-workspace", "retry-automation", "retry-run", 1)
+	require.NoError(t, repo.CreateTask(ctx, task))
+	base := &retryAutomationServiceStub{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "retry-automation", WorkspaceID: "retry-workspace", Name: "retry",
+			Prompt: "retry", Enabled: true,
+		}},
+		run: &automation.AutomationRun{
+			ID: "retry-run", AutomationID: "retry-automation", TriggerType: automation.TriggerTypeManual,
+			RetryGroupID: "retry-group", RetryGroupGeneration: 1,
+			RetryState: automation.RetryStateTriggered, Status: automation.RunStatusTriggered,
+		},
+		operation: &automation.RetryOperation{State: "leased", LeaseToken: "retry-lease"},
+	}
+	base.run.RetryLaunchConfigSnapshot = retrySnapshotForTest(base.run, base.automation)
+	base.run.RetryLaunchConfigVersion = automation.RetryLaunchConfigVersion
+	autoSvc := &retryContinuationRecoveryStub{
+		retryAutomationServiceStub: base,
+		dispatchErr:                errors.New("provider dispatch failed"),
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+	svc.reviewTaskCreator = &stubReviewTaskCreator{task: task}
+
+	evt := &automation.AutomationTriggeredEvent{
+		RunID: "retry-run", RetryGroupGeneration: 1,
+		RetryExternalID: automation.RetryTaskExternalID("retry-run", 1),
+		TriggerType:     automation.TriggerTypeManual,
+	}
+	svc.createAutomationTask(ctx, evt)
+
+	persisted, err := repo.GetTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, persisted, "committed retry task must survive dispatch failure")
+	require.Equal(t, task.ID, base.operation.ExternalTaskID)
+	require.Equal(t, retryOperationCommittedState, base.operation.State)
+
+	adopted, err := svc.adoptCommittedRetryTask(ctx, base.automation, evt, base.operation)
+	require.NoError(t, err)
+	require.Equal(t, task.ID, adopted.ID)
+}
+
+type retryCommittedContinuationRecoveryStub struct {
+	*retryContinuationRecoveryStub
+	bindErr   error
+	finalized bool
+}
+
+func (s *retryCommittedContinuationRecoveryStub) BindRun(
+	ctx context.Context,
+	runID string,
+	taskID, sessionID, turnID string,
+	action automation.ThreadAction,
+	reason string,
+) error {
+	if s.bindErr != nil {
+		err := s.bindErr
+		s.bindErr = nil
+		return err
+	}
+	return s.retryContinuationRecoveryStub.BindRun(ctx, runID, taskID, sessionID, turnID, action, reason)
+}
+
+func (s *retryCommittedContinuationRecoveryStub) FinalizeAutomationRetryFailure(
+	context.Context, string, int64, error, string,
+) (*automation.AutomationRun, error) {
+	s.finalized = true
+	return nil, nil
+}
+func TestCreateAutomationTaskRecoversCommittedContinuationAfterTransientBindFailure(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateTask(ctx,
+		retryOwnedTask("retry-task", "retry-workspace", "retry-automation", "retry-run", 3)))
+	base := &retryAutomationServiceStub{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "retry-automation", WorkspaceID: "retry-workspace", Name: "retry",
+			Prompt: "retry", Enabled: true, ContinuationPolicy: automation.ContinuationPolicyReuseThread,
+		}},
+		run: &automation.AutomationRun{
+			ID: "retry-run", AutomationID: "retry-automation", TriggerType: automation.TriggerTypeManual,
+			RetryGroupID: "retry-group", RetryGroupGeneration: 3,
+			RetryState: automation.RetryStateTriggered, Status: automation.RunStatusTriggered,
+		},
+		operation: &automation.RetryOperation{
+			State: "committed", ExternalTaskID: "retry-task",
+			ExternalSessionID: "retry-session", ExternalTurnID: "retry-turn",
+		},
+	}
+	base.run.RetryLaunchConfigSnapshot = retrySnapshotForTest(base.run, base.automation)
+	base.run.RetryLaunchConfigVersion = automation.RetryLaunchConfigVersion
+	autoSvc := &retryCommittedContinuationRecoveryStub{
+		retryContinuationRecoveryStub: &retryContinuationRecoveryStub{
+			retryAutomationServiceStub: base,
+		},
+		bindErr: errors.New("temporary binding failure"),
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+	svc.reviewTaskCreator = &stubReviewTaskCreator{}
+	event := &automation.AutomationTriggeredEvent{
+		RunID: "retry-run", RetryGroupGeneration: 3,
+		RetryExternalID: automation.RetryTaskExternalID("retry-run", 3),
+		TriggerType:     automation.TriggerTypeManual,
+	}
+
+	svc.createAutomationTask(ctx, event)
+
+	require.False(t, autoSvc.finalized)
+	require.False(t, autoSvc.acknowledged)
+	autoSvc.bindErr = nil
+	svc.createAutomationTask(ctx, event)
+
+	require.False(t, autoSvc.finalized)
+	require.True(t, autoSvc.acknowledged)
+	require.Equal(t, "retry-task", autoSvc.boundTaskID)
+}
+
+func TestDispatchAutomationContinuationCommitsAtAcceptanceBeforeCompletionError(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	seedTaskAndSession(t, repo, "retry-task", "retry-session", models.TaskSessionStateWaitingForInput)
+	seedExecutorRunning(t, repo, "retry-session", "retry-task", "retry-execution")
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, "retry-task", "automation_id", "previous-automation"))
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, "retry-task", "automation_run_id", "previous-run"))
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptErr:              errors.New("completion failed after acceptance"),
+		promptAcceptedOnError:  true,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.turnService = &repoTurnService{repo: repo}
+	base := &retryAutomationServiceStub{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "retry-automation", WorkspaceID: "ws1", Name: "retry",
+			Prompt: "retry", Enabled: true, ContinuationPolicy: automation.ContinuationPolicyReuseThread,
+		}},
+		run: &automation.AutomationRun{
+			ID: "retry-run", AutomationID: "retry-automation",
+			RetryGroupID: "retry-group", RetryGroupGeneration: 1,
+			RetryState: automation.RetryStateTriggered, Status: automation.RunStatusTriggered,
+		},
+		operation: &automation.RetryOperation{
+			State: "leased", GroupGeneration: 1, LeaseToken: "retry-lease",
+		},
+	}
+	base.run.RetryLaunchConfigSnapshot = retrySnapshotForTest(base.run, base.automation)
+	base.run.RetryLaunchConfigVersion = automation.RetryLaunchConfigVersion
+	svc.SetAutomationService(base)
+	task, err := repo.GetTask(ctx, "retry-task")
+	require.NoError(t, err)
+	task.Origin = models.TaskOriginAutomationRun
+	task.WorkspaceID = "ws1"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+	session, err := repo.GetTaskSession(ctx, "retry-session")
+	require.NoError(t, err)
+	metadata := map[string]interface{}{
+		"automation_id":     "retry-automation",
+		"automation_run_id": "retry-run",
+		"trigger_type":      string(automation.TriggerTypeManual),
+	}
+
+	svc.dispatchAutomationContinuation(
+		ctx, base.automation, task, session, "retry prompt", metadata,
+		"retry-run", automation.ThreadActionResumed, "recovery", base.operation,
+	)
+
+	require.True(t, base.continuationCommitted)
+	require.Equal(t, "committed", base.operation.State)
+	require.Equal(t, "retry-task", base.operation.ExternalTaskID)
+	require.Equal(t, "retry-session", base.operation.ExternalSessionID)
+	require.Equal(t, base.continuationDispatch.TurnID, base.operation.ExternalTurnID)
+	persisted, err := repo.GetTask(ctx, "retry-task")
+	require.NoError(t, err)
+	require.Equal(t, "retry-automation", persisted.Metadata["automation_id"])
+	require.Equal(t, "retry-run", persisted.Metadata["automation_run_id"])
+
+	replayEvent := &automation.AutomationTriggeredEvent{
+		RunID: "retry-run", RetryGroupGeneration: 1, SnapshotVersion: 1,
+		RetryExternalID:    automation.RetryTaskExternalID("retry-run", 1),
+		RetryOutboxEventID: "retry-run:1", RetryOutboxLeaseToken: "lease-token",
+		TriggerType: automation.TriggerTypeManual,
+	}
+	adopted, err := svc.adoptCommittedRetryTask(ctx, base.automation, replayEvent, base.operation)
+	require.NoError(t, err)
+	require.Equal(t, "retry-task", adopted.ID)
+	bound, err := svc.adoptCommittedRetryContinuation(ctx, replayEvent.RunID, adopted.ID, base.operation)
+	require.NoError(t, err)
+	require.True(t, bound)
+	receipt, ok := svc.automationService.(automationRetryReceipt)
+	require.True(t, ok)
+	require.NoError(t, receipt.AcknowledgeRetryEvent(ctx, replayEvent.RetryOutboxEventID, replayEvent.RetryOutboxLeaseToken, replayEvent.RunID, replayEvent.SnapshotVersion))
+	require.Equal(t, "retry-task", base.boundTaskID)
+	require.Equal(t, "retry-session", base.boundSessionID)
+	require.Equal(t, base.operation.ExternalTurnID, base.boundTurnID)
+	require.True(t, base.acknowledged)
+}
+
+func TestDispatchAutomationContinuationMarksAmbiguousOnAcceptanceCommitFailure(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	seedTaskAndSession(t, repo, "retry-task", "retry-session", models.TaskSessionStateWaitingForInput)
+	seedExecutorRunning(t, repo, "retry-session", "retry-task", "retry-execution")
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptErr:              errors.New("completion failed after acceptance"),
+		promptAcceptedOnError:  true,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.turnService = &repoTurnService{repo: repo}
+	base := &retryAutomationServiceStub{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "retry-automation", WorkspaceID: "ws1", Name: "retry",
+			Prompt: "retry", Enabled: true, ContinuationPolicy: automation.ContinuationPolicyReuseThread,
+		}},
+		run: &automation.AutomationRun{
+			ID: "retry-run", AutomationID: "retry-automation",
+			RetryGroupID: "retry-group", RetryGroupGeneration: 1,
+			RetryState: automation.RetryStateTriggered, Status: automation.RunStatusTriggered,
+		},
+		operation: &automation.RetryOperation{
+			State: "leased", GroupGeneration: 1, LeaseToken: "retry-lease",
+		},
+		continuationCommitErr: errors.New("identity commit unavailable"),
+	}
+	base.run.RetryLaunchConfigSnapshot = retrySnapshotForTest(base.run, base.automation)
+	base.run.RetryLaunchConfigVersion = automation.RetryLaunchConfigVersion
+	svc.SetAutomationService(base)
+	task, err := repo.GetTask(ctx, "retry-task")
+	require.NoError(t, err)
+	task.Origin = models.TaskOriginAutomationRun
+	task.WorkspaceID = "ws1"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+	session, err := repo.GetTaskSession(ctx, "retry-session")
+	require.NoError(t, err)
+
+	svc.dispatchAutomationContinuation(
+		ctx, base.automation, task, session, "retry prompt", map[string]interface{}{
+			"automation_id": "retry-automation", "automation_run_id": "retry-run",
+		}, "retry-run", automation.ThreadActionResumed, "recovery", base.operation,
+	)
+	require.Equal(t, "retry-task", base.operation.ExternalTaskID)
+	require.Equal(t, "retry-session", base.operation.ExternalSessionID)
+	require.NotEmpty(t, base.operation.ExternalTurnID)
+
+	require.False(t, base.continuationCommitted)
+	require.True(t, base.ambiguous)
+	require.Equal(t, "ambiguous", base.operation.State)
 }
 
 // TestRefreshAutomationContinuationMetadataOnResume is the regression
@@ -749,6 +1658,25 @@ func TestFinalizeAutomationRun_NonEphemeralTaskReachesTerminalStatus(t *testing.
 
 	svc.finalizeAutomationRun(context.Background(), "t-auto", false, "agent failed")
 	require.Equal(t, "agent failed", autoSvc.failed["t-auto"])
+}
+
+// Permission-blocked automation runs must settle even when there is no active
+// agent turn to match.
+func TestFailAutomationRunOnPermissionWithoutActiveTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedAutomationTask(t, repo, "t-permission", models.TaskOriginAutomationRun, false)
+	autoSvc := &stubAutomationService{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+
+	svc.failAutomationRunOnPermission(ctx, watcher.PermissionRequestData{
+		TaskID: "t-permission",
+		Title:  "run command",
+	})
+
+	require.Equal(t, "permission required: run command; automation runs cannot answer prompts",
+		autoSvc.failed["t-permission"])
 }
 
 // Only automation-origin tasks are finalized; an ordinary task must not have

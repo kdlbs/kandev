@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"go.uber.org/zap"
@@ -242,4 +243,46 @@ func TestWsGetAutomationSummary_RequiresAnAutomation(t *testing.T) {
 	if ep.Code != ws.ErrorCodeBadRequest {
 		t.Errorf("expected BAD_REQUEST, got %q", ep.Code)
 	}
+}
+
+func TestWsRetryHistoryRequiresOwnership(t *testing.T) {
+	svc := newTestService(t)
+	log, _ := logger.NewFromZap(zap.NewNop())
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-private", Name: "private", Enabled: true}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	denied := errors.New("denied")
+	svc.SetWorkspaceAuthorizer(func(_ context.Context, workspaceID string) error {
+		if workspaceID == "ws-private" {
+			return denied
+		}
+		return nil
+	})
+
+	t.Run("automation history", func(t *testing.T) {
+		req, _ := ws.NewRequest("req-1", ws.ActionAutomationRunsList, map[string]any{
+			"automation_id": a.ID, "history": true,
+		})
+		resp, err := wsListRuns(svc, log)(ctx, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Type != ws.MessageTypeError {
+			t.Fatalf("expected error, got %v: %s", resp.Type, string(resp.Payload))
+		}
+	})
+	t.Run("workspace history", func(t *testing.T) {
+		req, _ := ws.NewRequest("req-1", ws.ActionAutomationRunsListWorkspace, map[string]any{
+			"workspace_id": "ws-private", "history": true,
+		})
+		resp, err := wsListWorkspaceRuns(svc, log)(ctx, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Type != ws.MessageTypeError {
+			t.Fatalf("expected error, got %v: %s", resp.Type, string(resp.Payload))
+		}
+	})
 }

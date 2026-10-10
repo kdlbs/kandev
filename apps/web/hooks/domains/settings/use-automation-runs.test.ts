@@ -23,6 +23,8 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 vi.mock("@/lib/api/domains/automation-api", () => ({
   listAutomationRuns: vi.fn(),
+  listAutomationRunPage: vi.fn(),
+  listAutomationRetryHistory: vi.fn(),
   deleteAutomationRun: vi.fn(),
   deleteAllAutomationRuns: vi.fn(),
 }));
@@ -30,6 +32,8 @@ vi.mock("@/lib/api/domains/automation-api", () => ({
 import { toast } from "sonner";
 import {
   listAutomationRuns,
+  listAutomationRunPage,
+  listAutomationRetryHistory,
   deleteAutomationRun,
   deleteAllAutomationRuns,
 } from "@/lib/api/domains/automation-api";
@@ -38,6 +42,8 @@ import { useAutomationRuns } from "./use-automation-runs";
 beforeEach(() => {
   runsStore.reset();
   vi.mocked(listAutomationRuns).mockReset();
+  vi.mocked(listAutomationRunPage).mockReset();
+  vi.mocked(listAutomationRetryHistory).mockReset();
   vi.mocked(deleteAutomationRun).mockReset();
   vi.mocked(deleteAllAutomationRuns).mockReset();
   vi.mocked(toast.error).mockReset();
@@ -139,6 +145,65 @@ describe("useAutomationRuns", () => {
       result.current.deleteAllRuns();
     });
     expect(deleteAllAutomationRuns).toHaveBeenCalledWith(AUTOMATION_ID, WORKSPACE_ID);
+  });
+});
+describe("timeline mode", () => {
+  it("merges singleton runs and consumes every retry-history page in timeline mode", async () => {
+    const singleton = mkRun("singleton");
+    const attempt = mkRun("attempt");
+    vi.mocked(listAutomationRunPage).mockResolvedValue({ items: [singleton] });
+    vi.mocked(listAutomationRetryHistory)
+      .mockResolvedValueOnce({
+        scope: AUTOMATION_ID,
+        items: [
+          {
+            retry_group_id: "group-1",
+            trigger_ids: [],
+            attempts: [attempt],
+            completed: false,
+          },
+        ],
+        next_cursor: "cursor-1",
+        high_water_mark: "watermark",
+      })
+      .mockResolvedValueOnce({
+        scope: AUTOMATION_ID,
+        items: [],
+        high_water_mark: "watermark",
+      });
+
+    const { result, rerender } = renderHook(() =>
+      useAutomationRuns(AUTOMATION_ID, WORKSPACE_ID, "timeline"),
+    );
+    await act(async () => {});
+    rerender();
+
+    expect(listAutomationRunPage).toHaveBeenCalledWith(AUTOMATION_ID, undefined, 200);
+    expect(listAutomationRetryHistory).toHaveBeenNthCalledWith(1, AUTOMATION_ID, undefined, 50);
+    expect(listAutomationRetryHistory).toHaveBeenNthCalledWith(2, AUTOMATION_ID, "cursor-1", 50);
+    expect(result.current.runs.map((run) => run.id)).toEqual(["singleton", "attempt"]);
+  });
+  it("reloads retry history when the selected history mode changes", async () => {
+    vi.mocked(listAutomationRuns).mockResolvedValue([]);
+    vi.mocked(listAutomationRunPage).mockResolvedValue({ items: [] });
+    vi.mocked(listAutomationRetryHistory).mockResolvedValue({
+      scope: AUTOMATION_ID,
+      items: [],
+      high_water_mark: "watermark",
+    });
+
+    const { rerender } = renderHook(
+      ({ mode }: { mode: "attempts" | "timeline" }) =>
+        useAutomationRuns(AUTOMATION_ID, WORKSPACE_ID, mode),
+      { initialProps: { mode: "attempts" } },
+    );
+    await act(async () => {});
+    expect(listAutomationRetryHistory).not.toHaveBeenCalled();
+
+    rerender({ mode: "timeline" });
+    await act(async () => {});
+
+    expect(listAutomationRetryHistory).toHaveBeenCalledWith(AUTOMATION_ID, undefined, 50);
   });
 });
 

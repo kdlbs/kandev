@@ -15,13 +15,12 @@ import { PromptSection } from "./prompt-section";
 import { RequiredFieldLabel } from "./required-field-label";
 import { TriggersSection } from "./triggers-section";
 import { WebhookCreatedDialog } from "./webhook-created-dialog";
+import { RetryPolicySection } from "./retry-policy-section";
 import { useTaskTitleSelectionRestore } from "@/hooks/use-task-title-selection-restore";
 
+import { SELECTED_CARD_CLASS_NAME, UNSELECTED_CARD_CLASS_NAME } from "./automation-card-styles";
+
 type UpdateField = <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-
-const SELECTED_CARD_CLASS_NAME = "border-primary bg-primary/5";
-const UNSELECTED_CARD_CLASS_NAME = "border-border hover:bg-muted/30";
-
 export function NameField({
   value,
   isDirty,
@@ -454,12 +453,17 @@ export function SettingsSection({
   const maxRunsIsDirty = isAutomationFieldDirty(form, savedForm, "maxConcurrentRuns");
   const continuationIsDirty = isAutomationFieldDirty(form, savedForm, "continuationPolicy");
   const taskModeIsDirty = isAutomationFieldDirty(form, savedForm, "taskMode");
+  const retryPolicyIsDirty = isAutomationFieldDirty(form, savedForm, "retryPolicy");
   const reusesThread = form.continuationPolicy === "reuse_thread";
   return (
     <div
       className="space-y-3 rounded-lg border bg-card p-4"
       data-settings-dirty={
-        enabledIsDirty || maxRunsIsDirty || continuationIsDirty || taskModeIsDirty
+        enabledIsDirty ||
+        maxRunsIsDirty ||
+        continuationIsDirty ||
+        taskModeIsDirty ||
+        retryPolicyIsDirty
       }
       data-settings-dirty-level="container"
     >
@@ -499,6 +503,13 @@ export function SettingsSection({
       />
       {form.taskMode === "managed_conversation" ? null : (
         <ContinuationPolicySection form={form} savedForm={savedForm} updateField={updateField} />
+      )}
+      {form.taskMode === "managed_conversation" ? null : (
+        <RetryPolicySection
+          policy={form.retryPolicy}
+          savedPolicy={savedForm.retryPolicy}
+          updateField={updateField}
+        />
       )}
     </div>
   );

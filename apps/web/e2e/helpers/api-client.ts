@@ -18,6 +18,7 @@ import type {
   Repository,
   WorkspaceRecoveryProjection,
 } from "../../lib/types/http";
+import type { RetryPolicy } from "../../lib/types/automation";
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
 import type {
   Coordinator,
@@ -4059,6 +4060,7 @@ export class ApiClient {
     workflowStepId?: string;
     taskMode?: "automation_run" | "normal_task" | "managed_conversation";
     managedDestination?: { plugin_id: string; instance_key: string; revision: number };
+    retryPolicy?: RetryPolicy;
     repositoryMode?: "workspace_default" | "selected" | "none";
     repositoryIds?: string[];
     repositories?: Array<{ repository_id: string; base_branch: string }>;
@@ -4085,10 +4087,8 @@ export class ApiClient {
     /**
      * Backdate the row's `execution_mode` to `task` after creation, which is
      * what an install predating the withdrawal of execution modes carries on
-     * disk. The API ignores `execution_mode` on input by design, so this is
-     * the only way to stand up the state the board-move migration notice
-     * exists to explain; the `legacy_board_card` flag the UI reads is then
-     * derived by the same production SQL a real upgraded install goes through.
+     * disk. The API ignores `execution_mode` on input by design, so this flag
+     * seeds the state a real upgraded install carries.
      */
     legacyBoardCard?: boolean;
   }): Promise<{ id: string; workspace_id: string; name: string }> {
@@ -4102,6 +4102,7 @@ export class ApiClient {
       repository_mode: opts.repositoryMode,
       repository_ids: opts.repositoryIds,
       repositories: opts.repositories,
+      retry_policy: opts.retryPolicy,
       prompt: opts.prompt ?? "",
       agent_profile_id: opts.agentProfileId ?? "",
       executor_profile_id: opts.executorProfileId ?? "",

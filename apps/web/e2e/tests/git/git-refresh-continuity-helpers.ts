@@ -30,6 +30,37 @@ export async function openAllChangesDiff(panel: Locator, page: Page) {
   await page.getByRole("menuitem", { name: "Diff", exact: true }).click();
 }
 
+async function waitForInitialDiffScroll(page: Page) {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+
+  let previousScrollTop: number | null = null;
+  let stableSamples = 0;
+  await expect
+    .poll(
+      async () => {
+        const currentScrollTop = await page
+          .getByTestId("review-diff-scroll")
+          .evaluate((element) => (element as HTMLElement).scrollTop);
+        stableSamples =
+          previousScrollTop !== null && Math.abs(currentScrollTop - previousScrollTop) <= 1
+            ? stableSamples + 1
+            : 0;
+        previousScrollTop = currentScrollTop;
+        return stableSamples >= 2;
+      },
+      {
+        timeout: 5_000,
+        message: "the initial selected diff scroll should settle before test positioning",
+      },
+    )
+    .toBe(true);
+}
+
 export async function setDiffRenderer(page: Page, renderer: DiffRenderer) {
   await page.addInitScript((provider) => {
     localStorage.setItem(
@@ -56,6 +87,20 @@ export async function scrollDiffIntoReadingPosition(
   filePath: string,
   interaction: "programmatic" | "touch" = "programmatic",
 ) {
+  await waitForInitialDiffScroll(page);
+  const diffRoot = page.getByTestId("review-diff-scroll");
+  const targetSection = diffRoot.locator(
+    `[data-review-file-key="${encodeURIComponent(filePath)}"]`,
+  );
+  await targetSection.waitFor({ state: "attached" });
+  await diffRoot.evaluate((element, path) => {
+    const root = element as HTMLElement;
+    const section = root.querySelector<HTMLElement>(
+      `[data-review-file-key="${encodeURIComponent(path)}"]`,
+    );
+    if (!section) throw new Error(`Missing diff section for ${path}`);
+    root.scrollTop += section.getBoundingClientRect().top - root.getBoundingClientRect().top;
+  }, filePath);
   await expect
     .poll(
       async () => {

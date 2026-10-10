@@ -1,8 +1,13 @@
+import { act, renderHook } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { finishClosingDialogAnimations } from "@kandev/ui/lib/dialog-body-lock";
+import {
+  DIALOG_CLOSE_RECOVERY_MS,
+  finishClosingDialogAnimations,
+  useDialogBodyLockRecovery,
+} from "@kandev/ui/lib/dialog-body-lock";
 
 /**
- * Unit coverage for the modal body-lock recovery used by the base Dialog.
+ * Unit coverage for modal body-lock recovery shared by Dialog and AlertDialog.
  *
  * Radix releases `pointer-events: none` on <body> when the dialog content
  * unmounts, and Presence defers that unmount until the exit animation fires
@@ -67,6 +72,38 @@ describe("finishClosingDialogAnimations", () => {
 
     expect(finishClosingDialogAnimations(document)).toBe(true);
     expect(exit.finish).toHaveBeenCalledOnce();
+  });
+
+  it("finishes closing alert-dialog content and overlay", () => {
+    const contentExit = animation();
+    const overlayExit = animation();
+    mountContent("closed", "alert-dialog-content", [contentExit]);
+    mountContent("closed", "alert-dialog-overlay", [overlayExit]);
+    lockBody();
+
+    expect(finishClosingDialogAnimations(document)).toBe(true);
+    expect(contentExit.finish).toHaveBeenCalledOnce();
+    expect(overlayExit.finish).toHaveBeenCalledOnce();
+    expect(isLocked()).toBe(true);
+  });
+
+  it("recovers a controlled close when its open prop changes", () => {
+    const exit = animation();
+    mountContent("closed", DIALOG_CONTENT, [exit]);
+    vi.useFakeTimers();
+    const { rerender, unmount } = renderHook(
+      ({ open }: { open: boolean }) => useDialogBodyLockRecovery(open),
+      { initialProps: { open: true } },
+    );
+
+    try {
+      rerender({ open: false });
+      act(() => vi.advanceTimersByTime(DIALOG_CLOSE_RECOVERY_MS));
+      expect(exit.finish).toHaveBeenCalledOnce();
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
   });
 
   it("ignores open dialog animations", () => {

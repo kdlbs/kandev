@@ -44,6 +44,9 @@ var automationFieldDispositions = map[string]fieldDisposition{
 	"ExecutorProfileID":                {exported: true, yamlKey: "executor_profile"},
 	"RepositoryIDs":                    {exported: true, yamlKey: "repositories"},
 	"Repositories":                     {exported: false},
+	"RetryPolicy":                      {exported: true, yamlKey: "retry_policy"},
+	"RetryPolicyJSON":                  {exported: false}, // persisted JSON representation
+	"AutomationRevision":               {exported: false}, // configuration revision
 	"ContinuationTaskID":               {exported: false}, // runtime pointer to the reused task
 
 	"WebhookSecret":   {exported: false}, // secret
@@ -63,6 +66,7 @@ var automationTriggerFieldDispositions = map[string]fieldDisposition{
 	"ConfigJSON":      {exported: false}, // raw storage of Config; same value
 	"ID":              {exported: false}, // instance identity
 	"AutomationID":    {exported: false}, // instance identity
+	"TriggerRevision": {exported: false}, // configuration revision
 	"LastEvaluatedAt": {exported: false}, // runtime state / fire anchor
 	"CreatedAt":       {exported: false}, // runtime state / fire anchor
 	"UpdatedAt":       {exported: false}, // runtime state

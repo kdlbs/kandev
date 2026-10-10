@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
@@ -347,5 +348,59 @@ func TestGetAutomationSummary_NilWhenItHasNeverRun(t *testing.T) {
 	}
 	if got != nil {
 		t.Fatalf("expected nil for an automation that has never run, got %+v", got)
+	}
+}
+
+func TestListAutomationSummariesBatchesAndBoundsPendingRetries(t *testing.T) {
+	store := setupTestStore(t)
+	createTasksTable(t, store)
+	ctx := context.Background()
+	large := &Automation{WorkspaceID: "ws-pending", Name: "large", Enabled: true}
+	small := &Automation{WorkspaceID: "ws-pending", Name: "small", Enabled: true}
+	for _, automation := range []*Automation{large, small} {
+		if err := store.CreateAutomation(ctx, automation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, automation := range []*Automation{large, small} {
+		group := &RetryGroup{
+			ID: "group-" + automation.ID, AutomationID: automation.ID,
+			Generation: 1, State: RetryGroupLive,
+		}
+		if err := store.CreateRetryGroup(ctx, group); err != nil {
+			t.Fatal(err)
+		}
+		count := 1
+		if automation == large {
+			count = 34
+		}
+		for attempt := 1; attempt <= count; attempt++ {
+			due := time.Now().UTC().Add(time.Duration(attempt) * time.Minute)
+			run := &AutomationRun{
+				ID:           automation.ID + "-run-" + strconv.Itoa(attempt),
+				AutomationID: automation.ID, TriggerType: TriggerTypeManual,
+				Status: RunStatusScheduledRetry, RetryGroupID: group.ID,
+				RetryGroupGeneration: 1, AttemptNumber: int64(attempt),
+				RetryState: RetryStateScheduled, RetryScheduledAt: &due,
+			}
+			if err := store.CreateRun(ctx, run); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	summaries, err := store.ListAutomationSummaries(ctx, "ws-pending")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := make(map[string]PendingRetrySummary, len(summaries))
+	for _, summary := range summaries {
+		pending[summary.AutomationID] = summary.PendingRetries
+	}
+	if got := pending[large.ID]; got.Count != 34 || len(got.Items) != 32 || got.Limit != 32 {
+		t.Errorf("large pending summary = count %d, items %d, limit %d", got.Count, len(got.Items), got.Limit)
+	}
+	if got := pending[small.ID]; got.Count != 1 || len(got.Items) != 1 {
+		t.Errorf("small pending summary = count %d, items %d", got.Count, len(got.Items))
 	}
 }

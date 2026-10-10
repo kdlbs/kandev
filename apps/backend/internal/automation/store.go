@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -68,6 +69,8 @@ const createTablesSQL = `
 		continuation_policy TEXT NOT NULL DEFAULT 'new_task',
 		continuation_task_id TEXT DEFAULT '',
 		webhook_secret TEXT DEFAULT '',
+		retry_policy TEXT NOT NULL DEFAULT '{}',
+		automation_revision BIGINT NOT NULL DEFAULT 0,
 		last_triggered_at DATETIME,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
@@ -78,6 +81,7 @@ const createTablesSQL = `
 		automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
 		type TEXT NOT NULL,
 		config TEXT NOT NULL DEFAULT '{}',
+		trigger_revision BIGINT NOT NULL DEFAULT 0,
 		enabled BOOLEAN DEFAULT 1,
 		last_evaluated_at DATETIME,
 		created_at DATETIME NOT NULL,
@@ -111,12 +115,102 @@ const createTablesSQL = `
 		managed_input_id TEXT NOT NULL DEFAULT '',
 		delivery_status TEXT NOT NULL DEFAULT '',
 		managed_delivery_attempts INTEGER NOT NULL DEFAULT 0,
+		retry_group_id TEXT NOT NULL DEFAULT '',
+		retry_parent_run_id TEXT NOT NULL DEFAULT '',
+		attempt_number BIGINT NOT NULL DEFAULT 1,
+		retry_state TEXT NOT NULL DEFAULT 'none',
+		retry_scheduled_at DATETIME,
+		retry_claimed_at DATETIME,
+		retry_claim_expires_at DATETIME,
+		retry_claim_token TEXT NOT NULL DEFAULT '',
+		retry_group_generation BIGINT NOT NULL DEFAULT 0,
+		retry_cancelled_at DATETIME,
+		retry_base_title TEXT NOT NULL DEFAULT '',
+		retry_failure_phase TEXT NOT NULL DEFAULT '',
+		retry_failure_class TEXT NOT NULL DEFAULT '',
+		retry_task_intent_id TEXT NOT NULL DEFAULT '',
+		retry_policy_snapshot TEXT NOT NULL DEFAULT '{}',
+		retry_trigger_snapshot TEXT NOT NULL DEFAULT '{}',
+		retry_launch_config_snapshot TEXT NOT NULL DEFAULT '{}',
+		retry_launch_config_version BIGINT NOT NULL DEFAULT 1,
+		retry_resolved_prompt TEXT NOT NULL DEFAULT '',
+		retry_resolved_title TEXT NOT NULL DEFAULT '',
+		retry_resolved_trigger_timestamp DATETIME,
+		retry_continuation_snapshot TEXT NOT NULL DEFAULT '{}',
+		automation_revision BIGINT NOT NULL DEFAULT 0,
+		trigger_revision BIGINT NOT NULL DEFAULT 0,
 		created_at DATETIME NOT NULL
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id);
 	CREATE INDEX IF NOT EXISTS idx_automation_runs_dedup ON automation_runs(automation_id, dedup_key);
 	CREATE INDEX IF NOT EXISTS idx_automation_runs_created_at ON automation_runs(created_at DESC);
+	CREATE TABLE IF NOT EXISTS automation_retry_groups (
+		id TEXT PRIMARY KEY,
+		automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+		trigger_id TEXT NOT NULL DEFAULT '',
+		trigger_ids TEXT NOT NULL DEFAULT '[]',
+		generation BIGINT NOT NULL DEFAULT 1,
+		state TEXT NOT NULL DEFAULT 'live',
+		superseded_by_run_id TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_automation_retry_groups_automation
+		ON automation_retry_groups(automation_id, state);
+
+	CREATE TABLE IF NOT EXISTS automation_run_task_intents (
+		intent_id TEXT PRIMARY KEY,
+		run_id TEXT REFERENCES automation_runs(id) ON DELETE SET NULL,
+		task_id TEXT,
+		state TEXT NOT NULL,
+		group_generation BIGINT NOT NULL DEFAULT 0,
+		automation_deleted_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_run_intents_run ON automation_run_task_intents(run_id);
+
+	CREATE TABLE IF NOT EXISTS automation_run_operations (
+		operation_id TEXT PRIMARY KEY,
+		intent_id TEXT NOT NULL REFERENCES automation_run_task_intents(intent_id),
+		run_id TEXT REFERENCES automation_runs(id) ON DELETE SET NULL,
+		group_generation BIGINT NOT NULL DEFAULT 0,
+		operation_kind TEXT NOT NULL,
+		state TEXT NOT NULL,
+		lease_token TEXT NOT NULL DEFAULT '',
+		lease_expires_at DATETIME,
+		external_task_id TEXT NOT NULL DEFAULT '',
+		external_session_id TEXT NOT NULL DEFAULT '',
+		external_turn_id TEXT NOT NULL DEFAULT '',
+		result_json TEXT NOT NULL DEFAULT '{}',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		UNIQUE(intent_id, group_generation, operation_kind)
+	);
+
+	CREATE TABLE IF NOT EXISTS automation_retry_outbox (
+		event_id TEXT PRIMARY KEY,
+		run_id TEXT REFERENCES automation_runs(id) ON DELETE SET NULL,
+		snapshot_version BIGINT NOT NULL DEFAULT 1,
+		payload_hash TEXT NOT NULL DEFAULT '',
+		state TEXT NOT NULL DEFAULT 'pending',
+		lease_token TEXT NOT NULL DEFAULT '',
+		lease_expires_at DATETIME,
+		enqueued_at DATETIME,
+		acknowledged_at DATETIME,
+		attempts INTEGER NOT NULL DEFAULT 0,
+		safe_error TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS automation_retry_event_receipts (
+		event_id TEXT PRIMARY KEY,
+		run_id TEXT REFERENCES automation_runs(id) ON DELETE SET NULL,
+		snapshot_version BIGINT NOT NULL DEFAULT 1,
+		accepted_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_automation_retry_outbox_state ON automation_retry_outbox(state, lease_expires_at);
 	-- The summary query asks each automation for its newest run, ordered by
 	-- (created_at, id) — the ordering every run query uses. Without the
 	-- composite the per-automation lookup sorts that automation's whole run
@@ -160,23 +254,8 @@ const createTablesSQL = `
 `
 
 // In-branch column additions. The canonical CREATE TABLE covers fresh
-// installs; these ALTERs cover DBs already initialised from an earlier
-// commit on this branch (the original PR #406 schema). Duplicate-column
-// errors are the only replay result that the required migration logger
-// tolerates; all other migration errors stop boot.
-//
-// automations.repository_id is retained as a legacy, write-once column: it
-// is never read or written by current code (repository selection now lives
-// in automation_repositories), but dropping a column referenced by two
-// FK-child tables (automation_triggers, automation_runs) under
-// foreign_keys=on would require table-recreate migration infrastructure
-// this package doesn't have yet. Every query that scans a full Automation
-// row uses the explicit automationColumns list, which omits it, so its
-// continued presence in the table is inert.
-//
-// migrateExecutionModeSQL still runs because the notice derivation in
-// automationColumns needs the column to exist on every DB it queries,
-// including one initialised before the column was ever added.
+// installs; these ALTERs cover DBs already initialized from an earlier
+// commit on this branch.
 const (
 	migrateTaskTitleSQL                         = `ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT ''`
 	migrateExecutionModeSQL                     = `ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task'`
@@ -208,6 +287,36 @@ const (
 	migrateRunManagedInputSQL                   = `ALTER TABLE automation_runs ADD COLUMN managed_input_id TEXT NOT NULL DEFAULT ''`
 	migrateRunDeliveryStatusSQL                 = `ALTER TABLE automation_runs ADD COLUMN delivery_status TEXT NOT NULL DEFAULT ''`
 	migrateRunDeliveryAttemptsSQL               = `ALTER TABLE automation_runs ADD COLUMN managed_delivery_attempts INTEGER NOT NULL DEFAULT 0`
+	migrateRetryPolicySQL                       = `ALTER TABLE automations ADD COLUMN retry_policy TEXT NOT NULL DEFAULT '{}'`
+	migrateRetryAutomationRevisionSQL           = `ALTER TABLE automations ADD COLUMN automation_revision BIGINT NOT NULL DEFAULT 0`
+	migrateTriggerRevisionSQL                   = `ALTER TABLE automation_triggers ADD COLUMN trigger_revision BIGINT NOT NULL DEFAULT 0`
+)
+
+const (
+	migrateRunRetryGroupIDSQL            = `ALTER TABLE automation_runs ADD COLUMN retry_group_id TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryParentIDSQL           = `ALTER TABLE automation_runs ADD COLUMN retry_parent_run_id TEXT NOT NULL DEFAULT ''`
+	migrateRunAttemptNumberSQL           = `ALTER TABLE automation_runs ADD COLUMN attempt_number BIGINT NOT NULL DEFAULT 1`
+	migrateRunRetryStateSQL              = `ALTER TABLE automation_runs ADD COLUMN retry_state TEXT NOT NULL DEFAULT 'none'`
+	migrateRunRetryScheduledAtSQL        = `ALTER TABLE automation_runs ADD COLUMN retry_scheduled_at {{timestamp}}`
+	migrateRunRetryClaimedAtSQL          = `ALTER TABLE automation_runs ADD COLUMN retry_claimed_at {{timestamp}}`
+	migrateRunRetryClaimExpiresAtSQL     = `ALTER TABLE automation_runs ADD COLUMN retry_claim_expires_at {{timestamp}}`
+	migrateRunRetryClaimTokenSQL         = `ALTER TABLE automation_runs ADD COLUMN retry_claim_token TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryGenerationSQL         = `ALTER TABLE automation_runs ADD COLUMN retry_group_generation BIGINT NOT NULL DEFAULT 0`
+	migrateRunRetryCancelledAtSQL        = `ALTER TABLE automation_runs ADD COLUMN retry_cancelled_at {{timestamp}}`
+	migrateRunRetryBaseTitleSQL          = `ALTER TABLE automation_runs ADD COLUMN retry_base_title TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryFailurePhaseSQL       = `ALTER TABLE automation_runs ADD COLUMN retry_failure_phase TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryFailureClassSQL       = `ALTER TABLE automation_runs ADD COLUMN retry_failure_class TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryIntentIDSQL           = `ALTER TABLE automation_runs ADD COLUMN retry_task_intent_id TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryPolicySnapshotSQL     = `ALTER TABLE automation_runs ADD COLUMN retry_policy_snapshot TEXT NOT NULL DEFAULT '{}'`
+	migrateRunRetryTriggerSnapshotSQL    = `ALTER TABLE automation_runs ADD COLUMN retry_trigger_snapshot TEXT NOT NULL DEFAULT '{}'`
+	migrateRunRetryLaunchSnapshotSQL     = `ALTER TABLE automation_runs ADD COLUMN retry_launch_config_snapshot TEXT NOT NULL DEFAULT '{}'`
+	migrateRunRetryLaunchVersionSQL      = `ALTER TABLE automation_runs ADD COLUMN retry_launch_config_version BIGINT NOT NULL DEFAULT 1`
+	migrateRunRetryPromptSQL             = `ALTER TABLE automation_runs ADD COLUMN retry_resolved_prompt TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryTitleSQL              = `ALTER TABLE automation_runs ADD COLUMN retry_resolved_title TEXT NOT NULL DEFAULT ''`
+	migrateRunRetryTriggerTimestampSQL   = `ALTER TABLE automation_runs ADD COLUMN retry_resolved_trigger_timestamp {{timestamp}}`
+	migrateRunRetryContinuationSQL       = `ALTER TABLE automation_runs ADD COLUMN retry_continuation_snapshot TEXT NOT NULL DEFAULT '{}'`
+	migrateRunRetryAutomationRevisionSQL = `ALTER TABLE automation_runs ADD COLUMN automation_revision BIGINT NOT NULL DEFAULT 0`
+	migrateRunRetryTriggerRevisionSQL    = `ALTER TABLE automation_runs ADD COLUMN trigger_revision BIGINT NOT NULL DEFAULT 0`
 )
 
 // migrateRunDedupUniqueIndexSQL backstops admitTriggerLocked's check-then-insert
@@ -242,8 +351,8 @@ const automationColumns = `id, workspace_id, name, description, workflow_id, wor
 	managed_destination_installation_id, managed_destination_conversation_id,
 	managed_destination_plugin_id, managed_destination_instance_key, managed_destination_revision,
 	resource_revision, repository_mode, prompt, task_title_template,
-	 enabled, max_concurrent_runs, continuation_policy, continuation_task_id, webhook_secret,
-	 last_triggered_at, created_at, updated_at,
+	enabled, max_concurrent_runs, continuation_policy, continuation_task_id, webhook_secret,
+	retry_policy, automation_revision, last_triggered_at, created_at, updated_at,
 	execution_mode = 'task' AS legacy_board_card`
 
 func (s *Store) initSchema() error {
@@ -287,6 +396,33 @@ func (s *Store) initSchema() error {
 		{"automation_runs.managed_input_id", schemaSQLForDriver(migrateRunManagedInputSQL, s.db.DriverName())},
 		{"automation_runs.delivery_status", schemaSQLForDriver(migrateRunDeliveryStatusSQL, s.db.DriverName())},
 		{"automation_runs.managed_delivery_attempts", schemaSQLForDriver(migrateRunDeliveryAttemptsSQL, s.db.DriverName())},
+		{"automations.retry_policy", schemaSQLForDriver(migrateRetryPolicySQL, s.db.DriverName())},
+		{"automations.automation_revision", schemaSQLForDriver(migrateRetryAutomationRevisionSQL, s.db.DriverName())},
+		{"automation_triggers.trigger_revision", schemaSQLForDriver(migrateTriggerRevisionSQL, s.db.DriverName())},
+		{"automation_runs.retry_group_id", schemaSQLForDriver(migrateRunRetryGroupIDSQL, s.db.DriverName())},
+		{"automation_runs.retry_parent_run_id", schemaSQLForDriver(migrateRunRetryParentIDSQL, s.db.DriverName())},
+		{"automation_runs.attempt_number", schemaSQLForDriver(migrateRunAttemptNumberSQL, s.db.DriverName())},
+		{"automation_runs.retry_state", schemaSQLForDriver(migrateRunRetryStateSQL, s.db.DriverName())},
+		{"automation_runs.retry_scheduled_at", schemaSQLForDriver(migrateRunRetryScheduledAtSQL, s.db.DriverName())},
+		{"automation_runs.retry_claimed_at", schemaSQLForDriver(migrateRunRetryClaimedAtSQL, s.db.DriverName())},
+		{"automation_runs.retry_claim_expires_at", schemaSQLForDriver(migrateRunRetryClaimExpiresAtSQL, s.db.DriverName())},
+		{"automation_runs.retry_claim_token", schemaSQLForDriver(migrateRunRetryClaimTokenSQL, s.db.DriverName())},
+		{"automation_runs.retry_group_generation", schemaSQLForDriver(migrateRunRetryGenerationSQL, s.db.DriverName())},
+		{"automation_runs.retry_cancelled_at", schemaSQLForDriver(migrateRunRetryCancelledAtSQL, s.db.DriverName())},
+		{"automation_runs.retry_base_title", schemaSQLForDriver(migrateRunRetryBaseTitleSQL, s.db.DriverName())},
+		{"automation_runs.retry_failure_phase", schemaSQLForDriver(migrateRunRetryFailurePhaseSQL, s.db.DriverName())},
+		{"automation_runs.retry_failure_class", schemaSQLForDriver(migrateRunRetryFailureClassSQL, s.db.DriverName())},
+		{"automation_runs.retry_task_intent_id", schemaSQLForDriver(migrateRunRetryIntentIDSQL, s.db.DriverName())},
+		{"automation_runs.retry_policy_snapshot", schemaSQLForDriver(migrateRunRetryPolicySnapshotSQL, s.db.DriverName())},
+		{"automation_runs.retry_trigger_snapshot", schemaSQLForDriver(migrateRunRetryTriggerSnapshotSQL, s.db.DriverName())},
+		{"automation_runs.retry_launch_config_snapshot", schemaSQLForDriver(migrateRunRetryLaunchSnapshotSQL, s.db.DriverName())},
+		{"automation_runs.retry_launch_config_version", schemaSQLForDriver(migrateRunRetryLaunchVersionSQL, s.db.DriverName())},
+		{"automation_runs.retry_resolved_prompt", schemaSQLForDriver(migrateRunRetryPromptSQL, s.db.DriverName())},
+		{"automation_runs.retry_resolved_title", schemaSQLForDriver(migrateRunRetryTitleSQL, s.db.DriverName())},
+		{"automation_runs.retry_resolved_trigger_timestamp", schemaSQLForDriver(migrateRunRetryTriggerTimestampSQL, s.db.DriverName())},
+		{"automation_runs.retry_continuation_snapshot", schemaSQLForDriver(migrateRunRetryContinuationSQL, s.db.DriverName())},
+		{"automation_runs.automation_revision", schemaSQLForDriver(migrateRunRetryAutomationRevisionSQL, s.db.DriverName())},
+		{"automation_runs.trigger_revision", schemaSQLForDriver(migrateRunRetryTriggerRevisionSQL, s.db.DriverName())},
 	}
 	for _, migration := range migrations {
 		if err := migrate.Apply(migration.name, migration.stmt); err != nil {
@@ -295,6 +431,9 @@ func (s *Store) initSchema() error {
 	}
 	if err := migrate.Err(); err != nil {
 		return fmt.Errorf("required automation migration: %w", err)
+	}
+	if err := s.ensureRetryIndexes(); err != nil {
+		return err
 	}
 	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS automation_webhook_receipts_due ON automation_webhook_receipts(state,next_attempt_at,created_at,id)`); err != nil {
 		return err
@@ -457,6 +596,16 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	if a.WebhookSecret == "" {
 		a.WebhookSecret = generateSecret()
 	}
+	normalizedPolicy, err := NormalizeRetryPolicy(a.RetryPolicy)
+	if err != nil {
+		return err
+	}
+	a.RetryPolicy = normalizedPolicy
+	policyJSON, err := json.Marshal(normalizedPolicy)
+	if err != nil {
+		return fmt.Errorf("encode retry policy: %w", err)
+	}
+	a.RetryPolicyJSON = string(policyJSON)
 	now := time.Now().UTC()
 	a.CreatedAt = now
 	a.UpdatedAt = now
@@ -509,8 +658,8 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 			managed_destination_instance_key, managed_destination_revision, resource_revision,
 			repository_mode, prompt, task_title_template, execution_mode,
 			enabled, max_concurrent_runs, continuation_policy, continuation_task_id,
-			webhook_secret, last_triggered_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`),
+			retry_policy, automation_revision, webhook_secret, last_triggered_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
 		string(a.TaskMode), a.ManagedOwnerInstallationID, a.ManagedDestinationInstallationID,
@@ -518,7 +667,8 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 		a.ManagedDestinationInstanceKey, a.ManagedDestinationRevision, a.ResourceRevision, string(a.RepositoryMode),
 		a.Prompt, a.TaskTitleTemplate,
 		a.Enabled, a.MaxConcurrentRuns, a.ContinuationPolicy, a.ContinuationTaskID,
-		a.WebhookSecret, a.LastTriggeredAt, a.CreatedAt, a.UpdatedAt)
+		a.RetryPolicyJSON, a.AutomationRevision, a.WebhookSecret,
+		a.LastTriggeredAt, a.CreatedAt, a.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -553,6 +703,10 @@ func (s *Store) GetAutomation(ctx context.Context, id string) (*Automation, erro
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	a.RetryPolicy, err = decodeRetryPolicy(a.RetryPolicyJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -717,6 +871,10 @@ func (s *Store) hydrateAutomations(ctx context.Context, automations []*Automatio
 		return fmt.Errorf("hydrate repository_ids: %w", err)
 	}
 	for _, a := range automations {
+		a.RetryPolicy, err = decodeRetryPolicy(a.RetryPolicyJSON)
+		if err != nil {
+			return fmt.Errorf("hydrate retry policy: %w", err)
+		}
 		a.Triggers = triggersByAutomation[a.ID]
 		a.Repositories = repositoriesByAutomation[a.ID]
 		a.RepositoryIDs = repositoryIDs(a.Repositories)
@@ -761,6 +919,16 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 		return fmt.Errorf("automation not found: %s", id)
 	}
 	applyAutomationUpdate(a, req)
+	normalizedPolicy, err := NormalizeRetryPolicy(a.RetryPolicy)
+	if err != nil {
+		return err
+	}
+	a.RetryPolicy = normalizedPolicy
+	policyJSON, err := json.Marshal(normalizedPolicy)
+	if err != nil {
+		return fmt.Errorf("encode retry policy: %w", err)
+	}
+	a.RetryPolicyJSON = string(policyJSON)
 	if a.ContinuationPolicy == "" {
 		a.ContinuationPolicy = ContinuationPolicyNewTask
 	}
@@ -803,7 +971,8 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 			managed_destination_conversation_id = ?, managed_destination_plugin_id = ?,
 			managed_destination_instance_key = ?, managed_destination_revision = ?, resource_revision = resource_revision + 1,
 			repository_mode = ?, prompt = ?, task_title_template = ?,
-			enabled = ?, max_concurrent_runs = ?, continuation_policy = ?, updated_at = ?
+			enabled = ?, max_concurrent_runs = ?, continuation_policy = ?,
+			retry_policy = ?, automation_revision = automation_revision + 1, updated_at = ?
 		WHERE id = ?`),
 		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
@@ -811,7 +980,8 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 		a.ManagedDestinationConversationID, a.ManagedDestinationPluginID,
 		a.ManagedDestinationInstanceKey, a.ManagedDestinationRevision, string(a.RepositoryMode),
 		a.Prompt, a.TaskTitleTemplate,
-		a.Enabled, a.MaxConcurrentRuns, a.ContinuationPolicy, a.UpdatedAt, id)
+		a.Enabled, a.MaxConcurrentRuns, a.ContinuationPolicy,
+		a.RetryPolicyJSON, a.UpdatedAt, id)
 	if err != nil {
 		return err
 	}
@@ -909,6 +1079,9 @@ func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
 	if req.ContinuationPolicy != nil {
 		a.ContinuationPolicy = *req.ContinuationPolicy
 	}
+	if req.RetryPolicy != nil {
+		a.RetryPolicy = *req.RetryPolicy
+	}
 }
 
 func normalizeAutomationRepositories(a *Automation) {
@@ -963,6 +1136,21 @@ func (s *Store) ListOpenRuns(ctx context.Context, automationID string) ([]*Autom
 		WHERE automation_id = ? AND status IN (?, ?)
 		ORDER BY created_at ASC, id ASC`),
 		automationID, string(RunStatusTriggered), string(RunStatusTaskCreated))
+	for _, run := range runs {
+		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
+	}
+	return runs, err
+}
+
+// ListOpenRunsByTaskID returns every open run bound to one task. Callers must
+// use the returned session and turn identities for terminal writes.
+func (s *Store) ListOpenRunsByTaskID(ctx context.Context, taskID string) ([]*AutomationRun, error) {
+	var runs []*AutomationRun
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
+		SELECT * FROM automation_runs
+		WHERE task_id = ? AND status IN (?, ?)
+		ORDER BY created_at ASC, id ASC`),
+		taskID, string(RunStatusTriggered), string(RunStatusTaskCreated))
 	for _, run := range runs {
 		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
 	}
@@ -1036,7 +1224,14 @@ func (s *Store) DeleteAutomationWithCleanup(ctx context.Context, id string, clea
 func (s *Store) ListAutomationTaskIDs(ctx context.Context, id string) ([]string, error) {
 	var taskIDs []string
 	if err := s.ro.SelectContext(ctx, &taskIDs, s.ro.Rebind(
-		`SELECT DISTINCT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''`), id); err != nil {
+		`SELECT DISTINCT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''
+		 UNION
+		 SELECT DISTINCT o.external_task_id
+		 FROM automation_run_operations o
+		 JOIN automation_runs ar ON ar.id = o.run_id
+		 WHERE ar.automation_id = ? AND o.operation_kind = ?
+			AND o.state IN (?, ?) AND o.external_task_id != ''`), id, id,
+		retryTaskOperationKind, retryOperationCommitted, retryOperationAmbiguous); err != nil {
 		return nil, err
 	}
 	var continuationTaskID string
@@ -1058,11 +1253,17 @@ func loadAutomationCleanupOwner(ctx context.Context, tx *sqlx.Tx, id string) (au
 	}
 	return owner, err == nil, err
 }
-
 func listAutomationCleanupTaskIDs(ctx context.Context, tx *sqlx.Tx, id, continuationTaskID string) ([]string, error) {
 	var taskIDs []string
 	if err := tx.SelectContext(ctx, &taskIDs, tx.Rebind(
-		`SELECT DISTINCT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''`), id); err != nil {
+		`SELECT DISTINCT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''
+		 UNION
+		 SELECT DISTINCT o.external_task_id
+		 FROM automation_run_operations o
+		 JOIN automation_runs ar ON ar.id = o.run_id
+		 WHERE ar.automation_id = ? AND o.operation_kind = ?
+			AND o.state IN (?, ?) AND o.external_task_id != ''`), id, id,
+		retryTaskOperationKind, retryOperationCommitted, retryOperationAmbiguous); err != nil {
 		return nil, err
 	}
 	if continuationTaskID != "" {
@@ -1215,11 +1416,16 @@ func (s *Store) CreateTrigger(ctx context.Context, t *AutomationTrigger) error {
 	now := time.Now().UTC()
 	t.CreatedAt = now
 	t.UpdatedAt = now
+	if t.TriggerRevision == 0 {
+		t.TriggerRevision = 1
+	}
 	t.ConfigJSON = string(t.Config)
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
-		INSERT INTO automation_triggers (id, automation_id, type, config, enabled, last_evaluated_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
-		t.ID, t.AutomationID, t.Type, t.ConfigJSON, t.Enabled, t.LastEvaluatedAt, t.CreatedAt, t.UpdatedAt)
+		INSERT INTO automation_triggers
+			(id, automation_id, type, config, enabled, trigger_revision, last_evaluated_at, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		t.ID, t.AutomationID, t.Type, t.ConfigJSON, t.Enabled, t.TriggerRevision,
+		t.LastEvaluatedAt, t.CreatedAt, t.UpdatedAt)
 	return err
 }
 
@@ -1302,7 +1508,7 @@ func (s *Store) UpdateTrigger(ctx context.Context, id string, req *UpdateTrigger
 	}
 	t.UpdatedAt = time.Now().UTC()
 	_, err = s.db.ExecContext(ctx, s.db.Rebind(
-		`UPDATE automation_triggers SET config = ?, enabled = ?, updated_at = ? WHERE id = ?`),
+		`UPDATE automation_triggers SET config = ?, enabled = ?, trigger_revision = trigger_revision + 1, updated_at = ? WHERE id = ?`),
 		t.ConfigJSON, t.Enabled, t.UpdatedAt, id)
 	return err
 }
@@ -1344,20 +1550,43 @@ func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
 		r.ID = uuid.New().String()
 	}
 	r.CreatedAt = time.Now().UTC()
+	if r.AttemptNumber == 0 {
+		r.AttemptNumber = 1
+	}
+	if r.RetryState == "" {
+		r.RetryState = RetryStateNone
+	}
+	if r.RetryLaunchConfigVersion == 0 {
+		r.RetryLaunchConfigVersion = 1
+	}
 	r.TriggerDataJSON = string(r.TriggerData)
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
-		INSERT INTO automation_runs (id, automation_id, trigger_id, trigger_type, task_id, status,
-			dedup_key, trigger_data, error_message, session_id, turn_id, thread_action, thread_reason,
-			display_title, dedup_reason, repository_reason, managed_input_id, delivery_status, managed_delivery_attempts,
+		INSERT INTO automation_runs (
+			id, automation_id, trigger_id, trigger_type, task_id, status, dedup_key, trigger_data,
+			error_message, session_id, turn_id, thread_action, thread_reason, display_title,
+			dedup_reason, repository_reason, managed_input_id, delivery_status, managed_delivery_attempts,
 			managed_conversation_id, managed_destination_installation_id, managed_destination_plugin_id,
-			managed_destination_instance_key, managed_destination_revision, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-		r.ID, r.AutomationID, r.TriggerID, r.TriggerType, r.TaskID, r.Status,
-		r.DedupKey, r.TriggerDataJSON, r.ErrorMessage, r.SessionID, r.TurnID,
-		r.ThreadAction, r.ThreadReason, r.DisplayTitle, r.DedupReason, r.RepositoryReason,
-		r.ManagedInputID, r.DeliveryStatus, r.DeliveryAttempts, r.ManagedConversationID,
-		r.ManagedDestinationInstallationID, r.ManagedDestinationPluginID,
-		r.ManagedDestinationInstanceKey, r.ManagedDestinationRevision, r.CreatedAt)
+			managed_destination_instance_key, managed_destination_revision,
+			retry_group_id, retry_parent_run_id, attempt_number, retry_state, retry_scheduled_at,
+			retry_claimed_at, retry_claim_expires_at, retry_claim_token, retry_group_generation,
+			retry_cancelled_at, retry_base_title, retry_failure_phase, retry_failure_class,
+			retry_task_intent_id, retry_policy_snapshot, retry_trigger_snapshot,
+			retry_launch_config_snapshot, retry_launch_config_version, retry_resolved_prompt,
+			retry_resolved_title, retry_resolved_trigger_timestamp, retry_continuation_snapshot,
+			automation_revision, trigger_revision, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		r.ID, r.AutomationID, r.TriggerID, r.TriggerType, r.TaskID, r.Status, r.DedupKey,
+		r.TriggerDataJSON, r.ErrorMessage, r.SessionID, r.TurnID, r.ThreadAction, r.ThreadReason,
+		r.DisplayTitle, r.DedupReason, r.RepositoryReason, r.ManagedInputID, r.DeliveryStatus,
+		r.DeliveryAttempts, r.ManagedConversationID, r.ManagedDestinationInstallationID,
+		r.ManagedDestinationPluginID, r.ManagedDestinationInstanceKey, r.ManagedDestinationRevision,
+		r.RetryGroupID, r.RetryParentRunID, r.AttemptNumber, r.RetryState, r.RetryScheduledAt,
+		r.RetryClaimedAt, r.RetryClaimExpiresAt, r.RetryClaimToken, r.RetryGroupGeneration,
+		r.RetryCancelledAt, r.RetryBaseTitle, r.RetryFailurePhase, r.RetryFailureClass,
+		r.RetryTaskIntentID, r.RetryPolicySnapshot, r.RetryTriggerSnapshot,
+		r.RetryLaunchConfigSnapshot, r.RetryLaunchConfigVersion, r.RetryResolvedPrompt,
+		r.RetryResolvedTitle, r.RetryResolvedTriggerAt, r.RetryContinuationSnapshot,
+		r.AutomationRevision, r.TriggerRevision, r.CreatedAt)
 	return err
 }
 
@@ -1397,12 +1626,35 @@ func (s *Store) AdoptTriggeredRun(ctx context.Context, r *AutomationRun) (bool, 
 func (s *Store) BindRunTask(ctx context.Context, runID, taskID, repositoryReason string) error {
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE automation_runs SET task_id = ?, repository_reason = ?
-		WHERE id = ? AND status = ?`), taskID, repositoryReason, runID, string(RunStatusTriggered))
+		WHERE id = ? AND status = ? AND (
+			retry_group_id = '' OR EXISTS (
+				SELECT 1 FROM automation_retry_groups rg
+				JOIN automations a ON a.id = automation_runs.automation_id
+				WHERE rg.id = automation_runs.retry_group_id
+					AND rg.generation = automation_runs.retry_group_generation
+					AND rg.state = ? AND a.enabled = TRUE
+			)
+		)`), taskID, repositoryReason, runID, string(RunStatusTriggered), RetryGroupLive)
 	if err != nil {
 		return err
 	}
 	if affected, _ := res.RowsAffected(); affected == 0 {
+		var existing struct {
+			Status RunStatus `db:"status"`
+			TaskID string    `db:"task_id"`
+		}
+		if lookupErr := s.db.GetContext(ctx, &existing, s.db.Rebind(`SELECT status, task_id FROM automation_runs WHERE id = ?`), runID); lookupErr == nil &&
+			existing.Status == RunStatusTaskCreated && existing.TaskID == taskID {
+			return nil
+		}
+		var groupID string
+		if lookupErr := s.db.GetContext(ctx, &groupID, s.db.Rebind(`SELECT retry_group_id FROM automation_runs WHERE id = ?`), runID); lookupErr == nil && groupID != "" {
+			return ErrRetryGenerationMismatch
+		}
 		return fmt.Errorf("automation run %s is not an admitted triggered run", runID)
+	}
+	if err := s.bindRetryIntentTask(ctx, runID, taskID, retryIntentCreated); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1421,14 +1673,25 @@ func (s *Store) BindRun(ctx context.Context, runID, taskID, sessionID, turnID st
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE automation_runs
 		SET task_id = ?, session_id = ?, turn_id = ?, thread_action = ?, thread_reason = ?, status = ?
-		WHERE id = ? AND status IN (?, ?)`),
+		WHERE id = ? AND status IN (?, ?) AND (
+			retry_group_id = '' OR EXISTS (
+				SELECT 1 FROM automation_retry_groups rg
+				JOIN automations a ON a.id = automation_runs.automation_id
+				WHERE rg.id = automation_runs.retry_group_id
+					AND rg.generation = automation_runs.retry_group_generation
+					AND rg.state = ? AND a.enabled = TRUE
+			)
+		)`),
 		taskID, sessionID, turnID, action, reason, string(RunStatusTaskCreated),
-		runID, string(RunStatusTriggered), string(RunStatusTaskCreated))
+		runID, string(RunStatusTriggered), string(RunStatusTaskCreated), RetryGroupLive)
 	if err != nil {
 		return err
 	}
 	if affected, _ := res.RowsAffected(); affected == 0 {
-		return fmt.Errorf("automation run %s is not bindable", runID)
+		return ErrRetryGenerationMismatch
+	}
+	if err := s.bindRetryIntentTask(ctx, runID, taskID, retryIntentBound); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1544,6 +1807,104 @@ func (s *Store) updateRunTerminalStatus(ctx context.Context, taskID string, stat
 	return err
 }
 
+func encodeRetryHistoryCursor(createdAt time.Time, id string) string {
+	raw := createdAt.UTC().Format(time.RFC3339Nano) + "|" + id
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+func decodeRetryHistoryCursor(cursor string) (time.Time, string, error) {
+	if cursor == "" {
+		return time.Time{}, "", nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return time.Time{}, "", errors.New("invalid retry history cursor")
+	}
+	parts := strings.SplitN(string(raw), "|", 2)
+	if len(parts) != 2 {
+		return time.Time{}, "", errors.New("invalid retry history cursor")
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil || parts[1] == "" {
+		return time.Time{}, "", errors.New("invalid retry history cursor")
+	}
+	return createdAt, parts[1], nil
+}
+
+func (s *Store) ListRetryHistory(ctx context.Context, automationID, cursor string, limit int) (*RetryHistoryPage, error) {
+	return s.listRetryHistory(ctx, "automation:"+automationID, cursor, limit,
+		`SELECT rg.* FROM automation_retry_groups rg WHERE rg.automation_id = ?`,
+		[]any{automationID},
+		`SELECT rg.* FROM automation_retry_groups rg WHERE rg.automation_id = ?`,
+		[]any{automationID})
+}
+
+func (s *Store) ListWorkspaceRetryHistory(ctx context.Context, workspaceID, cursor string, limit int) (*RetryHistoryPage, error) {
+	return s.listRetryHistory(ctx, "workspace:"+workspaceID, cursor, limit,
+		`SELECT rg.* FROM automation_retry_groups rg JOIN automations a ON a.id = rg.automation_id WHERE a.workspace_id = ?`,
+		[]any{workspaceID},
+		`SELECT rg.* FROM automation_retry_groups rg JOIN automations a ON a.id = rg.automation_id WHERE a.workspace_id = ?`,
+		[]any{workspaceID})
+}
+
+func (s *Store) listRetryHistory(
+	ctx context.Context,
+	scope, cursor string,
+	limit int,
+	pageQuery string,
+	pageArgs []any,
+	highWaterQuery string,
+	highWaterArgs []any,
+) (*RetryHistoryPage, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > maxRunsLimit {
+		limit = maxRunsLimit
+	}
+	after, afterID, err := decodeRetryHistoryCursor(cursor)
+	if err != nil {
+		return nil, err
+	}
+	if !after.IsZero() {
+		pageQuery += ` AND (rg.created_at < ? OR (rg.created_at = ? AND rg.id < ?))`
+		pageArgs = append(pageArgs, after, after, afterID)
+	}
+	pageQuery += ` ORDER BY rg.created_at DESC, rg.id DESC LIMIT ?`
+	pageArgs = append(pageArgs, limit+1)
+	var groups []RetryGroup
+	if err := s.ro.SelectContext(ctx, &groups, s.ro.Rebind(pageQuery), pageArgs...); err != nil {
+		return nil, err
+	}
+	page := &RetryHistoryPage{Scope: scope, Items: []*RetryHistoryAttempt{}}
+	if len(groups) > limit {
+		last := groups[limit-1]
+		page.NextCursor = encodeRetryHistoryCursor(last.CreatedAt, last.ID)
+		groups = groups[:limit]
+	}
+	for _, group := range groups {
+		runs, err := s.listRetryGroupRuns(ctx, group.ID)
+		if err != nil {
+			return nil, err
+		}
+		var triggerIDs []string
+		_ = json.Unmarshal([]byte(group.TriggerIDsJSON), &triggerIDs)
+		page.Items = append(page.Items, &RetryHistoryAttempt{
+			RetryGroupID: group.ID, TriggerIDs: triggerIDs, Attempts: runs,
+			Completed: group.State == RetryGroupCompleted,
+		})
+	}
+	var highWater RetryGroup
+	if err := s.ro.GetContext(ctx, &highWater, s.ro.Rebind(highWaterQuery+" ORDER BY rg.created_at DESC, rg.id DESC LIMIT 1"), highWaterArgs...); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+	} else {
+		page.HighWaterMark = encodeRetryHistoryCursor(highWater.CreatedAt, highWater.ID)
+	}
+	return page, nil
+}
+
 // ListRuns returns recent runs for an automation. A task_created run whose
 // generated task has been archived is reported as archived; one whose task
 // is gone entirely or explicitly cancelled is reported as cancelled — see
@@ -1567,12 +1928,70 @@ func (s *Store) ListRuns(ctx context.Context, automationID string, limit int) ([
 		return nil, err
 	}
 	for _, r := range runs {
+		if r.RetryState == RetryStateCancelled {
+			r.Status = RunStatusCancelled
+		}
 		r.TriggerData = json.RawMessage(r.TriggerDataJSON)
 	}
 	if err := s.hydrateRunSummaries(ctx, runs); err != nil {
 		return nil, err
 	}
 	return runs, nil
+}
+func (s *Store) ListRunPage(ctx context.Context, automationID, cursor string, limit int) (*AutomationRunsPage, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > maxRunsLimit {
+		limit = maxRunsLimit
+	}
+	after, afterID, err := decodeRetryHistoryCursor(cursor)
+	if err != nil {
+		return nil, err
+	}
+	query := `SELECT` + runTaskStateColumnsSQL + `
+		FROM automation_runs ar
+		LEFT JOIN tasks t ON t.id = ar.task_id
+		WHERE ar.automation_id = ?`
+	args := append(runTaskStateArgs(), automationID)
+	if cursor != "" {
+		query += ` AND (ar.created_at < ? OR (ar.created_at = ? AND ar.id < ?))`
+		args = append(args, after, after, afterID)
+	}
+	query += ` ORDER BY ` + runOrderSQL("ar") + ` LIMIT ?`
+	args = append(args, limit+1)
+	var runs []*AutomationRun
+	err = s.ro.SelectContext(ctx, &runs, s.ro.Rebind(query), args...)
+	if db.IsMissingTableError(err) {
+		query = `SELECT * FROM automation_runs WHERE automation_id = ?`
+		args = []any{automationID}
+		if cursor != "" {
+			query += ` AND (created_at < ? OR (created_at = ? AND id < ?))`
+			args = append(args, after, after, afterID)
+		}
+		query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+		args = append(args, limit+1)
+		err = s.ro.SelectContext(ctx, &runs, s.ro.Rebind(query), args...)
+	}
+	if err != nil {
+		return nil, err
+	}
+	page := &AutomationRunsPage{Items: runs}
+	if len(runs) > limit {
+		last := runs[limit-1]
+		page.NextCursor = encodeRetryHistoryCursor(last.CreatedAt, last.ID)
+		page.Items = runs[:limit]
+	}
+	for _, run := range page.Items {
+		if run.RetryState == RetryStateCancelled {
+			run.Status = RunStatusCancelled
+		}
+		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
+	}
+	if err := s.hydrateRunSummaries(ctx, page.Items); err != nil {
+		return nil, err
+	}
+	return page, nil
 }
 
 // maxRunsLimit caps the per-automation run history for the same reason the
@@ -1689,6 +2108,7 @@ const runTaskStateColumnsSQL = `
 		-- that dead-ends; the derived cancelled status below already says why.
 		CASE WHEN t.id IS NULL THEN '' ELSE ar.task_id END AS task_id,
 		CASE
+			WHEN ar.retry_state = ? THEN ?
 			WHEN ar.status = ? AND t.id IS NULL THEN ?
 			WHEN ar.status = ? AND t.archived_at IS NOT NULL THEN ?
 			WHEN ar.status = ? AND EXISTS (
@@ -1703,6 +2123,12 @@ const runTaskStateColumnsSQL = `
 		ar.managed_conversation_id, ar.managed_destination_installation_id,
 		ar.managed_destination_plugin_id, ar.managed_destination_instance_key, ar.managed_destination_revision,
 		ar.managed_input_id, ar.delivery_status, ar.managed_delivery_attempts,
+		ar.retry_group_id, ar.retry_parent_run_id, ar.attempt_number, ar.retry_state,
+		ar.retry_scheduled_at, ar.retry_claimed_at, ar.retry_group_generation,
+		ar.retry_cancelled_at, ar.retry_failure_phase, ar.retry_failure_class,
+		ar.retry_policy_snapshot, ar.retry_trigger_snapshot, ar.retry_resolved_prompt,
+		ar.retry_resolved_title, ar.retry_resolved_trigger_timestamp,
+		ar.automation_revision, ar.trigger_revision,
 		ar.created_at,
 		COALESCE((
 			SELECT substr(m.content, 1, 280) FROM task_session_messages m
@@ -1726,6 +2152,7 @@ const runTaskStateColumnsSQL = `
 // matching argument being obvious.
 func runTaskStateArgs() []any {
 	return []any{
+		string(RetryStateCancelled), string(RunStatusCancelled),
 		string(RunStatusTaskCreated), string(RunStatusCancelled),
 		string(RunStatusTaskCreated), string(RunStatusArchived),
 		string(RunStatusTaskCreated), string(taskmodels.TaskSessionStateCancelled), string(RunStatusCancelled),
@@ -1750,6 +2177,36 @@ func (s *Store) listRunsRaw(ctx context.Context, automationID string, limit int)
 		`SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`),
 		automationID, limit)
 	return runs, err
+}
+
+func (s *Store) listRetryGroupRuns(ctx context.Context, groupID string) ([]*AutomationRun, error) {
+	var runs []*AutomationRun
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
+		SELECT`+runTaskStateColumnsSQL+`
+		FROM automation_runs ar
+		LEFT JOIN tasks t ON t.id = ar.task_id
+		WHERE ar.retry_group_id = ?
+		ORDER BY ar.attempt_number ASC, ar.id ASC`),
+		append(runTaskStateArgs(), groupID)...)
+	if db.IsMissingTableError(err) {
+		err = s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
+			SELECT * FROM automation_runs
+			WHERE retry_group_id = ?
+			ORDER BY attempt_number ASC, id ASC`), groupID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, run := range runs {
+		if run.RetryState == RetryStateCancelled {
+			run.Status = RunStatusCancelled
+		}
+		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
+	}
+	if err := s.hydrateRunSummaries(ctx, runs); err != nil {
+		return nil, err
+	}
+	return runs, nil
 }
 
 // maxWorkspaceRunsLimit caps the workspace-wide feed. Unlike ListRuns, which
@@ -1780,6 +2237,9 @@ func (s *Store) ListWorkspaceRuns(ctx context.Context, workspaceID string, limit
 		return nil, err
 	}
 	for _, r := range runs {
+		if r.RetryState == RetryStateCancelled {
+			r.Status = RunStatusCancelled
+		}
 		r.TriggerData = json.RawMessage(r.TriggerDataJSON)
 	}
 	if err := s.hydrateWorkspaceRunSummaries(ctx, runs); err != nil {
@@ -1855,20 +2315,28 @@ func (s *Store) listSummaries(ctx context.Context, scope string, arg any) ([]*Au
 		return nil, err
 	}
 	boundRuns := make([]*AutomationRun, len(rows))
+	automationIDs := make([]string, len(rows))
 	for i := range rows {
 		boundRuns[i] = &rows[i].AutomationRun
+		automationIDs[i] = rows[i].AutomationID
 	}
 	if err := s.hydrateRunSummaries(ctx, boundRuns); err != nil {
+		return nil, err
+	}
+	pendingByAutomation, err := s.PendingRetrySummaries(ctx, automationIDs)
+	if err != nil {
 		return nil, err
 	}
 	summaries := make([]*AutomationSummary, 0, len(rows))
 	for _, row := range rows {
 		run := row.AutomationRun
 		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
+		pending := pendingByAutomation[run.AutomationID]
 		summaries = append(summaries, &AutomationSummary{
-			AutomationID: run.AutomationID,
-			OpenRuns:     row.OpenRuns,
-			LastRun:      &run,
+			AutomationID:   run.AutomationID,
+			OpenRuns:       row.OpenRuns,
+			LastRun:        &run,
+			PendingRetries: pending,
 		})
 	}
 	return summaries, nil
@@ -2059,25 +2527,49 @@ func (s *Store) DeleteRun(ctx context.Context, id string) error {
 	return err
 }
 
-// ListRunTaskIDs returns all non-empty task_id values for an automation's runs.
-// Used by DeleteAllRuns so the service can clean up tasks before purging rows.
+// GetCommittedRetryTaskID returns the provider task identity committed for one
+// retry run before the run row could be bound to it.
+func (s *Store) GetCommittedRetryTaskID(ctx context.Context, runID string) (string, error) {
+	var taskID string
+	err := s.ro.GetContext(ctx, &taskID, s.ro.Rebind(`
+		SELECT external_task_id FROM automation_run_operations
+		WHERE run_id = ? AND operation_kind = ? AND state = ? AND external_task_id != ''
+		ORDER BY updated_at DESC LIMIT 1`),
+		runID, retryTaskOperationKind, retryOperationCommitted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return taskID, err
+}
+
+// ListRunTaskIDs returns all task identities owned by an automation's runs,
+// including provider identities committed or ambiguously accepted before retry
+// binding completed. Used by DeleteAllRuns before purging run rows.
 func (s *Store) ListRunTaskIDs(ctx context.Context, automationID string) ([]string, error) {
 	var ids []string
-	err := s.ro.SelectContext(ctx, &ids, s.ro.Rebind(
-		`SELECT DISTINCT task_id FROM automation_runs WHERE automation_id = ? AND task_id != ''`),
-		automationID)
+	err := s.ro.SelectContext(ctx, &ids, s.ro.Rebind(`
+		SELECT DISTINCT task_id FROM automation_runs
+		WHERE automation_id = ? AND task_id != ''
+		UNION
+		SELECT DISTINCT o.external_task_id
+		FROM automation_run_operations o
+		JOIN automation_runs ar ON ar.id = o.run_id
+		WHERE ar.automation_id = ? AND o.operation_kind = ?
+			AND o.state IN (?, ?) AND o.external_task_id != ''`),
+		automationID, automationID, retryTaskOperationKind,
+		retryOperationCommitted, retryOperationAmbiguous)
 	return ids, err
 }
 
-// DeleteAllRuns removes every run row for an automation.
+// DeleteAllRuns removes every run row and retry ledger entry for an automation.
 func (s *Store) DeleteAllRuns(ctx context.Context, automationID string) error {
-	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM automation_runs WHERE automation_id = ?`), automationID)
-	return err
+	return s.ClearContinuationAndDeleteAllRuns(ctx, automationID)
 }
 
 // ClearContinuationAndDeleteAllRuns atomically releases the reusable task
-// pointer with the run rows it protects. The service performs task cleanup
-// before calling this method, while holding the automation admission lock.
+// pointer with the run rows and retry ledger entries it protects. The service
+// performs task cleanup before calling this method, while holding the
+// automation admission lock.
 func (s *Store) ClearContinuationAndDeleteAllRuns(ctx context.Context, automationID string) error {
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -2088,8 +2580,32 @@ func (s *Store) ClearContinuationAndDeleteAllRuns(ctx context.Context, automatio
 		`UPDATE automations SET continuation_task_id = '', updated_at = ? WHERE id = ?`), time.Now().UTC(), automationID); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		DELETE FROM automation_retry_event_receipts
+		WHERE run_id IN (SELECT id FROM automation_runs WHERE automation_id = ?)`), automationID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		DELETE FROM automation_retry_outbox
+		WHERE run_id IN (SELECT id FROM automation_runs WHERE automation_id = ?)`), automationID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		DELETE FROM automation_run_operations
+		WHERE run_id IN (SELECT id FROM automation_runs WHERE automation_id = ?)`), automationID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		DELETE FROM automation_run_task_intents
+		WHERE run_id IN (SELECT id FROM automation_runs WHERE automation_id = ?)`), automationID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(
 		`DELETE FROM automation_runs WHERE automation_id = ?`), automationID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`DELETE FROM automation_retry_groups WHERE automation_id = ?`), automationID); err != nil {
 		return err
 	}
 	return tx.Commit()

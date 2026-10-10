@@ -46,6 +46,7 @@ func doWebhookPost(h *WebhookHandler, automationID, secret, body string) *httpte
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/automations/webhook/"+automationID, strings.NewReader(body))
+	c.Request.Header.Set("X-Kandev-Delivery-ID", "test-delivery")
 	if secret != "" {
 		c.Request.Header.Set("X-Webhook-Secret", secret)
 	}
@@ -113,8 +114,9 @@ func TestWebhookHandle_PassingFilters_AdmitsRun(t *testing.T) {
 	require.Equal(t, "webhook:x1", runs[0].DedupKey)
 }
 
-// A trigger with no dedup_key path declared admits with an empty key.
-func TestWebhookHandle_NoDedupKeyConfigured_AdmitsWithEmptyKey(t *testing.T) {
+// Without a configured dedup path, the required delivery ID supplies the
+// per-automation deduplication key.
+func TestWebhookHandle_NoDedupKeyConfigured_UsesDeliveryID(t *testing.T) {
 	h, svc := newWebhookTestHandler(t)
 	a, _ := createWebhookAutomation(t, svc, `{}`)
 
@@ -124,14 +126,13 @@ func TestWebhookHandle_NoDedupKeyConfigured_AdmitsWithEmptyKey(t *testing.T) {
 	runs, err := svc.store.ListRuns(context.Background(), a.ID, 10)
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
-	require.Empty(t, runs[0].DedupKey)
-	require.Equal(t, "dedup_not_configured", runs[0].DedupReason)
+	require.Equal(t, "webhook:"+a.ID+":test-delivery", runs[0].DedupKey)
+	require.Empty(t, runs[0].DedupReason)
 }
 
-// A declared dedup_key path that resolves to an empty/whitespace value is
-// treated the same as unresolved — the literal key "webhook:   " must never
-// be stored.
-func TestWebhookHandle_DedupKeyResolvesToBlank_TreatedAsUnresolved(t *testing.T) {
+// A configured dedup path that resolves to blank falls back to the required
+// delivery ID rather than storing a blank-derived key.
+func TestWebhookHandle_DedupKeyResolvesToBlank_FallsBackToDeliveryID(t *testing.T) {
 	h, svc := newWebhookTestHandler(t)
 	a, _ := createWebhookAutomation(t, svc, `{"dedup_key":"id"}`)
 
@@ -141,19 +142,13 @@ func TestWebhookHandle_DedupKeyResolvesToBlank_TreatedAsUnresolved(t *testing.T)
 	runs, err := svc.store.ListRuns(context.Background(), a.ID, 10)
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
-	require.Empty(t, runs[0].DedupKey)
-	require.Equal(t, "dedup_unresolved", runs[0].DedupReason)
+	require.Equal(t, "webhook:"+a.ID+":test-delivery", runs[0].DedupKey)
+	require.Empty(t, runs[0].DedupReason)
 }
 
-// A declared dedup_key path that resolves to a value beyond
-// maxDedupKeyValueLength (lookupPath JSON-marshals a non-leaf node, so an
-// operator-authored path can resolve to an arbitrarily large string, bounded
-// only by the webhook body's 1MB read limit) is treated as unresolved rather
-// than stored: the new Postgres unique index on (automation_id, dedup_key) is
-// a plain btree, which rejects an index entry once it nears ~2700 bytes with
-// a different error than the unique-violation admitTriggerLocked already
-// handles, silently dropping the run instead of admitting or skipping it.
-func TestWebhookHandle_DedupKeyResolvesTooLarge_TreatedAsUnresolved(t *testing.T) {
+// A configured dedup path over the supported length falls back to the required
+// delivery ID rather than storing an oversized index value.
+func TestWebhookHandle_DedupKeyResolvesTooLarge_FallsBackToDeliveryID(t *testing.T) {
 	h, svc := newWebhookTestHandler(t)
 	a, _ := createWebhookAutomation(t, svc, `{"dedup_key":"id"}`)
 
@@ -164,8 +159,8 @@ func TestWebhookHandle_DedupKeyResolvesTooLarge_TreatedAsUnresolved(t *testing.T
 	runs, err := svc.store.ListRuns(context.Background(), a.ID, 10)
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
-	require.Empty(t, runs[0].DedupKey)
-	require.Equal(t, "dedup_unresolved", runs[0].DedupReason)
+	require.Equal(t, "webhook:"+a.ID+":test-delivery", runs[0].DedupKey)
+	require.Empty(t, runs[0].DedupReason)
 }
 
 // A resolved value exactly at the cap is still stored normally — the guard

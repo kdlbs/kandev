@@ -868,7 +868,8 @@ type e2eCreateAutomationRequest struct {
 	// SQL (`execution_mode = 'task' AS legacy_board_card`), so seeding the
 	// column is the only honest way to put a workspace in the state the
 	// notice exists to explain.
-	LegacyBoardCard bool `json:"legacy_board_card"`
+	LegacyBoardCard bool                    `json:"legacy_board_card"`
+	RetryPolicy     *automation.RetryPolicy `json:"retry_policy,omitempty"`
 }
 
 // handleE2ECreateAutomation seeds an automation for E2E tests via HTTP so tests
@@ -884,6 +885,10 @@ func handleE2ECreateAutomation(
 			c.JSON(http.StatusBadRequest, gin.H{errKey: "workspace_id and name are required"})
 			return
 		}
+		retryPolicy := automation.RetryPolicy{}
+		if body.RetryPolicy != nil {
+			retryPolicy = *body.RetryPolicy
+		}
 		a, err := svc.CreateAutomation(c.Request.Context(), &automation.CreateAutomationRequest{
 			WorkspaceID:        body.WorkspaceID,
 			Name:               body.Name,
@@ -896,6 +901,7 @@ func handleE2ECreateAutomation(
 			Repositories:       body.Repositories,
 			Prompt:             body.Prompt,
 			AgentProfileID:     body.AgentProfileID,
+			RetryPolicy:        retryPolicy,
 			ExecutorProfileID:  body.ExecutorProfileID,
 			MaxConcurrentRuns:  10,
 		})

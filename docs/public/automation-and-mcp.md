@@ -97,7 +97,7 @@ Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace
 3. Choose the run destination:
    - **Run in automation history only** keeps each generated task out of Kanban and the sidebar. Workflow selection is optional.
    - **Create a normal task** creates ordinary workflow work that appears in Kanban and the sidebar. A workflow is required; an empty starting step uses that workflow's configured starting step.
-   - **Send to a managed conversation** delivers each firing to a retained plugin conversation. Select the plugin installation and conversation instance in this workspace. This destination does not create a task, and task-only repository and workflow settings are hidden.
+   - **Send to a managed conversation** delivers each firing to a retained plugin conversation. Select the plugin installation and conversation instance in this workspace. This destination does not create a task, and task-only repository, workflow, context-between-runs, and retry settings are hidden. Selecting it resets the unsaved retry draft to disabled; switching back to another destination does not restore discarded settings. For an existing automation with a previously saved enabled retry policy, the saved value remains unchanged until you explicitly save the reset. Generic retry admission can still use that saved policy before the reset is saved.
 4. Add one or more repository and base-branch pairs, or leave the list empty. The selector is the same searchable paired-chip control used by New Task. A discovered repository is registered in the workspace when the automation is saved. An empty list uses a task-scoped scratch workspace and does not create a Git worktree. Kandev never selects the workspace's first repository for you.
 5. Enter a prompt and optional task-title template.
 6. Choose **Context between runs**:
@@ -141,6 +141,24 @@ The editor has two exclusive layouts:
 - **Webhook**: one authenticated webhook trigger. Switching to webhook deletes the schedule and condition, and switching back deletes the webhook trigger.
 
 In the current backend, the schedule and GitHub PR condition are independent triggers. A non-empty schedule creates generic scheduled runs, while the PR trigger separately polls GitHub. Adding a PR condition does not constrain the scheduled run. Clear the schedule expression if the automation should run only for matching PRs.
+
+### Webhook delivery contract
+
+Send `POST /api/v1/automations/webhook/<automation-id>` with the
+`X-Webhook-Secret` and `X-Kandev-Delivery-ID` headers. Delivery IDs are required
+and deduplicate a delivery per automation, so a provider can safely retry the
+same request. The endpoint accepts bodies up to 1 MiB and never stores request
+headers. With no `safe_json_pointers` configured, the validated bounded JSON
+body is retained for legacy webhook interpolation, dedup-key, and repository
+selector paths. When pointers are configured, only selected values are retained
+in retry history; path-based features can resolve only those retained values.
+Invalid pointers, pointers deeper than eight segments, and projected values
+over the configured bounds are rejected.
+
+Automation retry history groups all attempts under the original trigger
+identity. The history view returns a bounded page, an opaque continuation
+cursor, and a high-water mark so clients can continue paging without losing
+newly-created retry groups.
 
 ### Schedule
 
@@ -211,16 +229,20 @@ Send:
 ```http
 POST /api/v1/automations/webhook/{automationId}
 X-Webhook-Secret: <secret>
+X-Kandev-Delivery-ID: <delivery-id>
 Content-Type: application/json
 ```
 
-Kandev silently reads only the first 1 MiB of the request body; it does not reject an oversized body. If that retained prefix is valid JSON, it becomes trigger data. Empty or invalid JSON is wrapped as `{"body":"<raw text>"}`. The endpoint always returns `200 {"status":"triggered"}` for a well-formed, authenticated request, whether the delivery went on to fire, was filtered out, or was deduplicated; it returns 401 for a wrong secret, 404 for an unknown automation, and 409 when the automation or its webhook trigger is disabled.
+Webhook requests must include `X-Kandev-Delivery-ID`, limited to 256 characters. If a configured deduplication path resolves to a supported, non-empty value, that value deduplicates deliveries. If the path is not configured or does not resolve to a supported value, Kandev uses the delivery ID instead. Kandev accepts an empty body, rejects invalid JSON or invalid JSON-pointer projections with `400`, and rejects bodies larger than 1 MiB with `413`.
 
-A webhook trigger's configuration can optionally set a deduplication key, a list of filters, and a repository selector:
+Webhook trigger configuration can retain selected payload values with up to 32 bounded RFC 6901 pointers. When pointers are configured, only selected values are stored in retry history. Without pointers, the validated payload is retained up to the 1 MiB request limit to preserve legacy `{{webhook.<path>}}` interpolation. A delivery whose configured deduplication key resolves to a value seen on an earlier firing is recorded as a duplicate and creates no new task.
 
-- **Deduplication key**: a dot path into the payload, for example `issue.id`. A delivery whose resolved value repeats an earlier firing's is recorded as a duplicate and creates no new task. Leave it blank to fire on every delivery.
+A webhook trigger's configuration can optionally set a deduplication key, a list of filters, a repository selector, and safe JSON pointers:
+
+- **Deduplication key**: a dot path into the payload, for example `issue.id`. A delivery whose resolved value repeats an earlier firing's is recorded as a duplicate and creates no new task. If the path is blank or does not resolve to a supported value, Kandev deduplicates by delivery ID.
 - **Filters**: an ordered list of `{path, op, values}` predicates, evaluated before deduplication and before the run's concurrency slot is claimed. Every filter must pass for the delivery to fire; a rejected delivery still returns the uniform 200 response, creates no task, and is recorded as skipped. Supported operators are `eq`, `ne`, `in`, `not_in`, `exists`, `not_exists`, and `contains`; the five comparison operators other than `exists`/`not_exists` trim and lowercase both sides before comparing, so filter values are case-insensitive. A path that does not resolve fails every operator except `not_exists`.
 - **Repository selector**: a dot path whose resolved value is matched, exactly and case-sensitively, against one of the automation's already-configured repositories by name. Exactly one match binds that repository to the run; no match, or more than one, binds none. This is deliberately not the same resolution GitHub pull request triggers use, because the webhook route is exempt from session authentication and authorized by its shared secret alone, so a payload must never be able to name an arbitrary repository.
+- **Safe JSON pointers**: up to 32 RFC 6901 pointers select payload fields retained in retry history. Selected values have per-value, total-size, and pointer-depth limits. When configured, unselected fields are not persisted in retry snapshots; when omitted, the bounded validated payload is retained for legacy interpolation.
 
 Make downstream actions idempotent regardless: a sender can still retry a delivery that Kandev has already deduplicated or filtered. The secret is stored with the automation rather than in Kandev's encrypted provider-secret store, and anyone with Kandev settings access can reveal it. Treat it as a credential, use TLS, keep it out of URLs/logs, and replace the automation if rotation is required.
 
@@ -1219,7 +1241,7 @@ workspace. Unknown and unauthorized task/session IDs return the same not-found r
 - **No GitHub PR runs:** connect GitHub and select explicit repositories; **All repos** currently evaluates none.
 - **Run fails before a task starts:** select valid non-passthrough agent and non-local executor profiles, and add/select a repository.
 - **Run fails on permission:** an automation run cannot answer prompts. Use a safely constrained profile that does not require one, or reply to the run afterward and let the agent continue.
-- **Webhook rejected or data is incomplete:** check the exact automation ID, `X-Webhook-Secret` header, and enabled automation/trigger. Bodies over 1 MiB are not rejected; the suffix is silently discarded, so inspect the retained trigger data.
+- **Webhook rejected or data is incomplete:** check the exact automation ID, `X-Webhook-Secret` header, and enabled automation/trigger. Bodies over 1 MiB are rejected with `413`; inspect the configured JSON pointers and retained trigger data for missing fields.
 - **Missing template data:** inspect run trigger data and the dot path; unresolved placeholders are intentionally removed.
 - **Task MCP tool missing:** confirm this is a Kandev task session, the agent supports the injection strategy, and the operation belongs to task rather than external mode.
 - **One agent did not load MCP tools:** inspect that session's toolbar report. A delivered/unverified row is evidence that ACP or passthrough configuration reached the agent, not proof that the agent contacted the server. For deeper developer investigation, run `acpdbg mcp-probe` against the agent and inspect its JSONL.
