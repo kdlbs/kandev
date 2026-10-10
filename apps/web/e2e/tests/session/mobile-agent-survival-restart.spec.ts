@@ -1,13 +1,20 @@
 // Filename starts with "mobile-" so this runs on the mobile-chrome project.
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { attachMessageAddCapture } from "../../helpers/ws-capture";
+import { attachGatewayTrafficCapture } from "../../helpers/ws-traffic";
+import {
+  captureSilentRestartSnapshot,
+  countSessionMessageAdds,
+  expectRestartConversationIdentity,
+} from "../../helpers/silent-restart-recovery";
 import { SessionPage } from "../../pages/session-page";
 
 // The mobile surface uses the same recovery state as desktop. This test keeps
 // the touch path in the real session chat while proving that backend restart
 // does not replace a surviving worktree agent or expose a recovery action.
 test.describe("mobile: agent survival across backend restart", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test("a worktree session's in-flight turn survives a graceful backend restart", async ({
     testPage,
@@ -16,6 +23,8 @@ test.describe("mobile: agent survival across backend restart", () => {
     backend,
   }) => {
     test.setTimeout(120_000);
+    const traffic = attachGatewayTrafficCapture(testPage);
+    const messageAdds = attachMessageAddCapture(testPage);
 
     const releaseFeature = await backend.useEnv({
       KANDEV_FEATURES_AGENT_SURVIVAL: "true",
@@ -48,6 +57,13 @@ test.describe("mobile: agent survival across backend restart", () => {
         (item) => item.is_primary,
       )?.id;
       expect(liveSessionID).toBeTruthy();
+      const beforeRestart = await captureSilentRestartSnapshot(apiClient, task.id, liveSessionID!);
+      expect(beforeRestart.agentExecutionId).toBeTruthy();
+      const messageAddsBeforeRestart = countSessionMessageAdds(
+        messageAdds.frames,
+        task.id,
+        liveSessionID!,
+      );
 
       await backend.restart();
       await testPage.reload();
@@ -59,6 +75,18 @@ test.describe("mobile: agent survival across backend restart", () => {
       const reattachedSession = reattachedSessions.sessions.find((item) => item.is_primary);
       expect(reattachedSession?.id).toBe(liveSessionID);
       expect(reattachedSession?.state).toBe("RUNNING");
+      await expectRestartConversationIdentity({
+        page: testPage,
+        api: apiClient,
+        taskId: task.id,
+        snapshot: beforeRestart,
+        traffic: traffic.frames,
+        expectedState: "RUNNING",
+        executionDisposition: "preserved",
+      });
+      expect(countSessionMessageAdds(messageAdds.frames, task.id, liveSessionID!)).toBe(
+        messageAddsBeforeRestart,
+      );
 
       await expect(session.chat.getByText(/Started agent|Resumed agent/i)).toHaveCount(1);
       await expect(session.recoveryFreshButton()).toHaveCount(0);
@@ -73,6 +101,10 @@ test.describe("mobile: agent survival across backend restart", () => {
 
       await session.sendMessageViaButton("/e2e:simple-message");
       await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
+      await session.waitForChatIdle({ timeout: 45_000 });
+      expect(countSessionMessageAdds(messageAdds.frames, task.id, liveSessionID!)).toBe(
+        messageAddsBeforeRestart + 1,
+      );
       await assertNoDocumentHorizontalOverflow(testPage, "mobile agent survival recovery");
     } finally {
       await releaseFeature();

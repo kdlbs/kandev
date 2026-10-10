@@ -2842,9 +2842,12 @@ type ExecutorRunning struct {
 	// lifecycle recovery inventory read and the matching remote runtime. It is
 	// excluded from JSON and database persistence.
 	TransientAuthToken string `json:"-" db:"-"`
-	ContainerID        string `json:"container_id,omitempty"`
-	AgentctlURL        string `json:"agentctl_url,omitempty"`
-	AgentctlPort       int    `json:"agentctl_port,omitempty"`
+	// TransientBootstrapNonce is a decrypted, one-time reconnect credential
+	// passed only to a remote runtime's authenticated control-client refresh.
+	TransientBootstrapNonce string `json:"-" db:"-"`
+	ContainerID             string `json:"container_id,omitempty"`
+	AgentctlURL             string `json:"agentctl_url,omitempty"`
+	AgentctlPort            int    `json:"agentctl_port,omitempty"`
 	// PID is SSH-only: the agentctl PID on the *remote* host, used by the SSH
 	// executor's remote-pid stop path. It is 0 for local/standalone rows.
 	PID int `json:"pid,omitempty"`

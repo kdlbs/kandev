@@ -452,6 +452,8 @@ func buildLifecycleLaunchRequest(
 		InterruptedSubmissionID:       req.InterruptedSubmissionID,
 		InterruptedStreamID:           req.InterruptedStreamID,
 		InterruptedHarnessGeneration:  req.InterruptedHarnessGeneration,
+		CandidateExecutionID:          req.CandidateExecutionID,
+		OnExecutionAllocated:          req.OnExecutionAllocated,
 		WorkspaceID:                   req.WorkspaceID,
 		SessionID:                     req.SessionID,
 		TaskEnvironmentID:             req.TaskEnvironmentID,

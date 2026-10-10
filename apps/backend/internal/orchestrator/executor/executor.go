@@ -513,6 +513,8 @@ type LaunchAgentRequest struct {
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
 	InterruptedHarnessGeneration uint64
+	CandidateExecutionID         string
+	OnExecutionAllocated         func(context.Context, string) error
 
 	TaskID                string
 	TaskScope             lifecycle.TaskLaunchScope

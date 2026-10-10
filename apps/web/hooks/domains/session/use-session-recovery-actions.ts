@@ -262,7 +262,7 @@ export function useSessionRecoveryActions({
   const localResultIsCurrent = localResultRequestKey === requestKey;
   const deliveryResultIsCurrent =
     localResultIsCurrent &&
-    (!deliveryRecoveryResult?.allowed_actions?.length ||
+    (!deliveryRecoveryResult ||
       recoveryRevision === undefined ||
       deliveryRecoveryResult.recovery_revision === recoveryRevision);
   const recoveryError = localResultIsCurrent
@@ -615,7 +615,6 @@ export function useSessionRecoveryActions({
     lastFailedAction: currentRecoveryValue(localResultIsCurrent, lastFailedAction),
     recoveryNotice: currentRecoveryValue(localResultIsCurrent, recoveryNotice),
     deliveryRecoveryNotice: currentRecoveryValue(deliveryResultIsCurrent, deliveryRecoveryNotice),
-    deliveryRecoveryResult: currentRecoveryValue(deliveryResultIsCurrent, deliveryRecoveryResult),
     recoveryNoticeKind: currentRecoveryValue(localResultIsCurrent, recoveryNoticeKind),
     clearInspectionContentionNotice,
     manualRecoveryFailure: currentRecoveryValue(localResultIsCurrent, manualRecoveryFailure),

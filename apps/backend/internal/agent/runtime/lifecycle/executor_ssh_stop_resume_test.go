@@ -334,6 +334,7 @@ func TestSSHExecutorResumeRemoteInstance(t *testing.T) {
 		for _, key := range []string{
 			MetadataKeySSHRemoteSessionDir,
 			MetadataKeySSHRemoteAgentctlPort,
+			MetadataKeySSHRemoteControlPort,
 			MetadataKeySSHRemoteAgentctlPID,
 			MetadataKeySSHLocalForwardPort,
 			MetadataKeySSHRemoteAgentctlURL,
@@ -449,7 +450,7 @@ func TestSSHExecutorResetManagedBrokerResume(t *testing.T) {
 			t.Fatal("the stale session must be dropped")
 		}
 		for _, key := range []string{
-			MetadataKeySSHRemoteSessionDir, MetadataKeySSHRemoteAgentctlPort,
+			MetadataKeySSHRemoteSessionDir, MetadataKeySSHRemoteAgentctlPort, MetadataKeySSHRemoteControlPort,
 			MetadataKeySSHRemoteAgentctlPID, MetadataKeySSHLocalForwardPort,
 			MetadataKeySSHRemoteAgentctlURL,
 		} {

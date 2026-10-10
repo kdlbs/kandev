@@ -3,7 +3,6 @@
 import { useCallback, useState } from "react";
 import { IconAlertTriangle, IconCircleCheck, IconPlayerStop } from "@tabler/icons-react";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
-import { InterruptedSessionContinuation } from "./interrupted-session-continuation";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
@@ -360,21 +359,13 @@ function StoppedSessionRecoveryControls({
   const { busyAction } = props.actions;
   if (props.uncertainDelivery && props.mode !== "completed") {
     return (
-      <>
-        <UncertainDeliveryActions
-          actions={choices}
-          busyAction={busyAction}
-          blocked={blocked}
-          taskId={props.taskId}
-          sessionId={props.sessionId}
-        />
-        {props.actions.deliveryRecoveryResult?.allowed_actions?.includes("resume_interrupted") && (
-          <InterruptedSessionContinuation
-            key={`${props.sessionId}:${props.actions.deliveryRecoveryResult.recovery_revision}`}
-            observed={props.actions.deliveryRecoveryResult}
-          />
-        )}
-      </>
+      <UncertainDeliveryActions
+        actions={choices}
+        busyAction={busyAction}
+        blocked={blocked}
+        taskId={props.taskId}
+        sessionId={props.sessionId}
+      />
     );
   }
   return (

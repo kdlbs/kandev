@@ -297,18 +297,13 @@ type LaunchSessionResponse struct {
 type SessionDeliveryRecoveryOutcome string
 
 const (
-	SessionDeliveryRecoveryContinued       SessionDeliveryRecoveryOutcome = "continued"
-	SessionDeliveryRecoveryRestoredBlocked SessionDeliveryRecoveryOutcome = "restored_blocked"
-	SessionDeliveryRecoveryAttached        SessionDeliveryRecoveryOutcome = "attached"
-	SessionDeliveryRecoverySettled         SessionDeliveryRecoveryOutcome = "settled"
-	SessionDeliveryRecoveryUncertain       SessionDeliveryRecoveryOutcome = "uncertain"
-	SessionDeliveryRecoveryBlocked         SessionDeliveryRecoveryOutcome = "blocked"
-	SessionDeliveryRecoveryUnavailable     SessionDeliveryRecoveryOutcome = "unavailable"
+	SessionDeliveryRecoveryContinued   SessionDeliveryRecoveryOutcome = "continued"
+	SessionDeliveryRecoveryAttached    SessionDeliveryRecoveryOutcome = "attached"
+	SessionDeliveryRecoverySettled     SessionDeliveryRecoveryOutcome = "settled"
+	SessionDeliveryRecoveryUncertain   SessionDeliveryRecoveryOutcome = "uncertain"
+	SessionDeliveryRecoveryBlocked     SessionDeliveryRecoveryOutcome = "blocked"
+	SessionDeliveryRecoveryUnavailable SessionDeliveryRecoveryOutcome = "unavailable"
 )
-
-type SessionDeliveryRecoveryAction string
-
-const SessionDeliveryRecoveryActionContinueInterrupted SessionDeliveryRecoveryAction = "resume_interrupted"
 
 type SessionDeliveryRecoveryIdentity struct {
 	SubmissionID      string `json:"submission_id"`
@@ -325,7 +320,6 @@ type SessionDeliveryRecoveryResponse struct {
 	SessionID        string                           `json:"session_id"`
 	Outcome          SessionDeliveryRecoveryOutcome   `json:"outcome"`
 	Reason           string                           `json:"reason,omitempty"`
-	AllowedActions   []SessionDeliveryRecoveryAction  `json:"allowed_actions,omitempty"`
 	RecoveryRevision int64                            `json:"recovery_revision"`
 	RecoveryIdentity *SessionDeliveryRecoveryIdentity `json:"recovery_identity,omitempty"`
 }

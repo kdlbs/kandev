@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path"
@@ -557,33 +558,70 @@ func (r *SpritesExecutor) getExistingInstancePort(
 	sprite *sprites.Sprite,
 	instanceID string,
 ) (int, error) {
-	if instanceID == "" {
-		return 0, fmt.Errorf("no instance ID")
+	info, err := r.getExistingInstanceInfo(ctx, sprite, instanceID)
+	if err != nil {
+		return 0, err
 	}
+	return info.Port, nil
+}
 
-	checkCmd := fmt.Sprintf(
-		"curl -sf http://localhost:%d/api/v1/instances/%s",
-		r.agentctlPort, instanceID)
+func (r *SpritesExecutor) getExistingInstanceInfo(
+	ctx context.Context,
+	sprite *sprites.Sprite,
+	instanceID string,
+) (*agentctl.InstanceInfo, error) {
+	if instanceID == "" {
+		return nil, fmt.Errorf("no instance ID")
+	}
 
 	stepCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	out, err := sprite.CommandContext(stepCtx, "sh", "-c", checkCmd).Output()
+	proxy, err := sprite.ProxyPort(stepCtx, 0, r.agentctlPort)
 	if err != nil {
-		return 0, fmt.Errorf("instance %s not found: %w", instanceID, err)
+		return nil, fmt.Errorf("open Sprite agentctl proxy for instance %s: %w", instanceID, err)
+	}
+	defer func() { _ = proxy.Close() }()
+	if proxy.LocalAddr() == nil {
+		return nil, fmt.Errorf("sprite agentctl proxy for instance %s has no local address", instanceID)
 	}
 
-	var resp struct {
-		Port int `json:"port"`
+	requestURL := fmt.Sprintf("http://%s/api/v1/instances/%s", proxy.LocalAddr(), url.PathEscape(instanceID))
+	request, err := http.NewRequestWithContext(stepCtx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create instance lookup request: %w", err)
 	}
-	if err := json.Unmarshal(out, &resp); err != nil || resp.Port == 0 {
-		return 0, fmt.Errorf("failed to parse instance response: %v", err)
+	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true}
+	defer transport.CloseIdleConnections()
+	response, err := (&http.Client{Transport: transport, Timeout: 10 * time.Second}).Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("instance %s not found: %w", instanceID, err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("instance %s lookup returned HTTP %d", instanceID, response.StatusCode)
+	}
+	const maxInstanceInfoBytes = 64 * 1024
+	out, err := io.ReadAll(io.LimitReader(response.Body, maxInstanceInfoBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read exact instance response: %w", err)
+	}
+	if len(out) > maxInstanceInfoBytes {
+		return nil, fmt.Errorf("instance %s response exceeds %d bytes", instanceID, maxInstanceInfoBytes)
+	}
+
+	var info agentctl.InstanceInfo
+	if err := json.Unmarshal(out, &info); err != nil {
+		return nil, fmt.Errorf("failed to parse exact instance response: %v", err)
+	}
+	if info.Port == 0 || info.ID != instanceID {
+		return nil, fmt.Errorf("agentctl returned a different instance for %q", instanceID)
 	}
 
 	r.logger.Info("reusing existing agent instance",
 		zap.String("instance_id", instanceID),
-		zap.Int("port", resp.Port))
-	return resp.Port, nil
+		zap.Int("port", info.Port))
+	return &info, nil
 }
 
 // isAgentSubprocessRunning checks whether the agent subprocess (e.g., Claude Code)

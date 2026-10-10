@@ -14,16 +14,19 @@ import (
 	"sync"
 	"time"
 
+	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	bolt "go.etcd.io/bbolt"
 )
 
 const (
-	CurrentVersion         uint32 = 1
-	DefaultMaxEventBytes          = 1 << 20
-	DefaultMaxStreamBytes         = 256 << 20
-	DefaultMaxJournalBytes        = 2 << 30
-	DefaultReserveBytes           = 1 << 20
-	MaxStreamSubmissions          = 10000
+	CurrentVersion                     uint32 = 1
+	DefaultMaxEventBytes                      = 1 << 20
+	DefaultReserveBytes                       = 1 << 20
+	DefaultDiskReserveBytes                   = 32 << 20
+	DefaultDiskAllocationHeadroomBytes        = 16 << 20
+	DefaultDiskWriteHeadroomBytes             = DefaultDiskAllocationHeadroomBytes + (4 << 20) + 2*DefaultMaxEventBytes
+	MaxStreamSubmissions                      = 10000
+	defaultDiskCapacityReadTimeout            = 2 * time.Second
 )
 
 var (
@@ -52,27 +55,41 @@ var (
 )
 
 type Config struct {
-	ExistingOnly    bool
-	Path            string
-	MaxEventBytes   int64
-	MaxStreamBytes  int64
-	MaxJournalBytes int64
-	ReserveBytes    int64
-	OpenTimeout     time.Duration
+	ExistingOnly           bool
+	Path                   string
+	MaxEventBytes          int64
+	MaxStreamBytes         int64
+	MaxJournalBytes        int64
+	ReserveBytes           int64
+	DiskReserveBytes       int64
+	DiskWriteHeadroomBytes int64
+	DiskCapacityCacheTTL   time.Duration
+	DiskCapacityTimeout    time.Duration
+	DiskCapacityReader     func(context.Context, string) (systemmetrics.DiskCapacity, error)
+	OpenTimeout            time.Duration
 }
 
 func (c Config) withDefaults() Config {
 	if c.MaxEventBytes <= 0 {
 		c.MaxEventBytes = DefaultMaxEventBytes
 	}
-	if c.MaxStreamBytes <= 0 {
-		c.MaxStreamBytes = DefaultMaxStreamBytes
-	}
-	if c.MaxJournalBytes <= 0 {
-		c.MaxJournalBytes = DefaultMaxJournalBytes
-	}
 	if c.ReserveBytes <= 0 {
 		c.ReserveBytes = DefaultReserveBytes
+	}
+	if c.DiskReserveBytes <= 0 {
+		c.DiskReserveBytes = DefaultDiskReserveBytes
+	}
+	if c.DiskWriteHeadroomBytes <= 0 {
+		c.DiskWriteHeadroomBytes = DefaultDiskWriteHeadroomBytes
+	}
+	if c.DiskCapacityCacheTTL <= 0 {
+		c.DiskCapacityCacheTTL = time.Second
+	}
+	if c.DiskCapacityTimeout <= 0 {
+		c.DiskCapacityTimeout = defaultDiskCapacityReadTimeout
+	}
+	if c.DiskCapacityReader == nil {
+		c.DiskCapacityReader = systemmetrics.DiskUsage
 	}
 	if c.OpenTimeout <= 0 {
 		c.OpenTimeout = 2 * time.Second
@@ -134,9 +151,16 @@ type Submission struct {
 }
 
 type Journal struct {
-	mu     sync.RWMutex
-	db     *bolt.DB
-	config Config
+	mu                       sync.RWMutex
+	db                       *bolt.DB
+	config                   Config
+	diskCapacityMu           sync.Mutex
+	diskCapacityAt           time.Time
+	diskAvailable            int64
+	diskCapacityKnown        bool
+	diskPendingBytes         int64
+	diskReusablePendingBytes int64
+	diskWrittenBytes         int64
 }
 
 func Open(config Config) (journal *Journal, err error) {
@@ -389,6 +413,13 @@ func (j *Journal) CompactIfNeeded(ctx context.Context) error {
 	if info.Size() <= logicalBytes*2+minimumCompactionFileBytes {
 		return nil
 	}
+	available, known, err := j.effectiveDiskCapacity(ctx)
+	if err != nil {
+		return err
+	}
+	if !known || available < requiredDiskBytes(info.Size(), j.config.DiskReserveBytes, j.config.DiskWriteHeadroomBytes) {
+		return nil
+	}
 	return j.Compact(ctx)
 }
 
@@ -424,7 +455,29 @@ func (j *Journal) AppendBatch(ctx context.Context, events []Event) ([]Event, err
 	if err := prepareAppendEvents(events, j.config.MaxEventBytes); err != nil {
 		return nil, err
 	}
-	err := j.updateLocked(func(tx *bolt.Tx) error {
+	db, err := j.dbLocked()
+	if err != nil {
+		return nil, err
+	}
+	writeBytes, err := estimateEncodedEventBytes(events)
+	if err != nil {
+		return nil, err
+	}
+	preserveReserve := false
+	for _, event := range events {
+		if !event.Terminal {
+			preserveReserve = true
+			break
+		}
+	}
+	diskReservation, err := j.checkDiskCapacity(ctx, db, writeBytes, preserveReserve)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			RecordJournalError(classifyJournalError(err))
+		}
+		return nil, err
+	}
+	err = j.updateLocked(func(tx *bolt.Tx) error {
 		for i := range events {
 			if err := j.appendEventTx(ctx, tx, &events[i]); err != nil {
 				return err
@@ -432,6 +485,7 @@ func (j *Journal) AppendBatch(ctx context.Context, events []Event) ([]Event, err
 		}
 		return nil
 	})
+	j.finishDiskCapacityReservation(diskReservation, err == nil)
 	if err != nil {
 		if errors.Is(err, ErrSequenceConflict) || errors.Is(err, ErrOwnerMismatch) {
 			RecordSequenceError(classifyJournalError(err))
@@ -541,19 +595,55 @@ func sameStreamOwner(stream Stream, event Event) bool {
 }
 
 func validateAppendCapacity(j *Journal, stream Stream, journalBytes, eventBytes int64, terminal bool) error {
-	streamLimit := j.config.MaxStreamBytes
-	journalLimit := j.config.MaxJournalBytes
+	streamLimit := logicalLimit(j.config.MaxStreamBytes, j.config.ReserveBytes)
+	journalLimit := logicalLimit(j.config.MaxJournalBytes, j.config.ReserveBytes)
 	if !terminal {
-		streamLimit -= min(j.config.ReserveBytes, streamLimit/10)
-		journalLimit -= j.config.ReserveBytes
+		if streamLimit > 0 && stream.Bytes+eventBytes > streamLimit {
+			return ErrStreamFull
+		}
+		if journalLimit > 0 && journalBytes+eventBytes > journalLimit {
+			return ErrJournalFull
+		}
+		return nil
 	}
-	if stream.Bytes+eventBytes > streamLimit {
+	if j.config.MaxStreamBytes > 0 && stream.Bytes+eventBytes > j.config.MaxStreamBytes {
 		return ErrStreamFull
 	}
-	if journalBytes+eventBytes > journalLimit {
+	if j.config.MaxJournalBytes > 0 && journalBytes+eventBytes > j.config.MaxJournalBytes {
 		return ErrJournalFull
 	}
 	return nil
+}
+
+func logicalLimit(maxBytes, reserveBytes int64) int64 {
+	if maxBytes <= 0 {
+		return 0
+	}
+	return maxBytes - min(reserveBytes, maxBytes/10)
+}
+
+func exceedsLimit(current, additional, limit int64) bool {
+	if limit <= 0 || additional <= 0 {
+		return false
+	}
+	return additional > limit || current > limit-additional
+}
+
+func estimateEncodedEventBytes(events []Event) (int64, error) {
+	maxInt64 := int64(^uint64(0) >> 1)
+	var total int64
+	for _, event := range events {
+		event.Sequence = ^uint64(0)
+		encoded, err := json.Marshal(event)
+		if err != nil {
+			return 0, err
+		}
+		if int64(len(encoded)) > maxInt64-total {
+			return maxInt64, nil
+		}
+		total += int64(len(encoded))
+	}
+	return total, nil
 }
 
 func writeAppendedEvent(tx *bolt.Tx, stream Stream, event Event, encoded []byte, journalBytes int64) error {

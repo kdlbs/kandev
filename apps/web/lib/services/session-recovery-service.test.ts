@@ -10,6 +10,7 @@ import {
   recoveryInspectionBusyMessage,
   resolveRequestErrorMessage,
   sessionRecoveryGuardDetails,
+  sessionDeliveryRecoveryResponse,
   sessionDeliveryRecoveryMessage,
 } from "./session-recovery-service";
 import { WebSocketRequestError } from "@/lib/ws/client";
@@ -306,64 +307,28 @@ it("recognizes only the typed, path-free managed clone error details", () => {
   expect(managedCloneRelocationRecoveryDetails(new Error("plain"))).toBeNull();
 });
 
-it("sends acknowledged interrupted resume and requires accepted continuation", async () => {
-  const interruptedResume = {
-    acknowledge_interruption: true,
-    recovery_revision: 7,
-    recovery_identity: {
-      submission_id: "old",
-      stream_id: "stream",
-      incarnation_id: "inc",
-      harness_generation: 1,
-      prompt_generation: 3,
-    },
-    instruction: "Inspect saved changes and continue",
-    idempotency_key: "stable-key",
-  };
-  mocks.request.mockResolvedValue({
+it("treats historical continued as restored instead of showing an uncertainty warning", () => {
+  const response = sessionDeliveryRecoveryResponse({
     task_id: "task",
     session_id: "session",
-    outcome: "restored_blocked",
-    recovery_revision: 7,
-    reason: "continuation_outcome_unknown",
+    outcome: "continued",
+    recovery_revision: 1,
   });
-  const result = await requestSessionRecover({
-    taskId: "task",
-    sessionId: "session",
-    action: "resume",
-    failureMessage: "failed",
-    interruptedResume,
-  });
-  expect(result?.outcome).toBe("restored_blocked");
-  expect(mocks.request).toHaveBeenCalledWith(
-    recoveryAction,
-    {
-      task_id: "task",
-      session_id: "session",
-      action: "resume",
-      interrupted_resume: interruptedResume,
-    },
-    150_000,
+  expect(response?.outcome).toBe("continued");
+  expect(response && sessionDeliveryRecoveryMessage(response, (key) => key)).toBe(
+    "task:deliveryRecoveryAttached",
   );
 });
 
-it("refuses malformed recovery identities that would enable a continuation", async () => {
-  mocks.request.mockResolvedValue({
-    task_id: "task",
-    session_id: "session",
-    outcome: "uncertain",
-    recovery_revision: 1,
-    allowed_actions: ["resume_interrupted"],
-    recovery_identity: { submission_id: "old" },
-  });
-  await expect(
-    requestSessionRecover({
-      taskId: "task",
-      sessionId: "session",
-      action: "retry_connection",
-      failureMessage: "failed",
+it("rejects the retired restored-blocked continuation outcome", () => {
+  expect(
+    sessionDeliveryRecoveryResponse({
+      task_id: "task",
+      session_id: "session",
+      outcome: "restored_blocked",
+      recovery_revision: 1,
     }),
-  ).rejects.toThrow("failed");
+  ).toBeNull();
 });
 
 it("returns the typed retry outcome and rejects malformed retry results", async () => {
