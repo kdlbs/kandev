@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 import { isBrowserDemoDevRouteAvailable, shouldInstallBrowserDemo } from "./mode";
 
 describe("browser demo mode", () => {
+  it("does not access storage in production and tolerates denied development storage", () => {
+    const getStorage = vi.fn(() => {
+      throw new Error("Denied");
+    });
+    expect(shouldInstallBrowserDemo({ env: {}, pathname: "/", getStorage })).toBe(false);
+    expect(getStorage).not.toHaveBeenCalled();
+    expect(shouldInstallBrowserDemo({ env: { DEV: true }, pathname: "/demo", getStorage })).toBe(
+      true,
+    );
+    expect(shouldInstallBrowserDemo({ env: { DEV: true }, pathname: "/", getStorage })).toBe(false);
+  });
   it("always enables the dedicated browser-demo build", () => {
     expect(
       shouldInstallBrowserDemo({

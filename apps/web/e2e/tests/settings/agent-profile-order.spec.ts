@@ -7,6 +7,8 @@ import {
   restoreProfileOrder,
 } from "./agent-profile-order-helpers";
 
+import { settledBoundingBox } from "../../helpers/settled-box";
+
 /** Fragment of the translated profile-position announcement. */
 const MOVED_OVER = "moved to position";
 
@@ -144,8 +146,10 @@ test.describe("Agent profile ordering", () => {
       await expect
         .poll(() => visibleProfileNames(testPage.getByTestId(`agent-profiles-${original.name}`)))
         .toEqual(current.profiles.map((profile) => profile.name));
+      await settledBoundingBox(handle);
       await handle.press("Space");
       await expect(row.locator("xpath=..")).toHaveClass(/opacity-70/);
+      await expect.poll(announcedTarget).toBe(initialAnnouncement);
       await handle.press("ArrowDown");
       await expect.poll(announcedTarget).not.toBe(initialAnnouncement);
       await handle.press("Space");

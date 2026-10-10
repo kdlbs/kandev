@@ -247,7 +247,7 @@ function TaskSessionStateIcon({
   TaskStateIconProps,
   "sessionState" | "state" | "interrupted" | "isOnLastWorkflowStep" | "accessibleLabel"
 >) {
-  if (sessionState === "IDLE") {
+  if (sessionState === "IDLE" && state !== "SCHEDULING") {
     return <TaskReadyIcon accessibleLabel={accessibleLabel} />;
   }
   if (computeIsPreparing(state, sessionState)) {

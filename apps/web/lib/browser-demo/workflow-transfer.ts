@@ -65,7 +65,9 @@ function appendPortableStep(
 export function parseWorkflowImport(raw: string): PortableWorkflow[] | null {
   try {
     const parsed = JSON.parse(raw) as { version?: unknown; type?: unknown; workflows?: unknown };
-    return validImportEnvelope(parsed) ? (parsed.workflows as PortableWorkflow[]) : null;
+    return validImportEnvelope(parsed) && parsed.workflows.every(validPortableWorkflow)
+      ? (parsed.workflows as PortableWorkflow[])
+      : null;
   } catch {
     return parseSimpleYaml(raw);
   }
@@ -97,9 +99,7 @@ function parseSimpleYaml(raw: string): PortableWorkflow[] | null {
     applyWorkflowField(line, workflow);
     applyStepField(line, step);
   }
-  return workflows.length && workflows.every((item) => item.name && item.steps.length)
-    ? workflows
-    : null;
+  return workflows.length && workflows.every(validPortableWorkflow) ? workflows : null;
 }
 
 function applyWorkflowField(line: string, workflow: PortableWorkflow | null) {
@@ -112,8 +112,73 @@ function applyStepField(line: string, step: PortableStep | null) {
   if (field && step) Object.assign(step, { [field[1]]: parseScalar(field[2]) });
 }
 
-function validImportEnvelope(value: { version?: unknown; type?: unknown; workflows?: unknown }) {
-  return value.version === 1 && value.type === "kandev_workflow" && Array.isArray(value.workflows);
+function validImportEnvelope(value: unknown): value is { workflows: unknown[] } {
+  return (
+    isRecord(value) &&
+    value.version === 1 &&
+    value.type === "kandev_workflow" &&
+    Array.isArray(value.workflows) &&
+    value.workflows.length > 0
+  );
+}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function validPortableWorkflow(value: unknown): value is PortableWorkflow {
+  return (
+    isRecord(value) &&
+    typeof value.name === "string" &&
+    !!value.name.trim() &&
+    (value.description === undefined || typeof value.description === "string") &&
+    Array.isArray(value.steps) &&
+    value.steps.length > 0 &&
+    value.steps.every(validPortableStep)
+  );
+}
+function validPortableStep(value: unknown): value is PortableStep {
+  if (!isRecord(value) || typeof value.name !== "string" || !value.name.trim()) return false;
+  for (const key of [
+    "position",
+    "auto_archive_after_hours",
+    "wip_limit",
+    "pull_from_step_position",
+  ]) {
+    if (
+      value[key] !== undefined &&
+      (typeof value[key] !== "number" || !Number.isFinite(value[key]))
+    )
+      return false;
+  }
+  for (const key of ["color", "prompt"]) {
+    if (value[key] !== undefined && typeof value[key] !== "string") return false;
+  }
+  for (const key of [
+    "is_start_step",
+    "show_in_command_panel",
+    "allow_manual_move",
+    "auto_advance_requires_signal",
+  ]) {
+    if (value[key] !== undefined && typeof value[key] !== "boolean") return false;
+  }
+  return value.events === undefined || validPortableEvents(value.events);
+}
+
+function validPortableEvents(events: unknown): boolean {
+  return (
+    isRecord(events) &&
+    Object.values(events).every(
+      (actions) => Array.isArray(actions) && actions.every(validPortableAction),
+    )
+  );
+}
+
+function validPortableAction(action: unknown): boolean {
+  return (
+    isRecord(action) &&
+    typeof action.type === "string" &&
+    !!action.type.trim() &&
+    (action.config === undefined || isRecord(action.config))
+  );
 }
 
 function parseScalar(raw: string): unknown {

@@ -163,7 +163,7 @@ function routeStepRequests(
 ) {
   return (
     routeStepCollections(context, state, changed) ??
-    routeTaskCountsAndMoves(context, getTasks, changed) ??
+    routeTaskCountsAndMoves(context, state, getTasks, changed) ??
     routeIndividualStep(context, state, deleteTasks, changed)
   );
 }
@@ -201,6 +201,7 @@ function routeStepCollections(
 
 function routeTaskCountsAndMoves(
   { path, method, input }: DemoWorkflowRouteContext,
+  state: DemoWorkflowRuntimeSnapshot,
   getTasks: () => Task[],
   changed: (action?: string, payload?: unknown) => void,
 ) {
@@ -217,7 +218,7 @@ function routeTaskCountsAndMoves(
     });
   }
   if (path === "/api/v1/tasks/bulk-move" && method === "POST") {
-    return bulkMoveTasks(input, getTasks(), changed);
+    return bulkMoveTasks(input, state, getTasks(), changed);
   }
   return null;
 }
@@ -404,6 +405,7 @@ function reorderStepsResponse(
 
 function bulkMoveTasks(
   input: Record<string, unknown>,
+  state: DemoWorkflowRuntimeSnapshot,
   tasks: Task[],
   changed: (action?: string, payload?: unknown) => void,
 ) {
@@ -414,6 +416,11 @@ function bulkMoveTasks(
   if (!targetWorkflowId || !targetStepId) {
     return error("target_workflow_id and target_step_id are required", 400);
   }
+  if (
+    !state.steps.some((step) => step.id === targetStepId && step.workflow_id === targetWorkflowId)
+  ) {
+    return error("Target step does not belong to target workflow", 400);
+  }
   let moved = 0;
   for (const task of tasks) {
     if (task.workflow_id !== sourceWorkflowId) continue;
@@ -422,6 +429,7 @@ function bulkMoveTasks(
     task.workflow_step_id = targetStepId;
     task.updated_at = new Date().toISOString();
     moved++;
+    changed("task.updated", { ...task, task_id: task.id });
   }
   changed();
   return ok({ moved_count: moved });

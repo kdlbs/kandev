@@ -76,3 +76,18 @@ The work order records the failed CI job and requires zero-retry browser verific
 
 The upstream selector driver also uses Escape to dismiss desktop Quick Chat.
 A failing trace proved the old Cancel lookup could not complete; the repaired case passed without retries.
+
+## Current review repairs
+
+The October 10 review repairs cover blocked storage, Worker failures, correlated handler errors, and saved file and plan edits.
+Task workspaces now retain separate contents and select the correct repository seed.
+Seeded clarification responses update the message and session. Imported workflows validate steps and events before mutation.
+Simulated completion follows workflow move actions, and bulk moves publish each changed task.
+The worker router now uses bounded modules without size or complexity suppressions.
+Stable artifact uploads retry three times. Nightly builds and unsupported legacy backfills skip demo delivery consistently.
+A new Stable release cannot silently omit the required demo build script.
+
+The latest rebase includes the read-only Resume recovery fix from main.
+Git fixture cleanup prunes missing worktree metadata before fetch and preserves live worktrees.
+Mobile discovery routes finish before test teardown. Keyboard drag cancellation settles before the next activation.
+The work order records the current validation and remaining delivery checks.

@@ -46,6 +46,8 @@ export type DemoState = {
   messagesBySession: Record<string, Message[]>;
   taskPRs: Record<string, TaskPR[]>;
   workflowRuntime?: DemoWorkflowRuntimeSnapshot;
+  filesByTask?: Record<string, Record<string, string>>;
+  plansByTask?: Record<string, TaskPlan>;
 };
 
 const NOW = "2026-07-18T12:00:00.000Z";

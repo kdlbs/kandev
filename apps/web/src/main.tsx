@@ -8,7 +8,7 @@ import { setBackendReloadDiagnosticReporter } from "@/lib/platform/backend-reloa
 import { useAppStoreApi, StateProvider } from "@/components/state-provider";
 import { SystemInfoQueryProvider } from "@/components/system-info-query-provider";
 import { PluginBootBridge } from "@/lib/plugins/plugin-boot-bridge";
-import { preloadLocale } from "@/lib/i18n";
+import { i18n, preloadLocale } from "@/lib/i18n";
 import { resolveInitialLocale } from "@/lib/i18n/boot";
 import { shouldInstallBrowserDemo } from "@/lib/browser-demo/mode";
 import { AppShell } from "./app-shell";
@@ -89,7 +89,7 @@ const buildEnv =
 const demoReady = shouldInstallBrowserDemo({
   env: buildEnv,
   pathname: window.location.pathname,
-  storage: window.sessionStorage,
+  getStorage: () => window.sessionStorage,
 })
   ? import("@/lib/browser-demo/install").then(({ installBrowserDemo }) => installBrowserDemo())
   : Promise.resolve();
@@ -115,4 +115,8 @@ void demoReady
         </RootErrorBoundary>
       </StrictMode>,
     );
+  })
+  .catch((error: unknown) => {
+    console.error("Application boot failed", error);
+    createRoot(root).render(<p role="alert">{i18n.t("common:failedToLoadRoute")}</p>);
   });

@@ -4,7 +4,7 @@ import type { BootPayload } from "@/src/boot-payload";
 import { resetKanbanPreviewState } from "@/lib/local-storage";
 import { linkToTask } from "@/lib/links";
 import type { DemoHttpResponse, DemoWorkerRequest, DemoWorkerResponse } from "./protocol";
-import { DEMO_STORAGE_KEY } from "./scenario";
+import { dismissDemoOnboarding, readDemoSnapshot, saveDemoSnapshot } from "./storage";
 
 type PendingRequest = {
   resolve(value: unknown): void;
@@ -14,16 +14,26 @@ type PendingRequest = {
 export async function installBrowserDemo(): Promise<void> {
   history.replaceState({}, "", "/");
   resetKanbanPreviewState();
-  localStorage.setItem("kandev.onboarding.completed", "true");
+  dismissDemoOnboarding();
   const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
   const pending = new Map<string, PendingRequest>();
   const sockets = new Map<string, DemoWebSocket>();
   let sequence = 0;
+  let workerFailure: Error | undefined;
+  function failWorker() {
+    workerFailure = new Error("Browser demo worker failed");
+    for (const request of pending.values()) request.reject(workerFailure);
+    pending.clear();
+    for (const socket of sockets.values())
+      socket.receive({ kind: "ws-event", socketId: socket.socketId, event: "close" });
+  }
+  worker.addEventListener("error", failWorker);
+  worker.addEventListener("messageerror", failWorker);
 
   worker.addEventListener("message", (event: MessageEvent<DemoWorkerResponse>) => {
     const message = event.data;
     if (message.kind === "persist") {
-      sessionStorage.setItem(DEMO_STORAGE_KEY, message.state);
+      saveDemoSnapshot(message.state);
       return;
     }
     if (message.kind === "ws-event") {
@@ -46,10 +56,16 @@ export async function installBrowserDemo(): Promise<void> {
           request: Extract<DemoWorkerRequest, { kind: "http" }>["request"];
         },
   ) {
+    if (workerFailure) return Promise.reject(workerFailure);
     const id = message.id ?? `demo-${++sequence}`;
     return new Promise<unknown>((resolve, reject) => {
       pending.set(id, { resolve, reject });
-      worker.postMessage({ ...message, id });
+      try {
+        worker.postMessage({ ...message, id });
+      } catch (error) {
+        pending.delete(id);
+        reject(error);
+      }
     });
   }
 
@@ -147,7 +163,7 @@ export async function installBrowserDemo(): Promise<void> {
   const payload = applyBrowserDemoDefaults(
     (await call({
       kind: "init",
-      persistedState: sessionStorage.getItem(DEMO_STORAGE_KEY) ?? undefined,
+      persistedState: readDemoSnapshot(),
     })) as BootPayload,
   );
   history.replaceState({}, "", browserDemoStartPath(payload));

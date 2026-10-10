@@ -230,3 +230,30 @@ TMPDIR=/root/.cache/kandev-demo-pr1785-e2e GOMAXPROCS=4 E2E_PORT_OFFSET=0 pnpm -
 ```
 
 Current-head CI and review evidence remain pending until the rebased remediation is pushed and checked.
+
+## October 10 automated review repairs
+
+All ten review threads have corresponding source repairs or a measured lint disposition.
+The production worker now dispatches through bounded modules. Its size and complexity suppressions are removed.
+Workflow runtime passes the configured file limit, which excludes blank lines and comments.
+
+Regression tests first exposed blocked storage access, missing clarification responses, lost edits, shared workspaces, invalid imports, and template completion.
+The repaired tests cover these behaviors, destination validation, and per-task move notifications.
+Worker errors reject pending and future requests. Boot failures render the translated route error.
+Stable delivery contracts cover required artifact retries, Nightly exclusion, supported tags, unsupported legacy tags, and missing scripts in new releases.
+
+The last pushed head passed CI, but its artifact audit exposed four first-attempt failures followed by successful retries.
+The Git fixture failure reproduced with a missing worktree and invalid HEAD. Its regression test also proves live worktrees survive cleanup.
+Mobile discovery cleanup waits for active routes. Keyboard drag restart waits for settled geometry and its fresh announcement.
+The archive feedback case passed with trace capture, both alone and within its complete spec, without retries.
+No timeout or assertion was weakened.
+
+A fresh production demo bundle passed desktop and mobile browser checks for boot, clarification, malformed import rejection, and file/plan persistence.
+Current local validation also includes release contracts, units, typecheck, lint, and the rebuilt desktop/mobile recovery suites.
+The full workflow security audit reports existing findings. The release-file audit has the same 27 findings before and after these changes.
+New-head CI and review disposition remain delivery gates after the normal commit and push.
+
+The final local gate passed 140 tests across 20 files, typecheck, staged lint, and the translation and sleep ratchets.
+All 65 release workflow contracts and nine action-pinning tests passed.
+The rebuilt desktop suite passed nine tests, and the phone suite passed five tests, both without retries.
+These suites include complete archive and profile-ordering specs, both Resume paths, delete cleanup, discovery collapse, and queue ownership.

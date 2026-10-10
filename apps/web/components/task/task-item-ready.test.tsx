@@ -23,6 +23,13 @@ function renderTaskItem(props: Partial<ComponentProps<typeof TaskItem>> = {}) {
 }
 
 describe("TaskItem ready status icon", () => {
+  it("keeps a scheduling task ahead of its idle session", () => {
+    renderTaskItem({ state: "SCHEDULING", sessionState: "IDLE" });
+    expect(screen.queryByTestId(READY_ICON_TEST_ID)).toBeNull();
+    expect(
+      screen.getByTestId(RUNNING_ICON_TEST_ID).classList.contains("text-muted-foreground/40"),
+    ).toBe(true);
+  });
   it("shows the green ready check when the session is idle", () => {
     renderTaskItem({ state: "IN_PROGRESS", sessionState: "IDLE" });
 

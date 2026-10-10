@@ -17,13 +17,20 @@ export function shouldInstallBrowserDemo({
   env,
   pathname,
   storage,
+  getStorage,
 }: {
   env: BrowserDemoEnv;
   pathname: string;
   storage?: SessionStorage;
+  getStorage?: () => SessionStorage;
 }): boolean {
   if (env.VITE_KANDEV_BROWSER_DEMO === "true") return true;
   if (!isBrowserDemoDevRouteAvailable(env)) return false;
+  try {
+    storage ??= getStorage?.();
+  } catch {
+    // Demo entry remains available when the browser denies storage access.
+  }
 
   if (pathname === "/demo") {
     writeDevDemoSession(storage);

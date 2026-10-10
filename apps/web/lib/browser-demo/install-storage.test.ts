@@ -30,11 +30,39 @@ beforeEach(() => {
   vi.stubGlobal("Worker", FakeWorker);
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   window.fetch = nativeFetch;
   window.WebSocket = nativeWebSocket;
   history.replaceState({}, "", "/");
 });
+it("boots and remains usable when storage reads and writes are denied", async () => {
+  vi.spyOn(window, "sessionStorage", "get").mockImplementation(() => {
+    throw new Error("Denied");
+  });
+  vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+    throw new Error("Denied");
+  });
+  await expect(installBrowserDemo()).resolves.toBeUndefined();
+  expect(() =>
+    FakeWorker.instances[0].dispatchEvent(
+      new MessageEvent("message", {
+        data: { kind: "persist", state: "snapshot" },
+      }),
+    ),
+  ).not.toThrow();
+});
+it.each(["error", "messageerror"])(
+  "rejects pending HTTP requests after Worker %s",
+  async (event) => {
+    await installBrowserDemo();
+    const pending = window.fetch("/api/v1/tasks");
+    const rejection = expect(pending).rejects.toThrow(/worker/i);
+    FakeWorker.instances[0].dispatchEvent(new Event(event));
+    await rejection;
+    await expect(window.fetch("/api/v1/tasks")).rejects.toThrow(/worker/i);
+  },
+);
 it("restores and saves this tab's snapshot without overwriting shared local storage", async () => {
   sessionStorage.setItem(DEMO_STORAGE_KEY, "this-tab");
   localStorage.setItem(DEMO_STORAGE_KEY, "other-tab");
