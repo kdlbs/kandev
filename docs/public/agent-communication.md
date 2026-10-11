@@ -48,7 +48,8 @@ By default, the message goes to the task's primary session. To target another se
 - `spawn_session_kandev` returns `{task_id, session_id, state, agent_profile_id}`. Pass its `session_id` to `message_task_kandev`.
 
 An explicit spawn creates a distinct session even when the workflow step is configured to reuse an earlier session. A supplied profile wins over workflow profiles and session targets. When you omit the profile, Kandev uses your verified same-task session's profile, then the target task's primary-session profile. If neither is available, normal launch defaults or errors apply. Ordinary workflow launches keep their configured profile precedence and session reuse.
-- The returned `agent_profile_id` is the effective profile after workflow resolution. A pinned step profile wins, then the workflow default. Without a workflow profile, an explicit profile wins before normal inheritance rules.
+
+The returned `agent_profile_id` is the actual profile persisted and launched on the distinct new session.
 
 Delivery behaviour depends on the target session's state at the moment of the call:
 
