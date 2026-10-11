@@ -160,3 +160,7 @@ shared expandable technical-details component to the restored historical notice
 so each archived stream and translated missing range survives reload and remains
 inspectable. The notice remains informational with existing phone touch targets.
 UI and browser validation remain CI-owned for the final fixup head.
+
+Focused frontend tests and lint pass after moving the localized diagnostic
+assembly out of JSX. The banner fixture follows the directory's describe-block
+convention. No local E2E was run; final remote CI remains pending.

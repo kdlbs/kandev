@@ -419,6 +419,7 @@ func (s *Service) proveSilentRestoreSourceDead(
 	running *models.ExecutorRunning,
 	recovery models.AgentDeliveryRecovery,
 ) error {
+	// Row selection cannot authorize retirement after replacement liveness changes.
 	if recovery.HistoryGap != nil && running != nil && running.AgentExecutionID != recovery.AgentExecutionID {
 		return s.provePrunedDeliveryReplacementDead(running, recovery.SessionID)
 	}

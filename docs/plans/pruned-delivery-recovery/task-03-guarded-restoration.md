@@ -147,3 +147,14 @@ historical only when the authenticated journal reports a distinct unsettled
 submission; an empty journal cannot recreate a presentation fence. Existing
 second-incident/repeated-restart controls cover that regression. Split proof
 predicates to meet backend complexity limits without weakening their guards.
+
+## Verified CI corrections
+
+Removed the stale declaration left by the proof-predicate extraction. Focused
+SQLite, lifecycle, orchestrator, and actual journal gap/sealing regressions pass
+with the race detector. Backend lint across the five affected packages reports
+zero issues. The orchestration fixture now preserves the earlier resolved block
+under its original reason, matching the incident rather than reopening that row.
+Startup diagnostics and restored-error matching share one stream/range formatter.
+The second cleanup liveness probe is retained intentionally and covered by a
+regression that changes liveness after row selection. CI parity remains pending.

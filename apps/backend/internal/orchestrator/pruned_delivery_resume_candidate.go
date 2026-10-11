@@ -37,7 +37,6 @@ func (s *Service) hasPrunedDeliveryResumeCandidate(ctx context.Context, session 
 }
 
 func prunedDeliveryCandidateCursorMatches(ctx context.Context, delivery repository.AgentDeliveryRepository, session *models.TaskSession, incarnation string, generation int64, stream *journal.Stream) bool {
-	stream := evidence.Descriptor.Stream
 	if stream == nil || stream.HighWater > 1<<63-1 || stream.FirstRetained > 1<<63-1 {
 		return false
 	}

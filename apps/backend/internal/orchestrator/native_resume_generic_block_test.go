@@ -14,7 +14,7 @@ func TestNativeResumeEmptyBlockAfterEarlierRestoration(t *testing.T) {
 	for _, metadata := range []string{"absent", "resolved history"} {
 		t.Run(metadata, func(t *testing.T) {
 			ctx := context.Background()
-			service, manager, block, submission, launched, _ := nativeResumeFixture(t, durableDeliveryUnresolvedReason, false, false)
+			service, manager, block, submission, launched, _ := nativeResumeFixture(t, "unknown_prompt_outcome", false, false)
 			repo := service.repo.(*sqliterepo.Repository)
 			if metadata == "resolved history" {
 				changed, err := repo.ResolveSessionRecoveryBlock(ctx, block.ID, "resume", time.Now().UTC())
@@ -30,6 +30,7 @@ func TestNativeResumeEmptyBlockAfterEarlierRestoration(t *testing.T) {
 			generic.DeliverySubmissionID, generic.DeliveryStreamID = "", ""
 			generic.ResolvedAt, generic.AuthorizedAction = nil, ""
 			generic.State = models.RecoveryBlockOpen
+			generic.Reason = durableDeliveryUnresolvedReason
 			require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, &generic))
 			current := *submission
 			current.ID, current.State = "prompt:current-crash", models.DeliverySubmissionDispatching

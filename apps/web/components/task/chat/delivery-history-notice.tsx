@@ -13,6 +13,14 @@ export function DeliveryHistoryNotice({ sessionId }: { sessionId: string | null 
   );
   const gaps = readAgentDeliveryHistoryGaps(metadata);
   if (!gaps.length) return null;
+  const details = gaps
+    .map((gap) =>
+      [
+        gap.streamId,
+        t("task:deliveryHistoryGapRange", { first: gap.firstSequence, last: gap.lastSequence }),
+      ].join("\n"),
+    )
+    .join("\n\n");
   return (
     <div
       role="note"
@@ -20,14 +28,7 @@ export function DeliveryHistoryNotice({ sessionId }: { sessionId: string | null 
       className="min-w-0 wrap-anywhere px-3 py-2 text-xs text-muted-foreground"
     >
       <p>{t("task:deliveryHistoryGapArchived")}</p>
-      <SessionErrorDetails testId="delivery-history-details">
-        {gaps
-          .map(
-            (gap) =>
-              `${gap.streamId}\n${t("task:deliveryHistoryGapRange", { first: gap.firstSequence, last: gap.lastSequence })}`,
-          )
-          .join("\n\n")}
-      </SessionErrorDetails>
+      <SessionErrorDetails testId="delivery-history-details">{details}</SessionErrorDetails>
     </div>
   );
 }

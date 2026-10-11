@@ -1,5 +1,7 @@
 package models
 
+import "fmt"
+
 // AgentDeliveryHistoryGap records unavailable output independently of the
 // contiguous receipt and projection cursors. It never authorizes prompt replay.
 type AgentDeliveryHistoryGap struct {
@@ -38,4 +40,12 @@ func SameAgentDeliveryHistoryGap(a, b *AgentDeliveryHistoryGap) bool {
 		return a == nil && b == nil
 	}
 	return *a == *b
+}
+
+const AgentDeliveryHistoryGapFailureCode = "delivery_history_gap"
+
+// AgentDeliveryHistoryGapDetails keeps startup diagnostics and exact restored
+// error matching on the same stream/range representation.
+func AgentDeliveryHistoryGapDetails(streamID string, first, last int64) string {
+	return fmt.Sprintf("stream %s, missing event range %d..%d", streamID, first, last)
 }

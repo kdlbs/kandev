@@ -29,7 +29,8 @@ func TestPrunedDeliverySourceCleanupSeparatelyProvesReplacementDead(t *testing.T
 			replacement := &models.ExecutorRunning{ID: "failed-replacement", TaskID: fixture.session.TaskID, SessionID: fixture.session.ID,
 				AgentExecutionID: "failed-replacement", Status: models.ExecutorRunningStatusStopped}
 			require.NoError(t, fixture.repo.UpsertExecutorRunning(context.Background(), replacement))
-			fixture.service.agentManager = &prunedDeliveryRowProber{mockAgentManager: fixture.manager, liveness: state}
+			prober := &prunedDeliveryRowProber{mockAgentManager: fixture.manager, liveness: state}
+			fixture.service.agentManager = prober
 			row, err := fixture.service.loadSilentRestoreSourceExecution(fixture.ctx, fixture.inputs, fixture.checkpoint, replacement)
 			if state != models.ProcessLivenessDead {
 				require.Error(t, err)
@@ -38,6 +39,8 @@ func TestPrunedDeliverySourceCleanupSeparatelyProvesReplacementDead(t *testing.T
 			require.NoError(t, err, "an independently proven dead failed startup must not pin the old interrupted prompt forever")
 			require.Equal(t, "failed-replacement", row.AgentExecutionID)
 			require.NoError(t, fixture.service.proveSilentRestoreSourceDead(row, fixture.inputs.recovery))
+			prober.liveness = models.ProcessLivenessAlive
+			require.Error(t, fixture.service.proveSilentRestoreSourceDead(row, fixture.inputs.recovery), "row selection cannot authorize cleanup after liveness changes")
 		})
 	}
 }
