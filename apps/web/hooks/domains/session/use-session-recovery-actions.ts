@@ -568,6 +568,12 @@ export function useSessionRecoveryActions({
 
   return {
     busyAction: sharedBusyAction ?? busyAction,
+    deliveryHistoryGap:
+      persistedDeliveryRecovery?.reconstruction?.processIdentityKnown &&
+      (persistedDeliveryRecovery.phase === "uncertain" ||
+        persistedDeliveryRecovery.phase === "reconnecting")
+        ? persistedDeliveryRecovery.historyGap
+        : undefined,
     recoveryError,
     branchDetails: currentRecoveryValue(localResultIsCurrent, branchDetails),
     guardDetails: currentRecoveryValue(localResultIsCurrent, guardDetails),

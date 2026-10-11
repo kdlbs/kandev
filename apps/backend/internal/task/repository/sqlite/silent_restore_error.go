@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -20,6 +21,11 @@ func clearSilentRestoreUncertainError(metadata map[string]json.RawMessage, recov
 	lastError, exists := models.LoadLastAgentError(map[string]interface{}{
 		models.SessionMetaKeyLastAgentError: decoded,
 	})
+	if exists && recovery.HistoryGap != nil && lastError.Code == "delivery_history_gap" &&
+		lastError.Details == fmt.Sprintf("delivery_history_gap: stream %s, missing event range %d..%d", recovery.StreamID, recovery.HistoryGap.FirstSequence, recovery.HistoryGap.LastSequence) {
+		delete(metadata, models.SessionMetaKeyLastAgentError)
+		return
+	}
 	structuredSubmission, hasStructuredSubmission := decoded["delivery_submission_id"]
 	submissionMatches := false
 	if hasStructuredSubmission {

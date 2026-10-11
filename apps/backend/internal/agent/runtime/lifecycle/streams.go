@@ -236,6 +236,9 @@ func (sm *StreamManager) ConnectAllAndWait(ctx context.Context, execution *Agent
 	connected := client.HasAgentStream()
 	releaseClient()
 	if !connected {
+		if err := execution.deliveryStreamFailureSnapshot(); err != nil {
+			return err
+		}
 		return errors.New("agent updates stream did not connect")
 	}
 	return nil
@@ -405,15 +408,8 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	if streamID == "" {
 		streamID = execution.SessionID
 	}
-	after, cursorErr := sm.deliveryReplayCursor(ctx, delivery, streamID)
-	if execution.DeliveryMode == DurableDeliveryV1 && delivery != nil {
-		status, statusErr := client.GetDeliveryStatus(ctx, streamID)
-		if statusErr != nil {
-			cursorErr = fmt.Errorf("read authenticated delivery descriptor: %w", statusErr)
-		} else {
-			after, cursorErr = authenticatedDeliveryReplayCursor(ctx, execution, delivery, status)
-		}
-	}
+	after, cursorErr := sm.initialDeliveryReplayCursor(ctx, execution, delivery, client, streamID)
+	execution.recordDeliveryStreamFailure(startupGeneration, cursorErr)
 	if cursorErr != nil {
 		sm.logger.Error("failed to load durable delivery replay cursor",
 			zap.String("instance_id", execution.ID),
@@ -479,6 +475,7 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 			sm.handleUpdatesDisconnectWithGeneration(execution, disconnectErr, startupGeneration)
 		}
 	}, after)
+	execution.recordDeliveryStreamFailure(startupGeneration, err)
 	releaseClient()
 
 	// Signal that the stream connection attempt is complete (success or failure)

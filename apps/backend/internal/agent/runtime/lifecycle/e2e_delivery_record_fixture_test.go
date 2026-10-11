@@ -41,6 +41,10 @@ func TestDeliveryRecordRecoveryFixture(t *testing.T) {
 	require.NoError(t, err)
 
 	switch action {
+	case "seed_pruned":
+		seedPrunedDeliveryIncident(t, repo, root, sessionID)
+	case "assert_pruned_restored":
+		assertPrunedDeliveryRestored(t, repo, sessionID)
 	case "seed", "seed_ambiguous", "seed_unblocked":
 		seedDeliveryRecordIncident(t, repo, root, sessionID, action == "seed_ambiguous", action != "seed_unblocked")
 	case "assert_reconstructed":

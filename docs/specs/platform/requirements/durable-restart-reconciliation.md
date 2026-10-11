@@ -38,3 +38,6 @@ inconsistent delivery records do not strand their saved conversations.
 
 - [System design](../system-design/durable-restart-reconciliation.md).
 - [Implementation package](../../../plans/journal-growth-restart-reconciliation/plan.md).
+- [Proposed pruned-history recovery](pruned-delivery-recovery.md) defines an
+  additional restoration contract when acknowledged events are absent from
+  both stores. Current reconciliation does not establish that missing receipt.

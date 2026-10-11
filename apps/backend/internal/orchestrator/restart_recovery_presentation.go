@@ -35,6 +35,18 @@ func (s *Service) repairRestartRecoveryPresentation(ctx context.Context, session
 		return session, nil
 	}
 	recovery, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
+	if exists && recovery.Phase == models.AgentDeliveryRecoveryRestored {
+		verifier, supported := s.repo.(nativeResumeRecoveryVerifier)
+		if supported {
+			resolved, verifyErr := verifier.HasResolvedNativeResumeRecovery(ctx, recovery)
+			if verifyErr != nil {
+				return nil, verifyErr
+			}
+			if resolved {
+				exists = false
+			}
+		}
+	}
 	if exists && !silentRestoreRecoveryPhase(recovery.Phase) {
 		return session, nil
 	}
@@ -60,7 +72,7 @@ func (s *Service) finishRestartPresentationRepair(ctx context.Context, session *
 		}
 		return s.repo.GetTaskSession(ctx, session.ID)
 	}
-	if !exists || incompleteReconstructedRecovery(recovery) {
+	if !exists || incompleteReconstructedRecovery(recovery) || s.knownRestartHistoryGap(ctx, session, recovery) {
 		if _, err := s.retryMissingCanonicalDeliverySubmission(ctx, session, session.QueueIncarnationID, generation.Generation, block); err != nil {
 			return nil, err
 		}

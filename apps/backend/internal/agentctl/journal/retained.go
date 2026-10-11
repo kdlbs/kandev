@@ -28,13 +28,16 @@ type RetainedRecoveryRequest struct {
 	After             uint64                   `json:"after"`
 	Limit             int                      `json:"limit"`
 	Acknowledge       uint64                   `json:"acknowledge,omitempty"`
+	PrunedThrough     uint64                   `json:"pruned_through,omitempty"`
+	ExpectedHash      string                   `json:"expected_hash,omitempty"`
 }
 
 type RetainedRecoveryResponse struct {
-	Descriptor        RecoveryDescriptor `json:"descriptor"`
-	Submission        Submission         `json:"submission"`
-	Events            []Event            `json:"events"`
-	ProcessTerminated bool               `json:"process_terminated"`
+	Descriptor         RecoveryDescriptor `json:"descriptor"`
+	Submission         Submission         `json:"submission"`
+	Events             []Event            `json:"events"`
+	ProcessTerminated  bool               `json:"process_terminated"`
+	HistoryGapVerified bool               `json:"history_gap_verified,omitempty"`
 }
 
 // RetainedReconstructionEvidenceRequest reads the complete bounded candidate
@@ -266,6 +269,9 @@ func ReadRetainedRecovery(ctx context.Context, request RetainedRecoveryRequest) 
 	}
 	if !retainedSubmissionMatches(submission, request) {
 		return nil, ErrOwnerMismatch
+	}
+	if request.PrunedThrough > 0 {
+		return readRetainedHistoryGap(ctx, j, request, descriptor, submission)
 	}
 	events, _, err := j.Replay(ctx, request.StreamID, request.After, request.Limit)
 	if err != nil && (descriptor.Stream != nil || request.After != 0) {

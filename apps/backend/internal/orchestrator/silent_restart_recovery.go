@@ -404,6 +404,12 @@ func (s *Service) loadSilentRestoreSourceExecution(
 		return nil, errors.New("candidate execution row exists before its launch checkpoint")
 	}
 	if running.AgentExecutionID != inputs.recovery.AgentExecutionID {
+		if inputs.recovery.HistoryGap != nil {
+			if err := s.provePrunedDeliveryReplacementDead(running, inputs.recovery.SessionID); err != nil {
+				return nil, err
+			}
+			return running, nil
+		}
 		return nil, errors.New("session execution does not match either pinned identity")
 	}
 	return running, nil
@@ -413,6 +419,9 @@ func (s *Service) proveSilentRestoreSourceDead(
 	running *models.ExecutorRunning,
 	recovery models.AgentDeliveryRecovery,
 ) error {
+	if recovery.HistoryGap != nil && running != nil && running.AgentExecutionID != recovery.AgentExecutionID {
+		return s.provePrunedDeliveryReplacementDead(running, recovery.SessionID)
+	}
 	state := models.ProcessLivenessUnknown
 	if prober, ok := s.agentManager.(rowLivenessProber); ok {
 		state = prober.RowLiveness(running)

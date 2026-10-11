@@ -2728,5 +2728,10 @@
   "deliveryRecoveryStoragePressure": "Saved output needs synchronization. The agent process has not been confirmed stopped.",
   "deliveryMessageBlocked": "Delivery is blocked while session recovery is pending.",
   "deliveryRecoveryIdentityIncomplete": "The record was restored, but the original process identity is missing. Continuing stays blocked.",
-  "deliveryRecoveryAmbiguousEvidence": "More than one saved prompt could own this delivery. Recovery remains blocked."
+  "deliveryRecoveryAmbiguousEvidence": "More than one saved prompt could own this delivery. Recovery remains blocked.",
+  "deliveryHistoryGapTitle": "Earlier output is unavailable.",
+  "deliveryHistoryGapBody": "Resume the existing conversation. The interrupted prompt outcome remains unknown.",
+  "deliveryHistoryGapArchived": "Some earlier output is unavailable. The interrupted prompt outcome remains unknown.",
+  "deliveryHistoryGapUnsupported": "This runtime cannot safely recover the missing output. Update the runtime and try Resume again.",
+  "deliveryHistoryGapRange": "Missing output events: {{first}} to {{last}}."
 }

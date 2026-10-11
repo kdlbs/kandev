@@ -44,7 +44,13 @@ func (s *Service) checkNativeResumeDeliveryBlock(ctx context.Context, taskID, se
 			continue
 		}
 		switch submission.State {
-		case models.DeliverySubmissionPrepared, models.DeliverySubmissionAccepted, models.DeliverySubmissionDispatching:
+		case models.DeliverySubmissionPrepared, models.DeliverySubmissionAccepted:
+			return &sessionRecoveryRequiredError{Block: block}
+		case models.DeliverySubmissionDispatching:
+			if block.ConsumerReference == agentDeliveryConsumer && block.DeliverySubmissionID == "" && block.DeliveryStreamID == "" {
+				unknown = true
+				continue
+			}
 			return &sessionRecoveryRequiredError{Block: block}
 		case models.DeliverySubmissionInterruptedUnknown:
 			unknown = true

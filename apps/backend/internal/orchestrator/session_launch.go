@@ -553,7 +553,7 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 		return fmt.Errorf("resolve session recovery block: %w", err)
 	}
 	if !resolved {
-		return fmt.Errorf("resolve session recovery block: block is no longer open")
+		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
 	}
 	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
 	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
@@ -1359,6 +1359,9 @@ func (s *Service) RecoverSessionWithOptions(
 		return nil, err
 	}
 	if action == recoveryActionResume {
+		if response, handled, err := s.resumePrunedDelivery(ctx, session); handled || err != nil {
+			return response, err
+		}
 		if err := s.checkNativeResumeDeliveryBlock(ctx, taskID, sessionID); err != nil {
 			return nil, err
 		}

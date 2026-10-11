@@ -2728,5 +2728,10 @@
   "deliveryRecoveryStoragePressure": "A saída guardada precisa de sincronização. A paragem do processo do agente não foi confirmada.",
   "deliveryMessageBlocked": "A entrega está bloqueada enquanto a sessão é recuperada.",
   "deliveryRecoveryIdentityIncomplete": "O registo foi recuperado, mas não foi possível verificar o processo original. A continuação continua bloqueada.",
-  "deliveryRecoveryAmbiguousEvidence": "Mais do que uma instrução guardada pode estar associada a esta entrega. A recuperação continua bloqueada."
+  "deliveryRecoveryAmbiguousEvidence": "Mais do que uma instrução guardada pode estar associada a esta entrega. A recuperação continua bloqueada.",
+  "deliveryHistoryGapTitle": "O resultado anterior não está disponível.",
+  "deliveryHistoryGapBody": "Retome a conversa existente. O resultado da instrução interrompida continua desconhecido.",
+  "deliveryHistoryGapArchived": "Parte do resultado anterior não está disponível. O resultado da instrução interrompida continua desconhecido.",
+  "deliveryHistoryGapUnsupported": "Este ambiente de execução não consegue recuperar com segurança o resultado em falta. Atualize-o e tente Retomar novamente.",
+  "deliveryHistoryGapRange": "Eventos de resultado em falta: de {{first}} a {{last}}."
 }

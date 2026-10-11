@@ -69,14 +69,25 @@ func validateReconstructionCursorEvidence(request *models.AgentDeliveryReconstru
 		return repoerrors.ErrAgentDeliveryReconstructionConflict
 	}
 	cursor := request.ExpectedCursor
+	if gap := request.Recovery.HistoryGap; gap != nil {
+		var received, projected int64
+		if cursor != nil {
+			received, projected = cursor.ReceivedSequence, cursor.ProjectedSequence
+		}
+		proof := request.Recovery.Reconstruction.ProcessTerminated
+		if proof == nil || !*proof || !request.Recovery.Reconstruction.ProcessIdentityKnown ||
+			!gap.MatchesPrunedStream(received, projected, request.SourceStreamHighWater, request.SourceStreamAcknowledged, request.SourceStreamFirstRetained) {
+			return repoerrors.ErrAgentDeliveryReconstructionConflict
+		}
+	}
 	if cursor == nil {
-		if request.SourceStreamFirstRetained > 1 {
+		if request.SourceStreamFirstRetained > 1 && request.Recovery.HistoryGap == nil {
 			return repoerrors.ErrAgentDeliveryReconstructionStale
 		}
 		return nil
 	}
 	if cursor.StreamID != request.Recovery.StreamID || cursor.SessionID != request.SessionID || cursor.IncarnationID != request.IncarnationID ||
-		cursor.HarnessGeneration != request.HarnessGeneration || cursor.ReceivedSequence < request.SourceStreamAcknowledged ||
+		cursor.HarnessGeneration != request.HarnessGeneration || (cursor.ReceivedSequence < request.SourceStreamAcknowledged && request.Recovery.HistoryGap == nil) ||
 		cursor.ReceivedSequence > request.SourceStreamHighWater || cursor.ProjectedSequence > cursor.ReceivedSequence ||
 		cursor.RemoteHighWater > request.SourceStreamHighWater {
 		return repoerrors.ErrAgentDeliveryReconstructionStale

@@ -164,7 +164,10 @@ func retireSubmissionTx(ctx context.Context, tx *bolt.Tx, id string, recoveryGen
 	if err := bucket.Put([]byte(id), encoded); err != nil {
 		return current, err
 	}
-	return current, tx.Bucket(bucketMeta).Put(keyJournalBytes, encodeInt64(journalBytes))
+	if err := tx.Bucket(bucketMeta).Put(keyJournalBytes, encodeInt64(journalBytes)); err != nil {
+		return current, err
+	}
+	return current, sealRetiredPredecessorStreamTx(tx, current, recoveryGeneration)
 }
 
 func (j *Journal) reserveSubmissionWrite(ctx context.Context, db *bolt.DB, encoded []byte, preserveReserve bool) (diskCapacityReservation, error) {

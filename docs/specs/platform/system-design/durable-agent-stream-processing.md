@@ -33,6 +33,11 @@ A missing sequence triggers catch-up or typed recovery, never silent advancement
 A positively identified legacy stream uses the existing projection path without durable inbox lookups.
 Missing identity on a v1 stream is a protocol error, not evidence of legacy support.
 
+The proposed [pruned-history recovery](pruned-delivery-recovery.md) addresses
+typed startup diagnosis and unavailable acknowledged intervals.
+It preserves actual receipt/projection cursors; the current expiry reconciliation
+does not authorize skipping missing receipt.
+
 ### Projection and acknowledgment scheduling
 
 A per-stream worker batches at most 64 KiB of compatible output with a maximum 20 ms batching wait.

@@ -27,6 +27,8 @@ const execute = promisify(execFile);
 
 type FixtureAction =
   | "seed"
+  | "seed_pruned"
+  | "assert_pruned_restored"
   | "seed_ambiguous"
   | "seed_unblocked"
   | "assert_reconstructed"
@@ -63,6 +65,8 @@ export async function deliveryRecordRecoveryFixture(
   });
   const marker = {
     seed: "KANDEV_E2E_RECORD_FIXTURE:seeded",
+    seed_pruned: "KANDEV_E2E_RECORD_FIXTURE:seeded",
+    assert_pruned_restored: "KANDEV_E2E_RECORD_FIXTURE:pruned_restored",
     seed_ambiguous: "KANDEV_E2E_RECORD_FIXTURE:seeded",
     seed_unblocked: "KANDEV_E2E_RECORD_FIXTURE:seeded",
     assert_reconstructed: "KANDEV_E2E_RECORD_FIXTURE:reconstructed_once",
@@ -76,7 +80,7 @@ export async function createDeliveryRecordRecoverySession(
   seedData: SeedData,
   fixtureRoot: string,
   title: string,
-  options: { ambiguous?: boolean; unblocked?: boolean } = {},
+  options: { ambiguous?: boolean; unblocked?: boolean; pruned?: boolean } = {},
 ) {
   const { ambiguous = false, unblocked = false } = options;
   const { agents } = await apiClient.listAgents();
@@ -129,6 +133,7 @@ export async function createDeliveryRecordRecoverySession(
   let action: FixtureAction = "seed";
   if (ambiguous) action = "seed_ambiguous";
   else if (unblocked) action = "seed_unblocked";
+  if (options.pruned) action = "seed_pruned";
   await deliveryRecordRecoveryFixture(fixtureRoot, seeded.session_id, action);
   const promptMessage = ambiguous
     ? "Ambiguous saved instruction 1"

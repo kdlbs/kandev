@@ -46,6 +46,7 @@ type AgentDeliveryRecovery struct {
 	PromptGeneration  uint64                                 `json:"prompt_generation"`
 	Message           string                                 `json:"message,omitempty"`
 	Reconstruction    *AgentDeliveryReconstructionProvenance `json:"reconstruction,omitempty"`
+	HistoryGap        *AgentDeliveryHistoryGap               `json:"history_gap,omitempty"`
 	UpdatedAt         time.Time                              `json:"updated_at"`
 }
 

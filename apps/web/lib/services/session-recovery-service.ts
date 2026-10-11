@@ -137,6 +137,9 @@ export function sessionDeliveryRecoveryReasonMessage(
   reason: string | undefined,
   t: Translator,
 ): string {
+  if (reason === "delivery_history_gap") return t("task:deliveryHistoryGapBody");
+  if (reason === "delivery_gap_recovery_unsupported")
+    return t("task:deliveryHistoryGapUnsupported");
   if (reason === "delivery_output_paused") return t("task:deliveryRecoveryOutputPaused");
   if (reason === "delivery_cancellation_pending")
     return t("task:deliveryRecoveryCancellationPending");

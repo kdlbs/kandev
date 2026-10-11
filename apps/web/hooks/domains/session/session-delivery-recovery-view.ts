@@ -26,6 +26,12 @@ export function persistedDeliveryRecoveryNotice(
   block: SessionRecoveryBlockProjection | undefined,
   t: TFunction,
 ): string | null {
+  if (
+    recovery?.historyGap &&
+    (recovery.phase === "uncertain" || recovery.phase === "reconnecting")
+  ) {
+    return sessionDeliveryRecoveryReasonMessage("delivery_history_gap", t);
+  }
   if (recovery?.reconstruction) {
     return recovery.reconstruction.processIdentityKnown
       ? null

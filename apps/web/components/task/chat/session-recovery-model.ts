@@ -63,6 +63,12 @@ export function recoveryCopy(
   model: ActiveSessionRecovery,
   t: ReturnType<typeof useTranslation>["t"],
 ) {
+  if (model.kind === "delivery_history_gap")
+    return {
+      title: t("task:deliveryHistoryGapTitle"),
+      summary: t("task:deliveryHistoryGapBody"),
+      showSummary: true,
+    };
   if (model.kind === "recovery_inspection_busy")
     return {
       title: t("task:launchNeedsAttention"),

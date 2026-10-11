@@ -729,6 +729,9 @@ func (sm *SessionManager) initializeACPConnection(
 		sm.streamManager.ConnectAll(execution, updatesReady)
 		select {
 		case <-updatesReady:
+			if err := execution.deliveryStreamFailureSnapshot(); err != nil {
+				return ctx, nil, err
+			}
 			sm.logger.Debug("updates stream ready")
 		case <-time.After(10 * time.Second):
 			return ctx, nil, fmt.Errorf("timeout waiting for agent stream to connect")

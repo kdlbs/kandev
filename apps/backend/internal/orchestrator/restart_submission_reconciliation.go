@@ -156,6 +156,9 @@ func matchingRetiredRestartSubmission(inputs *silentRestoreInputs, row *models.A
 }
 
 func sameRestartDescriptor(a, b journal.RecoveryDescriptor) bool {
+	if (a.Stream == nil) != (b.Stream == nil) || (a.Stream != nil && *a.Stream != *b.Stream) || a.StreamID != b.StreamID {
+		return false
+	}
 	if a.SessionID != b.SessionID || a.IncarnationID != b.IncarnationID || a.HarnessGeneration != b.HarnessGeneration ||
 		a.Durable != b.Durable || a.Version != b.Version || a.SubmissionCount != b.SubmissionCount ||
 		a.SubmissionsTruncated != b.SubmissionsTruncated || len(a.Submissions) != len(b.Submissions) {

@@ -2728,5 +2728,10 @@
   "deliveryRecoveryStoragePressure": "Śàvēď ōũţƥũţ ńēēďś śŷńćĥŕōńĩźàţĩōń. Ţĥē àĝēńţ ƥŕōćēśś ĥàś ńōţ ƀēēń ćōńƒĩŕḿēď śţōƥƥēď.",
   "deliveryMessageBlocked": "Ďēĺĩvēŕŷ ĩś ƀĺōćķēď ŵĥĩĺē śēśśĩōń ŕēćōvēŕŷ ĩś ƥēńďĩńĝ.",
   "deliveryRecoveryIdentityIncomplete": "Ţĥē ŕēćōŕď ŵàś ŕēśţōŕēď, ƀũţ ţĥē ōŕĩĝĩńàĺ ƥŕōćēśś ĩďēńţĩţŷ ĩś ḿĩśśĩńĝ. Ćōńţĩńũĩńĝ śţàŷś ƀĺōćķēď.",
-  "deliveryRecoveryAmbiguousEvidence": "Ḿōŕē ţĥàń ōńē śàvēď ƥŕōḿƥţ ćōũĺď ōŵń ţĥĩś ďēĺĩvēŕŷ. Ŕēćōvēŕŷ ŕēḿàĩńś ƀĺōćķēď."
+  "deliveryRecoveryAmbiguousEvidence": "Ḿōŕē ţĥàń ōńē śàvēď ƥŕōḿƥţ ćōũĺď ōŵń ţĥĩś ďēĺĩvēŕŷ. Ŕēćōvēŕŷ ŕēḿàĩńś ƀĺōćķēď.",
+  "deliveryHistoryGapTitle": "Ēàŕĺĩēŕ ōũţƥũţ ĩś ũńàvàĩĺàƀĺē.",
+  "deliveryHistoryGapBody": "Ŕēśũḿē ţĥē ēxĩśţĩńĝ ćōńvēŕśàţĩōń. Ţĥē ĩńţēŕŕũƥţēď ƥŕōḿƥţ ōũţćōḿē ŕēḿàĩńś ũńķńōŵń.",
+  "deliveryHistoryGapArchived": "Śōḿē ēàŕĺĩēŕ ōũţƥũţ ĩś ũńàvàĩĺàƀĺē. Ţĥē ĩńţēŕŕũƥţēď ƥŕōḿƥţ ōũţćōḿē ŕēḿàĩńś ũńķńōŵń.",
+  "deliveryHistoryGapUnsupported": "Ţĥĩś ŕũńţĩḿē ćàńńōţ śàƒēĺŷ ŕēćōvēŕ ţĥē ḿĩśśĩńĝ ōũţƥũţ. Ũƥďàţē ţĥē ŕũńţĩḿē àńď ţŕŷ Ŕēśũḿē àĝàĩń.",
+  "deliveryHistoryGapRange": "Ḿĩśśĩńĝ ōũţƥũţ ēvēńţś: {{first}} ţō {{last}}."
 }

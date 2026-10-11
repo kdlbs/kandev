@@ -14,6 +14,9 @@ import (
 
 var errDeliveryReplayReconciled = errors.New("expired agent delivery replay reconciled")
 
+// ErrAgentDeliveryHistoryGap identifies journal output missing from SQL receipts.
+var ErrAgentDeliveryHistoryGap = errors.New("delivery_history_gap")
+
 type agentDeliveryStatusReader interface {
 	GetDeliveryStatus(context.Context, string) (*agentctl.DeliveryStatus, error)
 }
@@ -34,6 +37,9 @@ func authenticatedDeliveryReplayCursor(
 	if errors.Is(err, sql.ErrNoRows) {
 		if status.Stream == nil || status.Stream.HighWater == 0 {
 			return 0, nil
+		}
+		if status.Stream.FirstRetained > 1 && status.Stream.FirstRetained <= status.Stream.HighWater+1 {
+			return 0, fmt.Errorf("%w: stream %s, missing event range 1..%d", ErrAgentDeliveryHistoryGap, status.StreamID, status.Stream.FirstRetained-1)
 		}
 		return 0, repoerrors.ErrAgentDeliveryCheckpointMissing
 	}
@@ -78,6 +84,9 @@ func projectedCursorCoveredByPeer(cursor *models.AgentDeliveryCursor, status *ag
 			return 0, repoerrors.ErrAgentDeliveryCheckpointMissing
 		}
 		return 0, nil
+	}
+	if uint64(cursor.ReceivedSequence)+1 < status.Stream.FirstRetained && status.Stream.FirstRetained <= status.Stream.HighWater+1 {
+		return 0, fmt.Errorf("%w: stream %s, missing event range %d..%d", ErrAgentDeliveryHistoryGap, status.StreamID, cursor.ReceivedSequence+1, status.Stream.FirstRetained-1)
 	}
 	if cursor.ProjectedSequence > int64(status.Stream.HighWater) ||
 		status.Stream.Acknowledged > status.Stream.HighWater ||

@@ -2728,5 +2728,10 @@
   "deliveryRecoveryStoragePressure": "保存された出力の同期が必要です。エージェントのプロセスが停止したことは確認されていません。",
   "deliveryMessageBlocked": "セッションの復旧中はメッセージを配信できません。",
   "deliveryRecoveryIdentityIncomplete": "記録は復元されましたが、元のプロセスを確認できません。続行はブロックされたままです。",
-  "deliveryRecoveryAmbiguousEvidence": "この配信に関連する保存済みプロンプトが複数あります。復旧は引き続きブロックされています。"
+  "deliveryRecoveryAmbiguousEvidence": "この配信に関連する保存済みプロンプトが複数あります。復旧は引き続きブロックされています。",
+  "deliveryHistoryGapTitle": "以前の出力を利用できません。",
+  "deliveryHistoryGapBody": "既存の会話を再開してください。中断されたプロンプトの結果は不明のままです。",
+  "deliveryHistoryGapArchived": "以前の出力の一部を利用できません。中断されたプロンプトの結果は不明のままです。",
+  "deliveryHistoryGapUnsupported": "このランタイムでは欠落した出力を安全に復元できません。ランタイムを更新して、再開を再試行してください。",
+  "deliveryHistoryGapRange": "欠落した出力イベント：{{first}} から {{last}}。"
 }

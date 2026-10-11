@@ -2728,5 +2728,10 @@
   "deliveryRecoveryStoragePressure": "已保存的输出需要同步。尚未确认代理进程已停止。",
   "deliveryMessageBlocked": "会话恢复期间，消息暂无法送达。",
   "deliveryRecoveryIdentityIncomplete": "记录已恢复，但无法确认原始进程。继续操作仍被阻止。",
-  "deliveryRecoveryAmbiguousEvidence": "多个已保存的提示可能与此投递相关。恢复仍被阻止。"
+  "deliveryRecoveryAmbiguousEvidence": "多个已保存的提示可能与此投递相关。恢复仍被阻止。",
+  "deliveryHistoryGapTitle": "较早的输出不可用。",
+  "deliveryHistoryGapBody": "恢复现有对话。中断提示的结果仍然未知。",
+  "deliveryHistoryGapArchived": "部分较早的输出不可用。中断提示的结果仍然未知。",
+  "deliveryHistoryGapUnsupported": "此运行时无法安全恢复缺失的输出。请更新运行时，然后再次尝试恢复。",
+  "deliveryHistoryGapRange": "缺失的输出事件：{{first}} 至 {{last}}。"
 }

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/task/models"
@@ -17,6 +18,12 @@ func TestRestartRecoveryRepairsMissingCanonicalProjection(t *testing.T) {
 
 func TestRestartRecoveryPreservesCanonicalLiveDispatch(t *testing.T) {
 	for _, condition := range []string{"live", "no death proof", "dead", "lost CAS", "retired verified", "retired changed", "retired live"} {
+		t.Run(condition, func(t *testing.T) { testMissingProjectionReconstruction(t, condition) })
+	}
+}
+
+func TestRestartRecoveryReplacesOnlyResolvedHistoricalMetadata(t *testing.T) {
+	for _, condition := range []string{"history resolved", "history unresolved"} {
 		t.Run(condition, func(t *testing.T) { testMissingProjectionReconstruction(t, condition) })
 	}
 }
@@ -80,7 +87,29 @@ func testMissingProjectionReconstruction(t *testing.T, condition string) {
 			require.NoError(t, err)
 		}
 	}
+	if condition == "history resolved" || condition == "history unresolved" {
+		_, err = repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{ID: "historical", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, OwnerGeneration: 1, PayloadHash: "history-hash", Payload: []byte("history"), State: models.DeliverySubmissionInterruptedUnknown})
+		require.NoError(t, err)
+		historical, err := repo.GetAgentDeliverySubmission(ctx, "historical")
+		require.NoError(t, err)
+		request.VerifiedRetiredSubmissions = []models.AgentDeliverySubmission{*historical}
+		restoredAt := time.Now().UTC()
+		prior := models.AgentDeliveryRecovery{Phase: models.AgentDeliveryRecoveryRestored, SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 1, SubmissionID: "historical", StreamID: "historical-stream", Revision: 9, UpdatedAt: restoredAt}
+		require.NoError(t, repo.SetSessionMetadataKey(ctx, "session", models.SessionMetaKeyAgentDeliveryRecovery, prior))
+		historicalBlock := models.SessionRecoveryBlock{ID: "historical-block", SessionID: "session", IncarnationID: "incarnation", ExpectedGeneration: 1, Reason: "historical-unknown", ConsumerReference: "agent_delivery", DeliverySubmissionID: prior.SubmissionID, DeliveryStreamID: prior.StreamID, State: models.RecoveryBlockResolved, AuthorizedAction: "resume", ResolvedAt: &restoredAt}
+		if condition == "history unresolved" {
+			historicalBlock.AuthorizedAction = "stop"
+		}
+		require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, &historicalBlock))
+		request.Recovery.Revision = prior.Revision
+	}
+
 	result, err := repo.ReconstructAgentDeliverySubmission(ctx, request)
+	if condition == "history unresolved" {
+		require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryReconstructionConflict)
+		return
+	}
+
 	if condition == "retired changed" || condition == "retired live" {
 		require.ErrorIs(t, err, repoerrors.ErrAgentDeliveryReconstructionConflict)
 		current, readErr := repo.GetTaskSession(ctx, "session")

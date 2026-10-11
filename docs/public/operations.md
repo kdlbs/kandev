@@ -33,6 +33,20 @@ Kandev automatically checks interrupted sessions at startup and after replacemen
 
 The interrupted prompt's historical outcome remains unknown unless a retained terminal event proves it. Missing native state, conflicting records, or an owner whose termination cannot be verified keep the session blocked. **Retry connection** checks retained evidence without sending another prompt. A successful native **Resume** clears the matching interrupted notice, including after a page reload, while preserving the conversation history.
 
+If an older crash left journal acknowledgments ahead of saved output, Kandev
+can restore a verified conversation on a new delivery generation while keeping
+the missing history explicit. **Resume** uses the same guarded recovery. A
+notice remains beside the composer when some earlier output is unavailable;
+the interrupted prompt's outcome remains unknown. Only a new instruction you
+send starts new work. Available retained output is synchronized normally.
+
+Recovery remains blocked if the original or replacement process cannot be
+proven terminated, native state is missing, records conflict, or retained work
+still needs acknowledgment. An older agent runtime may require an update
+before Resume can verify a history gap. Backend SQLite commits use FULL
+synchronization before output acknowledgments so new acknowledgments do not
+outlive their committed receipts after a power loss.
+
 ## Prevent host sleep during active tasks
 
 Administrators can open **Settings > Preferences > Task Behavior > Runtime** and enable

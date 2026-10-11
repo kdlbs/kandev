@@ -115,5 +115,23 @@ func (s *Service) prepareReconstructionRequest(ctx context.Context, session *mod
 	if existing, present := models.LoadAgentDeliveryRecovery(session.Metadata); present {
 		request.Recovery.Revision = existing.Revision
 	}
+	request.Recovery.HistoryGap = reconstructionHistoryGap(request, evidence)
 	return request, "", nil
+}
+
+func reconstructionHistoryGap(request *models.AgentDeliveryReconstructionRequest, evidence *agentruntime.DeliveryRecordEvidence) *models.AgentDeliveryHistoryGap {
+	if evidence.ProcessTerminated == nil || !*evidence.ProcessTerminated {
+		return nil
+	}
+	var received, projected int64
+	if cursor := request.ExpectedCursor; cursor != nil {
+		received, projected = cursor.ReceivedSequence, cursor.ProjectedSequence
+	}
+	gap := models.AgentDeliveryHistoryGap{FirstSequence: received + 1, LastSequence: request.SourceStreamHighWater,
+		ReceivedSequence: received, ProjectedSequence: projected}
+	if !gap.MatchesPrunedStream(received, projected, request.SourceStreamHighWater, request.SourceStreamAcknowledged, request.SourceStreamFirstRetained) {
+		return nil
+	}
+	request.Recovery.Message = "delivery_history_gap"
+	return &gap
 }

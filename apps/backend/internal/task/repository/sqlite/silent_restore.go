@@ -339,7 +339,7 @@ func sameSilentRestoreCheckpoint(a, b models.SilentRestoreCheckpoint) bool {
 }
 
 func sameAgentDeliveryRecovery(a, b models.AgentDeliveryRecovery) bool {
-	return a.OriginalRuntime == b.OriginalRuntime && a.Phase == b.Phase && a.Revision == b.Revision &&
+	return models.SameAgentDeliveryHistoryGap(a.HistoryGap, b.HistoryGap) && a.OriginalRuntime == b.OriginalRuntime && a.Phase == b.Phase && a.Revision == b.Revision &&
 		a.SessionID == b.SessionID && a.AgentExecutionID == b.AgentExecutionID &&
 		a.SubmissionID == b.SubmissionID && a.StreamID == b.StreamID &&
 		a.IncarnationID == b.IncarnationID && a.HarnessGeneration == b.HarnessGeneration &&
@@ -397,6 +397,9 @@ func (r *Repository) CommitSilentRestore(ctx context.Context, commit *models.Sil
 	if err != nil || !valid {
 		return false, err
 	}
+	if valid, err := r.validateHistoryGapCursorTx(ctx, tx, commit.Checkpoint.SourceRecovery); err != nil || !valid {
+		return false, err
+	}
 
 	now := commit.CompletedAt
 	if now.IsZero() {
@@ -408,7 +411,7 @@ func (r *Repository) CommitSilentRestore(ctx context.Context, commit *models.Sil
 	if err := insertGenerationTx(ctx, tx.Tx, r.db.Rebind, &generation); err != nil {
 		return false, err
 	}
-	if valid, err := writeSilentRestoreRecoveryTx(ctx, tx, r.db.Rebind, evidence.session, evidence.metadataRaw, now); err != nil || !valid {
+	if valid, err := writeSilentRestoreRecoveryTx(ctx, tx, r.db.Rebind, evidence.session, evidence.metadataRaw, now, generation.NativeSessionID); err != nil || !valid {
 		return false, err
 	}
 	if valid, err := resolveSilentRestoreBlockTx(ctx, tx, r.db.Rebind, commit.Checkpoint, now); err != nil || !valid {
@@ -779,8 +782,12 @@ func writeSilentRestoreRecoveryTx(
 	session *silentRestoreSessionRow,
 	metadataRaw sql.NullString,
 	completedAt time.Time,
+	nativeSessionID string,
 ) (bool, error) {
 	recovery := session.current
+	if err := retainDeliveryHistoryGap(session.metadata, recovery, nativeSessionID); err != nil {
+		return false, err
+	}
 	recovery.Phase = models.AgentDeliveryRecoveryRestored
 	recovery.Revision++
 	recovery.UpdatedAt = completedAt

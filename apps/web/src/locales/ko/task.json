@@ -2728,5 +2728,10 @@
   "deliveryRecoveryStoragePressure": "저장된 출력을 동기화해야 합니다. 에이전트 프로세스가 중지되었는지는 확인되지 않았습니다.",
   "deliveryMessageBlocked": "세션 복구가 완료될 때까지 메시지 전달이 차단됩니다.",
   "deliveryRecoveryIdentityIncomplete": "기록은 복구되었지만 원래 프로세스를 확인할 수 없습니다. 계속 진행할 수 없습니다.",
-  "deliveryRecoveryAmbiguousEvidence": "이 전달과 관련될 수 있는 저장된 프롬프트가 여러 개입니다. 복구가 계속 차단됩니다."
+  "deliveryRecoveryAmbiguousEvidence": "이 전달과 관련될 수 있는 저장된 프롬프트가 여러 개입니다. 복구가 계속 차단됩니다.",
+  "deliveryHistoryGapTitle": "이전 출력을 사용할 수 없습니다.",
+  "deliveryHistoryGapBody": "기존 대화를 재개하세요. 중단된 프롬프트의 결과는 여전히 알 수 없습니다.",
+  "deliveryHistoryGapArchived": "일부 이전 출력을 사용할 수 없습니다. 중단된 프롬프트의 결과는 여전히 알 수 없습니다.",
+  "deliveryHistoryGapUnsupported": "이 런타임에서는 누락된 출력을 안전하게 복구할 수 없습니다. 런타임을 업데이트한 후 재개를 다시 시도하세요.",
+  "deliveryHistoryGapRange": "누락된 출력 이벤트: {{first}}~{{last}}."
 }

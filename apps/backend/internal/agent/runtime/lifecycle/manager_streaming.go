@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -599,5 +600,11 @@ func (m *Manager) publishStreamingThinkingFinal(execution *AgentExecution, think
 
 // updateExecutionError updates an execution with an error
 func (m *Manager) updateExecutionError(executionID, errorMsg string) {
+	_ = m.executionStore.WithLock(executionID, func(execution *AgentExecution) {
+		if err := execution.deliveryStreamFailureSnapshot(); errors.Is(err, ErrAgentDeliveryHistoryGap) {
+			execution.FailureCode = "delivery_history_gap"
+			execution.FailureDetails = err.Error()
+		}
+	})
 	m.executionStore.UpdateError(executionID, errorMsg)
 }

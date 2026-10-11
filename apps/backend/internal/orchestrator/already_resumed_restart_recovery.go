@@ -14,6 +14,9 @@ type alreadyResumedDeliveryReconciler interface {
 }
 
 func (s *Service) finishAlreadyResumedRestartRecovery(ctx context.Context, inputs *silentRestoreInputs) (bool, error) {
+	if inputs.recovery.HistoryGap != nil {
+		return false, nil
+	}
 	manager, ok := s.agentManager.(alreadyResumedDeliveryReconciler)
 	if !ok {
 		return false, nil

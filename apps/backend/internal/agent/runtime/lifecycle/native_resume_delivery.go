@@ -30,6 +30,12 @@ func (m *Manager) AcknowledgeNativeResumeDelivery(ctx context.Context, sessionID
 	if err != nil {
 		return fmt.Errorf("list native resume delivery submissions: %w", err)
 	}
+	if m.streamManager == nil || m.streamManager.deliveryRepository() == nil {
+		return fmt.Errorf("%w: %w: SQL submission repository is unavailable", ErrDurableAdoptionBlocked, ErrDurableAdoptionEvidenceUnavailable)
+	}
+	if err := m.reconcileNativeResumeSQLDispatch(ctx, execution, status, submissions); err != nil {
+		return err
+	}
 	if err := m.validateNativeResumeSQLHistory(ctx, execution, status, submissions, false); err != nil {
 		return err
 	}

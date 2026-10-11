@@ -299,7 +299,7 @@ func sameSilentRestorePinnedSource(a, b models.SilentRestoreCheckpoint) bool {
 }
 
 func sameSilentRestoreRecovery(a, b models.AgentDeliveryRecovery) bool {
-	return a.OriginalRuntime == b.OriginalRuntime && a.Phase == b.Phase && a.Revision == b.Revision &&
+	return models.SameAgentDeliveryHistoryGap(a.HistoryGap, b.HistoryGap) && a.OriginalRuntime == b.OriginalRuntime && a.Phase == b.Phase && a.Revision == b.Revision &&
 		a.SessionID == b.SessionID && a.AgentExecutionID == b.AgentExecutionID &&
 		a.SubmissionID == b.SubmissionID && a.StreamID == b.StreamID &&
 		a.IncarnationID == b.IncarnationID && a.HarnessGeneration == b.HarnessGeneration &&
@@ -348,6 +348,7 @@ func (s *Service) reconcileSilentRestoreSource(ctx context.Context, inputs *sile
 		IncarnationID:     inputs.recovery.IncarnationID,
 		HarnessGeneration: uint64(inputs.recovery.HarnessGeneration),
 		PromptGeneration:  inputs.recovery.PromptGeneration,
+		HistoryGap:        inputs.recovery.HistoryGap, PayloadHash: recoveryPayloadHash(inputs.recovery),
 	}
 	result := s.runSessionDeliveryRecovery(ctx, identity)
 	if result.outcome != SessionDeliveryRecoveryUncertain || !result.processTerminated {

@@ -2728,5 +2728,10 @@
   "deliveryRecoveryStoragePressure": "已儲存的輸出需要同步。尚未確認代理處理程序已停止。",
   "deliveryMessageBlocked": "工作階段恢復期間，訊息暫無法送達。",
   "deliveryRecoveryIdentityIncomplete": "記錄已恢復，但無法確認原始處理程序。繼續操作仍被阻止。",
-  "deliveryRecoveryAmbiguousEvidence": "多個已儲存的提示可能與此投遞相關。恢復仍被阻止。"
+  "deliveryRecoveryAmbiguousEvidence": "多個已儲存的提示可能與此投遞相關。恢復仍被阻止。",
+  "deliveryHistoryGapTitle": "較早的輸出不可用。",
+  "deliveryHistoryGapBody": "恢復現有對話。中斷提示的結果仍然未知。",
+  "deliveryHistoryGapArchived": "部分較早的輸出不可用。中斷提示的結果仍然未知。",
+  "deliveryHistoryGapUnsupported": "此執行時無法安全恢復缺失的輸出。請更新執行時，然後再次嘗試恢復。",
+  "deliveryHistoryGapRange": "缺失的輸出事件：{{first}} 至 {{last}}。"
 }

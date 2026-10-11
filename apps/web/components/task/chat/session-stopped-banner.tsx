@@ -58,6 +58,15 @@ function uncertainDeliveryRecoveryChoices(
   t: RecoveryTranslator,
 ): RecoveryChoice[] {
   if (!props.taskId || !props.sessionId) return [];
+  if (props.actions.deliveryHistoryGap)
+    return [
+      {
+        kind: "resume",
+        label: t("task:resume"),
+        testId: "recovery-resume-button",
+        onClick: () => void props.actions.handleRecover("resume"),
+      },
+    ];
   return [
     {
       kind: "retry_connection",
@@ -414,16 +423,18 @@ function StoppedSessionContent(props: StoppedRecoveryProps) {
     cause,
     t,
   );
-  const title = stoppedSessionTitle(
-    {
-      completed,
-      managedCloneRecovery,
-      uncertainDelivery: Boolean(props.uncertainDelivery),
-      deliveryRecoveryPhase: props.deliveryRecoveryPhase,
-      message: props.message ?? "",
-    },
-    t,
-  );
+  const title = props.actions.deliveryHistoryGap
+    ? t("task:deliveryHistoryGapTitle")
+    : stoppedSessionTitle(
+        {
+          completed,
+          managedCloneRecovery,
+          uncertainDelivery: Boolean(props.uncertainDelivery),
+          deliveryRecoveryPhase: props.deliveryRecoveryPhase,
+          message: props.message ?? "",
+        },
+        t,
+      );
   const Icon = completed ? IconCircleCheck : IconAlertTriangle;
   return (
     <>
@@ -443,6 +454,14 @@ function StoppedSessionContent(props: StoppedRecoveryProps) {
               recoveryErrorMessage={recoveryErrorMessage}
             />
             <StoppedSessionRecoveryControls props={props} choices={choices} blocked={blocked} />
+            {props.actions.deliveryHistoryGap && (
+              <SessionErrorDetails>
+                {t("task:deliveryHistoryGapRange", {
+                  first: props.actions.deliveryHistoryGap.firstSequence,
+                  last: props.actions.deliveryHistoryGap.lastSequence,
+                })}
+              </SessionErrorDetails>
+            )}
             {!props.uncertainDelivery && (
               <SessionErrorDetails>
                 {[props.message, props.detail, props.actions.recoveryError?.message]
