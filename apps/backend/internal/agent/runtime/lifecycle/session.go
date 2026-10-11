@@ -2438,6 +2438,11 @@ const (
 	jsonRPCInvalidParams         = -32602
 	missingProviderRolloutPrefix = "no rollout found for thread id "
 	missingProviderSessionPrefix = "Session not found: "
+	// Codex reports a session it has archived with an internal error whose
+	// details name the requested session ("session <id> is archived. ...").
+	// The stored native session can no longer be loaded, like the other
+	// missing-provider-session shapes.
+	missingProviderArchivedSessionSuffix = " is archived"
 )
 
 type sessionLoadRequestError struct {
@@ -2449,24 +2454,25 @@ type sessionLoadRequestError struct {
 }
 
 // isMissingProviderSessionErr recognizes Codex's explicit not-found response
-// after its process-local rollout state disappeared and Auggie's session not
-// found error. The session ID must match the one Kandev attempted to load so an
-// unrelated provider error cannot be classified as missing native state.
-func isMissingProviderSessionErr(err error, expectedSessionID string) bool {
+// after its process-local rollout state disappeared, Codex's archived-session
+// response, and Auggie's session not found error. The session ID must match the
+// one Kandev attempted to load so an unrelated provider error cannot be
+// classified as missing native state.
+func isMissingProviderSessionErr(err error, expectedSessionID, agentType string) bool {
 	if err == nil || strings.TrimSpace(expectedSessionID) == "" {
 		return false
 	}
 	var reqErr *acp.RequestError
 	if errors.As(err, &reqErr) {
 		encoded, marshalErr := json.Marshal(reqErr)
-		if marshalErr == nil && matchesMissingProviderSession(encoded, expectedSessionID) {
+		if marshalErr == nil && matchesMissingProviderSession(encoded, expectedSessionID, agentType) {
 			return true
 		}
 	}
 	message := err.Error()
 	for offset := strings.IndexByte(message, '{'); offset >= 0; {
 		candidate := message[offset:]
-		if matchesMissingProviderSession([]byte(candidate), expectedSessionID) {
+		if matchesMissingProviderSession([]byte(candidate), expectedSessionID, agentType) {
 			return true
 		}
 		next := strings.IndexByte(candidate[1:], '{')
@@ -2478,7 +2484,7 @@ func isMissingProviderSessionErr(err error, expectedSessionID string) bool {
 	return false
 }
 
-func matchesMissingProviderSession(encoded []byte, expectedSessionID string) bool {
+func matchesMissingProviderSession(encoded []byte, expectedSessionID, agentType string) bool {
 	var projected sessionLoadRequestError
 	if err := json.Unmarshal(encoded, &projected); err != nil {
 		return false
@@ -2486,6 +2492,13 @@ func matchesMissingProviderSession(encoded []byte, expectedSessionID string) boo
 	if projected.Code == jsonRPCInternalError &&
 		projected.Message == "Internal error" &&
 		projected.Data.Details == missingProviderRolloutPrefix+expectedSessionID {
+		return true
+	}
+	archivedDetail := "session " + expectedSessionID + missingProviderArchivedSessionSuffix
+	if agentType == codexACPAgentID && projected.Code == jsonRPCInternalError &&
+		projected.Message == "Internal error" &&
+		(projected.Data.Details == archivedDetail || projected.Data.Details == archivedDetail+"." ||
+			strings.HasPrefix(projected.Data.Details, archivedDetail+". ")) {
 		return true
 	}
 	if projected.Code == jsonRPCInvalidParams &&
