@@ -36,6 +36,9 @@ type AgentExecution struct {
 	InterruptedHarnessGeneration uint64
 
 	ID string
+	// CausingRunID is the trusted Office run that initiated this task-owned
+	// execution. RunID remains reserved for run-owned runtime identity.
+	CausingRunID string
 	// startupDisposition is frozen from the merged executor metadata before
 	// this execution is published to lifecycle callers.
 	startupDisposition AgentStartupDisposition
@@ -1502,6 +1505,9 @@ type LaunchRequest struct {
 	WorkspaceID           string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
 	SessionID             string
 	TaskEnvironmentID     string // Env this session belongs to (shared across sessions in same task)
+	// CausingRunID is carried separately from Owner.RunID because Office task
+	// sessions remain task-owned while a scheduler run initiates their launch.
+	CausingRunID string
 	// WorkspaceReuseRequired selects attach-only environment preparation.
 	WorkspaceReuseRequired bool
 	// AllowBranchReplacement is an explicit user-selected recovery permission.

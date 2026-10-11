@@ -94,7 +94,11 @@ export function QuickTerminalTabView({ tab, onStateChange, onDescriptorReady }: 
         // an explicit tab close deletes the descriptor, via useQuickTerminalClose.
         if (cancelled) return;
         const nextTab = toQuickTerminalTab(descriptor);
-        onDescriptorReadyRef.current?.(nextTab);
+        onDescriptorReadyRef.current?.(
+          nextTab.sessionId
+            ? nextTab
+            : { ...nextTab, status: "connecting", exitCode: undefined, error: undefined },
+        );
         setDescriptorReady(true);
       })
       .catch((error: unknown) => {

@@ -249,7 +249,10 @@ func registeredSettingsContract(t *testing.T, transport string) {
 	t.Run("presence_and_error_controls", func(t *testing.T) {
 		pair := registeredSettingsPair(t)
 		f := pair[0]
+		baselineUpdatedAt := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
 		for _, payload := range []string{`{}`, `{"name":null,"description":null,"default_executor_id":null,"default_environment_id":null,"default_agent_profile_id":null,"default_config_agent_profile_id":null,"acp_idle_suspension_enabled":null,"acp_idle_timeout_minutes":null,"unit_id":null}`} {
+			_, err := f.database.ExecContext(t.Context(), `UPDATE workspaces SET updated_at = ? WHERE id = ?`, baselineUpdatedAt, "registered-settings")
+			require.NoError(t, err)
 			before, err := f.repo.GetWorkspace(t.Context(), "registered-settings")
 			require.NoError(t, err)
 			result := f.update(t.Context(), transport, payload)

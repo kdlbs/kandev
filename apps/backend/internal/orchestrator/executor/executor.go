@@ -522,6 +522,9 @@ type LaunchAgentRequest struct {
 	WorkspaceID           string // Kandev workspace ID — used to build scratch dir for repo-less tasks
 	SessionID             string
 	TaskEnvironmentID     string // Env owning this session (shared across sessions in the same task)
+	// CausingRunID is the trusted Office run that initiated this task-owned
+	// launch. It is lifecycle metadata, not runtime ownership identity.
+	CausingRunID string
 	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
 	// task environment. It must never be inferred from a sibling execution ID.
 	WorkspaceReuseRequired bool
@@ -735,6 +738,7 @@ const McpModeManagedConversation = "managed-conversation"
 type LaunchOptions struct {
 	AgentProfileID       string
 	OfficeAgentProfileID string
+	CausingRunID         string
 	ExecutorID           string
 	TurnID               string
 	// DeliverySubmissionID binds a persisted direct first message to the
@@ -795,6 +799,7 @@ type LaunchContext struct {
 	ExecutorID           string
 	ExecutorProfileID    string
 	Priority             string
+	CausingRunID         string
 	Prompt               string
 	WorkflowStepID       string
 	PlanMode             bool
