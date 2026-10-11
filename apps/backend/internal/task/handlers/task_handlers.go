@@ -31,6 +31,7 @@ type handlerRepo interface {
 }
 
 type TaskHandlers struct {
+	workspaceAdoptionCallerGuard  func(*gin.Context) bool
 	service                       *service.Service
 	orchestrator                  OrchestratorStarter
 	configChatRetirer             ConfigChatSessionRetirer
@@ -210,6 +211,7 @@ func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *serv
 }
 
 func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
+	h.registerWorkspaceAdoptionHTTP(router)
 	api := router.Group("/api/v1")
 	api.GET("/workflows/:id/tasks", h.httpListTasks)
 	api.GET("/workspaces/:id/tasks", h.httpListTasksByWorkspace)
