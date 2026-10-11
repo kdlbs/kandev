@@ -123,3 +123,27 @@ new stream. Native history replay must not synthesize missing canonical effects.
 ## Results
 
 Guarded gap proof, existing restore-checkpoint reuse, source sealing at authenticated retirement, unchanged old cursors, and atomic loss archive implemented. Journal race tests and focused orchestration regressions pass. SQLite/PostgreSQL archive/CAS regressions and no-gap historical empty-block recovery are included; final local and CI parity evidence remain pending.
+
+## CI remediation in progress
+
+The first PR head exposed a frontend test fixture cast error and review identified
+that an inbox-covered pruned prefix used generic projection for saved message and
+reasoning output. Route the retained SQL payload through canonical projection and
+idempotent callbacks before advancing its cursor, with no HTTP preflight ACK or
+terminal lifecycle callback. Meaningful message/reasoning/tool controls replace
+the context-only positive fixture.
+
+Contributor-task evidence adds queue-origin unknown submissions and legacy older
+resolved metadata whose resolution has an empty stream and precedes the notice.
+Allow that narrow historical proof only for the exact unknown submission and
+same saved native conversation. The strict current restored-admission verifier
+remains unchanged. Queue retirement and legacy historical-block regressions are
+included; final CI results remain pending. No further local test suite is run.
+
+Backend CI also found a duplicate harness generation in the new orchestration
+fixture and repeated restoration recreating a fence for already-retired SQL
+unknown history. Reuse the fixture's generation. Treat restored metadata as
+historical only when the authenticated journal reports a distinct unsettled
+submission; an empty journal cannot recreate a presentation fence. Existing
+second-incident/repeated-restart controls cover that regression. Split proof
+predicates to meet backend complexity limits without weakening their guards.

@@ -34,18 +34,9 @@ func (s *Service) repairRestartRecoveryPresentation(ctx context.Context, session
 	if reason != "" {
 		return session, nil
 	}
-	recovery, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
-	if exists && recovery.Phase == models.AgentDeliveryRecoveryRestored {
-		verifier, supported := s.repo.(nativeResumeRecoveryVerifier)
-		if supported {
-			resolved, verifyErr := verifier.HasResolvedNativeResumeRecovery(ctx, recovery)
-			if verifyErr != nil {
-				return nil, verifyErr
-			}
-			if resolved {
-				exists = false
-			}
-		}
+	recovery, exists, err := s.currentRestartRecoverySnapshot(ctx, session, generation)
+	if err != nil {
+		return nil, err
 	}
 	if exists && !silentRestoreRecoveryPhase(recovery.Phase) {
 		return session, nil
@@ -151,4 +142,20 @@ func (s *Service) restartRecoveryPresentationRepairAllowed(ctx context.Context, 
 		return true
 	}
 	return s.restartMissingOwnerProvenDead(ctx, session, generation)
+}
+
+func (s *Service) currentRestartRecoverySnapshot(ctx context.Context, session *models.TaskSession, generation *models.HarnessSessionGeneration) (models.AgentDeliveryRecovery, bool, error) {
+	recovery, exists := models.LoadAgentDeliveryRecovery(session.Metadata)
+	if !exists || recovery.Phase != models.AgentDeliveryRecoveryRestored {
+		return recovery, exists, nil
+	}
+	if !s.hasNewRestartJournalSubmission(ctx, session, generation, recovery.SubmissionID) {
+		return recovery, true, nil
+	}
+	verifier, supported := s.repo.(historicalNativeResumeRecoveryVerifier)
+	if !supported {
+		return recovery, exists, nil
+	}
+	resolved, err := verifier.HasResolvedHistoricalNativeResumeRecovery(ctx, recovery)
+	return recovery, !resolved, err
 }

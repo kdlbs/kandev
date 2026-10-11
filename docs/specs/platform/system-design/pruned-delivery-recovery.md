@@ -248,3 +248,11 @@ interrupted-work evidence under the existing source-death, journal ownership,
 revision, payload, and sole-block transaction guards. Its revision advances;
 resolved blocks retain historical proof. This does not invoke the pruned-gap
 fallback or allocate a successor when current native continuity is usable.
+
+Legacy older restored notices can postdate their recorded resolution and retain
+a stream ID while the resolved historical block lacks one. This narrower legacy
+proof requires the exact older session/incarnation/generation/submission, a Resume
+resolution before the notice, SQL unknown state with no terminal, and the same
+saved native conversation. It applies only to historical replacement or generic
+fence settlement after full authenticated retirement; it does not relax current
+restored-admission verification. Pending metadata and foreign work remain blocked.

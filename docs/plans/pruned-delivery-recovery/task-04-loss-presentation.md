@@ -152,3 +152,11 @@ CI owns rendered verification because the user prohibits local E2E.
 ## Results
 
 Localized inline Resume/Stop, collapsed range details, persistent informational archive notice, stale store fences, and public operations guidance implemented. Frontend unit, web typecheck, localization, and public docs checks pass. Desktop/phone restart scenarios and screenshots execute only in CI and remain pending.
+
+## CI remediation in progress
+
+Correct the intentionally partial banner fixture's TypeScript assertion. Add the
+shared expandable technical-details component to the restored historical notice
+so each archived stream and translated missing range survives reload and remains
+inspectable. The notice remains informational with existing phone touch targets.
+UI and browser validation remain CI-owned for the final fixup head.

@@ -16,7 +16,6 @@ func TestNativeResumeEmptyBlockAfterEarlierRestoration(t *testing.T) {
 			ctx := context.Background()
 			service, manager, block, submission, launched, _ := nativeResumeFixture(t, durableDeliveryUnresolvedReason, false, false)
 			repo := service.repo.(*sqliterepo.Repository)
-			require.NoError(t, repo.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{SessionID: submission.SessionID, IncarnationID: submission.IncarnationID, Generation: 1, NativeSessionID: "native-conversation", CreationReason: "initial"}))
 			if metadata == "resolved history" {
 				changed, err := repo.ResolveSessionRecoveryBlock(ctx, block.ID, "resume", time.Now().UTC())
 				require.NoError(t, err)

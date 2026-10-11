@@ -18,8 +18,10 @@ func TestDeliveryPreflightProjectsRealSQLInboxBeforeExpiredReplay(t *testing.T) 
 	repo, _ := runOwnerTestRepository(t)
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task", Title: "Inbox replay"}))
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session", TaskID: "task", QueueIncarnationID: "session"}))
-	for sequence := int64(1); sequence <= 6; sequence++ {
-		_, err := repo.ReceiveAgentDeliveryEvent(ctx, &models.AgentDeliveryEvent{SessionID: "session", IncarnationID: "session", HarnessGeneration: 1, StreamID: "session:g1", Sequence: sequence, EventType: "context_window", Payload: []byte(`{}`)}, 1)
+	for index, kind := range []string{"message_chunk", "reasoning", "tool_call", "tool_update", "context_window", "context_window"} {
+		payload, err := json.Marshal(agentctl.AgentEvent{Type: kind, Text: "saved " + kind, ReasoningText: "saved " + kind})
+		require.NoError(t, err)
+		_, err = repo.ReceiveAgentDeliveryEvent(ctx, &models.AgentDeliveryEvent{SessionID: "session", IncarnationID: "session", HarnessGeneration: 1, StreamID: "session:g1", Sequence: int64(index + 1), EventType: kind, Payload: payload}, 6)
 		require.NoError(t, err)
 	}
 	client := ackTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +30,8 @@ func TestDeliveryPreflightProjectsRealSQLInboxBeforeExpiredReplay(t *testing.T) 
 		require.NoError(t, json.NewEncoder(w).Encode(agentctl.DeliveryStatus{SessionID: "session", IncarnationID: "session", HarnessGeneration: 1, StreamID: "session:g1", StorageCapability: journal.StorageCapability{Durable: true, Version: journal.CurrentVersion}, Stream: &journal.Stream{SessionID: "session", IncarnationID: "session", HarnessGeneration: 1, StreamID: "session:g1", HighWater: 6, Acknowledged: 6, FirstRetained: 7}}))
 	})
 	execution := &AgentExecution{SessionID: "session", TaskID: "task", DeliveryMode: DurableDeliveryV1, DeliveryIncarnationID: "session", DeliveryHarnessGeneration: 1, DeliveryStreamID: "session:g1"}
-	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
+	var callbacks []string
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{OnAgentEvent: func(_ *AgentExecution, event agentctl.AgentEvent) { callbacks = append(callbacks, event.Type) }}, nil, nil)
 	t.Cleanup(sm.Wait)
 	after, err := sm.initialDeliveryReplayCursor(ctx, execution, repo, client, "session:g1")
 	require.NoError(t, err, "original SQL receipts must be projected instead of declaring unavailable output")
@@ -38,6 +41,19 @@ func TestDeliveryPreflightProjectsRealSQLInboxBeforeExpiredReplay(t *testing.T) 
 	require.EqualValues(t, 6, cursor.ReceivedSequence)
 	require.EqualValues(t, 6, cursor.ProjectedSequence)
 	require.Zero(t, cursor.RetiredSequence)
+	messages, err := repo.ListMessages(ctx, "session")
+	require.NoError(t, err)
+	var contents []string
+	for _, message := range messages {
+		if thinking, exists := message.Metadata["thinking"].(string); exists {
+			contents = append(contents, thinking)
+		} else {
+			contents = append(contents, message.Content)
+		}
+	}
+	require.ElementsMatch(t, []string{"saved message_chunk", "saved reasoning"}, contents)
+	require.Contains(t, callbacks, "tool_call")
+	require.Contains(t, callbacks, "tool_update")
 }
 
 // @covers AC-PLATFORM-PRUNED-DELIVERY-RECOVERY-001.2

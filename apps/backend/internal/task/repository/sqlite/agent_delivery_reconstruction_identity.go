@@ -24,12 +24,18 @@ func canEnrichReconstructedIdentity(owner *agentDeliveryReconstructionOwner, sub
 
 func canRecordReconstructedHistoryGap(owner *agentDeliveryReconstructionOwner, submission models.AgentDeliverySubmission, request *models.AgentDeliveryReconstructionRequest) bool {
 	current, next := owner.current, request.Recovery
-	return owner.exists && current.HistoryGap == nil && next.HistoryGap != nil &&
-		(current.Phase == models.AgentDeliveryRecoveryUncertain || current.Phase == models.AgentDeliveryRecoveryReconnecting) &&
-		current.Revision == next.Revision && current.SessionID == next.SessionID &&
+	if !owner.exists || current.HistoryGap != nil || next.HistoryGap == nil {
+		return false
+	}
+	return (current.Phase == models.AgentDeliveryRecoveryUncertain || current.Phase == models.AgentDeliveryRecoveryReconnecting) &&
+		sameReconstructedRecoveryOwner(current, next) &&
+		(submission.State == models.DeliverySubmissionInterruptedUnknown || submission.State == models.DeliverySubmissionDispatching)
+}
+
+func sameReconstructedRecoveryOwner(current, next models.AgentDeliveryRecovery) bool {
+	return current.Revision == next.Revision && current.SessionID == next.SessionID &&
 		current.IncarnationID == next.IncarnationID && current.HarnessGeneration == next.HarnessGeneration &&
 		current.StreamID == next.StreamID && current.SubmissionID == next.SubmissionID &&
 		current.AgentExecutionID == next.AgentExecutionID && current.PromptGeneration == next.PromptGeneration &&
-		current.OriginalRuntime == next.OriginalRuntime &&
-		(submission.State == models.DeliverySubmissionInterruptedUnknown || submission.State == models.DeliverySubmissionDispatching)
+		current.OriginalRuntime == next.OriginalRuntime
 }

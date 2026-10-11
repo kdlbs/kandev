@@ -30,7 +30,7 @@ it("offers same-conversation Resume for a verified pruned gap, with Stop still a
       receivedSequence: 5494,
       projectedSequence: 5494,
     },
-  } as SessionRecoveryActions;
+  } as unknown as SessionRecoveryActions;
   render(
     <TooltipProvider>
       <SessionStoppedBanner

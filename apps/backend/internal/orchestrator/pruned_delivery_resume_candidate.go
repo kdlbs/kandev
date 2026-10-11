@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 )
@@ -32,6 +33,10 @@ func (s *Service) hasPrunedDeliveryResumeCandidate(ctx context.Context, session 
 	if err != nil || evidence == nil {
 		return false
 	}
+	return prunedDeliveryCandidateCursorMatches(ctx, delivery, session, incarnation, generation.Generation, evidence.Descriptor.Stream)
+}
+
+func prunedDeliveryCandidateCursorMatches(ctx context.Context, delivery repository.AgentDeliveryRepository, session *models.TaskSession, incarnation string, generation int64, stream *journal.Stream) bool {
 	stream := evidence.Descriptor.Stream
 	if stream == nil || stream.HighWater > 1<<63-1 || stream.FirstRetained > 1<<63-1 {
 		return false
@@ -42,7 +47,7 @@ func (s *Service) hasPrunedDeliveryResumeCandidate(ctx context.Context, session 
 	}
 	var received, projected int64
 	if cursor != nil {
-		if cursor.SessionID != session.ID || cursor.IncarnationID != incarnation || cursor.HarnessGeneration != generation.Generation {
+		if cursor.SessionID != session.ID || cursor.IncarnationID != incarnation || cursor.HarnessGeneration != generation {
 			return false
 		}
 		received, projected = cursor.ReceivedSequence, cursor.ProjectedSequence

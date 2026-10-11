@@ -2,6 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { useOptionalAppStore } from "@/components/state-provider";
+import { SessionErrorDetails } from "@/components/task/session-error-details";
 import { readAgentDeliveryHistoryGaps } from "@/lib/session-agent-delivery-recovery";
 
 export function DeliveryHistoryNotice({ sessionId }: { sessionId: string | null }) {
@@ -10,14 +11,23 @@ export function DeliveryHistoryNotice({ sessionId }: { sessionId: string | null 
     (state) => (sessionId ? state.taskSessions.items[sessionId]?.metadata : undefined),
     undefined,
   );
-  if (!readAgentDeliveryHistoryGaps(metadata).length) return null;
+  const gaps = readAgentDeliveryHistoryGaps(metadata);
+  if (!gaps.length) return null;
   return (
-    <p
+    <div
       role="note"
       data-testid="delivery-history-notice"
       className="min-w-0 wrap-anywhere px-3 py-2 text-xs text-muted-foreground"
     >
-      {t("task:deliveryHistoryGapArchived")}
-    </p>
+      <p>{t("task:deliveryHistoryGapArchived")}</p>
+      <SessionErrorDetails testId="delivery-history-details">
+        {gaps
+          .map(
+            (gap) =>
+              `${gap.streamId}\n${t("task:deliveryHistoryGapRange", { first: gap.firstSequence, last: gap.lastSequence })}`,
+          )
+          .join("\n\n")}
+      </SessionErrorDetails>
+    </div>
   );
 }

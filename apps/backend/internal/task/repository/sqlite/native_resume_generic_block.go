@@ -27,6 +27,13 @@ func (r *Repository) canResolveGenericNativeResumeTx(ctx context.Context, tx *sq
 	if err != nil || !valid || !exists {
 		return valid, err
 	}
+	var sameOwner bool
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(`SELECT EXISTS (
+		SELECT 1 FROM session_recovery_blocks WHERE id = ? AND session_id = ? AND incarnation_id = ? AND expected_generation >= ?)`),
+		blockID, recovery.SessionID, recovery.IncarnationID, recovery.HarnessGeneration).Scan(&sameOwner)
+	if err != nil || !sameOwner {
+		return false, err
+	}
 	return r.hasResolvedNativeResumeRecoveryTx(ctx, tx, recovery)
 }
 
@@ -40,5 +47,8 @@ func (r *Repository) hasResolvedNativeResumeRecoveryTx(ctx context.Context, tx *
  AND consumer_reference = 'agent_delivery' AND state = 'resolved' AND authorized_action = 'resume'
  AND delivery_submission_id = ? AND delivery_stream_id = ? AND resolved_at = ?)`),
 		recovery.SessionID, recovery.IncarnationID, recovery.HarnessGeneration, recovery.SubmissionID, recovery.StreamID, recovery.UpdatedAt).Scan(&valid)
-	return valid, err
+	if err != nil || valid {
+		return valid, err
+	}
+	return r.hasLegacyResolvedNativeResumeHistoryTx(ctx, tx, recovery)
 }

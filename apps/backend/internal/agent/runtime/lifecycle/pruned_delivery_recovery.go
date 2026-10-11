@@ -33,12 +33,7 @@ func (m *Manager) recoverPrunedDelivery(ctx context.Context, lease *agentctl.Run
 	if !evidence.HistoryGapVerified {
 		return fail("delivery_gap_recovery_unsupported", ErrDeliveryRecoveryBlocked)
 	}
-	stream := evidence.Descriptor.Stream
-	if !evidence.ProcessTerminated || len(evidence.Events) != 0 || stream == nil ||
-		!matchesDeliveryReconciliationOwner(identity, &evidence.Descriptor, &evidence.Submission) ||
-		evidence.Submission.State != journal.SubmissionInterruptedUnknown || evidence.Submission.Hash != requested.PayloadHash ||
-		stream.HighWater > 1<<63-1 || stream.FirstRetained > 1<<63-1 ||
-		!gap.MatchesPrunedStream(received, projected, int64(stream.HighWater), int64(stream.Acknowledged), int64(stream.FirstRetained)) {
+	if !validPrunedDeliveryEvidence(evidence, identity, requested, received, projected) {
 		return fail("delivery_identity_mismatch", ErrDeliveryOwnerMismatch)
 	}
 	if err := lease.CheckCurrent(); err != nil {
@@ -47,4 +42,15 @@ func (m *Manager) recoverPrunedDelivery(ctx context.Context, lease *agentctl.Run
 	result := deliveryRecoveryResult(identity, DeliveryReconciliationUncertain, "delivery_history_gap", ErrUncertainPromptDelivery)
 	result.ProcessTerminated = true
 	return result
+}
+
+func validPrunedDeliveryEvidence(evidence *journal.RetainedRecoveryResponse, identity DeliveryReconciliationIdentity, requested AgentDeliveryRecoveryIdentity, received, projected int64) bool {
+	stream := evidence.Descriptor.Stream
+	if !evidence.ProcessTerminated || len(evidence.Events) != 0 || stream == nil ||
+		!matchesDeliveryReconciliationOwner(identity, &evidence.Descriptor, &evidence.Submission) {
+		return false
+	}
+	return evidence.Submission.State == journal.SubmissionInterruptedUnknown && evidence.Submission.Hash == requested.PayloadHash &&
+		stream.HighWater <= 1<<63-1 && stream.FirstRetained <= 1<<63-1 &&
+		requested.HistoryGap.MatchesPrunedStream(received, projected, int64(stream.HighWater), int64(stream.Acknowledged), int64(stream.FirstRetained))
 }

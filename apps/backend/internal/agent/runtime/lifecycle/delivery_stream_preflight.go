@@ -41,11 +41,8 @@ func (sm *StreamManager) initialDeliveryReplayCursor(ctx context.Context, execut
 		}
 		return 0, fmt.Errorf("read authenticated delivery descriptor: %w", err)
 	}
-	if !status.Durable && status.Reason == "storage_not_durable" && execution.DeliveryMode != DurableDeliveryV1 {
-		_, cursorErr := delivery.GetAgentDeliveryCursor(ctx, streamID)
-		if errors.Is(cursorErr, sql.ErrNoRows) {
-			return 0, nil
-		}
+	if canUseLegacyStorageDescriptor(ctx, execution, delivery, streamID, status) {
+		return 0, nil
 	}
 	if err := validateAuthenticatedDeliveryDescriptor(execution, status); err != nil {
 		return 0, err
@@ -106,16 +103,31 @@ func (sm *StreamManager) projectReceivedDeliveryPrefix(ctx context.Context, exec
 		if len(events) == 0 {
 			return ErrDeliveryRecoveryBlocked
 		}
-		for _, event := range events {
-			if event.Sequence != cursor.ProjectedSequence+1 || event.StreamID != status.StreamID ||
-				event.SessionID != execution.SessionID || event.IncarnationID != execution.DeliveryIncarnationID || event.HarnessGeneration != int64(execution.DeliveryHarnessGeneration) {
-				return ErrDeliveryOwnerMismatch
-			}
-			if err := sm.projectDurableAgentDeliveryEventWithEffect(ctx, event, delivery, deliveryEffectForDeliveryEvent(event)); err != nil {
-				return err
-			}
-			cursor.ProjectedSequence = event.Sequence
+		if err := sm.projectReceivedDeliveryPage(ctx, execution, delivery, cursor, events); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func (sm *StreamManager) projectReceivedDeliveryPage(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, cursor *models.AgentDeliveryCursor, events []*models.AgentDeliveryEvent) error {
+	for _, event := range events {
+		if event.Sequence != cursor.ProjectedSequence+1 || event.Sequence > cursor.ReceivedSequence || event.StreamID != cursor.StreamID ||
+			event.SessionID != execution.SessionID || event.IncarnationID != execution.DeliveryIncarnationID || event.HarnessGeneration != int64(execution.DeliveryHarnessGeneration) {
+			return ErrDeliveryOwnerMismatch
+		}
+		if err := sm.projectReceivedDeliveryEvent(ctx, execution, delivery, event); err != nil {
+			return err
+		}
+		cursor.ProjectedSequence = event.Sequence
+	}
+	return nil
+}
+
+func canUseLegacyStorageDescriptor(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, streamID string, status *agentctl.DeliveryStatus) bool {
+	if status.Durable || status.Reason != durableDeliveryStorageNotDurable || execution.DeliveryMode == DurableDeliveryV1 {
+		return false
+	}
+	_, err := delivery.GetAgentDeliveryCursor(ctx, streamID)
+	return errors.Is(err, sql.ErrNoRows)
 }

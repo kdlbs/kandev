@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -38,12 +39,12 @@ func nativeResumeJournalPeer(t *testing.T, store *journal.Journal, rejectRetirem
 				return
 			}
 			_ = json.NewEncoder(w).Encode(submissions)
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/submissions/interrupted/retire":
+		case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/agent/submissions/") && strings.HasSuffix(r.URL.Path, "/retire"):
 			if rejectRetirement {
 				http.Error(w, "retirement rejected", http.StatusConflict)
 				return
 			}
-			if _, err := store.RetireSubmission(r.Context(), "interrupted", 2); err != nil {
+			if _, err := store.RetireSubmission(r.Context(), strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/v1/agent/submissions/"), "/retire"), 2); err != nil {
 				http.Error(w, "retirement rejected", http.StatusConflict)
 				return
 			}

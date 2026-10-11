@@ -11,13 +11,16 @@ import (
 )
 
 func TestNativeResumeReconcilesJournalUnknownSQLDispatch(t *testing.T) {
-	for _, scenario := range []string{"abandoned", "hash conflict", "peer still dispatching", "independent work"} {
+	for _, scenario := range []string{"abandoned", "queue origin", "hash conflict", "peer still dispatching", "independent work"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			store, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "delivery.bbolt")})
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = store.Close() })
 			peer := journal.Submission{ID: "interrupted", SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 2, StreamID: "stream", Hash: "original-hash", Payload: []byte("original prompt"), State: journal.SubmissionInterruptedUnknown}
+			if scenario == "queue origin" {
+				peer.ID = "prompt:queue:interrupted"
+			}
 			if scenario == "peer still dispatching" {
 				peer.State = journal.SubmissionDispatching
 			}
@@ -42,7 +45,7 @@ func TestNativeResumeReconcilesJournalUnknownSQLDispatch(t *testing.T) {
 			execution.setSessionInitialized(true)
 			require.NoError(t, manager.executionStore.Add(execution))
 			err = manager.AcknowledgeNativeResumeDelivery(ctx, "session")
-			if scenario == "abandoned" {
+			if scenario == "abandoned" || scenario == "queue origin" {
 				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
@@ -50,7 +53,7 @@ func TestNativeResumeReconcilesJournalUnknownSQLDispatch(t *testing.T) {
 			submission, err := repo.GetAgentDeliverySubmission(ctx, peer.ID)
 			require.NoError(t, err)
 			expected := models.DeliverySubmissionDispatching
-			if scenario == "abandoned" {
+			if scenario == "abandoned" || scenario == "queue origin" {
 				expected = models.DeliverySubmissionInterruptedUnknown
 				require.Equal(t, "unknown", submission.Outcome)
 			}
@@ -59,7 +62,7 @@ func TestNativeResumeReconcilesJournalUnknownSQLDispatch(t *testing.T) {
 			require.Equal(t, peer.Payload, submission.Payload)
 			stored, err := store.GetSubmission(ctx, peer.ID)
 			require.NoError(t, err)
-			require.Equal(t, scenario == "abandoned", stored.Retired)
+			require.Equal(t, scenario == "abandoned" || scenario == "queue origin", stored.Retired)
 			require.Equal(t, "original-native", execution.ACPSessionID)
 		})
 	}

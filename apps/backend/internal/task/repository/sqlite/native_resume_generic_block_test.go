@@ -24,7 +24,7 @@ func TestPostgresNativeResumeEmptyHistoricalBlock(t *testing.T) {
 }
 
 func testNativeResumeEmptyHistoricalBlock(t *testing.T, open func(*testing.T) *Repository) {
-	for _, scenario := range []string{"absent", "resolved history", "unresolved history", "active work", "partial block", "independent block"} {
+	for _, scenario := range []string{"absent", "resolved history", "legacy queue history", "unresolved history", "active work", "partial block", "independent block"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := context.Background()
 			repo := open(t)
@@ -36,6 +36,10 @@ func testNativeResumeEmptyHistoricalBlock(t *testing.T, open func(*testing.T) *R
 			} else {
 				require.NoError(t, repo.SetSessionMetadataKey(ctx, fixture.session.ID, models.SessionMetaKeyAgentDeliveryRecovery, nil))
 				_, err := repo.DB().ExecContext(ctx, repo.db.Rebind(`DELETE FROM session_recovery_blocks WHERE id = ?`), fixture.block.ID)
+				require.NoError(t, err)
+			}
+			if scenario == "legacy queue history" {
+				_, err := repo.DB().ExecContext(ctx, repo.db.Rebind(`UPDATE session_recovery_blocks SET delivery_stream_id = '', resolved_at = ? WHERE id = ?`), time.Now().UTC().Add(-time.Hour), fixture.block.ID)
 				require.NoError(t, err)
 			}
 			generic := fixture.block
@@ -64,7 +68,7 @@ func testNativeResumeEmptyHistoricalBlock(t *testing.T, open func(*testing.T) *R
 			}
 			changed, err := repo.ResolveSessionRecoveryBlock(ctx, generic.ID, "resume", time.Now().UTC())
 			require.NoError(t, err)
-			require.Equal(t, scenario == "absent" || scenario == "resolved history", changed)
+			require.Equal(t, scenario == "absent" || scenario == "resolved history" || scenario == "legacy queue history", changed)
 			submission, err := repo.GetAgentDeliverySubmission(ctx, fixture.recovery.SubmissionID)
 			require.NoError(t, err)
 			require.Equal(t, models.DeliverySubmissionInterruptedUnknown, submission.State)

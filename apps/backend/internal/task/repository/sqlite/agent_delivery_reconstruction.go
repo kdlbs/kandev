@@ -205,7 +205,7 @@ func (r *Repository) lockAgentDeliveryReconstructionOwnerTx(
 	}
 	if taskID != request.TaskID || incarnationID != request.IncarnationID || executionID != request.ExpectedExecutionID ||
 		sessionState != request.ExpectedSessionState || (isTerminalReconstructionSession(sessionState) &&
-		!(sessionState == models.TaskSessionStateFailed && request.Recovery.HistoryGap != nil)) ||
+		(sessionState != models.TaskSessionStateFailed || request.Recovery.HistoryGap == nil)) ||
 		owner.workspacePath != request.ExpectedWorkspacePath {
 		return owner, false, nil
 	}
