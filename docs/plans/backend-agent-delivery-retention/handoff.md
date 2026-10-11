@@ -1,6 +1,6 @@
 # Backend delivery retention handoff
 
-PR #4407 is delivering the current retention/session/recovery issue fix. Tasks 01–07 are complete; Task 08 retains historical integration evidence and practical validation limits.
+PR #4407 delivers the retention/session/recovery fix. Tasks 01–07 are complete. Queue successors require predecessor settlement; late writes require the exact live incarnation after purge. Task 08 records regression receipts and historical validation limits.
 
 On 2026-10-11 the user instructed: “ignore that part, let's just fix the issue.” Original frozen-N and benchmark-artifact transfer is no longer a prerequisite for this delivery. Preserve the maintainer's Ready edit. Merge still requires current-head required CI, valid existing findings, ownership/recovery/retention regressions and protection checks. Historical rollback and latency acceptance are not claimed passed; the original-only browser check is explicitly optional when its binary is unavailable. No replacement is reported as an original. See Task 08 for the updated scope and receipts.
 

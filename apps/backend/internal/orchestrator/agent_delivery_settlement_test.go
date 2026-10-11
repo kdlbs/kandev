@@ -333,7 +333,7 @@ func TestDeliveryTerminalSettlesMatchingSendNowClaim(t *testing.T) {
 	service, repo := newServiceWithRealRepo(t)
 	queue, queueDB, identity, _ := newIdentityWorkflowTransferQueue(t, t.TempDir()+"/queue.db", true)
 	t.Cleanup(func() { _ = queueDB.Close() })
-	seedSession(t, repo, identity.TaskID, identity.SessionID, "step-1")
+	seedSession(t, repo, identity.TaskID, identity.SessionID, "step-1", identity.SessionIncarnationID)
 	service.messageQueue = queue
 
 	source, err := queue.QueueMessageWithMetadataForSession(

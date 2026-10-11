@@ -15,6 +15,7 @@ func TestDeliveryRetentionMetadataPagination(t *testing.T) {
 	for _, engine := range []string{"SQLite", "Postgres"} {
 		t.Run(engine, func(t *testing.T) {
 			repo := newRetentionTestRepo(t, engine)
+			seedAgentDeliveryTestSession(t, repo, "retention-page-session", "retention-page-incarnation")
 			ctx := context.Background()
 			base := time.Date(2026, time.October, 9, 12, 0, 0, 0, time.UTC)
 			states := []models.DeliverySubmissionState{
@@ -103,6 +104,7 @@ func TestDeliveryRetentionCompatibilityReader(t *testing.T) {
 	for _, engine := range []string{"SQLite", "Postgres"} {
 		t.Run(engine, func(t *testing.T) {
 			repo := newRetentionTestRepo(t, engine)
+			seedAgentDeliveryTestSession(t, repo, "retention-compat-session", "retention-compat-incarnation")
 			ctx := context.Background()
 			first := &models.AgentDeliveryEvent{
 				SessionID: "retention-compat-session", IncarnationID: "retention-compat-incarnation",
@@ -132,6 +134,7 @@ func TestDeliveryRetentionCompatibilityReader(t *testing.T) {
 				VALUES (?, ?, ?, ?, ?, ?)`), first.SessionID, first.IncarnationID, time.Now().UTC(), "pending", time.Now().UTC(), time.Now().UTC()); err != nil {
 				t.Fatalf("seed pending retirement job: %v", err)
 			}
+			seedAgentDeliveryTestSession(t, repo, "retention-compat-other-session", "retention-compat-other-incarnation")
 			second := *first
 			second.SessionID = "retention-compat-other-session"
 			second.IncarnationID = "retention-compat-other-incarnation"

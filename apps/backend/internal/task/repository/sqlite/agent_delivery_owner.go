@@ -15,7 +15,7 @@ func (r *Repository) validateAgentDeliveryEventAdmissionTx(
 	event *models.AgentDeliveryEvent,
 ) error {
 	if isLegacyAgentDeliveryEventOwner(event) {
-		return r.ensureAgentDeliverySessionNotRetired(ctx, tx, event.SessionID)
+		return r.ensureAgentDeliverySessionNotRetired(ctx, tx, event.SessionID, event.IncarnationID)
 	}
 	if !hasValidAgentDeliveryEventOwnerIdentity(event) {
 		return repoerrors.ErrAgentDeliveryIdentityMismatch

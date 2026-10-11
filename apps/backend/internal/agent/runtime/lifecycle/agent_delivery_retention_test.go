@@ -108,6 +108,15 @@ func TestDeliveryRetentionLostAck(t *testing.T) {
 			databasePath := filepath.Join(t.TempDir(), "delivery.db")
 			journalPath := filepath.Join(t.TempDir(), "delivery.bbolt")
 			repository, database := openRetentionLifecycleRepository(t, databasePath)
+			if err := repository.CreateWorkspace(ctx, &models.Workspace{ID: "lost-ack-workspace", Name: "Lost acknowledgement"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repository.CreateTask(ctx, &models.Task{ID: "lost-ack-task", WorkspaceID: "lost-ack-workspace", Title: "Lost acknowledgement"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repository.CreateTaskSession(ctx, &models.TaskSession{ID: sessionID, TaskID: "lost-ack-task", QueueIncarnationID: incarnationID}); err != nil {
+				t.Fatal(err)
+			}
 			retainedJournal := openRetentionLifecycleJournal(t, journalPath)
 			wire := streams.AgentEvent{
 				Type: streams.EventTypeMessageChunk, Text: "projected once",

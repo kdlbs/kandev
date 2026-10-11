@@ -41,16 +41,20 @@ func (r *Repository) ensureAgentDeliveryIdentityAvailable(
 func (r *Repository) ensureAgentDeliverySessionNotRetired(
 	ctx context.Context,
 	exec taskSessionQueryRowExecutor,
-	sessionID string,
+	sessionID, incarnationID string,
 ) error {
-	var retired bool
+	var retired, live bool
 	if err := exec.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT EXISTS (SELECT 1 FROM agent_delivery_cleanup_jobs WHERE session_id = ?)`),
-		sessionID).Scan(&retired); err != nil {
+		SELECT EXISTS (SELECT 1 FROM agent_delivery_cleanup_jobs WHERE session_id = ?),
+		EXISTS (SELECT 1 FROM task_sessions WHERE id = ? AND queue_incarnation_id = ?)`),
+		sessionID, sessionID, incarnationID).Scan(&retired, &live); err != nil {
 		return err
 	}
 	if retired {
 		return repoerrors.ErrAgentDeliveryIdentityRetiring
+	}
+	if !live {
+		return repoerrors.ErrAgentDeliveryIdentityMismatch
 	}
 	return nil
 }

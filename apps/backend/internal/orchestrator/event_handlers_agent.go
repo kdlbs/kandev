@@ -793,7 +793,9 @@ func (s *Service) drainQueuedBeforeWorkflowTransition(
 		return false
 	}
 	s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-	outcome := s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmission(ctx, taskID, sessionID)
+	outcome := s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity(
+		ctx, taskID, sessionID, nil, workflowEffectFromContext(ctx),
+	)
 	return outcome == queueDrainDispatched
 }
 
@@ -1136,7 +1138,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		return
 	}
 
-	if s.drainQueuedBeforeWorkflowTransition(ctx, data.TaskID, data.SessionID, session) {
+	if s.drainQueuedBeforeWorkflowTransition(completionCtx, data.TaskID, data.SessionID, session) {
 		return
 	}
 	if err := s.reconcileAgentDeliverySettlements(context.WithoutCancel(completionCtx), data.SessionID); err != nil {
@@ -2750,7 +2752,7 @@ func (s *Service) finishAgentCompleted(
 			s.logger.Warn("failed to record non-workflow completion outcome",
 				zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
 		}
-	} else if !s.drainQueuedBeforeWorkflowTransition(ctx, data.TaskID, data.SessionID, session) {
+	} else if !s.drainQueuedBeforeWorkflowTransition(completionCtx, data.TaskID, data.SessionID, session) {
 		cause := turnCompletionCauseAgentTurn
 		if data.DeliveryOutcome == string(models.DeliverySubmissionCancelled) {
 			cause = turnCompletionCauseUserCancellation

@@ -17,6 +17,7 @@ func TestDeliveryRetentionSerialization(t *testing.T) {
 	}
 	ctx := context.Background()
 	const sessionID = "delivery-retention-serialization-session"
+	seedAgentDeliveryTestSession(t, repo, sessionID, "delivery-retention-serialization-incarnation")
 
 	blocker, err := db.BeginTxx(ctx, nil)
 	if err != nil {

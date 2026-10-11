@@ -17,6 +17,7 @@ func TestDeliveryRetentionHash(t *testing.T) {
 	for _, engine := range []string{"SQLite", "Postgres"} {
 		t.Run(engine, func(t *testing.T) {
 			repo := newRetentionTestRepo(t, engine)
+			seedAgentDeliveryTestSession(t, repo, "retention-hash-session", "retention-hash-incarnation")
 			ctx := context.Background()
 			original := retentionHashEvent(t, 1, streams.AgentEvent{
 				Type:               streams.EventTypeMessageChunk,
@@ -102,6 +103,7 @@ func TestDeliveryRetentionHashEnvelope(t *testing.T) {
 	for _, engine := range []string{"SQLite", "Postgres"} {
 		t.Run(engine, func(t *testing.T) {
 			repo := newRetentionTestRepo(t, engine)
+			seedAgentDeliveryTestSession(t, repo, "retention-hash-session", "retention-hash-incarnation")
 			baseline := retentionHashEvent(t, 1, streams.AgentEvent{
 				Type: streams.EventTypeMessageChunk, Text: "same transport content",
 				Data: map[string]any{"provider_diagnostic": "source-only diagnostic"},
@@ -162,6 +164,7 @@ func TestDeliveryRetentionReplay(t *testing.T) {
 	for _, engine := range []string{"SQLite", "Postgres"} {
 		t.Run(engine, func(t *testing.T) {
 			repo := newRetentionTestRepo(t, engine)
+			seedAgentDeliveryTestSession(t, repo, "retention-replay-session", "retention-replay-incarnation")
 			ctx := context.Background()
 			event := &models.AgentDeliveryEvent{
 				SessionID: "retention-replay-session", IncarnationID: "retention-replay-incarnation",
@@ -218,6 +221,7 @@ func TestDeliveryRetentionExpiredReplay(t *testing.T) {
 	for _, engine := range []string{"SQLite", "Postgres"} {
 		t.Run(engine, func(t *testing.T) {
 			repo := newRetentionTestRepo(t, engine)
+			seedAgentDeliveryTestSession(t, repo, "retention-expired-session", "retention-expired-incarnation")
 			event := &models.AgentDeliveryEvent{
 				SessionID: "retention-expired-session", IncarnationID: "retention-expired-incarnation",
 				HarnessGeneration: 1, StreamID: "retention-expired-stream", Sequence: 1,
@@ -246,6 +250,7 @@ func TestDeliveryRetentionCheckpointMissing(t *testing.T) {
 	for _, engine := range []string{"SQLite", "Postgres"} {
 		t.Run(engine, func(t *testing.T) {
 			repo := newRetentionTestRepo(t, engine)
+			seedAgentDeliveryTestSession(t, repo, "retention-missing-session", "retention-missing-incarnation")
 			event := &models.AgentDeliveryEvent{
 				SessionID: "retention-missing-session", IncarnationID: "retention-missing-incarnation",
 				HarnessGeneration: 1, StreamID: "retention-missing-stream", Sequence: 1,

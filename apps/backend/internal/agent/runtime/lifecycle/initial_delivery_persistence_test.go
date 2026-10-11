@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/task/models"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 )
@@ -80,10 +81,13 @@ func TestInitialPromptNeverReusesUnownedCanonicalSubmission(t *testing.T) {
 			execution.setMetadataValue(initialDeliverySubmissionIDMetadataKey, "first-message")
 			payload := []byte(`{"text":"initial instruction"}`)
 			_, err := repo.PrepareAgentDeliverySubmission(ctx, &models.AgentDeliverySubmission{
-				ID: "prompt:first-message", SessionID: "session", IncarnationID: test.incarnation,
+				ID: "prompt:first-message", SessionID: "session", IncarnationID: "incarnation",
 				HarnessGeneration: 2, OwnerGeneration: 2, DispatchAttemptID: test.attempt,
 				Payload: payload, PayloadHash: journal.SubmissionHash(payload), State: models.DeliverySubmissionDispatching,
 			})
+			require.NoError(t, err)
+			// Model retained evidence from an older incarnation without admitting a new foreign write.
+			_, err = repo.DB().ExecContext(ctx, `UPDATE agent_delivery_submissions SET incarnation_id = ? WHERE id = ?`, test.incarnation, "prompt:first-message")
 			require.NoError(t, err)
 			reached := false
 			sm.beforePromptDispatchHook = func() { reached = true }
@@ -117,7 +121,7 @@ func TestInitialPromptUsesCanonicalSubmissionFromLaunchHandoff(t *testing.T) {
 	require.True(t, reached)
 }
 
-func initialDeliveryPersistenceFixture(t *testing.T) (*SessionManager, *AgentExecution, initialDeliveryAdmissionStore) {
+func initialDeliveryPersistenceFixture(t *testing.T) (*SessionManager, *AgentExecution, *tasksqlite.Repository) {
 	ctx := context.Background()
 	repo, _ := runOwnerTestRepository(t)
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task", Title: "Initial delivery"}))

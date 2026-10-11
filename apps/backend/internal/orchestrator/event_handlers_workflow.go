@@ -5596,7 +5596,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmissionAndIden
 		return queueDrainSkipped
 	}
 	return s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity(
-		ctx, taskID, sessionID, identity,
+		ctx, taskID, sessionID, identity, nil,
 	)
 }
 
@@ -5624,7 +5624,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmission(
 	taskID, sessionID string,
 ) queueDrainOutcome {
 	return s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity(
-		ctx, taskID, sessionID, nil,
+		ctx, taskID, sessionID, nil, nil,
 	)
 }
 
@@ -5661,6 +5661,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	ctx context.Context,
 	taskID, sessionID string,
 	identity *messagequeue.QueueSessionIdentity,
+	completionEffect *models.AgentDeliveryEffect,
 ) queueDrainOutcome {
 	if s.messageQueue == nil || s.isCancelInFlight(sessionID) ||
 		s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
@@ -5700,6 +5701,17 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	}
 	if !autoRun {
 		return queueDrainPaused
+	}
+	if ok && queuedMsg != nil && completionEffect != nil {
+		hasInput, inputErr := s.queuedMessageHasDispatchInput(ctx, queuedMsg)
+		if hasInput && inputErr == nil {
+			if err := s.settleQueuedDeliveryPredecessor(ctx, taskID, sessionID, completionEffect); err != nil {
+				s.logger.Warn("failed to settle delivery before queued successor",
+					zap.String("session_id", sessionID), zap.Error(err))
+				s.requeueMessageForReservation(ctx, &queuedDispatchReservation{identity: queueIdentity}, queuedMsg, queuedMsg.QueuedBy)
+				return queueDrainSkipped
+			}
+		}
 	}
 	if s.dispatchTakenQueuedMessageForSession(ctx, queueIdentity, queuedMsg, ok) {
 		return queueDrainDispatched

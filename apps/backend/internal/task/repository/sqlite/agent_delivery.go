@@ -114,7 +114,7 @@ func (r *Repository) PrepareAgentDeliverySubmission(ctx context.Context, submiss
 	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{submission.SessionID}, nil); err != nil {
 		return false, err
 	}
-	if err := r.ensureAgentDeliverySessionNotRetired(ctx, tx, submission.SessionID); err != nil {
+	if err := r.ensureAgentDeliverySessionNotRetired(ctx, tx, submission.SessionID, submission.IncarnationID); err != nil {
 		return false, err
 	}
 	var existingHash string
