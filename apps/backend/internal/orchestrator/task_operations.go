@@ -1429,9 +1429,9 @@ func (s *Service) StartTaskWithEnvAndSkills(ctx context.Context, taskID string, 
 // some callers supply. Keeping them in one struct avoids growing startTask's
 // already long positional parameter list for every new orthogonal concern.
 type startTaskOptions struct {
-	// ProfileExplicit marks a non-empty profile selected through an explicit
-	// selector-backed choice. It bypasses workflow-step profile resolution for
-	// this new session.
+	// ProfileExplicit protects a selected profile or an explicit MCP spawn.
+	// It bypasses workflow session-target routing and preserves a non-empty
+	// profile. Empty profiles still use normal launch defaults.
 	ProfileExplicit bool
 	// Env holds launch-scoped environment variables for the agent runtime.
 	Env map[string]string
