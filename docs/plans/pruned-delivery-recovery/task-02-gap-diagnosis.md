@@ -96,3 +96,8 @@ the existing verified stream identity and avoid competing consumers/deadlocks.
 ## Results
 
 Authenticated pre-ACP descriptor validation, canonical actual SQL cursor use, typed startup failure propagation, and real-inbox prefix projection implemented. Focused lifecycle regressions pass; new explicit compatibility controls require final verification. No bootstrap alias rewrite was needed.
+
+
+### CI startup compatibility correction
+
+Docker and SSH managed-runtime retries exposed retained child-exit events before native initialization creates the first SQL generation/checkpoint. A focused regression reproduced the checkpoint refusal. The preflight now permits zero-cursor replay only for explicit fresh generation-one bootstrap, fully retained unacknowledged output, no native conversation/replacement, no retained prompt work, no SQL cursor and no committed native generation. Restored ownership and genuine pruning still fail closed. The focused bootstrap/preflight/managed-startup and newly integrated archived-Codex regressions passed with the current main change. The Docker/SSH scenarios retain their assertions and attach backend logs on CI failure; no local E2E ran. Current-head remote CI remains pending until the correction is pushed and evaluated.

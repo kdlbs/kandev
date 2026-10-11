@@ -164,3 +164,6 @@ UI and browser validation remain CI-owned for the final fixup head.
 Focused frontend tests and lint pass after moving the localized diagnostic
 assembly out of JSX. The banner fixture follows the directory's describe-block
 convention. No local E2E was run; final remote CI remains pending.
+
+
+CI found lock contention in the mobile settings-recovery metadata fixture. Its direct SQLite write now uses a bounded busy timeout and an immediate transaction encompassing the metadata read and update, preserving concurrent backend metadata. Container recovery failures now retain backend logs as CI artifacts. These E2E scenarios are evaluated only in CI, with all existing assertions intact.

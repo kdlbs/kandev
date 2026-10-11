@@ -59,6 +59,27 @@ func (sm *StreamManager) initialDeliveryReplayCursor(ctx context.Context, execut
 	return authenticatedDeliveryReplayCursor(ctx, execution, delivery, status)
 }
 
+// A first child can exit before ACP initialization commits the native owner.
+// Replay its retained events from zero; the existing bootstrap processor waits
+// for committed authority before writing receipts or acknowledgments.
+func canReplayFreshBootstrapEvents(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, status *agentctl.DeliveryStatus) bool {
+	stream := status.Stream
+	if !execution.deliveryBootstrap.Load() || execution.ACPSessionID != "" || execution.RequiredNativeConversationID != "" ||
+		execution.isResumedSession || execution.DeliveryHarnessGeneration != 1 || stream == nil || stream.FirstRetained != 1 ||
+		stream.Acknowledged != 0 || status.Unresolved || status.SubmissionCount != 0 || len(status.Submissions) != 0 || status.SubmissionsTruncated {
+		return false
+	}
+	if _, err := delivery.GetAgentDeliveryCursor(ctx, status.StreamID); !errors.Is(err, sql.ErrNoRows) {
+		return false
+	}
+	reader, supported := delivery.(harnessGenerationReader)
+	if !supported {
+		return false
+	}
+	_, err := reader.GetCurrentHarnessSessionGeneration(ctx, execution.SessionID, execution.DeliveryIncarnationID)
+	return errors.Is(err, models.ErrTaskSessionNotFound)
+}
+
 func canUseLegacyEmptyDelivery(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, streamID string, err error) bool {
 	var response *agentctl.DeliveryHTTPError
 	if execution.DeliveryMode == DurableDeliveryV1 || !errors.As(err, &response) ||

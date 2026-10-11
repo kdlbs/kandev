@@ -41,6 +41,9 @@ func authenticatedDeliveryReplayCursor(
 		if status.Stream.FirstRetained > 1 && status.Stream.FirstRetained <= status.Stream.HighWater+1 {
 			return 0, fmt.Errorf("%w: %s", ErrAgentDeliveryHistoryGap, models.AgentDeliveryHistoryGapDetails(status.StreamID, 1, int64(status.Stream.FirstRetained-1)))
 		}
+		if canReplayFreshBootstrapEvents(ctx, execution, repository, status) {
+			return 0, nil
+		}
 		return 0, repoerrors.ErrAgentDeliveryCheckpointMissing
 	}
 	if err != nil {
