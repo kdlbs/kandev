@@ -9,6 +9,16 @@ export function filterGlobalSecrets(items: SecretListItem[]): SecretListItem[] {
   return items.filter((item) => item.scope !== "workspace");
 }
 
+function visibleSecretItems(
+  scope: SecretScope,
+  globalItems: SecretListItem[],
+  scopedItems: SecretListItem[],
+  scopedCurrent: boolean,
+): SecretListItem[] {
+  if (scope === "global") return filterGlobalSecrets(globalItems);
+  return scopedCurrent ? scopedItems : [];
+}
+
 export function useSecrets(
   scope: SecretScope = "global",
   workspaceId?: string,
@@ -86,12 +96,7 @@ export function useSecrets(
   }, [initialItems, scope, scopedKey, workspaceId]);
 
   const scopedCurrent = loadedScopedKey === scopedKey;
-  let items: SecretListItem[] = [];
-  if (scope === "global") {
-    items = filterGlobalSecrets(globalItems);
-  } else if (scopedCurrent) {
-    items = scopedItems;
-  }
+  const items = visibleSecretItems(scope, globalItems, scopedItems, scopedCurrent);
   const loaded = scope === "global" ? globalLoaded : scopedCurrent && scopedLoaded;
   const loading = scope === "global" ? globalLoading : scopedCurrent && scopedLoading;
 

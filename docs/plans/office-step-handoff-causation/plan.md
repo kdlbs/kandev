@@ -47,3 +47,7 @@ Task 01 records the integration validation and its local timeout limitation.
 Current-head CI and merge receipt remain delivery checks outside this work order.
 No public documentation change is needed for this integration: the existing
 causation requirement and design remain the behavior contract.
+
+The integration CI exposed the landed `useSecrets` hook's function-size warning.
+Task 01 also records its behavior-preserving helper extraction and focused hook
+validation. Fresh remote CI remains required after that remediation push.

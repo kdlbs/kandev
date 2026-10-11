@@ -95,3 +95,30 @@ so PostgreSQL-gated coverage was skipped locally. Specification lint, catalog
 validation, harness lint, and the harness/spec validator tests passed.
 Required CI must pass for the pushed integration head before merge; these
 local results do not waive any remote failure.
+
+## Frontend CI Remediation
+
+The integration head's frontend check failed because the landed `useSecrets`
+hook exceeded the 100-effective-line function limit (105 lines). Local ESLint
+reproduced that exact warning before the fix. Extracting the existing visible
+item selection into a private helper preserves global filtering, workspace
+isolation, loading state, and mutation-publication semantics without changing
+any rendered surface. The four existing owning test files cover those contracts;
+no new production export or test-only seam was introduced.
+
+```bash
+cd apps/web
+pnpm exec eslint --max-warnings 0 hooks/domains/settings/use-secrets.ts
+pnpm exec vitest run hooks/domains/settings/use-secrets.test.ts \
+  hooks/domains/settings/use-secrets.workspace-publication.test.tsx \
+  hooks/domains/settings/use-secrets.lifetime.test.tsx \
+  hooks/domains/settings/use-secrets.global-publication.test.tsx
+pnpm run lint
+pnpm run typecheck
+```
+
+The focused lint, 44 hook tests, full web lint, and typecheck passed.
+This behavior-preserving extraction
+requires no public documentation, specification, screenshot, or mobile-layout
+change. Earlier integration-head CI evidence is superseded by the remediation
+push; the new head must pass required CI before merge.
